@@ -25,6 +25,10 @@ import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, wai
  * - The side panel's tab panel is named by its chosen tab.
  * - The question an editor asks before it throws away changes is an
  *   alert, read out as it appears.
+ * - A part of a panel that opens in place, such as the X-card's card or
+ *   Export as image, takes focus, and its Cancel gives it back to the
+ *   button that opened it. The token bar's Details focuses the token's
+ *   panel.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus six, which it shares with
  * notes.e2e.ts, since the runs go one after another. The other
@@ -306,7 +310,77 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     await editor.waitFor({ state: "detached" });
   });
 
-  test("8. no page errors along the way", () => {
+  test("8. a part that opens in place takes focus, and its Cancel gives focus back to its button (LPD-DESK-7)", async () => {
+    const panel = dm.getByRole("tabpanel");
+    const section = (heading: string) => panel.locator("section").filter({ has: dm.getByRole("heading", { name: heading, exact: true }) }).last();
+
+    // Menu's X-card opens at its words, never at the X that sends it.
+    await dm.getByRole("tab", { name: "Menu", exact: true }).click();
+    await panel.getByRole("button", { name: /^X-card/ }).focus();
+    await dm.keyboard.press("Enter");
+    await waitFor("the X-card's words focused", async () => {
+      const f = await focused(dm);
+      return f.tag === "p" && f.name.startsWith("Tap the X");
+    });
+    await panel.getByRole("button", { name: "Cancel", exact: true }).click();
+    await waitFor("the X-card button focused again", async () => (await focused(dm)).name.startsWith("X-card"));
+
+    // The DM panel's handout form opens at its first field, and Show gives focus back to its button.
+    await dm.getByRole("tab", { name: "DM", exact: true }).click();
+    await panel.getByRole("button", { name: "Show a handout" }).click();
+    await waitFor("the handout form's first field focused", async () => (await focused(dm)).name === "From the library");
+    const image = path.join(work, "letter.png");
+    await sharp({ create: { width: 300, height: 200, channels: 3, background: { r: 230, g: 220, b: 190 } } }).png().toFile(image);
+    await panel.getByLabel("Upload an image").setInputFiles(image);
+    await panel.getByRole("button", { name: "Change" }).waitFor();
+    await panel.getByLabel("Title").fill("A letter");
+    await panel.getByRole("button", { name: "Show", exact: true }).click();
+    await waitFor("the handout in the DM's state", () => Object.values(dmSocket.state?.handouts ?? {}).length > 0 || null);
+    await waitFor("Show a handout focused again", async () => (await focused(dm)).name === "Show a handout");
+
+    // On the players' scene the map image's picker comes after a warning, which it names as its description.
+    await dm.getByRole("tab", { name: "Scenes", exact: true }).click();
+    await section("Map image").getByRole("button", { name: "Add a map image" }).click();
+    await waitFor("the image picker focused", async () => {
+      const f = await focused(dm);
+      return f.tag === "input" && f.name === "Choose the image";
+    });
+    const described = await dm.evaluate(() => {
+      const doc = (globalThis as unknown as { document: { activeElement: { getAttribute(n: string): string | null } | null; getElementById(id: string): { textContent: string | null } | null } }).document;
+      const id = doc.activeElement?.getAttribute("aria-describedby") ?? "";
+      return doc.getElementById(id)?.textContent ?? "";
+    });
+    assert.match(described, /^The players are on this scene\./);
+    await dm.keyboard.press("Tab");
+    assert.equal((await focused(dm)).name, "Cancel", "Tab goes from the picker to its Cancel");
+    await dm.keyboard.press("Enter");
+    await waitFor("Add a map image focused again", async () => (await focused(dm)).name === "Add a map image");
+
+    // Export as image opens at its first choice, the scale chosen, and Close gives focus back.
+    const exporting = section("Export as image");
+    await exporting.getByRole("button", { name: "Export as image" }).click();
+    await waitFor("the chosen pixels per square focused", () =>
+      dm.evaluate(() => {
+        const a = (globalThis as unknown as { document: { activeElement: { checked?: boolean; closest(s: string): { getAttribute(n: string): string | null } | null } | null } }).document.activeElement;
+        return a?.checked === true && a.closest('[role="radiogroup"]')?.getAttribute("aria-label") === "Pixels per square";
+      }),
+    );
+    await exporting.getByRole("button", { name: "Close", exact: true }).click();
+    await waitFor("Export as image focused again", async () => (await focused(dm)).name === "Export as image");
+    await shots.take(dm, "desk-export-closed-focus");
+
+    // The token bar's Details opens the token's panel with focus on it.
+    const p = await pagePoint(dm, run.bounds, { x: goblin()!.x + 0.5, y: goblin()!.y + 0.5 });
+    await dm.mouse.click(p.x, p.y);
+    const bar = dm.getByRole("dialog", { name: "Goblin actions" });
+    await bar.getByRole("button", { name: "Details" }).click();
+    await bar.waitFor({ state: "detached" });
+    await waitFor("the Token panel focused", async () => (await focused(dm)).role === "tabpanel");
+    assert.equal(await dm.getByRole("tab", { name: "Token", exact: true }).getAttribute("aria-selected"), "true");
+    await dm.keyboard.press("Escape");
+  });
+
+  test("9. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
   });
 });

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/Button.tsx";
+import { useExpansionFocus } from "../../components/expansionFocus.ts";
 import { api } from "../../lib/api.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
@@ -15,6 +16,10 @@ import { sendXcard, type SendState } from "./send.ts";
  * lost, and a failure says so there. On success the small card folds away
  * and the Menu's sheet closes (send.ts sendXcard): the card the whole table
  * sees arrives from the server, on this device too, over the same map.
+ *
+ * The small card opens with focus on its words, never on the X, so a
+ * second press of Enter or Space reads what the X does instead of sending
+ * it. Cancel gives focus back to the X-card button.
  */
 export function XCardButton() {
   const roomId = useRoomView((s) => s.roomId);
@@ -23,6 +28,9 @@ export function XCardButton() {
   const [state, setState] = useState<SendState>({ kind: "idle" });
   // "View as a player" is the DM's own device: a card sent from it would come from the DM's grant, not the player shown.
   const preview = usePreview();
+  const opener = useRef<HTMLButtonElement>(null);
+  const words = useRef<HTMLParagraphElement>(null);
+  useExpansionFocus(open, { inside: words, opener });
   const live = useRef(true);
   useEffect(() => {
     live.current = true;
@@ -48,6 +56,7 @@ export function XCardButton() {
   if (!open) {
     return (
       <button
+        ref={opener}
         type="button"
         disabled={preview !== null}
         onClick={() => {
@@ -97,7 +106,9 @@ export function XCardButton() {
         textAlign: "center",
       }}
     >
-      <p style={{ margin: 0, fontSize: theme.font.input, lineHeight: 1.4 }}>Tap the X to ask the table to edit out what just happened. Nobody will know who tapped it.</p>
+      <p ref={words} tabIndex={-1} style={{ margin: 0, fontSize: theme.font.input, lineHeight: 1.4 }}>
+        Tap the X to ask the table to edit out what just happened. Nobody will know who tapped it.
+      </p>
       <button
         type="button"
         onClick={() => void send()}

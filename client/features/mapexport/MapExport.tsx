@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import type { RoomState, Scene } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
+import { useExpansionFocus } from "../../components/expansionFocus.ts";
 import { buttonLook } from "../../components/looks.ts";
 import { Help, Note, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
@@ -50,6 +51,10 @@ export function MapExport(props: { scene: Scene }) {
   /** Bumped by every new run and by unmounting, so a slow run that was overtaken drops its result. */
   const runRef = useRef(0);
   const urlRef = useRef<string | null>(null);
+  // The options open at their first field, and Close gives focus back to the button that opened them.
+  const opener = useRef<HTMLButtonElement>(null);
+  const options = useRef<HTMLDivElement>(null);
+  useExpansionFocus(open, { inside: options, opener });
 
   const chunks = useRoomView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
   const labels = useRoomView((s) => s.view?.labels ?? EMPTY_LABELS);
@@ -134,7 +139,7 @@ export function MapExport(props: { scene: Scene }) {
     return (
       <Section label="Export as image">
         <Row>
-          <Button size="sm" onClick={() => setOpen(true)}>
+          <Button ref={opener} size="sm" onClick={() => setOpen(true)}>
             Export as image
           </Button>
         </Row>
@@ -148,22 +153,25 @@ export function MapExport(props: { scene: Scene }) {
   const made = status.kind === "made" ? status.made : null;
   return (
     <Section label="Export as image">
-      <SettingRow
-        name="Pixels per square"
-        help={
-          size.pxPerCell < size.requested
-            ? undefined
-            : `${size.width} × ${size.height} px: ${scene.bounds.w} × ${scene.bounds.h} squares at ${size.pxPerCell} px each.`
-        }
-        wide
-      >
-        <Segmented<number>
-          label="Pixels per square"
-          value={pxPerCell}
-          options={PX_PER_CELL_CHOICES.map((v) => ({ value: v, label: `${v} px`, title: `${v} pixels per square` }))}
-          onChange={setPxPerCell}
-        />
-      </SettingRow>
+      {/* No box of its own, so the row stays an item of the section. */}
+      <div ref={options} style={{ display: "contents" }}>
+        <SettingRow
+          name="Pixels per square"
+          help={
+            size.pxPerCell < size.requested
+              ? undefined
+              : `${size.width} × ${size.height} px: ${scene.bounds.w} × ${scene.bounds.h} squares at ${size.pxPerCell} px each.`
+          }
+          wide
+        >
+          <Segmented<number>
+            label="Pixels per square"
+            value={pxPerCell}
+            options={PX_PER_CELL_CHOICES.map((v) => ({ value: v, label: `${v} px`, title: `${v} pixels per square` }))}
+            onChange={setPxPerCell}
+          />
+        </SettingRow>
+      </div>
       {size.pxPerCell < size.requested ? (
         <Note>
           Lowered to {size.pxPerCell} px per square, so the image stays within 16.7 million pixels, the most an iPhone can draw. It will be {size.width} × {size.height} px.

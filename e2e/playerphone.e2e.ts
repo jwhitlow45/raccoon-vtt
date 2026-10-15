@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * A player on a phone after the visual design pass, from the live play
@@ -22,7 +22,8 @@ import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type 
  *   between the screen's foot and the alerts column (LPD-PLAYER-1). Focus
  *   stays in the Total field being typed in.
  * - A panel picked from the list of panels starts at its sheet's heading,
- *   and "All panels" goes back to its tile (LPD-PLAYER-5).
+ *   and "All panels" goes back to its tile (LPD-PLAYER-5). The token
+ *   bar's Details starts at the token's sheet too (LPD-DESK-7).
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seven. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
@@ -303,7 +304,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await ops.send({ t: "roll.close", rollIds: [id] });
   });
 
-  test("5. a panel picked from the list starts at its sheet's heading, and All panels goes back to its tile (LPD-PLAYER-5)", async () => {
+  test("5. a panel picked from the list starts at its sheet's heading, All panels goes back to its tile, and Details starts at the token's sheet (LPD-PLAYER-5)", async () => {
     await setUp({ ...PORTRAIT, scale: 1 });
     await player.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
     await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: "Menu", exact: true }).tap();
@@ -319,6 +320,16 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     });
     await shots.take(player, "playerphone-panels-tile-focused");
     await player.getByRole("button", { name: "Close Panels" }).tap();
+
+    // The token bar's Details gives way to the token's sheet, which takes focus at its heading (LPD-DESK-7).
+    const thorn = playerSocket.state!.tokens[run.thorn.id]!;
+    await tapCell(player, dmSocket.state!.scenes[run.sceneId]!.bounds, { x: thorn.x, y: thorn.y });
+    await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Details" }).tap();
+    await waitFor("the Token sheet's heading focused", async () => {
+      const f = await focused(player);
+      return f.tag === "h2" && f.name === "Token";
+    });
+    await player.getByRole("button", { name: "Close Token" }).tap();
   });
 
   test("6. nothing went wrong in the browsers", () => {

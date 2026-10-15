@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Handout, Member } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
+import { useExpansionFocus } from "../../components/expansionFocus.ts";
 import { ErrorText, Field } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
@@ -77,6 +78,10 @@ function ShowHandout(props: { members: Record<string, Member | undefined> }) {
   const [library, setLibrary] = useState<AssetRow[] | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The form opens at its first field, and Show or Cancel gives focus back to the button that opened it.
+  const opener = useRef<HTMLButtonElement>(null);
+  const form = useRef<HTMLDivElement>(null);
+  useExpansionFocus(open, { inside: form, opener });
   // Start the orientation check now, so it has finished by the first upload.
   useEffect(() => void honorsImageOrientation(), []);
   const players = Object.values(props.members)
@@ -85,7 +90,7 @@ function ShowHandout(props: { members: Record<string, Member | undefined> }) {
 
   if (!open) {
     return (
-      <Button size="sm" onClick={() => setOpen(true)} style={{ justifySelf: "start" }}>
+      <Button ref={opener} size="sm" onClick={() => setOpen(true)} style={{ justifySelf: "start" }}>
         Show a handout
       </Button>
     );
@@ -140,6 +145,9 @@ function ShowHandout(props: { members: Record<string, Member | undefined> }) {
 
   return (
     <div
+      ref={form}
+      role="group"
+      aria-label="Show a handout"
       style={{
         display: "grid",
         gap: theme.space(3),

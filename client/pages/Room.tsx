@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
@@ -159,12 +159,21 @@ function RoomPage() {
     ui.select(null);
   }, [sceneId, ui]);
 
-  // The action bar steps aside once the token's panel is open.
+  /*
+   * Where focus goes once the render that follows a tap has drawn what the
+   * tap asked for: the open panel (a phone's sheet at its heading, the side
+   * panel's tab panel), or a tile in the list of panels. See the effect
+   * after useDockFocus below.
+   */
+  const focusNext = useRef<{ kind: "panel" } | { kind: "tile"; panelId: string } | null>(null);
+
+  // The action bar steps aside once the token's panel is open, and focus, which went with the bar's Details, goes to the panel.
   const openDetails = useCallback(
     (id: string) => {
       ui.select(id);
       ui.showActions(false);
       ui.openPanel("token");
+      focusNext.current = { kind: "panel" };
     },
     [ui],
   );
@@ -263,21 +272,22 @@ function RoomPage() {
   useDockFocus({ folded, sheetOpen, store: dockStore, registry: scope.get(sheetFocusSlot), showing, showRef, summaryRef });
 
   /*
-   * A tile in the list of panels and an open panel's "All panels" each
-   * unmount with their sheet, and focus fell to the page. So a panel
-   * picked from the list starts at its sheet's heading, and "All panels"
-   * goes back to that panel's tile, as Back from a subpage returns to its
-   * row (features/panels.ts useSubpageFocus). The tap asks, and the render
-   * that draws the new sheet answers. After the dock's focus, which a
+   * A tile in the list of panels, an open panel's "All panels" and the
+   * token bar's Details each unmount as they act, and focus fell to the
+   * page. So a panel picked from the list or opened by Details starts at
+   * its sheet's heading, or at the side panel's tab panel, and "All
+   * panels" goes back to that panel's tile, as Back from a subpage returns
+   * to its row (features/panels.ts useSubpageFocus). The tap asks, and the
+   * render that draws the panel answers. After the dock's focus, which a
    * sheet opening may also move.
    */
-  const focusNext = useRef<{ kind: "sheet" } | { kind: "tile"; panelId: string } | null>(null);
   const sheetTitleRef = useRef<HTMLHeadingElement>(null);
+  const sidePanelRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const ask = focusNext.current;
     if (!ask) return;
     focusNext.current = null;
-    if (ask.kind === "sheet") sheetTitleRef.current?.focus({ preventScroll: true });
+    if (ask.kind === "panel") (wide ? sidePanelRef.current : sheetTitleRef.current)?.focus({ preventScroll: true });
     else sheetRef.current?.querySelector<HTMLElement>(`[data-opener="${panelTile(ask.panelId)}"]`)?.focus();
   });
 
@@ -380,7 +390,7 @@ function RoomPage() {
               current={tabId}
               badges={badges}
               onPick={(id) => {
-                focusNext.current = { kind: "sheet" };
+                focusNext.current = { kind: "panel" };
                 ui.openPanel(id);
               }}
             />
@@ -402,7 +412,7 @@ function RoomPage() {
         />
       </div>
       {wide ? (
-        <SidePanel zoom={zoom} tabs={panels} tab={tabId} badges={badges} onTab={(id) => ui.openPanel(id)} subpage={subpage}>
+        <SidePanel zoom={zoom} tabs={panels} tab={tabId} badges={badges} onTab={(id) => ui.openPanel(id)} subpage={subpage} panelRef={sidePanelRef}>
           {tabId ? <PanelBody id={tabId} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={setSubpage} /> : null}
         </SidePanel>
       ) : null}
@@ -1048,9 +1058,19 @@ const TAB_REST: CSSProperties = { background: "transparent", border: `${theme.li
  * panel, and focus follows it in and out (useSubpageFocus). With no
  * subpage there is no header, since the chosen tab already names the panel.
  */
-function SidePanel(props: { zoom: number; tabs: PanelDef[]; tab: string; badges: Record<string, number>; onTab(id: string): void; subpage: PanelHeader | null; children: ReactNode }) {
+function SidePanel(props: {
+  zoom: number;
+  tabs: PanelDef[];
+  tab: string;
+  badges: Record<string, number>;
+  onTab(id: string): void;
+  subpage: PanelHeader | null;
+  /** The tab panel, which takes focus from script when Details opens the token's panel. */
+  panelRef: RefObject<HTMLDivElement | null>;
+  children: ReactNode;
+}) {
   const titleRef = useRef<HTMLHeadingElement>(null);
-  const bodyRef = useRef<HTMLDivElement>(null);
+  const bodyRef = props.panelRef;
   // Where Back lands when the row that opened the subpage is gone (a page deleted from inside it): the header goes with the subpage, and the panel's tab stays.
   const chosenTabRef = useRef<HTMLButtonElement>(null);
   useSubpageFocus(props.subpage, { title: titleRef, body: bodyRef, fallback: chosenTabRef });
@@ -1135,7 +1155,8 @@ function SidePanel(props: { zoom: number; tabs: PanelDef[]; tab: string; badges:
           <SheetHeader title={props.subpage.title} back={subpageBack(props.subpage)} titleRef={titleRef} />
         </div>
       ) : null}
-      <div ref={bodyRef} id={panelId} role="tabpanel" aria-labelledby={tabId(props.tab)} style={{ flex: 1, overflowY: "auto", padding: theme.space(4) }}>
+      {/* Focusable from script, for Details, and its focus ring inside its edge, where the side panel cannot clip it. */}
+      <div ref={bodyRef} id={panelId} role="tabpanel" aria-labelledby={tabId(props.tab)} tabIndex={-1} style={{ flex: 1, overflowY: "auto", padding: theme.space(4), outlineOffset: -2 }}>
         {props.children}
       </div>
     </aside>

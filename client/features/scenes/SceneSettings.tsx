@@ -4,6 +4,7 @@ import { MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
 import { autoWallsOf } from "#shared/rules/autoWalls.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
+import { useExpansionFocus } from "../../components/expansionFocus.ts";
 import { FieldRow, Input } from "../../components/Field.tsx";
 import { buttonLook } from "../../components/looks.ts";
 import { Help, Note, Section } from "../../components/Panel.tsx";
@@ -326,6 +327,15 @@ function MapSection(props: { scene: Scene; close(): void }) {
   const [armed, setArmed] = useState(false);
   const [fogIt, setFogIt] = useState(true);
   useEffect(() => setArmed(false), [scene.id]);
+  /*
+   * The button that arms the picker gives way to it, and Cancel gives way
+   * back. Focus follows: to the picker, which names the warning beside it
+   * as its description, and back to the button.
+   */
+  const askRef = useRef<HTMLButtonElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const warningId = useId();
+  useExpansionFocus(playersHere && armed, { inside: fileRef, opener: askRef });
   const [upload, setUpload] = useState<{ busy: boolean; waiting: boolean; error: string | null }>({ busy: false, waiting: false, error: null });
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -380,9 +390,11 @@ function MapSection(props: { scene: Scene; close(): void }) {
     >
       {upload.busy ? "Uploading…" : label}
       <input
+        ref={fileRef}
         type="file"
         accept="image/*"
         disabled={upload.busy}
+        aria-describedby={playersHere ? warningId : undefined}
         style={{ position: "absolute", inset: 0, opacity: 0, width: "100%", cursor: "pointer" }}
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -418,7 +430,7 @@ function MapSection(props: { scene: Scene; close(): void }) {
   const picker = (label: string) =>
     playersHere && !armed && !upload.busy ? (
       <Row>
-        <Button size="sm" onClick={() => setArmed(true)}>
+        <Button ref={askRef} size="sm" onClick={() => setArmed(true)}>
           {label}
         </Button>
         {map ? removeButton : null}
@@ -434,7 +446,7 @@ function MapSection(props: { scene: Scene; close(): void }) {
           ) : null}
           {map ? removeButton : null}
         </Row>
-        {playersHere ? <Note>The players are on this scene. They see the new image as soon as it uploads.</Note> : null}
+        {playersHere ? <Note id={warningId}>The players are on this scene. They see the new image as soon as it uploads.</Note> : null}
         {firstFog && playersHere ? <Checkbox label="Start it under fog, so they see only what you reveal" checked={fogIt} onChange={setFogIt} /> : null}
         {firstFog && !playersHere ? <Help>Fog turns on with the first map, as for a scene made from a map.</Help> : null}
       </>
