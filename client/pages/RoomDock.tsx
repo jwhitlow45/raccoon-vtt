@@ -32,7 +32,8 @@ export function useDockSummary(): AlertsSummary | null {
   const text = rolls?.text ?? null;
   const name = rolls?.name ?? null;
   const waiting = rolls?.waiting ?? false;
-  return useMemo(() => alertsSummary(text !== null && name !== null ? { text, name, waiting } : null, alerts), [alerts, text, name, waiting]);
+  const requests = rolls?.requests ?? 0;
+  return useMemo(() => alertsSummary(text !== null && name !== null ? { text, name, waiting, requests } : null, alerts), [alerts, text, name, waiting, requests]);
 }
 
 /**

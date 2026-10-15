@@ -399,7 +399,10 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
 
     await openLog(dm);
     await waitFor("the stack folded under the sheet", async () => ((await cards.count()) === 0 ? true : null));
-    await dm.getByRole("button", { name: /^Rolls 0\/3/ }).first().waitFor();
+    const folded = dm.getByRole("button", { name: /^Rolls 0\/3/ }).first();
+    await folded.waitFor();
+    // Three requests are them, not it (LPD-DMPHONE-8).
+    assert.match((await folded.getAttribute("aria-label")) ?? "", /Close the sheet to see them\.$/);
     await shots.take(dm, "rolls-dm-phone-folded-under-sheet");
     await dm.getByRole("button", { name: "Close Log" }).tap();
     await closeAll();

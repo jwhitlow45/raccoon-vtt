@@ -110,6 +110,8 @@ export type AlertsSummaryEntry = {
   name: string;
   /** A request waits for this viewer's answer, which puts "Roll asked" first in the summary's order. */
   waiting: boolean;
+  /** How many requests the line stands for, so the dock's closing advice says "see them" for several. */
+  requests: number;
   /**
    * Shows what waits: the card of the request to answer, focused (3.3.1).
    * The dock closes the sheets first, then calls it.
@@ -150,8 +152,8 @@ function subscribeAlertsSummary(registry: SheetFocusRegistry, listener: () => vo
 /**
  * Publishes the rolls' part of the alerts summary while mounted, or
  * nothing for null. `open` may be a new function on every render: the
- * reader always calls the latest one. A change of the words or of
- * `waiting` publishes again.
+ * reader always calls the latest one. A change of the words, of `waiting`
+ * or of the count publishes again.
  */
 export function useAlertsSummary(entry: AlertsSummaryEntry | null): void {
   const registry = useScoped(sheetFocusSlot);
@@ -160,10 +162,11 @@ export function useAlertsSummary(entry: AlertsSummaryEntry | null): void {
   const text = entry?.text ?? null;
   const name = entry?.name ?? null;
   const waiting = entry?.waiting ?? false;
+  const requests = entry?.requests ?? 0;
   useLayoutEffect(() => {
     if (text === null || name === null) return;
-    return publishAlertsSummary(registry, { text, name, waiting, open: () => open.current?.() });
-  }, [registry, text, name, waiting]);
+    return publishAlertsSummary(registry, { text, name, waiting, requests, open: () => open.current?.() });
+  }, [registry, text, name, waiting, requests]);
 }
 
 /**

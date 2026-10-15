@@ -158,7 +158,7 @@ export function PlayerRolls() {
   // It names the request its tap opens, as this stack's own summary does.
   const opens = requestToOpen(requests, needs, folded, opened)?.id ?? null;
   const published = requests.length > 0 ? rollsSummary(requests, opens) : null;
-  useAlertsSummary(published ? { ...published, open } : null);
+  useAlertsSummary(published ? { ...published, requests: requests.length, open } : null);
 
   // The card is the first place focus returns to once a sheet that was hiding it closes (3.2.1). A request put off with Later has no card, so it is never a target.
   useSheetReturnFocus(cardRef, RETURN_RANK.rollCard, shown !== undefined && foldsUnderSheet);

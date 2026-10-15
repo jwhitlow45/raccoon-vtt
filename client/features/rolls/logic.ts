@@ -552,7 +552,7 @@ export function foldedChips(requests: readonly RollRequest[], tap: ChipButton = 
   const more = tap === "sheet" ? "" : "more ";
   const count = requests.length === 1 ? `1 ${more}roll request` : `${requests.length} ${more}roll requests`;
   const text = `Rolls ${done}/${asked}`;
-  const what = tap === "sheet" ? " Close the sheet to see them." : "";
+  const what = tap === "sheet" ? (requests.length === 1 ? " Close the sheet to see it." : " Close the sheet to see them.") : "";
   return { text, label: `${text}: ${count}, ${done} of ${asked} answered.${what}` };
 }
 

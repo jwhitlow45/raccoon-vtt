@@ -64,7 +64,7 @@ export type ColumnAlert =
   | { id: string; kind: "notice"; text: string; says: string };
 
 /** The rolls' line, as features/rolls publishes it (components/sheetFocus.ts AlertsSummaryEntry). */
-export type RollsLine = { text: string; name: string; waiting: boolean };
+export type RollsLine = { text: string; name: string; waiting: boolean; requests: number };
 
 export type SummaryKind = "rolls" | ColumnAlert["kind"];
 
@@ -95,7 +95,9 @@ function phrase(text: string): string {
  * a timer that share no clock. Its name starts with that text and lists
  * the rest, then says what a tap does: "Concentration check +2: Thorn
  * checks concentration, time is up, rolls 1 of 3 answered. Close the
- * sheet to see them." Null while nothing waits.
+ * sheet to see them." It says "see them" whenever the summary stands for
+ * more than one thing, the rolls' line of several requests included, and
+ * "see it" for one. Null while nothing waits.
  */
 export function alertsSummary(rolls: RollsLine | null, alerts: readonly ColumnAlert[]): AlertsSummary | null {
   const items: Item[] = [];
@@ -113,7 +115,8 @@ export function alertsSummary(rolls: RollsLine | null, alerts: readonly ColumnAl
   const [first] = items;
   if (!first) return null;
   const more = items.length > 1 ? `+${items.length - 1}` : "";
-  const advice = first.kind === "rolls" && rolls?.waiting ? "Close the sheet to answer." : items.length > 1 ? "Close the sheet to see them." : "Close the sheet to see it.";
+  const several = items.length > 1 || (rolls !== null && rolls.requests > 1);
+  const advice = first.kind === "rolls" && rolls?.waiting ? "Close the sheet to answer." : several ? "Close the sheet to see them." : "Close the sheet to see it.";
   const head = more ? `${first.text} ${more}` : first.text;
   return { text: first.text, more, name: `${head}: ${items.map((i) => i.phrase).join(", ")}. ${advice}`, first: { kind: first.kind, id: first.id } };
 }

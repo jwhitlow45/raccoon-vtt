@@ -347,7 +347,7 @@ describe("a player's chips on a phone (LP5-ROLLS-1)", () => {
     const seen = projectState(state, P1, { sceneId: null }).rolls.r1!;
     const second: RollRequest = { ...seen, id: "r2", targets: seen.targets.map((t) => ({ characterId: t.characterId! })) };
     assert.deepEqual(foldedChips([second, seen]), { text: "Rolls 1/2", label: "Rolls 1/2: 2 roll requests, 1 of 2 answered. Close the sheet to see them." });
-    assert.equal(foldedChips([seen]).label, "Rolls 1/1: 1 roll request, 1 of 1 answered. Close the sheet to see them.");
+    assert.equal(foldedChips([seen]).label, "Rolls 1/1: 1 roll request, 1 of 1 answered. Close the sheet to see it.", "one request is it, not them (LPD-DMPHONE-8)");
     // The same rule as the DM's cards: only a phone in portrait with a sheet open folds them.
     const folds = (width: number, height: number, open: boolean) => deskLayout({ width, height, wideMinWidth: 900, sheetOpen: open }).folded;
     assert.equal(folds(390, 844, true), true);
@@ -594,7 +594,7 @@ describe("the player's card under a sheet (docs/design-v1-visual.md 3.3.1)", () 
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, total: 17 }, P1, 2);
     const answeredOne = projectState(state, P1, { sceneId: null }).rolls.r1!;
     assert.deepEqual(rollsSummary([answeredOne]), { text: "Rolls 1/1", name: "rolls 1 of 1 answered", waiting: false });
-    assert.equal(sheetSummary([answeredOne]).label, "Rolls 1/1: 1 roll request, 1 of 1 answered. Close the sheet to see them.");
+    assert.equal(sheetSummary([answeredOne]).label, "Rolls 1/1: 1 roll request, 1 of 1 answered. Close the sheet to see it.");
     assert.deepEqual(answeredCount([answeredOne, waiting]), { text: "Rolls 1/2", name: "rolls 1 of 2 answered" });
   });
 });

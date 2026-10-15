@@ -115,7 +115,7 @@ export function DmDesk() {
     focusMap(scope.get(mapFocusSlot));
   }, [cards, scope]);
   // Nothing waits for the DM's own answer, so the rolls never lead the dock's summary for a DM.
-  useAlertsSummary(cards.length > 0 ? { ...answeredCount(cards), waiting: false, open } : null);
+  useAlertsSummary(cards.length > 0 ? { ...answeredCount(cards), waiting: false, requests: cards.length, open } : null);
 
   const summary = stack.button === "sheet" ? foldedChips(cards, "sheet") : stack.button ? foldedChips(cards.slice(PHONE_CHIPS), stack.button) : null;
   const summaryButton = summary ? (

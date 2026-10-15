@@ -37,7 +37,7 @@ describe("alertsSummary", () => {
   });
 
   test("a roll waiting for this viewer comes first, and a tap answers it", () => {
-    const s = alertsSummary({ text: "Roll asked", name: "the DM asks for a Wisdom check", waiting: true }, [prompt("p1", "Thorn"), timeUp]);
+    const s = alertsSummary({ text: "Roll asked", name: "the DM asks for a Wisdom check", waiting: true, requests: 2 }, [prompt("p1", "Thorn"), timeUp]);
     assert.deepEqual(s, {
       text: "Roll asked",
       more: "+2",
@@ -47,7 +47,7 @@ describe("alertsSummary", () => {
   });
 
   test("concentration, then the time-up, then rolls that do not wait for this viewer, then notices newest first", () => {
-    const s = alertsSummary({ text: "Rolls 1/3", name: "rolls 1 of 3 answered", waiting: false }, [
+    const s = alertsSummary({ text: "Rolls 1/3", name: "rolls 1 of 3 answered", waiting: false, requests: 2 }, [
       notice("n1", "Bless ended on Thorn."),
       timeUp,
       prompt("p1", "Thorn"),
@@ -64,7 +64,7 @@ describe("alertsSummary", () => {
   });
 
   test("the time-up outranks the rolls that do not wait", () => {
-    const s = alertsSummary({ text: "Rolls 0/2", name: "rolls 0 of 2 answered", waiting: false }, [timeUp]);
+    const s = alertsSummary({ text: "Rolls 0/2", name: "rolls 0 of 2 answered", waiting: false, requests: 1 }, [timeUp]);
     assert.equal(s?.text, "Time is up");
     assert.equal(s?.name, "Time is up +1: time is up, rolls 0 of 2 answered. Close the sheet to see them.");
   });
@@ -72,6 +72,14 @@ describe("alertsSummary", () => {
   test("a lone notice names itself without its stop, and says it", () => {
     const s = alertsSummary(null, [notice("n1", "Bless ended on Thorn.")]);
     assert.deepEqual(s, { text: "Bless ended on Thorn", more: "", name: "Bless ended on Thorn: Bless ended on Thorn. Close the sheet to see it.", first: { kind: "notice", id: "n1" } });
+  });
+
+  test("the rolls alone say see them when they stand for several requests, and see it for one (LPD-DMPHONE-8)", () => {
+    const desk = (requests: number) => alertsSummary({ text: "Rolls 1/4", name: "rolls 1 of 4 answered", waiting: false, requests }, []);
+    assert.equal(desk(4)?.name, "Rolls 1/4: rolls 1 of 4 answered. Close the sheet to see them.");
+    assert.equal(desk(1)?.name, "Rolls 1/4: rolls 1 of 4 answered. Close the sheet to see it.", "one request asking four creatures is one thing to see");
+    const waiting = alertsSummary({ text: "Roll asked", name: "the DM asks for a Wisdom check and 1 more roll", waiting: true, requests: 2 }, []);
+    assert.equal(waiting?.name, "Roll asked: the DM asks for a Wisdom check and 1 more roll. Close the sheet to answer.", "a roll to answer still says answer");
   });
 
   test("the newest notice leads when nothing else waits", () => {

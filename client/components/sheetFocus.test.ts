@@ -87,7 +87,7 @@ describe("the alerts summary slot", () => {
     const r = new SheetFocusRegistry();
     assert.equal(alertsSummaryEntry(r), null);
     let opened = 0;
-    const withdraw = publishAlertsSummary(r, { text: "Roll asked", name: "the DM asks for a Wisdom check", waiting: true, open: () => opened++ });
+    const withdraw = publishAlertsSummary(r, { text: "Roll asked", name: "the DM asks for a Wisdom check", waiting: true, requests: 1, open: () => opened++ });
     const entry = alertsSummaryEntry(r);
     assert.equal(entry?.text, "Roll asked");
     assert.equal(entry?.waiting, true);
@@ -99,8 +99,8 @@ describe("the alerts summary slot", () => {
 
   test("the entry published last shows, and withdrawing it brings back the one before", () => {
     const r = new SheetFocusRegistry();
-    const first = publishAlertsSummary(r, { text: "Rolls 1/3", name: "rolls 1 of 3 answered", waiting: false, open() {} });
-    const second = publishAlertsSummary(r, { text: "Roll asked", name: "the DM asks for a Dexterity save", waiting: true, open() {} });
+    const first = publishAlertsSummary(r, { text: "Rolls 1/3", name: "rolls 1 of 3 answered", waiting: false, requests: 1, open() {} });
+    const second = publishAlertsSummary(r, { text: "Roll asked", name: "the DM asks for a Dexterity save", waiting: true, requests: 1, open() {} });
     assert.equal(alertsSummaryEntry(r)?.text, "Roll asked");
     second();
     assert.equal(alertsSummaryEntry(r)?.text, "Rolls 1/3");
@@ -117,7 +117,7 @@ describe("a DM's room and a player preview mounted together", () => {
     const dm = new RoomScope().get(sheetFocusSlot);
     const preview = new RoomScope().get(sheetFocusSlot);
     let opened = 0;
-    const withdraw = publishAlertsSummary(dm, { text: "Roll asked", name: "the DM asks for a Wisdom check", waiting: true, open: () => opened++ });
+    const withdraw = publishAlertsSummary(dm, { text: "Roll asked", name: "the DM asks for a Wisdom check", waiting: true, requests: 1, open: () => opened++ });
     // Room's dock reads `waiting` and calls `open()`, and FoldStatus announces the text and name: all from this entry.
     assert.equal(alertsSummaryEntry(preview), null);
     assert.equal(alertsSummaryEntry(dm)?.waiting, true);
@@ -132,8 +132,8 @@ describe("a DM's room and a player preview mounted together", () => {
     const heard = { dm: 0, preview: 0 };
     dm.summaryListeners.add(() => heard.dm++);
     preview.summaryListeners.add(() => heard.preview++);
-    const own = publishAlertsSummary(preview, { text: "Rolls 0/1", name: "rolls 0 of 1 answered", waiting: false, open() {} });
-    const dms = publishAlertsSummary(dm, { text: "Rolls 1/3", name: "rolls 1 of 3 answered", waiting: false, open() {} });
+    const own = publishAlertsSummary(preview, { text: "Rolls 0/1", name: "rolls 0 of 1 answered", waiting: false, requests: 1, open() {} });
+    const dms = publishAlertsSummary(dm, { text: "Rolls 1/3", name: "rolls 1 of 3 answered", waiting: false, requests: 1, open() {} });
     assert.equal(alertsSummaryEntry(preview)?.text, "Rolls 0/1", "the DM's newer line does not replace the preview's");
     assert.deepEqual(heard, { dm: 1, preview: 1 });
     dms();
