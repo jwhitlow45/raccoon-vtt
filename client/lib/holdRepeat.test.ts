@@ -14,6 +14,7 @@ function stepper(start: number, max: number) {
       s.value = Math.min(max, s.value + 5);
       return s.value < max;
     },
+    atLimit: () => s.value >= max,
     onHold: (h) => held.push(h),
     value: { read: () => s.value, write: (v) => void (s.value = v) },
     timers: clock,
@@ -84,6 +85,17 @@ describe("a button that repeats while held", () => {
     s.repeat.release();
     s.repeat.click(true);
     assert.equal(s.value, 35);
+  });
+
+  test("a held Enter stops at the limit: past it the button, still focused, takes no click and no press", () => {
+    const s = stepper(85, 100);
+    for (let i = 0; i < 30; i++) s.repeat.click(true);
+    assert.equal(s.value, 100);
+    assert.equal(s.steps, 3, "no step at the limit");
+    s.repeat.press();
+    assert.equal(s.steps, 3);
+    assert.deepEqual(s.held, [], "a press at the limit is no hold");
+    assert.equal(s.clock.pendingTimers, 0);
   });
 
   test("a press says when it starts and ends, so the value is spoken once at the end", () => {

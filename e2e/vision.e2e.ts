@@ -477,7 +477,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await shots.take(dm, "vision-dm-readout-closet");
   });
 
-  test("7. a finger held on the door or on the platform pings and opens nothing, and the DM's held + climbs to 100 ft", async () => {
+  test("7. a finger held on the door or on the platform pings and opens nothing, and the DM's held + climbs to 100 ft and a held Enter stops at each end", async () => {
     const doorPill = player.getByRole("group", { name: /door$/ });
     for (const [what, world] of [
       ["the door", { x: 3.5, y: 10.1 }],
@@ -509,10 +509,27 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await dm.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
     await dm.mouse.down();
     await waitFor("the stepper at 100 ft", async () => (await stepper.innerText()).trim() === "100 ft up", 5_000);
-    assert.equal(await plus.isDisabled(), true);
+    assert.equal(await plus.getAttribute("aria-disabled"), "true");
     await waitFor("the value spoken again before the lift", async () => (await stepper.locator("[aria-live]").getAttribute("aria-live")) === "polite");
     await shots.take(dm, "vision-dm-stepper-held-to-100");
     await dm.mouse.up();
+
+    // A held Enter repeats a step to the end of the range and stops there: the button at its limit keeps the focus and
+    // takes no click, rather than handing the focus, and the rest of the key repeat, to the other button.
+    const focused = () => dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { getAttribute(n: string): string | null } | null } }).document.activeElement?.getAttribute("aria-label") ?? null);
+    for (const [name, end] of [
+      ["5 ft lower", "20 ft down"],
+      ["5 ft higher", "100 ft up"],
+    ] as const) {
+      const button = stepper.getByRole("button", { name });
+      await button.focus();
+      for (let i = 0; i < 30; i++) await dm.keyboard.down("Enter");
+      await dm.keyboard.up("Enter");
+      assert.equal((await stepper.innerText()).trim(), end, `a held Enter on ${name}`);
+      assert.equal(await focused(), name, `the focus left ${name} at its limit`);
+      assert.equal(await button.getAttribute("aria-disabled"), "true");
+      assert.equal(await button.evaluate((b) => (b as unknown as { disabled: boolean }).disabled), false, "a button at its limit stays focusable");
+    }
     await dm.getByRole("button", { name: "Select", exact: true }).click();
   });
 

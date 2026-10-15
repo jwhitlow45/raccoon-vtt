@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as R
 import { Button } from "../../components/Button.tsx";
 import { Input, Select } from "../../components/Field.tsx";
 import type { IconName } from "../../components/Icon.tsx";
+import { buttonLook } from "../../components/looks.ts";
 import { accessibleName } from "../../lib/a11y.ts";
 import { HoldRepeat, type RepeatValue } from "../../lib/holdRepeat.ts";
 import { theme } from "../../lib/theme.ts";
@@ -88,6 +89,13 @@ export function OptionsDivider() {
  * `onHold` hears when a pointer press starts and ends. `repeatValue` is
  * the value it steps, which a press the browser cancels before its first
  * repeat, a scroll that began on the button, puts back.
+ *
+ * A repeat button that is `disabled`, at its limit, is `aria-disabled`
+ * instead, with the disabled look, and does nothing when pressed or
+ * clicked. A truly disabled button loses the keyboard's focus to the page,
+ * and moving the focus to the other button instead sent the rest of a held
+ * Enter's key repeat back the other way. So the focus stays, and a held
+ * Enter stops at the limit.
  */
 export function OptButton(props: {
   ref?: Ref<HTMLButtonElement>;
@@ -104,22 +112,30 @@ export function OptButton(props: {
   repeatValue?: RepeatValue;
 }) {
   const { pressed, tone } = props;
-  const hold = useHoldRepeat(props.onClick, props.onHold, props.repeatValue);
+  const atLimit = props.repeat === true && props.disabled === true;
+  const hold = useHoldRepeat(props.onClick, props.onHold, props.repeatValue, atLimit);
+  const variant = tone ?? "secondary";
   return (
     <Button
       ref={props.ref}
       size="sm"
-      variant={tone ?? "secondary"}
+      variant={variant}
       pressed={pressed}
       armed={tone === "danger" && pressed === true}
       icon={props.icon}
-      disabled={props.disabled}
+      disabled={props.disabled && !atLimit}
+      aria-disabled={atLimit || undefined}
       aria-label={props.children === undefined ? props.label : accessibleName(props.children, props.label)}
       title={props.label}
       onClick={(e) => (props.repeat ? hold.click(e.detail === 0) : props.onClick())}
       onPointerDown={props.repeat ? hold.pointerDown : undefined}
       onContextMenu={props.repeat ? (e) => e.preventDefault() : undefined}
-      style={{ flex: "none", whiteSpace: "nowrap", ...(props.repeat ? NO_CALLOUT : null) }}
+      style={{
+        flex: "none",
+        whiteSpace: "nowrap",
+        ...(props.repeat ? NO_CALLOUT : null),
+        ...(atLimit ? { ...buttonLook(variant, { pressed, disabled: true }), cursor: "default" } : null),
+      }}
     >
       {props.children}
     </Button>
@@ -130,16 +146,18 @@ export function OptButton(props: {
 const NO_CALLOUT: CSSProperties = { WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" };
 
 /**
- * The hold repeat's wiring to the DOM. The lift is heard on `window`, since
- * a button that turns disabled at its limit may never get its own
- * `pointerup`, and also as the button's `lostpointercapture`, the last word
- * a touch's implicit capture gives. A finger sliding off the button ends
+ * The hold repeat's wiring to the DOM. The lift is heard on `window`, in
+ * case a browser never gives a button at its limit its own `pointerup`,
+ * and also as the button's `lostpointercapture`, the last word a touch's
+ * implicit capture gives. A finger sliding off the button ends
  * the hold, which that capture would otherwise hide. A `pointercancel` is
  * the browser taking the gesture for a scroll, which `cancel` answers.
  */
-function useHoldRepeat(onClick: () => unknown, onHold: ((holding: boolean) => void) | undefined, value: RepeatValue | undefined) {
+function useHoldRepeat(onClick: () => unknown, onHold: ((holding: boolean) => void) | undefined, value: RepeatValue | undefined, atLimit: boolean) {
   const clickRef = useRef(onClick);
   clickRef.current = onClick;
+  const limitRef = useRef(atLimit);
+  limitRef.current = atLimit;
   const holdRef = useRef(onHold);
   holdRef.current = onHold;
   const valueRef = useRef(value);
@@ -148,6 +166,7 @@ function useHoldRepeat(onClick: () => unknown, onHold: ((holding: boolean) => vo
     () =>
       new HoldRepeat({
         step: () => clickRef.current() !== false,
+        atLimit: () => limitRef.current,
         onHold: (h) => holdRef.current?.(h),
         value: { read: () => valueRef.current?.read() ?? 0, write: (v) => valueRef.current?.write(v) },
       }),
@@ -157,7 +176,7 @@ function useHoldRepeat(onClick: () => unknown, onHold: ((holding: boolean) => vo
   return {
     click: (fromKeyboard: boolean) => repeat.click(fromKeyboard),
     pointerDown(e: ReactPointerEvent<HTMLButtonElement>) {
-      if (!e.isPrimary || e.button !== 0) return;
+      if (!e.isPrimary || e.button !== 0 || limitRef.current) return;
       endRef.current?.();
       const button = e.currentTarget;
       const id = e.pointerId;

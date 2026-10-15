@@ -44,6 +44,12 @@ export type RepeatValue = { read(): number; write(value: number): void };
 export class HoldRepeat {
   /** Steps once. False when another step the same way would change nothing, at a limit, which ends the hold. */
   readonly #step: () => boolean;
+  /**
+   * Whether the button stands at its limit, where it is `aria-disabled`
+   * rather than disabled, so it keeps the keyboard's focus. There a press
+   * and a click do nothing, so a held Enter stops at the limit.
+   */
+  readonly #atLimit: () => boolean;
   /** A pointer press began or ended, so a stepper can keep its value's live announcement off meanwhile. */
   readonly #onHold: (holding: boolean) => void;
   readonly #value: RepeatValue | null;
@@ -56,8 +62,9 @@ export class HoldRepeat {
   #pressedTimer: unknown = null;
   #holding = false;
 
-  constructor(options: { step: () => boolean; onHold?: (holding: boolean) => void; value?: RepeatValue; timers?: RepeatTimers }) {
+  constructor(options: { step: () => boolean; atLimit?: () => boolean; onHold?: (holding: boolean) => void; value?: RepeatValue; timers?: RepeatTimers }) {
     this.#step = options.step;
+    this.#atLimit = options.atLimit ?? (() => false);
     this.#onHold = options.onHold ?? (() => {});
     this.#value = options.value ?? null;
     this.#timers = options.timers ?? realTimers;
@@ -65,6 +72,7 @@ export class HoldRepeat {
 
   /** A pointer pressed the button. */
   press(): void {
+    if (this.#atLimit()) return;
     this.#stopTimer();
     this.#clearPressedTimer();
     this.#pressed = true;
@@ -119,6 +127,7 @@ export class HoldRepeat {
       this.#clearPressedTimer();
       return;
     }
+    if (this.#atLimit()) return;
     this.#step();
   }
 
@@ -141,8 +150,8 @@ export class HoldRepeat {
 
   /**
    * The hold is over: the live announcement comes back on. At a limit this
-   * comes at once rather than on the lift, since a button that turns
-   * disabled there may never hear its lift (iPhone Safari sends a disabled
+   * comes at once rather than on the lift, since a button that changes
+   * state there may never hear its lift (iPhone Safari sends a disabled
    * button no pointer events), and a lost lift must never leave the stepper
    * quiet.
    */
