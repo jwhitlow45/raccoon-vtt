@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 /**
  * What a ping sounds and feels like (features section 12): a short rising
  * tone through Web Audio, and a buzz on phones that have the Vibration API
@@ -7,7 +9,17 @@
 
 const SOUND_KEY = "rvtt.pingSound";
 
-export function soundEnabled(): boolean {
+/*
+ * One value for the whole page, read from storage once. The ping tool's
+ * "Ping sound" and This device's switch are the same setting
+ * (docs/design-v1-visual.md 3.7), so both subscribe to it: a change in one
+ * shows in the other while both are on screen, and a tap never flips a
+ * stale copy.
+ */
+const soundListeners = new Set<() => void>();
+let soundOn = readSound();
+
+function readSound(): boolean {
   try {
     return localStorage.getItem(SOUND_KEY) !== "off";
   } catch {
@@ -15,12 +27,27 @@ export function soundEnabled(): boolean {
   }
 }
 
+export function soundEnabled(): boolean {
+  return soundOn;
+}
+
+export function subscribeSound(fn: () => void): () => void {
+  soundListeners.add(fn);
+  return () => soundListeners.delete(fn);
+}
+
+export function usePingSound(): boolean {
+  return useSyncExternalStore(subscribeSound, soundEnabled);
+}
+
 export function setSoundEnabled(on: boolean): void {
+  soundOn = on;
   try {
     localStorage.setItem(SOUND_KEY, on ? "on" : "off");
   } catch {
     // Private mode or blocked storage: the choice lasts for this page only.
   }
+  for (const fn of soundListeners) fn();
 }
 
 let audio: AudioContext | null = null;

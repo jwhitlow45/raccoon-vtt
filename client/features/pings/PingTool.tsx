@@ -4,7 +4,7 @@ import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import { InfoLine, OptButton, OptionsColumn, OptionsRow } from "../measure/controls.tsx";
-import { setSoundEnabled, soundEnabled } from "./feedback.ts";
+import { setSoundEnabled, usePingSound } from "./feedback.ts";
 import { lookHereEvent } from "./lookHere.ts";
 
 /**
@@ -18,7 +18,7 @@ import { lookHereEvent } from "./lookHere.ts";
 
 /** One Room page's ping tool: its options and the gesture in progress. */
 const pingSlot = scopeSlot(() => ({
-  store: createStore<{ lookHere: boolean; sound: boolean }>(() => ({ lookHere: false, sound: true })),
+  store: createStore<{ lookHere: boolean }>(() => ({ lookHere: false })),
   gesture: null as { screen: { x: number; y: number }; last: { x: number; y: number }; laser: boolean } | null,
 }));
 
@@ -62,7 +62,8 @@ function onCancel(ctx: ToolContext): void {
 
 function PingOptions(props: { role: "dm" | "player" }) {
   const pingStore = useScoped(pingSlot).store;
-  const { lookHere, sound } = useStore(pingStore);
+  const lookHere = useStore(pingStore, (s) => s.lookHere);
+  const sound = usePingSound();
   return (
     <OptionsColumn>
       <InfoLine tone="muted">
@@ -79,10 +80,7 @@ function PingOptions(props: { role: "dm" | "player" }) {
         <OptButton
           pressed={sound}
           label="Play a sound for pings on this device"
-          onClick={() => {
-            setSoundEnabled(!sound);
-            pingStore.setState({ sound: !sound });
-          }}
+          onClick={() => setSoundEnabled(!sound)}
         >
           Ping sound
         </OptButton>
@@ -99,9 +97,6 @@ export const pingTool: ToolDef = {
   order: 50,
   cursor: "pointer",
   pointer: { down: onDown, move: onMove, up: onUp, cancel: onCancel },
-  activate(ctx) {
-    ctx.scope.get(pingSlot).store.setState({ sound: soundEnabled() });
-  },
   deactivate(ctx) {
     onCancel(ctx);
   },

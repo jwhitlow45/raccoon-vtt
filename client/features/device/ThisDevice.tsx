@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Button } from "../../components/Button.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
@@ -7,7 +6,7 @@ import { useRoomScope } from "../../state/scope.ts";
 import { setShortcutSheet } from "../../state/shortcuts.ts";
 import { RadioGroup } from "../dm/controls.tsx";
 import { setSoundOn, useSoundOn } from "../encounter/alerts.ts";
-import { setSoundEnabled, soundEnabled } from "../pings/feedback.ts";
+import { setSoundEnabled, usePingSound } from "../pings/feedback.ts";
 import { setLowPower, setMapDetail, setUiScale, UI_SCALES, uiScaleLabel, useLowPower, useMapVariant, useUiScale, type UiScale } from "./settings.ts";
 
 /**
@@ -21,8 +20,7 @@ export default function ThisDevice() {
   const lowPower = useLowPower();
   const variant = useMapVariant();
   const turnSound = useSoundOn();
-  // The ping tool reads this on each use (features/pings/feedback.ts), so a plain read here is enough.
-  const [pingSound, setPingSound] = useState(soundEnabled);
+  const pingSound = usePingSound();
   return (
     <div style={{ display: "grid" }}>
       <Section label="Interface size" divider={false}>
@@ -56,10 +54,7 @@ export default function ThisDevice() {
           label="Ping sound"
           help="A short tone when someone pings the map."
           checked={pingSound}
-          onChange={(on) => {
-            setSoundEnabled(on);
-            setPingSound(on);
-          }}
+          onChange={setSoundEnabled}
         />
       </Section>
       <Section label="Keyboard shortcuts">
