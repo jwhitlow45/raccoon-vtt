@@ -231,19 +231,20 @@ function RoomPage() {
   useBackClose(sheetOpen, closeSheets);
   /*
    * On a phone the token's action bar is the sheet a tap opened, so Back
-   * closes it too, and with Select several on and the group's bar hidden it
-   * ends the mode as Done does, so Back never leaves the room while a group
-   * is held. Escape does the same everywhere. Neither ends the mode while
-   * the token's panel shows the selection (state/selection.ts dismissal).
+   * closes it too. With Select several on and the group's bar hidden, Back
+   * ends the mode as Done does at any width, a wide Android tablet's
+   * included, so Back never leaves the room while a group is held. Escape
+   * does both everywhere. Neither ends the mode while the token's panel
+   * shows the selection (state/selection.ts dismissal).
    */
   const tokenPanelShown = wide ? tabId === "token" : sheet?.id === "token";
   const away = useRoomView((s) => dismissal(s.local, tokenPanelShown));
   const putAway = useCallback(() => {
     const what = dismissal(store.getState().local, tokenPanelShown);
-    if (what === "bar") ui.select(null);
+    if (what === "bar" && !wide) ui.select(null);
     else if (what === "group") ui.doneSelecting();
-  }, [store, ui, tokenPanelShown]);
-  useBackClose(!wide && away !== null, putAway);
+  }, [store, ui, tokenPanelShown, wide]);
+  useBackClose(away === "group" || (!wide && away === "bar"), putAway);
   useEscape(sheetOpen, closeSheets, tokenPanelShown);
   // Where the open sheet stands, read when Find my token is pressed, so the found token lands clear of it.
   const sheetRef = useRef<HTMLElement | null>(null);
