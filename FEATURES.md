@@ -275,7 +275,7 @@ The DM asks players for a saving throw or an ability check, and each player type
 - When a page a player can read is new or changes, the Journal button shows a dot and the page reads "New" or "Updated".
 - **Map pins**: the Pin tool (DM) places a pin with a tap. Its pane sets a label, a linked page, a color and "DM only", and says who will see the pin. If the server refuses a change, the pane keeps it and says why. Drag a pin to move it. A page's "Pin to the map" places a pin linked to that page.
 - Players see a pin only on their scene, out of the fog, and when they can read its linked page. Deleting a page makes its pins DM only.
-- With the Select tool, a tap on a pin opens its page, or shows its label when it links none.
+- With the Select tool, a tap on a pin opens its page, or shows its label when it links none, until a few seconds pass or the next tap elsewhere on the map.
 - A room holds up to 200 pages, and a scene up to 200 pins.
 
 ## Log, chat and handouts

@@ -8,6 +8,7 @@ import { RoomScope } from "../../../state/scope.ts";
 import type { RoomUi } from "../../../state/store.ts";
 import type { RoomActions, RoomView } from "../../../state/types.ts";
 import { doorPillSlot } from "../../doors/store.ts";
+import { pinSlot } from "../../pins/store.ts";
 import type { ToolContext } from "../../tools.ts";
 import { builderSlot, labelPaneSlot } from "../store.ts";
 import { followReadout, readoutSlot } from "./store.ts";
@@ -110,6 +111,33 @@ describe("the height readout's tap", () => {
     assert.equal(tapGround(ctx, "select", { x: 3.5, y: 3.5 - 14 / 40 }), false);
     assert.equal(readout(), null, "the earlier reading goes with the tap");
     assert.deepEqual(spoken, ["Ground 10 ft up.", ""]);
+  });
+
+  test("one thing floats at a time both ways: a reading puts a pin's popover away, and a tap on the pin puts the reading away", () => {
+    const popover = () => ctx.scope.get(pinSlot).store.getState().popover;
+    const pinHead = { x: 3.5, y: 3.5 - 14 / 40 };
+    // The pin layer opens the popover on its own tap, and the same tap reaches the canvas, which leaves it be.
+    ctx.scope.get(pinSlot).store.setState({ popover: { id: "pin", at: 0 } });
+    tap(pinHead.x, pinHead.y);
+    assert.ok(popover(), "the pin's own tap closed its popover");
+    tap(2.5, 5.5);
+    flush();
+    assert.equal(popover(), null);
+    assert.deepEqual(readout()?.cell, { x: 2, y: 5 });
+    tap(pinHead.x, pinHead.y);
+    assert.equal(readout(), null);
+    // A tap that only puts the popover away, on ground at 0, or one a door takes, closes it too.
+    ctx.scope.get(pinSlot).store.setState({ popover: { id: "pin", at: 0 } });
+    tap(0.5, 0.5);
+    assert.equal(popover(), null);
+    ctx.scope.get(pinSlot).store.setState({ popover: { id: "pin", at: 0 } });
+    tap(6.5, 4);
+    assert.equal(popover(), null);
+    assert.ok(ctx.scope.get(doorPillSlot).getState().pill);
+    // A hold that pinged is no tap, and leaves the popover up.
+    ctx.scope.get(pinSlot).store.setState({ popover: { id: "pin", at: 0 } });
+    tap(2.5, 5.5, true);
+    assert.ok(popover());
   });
 
   test("a tap that closes the door pill shows no reading in its place", () => {

@@ -1,5 +1,5 @@
 import { createStore } from "zustand/vanilla";
-import { scopeSlot } from "../../state/scope.ts";
+import { scopeSlot, type RoomScope } from "../../state/scope.ts";
 
 export type PinToolState = {
   /** The pin whose pane is open. */
@@ -26,3 +26,13 @@ export const pinSlot = scopeSlot(() => ({
   /** The pointer gesture in progress with the Pin tool. */
   gesture: null as { start: { x: number; y: number }; hit: string | null; grab: { dx: number; dy: number } | null; moved: boolean } | null,
 }));
+
+/**
+ * Puts a label-only pin's popover away. A tap anywhere on the map but the
+ * pin does, so the popover never floats beside a door's pill or a height
+ * reading (canvas/emptyTap.ts, docs/design-v1-heights-readout.md section 2).
+ */
+export function closePinPopover(scope: RoomScope): void {
+  const store = scope.get(pinSlot).store;
+  if (store.getState().popover) store.setState({ popover: null });
+}
