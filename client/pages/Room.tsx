@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
+import { barDockSlot, type Chrome } from "../canvas/barDock.ts";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
 import { MapStage } from "../canvas/Stage.tsx";
 import { Button } from "../components/Button.tsx";
@@ -281,6 +282,25 @@ function RoomPage() {
     },
   };
   useDockFocus({ folded, sheetOpen, store: dockStore, registry: scope.get(sheetFocusSlot), showing, showRef, summaryRef });
+
+  // ------------------------------------------------ the docked token bar (canvas/barDock.ts)
+  // The bars as drawn, in the chrome's own pixels, so the token bar keeps to the part of the map they leave free.
+  const barDock = scope.get(barDockSlot);
+  const sheetRight = landscape && sheetOpen ? Math.min(theme.layout.landscapeSheetWidth, width * 0.6) : 0;
+  useLayoutEffect(() => {
+    // Until both bars have a height, the bar keeps its defaults rather than reaching under them.
+    const chrome: Chrome | null =
+      topBarHeight > 0 && toolbarHeight > 0
+        ? {
+            top: topBarHeight / zoom,
+            bottom: (toolbarHeight + optionsHeight) / zoom,
+            toolbar: toolbarHeight / zoom,
+            safe: { top: safe.top, right: safe.right, bottom: safe.bottom, left: safe.left },
+            sheet: sheetRight,
+          }
+        : null;
+    barDock.setState({ chrome });
+  }, [barDock, topBarHeight, toolbarHeight, optionsHeight, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight]);
   const mapFocus = scope.get(mapFocusSlot);
   const mapFocusRef = useCallback(
     (el: HTMLDivElement | null) => {

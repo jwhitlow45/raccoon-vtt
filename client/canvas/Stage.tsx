@@ -72,8 +72,6 @@ const EMPTY_TILES: RoomState["fogTiles"] = {};
 const EMPTY_MAP_LABELS: RoomState["labels"] = {};
 const NOT_CARRIED: ReadonlySet<string> = new Set();
 const BOARD_LAYERS = layersOf("board");
-/** The "Select several" bar's height above the toolbar (features/select/SelectOptions.tsx). */
-const SELECT_OPTIONS_PX = 60;
 const OVERLAY_LAYERS = layersOf("overlay");
 const UNDER_DECOR_LAYERS = layersOf("underDecor");
 
@@ -366,12 +364,8 @@ export function MapStage(props: {
 
   // Every token's marks and label for the zoom, laid out together (useBoardText.ts).
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const barOpen = actionBar && selecting && draggingId === null && selectedId !== null;
-  // The action bar's header shows the selected token's whole name, so that token's plate shows only while no bar does, hovered or not.
-  const plateIds = useMemo(
-    () => new Set([hoveredId, selectedId].filter((id): id is string => id !== null && !(barOpen && id === selectedId))),
-    [hoveredId, selectedId, barOpen],
-  );
+  // The selected token's plate shows its whole name on the map, since the action bar's header keeps two lines of it (docs/design-v1-bar-dock.md section 6).
+  const plateIds = useMemo(() => new Set([hoveredId, selectedId].filter((id): id is string => id !== null)), [hoveredId, selectedId]);
   const pills = useBoardPills();
   // The DM's labels on the map, as this viewer's projection holds them: token labels keep off them, measured as the builder draws them.
   const allMapLabels = useRoomView((s) => s.view?.labels ?? EMPTY_MAP_LABELS);
@@ -964,8 +958,6 @@ export function MapStage(props: {
   const selected = selectedId ? tokensById.get(selectedId) : undefined;
   const group = selectedIds.flatMap((id) => tokensById.get(id) ?? []);
   const barShown = actionBar && selecting && cam && size && draggingId === null;
-  // "Select several" puts its own bar above the toolbar, so the token bars keep clear of it.
-  const reserveBottom = multi ? SELECT_OPTIONS_PX : 0;
 
   const stageStyle: CSSProperties = {
     touchAction: "none",
@@ -1044,9 +1036,7 @@ export function MapStage(props: {
               tokens={group}
               movable={group.filter(canDrag).length}
               anchor={inZoomed(worldAnchor(cam, selected), zoom)}
-              tokenSize={sizeInZoomed(screenSize(cam, selected), zoom)}
               viewport={sizeInZoomed(size, zoom)}
-              reserveBottom={reserveBottom}
               onClose={() => ui.select(null)}
             />
           ) : barShown && selected ? (
@@ -1055,9 +1045,7 @@ export function MapStage(props: {
               key={selected.id}
               token={selected}
               anchor={inZoomed(belowLabel(worldAnchor(cam, selected), boardText.get(selected.id)), zoom)}
-              tokenSize={sizeInZoomed(screenSize(cam, selected), zoom)}
               viewport={sizeInZoomed(size, zoom)}
-              reserveBottom={reserveBottom}
               fullAccess={role === "dm" || ownsToken(selected)}
               onDetails={() => onOpenDetails(selected.id)}
               onClose={() => ui.select(null)}
@@ -1088,19 +1076,15 @@ export function MapStage(props: {
 }
 
 /**
- * The action bar hangs OFFSET_Y (34 px) under the token (TokenActionBar.tsx),
- * room for a label of two lines. A taller label under the token, or a
- * hover plate, pushes it further down, so the bar never hides it.
+ * A phone's spanning action bar hangs OFFSET_Y (34 px) under the token
+ * (TokenActionBar.tsx), room for a label of two lines. A taller label
+ * under the token, or its plate, pushes it further down, so the bar never
+ * hides it.
  */
 function belowLabel(anchor: Point, text: TokenText | undefined): Point {
   const block = text?.plate ?? text?.label;
   if (!text || !block || block.y < text.heightPx) return anchor;
   return { x: anchor.x, y: anchor.y + Math.max(0, block.y + block.height - text.heightPx + 4 - 34) };
-}
-
-function screenSize(cam: Camera, token: ViewToken): Size {
-  const fp = footprint(token);
-  return { width: fp.w * cam.scale, height: fp.h * cam.scale };
 }
 
 /** The screen point under a token's bottom center, where its action bar hangs. */

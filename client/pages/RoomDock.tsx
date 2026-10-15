@@ -277,20 +277,26 @@ export function useLayoutHeight(el: HTMLElement | null, zoom: number): number {
 }
 
 /**
- * The safe areas' top and bottom insets in pixels, which only CSS can
- * read (`env()`), from a probe that pads itself by them. The dock needs
- * them to tell whether it fits above the sheet (fold.ts dockFits).
+ * The safe areas' insets in pixels, which only CSS can read (`env()`),
+ * from a probe that pads itself by them. The dock needs the top and the
+ * bottom to tell whether it fits above the sheet (fold.ts dockFits), and
+ * the docked token bar all four for the map's free area
+ * (canvas/barDock.ts freeArea).
  */
-export function useSafeAreas(): { probe: (el: HTMLElement | null) => void; top: number; bottom: number } {
+export function useSafeAreas(): { probe: (el: HTMLElement | null) => void; top: number; right: number; bottom: number; left: number } {
   const [el, setEl] = useState<HTMLElement | null>(null);
-  const [areas, setAreas] = useState({ top: 0, bottom: 0 });
+  const [areas, setAreas] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
   useLayoutEffect(() => {
     if (!el) return;
     const read = () => {
       const style = getComputedStyle(el);
-      const top = parseFloat(style.paddingTop) || 0;
-      const bottom = parseFloat(style.paddingBottom) || 0;
-      setAreas((prev) => (prev.top === top && prev.bottom === bottom ? prev : { top, bottom }));
+      const next = {
+        top: parseFloat(style.paddingTop) || 0,
+        right: parseFloat(style.paddingRight) || 0,
+        bottom: parseFloat(style.paddingBottom) || 0,
+        left: parseFloat(style.paddingLeft) || 0,
+      };
+      setAreas((prev) => (prev.top === next.top && prev.right === next.right && prev.bottom === next.bottom && prev.left === next.left ? prev : next));
     };
     read();
     window.addEventListener("resize", read);
@@ -308,7 +314,9 @@ export const SAFE_PROBE_STYLE: CSSProperties = {
   width: 0,
   height: 0,
   paddingTop: theme.safe.top,
+  paddingRight: theme.safe.right,
   paddingBottom: theme.safe.bottom,
+  paddingLeft: theme.safe.left,
   visibility: "hidden",
   pointerEvents: "none",
 };

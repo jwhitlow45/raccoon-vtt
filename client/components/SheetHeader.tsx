@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode, Ref } from "react";
 import { theme } from "../lib/theme.ts";
 import { Icon } from "./Icon.tsx";
 import { IconButton } from "./IconButton.tsx";
@@ -146,12 +146,33 @@ function BackButton(props: { back: HeaderBack; ref?: Ref<HTMLButtonElement> }) {
 }
 
 /**
+ * What makes a pane's header a handle to move the pane by (the docked
+ * token action bar, canvas/TokenActionBar.tsx): the pointer handlers on
+ * its row, and whether a drag is under way, for the cursor.
+ */
+export type PaneHandle = {
+  dragging: boolean;
+  onPointerDown(e: ReactPointerEvent<HTMLDivElement>): void;
+  onPointerMove(e: ReactPointerEvent<HTMLDivElement>): void;
+  onPointerUp(e: ReactPointerEvent<HTMLDivElement>): void;
+  onPointerCancel(e: ReactPointerEvent<HTMLDivElement>): void;
+};
+
+/**
  * The header of a pane over the map (docs/design-v1-visual.md 2.3): the
  * token action bar, the label, pin and light panes, the door card and the
  * stop note. One 48 px row, the title at 16 px weight 700 and a close
  * button, so no pane needs negative margins to tuck its close into a
  * corner. The close is named "Close" unless the pane says more ("Close
  * without saving").
+ *
+ * The token action bar asks for three more (docs/design-v1-bar-dock.md):
+ * `handle` makes the row the pane's handle, with a grip at its start and
+ * no scrolling or zooming under a finger on it. `sticky` keeps the row at
+ * the top of the pane's scrolling frame on an opaque fill that reaches
+ * across the frame's 12 px side padding, so the handle and the close never
+ * scroll away. `lines` lets the title wrap to that many lines before it
+ * is cut short.
  */
 export function PaneHeader(props: {
   title: ReactNode;
@@ -161,14 +182,61 @@ export function PaneHeader(props: {
   closeRef?: Ref<HTMLButtonElement>;
   /** Between the title and the close button. */
   actions?: ReactNode;
+  handle?: PaneHandle;
+  sticky?: boolean;
+  lines?: number;
 }) {
+  const { handle, sticky, lines } = props;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0, minHeight: 48 }}>
-      <strong id={props.titleId} style={{ ...TITLE_STYLE, fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>
+    <div
+      onPointerDown={handle?.onPointerDown}
+      onPointerMove={handle?.onPointerMove}
+      onPointerUp={handle?.onPointerUp}
+      onPointerCancel={handle?.onPointerCancel}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: theme.space(1),
+        minWidth: 0,
+        minHeight: 48,
+        ...(handle ? { touchAction: "none", cursor: handle.dragging ? "grabbing" : "grab" } : null),
+        ...(sticky
+          ? {
+              position: "sticky",
+              top: 0,
+              zIndex: 1,
+              // The frame's 4 px top padding and 12 px side padding, taken back so the fill covers what scrolls under it.
+              margin: `-${theme.space(1)}px -${theme.space(3)}px 0`,
+              padding: `${theme.space(1)}px ${theme.space(3)}px 0`,
+              background: theme.color.surface,
+            }
+          : null),
+      }}
+    >
+      {handle ? <Grip /> : null}
+      <strong
+        id={props.titleId}
+        style={{
+          ...TITLE_STYLE,
+          fontSize: theme.font.input,
+          fontWeight: theme.weight.bold,
+          lineHeight: theme.leading.tight,
+          ...(lines ? { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", whiteSpace: "normal", overflowWrap: "anywhere" } : null),
+        }}
+      >
         {props.title}
       </strong>
       {props.actions}
       {props.onClose ? <IconButton ref={props.closeRef} icon="close" label={props.closeLabel ?? "Close"} onClick={props.onClose} /> : null}
     </div>
+  );
+}
+
+/** Six dots, the usual sign that a row moves what it heads. Decoration only: the pane's name and its Move bar button say the rest. */
+function Grip() {
+  return (
+    <svg aria-hidden viewBox="0 0 12 20" width={12} height={20} style={{ flex: "none", display: "block", color: theme.color.textMuted }}>
+      {[4, 10, 16].flatMap((y) => [3, 9].map((x) => <circle key={`${x}:${y}`} cx={x} cy={y} r={1.6} fill="currentColor" />))}
+    </svg>
   );
 }

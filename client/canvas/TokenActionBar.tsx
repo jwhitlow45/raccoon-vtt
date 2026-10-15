@@ -1,12 +1,14 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { useStore } from "zustand";
 import { CONDITION_KEYS, STATUS_KEYS, type Actor, type Effect, type LifeState } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
 import { RETURN_RANK, useSheetReturnFocus } from "../components/sheetFocus.ts";
-import { PaneHeader } from "../components/SheetHeader.tsx";
+import { PaneHeader, type PaneHandle } from "../components/SheetHeader.tsx";
 import { Tag } from "../components/Tag.tsx";
 import { useLayoutSize } from "../features/device/layout.ts";
+import { useUiScale } from "../features/device/settings.ts";
+import { usePreview } from "../features/dm/previewContext.ts";
 import { tokenAccess } from "../features/tokens/access.ts";
 import { AltImagesRow } from "../features/tokens/AltImages.tsx";
 import { DoorButton } from "../features/doors/DoorButton.tsx";
@@ -37,8 +39,9 @@ import { GroupMoreSheet } from "../features/tokens/GroupMoreSheet.tsx";
 import { DeathSaves, HpEntry, oneTarget } from "../features/tokens/HpSection.tsx";
 import { pathNow } from "../features/measure/movement.ts";
 import { lastMoveSlot, offered, offersMarkUndo, offersUndo, undoOf } from "../features/tokens/undoMove.ts";
-import { useTopBars } from "../features/encounter/band.ts";
+import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import type { Point, Size } from "../lib/camera.ts";
+import { TAP_SLOP_PX } from "../lib/gestures.ts";
 import { displayName, footprint, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { effectChip, elevationBadge, hpDisplay, hpText } from "../lib/tokenView.ts";
@@ -46,23 +49,40 @@ import { foldsUnderSheet, usePublishBar } from "../pages/fold.ts";
 import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope, useScoped } from "../state/scope.ts";
 import { sheetOpen } from "../state/types.ts";
+import {
+  BAR_FLOOR,
+  BAR_WIDTH,
+  barDockSlot,
+  barMode,
+  clampBox,
+  compactHang,
+  DEFAULT_CHROME,
+  DEFAULT_SPOT,
+  freeArea,
+  hangBox,
+  isDefaultSpot,
+  LANE_WIDTH,
+  laneLeft,
+  nextCorner,
+  overlapsLane,
+  releaseSpot,
+  shareLane,
+  spotHang,
+  writeSpot,
+  type BarFacts,
+  type BarMode,
+  type Box,
+  type Hang,
+  type Lane,
+  type Spot,
+} from "./barDock.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 
-const BAR_WIDTH = 304;
 const NO_CHARACTERS = {};
 /** Below the token's name label, which hangs about 30 px under the footprint. */
 const OFFSET_Y = 34;
 /** Room above the token's bottom edge for the token itself when the bar flips above it. */
 const FLIP_CLEARANCE = 40;
-const MARGIN = theme.space(2);
-/**
- * The canvas runs under the room's top bar and bottom toolbar (plus the
- * safe areas, client/pages/Room.tsx), so the bar keeps clear of both, with
- * a small gap, or its buttons would sit under theirs. On a phone in a fight
- * the turn band hangs under the top bar too (features/encounter/band.ts).
- */
-const TOP_GAP = 12;
-const BOTTOM_RESERVE = theme.layout.toolbar + 16;
 
 type Drawer = "conditions" | null;
 
@@ -78,11 +98,8 @@ type Drawer = "conditions" | null;
 export function TokenActionBar(props: {
   token: ViewToken;
   anchor: Point;
-  /** The token's footprint on screen, so a bar too tall for above or below can sit beside it. */
-  tokenSize?: Size;
+  /** The map's size in the chrome's own pixels. */
   viewport: Size;
-  /** Room the "Select several" bar takes above the toolbar, in pixels. */
-  reserveBottom?: number;
   fullAccess: boolean;
   onDetails(): void;
   onClose(): void;
@@ -144,15 +161,13 @@ export function TokenActionBar(props: {
   return (
     <BarFrame
       anchor={props.anchor}
-      tokenSize={props.tokenSize}
       viewport={props.viewport}
-      reserveBottom={props.reserveBottom}
       label={`${displayName(token)} actions`}
       dock={{ text: displayName(token), show: `Show ${displayName(token)} actions`, closeLabel: "Close", close: props.onClose }}
     >
-      <PaneHeader
-        // The whole name, wrapped: the token's plate on the map steps aside while the bar shows it (Stage.tsx).
-        title={<span style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{displayName(token)}</span>}
+      <BarHeader
+        // Two lines of the name at most: the frame's name holds all of it, and the token's plate shows it on the map.
+        title={displayName(token)}
         actions={badge ? <span style={{ flex: "none", color: theme.color.accentSoft, fontWeight: theme.weight.bold }}>{badge} ft</span> : null}
         onClose={props.onClose}
       />
@@ -262,6 +277,7 @@ export function TokenActionBar(props: {
         <BarButton grow onClick={props.onDetails}>
           Details
         </BarButton>
+        <PlaceButtons />
       </div>
     </BarFrame>
   );
@@ -281,10 +297,7 @@ export function GroupActionBar(props: {
   /** How many of them this member may move: a drag moves only those. */
   movable: number;
   anchor: Point;
-  /** The token's footprint on screen, so a bar too tall for above or below can sit beside it. */
-  tokenSize?: Size;
   viewport: Size;
-  reserveBottom?: number;
   onClose(): void;
 }) {
   const { tokens } = props;
@@ -317,13 +330,11 @@ export function GroupActionBar(props: {
   return (
     <BarFrame
       anchor={props.anchor}
-      tokenSize={props.tokenSize}
       viewport={props.viewport}
-      reserveBottom={props.reserveBottom}
       label={`${tokens.length} selected tokens`}
       dock={{ text: `${tokens.length} selected`, show: `Show actions for ${tokens.length} selected tokens`, closeLabel: "Let go of all of them", close: props.onClose }}
     >
-      <PaneHeader title={`${tokens.length} selected`} onClose={props.onClose} closeLabel="Let go of all of them" />
+      <BarHeader title={`${tokens.length} selected`} onClose={props.onClose} closeLabel="Let go of all of them" />
       <div style={{ color: theme.color.textMuted, overflowWrap: "anywhere" }}>{tokens.map((t) => displayName(t)).join(", ")}</div>
       <GroupHpEntry tokens={tokens} place="bar" />
       {props.movable >= 2 ? (
@@ -385,6 +396,7 @@ export function GroupActionBar(props: {
           Select several
         </BarButton>
         <BarButton onClick={props.onClose}>Clear</BarButton>
+        <PlaceButtons />
       </div>
       {more ? <GroupMoreSheet tokens={tokens} opener={moreButton} onClose={() => setMore(false)} /> : null}
     </BarFrame>
@@ -441,17 +453,62 @@ function CountLegButton(props: { token: ViewToken }) {
 }
 
 /**
- * Where a bar hangs: below its token when it fits, else above it. When it
- * fits neither, as on a desktop with the token low on an 800 px screen, it
- * moves beside the token if the screen is wide enough, with the whole
- * height to use. Otherwise it takes the side with more room and scrolls
- * inside, with a "Scroll for more" fade at the bottom while anything is
- * hidden, so Duplicate or Delete never sit out of view without a hint.
+ * What a bar's frame hands its header and its button row: the header's
+ * handle and stickiness, and Move bar with Reset bar position while it
+ * docks (docs/design-v1-bar-dock.md section 2).
+ */
+type FrameControls = {
+  handle: PaneHandle | null;
+  sticky: boolean;
+  place: { moveRef: RefObject<HTMLButtonElement | null>; moved: boolean; move(): void; reset(): void } | null;
+};
+
+const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null });
+
+/** The bar's header: its name on at most two lines, the grip and handle while it docks, sticky while it docks or spans. */
+function BarHeader(props: { title: string; actions?: ReactNode; onClose(): void; closeLabel?: string }) {
+  const frame = useContext(FrameContext);
+  return <PaneHeader title={props.title} actions={props.actions} onClose={props.onClose} closeLabel={props.closeLabel} handle={frame.handle ?? undefined} sticky={frame.sticky} lines={2} />;
+}
+
+/**
+ * Move bar, the single-pointer and keyboard way to move a docked bar
+ * (WCAG 2.2 SC 2.5.7), and Reset bar position while it is away from its
+ * default spot. Each is named by its words.
+ */
+function PlaceButtons() {
+  const { place } = useContext(FrameContext);
+  if (!place) return null;
+  return (
+    <>
+      <BarButton ref={place.moveRef} onClick={place.move}>
+        Move bar
+      </BarButton>
+      {place.moved ? <BarButton onClick={place.reset}>Reset bar position</BarButton> : null}
+    </>
+  );
+}
+
+/** A drag of the bar by its header, in progress: the pointer, where it went down, and the box the bar had then and has now. */
+type Drag = { pointerId: number; el: HTMLElement; x: number; y: number; start: Box; box: Box | null };
+
+/**
+ * Where a bar sits (docs/design-v1-bar-dock.md). From 600 layout px up, and
+ * on a phone on its side, it docks in the map's free area, at the bottom
+ * right unless the viewer moved it there by its header or with Move bar,
+ * and this device remembers the spot (`rvtt.tokenBarSpot`, barDock.ts). A
+ * phone held upright spans the screen under or over its token, as before.
+ * A screen too short for either opens it compact: a taller overlay over
+ * the Select several bar, and over the toolbar when even that is short,
+ * which scrolls as a whole and does not move. In each, a bar that meets
+ * the fight alerts column across shares the right lane with it
+ * (barDock.ts shareLane), and once it is drawn it publishes its box for
+ * the column, the notices and the camera.
  *
- * On a phone in portrait it spans the screen with small side margins,
- * since a 304 px card left a gap at the right that fit nothing. In
- * landscape an open sheet docks on the right, and the bar stops at the
- * sheet's left edge instead of passing under it.
+ * It scrolls inside when its content outgrows its room, with a "Scroll
+ * for more" fade at the bottom while anything is hidden, so Duplicate or
+ * Delete never sit out of view without a hint. While it docks or spans
+ * its header sticks to the top, so the handle and Close never scroll away.
  *
  * Under a portrait sheet it folds (pages/fold.ts, docs/design-v1-visual.md
  * 3.2.1): the frame takes the `hidden` attribute, which the global
@@ -465,27 +522,29 @@ function CountLegButton(props: { token: ViewToken }) {
  */
 function BarFrame(props: {
   anchor: Point;
-  tokenSize?: Size;
   viewport: Size;
-  reserveBottom?: number;
   label: string;
   dock: { text: string; show: string; closeLabel: string; close(): void };
   children: ReactNode;
 }) {
-  const { anchor } = props;
   const layout = useLayoutSize();
+  const zoom = useUiScale();
   const anySheet = useRoomView((s) => sheetOpen(s.local));
   const folded = foldsUnderSheet({ ...layout, sheetOpen: anySheet });
-  const phone = layout.width < theme.layout.wideMinWidth;
-  const portrait = phone && layout.width <= layout.height;
-  const sheetWidth = phone && !portrait && anySheet ? Math.min(theme.layout.landscapeSheetWidth, props.viewport.width * 0.6) : 0;
-  const viewport = sheetWidth > 0 ? { width: props.viewport.width - sheetWidth, height: props.viewport.height } : props.viewport;
-  const reserveBottom = BOTTOM_RESERVE + (props.reserveBottom ?? 0);
-  const topReserve = useTopBars() + TOP_GAP;
+  // "View as a player" reads this device's spot and keeps its own moves to itself, since nothing done there is saved.
+  const preview = usePreview() !== null;
+  const dockStore = useScoped(barDockSlot);
+  const chrome = useStore(dockStore, (s) => s.chrome) ?? DEFAULT_CHROME;
+  const spot = useStore(dockStore, (s) => s.spot);
+  const column = useStore(dockStore, (s) => s.column);
   const barRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const [barHeight, setBarHeight] = useState(160);
+  const moveRef = useRef<HTMLButtonElement>(null);
+  const [barHeight, setBarHeight] = useState(() => dockStore.getState().lastHeight);
   const [clipped, setClipped] = useState(false);
+  const [status, setStatus] = useState("");
+  const [dragBox, setDragBox] = useState<Box | null>(null);
+  const dragRef = useRef<Drag | null>(null);
   useSheetReturnFocus(barRef, RETURN_RANK.tokenBar);
   usePublishBar({ label: props.label, ...props.dock, frame: barRef });
   const measure = () => {
@@ -493,7 +552,9 @@ function BarFrame(props: {
     const content = contentRef.current;
     // Folded, the bar has no size: it keeps the last one it had, for where it unfolds.
     if (!el || !content || content.offsetHeight === 0) return;
-    setBarHeight(content.offsetHeight + 2);
+    const height = content.offsetHeight + 2;
+    setBarHeight(height);
+    if (dockStore.getState().lastHeight !== height) dockStore.setState({ lastHeight: height });
     setClipped(el.scrollHeight - el.clientHeight - el.scrollTop > 4);
   };
   // One wrapper holds every section, so a section that opens after the bar does (the conditions drawer, death saves) resizes it too.
@@ -506,39 +567,133 @@ function BarFrame(props: {
     observer.observe(content);
     return () => observer.disconnect();
   }, []);
-  const width = portrait ? viewport.width - 2 * MARGIN : Math.min(BAR_WIDTH, viewport.width - 2 * MARGIN);
-  const tokenW = props.tokenSize?.width ?? 0;
-  const tokenH = props.tokenSize?.height ?? 0;
-  const topBelow = Math.max(topReserve, anchor.y + OFFSET_Y);
-  const spaceBelow = viewport.height - reserveBottom - topBelow;
-  const bottomAbove = Math.max(reserveBottom, viewport.height - anchor.y + OFFSET_Y + FLIP_CLEARANCE);
-  const spaceAbove = viewport.height - bottomAbove - topReserve;
-  const spaceSide = viewport.height - topReserve - reserveBottom;
-  const rightLeft = anchor.x + tokenW / 2 + MARGIN;
-  const leftLeft = anchor.x - tokenW / 2 - MARGIN - width;
-  const sideLeft = portrait ? null : rightLeft + width <= viewport.width - MARGIN ? rightLeft : leftLeft >= MARGIN ? leftLeft : null;
-  const beside = barHeight > Math.max(spaceBelow, spaceAbove) && sideLeft !== null && spaceSide > Math.max(spaceBelow, spaceAbove);
-  const below = !beside && (barHeight <= spaceBelow || spaceBelow >= spaceAbove);
-  const left = beside ? sideLeft! : Math.min(Math.max(MARGIN, anchor.x - width / 2), viewport.width - width - MARGIN);
-  const sideTop = Math.min(Math.max(topReserve, anchor.y - tokenH / 2 - barHeight / 2), viewport.height - reserveBottom - Math.min(barHeight, spaceSide));
-  const maxHeight = Math.max(120, beside ? spaceSide : below ? spaceBelow : spaceAbove);
+
+  const free = freeArea(props.viewport, chrome);
+  const mode: BarMode = barMode(layout, free.height);
+  const placed = placeBar({ mode, layout, viewport: props.viewport, chrome, free, anchor: props.anchor, spot, height: barHeight, column });
+
+  // Actions in the Select several bar shows the bar and focuses its frame, once it is drawn.
+  useLayoutEffect(() => {
+    if (folded || !dockStore.getState().focusFrame) return;
+    dockStore.setState({ focusFrame: false });
+    barRef.current?.focus({ preventScroll: true });
+  }, [folded, dockStore]);
+
+  // The box the bar draws, for the column, the notices and the camera. A drag publishes nothing new until it lands.
+  const facts: BarFacts | null = folded ? null : { box: hangBox(placed.hang, barHeight), mode, lane: placed.lane, laneLeft: laneLeft(free) };
+  const factsKey = facts ? JSON.stringify(facts) : "";
+  useLayoutEffect(() => {
+    if (dragRef.current) return;
+    dockStore.setState({ bar: facts });
+    // The facts are read through factsKey, which changes exactly when they do.
+  }, [factsKey, dockStore]);
+  useLayoutEffect(() => () => dockStore.setState({ bar: null }), [dockStore]);
+
+  const setSpot = (next: Spot) => {
+    dockStore.setState({ spot: next });
+    if (!preview) writeSpot(next);
+  };
+  /*
+   * Escape or a cancelled pointer during a drag puts the bar back where the
+   * drag began and keeps it open. A press on the header focuses the frame,
+   * so the header never sees the key: a capture listener on the window,
+   * there only while a drag is under way, takes it first, and its
+   * preventDefault leaves Room's Escape (RoomChrome.tsx useEscape) alone.
+   */
+  const endDrag = useRef(() => {});
+  const onEscape = useRef((e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    endDrag.current();
+  });
+  endDrag.current = () => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    window.removeEventListener("keydown", onEscape.current, true);
+    if (drag?.el.hasPointerCapture(drag.pointerId)) drag.el.releasePointerCapture(drag.pointerId);
+    setDragBox(null);
+  };
+  useEffect(() => () => window.removeEventListener("keydown", onEscape.current, true), []);
+  const layerBox = (el: HTMLElement): Box | null => {
+    const layer = el.offsetParent;
+    if (!layer) return null;
+    const r = el.getBoundingClientRect();
+    const l = layer.getBoundingClientRect();
+    return { left: (r.left - l.left) / zoom, top: (r.top - l.top) / zoom, width: r.width / zoom, height: r.height / zoom };
+  };
+  const handle: PaneHandle | null =
+    mode === "dock"
+      ? {
+          dragging: dragBox !== null,
+          onPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+            if (e.button !== 0 || dragRef.current) return;
+            if (e.target instanceof Element && e.target.closest("button, a, input, select, textarea")) return;
+            const frame = barRef.current;
+            const start = frame ? layerBox(frame) : null;
+            if (!start) return;
+            e.currentTarget.setPointerCapture(e.pointerId);
+            dragRef.current = { pointerId: e.pointerId, el: e.currentTarget, x: e.clientX, y: e.clientY, start, box: null };
+          },
+          onPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+            const drag = dragRef.current;
+            if (!drag || drag.pointerId !== e.pointerId) return;
+            const dx = e.clientX - drag.x;
+            const dy = e.clientY - drag.y;
+            // A tap on the header moves nothing: the bar moves once the pointer passes the slop a tap on the map has.
+            if (!drag.box && Math.hypot(dx, dy) <= TAP_SLOP_PX) return;
+            if (!drag.box) window.addEventListener("keydown", onEscape.current, true);
+            drag.box = clampBox({ ...drag.start, left: drag.start.left + dx / zoom, top: drag.start.top + dy / zoom }, free);
+            setDragBox(drag.box);
+          },
+          onPointerUp(e: ReactPointerEvent<HTMLDivElement>) {
+            const drag = dragRef.current;
+            if (!drag || drag.pointerId !== e.pointerId) return;
+            if (drag.box) setSpot(releaseSpot(drag.box, free));
+            endDrag.current();
+          },
+          onPointerCancel(e: ReactPointerEvent<HTMLDivElement>) {
+            if (dragRef.current?.pointerId === e.pointerId) endDrag.current();
+          },
+        }
+      : null;
+  const place: FrameControls["place"] =
+    mode === "dock"
+      ? {
+          moveRef,
+          moved: !isDefaultSpot(spot),
+          move: () => {
+            const next = nextCorner(spot);
+            setSpot(next.spot);
+            setStatus(next.status);
+          },
+          reset: () => {
+            // Reset goes away with the press, so focus moves to Move bar first.
+            moveRef.current?.focus();
+            setSpot(DEFAULT_SPOT);
+          },
+        }
+      : null;
+  const controls: FrameControls = { handle, sticky: mode !== "compact", place };
+
+  const { hang } = placed;
+  const where = dragBox
+    ? { left: dragBox.left, top: dragBox.top, width: dragBox.width, maxHeight: dragBox.height }
+    : hang.anchor === "top"
+      ? { left: hang.left, top: hang.at, width: hang.width, maxHeight: hang.room }
+      : { left: hang.left, bottom: props.viewport.height - hang.at, width: hang.width, maxHeight: hang.room };
   return (
     <div
       ref={barRef}
       role="dialog"
       aria-label={props.label}
       hidden={folded}
-      // Focusable from script, not by Tab: the dock's Show and a closing sheet move focus here, which announces the bar and opens no keyboard.
+      data-bar-mode={mode}
+      // Focusable from script, not by Tab: the dock's Show, a closing sheet and Actions move focus here, which announces the bar and opens no keyboard.
       tabIndex={-1}
       onScroll={measure}
       style={{
         position: "absolute",
-        left,
-        // The reserves above leave out the safe areas, which only CSS can read, so CSS adds them.
-        top: beside ? `max(${sideTop}px, calc(${theme.safe.top} + ${topReserve}px))` : below ? `max(${topBelow}px, calc(${theme.safe.top} + ${topReserve}px))` : undefined,
-        bottom: beside || below ? undefined : `max(${bottomAbove}px, calc(${theme.safe.bottom} + ${reserveBottom}px))`,
-        width,
-        maxHeight: `max(120px, calc(${maxHeight}px - ${theme.safe.top} - ${theme.safe.bottom}))`,
+        ...where,
         overflowY: "auto",
         overscrollBehavior: "contain",
         background: theme.color.surface,
@@ -547,41 +702,112 @@ function BarFrame(props: {
         boxShadow: theme.shadow.pane,
         color: theme.color.text,
         fontSize: theme.font.body14,
-        zIndex: theme.z.pane,
+        zIndex: mode === "compact" ? theme.z.barOverlay : theme.z.pane,
       }}
     >
+      <FrameContext.Provider value={controls}>
+        <div
+          ref={contentRef}
+          style={{
+            padding: `${theme.space(1)}px ${theme.space(3)}px ${theme.space(3)}px`,
+            display: "grid",
+            // One column no wider than the bar: an auto column grows to its widest unbreakable child, such as a long name, and pushes the buttons out of view.
+            gridTemplateColumns: "minmax(0, 1fr)",
+            gap: theme.space(2),
+          }}
+        >
+          {props.children}
+        </div>
+      </FrameContext.Provider>
+      <div role="status" style={VISUALLY_HIDDEN}>
+        {status}
+      </div>
+      {clipped ? <ScrollForMore /> : null}
+    </div>
+  );
+}
+
+/**
+ * Where a bar hangs in each mode, before a drag: by its token when it
+ * spans, at its spot when it docks, and the overlay's place when compact,
+ * then shared with the column when they meet across.
+ */
+function placeBar(input: {
+  mode: BarMode;
+  layout: Size;
+  viewport: Size;
+  chrome: typeof DEFAULT_CHROME;
+  free: Box;
+  anchor: Point;
+  spot: Spot;
+  height: number;
+  column: { top: number; content: number; first: number } | null;
+}): { hang: Hang; lane: Lane } {
+  const { mode, free } = input;
+  const hang =
+    mode === "span"
+      ? spanHang(input.anchor, free, input.height)
+      : mode === "compact"
+        ? compactHang(input.layout, input.viewport, input.chrome)
+        : spotHang(input.spot, free, { width: BAR_WIDTH, height: input.height });
+  // An upright span crosses the whole map, so it always meets the column.
+  if (!input.column || (mode !== "span" && !overlapsLane(hang, free))) return { hang, lane: "none" };
+  return shareLane({
+    hang,
+    laneTop: free.top,
+    laneHeight: mode === "compact" ? hang.room : free.height,
+    column: input.column,
+    laneLeft: laneLeft(free),
+    besideRoom: free.width - LANE_WIDTH,
+  });
+}
+
+/**
+ * An upright phone's bar, the screen's width less the free area's margins:
+ * below its token when it fits there, else above it, whichever has more
+ * room. Too little room either way, it keeps its floor and slides back
+ * inside the free area.
+ */
+function spanHang(anchor: Point, free: Box, height: number): Hang {
+  const bottom = free.top + free.height;
+  const floor = Math.min(BAR_FLOOR, free.height);
+  const topBelow = Math.max(free.top, anchor.y + OFFSET_Y);
+  const spaceBelow = bottom - topBelow;
+  const bottomAbove = Math.min(bottom, anchor.y - OFFSET_Y - FLIP_CLEARANCE);
+  const spaceAbove = bottomAbove - free.top;
+  if (height <= spaceBelow || spaceBelow >= spaceAbove) {
+    const at = spaceBelow >= floor ? topBelow : bottom - floor;
+    return { left: free.left, width: free.width, anchor: "top", at, room: bottom - at };
+  }
+  const at = spaceAbove >= floor ? bottomAbove : free.top + floor;
+  return { left: free.left, width: free.width, anchor: "bottom", at, room: at - free.top };
+}
+
+/**
+ * "Scroll for more", laid over the foot of a box that scrolls while
+ * anything is hidden below. It has no height of its own, so it never adds
+ * to what scrolls, and screen readers skip it: they reach every control by
+ * moving through them. The alerts column shows it too while a docked bar
+ * cuts it short (features/encounter/InitiativeStrip.tsx).
+ */
+export function ScrollForMore() {
+  return (
+    <div aria-hidden style={{ position: "sticky", bottom: 0, height: 0, pointerEvents: "none" }}>
       <div
-        ref={contentRef}
         style={{
-          padding: `${theme.space(1)}px ${theme.space(3)}px ${theme.space(3)}px`,
-          display: "grid",
-          // One column no wider than the bar: an auto column grows to its widest unbreakable child, such as a long name, and pushes the buttons out of view.
-          gridTemplateColumns: "minmax(0, 1fr)",
-          gap: theme.space(2),
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          padding: `${theme.space(6)}px ${theme.space(3)}px ${theme.space(2)}px`,
+          background: `linear-gradient(transparent, ${theme.color.surface} 60%)`,
+          color: theme.color.textMuted,
+          fontSize: theme.font.small,
+          textAlign: "center",
         }}
       >
-        {props.children}
+        Scroll for more
       </div>
-      {clipped ? (
-        // No height of its own, so the hint never adds to what scrolls: it is laid over the bar's bottom edge.
-        <div aria-hidden style={{ position: "sticky", bottom: 0, height: 0, pointerEvents: "none" }}>
-          <div
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              bottom: 0,
-              padding: `${theme.space(6)}px ${theme.space(3)}px ${theme.space(2)}px`,
-              background: `linear-gradient(transparent, ${theme.color.surface} 60%)`,
-              color: theme.color.textMuted,
-              fontSize: theme.font.small,
-              textAlign: "center",
-            }}
-          >
-            Scroll for more
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
