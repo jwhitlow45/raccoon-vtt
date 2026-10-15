@@ -99,6 +99,34 @@ function picture(width: number, height: number): Promise<Buffer> {
   return sharp({ create: { width, height, channels: 3, background: { r: 60, g: 60, b: 200 } } }).png().toBuffer();
 }
 
+/** What the page's share sheet does, stubbed: missing ("none"), sharing, or closed by the player ("cancel"). */
+async function shareStub(page: Page, mode: "none" | "share" | "cancel"): Promise<void> {
+  await page.evaluate((m) => {
+    type Shared = { name: string; type: string; bytes: string };
+    const w = globalThis as unknown as { navigator: object; __shared?: Shared | null; btoa(s: string): string };
+    w.__shared = null;
+    const canShare = m === "none" ? undefined : () => true;
+    const share =
+      m === "none"
+        ? undefined
+        : async (data: { files: { name: string; type: string; arrayBuffer(): Promise<ArrayBuffer> }[] }) => {
+            const file = data.files[0]!;
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            let text = "";
+            for (const b of bytes) text += String.fromCharCode(b);
+            w.__shared = { name: file.name, type: file.type, bytes: w.btoa(text) };
+            if (m === "cancel") throw new DOMException("The share was cancelled", "AbortError");
+          };
+    Object.defineProperty(w.navigator, "canShare", { configurable: true, value: canShare });
+    Object.defineProperty(w.navigator, "share", { configurable: true, value: share });
+  }, mode);
+}
+
+/** The file the stubbed share sheet was given, or null. */
+function sharedFile(page: Page): Promise<{ name: string; type: string; bytes: string } | null> {
+  return page.evaluate(() => (globalThis as unknown as { __shared?: { name: string; type: string; bytes: string } | null }).__shared ?? null);
+}
+
 describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
@@ -271,51 +299,91 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     await popup.waitFor();
     await shots.take(player, "display-handout-after-xcard");
 
-    // Anyone shown a handout can save it: the stored image, under the handout's title.
-    const [saved] = await Promise.all([player.waitForEvent("download"), popup.getByRole("button", { name: "Download", exact: true }).tap()]);
+    // Anyone shown a handout can save it: the stored image, under the handout's title. Without file sharing it is a download.
+    await shareStub(player, "none");
+    const download = popup.getByRole("button", { name: "Download", exact: true });
+    const [saved] = await Promise.all([player.waitForEvent("download"), download.tap()]);
     assert.equal(saved.suggestedFilename(), "Strange letter.webp");
     const stored = await playerContext.request.get(`${server.origin}/api/assets/${run.handoutImage}/full`);
     assert.equal(stored.status(), 200, "the player may read the handout's image");
-    assert.ok(Buffer.from(readFileSync(await saved.path())).equals(await stored.body()), "the file saved is not the stored image");
+    const storedBytes = await stored.body();
+    assert.ok(Buffer.from(readFileSync(await saved.path())).equals(storedBytes), "the file saved is not the stored image");
+
+    // The popup fetches the image as it opens, so these steps open it again with that fetch held or refused.
+    // Only the fetches: the picture itself still loads.
+    const image = `**/api/assets/${run.handoutImage}/full`;
+    const reopen = async () => {
+      await popup.getByRole("button", { name: "Close" }).tap();
+      await popup.waitFor({ state: "detached" });
+      await player.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
+      await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Library/ }).tap();
+      await player.getByRole("region", { name: "Library" }).getByRole("listitem").filter({ hasText: "Strange letter" }).getByRole("button", { name: "Open" }).tap();
+      await popup.waitFor();
+    };
+    const hold = async () => {
+      let release = () => {};
+      const held = new Promise<void>((resolve) => (release = resolve));
+      await player.route(image, async (route) => {
+        if (route.request().resourceType() === "fetch") await held;
+        await route.continue();
+      });
+      return release;
+    };
 
     // A download that fails says so in words, and Try again saves it.
-    const image = `**/api/assets/${run.handoutImage}/full`;
-    await player.route(image, (route) => route.abort("internetdisconnected"));
-    await popup.getByRole("button", { name: "Download", exact: true }).tap();
+    await player.route(image, (route) => (route.request().resourceType() === "fetch" ? route.abort("internetdisconnected") : route.continue()));
+    await reopen();
+    await download.tap();
     await popup.getByRole("alert").filter({ hasText: "The handout could not be downloaded." }).waitFor();
     await shots.take(player, "display-handout-download-failed");
     await player.unroute(image);
     const [again] = await Promise.all([player.waitForEvent("download"), popup.getByRole("button", { name: "Try again" }).tap()]);
     assert.equal(again.suggestedFilename(), "Strange letter.webp");
-    await popup.getByRole("alert").waitFor({ state: "detached" });
+    await popup.getByRole("alert").filter({ hasText: "could not be downloaded" }).waitFor({ state: "detached" });
     // The table display has no one with a pointer to save it.
     await tv.getByRole("dialog", { name: "Strange letter" }).waitFor();
     assert.equal(await tv.getByRole("button", { name: "Download" }).count(), 0, "the table display offers a download");
 
     // A download under way when the popup closes still saves the file, and the same handout opened again from the Library
     // shows it working until it does, then takes a tap again (P3-ASTRA-03, P3R-6).
-    let release = () => {};
-    const held = new Promise<void>((resolve) => (release = resolve));
-    await player.route(image, async (route) => {
-      await held;
-      await route.continue();
-    });
-    await popup.getByRole("button", { name: "Download", exact: true }).tap();
+    let release = await hold();
+    await reopen();
+    await download.tap();
     await popup.getByRole("button", { name: "Downloading…" }).waitFor();
-    await popup.getByRole("button", { name: "Close" }).tap();
-    await popup.waitFor({ state: "detached" });
-    await player.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
-    await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Library/ }).tap();
-    await player.getByRole("region", { name: "Library" }).getByRole("listitem").filter({ hasText: "Strange letter" }).getByRole("button", { name: "Open" }).tap();
+    await reopen();
     await popup.getByRole("button", { name: "Downloading…" }).waitFor();
     const finished = player.waitForEvent("download");
     release();
     const late = await finished;
     assert.equal(late.suggestedFilename(), "Strange letter.webp");
-    assert.ok(Buffer.from(readFileSync(await late.path())).equals(await stored.body()), "the file saved through the close is not the stored image");
+    assert.ok(Buffer.from(readFileSync(await late.path())).equals(storedBytes), "the file saved through the close is not the stored image");
     await player.unroute(image);
-    const [fresh] = await Promise.all([player.waitForEvent("download"), popup.getByRole("button", { name: "Download", exact: true }).tap()]);
-    assert.equal(fresh.suggestedFilename(), "Strange letter.webp");
+    await download.waitFor();
+
+    // A phone that shares files gets the share sheet, opened within the tap, with the stored image under the handout's title (P3R-7).
+    await shareStub(player, "share");
+    await download.tap();
+    const shared = await waitFor("the share sheet", () => sharedFile(player));
+    assert.equal(shared.name, "Strange letter.webp");
+    assert.equal(shared.type, "image/webp");
+    assert.ok(Buffer.from(shared.bytes, "base64").equals(storedBytes), "the file shared is not the stored image");
+    // Closing the share sheet is a choice, not a failure.
+    await shareStub(player, "cancel");
+    await download.tap();
+    await waitFor("the cancelled share", () => sharedFile(player));
+    await player.waitForTimeout(300);
+    assert.equal(await popup.getByRole("alert").filter({ hasText: "could not be shared" }).count(), 0, "a cancelled share said it failed");
+    // With the image not in hand yet, the tap fetches it, and a second tap on Share opens the sheet.
+    await shareStub(player, "share");
+    release = await hold();
+    await reopen();
+    await download.tap();
+    await popup.getByRole("button", { name: "Downloading…" }).waitFor();
+    release();
+    await popup.getByRole("button", { name: "Share", exact: true }).tap();
+    assert.equal((await waitFor("the share sheet after the second tap", () => sharedFile(player))).name, "Strange letter.webp");
+    await player.unroute(image);
+    await shots.take(player, "display-handout-shared");
     await popup.getByRole("button", { name: "Close" }).tap();
     await dm.getByRole("dialog", { name: "X-card" }).getByRole("button", { name: "Dismiss" }).click();
     await ops.send({ t: "handout.close", handoutId });

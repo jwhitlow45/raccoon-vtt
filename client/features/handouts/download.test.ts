@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { handoutFileName, saveSettled, type SaveState } from "./download.ts";
+import { downloadAction, handoutFile, handoutFileName, saveSettled, type SaveState } from "./download.ts";
 
 describe("handoutFileName", () => {
   test("the title, with the extension of the image's type", () => {
@@ -46,7 +46,7 @@ describe("saveSettled (P3-ASTRA-03, P3R-6)", () => {
 
   test("a download's end clears its state, or marks it failed", () => {
     assert.equal(saveSettled(busy(1), 1, "done"), null);
-    assert.deepEqual(saveSettled(busy(1), 1, "failed"), { op: 1, key: "h1:1", state: "failed" });
+    assert.deepEqual(saveSettled(busy(1), 1, "failed"), { op: 1, key: "h1:1", state: "failed", why: "fetch" });
   });
 
   test("a download goes on through the popup closing and opening again, and its end frees Download", () => {
@@ -65,5 +65,32 @@ describe("saveSettled (P3-ASTRA-03, P3R-6)", () => {
 
   test("an end with nothing under way changes nothing", () => {
     assert.equal(saveSettled(null, 3, "failed"), null);
+  });
+
+  test("a fetch that ends on a device that shares waits for a second tap, and a failed fetch says why", () => {
+    assert.deepEqual(saveSettled(busy(4), 4, "share"), { op: 4, key: "h1:1", state: "share" });
+    assert.deepEqual(saveSettled(busy(4), 4, "failed"), { op: 4, key: "h1:1", state: "failed", why: "fetch" });
+  });
+});
+
+describe("downloadAction (P3R-7)", () => {
+  test("with the image in hand, a device that shares files opens the share sheet within the tap", () => {
+    assert.equal(downloadAction(true, true), "share");
+  });
+
+  test("with the image in hand, a computer or a device without file sharing saves through a link", () => {
+    assert.equal(downloadAction(true, false), "link");
+  });
+
+  test("without the image yet, the tap fetches it first, whatever the device", () => {
+    assert.equal(downloadAction(false, true), "fetch");
+    assert.equal(downloadAction(false, false), "fetch");
+  });
+
+  test("the file shared or saved is named after the handout, with the image's type", () => {
+    const file = handoutFile(new Blob(["x"], { type: "image/webp" }), "Strange letter");
+    assert.equal(file.name, "Strange letter.webp");
+    assert.equal(file.type, "image/webp");
+    assert.equal(handoutFile(new Blob(["x"]), "Letter").type, "image/webp", "a blob with no type is the WebP the server stores");
   });
 });

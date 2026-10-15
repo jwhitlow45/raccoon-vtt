@@ -7,8 +7,15 @@
  * dropped connection or a handout the DM has just closed says so in the
  * popup, in words, instead of leaving a failed file in the browser's
  * downloads. The image is in the browser's cache already, since the popup
- * shows it, so the fetch is quick. The file then goes out through an
- * object URL and a download link, which iOS Safari 13 and later honors.
+ * shows it, so the fetch is quick.
+ *
+ * A computer saves the file through a download link. A touch device that
+ * can share files gets the share sheet instead (Save Image, Save to Files,
+ * AirDrop), as the map export and the log export do: on an iPhone a
+ * download lands in the Files app's Downloads folder at best, and a Home
+ * Screen app may not download at all (mapexport/save.ts). The share sheet
+ * opens only from a tap, with no wait between, so the popup fetches the
+ * image as it opens and the tap shares it at once (downloadAction).
  */
 
 /** Characters that Windows, macOS or Linux refuse in a file name, and control characters. */
@@ -49,33 +56,55 @@ function extensionFor(type: string): string {
 }
 
 /**
- * The popup's Download, by operation: which press is under way or failed,
- * and for which handout. Each press gets a new `op`.
+ * The popup's Download, by operation: which press is fetching, has the
+ * file for a share that needs a tap of its own ("share"), or failed, and
+ * for which handout. Each press gets a new `op`.
  */
-export type SaveState = { op: number; key: string; state: "busy" | "failed" } | null;
+export type SaveState = { op: number; key: string; state: "busy" | "share" | "failed"; why?: "fetch" | "share" } | null;
 
 /**
  * What an operation's end does to the state. Only the operation the state
  * holds may change it, so a download that ends after a newer one started
  * never clears or overwrites the newer (P3-ASTRA-03).
  */
-export function saveSettled(current: SaveState, op: number, outcome: "done" | "failed"): SaveState {
+export function saveSettled(current: SaveState, op: number, outcome: "done" | "share" | "failed"): SaveState {
   if (current?.op !== op) return current;
-  return outcome === "failed" ? { ...current, state: "failed" } : null;
+  if (outcome === "done") return null;
+  return outcome === "share" ? { ...current, state: "share" } : { ...current, state: "failed", why: "fetch" };
+}
+
+/**
+ * What a tap on Download does (P3R-7). With the image in hand, a device
+ * that shares files (mapexport/save.ts prefersShare) opens the share sheet
+ * within the tap, and anything else saves through a link. Without it yet
+ * the tap fetches it first, and a share then waits for a second tap.
+ */
+export function downloadAction(ready: boolean, shares: boolean): "share" | "link" | "fetch" {
+  if (!ready) return "fetch";
+  return shares ? "share" : "link";
+}
+
+/** The image as the file a handout saves as, named after its title. */
+export function handoutFile(blob: Blob, title: string): File {
+  return new File([blob], handoutFileName(title, blob.type), { type: blob.type || `image/${DEFAULT_EXTENSION}` });
+}
+
+/** Fetches a handout's image. Throws when it cannot be fetched. */
+export async function fetchHandoutImage(url: string, signal?: AbortSignal): Promise<Blob> {
+  const res = await fetch(url, { credentials: "same-origin", ...(signal ? { signal } : null) });
+  if (!res.ok) throw new Error(`The handout's image answered ${res.status}`);
+  return res.blob();
 }
 
 /** How long the object URL outlives the click. Revoked at once, some browsers lose the download. */
 const REVOKE_AFTER_MS = 60_000;
 
-/** Fetches the handout's image and saves it under its title. Throws when the image cannot be fetched. */
-export async function downloadHandout(url: string, title: string): Promise<void> {
-  const res = await fetch(url, { credentials: "same-origin" });
-  if (!res.ok) throw new Error(`The handout's image answered ${res.status}`);
-  const blob = await res.blob();
-  const objectUrl = URL.createObjectURL(blob);
+/** Saves a file through an object URL and a download link, as a computer expects. */
+export function saveThroughLink(file: File): void {
+  const objectUrl = URL.createObjectURL(file);
   const a = document.createElement("a");
   a.href = objectUrl;
-  a.download = handoutFileName(title, blob.type);
+  a.download = file.name;
   a.style.display = "none";
   document.body.append(a);
   a.click();

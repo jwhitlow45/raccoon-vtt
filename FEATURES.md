@@ -284,7 +284,7 @@ The DM asks players for a saving throw or an ability check, and each player type
 - Whisper to the DM or to one player. Only the sender and the recipients see a whisper.
 - While the Log is closed, its button counts new messages, and a whisper to you shows a short notice.
 - **Export** in the Log saves it as a Markdown file, one evening or all of it. A gap of more than 4 hours starts a new evening. Everyone can export, and the file holds only what that person's Log shows. On an iPhone it saves through the share sheet. Listing the evenings and each export count toward 10 an hour per person.
-- **Handouts** (DM panel): show an image to everyone or to chosen players as a popup. Players can zoom in, and anyone shown a handout can download it with the popup's Download button, saved under the handout's title. A closed handout stays closed after a reload and opens again from the Library.
+- **Handouts** (DM panel): show an image to everyone or to chosen players as a popup. Players can zoom in, and anyone shown a handout can download it with the popup's Download button, saved under the handout's title. On a phone that can share files, Download opens the share sheet instead, to save the image to Photos or Files or send it on. A closed handout stays closed after a reload and opens again from the Library.
 
 ## Drawing, pings and the laser
 

@@ -11,7 +11,8 @@ import { useAssets, useRoomView } from "../../state/view.ts";
 import { closedSlot, closedStorageKey, closeHandout, loadClosed } from "./closed.ts";
 import { layoutWidth } from "../device/layout.ts";
 import { useXCard } from "../xcard/XCardHost.tsx";
-import { downloadHandout, saveSettled, type SaveState } from "./download.ts";
+import { prefersShare, shareFile } from "../mapexport/save.ts";
+import { downloadAction, fetchHandoutImage, handoutFile, saveSettled, saveThroughLink, type SaveState } from "./download.ts";
 import { nextPopup, popupShows, showingKey } from "./handouts.ts";
 import { doubleTapView, FIT, isDoubleTap, panView, pinchView, zoomAround, type Point, type ZoomView } from "./zoom.ts";
 
@@ -65,9 +66,30 @@ export function HandoutPopup() {
     if (key && handouts) closeHandout(closedStore, key, handouts);
   };
 
-  // Download's state, for the handout it was pressed for: under way, or failed (download.ts SaveState).
+  // Download's state, for the handout it was pressed for (download.ts SaveState).
   const [saving, setSaving] = useState<SaveState>(null);
   const lastOp = useRef(0);
+  const url = handout ? assets.url(handout.assetId, "full") : null;
+  /*
+   * The image in hand, fetched as the popup opens, so a tap on Download can
+   * open the share sheet at once, inside the tap (download.ts). It comes
+   * from the cache the picture just filled. A failure here is quiet: the
+   * tap fetches again, and says so if that fails too. The image is let go
+   * when the popup closes, and fetched again when it opens.
+   */
+  const [ready, setReady] = useState<{ key: string; blob: Blob } | null>(null);
+  useEffect(() => {
+    if (!key || !url) return;
+    const controller = new AbortController();
+    fetchHandoutImage(url, controller.signal).then(
+      (blob) => setReady({ key, blob }),
+      () => {},
+    );
+    return () => {
+      controller.abort();
+      setReady((r) => (r?.key === key ? null : r));
+    };
+  }, [key, url]);
   /*
    * A download under way goes on when the popup closes, since the player
    * asked for the file, and the same handout opened again from the Library
@@ -76,19 +98,42 @@ export function HandoutPopup() {
    * saw it, so the handout opened again starts clean.
    */
   useEffect(() => () => setSaving((s) => (s?.state === "failed" ? null : s)), [key]);
-  const busy = saving?.key === key && saving.state === "busy";
+  const mine = saving?.key === key ? saving : null;
+  const busy = mine?.state === "busy";
   const download = async () => {
-    if (!handout || !key || busy) return;
+    if (!handout || !key || !url || busy) return;
     const op = ++lastOp.current;
-    setSaving({ op, key, state: "busy" });
-    let outcome: "done" | "failed" = "done";
-    try {
-      await downloadHandout(assets.url(handout.assetId, "full"), handout.title);
-    } catch {
-      outcome = "failed";
+    const blob = ready?.key === key ? ready.blob : null;
+    const file = blob ? handoutFile(blob, handout.title) : null;
+    const action = downloadAction(file !== null, file !== null && prefersShare(file));
+    if (file && action === "share") {
+      setSaving(null);
+      // Called before any wait, so the share sheet opens within the tap. Closing the sheet is a choice, not a failure.
+      if ((await shareFile(file)) === "failed") setSaving({ op, key, state: "failed", why: "share" });
+      return;
     }
-    setSaving((s) => saveSettled(s, op, outcome));
+    if (file && action === "link") {
+      setSaving(null);
+      saveThroughLink(file);
+      return;
+    }
+    setSaving({ op, key, state: "busy" });
+    try {
+      const fetched = await fetchHandoutImage(url);
+      // Kept for a share's second tap, unless another handout's image is in hand by now.
+      setReady((r) => (r && r.key !== key ? r : { key, blob: fetched }));
+      const made = handoutFile(fetched, handout.title);
+      if (prefersShare(made)) {
+        setSaving((s) => saveSettled(s, op, "share"));
+        return;
+      }
+      saveThroughLink(made);
+      setSaving((s) => saveSettled(s, op, "done"));
+    } catch {
+      setSaving((s) => saveSettled(s, op, "failed"));
+    }
   };
+  const label = busy ? "Downloading…" : mine?.state === "share" ? "Share" : "Download";
 
   // Android's Back closes the handout before it leaves the room, one Back for each handout shown in turn.
   useBackClose(key, close);
@@ -106,15 +151,17 @@ export function HandoutPopup() {
       headerActions={
         // A busy button says so in its own words at once, and takes no second tap (components/Loading.tsx).
         <Button size="sm" busy={busy} onClick={() => void download()}>
-          {busy ? "Downloading…" : "Download"}
+          {label}
         </Button>
       }
       bodyStyle={{ display: "grid", alignContent: "start", gap: theme.space(2) }}
     >
       <Help>The DM shows you</Help>
-      {saving?.key === key && saving.state === "failed" ? (
+      {mine?.state === "failed" ? (
         <div role="alert" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), fontSize: theme.font.body14, color: theme.color.dangerText }}>
-          <span style={{ flex: "1 1 200px" }}>The handout could not be downloaded. Check your connection.</span>
+          <span style={{ flex: "1 1 200px" }}>
+            {mine.why === "share" ? "The handout could not be shared." : "The handout could not be downloaded. Check your connection."}
+          </span>
           <Button size="sm" onClick={() => void download()}>
             Try again
           </Button>
