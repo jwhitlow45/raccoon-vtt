@@ -375,7 +375,8 @@ function RoomPage() {
     observer.observe(lasting);
     for (const child of lasting.children) observer.observe(child);
     return () => observer.disconnect();
-  }, [barDock, besideLane, previewBottom, zoom, role]);
+    // The observer hears the stack's size only, so what moves it measures again: the turn band coming or going, the notch, the preview's notice.
+  }, [barDock, besideLane, previewBottom, zoom, role, topInset, safe.top, laneTop]);
   const columnSummary = useStore(barDock, (s) => s.bar !== null && (s.bar.lane === "summary" || s.footYields)) && summary !== null;
   const mapFocus = scope.get(mapFocusSlot);
   const mapFocusRef = useCallback(
