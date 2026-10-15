@@ -118,7 +118,13 @@ export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactN
   );
 }
 
-export function Card(props: { title?: string; children: ReactNode }) {
+/**
+ * A page's card under its heading. `titleRef` makes the heading one that
+ * takes focus from script (`tabIndex={-1}`), never a Tab stop, for a page
+ * that moves focus to the card it just showed, such as the join's second
+ * step.
+ */
+export function Card(props: { title?: string; titleRef?: Ref<HTMLHeadingElement>; children: ReactNode }) {
   return (
     <section
       style={{
@@ -130,7 +136,11 @@ export function Card(props: { title?: string; children: ReactNode }) {
         gap: theme.space(3),
       }}
     >
-      {props.title ? <h2 style={{ margin: 0, fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>{props.title}</h2> : null}
+      {props.title ? (
+        <h2 ref={props.titleRef} tabIndex={props.titleRef ? -1 : undefined} style={{ margin: 0, fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>
+          {props.title}
+        </h2>
+      ) : null}
       {props.children}
     </section>
   );

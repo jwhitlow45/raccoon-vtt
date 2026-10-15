@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { Button } from "../components/Button.tsx";
 import { Card, ErrorText, Field, Page } from "../components/Field.tsx";
 import { RowDot } from "../components/Row.tsx";
@@ -223,6 +223,18 @@ function PickPlayer(props: {
   const swatches = memberSwatches({ players, dmColors: props.dmColors });
   const colorLabel = useId();
 
+  /*
+   * The password step's form unmounts with its Next button, and focus fell
+   * to the page, so a screen reader heard nothing of this step. It starts
+   * at the list of players to continue as, or at the name when there is
+   * none to pick.
+   */
+  const pickRef = useRef<HTMLHeadingElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => {
+    (pickRef.current ?? nameRef.current)?.focus();
+  }, []);
+
   async function complete(input: { memberId: string } | { name: string; color: string }, remembered: string) {
     setBusy(true);
     setError(null);
@@ -263,7 +275,7 @@ function PickPlayer(props: {
   return (
     <>
       {players.length > 0 ? (
-        <Card title="Who are you?">
+        <Card title="Who are you?" titleRef={pickRef}>
           <p style={{ margin: 0, color: theme.color.textMuted, fontSize: theme.font.body14 }}>
             Joining from a new phone? Pick yourself to carry on as the same player.
           </p>
@@ -285,7 +297,7 @@ function PickPlayer(props: {
       ) : null}
       <Card title={players.length > 0 ? "Or join as someone new" : "Join as a new player"}>
         <form onSubmit={submitNew} style={{ display: "grid", gap: theme.space(3) }}>
-          <Field label="Your name" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} autoComplete="nickname" />
+          <Field ref={nameRef} label="Your name" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} autoComplete="nickname" />
           <div style={{ display: "grid", gap: theme.space(1) }}>
             <span id={colorLabel} style={{ fontSize: theme.font.body14, fontWeight: theme.weight.strong }}>
               Your color

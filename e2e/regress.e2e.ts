@@ -11,7 +11,8 @@ import { ConsoleWatch, dragCells, OpSocket, Shots, SocketWatch, startServer, tap
  * Older features on a wave 4 build that the live play review after wave 4
  * found broken (LP4-REGRESS): a DM on a desktop and a player on a phone.
  * The same two also carry the member color picker's round trip
- * (docs/design-v1-visual.md 5.3).
+ * (docs/design-v1-visual.md 5.3), and where focus starts on the join's
+ * second step (LPD-DESK-9).
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus three. The
  * other environment variables are the smoke run's (smoke.e2e.ts).
@@ -57,6 +58,22 @@ function circleFilled(page: Page, color: string): Promise<boolean> {
     const konva = (globalThis as unknown as { Konva?: { stages: { find(selector: string): Node[] }[] } }).Konva;
     return konva?.stages.some((stage) => stage.find("Circle").some((n) => n.fill() === c)) ?? false;
   }, color);
+}
+
+/** What has focus: its tag, and its name by its label, its aria-label or its text. */
+function focused(page: Page): Promise<{ tag: string; name: string }> {
+  return page.evaluate(() => {
+    const doc = (globalThis as unknown as { document: { activeElement: unknown } }).document;
+    const el = doc.activeElement as {
+      tagName: string;
+      textContent: string | null;
+      labels?: ArrayLike<{ textContent: string | null }> | null;
+      getAttribute(name: string): string | null;
+    } | null;
+    if (!el) return { tag: "", name: "" };
+    const name = el.getAttribute("aria-label") ?? el.labels?.[0]?.textContent ?? el.textContent ?? "";
+    return { tag: el.tagName.toLowerCase(), name: name.trim() };
+  });
 }
 
 /** An element's computed background color. */
@@ -113,7 +130,7 @@ describe("raccoon-vtt older features on a wave 4 build", { timeout: 180_000 }, (
     rmSync(work, { recursive: true, force: true });
   });
 
-  test("1. the DM creates a room and a player joins from a phone", async () => {
+  test("1. the DM creates a room and a player joins from a phone, each join step starting with focus on it (LPD-DESK-9)", async () => {
     await dm.goto(`${server.origin}/`);
     await dm.getByLabel("Room name").fill(run.roomName);
     await dm.getByLabel("Your name").fill("Dana the DM");
@@ -133,12 +150,34 @@ describe("raccoon-vtt older features on a wave 4 build", { timeout: 180_000 }, (
     await player.goto(`${server.origin}/r/${run.roomId}`);
     await player.getByLabel("Player password").fill(run.password);
     await player.getByRole("button", { name: "Next" }).click();
+    // No player to continue as yet, so the second step starts at the name.
+    await waitFor("the name field focused", async () => {
+      const f = await focused(player);
+      return f.tag === "input" && f.name === "Your name";
+    });
     await player.getByLabel("Your name").fill("Pat");
     await player.getByRole("button", { name: "Join", exact: true }).click();
     await waitFor("the player's snapshot", () => playerSocket.state);
     playerConsole.allow = [];
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
     run.patId = playerSocket.you!.memberId;
+
+    // A second device lists Pat to continue as, so its second step starts at that list's heading.
+    const other = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    try {
+      const page = await other.newPage();
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByLabel("Player password").fill(run.password);
+      await page.getByRole("button", { name: "Next" }).click();
+      await page.getByRole("button", { name: "Continue as Pat" }).waitFor();
+      await waitFor("the heading of the players to continue as focused", async () => {
+        const f = await focused(page);
+        return f.tag === "h2" && f.name === "Who are you?";
+      });
+      await shots.take(page, "regress-join-step-two-focus");
+    } finally {
+      await other.close();
+    }
   });
 
   test("2. on a dark vision scene, Visible to players counts the goblin in the party's torchlight (LP4-REGRESS-1)", async () => {
