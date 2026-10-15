@@ -1,8 +1,8 @@
 # raccoon-vtt design: the players' height readout
 
-Status: draft 2, after design review round 1. It writes the design only and changes no app code. It is built after the whole-app design pass deploys.
+Status: built. Draft 2, after design review round 1, reached consensus in round 2, and the build follows it with round 2's seven notes applied in place. The project owner decided question 1 on 2026-10-15.
 
-J asked: "As a player what's the easiest way to see the height of a raised area". Players have no readout today. Height mode's "↑10 ft" pills show only to the DM while Heights and stairs is open (`client/features/builder/heights/HeightLayer.tsx:41`). Raised ground only looks lighter with a shadow, and a token on it shows "↑10" on its badge. J chose both fixes the owner offered: a tap on raised or lowered ground shows its height (section 2), and a ruler stop on raised ground stands on it (section 3). J also set the builder's top height to 100 ft (section 5).
+The project owner asked: "As a player what's the easiest way to see the height of a raised area". Players have no readout today. Height mode's "↑10 ft" pills show only to the DM while Heights and stairs is open (`client/features/builder/heights/HeightLayer.tsx:41`). Raised ground only looks lighter with a shadow, and a token on it shows "↑10" on its badge. The project owner chose both fixes offered: a tap on raised or lowered ground shows its height (section 2), and a ruler stop on raised ground stands on it (section 3). The project owner also set the builder's top height to 100 ft (section 5).
 
 ## 1. What a player may learn
 
@@ -59,7 +59,7 @@ Today a free stop stands at z 0 (`client/features/measure/ruler.ts`), and every 
 **The change.** A free stop carries `z`: the measurer's `seenGround` under it when the stop was placed, in feet, left out at 0. A stop on a token carries none, since the token's own box decides there. Every receiver measures a free stop with `pointCellBox({ x, y, z })`, which `shared/rules/distance.ts` already reads. So the reading is the measurer's, the same on every updated page (Rollout below), whatever the receiver's fog. From a cell at 0 to the next cell 10 ft up, a ruler reads 10 ft under "every diagonal 5 ft" and under 5-10-5, and 11 ft under true distance (each leg rounds, `roundFeet`), where it read 5 ft.
 
 - A player's stop on ground their fog hides stays at 0, as today, so a ruler cannot probe the dark.
-- The DM's stops stand on all ground. Once the DM shares a ruler, players read the DM's numbers, which may count ground under their fog. That ground is in their chunks already, and the DM chose to share (question 1, decided by J).
+- The DM's stops stand on all ground. Once the DM shares a ruler, players read the DM's numbers, which may count ground under their fog. That ground is in their chunks already, and the DM chose to share (question 1, decided by the project owner).
 - Receivers computing ground from their own chunks was rejected: each would need the measurer's fog, and the DM's client would have to rebuild the players' merged fog.
 
 **Frames.** `rulerPoint` gains an optional `z`, an integer from `MIN_HEIGHT_FT` to `MAX_HEIGHT_FT` (`shared/protocol.ts:1290`), and refuses `z` together with `tokenId`. So a live frame has at most one `z` per free stop, absent at 0. A free stop with `z` takes at most 32 bytes (`{"x":-999.5,"y":-999.5,"z":-100}`), under a stop on a token with its 36-character id. So `z` never makes a frame longer than the same frame with every stop on a token. 50 stops on tokens with UUID ids measure 3,732 bytes, inside `MAX_EPH_BYTES` (4,096). That is the measured example, not the largest frame: ids may be 64 characters, which make the same frame 5,132 bytes, and the byte guard already refuses it (`withinEphBytes`, with its oversized-frame test in `shared/protocol.test.ts`). The guard and its test stay. The server forwards `z` untouched.
@@ -81,7 +81,7 @@ Token distances already count height, since a token on raised ground stands at t
 
 ## 5. Heights up to 100 ft
 
-J: "Let's set max of 100ft". `HEIGHT_MAX_FT` goes from 30 to 100 (`heights/store.ts:23`), still in 5 ft steps. The model allows -100 to 200 and `build.height` checks that (`shared/model.ts:365`), so the server does not change. The minimum stays -20, since nothing found needs it to move.
+The project owner: "Let's set max of 100ft". `HEIGHT_MAX_FT` goes from 30 to 100 (`heights/store.ts:23`), still in 5 ft steps. The model allows -100 to 200 and `build.height` checks that (`shared/model.ts:365`), so the server does not change. The minimum stays -20, since nothing found needs it to move.
 
 At 100 ft:
 
@@ -90,7 +90,7 @@ At 100 ft:
 - **Height pills** read "↑100 ft", one character wider. Placement measures each text, so nothing else changes. A flier's badge already shows "↑100".
 - **Sight over ledges** compares an eye with the edge's top and has no cap. From below, a 100 ft cliff hides everything on it, and from the top a creature sees down. The plateau simplification (a flier over a plateau is hidden from beside it, maps-vision 4.2) and horizontal light ranges (4.3) reach further but do not change.
 - **Doors' reach** measures to each door cell at its own ground, so a door at the top of a 100 ft drop opens from either side as it does at 30. No change.
-- **The stepper on a phone** has 25 values, and the default 10 ft takes 18 taps to reach 100. Keep the 5 ft steps J asked for, and make − and + repeat while held: besides the press's own step, one step 400 ms into the hold and one every 80 ms after, so a 1.68 s hold takes 10 to 100. Every tap still steps once, so nothing needs the hold. The rules:
+- **The stepper on a phone** has 25 values, and the default 10 ft takes 18 taps to reach 100. Keep the 5 ft steps the project owner asked for, and make − and + repeat while held: besides the press's own step, one step 400 ms into the hold and one every 80 ms after, so a 1.68 s hold takes 10 to 100. Every tap still steps once, so nothing needs the hold. The rules:
   - Exactly one step per press, whichever event drives it, and the press's own `click` adds none. Enter and Space keep `click`. A held Space steps once, since its `click` comes on keyup, and Enter's key repeat repeats it.
   - The timer reads the store through `stepHeight` (`heights/store.ts`), never a render's value.
   - The repeat stops on lift, cancel, a finger sliding off, and at -20 or 100. It hears the lift on `window` or through pointer capture, since a button that turns disabled at the limit may never get its `pointerup`.
@@ -120,13 +120,13 @@ Unit:
 End to end, all in `e2e/vision.e2e.ts`, which already has the 10 ft platform, the stair at (5, 14), fog and vision, a phone player and a desktop DM. Its layout (`vision.e2e.ts:120-141`) gains two things it lacks today:
 
 - A `build.height` of -10 on the closet, (14, 18) to (15, 19), sent after the creatures are placed, so the Goblin Boss standing there sinks to -10 with it by the height paint's rule. Sent before, it would leave the boss at elevation 0 (`tokenCreate` defaults to 0, `shared/reducer/tokens.ts:57`). The party never sees the closet. The steps that touch the boss still hold: the leak asserts (`vision.e2e.ts:460-461`) look only at its id, and step 8's sight check (`seesToken`) ignores elevation, while the closet's walls keep it out of sight.
-- A label-only pin on a platform cell the party has seen (`pin.put`, visibility all).
+- A label-only pin on a platform cell the party has seen (`pin.put`, visibility all). The build puts it at (8, 16), clear of Thorn's cells and the cells the later steps tap.
 
 Its new steps:
 
-- After the ledge and stair step: the player taps the platform with Select and the status line says "Ground 10 ft up.", taps the stair and hears "Stairs, up to the east.", taps the pin and gets its popover with no readout, and taps the closet and hears nothing. The DM clicks the closet and reads "Ground 10 ft down." A screenshot of each pill.
+- After the ledge and stair step: the player taps the platform with Select and the status line says "Ground 10 ft up.", taps the stair and hears "Stairs, up to the east.", taps the pin and gets its popover with no readout, and taps the closet and hears nothing. The DM clicks the closet, at (14, 19) beside the boss, and reads "Ground 10 ft down." A screenshot of each pill.
 - The player measures from (5, 12) to the platform cell (6, 12). The ruler's options line reads 10 ft, and the DM's socket gets the frame with `z: 10` on that stop. A player's stop in the closet carries no `z`. The DM shares a ruler that ends in the closet, and the player's frame carries `z: -10`. The player keeps the platform ruler, and both states hold it with `z: [0, 10]`.
-- The leak check (today's step 8) gains:
+- The leak check (step 8 before the build, step 10 after it) gains:
   - Every live ruler frame the player received carries `z` only on stops without a token, and each equals the measurer's ground at that cell when sent. The e2e paints nothing after its layout, so that is the layout's ground.
   - Every ruler frame the DM received from the player carries `z` only on cells that player could see when it was sent.
   - Every kept ruler the player received carries one `z` entry per stop, 0 where its anchor names a token.
@@ -148,9 +148,9 @@ One part, scheduled after the design pass deploys. It touches:
 - The tap's chain: `client/canvas/Stage.tsx` (`ReadoutHost` beside `DoorPillHost`, and the chain moved out to `client/canvas/emptyTap.ts`), `client/lib/gestures.ts` (`hold`, and `held` from `up`) with `camera.test.ts`, `features/pings/hold.ts` (new: the ping layer's report of each press it pinged) and `PingLayer.tsx`, `features/doors/tap.ts` (a closing tap is taken), `features/pins/rules.ts` (`pinUnder`, `pinTapCounts`) and `PinLayer.tsx` (a held press opens no pin).
 - Shared constants: `TOAST_MS` moves from `pages/Room.tsx:53` to an export in `client/state/store.ts`. `VISUALLY_HIDDEN` has three copies, in `pages/Room.tsx:730`, `pages/RoomDock.tsx:217` and inline in `pages/RoomChrome.tsx:350`. They move to one export in `client/lib/a11y.ts`, which the readout uses too, rather than a fourth copy.
 - `e2e/vision.e2e.ts`.
-- Deploy notes: reload every open page, table displays included, after the deploy (section 3, Rollout).
+- Deploy notes: reload every open page, table displays included, after the deploy (section 3, Rollout). The README's Updating section says so.
 - Docs: `FEATURES.md` (section 7), `docs/features.md:117`, `docs/design-v1-maps-vision.md` 4.2 (the stepper's "-20 ft to +30 ft" at line 541 becomes "+100 ft", and Player behavior gains the readout and the ruler), and `docs/design.md` sections 6 (`Drawing.z`), 7.6 (free stops carry `z`, line 649), 9.2 (a free stop stands on its ground, line 778) and 12 (the stepper, line 1379).
 
-## 9. Questions for J
+## 9. Questions for the project owner
 
-1. Decided by J on 2026-10-15: "fine with me". A DM's shared ruler stands on all the ground the DM sees, including ground under the players' fog, so its numbers can hint at a pit players have not found. It keeps doing so. The DM chose to share, the line already runs into the fog, and the heights are already in players' data. The other way, a shared DM ruler that ignores ground under the players' fog, would change the DM's own numbers the moment Shared is tapped. All three round 1 reviewers supported this default.
+1. Decided by the project owner on 2026-10-15: "fine with me". A DM's shared ruler stands on all the ground the DM sees, including ground under the players' fog, so its numbers can hint at a pit players have not found. It keeps doing so. The DM chose to share, the line already runs into the fog, and the heights are already in players' data. The other way, a shared DM ruler that ignores ground under the players' fog, would change the DM's own numbers the moment Shared is tapped. All three round 1 reviewers supported this default.

@@ -454,6 +454,12 @@ docker compose -f docker-compose.server.yml up -d --build
 
 The backup prints one line ending in `good` when it worked.
 
+After the update that stands ruler stops on raised ground
+(docs/design-v1-heights-readout.md section 3), reload every page left open
+across it, table displays included. Until it reloads, an old page does not
+show live rulers that carry heights, and reads kept ones as if on flat
+ground, so its numbers differ from everyone else's.
+
 Compose rebuilds the image and replaces only the containers that changed. On
 the way down the app closes every WebSocket with code 1012, finishes each
 room's current write and saves a snapshot, so phones reconnect on their own
