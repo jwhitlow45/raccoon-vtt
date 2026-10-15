@@ -96,13 +96,21 @@ export function DmDesk() {
    * Close and "Close all answered" go with the cards they close, and focus
    * fell to the page. Once those cards are gone, focus goes to the card
    * after the one closed (the first card left, after Close all answered),
-   * else the column's first alert, else the map. A close the server
-   * refuses leaves its card, and focus stays on its button.
+   * else the column's first alert, else the map. A close applies to this
+   * view at once, before the server answers (state/store.ts), so the cards
+   * go and focus moves straight away. One the server refuses brings its
+   * card back later, with focus wherever it is by then. A close whose cards
+   * are still there when its answer comes is forgotten then, so it cannot
+   * move focus later, when those cards close some other way.
    */
   const afterClose = useRef<{ ids: readonly string[]; next: string | null } | null>(null);
   const close = (ids: readonly string[], by: "card" | "all") => {
-    afterClose.current = { ids, next: cardAfterClose(cards.map((c) => c.id), ids, by) };
-    actions.dispatch({ t: "roll.close", rollIds: [...ids] });
+    const ask = { ids, next: cardAfterClose(cards.map((c) => c.id), ids, by) };
+    afterClose.current = ask;
+    const settled = () => {
+      if (afterClose.current === ask) afterClose.current = null;
+    };
+    if (actions.dispatch({ t: "roll.close", rollIds: [...ids] }, { onAnswer: settled }) === null) settled();
   };
   useLayoutEffect(() => {
     const ask = afterClose.current;
