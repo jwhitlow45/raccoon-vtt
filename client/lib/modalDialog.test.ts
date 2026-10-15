@@ -84,11 +84,22 @@ describe("focus as a modal dialog opens", () => {
   const inDialog = (el: string) => inside.has(el);
 
   test("a field focused by autoFocus during the commit keeps focus, and focus goes back to the control that had it before", () => {
-    assert.deepEqual(openingFocus("title field", inDialog, "New page button"), { opener: "New page button", first: "title field" });
+    assert.deepEqual(openingFocus(null, "title field", inDialog, "New page button"), { opener: "New page button", first: "title field" });
   });
 
   test("with nothing focused inside, the dialog takes focus and gives it back to what had it as it opened", () => {
-    assert.deepEqual(openingFocus("Filters button", inDialog, "Filters button"), { opener: "Filters button", first: null });
-    assert.deepEqual(openingFocus(null, inDialog, null), { opener: null, first: null });
+    assert.deepEqual(openingFocus(null, "Filters button", inDialog, "Filters button"), { opener: "Filters button", first: null });
+    assert.deepEqual(openingFocus(null, null, inDialog, null), { opener: null, first: null });
+  });
+
+  test("a second run of the effect, as StrictMode makes in development, keeps the autofocused field after the cleanup gave focus back", () => {
+    const first = openingFocus(null, "title field", inDialog, "New page button");
+    // The cleanup between the two runs closed the dialog and focused the opener.
+    assert.deepEqual(openingFocus(first, "New page button", inDialog, "New page button"), { opener: "New page button", first: "title field" });
+  });
+
+  test("a field that left the dialog since is passed over, and the dialog takes focus", () => {
+    const first = openingFocus(null, "stat block field", (el) => el === "stat block field", "Paste button");
+    assert.deepEqual(openingFocus(first, "Paste button", inDialog, "Paste button"), { opener: "Paste button", first: null });
   });
 });

@@ -22,7 +22,8 @@ import { useUiScale } from "../features/device/settings.ts";
  * handlers look for that attribute to leave their own sheets alone while a
  * dialog is open (useEscape in pages/RoomChrome.tsx, and the label pane in
  * features/builder/LabelPane.tsx). Give it `tabIndex={-1}`, since it takes
- * the first focus so a screen reader starts at its label.
+ * the first focus so a screen reader starts at its label, unless a field
+ * inside has autoFocus.
  *
  * The dialog takes this device's interface size (features/device/layout.ts)
  * with the rest of the chrome. A dialog that holds its own pointer math, a
@@ -45,13 +46,15 @@ export function useModalDialog(
   latest.current = options;
   // Read during the first render, before React commits the dialog: a field inside it with autoFocus takes focus in the commit (openingFocus).
   const [beforeCommit] = useState(() => focusedElement());
+  const opening = useRef<OpeningFocus<HTMLElement> | null>(null);
   const deviceScale = useUiScale();
   const scale = options.zoom === false ? 1 : deviceScale;
   // A layout effect, so the dialog is modal before the first paint and never shows as a plain element.
   useLayoutEffect(() => {
     const el = dialog.current;
     if (!el) return;
-    const { opener, first } = openingFocus(focusedElement(), (node) => el.contains(node), beforeCommit);
+    opening.current = openingFocus(opening.current, focusedElement(), (node) => el.contains(node), beforeCommit);
+    const { opener, first } = opening.current;
     if (!el.open) el.showModal();
     (first ?? el).focus({ preventScroll: true });
     const onCancel = (e: Event) => {
@@ -112,6 +115,8 @@ function focusedElement(): HTMLElement | null {
   return typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null;
 }
 
+export type OpeningFocus<T> = { opener: T | null; first: T | null };
+
 /**
  * Who had focus before the dialog opened, and what inside it takes the
  * first focus. React focuses a field marked autoFocus (a new journal
@@ -120,8 +125,14 @@ function focusedElement(): HTMLElement | null {
  * field, gone once the dialog closed, so focus fell to the page, and the
  * dialog then took focus from the field. So when focus is already inside,
  * the field keeps it and the opener is what had focus before the commit.
+ *
+ * It is read once per dialog (`saved` holds the first reading). React's
+ * StrictMode runs the effect a second time in development, after a
+ * cleanup that gave focus back to the opener. Read again there, focus was
+ * outside, and the dialog took it from the field in development only.
  */
-export function openingFocus<T>(active: T | null, inDialog: (el: T) => boolean, beforeCommit: T | null): { opener: T | null; first: T | null } {
+export function openingFocus<T>(saved: OpeningFocus<T> | null, active: T | null, inDialog: (el: T) => boolean, beforeCommit: T | null): OpeningFocus<T> {
+  if (saved) return saved.first === null || inDialog(saved.first) ? saved : { opener: saved.opener, first: null };
   if (active !== null && inDialog(active)) return { opener: beforeCommit, first: active };
   return { opener: active, first: null };
 }
