@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { accessibleName } from "./a11y.ts";
+import { accessibleName, tabKeyIndex } from "./a11y.ts";
 
 describe("button names", () => {
   test("a button with words on it is named by them, not by its title", () => {
@@ -17,5 +17,24 @@ describe("button names", () => {
     assert.equal(accessibleName("2", "Two squares wide"), "Two squares wide");
     assert.equal(accessibleName(undefined, "Close"), "Close");
     assert.equal(accessibleName("Undo", undefined), undefined);
+  });
+});
+
+describe("keys on a row of tabs", () => {
+  test("Left and Right move to the tab beside, wrapping at the ends", () => {
+    assert.equal(tabKeyIndex("ArrowRight", 1, 4), 2);
+    assert.equal(tabKeyIndex("ArrowLeft", 1, 4), 0);
+    assert.equal(tabKeyIndex("ArrowRight", 3, 4), 0);
+    assert.equal(tabKeyIndex("ArrowLeft", 0, 4), 3);
+  });
+
+  test("Home and End go to the first and the last tab", () => {
+    assert.equal(tabKeyIndex("Home", 2, 4), 0);
+    assert.equal(tabKeyIndex("End", 0, 4), 3);
+  });
+
+  test("other keys are left to the tab", () => {
+    for (const key of ["ArrowUp", "ArrowDown", "PageDown", "Enter", " "]) assert.equal(tabKeyIndex(key, 1, 4), null, key);
+    assert.equal(tabKeyIndex("ArrowRight", 0, 0), null, "no tabs");
   });
 });

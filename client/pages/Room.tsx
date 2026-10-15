@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
@@ -29,7 +29,7 @@ import { FrameViewBar } from "../features/scenes/FrameView.tsx";
 import { barInset, chromeZoom, layoutWidth, screenHeight, smallUi, useLayoutSize } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { activeTool, toolsFor, type ToolDef } from "../features/tools.ts";
-import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
+import { tabKeyIndex, VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { useBackClose } from "../lib/backClose.ts";
 import { useWakeLock } from "../lib/wakeLock.ts";
 import type { Insets } from "../lib/camera.ts";
@@ -1023,6 +1023,23 @@ function SidePanel(props: { zoom: number; tabs: PanelDef[]; tab: string; badges:
   const ids = useId();
   const tabId = (id: string) => `${ids}-tab-${id}`;
   const panelId = `${ids}-panel`;
+  /*
+   * The ARIA tab pattern, which role="tab" promises a screen reader: the
+   * row is one Tab stop, the chosen tab (roving tabindex), and Left, Right,
+   * Home and End move along it and choose. The map's arrow shortcuts stand
+   * aside on a tab list (state/shortcuts.ts ownsNavigationKeys).
+   */
+  const stop = props.tabs.some((t) => t.id === props.tab) ? props.tab : props.tabs[0]?.id;
+  const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const at = props.tabs.findIndex((t) => tabId(t.id) === (e.target as HTMLElement).id);
+    const index = at === -1 ? null : tabKeyIndex(e.key, at, props.tabs.length);
+    const next = index === null ? undefined : props.tabs[index];
+    if (!next) return;
+    e.preventDefault();
+    props.onTab(next.id);
+    document.getElementById(tabId(next.id))?.focus();
+  };
   return (
     <aside
       {...smallUi(props.zoom)}
@@ -1040,7 +1057,12 @@ function SidePanel(props: { zoom: number; tabs: PanelDef[]; tab: string; badges:
       }}
     >
       <PartyDock />
-      <div role="tablist" aria-label="Panels" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(0.5), padding: theme.space(2), borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>
+      <div
+        role="tablist"
+        aria-label="Panels"
+        onKeyDown={onTabKey}
+        style={{ display: "flex", flexWrap: "wrap", gap: theme.space(0.5), padding: theme.space(2), borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}
+      >
         {props.tabs.map((t) => {
           const chosen = props.tab === t.id;
           return (
@@ -1052,6 +1074,7 @@ function SidePanel(props: { zoom: number; tabs: PanelDef[]; tab: string; badges:
               role="tab"
               aria-selected={chosen}
               aria-controls={chosen ? panelId : undefined}
+              tabIndex={t.id === stop ? 0 : -1}
               onClick={() => props.onTab(t.id)}
               style={{
                 flex: "none",

@@ -354,6 +354,8 @@ On any device with a keyboard. They do nothing while you type in a field or a wi
 
 With a mouse, the wheel zooms, and a drag with the right or middle button, or with Space held, moves the map. Escape closes a sheet or the token's action bar.
 
+On a focused side panel tab, Left and Right switch to the tab beside it, and Home and End to the first and the last. There, and on a focused choice or slider, the arrow and Page keys never move a token.
+
 ## Look and accessibility
 
 - A dark theme. In a room, buttons take your own member color, adjusted so they stay readable.

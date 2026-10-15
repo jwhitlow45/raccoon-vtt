@@ -342,7 +342,7 @@ Busy: the button that started the work shows `busy`. A form that waits on it (Jo
 - A tap on the chosen radio does nothing, as with any native radio, so Segmented has no reselect handler. The one caller that closed its form that way, the new scene kind (`NewScene.tsx:42`), gets a Cancel (3.3).
 - Segmented: options gap `space(1)`, wrapping, small-button size, the chosen one in the pressed look. For two to six choices: the new scene kind, light, who can read a page, the interface size, the tool modes. The HP entry modes (Damage, Heal, Set, Temp) keep their own mode colors, since red for damage and green for healing carry meaning.
 - Swatches: 44 px options, 28 px disks, the chosen one in a 2 px `text` ring with a 2 px `bg` gap. Each option's name is the color's name from `MEMBER_COLOR_NAMES` (other colors keep their names from their own lists, such as the icon neutrals). One row serves draw, pins, areas, the icon disk and members.
-- Not choices: tabs. The image picker's sources and the side panel keep `tablist`, `tab` and `tabpanel`, which e2e queries. Their chosen tab takes the pressed look.
+- Not choices: tabs. The image picker's sources and the side panel keep `tablist`, `tab` and `tabpanel`, which e2e queries. Their chosen tab takes the pressed look. The side panel's tabs take the ARIA tab keys: one Tab stop on the chosen tab (roving tabindex), Left and Right to move and choose, Home and End for the ends. The map's arrow and Page shortcuts stand aside on any tab list.
 
 **Radio cards.** The settings' option cards stay as they are, the best-looking pattern in the app: radius `md`, accent border and tint when chosen.
 

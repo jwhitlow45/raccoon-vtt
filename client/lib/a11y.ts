@@ -22,3 +22,18 @@ export function accessibleName(label: unknown, title: string | undefined): strin
  * status line the page speaks.
  */
 export const VISUALLY_HIDDEN: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
+
+/**
+ * Where a key moves focus in a row of tabs, the ARIA tab pattern with
+ * automatic activation: Left and Right to the tab beside, wrapping at the
+ * ends, Home and End to the first and the last. Null for any other key,
+ * which the tab leaves alone.
+ */
+export function tabKeyIndex(key: string, index: number, count: number): number | null {
+  if (count === 0) return null;
+  if (key === "ArrowLeft") return (index - 1 + count) % count;
+  if (key === "ArrowRight") return (index + 1) % count;
+  if (key === "Home") return 0;
+  if (key === "End") return count - 1;
+  return null;
+}

@@ -11,8 +11,9 @@ import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, wai
 /**
  * A DM at a computer with a keyboard, after the design pass's live play:
  *
- * - With a token selected, the arrow and Page keys still move it while
- *   focus is on a side panel tab, which answers no arrow key itself.
+ * - The side panel's tabs are one Tab stop. Left and Right on a focused
+ *   tab switch tabs, Home and End go to the ends, and a selected token
+ *   stays where it is.
  * - A dialog with a field that focuses itself (a new journal page's
  *   title, a pasted stat block) keeps that field focused, and closing it
  *   gives focus back to the button that opened it, not to the page.
@@ -153,19 +154,41 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     await waitFor("the goblin in the DM's view", () => goblin());
   });
 
-  test("2. with a token selected, the arrow and Page keys on a focused panel tab move it", async () => {
+  test("2. Left and Right on a focused panel tab switch tabs, Home and End go to the ends, and a selected token stays put", async () => {
     const p = await pagePoint(dm, run.bounds, { x: run.goblin.x + 0.5, y: run.goblin.y + 0.5 });
     await dm.mouse.click(p.x, p.y);
     await dm.getByRole("dialog", { name: "Goblin actions" }).waitFor();
-    const tab = dm.getByRole("tab", { name: /^Log/ });
-    await tab.focus();
+    const tabs = dm.getByRole("tablist", { name: "Panels" }).getByRole("tab");
+    const names = (await tabs.allTextContents()).map((t) => t.trim());
+    const log = names.findIndex((n) => n.startsWith("Log"));
+    assert.ok(log > 0, `the tabs are ${names.join(", ")}`);
+    const chosen = async () => {
+      const f = await focused(dm);
+      assert.equal(f.role, "tab", `focus left the tabs for ${JSON.stringify(f)}`);
+      const selected = await tabs.evaluateAll((els) => els.map((el) => (el as unknown as { getAttribute(n: string): string | null }).getAttribute("aria-selected")));
+      const stops = await tabs.evaluateAll((els) => els.filter((el) => (el as unknown as { tabIndex: number }).tabIndex === 0).length);
+      assert.equal(stops, 1, "the row is one Tab stop");
+      assert.equal(names[selected.indexOf("true")], f.name, "the focused tab is the chosen one");
+      return f.name;
+    };
+
+    await tabs.nth(log).focus();
     await dm.keyboard.press("ArrowLeft");
-    await waitFor("the goblin one square left", () => goblin()?.x === run.goblin.x - 1);
+    assert.equal(await chosen(), names[log - 1]);
+    await dm.keyboard.press("ArrowRight");
+    assert.equal(await chosen(), names[log]);
+    await dm.keyboard.press("Home");
+    assert.equal(await chosen(), names[0]);
+    await dm.keyboard.press("ArrowLeft");
+    assert.equal(await chosen(), names[names.length - 1], "Left from the first wraps to the last");
+    await dm.keyboard.press("Home");
+    await dm.keyboard.press("End");
+    assert.equal(await chosen(), names[names.length - 1]);
     await dm.keyboard.press("PageDown");
-    await waitFor("the goblin 5 ft lower", () => goblin()?.elevation === -5);
-    const f = await focused(dm);
-    assert.ok(f.role === "tab" && f.name.startsWith("Log"), `focus left the tab for ${JSON.stringify(f)}`);
-    assert.equal(await tab.getAttribute("aria-selected"), "false", "the arrow did not choose the tab");
+    await dm.keyboard.press("ArrowUp");
+    // Nothing comes back to wait for when nothing moves, so this gives a stray move time to reach the DM's view.
+    await dm.waitForTimeout(500);
+    assert.deepEqual(goblin(), { x: run.goblin.x, y: run.goblin.y, elevation: 0 }, "the goblin stayed where it was");
     await dm.keyboard.press("Escape");
   });
 
