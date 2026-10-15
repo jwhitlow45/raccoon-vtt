@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type Ref, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type Ref, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { Effect, RollRequest, RollTarget, RoomState } from "#shared/model.ts";
 import { rollReminders } from "#shared/rules/rollReminders.ts";
@@ -59,12 +59,23 @@ const NO_ROLLS = {};
 /** What a summary activation focuses once the sheet has closed: a request's card, or the newest chip when no card opens. */
 type FocusAfter = { card: string } | { chip: true };
 
+/** What a card at the screen's foot must show, in its own pixels (RollCard onMeasure). */
+type FootNeed = {
+  /** Its header and everything down to its first answer row: the creature's name, the choice, the reminders, the total and Send. */
+  whole: number;
+  /** Its header and its first answer row alone, scrolled to sit under the header as it sticks. */
+  least: number;
+};
+
 /**
- * The least room a card at the screen's foot needs before it has been
- * measured: its padding, a header of two lines beside Later, and one
- * answer row. Measured from then on (RollCard onMinHeight).
+ * What a card at the screen's foot needs before it has been measured: its
+ * padding, a header of two lines beside Later, and one answer row.
+ * Measured from then on.
  */
-const FOOT_MIN_ESTIMATE = 134;
+const FOOT_NEED_ESTIMATE: FootNeed = { whole: 134, least: 106 };
+
+/** What a card at the screen's foot stands on, and how high it may reach (RollCard `stand`). */
+type FootStand = "options" | "toolbar" | "screen";
 
 /**
  * A player's side of request a roll (docs/design-v1-dm-tools.md 3.3). A
@@ -135,22 +146,34 @@ export function PlayerRolls() {
    * The card's title and Later must always show and take a tap, and the
    * Select several bar it stands on must stay in reach. So where the room
    * between the top bars and that bar is too short for the card's header
-   * and its first answer row (`minFoot`, measured), the card folds the same
-   * way, the row standing in. The row's tap then opens it (`summoned`),
-   * standing on the toolbar over the tool's options, until it is answered
-   * or put off with Later.
+   * and all of it down to its first answer row (`need.whole`, measured),
+   * the card folds the same way, the row standing in. The row's tap then
+   * opens it (`summoned`), standing on the toolbar over the tool's options,
+   * until it is answered or put off with Later. Where even that leaves too
+   * little room, as at 480 x 320 at 130%, it rises over the top bars and
+   * the turn band to the screen's top. Where the screen is too short for
+   * the choice as well, the card opens scrolled down to its answer row
+   * under the sticking header, so its question, Later, total and Send all
+   * show and take a tap at once (`need.least`). Only where even that does
+   * not fit does the header stop sticking and the whole card scroll, so
+   * each can be read and tapped in turn.
    */
   const dockStore = useScoped(barDockSlot);
   const zoom = useUiScale();
   const compactBar = useStore(dockStore, (s) => s.bar?.mode === "compact");
   const chrome = useStore(dockStore, (s) => s.chrome);
-  const [minFoot, setMinFoot] = useState(FOOT_MIN_ESTIMATE);
+  const [need, setNeed] = useState(FOOT_NEED_ESTIMATE);
+  const measured = useCallback((next: FootNeed) => setNeed((n) => (n.whole === next.whole && n.least === next.least ? n : next)), []);
   const [summoned, setSummoned] = useState<string | null>(null);
   const atFoot = shown !== undefined && width < CARD_MIN_WIDTH;
   const room = chrome ? size.height - chrome.top - chrome.bottom : Infinity;
-  const tooShort = atFoot && room < minFoot;
+  const tooShort = atFoot && room < need.whole;
   const onToolbar = tooShort && summoned === shown?.id;
   const yieldsToBar = atFoot && (compactBar || (tooShort && !onToolbar));
+  const toolbarRoom = chrome ? size.height - chrome.top - chrome.toolbar : Infinity;
+  const screenRoom = chrome ? size.height - chrome.safe.top - chrome.toolbar : Infinity;
+  const stand: FootStand = !onToolbar ? "options" : toolbarRoom >= need.whole ? "toolbar" : "screen";
+  const stickyHeader = stand !== "screen" || screenRoom >= need.least;
   useLayoutEffect(() => {
     dockStore.setState({ footYields: yieldsToBar });
   }, [dockStore, yieldsToBar]);
@@ -260,8 +283,9 @@ export function PlayerRolls() {
       drafts={drafts.current}
       sheet={width < CARD_MIN_WIDTH}
       hidden={cardHidden || yieldsToBar}
-      onToolbar={onToolbar}
-      onMinHeight={setMinFoot}
+      stand={stand}
+      stickyHeader={stickyHeader}
+      onMeasure={measured}
       onFold={() => fold(shown.id)}
       onEngage={() => setOpened(shown.id)}
       onFocusWithin={(inside) => {
@@ -311,10 +335,17 @@ function RollCard(props: {
   sheet: boolean;
   /** Folded under a sheet: still mounted, so a typed total and a chosen roll survive, but out of sight, the focus order and the accessibility tree. */
   hidden: boolean;
-  /** At the screen's foot, standing on the toolbar rather than on the active tool's options, as when the viewer opened it on a screen too short for both. */
-  onToolbar: boolean;
-  /** At the screen's foot, the least height that shows its header and its first answer row, in its own pixels. */
-  onMinHeight(height: number): void;
+  /**
+   * At the screen's foot, what it stands on and how high it may reach: on
+   * the active tool's options under the top bars, on the toolbar under
+   * them once the viewer asked for it on a screen too short for both, or
+   * on the toolbar up to the screen's top where even that is too short.
+   */
+  stand: FootStand;
+  /** The header sticks to the card's top while the card has room for it and an answer row under it. */
+  stickyHeader: boolean;
+  /** At the screen's foot, how tall it must stand to show what matters (FootNeed). */
+  onMeasure(need: FootNeed): void;
   onFold(): void;
   /** The first keystroke or roll choice: the card then stays up when a newer request arrives. */
   onEngage(): void;
@@ -335,28 +366,47 @@ function RollCard(props: {
   /*
    * At the screen's foot the card's header (what to roll, and Later) sticks
    * to its top on an opaque fill, so it shows whatever scrolls under it,
-   * and the card reports how tall its header and first answer row stand,
-   * which PlayerRolls folds it below.
+   * and the card reports how tall it must stand (FootNeed), which
+   * PlayerRolls folds it, raises it and unsticks the header by.
    */
   const headerRef = useRef<HTMLDivElement>(null);
-  const { onMinHeight } = props;
+  const { onMeasure, request: shownRequest } = props;
+  const sticks = props.sheet && props.stickyHeader;
   useLayoutEffect(() => {
     const card = props.cardRef.current;
     const header = headerRef.current;
     if (!props.sheet || !card || !header) return;
     const measure = () => {
-      // Folded, the card has no size: the last height measured stands.
+      // Folded, the card has no size: the last measures stand.
       if (card.offsetHeight === 0) return;
+      // Measured as a sticking header stands, its fill taking in the card's top padding and a little under it, so whether it sticks never changes the answer.
+      const lift = sticks ? 0 : theme.space(1);
+      const head = header.offsetHeight + (sticks ? 0 : theme.space(4) + lift);
+      const edges = 2 * theme.line.border;
       const row = card.querySelector("form");
-      // The header's box holds the card's top padding (its margin takes it back), and the card's bottom padding and edges come after the row.
-      onMinHeight(header.offsetHeight + (row ? theme.space(3) + row.offsetHeight : 0) + theme.space(4) + 2 * theme.line.border);
+      if (!row) {
+        const whole = edges + head + theme.space(4);
+        onMeasure({ whole, least: whole });
+        return;
+      }
+      // The row's offset in the card takes in all that stands above it: the header, the creature's name, the choice and the reminders.
+      onMeasure({ whole: edges + row.offsetTop + lift + row.offsetHeight + theme.space(4), least: edges + head + row.offsetHeight });
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(card);
-    observer.observe(header);
+    // Capped, the card keeps its size as a choice brings reminders over the row, so its parts are watched too. A sent total remounts them, and the changed request watches the new ones.
+    for (const part of card.children) observer.observe(part);
     return () => observer.disconnect();
-  }, [props.sheet, props.cardRef, onMinHeight]);
+  }, [props.sheet, props.cardRef, onMeasure, sticks, shownRequest]);
+  // Shown where it is too short for all of it, the card scrolls just far enough to show its first answer row whole, under the header as it sticks.
+  useLayoutEffect(() => {
+    const card = props.cardRef.current;
+    const row = card?.querySelector("form");
+    if (!props.sheet || props.hidden || !card || !row) return;
+    const bottom = row.offsetTop + row.offsetHeight;
+    if (bottom > card.scrollTop + card.clientHeight) card.scrollTop = bottom - card.clientHeight;
+  }, [props.sheet, props.hidden, props.stand, props.cardRef, sticks]);
   const body = (
     <>
       <div
@@ -365,10 +415,11 @@ function RollCard(props: {
           display: "flex",
           alignItems: "flex-start",
           gap: theme.space(2),
-          ...(props.sheet
+          ...(sticks
             ? {
                 position: "sticky",
-                top: 0,
+                // A sticky box keeps inside its scroller's padding, so at 0 the header stood a padding's height below its place and its fill covered the top of the row under it.
+                top: -theme.space(4),
                 zIndex: 1,
                 // The card's top and side padding, taken back so the fill covers what scrolls under it.
                 margin: `-${theme.space(4)}px calc(-1 * (${theme.safe.right} + ${theme.space(4)}px)) 0 calc(-1 * (${theme.safe.left} + ${theme.space(4)}px))`,
@@ -431,12 +482,14 @@ function RollCard(props: {
         position: "fixed",
         left: 0,
         right: 0,
-        bottom: chrome ? (props.onToolbar ? chrome.toolbar : chrome.bottom) : `calc(${theme.safe.bottom} + ${theme.layout.toolbar}px)`,
+        bottom: chrome ? (props.stand === "options" ? chrome.bottom : chrome.toolbar) : `calc(${theme.safe.bottom} + ${theme.layout.toolbar}px)`,
         zIndex: theme.z.overBars,
-        // At most 70% of the screen, and never past the top bars: standing on the options bar of a short phone, 70% reached above the screen and took the card's Later with it. What does not fit scrolls under the header.
-        maxHeight: chrome
-          ? `min(${screenHeight(70)}, calc(${screenHeight(100)} - ${chrome.top + (props.onToolbar ? chrome.toolbar : chrome.bottom)}px))`
-          : `min(${screenHeight(70)}, calc(${screenHeight(100)} - ${theme.safe.top} - ${theme.safe.bottom} - ${theme.layout.topBar + theme.layout.toolbar}px))`,
+        // At most 70% of the screen, and never past the top bars: standing on the options bar of a short phone, 70% reached above the screen and took the card's Later with it. What does not fit scrolls. Asked for where even the toolbar leaves too little, it may reach the screen's top.
+        maxHeight: !chrome
+          ? `min(${screenHeight(70)}, calc(${screenHeight(100)} - ${theme.safe.top} - ${theme.safe.bottom} - ${theme.layout.topBar + theme.layout.toolbar}px))`
+          : props.stand === "screen"
+            ? `calc(${screenHeight(100)} - ${chrome.safe.top + chrome.toolbar}px)`
+            : `min(${screenHeight(70)}, calc(${screenHeight(100)} - ${chrome.top + (props.stand === "options" ? chrome.bottom : chrome.toolbar)}px))`,
         overflowY: "auto",
         overscrollBehavior: "contain",
         display: "grid",

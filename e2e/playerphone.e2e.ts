@@ -206,10 +206,44 @@ async function buttonAt(control: Locator): Promise<string | null> {
 }
 
 /**
- * A roll card at the screen's foot keeps what to roll and its Later on
- * screen and taking taps, or, on a screen too short for that, it folds and
- * the alerts column's "Roll asked" row stands in, whose tap opens it with
- * both in reach.
+ * Whether `target` shows whole and takes a tap as things stand, with
+ * nothing scrolled first: a tap at its middle, and one just inside the
+ * middle of each edge, lands on it. A control cut off by its card's foot
+ * can still take a tap at its middle.
+ */
+async function wholeInReach(target: Locator): Promise<boolean> {
+  const r = await rectOf(target);
+  const x = (r.left + r.right) / 2;
+  const y = (r.top + r.bottom) / 2;
+  const points = [
+    [x, y],
+    [x, r.top + 3],
+    [x, r.bottom - 3],
+    [r.left + 3, y],
+    [r.right - 3, y],
+  ] as const;
+  return target.evaluate(
+    (el, at) =>
+      at.every(([px, py]) => {
+        const top = el.ownerDocument.elementFromPoint(px, py);
+        return top !== null && el.contains(top);
+      }),
+    points,
+  );
+}
+
+/** Whether the turn band shows under the top bar's row: the turn strip's name stands below the room's name. */
+async function bandShows(): Promise<boolean> {
+  const strip = player.locator("header [data-rvtt-strip-name]").first();
+  if ((await strip.count()) === 0) return false;
+  return (await rectOf(strip)).top >= (await rectOf(player.locator("header h1"))).bottom - 0.5;
+}
+
+/**
+ * A roll card at the screen's foot keeps what to roll, its Later, and its
+ * first total and Send whole on screen and taking taps, or, on a screen
+ * too short for that, it folds and the alerts column's "Roll asked" row
+ * stands in, whose tap opens it with all four in reach at once.
  */
 async function cardInReach(label: string, shot: string): Promise<void> {
   if (!(await card(player).isVisible())) {
@@ -226,8 +260,14 @@ async function cardInReach(label: string, shot: string): Promise<void> {
   const title = card(player).getByText(/^The DM asks for/);
   const t = await rectOf(title);
   assert.ok(t.top >= box.top - 0.5 && t.bottom <= box.bottom + 0.5, `${label}: what to roll is cut off: ${JSON.stringify({ t, box })}`);
-  const later = card(player).getByRole("button", { name: "Later" });
-  assert.equal(await buttonAt(later), "Later", `${label}: Later takes no tap`);
+  for (const [name, part] of [
+    ["what to roll", title],
+    ["Later", card(player).getByRole("button", { name: "Later" })],
+    ["the total", card(player).getByLabel(/^Total /).first()],
+    ["Send", card(player).getByRole("button", { name: "Send", exact: true }).first()],
+  ] as const) {
+    assert.ok(await wholeInReach(part), `${label}: ${name} is cut off or takes no tap`);
+  }
   await shots.take(player, shot);
 }
 
@@ -781,7 +821,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     { width: 320, height: 480, scale: 1.3, insets: { top: 44, bottom: 34 } },
   ]) {
     const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
-    test(`12. with a roll card waiting at the screen's foot, Select several's Actions takes a tap after a tap off, and the card's title and Later show and take a tap, or the summary row stands in and opens it: ${label}`, async () => {
+    test(`12. with a roll card waiting at the screen's foot, Select several's Actions takes a tap after a tap off, and the card's title, Later, total and Send show whole and take a tap, or the summary row stands in and opens it so: ${label}`, async () => {
       await insets(view.insets);
       await setUp(view);
       await touch([await cellPoint({ x: 8, y: 6 })]);
@@ -808,7 +848,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       }
     });
 
-    test(`13. with the Ruler's options showing, a roll card at the screen's foot keeps its title and Later in reach, or the summary row stands in and opens it: ${label}`, async () => {
+    test(`13. with the Ruler's options showing, a roll card at the screen's foot keeps its title, Later, total and Send whole in reach, or the summary row stands in and opens it so: ${label}`, async () => {
       await insets(view.insets);
       await setUp(view);
       await player.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Ruler" }).tap();
@@ -827,7 +867,48 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     });
   }
 
-  test("14. nothing went wrong in the browsers", () => {
+  for (const fight of [false, true]) {
+    const label = `480 x 320 at 130% ${fight ? "in a fight, under the turn band" : "with no fight"}`;
+    test(`14. ${label}, a long roll question opened from the Roll asked row shows its question, Later, total and Send at once, each taking a tap, and is answered`, async () => {
+      if (fight) {
+        await ops.send({
+          t: "encounter.start",
+          entries: [
+            { id: randomUUID(), tokenId: run.goblin.id, value: 18 },
+            { id: randomUUID(), tokenId: run.thorn.id, value: 15 },
+          ],
+        });
+      }
+      await insets({ side: 47, bottom: 21 });
+      const id = randomUUID();
+      try {
+        await setUp({ width: 480, height: 320, scale: 1.3 });
+        await player.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Ruler" }).tap();
+        await player.getByRole("toolbar", { name: "Ruler options" }).waitFor();
+        assert.equal(await bandShows(), fight, `${label}: the turn band ${fight ? "is missing" : "shows"}`);
+        // Two saves to choose from: a question of three lines at this size, and a choice above the total.
+        await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }, { ability: "str" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+        await player.getByRole("button", { name: /^Roll asked/ }).waitFor();
+        await player.waitForTimeout(400);
+        assert.equal(await card(player).isVisible(), false, `${label}: the card shows on a screen too short for it`);
+        await cardInReach(label, `playerphone-card-in-reach-${fight ? "fight" : "no-fight"}-480x320`);
+        const answer = card(player);
+        const total = answer.getByLabel("Total Thorn rolled");
+        const send = answer.getByRole("button", { name: "Send", exact: true });
+        await answer.getByRole("radiogroup", { name: "Which one you rolled" }).locator("label").filter({ hasText: "Strength" }).tap();
+        await total.fill("13");
+        assert.ok(await wholeInReach(send), `${label}: Send is cut off or takes no tap once the total is in`);
+        await send.tap();
+        await waitFor(`Thorn's answer at the server, ${label}`, () => (dmSocket.state?.rolls[id]?.targets[0]?.total === 13 ? true : null));
+      } finally {
+        await ops.send({ t: "roll.close", rollIds: [id] });
+        if (fight) await ops.send({ t: "encounter.end" });
+        await insets({});
+      }
+    });
+  }
+
+  test("15. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });
