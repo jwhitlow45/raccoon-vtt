@@ -20,8 +20,8 @@
 
 /** Characters that Windows, macOS or Linux refuse in a file name, and control characters. */
 const UNSAFE = /[<>:"/\\|?*\u0000-\u001f\u007f]/g;
-/** Names Windows keeps for devices, with or without an extension. */
-const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+/** Names Windows keeps for devices, with or without an extension: "CON" and "CON.v2" alike. */
+const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 /** Long enough for any title a DM types, short of every file system's limit once the extension is on. */
 const MAX_BASE = 100;
 const EXTENSIONS: Readonly<Record<string, string>> = {
@@ -46,7 +46,9 @@ export function handoutFileName(title: string, type: string): string {
   // By code point, so a cut never splits an emoji in half.
   let base = trim([...trim(cleaned)].slice(0, MAX_BASE).join(""));
   if (base === "") base = "handout";
-  else if (RESERVED.test(base)) base = `${base} handout`;
+  // A device name takes its word right after it, since Windows reads only the part before the first dot.
+  const device = RESERVED.exec(base);
+  if (device) base = `${device[1]} handout${device[2] ?? ""}`;
   return `${base}.${extensionFor(type)}`;
 }
 

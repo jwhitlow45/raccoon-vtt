@@ -28,10 +28,13 @@ describe("handoutFileName", () => {
     assert.equal(handoutFileName("...", "image/webp"), "handout.webp");
   });
 
-  test("a Windows device name gets a word after it", () => {
+  test("a Windows device name gets a word after it, with an extension of its own too (P3R-8)", () => {
     assert.equal(handoutFileName("CON", "image/webp"), "CON handout.webp");
     assert.equal(handoutFileName("lpt1", "image/webp"), "lpt1 handout.webp");
+    assert.equal(handoutFileName("CON.v2", "image/webp"), "CON handout.v2.webp");
+    assert.equal(handoutFileName("nul.final draft", "image/webp"), "nul handout.final draft.webp");
     assert.equal(handoutFileName("Console", "image/webp"), "Console.webp");
+    assert.equal(handoutFileName("Con the Lost Mine", "image/webp"), "Con the Lost Mine.webp");
   });
 
   test("a long title is cut to 100 characters, never inside an emoji", () => {
