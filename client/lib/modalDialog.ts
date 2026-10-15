@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { useUiScale } from "../features/device/settings.ts";
 
 /**
@@ -43,15 +43,17 @@ export function useModalDialog(
 ): void {
   const latest = useRef(options);
   latest.current = options;
+  // Read during the first render, before React commits the dialog: a field inside it with autoFocus takes focus in the commit (openingFocus).
+  const [beforeCommit] = useState(() => focusedElement());
   const deviceScale = useUiScale();
   const scale = options.zoom === false ? 1 : deviceScale;
   // A layout effect, so the dialog is modal before the first paint and never shows as a plain element.
   useLayoutEffect(() => {
     const el = dialog.current;
     if (!el) return;
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const { opener, first } = openingFocus(focusedElement(), (node) => el.contains(node), beforeCommit);
     if (!el.open) el.showModal();
-    el.focus({ preventScroll: true });
+    (first ?? el).focus({ preventScroll: true });
     const onCancel = (e: Event) => {
       e.preventDefault();
       latest.current.onClose();
@@ -81,7 +83,7 @@ export function useModalDialog(
       const target = latest.current.returnFocus?.current ?? opener;
       if (target?.isConnected) target.focus({ preventScroll: true });
     };
-  }, [dialog]);
+  }, [dialog, beforeCommit]);
 
   // Through the DOM rather than the dialog's own style, so every dialog takes it without passing it along.
   useLayoutEffect(() => {
@@ -91,6 +93,24 @@ export function useModalDialog(
     el.style.setProperty("--rvtt-ui", scale === 1 ? "" : String(scale));
     el.toggleAttribute("data-rvtt-small-ui", scale < 1);
   }, [dialog, scale]);
+}
+
+function focusedElement(): HTMLElement | null {
+  return typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null;
+}
+
+/**
+ * Who had focus before the dialog opened, and what inside it takes the
+ * first focus. React focuses a field marked autoFocus (a new journal
+ * page's title, the pasted stat block) while it commits the dialog, which
+ * is before this hook's layout effect runs. Read there, the opener was that
+ * field, gone once the dialog closed, so focus fell to the page, and the
+ * dialog then took focus from the field. So when focus is already inside,
+ * the field keeps it and the opener is what had focus before the commit.
+ */
+export function openingFocus<T>(active: T | null, inDialog: (el: T) => boolean, beforeCommit: T | null): { opener: T | null; first: T | null } {
+  if (active !== null && inDialog(active)) return { opener: beforeCommit, first: active };
+  return { opener: active, first: null };
 }
 
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';

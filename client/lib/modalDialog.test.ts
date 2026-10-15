@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { stopIndex, tabStops, wrapFocusIndex } from "./modalDialog.ts";
+import { openingFocus, stopIndex, tabStops, wrapFocusIndex } from "./modalDialog.ts";
 
 describe("focus wrapping in a modal dialog", () => {
   test("Tab from the last control goes to the first", () => {
@@ -76,5 +76,19 @@ describe("Tab stops with a group of native radios", () => {
     const stops = tabStops([close, ...radios], radio);
     assert.equal(stopIndex(stops, radios[2]!, radio), 1);
     assert.equal(stopIndex(stops, null, radio), -1);
+  });
+});
+
+describe("focus as a modal dialog opens", () => {
+  const inside = new Set(["title field"]);
+  const inDialog = (el: string) => inside.has(el);
+
+  test("a field focused by autoFocus during the commit keeps focus, and focus goes back to the control that had it before", () => {
+    assert.deepEqual(openingFocus("title field", inDialog, "New page button"), { opener: "New page button", first: "title field" });
+  });
+
+  test("with nothing focused inside, the dialog takes focus and gives it back to what had it as it opened", () => {
+    assert.deepEqual(openingFocus("Filters button", inDialog, "Filters button"), { opener: "Filters button", first: null });
+    assert.deepEqual(openingFocus(null, inDialog, null), { opener: null, first: null });
   });
 });
