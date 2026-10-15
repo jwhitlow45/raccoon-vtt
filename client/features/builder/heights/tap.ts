@@ -1,9 +1,15 @@
+import type { RoomState, Scene } from "#shared/model.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { worldToScreen, type Point } from "../../../lib/camera.ts";
 import type { ToolContext } from "../../tools.ts";
 import { pinUnder } from "../../pins/rules.ts";
-import { cellReadout, groundSource } from "./ground.ts";
+import { cellReadout, groundSource, type Cell, type ReadoutWords } from "./ground.ts";
 import { closeReadout, readoutSlot, showReadout } from "./store.ts";
+
+/** What the readout says of a cell in this viewer's view now, held to what the viewer may see (ground.ts cellReadout). */
+export function wordsAt(view: Pick<RoomState, "buildChunks" | "fogTiles">, scene: Scene, role: "dm" | "player", cell: Cell): ReadoutWords | null {
+  return cellReadout(groundSource(view, scene, role), sceneWalls(scene, view.buildChunks), cell);
+}
 
 /**
  * A tap on empty map with the Select tool, as the height readout sees it
@@ -17,14 +23,12 @@ export function tapGround(ctx: Pick<ToolContext, "getState" | "scene" | "camera"
   const view = ctx.getState().view;
   const camera = ctx.camera();
   // A pin answers its own tap (features/pins/PinLayer.tsx), and a reading beside its popover would be two things floating at once.
-  const words =
-    tool === "select" && view && !pinUnder(view, ctx.scene.id, camera, worldToScreen(camera, world))
-      ? cellReadout(groundSource(view, ctx.scene, ctx.role), sceneWalls(ctx.scene, view.buildChunks), { x: Math.floor(world.x), y: Math.floor(world.y) })
-      : null;
+  const cell = { x: Math.floor(world.x), y: Math.floor(world.y) };
+  const words = tool === "select" && view && !pinUnder(view, ctx.scene.id, camera, worldToScreen(camera, world)) ? wordsAt(view, ctx.scene, ctx.role, cell) : null;
   if (!words) {
     closeReadout(slot);
     return false;
   }
-  showReadout(slot, { sceneId: ctx.scene.id, cell: { x: Math.floor(world.x), y: Math.floor(world.y) } }, words.spoken);
+  showReadout(slot, { sceneId: ctx.scene.id, cell }, words.spoken);
   return true;
 }

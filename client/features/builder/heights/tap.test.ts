@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, test } from "node:test";
-import { CHUNK_CELLS, type BuildChunk, type RoomState } from "#shared/model.ts";
+import { CHUNK_CELLS, STAIRS_CHARS, type BuildChunk, type RoomState } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { room, scene } from "#shared/testutil.ts";
 import { emptyTap } from "../../../canvas/emptyTap.ts";
@@ -10,26 +10,43 @@ import type { RoomActions, RoomView } from "../../../state/types.ts";
 import { doorPillSlot } from "../../doors/store.ts";
 import type { ToolContext } from "../../tools.ts";
 import { builderSlot, labelPaneSlot } from "../store.ts";
-import { readoutSlot } from "./store.ts";
-import { tapGround } from "./tap.ts";
+import { followReadout, readoutSlot } from "./store.ts";
+import { tapGround, wordsAt } from "./tap.ts";
 
 /**
  * A 12 by 8 scene at 40 px a cell: a platform 10 ft up over columns 2 to 4,
  * a second one 10 ft up at column 8, a door on the north edge of (6, 4), a
- * label-only pin on the platform at (3, 3), and a DM's label at (10, 6).
+ * stair pointing east at (6, 6), a label-only pin on the platform at (3, 3),
+ * and a DM's label at (10, 6).
  */
 function layout(): RoomState {
   const state = room();
   state.scenes.s1 = scene("s1", { bounds: { w: 12, h: 8 } });
-  const feet = new Array<number>(CHUNK_CELLS * CHUNK_CELLS).fill(0);
-  for (let y = 0; y < 8; y++) {
-    for (const x of [2, 3, 4, 8]) feet[y * CHUNK_CELLS + x] = 10;
-  }
-  const chunk: BuildChunk = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: { "6,4,n": { kind: "door", state: "closed", secret: false, discovered: false } }, heights: encodeHeights(feet) };
-  state.buildChunks["s1:0,0"] = chunk;
+  state.buildChunks["s1:0,0"] = chunkWith({ platform: 10, stair: "e" });
   state.pins.pin = { id: "pin", rev: 0, sceneId: "s1", x: 3.5, y: 3.5, color: "#f7df00", visibility: "all", label: "Old shrine" };
   state.labels.lbl = { id: "lbl", rev: 0, sceneId: "s1", x: 10.5, y: 6.5, text: "Crypt", size: 1 } as RoomState["labels"][string];
   return state;
+}
+
+/** The layout's one chunk, its platform at `platform` feet and its stair pointing `stair`. */
+function chunkWith(input: { platform: number; stair: "n" | "e" | "s" | "w" }): BuildChunk {
+  const feet = new Array<number>(CHUNK_CELLS * CHUNK_CELLS).fill(0);
+  for (let y = 0; y < 8; y++) {
+    for (const x of [2, 3, 4]) feet[y * CHUNK_CELLS + x] = input.platform;
+    feet[y * CHUNK_CELLS + 8] = 10;
+  }
+  const up = ".".repeat(STAIRS_CHARS).split("");
+  up[6 * CHUNK_CELLS + 6] = input.stair;
+  return {
+    sceneId: "s1",
+    cx: 0,
+    cy: 0,
+    rev: 0,
+    cells: {},
+    edges: { "6,4,n": { kind: "door", state: "closed", secret: false, discovered: false } },
+    heights: encodeHeights(feet),
+    up: up.join(""),
+  };
 }
 
 let state: RoomState;
@@ -140,6 +157,49 @@ describe("the height readout's tap", () => {
     assert.ok(ctx.scope.get(doorPillSlot).getState().pill);
     tap(10.6, 6.5);
     assert.equal(ctx.scope.get(labelPaneSlot).getState().labelId, "lbl");
+  });
+
+  /** A change to the build arrives as a new chunk collection, as the store hands the view one (walls.ts caches by it). */
+  function repaint(input: Parameters<typeof chunkWith>[0]) {
+    state.buildChunks = { ...state.buildChunks, "s1:0,0": chunkWith(input) };
+  }
+
+  /** What ReadoutHost does on each render: keeps the readout's words on what its pill says now. */
+  function follow() {
+    const r = ctx.scope.get(readoutSlot).store.getState().readout;
+    const words = r ? wordsAt(state, ctx.scene, ctx.role, r.cell) : null;
+    if (words) followReadout(ctx.scope.get(readoutSlot), words.spoken);
+  }
+
+  test("a repaint under an open readout changes what the status line says, as it changes the pill", () => {
+    tap(2.5, 5.5);
+    flush();
+    repaint({ platform: -10, stair: "e" });
+    follow();
+    assert.deepEqual(spoken, ["Ground 10 ft up.", "Ground 10 ft down."]);
+    follow();
+    assert.deepEqual(spoken, ["Ground 10 ft up.", "Ground 10 ft down."], "no change, nothing said again");
+  });
+
+  test("a stair turned under an open readout says its new way up", () => {
+    tap(6.5, 6.5);
+    flush();
+    repaint({ platform: 10, stair: "n" });
+    follow();
+    assert.deepEqual(spoken, ["Stairs, up to the east.", "Stairs, up to the north."]);
+  });
+
+  test("a repaint before the readout's first frame is said by that frame, and a repeated tap is still cleared first", () => {
+    tap(2.5, 5.5);
+    repaint({ platform: 15, stair: "e" });
+    follow();
+    assert.deepEqual(spoken, []);
+    flush();
+    assert.deepEqual(spoken, ["Ground 15 ft up."]);
+    tap(2.5, 5.5);
+    follow();
+    flush();
+    assert.deepEqual(spoken, ["Ground 15 ft up.", "", "Ground 15 ft up."]);
   });
 
   test("ground at 0, any other tool, and ground under a player's fog read nothing", () => {

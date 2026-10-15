@@ -70,9 +70,11 @@ export function useHeightStore(): StoreApi<HeightState> {
  * The height readout's slot (docs/design-v1-heights-readout.md section 2):
  * the cell a tap with the Select tool read, and the words the status line
  * speaks. The pill reads the cell's ground from the view on each render,
- * so it follows a repaint and goes when the ground does.
+ * so it follows a repaint and goes when the ground does, and the host keeps
+ * `words` on what the pill says (`followReadout`). `voiced` is whether the
+ * status line has said them yet.
  */
-export type HeightReadout = { id: number; sceneId: string; cell: { x: number; y: number }; at: number };
+export type HeightReadout = { id: number; sceneId: string; cell: { x: number; y: number }; at: number; words: string; voiced: boolean };
 export type ReadoutState = { readout: HeightReadout | null; spoken: string };
 
 export const readoutSlot = scopeSlot(() => ({
@@ -89,12 +91,26 @@ type ReadoutSlot = ReturnType<typeof readoutSlot.create>;
  * the next frame, so a second reading with the same words, two areas at
  * the same height, is spoken again rather than heard as no change.
  */
-export function showReadout(slot: ReadoutSlot, at: { sceneId: string; cell: { x: number; y: number } }, spoken: string, now: number = Date.now()): void {
+export function showReadout(slot: ReadoutSlot, at: { sceneId: string; cell: { x: number; y: number } }, words: string, now: number = Date.now()): void {
   const id = ++slot.seq;
-  slot.store.setState({ readout: { id, sceneId: at.sceneId, cell: at.cell, at: now }, spoken: "" });
+  slot.store.setState({ readout: { id, sceneId: at.sceneId, cell: at.cell, at: now, words, voiced: false }, spoken: "" });
   slot.nextFrame(() => {
-    if (slot.store.getState().readout?.id === id) slot.store.setState({ spoken });
+    const readout = slot.store.getState().readout;
+    if (readout?.id === id) slot.store.setState({ readout: { ...readout, voiced: true }, spoken: readout.words });
   });
+}
+
+/**
+ * Keeps an open readout's words on what its pill says now. A repaint or a
+ * stair change under the readout changes the pill, and the status line
+ * says the new words too, rather than a height that is no longer there.
+ * Before the first frame the line stays clear, and the frame says the
+ * newest words.
+ */
+export function followReadout(slot: ReadoutSlot, words: string): void {
+  const s = slot.store.getState();
+  if (!s.readout || s.readout.words === words) return;
+  slot.store.setState({ readout: { ...s.readout, words }, spoken: s.readout.voiced ? words : s.spoken });
 }
 
 /** Ends the readout, and the status line with it. */

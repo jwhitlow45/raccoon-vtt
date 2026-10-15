@@ -1,7 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { useStore } from "zustand";
 import type { BuildChunk, FogTile, Scene } from "#shared/model.ts";
-import { sceneWalls } from "#shared/rules/walls.ts";
 import { measurePill } from "../../../canvas/measureText.ts";
 import { VISUALLY_HIDDEN } from "../../../lib/a11y.ts";
 import { worldToScreen, type Camera, type Insets, type Size } from "../../../lib/camera.ts";
@@ -10,8 +9,9 @@ import { useScoped } from "../../../state/scope.ts";
 import { TOAST_MS } from "../../../state/store.ts";
 import { useIsDisplay, useRoomView } from "../../../state/view.ts";
 import { LOWERED_EDGE, RAISED_EDGE } from "./boardText.ts";
-import { cellReadout, groundSource, pillOutline, POINTER_PX, readoutPlace, type ReadoutWords } from "./ground.ts";
-import { closeReadout, readoutSlot } from "./store.ts";
+import { pillOutline, POINTER_PX, readoutPlace, type ReadoutWords } from "./ground.ts";
+import { closeReadout, followReadout, readoutSlot } from "./store.ts";
+import { wordsAt } from "./tap.ts";
 
 const EMPTY_CHUNKS: Readonly<Record<string, BuildChunk>> = {};
 const EMPTY_FOG: Readonly<Record<string, FogTile>> = {};
@@ -31,7 +31,7 @@ const EDGE_PX = 1.5;
  *
  * The pill reads its cell from this viewer's own view on each render, so it
  * follows a DM's repaint and goes when the ground turns 0 or the fog covers
- * it. It also goes on the next tap on the map, a token selection, a change
+ * it, and the status line follows it. It also goes on the next tap on the map, a token selection, a change
  * of tool or scene, or after a toast's time. A pan or a pinch keeps it on
  * its cell. It takes no pointer and no focus.
  *
@@ -52,13 +52,18 @@ export function ReadoutHost(props: { scene: Scene; tool: string; camera: Camera;
   const { scene } = props;
   const words = useMemo(() => {
     if (!readout || readout.sceneId !== scene.id) return null;
-    return cellReadout(groundSource({ buildChunks: chunks, fogTiles }, scene, role), sceneWalls(scene, chunks), readout.cell);
+    return wordsAt({ buildChunks: chunks, fogTiles }, scene, role, readout.cell);
   }, [readout, chunks, fogTiles, role, scene]);
   const open = words !== null && props.tool === "select" && !tokenSelected && !display;
 
   useEffect(() => {
     if (readout && !open) closeReadout(slot);
   }, [readout, open, slot]);
+
+  // The status line says what the pill says, after a repaint or a stair change under it too.
+  useEffect(() => {
+    if (open && words) followReadout(slot, words.spoken);
+  }, [open, words, slot]);
 
   // One timer for the toast's time, and no animation loop.
   useEffect(() => {
