@@ -403,9 +403,7 @@ function UndoMoveButton(props: { tokenIds: readonly string[] }) {
   const offer = useStore(useScoped(lastMoveSlot), offered);
   if (!offer || !offersUndo(offer, props.tokenIds)) return null;
   return (
-    <BarButton label="Undo your last move" onClick={() => actions.dispatch(undoOf(offer))}>
-      Undo move
-    </BarButton>
+    <BarButton onClick={() => actions.dispatch(undoOf(offer))}>Undo move</BarButton>
   );
 }
 

@@ -180,7 +180,14 @@ function useWindow(listRef: RefObject<HTMLElement | null>, count: number): { sta
   return range;
 }
 
-function WindowedList(props: { items: ListItem[]; onPick(row: OutlineRow): void; onToggle(group: OutlineGroup): void }) {
+/**
+ * The windowed lines, each in a `listitem` of its own that holds its
+ * place, around a button that keeps its button role: a group's header,
+ * which folds its group, or a row, which shows its item on the map. With
+ * `role="listitem"` on the row's own button, a screen reader heard a list
+ * item and never a button to press.
+ */
+export function WindowedList(props: { items: ListItem[]; onPick(row: OutlineRow): void; onToggle(group: OutlineGroup): void }) {
   const listRef = useRef<HTMLDivElement>(null);
   const { start, end } = useWindow(listRef, props.items.length);
   return (
@@ -188,56 +195,58 @@ function WindowedList(props: { items: ListItem[]; onPick(row: OutlineRow): void;
       {props.items.slice(start, end).map((item, i) => {
         const top = (start + i) * ROW_PX;
         return item.kind === "header" ? (
-          <button
-            key={`h:${item.group}`}
-            type="button"
-            aria-expanded={!item.folded}
-            onClick={() => props.onToggle(item.group)}
-            style={{ ...line(top), justifyContent: "flex-start", gap: theme.space(2), background: "transparent", border: "none", borderBottom: `${theme.line.border}px solid ${theme.color.border}`, color: theme.color.text }}
-          >
-            <span style={{ flex: "none", color: theme.color.textMuted }}>
-              <Icon name={item.folded ? "chevronRight" : "chevronDown"} />
-            </span>
-            <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold }}>{item.title}</span>
-            <span style={{ fontSize: theme.font.body14, color: theme.color.textMuted }}>{item.count}</span>
-          </button>
+          <div key={`h:${item.group}`} role="listitem" style={slot(top)}>
+            <button
+              type="button"
+              aria-expanded={!item.folded}
+              onClick={() => props.onToggle(item.group)}
+              style={{ ...LINE, justifyContent: "flex-start", gap: theme.space(2), background: "transparent", border: "none", borderBottom: `${theme.line.border}px solid ${theme.color.border}`, color: theme.color.text }}
+            >
+              <span style={{ flex: "none", color: theme.color.textMuted }}>
+                <Icon name={item.folded ? "chevronRight" : "chevronDown"} />
+              </span>
+              <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold }}>{item.title}</span>
+              <span style={{ fontSize: theme.font.body14, color: theme.color.textMuted }}>{item.count}</span>
+            </button>
+          </div>
         ) : (
-          <button
-            key={item.row.key}
-            type="button"
-            role="listitem"
-            onClick={() => props.onPick(item.row)}
-            title={`Show ${item.row.name} on the map`}
-            style={{ ...line(top), gap: theme.space(3), background: "transparent", border: "none", color: theme.color.text, paddingLeft: theme.space(8) }}
-          >
-            <span style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5), textAlign: "left", lineHeight: theme.leading.tight }}>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: theme.font.input, fontWeight: theme.weight.strong }}>{item.row.name}</span>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: theme.font.small, color: theme.color.textMuted }}>{item.row.detail}</span>
-            </span>
-            {item.row.mark ? <Mark text={item.row.mark} /> : null}
-          </button>
+          <div key={item.row.key} role="listitem" style={slot(top)}>
+            <button
+              type="button"
+              onClick={() => props.onPick(item.row)}
+              title={`Show ${item.row.name} on the map`}
+              style={{ ...LINE, gap: theme.space(3), background: "transparent", border: "none", color: theme.color.text, paddingLeft: theme.space(8) }}
+            >
+              <span style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5), textAlign: "left", lineHeight: theme.leading.tight }}>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: theme.font.input, fontWeight: theme.weight.strong }}>{item.row.name}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: theme.font.small, color: theme.color.textMuted }}>{item.row.detail}</span>
+              </span>
+              {item.row.mark ? <Mark text={item.row.mark} /> : null}
+            </button>
+          </div>
         );
       })}
     </div>
   );
 }
 
-function line(top: number) {
-  return {
-    position: "absolute" as const,
-    top,
-    left: 0,
-    right: 0,
-    height: ROW_PX,
-    display: "flex",
-    alignItems: "center",
-    padding: `0 ${theme.space(3)}px 0 ${theme.space(1)}px`,
-    fontFamily: theme.font.body,
-    fontSize: theme.font.body14,
-    cursor: "pointer",
-    textAlign: "left" as const,
-  };
+/** Where a line sits in the windowed list. */
+function slot(top: number) {
+  return { position: "absolute" as const, top, left: 0, right: 0, height: ROW_PX };
 }
+
+/** A line's button, filling its slot. */
+const LINE = {
+  width: "100%",
+  height: "100%",
+  display: "flex",
+  alignItems: "center",
+  padding: `0 ${theme.space(3)}px 0 ${theme.space(1)}px`,
+  fontFamily: theme.font.body,
+  fontSize: theme.font.body14,
+  cursor: "pointer",
+  textAlign: "left" as const,
+};
 
 /**
  * What players get, as a muted Tag: nothing here is an error, only a fact

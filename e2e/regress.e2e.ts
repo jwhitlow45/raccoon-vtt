@@ -232,7 +232,7 @@ describe("raccoon-vtt older features on a wave 4 build", { timeout: 180_000 }, (
     await shots.take(player, "regress-out-of-sight-note");
   });
 
-  test("5. a creature carrying its own light into the dark gets no note, since the party still sees it", async () => {
+  test("5. a creature carrying its own light into the dark gets no note, since the party still sees it, and its bar's Undo move is named by its words", async () => {
     const lanternId = randomUUID();
     await ops.send({
       t: "token.create",
@@ -245,6 +245,13 @@ describe("raccoon-vtt older features on a wave 4 build", { timeout: 180_000 }, (
     await player.waitForTimeout(800);
     assert.ok(playerSocket.state?.tokens[lanternId], "the server stopped sending the lantern goblin");
     assert.equal(await player.getByRole("status").filter({ hasText: "Lantern goblin is out of the party's sight now." }).count(), 0, "a note for a creature still in sight");
+
+    // The bar offers the move back, by the words it shows (LPD-REGRESS-4).
+    await tapCell(player, { w: 18, h: 10 }, { x: 17, y: 9 });
+    const bar = player.getByRole("dialog", { name: "Lantern goblin actions" });
+    await bar.getByRole("button", { name: "Undo move", exact: true }).waitFor();
+    await bar.getByRole("button", { name: /^Close/ }).first().tap();
+    await bar.waitFor({ state: "detached" });
   });
 
   test("6. on a phone, a long room name gives way to the player's chip, down to a few letters (LP4-REGRESS-5)", async () => {

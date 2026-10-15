@@ -108,21 +108,7 @@ export function PartyBar(props: { dock?: boolean; onLeave?(): void }) {
         </Button>
       </div>
       {folded ? (
-        <div role="list" style={{ display: "flex", gap: theme.space(1), overflowX: "auto", scrollbarWidth: "thin", whiteSpace: "nowrap" }}>
-          {entries.map((e) => (
-            <button
-              key={e.character.id}
-              type="button"
-              role="listitem"
-              disabled={!e.tokenId}
-              onClick={() => frame(e)}
-              aria-label={`${e.character.name}, HP ${hpLine(e.hp)}${e.tokenId ? ". Show it on the map" : ""}`}
-              style={{ ...pill, cursor: e.tokenId ? "pointer" : "default" }}
-            >
-              <strong>{e.character.name}</strong> <span style={{ color: LABEL_COLOR[e.label] }}>{lifeWord(e.life) ?? hpLine(e.hp)}</span>
-            </button>
-          ))}
-        </div>
+        <FoldedParty entries={entries} onFrame={frame} />
       ) : (
         <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(0.5), maxHeight: props.dock ? screenHeight(40) : undefined, overflowY: props.dock ? "auto" : undefined }}>
           {entries.map((e) => (
@@ -133,6 +119,31 @@ export function PartyBar(props: { dock?: boolean; onLeave?(): void }) {
         </ul>
       )}
     </section>
+  );
+}
+
+/**
+ * The folded bar: one line of names and HP. Each pill is a button in a
+ * `listitem` of its own. With `role="listitem"` on the button itself, a
+ * screen reader heard a list item and never a button to press.
+ */
+export function FoldedParty(props: { entries: readonly PartyEntry[]; onFrame(entry: PartyEntry): void }) {
+  return (
+    <div role="list" style={{ display: "flex", gap: theme.space(1), overflowX: "auto", scrollbarWidth: "thin", whiteSpace: "nowrap" }}>
+      {props.entries.map((e) => (
+        <div key={e.character.id} role="listitem" style={{ flex: "none", display: "flex" }}>
+          <button
+            type="button"
+            disabled={!e.tokenId}
+            onClick={() => props.onFrame(e)}
+            aria-label={`${e.character.name}, HP ${hpLine(e.hp)}${e.tokenId ? ". Show it on the map" : ""}`}
+            style={{ ...pill, cursor: e.tokenId ? "pointer" : "default" }}
+          >
+            <strong>{e.character.name}</strong> <span style={{ color: LABEL_COLOR[e.label] }}>{lifeWord(e.life) ?? hpLine(e.hp)}</span>
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 
