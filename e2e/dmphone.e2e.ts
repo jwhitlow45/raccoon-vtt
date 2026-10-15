@@ -425,6 +425,13 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       const r = await rectOf(bar);
       const col = await column(dm);
       if (view.width > view.height) for (const c of col.cards) assert.ok(!intersects(c, r), `${label}: a card meets the bar: ${JSON.stringify({ c, r })}`);
+      if (view.width === 390) {
+        // Upright with a check at the column's head, the bar keeps off the Hag, low on the screen (BB-6).
+        const a = await pagePoint(dm, bounds, { x: 1, y: 17 });
+        const b = await pagePoint(dm, bounds, { x: 2, y: 18 });
+        const hag = { left: a.x, top: a.y, right: b.x, bottom: b.y };
+        assert.ok(!intersects(hag, r), `${label}: the bar covers the Hag: ${JSON.stringify({ hag, r })}`);
+      }
       // The check, or the summary row that stands for it, is in sight with the bar open.
       const check = dm.locator('[data-alert="concentration"]').first();
       const row = dm.getByRole("button", { name: /^Concentration check/ });

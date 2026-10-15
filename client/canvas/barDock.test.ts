@@ -311,11 +311,36 @@ describe("the right lane", () => {
     assert.deepEqual({ at: shorter.hang.at, room: shorter.hang.room }, { at: 440, room: 100 }, "a short bar moves down only as far as it needs");
     const clear = shareLane({ ...at, hang: raised, content: 30 });
     assert.deepEqual({ at: clear.hang.at, room: clear.hang.room }, { at: 380, room: 40 }, "a bar already clear of the card stays where it is");
-    // An upright span flipped above its token hangs by its bottom too.
-    const flipped: Hang = { left: 8, width: 374, anchor: "bottom", at: 300, room: 240 };
-    const span = shareLane({ hang: flipped, laneTop: 60, laneHeight: 600, column, laneLeft: -8, besideRoom: -8, content: 400 });
-    assert.equal(span.lane, "stacked");
-    assert.deepEqual({ at: span.hang.at, room: span.hang.room }, { at: 660, room: 320 });
+  });
+
+  test("an upright span keeps below the column's first card and never covers its token, above it or below it", () => {
+    // The DM at 390 x 844 with one 122 px check: the bar may reach up to 190, and the token sits low on the screen.
+    const chrome: Chrome = { top: 52, bottom: 60, toolbar: 60, safe: NONE, sheet: 0 };
+    const phoneView = { width: 390, height: 844 };
+    const column = { top: 60, content: 122, first: 122 };
+    for (const y of [300, 440, 480, 520, 560, 700]) {
+      for (const height of [200, 418, 900]) {
+        const placed = placeBar({ layout: phoneView, viewport: phoneView, chrome, foot: 0, anchor: { x: 200, y }, spot: DEFAULT_SPOT, height, column });
+        assert.ok(placed && placed.mode === "span");
+        const box = hangBox(placed.hang, height);
+        // The token stands in the 74 px above the anchor (FLIP_CLEARANCE and OFFSET_Y), its label in the 34 below.
+        const clear = box.top + box.height <= y - 74 + 0.5 || box.top >= y + 34 - 0.5;
+        assert.ok(clear, `a ${height} px bar over a token at ${y}: ${JSON.stringify(box)}`);
+        assert.ok(box.top >= 190 - 0.5, `the bar reaches over the check: ${JSON.stringify(box)}`);
+        assert.ok(box.top + box.height <= 844 - 60 - 8 + 0.5, "the bar runs under the toolbar");
+      }
+    }
+    // With room on both sides it takes the side with more of it, and with no card it may reach to the top bars again.
+    const low = placeBar({ layout: phoneView, viewport: phoneView, chrome, foot: 0, anchor: { x: 200, y: 560 }, spot: DEFAULT_SPOT, height: 418, column });
+    assert.equal(low?.hang.anchor, "bottom");
+    assert.equal(hangBox(low!.hang, 418).top, 190);
+    const bare = placeBar({ layout: phoneView, viewport: phoneView, chrome, foot: 0, anchor: { x: 200, y: 560 }, spot: DEFAULT_SPOT, height: 418, column: null });
+    assert.equal(hangBox(bare!.hang, 418).top, 560 - 74 - 418);
+    // Where neither side leaves its floor, as at 320 x 480 at 130% under a check's summary row, it keeps the floor rather than shrink to nothing.
+    const tiny = { width: 246, height: 369 };
+    const cramped = placeBar({ layout: tiny, viewport: tiny, chrome: phone({ band: false, options: false, safe: { top: 44, side: 0, bottom: 34 } }), foot: 0, anchor: { x: 60, y: 230 }, spot: DEFAULT_SPOT, height: 400, column: { top: 104, content: 140, first: 140 } });
+    assert.equal(cramped?.lane, "summary");
+    assert.equal(cramped?.hang.room, 111, "the floor, all the lane under the summary row");
   });
 
   test("beside at exactly 230 px left of the lane, and the summary row at 229", () => {

@@ -263,9 +263,11 @@ export function overlapsLane(hang: Pick<Hang, "left" | "width">, free: Box): boo
  * 1. Stacked: the column keeps at least its first card, and the bar sits
  *    8 px below it, no shorter than its floor, `min(120, L)`. Beyond the
  *    first card the column gives way first (it stops 8 px above the bar),
- *    then the bar down to its floor. A bar hung by its bottom moves down
- *    first, as far as the lane's bottom, so it keeps its content's height
- *    where the lane has room for it, and shrinks only past that.
+ *    then the bar down to its floor. A docked bar hung by its bottom moves
+ *    down first, as far as the lane's bottom, so it keeps its content's
+ *    height where the lane has room for it, and shrinks only past that.
+ *    An upright span takes the first card's bottom as its top limit
+ *    instead and stays off its token (placeBar).
  * 2. Beside: with 230 px or more left of the lane, the bar moves there,
  *    up to 304 px wide, with the lane's whole height, and the column keeps
  *    the lane whole.
@@ -286,29 +288,35 @@ export function shareLane(input: {
   /** The bar's content height, which a bar hung by its bottom keeps by moving down. */
   content: number;
 }): { lane: Lane; hang: Hang } {
-  const { hang, laneTop, column } = input;
-  const height = Math.max(0, input.laneHeight);
-  const laneBottom = laneTop + height;
-  if (!column || column.first <= 0) return { lane: "none", hang };
-  /*
-   * A compact overlay already hangs from the lane's bottom (its lane is the
-   * overlay), so this leaves its bottom where it is. A docked bar in a
-   * bottom corner, or an upright span flipped above its token, moves down
-   * instead of shrinking while the lane has room below it.
-   */
-  const below = (floor: number): Hang => {
-    if (hang.anchor === "top") return { ...hang, at: Math.max(hang.at, floor), room: Math.max(0, laneBottom - Math.max(hang.at, floor)) };
-    const at = Math.min(laneBottom, Math.max(hang.at, floor + Math.min(Math.max(0, input.content), laneBottom - floor)));
-    return { ...hang, at, room: Math.max(0, at - floor) };
-  };
-  const firstBottom = column.top + column.first + EDGE;
-  if (laneBottom - firstBottom >= Math.min(BAR_FLOOR, height) && height > 0) return { lane: "stacked", hang: below(firstBottom) };
-  if (input.besideRoom >= BESIDE_MIN) {
+  const { hang, laneTop } = input;
+  const laneBottom = laneTop + Math.max(0, input.laneHeight);
+  const { lane, floor } = laneChoice(input);
+  if (lane === "none") return { lane, hang };
+  if (lane === "beside") {
     const width = Math.min(BAR_WIDTH, input.besideRoom);
     const room = Math.max(0, hang.anchor === "top" ? laneBottom - hang.at : hang.at - laneTop);
-    return { lane: "beside", hang: { ...hang, left: input.laneLeft - width, width, room } };
+    return { lane, hang: { ...hang, left: input.laneLeft - width, width, room } };
   }
-  return { lane: "summary", hang: below(column.top + SUMMARY_ROW + EDGE) };
+  // A compact overlay already hangs from the lane's bottom (its lane is the overlay), so this leaves its bottom where it is.
+  if (hang.anchor === "top") return { lane, hang: { ...hang, at: Math.max(hang.at, floor), room: Math.max(0, laneBottom - Math.max(hang.at, floor)) } };
+  const at = Math.min(laneBottom, Math.max(hang.at, floor + Math.min(Math.max(0, input.content), laneBottom - floor)));
+  return { lane, hang: { ...hang, at, room: Math.max(0, at - floor) } };
+}
+
+/**
+ * Which way the lane goes for a bar that meets a column with cards
+ * (shareLane), and the top the bar keeps below: the first card's bottom
+ * when stacked, the summary row's when summarized, and the lane's own top
+ * beside it or with no card.
+ */
+export function laneChoice(input: { laneTop: number; laneHeight: number; column: ColumnFacts | null; besideRoom: number }): { lane: Lane; floor: number } {
+  const { laneTop, column } = input;
+  const height = Math.max(0, input.laneHeight);
+  if (!column || column.first <= 0) return { lane: "none", floor: laneTop };
+  const firstBottom = column.top + column.first + EDGE;
+  if (laneTop + height - firstBottom >= Math.min(BAR_FLOOR, height) && height > 0) return { lane: "stacked", floor: firstBottom };
+  if (input.besideRoom >= BESIDE_MIN) return { lane: "beside", floor: laneTop };
+  return { lane: "summary", floor: column.top + SUMMARY_ROW + EDGE };
 }
 
 /**
@@ -387,22 +395,28 @@ const FLIP_CLEARANCE = 40;
 /**
  * An upright phone's bar, the screen's width less the free area's margins:
  * below its token when it fits there, else above it, whichever has more
- * room. Too little room either way, it keeps its floor and slides back
- * inside the free area.
+ * room. `top` is how high it may reach, the free area's top or under the
+ * alerts column's first card. It never covers its token while the side it
+ * takes leaves it its floor, `min(120, the room it has)`: a bar over the
+ * creature it acts on is the very thing the dock exists to stop. Only on a
+ * screen so short that neither side does, as at 320 x 480 at 130% under a
+ * check, does it keep its floor over the token rather than shrink below
+ * its header and buttons.
  */
-function spanHang(anchor: Point, free: Box, height: number): Hang {
+function spanHang(anchor: Point, free: Box, height: number, top: number): Hang {
   const bottom = free.top + free.height;
-  const floor = Math.min(BAR_FLOOR, free.height);
-  const topBelow = Math.max(free.top, anchor.y + OFFSET_Y);
+  const ceiling = Math.max(free.top, top);
+  const floor = Math.min(BAR_FLOOR, Math.max(0, bottom - ceiling));
+  const topBelow = Math.max(ceiling, anchor.y + OFFSET_Y);
   const spaceBelow = bottom - topBelow;
   const bottomAbove = Math.min(bottom, anchor.y - OFFSET_Y - FLIP_CLEARANCE);
-  const spaceAbove = bottomAbove - free.top;
+  const spaceAbove = bottomAbove - ceiling;
   if (height <= spaceBelow || spaceBelow >= spaceAbove) {
     const at = spaceBelow >= floor ? topBelow : bottom - floor;
-    return { left: free.left, width: free.width, anchor: "top", at, room: bottom - at };
+    return { left: free.left, width: free.width, anchor: "top", at, room: Math.max(0, bottom - at) };
   }
-  const at = spaceAbove >= floor ? bottomAbove : free.top + floor;
-  return { left: free.left, width: free.width, anchor: "bottom", at, room: at - free.top };
+  const at = spaceAbove >= floor ? bottomAbove : ceiling + floor;
+  return { left: free.left, width: free.width, anchor: "bottom", at, room: Math.max(0, at - ceiling) };
 }
 
 /**
@@ -426,15 +440,17 @@ export function placeBar(input: {
 }): { mode: BarMode; free: Box; hang: Hang; lane: Lane } | null {
   const free = freeArea(input.viewport, input.chrome, input.foot);
   const mode = barMode(input.layout, free.height);
-  if (mode === "span" && !input.anchor) return null;
-  const hang =
-    mode === "span" && input.anchor
-      ? spanHang(input.anchor, free, input.height)
-      : mode === "compact"
-        ? compactHang(input.layout, input.viewport, input.chrome)
-        : spotHang(input.spot, free, { width: BAR_WIDTH, height: input.height });
-  // An upright span crosses the whole map, so it always meets the column.
-  if (!input.column || (mode !== "span" && !overlapsLane(hang, free))) return { mode, free, hang, lane: "none" };
+  if (mode === "span") {
+    if (!input.anchor) return null;
+    // An upright span crosses the whole map, so it always meets the column: it keeps below the first card, or moves beside the lane, and never covers its token either way.
+    const { lane, floor } = laneChoice({ laneTop: free.top, laneHeight: free.height, column: input.column, besideRoom: free.width - LANE_WIDTH });
+    const hang = spanHang(input.anchor, free, input.height, floor);
+    if (lane !== "beside") return { mode, free, hang, lane };
+    const width = Math.min(BAR_WIDTH, free.width - LANE_WIDTH);
+    return { mode, free, hang: { ...hang, left: laneLeft(free) - width, width }, lane };
+  }
+  const hang = mode === "compact" ? compactHang(input.layout, input.viewport, input.chrome) : spotHang(input.spot, free, { width: BAR_WIDTH, height: input.height });
+  if (!input.column || !overlapsLane(hang, free)) return { mode, free, hang, lane: "none" };
   const shared = shareLane({
     hang,
     laneTop: free.top,
