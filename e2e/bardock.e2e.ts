@@ -58,6 +58,8 @@ const run = {
   ],
   /** Far in the map's bottom right, where the docked bar sits. */
   far: { id: randomUUID(), x: 27, y: 17 },
+  /** The roll asked of Thorn in step 6, which waits in the DM's column until step 10 closes it. */
+  deskRoll: randomUUID(),
 };
 
 type Rect = { left: number; top: number; right: number; bottom: number };
@@ -523,7 +525,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
   test("6. in a fight with three concentration checks and a roll card, the bar and the column never meet, and a column the bar cuts short says Scroll for more", async () => {
     await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: randomUUID(), tokenId: g.id, value: 15 - i })) });
     for (const g of run.goblins) await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } });
-    await ops.send({ t: "roll.ask", request: { id: randomUUID(), test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+    await ops.send({ t: "roll.ask", request: { id: run.deskRoll, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
     for (const view of [
       { ...DESK, scale: 1 },
       { width: 1024, height: 768, scale: 1.3 },
@@ -684,6 +686,12 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
   });
 
   test("10. a press on the header while checks arrive leaves no card on the bar, nor does a drag Escape put back, and a bar raised in its corner moves down under a tall first card", async () => {
+    // Each drag starts with an empty column, so the first card arrives during the press: that is what changes the box the bar publishes. Step 6's roll would already hold the lane.
+    await ops.send({ t: "roll.close", rollIds: [run.deskRoll] });
+    const empty = async (label: string) => {
+      await dm.waitForTimeout(300);
+      assert.deepEqual(await cards(dm), [], `${label}: the column is not empty before the press`);
+    };
     await setUp(dm, { ...DESK, scale: 1 });
     await selectThorn();
     const prompts = dm.locator('[data-alert="concentration"]');
@@ -693,6 +701,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
       return (await cards(dm)).filter((c) => intersects(c, bar));
     };
     // A plain press: down on the header, the checks arrive, then up.
+    await empty("a press");
     let r = await barRect(dm);
     await dm.mouse.move(r.left + 40, r.top + 26);
     await dm.mouse.down();
@@ -703,6 +712,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     // A drag put back with Escape.
     await setUp(dm, { ...DESK, scale: 1 });
     await selectThorn();
+    await empty("a drag");
     r = await barRect(dm);
     await dm.mouse.move(r.left + 40, r.top + 26);
     await dm.mouse.down();
@@ -730,7 +740,9 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
   });
 
   test("11. at 1180 x 390, a token opened from the outliner lands clear of a bar that sits beside the alerts", async () => {
-    // The roll card asked in step 6 waits at the column's head, taller than the room the bar would keep under it.
+    // A roll card at the column's head, taller than the room the bar would keep under it.
+    const ask = randomUUID();
+    await ops.send({ t: "roll.ask", request: { id: ask, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
     await setUp(dm, { width: 1180, height: 390, scale: 1 });
     await dm.locator('[data-alert="rolls"] > *').first().waitFor();
     await dm.getByRole("tab", { name: "Outliner" }).click();
@@ -745,6 +757,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await shots.take(dm, "bardock-outliner-beside-1180x390");
     await barFrame(dm).getByRole("button", { name: "Close", exact: true }).click();
     await dm.getByRole("tab", { name: "Initiative" }).click();
+    await ops.send({ t: "roll.close", rollIds: [ask] });
   });
 
   test("12. after Fit, turning the screen fits the map again against where the bar ends up, the turn band moving included (BD-ASTRA-03, BD-ASTRA-07)", async () => {
