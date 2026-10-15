@@ -470,8 +470,8 @@ function FightAlerts() {
   const laneTop = chrome ? chrome.top + EDGE : null;
   const colTop = laneTop === null ? null : columnTop(laneTop, lasting);
   const push = laneTop !== null && colTop !== null ? colTop - laneTop : 0;
-  // A roll card folded at the screen's foot for a compact bar needs the row to stand for it, room or not (PlayerRolls.tsx).
-  const forFootCard = !folded && bar !== null && footYields && summary !== null;
+  // A roll card folded at the screen's foot, for a compact bar or a screen too short for it, needs the row to stand for it, room or not (PlayerRolls.tsx).
+  const forFootCard = !folded && footYields && summary !== null;
   const summarized = forFootCard || (!folded && bar?.lane === "summary" && summary !== null);
   const stacked = bar?.lane === "stacked" && colTop !== null ? columnRoom({ lane: "stacked", columnTop: colTop, bar: bar.box }) : null;
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -578,7 +578,9 @@ function FightAlerts() {
           summary={summary}
           onClick={() => {
             ui.showActions(false);
-            setShowAfter(rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: summary.first });
+            // A card folded at the foot opens at once, since it may stay folded for want of room until asked for.
+            if (forFootCard) rolls?.open();
+            else setShowAfter(rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: summary.first });
           }}
           style={{ ...card, minHeight: SUMMARY_ROW, padding: `0 ${theme.space(3)}px` }}
         />

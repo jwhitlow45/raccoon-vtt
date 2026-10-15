@@ -195,6 +195,42 @@ function along(from: { x: number; y: number }, to: { x: number; y: number }, ste
   return Array.from({ length: steps + 1 }, (_, i) => ({ x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps }));
 }
 
+/** What takes a tap at a control's middle: the words of the button there, or the tag of whatever else is. */
+async function buttonAt(control: Locator): Promise<string | null> {
+  const r = await rectOf(control);
+  return player.evaluate(([x, y]) => {
+    type Node = { tagName: string; textContent: string | null; closest(s: string): Node | null };
+    const el = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): Node | null } }).document.elementFromPoint(x, y);
+    return el?.closest("button")?.textContent?.trim() ?? el?.tagName ?? null;
+  }, [(r.left + r.right) / 2, (r.top + r.bottom) / 2] as const);
+}
+
+/**
+ * A roll card at the screen's foot keeps what to roll and its Later on
+ * screen and taking taps, or, on a screen too short for that, it folds and
+ * the alerts column's "Roll asked" row stands in, whose tap opens it with
+ * both in reach.
+ */
+async function cardInReach(label: string, shot: string): Promise<void> {
+  if (!(await card(player).isVisible())) {
+    const row = player.getByRole("button", { name: /^Roll asked/ });
+    await row.waitFor();
+    await shots.take(player, `${shot}-row`);
+    await row.tap();
+    await card(player).waitFor();
+    await player.waitForTimeout(200);
+  }
+  const box = await rectOf(card(player));
+  const height = player.viewportSize()!.height;
+  assert.ok(box.top >= -0.5 && box.bottom <= height + 0.5, `${label}: the roll card runs off the screen: ${JSON.stringify(box)}`);
+  const title = card(player).getByText(/^The DM asks for/);
+  const t = await rectOf(title);
+  assert.ok(t.top >= box.top - 0.5 && t.bottom <= box.bottom + 0.5, `${label}: what to roll is cut off: ${JSON.stringify({ t, box })}`);
+  const later = card(player).getByRole("button", { name: "Later" });
+  assert.equal(await buttonAt(later), "Later", `${label}: Later takes no tap`);
+  await shots.take(player, shot);
+}
+
 /** Each button in the bar, scrolled into view, takes a tap at its middle: the names of those that do not. */
 async function unreachable(): Promise<string[]> {
   const buttons = barFrame(player).locator("button");
@@ -745,7 +781,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     { width: 320, height: 480, scale: 1.3, insets: { top: 44, bottom: 34 } },
   ]) {
     const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
-    test(`12. with a roll card waiting at the screen's foot, Select several's Actions and the card's Later each take a tap after a tap off: ${label}`, async () => {
+    test(`12. with a roll card waiting at the screen's foot, Select several's Actions takes a tap after a tap off, and the card's title and Later show and take a tap, or the summary row stands in and opens it: ${label}`, async () => {
       await insets(view.insets);
       await setUp(view);
       await touch([await cellPoint({ x: 8, y: 6 })]);
@@ -756,31 +792,13 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         await player.waitForTimeout(300);
         await touch([await emptyPoint(player)]);
         await barFrame(player).waitFor({ state: "detached" });
-        await card(player).waitFor();
+        await player.waitForTimeout(300);
         const options = player.getByRole("toolbar", { name: "Select options" });
         const actions = options.getByRole("button", { name: "Actions", exact: true });
-        const r = await rectOf(actions);
-        const at = await player.evaluate(([x, y]) => {
-          type Node = { tagName: string; textContent: string | null; closest(s: string): Node | null };
-          const el = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): Node | null } }).document.elementFromPoint(x, y);
-          return el?.closest("button")?.textContent ?? el?.tagName ?? null;
-        }, [(r.left + r.right) / 2, (r.top + r.bottom) / 2] as const);
-        assert.equal(at, "Actions", `${label}: something covers Actions`);
-        const held = await rectOf(card(player));
-        assert.ok(!intersects(held, await rectOf(options)), `${label}: the roll card covers the Select several bar`);
-        // The card keeps to the screen, under the top bars, so its own Later stays in reach.
-        assert.ok(held.top >= -0.5, `${label}: the roll card runs above the screen: ${JSON.stringify(held)}`);
-        const later = card(player).getByRole("button", { name: "Later" });
-        await later.scrollIntoViewIfNeeded();
-        const l = await rectOf(later);
-        const onLater = await player.evaluate(([x, y]) => {
-          type Node = { getAttribute(n: string): string | null; closest(s: string): Node | null };
-          const el = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): Node | null } }).document.elementFromPoint(x, y);
-          return el?.closest("button")?.getAttribute("aria-label") ?? null;
-        }, [(l.left + l.right) / 2, (l.top + l.bottom) / 2] as const);
-        assert.match(onLater ?? "", /answer later/, `${label}: Later takes no tap`);
-        await shots.take(player, `playerphone-actions-over-card-${view.width}x${view.height}`);
-        await later.tap();
+        assert.equal(await buttonAt(actions), "Actions", `${label}: something covers Actions while the roll waits`);
+        if (await card(player).isVisible()) assert.ok(!intersects(await rectOf(card(player)), await rectOf(options)), `${label}: the roll card covers the Select several bar`);
+        await cardInReach(label, `playerphone-card-in-reach-several-${view.width}x${view.height}`);
+        await card(player).getByRole("button", { name: "Later" }).tap();
         await card(player).waitFor({ state: "detached" });
         await actions.tap();
         await player.getByRole("dialog", { name: "Thorn actions" }).waitFor();
@@ -789,9 +807,27 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         await insets({});
       }
     });
+
+    test(`13. with the Ruler's options showing, a roll card at the screen's foot keeps its title and Later in reach, or the summary row stands in and opens it: ${label}`, async () => {
+      await insets(view.insets);
+      await setUp(view);
+      await player.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Ruler" }).tap();
+      await player.getByRole("toolbar", { name: "Ruler options" }).waitFor();
+      const id = randomUUID();
+      try {
+        await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+        await player.waitForTimeout(400);
+        await cardInReach(label, `playerphone-card-in-reach-ruler-${view.width}x${view.height}`);
+        await card(player).getByRole("button", { name: "Later" }).tap();
+        await card(player).waitFor({ state: "detached" });
+      } finally {
+        await ops.send({ t: "roll.close", rollIds: [id] });
+        await insets({});
+      }
+    });
   }
 
-  test("13. nothing went wrong in the browsers", () => {
+  test("14. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });
