@@ -274,6 +274,26 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       if (view.width === 360) await shots.take(player, "playerphone-band-time-up-360-130");
       if (view.width === 320) await shots.take(player, "playerphone-band-time-up-320-130");
     }
+
+    // Stacked at 320 px at 130%, End turn keeps to the screen while it waits on the server too (P3-ASTRA-02).
+    // Offline, the op waits for a socket: Chrome's offline mode stalls the open one, which the client gives up
+    // on after its heartbeat goes unanswered (smoke.e2e.ts), and the answer waits until the page is back online.
+    await setUp({ width: 320, height: 568, scale: 1.3 });
+    await waitFor("time up in the band, 320 x 568 at 130%", async () => /Time’s up\s*\+/.test((await band(player)).timerText) || null, 15_000);
+    playerConsole.expectSocketFailures = true;
+    const closesBefore = playerSocket.closes;
+    await playerContext.setOffline(true);
+    await waitFor("the player's socket to drop", () => playerSocket.closes > closesBefore || null, 45_000);
+    const endTurn = player.getByRole("button", { name: /End turn$/ });
+    await endTurn.tap();
+    await waitFor("End turn waiting on the server", async () => ((await endTurn.getAttribute("aria-busy")) === "true" ? true : null));
+    const held = await band(player);
+    assert.ok(held.endTurn && held.endTurn.right <= held.width + 0.5 && held.endTurn.left >= -0.5, `End turn runs off the screen while it waits: ${JSON.stringify(held)}`);
+    await shots.take(player, "playerphone-end-turn-waiting-320-130");
+    await playerContext.setOffline(false);
+    await endTurn.waitFor({ state: "detached", timeout: 45_000 });
+    await player.getByRole("status", { name: "Connected" }).first().waitFor({ timeout: 30_000 });
+    playerConsole.expectSocketFailures = false;
     await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
     await ops.send({ t: "encounter.end" });
   });
