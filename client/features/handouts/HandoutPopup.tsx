@@ -11,6 +11,7 @@ import { useAssets, useRoomView } from "../../state/view.ts";
 import { closedSlot, closedStorageKey, closeHandout, loadClosed } from "./closed.ts";
 import { layoutWidth } from "../device/layout.ts";
 import { useXCard } from "../xcard/XCardHost.tsx";
+import { downloadHandout } from "./download.ts";
 import { nextPopup, popupShows, showingKey } from "./handouts.ts";
 import { doubleTapView, FIT, isDoubleTap, panView, pinchView, zoomAround, type Point, type ZoomView } from "./zoom.ts";
 
@@ -31,7 +32,8 @@ import { doubleTapView, FIT, isDoubleTap, panView, pinchView, zoomAround, type P
  * that strays past the picture never loses it. It stays open while one
  * handout follows another. Its image pans and pinches under the finger,
  * which a zoomed box would put in other units than the pointer, so it
- * keeps 100% whatever the interface size.
+ * keeps 100% whatever the interface size. Download, beside the close
+ * button, saves the image to the device (download.ts).
  */
 export function HandoutPopup() {
   const role = useRoomView((s) => s.you?.role);
@@ -63,6 +65,26 @@ export function HandoutPopup() {
     if (key && handouts) closeHandout(closedStore, key, handouts);
   };
 
+  // Download's state, for the handout it was pressed for: under way, or failed.
+  const [saving, setSaving] = useState<{ key: string; state: "busy" | "failed" } | null>(null);
+  const abort = useRef<AbortController | null>(null);
+  // A download the popup no longer shows has nothing to report to.
+  useEffect(() => () => abort.current?.abort(), [key]);
+  const busy = saving?.key === key && saving.state === "busy";
+  const download = async () => {
+    if (!handout || !key || busy) return;
+    abort.current?.abort();
+    const controller = new AbortController();
+    abort.current = controller;
+    setSaving({ key, state: "busy" });
+    try {
+      await downloadHandout(assets.url(handout.assetId, "full"), handout.title, controller.signal);
+      setSaving(null);
+    } catch {
+      if (!controller.signal.aborted) setSaving({ key, state: "failed" });
+    }
+  };
+
   // Android's Back closes the handout before it leaves the room, one Back for each handout shown in turn.
   useBackClose(key, close);
 
@@ -76,9 +98,23 @@ export function HandoutPopup() {
       scrim={theme.color.overlay}
       dismissOnBackdrop={false}
       zoom={false}
+      headerActions={
+        // A busy button says so in its own words at once, and takes no second tap (components/Loading.tsx).
+        <Button size="sm" busy={busy} onClick={() => void download()}>
+          {busy ? "Downloading…" : "Download"}
+        </Button>
+      }
       bodyStyle={{ display: "grid", alignContent: "start", gap: theme.space(2) }}
     >
       <Help>The DM shows you</Help>
+      {saving?.key === key && saving.state === "failed" ? (
+        <div role="alert" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), fontSize: theme.font.body14, color: theme.color.dangerText }}>
+          <span style={{ flex: "1 1 200px" }}>The handout could not be downloaded. Check your connection.</span>
+          <Button size="sm" onClick={() => void download()}>
+            Try again
+          </Button>
+        </div>
+      ) : null}
       {failed === key ? (
         <p role="alert" style={{ margin: 0, fontSize: theme.font.body14, color: theme.color.textMuted }}>
           The image could not be loaded. Check your connection.

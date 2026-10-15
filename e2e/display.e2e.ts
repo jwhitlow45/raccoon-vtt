@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -12,7 +12,7 @@ import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type 
  * The table display (docs/design-v1-dm-tools.md 3.1) where the live play
  * review after wave 5 found it broken (LP5-DISPLAY): a DM on a desktop, a
  * TV at 1920 x 1080 paired with a code, and a player on a phone for the
- * X-card.
+ * X-card and for saving a handout with its Download button.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus four, as
  * tools.e2e.ts does, since the runs never overlap. The other environment
@@ -267,9 +267,31 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     await shots.take(player, "display-xcard-before-handout");
 
     await card.getByRole("button", { name: "Dismiss" }).tap();
-    await player.getByRole("dialog", { name: "Strange letter" }).waitFor();
+    const popup = player.getByRole("dialog", { name: "Strange letter" });
+    await popup.waitFor();
     await shots.take(player, "display-handout-after-xcard");
-    await player.getByRole("dialog", { name: "Strange letter" }).getByRole("button", { name: "Close" }).tap();
+
+    // Anyone shown a handout can save it: the stored image, under the handout's title.
+    const [saved] = await Promise.all([player.waitForEvent("download"), popup.getByRole("button", { name: "Download", exact: true }).tap()]);
+    assert.equal(saved.suggestedFilename(), "Strange letter.webp");
+    const stored = await playerContext.request.get(`${server.origin}/api/assets/${run.handoutImage}/full`);
+    assert.equal(stored.status(), 200, "the player may read the handout's image");
+    assert.ok(Buffer.from(readFileSync(await saved.path())).equals(await stored.body()), "the file saved is not the stored image");
+
+    // A download that fails says so in words, and Try again saves it.
+    const image = `**/api/assets/${run.handoutImage}/full`;
+    await player.route(image, (route) => route.abort("internetdisconnected"));
+    await popup.getByRole("button", { name: "Download", exact: true }).tap();
+    await popup.getByRole("alert").filter({ hasText: "The handout could not be downloaded." }).waitFor();
+    await shots.take(player, "display-handout-download-failed");
+    await player.unroute(image);
+    const [again] = await Promise.all([player.waitForEvent("download"), popup.getByRole("button", { name: "Try again" }).tap()]);
+    assert.equal(again.suggestedFilename(), "Strange letter.webp");
+    await popup.getByRole("alert").waitFor({ state: "detached" });
+    // The table display has no one with a pointer to save it.
+    await tv.getByRole("dialog", { name: "Strange letter" }).waitFor();
+    assert.equal(await tv.getByRole("button", { name: "Download" }).count(), 0, "the table display offers a download");
+    await popup.getByRole("button", { name: "Close" }).tap();
     await dm.getByRole("dialog", { name: "X-card" }).getByRole("button", { name: "Dismiss" }).click();
     await ops.send({ t: "handout.close", handoutId });
     await tv.mouse.click(TV.width / 2, TV.height / 2);
