@@ -357,9 +357,11 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     const sheet = dm.getByRole("dialog", { name: "Request a roll" });
     await sheet.waitFor();
     await sheet.getByRole("radio", { name: "Saving throw" }).click();
-    await sheet.getByRole("radiogroup", { name: "Ability" }).first().getByRole("radio", { name: "Strength" }).click();
+    await sheet.getByRole("radiogroup", { name: "Ability", exact: true }).getByRole("radio", { name: "Strength" }).click();
     await sheet.getByRole("button", { name: "Or…" }).click();
-    await sheet.getByRole("radiogroup", { name: "Ability" }).nth(1).getByRole("radio", { name: "Dexterity" }).click();
+    // With a second choice, each group is named by its place in the pair (LPD-DMPHONE-6).
+    await sheet.getByRole("radiogroup", { name: "First ability", exact: true }).getByRole("radio", { name: "Strength", checked: true }).waitFor();
+    await sheet.getByRole("radiogroup", { name: "Second ability", exact: true }).getByRole("radio", { name: "Dexterity" }).click();
     await sheet.getByLabel("DC", { exact: true }).fill("12");
     await sheet.getByRole("checkbox", { name: /^Thorn/, checked: true }).waitFor();
     await shots.take(dm, "tools-roll-request");

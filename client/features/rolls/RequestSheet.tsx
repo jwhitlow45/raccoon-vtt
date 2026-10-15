@@ -272,7 +272,8 @@ function ChoiceEditor(props: {
       }
     >
       <Segmented
-        label="Ability"
+        // Two groups both named "Ability" could not be told apart by name, so each takes its place in the pair.
+        label={props.two ? (props.index === 0 ? "First ability" : "Second ability") : "Ability"}
         value={choice.ability}
         disabled={props.disabled}
         options={ABILITY_KEYS.map((a) => ({ value: a, label: ABILITY_NAMES[a] }))}
