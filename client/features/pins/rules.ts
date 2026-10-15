@@ -1,6 +1,7 @@
 import type { JournalPage, Member, Pin } from "#shared/model.ts";
 import { MAX_NAME, type PinInput } from "#shared/protocol.ts";
 import { worldToScreen, type Camera, type Point } from "../../lib/camera.ts";
+import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { cleanLabelText } from "../builder/labelEdit.ts";
 
@@ -54,6 +55,29 @@ export function pinAt<P extends Pick<Pin, "id" | "x" | "y">>(pins: readonly P[],
     }
   }
   return best;
+}
+
+/**
+ * The pin of a scene under a screen point, as a tap with the Select tool
+ * finds it (PinLayer.tsx useTapPin), or null. The height readout yields to
+ * it, since the pin answers that tap itself.
+ */
+export function pinUnder(view: { pins: Readonly<Record<string, Pin | undefined>> } | null, sceneId: string, camera: Camera, screen: Point): Pin | null {
+  if (!view) return null;
+  const pins = Object.values(view.pins).filter((pin): pin is Pin => !!pin && pin.sceneId === sceneId);
+  return pinAt(pins, camera, screen);
+}
+
+/**
+ * Whether a lifted press is a tap on a pin with the Select tool: one finger
+ * that lifts within the tap slop of where it landed, so a pan or a pinch
+ * that starts on a pin does nothing, and one not held until the
+ * hold-to-ping fired (features/pings/hold.ts), so a ping on a pin does not
+ * open it.
+ */
+export function pinTapCounts(input: { start: Point; end: Point; several: boolean; held: boolean }): boolean {
+  if (input.several || input.held) return false;
+  return Math.hypot(input.end.x - input.start.x, input.end.y - input.start.y) <= TAP_SLOP_PX;
 }
 
 /** The marker's box on screen, for placing the pane beside it. */

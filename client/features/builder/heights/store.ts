@@ -67,6 +67,43 @@ export function useHeightStore(): StoreApi<HeightState> {
 }
 
 /**
+ * The height readout's slot (docs/design-v1-heights-readout.md section 2):
+ * the cell a tap with the Select tool read, and the words the status line
+ * speaks. The pill reads the cell's ground from the view on each render,
+ * so it follows a repaint and goes when the ground does.
+ */
+export type HeightReadout = { id: number; sceneId: string; cell: { x: number; y: number }; at: number };
+export type ReadoutState = { readout: HeightReadout | null; spoken: string };
+
+export const readoutSlot = scopeSlot(() => ({
+  store: createStore<ReadoutState>(() => ({ readout: null, spoken: "" })),
+  seq: 0,
+  /** Runs `fn` on the next animation frame. Tests run it when they choose. */
+  nextFrame: (fn: () => void): void => void requestAnimationFrame(fn),
+}));
+
+type ReadoutSlot = ReturnType<typeof readoutSlot.create>;
+
+/**
+ * Shows a readout of a cell. The status line is cleared and then set on
+ * the next frame, so a second reading with the same words, two areas at
+ * the same height, is spoken again rather than heard as no change.
+ */
+export function showReadout(slot: ReadoutSlot, at: { sceneId: string; cell: { x: number; y: number } }, spoken: string, now: number = Date.now()): void {
+  const id = ++slot.seq;
+  slot.store.setState({ readout: { id, sceneId: at.sceneId, cell: at.cell, at: now }, spoken: "" });
+  slot.nextFrame(() => {
+    if (slot.store.getState().readout?.id === id) slot.store.setState({ spoken });
+  });
+}
+
+/** Ends the readout, and the status line with it. */
+export function closeReadout(slot: ReadoutSlot): void {
+  const s = slot.store.getState();
+  if (s.readout !== null || s.spoken !== "") slot.store.setState({ readout: null, spoken: "" });
+}
+
+/**
  * Steps the stepper's height `by` feet within its range. It reads the
  * store, never a render's value, since a held − or + steps from a timer
  * that outlives renders. Returns whether another step the same way would

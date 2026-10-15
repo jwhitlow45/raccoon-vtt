@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { JournalPage, Pin } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { editDraft, saveAnswered, saveSent, saveState } from "../journal/pendingSave.ts";
-import { dmOnlyPin, PIN_HEIGHT_PX, pinAt, pinAudience, pinCommit, pinDraftOf, pinOutline, pinSaveAnswer, pinToolTap, withDmOnly, withPage, withPageGone } from "./rules.ts";
+import { dmOnlyPin, PIN_HEIGHT_PX, pinAt, pinAudience, pinCommit, pinDraftOf, pinOutline, pinSaveAnswer, pinTapCounts, pinToolTap, pinUnder, withDmOnly, withPage, withPageGone } from "./rules.ts";
 
 const page = (id: string, title: string, access: JournalPage["access"]): JournalPage => ({ id, rev: 0, title, access, blocks: [] });
 const PAGES = { all: page("all", "Tavern", "all"), dm: page("dm", "Villain plans", "dm"), thorn: page("thorn", "Old Map", { member: "m1" }), mira: page("mira", "Letter", { member: "m2" }) };
@@ -28,6 +28,19 @@ describe("map pins", () => {
   test("the nearer of two overlapping pins takes the tap", () => {
     const pins = [pin({ id: "a", x: 1 }), pin({ id: "b", x: 1.5 })];
     assert.equal(pinAt(pins, { x: 0, y: 0, scale: 40 }, { x: 58, y: 116 })?.id, "b");
+  });
+
+  test("a Select tap on a pin is one finger lifted where it landed, and never a hold that pinged", () => {
+    const start = { x: 180, y: 116 };
+    assert.equal(pinTapCounts({ start, end: { x: 186, y: 120 }, several: false, held: false }), true);
+    assert.equal(pinTapCounts({ start, end: { x: 186, y: 120 }, several: false, held: true }), false, "a hold-to-ping on a pin does not open it");
+    assert.equal(pinTapCounts({ start, end: { x: 190, y: 116 }, several: false, held: false }), false, "a pan");
+    assert.equal(pinTapCounts({ start, end: start, several: true, held: false }), false, "a pinch");
+    const view = { pins: { p1: pin(), p2: pin({ id: "p2", sceneId: "s2" }) } };
+    const camera = { x: 0, y: 0, scale: 40 };
+    assert.equal(pinUnder(view, "s1", camera, start)?.id, "p1");
+    assert.equal(pinUnder(view, "s3", camera, start), null, "a pin on another scene");
+    assert.equal(pinUnder(null, "s1", camera, start), null);
   });
 
   test("a tap with the Pin tool: a waiting page places a linked pin, a pin opens, away closes, else a new pin", () => {

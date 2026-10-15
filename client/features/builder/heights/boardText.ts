@@ -17,9 +17,13 @@ const PAD_X = 6;
 const PILL_H = 20;
 /** The pill's outline, the same 1.5 screen px as the board's other pills (measure/Pill.tsx). */
 const EDGE_PX = 1.5;
-/** A raised region's outline is light and a lowered one's grey, so the two read apart before the arrow does. */
-const RAISED_EDGE = "rgba(255, 255, 255, 0.7)";
-const LOWERED_EDGE = "rgba(160, 160, 170, 0.7)";
+/**
+ * A raised region's outline is light and a lowered one's grey, so the two
+ * read apart before the arrow does. The height readout's pill takes the
+ * same outlines (ReadoutHost.tsx).
+ */
+export const RAISED_EDGE = "rgba(255, 255, 255, 0.7)";
+export const LOWERED_EDGE = "rgba(160, 160, 170, 0.7)";
 
 export type HeightPillSize = { fontPx: number; padX: number; heightPx: number };
 

@@ -39,6 +39,8 @@ export class CameraGesture {
   private base: Baseline = { kind: "none" };
   /** Whether the gesture so far can still be a tap: one pointer, never past the slop. */
   private tapCandidate = false;
+  /** Whether the press was held until the select tool's hold-to-ping fired (`hold`). */
+  private held = false;
   private downAt: Point = { x: 0, y: 0 };
 
   /**
@@ -52,6 +54,7 @@ export class CameraGesture {
       this.mode = onEmpty ? "pan" : "tool";
       this.base = { kind: "pan", cam, start: p };
       this.tapCandidate = true;
+      this.held = false;
       this.downAt = p;
     } else {
       this.tapCandidate = false;
@@ -76,24 +79,39 @@ export class CameraGesture {
   }
 
   /**
+   * The select tool's hold-to-ping fired for this pointer
+   * (features/pings/hold.ts), so its press is a hold: on its lift the
+   * canvas deselects but opens no label, door or height readout, since a
+   * hold that pings should open nothing. "Held" means the ping fired, not
+   * that 500 ms passed: a busy phone can fire the ping's timer late, and a
+   * press lifted before it pinged nothing and stays a tap.
+   */
+  hold(id: number): void {
+    if (this.pointers.size === 1 && this.pointers.has(id) && this.tapCandidate) this.held = true;
+  }
+
+  /**
    * A pointer lifted or was cancelled. `cam` is the camera now on screen, so
    * the pointers that remain continue from it without a jump. Returns whether
-   * the whole gesture was a tap on empty map.
+   * the whole gesture was a tap on empty map, and whether that tap was held
+   * until it pinged.
    */
-  up(id: number, cam: Camera): { tapOnEmpty: boolean } {
-    if (!this.pointers.delete(id)) return { tapOnEmpty: false };
+  up(id: number, cam: Camera): { tapOnEmpty: boolean; held: boolean } {
+    if (!this.pointers.delete(id)) return { tapOnEmpty: false, held: false };
     if (this.pointers.size === 0) {
       const tapOnEmpty = this.tapCandidate && this.mode === "pan";
+      const held = tapOnEmpty && this.held;
       this.mode = "idle";
       this.base = { kind: "none" };
       this.tapCandidate = false;
-      return { tapOnEmpty };
+      this.held = false;
+      return { tapOnEmpty, held };
     }
     // Going from two fingers to one: the remaining finger keeps panning
     // from where it is. A finger left over from a token press only pans
     // after a pinch, since its drag was already stopped.
     this.rebaseline(cam);
-    return { tapOnEmpty: false };
+    return { tapOnEmpty: false, held: false };
   }
 
   private rebaseline(cam: Camera): void {

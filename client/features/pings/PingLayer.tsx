@@ -7,10 +7,12 @@ import { LONG_PRESS_MS, TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { theme } from "../../lib/theme.ts";
 import { PING_MS } from "../../state/ephemeral.ts";
 import type { Ping } from "../../state/types.ts";
+import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
 import { Pill } from "../measure/Pill.tsx";
 import { playPing, unlockAudio, vibrate } from "./feedback.ts";
+import { reportHoldPing } from "./hold.ts";
 import { markOwner } from "./who.ts";
 
 /**
@@ -28,7 +30,9 @@ import { markOwner } from "./who.ts";
  * This layer also gives the select tool a tap-and-hold ping: a press held
  * still for 500 ms on empty map pings it. A token under the finger keeps
  * its own long-press (it selects the token), and any movement past the tap
- * slop is a pan, so the hold never fights the select tool.
+ * slop is a pan, so the hold never fights the select tool. Each press it
+ * pings is reported (hold.ts), so its lift opens no label, door, readout
+ * or pin.
  */
 
 const PULSE_MS = 1_000;
@@ -41,12 +45,16 @@ export const PingLayer = memo(function PingLayer(props: LayerProps) {
   const focus = useRoomView((s) => s.ephemeral.focus);
   const tool = useRoomView((s) => s.local.tool);
   const actions = useRoomActions();
+  const scope = useRoomScope();
   const groupRef = useRef<Konva.Group>(null);
   const still = useLowPower();
   const now = useFrameClock(pings.length > 0 && !still);
 
   useFeedback(pings, focus?.id ?? null);
-  useHoldToPing(groupRef, tool === "select", (x, y) => actions.sendEph({ k: "ping", x, y }));
+  useHoldToPing(groupRef, tool === "select", (x, y, pointerId) => {
+    actions.sendEph({ k: "ping", x, y });
+    reportHoldPing(scope, pointerId);
+  });
 
   return (
     <Group ref={groupRef} listening={false}>
@@ -125,7 +133,7 @@ function useFeedback(pings: readonly Ping[], focusId: number | null): void {
   }, []);
 }
 
-function useHoldToPing(ref: RefObject<Konva.Group | null>, enabled: boolean, ping: (x: number, y: number) => void): void {
+function useHoldToPing(ref: RefObject<Konva.Group | null>, enabled: boolean, ping: (x: number, y: number, pointerId: number) => void): void {
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
   const pingRef = useRef(ping);
@@ -153,10 +161,11 @@ function useHoldToPing(ref: RefObject<Konva.Group | null>, enabled: boolean, pin
       const p = local(e);
       if (stage.getIntersection(p)?.findAncestor(".token", true)) return;
       start = p;
+      const pointerId = e.pointerId;
       timer = setTimeout(() => {
         timer = null;
         const scale = stage.scaleX() || 1;
-        pingRef.current((p.x - stage.x()) / scale, (p.y - stage.y()) / scale);
+        pingRef.current((p.x - stage.x()) / scale, (p.y - stage.y()) / scale, pointerId);
       }, LONG_PRESS_MS);
     };
     const move = (e: PointerEvent) => {

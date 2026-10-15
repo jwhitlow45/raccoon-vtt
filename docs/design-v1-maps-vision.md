@@ -549,6 +549,7 @@ The feature request asked for raised areas "accessed via stairs up to it", with 
 - Stairs show their direction. Five treads run across the up direction, lighter toward the top, with a chevron at the high end. A stair drawn over a map image draws only the treads, translucent, over the art. A stair with no direction draws as today.
 - A token on raised ground stands at that height. Its elevation badge shows it ("↑10", design.md 14.4), as the badge reports absolute elevation, and distances and areas count it in 3D as they already do. A creature off the ground is told apart by its shadow (section 4.4).
 - A walking token cannot cross an edge between two heights except along a stair. The drag stops there ("Ledge in the way. Take the stairs."). A token higher than the edge's top, flying, crosses it.
+- With the Select tool, a tap on raised or lowered ground, or on a stair, shows its height in a small pill for a few seconds ("↑10 ft", "Stairs"), and a status line speaks it. Under the player's fog it shows nothing (docs/design-v1-heights-readout.md section 2).
 - A ruler's free point on raised or lowered ground stands on it, so a ruler from the floor to a platform counts the climb. A player's point counts only ground their fog shows, and the frame carries the height, so everyone reads the measurer's numbers (docs/design-v1-heights-readout.md section 3).
 
 **Model.**

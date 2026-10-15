@@ -101,7 +101,7 @@ describe("camera gesture", () => {
     const g = new CameraGesture();
     assert.equal(g.down(1, { x: 10, y: 10 }, cam, true), "pan");
     assert.deepEqual(g.move(1, { x: 30, y: 5 }), { x: 20, y: -5, scale: 50 });
-    assert.deepEqual(g.up(1, cam), { tapOnEmpty: false });
+    assert.deepEqual(g.up(1, cam), { tapOnEmpty: false, held: false });
     assert.equal(g.mode, "idle");
   });
 
@@ -109,14 +109,14 @@ describe("camera gesture", () => {
     const g = new CameraGesture();
     g.down(1, { x: 10, y: 10 }, cam, true);
     g.move(1, { x: 14, y: 13 });
-    assert.deepEqual(g.up(1, cam), { tapOnEmpty: true });
+    assert.deepEqual(g.up(1, cam), { tapOnEmpty: true, held: false });
   });
 
   test("one finger on a token is left to Konva", () => {
     const g = new CameraGesture();
     assert.equal(g.down(1, { x: 10, y: 10 }, cam, false), "tool");
     assert.equal(g.move(1, { x: 50, y: 50 }), null);
-    assert.deepEqual(g.up(1, cam), { tapOnEmpty: false });
+    assert.deepEqual(g.up(1, cam), { tapOnEmpty: false, held: false });
   });
 
   test("a second finger starts a pinch, even over a token drag", () => {
@@ -143,7 +143,7 @@ describe("camera gesture", () => {
     // The remaining finger has not moved yet, so the camera holds.
     assert.deepEqual(g.move(1, { x: 100, y: 100 }), zoomed);
     assert.deepEqual(g.move(1, { x: 110, y: 100 }), { ...zoomed, x: zoomed.x + 10 });
-    assert.deepEqual(g.up(1, zoomed), { tapOnEmpty: false });
+    assert.deepEqual(g.up(1, zoomed), { tapOnEmpty: false, held: false });
   });
 
   test("three or more fingers are ignored, and going back to two re-baselines", () => {
@@ -157,10 +157,36 @@ describe("camera gesture", () => {
     assert.deepEqual(g.move(1, { x: 0, y: 0 }), cam);
   });
 
+  test("a press its hold-to-ping fired for is a held tap, and the next press starts unheld", () => {
+    const g = new CameraGesture();
+    g.down(1, { x: 10, y: 10 }, cam, true);
+    g.move(1, { x: 13, y: 12 });
+    g.hold(1);
+    assert.deepEqual(g.up(1, cam), { tapOnEmpty: true, held: true });
+    g.down(1, { x: 10, y: 10 }, cam, true);
+    assert.deepEqual(g.up(1, cam), { tapOnEmpty: true, held: false });
+  });
+
+  test("a ping report for another pointer, for a pan, or for a pinch's finger holds nothing", () => {
+    const g = new CameraGesture();
+    g.down(1, { x: 10, y: 10 }, cam, true);
+    g.hold(2);
+    assert.deepEqual(g.up(1, cam), { tapOnEmpty: true, held: false });
+    g.down(1, { x: 10, y: 10 }, cam, true);
+    g.move(1, { x: 40, y: 10 });
+    g.hold(1);
+    assert.deepEqual(g.up(1, cam), { tapOnEmpty: false, held: false });
+    g.down(1, { x: 10, y: 10 }, cam, true);
+    g.down(2, { x: 90, y: 10 }, cam, true);
+    g.hold(1);
+    g.up(2, cam);
+    assert.deepEqual(g.up(1, cam), { tapOnEmpty: false, held: false });
+  });
+
   test("moves of unknown pointers are ignored", () => {
     const g = new CameraGesture();
     assert.equal(g.move(9, { x: 1, y: 1 }), null);
-    assert.deepEqual(g.up(9, cam), { tapOnEmpty: false });
+    assert.deepEqual(g.up(9, cam), { tapOnEmpty: false, held: false });
   });
 });
 

@@ -12,7 +12,11 @@ export const DOOR_SLOP_PX = 22;
  * a tap anywhere else puts an open pill away. The canvas calls this only
  * for a tap that no token caught, so a token under the finger wins. Doors
  * are part of the map, not shapes that catch a tap of their own, as labels
- * are. Returns whether the tap landed on a door.
+ * are. Returns whether the tap was the door's: it landed on a door, or it
+ * put an open pill away, as a tap closing the label pane is the pane's. So
+ * the tap that closes a pill shows no height readout in its place
+ * (docs/design-v1-heights-readout.md section 2), and one thing floats over
+ * the map at a time.
  */
 export function tapDoor(ctx: Pick<ToolContext, "getState" | "scene" | "camera" | "role" | "scope">, tool: string, world: Point): boolean {
   const pill = ctx.scope.get(doorPillSlot);
@@ -22,7 +26,11 @@ export function tapDoor(ctx: Pick<ToolContext, "getState" | "scene" | "camera" |
     tool === "select" && view
       ? doorUnder({ chunks: view.buildChunks, sceneId: ctx.scene.id, at: world, slop: DOOR_SLOP_PX / ctx.camera().scale, fog: fogged ? view.fogTiles : null })
       : null;
-  if (hit) pill.setState({ pill: { sceneId: ctx.scene.id, ref: hit.ref } });
-  else if (pill.getState().pill) pill.setState({ pill: null });
-  return hit !== null;
+  if (hit) {
+    pill.setState({ pill: { sceneId: ctx.scene.id, ref: hit.ref } });
+    return true;
+  }
+  if (!pill.getState().pill) return false;
+  pill.setState({ pill: null });
+  return true;
 }

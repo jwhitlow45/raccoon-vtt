@@ -6,8 +6,7 @@ import type { RoomState, Scene, Token } from "#shared/model.ts";
 import { labelBox } from "#shared/rules/labels.ts";
 import { activeTool, type ToolContext, type ToolDef, type ToolPointer } from "../features/tools.ts";
 import { LabelPaneHost } from "../features/builder/LabelPaneHost.tsx";
-import { tapMapLabel } from "../features/builder/labelTap.ts";
-import { tapDoor } from "../features/doors/tap.ts";
+import { ReadoutHost } from "../features/builder/heights/ReadoutHost.tsx";
 import { measureLabel as measureMapLabel } from "../features/builder/draw.ts";
 import { turnFocus, useFollowTurn } from "../features/encounter/followTurn.ts";
 import { panAnchor, requestPan, watchPans } from "../features/encounter/pan.ts";
@@ -16,6 +15,7 @@ import { layersOf, type LayerProps } from "../features/layers.ts";
 import { LightPaneHost } from "../features/lights/LightPaneHost.tsx";
 import { PinPaneHost } from "../features/pins/PinPaneHost.tsx";
 import { DoorPillHost } from "../features/doors/DoorPill.tsx";
+import { onHoldPing } from "../features/pings/hold.ts";
 import { StopNoteHost } from "../features/movement/StopNote.tsx";
 import { SightOverlay } from "../features/vision/SightOverlay.tsx";
 import { useDrawnFogTiles, useSightMode } from "../features/vision/stageHooks.ts";
@@ -56,6 +56,7 @@ import { stageKeysSlot } from "../state/shortcuts.ts";
 import { sheetOpen as sheetIsOpen } from "../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
+import { emptyTap } from "./emptyTap.ts";
 import { canDragToken, movesOthers } from "./dragRights.ts";
 import { fitSlot } from "./fitSlot.ts";
 import { FogShape } from "./FogShape.tsx";
@@ -459,6 +460,8 @@ export function MapStage(props: {
   // ------------------------------------------------------------ gestures
 
   const gestureRef = useRef(new CameraGesture());
+  // A press the select tool's hold-to-ping fired for is a hold, which a tap on empty map must not act on (emptyTap.ts).
+  useEffect(() => onHoldPing(scope, (pointerId) => gestureRef.current.hold(pointerId)), [scope]);
   const longPressRef = useRef(new LongPress());
   const dragRef = useRef<{
     node: Konva.Node;
@@ -750,13 +753,8 @@ export function MapStage(props: {
           if (picked.length > 0) uiRef.current.selectMany(picked.map((t) => t.id));
         }
       }
-      const { tapOnEmpty } = gesture.up(e.pointerId, c);
-      if (tapOnEmpty) {
-        onSelectRef.current(null);
-        // Labels and doors are drawn into the map, not shapes that catch a tap, so a tap on one arrives here.
-        const world = screenToWorld(c, local(e));
-        if (!tapMapLabel(toolContextRef.current, toolRef.current.id, world)) tapDoor(toolContextRef.current, toolRef.current.id, world);
-      }
+      const { tapOnEmpty, held } = gesture.up(e.pointerId, c);
+      if (tapOnEmpty) emptyTap(toolContextRef.current, toolRef.current.id, screenToWorld(c, local(e)), held, () => onSelectRef.current(null));
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -1067,6 +1065,7 @@ export function MapStage(props: {
           {role === "dm" ? <LightPaneHost scene={scene} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
           {role === "dm" ? <PinPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
           <DoorPillHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} />
+          <ReadoutHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} />
           {draggingId === null ? <StopNoteHost scene={scene} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
         </div>
       ) : null}

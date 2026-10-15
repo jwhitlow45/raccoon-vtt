@@ -3,14 +3,14 @@ import { memo, useEffect, useMemo, useRef, type RefObject } from "react";
 import { Circle, Group, Line, Rect } from "react-konva";
 import { useStore } from "zustand";
 import type { JournalPage, Pin } from "#shared/model.ts";
-import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useIsDisplay, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { journalSlot } from "../journal/store.ts";
 import type { LayerProps } from "../layers.ts";
 import { Pill } from "../measure/Pill.tsx";
-import { dmOnlyPin, HEAD_CENTER_PX, LABEL_MIN_CELL_PX, pinAt, pinOutline } from "./rules.ts";
+import { onHoldPing } from "../pings/hold.ts";
+import { dmOnlyPin, HEAD_CENTER_PX, LABEL_MIN_CELL_PX, pinOutline, pinTapCounts, pinUnder } from "./rules.ts";
 import { pinSlot } from "./store.ts";
 
 const OUTLINE = pinOutline();
@@ -86,9 +86,8 @@ export const PinLayer = memo(function PinLayer(props: LayerProps) {
 
 /**
  * A tap with the Select tool on a pin: its page opens in the Journal, or a
- * pin with only a label shows it in a popover. A tap is one finger that
- * lifts within the tap slop of where it landed, so a pan or a pinch that
- * starts on a pin does nothing.
+ * pin with only a label shows it in a popover. What counts as a tap is
+ * rules.ts pinTapCounts: a pan, a pinch or a hold that pinged opens nothing.
  */
 function useTapPin(ref: RefObject<Konva.Group | null>, enabled: boolean, sceneId: string): void {
   const store = useRoomStore();
@@ -105,6 +104,9 @@ function useTapPin(ref: RefObject<Konva.Group | null>, enabled: boolean, sceneId
     const down = new Map<number, { x: number; y: number }>();
     /** More than one finger touched during this gesture, so it is a pinch, never a tap. */
     let several = false;
+    /** Presses the hold-to-ping fired for. */
+    const held = new Set<number>();
+    const offHold = onHoldPing(scope, (id) => void held.add(id));
     const local = (e: PointerEvent) => {
       const r = el.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -112,19 +114,20 @@ function useTapPin(ref: RefObject<Konva.Group | null>, enabled: boolean, sceneId
     const onDown = (e: PointerEvent) => {
       if (down.size === 0) several = false;
       down.set(e.pointerId, local(e));
+      held.delete(e.pointerId);
       if (down.size > 1) several = true;
     };
     const onUp = (e: PointerEvent) => {
       const start = down.get(e.pointerId);
       down.delete(e.pointerId);
-      if (!start || several || e.type === "pointercancel" || !enabledRef.current) return;
+      const wasHeld = held.delete(e.pointerId);
+      if (!start || e.type === "pointercancel" || !enabledRef.current) return;
       if (e.pointerType === "mouse" && e.button !== 0) return;
       const p = local(e);
-      if (Math.hypot(p.x - start.x, p.y - start.y) > TAP_SLOP_PX) return;
+      if (!pinTapCounts({ start, end: p, several, held: wasHeld })) return;
       const view = store.getState().view;
       if (!view) return;
-      const pins = Object.values(view.pins).filter((pin) => pin.sceneId === sceneRef.current);
-      const hit = pinAt(pins, { x: stage.x(), y: stage.y(), scale: stage.scaleX() || 1 }, p);
+      const hit = pinUnder(view, sceneRef.current, { x: stage.x(), y: stage.y(), scale: stage.scaleX() || 1 }, p);
       if (!hit) return;
       const pinState = scope.get(pinSlot).store;
       if (hit.pageId !== undefined && view.journal[hit.pageId]) {
@@ -139,6 +142,7 @@ function useTapPin(ref: RefObject<Konva.Group | null>, enabled: boolean, sceneId
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
     return () => {
+      offHold();
       el.removeEventListener("pointerdown", onDown);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
