@@ -529,6 +529,21 @@ function BarFrame(props: {
   const [barHeight, setBarHeight] = useState(() => dockStore.getState().lastHeight);
   const [clipped, setClipped] = useState(false);
   const [status, setStatus] = useState("");
+  const statusSeq = useRef(0);
+  /*
+   * What Move bar's status says. It is cleared, then set on the next frame,
+   * so the same words twice are spoken again rather than heard as no
+   * change. A drop or Reset clears it, so it never names a corner the bar
+   * has left.
+   */
+  const say = (text: string) => {
+    const id = ++statusSeq.current;
+    setStatus("");
+    if (!text) return;
+    requestAnimationFrame(() => {
+      if (statusSeq.current === id) setStatus(text);
+    });
+  };
   const [dragBox, setDragBox] = useState<Box | null>(null);
   const dragRef = useRef<Drag | null>(null);
   useSheetReturnFocus(barRef, RETURN_RANK.tokenBar);
@@ -642,7 +657,10 @@ function BarFrame(props: {
           onPointerUp(e: ReactPointerEvent<HTMLDivElement>) {
             const drag = dragRef.current;
             if (!drag || drag.pointerId !== e.pointerId) return;
-            if (drag.box) setSpot(releaseSpot(drag.box, free));
+            if (drag.box) {
+              setSpot(releaseSpot(drag.box, free));
+              say("");
+            }
             endDrag.current();
           },
           onPointerCancel(e: ReactPointerEvent<HTMLDivElement>) {
@@ -658,12 +676,13 @@ function BarFrame(props: {
           move: () => {
             const next = nextCorner(spot);
             setSpot(next.spot);
-            setStatus(next.status);
+            say(next.status);
           },
           reset: () => {
             // Reset goes away with the press, so focus moves to Move bar first.
             moveRef.current?.focus();
             setSpot(DEFAULT_SPOT);
+            say("");
           },
         }
       : null;
