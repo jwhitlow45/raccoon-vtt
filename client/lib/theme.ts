@@ -138,7 +138,16 @@ export const theme = {
    * sit in the browser's top layer, so they need none. Stacking inside one
    * component (1 or 2) and the table display's own order stay local.
    */
-  z: { pane: 5, sheet: 10, options: 14, bars: 15, notices: 20, overBars: 25 },
+  z: {
+    pane: 5,
+    sheet: 10,
+    options: 14,
+    bars: 15,
+    /** The token action bar on a screen too short to dock it (docs/design-v1-bar-dock.md 1.4): over the toolbar and the options it covers, under the notices. */
+    barOverlay: 16,
+    notices: 20,
+    overBars: 25,
+  },
   /** Minimum touch target, per Apple's and Google's guidance. */
   touch: 44,
   layout: {
