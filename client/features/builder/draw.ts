@@ -585,16 +585,20 @@ export function drawSuns(g: CanvasRenderingContext2D, lights: readonly Light[], 
   g.restore();
 }
 
+/** A picked light's caption's text size on screen, in px, at every zoom. */
+export const CAPTION_PX = 13;
+
 /**
  * The reach of the light picked in the builder, as faint rings: bright
  * light inside the solid ring, dim light out to the dashed one, in cells.
- * Its sun is ringed and its radii written under it.
+ * Its sun is ringed and its radii written where `caption` says, in cells
+ * (lightTap.ts lightCaptionSpot), or nowhere when it is null.
  */
 export function drawLightReach(
   g: CanvasRenderingContext2D,
   light: Pick<Light, "x" | "y">,
   reach: { bright: number; dim: number },
-  caption: string,
+  caption: { text: string; x: number; y: number } | null,
   scale: number,
   /** The viewer's accent (state/accent.ts), around the light's sun. */
   ring: string,
@@ -623,6 +627,6 @@ export function drawLightReach(
   g.strokeStyle = ring;
   g.lineWidth = 2 * px;
   g.stroke();
-  drawLabel(g, { x: light.x, y: light.y + 28 * px, text: caption, size: 13 * px });
+  if (caption) drawLabel(g, { x: caption.x, y: caption.y, text: caption.text, size: CAPTION_PX * px });
   g.restore();
 }

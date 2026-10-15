@@ -9,10 +9,10 @@ import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
 import { parseCellKey, polygonCells, rectBetween } from "./cells.ts";
-import { buildPaths, drawBuild, drawLabel, drawLightReach, drawSuns, measureLabel } from "./draw.ts";
+import { buildPaths, CAPTION_PX, drawBuild, drawLabel, drawLightReach, drawSuns, measureLabel } from "./draw.ts";
 import { isSymbolTerrain, type TexturedTerrain } from "./geometry.ts";
 import { labelBox } from "#shared/rules/labels.ts";
-import { lightCaption, lightReach, lightSlot } from "./lightTap.ts";
+import { lightCaption, lightCaptionSpot, lightReach, lightSlot, tokenBodies } from "./lightTap.ts";
 import { labelPaneSlot, useBuilderStore } from "./store.ts";
 import { useStampDrawing } from "./stamps/useStampDrawing.ts";
 import { TERRAIN_COLORS, useTextures } from "./textures.ts";
@@ -87,24 +87,30 @@ function useSceneLights(sceneId: string): Light[] {
 /**
  * The reach of the light picked in the builder's Lights mode, while that
  * mode is open. On the overlay layer, so tokens never cover its rings or
- * the radii written under it. While it is dragged, its sun and rings follow
+ * the radii written beside it. While it is dragged, its sun and rings follow
  * the finger and the stored sun stays where it was until the move is sent.
  * It draws only for the DM: a player's view never holds a light, and the
  * role is checked as well.
  */
 export function LightReachLayer(props: LayerProps) {
-  const { scene, role, scale } = props;
+  const { scene, role, scale, labelBoxes } = props;
   const lights = useSceneLights(scene.id);
   const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
   const building = useRoomView((s) => s.local.tool === "build");
   const lightMode = useStore(useBuilderStore(), (b) => b.mode === "light");
   const { lightId, dragTo } = useStore(useScoped(lightSlot), useShallow((l) => ({ lightId: l.lightId, dragTo: l.dragTo })));
   const { accent } = useAccent();
+  const tokens = useRoomView((s) => s.view?.tokens);
   const stored = role === "dm" && building && lightMode && lightId ? lights.find((l) => l.id === lightId) : undefined;
   if (!stored) return null;
   const picked = dragTo ? { ...stored, ...dragTo } : stored;
   const reach = lightReach(picked, feetPerCell);
-  const caption = lightCaption(picked, feetPerCell);
+  const text = lightCaption(picked, feetPerCell);
+  // The halo drawLabel strokes reaches about a pixel past the letters, and a line of text stands 1.4 times its size.
+  const size = { width: measureLabel(text) * CAPTION_PX + 2, height: CAPTION_PX * 1.4 };
+  // Clear of the names, as the height pills keep, and of the tokens too, since the caption draws over them (LPD-REGRESS-3).
+  const spot = lightCaptionSpot(picked, size, scale, [...labelBoxes, ...tokenBodies(tokens ?? {}, scene.id, scale)]);
+  const caption = spot ? { text, ...spot } : null;
   return (
     <Shape
       listening={false}

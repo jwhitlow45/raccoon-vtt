@@ -1,9 +1,12 @@
 import { createStore } from "zustand/vanilla";
-import type { Light } from "#shared/model.ts";
+import type { Light, Token } from "#shared/model.ts";
+import type { Box } from "../../lib/boardText.ts";
 import type { Point } from "../../lib/camera.ts";
 import { lightCells } from "#shared/rules/vision.ts";
+import { footprint } from "../../lib/scene.ts";
 import { scopeSlot } from "../../state/scope.ts";
 import { lightText } from "../vision/presets.ts";
+import { overlaps } from "./heights/boardText.ts";
 
 /**
  * Lights in the builder (docs/design-v1-maps-vision.md sections 3.6 and
@@ -62,6 +65,54 @@ export function lightCaption(light: Pick<Light, "bright" | "dim" | "on" | "label
   const reach = lightText(light, feetPerCell);
   const text = light.label ? `${light.label}: ${reach}` : reach;
   return light.on ? text : `${text}, off`;
+}
+
+/** The ring drawn around a picked light's sun, and the room kept outside it. */
+const RING_PX = 17;
+const RING_GAP_PX = 6;
+/** How far below or above the sun the caption's middle sits: clear of the ring, as it always sat below it. */
+const CAPTION_DROP_PX = 28;
+
+/**
+ * Where a picked light's caption goes, in cells, or null for nowhere: under
+ * the sun as always, else over it, else to its right, else its left, the
+ * first spot that clears everything in `avoid`, in screen pixels with the
+ * world's origin at 0,0. The layer passes every token label, plate and
+ * mark (features/layers.ts LayerProps `labelBoxes`) and every token's body
+ * (tokenBodies), since the caption draws over the tokens. With no spot
+ * clear it is not drawn at this zoom, as a height pill is not
+ * (heights/boardText.ts placeHeightPills): a caption over a name reads as
+ * neither, and the light's pane says the same words. `size` is the
+ * caption's box on screen, halo included.
+ */
+export function lightCaptionSpot(light: Point, size: { width: number; height: number }, scale: number, avoid: readonly Box[]): Point | null {
+  const cx = light.x * scale;
+  const cy = light.y * scale;
+  const halfW = size.width / 2;
+  const halfH = size.height / 2;
+  const aside = RING_PX + RING_GAP_PX + halfW;
+  const spots = [
+    { x: cx, y: cy + CAPTION_DROP_PX },
+    { x: cx, y: cy - CAPTION_DROP_PX },
+    { x: cx + aside, y: cy },
+    { x: cx - aside, y: cy },
+  ];
+  for (const s of spots) {
+    const box = { x0: s.x - halfW, y0: s.y - halfH, x1: s.x + halfW, y1: s.y + halfH };
+    if (!avoid.some((b) => overlaps(b, box))) return { x: s.x / scale, y: s.y / scale };
+  }
+  return null;
+}
+
+/** The bodies of a scene's tokens, in screen pixels with the world's origin at 0,0, the space of lightCaptionSpot's `avoid`. */
+export function tokenBodies(tokens: Readonly<Record<string, Token | undefined>>, sceneId: string, scale: number): Box[] {
+  const out: Box[] = [];
+  for (const t of Object.values(tokens)) {
+    if (!t || t.sceneId !== sceneId) continue;
+    const fp = footprint(t);
+    out.push({ x0: t.x * scale, y0: t.y * scale, x1: (t.x + fp.w) * scale, y1: (t.y + fp.h) * scale });
+  }
+  return out;
 }
 
 /** Whether a scene has any light, for the Lights mode's hint. */
