@@ -1,0 +1,454 @@
+import { chunkKey, parseKey, readEntity, tileKey, type EntityKey } from "#shared/keys.ts";
+import { exploredReserve, exploringSceneId, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes, utf8Bytes, type LimitCheck } from "#shared/limits.ts";
+import type { RoomState, Scene } from "#shared/model.ts";
+import { tilesAcross } from "#shared/rules/fog.ts";
+import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
+import { isWritable } from "#shared/writable.ts";
+
+/**
+ * The byte limits of design 10.5 (8 MiB of serialized state, 3 MiB per
+ * projected scene) without serializing the room on every op.
+ *
+ * The guard keeps the last exact size plus the most the state can have grown
+ * since, and only serializes again when that sum could pass the limit. Each
+ * op's growth comes from what it actually wrote (`growthBound`), not from the
+ * size of its frame: one small op can write far more than it carries, such
+ * as a fog reset over a 200 by 200 scene or an undo that restores a deleted
+ * scene. A room far under its limits is therefore measured only at
+ * snapshots, while a room near them is measured exactly before every op that
+ * could cross.
+ *
+ * Wave 4 adds two reserves (docs/design-v1-maps-vision.md 2.4), both for
+ * what can grow without an op that could be refused. The party's explored
+ * layer grows by `sys.explore`, which is never refused, so the room check
+ * and the exploring scene's projected check add what that layer may still
+ * take (`exploredReserve`), and an explore only spends it. Sight is derived
+ * and never stored, so every projected check of a vision scene adds the
+ * most its sight tiles can take instead of measuring them.
+ *
+ * Wave 5 (docs/design-v1-dm-tools.md 2.4) splits a DM's projected scene into
+ * the room-level part every DM projection shares (the monsters, the journal,
+ * the roll requests, the characters, the log) and each scene's own part.
+ * Journal pages and roll requests are room level, so an op on them touches
+ * no scene, yet it grows every scene's projection, a scene nobody is viewing
+ * included. So every op is checked against the room-level part plus the
+ * largest scene part: the check of every scene and every DM at once.
+ *
+ * - The room-level part is measured exactly on every op, which costs only
+ *   the collections the op wrote: sizes are kept per collection and per
+ *   entity object, which are replaced and never changed. It counts every
+ *   whisper in the in-memory log, since a whisper reaches only the DMs it
+ *   names, and so it is the most any DM can receive.
+ * - Each scene's own part is measured once, from one pass over the stored
+ *   entities grouped by scene, at the room's first check, and kept with its
+ *   growth bound. An op that touches a scene adds its growth there as
+ *   before, and a scene whose bound could cross is measured exactly, by a
+ *   pass over that scene's entities, never a projection.
+ *
+ * A DM's projection of a scene is exactly the two parts with the JSON around
+ * them (and an empty sight map, whose real tiles the sight reserve covers),
+ * so the measure is the projection's size, every whisper counted.
+ */
+
+function roomFull(limit: number): LimitCheck {
+  return { ok: false, code: "quota", message: `the room is full: it is at its ${Math.floor(limit / 1024 / 1024)} MiB size limit` };
+}
+
+function sceneFull(limit: number): LimitCheck {
+  return { ok: false, code: "quota", message: `this scene is at its ${Math.floor(limit / 1024 / 1024)} MiB size limit` };
+}
+
+/** The last exact size, and how much the state may have grown since. */
+type Measure = { bytes: number; growth: number };
+
+export class SizeGuard {
+  readonly stateLimit: number;
+  readonly sceneLimit: number;
+  #state: Measure | null = null;
+  /** Each scene's own part (sceneOwnBytes), measured at the first check. */
+  #scenes: Map<string, Measure> | null = null;
+
+  constructor(opts: { stateLimit?: number; sceneLimit?: number } = {}) {
+    this.stateLimit = opts.stateLimit ?? LIMITS.stateBytes;
+    this.sceneLimit = opts.sceneLimit ?? LIMITS.projectedSceneBytes;
+  }
+
+  /** An exact measurement from outside, such as the snapshot just written. */
+  stateMeasured(bytes: number): void {
+    this.#state = { bytes, growth: 0 };
+  }
+
+  /**
+   * Checks the state an op would produce, given at most how many bytes the
+   * op added. On refusal nothing is recorded, because that state is
+   * discarded. On success the growth is counted against the bounds of the
+   * room and of each scene the op touched.
+   *
+   * `before` is the state the op applied to. An op that changes which scene
+   * can explore (moving players, turning vision or fog on for the player
+   * scene, an undo of either) is checked with the new scene's reserve, and
+   * when only that reserve does not fit, the refusal says so in the words
+   * the DM can act on (NO_ROOM_TO_EXPLORE).
+   *
+   * A scene already over its limit, as a room from before whispers counted
+   * may be, refuses only an op that grows its whole measure, the room-level
+   * part and its reserves included, compared exactly with `before`: a
+   * shortened name or a deleted token on it passes, as does every edit
+   * elsewhere. Without `before`, any op on the scene counts as growing it.
+   */
+  check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState): LimitCheck {
+    const updates: Array<() => void> = [];
+    const exploring = exploringSceneId(next);
+    const newlyExploring = exploring !== null && before !== undefined && exploringSceneId(before) !== exploring;
+    const reserve = exploredReserve(next);
+    const state = this.#state;
+    if (!state || state.bytes + state.growth + growth + reserve > this.stateLimit) {
+      const bytes = serializedBytes(next);
+      if (bytes + reserve > this.stateLimit) {
+        return newlyExploring && bytes <= this.stateLimit ? { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE } : roomFull(this.stateLimit);
+      }
+      updates.push(() => this.stateMeasured(bytes));
+    } else {
+      updates.push(() => {
+        state.growth += growth;
+      });
+    }
+    const room = roomLevelBytes(next);
+    const scenes = this.#sceneMeasures(before ?? next);
+    const touched = new Set(sceneIds);
+    for (const sceneId of scenes.keys()) if (!next.scenes[sceneId]) updates.push(() => scenes.delete(sceneId));
+    for (const scene of Object.values(next.scenes)) {
+      const sight = sightReserve(scene);
+      const explored = scene.id === exploring ? reserve : 0;
+      const measure = scenes.get(scene.id);
+      const added = touched.has(scene.id) ? growth : 0;
+      if (measure && SHELL_BYTES + room + measure.bytes + measure.growth + added + sight + explored <= this.sceneLimit) {
+        if (added > 0) updates.push(() => (measure.growth += added));
+        continue;
+      }
+      const own = sceneOwnBytes(next, scene.id);
+      const need = SHELL_BYTES + room + own + sight + explored;
+      if (need > this.sceneLimit && (before === undefined ? touched.has(scene.id) || (newlyExploring && scene.id === exploring) : need > neededBefore(before, scene.id))) {
+        const exploringHere = newlyExploring && scene.id === exploring && SHELL_BYTES + room + own + sight <= this.sceneLimit;
+        return exploringHere ? { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE } : sceneFull(this.sceneLimit);
+      }
+      updates.push(() => scenes.set(scene.id, { bytes: own, growth: 0 }));
+    }
+    for (const update of updates) update();
+    return { ok: true };
+  }
+
+  /**
+   * Counts growth that is never checked: an explore, which only spends the
+   * explored reserve the checks already held (section 2.4), so the room's
+   * and the scene's bounds stay upper bounds without refusing it.
+   */
+  grew(growth: number, sceneIds: readonly string[]): void {
+    if (this.#state) this.#state.growth += growth;
+    for (const sceneId of sceneIds) {
+      const measure = this.#scenes?.get(sceneId);
+      if (measure) measure.growth += growth;
+    }
+  }
+
+  /** Each scene's own part, from one pass over the state the guard first sees. */
+  #sceneMeasures(state: RoomState): Map<string, Measure> {
+    if (!this.#scenes) {
+      this.#scenes = new Map();
+      for (const [sceneId, bytes] of allScenesOwnBytes(state)) this.#scenes.set(sceneId, { bytes, growth: 0 });
+    }
+    return this.#scenes;
+  }
+}
+
+/**
+ * The scenes an op wrote into, from the entity keys the reducer touched:
+ * those a written chunk, fog tile, explored tile or draft is keyed under, a
+ * written scene itself, and those any written entity stood on before or
+ * stands on after. Read from what the op did rather than from its type, so
+ * an op that writes into a scene without naming it (conditions on inline
+ * actors, a group edit, a member's removal) is never left out of that
+ * scene's bound.
+ */
+export function touchedScenes(before: RoomState, after: RoomState, touched: readonly EntityKey[]): string[] {
+  const out = new Set<string>();
+  for (const key of touched) {
+    const parsed = parseKey(key);
+    if (!parsed) continue;
+    switch (parsed.kind) {
+      case "chunk":
+      case "fog":
+      case "explored":
+      case "fogDraft":
+        out.add(parsed.sceneId);
+        continue;
+      case "scene":
+        out.add(parsed.id);
+        continue;
+      default:
+        for (const value of [readEntity(before, key), readEntity(after, key)]) {
+          const sceneId = sceneOf(value);
+          if (typeof sceneId === "string") out.add(sceneId);
+        }
+    }
+  }
+  return [...out];
+}
+
+/**
+ * A scene's whole measure in the state an op started from, reserves
+ * included, so an op on a scene already over its limit is refused only when
+ * it adds to it. A scene the op made has none. Only asked of a scene over
+ * its limit, which a room reaches rarely.
+ */
+function neededBefore(before: RoomState, sceneId: string): number {
+  const scene = before.scenes[sceneId];
+  if (!scene) return 0;
+  const explored = exploringSceneId(before) === sceneId ? exploredReserve(before) : 0;
+  return SHELL_BYTES + roomLevelBytes(before) + sceneOwnBytes(before, sceneId) + sightReserve(scene) + explored;
+}
+
+/** The most a vision scene's sight tiles can add to its projection, from its own key (section 4.3.4). */
+function sightReserve(scene: Scene): number {
+  if (scene.vision?.on !== true) return 0;
+  return tilesAcross(scene.bounds.w) * tilesAcross(scene.bounds.h) * sightEntryMaxBytes(scene.id);
+}
+
+/*
+ * A DM's projection (shared/project.ts projectState) as JSON:
+ * `{"meta":…,"members":{…},…,"sight":{}}`. Its room-level collections are
+ * the state's own, every one of them, the log with every whisper. Its
+ * scene-level collections hold only the viewed scene's entities.
+ */
+const ROOM_LEVEL = [
+  "meta",
+  "members",
+  "scenes",
+  "characters",
+  "encounter",
+  "encounterHistory",
+  "handouts",
+  "log",
+  "monsters",
+  "srdImages",
+  "savedEncounters",
+  "journal",
+  "rolls",
+] as const satisfies readonly (keyof RoomState)[];
+
+const SCENE_LEVEL = [
+  "buildChunks",
+  "labels",
+  "fogTiles",
+  "fogDrafts",
+  "tokens",
+  "templates",
+  "drawings",
+  "stamps",
+  "lights",
+  "exploredTiles",
+  "pins",
+] as const satisfies readonly (keyof RoomState)[];
+
+type SceneLevel = (typeof SCENE_LEVEL)[number];
+
+/** `"name":` before a collection. */
+function fieldBytes(name: string): number {
+  return utf8Bytes(JSON.stringify(name)) + 1;
+}
+
+/**
+ * The braces, the commas between the top-level fields, and the empty
+ * sight map: what is around the two parts. A field per collection, plus
+ * `sight`.
+ */
+const SHELL_BYTES = 2 + (ROOM_LEVEL.length + SCENE_LEVEL.length + 1 - 1) + fieldBytes("sight") + 2;
+
+/*
+ * Sizes kept per entity object and per collection object, which are
+ * replaced and never changed once their op finished (shared/writable.ts),
+ * so an op re-measures only what it wrote.
+ */
+const valueSizes = new WeakMap<object, number>();
+const collectionSizes = new WeakMap<object, number>();
+
+function valueBytes(value: unknown): number {
+  if (value === null || typeof value !== "object") return serializedBytes(value);
+  let bytes = valueSizes.get(value);
+  if (bytes === undefined) {
+    bytes = serializedBytes(value);
+    if (!isWritable(value)) valueSizes.set(value, bytes);
+  }
+  return bytes;
+}
+
+/** A collection as JSON, a record or an array, from its entries' sizes. */
+function collectionBytes(collection: unknown): number {
+  if (collection === null || typeof collection !== "object") return valueBytes(collection);
+  let bytes = collectionSizes.get(collection);
+  if (bytes !== undefined) return bytes;
+  if (Array.isArray(collection)) {
+    bytes = 2 + Math.max(0, collection.length - 1);
+    for (const item of collection) bytes += valueBytes(item);
+  } else {
+    const entries = Object.entries(collection);
+    bytes = 2 + Math.max(0, entries.length - 1);
+    for (const [key, value] of entries) bytes += fieldBytes(key) + valueBytes(value);
+  }
+  if (!isWritable(collection)) collectionSizes.set(collection, bytes);
+  return bytes;
+}
+
+/**
+ * The room-level part of every DM's projected scene, with its field names:
+ * the state's own room-level collections, the log with every whisper in it.
+ * A singleton the op did not write and a collection it did not copy are the
+ * same objects as before, so they cost a lookup.
+ */
+export function roomLevelBytes(state: RoomState): number {
+  let bytes = 0;
+  for (const name of ROOM_LEVEL) bytes += fieldBytes(name) + (name === "meta" || name === "encounter" ? valueBytes(state[name]) : collectionBytes(state[name] ?? {}));
+  return bytes;
+}
+
+/** The scene an entity of a scene-level collection belongs to. */
+function sceneOfEntry(name: SceneLevel, key: string, value: unknown): string | undefined {
+  if (name === "fogDrafts") return key;
+  const sceneId = (value as { sceneId?: unknown } | null)?.sceneId;
+  return typeof sceneId === "string" ? sceneId : undefined;
+}
+
+/** One scene's own part of a DM's projection: its scene-level collections, filtered to it, with their field names. */
+export function sceneOwnBytes(state: RoomState, sceneId: string): number {
+  let bytes = 0;
+  for (const name of SCENE_LEVEL) {
+    let count = 0;
+    let inside = 0;
+    for (const [key, value] of Object.entries(state[name] ?? {})) {
+      if (sceneOfEntry(name, key, value) !== sceneId) continue;
+      count++;
+      inside += fieldBytes(key) + valueBytes(value);
+    }
+    bytes += fieldBytes(name) + 2 + inside + Math.max(0, count - 1);
+  }
+  return bytes;
+}
+
+/** Every scene's own part, in one pass over the state's scene-level entities. */
+function allScenesOwnBytes(state: RoomState): Map<string, number> {
+  const counts = new Map<string, number[]>();
+  const sizes = new Map<string, number[]>();
+  for (const id of Object.keys(state.scenes)) {
+    counts.set(id, SCENE_LEVEL.map(() => 0));
+    sizes.set(id, SCENE_LEVEL.map(() => 0));
+  }
+  SCENE_LEVEL.forEach((name, i) => {
+    for (const [key, value] of Object.entries(state[name] ?? {})) {
+      const sceneId = sceneOfEntry(name, key, value);
+      const count = sceneId === undefined ? undefined : counts.get(sceneId);
+      if (!count) continue;
+      count[i]! += 1;
+      sizes.get(sceneId!)![i]! += fieldBytes(key) + valueBytes(value);
+    }
+  });
+  const out = new Map<string, number>();
+  for (const id of Object.keys(state.scenes)) {
+    const count = counts.get(id)!;
+    const size = sizes.get(id)!;
+    let bytes = 0;
+    SCENE_LEVEL.forEach((name, i) => (bytes += fieldBytes(name) + 2 + size[i]! + Math.max(0, count[i]! - 1)));
+    out.set(id, bytes);
+  }
+  return out;
+}
+
+/**
+ * Every scene of a room that arrives whole, as a room import stores it, by
+ * the projected-scene check every op runs (design 10.5,
+ * docs/design-v1-maps-vision.md 2.4): the room-level part, the scene's own
+ * part, the most its sight tiles can take and, on the player scene, all its
+ * explored layer may still take. A room the import accepts then takes the
+ * moves and edits its own checks would refuse at once otherwise. The import
+ * makes its player scene the one that explores, as moving players there
+ * would, so a scene whose explored reserve alone does not fit gets the words
+ * the DM can act on (NO_ROOM_TO_EXPLORE). The room's own bytes are the
+ * import's to check.
+ */
+export function checkWholeScenes(state: RoomState, sceneLimit: number = LIMITS.projectedSceneBytes): LimitCheck {
+  const exploring = exploringSceneId(state);
+  const explored = exploredReserve(state);
+  const room = roomLevelBytes(state);
+  for (const [sceneId, own] of allScenesOwnBytes(state)) {
+    const scene = state.scenes[sceneId]!;
+    const need = SHELL_BYTES + room + own + sightReserve(scene);
+    if (need + (sceneId === exploring ? explored : 0) <= sceneLimit) continue;
+    return sceneId === exploring && need <= sceneLimit ? { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE } : sceneFull(sceneLimit);
+  }
+  return { ok: true };
+}
+
+/**
+ * At most how many bytes an op added to the serialized state: for every
+ * entity it wrote, the new value's size less the old one's, counting only
+ * the entities that grew, plus the key that names a new one. A DM's
+ * projection of a scene holds those same values, so this also bounds how
+ * much any projected scene grew. An entity that changed scene counts in
+ * full, as a new one, because the scene it moved into gained all of it even
+ * though the room barely changed. Entities that shrank or went away are not
+ * subtracted, so the bound errs high and the next exact measurement settles
+ * it.
+ */
+export function growthBound(before: RoomState, after: RoomState, touched: readonly EntityKey[]): number {
+  let growth = 0;
+  for (const key of touched) {
+    const next = readEntity(after, key);
+    if (next === null || next === undefined) continue;
+    const prev = readEntity(before, key);
+    const added = prev === null || prev === undefined || sceneOf(prev) !== sceneOf(next);
+    const delta = serializedBytes(next) + (added ? entryKeyBytes(key) : -serializedBytes(prev));
+    if (delta > 0) growth += delta;
+  }
+  return growth;
+}
+
+/**
+ * What a new entry's key adds to the stored JSON: the key its collection
+ * stores it under (an entity's id, or "<scene>:<x>,<y>" for chunks and fog
+ * and explored tiles) as JSON writes it, quotes and escapes included, then
+ * the colon and the comma after it. A scene ID may be 64 control
+ * characters, each escaped to six bytes, so the entity key's own length
+ * would undercount it, while the explored layer's reserve counts the
+ * escaped key (shared/limits.ts): an explore must take off the guard's
+ * bound exactly what it takes off the reserve. A log entry is an array
+ * element and adds only its comma, and the singletons are always there.
+ */
+function entryKeyBytes(key: EntityKey): number {
+  const parsed = parseKey(key);
+  if (!parsed) return jsonKeyBytes(key);
+  switch (parsed.kind) {
+    case "meta":
+    case "encounter":
+    case "encounterHistory":
+      return 0;
+    case "log":
+      return 1;
+    case "chunk":
+      return jsonKeyBytes(chunkKey(parsed.sceneId, parsed.cx, parsed.cy));
+    case "fog":
+    case "explored":
+    case "sight":
+      return jsonKeyBytes(tileKey(parsed.sceneId, parsed.tx, parsed.ty));
+    case "fogDraft":
+      return jsonKeyBytes(parsed.sceneId);
+    default:
+      return jsonKeyBytes(parsed.id);
+  }
+}
+
+function jsonKeyBytes(key: string): number {
+  return utf8Bytes(JSON.stringify(key)) + 2;
+}
+
+function sceneOf(value: unknown): unknown {
+  return typeof value === "object" && value !== null && "sceneId" in value ? value.sceneId : undefined;
+}

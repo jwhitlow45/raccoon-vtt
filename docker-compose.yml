@@ -1,0 +1,125 @@
+# Development. `pnpm db:up` starts postgres only, which is all `pnpm dev`
+# needs. The production deployment is docker-compose.server.yml.
+#
+# `docker compose up --build raccoon` also runs the production image against
+# the same postgres, on http://127.0.0.1:9180, to try a build before it goes
+# to the server.
+#
+# Postgres publishes on 127.0.0.1:5434. Not 5432, because a native postgres
+# often listens on 127.0.0.1:5432 and wins `localhost`, which shows up as
+# `role "raccoon" does not exist` against a container that looks healthy.
+# RACCOON_DB_PORT overrides it.
+
+name: raccoon-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: raccoon
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-raccoon}
+      POSTGRES_DB: raccoon
+    volumes:
+      - raccoon-dev-db:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${RACCOON_DB_PORT:-5434}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raccoon -d raccoon"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # The image docker-compose.server.yml runs, with the same read-only root,
+  # tmpfs and dropped capabilities, but published on this machine.
+  #
+  # It runs with NODE_ENV=development, because production refuses to start
+  # with a PUBLIC_ORIGIN that is not https: its session cookie is a Secure
+  # `__Host-` cookie. Open exactly http://127.0.0.1:9180, not localhost. The
+  # WebSocket upgrade checks Origin against PUBLIC_ORIGIN character for
+  # character.
+  #
+  # With no egress proxy set, image search and URL import go out directly
+  # through the app's own private-address filter (design section 10.6).
+  raccoon:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://raccoon:${POSTGRES_PASSWORD:-raccoon}@postgres:5432/raccoon
+      PUBLIC_ORIGIN: http://127.0.0.1:9180
+    ports:
+      - "127.0.0.1:9180:3000"
+    volumes:
+      - raccoon-dev-assets:/data/assets
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+    init: true
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  # The production backup and restore services (docker-compose.server.yml,
+  # docker/backup.sh), behind a profile, against this postgres and the
+  # image's asset volume. scripts/backup-check.ts runs them in a compose
+  # project of its own, so it never touches this one's data:
+  #
+  #   docker compose --profile backup run --rm backup sh /backup/backup.sh once
+  backup:
+    image: &backup-image postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    profiles: ["backup"]
+    command: ["sh", "/backup/backup.sh"]
+    user: "0:0"
+    environment: &backup-env
+      PGHOST: postgres
+      PGUSER: raccoon
+      PGDATABASE: raccoon
+      PGPASSWORD: ${POSTGRES_PASSWORD:-raccoon}
+      TZ: ${TZ:-UTC}
+      BACKUP_AT: ${BACKUP_AT:-04:00}
+    volumes:
+      - &backup-script ./docker/backup.sh:/backup/backup.sh:ro
+      - raccoon-dev-backups:/backups
+      - raccoon-dev-assets:/assets:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=16m
+
+  restore:
+    image: *backup-image
+    profiles: ["backup"]
+    user: "1000:1000"
+    environment: *backup-env
+    volumes:
+      - *backup-script
+      - raccoon-dev-backups:/backups:ro
+      - raccoon-dev-assets:/data/assets
+    depends_on:
+      postgres:
+        condition: service_healthy
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=16m
+
+volumes:
+  raccoon-dev-db:
+  raccoon-dev-assets:
+  raccoon-dev-backups:

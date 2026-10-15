@@ -1,0 +1,503 @@
+import { isApiErrorCode, type ApiErrorCode } from "#shared/apiErrors.ts";
+import type { AssetId, LogEntry, Member, MemberId } from "#shared/model.ts";
+import type { AssetCredit, SearchResult, SearchSource } from "#shared/protocol.ts";
+
+/**
+ * Typed helpers for the HTTP routes in design section 10.8.
+ *
+ * Every call is a same-origin fetch with the session cookie. The cookie is
+ * SameSite=Strict and every non-GET route requires same-origin
+ * (Sec-Fetch-Site) and an exact content type (section 10.7), so `mode` and
+ * `credentials` are pinned to same-origin and JSON bodies always say
+ * `application/json`.
+ *
+ * Response shapes follow the design's wording. The server slice owns the
+ * real ones, so a mismatch is fixed here, in one place.
+ */
+
+export type MemberSummary = Pick<Member, "id" | "name" | "color">;
+/**
+ * Step 1 of the player join's answer: the ticket, the players this device
+ * may continue as, and the colors the room's DMs use now, one per DM, with
+ * no names or ids (docs/design-v1-visual.md 4.4).
+ */
+export type JoinStep = { ticket: string; players: MemberSummary[]; dmColors: string[] };
+export type Me = {
+  member: Pick<Member, "id" | "name" | "color" | "kind">;
+  role: "dm" | "player";
+  /** The room's name as created, sent by GET /me (not by a join or claim answer). */
+  roomName?: string;
+};
+export type AssetKind = "map" | "token" | "handout" | "thumb";
+export type AssetVariant = "full" | "mobile" | "thumb";
+export type AssetRow = {
+  id: AssetId;
+  kind: AssetKind;
+  /** Canonical size: the `full` variant's pixels. */
+  width: number;
+  height: number;
+  variants: AssetVariant[];
+  /** Upload responses for maps only: a suggested cellPx from a hint such as `30x20` in the file name. */
+  cellPx?: number;
+  /** An Openverse image's credit, with the original's size (docs/design-v1-dm-tools.md 3.13). */
+  credit?: AssetCredit;
+  /** For a DM only: whether the room's committed state names the image (docs/design-v1-dm-tools.md 3.19). */
+  inUse?: boolean;
+  /** The bytes the image's files take, when the server says. */
+  bytes?: number;
+};
+/** The server's own shape, which sends the original's size only when the search service gave it. */
+export type { SearchResult, SearchSource };
+/** Who a device with no member in the room becomes on a DM claim (design 10.2). */
+export type DmClaimChoice = { name?: string; memberId?: MemberId };
+/** `device` is a rough label from the user agent, such as "Safari on iPhone". `current` marks the calling device. */
+/** `online`: the device has a socket open in the room now. `display` marks a table display (docs/design-v1-dm-tools.md 3.1), signed out the same way. */
+export type DmDevice = { sessionId: string; memberId: MemberId; device: string; lastSeenAt: string; online: boolean; current: boolean; display?: true };
+/** One of this device's own invites from the last hour, found by its expiry time. */
+export type DmInviteState = { expiresAt: string; used: boolean };
+/** A table display's pairing code (docs/design-v1-dm-tools.md 3.1): `link` is the path `/display#code=<code>`, good once within 10 minutes. */
+export type DisplayCode = { code: string; link: string; expiresAt: string };
+/** Who a table display is in its room: no member, only an id no member can have. */
+export type DisplayMe = { roomId: string; roomName: string; role: "display"; memberId: string };
+export type LogPage = {
+  /** Oldest first. */
+  entries: LogEntry[];
+  /** Pass as `before` for the page after this one. Null when there are no older entries. */
+  nextBefore: string | null;
+};
+/** One evening of the log, as the caller's own Log panel holds it (docs/design-v1-dm-tools.md 3.10). */
+export type LogSession = { from: string; to: string; lines: number };
+/** A file the server rendered, with the name it asked to be saved under. */
+export type ServerFile = { blob: Blob; fileName: string };
+export type ImportForm = {
+  /** Replaces the exported room's name. Left out, the name in the export is kept. */
+  name?: string;
+  playerPassword: string;
+  dmName: string;
+  turnstileToken?: string;
+};
+
+/** The largest room export the site takes back, under Cloudflare's 100 MB request limit (design 10.7 and 16.4). */
+export const MAX_IMPORT_BYTES = 95_000_000;
+
+/** A code from the server's list, or "network" when no response arrived. */
+export type ApiErrorCodeOrNetwork = ApiErrorCode | "network";
+
+export class ApiError extends Error {
+  readonly status: number;
+  /**
+   * The server's machine-readable code when it sent one from its list, or
+   * "network" when no response arrived. Typed from that list, so checking
+   * for a code the server never sends fails the typecheck.
+   */
+  readonly code: ApiErrorCodeOrNetwork | undefined;
+  /** From a Retry-After header, in milliseconds. */
+  readonly retryAfterMs: number | null;
+  /** Any other fields of the error body, such as `reason` on a refused password. */
+  readonly detail: Readonly<Record<string, unknown>>;
+
+  constructor(
+    status: number,
+    message: string,
+    code: ApiErrorCodeOrNetwork | undefined,
+    retryAfterMs: number | null,
+    detail: Readonly<Record<string, unknown>> = {},
+  ) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.retryAfterMs = retryAfterMs;
+    this.detail = detail;
+  }
+}
+
+const STATUS_MESSAGES: Record<number, string> = {
+  400: "That request was not valid.",
+  401: "This device is not signed in to the room.",
+  403: "You do not have access to that.",
+  404: "Not found.",
+  409: "Someone else changed this first. Try again.",
+  413: "That is too large.",
+  429: "Too many tries. Wait a little and try again.",
+  // 502 and 504 come from the proxy in front of the app (Cloudflare, or
+  // Vite in development) when the app itself does not answer.
+  502: "The server is not answering. Try again in a moment.",
+  503: "The server is busy. Try again in a minute.",
+  504: "The server is not answering. Try again in a moment.",
+};
+
+/** Seconds or an HTTP date, per RFC 9110. Null when absent or unreadable. */
+export function parseRetryAfter(value: string | null, now: number = Date.now()): number | null {
+  if (value === null) return null;
+  const text = value.trim();
+  if (/^\d+$/.test(text)) return Number(text) * 1000;
+  const at = Date.parse(text);
+  return Number.isNaN(at) ? null : Math.max(0, at - now);
+}
+
+export async function toApiError(res: Response): Promise<ApiError> {
+  let code: ApiErrorCode | undefined;
+  let message: string | undefined;
+  let detail: Record<string, unknown> = {};
+  try {
+    const body: unknown = await res.json();
+    if (body && typeof body === "object") {
+      const b = body as Record<string, unknown>;
+      detail = b;
+      // The access routes answer `{error: code, ...extra}` (server/auth/http.ts).
+      // Anything else, such as Fastify's own `FST_` codes, is left out:
+      // nothing on this side knows it, and the status still applies.
+      const raw = typeof b.code === "string" ? b.code : b.error;
+      if (isApiErrorCode(raw)) code = raw;
+      // `message` is meant for people. `error` is often a terse technical
+      // string, so it is used only when nothing better exists.
+      if (typeof b.message === "string") message = b.message;
+    }
+  } catch {
+    // No JSON body. The status says enough.
+  }
+  return new ApiError(
+    res.status,
+    message ?? STATUS_MESSAGES[res.status] ?? `Something went wrong (${res.status}).`,
+    code,
+    parseRetryAfter(res.headers.get("retry-after")),
+    detail,
+  );
+}
+
+type RequestOptions = { json?: unknown; body?: Blob; contentType?: string; headers?: Record<string, string>; signal?: AbortSignal };
+
+async function request<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
+  const headers: Record<string, string> = { ...options.headers, accept: "application/json" };
+  let body: BodyInit | undefined;
+  if (options.json !== undefined) {
+    headers["content-type"] = "application/json";
+    body = JSON.stringify(options.json);
+  } else if (options.body) {
+    headers["content-type"] = options.contentType ?? options.body.type;
+    body = options.body;
+  }
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method,
+      headers,
+      body,
+      mode: "same-origin",
+      credentials: "same-origin",
+      signal: options.signal,
+    });
+  } catch (err) {
+    if (options.signal?.aborted) throw err;
+    throw new ApiError(0, "Could not reach the server. Check your connection.", "network", null);
+  }
+  if (!res.ok) throw await toApiError(res);
+  if (res.status === 204) return undefined as T;
+  const type = res.headers.get("content-type") ?? "";
+  return (type.includes("application/json") ? await res.json() : undefined) as T;
+}
+
+export type RetryOptions = {
+  /** Total time to keep retrying, 60 s by default (design section 11.1). */
+  budgetMs?: number;
+  /** True while waiting on the server, so the UI can say "Waiting for the server…". */
+  onWaiting?: (waiting: boolean) => void;
+  signal?: AbortSignal;
+  now?: () => number;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+};
+
+const DEFAULT_WAIT_MS = 2000;
+const MIN_WAIT_MS = 250;
+const MAX_WAIT_MS = 15_000;
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * Uploads, URL imports and searches answer 503 with Retry-After when the
+ * server's intake slots or processing queue are full (design section 11.1).
+ * At an in-person session start several phones upload at once, so instead of
+ * failing, the client waits as told and tries again, for up to 60 s in total.
+ * Any other error, or a wait that would run past the budget, is thrown.
+ */
+/** The file name in a Content-Disposition header, or null when it names none. */
+export function dispositionFileName(header: string | null): string | null {
+  const match = header ? /filename="([^"]+)"/.exec(header) : null;
+  return match ? match[1]! : null;
+}
+
+/** A GET whose answer is a file, read whole, with the same errors as `request`. */
+async function requestFile(path: string, fallbackName: string, signal?: AbortSignal): Promise<ServerFile> {
+  let res: Response;
+  try {
+    res = await fetch(path, { method: "GET", headers: { accept: "text/markdown, application/json" }, mode: "same-origin", credentials: "same-origin", signal });
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    throw new ApiError(0, "Could not reach the server. Check your connection.", "network", null);
+  }
+  if (!res.ok) throw await toApiError(res);
+  return { blob: await res.blob(), fileName: dispositionFileName(res.headers.get("content-disposition")) ?? fallbackName };
+}
+
+export async function retryOn503<T>(attempt: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
+  const budget = options.budgetMs ?? 60_000;
+  const now = options.now ?? Date.now;
+  const wait = options.sleep ?? sleep;
+  const start = now();
+  let waiting = false;
+  try {
+    for (;;) {
+      try {
+        return await attempt();
+      } catch (err) {
+        if (!(err instanceof ApiError) || err.status !== 503) throw err;
+        const ms = Math.min(Math.max(err.retryAfterMs ?? DEFAULT_WAIT_MS, MIN_WAIT_MS), MAX_WAIT_MS);
+        if (now() - start + ms > budget) throw err;
+        if (!waiting) {
+          waiting = true;
+          options.onWaiting?.(true);
+        }
+        await wait(ms, options.signal);
+      }
+    }
+  } finally {
+    if (waiting) options.onWaiting?.(false);
+  }
+}
+
+const room = (roomId: string) => `/api/rooms/${encodeURIComponent(roomId)}`;
+
+export const api = {
+  /** Public server settings: the Turnstile site key when Turnstile is on, and whether image search is. */
+  getConfig: () => request<{ turnstileSiteKey: string | null; searchEnabled: boolean }>("GET", "/api/config"),
+
+  createRoom: (input: { name: string; playerPassword: string; dmName: string; turnstileToken?: string }) =>
+    request<{ roomId: string; dmLink: string }>("POST", "/api/rooms", { json: input }),
+
+  /** The room's name only, for the join page. */
+  getRoom: (roomId: string) => request<{ name: string }>("GET", room(roomId)),
+
+  /** The caller's member and role. A 401, 403 or 404 means this device has no grant here. */
+  getMe: (roomId: string) => request<Me>("GET", `${room(roomId)}/me`),
+
+  /**
+   * Step 1 of the player join: the password. The roster comes back only on
+   * success. A room that has seen many wrong passwords also asks for a
+   * solved Turnstile check, and answers `turnstile_required` without one.
+   */
+  join: (roomId: string, password: string, turnstileToken?: string) =>
+    request<JoinStep>("POST", `${room(roomId)}/join`, {
+      json: { password, ...(turnstileToken ? { turnstileToken } : {}) },
+    }),
+
+  /** Step 2: continue as an existing player, or become a new one. */
+  completeJoin: (
+    roomId: string,
+    input: { ticket: string; memberId: MemberId } | { ticket: string; name: string; color: string },
+  ) => request<Me>("POST", `${room(roomId)}/join/complete`, { json: input }),
+
+  /**
+   * `name` (someone new) or `memberId` (a current DM member, "This is me")
+   * is used only when this device has no member in the room yet. With
+   * neither, such a device is refused with `choose_member`, whose detail
+   * lists the room's DM members to choose from (claimRefusal.ts).
+   */
+  claimDm: (roomId: string, input: DmClaimChoice & { key: string }) =>
+    request<Me>("POST", `${room(roomId)}/dm`, { json: input }),
+
+  /** `link` is a path (`/r/<id>#invite=<token>`). The invite works once, for 10 minutes. */
+  mintInvite: (roomId: string) =>
+    request<{ token: string; link: string; expiresAt: string }>("POST", `${room(roomId)}/dm/invite`, { json: {} }),
+
+  /** The same choice as claimDm. Asking spends nothing: the invite is used only by a claim that succeeds. */
+  redeemInvite: (roomId: string, input: DmClaimChoice & { token: string }) =>
+    request<Me>("POST", `${room(roomId)}/dm/redeem`, { json: input }),
+
+  /** A bare invite token. The server finds the room from it, and names it in a `choose_member` refusal too. */
+  redeemBareInvite: (input: DmClaimChoice & { token: string }) =>
+    request<Me & { roomId: string }>("POST", "/api/dm/redeem", { json: input }),
+
+  listDmDevices: (roomId: string) => request<{ devices: DmDevice[]; invites: DmInviteState[] }>("GET", `${room(roomId)}/dm/devices`),
+
+  revokeDmDevice: (roomId: string, sessionId: string) =>
+    request<void>("DELETE", `${room(roomId)}/dm/devices/${encodeURIComponent(sessionId)}`),
+
+  replaceDmLink: (roomId: string) =>
+    request<{ dmLink: string }>("POST", `${room(roomId)}/dm/replace-link`, { json: {} }),
+
+  removeDm: (roomId: string, memberId: MemberId) =>
+    request<void>("DELETE", `${room(roomId)}/dm/members/${encodeURIComponent(memberId)}`),
+
+  changePassword: (roomId: string, password: string) =>
+    request<void>("POST", `${room(roomId)}/password`, { json: { password } }),
+
+  /**
+   * The player link (`/r/<id>#pw=<password>`) for a DM to show at any time,
+   * or null when the server holds no copy of the password it can open: the
+   * password was set before the server kept one, or its key changed.
+   * Changing the password once stores a fresh copy.
+   */
+  getPlayerLink: (roomId: string) => request<{ playerLink: string | null }>("GET", `${room(roomId)}/player-link`),
+
+  kick: (roomId: string, memberId: MemberId) =>
+    request<void>("DELETE", `${room(roomId)}/members/${encodeURIComponent(memberId)}/grants`),
+
+  /** A kick that also takes the member off the roster. */
+  removeMember: (roomId: string, memberId: MemberId) =>
+    request<void>("DELETE", `${room(roomId)}/members/${encodeURIComponent(memberId)}`),
+
+  /** The DM types the room's name to confirm. */
+  deleteRoom: (roomId: string, name: string) => request<void>("DELETE", room(roomId), { json: { name } }),
+
+  /** Runs the export route's checks without making the zip: resolves when an export may start now, else throws the refusal. */
+  checkExport: (roomId: string) => request<void>("HEAD", exportUrl(roomId)),
+
+  /**
+   * Older log entries, projected for the caller. A DM names the scene it is
+   * viewing, because creature events are projected per scene.
+   */
+  getLog: (roomId: string, options: { before?: string; sceneId?: string | null; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (options.before !== undefined) q.set("before", options.before);
+    if (options.sceneId) q.set("sceneId", options.sceneId);
+    if (options.limit !== undefined) q.set("limit", String(options.limit));
+    const query = q.toString();
+    return request<LogPage>("GET", `${room(roomId)}/log${query ? `?${query}` : ""}`);
+  },
+
+  /**
+   * A new room from an export zip (design 16.4). The body is the zip itself,
+   * so the form travels in a header, never in the URL where logs would keep
+   * the password.
+   */
+  importRoom: (file: Blob, form: ImportForm, options: RetryOptions = {}) =>
+    retryOn503(
+      () =>
+        request<{ roomId: string; dmLink: string }>("POST", "/api/rooms/import", {
+          body: file,
+          contentType: "application/zip",
+          headers: { "x-import-form": importFormHeader(form) },
+          signal: options.signal,
+        }),
+      options,
+    ),
+
+  listAssets: (roomId: string) => request<{ assets: AssetRow[] }>("GET", `${room(roomId)}/assets`),
+
+  /**
+   * Deletes library images nothing uses, DM only, at most 500 a request
+   * (docs/design-v1-dm-tools.md 3.19). The server refuses with
+   * `asset_in_use` an image the room's state names when the request runs.
+   */
+  deleteAssets: (roomId: string, ids: readonly string[]) => request<unknown>("POST", `${room(roomId)}/assets/delete`, { json: { ids } }),
+
+  /** `name` is the original file name, sent only so a map's name can hint its grid (design 11.1). */
+  uploadAsset: (roomId: string, kind: AssetKind, file: Blob, options: RetryOptions & { name?: string } = {}) =>
+    retryOn503(
+      () =>
+        request<AssetRow>("PUT", `${room(roomId)}/assets?kind=${kind}${options.name ? `&name=${encodeURIComponent(options.name.slice(0, 255))}` : ""}`, {
+          body: file,
+          contentType: file.type,
+          signal: options.signal,
+        }),
+      options,
+    ),
+
+  importAsset: (roomId: string, input: { url: string; fallback?: string; kind: AssetKind }, options: RetryOptions = {}) =>
+    retryOn503(
+      () => request<AssetRow>("POST", `${room(roomId)}/assets/import`, { json: input, signal: options.signal }),
+      options,
+    ),
+
+  // Table displays (docs/design-v1-dm-tools.md 3.1). Minting takes this
+  // device's DM grant. The other three use the display's own session, in a
+  // cookie of its own, so a DM's laptop can hold both at once.
+
+  /** A one-time code for a table display. At most 3 wait at once (`too_many_codes`). */
+  mintDisplayCode: (roomId: string) => request<DisplayCode>("POST", `${room(roomId)}/display/code`, { json: {} }),
+
+  /** Pairs this device as a table display. `bad_code`, or `displays_full` when the room has 4 already. */
+  redeemDisplayCode: (code: string) => request<{ roomId: string }>("POST", "/api/display/redeem", { json: { code } }),
+
+  /** This device as the room's table display. A 401 or 403 means it is not one, or no longer. */
+  getDisplayMe: (roomId: string) => request<DisplayMe>("GET", `${room(roomId)}/display/me`),
+
+  /** Leave: signs this display out for good and clears its cookie. */
+  leaveDisplay: () => request<void>("DELETE", "/api/display/session"),
+
+  // Notes and the table (docs/design-v1-dm-tools.md 3.10 and 3.11).
+
+  /**
+   * The evenings of the log the caller may read, newest first, and how many
+   * lines they hold. Every listing counts against the same hourly limit as
+   * an export, whatever the server had cached.
+   */
+  logSessions: (roomId: string) => request<{ sessions: LogSession[]; lines: number }>("GET", `${room(roomId)}/log/sessions`),
+
+  /**
+   * The log as a Markdown file: one session (`from` and `to` from the
+   * listing, inclusive) or everything (neither), with times in `tz`, the
+   * device's IANA time zone.
+   */
+  exportLog: (roomId: string, range: { from?: string; to?: string }, tz: string, signal?: AbortSignal) => {
+    const q = new URLSearchParams();
+    if (range.from !== undefined) q.set("from", range.from);
+    if (range.to !== undefined) q.set("to", range.to);
+    q.set("tz", tz);
+    return requestFile(`${room(roomId)}/log/export?${q.toString()}`, "log.md", signal);
+  },
+
+  /**
+   * The X-card: asks the whole table to edit out what just happened, with
+   * no name on it. The server answers 204 for a tap that merged into a card
+   * already showing, and a bare 429 past a session's taps for the hour.
+   */
+  xcard: (roomId: string) => request<void>("POST", `${room(roomId)}/xcard`),
+
+  /** Google first when the server has it, Openverse when it cannot answer, or Openverse on purpose with `source`. */
+  imageSearch: (roomId: string, q: string, options: RetryOptions & { source?: "openverse" } = {}) =>
+    retryOn503(
+      () =>
+        request<{ results: SearchResult[]; source: SearchSource }>("POST", `${room(roomId)}/image-search`, {
+          json: options.source ? { q, source: options.source } : { q },
+          signal: options.signal,
+        }),
+      options,
+    ),
+};
+
+/** JSON as base64url, the encoding the import route reads its form header in. */
+export function importFormHeader(form: ImportForm): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(form));
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export function assetUrl(assetId: AssetId, variant: AssetVariant): string {
+  return `/api/assets/${encodeURIComponent(assetId)}/${variant}`;
+}
+
+/** A table display's images come through its own route, which reads the display's cookie and allows only what it may show. */
+export function displayAssetUrl(roomId: string, assetId: AssetId, variant: AssetVariant): string {
+  return `${room(roomId)}/display/assets/${encodeURIComponent(assetId)}/${variant}`;
+}
+
+/** A plain GET the browser downloads, so the zip streams to disk instead of into memory. */
+export function exportUrl(roomId: string): string {
+  return `${room(roomId)}/export`;
+}

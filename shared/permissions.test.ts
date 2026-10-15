@@ -1,0 +1,775 @@
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+import type { MoveAnyToken } from "./model.ts";
+import { canApply, movesAnyToken, type PermissionDeps } from "./permissions.ts";
+import type { Op } from "./protocol.ts";
+import { DM, P1, P2, actor, blockOf, character, customMonster, drawing, entry, imageRef, reveal, room, template, token } from "./testutil.ts";
+
+const deps: PermissionDeps = { canUseAsset: (memberId, assetId) => assetId.startsWith(`${memberId}-`) || assetId === "shared" };
+
+function setup() {
+  const state = room();
+  state.scenes.s1!.fogEnabled = true;
+  state.characters.c1 = character("c1", { ownerIds: ["p1"] });
+  state.tokens.pc1 = token("pc1", { kind: "pc", name: "Ayla", actor: { ref: "c1" }, x: 1, y: 1 });
+  state.tokens.own = token("own", { name: "Familiar", ownerIds: ["p1"], x: 1, y: 2 });
+  state.tokens.gob = token("gob", { name: "Goblin", x: 2, y: 2 });
+  state.tokens.hidden = token("hidden", { name: "Assassin", visibility: "dm", x: 2, y: 3 });
+  state.tokens.dark = token("dark", { name: "Lurker", x: 30, y: 30 });
+  state.tokens.locked = token("locked", { name: "Statue", locked: true, x: 3, y: 3 });
+  state.tokens.other = token("other", { name: "Pet", ownerIds: ["p2"], x: 3, y: 1, sceneId: "s2" });
+  state.monsters.mon = customMonster("mon");
+  reveal(state, "s1", { x: 0, y: 0, w: 6, h: 6 });
+  return state;
+}
+
+const code = (op: Op, who = P1, state = setup()) => {
+  const d = canApply(op, who, state, deps);
+  return d.ok ? "ok" : d.code;
+};
+
+describe("DM", () => {
+  test("may do everything a client sends, except editing other members", () => {
+    assert.equal(code({ t: "fog.reset", sceneId: "s1", to: "hidden" }, DM), "ok");
+    assert.equal(code({ t: "token.move", tokenId: "locked", x: 0, y: 0 }, DM), "ok");
+    assert.equal(code({ t: "actor.life", target: { tokenId: "gob" }, life: "dead" }, DM), "ok");
+    assert.equal(code({ t: "member.update", memberId: "dm1", name: "G" }, DM), "ok");
+    assert.equal(code({ t: "member.update", memberId: "p1", name: "G" }, DM), "forbidden");
+    assert.equal(code({ t: "undo" }, DM), "ok");
+    assert.equal(code({ t: "sys.restore", entries: [{ key: "token:gob", value: null, expectRev: 1 }], from: "undo" }, DM), "ok");
+  });
+
+  test("roster changes never come from a socket", () => {
+    assert.equal(code({ t: "sys.memberJoin", member: { id: "x", name: "X", color: "#000000", kind: "player", createdAt: "" } }, DM), "forbidden");
+    assert.equal(code({ t: "sys.memberSetKind", memberId: "p1", kind: "dm" }, DM), "forbidden");
+  });
+
+  test("asset references go through the predicate", () => {
+    const img = (assetId: string) => ({ assetId, crop: { cx: 0, cy: 0, zoom: 1 } });
+    assert.equal(code({ t: "token.update", tokenId: "gob", patch: { image: img("dm1-pic") } }, DM), "ok");
+    assert.equal(code({ t: "token.update", tokenId: "gob", patch: { image: img("p1-pic") } }, DM), "gone");
+    assert.equal(code({ t: "scene.setMap", sceneId: "s1", map: { assetId: "nope", widthPx: 1, heightPx: 1, cellPx: 1, originPx: { x: 0, y: 0 } } }, DM), "gone");
+    assert.equal(code({ t: "handout.show", handout: { id: "h", assetId: "dm1-h", title: "x", to: "all" } }, DM), "ok");
+    assert.equal(code({ t: "handout.show", handout: { id: "h", assetId: "other", title: "x", to: "all" } }, DM), "gone");
+    assert.equal(code({ t: "character.create", character: { id: "c9", name: "n", size: "medium", ownerIds: [], defaultImage: img("x"), actor: actor() } }, DM), "gone");
+  });
+});
+
+describe("custom monsters", () => {
+  const create: Op = { t: "monster.create", monster: { id: "mon2", ...blockOf(customMonster("mon2")) } };
+  const ops: Op[] = [create, { t: "monster.update", monsterId: "mon", patch: { ac: 20 } }, { t: "monster.delete", monsterId: "mon" }];
+
+  test("the DM creates, edits and deletes them", () => {
+    for (const op of ops) assert.equal(code(op, DM), "ok", op.t);
+  });
+
+  test("players may not touch them, nor undo their way into them", () => {
+    for (const op of ops) for (const who of [P1, P2]) assert.equal(code(op, who), "forbidden", `${op.t} by ${who.memberId}`);
+    assert.equal(code({ t: "sys.restore", entries: [{ key: "monster:mon", value: null, expectRev: 0 }], from: "undo" }), "forbidden");
+  });
+});
+
+describe("monster images", () => {
+  const withImage = (assetId: string): Op[] => [
+    { t: "monster.create", monster: { id: "mon2", ...blockOf(customMonster("mon2")), defaultImage: imageRef(assetId) } },
+    { t: "monster.update", monsterId: "mon", patch: { defaultImage: imageRef(assetId) } },
+    { t: "monster.setSrdImage", srdId: "goblin-warrior", image: imageRef(assetId) },
+  ];
+
+  test("the DM sets them with an image the DM may use, as for a token", () => {
+    for (const op of withImage("dm1-goblin")) assert.equal(code(op, DM), "ok", op.t);
+    for (const op of withImage("p1-goblin")) assert.equal(code(op, DM), "gone", op.t);
+    assert.equal(code({ t: "monster.update", monsterId: "mon", patch: { defaultImage: null } }, DM), "ok");
+    assert.equal(code({ t: "monster.setSrdImage", srdId: "goblin-warrior", image: null }, DM), "ok");
+  });
+
+  test("players set none, even with an image of their own, nor undo their way into one", () => {
+    for (const op of withImage("p1-goblin")) assert.equal(code(op, P1), "forbidden", op.t);
+    assert.equal(code({ t: "monster.setSrdImage", srdId: "goblin-warrior", image: null }, P1), "forbidden");
+    assert.equal(code({ t: "sys.restore", entries: [{ key: "srdImage:goblin-warrior", value: null, expectRev: null }], from: "undo" }), "forbidden");
+  });
+});
+
+describe("saved encounters", () => {
+  const ops: Op[] = [
+    { t: "savedEncounter.create", encounter: { id: "enc2", name: "Wolves", monsters: [{ srdId: "wolf", count: 3 }] } },
+    { t: "savedEncounter.update", encounterId: "enc1", patch: { name: "Renamed" } },
+    { t: "savedEncounter.delete", encounterId: "enc1" },
+  ];
+
+  test("only the DM builds them, and players cannot undo their way into one", () => {
+    for (const op of ops) {
+      assert.equal(code(op, DM), "ok", op.t);
+      assert.equal(code(op, P1), "forbidden", op.t);
+    }
+    assert.equal(code({ t: "sys.restore", entries: [{ key: "savedEncounter:enc1", value: null, expectRev: null }], from: "undo" }), "forbidden");
+  });
+});
+
+describe("player role rules", () => {
+  test("DM-only ops are forbidden", () => {
+    const ops: Op[] = [
+      { t: "room.update", name: "x" },
+      { t: "room.setPlayerScene", sceneId: "s2" },
+      { t: "view.blackout", blackout: true },
+      { t: "scene.create", scene: { id: "n", name: "n", bounds: { w: 1, h: 1 } } },
+      { t: "token.create", token: { id: "t", sceneId: "s1", kind: "monster", name: "g", size: "medium", x: 0, y: 0, actor: { inline: actor() } } },
+      { t: "token.delete", tokenId: "own" },
+      { t: "actor.life", target: { tokenId: "own" }, life: "dead" },
+      { t: "character.create", character: { id: "c9", name: "n", size: "medium", ownerIds: ["p1"], actor: actor() } },
+      { t: "character.delete", characterId: "c1" },
+      { t: "fog.live", sceneId: "s1", ops: [{ id: "a", mode: "reveal", shape: { kind: "all" } }] },
+      { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["1,1"] },
+      { t: "encounter.start", entries: [] },
+      { t: "encounter.end" },
+      { t: "encounter.setValues", values: [{ entryId: "n1", value: 1 }] },
+      { t: "encounter.reorder", entryIds: ["n1"] },
+      { t: "encounter.prev" },
+      { t: "handout.show", handout: { id: "h", assetId: "p1-x", title: "t", to: "all" } },
+      { t: "drawing.clear", sceneId: "s1", scope: "all" },
+    ];
+    for (const op of ops) assert.equal(code(op), "forbidden", op.t);
+  });
+
+  test("members edit only themselves, and anyone chats", () => {
+    assert.equal(code({ t: "member.update", memberId: "p1", color: "#00ff00" }), "ok");
+    assert.equal(code({ t: "member.update", memberId: "p2", color: "#00ff00" }), "forbidden");
+    assert.equal(code({ t: "log.chat", text: "hi" }), "ok");
+    assert.equal(code({ t: "log.whisper", to: ["p2"], text: "hi" }), "ok");
+    assert.equal(code({ t: "log.whisper", to: ["ghost"], text: "hi" }), "gone");
+    assert.equal(code({ t: "undo" }), "ok");
+    // Taking an HP change back from the log is the DM's.
+    assert.equal(code({ t: "undo", log: "4:0" }), "forbidden");
+    assert.equal(code({ t: "undo", log: "4:0" }, DM), "ok");
+  });
+
+  test("behind a blackout an op on the table answers as if nothing were there, a fight or the scene alike", () => {
+    const state = setup();
+    state.meta.settings.playersCreateCharacters = true;
+    delete state.tokens.pc1;
+    const ops: Op[] = [
+      { t: "encounter.add", entries: [{ id: "x", label: "probe", hidden: true }] },
+      { t: "token.create", token: { id: "t9", sceneId: "s1", kind: "pc", name: "Ayla", size: "medium", x: 4, y: 4, actor: { ref: "c1" } } },
+      { t: "token.create", token: { id: "t9", sceneId: "s1", kind: "pc", name: "Ayla", size: "medium", x: 500, y: 4, actor: { ref: "c1" } } },
+      { t: "drawing.create", drawing: drawing("d9", { ownerId: "p1" }) },
+      { t: "template.create", template: template("a9", { ownerId: "p1" }) },
+    ];
+    state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("n1", { tokenId: "gob" })] };
+    assert.deepEqual(
+      ops.map((op) => code(op, P1, state)),
+      ["forbidden", "ok", "forbidden", "ok", "ok"],
+      "in the light",
+    );
+    state.meta.view.blackout = true;
+    const paused = ops.map((op) => code(op, P1, state));
+    assert.deepEqual(paused, ops.map(() => "gone"), "behind the blackout, with a fight");
+    state.encounter = null;
+    assert.deepEqual(ops.map((op) => code(op, P1, state)), paused, "behind the blackout, without one");
+  });
+});
+
+describe("movement", () => {
+  test("owners move their own, others need the room's leave, and locked never moves", () => {
+    assert.equal(code({ t: "token.move", tokenId: "own", x: 0, y: 0 }), "ok");
+    assert.equal(code({ t: "token.move", tokenId: "pc1", x: 0, y: 0 }), "ok");
+    assert.equal(code({ t: "token.move", tokenId: "gob", x: 0, y: 0 }), "forbidden");
+    const open = setup();
+    open.meta.settings.playersMoveAny = "all";
+    assert.equal(code({ t: "token.move", tokenId: "gob", x: 0, y: 0 }, P1, open), "ok");
+    assert.equal(code({ t: "token.move", tokenId: "locked", x: 0, y: 0 }, P1, open), "forbidden");
+    assert.equal(code({ t: "token.moveMany", moves: [{ tokenId: "own", x: 0, y: 0 }, { tokenId: "gob", x: 1, y: 1 }] }), "forbidden");
+    assert.equal(code({ t: "token.moveMany", moves: [{ tokenId: "own", x: 0, y: 0 }, { tokenId: "gob", x: 1, y: 1 }] }, P1, open), "ok");
+  });
+
+  test("no one, everyone, or the players the DM picked move tokens they do not own", () => {
+    const moves = (who: MoveAnyToken, viewer: typeof P1, tokenId = "gob") => {
+      const state = setup();
+      state.meta.settings.playersMoveAny = who;
+      return [code({ t: "token.move", tokenId, x: 0, y: 0 }, viewer, state), code({ t: "token.moveMany", moves: [{ tokenId, x: 0, y: 0 }] }, viewer, state)];
+    };
+    assert.deepEqual(moves("none", P1), ["forbidden", "forbidden"]);
+    assert.deepEqual(moves("none", P1, "own"), ["ok", "ok"], "owners always move their own");
+    assert.deepEqual(moves("all", P1), ["ok", "ok"]);
+    assert.deepEqual(moves("all", P2), ["ok", "ok"]);
+    assert.deepEqual(moves(["p1"], P1), ["ok", "ok"]);
+    assert.deepEqual(moves(["p1"], P2), ["forbidden", "forbidden"]);
+    assert.deepEqual(moves([], P1), ["forbidden", "forbidden"]);
+    assert.deepEqual(moves(["p1"], P1, "locked"), ["forbidden", "forbidden"]);
+    assert.deepEqual(moves(["p1"], P1, "hidden"), ["gone", "gone"]);
+    assert.deepEqual(moves(["p2"], P2, "own"), ["ok", "ok"], "a chosen player moves other players' tokens too");
+    assert.equal(code({ t: "token.move", tokenId: "gob", x: 0, y: 0 }, DM), "ok");
+    for (const [who, p1, p2] of [["none", false, false], ["all", true, true], [["p1"], true, false], [["p2", "p9"], false, true], [[], false, false]] as const) {
+      const settings = { playersMoveAny: (Array.isArray(who) ? [...who] : who) as MoveAnyToken };
+      assert.deepEqual([movesAnyToken(settings, "p1"), movesAnyToken(settings, "p2")], [p1, p2], JSON.stringify(who));
+    }
+    assert.equal(movesAnyToken({}, "p1"), false, "a view without settings moves nothing");
+  });
+
+  test("a hidden token, a token under fog or one on another scene is gone, whatever the setting", () => {
+    const open = setup();
+    open.meta.settings.playersMoveAny = "all";
+    assert.equal(code({ t: "token.move", tokenId: "hidden", x: 0, y: 0 }, P1, open), "gone");
+    assert.equal(code({ t: "token.move", tokenId: "dark", x: 0, y: 0 }, P1, open), "gone");
+    assert.equal(code({ t: "token.move", tokenId: "other", x: 0, y: 0 }, P2, open), "gone");
+    assert.equal(code({ t: "token.move", tokenId: "nope", x: 0, y: 0 }, P1, open), "gone");
+    open.scenes.s1!.fogEnabled = false;
+    assert.equal(code({ t: "token.move", tokenId: "dark", x: 0, y: 0 }, P1, open), "ok");
+  });
+});
+
+describe("a move that doesn't count", () => {
+  test("the DM and the token's owners mark it, a locked token included, and nobody else", () => {
+    const state = setup();
+    const op = (tokenId: string): Op => ({ t: "token.countLeg", tokenId, counts: false });
+    assert.equal(code(op("gob"), DM, state), "ok");
+    assert.equal(code(op("own"), P1, state), "ok");
+    assert.equal(code(op("pc1"), P1, state), "ok", "through the character");
+    state.tokens.own!.locked = true;
+    assert.equal(code(op("own"), P1, state), "ok", "it says how the creature moved, which owners may on a locked token");
+    state.meta.settings.playersMoveAny = "all";
+    assert.equal(code(op("gob"), P1, state), "forbidden", "moving it is not owning it");
+    assert.equal(code(op("hidden"), P1, state), "gone");
+    assert.equal(code(op("dark"), P1, state), "gone");
+  });
+});
+
+describe("a player's undo of a move", () => {
+  const back = (state: ReturnType<typeof setup>, id: string, patch: object = {}): Op => ({
+    t: "sys.restore",
+    entries: [{ key: `token:${id}`, value: { ...state.tokens[id]!, x: 0, y: 0, elevation: 10, rotation: 90, rev: 7, ...patch } }],
+    from: "undo",
+    deps: true,
+  });
+
+  test("puts back a token the player may move, and changes nothing else about it", () => {
+    const state = setup();
+    assert.equal(code(back(state, "own"), P1, state), "ok");
+    assert.equal(code(back(state, "pc1"), P1, state), "ok");
+    assert.equal(code(back(state, "own", { path: { turn: 3, stops: [{ x: 0, y: 0, elevation: 0 }] } }), P1, state), "ok", "with the path of its turn as it was there");
+    assert.equal(code(back(state, "own", { name: "Renamed" }), P1, state), "forbidden");
+    assert.equal(code(back(state, "own", { visibility: "dm" }), P1, state), "forbidden");
+    assert.equal(code(back(state, "own", { ownerIds: ["p1", "p2"] }), P1, state), "forbidden");
+    assert.equal(code({ t: "sys.restore", entries: [{ key: "token:own", value: null }], from: "undo", deps: true }, P1, state), "forbidden");
+  });
+
+  test("only on a token the player may move now", () => {
+    const state = setup();
+    assert.equal(code(back(state, "gob"), P1, state), "forbidden");
+    state.meta.settings.playersMoveAny = "all";
+    assert.equal(code(back(state, "gob"), P1, state), "ok");
+    assert.equal(code(back(state, "locked"), P1, state), "forbidden");
+    assert.equal(code(back(state, "hidden"), P1, state), "gone");
+    assert.equal(code(back(state, "dark"), P1, state), "gone");
+    assert.equal(code({ t: "sys.restore", entries: [{ key: "token:nope", value: state.tokens.own }], from: "undo", deps: true }, P1, state), "gone");
+  });
+
+  test("on a locked token, an owner takes back a change of elevation or facing, which they may make, but no move", () => {
+    const state = setup();
+    state.tokens.own!.locked = true;
+    const { x, y } = state.tokens.own!;
+    assert.equal(code(back(state, "own", { x, y }), P1, state), "ok", "elevation and facing alone, as an owner may change them");
+    assert.equal(code(back(state, "own"), P1, state), "forbidden", "a move back needs the token unlocked");
+    assert.equal(code(back(state, "own", { x, y, sceneId: "s2" }), P1, state), "forbidden", "nor another scene");
+    state.meta.settings.playersMoveAny = "all";
+    const statue = state.tokens.locked!;
+    assert.equal(code(back(state, "locked", { x: statue.x, y: statue.y }), P1, state), "forbidden", "a mover who does not own it needs it unlocked");
+    state.tokens.own!.visibility = "dm";
+    state.tokens.own!.ownerIds = ["p2"];
+    assert.equal(code(back(state, "own", { x, y }), P1, state), "gone");
+  });
+});
+
+describe("token and character fields", () => {
+  test("owners patch only the allowed token fields, names only on PCs", () => {
+    assert.equal(code({ t: "token.update", tokenId: "own", patch: { rotation: 90, elevation: 5 } }), "ok");
+    assert.equal(code({ t: "token.update", tokenId: "own", patch: { rangeRings: [30, 60] } }), "ok", "owners set their creature's range rings");
+    assert.equal(code({ t: "token.update", tokenId: "gob", patch: { rangeRings: [30] } }), "forbidden");
+    assert.equal(code({ t: "token.update", tokenId: "own", patch: { name: "Fluffy" } }), "forbidden");
+    assert.equal(code({ t: "token.update", tokenId: "pc1", patch: { name: "Ayla", publicName: "A" } }), "ok");
+    assert.equal(code({ t: "token.update", tokenId: "own", patch: { visibility: "dm" } }), "forbidden");
+    assert.equal(code({ t: "token.update", tokenId: "own", patch: { ownerIds: ["p1", "p2"] } }), "forbidden");
+    assert.equal(code({ t: "token.update", tokenId: "own", patch: { actor: { dmNotes: "x" } } }), "forbidden");
+    assert.equal(code({ t: "token.update", tokenId: "own", patch: { notes: "Raging" } }), "ok");
+    assert.equal(code({ t: "token.update", tokenId: "pc1", patch: { notes: null } }), "ok");
+    assert.equal(code({ t: "token.update", tokenId: "gob", patch: { notes: "Mine now" } }), "forbidden");
+    const img = (assetId: string) => ({ assetId, crop: { cx: 0, cy: 0, zoom: 1 } });
+    assert.equal(code({ t: "token.update", tokenId: "own", patch: { image: img("p1-wolf"), altImages: [img("p1-elf"), img("shared")] } }), "ok");
+    assert.equal(code({ t: "token.update", tokenId: "own", patch: { altImages: [img("p1-elf"), img("p2-secret")] } }), "gone");
+    assert.equal(code({ t: "token.update", tokenId: "own", patch: { altImages: null } }), "ok");
+    assert.equal(code({ t: "token.update", tokenId: "gob", patch: { altImages: [img("p1-elf")] } }), "forbidden");
+    assert.equal(code({ t: "token.update", tokenId: "gob", patch: { altImages: [img("dm1-face"), img("p1-elf")] } }, DM), "gone");
+    assert.equal(code({ t: "token.update", tokenId: "gob", patch: { altImages: [img("dm1-face")] } }, DM), "ok");
+    assert.equal(code({ t: "token.update", tokenId: "gob", patch: { rotation: 1 } }), "forbidden");
+    assert.equal(code({ t: "token.update", tokenId: "hidden", patch: { rotation: 1 } }), "gone");
+    assert.equal(code({ t: "token.update", tokenId: "own", patch: { image: { assetId: "p1-pic", crop: { cx: 0, cy: 0, zoom: 1 } } } }), "ok");
+    assert.equal(code({ t: "token.update", tokenId: "own", patch: { image: { assetId: "dm1-secret", crop: { cx: 0, cy: 0, zoom: 1 } } } }), "gone");
+  });
+
+  test("character owners edit the allowed fields only", () => {
+    assert.equal(code({ t: "character.update", characterId: "c1", patch: { name: "A", actor: { hp: { cur: 5 }, ac: 16, sheetUrl: "https://x" } } }), "ok");
+    assert.equal(code({ t: "character.update", characterId: "c1", patch: { ownerIds: ["p2"] } }), "forbidden");
+    assert.equal(code({ t: "character.update", characterId: "c1", patch: { actor: { dmNotes: "x" } } }), "forbidden");
+    assert.equal(code({ t: "character.update", characterId: "c1", patch: { actor: { legendary: null } } }), "forbidden");
+    assert.equal(code({ t: "character.update", characterId: "c1", patch: { name: "A" } }, P2), "forbidden");
+    // A player keeps their own character's level, for the DM's encounter budget.
+    assert.equal(code({ t: "character.update", characterId: "c1", patch: { level: 5 } }), "ok");
+    assert.equal(code({ t: "character.update", characterId: "c1", patch: { level: null } }), "ok");
+    assert.equal(code({ t: "character.update", characterId: "c1", patch: { level: 5 } }, P2), "forbidden");
+    assert.equal(code({ t: "character.update", characterId: "nope", patch: { name: "A" } }), "gone");
+    assert.equal(code({ t: "character.update", characterId: "c1", patch: { defaultImage: { assetId: "shared", crop: { cx: 0, cy: 0, zoom: 1 } } } }), "ok");
+    assert.equal(code({ t: "character.update", characterId: "c1", patch: { defaultImage: { assetId: "dm1-x", crop: { cx: 0, cy: 0, zoom: 1 } } } }), "gone");
+  });
+});
+
+describe("HP and effects", () => {
+  test("owners apply any change, others need playersApplyDamage and only for damage and healing", () => {
+    assert.equal(code({ t: "actor.hp", target: { tokenId: "own" }, change: { kind: "set", cur: 1 } }), "ok");
+    assert.equal(code({ t: "actor.hp", target: { characterId: "c1" }, change: { kind: "temp", amount: 3 } }), "ok");
+    assert.equal(code({ t: "actor.hp", target: { tokenId: "gob" }, change: { kind: "damage", amount: 3 } }), "forbidden");
+    const open = setup();
+    open.meta.settings.playersApplyDamage = true;
+    assert.equal(code({ t: "actor.hp", target: { tokenId: "gob" }, change: { kind: "damage", amount: 3 } }, P1, open), "ok");
+    assert.equal(code({ t: "actor.hp", target: { tokenId: "gob" }, change: { kind: "heal", amount: 3 } }, P1, open), "ok");
+    assert.equal(code({ t: "actor.hp", target: { tokenId: "gob" }, change: { kind: "set", cur: 0 } }, P1, open), "forbidden");
+    assert.equal(code({ t: "actor.hp", target: { tokenId: "hidden" }, change: { kind: "damage", amount: 3 } }, P1, open), "gone");
+    assert.equal(code({ t: "actor.hp", target: { tokenId: "dark" }, change: { kind: "damage", amount: 3 } }, P1, open), "gone");
+    assert.equal(code({ t: "actor.hp", target: { characterId: "c1" }, change: { kind: "damage", amount: 3 } }, P2, open), "forbidden");
+    assert.equal(code({ t: "actor.hp", target: { characterId: "nope" }, change: { kind: "damage", amount: 3 } }, P2, open), "gone");
+  });
+
+  test("an area's damage is the DM's to confirm, whatever the targets and the room's settings", () => {
+    const op: Op = { t: "actor.damageMany", hits: [{ target: { tokenId: "own" }, amount: 3 }, { target: { tokenId: "gob" }, amount: 1 }] };
+    assert.equal(code(op, DM), "ok");
+    const open = setup();
+    open.meta.settings.playersApplyDamage = true;
+    assert.equal(code(op, P1, open), "forbidden");
+    // The same answer for a hidden creature, so the refusal tells a player nothing.
+    assert.equal(code({ t: "actor.damageMany", hits: [{ target: { tokenId: "hidden" }, amount: 3 }] }, P1, open), "forbidden");
+  });
+
+  test("death saves and effects belong to owners, and anchors must be visible", () => {
+    assert.equal(code({ t: "actor.deathSave", target: { characterId: "c1" }, ok: 1, fail: 0 }), "ok");
+    assert.equal(code({ t: "actor.deathSave", target: { characterId: "c1" }, ok: 1, fail: 0 }, P2), "forbidden");
+    assert.equal(code({ t: "actor.effect.add", target: { tokenId: "own" }, effect: { id: "e", key: "blessed" } }), "ok");
+    assert.equal(code({ t: "actor.effect.add", target: { tokenId: "gob" }, effect: { id: "e", key: "blessed" } }), "forbidden");
+    assert.equal(code({ t: "actor.effect.add", target: { tokenId: "own" }, effect: { id: "e", key: "blessed", duration: { mode: "turnEnd", of: { tokenId: "gob" } } } }), "ok");
+    assert.equal(code({ t: "actor.effect.add", target: { tokenId: "own" }, effect: { id: "e", key: "blessed", duration: { mode: "turnEnd", of: { tokenId: "hidden" } } } }), "gone");
+    assert.equal(code({ t: "actor.effect.add", target: { tokenId: "own" }, effect: { id: "e", key: "blessed", duration: { mode: "turnEnd", of: { entryId: "nope" } } } }), "gone");
+    const state = setup();
+    (state.tokens.own!.actor as { inline: { effects: object[] } }).inline.effects = [{ id: "e", key: "blessed" }];
+    state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("n1", { tokenId: "gob" }), entry("n2", { tokenId: "hidden" }), entry("n3", { tokenId: "own", hidden: true })] };
+    assert.equal(code({ t: "actor.effect.update", target: { tokenId: "own" }, effectId: "e", patch: { duration: { mode: "rounds", rounds: 2, of: { entryId: "n1" } } } }, P1, state), "ok");
+    assert.equal(code({ t: "actor.effect.update", target: { tokenId: "own" }, effectId: "e", patch: { duration: { mode: "rounds", rounds: 2, of: { entryId: "n2" } } } }, P1, state), "gone");
+    assert.equal(code({ t: "actor.effect.update", target: { tokenId: "own" }, effectId: "e", patch: { duration: { mode: "rounds", rounds: 2, of: { entryId: "n3" } } } }, P1, state), "gone");
+    assert.equal(code({ t: "actor.effect.remove", target: { tokenId: "own" }, effectId: "e" }, P1, state), "ok");
+    assert.equal(code({ t: "actor.effect.remove", target: { tokenId: "hidden" }, effectId: "e" }), "gone");
+  });
+
+  test("a condition the DM hid is not there for the creature's owner, and only the DM hides one", () => {
+    const state = setup();
+    const hidden = { id: "secret", key: "poisoned" as const, hiddenFromPlayers: true };
+    state.characters.c1!.actor.effects = [hidden, { id: "seen", key: "blessed" }];
+    (state.tokens.own!.actor as { inline: { effects: object[] } }).inline.effects = [hidden];
+    for (const target of [{ characterId: "c1" }, { tokenId: "pc1" }, { tokenId: "own" }]) {
+      // The same answer as an effect that does not exist, so a refusal never confirms a hidden one.
+      assert.equal(code({ t: "actor.effect.remove", target, effectId: "secret" }, P1, state), "gone");
+      assert.equal(code({ t: "actor.effect.update", target, effectId: "secret", patch: { level: 2 } }, P1, state), "gone");
+      assert.equal(code({ t: "actor.effect.add", target, effect: { id: "secret", key: "blessed" } }, P1, state), "gone");
+      assert.equal(code({ t: "actor.effect.add", target, effect: { id: "mine", key: "blessed", hiddenFromPlayers: true } }, P1, state), "forbidden");
+      assert.equal(code({ t: "actor.effect.remove", target, effectId: "secret" }, DM, state), "ok");
+      assert.equal(code({ t: "actor.effect.add", target, effect: { id: "mine", key: "blessed", hiddenFromPlayers: true } }, DM, state), "ok");
+    }
+    assert.equal(code({ t: "actor.effect.remove", target: { characterId: "c1" }, effectId: "seen" }, P1, state), "ok");
+    assert.equal(code({ t: "actor.effect.update", target: { characterId: "c1" }, effectId: "seen", patch: { hiddenFromPlayers: true } }, P1, state), "forbidden");
+    assert.equal(code({ t: "actor.effect.update", target: { characterId: "c1" }, effectId: "seen", patch: { hiddenFromPlayers: false } }, P1, state), "forbidden");
+    assert.equal(code({ t: "actor.effect.update", target: { characterId: "c1" }, effectId: "seen", patch: { hiddenFromPlayers: true } }, DM, state), "ok");
+  });
+
+  test("an owner's change to a hidden condition gets the very answer one that is not there gets, whatever the change", () => {
+    const state = setup();
+    state.characters.c1!.actor.effects = [{ id: "secret", key: "poisoned", hiddenFromPlayers: true }];
+    state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("n2", { tokenId: "hidden" })] };
+    const target = { characterId: "c1" };
+    const patches = [{ level: 2 }, { hiddenFromPlayers: false }, { label: "x" }, { duration: { mode: "rounds" as const, rounds: 2, of: { entryId: "n2" } } }, { duration: null }];
+    const answer = (op: Op) => canApply(op, P1, state, deps);
+    for (const patch of patches) {
+      const hidden = answer({ t: "actor.effect.update", target, effectId: "secret", patch });
+      assert.deepEqual(answer({ t: "actor.effect.update", target, effectId: "removed", patch }), hidden, JSON.stringify(patch));
+      assert.deepEqual(hidden, { ok: false, code: "gone", message: "that is not here" });
+    }
+    assert.deepEqual(answer({ t: "actor.effect.remove", target, effectId: "secret" }), answer({ t: "actor.effect.remove", target, effectId: "removed" }));
+    assert.deepEqual(answer({ t: "actor.effect.remove", target, effectId: "secret" }), { ok: false, code: "gone", message: "that is not here" });
+  });
+});
+
+describe("an Exhaustion level", () => {
+  const bad = { ok: false, code: "invalid", message: "Exhaustion is level 1 to 6" };
+
+  test("is 1 to 6 on every op that sets one, from the DM or an owner, and any other counter 0 to 99", () => {
+    const state = setup();
+    state.characters.c1!.actor.effects = [{ id: "x", key: "exhaustion", level: 2 }, { id: "c", key: "blessed", level: 3 }];
+    const target = { characterId: "c1" };
+    for (const who of [DM, P1]) {
+      for (const level of [0, 7, 99]) assert.deepEqual(canApply({ t: "actor.effect.add", target, effect: { id: "n", key: "exhaustion", level } }, who, state, deps), bad);
+      for (const level of [1, 6]) assert.equal(code({ t: "actor.effect.add", target, effect: { id: "n", key: "exhaustion", level } }, who, state), "ok");
+      assert.equal(code({ t: "actor.effect.add", target, effect: { id: "n", key: "blessed", level: 99 } }, who, state), "ok");
+      for (const level of [0, 7, null]) assert.deepEqual(canApply({ t: "actor.effect.update", target, effectId: "x", patch: { level } }, who, state, deps), bad, String(level));
+      assert.equal(code({ t: "actor.effect.update", target, effectId: "x", patch: { level: 6 } }, who, state), "ok");
+      assert.equal(code({ t: "actor.effect.update", target, effectId: "c", patch: { level: 0 } }, who, state), "ok");
+      assert.equal(code({ t: "actor.effect.update", target, effectId: "x", patch: { label: "x" } }, who, state), "ok", "a change that leaves the level alone");
+    }
+  });
+
+  test("holds for the actor a new token or character brings, and a hidden one is still answered as not there", () => {
+    const state = setup();
+    const actorWith = (level: number) => actor({ effects: [{ id: "e", key: "exhaustion", level }] });
+    for (const level of [0, 9]) {
+      assert.deepEqual(canApply({ t: "token.create", token: { id: "t9", sceneId: "s1", kind: "monster", name: "Gob", size: "medium", x: 1, y: 1, actor: { inline: actorWith(level) } } }, DM, state, deps), bad);
+      assert.deepEqual(canApply({ t: "character.create", character: { id: "c9", name: "Bo", size: "small", ownerIds: [], actor: actorWith(level) } }, DM, state, deps), bad);
+    }
+    assert.equal(code({ t: "character.create", character: { id: "c9", name: "Bo", size: "small", ownerIds: [], actor: actorWith(3) } }, DM, state), "ok");
+    state.characters.c1!.actor.effects = [{ id: "secret", key: "exhaustion", level: 2, hiddenFromPlayers: true }];
+    assert.equal(code({ t: "actor.effect.update", target: { characterId: "c1" }, effectId: "secret", patch: { level: 9 } }, P1, state), "gone");
+  });
+});
+
+describe("areas and drawings", () => {
+  const area = (overrides: object) => ({ id: "new", sceneId: "s1", shape: "sphere" as const, size: 20, origin: { x: 1, y: 1, z: 0 }, yaw: 0, includeOrigin: true, color: "#ff0000", ownerId: "p1", visibility: "all" as const, ...overrides });
+
+  test("players create their own visible areas on the player scene, with visible references", () => {
+    assert.equal(code({ t: "template.create", template: area({}) }), "ok");
+    assert.equal(code({ t: "template.create", template: area({ ownerId: "p2" }) }), "forbidden");
+    assert.equal(code({ t: "template.create", template: area({ visibility: "dm" }) }), "forbidden");
+    assert.equal(code({ t: "template.create", template: area({ sceneId: "s2" }) }), "gone");
+    assert.equal(code({ t: "template.create", template: area({ attachedTo: "hidden" }) }), "gone");
+    assert.equal(code({ t: "template.create", template: area({ casterId: "dark" }) }), "gone");
+    assert.equal(code({ t: "template.create", template: area({ attachedTo: "gob", casterId: "own" }) }), "ok");
+    const state = setup();
+    state.templates.new = template("new", { visibility: "dm", ownerId: "dm1" });
+    assert.equal(code({ t: "template.create", template: area({}) }, P1, state), "gone");
+  });
+
+  test("players edit and delete only their own, and cannot see withheld ones", () => {
+    const state = setup();
+    state.templates.mine = template("mine", { ownerId: "p1" });
+    state.templates.theirs = template("theirs", { ownerId: "p2" });
+    state.templates.secret = template("secret", { ownerId: "p1", attachedTo: "hidden" });
+    assert.equal(code({ t: "template.update", templateId: "mine", patch: { size: 30 } }, P1, state), "ok");
+    assert.equal(code({ t: "template.update", templateId: "mine", patch: { visibility: "dm" } }, P1, state), "forbidden");
+    assert.equal(code({ t: "template.update", templateId: "mine", patch: { attachedTo: "hidden" } }, P1, state), "gone");
+    assert.equal(code({ t: "template.update", templateId: "theirs", patch: { size: 30 } }, P1, state), "forbidden");
+    assert.equal(code({ t: "template.update", templateId: "secret", patch: { size: 30 } }, P1, state), "gone");
+    assert.equal(code({ t: "template.delete", templateId: "mine" }, P1, state), "ok");
+    assert.equal(code({ t: "template.delete", templateId: "theirs" }, P1, state), "forbidden");
+    assert.equal(code({ t: "template.delete", templateId: "nope" }, P1, state), "gone");
+    state.meta.settings.playersSeeAoeOfOthers = false;
+    assert.equal(code({ t: "template.delete", templateId: "theirs" }, P1, state), "gone");
+  });
+
+  test("drawings follow the same shape", () => {
+    const state = setup();
+    state.drawings.mine = drawing("mine", { ownerId: "p1" });
+    state.drawings.theirs = drawing("theirs", { ownerId: "p2" });
+    state.drawings.dm = drawing("dm", { ownerId: "dm1", visibility: "dm" });
+    const d = (overrides: object) => ({ id: "new", sceneId: "s1", kind: "line" as const, points: [0, 0, 1, 1], style: { stroke: "#ffffff", width: 1, opacity: 1 }, ownerId: "p1", visibility: "all" as const, ...overrides });
+    assert.equal(code({ t: "drawing.create", drawing: d({}) }, P1, state), "ok");
+    assert.equal(code({ t: "drawing.create", drawing: d({ id: "dm" }) }, P1, state), "gone");
+    assert.equal(code({ t: "drawing.create", drawing: d({ ownerId: "p2" }) }, P1, state), "forbidden");
+    assert.equal(code({ t: "drawing.create", drawing: d({ visibility: "dm" }) }, P1, state), "forbidden");
+    assert.equal(code({ t: "drawing.create", drawing: d({ sceneId: "s2" }) }, P1, state), "gone");
+    assert.equal(code({ t: "drawing.delete", drawingId: "mine" }, P1, state), "ok");
+    assert.equal(code({ t: "drawing.delete", drawingId: "theirs" }, P1, state), "forbidden");
+    assert.equal(code({ t: "drawing.delete", drawingId: "dm" }, P1, state), "gone");
+    assert.equal(code({ t: "drawing.clear", sceneId: "s1", scope: "own" }, P1, state), "ok");
+    assert.equal(code({ t: "drawing.clear", sceneId: "s2", scope: "own" }, P1, state), "gone");
+    assert.equal(code({ t: "sys.restore", entries: [{ key: "drawing:mine", value: state.drawings.mine, expectRev: null }], from: "undo" }, P1, state), "ok");
+    assert.equal(code({ t: "sys.restore", entries: [{ key: "drawing:theirs", value: null, expectRev: 0 }], from: "undo" }, P1, state), "forbidden");
+    assert.equal(code({ t: "sys.restore", entries: [{ key: "token:own", value: null, expectRev: 0 }], from: "undo" }, P1, state), "forbidden");
+  });
+
+  test("a player's restore of a drawing off the player scene answers gone, whether that scene is there or deleted", () => {
+    const state = setup();
+    state.drawings.away = drawing("away", { ownerId: "p1", sceneId: "s2" });
+    const restore = (entry: { key: string; value: unknown }): Op => ({ t: "sys.restore", entries: [entry], from: "undo", deps: true });
+    // Putting back an erased drawing, on the players' scene, on another, and on one deleted since.
+    assert.equal(code(restore({ key: "drawing:gone1", value: drawing("gone1", { ownerId: "p1" }) }), P1, state), "ok");
+    assert.equal(code(restore({ key: "drawing:gone2", value: drawing("gone2", { ownerId: "p1", sceneId: "s2" }) }), P1, state), "gone");
+    assert.equal(code(restore({ key: "drawing:gone3", value: drawing("gone3", { ownerId: "p1", sceneId: "deleted" }) }), P1, state), "gone");
+    // Taking back a drawing that now stands on another scene.
+    assert.equal(code(restore({ key: "drawing:away", value: null }), P1, state), "gone");
+  });
+
+  test("a player's kept ruler stands only on tokens they can see", () => {
+    const ruler = (anchors: (string | null)[]) => ({
+      id: "kept",
+      sceneId: "s1",
+      kind: "ruler" as const,
+      points: [1.5, 1.5, 2.5, 2.5],
+      style: { stroke: "#ffffff", width: 3, opacity: 1 },
+      ownerId: "p1",
+      visibility: "all" as const,
+      anchors,
+    });
+    assert.equal(code({ t: "drawing.create", drawing: ruler(["pc1", "gob"]) }), "ok");
+    assert.equal(code({ t: "drawing.create", drawing: ruler(["pc1", null]) }), "ok");
+    for (const unseen of ["hidden", "dark", "other", "missing"]) {
+      assert.equal(code({ t: "drawing.create", drawing: ruler(["pc1", unseen]) }), "gone", unseen);
+    }
+    assert.equal(code({ t: "drawing.create", drawing: { ...ruler(["pc1", "hidden"]), ownerId: "dm1", visibility: "dm" } }, DM), "ok");
+  });
+});
+
+describe("encounter", () => {
+  function combat() {
+    const state = setup();
+    state.encounter = {
+      rev: 0,
+      round: 1,
+      activeEntryId: "n1",
+      entries: [entry("n1", { tokenId: "pc1", value: 20 }), entry("n2", { tokenId: "gob", value: 10, tieOrder: 1 }), entry("n3", { tokenId: "hidden", value: 5, tieOrder: 2 }), entry("n4", { label: "Lair", value: 20, tieOrder: 3 })],
+    };
+    return state;
+  }
+
+  test("players add and remove their own creatures and set their own values", () => {
+    const state = combat();
+    assert.equal(code({ t: "encounter.add", entries: [{ id: "x", tokenId: "own" }] }, P1, state), "ok");
+    assert.equal(code({ t: "encounter.add", entries: [{ id: "x", characterId: "c1" }] }, P1, state), "ok");
+    assert.equal(code({ t: "encounter.add", entries: [{ id: "x", tokenId: "gob" }] }, P1, state), "forbidden");
+    assert.equal(code({ t: "encounter.add", entries: [{ id: "x", tokenId: "hidden" }] }, P1, state), "gone");
+    assert.equal(code({ t: "encounter.add", entries: [{ id: "n1", tokenId: "own" }] }, P1, state), "gone");
+    assert.equal(code({ t: "encounter.add", entries: [{ id: "x", label: "Lair" }] }, P1, state), "forbidden");
+    assert.equal(code({ t: "encounter.add", entries: [{ id: "x", tokenId: "own", hidden: true }] }, P1, state), "forbidden");
+    assert.equal(code({ t: "encounter.add", entries: [{ id: "x", tokenId: "own" }] }, P1, setup()), "gone");
+    assert.equal(code({ t: "encounter.remove", entryIds: ["n1"] }, P1, state), "ok");
+    assert.equal(code({ t: "encounter.remove", entryIds: ["n2"] }, P1, state), "forbidden");
+    assert.equal(code({ t: "encounter.remove", entryIds: ["n3"] }, P1, state), "gone");
+    assert.equal(code({ t: "encounter.remove", entryIds: ["n4"] }, P1, state), "forbidden");
+    assert.equal(code({ t: "encounter.setValue", entryId: "n1", value: 3 }, P1, state), "ok");
+    assert.equal(code({ t: "encounter.setValue", entryId: "n1", value: 3 }, P2, state), "forbidden");
+    assert.equal(code({ t: "encounter.setValue", entryId: "n3", value: 3 }, P1, state), "gone");
+  });
+
+  test("players mark their own row's reaction spent, and every other row flag stays the DM's", () => {
+    const state = combat();
+    assert.equal(code({ t: "encounter.update", entryId: "n1", patch: { reactionUsed: true } }, P1, state), "ok");
+    assert.equal(code({ t: "encounter.update", entryId: "n1", patch: { reactionUsed: false } }, P1, state), "ok");
+    assert.equal(code({ t: "encounter.update", entryId: "n1", patch: { reactionUsed: true } }, P2, state), "forbidden");
+    assert.equal(code({ t: "encounter.update", entryId: "n2", patch: { reactionUsed: true } }, P1, state), "forbidden");
+    assert.equal(code({ t: "encounter.update", entryId: "n3", patch: { reactionUsed: true } }, P1, state), "gone");
+    for (const patch of [{ hidden: false }, { inLair: true }, { advantage: "adv" as const }, { label: "x" }, { groupKey: null }, { reactionUsed: true, hidden: false }]) {
+      assert.equal(code({ t: "encounter.update", entryId: "n1", patch }, P1, state), "forbidden", JSON.stringify(patch));
+    }
+    assert.equal(code({ t: "encounter.update", entryId: "n1", patch: { reactionUsed: true } }, P1, setup()), "gone");
+  });
+
+  test("End Turn is allowed only on the player's own turn", () => {
+    const state = combat();
+    assert.equal(code({ t: "encounter.next" }, P1, state), "ok");
+    assert.equal(code({ t: "encounter.next" }, P2, state), "forbidden");
+    state.encounter!.activeEntryId = "n3";
+    assert.equal(code({ t: "encounter.next" }, P1, state), "gone");
+    state.encounter!.activeEntryId = null;
+    assert.equal(code({ t: "encounter.next" }, P1, state), "gone");
+    assert.equal(code({ t: "encounter.next" }, P1, setup()), "gone");
+  });
+
+  test("an End Turn that arrives after the turn moved on is taken, since it changes nothing, and never tells whose turn it is", () => {
+    const state = combat();
+    const next = (entry: string | null, round = 1): Op => ({ t: "encounter.next", from: { entry, round } });
+    assert.equal(code(next("n1"), P1, state), "ok");
+    assert.equal(code(next("n1"), P2, state), "forbidden");
+    // The DM pressed Next first: the turn is a goblin's now, and the player's late press does nothing.
+    state.encounter!.activeEntryId = "n2";
+    assert.equal(code(next("n1"), P1, state), "ok");
+    assert.equal(code(next("n1"), P2, state), "ok");
+    // The same row in a later round is another turn.
+    state.encounter!.activeEntryId = "n1";
+    state.encounter!.round = 2;
+    assert.equal(code(next("n1"), P1, state), "ok");
+    assert.equal(code(next("n1", 2), P2, state), "forbidden");
+    assert.equal(code(next("n1"), P1, setup()), "gone");
+    // Previous stays the DM's, late or not.
+    assert.equal(code({ t: "encounter.prev", from: { entry: "n1", round: 1 } }, P1, state), "forbidden");
+  });
+
+  test("while a hidden row acts, every guarded press is answered alike, whichever row it names", () => {
+    const state = combat();
+    state.encounter!.activeEntryId = "n3";
+    const answers = ["n3", "n1", "n2", null].map((entry) => code({ t: "encounter.next", from: { entry, round: 1 } }, P1, state));
+    assert.deepEqual(answers, ["ok", "ok", "ok", "ok"]);
+    assert.equal(code({ t: "encounter.next", from: { entry: "n3", round: 2 } }, P1, state), "ok");
+    // Before the first turn too: no row acts, and a player cannot start the fight.
+    state.encounter!.activeEntryId = null;
+    assert.equal(code({ t: "encounter.next", from: { entry: null, round: 1 } }, P1, state), "ok");
+    assert.equal(code({ t: "encounter.next", from: { entry: "n1", round: 1 } }, P1, state), "ok");
+  });
+
+  test("while the player's own row acts out of their view, every guarded press is answered alike too", () => {
+    for (const hide of ["row", "scene"] as const) {
+      const state = combat();
+      if (hide === "row") state.encounter!.entries.find((e) => e.id === "n1")!.hidden = true;
+      else state.tokens.pc1!.sceneId = "s2";
+      const answers = ["n1", "n2", null].map((entry) => code({ t: "encounter.next", from: { entry, round: 1 } }, P1, state));
+      assert.deepEqual(answers, ["ok", "ok", "ok"], hide);
+      assert.equal(code({ t: "encounter.next" }, P1, state), "gone", hide);
+    }
+  });
+
+  test("behind a blackout every press is gone, whether a row acts and whichever it names", () => {
+    for (const active of ["n1", "n2", "n3", null]) {
+      const state = combat();
+      state.meta.view.blackout = true;
+      state.encounter!.activeEntryId = active;
+      for (const entry of ["n1", "n2", "n3", null]) {
+        assert.equal(code({ t: "encounter.next", from: { entry, round: 1 } }, P1, state), "gone", `${active} acting, ${entry} named`);
+      }
+      assert.equal(code({ t: "encounter.next" }, P1, state), "gone");
+    }
+  });
+});
+
+describe("players creating their own characters", () => {
+  const img = (assetId: string) => ({ assetId, crop: { cx: 0, cy: 0, zoom: 1 } });
+  const on = () => {
+    const state = setup();
+    state.meta.settings.playersCreateCharacters = true;
+    return state;
+  };
+  const create = (over: Record<string, unknown> = {}): Op =>
+    ({ t: "character.create", character: { id: "new", name: "Wren", size: "medium", ownerIds: ["p1"], actor: actor({ dmNotes: "" }), ...over } }) as Op;
+  const place = (over: Record<string, unknown> = {}): Op =>
+    ({ t: "token.create", token: { id: "t9", sceneId: "s1", kind: "pc", name: "Ayla", size: "medium", x: 4, y: 4, actor: { ref: "c1" }, ...over } }) as Op;
+
+  test("off, as by default and in rooms from before the setting, players get today's refusal", () => {
+    assert.equal(code(create()), "forbidden");
+    assert.equal(code(place()), "forbidden");
+    const old = setup();
+    delete (old.meta.settings as Partial<typeof old.meta.settings>).playersCreateCharacters;
+    assert.equal(code(create(), P1, old), "forbidden");
+    assert.equal(code(place(), P1, old), "forbidden");
+  });
+
+  test("on, a player makes a plain character owned by themselves alone, with their own portrait", () => {
+    assert.equal(code(create(), P1, on()), "ok");
+    assert.equal(code(create({ defaultImage: img("p1-face") }), P1, on()), "ok");
+    assert.equal(code(create({ defaultImage: img("p2-face") }), P1, on()), "gone");
+    assert.equal(code(create({ ownerIds: ["p2"] }), P1, on()), "forbidden");
+    assert.equal(code(create({ ownerIds: ["p1", "p2"] }), P1, on()), "forbidden");
+    assert.equal(code(create({ ownerIds: [] }), P1, on()), "forbidden");
+    assert.equal(code(create({ id: "c1" }), P1, on()), "gone");
+    assert.equal(code(create({ actor: actor({ dmNotes: "secret" }) }), P1, on()), "forbidden");
+    assert.equal(code(create({ actor: actor({ dmNotes: "", life: "dead" }) }), P1, on()), "forbidden");
+    assert.equal(code(create({ actor: actor({ dmNotes: "", effects: [{ id: "e", key: "blessed" }] }) }), P1, on()), "forbidden");
+  });
+
+  test("a player's new character starts unhurt: full HP above 0 and no temporary HP", () => {
+    const hp = (cur: number, max: number, temp = 0) => create({ actor: actor({ dmNotes: "", hp: { cur, max, temp } }) });
+    assert.equal(code(hp(12, 12), P1, on()), "ok");
+    assert.equal(code(hp(5, 12), P1, on()), "forbidden", "wounded");
+    assert.equal(code(hp(0, 12), P1, on()), "forbidden", "down");
+    assert.equal(code(hp(0, 0), P1, on()), "forbidden", "no HP at all");
+    assert.equal(code(hp(12, 12, 999), P1, on()), "forbidden", "temporary HP");
+    assert.equal(code(create({ actor: actor({ dmNotes: "", deathSaves: { ok: 0, fail: 2 } }) }), P1, on()), "forbidden");
+    // The DM sets up a character however the story needs.
+    assert.equal(code(hp(0, 12, 999), DM, on()), "ok");
+  });
+
+  test("a player's token takes its character's size, under any name", () => {
+    const state = on();
+    delete state.tokens.pc1;
+    assert.equal(code(place({ name: "Ayla the Bold" }), P1, state), "ok", "owners may name a PC's token");
+    assert.equal(code(place({ size: "large" }), P1, state), "forbidden");
+    assert.equal(code(place({ size: "custom", w: 20, h: 20, x: 0, y: 0 }), P1, state), "forbidden");
+    assert.equal(code(place({ w: 2 }), P1, state), "forbidden");
+    state.characters.c1 = character("c1", { ownerIds: ["p1"], size: "small" });
+    assert.equal(code(place({ size: "small" }), P1, state), "ok");
+    assert.equal(code(place(), P1, state), "forbidden", "medium is not this character's size");
+  });
+
+  test("a player's token never carries the DM's party mark, set or unset", () => {
+    const state = on();
+    delete state.tokens.pc1;
+    assert.equal(code(place(), P1, state), "ok");
+    assert.equal(code(place({ partyVision: true }), P1, state), "forbidden");
+    assert.equal(code(place({ partyVision: false }), P1, state), "forbidden");
+    // The token's own light is the owner's (docs/design-v1-maps-vision.md 4.3.9).
+    assert.equal(code(place({ light: { bright: 20, dim: 20 } }), P1, state), "ok");
+  });
+
+  test("at most three characters each, counting the ones the DM gave them", () => {
+    const state = on();
+    state.characters.c2 = character("c2", { ownerIds: ["p1"] });
+    assert.equal(code(create(), P1, state), "ok");
+    state.characters.c3 = character("c3", { ownerIds: ["p1", "p2"] });
+    const d = canApply(create(), P1, state, deps);
+    assert.ok(!d.ok && d.code === "forbidden" && /at most 3/.test(d.message));
+    assert.equal(code(create({ ownerIds: ["p2"] }), P2, state), "ok", "p2 owns one of them");
+  });
+
+  test("a player places their own character's token on the players' scene, inside it, once", () => {
+    const state = on();
+    delete state.tokens.pc1;
+    assert.equal(code(place(), P1, state), "ok");
+    assert.equal(code(place({ ownerIds: ["p1"] }), P1, state), "ok");
+    assert.equal(code(place({ image: img("p1-face") }), P1, state), "ok");
+    assert.equal(code(place({ hpVisibility: "exact", disposition: "ally" }), P1, state), "ok");
+    assert.equal(code(place(), P2, state), "forbidden", "not their character");
+    assert.equal(code(place({ actor: { ref: "nope" } }), P1, state), "gone");
+    assert.equal(code(place({ sceneId: "s2" }), P1, state), "gone");
+    assert.equal(code(place({ x: -1 }), P1, state), "forbidden");
+    assert.equal(code(place({ x: state.scenes.s1!.bounds.w - 0.5 }), P1, state), "forbidden");
+    assert.equal(code(place({ ownerIds: ["p1", "p2"] }), P1, state), "forbidden");
+    assert.equal(code(place({ id: "gob" }), P1, state), "gone");
+    assert.equal(code(place({ image: img("p2-face") }), P1, state), "gone");
+    for (const over of [{ kind: "monster" }, { visibility: "dm" }, { fogExempt: true }, { locked: true }, { nameHidden: true }, { number: 2 }, { hpVisibility: "hidden" }, { layer: "object" }]) {
+      assert.equal(code(place(over), P1, state), "forbidden", JSON.stringify(over));
+    }
+    assert.equal(code(place({ actor: { inline: actor() } }), P1, state), "forbidden");
+    state.tokens.pc1 = token("pc1", { kind: "pc", actor: { ref: "c1" }, x: 1, y: 1 });
+    assert.equal(code(place(), P1, state), "forbidden", "already on the map");
+  });
+
+  test("the DM still edits, takes over and deletes them", () => {
+    const state = on();
+    state.characters.mine = character("mine", { ownerIds: ["p1"] });
+    assert.equal(code({ t: "character.update", characterId: "mine", patch: { ownerIds: ["p2"] } }, DM, state), "ok");
+    assert.equal(code({ t: "character.delete", characterId: "mine" }, DM, state), "ok");
+    assert.equal(code({ t: "token.delete", tokenId: "pc1" }, DM, state), "ok");
+    assert.equal(code({ t: "character.delete", characterId: "mine" }, P1, state), "forbidden");
+    assert.equal(code({ t: "token.delete", tokenId: "pc1" }, P1, state), "forbidden");
+  });
+});
+
+describe("wave 3 map ops", () => {
+  /** An asset of each kind the DM may use: its id names its kind, as the room's asset rows would. */
+  const kinds: PermissionDeps = { canUseAsset: (_memberId, assetId, kind) => assetId.startsWith(`${kind}-`) };
+  const dmCode = (op: Op) => {
+    const d = canApply(op, DM, setup(), kinds);
+    return d.ok ? "ok" : d.code;
+  };
+  const stamp = (art: { key: string } | { assetId: string }) => ({ id: "st", art, x: 1, y: 1, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" as const });
+  const phase = (assetId: string) => ({ id: "p", name: "Day", assetId, widthPx: 10, heightPx: 10 });
+
+  test("are the DM's alone", () => {
+    const ops: Op[] = [
+      { t: "build.walls", sceneId: "s1", put: [{ id: "abcdefabcdef", a: [0, 0], b: [1, 1], f: { kind: "wall" } }] },
+      { t: "build.stamps", sceneId: "s1", put: [stamp({ key: "oak" })] },
+      { t: "build.lights", sceneId: "s1", put: [{ id: "l", x: 1, y: 1, bright: 20, dim: 20, on: true, walls: true }] },
+      { t: "scene.setPhase", sceneId: "s1", phaseId: "p" },
+      { t: "scene.duplicate", sceneId: "s1", newSceneId: "s9", name: "Copy", include: { creatures: true, characters: false, fog: false, drawings: false } },
+      { t: "scene.update", sceneId: "s1", patch: { folder: "Act 1" } },
+    ];
+    for (const op of ops) assert.equal(code(op), "forbidden", op.t);
+  });
+
+  test("a thumbnail must be a thumb asset, a phase a map and a stamp's image a token image", () => {
+    assert.equal(dmCode({ t: "scene.update", sceneId: "s1", patch: { thumb: "thumb-1" } }), "ok");
+    assert.equal(dmCode({ t: "scene.update", sceneId: "s1", patch: { thumb: "map-1" } }), "gone");
+    assert.equal(dmCode({ t: "scene.update", sceneId: "s1", patch: { thumb: null } }), "ok");
+    assert.equal(dmCode({ t: "scene.update", sceneId: "s1", patch: { phases: [phase("map-1"), { ...phase("map-2"), id: "q" }] } }), "ok");
+    assert.equal(dmCode({ t: "scene.update", sceneId: "s1", patch: { phases: [phase("map-1"), { ...phase("token-2"), id: "q" }] } }), "gone");
+    assert.equal(dmCode({ t: "build.stamps", sceneId: "s1", put: [stamp({ key: "oak" }), stamp({ assetId: "token-1" })] }), "ok");
+    assert.equal(dmCode({ t: "build.stamps", sceneId: "s1", put: [stamp({ assetId: "map-1" })] }), "gone");
+  });
+});

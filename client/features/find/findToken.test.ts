@@ -1,0 +1,99 @@
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+import type { Character, Token } from "#shared/model.ts";
+import { character, token } from "#shared/testutil.ts";
+import { fitRect, NO_INSETS } from "../../lib/camera.ts";
+import { FIND_ROOM_CELLS, findCamera, findRect, nextOwnToken, sheetCover } from "./findToken.ts";
+
+function view(tokens: Token[], characters: Character[] = []) {
+  return { tokens: Object.fromEntries(tokens.map((t) => [t.id, t])), characters: Object.fromEntries(characters.map((c) => [c.id, c])) };
+}
+
+function presses(v: ReturnType<typeof view>, count: number, memberId = "p1", sceneId = "s1"): (string | null)[] {
+  const found: (string | null)[] = [];
+  let lastId: string | null = null;
+  for (let i = 0; i < count; i++) {
+    const next = nextOwnToken({ view: v, sceneId, memberId, lastId });
+    found.push(next?.id ?? null);
+    lastId = next?.id ?? lastId;
+  }
+  return found;
+}
+
+describe("find my token", () => {
+  test("finds nothing when the player owns no token on the scene", () => {
+    const v = view([token("t1"), token("t2", { ownerIds: ["p2"] }), token("t3", { ownerIds: ["p1"], sceneId: "s2" })]);
+    assert.equal(nextOwnToken({ view: v, sceneId: "s1", memberId: "p1", lastId: null }), null);
+  });
+
+  test("finds the one token again on every press", () => {
+    const v = view([token("t1", { ownerIds: ["p1"], kind: "pc" }), token("t2")]);
+    assert.deepEqual(presses(v, 3), ["t1", "t1", "t1"]);
+  });
+
+  test("cycles through several, the character first, then creatures, then objects", () => {
+    const v = view([
+      token("a-marker", { ownerIds: ["p1"], kind: "object" }),
+      token("b-familiar", { ownerIds: ["p1"], kind: "npc" }),
+      token("c-hero", { ownerIds: ["p1"], kind: "pc" }),
+      token("d-wolf", { ownerIds: ["p1"], kind: "monster" }),
+      token("e-goblin"),
+    ]);
+    assert.deepEqual(presses(v, 5), ["c-hero", "b-familiar", "d-wolf", "a-marker", "c-hero"]);
+  });
+
+  test("counts a token owned through its character", () => {
+    const v = view([token("t1", { kind: "pc", actor: { ref: "c1" } })], [character("c1", { ownerIds: ["p1"] })]);
+    assert.equal(nextOwnToken({ view: v, sceneId: "s1", memberId: "p1", lastId: null })?.id, "t1");
+    assert.equal(nextOwnToken({ view: v, sceneId: "s1", memberId: "p2", lastId: null }), null);
+  });
+
+  test("starts over when the token found last is gone", () => {
+    const v = view([token("t1", { ownerIds: ["p1"] }), token("t2", { ownerIds: ["p1"] })]);
+    assert.equal(nextOwnToken({ view: v, sceneId: "s1", memberId: "p1", lastId: "deleted" })?.id, "t1");
+  });
+
+  test("fits the token with room around it", () => {
+    assert.deepEqual(findRect({ x: 10, y: 6, size: "large" }), {
+      x: 10 - FIND_ROOM_CELLS,
+      y: 6 - FIND_ROOM_CELLS,
+      width: 2 + FIND_ROOM_CELLS * 2,
+      height: 2 + FIND_ROOM_CELLS * 2,
+    });
+  });
+
+  test("keeps clear of a phone's open sheet", () => {
+    assert.deepEqual(sheetCover(null), { top: 0, right: 0, bottom: 0, left: 0 });
+    assert.deepEqual(sheetCover({ placement: "bottom", width: 390, height: 401.5 }), { top: 0, right: 0, bottom: 402, left: 0 });
+    assert.deepEqual(sheetCover({ placement: "right", width: 340, height: 280 }), { top: 0, right: 340, bottom: 0, left: 0 });
+  });
+
+  test("zooms to the token between the bars, and centers it there", () => {
+    const viewport = { width: 390, height: 844 };
+    const bars = { top: 52, right: 0, bottom: 60, left: 0 };
+    const target = findRect({ x: 10, y: 6, size: "medium" });
+    const cam = findCamera(viewport, target, bars, NO_INSETS);
+    assert.deepEqual(cam, fitRect(viewport, target, 24, bars));
+    // The token's middle lands in the middle of the part the bars leave clear.
+    assert.equal(10.5 * cam.scale + cam.x, 195);
+    assert.equal(6.5 * cam.scale + cam.y, 52 + (844 - 52 - 60) / 2);
+  });
+
+  test("keeps the zoom with a sheet open, and centers the token above it", () => {
+    const viewport = { width: 390, height: 844 };
+    const bars = { top: 52, right: 0, bottom: 60, left: 0 };
+    const target = findRect({ x: 10, y: 6, size: "medium" });
+    const cover = sheetCover({ placement: "bottom", width: 390, height: 400 });
+    const cam = findCamera(viewport, target, bars, cover);
+    assert.equal(cam.scale, fitRect(viewport, target, 24, bars).scale);
+    assert.equal(6.5 * cam.scale + cam.y, 52 + (844 - 52 - 60 - cover.bottom) / 2);
+  });
+
+  test("a sheet that leaves no map centers between the bars instead", () => {
+    const viewport = { width: 390, height: 300 };
+    const bars = { top: 52, right: 0, bottom: 60, left: 0 };
+    const target = findRect({ x: 10, y: 6, size: "medium" });
+    const cam = findCamera(viewport, target, bars, { top: 0, right: 0, bottom: 250, left: 0 });
+    assert.equal(6.5 * cam.scale + cam.y, 52 + (300 - 52 - 60) / 2);
+  });
+});

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">raccoon-vtt</title>
+
+  <!-- A raccoon face drawn as negative space, so the white disc is what
+       keeps it readable on a dark background. Three colors only. Paths are
+       in the original drawing's coordinates and scaled down as a group, and
+       the right half mirrors the left across x = 510. -->
+  <defs>
+    <g id="half">
+      <path fill="#f38400" d="M232 238 C205 200 185 140 192 95 C198 55 225 40 262 45 C300 50 335 75 362 104 L353.54 115.8 C321.5 86.8 285 68 258 70 C232 72 218 95 216 130 C214.2 166.1 225.5 202.3 245.4 228.1 C252.1 236.9 238.4 247 232 238 Z"/>
+      <!-- The tuft's left edge is the ear's inner edge offset by 9, so the gap stays even. -->
+      <path fill="#f38400" d="M237.8 89.6 C230.8 97.9 226.1 111.9 225 130.5 C223.4 162.8 233 195.4 249.9 219.1 C254.5 225.6 266.2 224 276 222 L296 218 L282 204 L306 190 L284 178 L306 160 L284 150 L298 128 L276 124 L280 102 C266 92 249.8 91.4 237.8 89.6 Z"/>
+      <path fill="#f38400" d="M333 253 C369.5 238.6 430 238 460 247 C478.2 252.5 484 280 484 320 C484 360 450 400 420 428 C398 448 392 470 405 490 C413.2 502.3 426.1 509.2 433.2 517.4 C436.5 521.1 434 523.5 429 523.8 C393.1 526.2 347.4 514.4 313 507 C287.6 501.5 278.6 487.3 274 472 C271.7 464.3 266.7 452.3 260.7 439.6 C249.6 416.3 236.1 388.9 227 363 C250 320 290 270 333 253 Z"/>
+      <path fill="#f7df00" d="M357 292 C375.8 280.3 414.6 281.5 432 300 C442.7 311.4 450 330 454 346 C430 352 400 352 380 342 C354.9 329.5 345.1 314.6 348.7 302.2 C350.1 297.5 353.1 294.4 357 292 Z"/>
+    </g>
+  </defs>
+
+  <circle cx="256" cy="256" r="248" fill="#ffffff"/>
+
+  <g transform="translate(256 256) scale(0.58) translate(-510 -291)">
+    <use xlink:href="#half"/>
+    <use xlink:href="#half" transform="translate(1020 0) scale(-1 1)"/>
+    <!-- The nose sits at the muzzle tip between the mask's lower edges, large enough to stay a distinct shape at favicon size. -->
+    <path fill="#f38400" d="M462.0 457.4 C462.0 443.7 486.0 440 510 440 C534.0 440 558.0 443.7 558.0 457.4 C558.0 477.2 529.2 497.0 510 502 C490.8 497.0 462.0 477.2 462.0 457.4 Z"/>
+    <!-- Butt ends land exactly on the ear tips. Round caps would bulge out below them. -->
+    <path d="M352 110 C420 92 470 88 510 88 C550 88 600 92 668 110" fill="none" stroke="#f38400" stroke-width="12"/>
+  </g>
+</svg>

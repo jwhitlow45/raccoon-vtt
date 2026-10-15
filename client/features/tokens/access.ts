@@ -1,0 +1,124 @@
+import type { Character, MemberId, RoomState, Token } from "#shared/model.ts";
+import type { ActorPatch, TokenPatch } from "#shared/protocol.ts";
+
+/**
+ * What this device may change on a token or a character, so the panels can
+ * hide or disable what the role cannot do (design section 8.1). The server
+ * decides for real in shared/permissions.ts. These lists mirror its owner
+ * whitelists, and access.test.ts checks them against canApply, so the two
+ * cannot drift apart unnoticed.
+ *
+ * A viewer's copy of the room is a projection: a player's copy of someone
+ * else's token has no `ownerIds`, and their copy of someone else's character
+ * has none either. Missing lists simply mean "not yours".
+ */
+
+/** Token fields an owner may patch. `name` and `publicName` only on a PC. */
+export const OWNER_TOKEN_FIELDS: ReadonlySet<keyof TokenPatch> = new Set(["image", "altImages", "rotation", "elevation", "name", "publicName", "notes", "rangeRings", "light"]);
+const OWNER_PC_ONLY_FIELDS: ReadonlySet<keyof TokenPatch> = new Set(["name", "publicName"]);
+
+/** Actor fields an owner may patch, and only through `character.update`: an inline actor is the DM's. */
+export const OWNER_ACTOR_FIELDS: ReadonlySet<keyof ActorPatch> = new Set([
+  "hp",
+  "speeds",
+  "ac",
+  "initBonus",
+  "passivePerception",
+  "senses",
+  "notes",
+  "sheetUrl",
+]);
+
+/** Character fields an owner may patch. `actor` is limited further by OWNER_ACTOR_FIELDS. */
+export const OWNER_CHARACTER_FIELDS: ReadonlySet<string> = new Set(["name", "defaultImage", "actor", "level"]);
+
+type View = Pick<RoomState, "characters"> | null | undefined;
+
+function listed(ids: readonly MemberId[] | undefined, memberId: MemberId | null | undefined): boolean {
+  return !!memberId && (ids ?? []).includes(memberId);
+}
+
+export function characterOf(view: View, token: Pick<Token, "actor">): Character | undefined {
+  return "ref" in token.actor ? view?.characters[token.actor.ref] : undefined;
+}
+
+/** Ownership counts directly and through the token's character, as the server's `ownsToken` does. */
+export function ownsToken(view: View, memberId: MemberId | null | undefined, token: Pick<Token, "ownerIds" | "actor">): boolean {
+  if (listed(token.ownerIds, memberId)) return true;
+  const character = characterOf(view, token);
+  return character !== undefined && listed(character.ownerIds, memberId);
+}
+
+export function ownsCharacter(memberId: MemberId | null | undefined, character: Pick<Character, "ownerIds">): boolean {
+  return listed(character.ownerIds, memberId);
+}
+
+export type Role = "dm" | "player";
+
+export type TokenAccess = {
+  dm: boolean;
+  owner: boolean;
+  /** The DM or an owner: sees the whole stat card and its numbers. */
+  full: boolean;
+  /** Where actor edits go: the character a PC token points at, or the token's own copy. */
+  actorVia: "character" | "token";
+  canEditToken(field: keyof TokenPatch): boolean;
+  canEditActor(field: keyof ActorPatch): boolean;
+  /** `all` for damage, healing, set and temp. `relative` is damage and healing only (the room's `playersApplyDamage`). */
+  hp: "all" | "relative" | "none";
+  effects: boolean;
+  deathSaves: boolean;
+  life: boolean;
+};
+
+export function tokenAccess(input: {
+  role: Role;
+  memberId: MemberId | null | undefined;
+  view: (View & { meta?: { settings?: { playersApplyDamage?: boolean } } }) | null | undefined;
+  token: Pick<Token, "ownerIds" | "actor" | "kind">;
+}): TokenAccess {
+  const { role, memberId, view, token } = input;
+  const dm = role === "dm";
+  const owner = !dm && ownsToken(view, memberId, token);
+  const full = dm || owner;
+  const actorVia = "ref" in token.actor ? "character" : "token";
+  return {
+    dm,
+    owner,
+    full,
+    actorVia,
+    canEditToken(field) {
+      if (dm) return true;
+      if (!owner || !OWNER_TOKEN_FIELDS.has(field)) return false;
+      return !OWNER_PC_ONLY_FIELDS.has(field) || token.kind === "pc";
+    },
+    canEditActor(field) {
+      if (dm) return true;
+      return owner && actorVia === "character" && OWNER_ACTOR_FIELDS.has(field);
+    },
+    hp: full ? "all" : view?.meta?.settings?.playersApplyDamage ? "relative" : "none",
+    effects: full,
+    deathSaves: full,
+    life: dm,
+  };
+}
+
+export type CharacterAccess = {
+  dm: boolean;
+  owner: boolean;
+  full: boolean;
+  canEdit(field: "name" | "size" | "ownerIds" | "defaultImage" | "level"): boolean;
+  canEditActor(field: keyof ActorPatch): boolean;
+};
+
+export function characterAccess(input: { role: Role; memberId: MemberId | null | undefined; character: Pick<Character, "ownerIds"> }): CharacterAccess {
+  const dm = input.role === "dm";
+  const owner = !dm && ownsCharacter(input.memberId, input.character);
+  return {
+    dm,
+    owner,
+    full: dm || owner,
+    canEdit: (field) => dm || (owner && OWNER_CHARACTER_FIELDS.has(field)),
+    canEditActor: (field) => dm || (owner && OWNER_ACTOR_FIELDS.has(field)),
+  };
+}

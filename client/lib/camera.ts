@@ -1,0 +1,138 @@
+/**
+ * Camera math for the map canvas.
+ *
+ * World units are grid cells (design section 5). The camera maps a world
+ * point to a screen point as `screen = world * scale + (x, y)`, so `scale` is
+ * screen pixels per cell and `(x, y)` is where world (0, 0) lands. That is
+ * exactly a Konva stage's scale and position, so the stage takes the camera
+ * as is.
+ */
+export type Camera = { x: number; y: number; scale: number };
+export type Point = { x: number; y: number };
+export type Size = { width: number; height: number };
+export type Rect = { x: number; y: number; width: number; height: number };
+
+/** Pixels per cell. Below 4 a 200-cell scene fits a phone, above 400 one cell fills it. */
+export const MIN_SCALE = 4;
+export const MAX_SCALE = 400;
+
+/** `min` is a scene's own floor (sceneMinScale), never below MIN_SCALE. */
+export function clampScale(scale: number, min: number = MIN_SCALE): number {
+  return Math.min(MAX_SCALE, Math.max(min, scale));
+}
+
+export function worldToScreen(cam: Camera, p: Point): Point {
+  return { x: p.x * cam.scale + cam.x, y: p.y * cam.scale + cam.y };
+}
+
+export function screenToWorld(cam: Camera, p: Point): Point {
+  return { x: (p.x - cam.x) / cam.scale, y: (p.y - cam.y) / cam.scale };
+}
+
+export function panBy(cam: Camera, dx: number, dy: number): Camera {
+  return { x: cam.x + dx, y: cam.y + dy, scale: cam.scale };
+}
+
+/** Zooms by `factor`, keeping the world point under `anchor` (a screen point) where it is. */
+export function zoomAt(cam: Camera, anchor: Point, factor: number, minScale: number = MIN_SCALE): Camera {
+  const scale = clampScale(cam.scale * factor, Math.min(minScale, cam.scale));
+  const world = screenToWorld(cam, anchor);
+  return { x: anchor.x - world.x * scale, y: anchor.y - world.y * scale, scale };
+}
+
+/**
+ * Wheel deltas to a zoom factor. An exponential keeps zooming in and back out
+ * by the same scroll symmetric. Line-mode deltas (Firefox with a mouse wheel)
+ * count as 16 pixels per line. A trackpad pinch arrives as a wheel event with
+ * ctrlKey and small deltas, so it gets a stronger response.
+ */
+export function wheelZoomFactor(deltaY: number, deltaMode: number, pinch: boolean): number {
+  const pixels = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * 400 : deltaY;
+  const clamped = Math.max(-200, Math.min(200, pixels));
+  return Math.exp(-clamped * (pinch ? 0.01 : 0.002));
+}
+
+/** Screen pixels along each side of the viewport that something else covers, such as a toolbar. */
+export type Insets = { top: number; right: number; bottom: number; left: number };
+
+export const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
+
+/**
+ * The camera that shows all of `rect` (world units) centered in the part of
+ * the viewport that `insets` leave clear. When even the smallest zoom
+ * cannot fit it, its middle sits in the middle of that part.
+ */
+export function fitRect(viewport: Size, rect: Rect, paddingPx = 24, insets: Insets = NO_INSETS): Camera {
+  const clearW = viewport.width - insets.left - insets.right;
+  const clearH = viewport.height - insets.top - insets.bottom;
+  const w = Math.max(1, clearW - paddingPx * 2);
+  const h = Math.max(1, clearH - paddingPx * 2);
+  const scale = clampScale(Math.min(w / Math.max(rect.width, 1e-6), h / Math.max(rect.height, 1e-6)));
+  return {
+    x: insets.left + clearW / 2 - (rect.x + rect.width / 2) * scale,
+    y: insets.top + clearH / 2 - (rect.y + rect.height / 2) * scale,
+    scale,
+  };
+}
+
+/** Whether all of `rect` (world units) shows in the part of the viewport that `insets` leave clear. */
+export function rectClear(cam: Camera, rect: Rect, viewport: Size, insets: Insets): boolean {
+  const a = worldToScreen(cam, { x: rect.x, y: rect.y });
+  const b = worldToScreen(cam, { x: rect.x + rect.width, y: rect.y + rect.height });
+  return a.x >= insets.left && a.y >= insets.top && b.x <= viewport.width - insets.right && b.y <= viewport.height - insets.bottom;
+}
+
+/** A scene's saved starting view: the world point at the viewport center, and a zoom. */
+export function cameraForView(viewport: Size, view: { x: number; y: number; zoom: number }): Camera {
+  const scale = clampScale(view.zoom);
+  return { x: viewport.width / 2 - view.x * scale, y: viewport.height / 2 - view.y * scale, scale };
+}
+
+/**
+ * Pinch-zoom from a baseline taken when the second finger landed (or when the
+ * gesture was last re-baselined). Computing from the baseline every time,
+ * instead of applying small increments per event, keeps the world point that
+ * was under the fingers' midpoint pinned to it with no drift, and folds the
+ * two-finger pan into the same step.
+ */
+export function pinchCamera(
+  base: { cam: Camera; mid: Point; dist: number },
+  current: { mid: Point; dist: number },
+  minScale: number = MIN_SCALE,
+): Camera {
+  const ratio = base.dist > 0 ? current.dist / base.dist : 1;
+  const scale = clampScale(base.cam.scale * ratio, Math.min(minScale, base.cam.scale));
+  const world = screenToWorld(base.cam, base.mid);
+  return { x: current.mid.x - world.x * scale, y: current.mid.y - world.y * scale, scale };
+}
+
+/**
+ * How far out a scene zooms (UP-20): until the whole scene fills half the
+ * screen, and no further. Past that a small map shrank to a few pixels a
+ * square, with nothing to tap and no way to tell where it went. A scene too
+ * big to fit even at MIN_SCALE keeps MIN_SCALE.
+ */
+export function sceneMinScale(viewport: Size, bounds: { w: number; h: number }): number {
+  const fit = Math.min(viewport.width / Math.max(bounds.w, 1e-6), viewport.height / Math.max(bounds.h, 1e-6));
+  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, fit / 2));
+}
+
+/**
+ * Keeps at least `marginPx` of the scene on screen on each axis, so a pan
+ * can never leave the screen empty with no way back to the map. The margin
+ * counts only in the part of the viewport that `insets` leave clear, since
+ * a sliver of map under a toolbar is as good as gone.
+ */
+export function keepInView(cam: Camera, viewport: Size, bounds: { w: number; h: number }, insets: Insets = NO_INSETS, marginPx = 64): Camera {
+  const clampAxis = (pos: number, start: number, end: number, length: number) => {
+    const margin = Math.min(marginPx, Math.max(0, end - start) / 2, length / 2);
+    return Math.min(end - margin, Math.max(start + margin - length, pos));
+  };
+  const x = clampAxis(cam.x, insets.left, viewport.width - insets.right, bounds.w * cam.scale);
+  const y = clampAxis(cam.y, insets.top, viewport.height - insets.bottom, bounds.h * cam.scale);
+  return x === cam.x && y === cam.y ? cam : { x, y, scale: cam.scale };
+}
+
+export function sameCamera(a: Camera, b: Camera): boolean {
+  return a.x === b.x && a.y === b.y && a.scale === b.scale;
+}

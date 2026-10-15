@@ -1,0 +1,441 @@
+# Production, behind an HTTPS front end such as a Cloudflare tunnel or a
+# reverse proxy (README, "Deploying").
+#
+#   docker compose -f docker-compose.server.yml up -d --build
+#
+# The shape, drawn with a tunnel as the front end:
+#
+#                 internet
+#                    |          (cloudflared dials out to Cloudflare, so no
+#             [ cloudflared ]    port on this host is open to anyone)
+#                    |
+#              raccoon-edge      internal
+#                    |
+#               [ raccoon ] ---- raccoon-data (internal) ---- [ postgres ]
+#                    |                     |
+#                    |                [ backup ]    nightly pg_dump and image copy,
+#                    |                              onto the raccoon-backups volume
+#                    |
+#              raccoon-proxy     internal
+#                    |
+#               [ egress ] ----- raccoon-egress ---- serpapi.com,
+#                                                    api.openverse.org,
+#                                                    challenges.cloudflare.com
+#                                                    and public images on 443
+#
+# There is no `ports:` key anywhere in this file, on purpose. The only way in
+# is the front end on raccoon-edge. Trusting CF-Connecting-IP below is safe
+# only while that front end sets the header itself (design section 10.3,
+# README "Put HTTPS in front of it"). Adding a port would undo that.
+#
+# The three internal networks also set `gateway_mode_ipv4: isolated`, which
+# needs Docker Engine 28 or later. `internal: true` alone removes the route
+# off the subnet but leaves the bridge's gateway address, which is an address
+# on this host, so a container could still reach anything the host listens on
+# (an app on such a network has been measured reaching the host's SSH port).
+# `isolated` gives the bridge no gateway address at all.
+#
+# Two steps outside this file put the site on the internet. Both are
+# deliberate, and README.md walks through them:
+#
+#   1. The HTTPS front end (a reverse proxy or tunnel container) joins
+#      raccoon-edge as an external network.
+#   2. It sends the site's hostname to http://raccoon:3000.
+#
+# Secrets come from `.env` beside this file, which compose reads for the
+# ${...} substitutions below. It is gitignored and never committed. The
+# required ones use `:?`, so compose refuses to start without them instead of
+# booting half configured.
+
+name: raccoon
+
+# What the backup and restore services share (docs/design-v1-dm-tools.md
+# 3.17): how they reach the database and the server's time zone. Never
+# ROOM_SECRET_KEY, which no backup needs: the dumps hold the sealed player
+# passwords, and only the app's key opens them.
+x-backup-env: &backup-env
+  PGHOST: postgres
+  PGUSER: raccoon
+  PGDATABASE: raccoon
+  PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+  TZ: ${TZ:-UTC}
+
+services:
+  # ----------------------------------------------------------------- app
+  raccoon:
+    build: .
+    networks:
+      # One network per thing it talks to. `raccoon-edge` is how the tunnel
+      # reaches it, `raccoon-data` how it reaches postgres, `raccoon-proxy`
+      # its one way out. The proxy is kept off the edge network so the tunnel
+      # container cannot use it as an open way out.
+      raccoon-edge:
+        # The front end points at http://raccoon:3000. A shared proxy or
+        # tunnel may join other projects' edge networks too, where a service
+        # named `app` is common, so this name is specific to this site and
+        # cannot resolve to the wrong container.
+        aliases:
+          - raccoon
+      raccoon-data: {}
+      raccoon-proxy: {}
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgres://raccoon:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/raccoon
+      # The exact origin, scheme and host, no trailing slash. The WebSocket
+      # Origin check and CSRF compare against it character for character.
+      - PUBLIC_ORIGIN=${PUBLIC_ORIGIN:?set PUBLIC_ORIGIN in .env, for example https://vtt.example.com}
+      # Keeps each room's player password readable for its DM, so the DM can
+      # show the player link at any time (design 10.2). Changing it later
+      # makes the stored passwords unreadable until each DM sets a new one.
+      - ROOM_SECRET_KEY=${ROOM_SECRET_KEY:?set ROOM_SECRET_KEY in .env, made with openssl rand -base64 32}
+      - ASSET_DIR=/data/assets
+      # Safe only while the front end is the only way in and overwrites this
+      # header with the real client address, as Cloudflare does. Behind a
+      # proxy that does not overwrite it, set it to 0 or configure the proxy
+      # to (README, "Put HTTPS in front of it").
+      - TRUST_CF_CONNECTING_IP=1
+      # Every outbound call goes through squid, on the port that matches its
+      # trust (design section 10.6). The app passes these to an explicit
+      # undici ProxyAgent and never reads HTTPS_PROXY.
+      - EGRESS_STRICT_PROXY=http://egress:3128
+      - EGRESS_PUBLIC_PROXY=http://egress:3129
+      # Bare entries pass the value from .env when it is there and nothing at
+      # all when it is not. The app treats an empty value as unset for these.
+      # Without SERPAPI_KEY image search uses Openverse alone. Turnstile needs
+      # both of its keys or neither, and so does an Openverse registration.
+      - SERPAPI_KEY
+      - OPENVERSE_CLIENT_ID
+      - OPENVERSE_CLIENT_SECRET
+      - TURNSTILE_SITE_KEY
+      - TURNSTILE_SECRET
+      # The admin page at /admin exists only while this is set (an argon2id
+      # hash from `node scripts/admin.ts hash-password`, single-quoted in
+      # .env). This service alone receives it.
+      - ADMIN_PASSWORD_HASH
+      # Abuse limits. The defaults match server/config.ts. They are spelled
+      # out because an empty value would otherwise reach the app as 0 and
+      # stop it booting.
+      - ROOMS_PER_IP_PER_DAY=${ROOMS_PER_IP_PER_DAY:-5}
+      - ROOMS_PER_DAY=${ROOMS_PER_DAY:-20}
+      - ROOM_QUOTA_MB=${ROOM_QUOTA_MB:-1024}
+    volumes:
+      # Uploaded images, plus room exports copied in for `admin.ts import`.
+      - raccoon-assets:/data/assets
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # Healthy, not started: squid has bound its ports by then, so the
+      # first image search after a deploy does not fail at the proxy.
+      egress:
+        condition: service_healthy
+    restart: unless-stopped
+    init: true
+    # Shutdown closes every socket with 1012, lets each room finish its
+    # commit and write its snapshot, then closes the pool, all within 25 s
+    # (design section 15.4). This leaves room for that before Docker kills it.
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+    logging:
+      driver: local
+    deploy:
+      resources:
+        limits:
+          # One Node process. Image processing runs one sharp job at a time
+          # and argon2 two hashes at a time, so more than this would sit idle.
+          cpus: "1.5"
+          # A 100 megapixel map upload, the largest the app accepts, peaked
+          # at about 750 MiB for the whole container when measured. The rest
+          # is room state (at most 8 MiB per loaded room) and sockets.
+          memory: 1536m
+          # About 16 in use at rest: the init shim, Node's threads and the
+          # libuv pool. The cap stops a runaway, nothing more.
+          pids: 256
+
+  # ------------------------------------------------------------------ db
+  postgres:
+    # The backup and restore services run this same image, so pg_dump and
+    # pg_restore match the server's version exactly.
+    image: &postgres-image postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    networks:
+      # Only the app shares this network, and it is internal, so the database
+      # is unreachable from the host, the tunnel and every other container.
+      # For psql: `docker compose -f docker-compose.server.yml exec postgres
+      # psql -U raccoon -d raccoon`.
+      - raccoon-data
+    environment:
+      POSTGRES_USER: raccoon
+      # No default here, unlike the development file. Postgres reads this
+      # only when it initializes an empty data directory, so changing it later
+      # does nothing on its own. It is interpolated into DATABASE_URL, so it
+      # must be URL safe (README.md shows how to generate one).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: raccoon
+    volumes:
+      - raccoon-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raccoon -d raccoon"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      # The official entrypoint starts as root to fix ownership of the data
+      # directory, then drops to the postgres user. These five are what that
+      # takes, and nothing else.
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    read_only: true
+    tmpfs:
+      # The unix socket and lock file, and scratch space. The data itself is
+      # on the volume.
+      - /var/run/postgresql:mode=3777,size=8m
+      - /tmp:mode=1777,size=64m
+    logging:
+      driver: local
+    deploy:
+      resources:
+        limits:
+          # The app's pool opens at most 10 connections, and postgres runs a
+          # process per connection.
+          cpus: "1.0"
+          memory: 512m
+          pids: 128
+
+  # -------------------------------------------------------------- backup
+  # A nightly pg_dump, read back whole, and a copy of the images it names,
+  # onto the raccoon-backups volume, kept 7 days and 4 weeks
+  # (docs/design-v1-dm-tools.md 3.17, docker/backup.sh, README.md).
+  #
+  #   docker compose -f docker-compose.server.yml exec backup sh /backup/backup.sh once
+  #
+  # runs one now, for before an update.
+  backup:
+    image: *postgres-image
+    command: ["sh", "/backup/backup.sh"]
+    # Root on purpose, with no capabilities. The image's postgres user is
+    # UID 70, and a new named volume comes up root's, which only CAP_CHOWN
+    # could change. Without capabilities root writes only what root owns
+    # (the backups volume) and reads the images as anyone may, through a
+    # read-only mount.
+    user: "0:0"
+    networks:
+      # Postgres and nothing else: no route out at all.
+      - raccoon-data
+    environment:
+      <<: *backup-env
+      # HH:MM in TZ. Unset or empty means 04:00.
+      BACKUP_AT: ${BACKUP_AT:-04:00}
+    volumes:
+      - &backup-script ./docker/backup.sh:/backup/backup.sh:ro
+      - raccoon-backups:/backups
+      - raccoon-assets:/assets:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    # So `docker compose stop` ends the sleeping loop at once.
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      # The copy's working lists. The dump goes straight to the volume.
+      - /tmp:mode=1777,size=16m
+    logging:
+      driver: local
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+          pids: 64
+
+  # A restore from the backups volume, which never starts with the others:
+  #
+  #   docker compose -f docker-compose.server.yml --profile restore run --rm restore sh /backup/backup.sh restore <dump name>
+  #
+  # README.md has the order around it. It runs as the app's own user, UID
+  # 1000, so every folder and file it puts on the image volume is the app's,
+  # and it holds the backup's lock throughout, so no backup's retention can
+  # delete the chosen dump's images partway through.
+  restore:
+    image: *postgres-image
+    profiles: ["restore"]
+    user: "1000:1000"
+    networks:
+      - raccoon-data
+    environment: *backup-env
+    volumes:
+      - *backup-script
+      - raccoon-backups:/backups:ro
+      - raccoon-assets:/data/assets
+    depends_on:
+      postgres:
+        condition: service_healthy
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=16m
+    logging:
+      driver: local
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+          pids: 64
+
+  # -------------------------------------------------------------- egress
+  # The only container here that can reach the internet. Its rules and the
+  # reasoning behind them are in docker/squid.conf.
+  egress:
+    # Pinned by digest, so the squid.conf behavior that was tested holds.
+    # Refresh deliberately with
+    # `docker buildx imagetools inspect ubuntu/squid:latest`.
+    image: ubuntu/squid@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029
+    networks:
+      # The only container on both sides of the boundary. `raccoon-proxy` is
+      # internal and carries the app. `raccoon-egress` is an ordinary bridge
+      # and carries nothing else.
+      - raccoon-proxy
+      - raccoon-egress
+    volumes:
+      - ./docker/squid.conf:/etc/squid/squid.conf:ro
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      # squid starts as root, binds its ports and drops to the `proxy` user.
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    read_only: true
+    tmpfs:
+      # The image's entrypoint tails /var/log/squid to the container's
+      # output, so `docker compose logs egress` lists every destination the
+      # app asked for. In memory, so nothing accumulates on disk.
+      - /var/log/squid:mode=1777,size=32m
+      - /var/spool/squid:mode=1777,size=32m
+      - /run:mode=1777,size=8m
+      - /tmp:mode=1777,size=16m
+    healthcheck:
+      # bash's /dev/tcp, because the image has no curl, wget, nc or
+      # squidclient. Named explicitly, because /bin/sh here is dash, which has
+      # no /dev/tcp. Opening both ports proves squid is accepting. It does not
+      # try a real CONNECT, so an outage at SerpApi never shows up as this
+      # proxy being broken.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3128 && exec 4<>/dev/tcp/127.0.0.1/3129"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: local
+    deploy:
+      resources:
+        limits:
+          # It shuffles bytes between two sockets and caches nothing.
+          cpus: "0.5"
+          memory: 256m
+          pids: 128
+
+networks:
+  # The front end's way in. Created here and joined by the proxy or tunnel
+  # project as `external: true`. Internal, so joining it gives the front end
+  # a route to the app and nothing else, in particular not to postgres, which
+  # is on another network.
+  #
+  # All three internal networks have pinned subnets, so host firewall rules
+  # can name them and a recreate never moves them. A daemon-chosen range has
+  # been seen to land on a bridge that carried no traffic at all, while one
+  # with identical options on 192.168.x worked. Change the subnets if they
+  # clash with networks on your host.
+  raccoon-edge:
+    name: raccoon-edge
+    ipam:
+      config:
+        - subnet: 192.168.206.0/24
+    internal: true
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: br-rvtt-edge
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+      # Inert while the daemon gives this bridge no IPv6, but a daemon with
+      # IPv6 enabled would otherwise hand it a v6 gateway on the host.
+      com.docker.network.bridge.gateway_mode_ipv6: isolated
+
+  # The app and the database, alone together.
+  raccoon-data:
+    name: raccoon-data
+    ipam:
+      config:
+        - subnet: 192.168.207.0/24
+    internal: true
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: br-rvtt-data
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+      com.docker.network.bridge.gateway_mode_ipv6: isolated
+
+  # The app and the proxy, alone together.
+  raccoon-proxy:
+    name: raccoon-proxy
+    ipam:
+      config:
+        - subnet: 192.168.208.0/24
+    internal: true
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: br-rvtt-proxy
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+      com.docker.network.bridge.gateway_mode_ipv6: isolated
+
+  # The one bridge with a route off the machine, so the one that keeps a real
+  # gateway, and squid alone could address this host through it. squid's own
+  # rules refuse every private range, and two host firewall rules back that
+  # up against a compromised squid or a DNS rebind (design section 15.3,
+  # README.md). The fixed bridge name keeps those rules valid when the
+  # network is recreated.
+  raccoon-egress:
+    name: raccoon-egress
+    driver: bridge
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: br-rvtt-egress
+      # No container-to-container traffic on this network. There is only one
+      # container on it, and this keeps that true.
+      com.docker.network.bridge.enable_icc: "false"
+    ipam:
+      config:
+        # Tiny, since only the egress proxy sits on it. Change it if it
+        # clashes with a network on your host.
+        - subnet: 172.31.243.0/28
+
+volumes:
+  raccoon-db:
+  raccoon-assets:
+  # The backups, on the same disk. README.md says how to size it and how to
+  # copy it off the server.
+  raccoon-backups:

@@ -1,0 +1,390 @@
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+import { stableStringify, visibleAssetIds } from "#shared/project.ts";
+import { AT, P1, actor, apply, character, customMonster, drawing, imageRef, randomState, rng, room, srdImage, token } from "#shared/testutil.ts";
+import type { AssetKind } from "../assets/kinds.ts";
+import { remapState, type ImportedAsset } from "./remap.ts";
+import { parseRoomState } from "./stateSchema.ts";
+import { imageAssetId } from "#shared/imageRef.ts";
+
+function allIds(value: unknown, out = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) for (const v of value) allIds(v, out);
+  else if (value && typeof value === "object") {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof v === "string" && /Id$|^id$|^ref$|^from$|^attachedTo$|^casterId$/.test(k)) out.add(v);
+      else allIds(v, out);
+    }
+  }
+  return out;
+}
+
+/** Old asset id to the asset the import made of it, from `{ old: [newId, kind] }`. */
+function kinds(table: Record<string, [string, AssetKind]>): Map<string, ImportedAsset> {
+  return new Map(Object.entries(table).map(([old, [id, kind]]) => [old, { id, kind }]));
+}
+
+describe("remapState", () => {
+  test("every entity gets a new id, references follow, and nothing old survives", () => {
+    const state = randomState(rng(11));
+    state.monsters.mx = customMonster("mx", { defaultImage: imageRef("img-mx") });
+    state.srdImages.bandit = srdImage("bandit", "img-bandit");
+    state.savedEncounters.ex = { id: "ex", rev: 0, name: "Lurkers", monsters: [{ srdId: "bandit", count: 2 }, { monsterId: "mx", count: 1, inLair: true }, { monsterId: "deleted-monster", count: 1 }], party: [{ count: 4, level: 3 }] };
+    // What a seed draws moves with every addition to randomState, so the HP line that can be taken back is made here.
+    const vitals = (cur: number) => ({ hp: { cur, max: 7, temp: 0 }, life: "alive" as const, deathSaves: { ok: 0, fail: 0 } });
+    const hurt = Object.keys(state.tokens)[0]!;
+    state.log.push({ id: "9:0", at: AT, kind: "event", data: { type: "hp", tokenId: hurt, change: "damage", amount: 4, left: { cur: 3, max: 7, temp: 0 }, revert: { before: vitals(7), after: vitals(3) } } });
+    const assets = new Map<string, ImportedAsset>();
+    const asToken = (id: string) => assets.set(id, { id: `new-${id}`, kind: "token" });
+    // A shipped icon names no asset (docs/design-v1-dm-tools.md 3.12), so only uploads go through the image pipeline.
+    const upload = (image: Parameters<typeof imageAssetId>[0]) => {
+      const id = imageAssetId(image);
+      if (id !== undefined) asToken(id);
+    };
+    for (const t of Object.values(state.tokens)) upload(t.image);
+    for (const t of Object.values(state.tokens)) for (const image of t.altImages ?? []) upload(image);
+    for (const m of Object.values(state.monsters)) if (m.defaultImage) asToken(imageAssetId(m.defaultImage)!);
+    for (const e of Object.values(state.srdImages)) asToken(imageAssetId(e.image)!);
+    const out = remapState(state, { assets, newId: (() => {
+      let n = 0;
+      return () => `n${n++}`;
+    })() });
+    const oldIds = new Set([...Object.keys(state.members), ...Object.keys(state.scenes), ...Object.keys(state.tokens), ...Object.keys(state.characters), ...Object.keys(state.templates), ...Object.keys(state.drawings), ...Object.keys(state.handouts), ...Object.keys(state.monsters), ...Object.keys(state.savedEncounters)]);
+    const referenced = allIds(out);
+    for (const id of oldIds) assert.ok(!referenced.has(id), `old id ${id} survived`);
+    assert.ok(stableStringify(out) !== stableStringify(state));
+    for (const t of Object.values(out.tokens)) {
+      assert.ok(out.scenes[t.sceneId], "token scene exists");
+      if ("ref" in t.actor) assert.ok(out.characters[t.actor.ref], "token character exists");
+      for (const owner of t.ownerIds) assert.ok(out.members[owner]);
+      // An icon's key means the same in every room, and an upload follows its new id.
+      for (const image of [...(t.image ? [t.image] : []), ...(t.altImages ?? [])]) assert.ok("icon" in image || /^new-/.test(image.assetId));
+    }
+    assert.ok(Object.values(out.tokens).some((t) => t.altImages), "the random room has a token with other images");
+    for (const tpl of Object.values(out.templates)) {
+      assert.ok(out.scenes[tpl.sceneId]);
+      if (tpl.attachedTo) assert.ok(out.tokens[tpl.attachedTo], "attachedTo resolves or was dropped");
+    }
+    for (const key of Object.keys(out.buildChunks)) assert.ok(out.scenes[key.split(":")[0]!]);
+    for (const key of Object.keys(out.fogTiles)) assert.ok(out.scenes[key.split(":")[0]!]);
+    for (const m of Object.values(out.members)) assert.equal(m.kind, "player");
+    // Nothing points at a custom monster, so each comes through whole under its new id, its image remapped like a token's.
+    const withoutId = ({ id: _id, defaultImage: _image, ...block }: (typeof out.monsters)[string]) => block;
+    for (const [id, m] of Object.entries(out.monsters)) assert.equal(m.id, id);
+    assert.deepEqual(Object.values(out.monsters).map(withoutId), Object.values(state.monsters).map(withoutId));
+    assert.deepEqual(
+      Object.values(out.monsters).map((m) => m.defaultImage),
+      Object.values(state.monsters).map((m) => (m.defaultImage ? { ...m.defaultImage, assetId: `new-${imageAssetId(m.defaultImage)}` } : undefined)),
+    );
+    // SRD ids mean the same in every room, so only the images change.
+    assert.deepEqual(Object.keys(out.srdImages).sort(), Object.keys(state.srdImages).sort());
+    for (const [srdId, e] of Object.entries(out.srdImages)) {
+      assert.equal(e.id, srdId);
+      assert.deepEqual(e.image, { ...state.srdImages[srdId]!.image, assetId: `new-${imageAssetId(state.srdImages[srdId]!.image)}` });
+    }
+    // A saved encounter keeps its SRD monsters and follows the room's own to their new ids. One deleted before the backup has no new id and goes.
+    // Monsters come through in order, so the nth new id is the nth old monster's.
+    const newMonsterId = new Map(Object.keys(state.monsters).map((id, i) => [id, Object.keys(out.monsters)[i]!]));
+    const before = Object.values(state.savedEncounters);
+    const after = Object.values(out.savedEncounters);
+    assert.equal(after.length, before.length);
+    after.forEach((e, i) => {
+      const old = before[i]!;
+      assert.equal(out.savedEncounters[e.id], e);
+      assert.equal(e.name, old.name);
+      assert.deepEqual(e.party, old.party);
+      const kept = old.monsters.filter((m) => "srdId" in m || newMonsterId.has(m.monsterId));
+      assert.deepEqual(e.monsters, kept.map((m) => ("srdId" in m ? m : { ...m, monsterId: newMonsterId.get(m.monsterId)! })));
+      for (const m of e.monsters) if ("monsterId" in m) assert.ok(out.monsters[m.monsterId]);
+    });
+    assert.ok(out.meta.playerSceneId && out.scenes[out.meta.playerSceneId]);
+    out.log.forEach((e, i) => assert.equal(e.id, `0:${i}`));
+    // An imported HP line is history: it keeps what it says and loses what the change replaced.
+    assert.ok(state.log.some((e) => e.data?.type === "hp" && e.data.revert), "the random room has HP lines that can be taken back");
+    for (const e of out.log) if (e.data?.type === "hp") assert.ok(!("revert" in e.data) && !("of" in e.data), `log ${e.id}`);
+    for (const e of out.encounter?.entries ?? []) {
+      if (e.tokenId) assert.ok(out.tokens[e.tokenId]);
+      if (e.characterId) assert.ok(out.characters[e.characterId]);
+    }
+    if (out.encounter?.activeEntryId) assert.ok(out.encounter.entries.some((e) => e.id === out.encounter!.activeEntryId));
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+
+  test("references to assets that did not come through are dropped, handouts with them", () => {
+    const state = randomState(rng(5));
+    state.monsters.mx = customMonster("mx", { defaultImage: imageRef("img-mx") });
+    state.srdImages.bandit = srdImage("bandit", "img-bandit");
+    const out = remapState(state, { assets: new Map() });
+    // Shipped icons need no asset, so only they stay.
+    for (const t of Object.values(out.tokens)) assert.ok(t.image === undefined || "icon" in t.image);
+    for (const t of Object.values(out.tokens)) assert.ok(t.altImages === undefined || t.altImages.every((image) => "icon" in image), "a list left with nothing goes");
+    // A monster keeps its stat block without the image, and an SRD monster's choice goes with its image.
+    assert.equal(Object.keys(out.monsters).length, Object.keys(state.monsters).length);
+    for (const m of Object.values(out.monsters)) assert.equal(m.defaultImage, undefined);
+    assert.deepEqual(out.srdImages, {});
+    for (const s of Object.values(out.scenes)) assert.equal(s.map, undefined);
+    assert.equal(Object.keys(out.handouts).length, 0);
+    for (const e of out.log) assert.notEqual(e.data?.type, "handout");
+  });
+
+  test("the legendary actions a turn reset stay in the history, so Previous still gives them back", () => {
+    let state = room();
+    state.tokens.gob1 = token("gob1", { actor: { inline: actor({ legendary: { actionsMax: 3, actionsUsed: 2, resistMax: 3, resistUsed: 1 } }) } });
+    state.tokens.pc1 = token("pc1", { kind: "pc", name: "Pip" });
+    state = apply(state, { t: "encounter.start", entries: [{ id: "n1", tokenId: "pc1", value: 20 }, { id: "n2", tokenId: "gob1", value: 10 }] });
+    state = apply(state, { t: "encounter.next" }, undefined, 2);
+    state = apply(state, { t: "encounter.next" }, undefined, 3);
+    const out = remapState(state, { assets: new Map() });
+    const goblin = Object.values(out.tokens).find((t) => t.name === "Goblin")!;
+    assert.deepEqual(out.encounterHistory.at(-1)!.legendary, { holderId: goblin.id, actionsUsed: 2 });
+    const back = apply(out, { t: "encounter.prev" }, undefined, 4);
+    const restored = back.tokens[goblin.id]!.actor;
+    assert.equal("inline" in restored ? restored.inline.legendary?.actionsUsed : undefined, 2);
+  });
+
+  test("where a turn began and the tokens kept rulers stand on follow their new ids", () => {
+    let state = room();
+    state.tokens.pc1 = token("pc1", { kind: "pc", name: "Pip", x: 2, y: 3 });
+    state.tokens.gob = token("gob", { x: 6, y: 3 });
+    state = apply(state, { t: "encounter.start", entries: [{ id: "n1", tokenId: "pc1", value: 20 }] });
+    state = apply(state, { t: "encounter.next" }, undefined, 2);
+    state = apply(state, { t: "token.move", tokenId: "pc1", x: 4, y: 3 }, undefined, 3);
+    assert.ok(state.tokens.pc1!.path);
+    state.drawings.k1 = drawing("k1", { kind: "ruler", points: [2.5, 3.5, 6.5, 3.5], anchors: ["pc1", "gob"] });
+    state.drawings.k2 = drawing("k2", { kind: "ruler", points: [2.5, 3.5, 9.5, 3.5], anchors: [null, "no-such-token"] });
+    const out = remapState(state, { assets: new Map() });
+    const pip = Object.values(out.tokens).find((t) => t.name === "Pip")!;
+    const goblin = Object.values(out.tokens).find((t) => t.name === "Goblin")!;
+    assert.deepEqual(out.encounter!.turnStart, { entryId: out.encounter!.activeEntryId, tokenId: pip.id, sceneId: pip.sceneId, x: 2, y: 3, elevation: 0, seen: true });
+    // The seq that names a turn counts the old room's ops, and the new room counts again from the start.
+    assert.equal(pip.path, undefined, "the path of the turn stays behind with the seq naming the turn");
+    const kept = Object.values(out.drawings);
+    assert.equal(kept.length, 1, "a ruler on a token that did not come through goes with it");
+    assert.deepEqual(kept[0]!.anchors, [pip.id, goblin.id]);
+  });
+
+  test("a take-back line names the row it resumed by its new id", () => {
+    let state = room();
+    state.tokens.a = token("a", { name: "A" });
+    state.tokens.b = token("b", { name: "B", x: 3 });
+    state = apply(state, { t: "encounter.start", entries: [{ id: "n1", tokenId: "a", value: 20 }, { id: "n2", tokenId: "b", value: 10 }] });
+    state = apply(state, { t: "encounter.next" }, undefined, 2);
+    state = apply(state, { t: "encounter.next" }, undefined, 3);
+    state = apply(state, { t: "encounter.prev" }, undefined, 4);
+    const out = remapState(state, { assets: new Map() });
+    const back = out.log.find((e) => e.data?.type === "turn" && e.data.back)?.data;
+    assert.ok(back?.type === "turn");
+    assert.equal(back.to, out.encounter!.activeEntryId);
+    assert.notEqual(back.to, "n1");
+    assert.ok(parseRoomState(JSON.parse(JSON.stringify(out))).ok);
+  });
+
+  test("the players chosen to move any token follow their new ids, and only members of the room stay chosen", () => {
+    const state = room();
+    state.meta.settings.playersMoveAny = ["p2", "gone"];
+    const out = remapState(state, { assets: new Map(), memberIds: new Map([["p2", "new-p2"]]), newId: () => "x" });
+    assert.deepEqual(out.meta.settings.playersMoveAny, ["new-p2"]);
+    state.meta.settings.playersMoveAny = "all";
+    assert.equal(remapState(state, { assets: new Map() }).meta.settings.playersMoveAny, "all");
+  });
+
+  test("a preset member map is honored", () => {
+    const state = randomState(rng(2));
+    const memberIds = new Map(Object.keys(state.members).map((id) => [id, `member-${id}`]));
+    const out = remapState(state, { assets: new Map(), memberIds });
+    assert.deepEqual(Object.keys(out.members).sort(), [...memberIds.values()].sort());
+    for (const d of Object.values(out.drawings)) assert.match(d.ownerId, /^member-/);
+  });
+
+  test("wave 3: stamps and lights get new ids, free walls keep theirs, and phases, thumbnails and stamps follow their images or go", () => {
+    const state = room();
+    const day = { id: "p1", name: "Day", assetId: "day", widthPx: 1000, heightPx: 500 };
+    const night = { id: "p2", name: "Night", assetId: "night", widthPx: 2000, heightPx: 1000 };
+    const grid = { refWidthPx: 1000, refHeightPx: 500, cellPx: 50, originPx: { x: 10, y: 0 } };
+    state.scenes.s1 = { ...state.scenes.s1!, thumb: "thumb1", autoWalls: "off", folder: "Act 1", map: { assetId: "day", widthPx: 1000, heightPx: 500, cellPx: 50, originPx: { x: 10, y: 0 } }, phases: [day, night], phaseId: "p1", phaseGrid: grid };
+    state.scenes.s2 = { ...state.scenes.s2!, thumb: "lost-thumb", map: { assetId: "lost", widthPx: 1000, heightPx: 500, cellPx: 50, originPx: { x: 10, y: 0 } }, phases: [{ ...day, assetId: "lost" }, night], phaseId: "p1", phaseGrid: grid };
+    const walls = [{ id: "abcdefabcdef", a: [1, 1] as [number, number], b: [2, 2] as [number, number], f: { kind: "door" as const, state: "locked" as const, secret: true, discovered: false } }];
+    state.buildChunks["s1:0,0"] = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: {}, walls };
+    const stamp = { rev: 0, sceneId: "s1", x: 1, y: 1, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" as const };
+    state.stamps.st1 = { ...stamp, id: "st1", art: { key: "oak-tree" } };
+    state.stamps.st2 = { ...stamp, id: "st2", art: { assetId: "chair" } };
+    state.stamps.st3 = { ...stamp, id: "st3", art: { assetId: "lost-chair" } };
+    state.lights.l1 = { id: "l1", rev: 0, sceneId: "s2", x: 1, y: 1, bright: 20, dim: 20, on: true, walls: true };
+    const assets = kinds({ day: ["day2", "map"], night: ["night2", "map"], thumb1: ["thumb2", "thumb"], chair: ["chair2", "token"] });
+    let n = 0;
+    const out = remapState(state, { assets, newId: () => `n${n++}` });
+    const [s1, s2] = Object.values(out.scenes).sort((a, b) => a.order - b.order);
+    assert.equal(s1!.thumb, "thumb2");
+    assert.equal(s1!.autoWalls, "off");
+    assert.equal(s1!.folder, "Act 1");
+    assert.deepEqual(s1!.phases, [{ ...day, assetId: "day2" }, { ...night, assetId: "night2" }]);
+    assert.equal(s1!.map!.assetId, "day2");
+    // The active phase's image did not come through, so the scene switched to the first one left, on the same grid.
+    assert.equal("thumb" in s2!, false);
+    assert.deepEqual(s2!.phases, [{ ...night, assetId: "night2" }]);
+    assert.equal(s2!.phaseId, "p2");
+    assert.deepEqual(s2!.map, { assetId: "night2", widthPx: 2000, heightPx: 1000, cellPx: 100, originPx: { x: 20, y: 0 } });
+    assert.deepEqual(out.buildChunks[`${s1!.id}:0,0`]!.walls, walls);
+    const stamps = Object.values(out.stamps);
+    assert.deepEqual(stamps.map((st) => st.art).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))), [{ assetId: "chair2" }, { key: "oak-tree" }]);
+    for (const st of stamps) {
+      assert.equal(st.sceneId, s1!.id);
+      assert.ok(!["st1", "st2", "st3"].includes(st.id));
+    }
+    assert.deepEqual(Object.values(out.lights).map((l) => [l.sceneId, l.id === "l1"]), [[s2!.id, false]]);
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+
+  test("wave 4: the explored layer follows its scene, and squeezes, lights, party members, heights, stairs, vision, phase light and teleport lines keep", () => {
+    const state = room();
+    const bits = "A".repeat(683) + "=";
+    state.scenes.s1 = { ...state.scenes.s1!, vision: { on: true, light: "dim" }, blockMovement: true, fogEnabled: true };
+    state.exploredTiles["s1:1,0"] = { sceneId: "s1", tx: 1, ty: 0, rev: 7, bits };
+    state.exploredTiles["gone:0,0"] = { sceneId: "gone", tx: 0, ty: 0, rev: 1, bits };
+    const heights = "B".repeat(683) + "=";
+    const up = "n".repeat(256);
+    state.buildChunks["s1:0,0"] = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: {}, heights, up };
+    state.tokens.ogre = token("ogre", { size: "large", x: 2.5, y: 3, squeeze: true, light: { bright: 20, dim: 20 }, partyVision: true });
+    state.log.push({ id: "3:0", at: AT, kind: "event", data: { type: "teleport", tokenId: "ogre", past: "ledge" } });
+    let n = 0;
+    const out = remapState(state, { assets: new Map(), newId: () => `n${n++}` });
+    const s1 = Object.values(out.scenes).find((sc) => sc.order === 0)!;
+    assert.deepEqual(out.exploredTiles, { [`${s1.id}:1,0`]: { sceneId: s1.id, tx: 1, ty: 0, rev: 7, bits } });
+    assert.deepEqual([s1.vision, s1.blockMovement], [{ on: true, light: "dim" }, true]);
+    assert.deepEqual(out.buildChunks[`${s1.id}:0,0`], { sceneId: s1.id, cx: 0, cy: 0, rev: 0, cells: {}, edges: {}, heights, up });
+    const ogre = Object.values(out.tokens)[0]!;
+    assert.deepEqual([ogre.squeeze, ogre.light, ogre.partyVision], [true, { bright: 20, dim: 20 }, true]);
+    assert.deepEqual(out.log[0]!.data, { type: "teleport", tokenId: ogre.id, past: "ledge" });
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+
+  test("an image is kept only where its kind belongs, so a hand-made file cannot show players a thumbnail or another phase", () => {
+    const state = room();
+    const day = { id: "p1", name: "Day", assetId: "day", widthPx: 100, heightPx: 100 };
+    const night = { id: "p2", name: "Night", assetId: "night", widthPx: 100, heightPx: 100 };
+    const map = { assetId: "day", widthPx: 100, heightPx: 100, cellPx: 10, originPx: { x: 0, y: 0 } };
+    state.scenes.s1 = { ...state.scenes.s1!, thumb: "thumb", map, phases: [day, night], phaseId: "p1", phaseGrid: { refWidthPx: 100, refHeightPx: 100, cellPx: 10, originPx: { x: 0, y: 0 } } };
+    // Each kind where another belongs: a map on a token, a thumbnail on the other scene's map, a token image as its thumbnail.
+    state.scenes.s2 = { ...state.scenes.s2!, thumb: "art", map: { ...map, assetId: "thumb" } };
+    const stamp = { rev: 0, sceneId: "s1", x: 1, y: 1, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" as const };
+    state.stamps.onThumb = { ...stamp, id: "onThumb", art: { assetId: "thumb" } };
+    state.stamps.onPhase = { ...stamp, id: "onPhase", art: { assetId: "night" } };
+    state.stamps.onArt = { ...stamp, id: "onArt", art: { assetId: "art" } };
+    state.tokens.t1 = token("t1", { image: imageRef("night"), altImages: [imageRef("thumb"), imageRef("art")] });
+    state.tokens.t2 = token("t2", { image: imageRef("art") });
+    state.characters.c1 = { id: "c1", rev: 0, ownerIds: [], name: "Ayla", size: "medium", actor: actor(), defaultImage: imageRef("thumb") };
+    state.monsters.mx = customMonster("mx", { defaultImage: imageRef("night") });
+    state.srdImages.bandit = srdImage("bandit", "thumb");
+    state.handouts.h1 = { id: "h1", rev: 0, assetId: "night", title: "Letter", to: "all", shownAt: AT };
+    const assets = kinds({ day: ["day2", "map"], night: ["night2", "map"], thumb: ["thumb2", "thumb"], art: ["art2", "token"] });
+    const out = remapState(state, { assets });
+    const [s1, s2] = Object.values(out.scenes).sort((a, b) => a.order - b.order);
+    assert.equal(s1!.thumb, "thumb2");
+    assert.deepEqual(s1!.phases?.map((p) => p.assetId), ["day2", "night2"]);
+    assert.equal(s1!.map?.assetId, "day2");
+    assert.equal("thumb" in s2!, false, "a token image is no thumbnail");
+    assert.equal("map" in s2!, false, "a thumbnail is no map");
+    assert.deepEqual(Object.values(out.stamps).map((st) => st.art), [{ assetId: "art2" }]);
+    const tokens = Object.values(out.tokens).sort((a, b) => a.name.localeCompare(b.name));
+    for (const t of tokens) {
+      if (imageAssetId(t.image) === "art2") continue;
+      assert.equal(t.image, undefined, "a phase image is no token image");
+      assert.deepEqual(t.altImages, [imageRef("art2")], "a thumbnail is no token image");
+    }
+    assert.equal(Object.values(out.characters)[0]!.defaultImage, undefined);
+    assert.equal(Object.values(out.monsters)[0]!.defaultImage, undefined);
+    assert.deepEqual(out.srdImages, {});
+    assert.deepEqual(out.handouts, {}, "a map is no handout");
+    // The thumbnail and the phase not showing stay the DM's: no player's visible set holds them, which is all the asset route checks.
+    out.meta.playerSceneId = s1!.id;
+    const visible = visibleAssetIds(out, P1, { sceneId: s1!.id });
+    assert.ok(visible.has("day2") && visible.has("art2"));
+    assert.ok(!visible.has("thumb2") && !visible.has("night2"), [...visible].join(", "));
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+
+  test("a scene whose showing phase's image went switches to the first phase left with that phase's light", () => {
+    const state = room();
+    const grid = { refWidthPx: 1000, refHeightPx: 500, cellPx: 50, originPx: { x: 0, y: 0 } };
+    const day = { id: "p1", name: "Day", assetId: "day", widthPx: 1000, heightPx: 500, light: "bright" as const };
+    const night = { id: "p2", name: "Night", assetId: "lost-night", widthPx: 1000, heightPx: 500, light: "dark" as const };
+    const map = { assetId: "lost-night", widthPx: 1000, heightPx: 500, cellPx: 50, originPx: { x: 0, y: 0 } };
+    state.scenes.s1 = { ...state.scenes.s1!, map, phases: [day, night], phaseId: "p2", phaseGrid: grid, vision: { on: true, light: "dark" } };
+    state.scenes.s2 = { ...state.scenes.s2!, map: { ...map, assetId: "day" }, phases: [day, night], phaseId: "p1", phaseGrid: grid, vision: { on: true, light: "dim" } };
+    let n = 0;
+    const out = remapState(state, { assets: kinds({ day: ["day2", "map"] }), newId: () => `n${n++}` });
+    const [s1, s2] = Object.values(out.scenes).sort((a, b) => a.order - b.order);
+    assert.equal(s1!.phaseId, "p1");
+    assert.deepEqual(s1!.vision, { on: true, light: "bright" });
+    assert.deepEqual(s2!.vision, { on: true, light: "dim" }, "a scene still showing its phase keeps its level");
+  });
+
+  test("a scene whose every phase image went has no phases and no map", () => {
+    const state = room();
+    const grid = { refWidthPx: 100, refHeightPx: 100, cellPx: 10, originPx: { x: 0, y: 0 } };
+    state.scenes.s1 = { ...state.scenes.s1!, map: { assetId: "gone", widthPx: 100, heightPx: 100, cellPx: 10, originPx: { x: 0, y: 0 } }, phases: [{ id: "p1", name: "Day", assetId: "gone", widthPx: 100, heightPx: 100 }], phaseId: "p1", phaseGrid: grid };
+    const out = remapState(state, { assets: new Map() });
+    const s1 = Object.values(out.scenes).find((s) => s.name === "s1")!;
+    for (const field of ["map", "phases", "phaseId", "phaseGrid"]) assert.equal(field in s1, false, field);
+  });
+});
+
+describe("remapState, wave 5 (docs/design-v1-dm-tools.md 2.5)", () => {
+  function wave5() {
+    const state = room();
+    state.monsters.m1 = customMonster("m1");
+    state.characters.c1 = character("c1", { ownerIds: ["p1"], defaultImage: { icon: "lorc/wolf-head", color: "#336699" }, actor: actor({ monsterId: "gone-monster" }) });
+    state.tokens.t1 = token("t1", { ownerIds: ["p1"], image: { icon: "delapouite/goblin-head", color: "#000000" }, actor: { inline: actor({ monsterId: "m1" }) } });
+    state.journal = {
+      all: { id: "all", rev: 3, title: "Shared", access: "all", blocks: [{ id: "abcdefghijkl", text: "Hush", secret: { revealed: true } }] },
+      mine: { id: "mine", rev: 0, title: "Thorn's", access: { member: "p1" }, blocks: [] },
+      ghost: { id: "ghost", rev: 0, title: "Gone reader's", access: { member: "nobody" }, blocks: [] },
+    };
+    state.pins = {
+      a: { id: "a", rev: 0, sceneId: "s1", x: 1, y: 1, color: "#ff8800", visibility: "all", pageId: "all" },
+      b: { id: "b", rev: 0, sceneId: "s2", x: 1, y: 1, color: "#ff8800", visibility: "all", pageId: "missing" },
+      c: { id: "c", rev: 0, sceneId: "nowhere", x: 1, y: 1, color: "#ff8800", visibility: "all" },
+    };
+    state.rolls.r1 = { id: "r1", rev: 1, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, at: AT, targets: [{ characterId: "c1", total: 12, by: "p1" }] };
+    state.log.push({ id: "1:0", at: AT, kind: "event", data: { type: "roll", test: { kind: "save", choices: [{ ability: "dex" }] }, characterId: "c1", total: 12 } });
+    state.meta.settings = { ...state.meta.settings, playersDraw: ["p1", "nobody"] };
+    return state;
+  }
+
+  test("pages, pins and links get new ids, a player's access and who may draw follow the member, and open requests stay behind", () => {
+    const state = wave5();
+    const out = remapState(state, { assets: new Map() });
+    const p1 = out.members[Object.keys(out.members).find((id) => out.members[id]!.name === "p1")!]!;
+    const pages = Object.values(out.journal);
+    assert.equal(pages.length, 3);
+    for (const page of pages) assert.ok(!(page.id in state.journal), `page ${page.id} kept its old id`);
+    const byTitle = (title: string) => pages.find((p) => p.title === title)!;
+    assert.deepEqual(byTitle("Shared").blocks, state.journal.all!.blocks);
+    assert.deepEqual(byTitle("Thorn's").access, { member: p1.id });
+    assert.equal(byTitle("Gone reader's").access, "dm", "a page whose reader did not come through is the DM's");
+    const pins = Object.values(out.pins);
+    assert.equal(pins.length, 2, "a pin of a scene that did not come through goes with it");
+    const shared = pins.find((p) => p.visibility === "all")!;
+    assert.equal(shared.pageId, byTitle("Shared").id);
+    assert.ok(out.scenes[shared.sceneId]);
+    const unlinked = pins.find((p) => p !== shared)!;
+    assert.deepEqual([unlinked.pageId, unlinked.visibility], [undefined, "dm"], "a pin whose page did not come through is made the DM's");
+    assert.deepEqual(out.rolls, {});
+    assert.deepEqual(out.meta.settings.playersDraw, [p1.id]);
+    // Icons keep their keys, a link to a room monster follows its new id, and one to a monster that is gone goes.
+    const token = Object.values(out.tokens)[0]!;
+    assert.deepEqual(token.image, state.tokens.t1!.image);
+    assert.equal((token.actor as { inline: { monsterId?: string } }).inline.monsterId, Object.keys(out.monsters)[0]);
+    const character = Object.values(out.characters)[0]!;
+    assert.deepEqual(character.defaultImage, state.characters.c1!.defaultImage);
+    assert.equal("monsterId" in character.actor, false);
+    // A roll line is history, and follows its creature to its new id.
+    const line = out.log.find((e) => e.data?.type === "roll")?.data as { characterId?: string } | undefined;
+    assert.equal(line?.characterId, character.id);
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+});

@@ -1,0 +1,33 @@
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+import { monsterView } from "#shared/statBlock.ts";
+import { customMonster, imageRef, room } from "#shared/testutil.ts";
+import { pendingTokens } from "./placeInputs.ts";
+
+describe("what one tap of Add token places", () => {
+  test("monsters from the room's own keep their link and wear the monster's image, around the tap", () => {
+    const state = room();
+    state.scenes.s1!.bounds = { w: 20, h: 20 };
+    state.monsters.m1 = customMonster("m1", { name: "Cave Lurker", defaultImage: imageRef("lurker-pic") });
+    let n = 0;
+    const tokens = pendingTokens(
+      { kind: "monster", monster: monsterView(state.monsters.m1), monsterId: "m1", count: 2, hp: null, hidden: false, inLair: false },
+      { view: state, scene: state.scenes.s1!, world: { x: 5, y: 5 }, newId: () => `t${n++}` },
+    );
+    assert.equal(tokens.length, 2);
+    for (const t of tokens) {
+      assert.ok("inline" in t.actor);
+      assert.equal(t.actor.inline.monsterId, "m1");
+      assert.deepEqual(t.image, imageRef("lurker-pic"));
+    }
+    assert.notDeepEqual([tokens[0]!.x, tokens[0]!.y], [tokens[1]!.x, tokens[1]!.y], "never stacked");
+  });
+
+  test("a blank token and a character's token carry no monster link", () => {
+    const state = room();
+    const [blank] = pendingTokens({ kind: "blank", tokenKind: "monster" }, { view: state, scene: state.scenes.s1!, world: { x: 2, y: 2 }, newId: () => "b1" });
+    assert.ok(blank && "inline" in blank.actor);
+    assert.equal("monsterId" in blank.actor.inline, false);
+    assert.deepEqual(pendingTokens({ kind: "character", characterId: "gone", name: "Gone" }, { view: state, scene: state.scenes.s1!, world: { x: 2, y: 2 }, newId: () => "c1" }), []);
+  });
+});

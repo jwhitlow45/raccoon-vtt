@@ -1,0 +1,373 @@
+import { useMemo } from "react";
+import type { Actor, CreatureSize, HpVisibility, Token, TokenKind } from "#shared/model.ts";
+import type { ActorPatch, TokenPatch } from "#shared/protocol.ts";
+import { Checkbox } from "../components/Checkbox.tsx";
+import { Empty } from "../components/Empty.tsx";
+import { RowDot } from "../components/Row.tsx";
+import { Switch } from "../components/Switch.tsx";
+import { Tag } from "../components/Tag.tsx";
+import type { PanelProps } from "../features/panels.ts";
+import { ImageField } from "../features/images/ImageField.tsx";
+import { RangeRingsSection } from "../features/measure/RangeRingsSection.tsx";
+import { GroundNotice } from "../features/movement/GroundNotice.tsx";
+import { tokenAccess, type TokenAccess } from "../features/tokens/access.ts";
+import { AltImagesField } from "../features/tokens/AltImages.tsx";
+import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
+import { HpSection } from "../features/tokens/HpSection.tsx";
+import { RestSection } from "../features/tokens/RestSection.tsx";
+import { StatBlockSection } from "../features/tokens/StatBlockSection.tsx";
+import { StatsSection } from "../features/tokens/StatsSection.tsx";
+import { TokenNotes } from "../features/tokens/TokenNotes.tsx";
+import { TokenSight } from "../features/vision/TokenSight.tsx";
+import { ConfirmButton, FieldRow, Note, NumberField, Section, Select, Stepper, TextField } from "../features/tokens/ui.tsx";
+import { displayName, footprint } from "../lib/scene.ts";
+import { theme } from "../lib/theme.ts";
+import { elevationBadge, initials } from "../lib/tokenView.ts";
+import { useRoomActions, useRoomUi, useRoomView } from "../state/view.ts";
+
+const SIZE_OPTIONS: { value: CreatureSize; label: string }[] = [
+  { value: "tiny", label: "Tiny" },
+  { value: "small", label: "Small" },
+  { value: "medium", label: "Medium" },
+  { value: "large", label: "Large" },
+  { value: "huge", label: "Huge" },
+  { value: "gargantuan", label: "Gargantuan" },
+  { value: "custom", label: "Custom" },
+];
+const SIZE_NAMES = Object.fromEntries(SIZE_OPTIONS.map((o) => [o.value, o.label])) as Record<CreatureSize, string>;
+
+const KIND_OPTIONS: { value: TokenKind; label: string }[] = [
+  { value: "pc", label: "Player character" },
+  { value: "npc", label: "NPC" },
+  { value: "monster", label: "Monster" },
+  { value: "object", label: "Object or marker" },
+];
+
+const HP_VISIBILITY_OPTIONS: { value: HpVisibility; label: string }[] = [
+  { value: "hidden", label: "Nothing" },
+  { value: "label", label: "Healthy, Bloodied, Dying, Dead" },
+  { value: "bar", label: "A bar" },
+  { value: "exact", label: "Exact numbers" },
+];
+
+const RING: Record<Token["disposition"], string> = { ally: theme.color.ally, neutral: theme.color.neutral, hostile: theme.color.hostile };
+
+/**
+ * The selected token's panel (features sections 5, 7, 8 and 15). The DM and
+ * the token's owners, directly or through its character, get its full stat
+ * card and the controls their role allows. Everyone else sees the public
+ * view: the name the projection gave them, the HP the DM allows,
+ * conditions with their rules text, and the elevation.
+ */
+export default function TokenPanel(props: PanelProps) {
+  // One instance per token, so an armed Delete or a half-typed field never carries over to the next token selected.
+  return <TokenDetails key={props.selectedTokenId ?? ""} {...props} />;
+}
+
+function TokenDetails(props: PanelProps) {
+  const tokenId = props.selectedTokenId;
+  const token = useRoomView((s) => (tokenId ? s.view?.tokens[tokenId] : undefined));
+  const you = useRoomView((s) => s.you);
+  const character = useRoomView((s) => (token && "ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
+  const playersApplyDamage = useRoomView((s) => s.view?.meta.settings.playersApplyDamage ?? false);
+  const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
+  const actions = useRoomActions();
+
+  const access = useMemo(
+    () =>
+      token && you
+        ? tokenAccess({
+            role: you.role,
+            memberId: you.memberId,
+            view: { characters: character ? { [character.id]: character } : {}, meta: { settings: { playersApplyDamage } } },
+            token,
+          })
+        : null,
+    [token, you, character, playersApplyDamage],
+  );
+
+  if (!token || !access) return <Empty>Tap a token to see it here.</Empty>;
+
+  const actor: Partial<Actor> | undefined = "inline" in token.actor ? token.actor.inline : character?.actor;
+  const fp = footprint(token);
+  const name = displayName(token);
+  const update = (patch: TokenPatch) => actions.dispatch({ t: "token.update", tokenId: token.id, patch });
+  const patchActor = (patch: ActorPatch) => {
+    if (access.actorVia === "character" && character) actions.dispatch({ t: "character.update", characterId: character.id, patch: { actor: patch } });
+    else update({ actor: patch });
+  };
+
+  return (
+    <div style={{ fontSize: theme.font.body14 }}>
+      <Header token={token} name={name} access={access} feetPerCell={feetPerCell} update={update} />
+      <HpSection actor={actor} hpVisibility={token.hpVisibility} target={{ tokenId: token.id }} access={access} />
+      <EffectsSection
+        effects={actor?.effects ?? []}
+        target={{ tokenId: token.id }}
+        self={{ tokenId: token.id }}
+        selfLabel={name}
+        canEdit={access.effects}
+      />
+      {access.full && token.kind !== "object" ? <RestSection actor={actor?.hp && actor.life ? { hp: actor.hp, life: actor.life } : undefined} target={{ tokenId: token.id }} /> : null}
+      <TokenNotes
+        notes={token.notes}
+        canEdit={access.canEditToken("notes")}
+        onNotes={(notes) => update({ notes })}
+        dm={access.dm && actor ? { notes: actor.dmNotes ?? "", onNotes: (dmNotes) => patchActor({ dmNotes }) } : null}
+      />
+      <PositionSection token={token} access={access} feetPerCell={feetPerCell} fp={fp} update={update} />
+      <RangeRingsSection token={token} canEdit={access.canEditToken("rangeRings")} update={update} />
+      <TokenSight token={token} actor={actor} access={access} update={update} />
+      {actor ? (
+        <StatsSection actor={actor} canEdit={access.canEditActor} onPatch={patchActor} dm={access.dm} full={access.full} notesTitle="Card notes" dmNotes={false} />
+      ) : null}
+      <StatBlockSection token={token} actor={actor} access={access} patchActor={patchActor} />
+      {access.dm ? <DmSettings token={token} update={update} /> : null}
+      {access.dm ? <Owners token={token} update={update} /> : null}
+      {access.dm ? <DmActions token={token} onDeleted={props.close} /> : null}
+    </div>
+  );
+}
+
+function Header(props: { token: Token; name: string; access: TokenAccess; feetPerCell: number; update(patch: TokenPatch): void }) {
+  const { token, access, update } = props;
+  const fp = footprint(token);
+  const sizeText = fp.w === fp.h ? `${fp.w * props.feetPerCell} ft` : `${fp.w * props.feetPerCell} by ${fp.h * props.feetPerCell} ft`;
+  const badges: string[] = [];
+  if (token.visibility === "dm") badges.push("Hidden from players");
+  if (token.locked) badges.push("Locked");
+  if (token.nameHidden) badges.push("Name hidden");
+  return (
+    <div style={{ display: "grid", gap: theme.space(2), padding: `${theme.space(2)}px 0 ${theme.space(3)}px` }}>
+      <ImageField
+        value={token.image}
+        onChange={(image) => update({ image })}
+        shape={token.kind === "object" ? "square" : "circle"}
+        aspect={fp.w / fp.h}
+        canEdit={access.canEditToken("image")}
+        ring={RING[token.disposition] ?? theme.color.neutral}
+        initials={initials(props.name)}
+      />
+      {access.canEditToken("altImages") ? (
+        <AltImagesField
+          token={token}
+          shape={token.kind === "object" ? "square" : "circle"}
+          aspect={fp.w / fp.h}
+          ring={RING[token.disposition] ?? theme.color.neutral}
+          onPatch={update}
+        />
+      ) : null}
+      <div style={{ display: "grid", gap: theme.space(0.5) }}>
+        <h3 style={{ margin: 0, fontSize: theme.font.heading, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>{props.name}</h3>
+        <div style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>
+          {SIZE_NAMES[token.size] ?? token.size} ({sizeText}){token.kind === "object" ? ", object" : ""}
+        </div>
+        {badges.length > 0 ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), marginTop: theme.space(0.5) }}>
+            {badges.map((b) => (
+              <Tag key={b}>{b}</Tag>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      {!access.dm && access.canEditToken("name") ? (
+        <>
+          <FieldRow label="Name">
+            <TextField label="Name" value={token.name} maxLength={80} onCommit={(v) => v.trim() && update({ name: v.trim() })} />
+          </FieldRow>
+          <FieldRow label="Name others see" hint="Used when the DM hides the name">
+            <TextField label="Name others see" value={token.publicName ?? ""} maxLength={80} onCommit={(v) => update({ publicName: v.trim() || null })} />
+          </FieldRow>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function PositionSection(props: { token: Token; access: TokenAccess; feetPerCell: number; fp: { w: number; h: number }; update(patch: TokenPatch): void }) {
+  const { token, access, update } = props;
+  const canElevate = access.canEditToken("elevation");
+  const canRotate = access.canEditToken("rotation");
+  const autoHeight = Math.max(props.fp.w, props.fp.h) * props.feetPerCell;
+  const rotation = (((token.rotation ?? 0) % 360) + 360) % 360;
+  if (!canElevate && !canRotate) {
+    const badge = elevationBadge(token.elevation);
+    return (
+      <Section title="Position">
+        <Note>{badge ? `Elevation ${badge} ft` : "On the ground"}</Note>
+      </Section>
+    );
+  }
+  return (
+    <Section title="Position">
+      {canElevate ? (
+        <FieldRow label="Elevation" hint="Feet. Negative is below ground.">
+          <Stepper label="Elevation" value={token.elevation ?? 0} step={5} min={-100_000} max={100_000} onChange={(elevation) => update({ elevation })} />
+        </FieldRow>
+      ) : null}
+      <GroundNotice token={token} />
+      {access.dm ? (
+        <FieldRow label="Height" hint={`Feet. Empty uses the size: ${autoHeight} ft.`}>
+          <NumberField label="Height" value={token.height} min={0} max={10_000} nullable placeholder={`${autoHeight}`} onCommit={(height) => update({ height })} />
+        </FieldRow>
+      ) : null}
+      {canRotate ? (
+        <FieldRow label="Facing" hint="Degrees clockwise">
+          <Stepper label="Facing" value={rotation} step={45} min={-360} max={360} onChange={(r) => update({ rotation: ((r % 360) + 360) % 360 })} />
+        </FieldRow>
+      ) : null}
+    </Section>
+  );
+}
+
+function DmSettings(props: { token: Token; update(patch: TokenPatch): void }) {
+  const { token, update } = props;
+  const fp = footprint(token);
+  return (
+    <Section title="Token settings">
+      <FieldRow label="Name">
+        <TextField label="Name" value={token.name} maxLength={80} onCommit={(v) => v.trim() && update({ name: v.trim() })} />
+      </FieldRow>
+      <Switch checked={token.nameHidden} onChange={(nameHidden) => update({ nameHidden })} label="Hide the name from players" />
+      {token.nameHidden ? (
+        <FieldRow label="Name players see" hint="Empty shows “Unknown creature”">
+          <TextField
+            label="Name players see"
+            value={token.publicName ?? ""}
+            maxLength={80}
+            placeholder="Unknown creature"
+            onCommit={(v) => update({ publicName: v.trim() || null })}
+          />
+        </FieldRow>
+      ) : null}
+      <FieldRow label="Kind">
+        <Select<TokenKind> label="Kind" value={token.kind} options={KIND_OPTIONS} onChange={(kind) => update({ kind })} />
+      </FieldRow>
+      <FieldRow label="Size">
+        <Select<CreatureSize>
+          label="Size"
+          value={token.size}
+          options={SIZE_OPTIONS}
+          onChange={(size) => (size === "custom" ? update({ size, w: fp.w, h: fp.h }) : update({ size, w: null, h: null }))}
+        />
+      </FieldRow>
+      {token.size === "custom" ? (
+        <FieldRow label="Width by height" hint="Squares, 0.5 to 20">
+          <CellsField label="Width in squares" value={token.w ?? fp.w} onCommit={(w) => update({ w })} />
+          <span style={{ color: theme.color.textMuted }}>by</span>
+          <CellsField label="Height in squares" value={token.h ?? fp.h} onCommit={(h) => update({ h })} />
+        </FieldRow>
+      ) : null}
+      <FieldRow label="Ring">
+        <Select<Token["disposition"]>
+          label="Disposition"
+          value={token.disposition}
+          options={[
+            { value: "ally", label: "Ally (blue)" },
+            { value: "neutral", label: "Neutral (gray)" },
+            { value: "hostile", label: "Hostile (red)" },
+          ]}
+          onChange={(disposition) => update({ disposition })}
+        />
+      </FieldRow>
+      <FieldRow label="Layer">
+        <Select<Token["layer"]>
+          label="Layer"
+          value={token.layer}
+          options={[
+            { value: "token", label: "Creatures" },
+            { value: "object", label: "Objects, under creatures" },
+          ]}
+          onChange={(layer) => update({ layer })}
+        />
+      </FieldRow>
+      <FieldRow label="Players see HP as">
+        <Select<HpVisibility> label="Players see HP as" value={token.hpVisibility} options={HP_VISIBILITY_OPTIONS} onChange={(hpVisibility) => update({ hpVisibility })} />
+      </FieldRow>
+      <Switch
+        checked={token.visibility === "dm"}
+        onChange={(hidden) => update({ visibility: hidden ? "dm" : "all" })}
+        label="Hidden from players"
+        help="Never sent to players while hidden."
+      />
+      <Switch checked={token.locked} onChange={(locked) => update({ locked })} label="Locked" help="Nobody can drag it." />
+      <Switch
+        checked={token.fogExempt}
+        onChange={(fogExempt) => update({ fogExempt })}
+        label="Always visible, even under fog"
+        help="When off, players lose sight of it while it stands fully in the fog."
+      />
+    </Section>
+  );
+}
+
+function CellsField(props: { label: string; value: number; onCommit(value: number): void }) {
+  return (
+    <TextField
+      label={props.label}
+      value={String(props.value)}
+      onCommit={(v) => {
+        const n = Math.round(Number(v) * 2) / 2;
+        if (Number.isFinite(n)) props.onCommit(Math.min(20, Math.max(0.5, n)));
+      }}
+      style={{ maxWidth: 72, textAlign: "center" }}
+    />
+  );
+}
+
+/** Who controls the token. A PC token is also owned through its character, which the character card sets. */
+function Owners(props: { token: Token; update(patch: TokenPatch): void }) {
+  const { token, update } = props;
+  const members = useRoomView((s) => s.view?.members);
+  const owners = token.ownerIds ?? [];
+  const list = Object.values(members ?? {}).sort((a, b) =>
+    a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "player" ? -1 : 1,
+  );
+  const character = useRoomView((s) => ("ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
+  const through = (character?.ownerIds ?? []).map((id) => members?.[id]?.name).filter(Boolean);
+  return (
+    <Section title="Owners">
+      <Note>Owners can move it and edit what their role allows.</Note>
+      <div style={{ display: "grid" }}>
+        {list.map((m) => (
+          <Checkbox
+            key={m.id}
+            checked={owners.includes(m.id)}
+            onChange={(on) => update({ ownerIds: on ? [...owners, m.id] : owners.filter((id) => id !== m.id) })}
+            label={
+              <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(2) }}>
+                <RowDot color={m.color} size={12} />
+                {m.name}
+                {m.kind === "dm" ? <span style={{ color: theme.color.textMuted }}>(DM)</span> : null}
+              </span>
+            }
+          />
+        ))}
+      </div>
+      {through.length > 0 ? (
+        <Note>
+          Also owned through {character?.name}: {through.join(", ")}.
+        </Note>
+      ) : null}
+    </Section>
+  );
+}
+
+function DmActions(props: { token: Token; onDeleted(): void }) {
+  const actions = useRoomActions();
+  const ui = useRoomUi();
+  return (
+    <Section title="Remove">
+      <ConfirmButton
+        confirm="Tap again to delete"
+        onConfirm={() => {
+          actions.dispatch({ t: "token.delete", tokenId: props.token.id });
+          ui.select(null);
+          props.onDeleted();
+        }}
+      >
+        Delete this token
+      </ConfirmButton>
+    </Section>
+  );
+}

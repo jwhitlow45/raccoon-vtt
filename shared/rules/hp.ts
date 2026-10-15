@@ -1,0 +1,281 @@
+import type { Actor, Effect, LifeState, LogEvent, RoomSettings, TokenKind } from "../model.ts";
+
+/**
+ * HP and life-state transitions (design section 9.6). Pure functions over an
+ * actor: each returns the new actor and the structured log events the change
+ * produced, and the reducer stamps ids and targets on those events.
+ *
+ * The Unconscious that 0 HP brings carries a fixed effect id, so healing and
+ * death can remove exactly that one and leave a condition the DM applied by
+ * hand.
+ */
+export const ZERO_HP_UNCONSCIOUS_ID = "unconscious@0";
+
+export type HpLabel = "Healthy" | "Bloodied" | "Dying" | "Dead";
+
+/** A log event minus the target, which the reducer fills in. */
+export type ActorEvent =
+  | Extract<LogEvent, { type: "hp" }>
+  | Extract<LogEvent, { type: "life" }>
+  | Extract<LogEvent, { type: "effect" }>
+  | Extract<LogEvent, { type: "concentration" }>
+  | Extract<LogEvent, { type: "deathSave" }>
+  | Extract<LogEvent, { type: "rest" }>;
+
+export type HpResult = { actor: Actor; events: ActorEvent[] };
+
+/** Conditions that include Incapacitated in the 2024 rules, which end concentration. */
+export const INCAPACITATING_KEYS: ReadonlySet<Effect["key"]> = new Set([
+  "incapacitated",
+  "paralyzed",
+  "petrified",
+  "stunned",
+  "unconscious",
+]);
+
+export function hpLabel(actor: Pick<Actor, "hp" | "life">): HpLabel {
+  if (actor.life === "dead") return "Dead";
+  if (actor.life === "dying" || actor.life === "stable") return "Dying";
+  if (actor.hp.cur <= Math.floor(actor.hp.max / 2)) return "Bloodied";
+  return "Healthy";
+}
+
+export function isBloodied(actor: Pick<Actor, "hp">): boolean {
+  return actor.hp.cur <= Math.floor(actor.hp.max / 2);
+}
+
+/** `cur / max` rounded to the nearest 1/20, the only HP shape a `bar` viewer gets. */
+export function hpBar(actor: Pick<Actor, "hp">): number {
+  if (actor.hp.max <= 0) return 0;
+  const ratio = Math.min(1, Math.max(0, actor.hp.cur / actor.hp.max));
+  return Math.round(ratio * 20) / 20;
+}
+
+export function concentrationDc(damage: number): number {
+  return Math.min(30, Math.max(10, Math.floor(damage / 2)));
+}
+
+export function isConcentrating(actor: Pick<Actor, "effects">): boolean {
+  return actor.effects.some((e) => e.key === "concentrating");
+}
+
+function withUnconscious(actor: Actor): Actor {
+  if (actor.effects.some((e) => e.key === "unconscious")) return actor;
+  return { ...actor, effects: [...actor.effects, { id: ZERO_HP_UNCONSCIOUS_ID, key: "unconscious" }] };
+}
+
+function withoutZeroUnconscious(actor: Actor): Actor {
+  if (!actor.effects.some((e) => e.id === ZERO_HP_UNCONSCIOUS_ID)) return actor;
+  return { ...actor, effects: actor.effects.filter((e) => e.id !== ZERO_HP_UNCONSCIOUS_ID) };
+}
+
+/** The log event for an effect starting, ending or pausing, marked when players may not know about the effect. */
+export function effectEvent(effect: Effect, action: Extract<LogEvent, { type: "effect" }>["action"]): ActorEvent {
+  const event: ActorEvent = { type: "effect", key: effect.key, action };
+  if (effect.spell !== undefined) event.spell = effect.spell;
+  if (effect.hiddenFromPlayers) event.hidden = true;
+  return event;
+}
+
+/** Ends every concentration effect, logging each spell, for Incapacitated and for death. */
+export function endConcentration(actor: Actor): HpResult {
+  const ending = actor.effects.filter((e) => e.key === "concentrating");
+  if (ending.length === 0) return { actor, events: [] };
+  return {
+    actor: { ...actor, effects: actor.effects.filter((e) => e.key !== "concentrating") },
+    events: ending.map((e) => ({
+      type: "concentration",
+      ended: true,
+      ...(e.spell !== undefined ? { spell: e.spell } : {}),
+      ...(e.hiddenFromPlayers ? { hidden: true as const } : {}),
+    })),
+  };
+}
+
+function setLife(actor: Actor, life: LifeState): HpResult {
+  const events: ActorEvent[] = [];
+  let next: Actor = { ...actor, life };
+  if (life === "dying") {
+    next = withUnconscious(next);
+  } else if (life === "dead") {
+    // Unconscious belongs to dying (9.6). A dead creature keeps only the
+    // conditions someone applied by hand.
+    next = withoutZeroUnconscious(next);
+    const ended = endConcentration(next);
+    next = ended.actor;
+    events.push(...ended.events);
+  }
+  events.push({ type: "life", life });
+  return { actor: next, events };
+}
+
+/**
+ * What happens the moment current HP reaches 0 from above. Objects just sit
+ * at 0. Monsters die when the room says so, and otherwise follow the PC rules
+ * with death saves the DM enters.
+ */
+function reachZero(actor: Actor, kind: TokenKind, settings: RoomSettings): HpResult {
+  if (kind === "object") return { actor, events: [] };
+  const diesAtZero = (kind === "monster" || kind === "npc") && settings.monstersDieAtZero;
+  if (diesAtZero) return setLife(actor, "dead");
+  const dying = setLife({ ...actor, deathSaves: { ok: 0, fail: 0 } }, "dying");
+  // Falling Unconscious includes Incapacitated, which ends concentration.
+  const ended = endConcentration(dying.actor);
+  return { actor: ended.actor, events: [...dying.events, ...ended.events] };
+}
+
+export function applyDamage(
+  actor: Actor,
+  amount: number,
+  kind: TokenKind,
+  settings: RoomSettings,
+  crit = false,
+): HpResult {
+  if (amount <= 0 || actor.life === "dead") return { actor, events: [] };
+  const events: ActorEvent[] = [];
+  const absorbed = Math.min(actor.hp.temp, amount);
+  const toCur = amount - absorbed;
+  let next: Actor = { ...actor, hp: { ...actor.hp, temp: actor.hp.temp - absorbed } };
+
+  if (next.hp.cur > 0) {
+    const cur = Math.max(0, next.hp.cur - toCur);
+    const leftover = toCur - next.hp.cur;
+    next = { ...next, hp: { ...next.hp, cur } };
+    events.push({ type: "hp", change: "damage", amount, ...(crit ? { crit } : {}), label: hpLabel(next) });
+    if (cur === 0) {
+      const zero = leftover >= next.hp.max && kind !== "object" ? setLife(next, "dead") : reachZero(next, kind, settings);
+      next = zero.actor;
+      events.push(...zero.events);
+      // The label event was logged before the life change, so refresh it.
+      const hp = events.find((e) => e.type === "hp");
+      if (hp && hp.type === "hp") hp.label = hpLabel(next);
+    } else if (isConcentrating(next)) {
+      // One prompt covers every concentration at once, so it is hidden only when each of them is.
+      const hidden = next.effects.every((e) => e.key !== "concentrating" || e.hiddenFromPlayers);
+      events.push({ type: "concentration", dc: concentrationDc(amount), ...(hidden ? { hidden: true as const } : {}) });
+    }
+    return { actor: next, events };
+  }
+
+  // Already at 0: damage adds failed death saves, or kills outright. The
+  // 2024 rules count the damage taken, so a hit that temporary HP soaks up
+  // still costs a death save, and the whole hit counts toward the maximum.
+  events.push({ type: "hp", change: "damage", amount, ...(crit ? { crit } : {}), label: hpLabel(next) });
+  if (kind === "object" || next.life === "alive") return { actor: next, events };
+  if (amount >= next.hp.max) {
+    const dead = setLife(next, "dead");
+    return { actor: dead.actor, events: [...events, ...dead.events] };
+  }
+  const fails = crit ? 2 : 1;
+  if (next.life === "stable") {
+    const dying = setLife({ ...next, deathSaves: { ok: 0, fail: fails } }, "dying");
+    next = dying.actor;
+    events.push(...dying.events, { type: "deathSave", ok: 0, fail: fails });
+  } else {
+    const fail = Math.min(3, next.deathSaves.fail + fails);
+    next = { ...next, deathSaves: { ...next.deathSaves, fail } };
+    events.push({ type: "deathSave", ok: next.deathSaves.ok, fail });
+    if (fail >= 3) {
+      const dead = setLife(next, "dead");
+      next = dead.actor;
+      events.push(...dead.events);
+    }
+  }
+  const hp = events.find((e) => e.type === "hp");
+  if (hp && hp.type === "hp") hp.label = hpLabel(next);
+  return { actor: next, events };
+}
+
+/** Coming back from 0 HP: alive again, the automatic Unconscious gone, death saves cleared. */
+function revive(actor: Actor): Actor {
+  return withoutZeroUnconscious({ ...actor, life: "alive", deathSaves: { ok: 0, fail: 0 } });
+}
+
+export function applyHeal(actor: Actor, amount: number): HpResult {
+  if (amount <= 0 || actor.life === "dead") return { actor, events: [] };
+  const cur = Math.min(actor.hp.max, actor.hp.cur + amount);
+  let next: Actor = { ...actor, hp: { ...actor.hp, cur } };
+  const events: ActorEvent[] = [];
+  const wasDown = actor.hp.cur === 0 && (actor.life === "dying" || actor.life === "stable");
+  if (wasDown && cur > 0) {
+    next = revive(next);
+  }
+  events.push({ type: "hp", change: "heal", amount, label: hpLabel(next) });
+  if (wasDown && cur > 0) events.push({ type: "life", life: "alive" });
+  return { actor: next, events };
+}
+
+/** Temporary HP is set, not added: the rules say to keep one pool, and the player picks which. */
+export function applyTemp(actor: Actor, amount: number): HpResult {
+  const next: Actor = { ...actor, hp: { ...actor.hp, temp: amount } };
+  return { actor: next, events: [{ type: "hp", change: "temp", amount, label: hpLabel(next) }] };
+}
+
+/**
+ * An absolute HP edit. Dropping to 0 follows the reaching-0 rules without the
+ * massive-damage check, and rising from 0 revives like healing. A dead
+ * creature stays dead: only `actor.life` brings it back.
+ */
+export function applyHpSet(
+  actor: Actor,
+  values: { cur?: number; max?: number; temp?: number },
+  kind: TokenKind,
+  settings: RoomSettings,
+): HpResult {
+  const max = values.max ?? actor.hp.max;
+  const requestedCur = values.cur ?? actor.hp.cur;
+  const cur = Math.min(max, Math.max(0, requestedCur));
+  const temp = values.temp ?? actor.hp.temp;
+  let next: Actor = { ...actor, hp: { cur, max, temp } };
+  const events: ActorEvent[] = [];
+  const wasDown = actor.hp.cur === 0 && (actor.life === "dying" || actor.life === "stable");
+  if (actor.life !== "dead") {
+    if (actor.hp.cur > 0 && cur === 0) {
+      const zero = reachZero(next, kind, settings);
+      next = zero.actor;
+      events.push(...zero.events);
+    } else if (wasDown && cur > 0) {
+      next = revive(next);
+      events.push({ type: "life", life: "alive" });
+    }
+  }
+  const hp: ActorEvent = { type: "hp", change: "set", label: hpLabel(next) };
+  if (values.cur !== undefined) hp.amount = cur;
+  return { actor: next, events: [hp, ...events] };
+}
+
+/** Death save pips as the player entered them. Three successes stabilize, three failures kill. */
+export function applyDeathSaves(actor: Actor, ok: number, fail: number): HpResult {
+  const events: ActorEvent[] = [];
+  let next: Actor = { ...actor, deathSaves: { ok, fail } };
+  events.push({ type: "deathSave", ok, fail });
+  if (fail >= 3) {
+    const dead = setLife(next, "dead");
+    next = dead.actor;
+    events.push(...dead.events);
+  } else if (ok >= 3) {
+    next = { ...next, life: "stable", deathSaves: { ok: 0, fail: 0 } };
+    events.push({ type: "life", life: "stable" });
+  }
+  return { actor: next, events };
+}
+
+/**
+ * The DM's direct life change. Reviving a creature at 0 HP gives it 1 HP, so
+ * it does not sit alive at 0. Killing sets HP to 0.
+ */
+export function applyLife(actor: Actor, life: LifeState): HpResult {
+  if (life === "alive") {
+    const cur = Math.max(1, actor.hp.cur);
+    const next = revive({ ...actor, hp: { ...actor.hp, cur } });
+    return { actor: next, events: [{ type: "life", life }] };
+  }
+  if (life === "dead") {
+    const dead = setLife({ ...actor, hp: { ...actor.hp, cur: 0 }, deathSaves: { ok: 0, fail: 0 } }, "dead");
+    return dead;
+  }
+  const down: Actor = { ...actor, hp: { ...actor.hp, cur: 0 }, deathSaves: life === "stable" ? { ok: 0, fail: 0 } : actor.deathSaves };
+  const result = setLife(down, life);
+  const stabilized = life === "stable" ? withUnconscious(result.actor) : result.actor;
+  return { actor: stabilized, events: result.events };
+}

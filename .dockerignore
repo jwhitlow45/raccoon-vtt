@@ -1,0 +1,54 @@
+# What the build context must not carry.
+#
+# The Dockerfile copies named folders rather than `COPY . .`, so most of this
+# is about keeping the context small and fast to send. The secret rules are
+# the exception and are load bearing: they keep .env files out of any layer
+# even if a later edit copies more than it should. A file that lands in a
+# layer stays readable to anyone who can pull the image, whatever a later
+# stage deletes.
+#
+# Secret rules are written `**/name`, not `name`. Docker matches patterns
+# against the whole path from the context root and `*` does not cross a
+# slash, so a bare `.env` would only exclude the file at the root.
+**/.env
+**/.env.*
+**/.envrc
+**/*.pem
+**/*.key
+
+# History. Both hold every past revision of every file.
+.git
+.jj
+
+# Rebuilt inside the image. The host copies are the wrong platform anyway:
+# sharp and argon2 ship native binaries per OS and CPU.
+**/node_modules
+.pnpm-store
+dist
+*.tsbuildinfo
+
+# Local data a development server wrote: uploaded images and room exports.
+.data
+
+# Tests never run in the image, and the runtime stage copies server/ and
+# shared/ whole, so leaving them out here keeps them out of production.
+**/*.test.ts
+**/*.itest.ts
+e2e
+test-results
+playwright-report
+
+# Not part of the application. docker/ holds the egress proxy's config, which
+# is bind mounted into the squid container and has no business in this image.
+docs
+screenshots
+docker
+Dockerfile
+.dockerignore
+docker-compose*.yml
+README.md
+.claude
+.vscode
+.idea
+**/*.log
+**/.DS_Store

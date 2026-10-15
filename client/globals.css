@@ -1,0 +1,164 @@
+/* Only what inline styles cannot express: the base document, native
+   controls drawn dark, the hidden attribute, focus rings, the tap flash
+   and the disclosure marker, selection, the loading spinner's turn and
+   delay, the "Your turn" notice's keyframes, the interface size's two
+   rules, and reduced motion. Everything else is inline from lib/theme.ts. */
+
+/* Native checkboxes, radios, selects, date fields and scrollbars draw for
+   a dark page. Without it an unchecked box is a white square. */
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100dvh;
+  background: #16161a;
+  color: #f1efe9;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  overscroll-behavior: none;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Folded parts keep their inline display (grid, flex), which would
+   otherwise beat the hidden attribute. The image picker's file input,
+   hidden today, stays hidden. */
+[hidden] {
+  display: none !important;
+}
+
+/* The accent's variables follow the viewer's member color in a room
+   (lib/accent.ts, set by pages/RoomChrome.tsx), the crest yellow elsewhere.
+   The ring is the accent, unless a container on a light fill sets
+   --rvtt-focus (the highlight Notice sets it to ink, 15.3:1 on cream,
+   where the yellow accent would read 1.1:1). */
+:focus-visible {
+  outline: 2px solid var(--rvtt-focus, var(--rvtt-accent, #f7df00));
+  outline-offset: 2px;
+}
+
+/* A choice's native radio lies unseen over its option (components/
+   Segmented.tsx, Swatches.tsx), so the ring goes on the option. */
+.rvtt-choice:has(> input:focus-visible) {
+  outline: 2px solid var(--rvtt-focus, var(--rvtt-accent, #f7df00));
+  outline-offset: 2px;
+}
+
+/* The option draws its own chosen look, and a tap on a phone would flash
+   Chrome's grey square over it as well, which on a round swatch reads as a
+   glitch. */
+.rvtt-choice {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* A disclosure's summary is a flex row with its own chevron icon (pages/
+   Home.tsx, features/dm/PlayerLinkShare.tsx). list-style: none hides the
+   marker everywhere but older Safari, which draws its triangle beside it. */
+summary::-webkit-details-marker {
+  display: none;
+}
+
+::selection {
+  background: var(--rvtt-selection, #f7df0066);
+}
+
+/* The interface size (features/device/layout.ts). Below 100% a field would
+   draw under 16 px, and iOS zooms the page into such a field when it takes
+   focus, so fields in a zoomed piece of chrome keep a drawn 16 px. */
+[data-rvtt-small-ui] :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]), textarea, select) {
+  font-size: calc(16px / var(--rvtt-ui, 1)) !important;
+}
+
+/* The zoomed layer over the map (canvas/Stage.tsx) lets a tap through to
+   the map, and what it holds, the action bar and the panes, takes it. */
+[data-rvtt-pass] > * {
+  pointer-events: auto;
+}
+
+/* The spinner (components/Loading.tsx) turns on the compositor, so it keeps
+   turning while the main thread is busy drawing a scene. */
+@keyframes rvtt-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.rvtt-spin {
+  animation: rvtt-spin 0.8s linear infinite;
+}
+
+/* index.html's "Loading RaccoonVTT…", hidden for its first 300 ms. The
+   page's CSP refuses inline style attributes, so its look is here too. */
+@keyframes rvtt-appear {
+  from {
+    visibility: hidden;
+  }
+}
+
+.rvtt-boot {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  color: #a7a5ad;
+  font-size: 14px;
+  animation: rvtt-appear 1ms 300ms both;
+}
+
+/* "Your turn" in the turn strip (features/encounter/InitiativeStrip.tsx):
+   it pops in as a filled pill with one ripple, holds, then fades into the
+   strip's plain "Your turn" text, which stays for the rest of the turn.
+   The element sets the colors, from lib/theme.ts, and the duration. */
+@keyframes rvtt-turn-notice {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  6% {
+    opacity: 1;
+    transform: none;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--rvtt-notice-fill) 70%, transparent);
+  }
+  35% {
+    box-shadow: 0 0 0 10px transparent;
+  }
+  80% {
+    background-color: var(--rvtt-notice-fill);
+    color: var(--rvtt-notice-ink);
+  }
+  to {
+    background-color: transparent;
+    color: var(--rvtt-notice-settled);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  /* A 0.01 ms turn repeated forever would flicker, so the spinner holds still and its words carry it. */
+  .rvtt-spin {
+    animation: none;
+  }
+
+  /* Cut to 0.01 ms, the notice would jump straight to its plain text. Still, it stays a filled pill for its few seconds. */
+  .rvtt-turn-notice {
+    animation: none !important;
+  }
+}

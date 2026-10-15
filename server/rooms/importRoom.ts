@@ -1,0 +1,382 @@
+import { createHash } from "node:crypto";
+import { createWriteStream } from "node:fs";
+import { unlink } from "node:fs/promises";
+import { Transform, type Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type pg from "pg";
+import yauzl from "yauzl";
+import { z } from "zod";
+import { uuidv7 } from "#shared/ids.ts";
+import { checkLimits, exploredReserve, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes } from "#shared/limits.ts";
+import { sightPiecesCheck } from "#shared/visionLimits.ts";
+import { migrateSnapshot } from "#shared/migrate.ts";
+import { assetCreditSchema } from "#shared/protocol.ts";
+import type { Member, RoomState } from "#shared/model.ts";
+import { splitCheck } from "#shared/rules/walls.ts";
+import { KINDS, isAssetKind } from "../assets/kinds.ts";
+import type { AssetService } from "../assets/service.ts";
+import { deleteUnreferencedFiles, roomFileKeys } from "../assets/store.ts";
+import { tempFile } from "../assets/upload.ts";
+import { markDmMembers } from "../auth/grants.ts";
+import { HttpError } from "../auth/http.ts";
+import { newRoomId } from "../auth/roomId.ts";
+import { newMember, type NewRoom } from "../auth/roomRecords.ts";
+import { randomToken, sha256 } from "../auth/tokens.ts";
+import { withTx } from "../auth/tx.ts";
+import type { Logger } from "./actor.ts";
+import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION, assetFileName } from "./exportRoom.ts";
+import type { RoomGateway } from "./gateway.ts";
+import { remapState, type ImportedAsset } from "./remap.ts";
+import { checkWholeScenes } from "./sizeGuard.ts";
+import { parseRoomState } from "./stateSchema.ts";
+
+/**
+ * Room import (design 16.4). Everything in the file is untrusted:
+ *
+ * - entries are counted and their inflated bytes are counted while reading,
+ *   because central-directory sizes can lie;
+ * - `room.json` goes through the snapshot migrations, the state schema and
+ *   the room limits before anything is written;
+ * - `assets.json` only says which file belongs to which old asset id. Each
+ *   image is re-processed by the asset pipeline, which decides its kind's
+ *   dimensions and variants and refuses anything that is not an image;
+ * - every id is remapped, uploaders included.
+ *
+ * The room row is written first so asset rows have something to reference,
+ * and the snapshot and the importer's grant last, so nothing can load or
+ * join the room before it is whole. A failure in between deletes the row,
+ * which cascades to the asset rows, and then the files nobody refers to.
+ */
+export const IMPORT_LIMITS = {
+  bodyBytes: 95_000_000,
+  entries: 2_000,
+  inflatedBytes: 1024 * 1024 * 1024,
+  roomJsonBytes: 2 * LIMITS.stateBytes,
+  manifestBytes: 1024 * 1024,
+} as const;
+
+export type ImportForm = {
+  /** Overrides the exported room name when given. */
+  name?: string | undefined;
+  playerPwHash: string;
+  dmName: string;
+  dmColor: string;
+  createdIp: string | null;
+};
+
+export type ImportHooks = {
+  /** Runs in the transaction that creates the room row, before any image is processed: the creation limits. */
+  beforeImages?: (tx: pg.PoolClient, roomId: string) => Promise<void>;
+  /** Runs in the transaction that writes the snapshot: the importer's session and DM grant. */
+  afterImages?: (tx: pg.PoolClient, room: NewRoom) => Promise<void>;
+};
+
+export type ImportDeps = { pool: pg.Pool; assets: AssetService; gateway: RoomGateway; log: Logger };
+
+const manifestSchema = z.object({
+  formatVersion: z.number().int(),
+  assets: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(64),
+        sha256: z.string().regex(/^[0-9a-f]{64}$/i),
+        kind: z.string().max(16),
+        uploaders: z.array(z.string().max(64)).max(50).optional(),
+        // Checked on its own below, so a credit this server cannot read costs only the credit, never the image.
+        credit: z.unknown().optional(),
+      }),
+    )
+    .max(IMPORT_LIMITS.entries),
+});
+
+const roomJsonSchema = z.object({
+  format: z.literal(EXPORT_FORMAT),
+  formatVersion: z.literal(EXPORT_FORMAT_VERSION),
+  schemaVersion: z.number().int().min(1).max(1_000),
+  state: z.unknown(),
+  // Optional, because exports made before it existed lack it. See `everDmMembers` for those.
+  dmMemberIds: z.array(z.string().min(1).max(64)).max(LIMITS.membersPerRoom).optional(),
+});
+
+export class InflatedCounter {
+  total = 0;
+  add(bytes: number): void {
+    this.total += bytes;
+    if (this.total > IMPORT_LIMITS.inflatedBytes) throw new HttpError(413, "import_too_large");
+  }
+}
+
+function safeName(name: string): boolean {
+  return yauzl.validateFileName(name) === null && !name.includes("\\");
+}
+
+async function readEntry(zip: yauzl.ZipFile, entry: yauzl.Entry, maxBytes: number, counter: InflatedCounter): Promise<Buffer> {
+  const stream = await zip.openReadStreamPromise(entry);
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of stream as AsyncIterable<Buffer>) {
+    size += chunk.length;
+    counter.add(chunk.length);
+    if (size > maxBytes) {
+      stream.destroy();
+      throw new HttpError(413, "import_entry_too_large", { extra: { entry: entry.fileName } });
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+/**
+ * Streams one entry to a file, counting inflated bytes and hashing as it
+ * goes. Returns the SHA-256.
+ *
+ * A pipeline listens for errors on every stream from the start. A write
+ * error (a full disk, a file that cannot be opened) is an event, and one
+ * with no listener ends the whole process, while a write waiting on `drain`
+ * when the error comes would wait forever and keep the import slot.
+ */
+export async function entryToFile(zip: yauzl.ZipFile, entry: yauzl.Entry, path: string, maxBytes: number, counter: InflatedCounter): Promise<Buffer> {
+  const stream: Readable = await zip.openReadStreamPromise(entry);
+  const hash = createHash("sha256");
+  let size = 0;
+  const measure = new Transform({
+    transform(chunk: Buffer, _encoding, done) {
+      try {
+        size += chunk.length;
+        counter.add(chunk.length);
+        if (size > maxBytes) throw new HttpError(413, "import_entry_too_large", { extra: { entry: entry.fileName } });
+      } catch (err) {
+        done(err as Error);
+        return;
+      }
+      hash.update(chunk);
+      done(null, chunk);
+    },
+  });
+  await pipeline(stream, measure, createWriteStream(path, { flags: "wx", mode: 0o600 }));
+  return hash.digest();
+}
+
+export async function importRoom(deps: ImportDeps, zipPath: string, form: ImportForm, hooks: ImportHooks = {}): Promise<NewRoom> {
+  const zip = await yauzl.openPromise(zipPath, { autoClose: false }).catch(() => {
+    throw new HttpError(400, "bad_zip");
+  });
+  try {
+    if (zip.entryCount > IMPORT_LIMITS.entries) throw new HttpError(413, "too_many_entries");
+    const entries = new Map<string, yauzl.Entry>();
+    try {
+      for await (const entry of zip.eachEntry()) {
+        if (entries.size >= IMPORT_LIMITS.entries) throw new HttpError(413, "too_many_entries");
+        if (!safeName(entry.fileName)) throw new HttpError(400, "bad_zip");
+        entries.set(entry.fileName, entry);
+      }
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw new HttpError(400, "bad_zip");
+    }
+    const counter = new InflatedCounter();
+    const roomEntry = entries.get("room.json");
+    if (!roomEntry) throw new HttpError(400, "missing_room_json");
+    const roomJson = parseJson(await readEntry(zip, roomEntry, IMPORT_LIMITS.roomJsonBytes, counter), "room.json");
+    const header = roomJsonSchema.safeParse(roomJson);
+    if (!header.success) throw new HttpError(400, "bad_room_json", { extra: { field: header.error.issues[0]?.path.join(".") ?? "" } });
+    let migrated: unknown;
+    try {
+      migrated = migrateSnapshot(header.data.state, header.data.schemaVersion);
+    } catch {
+      throw new HttpError(400, "unsupported_schema_version");
+    }
+    const parsed = parseRoomState(migrated);
+    if (!parsed.ok) throw new HttpError(400, "bad_room_json", { extra: { field: parsed.message.slice(0, 200) } });
+    const dmMember = newMember(form.dmName, form.dmColor, "dm");
+    const roomName = form.name ?? parsed.state.meta.name;
+    // The importer joins as one more member, so the limits are checked on the
+    // room as it will be stored. A full roster plus the importer would make a
+    // room that refuses every op, deletions included.
+    assertWithinLimits(finishState(parsed.state, dmMember, roomName));
+
+    let manifest: z.infer<typeof manifestSchema> = { formatVersion: 1, assets: [] };
+    const manifestEntry = entries.get("assets.json");
+    if (manifestEntry) {
+      const raw = manifestSchema.safeParse(parseJson(await readEntry(zip, manifestEntry, IMPORT_LIMITS.manifestBytes, counter), "assets.json"));
+      if (!raw.success) throw new HttpError(400, "bad_manifest");
+      manifest = raw.data;
+    }
+
+    const dmKey = randomToken();
+    const roomId = await withTx(deps.pool, async (tx) => {
+      let id = "";
+      for (let attempt = 0; attempt < 5 && !id; attempt++) {
+        const candidate = newRoomId();
+        const { rowCount } = await tx.query(
+          `insert into rooms (id, name, player_pw_hash, dm_key_hash, created_ip) values ($1, $2, $3, $4, $5) on conflict (id) do nothing`,
+          [candidate, roomName, form.playerPwHash, sha256(dmKey), form.createdIp],
+        );
+        if (rowCount === 1) id = candidate;
+      }
+      if (!id) throw new Error("could not find a free room id");
+      if (hooks.beforeImages) await hooks.beforeImages(tx, id);
+      return id;
+    });
+
+    try {
+      // Members get their new ids first, because asset uploader rows are written during image processing.
+      const memberIds = new Map(Object.keys(parsed.state.members).map((id) => [id, uuidv7()]));
+      const assetIds = await importImages(deps, zip, entries, manifest, roomId, counter, memberIds);
+      const state = finishState(remapState(parsed.state, { assets: assetIds, memberIds }), dmMember, roomName);
+      // What is stored is checked as it is stored, not only as it arrived:
+      // the remap and the importer's member change it.
+      const final = parseRoomState(state);
+      if (!final.ok) throw new HttpError(400, "bad_room_json", { extra: { field: final.message.slice(0, 200) } });
+      assertWithinLimits(state);
+      const room: NewRoom = { roomId, dmKey, dmMember };
+      // Every imported member arrives as a player, the old DMs too, and
+      // those keep what they had as DM in the log. So they are marked like
+      // any member that held a DM grant here, and nobody can continue as them.
+      const oldDms = everDmMembers(parsed.state, header.data.dmMemberIds).flatMap((id) => {
+        const mapped = memberIds.get(id);
+        return mapped === undefined ? [] : [mapped];
+      });
+      await withTx(deps.pool, async (tx) => {
+        await deps.gateway.createRoom(roomId, state, tx);
+        await markDmMembers(tx, roomId, oldDms);
+        if (hooks.afterImages) await hooks.afterImages(tx, room);
+      });
+      return room;
+    } catch (err) {
+      await discardRoom(deps, roomId).catch((cleanupErr: unknown) => {
+        deps.log.error({ err: cleanupErr, roomId }, "failed import left a room row behind");
+      });
+      throw err;
+    }
+  } finally {
+    zip.close();
+  }
+}
+
+function parseJson(buffer: Buffer, name: string): unknown {
+  try {
+    return JSON.parse(buffer.toString("utf8"));
+  } catch {
+    throw new HttpError(400, "bad_zip", { extra: { entry: name } });
+  }
+}
+
+/** The room limits of design 10.5 over the whole imported state. */
+export function assertWithinLimits(state: RoomState): void {
+  const over = (reason: string) => new HttpError(413, "over_room_limits", { extra: { reason } });
+  const room = checkLimits(state);
+  if (!room.ok) throw over(room.message);
+  for (const sceneId of Object.keys(state.scenes)) {
+    const scene = checkLimits(state, sceneId);
+    if (!scene.ok) throw over(scene.message);
+    // No op's limits step ever saw an imported scene's walls, so the split's caps are checked here
+    // (docs/design-v1-maps-vision.md 2.1).
+    const split = splitCheck(state, sceneId);
+    if (!split.ok) throw over(split.message);
+    const sight = sightPiecesCheck(state, sceneId);
+    if (!sight.ok) throw over(sight.message);
+  }
+  const bytes = serializedBytes(state);
+  if (bytes > LIMITS.stateBytes) throw over("the room state is over 8 MiB");
+  // The player scene's explored layer must be able to grow to its full size (docs/design-v1-maps-vision.md 2.4).
+  if (bytes + exploredReserve(state) > LIMITS.stateBytes) throw over(NO_ROOM_TO_EXPLORE);
+  // Each scene as the ops on it will measure it, its sight and exploration reserved, so no imported scene refuses its first move.
+  const scenes = checkWholeScenes(state);
+  if (!scenes.ok) throw over(scenes.message);
+}
+
+/**
+ * Streams each image the manifest names through the asset pipeline, at the
+ * back of the processing queue, under its kind's size cap, with quota
+ * reserved and the free-disk guard checked before each one. Returns old
+ * asset id to the new asset and its kind for everything that went through,
+ * so the remap can hold each reference to the kind it takes.
+ */
+async function importImages(
+  deps: ImportDeps,
+  zip: yauzl.ZipFile,
+  entries: Map<string, yauzl.Entry>,
+  manifest: z.infer<typeof manifestSchema>,
+  roomId: string,
+  counter: InflatedCounter,
+  memberIds: ReadonlyMap<string, string>,
+): Promise<Map<string, ImportedAsset>> {
+  const out = new Map<string, ImportedAsset>();
+  for (const asset of manifest.assets) {
+    if (out.has(asset.id) || !isAssetKind(asset.kind)) continue;
+    const sha = asset.sha256.toLowerCase();
+    const entry = entries.get(assetFileName(sha, asset.kind, "full"));
+    if (!entry) continue;
+    const cap = KINDS[asset.kind].maxUploadBytes;
+    await deps.assets.assertFreeDisk();
+    const reservation = await deps.assets.quota.reserve(roomId, cap);
+    const path = tempFile(deps.assets.tmpDir, "intake");
+    try {
+      const digest = await entryToFile(zip, entry, path, cap, counter);
+      // Uploaders are old member ids from the manifest: only members the room knows are kept, under their new ids.
+      // Every imported member is a player here, and a player can upload no DM-only kind, so such an asset keeps
+      // none: an uploader row is a player's read access (uploadedAssetIds), whatever the projection says.
+      const uploaders = KINDS[asset.kind].dmOnly
+        ? []
+        : (asset.uploaders ?? []).flatMap((m) => {
+            const mapped = memberIds.get(m);
+            return mapped === undefined ? [] : [mapped];
+          });
+      const result = await deps.assets.ingest({
+        roomId,
+        uploaderIds: uploaders,
+        kind: asset.kind,
+        tempPath: path,
+        sha256: digest,
+        reservation,
+        background: true,
+      });
+      out.set(asset.id, { id: result.id, kind: result.kind });
+      // An Openverse image keeps its credit (docs/design-v1-dm-tools.md 2.5), checked as bounded text like any of the
+      // file's text, since the file is untrusted. A credit that does not parse is left behind with a warning.
+      if (asset.credit !== undefined) {
+        const credit = assetCreditSchema.safeParse(asset.credit);
+        if (credit.success) await deps.pool.query("update assets set credit = $2 where id = $1", [result.id, JSON.stringify(credit.data)]);
+        else deps.log.warn({ roomId, entry: entry.fileName }, "import left out an image's credit it could not read");
+      }
+    } catch (err) {
+      // One bad image does not sink the room: the manifest is untrusted, so a refusal is expected input.
+      if (err instanceof Error && "status" in err && typeof (err as { status: unknown }).status === "number" && (err as { status: number }).status < 500) {
+        deps.log.warn({ roomId, entry: entry.fileName, err: err.message }, "import skipped an image");
+        continue;
+      }
+      throw err;
+    } finally {
+      reservation.release();
+      await unlink(path).catch(() => undefined);
+    }
+  }
+  return out;
+}
+
+/**
+ * The exported members that ever held a DM grant: those the export lists,
+ * former co-DMs included, and any still labeled DM. An export from before
+ * the list existed cannot tell a former co-DM from a player, so every one
+ * of its members counts as one. That costs its players a "continue as",
+ * and they join as new members instead, where the other choice would hand
+ * a former DM's whispers to anyone with the player password.
+ */
+function everDmMembers(state: RoomState, listed: readonly string[] | undefined): string[] {
+  if (listed === undefined) return Object.keys(state.members);
+  const ids = new Set(listed);
+  for (const m of Object.values(state.members)) if (m.kind === "dm") ids.add(m.id);
+  return [...ids];
+}
+
+/** The importer becomes the DM member; every imported member is a player until someone claims otherwise. */
+function finishState(state: RoomState, dm: Member, name: string): RoomState {
+  return { ...state, meta: { ...state.meta, name }, members: { ...state.members, [dm.id]: dm } };
+}
+
+async function discardRoom(deps: ImportDeps, roomId: string): Promise<void> {
+  const keys = await roomFileKeys(deps.pool, roomId);
+  await deps.pool.query("delete from rooms where id = $1", [roomId]);
+  await deleteUnreferencedFiles(deps.pool, deps.assets.assetDir, keys);
+}

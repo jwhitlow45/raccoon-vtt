@@ -1,0 +1,142 @@
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { Image as KImage, Layer, Rect, Shape } from "react-konva";
+import type { Scene } from "#shared/model.ts";
+import { phasePreloads, usePhasePreload } from "../../features/phases/preload.ts";
+import { mapSwap, sameShown, type ShownMap } from "../../features/phases/swap.ts";
+import type { AssetVariant } from "../../lib/api.ts";
+import { mapWorldRect } from "../../lib/scene.ts";
+import { mapFailureText } from "../../state/sceneLoad.ts";
+import { useAssets, useRoomUi, useRoomView } from "../../state/view.ts";
+import { useMapProgressStore } from "../mapProgress.ts";
+import { useMapImage, type MapSource } from "../useImage.ts";
+
+/**
+ * Layer 1 of 4 (design section 14.2): the scene background, the map image and
+ * the grid. Nothing here takes input, so the layer skips its hit canvas
+ * work entirely. Coordinates are world cells.
+ *
+ * This layer mounts only after the gate opens (section 13.3), so the map
+ * request itself starts after the snapshot and its fog are applied.
+ */
+export const MapLayer = memo(MapLayerImpl, sameMapInputs);
+
+/*
+ * Every build op bumps the scene's walls version, which writes a new scene
+ * object, and renaming or a fog toggle does too. None of those change what
+ * this layer draws, so it compares only its own inputs and the map image
+ * is not redrawn on every brush stroke.
+ */
+function sameMapInputs(a: { scene: Scene; variant: AssetVariant }, b: { scene: Scene; variant: AssetVariant }): boolean {
+  return (
+    a.variant === b.variant &&
+    a.scene.id === b.scene.id &&
+    a.scene.bounds.w === b.scene.bounds.w &&
+    a.scene.bounds.h === b.scene.bounds.h &&
+    a.scene.background === b.scene.background &&
+    a.scene.map === b.scene.map &&
+    a.scene.phases === b.scene.phases &&
+    a.scene.grid === b.scene.grid
+  );
+}
+
+function MapLayerImpl(props: { scene: Scene; variant: AssetVariant }) {
+  const { scene, variant } = props;
+  const { w, h } = scene.bounds;
+  return (
+    <Layer listening={false}>
+      <Rect x={0} y={0} width={w} height={h} fill={scene.background || "#2b2b31"} />
+      {scene.map ? <MapImage sceneId={scene.id} map={scene.map} phases={scene.phases} variant={variant} sceneName={scene.name} /> : null}
+      {scene.grid?.show ? <Grid scene={scene} /> : null}
+    </Layer>
+  );
+}
+
+function MapImage(props: { sceneId: string; map: NonNullable<Scene["map"]>; phases: Scene["phases"]; variant: AssetVariant; sceneName: string }) {
+  const assets = useAssets();
+  const ui = useRoomUi();
+  const progress = useMapProgressStore();
+  const rect = mapWorldRect(props.map);
+  const url = assets.url(props.map.assetId, props.variant);
+  const fallback = props.variant === "full" ? null : assets.url(props.map.assetId, "full");
+  const { image, status } = useMapImage(rect ? url : null, fallback);
+
+  // The image last drawn stays up while a new one for the same scene loads
+  // (features/phases/swap.ts). The hook frees an image only once a new one
+  // has settled, after the commit that stopped drawing it, so the kept one
+  // is still whole whenever it is drawn.
+  const [kept, setKept] = useState<ShownMap<MapSource> | null>(null);
+  const swap = mapSwap({ sceneId: props.sceneId, assetId: props.map.assetId, rect, status, image }, kept);
+  useEffect(() => {
+    if (!sameShown(swap.keep, kept)) setKept(swap.keep);
+  }, [swap.keep, kept]);
+
+  // The DM's device fetches the other phases once this map is up (features/phases/preload.ts).
+  const dm = useRoomView((s) => s.you?.role === "dm");
+  const preloads = useMemo(
+    () => (dm ? phasePreloads(props.phases, props.map.assetId, props.variant, assets.url) : []),
+    [dm, props.phases, props.map.assetId, props.variant, assets],
+  );
+  usePhasePreload(preloads, status === "ready");
+
+  // The loading notice over the canvas waits for this report. A map that
+  // cannot be placed or will not load ends it as failed, so it never spins
+  // forever, and a failed download says so once.
+  const assetId = props.map.assetId;
+  const placeable = rect !== null;
+  const swapping = swap.swapping;
+  // The name only words the toast, so a rename does not report again.
+  const nameRef = useRef(props.sceneName);
+  nameRef.current = props.sceneName;
+  useEffect(() => {
+    const report = (state: "loading" | "drawn" | "failed") => progress.setState({ progress: { assetId, state, swap: swapping } });
+    if (!placeable) return report("failed");
+    if (status === "loading") return report("loading");
+    if (status === "failed") {
+      report("failed");
+      ui.notify(mapFailureText(nameRef.current), "error");
+      return;
+    }
+    // Konva draws on the next animation frame. This callback was queued
+    // after Konva's, so by the time it runs the map is on the canvas.
+    const frame = requestAnimationFrame(() => report("drawn"));
+    return () => cancelAnimationFrame(frame);
+  }, [assetId, placeable, status, swapping, progress, ui]);
+
+  const drawn = swap.draw;
+  if (!drawn) return null;
+  // Every variant is stretched to the calibrated rectangle, so a phone's
+  // 4096 px copy and a desktop's 8192 px original agree with the printed
+  // grid. The image is never cache()d: a cached 8192 px map exceeds iOS
+  // canvas limits.
+  return <KImage image={drawn.image} x={drawn.rect.x} y={drawn.rect.y} width={drawn.rect.width} height={drawn.rect.height} />;
+}
+
+/**
+ * The whole grid is one shape with one path, so it is one draw call however
+ * large the scene. Lines keep their width on screen at any zoom.
+ */
+function Grid(props: { scene: Scene }) {
+  const { w, h } = props.scene.bounds;
+  const { color, opacity, lineWidth } = props.scene.grid;
+  return (
+    <Shape
+      stroke={color || "#ffffff"}
+      strokeWidth={lineWidth > 0 ? lineWidth : 1}
+      strokeScaleEnabled={false}
+      opacity={Number.isFinite(opacity) ? opacity : 0.25}
+      perfectDrawEnabled={false}
+      sceneFunc={(ctx, shape) => {
+        ctx.beginPath();
+        for (let x = 0; x <= w; x++) {
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, h);
+        }
+        for (let y = 0; y <= h; y++) {
+          ctx.moveTo(0, y);
+          ctx.lineTo(w, y);
+        }
+        ctx.strokeShape(shape);
+      }}
+    />
+  );
+}

@@ -1,0 +1,457 @@
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import type { AutoWalls, Scene } from "#shared/model.ts";
+import { MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
+import { autoWallsOf } from "#shared/rules/autoWalls.ts";
+import { Button } from "../../components/Button.tsx";
+import { Checkbox } from "../../components/Checkbox.tsx";
+import { FieldRow, Input } from "../../components/Field.tsx";
+import { buttonLook } from "../../components/looks.ts";
+import { Help, Note, Section } from "../../components/Panel.tsx";
+import { SettingRow } from "../../components/SettingRow.tsx";
+import { Switch } from "../../components/Switch.tsx";
+import { theme } from "../../lib/theme.ts";
+import { useRoomScope } from "../../state/scope.ts";
+import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { calibrationFromCounts, fitBounds, imageSquares, sameCalibration } from "../grid/calibrate.ts";
+import { MapExport } from "../mapexport/MapExport.tsx";
+import { BlockMovementSetting } from "../movement/SceneSetting.tsx";
+import { PhasesSection } from "../phases/PhasesSection.tsx";
+import { VisionSettings } from "../vision/VisionSettings.tsx";
+import { ColorInput, ConfirmButton, NumberInput, Select, Slider } from "./controls.tsx";
+import { fogsWithFirstMap, replaceMap, viewFromCamera } from "./create.ts";
+import { useStartFraming } from "./FrameView.tsx";
+import { currentStageCamera } from "./stageCamera.ts";
+import { uploadErrorText, uploadMap } from "./upload.ts";
+import { layoutWidth } from "../device/layout.ts";
+
+/**
+ * Settings of the scene the DM is looking at: name, fog, starting view,
+ * size, background, grid style, the map image and its grid, the build, and
+ * deleting it. Every change is one op, so it shows at once and undo covers
+ * it, and a setting that is on or off is a Switch row named by the setting
+ * (docs/design-v1-visual.md 3.7), never a button named by its state.
+ */
+export function SceneSettings(props: { scene: Scene; others: Scene[]; close(): void }) {
+  const { scene, others } = props;
+  const actions = useRoomActions();
+  const ui = useRoomUi();
+  const scope = useRoomScope();
+  const startFraming = useStartFraming();
+  const update = (patch: OpOf<"scene.update">["patch"]) => actions.dispatch({ t: "scene.update", sceneId: scene.id, patch });
+
+  const saveView = () => {
+    // A phone's sheet hides most of the map, so the DM frames the view with the sheet closed (FrameView.tsx).
+    if (layoutWidth() < theme.layout.wideMinWidth) {
+      startFraming(scene.id);
+      props.close();
+      return;
+    }
+    const live = currentStageCamera(scope);
+    if (live) update({ defaultView: viewFromCamera(live.camera, live.viewport) });
+  };
+
+  return (
+    <>
+      <Section label="This scene">
+        <NameField key={scene.id} name={scene.name} onSave={(name) => update({ name })} />
+        <Switch
+          label="Fog"
+          help={scene.fogEnabled ? "Players see only what you reveal. Use the fog tool to reveal." : "Players see the whole scene."}
+          checked={scene.fogEnabled}
+          onChange={(fogEnabled) => update({ fogEnabled })}
+        />
+        <SettingRow name="Starting view" help={scene.defaultView ? "The scene opens where you saved it." : "The scene opens fitted to the screen."} wide>
+          <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
+            <Button size="sm" onClick={saveView}>
+              Save current view
+            </Button>
+            {scene.defaultView ? (
+              <Button size="sm" onClick={() => update({ defaultView: null })}>
+                Clear
+              </Button>
+            ) : null}
+          </div>
+        </SettingRow>
+        <SettingRow name="Size in squares" wide>
+          <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+            <NumberInput label="Squares across" value={scene.bounds.w} min={1} max={MAX_SCENE_CELLS} onChange={(w) => update({ bounds: { ...scene.bounds, w } })} />
+            <span aria-hidden>×</span>
+            <NumberInput label="Squares down" value={scene.bounds.h} min={1} max={MAX_SCENE_CELLS} onChange={(h) => update({ bounds: { ...scene.bounds, h } })} />
+          </div>
+        </SettingRow>
+        <SettingRow name="Background">
+          <ColorInput label="Background color" value={scene.background} onChange={(background) => update({ background })} />
+        </SettingRow>
+      </Section>
+
+      <GridStyle scene={scene} onChange={(grid) => update({ grid })} close={props.close} />
+
+      <MapSection scene={scene} close={props.close} />
+
+      <PhasesSection scene={scene} />
+
+      <VisionSettings scene={scene} />
+
+      <BlockMovementSetting scene={scene} />
+
+      <Section label="Map builder">
+        <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
+          <Button
+            size="sm"
+            onClick={() => {
+              ui.setTool("build");
+              props.close();
+            }}
+          >
+            Open the builder
+          </Button>
+          <ConfirmButton label="Clear the build" confirm="Tap again to clear" title="Remove every floor, wall, door, height, stair, label, light and stamp" onConfirm={() => actions.dispatch({ t: "build.clear", sceneId: scene.id })} />
+        </div>
+        <SettingRow name="Automatic walls" help={AUTO_WALLS_NOTE[autoWallsOf(scene)]} wide>
+          <Select<AutoWalls> label="Automatic walls" value={autoWallsOf(scene)} options={AUTO_WALLS} onChange={(autoWalls) => update({ autoWalls })} />
+        </SettingRow>
+      </Section>
+
+      <MapExport scene={scene} />
+
+      <Section label="Delete">
+        <div>
+          <ConfirmButton
+            label="Delete scene"
+            confirm="Tap again to delete"
+            title="Delete this scene and everything on it"
+            disabled={others.length === 0}
+            onConfirm={() => {
+              const next = others[0];
+              if (!next) return;
+              actions.dispatch({ t: "scene.delete", sceneId: scene.id });
+              actions.switchScene(next.id);
+            }}
+          />
+        </div>
+        <Help>{others.length === 0 ? "The last scene cannot be deleted." : "Removes its tokens, drawings, build and fog too."}</Help>
+      </Section>
+    </>
+  );
+}
+
+/**
+ * The walls the builder adds where painted ground meets unpainted ground
+ * (docs/design-v1-maps-vision.md section 2.1). Each note names the edges its
+ * rule walls, so switching says which edges open or close.
+ */
+const AUTO_WALLS: readonly { value: AutoWalls; label: string }[] = [
+  { value: "all", label: "Around every painted cell" },
+  { value: "floor", label: "Around floor only" },
+  { value: "off", label: "Off" },
+];
+
+const AUTO_WALLS_NOTE: Record<AutoWalls, string> = {
+  all: "A wall wherever a painted cell meets unpainted ground, water, stairs and pillars included.",
+  floor: "A wall wherever stone, wood, grass, dirt or cave meets unpainted ground. Water, difficult ground, rubble, pits, pillars and stairs are not walled in.",
+  off: "No automatic walls. Only the walls and doors you draw.",
+};
+
+function NameField(props: { name: string; onSave(name: string): void }) {
+  const id = useId();
+  const [text, setText] = useState(props.name);
+  // Enter saves, and the blur that follows must not save the same name again.
+  const saved = useRef(props.name);
+  useEffect(() => {
+    setText(props.name);
+    saved.current = props.name;
+  }, [props.name]);
+  const save = () => {
+    const trimmed = text.trim();
+    if (trimmed && trimmed !== saved.current) {
+      saved.current = trimmed;
+      props.onSave(trimmed);
+    } else if (!trimmed) {
+      setText(props.name);
+    }
+  };
+  return (
+    <FieldRow label="Scene name" htmlFor={id}>
+      <Input
+        id={id}
+        value={text}
+        maxLength={80}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") save();
+        }}
+        style={{ flex: 1, width: "100%" }}
+      />
+    </FieldRow>
+  );
+}
+
+/** The grid lines' look, and for a map image, how its squares line up with the scene's. */
+function GridStyle(props: { scene: Scene; onChange(grid: Scene["grid"]): void; close(): void }) {
+  const { grid } = props.scene;
+  const set = (patch: Partial<Scene["grid"]>) => props.onChange({ ...grid, ...patch });
+  return (
+    <Section label="Grid">
+      <Switch
+        label="Grid lines"
+        help={props.scene.map ? "Hide them when the map has its own grid. Tokens and rulers still follow the squares." : undefined}
+        checked={grid.show}
+        onChange={(show) => set({ show })}
+      />
+      <SettingRow name="Grid color">
+        <ColorInput label="Grid color" value={grid.color} onChange={(color) => set({ color })} />
+      </SettingRow>
+      {grid.show ? (
+        <>
+          <Slider label="Opacity" value={grid.opacity} min={0.05} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(opacity) => set({ opacity })} />
+          <Slider label="Line width" value={grid.lineWidth} min={0.5} max={4} step={0.5} format={(v) => `${v} px`} onChange={(lineWidth) => set({ lineWidth })} />
+        </>
+      ) : null}
+      {props.scene.map ? <MapGrid key={props.scene.id} scene={props.scene} map={props.scene.map} close={props.close} /> : null}
+    </Section>
+  );
+}
+
+/**
+ * A map image's scale: aligning its grid with a box on the map, or by
+ * counting the squares across and down the art.
+ */
+function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close(): void }) {
+  const { scene, map } = props;
+  const actions = useRoomActions();
+  const ui = useRoomUi();
+  const squares = imageSquares(map);
+  const [across, setAcross] = useState(squares.across);
+  const [down, setDown] = useState(squares.down);
+  /** The DM typed a count. Only then can the counts be wrong: the ones filled in are the grid's own. */
+  const [countsEdited, setCountsEdited] = useState(false);
+  useEffect(() => {
+    setAcross(squares.across);
+    setDown(squares.down);
+    setCountsEdited(false);
+  }, [scene.id, squares.across, squares.down]);
+  const counts = calibrationFromCounts(map, across, down);
+
+  const applyCounts = () => {
+    const cal = { cellPx: counts.cellPx, originPx: counts.originPx };
+    if (!sameCalibration(cal, map)) actions.dispatch({ t: "scene.setGrid", sceneId: scene.id, ...cal });
+    const bounds = fitBounds({ ...map, ...cal });
+    if (bounds.w !== scene.bounds.w || bounds.h !== scene.bounds.h) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { bounds } });
+  };
+
+  return (
+    <>
+      <SettingRow
+        name="Map grid"
+        help={`${formatPx(map.cellPx)} px per square, first line at ${formatPx(map.originPx.x)}, ${formatPx(map.originPx.y)} of a ${map.widthPx} × ${map.heightPx} image.`}
+        wide
+      >
+        <Button
+          size="sm"
+          onClick={() => {
+            ui.setTool("grid");
+            props.close();
+          }}
+        >
+          Line up the grid
+        </Button>
+      </SettingRow>
+      {/* Counting assumes squares that start at the image's corner. A grid whose first line sits before the image
+          only comes from a Universal VTT file, and counting would slide the image half a square under its walls. */}
+      {map.originPx.x < 0 || map.originPx.y < 0 ? null : (
+        <SettingRow name="Or count the squares" wide>
+          <div style={{ display: "grid", gap: theme.space(1) }}>
+            <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
+              <NumberInput
+                label="Squares across the image"
+                value={across}
+                min={1}
+                max={MAX_SCENE_CELLS}
+                onChange={(n) => {
+                  setAcross(n);
+                  setCountsEdited(true);
+                }}
+              />
+              <span aria-hidden>×</span>
+              <NumberInput
+                label="Squares down the image"
+                value={down}
+                min={1}
+                max={MAX_SCENE_CELLS}
+                onChange={(n) => {
+                  setDown(n);
+                  setCountsEdited(true);
+                }}
+              />
+              <Button size="sm" onClick={applyCounts}>
+                Apply
+              </Button>
+            </div>
+            {countsEdited && counts.mismatch > 0.02 ? (
+              <Note>
+                Those counts make squares that are not square ({formatPx(map.widthPx / across)} by {formatPx(map.heightPx / down)} px). Check them.
+              </Note>
+            ) : (
+              <Help>For art whose squares run edge to edge. Also resizes the scene to match.</Help>
+            )}
+          </div>
+        </SettingRow>
+      )}
+    </>
+  );
+}
+
+/**
+ * The map image: adding one to a scene without, replacing it, or removing
+ * it.
+ *
+ * On the scene the players are on, a new image shows on their screens the
+ * moment it uploads, so the picker asks first (features 3: the DM prepares
+ * privately). A scene's first image also brings the fog a map scene starts
+ * with (create.ts `fogsWithFirstMap`), which the DM can decline there.
+ */
+function MapSection(props: { scene: Scene; close(): void }) {
+  const { scene } = props;
+  const map = scene.map;
+  const actions = useRoomActions();
+  const ui = useRoomUi();
+  const roomId = useRoomView((s) => s.roomId);
+  const playersHere = useRoomView((s) => s.view?.meta.playerSceneId === scene.id);
+  const hasBuild = useRoomView((s) =>
+    Object.values(s.view?.buildChunks ?? {}).some((c) => c?.sceneId === scene.id && (Object.keys(c.cells).length > 0 || Object.keys(c.edges).length > 0)),
+  );
+  const firstFog = fogsWithFirstMap(scene, hasBuild);
+  /** On the players' scene: the DM has read the warning, and the picker is out. */
+  const [armed, setArmed] = useState(false);
+  const [fogIt, setFogIt] = useState(true);
+  useEffect(() => setArmed(false), [scene.id]);
+  const [upload, setUpload] = useState<{ busy: boolean; waiting: boolean; error: string | null }>({ busy: false, waiting: false, error: null });
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
+  const phaseCount = scene.phases?.length ?? 0;
+
+  const choose = async (file: File) => {
+    const abort = new AbortController();
+    abortRef.current = abort;
+    setUpload({ busy: true, waiting: false, error: null });
+    try {
+      const asset = await uploadMap(roomId, file, { signal: abort.signal, onWaiting: (waiting) => setUpload((u) => ({ ...u, waiting })) });
+      setUpload({ busy: false, waiting: false, error: null });
+      setArmed(false);
+      const next = replaceMap(map, asset);
+      // Fog first, so players on this scene never see the map before it.
+      if (firstFog && (!playersHere || fogIt)) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { fogEnabled: true } });
+      actions.dispatch({ t: "scene.setMap", sceneId: scene.id, map: next });
+      // A replacement keeps the scene as it is. A first image either knows
+      // its scale from its name, so the scene fits it now, or the grid
+      // tool comes up to find the scale (and fits the scene when applied).
+      if (!map && asset.cellPx !== undefined && next.cellPx === asset.cellPx) {
+        const bounds = fitBounds(next);
+        if (bounds.w !== scene.bounds.w || bounds.h !== scene.bounds.h) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { bounds } });
+      } else if (!map) {
+        ui.setTool("grid");
+        props.close();
+      }
+    } catch (err) {
+      if (!abort.signal.aborted) setUpload({ busy: false, waiting: false, error: uploadErrorText(err) });
+    } finally {
+      if (abortRef.current === abort) abortRef.current = null;
+    }
+  };
+
+  // A label over a file input, so it takes the tap that opens the picker. It wears the small secondary button's look.
+  const filePicker = (label: string) => (
+    <label
+      style={{
+        position: "relative",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: theme.space(2),
+        minHeight: theme.touch,
+        padding: `0 ${theme.space(3)}px`,
+        borderRadius: theme.radius.md,
+        fontSize: theme.font.body14,
+        fontWeight: theme.weight.strong,
+        cursor: upload.busy ? "default" : "pointer",
+        ...buttonLook("secondary", { disabled: upload.busy }),
+      }}
+    >
+      {upload.busy ? "Uploading…" : label}
+      <input
+        type="file"
+        accept="image/*"
+        disabled={upload.busy}
+        style={{ position: "absolute", inset: 0, opacity: 0, width: "100%", cursor: "pointer" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) void choose(f);
+        }}
+      />
+    </label>
+  );
+
+  const status = (
+    <>
+      {upload.waiting ? <Help>Waiting for the server…</Help> : null}
+      {upload.error ? (
+        <div role="alert">
+          <Note>{upload.error}</Note>
+        </div>
+      ) : null}
+    </>
+  );
+
+  /* Removing the image removes every map phase with it (docs/design-v1-maps-vision.md section 3.4), so the second tap says so. */
+  const removeButton = (
+    <ConfirmButton
+      label="Remove image"
+      confirm={phaseCount > 1 ? `Tap again to remove all ${phaseCount} phases` : "Tap again to remove"}
+      title={phaseCount > 1 ? "Removes the map image and every map phase of this scene" : undefined}
+      onConfirm={() => actions.dispatch({ t: "scene.setMap", sceneId: scene.id, map: null })}
+    />
+  );
+
+  // The players' scene asks before the picker opens: the image is theirs to see the moment it uploads.
+  const picker = (label: string) =>
+    playersHere && !armed && !upload.busy ? (
+      <Row>
+        <Button size="sm" onClick={() => setArmed(true)}>
+          {label}
+        </Button>
+        {map ? removeButton : null}
+      </Row>
+    ) : (
+      <>
+        <Row>
+          {filePicker(playersHere ? "Choose the image" : label)}
+          {playersHere && !upload.busy ? (
+            <Button size="sm" onClick={() => setArmed(false)}>
+              Cancel
+            </Button>
+          ) : null}
+          {map ? removeButton : null}
+        </Row>
+        {playersHere ? <Note>The players are on this scene. They see the new image as soon as it uploads.</Note> : null}
+        {firstFog && playersHere ? <Checkbox label="Start it under fog, so they see only what you reveal" checked={fogIt} onChange={setFogIt} /> : null}
+        {firstFog && !playersHere ? <Help>Fog turns on with the first map, as for a scene made from a map.</Help> : null}
+      </>
+    );
+
+  return (
+    <Section label="Map image">
+      {picker(map ? "Replace image" : "Add a map image")}
+      {status}
+    </Section>
+  );
+}
+
+function Row(props: { children: ReactNode }) {
+  return <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>{props.children}</div>;
+}
+
+function formatPx(v: number): string {
+  return Number.isInteger(v) ? String(v) : v.toFixed(2);
+}

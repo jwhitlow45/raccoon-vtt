@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "lib": ["dom", "dom.iterable", "es2024"],
+    "types": ["vite/client"]
+  },
+  "include": ["client/**/*.ts", "client/**/*.tsx", "shared/**/*.ts", "vite.config.ts"]
+}

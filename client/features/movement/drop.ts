@@ -1,0 +1,188 @@
+import type { BuildChunk, Scene, Token } from "#shared/model.ts";
+import { MAX_MOVES, type ClientOp, type DoorRef } from "#shared/protocol.ts";
+import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
+import { canSqueeze, footprintSize } from "#shared/rules/footprint.ts";
+import { footprintGround, standing } from "#shared/rules/heights.ts";
+import { landing, legStop, type DropMode } from "#shared/rules/movement.ts";
+import { snapPosition } from "../../lib/scene.ts";
+
+/**
+ * Where a dropped token lands when walls, doors and ledges stop players'
+ * moves (docs/design-v1-maps-vision.md sections 4.1 and 4.2), as plain
+ * functions for node --test. The rule itself is part 4B's
+ * (shared/rules/movement.ts), the very test the server runs in
+ * `canApply`, so a drop the map sends is one the server takes, and a drag
+ * into a wall stops there instead of bouncing back.
+ *
+ * Only a player's walk on a scene whose walls stop moves is stopped. The
+ * DM's moves never are, and on other scenes nothing is, but a creature that
+ * can squeeze still lands squeezed where it is dropped into a narrow
+ * opening, whoever drops it.
+ */
+
+export type Role = "dm" | "player";
+export type Point = { x: number; y: number };
+
+/** The token fields a drop reads. */
+export type DropToken = Pick<Token, "id" | "sceneId" | "size" | "x" | "y" | "elevation"> & Partial<Pick<Token, "w" | "h" | "squeeze" | "name" | "number">>;
+
+/** The fields a landing's elevation reads: where the token stands and how high. */
+export type LandingToken = Omit<DropToken, "id" | "name" | "number">;
+
+/** How this viewer's drops are judged on this scene: walked, or placed where they land. */
+export function dropMode(role: Role, scene: Pick<Scene, "blockMovement"> | undefined): Exclude<DropMode, "teleport"> {
+  return role === "player" && scene?.blockMovement === true ? "walk" : "free";
+}
+
+/**
+ * The elevation a token lands at (section 4.2, "Landings write the
+ * ground"): a token that stood on the ground takes the ground where it
+ * lands, a flier keeps its height or rises to the ground there, whichever
+ * is higher, and a token inside the ground keeps its elevation, since
+ * nothing raises one on its own.
+ */
+export function landedElevation(chunks: Readonly<Record<string, BuildChunk>>, token: LandingToken, at: Point & { squeeze?: boolean }): number {
+  const before = standing(token.elevation, footprintGround(chunks, token));
+  if (before === "inside") return token.elevation;
+  const there = footprintGround(chunks, { ...token, x: at.x, y: at.y, squeeze: at.squeeze === true ? true : undefined });
+  return before === "ground" ? there : Math.max(token.elevation, there);
+}
+
+/** One token's landing, as a move op carries it. `elevation` only when the landing changes it, `squeeze` only when it squeezes. */
+export type Landed = { tokenId: string; x: number; y: number; elevation?: number; squeeze?: true };
+
+/** A walk that a wall, a door or a ledge stopped short of where the player dropped the token. */
+export type Stop = {
+  tokenId: string;
+  sceneId: string;
+  blocker: Blocker;
+  /** The door in the way, when the player sees a door there: a secret door not yet found is a wall to them. */
+  door: DoorRef | null;
+  /** Where the player dropped the token, snapped: the ghost, and where "Teleport here" goes. */
+  ghost: Point;
+  /** The drop's own unsnapped point, from which a teleport finds its squeezed spot as the drop does (`squeezedSpot`). */
+  aim: Point;
+  /** Where the walk stopped, the start when it stopped at its first step. */
+  at: Point;
+};
+
+export type DropPlan = {
+  moves: Landed[];
+  /** The lone token's walk, stopped short. */
+  stop: Stop | null;
+  /** Tokens of a group drag left where they were, since a wall or a ledge stood in their way (section 4.1). */
+  held: { token: DropToken; blocker: Blocker }[];
+};
+
+function moved(token: DropToken, at: Point & { squeeze: boolean }): boolean {
+  return at.x !== token.x || at.y !== token.y || at.squeeze !== (token.squeeze === true);
+}
+
+export function landed(chunks: Readonly<Record<string, BuildChunk>>, token: DropToken, at: Point & { squeeze: boolean }): Landed {
+  const out: Landed = { tokenId: token.id, x: at.x, y: at.y };
+  const elevation = landedElevation(chunks, token, at);
+  if (elevation !== token.elevation) out.elevation = elevation;
+  if (at.squeeze) out.squeeze = true;
+  return out;
+}
+
+/**
+ * The squeezed spot under a drop at the unsnapped point `raw`: the one
+ * whose squeezed footprint, on cell boundaries, is centered nearest the
+ * dragged footprint's center. That is half a cell off the grid on each
+ * side a squeeze shrinks, and on the grid on the others. Null when the
+ * token never squeezes, or does not squeeze there.
+ *
+ * A drop tries it before the rule's half-cell shifts from the snapped spot
+ * (movement.ts `landing`). Those shifts are tried in a fixed order and
+ * keep the first that passes, which can be a cell from the finger, or, for
+ * a placement that walks no leg, a spot against the corridor's wall from
+ * the far side. So a squeezed creature dragged along its corridor stays
+ * in it, and a nudge leaves it where it is.
+ */
+export function squeezedSpot(state: BuildState, token: DropToken, raw: Point, mode: DropMode): (Point & { squeeze: true }) | null {
+  if (!canSqueeze(token)) return null;
+  const size = footprintSize(token);
+  const to = snapPosition(raw.x, raw.y, size);
+  const spot = { x: size.w >= 2 ? Math.floor(raw.x) + 0.5 : to.x, y: size.h >= 2 ? Math.floor(raw.y) + 0.5 : to.y };
+  const land = landing(state, token, { ...spot, elevation: landedElevation(state.buildChunks, token, spot) }, mode);
+  return land.squeeze && !land.stopped && land.x === spot.x && land.y === spot.y ? { ...spot, squeeze: true } : null;
+}
+
+/**
+ * Where one token dropped at the unsnapped point `raw` lands: in the
+ * squeezed spot under it when the creature squeezes there, else on its own
+ * snap grid by the movement rule's landing (movement.ts `landing`), which
+ * walks a player's token up to the last clear spot and lines a squeezing
+ * creature up with a narrow opening.
+ */
+export function planOne(state: BuildState, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">): DropPlan {
+  const squeezed = squeezedSpot(state, token, raw, mode);
+  if (squeezed) return { moves: moved(token, squeezed) ? [landed(state.buildChunks, token, squeezed)] : [], stop: null, held: [] };
+  const to = snapPosition(raw.x, raw.y, footprintSize(token));
+  if (to.x === token.x && to.y === token.y) return { moves: [], stop: null, held: [] };
+  const elevation = landedElevation(state.buildChunks, token, to);
+  const land = landing(state, token, { x: to.x, y: to.y, elevation }, mode);
+  const at = { x: land.x, y: land.y, squeeze: land.squeeze };
+  const moves = moved(token, at) ? [landed(state.buildChunks, token, at)] : [];
+  const stop: Stop | null = land.stopped
+    ? { tokenId: token.id, sceneId: token.sceneId, blocker: land.stopped.blocker, door: land.stopped.door, ghost: to, aim: { x: raw.x, y: raw.y }, at: { x: land.x, y: land.y } }
+    : null;
+  return { moves, stop, held: [] };
+}
+
+/**
+ * A group drag (features section 5): each token moves by the same offset
+ * and snaps by its own footprint. Walking, each token's own leg is tested,
+ * and only the allowed ones go, since the server refuses a group move whole
+ * when one leg is stopped (section 4.1). A group move carries no squeeze,
+ * so a creature that would have to squeeze to land stays put on a walk.
+ */
+export function planGroup(state: BuildState, tokens: readonly DropToken[], dx: number, dy: number, mode: Exclude<DropMode, "teleport">): DropPlan {
+  const moves: Landed[] = [];
+  const held: DropPlan["held"] = [];
+  for (const token of tokens) {
+    const to = snapPosition(token.x + dx, token.y + dy, footprintSize(token));
+    if (to.x === token.x && to.y === token.y) continue;
+    const elevation = landedElevation(state.buildChunks, token, to);
+    const stopped = mode === "walk" ? legStop(state, token, { x: to.x, y: to.y, elevation }) : null;
+    if (stopped) held.push({ token, blocker: stopped.blocker });
+    else moves.push(landed(state.buildChunks, token, { ...to, squeeze: false }));
+  }
+  return { moves, stop: null, held };
+}
+
+/**
+ * The ops for a plan's moves: one `token.move` for a lone token, which may
+ * squeeze, else `token.moveMany` in batches the protocol takes, which never
+ * squeezes.
+ */
+export function moveOpsOf(moves: readonly Landed[]): ClientOp[] {
+  if (moves.length === 0) return [];
+  if (moves.length === 1) return [{ t: "token.move", ...moves[0]! }];
+  const plain = moves.map(({ squeeze: _squeeze, ...m }) => m);
+  const ops: ClientOp[] = [];
+  for (let i = 0; i < plain.length; i += MAX_MOVES) ops.push({ t: "token.moveMany", moves: plain.slice(i, i + MAX_MOVES) });
+  return ops;
+}
+
+/** What the map says while a drag is held at a wall or a ledge. */
+export function holdLabel(blocker: Blocker): string {
+  return blocker === "wall" ? "Wall in the way" : "Ledge in the way";
+}
+
+/** The note after a stopped drop: what stopped it, and how to go on. */
+export function stopText(stop: Pick<Stop, "blocker" | "door">): string {
+  if (stop.blocker === "ledge") return "Ledge in the way. Take the stairs.";
+  if (stop.door) return "A door is in the way. Tap it to open.";
+  return "Stopped at a wall. Drop at the corner first, then go on.";
+}
+
+/** The note for the tokens of a group drag that stayed where they were. */
+export function heldText(held: readonly { name: string; blocker: Blocker }[]): string | null {
+  const first = held[0];
+  if (!first) return null;
+  if (held.length === 1) return `${first.name} stayed where it was: a ${first.blocker} is in the way.`;
+  const what = held.every((h) => h.blocker === "wall") ? "walls are" : held.every((h) => h.blocker === "ledge") ? "ledges are" : "walls or ledges are";
+  return `${held.length} tokens stayed where they were: ${what} in the way.`;
+}

@@ -1,0 +1,27 @@
+# Review routine working folders. They hold requests and replies for the
+# review in progress and never belong in history.
+.claude/review-*/
+
+# dependencies
+node_modules/
+.pnpm-store/
+pnpm-debug.log*
+# pnpm-lock.yaml is intentionally NOT ignored. It is committed.
+
+# build output
+dist/
+*.tsbuildinfo
+
+# env
+.env
+.env.local
+.env.*.local
+
+# local data written by a development server
+.data/
+
+# test and tool output
+test-results/
+playwright-report/
+*.log
+.DS_Store

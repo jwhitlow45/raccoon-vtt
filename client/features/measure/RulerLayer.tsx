@@ -1,0 +1,223 @@
+import type Konva from "konva";
+import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Circle, Group, Line } from "react-konva";
+import type { Drawing, RoomState, Token } from "#shared/model.ts";
+import { footprint, snapPosition } from "../../lib/scene.ts";
+import { theme } from "../../lib/theme.ts";
+import type { DragPreview } from "../../state/types.ts";
+import { useRoomView } from "../../state/view.ts";
+import type { LayerProps } from "../layers.ts";
+import { markOwner } from "../pings/who.ts";
+import { dragReading, leftText, type SpeedLeft, type Speeds } from "./movement.ts";
+import { Pill } from "./Pill.tsx";
+import { drawnPoints, formatFeet, keptStops, measureStops, type DistanceRules, type Point, type RulerStop } from "./ruler.ts";
+
+/**
+ * Rulers and the distance a dragged token travels (design sections 7.6 and
+ * 9.2), on the overlay layer.
+ *
+ * Every ruler in the store is drawn the same way, this device's own
+ * included (the store echoes it), each in its measurer's color. The server
+ * has already dropped any ruler frame anchored on a token this viewer may
+ * not see, so whatever arrives may be drawn above the fog.
+ *
+ * Kept rulers are drawings of kind `ruler` in the room state, drawn here
+ * the same way with a solid line, and faded on a DM's screen while only
+ * DMs see them. The projection holds back from players any kept ruler on
+ * a token they cannot see (design 7.3), so these may be drawn above the
+ * fog too.
+ *
+ * Labels keep one size on screen at any zoom: they sit in groups scaled by
+ * the inverse of the camera zoom.
+ *
+ * A dragged creature's line and label take the color of the speed band its
+ * move falls in (features section 4): green within its speed, yellow within
+ * a Dash, red past both. During a fight that is the active creature's path
+ * this turn plus the leg being dragged (movement.ts dragReading). The label
+ * says the same in words, so the color is never the only sign.
+ */
+
+const EMPTY_TOKENS: Record<string, Token> = {};
+const EMPTY_DRAWINGS: RoomState["drawings"] = {};
+const LINE_PX = 3;
+const HALO_PX = 6;
+/** A leg shorter than this on screen gets no label of its own: the total says enough. */
+const LEG_LABEL_MIN_PX = 56;
+
+/** Green, yellow and red, as features section 4 names them, whatever the viewer's accent. */
+const BAND_COLOR: Record<SpeedLeft["band"], string> = { walk: theme.color.success, dash: theme.color.crest, over: theme.color.danger };
+
+type DragRead = (token: Token, to: Point) => ReturnType<typeof dragReading>;
+
+export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
+  const rulers = useRoomView((s) => s.ephemeral.rulers);
+  const drags = useRoomView((s) => s.ephemeral.drags);
+  const tokens = useRoomView((s) => s.view?.tokens ?? EMPTY_TOKENS);
+  const members = useRoomView((s) => s.view?.members);
+  const settings = useRoomView((s) => s.view?.meta.settings);
+  const youId = useRoomView((s) => s.you?.memberId ?? null);
+  const encounter = useRoomView((s) => s.view?.encounter);
+  const drawings = useRoomView((s) => s.view?.drawings ?? EMPTY_DRAWINGS);
+  const characters = useRoomView((s) => s.view?.characters);
+  const role = useRoomView((s) => s.you?.role ?? "player");
+  const groupRef = useRef<Konva.Group>(null);
+  const localDrag = useLocalDrag(groupRef);
+  const feetPerCell = settings?.feetPerCell ?? 5;
+  const diagonal = settings?.diagonal ?? "five";
+  const rules = useMemo<DistanceRules>(() => ({ feetPerCell, diagonal }), [feetPerCell, diagonal]);
+  const read = useMemo<DragRead>(() => {
+    const activeTokenId = encounter?.entries.find((e) => e.id === encounter.activeEntryId)?.tokenId ?? null;
+    return (token, to) => {
+      // Speeds are the actor's, which only the DM and the creature's owners receive.
+      const speeds: Speeds | undefined = "inline" in token.actor ? token.actor.inline.speeds : characters?.[token.actor.ref]?.actor.speeds;
+      return dragReading({ token, to, encounter, activeTokenId, speeds, rules, role });
+    };
+  }, [encounter, characters, rules, role]);
+  if (!settings) return <Group ref={groupRef} listening={false} />;
+  const colorOf = (id: string) => members?.[id]?.color ?? theme.color.crest;
+  const kept = Object.values(drawings).filter((d): d is Drawing => !!d && d.kind === "ruler" && d.sceneId === props.scene.id);
+
+  return (
+    <Group ref={groupRef} listening={false}>
+      {kept.map((d) => (
+        <KeptRuler
+          key={d.id}
+          drawing={d}
+          tokens={tokens}
+          rules={rules}
+          scale={props.scale}
+          color={members?.[d.ownerId]?.color ?? d.style.stroke}
+          owner={markOwner({ from: d.ownerId, local: d.ownerId === youId }, members)}
+        />
+      ))}
+      {Object.entries(rulers).map(([key, r]) => (
+        <Ruler key={key} stops={r.points} tokens={tokens} rules={rules} scale={props.scale} color={colorOf(r.from)} owner={markOwner(r, members)} />
+      ))}
+      {Object.entries(drags).map(([key, d]) =>
+        // This device's own drag is measured from Konva's node below. Another device of the same member counts as remote.
+        d.ended || d.tokenId === localDrag?.tokenId ? null : (
+          <RemoteDragMeasure key={key} drag={d} token={tokens[d.tokenId]} read={read} scale={props.scale} color={colorOf(d.from)} />
+        ),
+      )}
+      {localDrag && tokens[localDrag.tokenId] ? (
+        <DragMeasure
+          token={tokens[localDrag.tokenId]!}
+          to={snapPosition(localDrag.x, localDrag.y, footprint(tokens[localDrag.tokenId]!))}
+          read={read}
+          scale={props.scale}
+          color={youId ? colorOf(youId) : theme.color.crest}
+        />
+      ) : null}
+    </Group>
+  );
+});
+
+function KeptRuler(props: { drawing: Drawing; tokens: Record<string, Token>; rules: DistanceRules; scale: number; color: string; owner: string | null }) {
+  const { drawing } = props;
+  const stops = useMemo(() => keptStops(drawing), [drawing]);
+  return (
+    <Group opacity={drawing.visibility === "dm" ? 0.6 : 1}>
+      <Ruler stops={stops} tokens={props.tokens} rules={props.rules} scale={props.scale} color={props.color} owner={props.owner} kept />
+    </Group>
+  );
+}
+
+/**
+ * `owner` names whoever is measuring, on someone else's ruler (pings/who.ts).
+ * A kept ruler draws its line solid, so it never reads as one being measured now.
+ */
+function Ruler(props: { stops: readonly RulerStop[]; tokens: Record<string, Token>; rules: DistanceRules; scale: number; color: string; owner: string | null; kept?: boolean }) {
+  const { stops, tokens, rules, scale, color } = props;
+  const { points, totalFt, legsFt } = useMemo(() => {
+    const m = stops.length > 1 ? measureStops(stops, tokens, rules) : { totalFt: 0, legsFt: [] };
+    return { points: drawnPoints(stops, tokens), ...m };
+  }, [stops, tokens, rules]);
+  const flat = points.flatMap((p) => [p.x, p.y]);
+  const last = points[points.length - 1];
+  if (!last) return null;
+  return (
+    <>
+      {points.length > 1 ? (
+        <>
+          <Line points={flat} stroke={theme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" perfectDrawEnabled={false} />
+          <Line points={flat} stroke={color} strokeWidth={LINE_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" dash={props.kept ? undefined : [10, 6]} perfectDrawEnabled={false} />
+        </>
+      ) : null}
+      {points.map((p, i) => (
+        <Circle key={i} x={p.x} y={p.y} radius={(i === 0 || i === points.length - 1 ? 5 : 4) / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />
+      ))}
+      {legsFt.length > 1
+        ? legsFt.map((ft, i) => {
+            const a = points[i]!;
+            const b = points[i + 1]!;
+            if (Math.hypot(b.x - a.x, b.y - a.y) * scale < LEG_LABEL_MIN_PX) return null;
+            return <Pill key={i} x={(a.x + b.x) / 2} y={(a.y + b.y) / 2} scale={scale} value={formatFeet(ft)} size="screen" color={color} small />;
+          })
+        : null}
+      {points.length > 1 ? (
+        <Pill x={last.x} y={last.y} scale={scale} name={props.owner} value={formatFeet(totalFt)} size="screen" color={color} offsetPx={18} />
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * A straight line from where a token stood to where it is being dropped, how
+ * far that is, and what the creature's speed has left after it.
+ */
+function DragMeasure(props: { token: Token; to: Point; read: DragRead; scale: number; color: string }) {
+  const { token, to, scale } = props;
+  const fp = footprint(token);
+  if (to.x === token.x && to.y === token.y) return null;
+  const { dragFt, left } = props.read(token, to);
+  const color = left ? BAND_COLOR[left.band] : props.color;
+  const text = left ? `${formatFeet(dragFt)} · ${leftText(left)}` : formatFeet(dragFt);
+  const a = { x: token.x + fp.w / 2, y: token.y + fp.h / 2 };
+  const b = { x: to.x + fp.w / 2, y: to.y + fp.h / 2 };
+  return (
+    <>
+      <Line points={[a.x, a.y, b.x, b.y]} stroke={theme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" />
+      <Line points={[a.x, a.y, b.x, b.y]} stroke={color} strokeWidth={LINE_PX} strokeScaleEnabled={false} lineCap="round" dash={[10, 6]} />
+      <Pill x={to.x + fp.w} y={to.y + fp.h} scale={scale} value={text} size="screen" color={color} offsetPx={4} />
+    </>
+  );
+}
+
+/**
+ * Another member's drag, measured from where the token stands to the
+ * snapped preview point. The server already dropped frames whose preview is
+ * under the fog for this viewer (design 7.6), so the measurement shows only
+ * what the ghost token below it shows.
+ */
+function RemoteDragMeasure(props: { drag: DragPreview; token: Token | undefined; read: DragRead; scale: number; color: string }) {
+  const { drag, token } = props;
+  if (!token) return null;
+  return <DragMeasure token={token} to={snapPosition(drag.x, drag.y, footprint(token))} read={props.read} scale={props.scale} color={props.color} />;
+}
+
+/**
+ * This device's own token drag. Konva moves the dragged node without a
+ * React render, and the canvas sends no local echo of drags, so this
+ * listens to the stage's drag events, which bubble up from the token's
+ * group (named "token", with the token's id).
+ */
+function useLocalDrag(ref: RefObject<Konva.Group | null>): { tokenId: string; x: number; y: number } | null {
+  const [drag, setDrag] = useState<{ tokenId: string; x: number; y: number } | null>(null);
+  useEffect(() => {
+    const stage = ref.current?.getStage();
+    if (!stage) return;
+    const onMove = (e: Konva.KonvaEventObject<DragEvent>) => {
+      const node = e.target;
+      if (node.name() !== "token") return;
+      setDrag({ tokenId: node.id(), x: node.x(), y: node.y() });
+    };
+    const onEnd = () => setDrag(null);
+    stage.on("dragmove.rulerlayer", onMove);
+    stage.on("dragend.rulerlayer", onEnd);
+    return () => {
+      stage.off("dragmove.rulerlayer");
+      stage.off("dragend.rulerlayer");
+    };
+  }, [ref]);
+  return drag;
+}
