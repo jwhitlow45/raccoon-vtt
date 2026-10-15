@@ -1,0 +1,193 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { after, before, describe, test } from "node:test";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
+import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+
+/**
+ * A player on a phone after the visual design pass, from the live play
+ * review of that pass (LPD-PLAYER), on the real server serving the
+ * production build:
+ *
+ * - The Log fits a narrow phone at a large interface size: Send, Export,
+ *   the recipient picker and the times stay on screen (LPD-PLAYER-3).
+ *
+ * It runs with `pnpm test:e2e` on E2E_PORT plus seven. The other
+ * environment variables are the smoke run's (smoke.e2e.ts).
+ */
+
+const PORT = Number(process.env.E2E_PORT ?? 3100) + 7;
+const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
+const SHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? "test-results/e2e-screenshots";
+
+const work = mkdtempSync(path.join(tmpdir(), "raccoon-e2e-playerphone-"));
+const assetDir = path.join(work, "assets");
+const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
+
+const PORTRAIT = { width: 390, height: 844 };
+
+let server: Server;
+let browser: Browser;
+let dmContext: BrowserContext;
+let dm: Page;
+let playerContext: BrowserContext;
+let player: Page;
+let ops: OpSocket;
+const dmSocket = new SocketWatch("dm");
+const playerSocket = new SocketWatch("player");
+const dmConsole = new ConsoleWatch("dm");
+const playerConsole = new ConsoleWatch("player");
+
+const run = {
+  roomId: "",
+  roomName: `E2E player phone ${new Date().toISOString().slice(0, 19)}`,
+  sceneId: "",
+  thorn: { id: randomUUID(), characterId: randomUUID(), entryId: randomUUID() },
+  goblin: { id: randomUUID(), entryId: randomUUID() },
+};
+
+/** A box as the page measured it, in CSS pixels. */
+type Box = { left: number; right: number };
+/** The few DOM members these steps read in the page. The e2e files compile without the DOM's types. */
+type El = { tagName: string; textContent: string | null; getAttribute(name: string): string | null; getBoundingClientRect(): Box };
+type PageGlobals = {
+  innerWidth: number;
+  document: { querySelector(selector: string): (El & { querySelectorAll(selector: string): ArrayLike<El> }) | null };
+};
+
+function actor(hp = 20) {
+  return {
+    hp: { cur: hp, max: hp, temp: 0 },
+    life: "alive",
+    ac: 14,
+    speeds: { walk: 30 },
+    initBonus: 0,
+    passivePerception: 12,
+    senses: "",
+    effects: [],
+    deathSaves: { ok: 0, fail: 0 },
+    notes: "",
+    dmNotes: "",
+  };
+}
+
+/** Sets the window and the interface size, then loads the room again. */
+async function setUp(view: { width: number; height: number; scale: number }): Promise<void> {
+  await player.setViewportSize({ width: view.width, height: view.height });
+  await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
+  await player.reload();
+  await player.getByRole("status", { name: "Connected" }).first().waitFor();
+  await player.locator(".konvajs-content").first().waitFor();
+}
+
+/** Every control in a panel's sheet that runs past the window's edges, by its name. */
+function offScreen(page: Page, region: string): Promise<string[]> {
+  return page.evaluate((name) => {
+    const g = globalThis as unknown as PageGlobals;
+    const sheet = g.document.querySelector(`section[aria-label="${name}"]`);
+    if (!sheet) return [`no sheet named ${name}`];
+    return Array.from(sheet.querySelectorAll("button, input, select, time"))
+      .map((el) => ({ name: el.getAttribute("aria-label") ?? el.textContent ?? el.tagName, r: el.getBoundingClientRect() }))
+      .filter(({ r }) => r.right - r.left > 0 && (r.left < -0.5 || r.right > g.innerWidth + 0.5))
+      .map(({ name, r }) => `${name} at ${Math.round(r.left)}-${Math.round(r.right)}`);
+  }, region);
+}
+
+describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_000 }, () => {
+  before(async () => {
+    server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
+    browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
+    dmContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    dm = await dmContext.newPage();
+    dmConsole.attach(dm);
+    await dmSocket.attach(dmContext, dm);
+    playerContext = await browser.newContext({ viewport: PORTRAIT, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    player = await playerContext.newPage();
+    playerConsole.attach(player);
+    await playerSocket.attach(playerContext, player);
+  });
+
+  after(async () => {
+    if (process.env.E2E_DEBUG === "1") {
+      for (const c of [dmConsole, playerConsole]) console.error(`[${c.label}] errors`, c.errors, "warnings", c.warnings);
+      console.error(server?.output().split("\n").slice(-40).join("\n"));
+    }
+    ops?.close();
+    if (run.roomId && dmContext) {
+      try {
+        const res = await dmContext.request.delete(`${server.origin}/api/rooms/${run.roomId}`, { headers: { Origin: server.origin }, data: { name: run.roomName } });
+        if (!res.ok()) console.error(`Deleting room ${run.roomId} answered ${res.status()}`);
+      } catch (err) {
+        console.error(`Deleting room ${run.roomId} failed`, err);
+      }
+    }
+    await browser?.close();
+    await server?.stop();
+    rmSync(work, { recursive: true, force: true });
+  });
+
+  test("1. a DM's room with Pat's Thorn and a goblin, Pat on a phone", async () => {
+    await dm.goto(`${server.origin}/`);
+    await dm.getByLabel("Room name").fill(run.roomName);
+    await dm.getByLabel("Your name").fill("Dana the DM");
+    const password = await dm.getByLabel("Player password").inputValue();
+    await dm.getByRole("button", { name: "Create room" }).click();
+    await dm.getByRole("heading", { name: "Save your DM link" }).waitFor();
+    const link = (await dm.locator("code").first().textContent()) ?? "";
+    const match = /\/r\/([0-9A-Z]{4}-[0-9A-Z]{4})#dm=/.exec(link);
+    assert.ok(match, `DM link looks wrong: ${link}`);
+    run.roomId = match[1]!.replace("-", "");
+    await dm.getByLabel("I saved my DM link").check();
+    await dm.getByRole("button", { name: "Continue to the room" }).click();
+    await waitFor("the DM's snapshot", () => dmSocket.state);
+    run.sceneId = dmSocket.state!.meta.playerSceneId!;
+
+    // Pat joins from the phone, whose cookies the request shares.
+    const headers = { Origin: server.origin, "content-type": "application/json" };
+    const joined = await playerContext.request.post(`${server.origin}/api/rooms/${run.roomId}/join`, { headers, data: { password } });
+    assert.ok(joined.ok(), `joining answered ${joined.status()}`);
+    const { ticket } = (await joined.json()) as { ticket: string };
+    const done = await playerContext.request.post(`${server.origin}/api/rooms/${run.roomId}/join/complete`, { headers, data: { ticket, name: "Pat", color: "#30a46c" } });
+    assert.ok(done.ok(), `completing the join answered ${done.status()}`);
+    const patId = ((await done.json()) as { member: { id: string } }).member.id;
+
+    const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+    ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
+    await ops.send({ t: "character.create", character: { id: run.thorn.characterId, name: "Thorn", size: "medium", ownerIds: [patId], actor: actor(24) } });
+    const token = (id: string, extra: Record<string, unknown>) => ({ t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", ...extra } });
+    await ops.send(token(run.thorn.id, { kind: "pc", name: "Thorn", x: 8, y: 6, disposition: "ally", actor: { ref: run.thorn.characterId } }));
+    await ops.send(token(run.goblin.id, { kind: "monster", name: "Goblin 1", x: 12, y: 9, disposition: "hostile", actor: { inline: actor(7) } }));
+
+    await player.goto(`${server.origin}/r/${run.roomId}`);
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+    await waitFor("Thorn on the player's map", () => playerSocket.state?.tokens[run.thorn.id]);
+  });
+
+  for (const view of [
+    { width: 360, height: 740, scale: 1.3 },
+    { width: 320, height: 568, scale: 1.15 },
+  ]) {
+    const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+    test(`2. the Log keeps Send, Export, the recipient and the times on screen: ${label} (LPD-PLAYER-3)`, async () => {
+      await setUp(view);
+      await player.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
+      await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Log/ }).tap();
+      await player.getByRole("region", { name: "Log" }).waitFor();
+      const log = player.getByRole("region", { name: "Log" });
+      await log.getByRole("textbox", { name: "Message" }).fill(`Hello from ${label}`);
+      assert.deepEqual(await offScreen(player, "Log"), [], "the Log ran past the window");
+      await log.getByRole("button", { name: "Send", exact: true }).tap();
+      await log.getByText(`Hello from ${label}`).waitFor();
+      if (view.width === 360) await shots.take(player, "playerphone-log-360-130");
+      await player.getByRole("button", { name: "Close Log" }).tap();
+    });
+  }
+
+  test("3. nothing went wrong in the browsers", () => {
+    assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
+    assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
+  });
+});

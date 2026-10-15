@@ -142,7 +142,10 @@ export default function LogPanel(_props: PanelProps) {
   };
 
   return (
-    <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
+    // One column no wider than the sheet. An auto column grows to its widest unbreakable child, here the
+    // composer's select and its field beside Send, and on a narrow phone at a large interface size it
+    // pushed Send, Export and the times past the screen's edge.
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
         <Older paging={paging} hasEntries={entries.length > 0} onLoad={() => void loadOlder()} />
         <div style={{ flex: 1 }} />
@@ -272,6 +275,7 @@ function Composer(props: { names: LogNames; me: string; onSend(op: NonNullable<R
         position: "sticky",
         bottom: 0,
         display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr)",
         gap: theme.space(2),
         padding: `${theme.space(2)}px 0`,
         background: theme.color.surface,
