@@ -226,7 +226,24 @@ function Band(props: { notice: boolean }) {
           ?
         </span>
       ) : null}
-      <span style={{ flex: 1, minWidth: 0, display: "grid", marginLeft: theme.space(1) }}>
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr)",
+          /*
+           * Short of room, the name and "Your turn" give way here instead
+           * of drawing over the timer beside them. Only across: the flare's
+           * ripple still spreads above and below. The padding, which the
+           * margins take back, leaves the flare's pill its reach past the
+           * words (PILL_PAD) inside the clip.
+           */
+          overflowX: "clip",
+          margin: `0 -${PILL_PAD}px 0 ${theme.space(1) - PILL_PAD}px`,
+          padding: `0 ${PILL_PAD}px`,
+        }}
+      >
         <span
           aria-hidden
           data-rvtt-strip-name=""
@@ -243,7 +260,7 @@ function Band(props: { notice: boolean }) {
         </span>
         {current && yours ? <YourTurn notice={props.notice} fontSize={theme.font.small} /> : null}
       </span>
-      {timer && current ? <TimerClock state={timer} size={theme.font.body14} /> : null}
+      {timer && current ? <TimerClock state={timer} size={theme.font.body14} stack /> : null}
       {next.length > 0 ? (
         <span aria-hidden style={{ flex: "none", display: "flex", alignItems: "center", gap: theme.space(1) }}>
           <span style={{ fontSize: theme.font.tiny, color: theme.color.textMuted }}>Next</span>
@@ -325,6 +342,8 @@ function YourTurn(props: { notice: boolean; fontSize: number; inline?: boolean }
     lineHeight: "20px",
     whiteSpace: "nowrap",
     pointerEvents: "none",
+    // Under the name in the band it ends in an ellipsis when the row is short of room, as the name does.
+    ...(props.inline ? null : { maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis" }),
   };
   if (!props.notice) {
     return (
@@ -348,6 +367,7 @@ function YourTurn(props: { notice: boolean; fontSize: number; inline?: boolean }
         ...colors,
         padding: `0 ${PILL_PAD}px`,
         margin: props.inline ? 0 : `0 -${PILL_PAD}px`,
+        ...(props.inline ? null : { maxWidth: `calc(100% + ${2 * PILL_PAD}px)` }),
         borderRadius: theme.radius.pill,
         background: theme.color.accentSoft,
         color: theme.color.ink,

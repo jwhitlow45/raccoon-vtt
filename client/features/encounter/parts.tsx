@@ -256,18 +256,30 @@ export function EndTurnPill(props: { waiting: boolean; onClick(): void }) {
  * The turn timer's clock: quiet while time is left, amber in the last
  * seconds, red once it runs out, then counting the time past it. Words go
  * with the color, so the state never rests on color alone.
+ *
+ * `stack` puts the time past it under "Time’s up", for the phone's turn
+ * band: on one line it is the widest thing in a row that also holds the
+ * picture, the name, "Your turn" and End Turn, and at a large interface
+ * size on a narrow phone it pushed End Turn off the screen.
  */
-export function TimerClock(props: { state: TimerState; size?: number }) {
+export function TimerClock(props: { state: TimerState; size?: number; stack?: boolean }) {
   const { state } = props;
   const color = state.over ? theme.color.dangerText : state.warning ? theme.color.warning : theme.color.textMuted;
   const text = clockText(state);
+  const past = state.over && state.left < 0;
+  const style: CSSProperties = { flex: "none", color, fontSize: props.size ?? theme.font.small, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+  const label = state.over ? `Turn time is up, ${text} over` : `${text} left this turn`;
+  if (props.stack && past) {
+    return (
+      <span role="timer" aria-label={label} style={{ ...style, display: "grid", justifyItems: "end", lineHeight: theme.leading.tight }}>
+        <span>Time’s up</span>
+        <span>{text}</span>
+      </span>
+    );
+  }
   return (
-    <span
-      role="timer"
-      aria-label={state.over ? `Turn time is up, ${text} over` : `${text} left this turn`}
-      style={{ flex: "none", color, fontSize: props.size ?? theme.font.small, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}
-    >
-      {state.over ? `Time’s up${state.left < 0 ? ` ${text}` : ""}` : text}
+    <span role="timer" aria-label={label} style={style}>
+      {state.over ? `Time’s up${past ? ` ${text}` : ""}` : text}
     </span>
   );
 }

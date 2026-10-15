@@ -14,6 +14,9 @@ import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type 
  *
  * - The Log fits a narrow phone at a large interface size: Send, Export,
  *   the recipient picker and the times stay on screen (LPD-PLAYER-3).
+ * - On the player's own turn with the turn timer over, the phone's turn
+ *   band keeps End Turn on screen and the name and "Your turn" clear of
+ *   the timer, at 130% on 390 and 360 px phones (LPD-PLAYER-4).
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seven. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
@@ -94,6 +97,30 @@ function offScreen(page: Page, region: string): Promise<string[]> {
       .filter(({ r }) => r.right - r.left > 0 && (r.left < -0.5 || r.right > g.innerWidth + 0.5))
       .map(({ name, r }) => `${name} at ${Math.round(r.left)}-${Math.round(r.right)}`);
   }, region);
+}
+
+/**
+ * The turn band's parts on the player's turn: the name and "Your turn",
+ * the timer, End Turn, and the window's width. Each text's own box is
+ * read, not its column's, since a column too narrow for its text lets the
+ * text run over what stands beside it.
+ */
+function band(page: Page) {
+  return page.evaluate(() => {
+    const g = globalThis as unknown as PageGlobals;
+    const header = g.document.querySelector("header");
+    if (!header) throw new Error("no top bar");
+    const box = (el: El | undefined) => (el ? { left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right } : null);
+    const all = Array.from(header.querySelectorAll("*"));
+    return {
+      width: g.innerWidth,
+      name: box(all.find((el) => el.getAttribute("data-rvtt-strip-name") !== null)),
+      yourTurn: box(all.find((el) => el.textContent === "Your turn" && el.tagName === "SPAN")),
+      timer: box(all.find((el) => el.getAttribute("role") === "timer")),
+      endTurn: box(all.find((el) => el.tagName === "BUTTON" && el.textContent === "End turn")),
+      timerText: all.find((el) => el.getAttribute("role") === "timer")?.textContent ?? "",
+    };
+  });
 }
 
 describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_000 }, () => {
@@ -186,7 +213,40 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     });
   }
 
-  test("3. nothing went wrong in the browsers", () => {
+  test("3. time is up on the player's turn: the band's name gives way and End turn stays on screen at 130% (LPD-PLAYER-4)", async () => {
+    await ops.send({ t: "room.update", settings: { turnTimerSec: 4 } });
+    await ops.send({
+      t: "encounter.start",
+      entries: [
+        { id: run.goblin.entryId, tokenId: run.goblin.id, value: 18 },
+        { id: run.thorn.entryId, tokenId: run.thorn.id, value: 15 },
+      ],
+    });
+    await ops.send({ t: "encounter.next" });
+    await ops.send({ t: "encounter.next" });
+    for (const view of [
+      { width: 390, height: 844, scale: 1.3 },
+      { width: 360, height: 740, scale: 1.3 },
+      { width: 390, height: 844, scale: 1 },
+    ]) {
+      const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+      await setUp(view);
+      await player.getByRole("button", { name: "End turn" }).waitFor();
+      // The time past the turn needs room of its own: "Time’s up +0:05" and the like.
+      await waitFor(`time up in the band, ${label}`, async () => /Time’s up\s*\+/.test((await band(player)).timerText) || null, 15_000);
+      const b = await band(player);
+      assert.ok(b.name && b.yourTurn && b.timer && b.endTurn, `${label}: the band is missing a part: ${JSON.stringify(b)}`);
+      assert.ok(b.endTurn.right <= b.width + 0.5 && b.endTurn.left >= -0.5, `${label}: End turn runs off the screen: ${JSON.stringify(b)}`);
+      assert.ok(b.name.right <= b.timer.left + 0.5, `${label}: the name runs over the timer: ${JSON.stringify(b)}`);
+      assert.ok(b.yourTurn.right <= b.timer.left + 0.5, `${label}: "Your turn" runs over the timer: ${JSON.stringify(b)}`);
+      assert.ok(b.timer.right <= b.endTurn.left + 0.5, `${label}: the timer runs under End turn: ${JSON.stringify(b)}`);
+      if (view.width === 360) await shots.take(player, "playerphone-band-time-up-360-130");
+    }
+    await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
+    await ops.send({ t: "encounter.end" });
+  });
+
+  test("4. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });
