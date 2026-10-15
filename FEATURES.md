@@ -43,7 +43,8 @@ This page lists what RaccoonVTT does today, grouped by area. "The DM" means anyo
 - A small dot shows the connection. A banner appears only after a few seconds offline.
 - Other people's token drags move live, with their name over the token in their color.
 - One finger uses the current tool. Two fingers pan and pinch-zoom. Nothing needs a long press.
-- Tapping a token opens a small action bar under it. On a phone held upright it spans the screen.
+- Tapping a token opens its action bar. On a screen 600 px or wider, or a phone on its side, it sits at the bottom right of the map instead of under the token. Drag it by its header, or press "Move bar" to send it to the next corner. This device remembers the spot, and "Reset bar position" puts it back. "Fit the map" keeps the map out from under it. On a phone held upright it spans the screen under the token. On a screen too short for either, it opens taller, over the Select several bar and if need be the toolbar. Close it to reach the toolbar again.
+- A tap on empty map closes the action bar. Panning, pinching and holding a finger down to ping leave it open.
 - On a phone held upright, an open sheet folds the token's action bar and the fight's alerts into one row on the sheet's top edge: a button with the token's name, its Close, and one button that names the most pressing alert and how many more wait. The token's name closes the sheet and brings the bar back as it was, a half-typed HP entry included. The alert button closes the sheet and shows the alerts, or opens a roll waiting for your answer. Where the screen is too short for that row, its buttons sit in the sheet's header.
 - The fit button in the top bar ("Fit the map to the screen") brings the map back into view. A pinch anywhere but the map never zooms the page.
 - Android's Back button and the Escape key close an open sheet, handout or action bar before they leave the room.
@@ -109,6 +110,7 @@ The Builder tool is the DM's. Its modes:
 ### Several tokens at once
 
 - Select several with Shift or Cmd and a click, with the "Select several" button, or with a box drag. Drag any of them to move them all.
+- With Select several on, a tap on empty map hides the group's action bar and keeps the group, and "Actions" in the Select several bar brings it back. A tap on a token in the group takes it out. Done ends Select several and lets go of the group, and so do Escape and Android's Back while the bar is hidden.
 - The group's action bar offers one HP entry for all of them, Conditions, and elevation up and down 5 ft.
 - The DM also gets Request a roll, Hidden, Locked, Start a fight or Add to the fight (objects stay out of the fight), Delete, and More: ring color, size, layer, image, how players see HP, hiding names from players, "Always visible, even under fog", and owners.
 - Each action shows only when you may use it on every selected token, except Request a roll and Start a fight or Add to the fight, which show when any of them can take part. A player who selected their own creatures gets conditions and elevation.
@@ -352,7 +354,7 @@ On any device with a keyboard. They do nothing while you type in a field or a wi
 | / | Search the scene in the outliner | DM |
 | ? | Show the shortcuts | everyone |
 
-With a mouse, the wheel zooms, and a drag with the right or middle button, or with Space held, moves the map. Escape closes a sheet or the token's action bar.
+With a mouse, the wheel zooms, and a drag with the right or middle button, or with Space held, moves the map. Escape closes a sheet or the token's action bar. While you drag the action bar, Escape puts it back.
 
 On a focused side panel tab, Left and Right switch to the tab beside it, and Home and End to the first and the last. There, and on a focused choice or slider, the arrow and Page keys never move a token.
 
