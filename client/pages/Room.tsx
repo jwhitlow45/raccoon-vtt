@@ -107,11 +107,29 @@ function useOptionsHeights(scale: number): [(el: HTMLElement | null) => (() => v
         const controls = tops.length > 0 ? Math.round(Math.min(box.height, box.bottom - Math.min(...tops))) : 0;
         setHeights((h) => (h.height === height && h.controls === controls ? h : { height, controls }));
       };
+      /*
+       * Its controls move without the bar changing size: past half the
+       * screen it is capped and scrolls, and rows such as the kept rulers
+       * grow or go inside it. So it measures again as it scrolls, as its
+       * rows change size, and as they come and go.
+       */
       const observer = new ResizeObserver(measure);
-      observer.observe(el);
+      const watch = () => {
+        observer.observe(el);
+        for (const row of el.children) observer.observe(row);
+      };
+      const changes = new MutationObserver(() => {
+        watch();
+        measure();
+      });
+      watch();
+      changes.observe(el, { childList: true, subtree: true });
+      el.addEventListener("scroll", measure, { passive: true });
       measure();
       return () => {
         observer.disconnect();
+        changes.disconnect();
+        el.removeEventListener("scroll", measure);
         setHeights({ height: 0, controls: 0 });
       };
     },

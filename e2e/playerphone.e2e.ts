@@ -74,6 +74,7 @@ const run = {
   sceneId: "",
   thorn: { id: randomUUID(), characterId: randomUUID(), entryId: randomUUID() },
   goblin: { id: randomUUID(), entryId: randomUUID() },
+  patId: "",
 };
 
 /** A box as the page measured it, in CSS pixels. */
@@ -379,6 +380,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     const done = await playerContext.request.post(`${server.origin}/api/rooms/${run.roomId}/join/complete`, { headers, data: { ticket, name: "Pat", color: "#30a46c" } });
     assert.ok(done.ok(), `completing the join answered ${done.status()}`);
     const patId = ((await done.json()) as { member: { id: string } }).member.id;
+    run.patId = patId;
 
     const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
@@ -1078,7 +1080,57 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     });
   }
 
-  test("19. nothing went wrong in the browsers", () => {
+  test("19. with the Ruler's options capped at half the screen and scrolled past kept rulers, the row standing for a roll put off with Later covers none of their buttons: 480 x 320 at 100%", async () => {
+    const label = "480 x 320 at 100% with kept rulers";
+    await insets({ side: 47, bottom: 21 });
+    const id = randomUUID();
+    const kept = Array.from({ length: 10 }, () => randomUUID());
+    try {
+      for (const [i, drawingId] of kept.entries()) {
+        await ops.send({
+          t: "drawing.create",
+          drawing: { id: drawingId, sceneId: run.sceneId, kind: "ruler", points: [1, 1, 2 + i, 1], style: { stroke: "#ffffff", width: 2, opacity: 1 }, ownerId: run.patId, visibility: "all", anchors: [null, null] },
+        });
+      }
+      await setUp({ width: 480, height: 320, scale: 1 });
+      await player.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Ruler" }).tap();
+      const options = player.getByRole("toolbar", { name: "Ruler options" });
+      await options.waitFor();
+      await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+      await player.waitForTimeout(400);
+      await cardInReach(label, "playerphone-kept-rulers-card-before-later-480x320");
+      await card(player).getByRole("button", { name: "Later" }).tap();
+      await card(player).waitFor({ state: "detached" });
+      // Scrolled to its foot, the capped bar moves the kept rulers up to where its hint was.
+      const scrolls = await options.evaluate((el) => {
+        const box = el as unknown as { scrollTop: number; scrollHeight: number; clientHeight: number };
+        box.scrollTop = box.scrollHeight;
+        return box.scrollHeight > box.clientHeight + 1;
+      });
+      assert.ok(scrolls, `${label}: the options bar does not scroll, so this step tests nothing`);
+      await player.waitForTimeout(300);
+      await wayBack(label, /^Wis save: waiting for your roll\./);
+      await shots.take(player, "playerphone-kept-rulers-scrolled-480x320");
+      const bar = await rectOf(options);
+      const buttons = options.getByRole("button");
+      let checked = 0;
+      for (let i = 0; i < (await buttons.count()); i++) {
+        const b = buttons.nth(i);
+        const r = await b.boundingBox();
+        // Only the buttons the scrolled bar shows whole: the rest it clips itself.
+        if (!r || r.y < bar.top + 1 || r.y + r.height > bar.bottom - 1) continue;
+        checked += 1;
+        assert.ok(await wholeInReach(b), `${label}: the row covers ${(await b.getAttribute("aria-label")) ?? (await b.textContent())} once the options scroll`);
+      }
+      assert.ok(checked > 0, `${label}: no option button shows whole`);
+    } finally {
+      await ops.send({ t: "roll.close", rollIds: [id] });
+      for (const drawingId of kept) await ops.send({ t: "drawing.delete", drawingId });
+      await insets({});
+    }
+  });
+
+  test("20. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });
