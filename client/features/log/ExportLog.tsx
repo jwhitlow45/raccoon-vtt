@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { Button } from "../../components/Button.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
 import { ErrorText } from "../../components/Field.tsx";
@@ -38,6 +38,7 @@ export function ExportLog(props: { onClose(): void }) {
   const urlRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const tz = deviceTimeZone();
+  const ids = useId();
 
   useEffect(() => {
     let live = true;
@@ -93,13 +94,25 @@ export function ExportLog(props: { onClose(): void }) {
   };
 
   const busy = job.kind === "busy";
-  const row = (key: string, label: string, range: { from?: string; to?: string }) => {
+  const row = (key: string, index: number, label: string, range: { from?: string; to?: string }) => {
     const mine = job.kind !== "idle" && job.key === key;
+    const buttonId = `${ids}-export-${index}`;
+    const labelId = `${ids}-label-${index}`;
     return (
       <li key={key} style={{ display: "grid", gap: theme.space(1), padding: `${theme.space(2)}px 0`, borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-          <span style={{ flex: 1, minWidth: 0, fontSize: theme.font.body14 }}>{label}</span>
-          <Button size="sm" busy={mine && job.kind === "busy"} disabled={busy && !mine} onClick={() => void run(key, range)}>
+          <span id={labelId} style={{ flex: 1, minWidth: 0, fontSize: theme.font.body14 }}>
+            {label}
+          </span>
+          {/* Every row's button says Export, so its name adds its row's evening: "Export Thursday, October 15, …". */}
+          <Button
+            id={buttonId}
+            aria-labelledby={`${buttonId} ${labelId}`}
+            size="sm"
+            busy={mine && job.kind === "busy"}
+            disabled={busy && !mine}
+            onClick={() => void run(key, range)}
+          >
             {mine && job.kind === "busy" ? "Preparing…" : "Export"}
           </Button>
         </div>
@@ -135,8 +148,8 @@ export function ExportLog(props: { onClose(): void }) {
         {list.kind === "ready" && list.lines === 0 ? <Help>The log is empty, so there is nothing to export yet.</Help> : null}
         {list.kind === "ready" && list.lines > 0 ? (
           <ul aria-label="Sessions" style={{ listStyle: "none", margin: 0, padding: 0 }}>
-            {list.sessions.map((s) => row(`${s.from}|${s.to}`, sessionLabel(s), { from: s.from, to: s.to }))}
-            {row("all", everythingLabel(list.lines), {})}
+            {list.sessions.map((s, i) => row(`${s.from}|${s.to}`, i, sessionLabel(s), { from: s.from, to: s.to }))}
+            {row("all", list.sessions.length, everythingLabel(list.lines), {})}
           </ul>
         ) : null}
         <Help>{EXPORT_LIMIT_NOTE}</Help>

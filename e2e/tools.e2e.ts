@@ -158,7 +158,8 @@ async function exportEverything(page: Page): Promise<string> {
   const everything = sheet.getByRole("listitem").filter({ hasText: /^Everything, / });
   await everything.waitFor();
   const auto = page.waitForEvent("download", { timeout: 5_000 }).catch(() => null);
-  await everything.getByRole("button", { name: "Export" }).click();
+  // Each row's button is named by its row, so a list of them reads apart (LPD-DESK-10).
+  await everything.getByRole("button", { name: /^Export Everything, \d+ lines?$/ }).click();
   const link = everything.getByRole("link", { name: "Download" });
   await link.waitFor();
   const downloaded = await auto;

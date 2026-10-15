@@ -229,7 +229,7 @@ async function checkTargets(dialog: Locator, label: string): Promise<void> {
  * a footer must be there as the dialog opens. One in the dialog's body,
  * which scrolls, must be reachable by scrolling it.
  */
-async function checkDialog(dialog: Locator, label: string, main: { name: string; in: "footer" | "body" } | null, opts: { titleless?: boolean } = {}): Promise<void> {
+async function checkDialog(dialog: Locator, label: string, main: { name: string | RegExp; in: "footer" | "body" } | null, opts: { titleless?: boolean } = {}): Promise<void> {
   const titleless = opts.titleless === true;
   const owner = dialog.page();
   await dialog.waitFor();
@@ -378,7 +378,8 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await openPanel("Log", phone);
         await page.getByRole("button", { name: "Export", exact: true }).click();
         const exportLog = page.getByRole("dialog", { name: "Export the log" });
-        await checkDialog(exportLog, `${label}, Export the log`, { name: "Export", in: "body" });
+        // Each row's Export is named by its row: the first is the newest evening's.
+        await checkDialog(exportLog, `${label}, Export the log`, { name: /^Export /, in: "body" });
         await closeDialog(exportLog);
 
         // Modal: a new room monster.
