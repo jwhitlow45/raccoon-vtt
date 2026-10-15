@@ -364,14 +364,15 @@ export function parseTotal(text: string): { ok: true; total: number } | { ok: fa
 
 /**
  * What a player typed into a card and has not sent: the total and which
- * choice they rolled, and the answer it was typed over (`base`, from
- * answerKey). Kept by the player's rolls for each creature a request asks
- * about, because the card itself can be built again: under 600 layout px
- * it stands across the screen and from 600 px it sits in the alerts
- * column, so turning a phone between portrait and landscape mounts it
- * afresh.
+ * choice they rolled, the answer it was typed over (`base`, from
+ * answerKey), and whether the Total field has focus. Kept by the player's
+ * rolls for each creature a request asks about, because the card itself
+ * can be built again: under 600 layout px it stands across the screen and
+ * from 600 px it sits in the alerts column, so turning a phone between
+ * portrait and landscape mounts it afresh, and focus in the field fell to
+ * the page.
  */
-export type AnswerDraft = { text: string; choice: 0 | 1; base: string };
+export type AnswerDraft = { text: string; choice: 0 | 1; base: string; focused?: boolean };
 
 /** The key of one creature's draft on one request. */
 export function draftKey(requestId: string, target: Pick<RollTarget, "tokenId" | "characterId">): string {
@@ -398,15 +399,25 @@ export function forgetStaleDrafts(drafts: Map<string, AnswerDraft>, requests: re
 }
 
 /**
- * What a creature's answer starts as when its card mounts: the draft, unless
- * the answer changed since it was typed, such as a total sent from this
- * player's other device, which then wins as it does today. The card can
- * mount in the same render the answer changes, before forgetStaleDrafts
- * runs, so this checks too.
+ * Keeps the focus mark only on the drafts of the request whose card shows.
+ * Only turning the phone mounts that card afresh with the same request:
+ * one folded by Send, Later or Back, or put aside by a newer request,
+ * never takes focus back when it shows again.
  */
-export function startingAnswer(target: RollAnswer, draft: AnswerDraft | undefined): { text: string; choice: 0 | 1 } {
-  if (draft && draft.base === answerKey(target)) return { text: draft.text, choice: draft.choice };
-  return { text: target.total !== undefined ? String(target.total) : "", choice: target.choice ?? 0 };
+export function keepFocusFor(drafts: Map<string, AnswerDraft>, shownId: string | undefined): void {
+  for (const [key, draft] of drafts) if (draft.focused && key.slice(0, key.indexOf(":")) !== shownId) drafts.set(key, { ...draft, focused: false });
+}
+
+/**
+ * What a creature's answer starts as when its card mounts: the draft, and
+ * focus in the Total field if it had it, unless the answer changed since
+ * it was typed, such as a total sent from this player's other device,
+ * which then wins as it does today. The card can mount in the same render
+ * the answer changes, before forgetStaleDrafts runs, so this checks too.
+ */
+export function startingAnswer(target: RollAnswer, draft: AnswerDraft | undefined): { text: string; choice: 0 | 1; focused: boolean } {
+  if (draft && draft.base === answerKey(target)) return { text: draft.text, choice: draft.choice, focused: draft.focused === true };
+  return { text: target.total !== undefined ? String(target.total) : "", choice: target.choice ?? 0, focused: false };
 }
 
 /** Whether any of the creatures a request asked this player about, their own alone in their projection, still waits for an answer. */

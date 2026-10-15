@@ -34,6 +34,7 @@ import {
   finalForPlayer,
   foldedChips,
   forgetStaleDrafts,
+  keepFocusFor,
   lookAtRequests,
   newestFirst,
   parseTotal,
@@ -105,6 +106,7 @@ export function PlayerRolls() {
   }, [needs, loaded]);
 
   const shown = shownRequest(requests, needs, folded, opened);
+  useEffect(() => keepFocusFor(drafts.current, shown?.id), [shown?.id]);
   const fold = (id: string) => {
     setFolded((f) => new Set([...f, id]));
     setOpened((o) => (o === id ? null : o));
@@ -359,7 +361,13 @@ function CreatureAnswer(props: {
   const [start] = useState(() => startingAnswer(target, drafts.get(key)));
   const [choice, setChoice] = useState<0 | 1>(start.choice);
   const [text, setText] = useState(start.text);
-  const keep = (draft: { text: string; choice: 0 | 1 }) => drafts.set(key, { ...draft, base: answerKey(target) });
+  const keep = (draft: { text?: string; choice?: 0 | 1; focused?: boolean }) =>
+    drafts.set(key, { text, choice, focused: drafts.get(key)?.focused === true, ...draft, base: answerKey(target) });
+  const field = useRef<HTMLInputElement>(null);
+  // A card mounted afresh by turning the phone gives focus back to the field being typed in.
+  useLayoutEffect(() => {
+    if (start.focused) revealAndFocus(field.current);
+  }, [start]);
   const [sending, setSending] = useState(false);
   const connected = useRoomView((s) => s.connection === "open");
   const [error, setError] = useState<string | null>(null);
@@ -414,7 +422,7 @@ function CreatureAnswer(props: {
               options={request.test.choices.map((c, i) => ({ value: i as 0 | 1, label: choiceText(c) }))}
               onChange={(i) => {
                 setChoice(i);
-                keep({ text, choice: i });
+                keep({ choice: i });
                 props.onEngage();
               }}
             />
@@ -437,6 +445,7 @@ function CreatureAnswer(props: {
             style={{ display: "flex", gap: theme.space(2) }}
           >
             <Input
+              ref={field}
               aria-label={`Total ${name} rolled`}
               value={text}
               inputMode="numeric"
@@ -446,9 +455,13 @@ function CreatureAnswer(props: {
               error={error !== null}
               onChange={(e) => {
                 setText(e.target.value);
-                keep({ text: e.target.value, choice });
+                keep({ text: e.target.value });
                 setError(null);
                 props.onEngage();
+              }}
+              onFocus={() => keep({ focused: true })}
+              onBlur={() => {
+                if (drafts.has(key)) keep({ focused: false });
               }}
               style={{ flex: 1, width: 0 }}
             />

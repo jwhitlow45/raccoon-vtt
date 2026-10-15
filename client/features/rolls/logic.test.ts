@@ -29,6 +29,7 @@ import {
   chipsStayShown,
   foldedChips,
   forgetStaleDrafts,
+  keepFocusFor,
   lookAtRequests,
   newestFirst,
   offersRequest,
@@ -564,15 +565,15 @@ describe("the DM's cards on a phone with no sheet open (docs/design-v1-visual.md
 describe("a total typed into a card and not sent (LPD-PLAYER-1)", () => {
   test("comes back when the card mounts again, as turning the phone does", () => {
     const draft = { text: "14", choice: 1 as const, base: answerKey({}) };
-    assert.deepEqual(startingAnswer({}, draft), { text: "14", choice: 1 });
-    assert.deepEqual(startingAnswer({}, undefined), { text: "", choice: 0 }, "with nothing typed the card starts empty");
+    assert.deepEqual(startingAnswer({}, draft), { text: "14", choice: 1, focused: false });
+    assert.deepEqual(startingAnswer({}, undefined), { text: "", choice: 0, focused: false }, "with nothing typed the card starts empty");
   });
 
   test("gives way to an answer sent since it was typed, from this player's other device", () => {
-    assert.deepEqual(startingAnswer({ total: 9, choice: 0 }, { text: "14", choice: 1, base: answerKey({}) }), { text: "9", choice: 0 });
+    assert.deepEqual(startingAnswer({ total: 9, choice: 0 }, { text: "14", choice: 1, base: answerKey({}), focused: true }), { text: "9", choice: 0, focused: false });
     const sent = answerKey({ total: 9, choice: 0 });
-    assert.deepEqual(startingAnswer({ total: 9, choice: 0 }, { text: "12", choice: 1, base: sent }), { text: "12", choice: 1 }, "a change typed over a sent answer stays");
-    assert.deepEqual(startingAnswer({ result: "fail", noRoll: true }, { text: "12", choice: 1, base: answerKey({}) }), { text: "", choice: 0 }, "a save failed without rolling elsewhere wins too");
+    assert.deepEqual(startingAnswer({ total: 9, choice: 0 }, { text: "12", choice: 1, base: sent }), { text: "12", choice: 1, focused: false }, "a change typed over a sent answer stays");
+    assert.deepEqual(startingAnswer({ result: "fail", noRoll: true }, { text: "12", choice: 1, base: answerKey({}) }), { text: "", choice: 0, focused: false }, "a save failed without rolling elsewhere wins too");
   });
 
   test("is forgotten once the answer changes, so a reopen after an answer from another device starts the card empty", () => {
@@ -594,7 +595,27 @@ describe("a total typed into a card and not sent (LPD-PLAYER-1)", () => {
     state = run(state, { t: "roll.reopen", rollId: "r1", target: { characterId: "ayla" } }, DM, 3);
     const reopened = view();
     forgetStaleDrafts(drafts, [reopened]);
-    assert.deepEqual(startingAnswer(reopened.targets[0]!, drafts.get(key)), { text: "", choice: 0 });
+    assert.deepEqual(startingAnswer(reopened.targets[0]!, drafts.get(key)), { text: "", choice: 0, focused: false });
+  });
+
+  test("gives focus back to the Total field when the card mounts again, if the field had it", () => {
+    assert.equal(startingAnswer({}, { text: "14", choice: 0, base: answerKey({}), focused: true }).focused, true);
+    assert.equal(startingAnswer({}, { text: "", choice: 0, base: answerKey({}), focused: true }).focused, true, "a field focused with nothing typed yet too");
+  });
+
+  test("keeps the focus mark only while its request's card shows, so a card folded or put aside never takes focus when it comes back", () => {
+    const r1 = draftKey("r1", { characterId: "ayla" });
+    const r2 = draftKey("r2", { characterId: "ayla" });
+    const drafts = new Map<string, AnswerDraft>([
+      [r1, { text: "14", choice: 0, base: answerKey({}), focused: true }],
+      [r2, { text: "", choice: 0, base: answerKey({}), focused: true }],
+    ]);
+    keepFocusFor(drafts, "r1");
+    assert.equal(drafts.get(r1)?.focused, true, "the card turning with the phone keeps it");
+    assert.equal(drafts.get(r2)?.focused, false);
+    keepFocusFor(drafts, undefined);
+    assert.equal(drafts.get(r1)?.focused, false, "folded");
+    assert.equal(drafts.get(r1)?.text, "14", "the typed total stays");
   });
 
   test("is forgotten when its request closes", () => {

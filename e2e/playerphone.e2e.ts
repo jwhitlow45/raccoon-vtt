@@ -19,7 +19,8 @@ import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type 
  *   the timer, at 130% on 390 and 360 px phones (LPD-PLAYER-4).
  * - A total typed into a roll card, and the choice picked in it, survive
  *   turning the phone between portrait and landscape, which moves the card
- *   between the screen's foot and the alerts column (LPD-PLAYER-1).
+ *   between the screen's foot and the alerts column (LPD-PLAYER-1). Focus
+ *   stays in the Total field being typed in.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seven. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
@@ -255,7 +256,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await ops.send({ t: "encounter.end" });
   });
 
-  test("4. a total typed into the roll card and the choice picked survive turning the phone (LPD-PLAYER-1)", async () => {
+  test("4. a total typed into the roll card, the choice picked and focus in the field survive turning the phone (LPD-PLAYER-1)", async () => {
     await setUp({ ...PORTRAIT, scale: 1 });
     const id = randomUUID();
     await ops.send({
@@ -271,9 +272,16 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       [PORTRAIT, "turned back to portrait"],
     ] as const) {
       await player.setViewportSize(view);
-      await card(player).waitFor();
+      // Across the screen's foot in portrait, portaled to the body, and in the alerts column in landscape: a card mounted afresh.
+      const portaled = view === PORTRAIT;
+      await waitFor(`${label}: the card in its new place`, async () => {
+        const top = await card(player).evaluate((el) => (el as unknown as { parentElement: unknown }).parentElement === (globalThis as unknown as { document: { body: unknown } }).document.body);
+        return top === portaled;
+      });
       assert.equal(await card(player).getByLabel("Total Thorn rolled").inputValue(), "16", `${label}: the typed total is gone`);
       assert.ok(await card(player).getByRole("radio", { name: "Strength" }).isChecked(), `${label}: the chosen roll is gone`);
+      const focus = await player.evaluate(() => (globalThis as unknown as { document: { activeElement: El | null } }).document.activeElement?.getAttribute("aria-label") ?? null);
+      assert.equal(focus, "Total Thorn rolled", `${label}: focus left the Total field`);
     }
     await shots.take(player, "playerphone-card-after-turning");
     await card(player).getByRole("button", { name: "Send", exact: true }).tap();
