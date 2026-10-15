@@ -293,6 +293,8 @@ function RollCard(props: {
   const { request } = props;
   const dc = dcText(request, "player");
   const zoom = useUiScale();
+  // The toolbar and the active tool's options as Room measured them (canvas/barDock.ts Chrome), in the card's own pixels.
+  const chrome = useStore(useScoped(barDockSlot), (s) => s.chrome);
   // Only while it shows, so a card folded under a sheet, or one that arrived there, never takes Back from the sheet.
   useBackClose(props.sheet && !props.hidden, props.onFold);
   const sent = (key: string) => {
@@ -345,7 +347,8 @@ function RollCard(props: {
     );
   }
   // Portaled out of the zoomed room, so it takes the interface size itself, as Sheet does: its bottom inset
-  // and text then scale with the toolbar it stands on (docs/design-v1-dm-tools.md 3.16).
+  // and text then scale with the toolbar it stands on (docs/design-v1-dm-tools.md 3.16). It stands on the
+  // active tool's options too, once Room has measured them, so Select several's Actions and Done stay in reach.
   return (
     <section
       {...common}
@@ -355,7 +358,7 @@ function RollCard(props: {
         position: "fixed",
         left: 0,
         right: 0,
-        bottom: `calc(${theme.safe.bottom} + ${theme.layout.toolbar}px)`,
+        bottom: chrome ? chrome.bottom : `calc(${theme.safe.bottom} + ${theme.layout.toolbar}px)`,
         zIndex: theme.z.overBars,
         maxHeight: screenHeight(70),
         overflowY: "auto",

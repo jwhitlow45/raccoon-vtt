@@ -73,14 +73,14 @@ export const DEFAULT_CHROME: Chrome = { top: 52, bottom: 60, toolbar: 60, safe: 
  * The part of the map a docked bar lives in: the map less the bars over
  * it, the side safe areas and a landscape sheet, with an 8 px margin all
  * round. Its height may come out at 0 or less on a short screen. `foot` is
- * a roll card standing on a narrow screen's toolbar
- * (features/rolls/PlayerRolls.tsx), which the bar keeps above.
+ * a roll card standing on a narrow screen's toolbar and the active tool's
+ * options (features/rolls/PlayerRolls.tsx), which the bar keeps above.
  */
 export function freeArea(viewport: Size, chrome: Chrome, foot = 0): Box {
   const left = chrome.safe.left + EDGE;
   const right = viewport.width - (chrome.sheet > 0 ? chrome.sheet : chrome.safe.right) - EDGE;
   const top = chrome.top + EDGE;
-  const bottom = Math.min(viewport.height - chrome.bottom - EDGE, foot > 0 ? viewport.height - chrome.toolbar - foot - EDGE : Infinity);
+  const bottom = viewport.height - chrome.bottom - Math.max(0, foot) - EDGE;
   return { left, top, width: right - left, height: bottom - top };
 }
 
@@ -531,7 +531,7 @@ type BarDockState = {
   /** Set by Actions: the next bar to show takes focus on its frame. */
   focusFrame: boolean;
   /**
-   * The height of a roll card standing on a narrow screen's toolbar
+   * The height of a roll card standing on a narrow screen's toolbar and options bar
    * (features/rolls/PlayerRolls.tsx), or 0: a docked or spanning bar keeps
    * above it. Measured while it shows and kept while it is folded, so
    * folding it never changes where the bar goes.
