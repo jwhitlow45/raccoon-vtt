@@ -5,9 +5,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import type { BuildChunk, EdgeFeature, RoomState, SightTile, Token } from "#shared/model.ts";
+import type { BuildChunk, Drawing, EdgeFeature, RoomState, SightTile, Token } from "#shared/model.ts";
 import type { PartySight } from "#shared/ruleHooks.ts";
-import { decodeTile, getBit, TILE_CELLS } from "#shared/rules/fog.ts";
+import { decodeTile, getBit, isCellFullyFogged, TILE_CELLS } from "#shared/rules/fog.ts";
+import { groundAt } from "#shared/rules/heights.ts";
 import { partyMember, partySight, type VisionWorld } from "#shared/rules/vision.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { assertCanvasAt, ConsoleWatch, dragCells, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
@@ -22,14 +23,17 @@ import { assertCanvasAt, ConsoleWatch, dragCells, OpSocket, pagePoint, Shots, So
  * the builder is not what this run tests. Everything after that goes through
  * the two browsers: the DM drags a goblin to the edge of the party's torch
  * and back out, the player's drag stops at a closed door and the player
- * opens it, stops at a ledge and takes the stair, teleports past a wall,
- * and leaves explored ground behind.
+ * opens it, stops at a ledge and takes the stair, reads the platform's and
+ * the stair's height with a tap (docs/design-v1-heights-readout.md), measures
+ * up onto the platform, teleports past a wall, and leaves explored ground
+ * behind.
  *
  * Every frame the player receives is kept. After each step the player's
  * creatures and sight tiles are checked against the party's sight computed
  * from the DM's state with the server's own rules, and at the end every
  * frame is checked: nothing out of the party's sight, no light, no
- * explored layer, no drag path and no DM log line ever reached the player.
+ * explored layer, no drag path and no DM log line ever reached the player,
+ * and every ruler's ground heights are the measurer's own.
  *
  * It runs with `pnpm test:e2e`, after the smoke and maps runs, on its own
  * port: E2E_PORT plus two. The other environment variables are the smoke
@@ -43,6 +47,8 @@ const SHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? "test-results/e2e-screenshots
 const work = mkdtempSync(path.join(tmpdir(), "raccoon-e2e-vision-"));
 const assetDir = path.join(work, "assets");
 const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
+/** What a stored drawing may hold (shared/model.ts Drawing), so a new field reaching players fails the run. */
+const DRAWING_FIELDS = new Set(["id", "rev", "sceneId", "kind", "points", "style", "text", "ownerId", "visibility", "anchors", "z"]);
 const WORLD: VisionWorld = { walls: sceneWalls };
 
 let server: Server;
@@ -70,12 +76,16 @@ const playerConsole = new ConsoleWatch("player");
  *   12 to 17, reached by a stair at (5, 14) that points east, up to it. A
  *   wall along column 9 splits the platform's top for the teleport.
  * - A closet at (14, 18) to (15, 19), walled on its open sides, holds the
- *   boss and a candle, neither of which the party can ever see.
+ *   boss and a candle, neither of which the party can ever see. Its floor is
+ *   10 ft down, painted after the boss is placed so the boss sinks with it.
+ * - A pin with only a label, "Old shrine", on the platform at (8, 16).
  */
 const BOUNDS = { w: 16, h: 20 };
 const SCENE_NAME = "Torchlit vault";
 const DOOR = "3,10,n";
 const START = { x: 3, y: 4 };
+const PIN_CELL = { x: 8, y: 16 };
+const CLOSET = { x: 14, y: 19 };
 
 const run = {
   roomId: "",
@@ -87,6 +97,9 @@ const run = {
   goblinId: randomUUID(),
   bossId: randomUUID(),
   lightId: randomUUID(),
+  pinId: randomUUID(),
+  /** The DM's frames from where the player's ruler began to where it ended, and the player's fog meanwhile, which nothing changes then. */
+  playerRulers: null as { from: number; to: number; fog: RoomState["fogTiles"] } | null,
   /** The player's frame count when the goblin left the party's sight. */
   goblinGoneAt: -1,
   /** The player's frame count when Thorn first moved, after which the goblin was never in sight again. */
@@ -138,6 +151,8 @@ async function layOut(): Promise<void> {
   await ops.send(creature(run.thornId, "Thorn", START, { kind: "pc", disposition: "ally", ownerIds: [run.patId], light: { bright: 20, dim: 20 } }));
   await ops.send(creature(run.goblinId, "Goblin", { x: 14, y: 4 }, { disposition: "hostile" }));
   await ops.send(creature(run.bossId, "Goblin Boss", { x: 14, y: 18 }, { disposition: "hostile" }));
+  await ops.send({ t: "build.height", sceneId: run.sceneId, cells: cells(14, 18, 15, 19), height: -10 });
+  await ops.send({ t: "pin.put", pin: { id: run.pinId, sceneId: run.sceneId, x: PIN_CELL.x + 0.5, y: PIN_CELL.y + 0.5, label: "Old shrine", color: "#f7df00", visibility: "all" } });
 }
 
 function tokenOf(state: RoomState | null, id: string): Token | undefined {
@@ -223,10 +238,47 @@ function revealedIn(tiles: RoomState["fogTiles"] | undefined, sx: number, sy: nu
   return !!bits && getBit(bits, sx % per, sy % per);
 }
 
-type Frame = { t?: string; changes?: { key: string; value?: unknown; deleted?: true }[]; e?: { k?: string; tokenId?: string; x?: number; y?: number; path?: unknown } };
+type RulerPoint = { x: number; y: number; z?: number; tokenId?: string };
+type Frame = {
+  t?: string;
+  from?: string;
+  changes?: { key: string; value?: unknown; deleted?: true }[];
+  e?: { k?: string; id?: string; tokenId?: string; x?: number; y?: number; path?: unknown; points?: RulerPoint[]; shared?: boolean };
+};
 
-function framesFrom(index: number): Frame[] {
-  return playerSocket.received.slice(index).map((text) => JSON.parse(text) as Frame);
+function framesFrom(index: number, watch: SocketWatch = playerSocket): Frame[] {
+  return watch.received.slice(index).map((text) => JSON.parse(text) as Frame);
+}
+
+/** The ruler frames a page received since `index`. */
+function rulerFrames(watch: SocketWatch, index: number): NonNullable<Frame["e"]>[] {
+  return framesFrom(index, watch).flatMap((f) => (f.t === "eph" && f.e?.k === "ruler" ? [f.e] : []));
+}
+
+/** The height readout's status line and pill on a page (features/builder/heights/ReadoutHost.tsx). */
+function heightStatus(page: Page) {
+  return page.locator("[data-rvtt-height-status]");
+}
+function heightPill(page: Page) {
+  return page.locator("[data-rvtt-height-pill]");
+}
+
+async function heard(page: Page, words: string): Promise<void> {
+  await waitFor(`"${words}" on the status line`, async () => (await heightStatus(page).innerText()) === words);
+}
+
+/** Whether a pin's label popover shows: a screen-size pill pointing down at the pin (features/pins/PinLayer.tsx). */
+function pinPopover(page: Page, text: string): Promise<boolean> {
+  return page.evaluate((label) => {
+    type Node = { getTag(): { pointerDirection(): string } | undefined; getText(): { text(): string } | undefined };
+    const konva = (globalThis as unknown as { Konva: { stages: { find(selector: string): Node[] }[] } }).Konva;
+    return konva.stages[0]!.find("Label").some((l) => l.getTag()?.pointerDirection() === "down" && l.getText()?.text() === label);
+  }, text);
+}
+
+/** A cell's ground as the layout painted it. The run paints nothing after, so it is the ground every ruler stood on. */
+function layoutGround(x: number, y: number): number {
+  return groundAt(dmSocket.state?.buildChunks ?? {}, run.sceneId, Math.floor(x), Math.floor(y));
 }
 
 describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
@@ -378,7 +430,86 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await shots.take(player, "vision-player-up-the-stair");
   });
 
-  test("6. Teleport here after a stopped walk replaces the walk, and only the DM hears of it", async () => {
+  test("6. with Select, a tap reads the platform's and the stair's height, leaves a pin its popover, and says nothing of the closet under the fog", async () => {
+    await waitFor("the pin on explored ground in the player's state", () => playerSocket.state?.pins[run.pinId]);
+    await tapCell(player, BOUNDS, { x: 6, y: 13 });
+    await heard(player, "Ground 10 ft up.");
+    assert.equal(await heightPill(player).innerText(), "↑10 ft");
+    await shots.take(player, "vision-player-readout-platform");
+
+    await tapCell(player, BOUNDS, { x: 5, y: 14 });
+    await heard(player, "Stairs, up to the east.");
+    assert.equal(await heightPill(player).innerText(), "Stairs");
+    await shots.take(player, "vision-player-readout-stair");
+
+    // The pin is on raised ground, and its own tap wins.
+    await tapCell(player, BOUNDS, PIN_CELL);
+    await waitFor("the pin's popover", () => pinPopover(player, "Old shrine"));
+    assert.equal(await heightPill(player).count(), 0, "a readout beside the pin's popover");
+    assert.equal(await heightStatus(player).innerText(), "");
+    await shots.take(player, "vision-player-pin-not-readout");
+
+    // The closet is 10 ft down, and the party never saw it.
+    await tapCell(player, BOUNDS, { x: 6, y: 13 });
+    await heard(player, "Ground 10 ft up.");
+    await tapCell(player, BOUNDS, CLOSET);
+    await heard(player, "");
+    await player.waitForTimeout(300);
+    assert.equal(await heightStatus(player).innerText(), "", "the closet's ground was spoken");
+    assert.equal(await heightPill(player).count(), 0, "the closet's ground showed");
+
+    await tapCell(dm, BOUNDS, CLOSET);
+    await heard(dm, "Ground 10 ft down.");
+    assert.equal(await heightPill(dm).innerText(), "↓10 ft");
+    await shots.take(dm, "vision-dm-readout-closet");
+  });
+
+  test("7. a ruler stop stands on the ground its measurer sees, and every page reads the measurer's numbers", async () => {
+    // The pin's popover would cover the reading in the screenshot.
+    await waitFor("the pin's popover to go", async () => !(await pinPopover(player, "Old shrine")), 6_000);
+    const dmFrom = dmSocket.received.length;
+    await player.getByRole("button", { name: "Ruler", exact: true }).click();
+    const options = player.getByRole("toolbar", { name: "Ruler options" });
+    await dragCells(player, BOUNDS, { x: 5, y: 12 }, { x: 6, y: 12 });
+    await options.getByText(/^10 ft · every diagonal 5 ft$/).waitFor();
+    const climb = await waitFor("the climb's frame at the DM", () =>
+      rulerFrames(dmSocket, dmFrom).find((e) => e.points?.length === 2 && e.points[1]!.x === 6.5 && e.points[1]!.y === 12.5),
+    );
+    assert.deepEqual(climb.points, [{ x: 5.5, y: 12.5 }, { x: 6.5, y: 12.5, z: 10 }]);
+    await shots.take(player, "vision-player-ruler-onto-platform");
+
+    await options.getByRole("button", { name: "Keep this ruler on the map" }).click();
+    const kept = (state: RoomState | null) => Object.values(state?.drawings ?? {}).find((d): d is Drawing => d?.kind === "ruler" && d.ownerId === run.patId);
+    await waitFor("the kept ruler in both states", () => kept(dmSocket.state) && kept(playerSocket.state));
+    for (const state of [dmSocket.state, playerSocket.state]) {
+      assert.deepEqual(kept(state)!.points, [5.5, 12.5, 6.5, 12.5]);
+      assert.deepEqual(kept(state)!.z, [0, 10]);
+    }
+
+    // The closet's floor is under the player's fog, so their stop there stands at 0.
+    await tapCell(player, BOUNDS, CLOSET);
+    const dark = await waitFor("the closet stop's frame at the DM", () =>
+      rulerFrames(dmSocket, dmFrom).find((e) => e.points?.length === 1 && e.points[0]!.x === CLOSET.x + 0.5 && e.points[0]!.y === CLOSET.y + 0.5),
+    );
+    assert.deepEqual(dark.points, [{ x: CLOSET.x + 0.5, y: CLOSET.y + 0.5 }]);
+    await player.getByRole("button", { name: "Select", exact: true }).click();
+    await waitFor("the player's ruler ended at the DM", () => framesFrom(dmFrom, dmSocket).some((f) => f.t === "eph" && f.e?.k === "rulerEnd"));
+    run.playerRulers = { from: dmFrom, to: dmSocket.received.length, fog: playerSocket.state?.fogTiles ?? {} };
+
+    // The DM's shared ruler stands on the closet's floor, 10 ft down, and the player reads the DM's numbers.
+    const playerFrom = playerSocket.received.length;
+    await dm.getByRole("button", { name: "Ruler", exact: true }).click();
+    await dm.getByRole("toolbar", { name: "Ruler options" }).getByRole("button", { name: "Shared" }).click();
+    await dragCells(dm, BOUNDS, { x: 12, y: 19 }, CLOSET);
+    const shared = await waitFor("the DM's shared ruler at the player", () =>
+      rulerFrames(playerSocket, playerFrom).find((e) => e.points?.at(-1)?.x === CLOSET.x + 0.5 && e.points.at(-1)?.y === CLOSET.y + 0.5),
+    );
+    assert.deepEqual(shared.points, [{ x: 12.5, y: 19.5 }, { x: CLOSET.x + 0.5, y: CLOSET.y + 0.5, z: -10 }]);
+    await shots.take(dm, "vision-dm-shared-ruler-into-closet");
+    await dm.getByRole("button", { name: "Select", exact: true }).click();
+  });
+
+  test("8. Teleport here after a stopped walk replaces the walk, and only the DM hears of it", async () => {
     // A phone's usual flow: tap the token, then drag it. The stopped walk's note wins over its action bar (W4-O-1).
     const bar = player.getByRole("dialog", { name: "Thorn actions" });
     await tapCell(player, BOUNDS, { x: 7, y: 14 });
@@ -409,7 +540,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await shots.take(player, "vision-player-teleported");
   });
 
-  test("7. ground the party explored stays revealed after it leaves, with no creature on it", async () => {
+  test("9. ground the party explored stays revealed after it leaves, with no creature on it", async () => {
     // A quarter square in the middle of Thorn's first square: the party saw it, and sees it no longer.
     const sx = START.x * 4 + 2;
     const sy = START.y * 4 + 2;
@@ -432,15 +563,26 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await shots.take(dm, "vision-dm-explored-outline");
   });
 
-  test("8. no frame the player received held anything out of the party's sight", () => {
+  test("10. no frame the player received held anything out of the party's sight, and every ruler stood on its measurer's ground", () => {
     const frames = framesFrom(0);
     const start = run.startSight;
     assert.ok(start);
     let goblinDrags = 0;
+    let rulers = 0;
+    let keptWithGround = 0;
     for (const [i, frame] of frames.entries()) {
       for (const change of frame.changes ?? []) {
         assert.equal(change.key.startsWith("explored:"), false, `frame ${i}: the explored layer reached the player`);
         assert.equal(change.key.startsWith("light:"), false, `frame ${i}: a light reached the player`);
+        const drawing = change.value as Drawing | undefined;
+        if (change.key.startsWith("drawing:") && drawing?.kind === "ruler") {
+          assert.deepEqual(Object.keys(drawing).filter((k) => !DRAWING_FIELDS.has(k)), [], `frame ${i}: a kept ruler with a new field`);
+          if (drawing.z !== undefined) {
+            keptWithGround++;
+            assert.equal(drawing.z.length, drawing.points.length / 2, `frame ${i}: a kept ruler without one height per stop`);
+            for (const [s, feet] of drawing.z.entries()) if (drawing.anchors?.[s]) assert.equal(feet, 0, `frame ${i}: a kept ruler's stop on a token stands on ground`);
+          }
+        }
         if (change.key !== `token:${run.goblinId}` || change.deleted) continue;
         // The goblin reached the player only while it stood in the torchlight, before Thorn moved.
         const goblin = change.value as Token;
@@ -448,6 +590,16 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
         assert.equal(start.seesToken(goblin), true, `frame ${i}: the goblin at ${goblin.x},${goblin.y} reached the player out of sight`);
       }
       const e = frame.t === "eph" ? frame.e : undefined;
+      if (e?.k === "ruler") {
+        rulers++;
+        assert.deepEqual(Object.keys(e).filter((k) => !["k", "id", "points", "shared"].includes(k)), [], `frame ${i}: a ruler frame with a new field`);
+        for (const p of e.points ?? []) {
+          assert.deepEqual(Object.keys(p).filter((k) => !["x", "y", "z", "tokenId"].includes(k)), [], `frame ${i}: a ruler stop with a new field`);
+          // Only the DM's rulers reach the player, and the DM stands every free stop on the ground there.
+          if (p.tokenId !== undefined) assert.equal(p.z, undefined, `frame ${i}: a stop on a token stands on ground`);
+          else assert.equal(p.z ?? 0, layoutGround(p.x, p.y), `frame ${i}: a stop at ${p.x},${p.y} off the measurer's ground`);
+        }
+      }
       if (e) {
         assert.equal(e.path, undefined, `frame ${i}: a drag frame carried its path`);
         if (e.tokenId === run.goblinId && e.k !== "dragCancel") {
@@ -466,9 +618,28 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     assert.ok(goblinDrags > 0, "no goblin drag frame reached the player");
     assert.equal(Object.keys(playerSocket.state?.exploredTiles ?? {}).length, 0);
     assert.equal(Object.keys(playerSocket.state?.lights ?? {}).length, 0);
+    assert.ok(rulers > 0, "no ruler frame reached the player");
+    assert.ok(keptWithGround > 0, "no kept ruler with its ground reached the player");
+
+    // The player's ruler frames stand only on ground the player could see when they were sent: all of them came while the
+    // player measured, and nothing moved the fog then.
+    const measured = run.playerRulers;
+    assert.ok(measured);
+    let playerStops = 0;
+    for (const [i, frame] of framesFrom(0, dmSocket).entries()) {
+      if (frame.t !== "eph" || frame.e?.k !== "ruler" || frame.from !== run.patId) continue;
+      assert.ok(i >= measured.from && i < measured.to, `DM frame ${i}: a ruler of the player's outside their measuring`);
+      for (const p of frame.e.points ?? []) {
+        if (p.z === undefined) continue;
+        playerStops++;
+        assert.equal(isCellFullyFogged(measured.fog, run.sceneId, { x: Math.floor(p.x), y: Math.floor(p.y) }), false, `DM frame ${i}: the player's stop at ${p.x},${p.y} stood on ground under their fog`);
+        assert.equal(p.z, layoutGround(p.x, p.y), `DM frame ${i}: the player's stop at ${p.x},${p.y} off the ground`);
+      }
+    }
+    assert.ok(playerStops > 0, "no stop of the player's stood on raised ground");
   });
 
-  test("9. no page logged an error or a warning", () => {
+  test("11. no page logged an error or a warning", () => {
     for (const c of [dmConsole, playerConsole]) {
       assert.deepEqual(c.errors, [], `${c.label} logged errors`);
       assert.deepEqual(c.warnings, [], `${c.label} logged warnings`);
