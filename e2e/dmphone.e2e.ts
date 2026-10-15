@@ -4,13 +4,20 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
+import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * A DM running a session from a phone, after the whole-app design pass
  * (docs/design-v1-visual.md), as the live play review found it
  * (LPD-DMPHONE): the bugs it fixed, each checked where a DM meets it.
+ *
+ * The docked token action bar's part (docs/design-v1-bar-dock.md section 7):
+ * on its side the bar and the alerts never meet (LPD-DMPHONE-3), the
+ * column stays inside the window and a focused card never scrolls the room
+ * (LPD-DMPHONE-4), "Viewing as Pat" covers no card and a toast never moves
+ * the column (LPD-DMPHONE-9), and at 130% every bar button takes a tap
+ * with a concentration check in sight.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seven, which it shares
  * with playerphone.e2e.ts, since the runs go one after another. The other
@@ -29,6 +36,7 @@ let server: Server;
 let browser: Browser;
 let dmContext: BrowserContext;
 let dm: Page;
+let dmCdp: CDPSession;
 let ops: OpSocket;
 const dmSocket = new SocketWatch("dm");
 const dmConsole = new ConsoleWatch("dm");
@@ -38,7 +46,13 @@ const run = {
   roomName: `E2E DM phone ${new Date().toISOString().slice(0, 19)}`,
   password: "",
   sceneId: "",
+  /** A creature concentrating on Hex, whose damage brings up a concentration check for the DM. */
+  hag: "",
 };
+
+async function hurtHag(): Promise<void> {
+  await ops.send({ t: "actor.hp", target: { tokenId: run.hag }, change: { kind: "damage", amount: 1 } });
+}
 
 /** The few DOM parts the page functions read, typed by hand: the e2e files compile without the DOM library. */
 type El = {
@@ -138,6 +152,67 @@ async function assertSubpageScroll(page: Page, sheetName: string, row: Locator, 
   assert.ok(f.top >= after.viewTop - 1 && f.bottom <= after.viewBottom + 1, `${sheetName}: the row that took focus lies at ${Math.round(f.top)}-${Math.round(f.bottom)}, outside the sheet's view ${Math.round(after.viewTop)}-${Math.round(after.viewBottom)}`);
 }
 
+type Rect = { left: number; top: number; right: number; bottom: number };
+
+function intersects(a: Rect, b: Rect): boolean {
+  return a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+}
+
+async function rectOf(locator: Locator): Promise<Rect> {
+  const b = await locator.boundingBox();
+  assert.ok(b, "nothing on screen to measure");
+  return { left: b.x, top: b.y, right: b.x + b.width, bottom: b.y + b.height };
+}
+
+/** The token bar's frame, whichever token or group it is for. */
+function barFrame(page: Page): Locator {
+  return page.locator('[role="dialog"][data-bar-mode]');
+}
+
+/** Sets the window, the safe areas and the interface size, then loads the room again. */
+async function setUp(view: { width: number; height: number; scale: number; top?: number; side?: number; bottom?: number }): Promise<void> {
+  await dmCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: view.top ?? 0, bottom: view.bottom ?? 0, left: view.side ?? 0, right: view.side ?? 0 } });
+  await dm.setViewportSize({ width: view.width, height: view.height });
+  await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
+  await dm.reload();
+  await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+  await dm.locator(".konvajs-content").first().waitFor();
+}
+
+/**
+ * The fight alerts column's cards as drawn, each clipped to the part its
+ * column leaves in view, and the column's own box. The rolls' cards sit
+ * in a wrapper with no box of its own, so its children count instead.
+ */
+function column(page: Page, within = "body"): Promise<{ cards: Rect[]; box: Rect | null; width: number; height: number }> {
+  return page.evaluate((root) => {
+    type Node = { tagName: string; parentElement: Node | null; getBoundingClientRect(): Rect & { width: number }; querySelectorAll(s: string): ArrayLike<Node> };
+    const g = globalThis as unknown as { innerWidth: number; innerHeight: number; document: { querySelector(s: string): Node | null } };
+    const cards: Rect[] = [];
+    let box: Rect | null = null;
+    for (const el of Array.from(g.document.querySelector(root)?.querySelectorAll('[data-alert]:not([data-alert="rolls"]), [data-alert="rolls"] > *') ?? [])) {
+      let col: Node = el;
+      while (col.parentElement && col.parentElement.tagName !== "HEADER") col = col.parentElement;
+      const r = el.getBoundingClientRect();
+      const c = col.getBoundingClientRect();
+      box = { left: c.left, top: c.top, right: c.right, bottom: c.bottom };
+      const top = Math.max(r.top, c.top);
+      const bottom = Math.min(r.bottom, c.bottom);
+      if (r.width > 0 && bottom - top > 0.5) cards.push({ left: r.left, top, right: r.right, bottom });
+    }
+    return { cards, box, width: g.innerWidth, height: g.innerHeight };
+  }, within);
+}
+
+/** What takes a tap at a point: "bar" when the token bar does, else the tag. */
+function hit(page: Page, p: { x: number; y: number }): Promise<string | null> {
+  return page.evaluate(([x, y]) => {
+    type Node = { tagName: string; closest(s: string): Node | null };
+    const el = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): Node | null } }).document.elementFromPoint(x, y);
+    return el ? (el.closest('[role="dialog"][data-bar-mode]') ? "bar" : el.tagName) : null;
+  }, [p.x, p.y] as const);
+}
+
 describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
@@ -146,6 +221,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     dm = await dmContext.newPage();
     dmConsole.attach(dm);
     await dmSocket.attach(dmContext, dm);
+    dmCdp = await dmContext.newCDPSession(dm);
   });
 
   after(async () => {
@@ -314,6 +390,112 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await dm.setViewportSize({ width: 390, height: 844 });
     await dm.reload();
     await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+  });
+
+  test("7. the docked bar and the alerts column share the right of the map: they never meet on its side, the column stays in the window, and every bar button takes a tap at 130% (LPD-DMPHONE-3, LPD-DMPHONE-4)", async () => {
+    const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
+    const caster = randomUUID();
+    await ops.send({ t: "token.create", token: { id: caster, sceneId: run.sceneId, kind: "monster", name: "Hag", x: 1, y: 17, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: { ...goblin(), hp: { cur: 40, max: 40, temp: 0 } } } } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: caster }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } });
+    run.hag = caster;
+    for (const view of [
+      { width: 844, height: 390, scale: 1 },
+      { width: 844, height: 390, scale: 1.3, side: 47, bottom: 21 },
+      { width: 480, height: 320, scale: 1.3, side: 47, bottom: 21 },
+      { width: 320, height: 480, scale: 1.3, top: 44, bottom: 34 },
+      { width: 390, height: 844, scale: 1 },
+    ]) {
+      const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+      await setUp(view);
+      // A check comes up as the damage arrives, so a page loaded again has none until the Hag takes more.
+      await hurtHag();
+      await dm.locator('[data-alert="concentration"]').first().waitFor({ state: "attached" });
+      // On the smallest screens the check's card covers the whole map, so the outliner picks the Hag, as a DM would there.
+      const p = await pagePoint(dm, bounds, { x: 1.5, y: 17.5 });
+      if ((await hit(dm, p)) === "CANVAS") {
+        await dm.touchscreen.tap(p.x, p.y);
+      } else {
+        const outliner = await openPanel(dm, "Outliner");
+        await outliner.getByLabel("Search the scene").fill("Hag");
+        await outliner.getByRole("button", { name: /^Hag/ }).first().tap();
+      }
+      const bar = dm.getByRole("dialog", { name: "Hag actions" });
+      await bar.waitFor();
+      await dm.waitForTimeout(250);
+      const r = await rectOf(bar);
+      const col = await column(dm);
+      if (view.width > view.height) for (const c of col.cards) assert.ok(!intersects(c, r), `${label}: a card meets the bar: ${JSON.stringify({ c, r })}`);
+      // The check, or the summary row that stands for it, is in sight with the bar open.
+      const check = dm.locator('[data-alert="concentration"]').first();
+      const row = dm.getByRole("button", { name: /^Concentration check/ });
+      assert.ok((await check.isVisible()) || (await row.isVisible()), `${label}: neither the check nor the summary row shows`);
+      // The column's box never reaches past the window (LPD-DMPHONE-4).
+      if (col.box) assert.ok(col.box.right <= col.width + 0.5 && col.box.left >= -0.5, `${label}: the column runs past the window: ${JSON.stringify(col.box)}`);
+      if (view.scale === 1.3) {
+        const missed: string[] = [];
+        const buttons = bar.locator("button");
+        for (let i = 0; i < (await buttons.count()); i++) {
+          const b = buttons.nth(i);
+          if (!(await b.isVisible())) continue;
+          await b.scrollIntoViewIfNeeded();
+          const br = await rectOf(b);
+          if ((await hit(dm, { x: (br.left + br.right) / 2, y: (br.top + br.bottom) / 2 })) !== "bar") missed.push((await b.textContent()) ?? "?");
+        }
+        assert.deepEqual(missed, [], `${label}: bar buttons that take no tap`);
+      }
+      await shots.take(dm, `dmphone-bar-and-column-${view.width}x${view.height}-${Math.round(view.scale * 100)}`);
+      await bar.getByRole("button", { name: "Close", exact: true }).tap();
+      await bar.waitFor({ state: "detached" });
+    }
+
+    // The column's last card taking focus never scrolls the room frame.
+    await setUp({ width: 844, height: 390, scale: 1 });
+    await hurtHag();
+    await dm.locator('[data-alert="concentration"]').first().waitFor();
+    const scrolled = await dm.evaluate(() => {
+      type Node = { tagName: string; parentElement: Node | null; scrollLeft: number; scrollTop: number; focus(): void; querySelectorAll(s: string): ArrayLike<Node> };
+      const g = globalThis as unknown as { document: { querySelectorAll(s: string): ArrayLike<Node> }; getComputedStyle(el: Node): { position: string } };
+      const focusables = Array.from(g.document.querySelectorAll("[data-alert] button, [data-alert][tabindex]"));
+      const last = focusables[focusables.length - 1];
+      if (!last) return null;
+      last.focus();
+      let frame: Node | null = last;
+      while (frame && g.getComputedStyle(frame).position !== "fixed") frame = frame.parentElement;
+      return frame ? { left: frame.scrollLeft, top: frame.scrollTop } : null;
+    });
+    assert.deepEqual(scrolled, { left: 0, top: 0 }, "a focused card scrolled the room");
+    await dmCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
+  });
+
+  test("8. Viewing as Pat covers no card, and a toast does not move the column (LPD-DMPHONE-9)", async () => {
+    await setUp({ width: 390, height: 844, scale: 1 });
+    await hurtHag();
+    const check = dm.locator('[data-alert="concentration"]').first();
+    await check.waitFor();
+    const before = await rectOf(check);
+    // Undo and Redo each say what they took back, in a toast.
+    await dm.getByRole("button", { name: "Undo", exact: true }).tap();
+    await dm.locator('button[role="status"]').first().waitFor();
+    await dm.waitForTimeout(150);
+    const during = await rectOf(check);
+    assert.ok(Math.abs(during.top - before.top) < 0.5, `a toast moved the column: ${JSON.stringify({ before, during })}`);
+    await dm.getByRole("button", { name: "Redo", exact: true }).tap();
+
+    const thorn = Object.values(dmSocket.state!.characters).find((c) => c.name === "Thorn");
+    assert.ok(thorn, "Thorn is not in the room");
+    const id = randomUUID();
+    await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: thorn.id }] } });
+    await openPanel(dm, "DM");
+    await dm.getByRole("button", { name: "View", exact: true }).tap();
+    const preview = dm.getByRole("dialog", { name: "Viewing as Pat" });
+    await preview.waitFor();
+    await dm.waitForTimeout(300);
+    const notice = await rectOf(preview.getByRole("status").filter({ hasText: "Viewing as Pat." }));
+    for (const c of (await column(dm, 'dialog[aria-label="Viewing as Pat"]')).cards) assert.ok(!intersects(c, notice), `"Viewing as Pat" covers a card: ${JSON.stringify({ c, notice })}`);
+    await shots.take(dm, "dmphone-viewing-as-pat");
+    await preview.getByRole("button", { name: "Exit", exact: true }).tap();
+    await preview.waitFor({ state: "detached" });
+    await ops.send({ t: "roll.close", rollIds: [id] });
   });
 });
 

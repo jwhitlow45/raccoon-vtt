@@ -4,8 +4,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
+import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * A player on a phone after the visual design pass, from the live play
@@ -29,6 +29,13 @@ import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, tapCell, waitF
  * - A DM's blackout keeps the player's selection and the HP typed into the
  *   token bar, which hides behind the pause and comes back after it
  *   (LPD-PLAYER-7).
+ * - The docked token action bar (docs/design-v1-bar-dock.md section 7): on
+ *   its side the phone docks the bar at the bottom right, left of a sheet,
+ *   and a roll card never meets it (LPD-PLAYER-2). Pans, pinches and a
+ *   held press leave it open and a quick tap off closes it. Select
+ *   several's tap off hides it and keeps the group, and Back then lets go.
+ *   The Select several bar stays one row, and on screens too short for the
+ *   bar it opens compact, where every button still takes a tap.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seven. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
@@ -54,6 +61,7 @@ let dmContext: BrowserContext;
 let dm: Page;
 let playerContext: BrowserContext;
 let player: Page;
+let playerCdp: CDPSession;
 let ops: OpSocket;
 const dmSocket = new SocketWatch("dm");
 const playerSocket = new SocketWatch("player");
@@ -100,6 +108,106 @@ async function setUp(view: { width: number; height: number; scale: number }): Pr
   await player.reload();
   await player.getByRole("status", { name: "Connected" }).first().waitFor();
   await player.locator(".konvajs-content").first().waitFor();
+}
+
+/** The phone's notch and home bar, as the browser reports them to `env()`. */
+async function insets(sides: { top?: number; side?: number; bottom?: number }): Promise<void> {
+  await playerCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: sides.top ?? 0, bottom: sides.bottom ?? 0, left: sides.side ?? 0, right: sides.side ?? 0 } });
+}
+
+type Rect = { left: number; top: number; right: number; bottom: number };
+
+async function rectOf(locator: Locator): Promise<Rect> {
+  const b = await locator.boundingBox();
+  assert.ok(b, "nothing on screen to measure");
+  return { left: b.x, top: b.y, right: b.x + b.width, bottom: b.y + b.height };
+}
+
+function intersects(a: Rect, b: Rect): boolean {
+  return a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+}
+
+/** The token bar's frame, whichever token or group it is for. */
+function barFrame(page: Page): Locator {
+  return page.locator('[role="dialog"][data-bar-mode]');
+}
+
+/** The page point at a cell's center, after checking the map takes a tap there. */
+async function cellPoint(cell: { x: number; y: number }): Promise<{ x: number; y: number }> {
+  const p = await pagePoint(player, playerSocket.state!.scenes[run.sceneId]!.bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+  const at = await hit(p);
+  assert.equal(at, "CANVAS", `the map does not take a tap at cell ${cell.x},${cell.y}, at ${Math.round(p.x)},${Math.round(p.y)}: ${at} does`);
+  return p;
+}
+
+/**
+ * A point of empty map that takes a tap: the first, scanning the window
+ * from the top left in 4 px steps, that the canvas holds, two cells or
+ * more from every token. A docked bar may sit beside the alerts column,
+ * over the map's middle, and a compact one leaves an upright phone only
+ * the strip under the top bar, so no fixed cell is sure to be clear.
+ */
+function emptyPoint(page: Page): Promise<{ x: number; y: number }> {
+  const taken = Object.values(playerSocket.state?.tokens ?? {}).map((t) => ({ x: t.x, y: t.y }));
+  return page.evaluate((taken) => {
+    type Node = { tagName: string };
+    const g = globalThis as unknown as {
+      innerWidth: number;
+      innerHeight: number;
+      Konva: { stages: { x(): number; y(): number; scaleX(): number; container(): { getBoundingClientRect(): { left: number; top: number } } }[] };
+      document: { elementFromPoint(x: number, y: number): Node | null };
+    };
+    const stage = g.Konva.stages[0]!;
+    const box = stage.container().getBoundingClientRect();
+    for (let y = 2; y < g.innerHeight; y += 4) {
+      for (let x = 2; x < g.innerWidth; x += 4) {
+        // Past the scene's edge is empty map too, which a tap reaches as one inside it.
+        const cell = { x: (x - box.left - stage.x()) / stage.scaleX(), y: (y - box.top - stage.y()) / stage.scaleX() };
+        if (taken.some((t) => Math.abs(t.x + 0.5 - cell.x) < 2 && Math.abs(t.y + 0.5 - cell.y) < 2)) continue;
+        if (g.document.elementFromPoint(x, y)?.tagName === "CANVAS") return { x, y };
+      }
+    }
+    throw new Error("no empty map takes a tap");
+  }, taken);
+}
+
+/** What takes a tap at a point: the tag, or "bar" when the token bar does. */
+function hit(p: { x: number; y: number }): Promise<string | null> {
+  return player.evaluate(([x, y]) => {
+    type Node = { tagName: string; closest(s: string): Node | null };
+    const el = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): Node | null } }).document.elementFromPoint(x, y);
+    return el ? (el.closest('[role="dialog"][data-bar-mode]') ? "bar" : el.tagName) : null;
+  }, [p.x, p.y] as const);
+}
+
+/** One finger through the browser's touch input: down, along the points given, and up, with a pause where asked. */
+async function touch(points: { x: number; y: number }[], holdMs = 0): Promise<void> {
+  const [first, ...rest] = points;
+  assert.ok(first);
+  await playerCdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: first.x, y: first.y }] });
+  if (holdMs > 0) await player.waitForTimeout(holdMs);
+  for (const p of rest) await playerCdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: p.x, y: p.y }] });
+  await playerCdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+}
+
+/** A line of points from one to the other, as a finger moves. */
+function along(from: { x: number; y: number }, to: { x: number; y: number }, steps = 10): { x: number; y: number }[] {
+  return Array.from({ length: steps + 1 }, (_, i) => ({ x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps }));
+}
+
+/** Each button in the bar, scrolled into view, takes a tap at its middle: the names of those that do not. */
+async function unreachable(): Promise<string[]> {
+  const buttons = barFrame(player).locator("button");
+  const missed: string[] = [];
+  for (let i = 0; i < (await buttons.count()); i++) {
+    const b = buttons.nth(i);
+    if (!(await b.isVisible())) continue;
+    await b.scrollIntoViewIfNeeded();
+    const r = await rectOf(b);
+    const at = { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 };
+    if ((await hit(at)) !== "bar") missed.push((await b.getAttribute("aria-label")) ?? (await b.textContent()) ?? "?");
+  }
+  return missed;
 }
 
 /** Every control in a panel's sheet that runs past the window's edges, by its name. */
@@ -163,6 +271,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     player = await playerContext.newPage();
     playerConsole.attach(player);
     await playerSocket.attach(playerContext, player);
+    playerCdp = await playerContext.newCDPSession(player);
   });
 
   after(async () => {
@@ -423,7 +532,214 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await bar.getByRole("button", { name: "Close", exact: true }).tap();
   });
 
-  test("7. nothing went wrong in the browsers", () => {
+  test("7. on its side the bar docks at the bottom right, left of an open sheet, and the roll card never meets it, on its side or upright after Show (LPD-PLAYER-2)", async () => {
+    await setUp({ ...LANDSCAPE, scale: 1 });
+    const bounds = playerSocket.state!.scenes[run.sceneId]!.bounds;
+    await tapCell(player, bounds, { x: 8, y: 6 });
+    const bar = player.getByRole("dialog", { name: "Thorn actions" });
+    await bar.waitFor();
+    assert.equal(await barFrame(player).getAttribute("data-bar-mode"), "dock");
+    const docked = await rectOf(bar);
+    const toolbar = await rectOf(player.locator('nav[aria-label="Tools"]'));
+    assert.ok(Math.abs(docked.right - (LANDSCAPE.width - 8)) <= 1.5 && Math.abs(docked.bottom - (toolbar.top - 8)) <= 1.5, `the bar is not at the bottom right: ${JSON.stringify({ docked, toolbar })}`);
+    await player.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
+    const sheet = await rectOf(player.getByRole("region", { name: "Panels" }));
+    await player.waitForTimeout(150);
+    const beside = await rectOf(bar);
+    assert.ok(beside.right <= sheet.left - 8 + 1.5, `the bar runs under the sheet: ${JSON.stringify({ beside, sheet })}`);
+    await shots.take(player, "playerphone-bar-left-of-sheet");
+    await player.getByRole("button", { name: "Close Panels" }).tap();
+
+    const id = randomUUID();
+    await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+    await card(player).waitFor();
+    await player.waitForTimeout(200);
+    assert.ok(!intersects(await rectOf(card(player)), await rectOf(bar)), "on its side, the roll card meets the bar");
+    await shots.take(player, "playerphone-card-and-bar-landscape");
+
+    // Upright, the card stands at the screen's foot, and the bar keeps above it.
+    await player.setViewportSize(PORTRAIT);
+    await player.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
+    await player.getByRole("button", { name: "Show Thorn actions" }).tap();
+    await player.getByRole("region", { name: "Panels" }).waitFor({ state: "detached" });
+    await bar.waitFor();
+    await card(player).waitFor();
+    await player.waitForTimeout(200);
+    assert.ok(!intersects(await rectOf(card(player)), await rectOf(bar)), "upright after Show, the roll card meets the bar");
+    await shots.take(player, "playerphone-card-and-bar-portrait");
+    await card(player).getByRole("button", { name: "Later" }).tap();
+    await ops.send({ t: "roll.close", rollIds: [id] });
+  });
+
+  test("8. by touch: a pan, a pinch and a held press leave the bar open, a quick tap off closes it, a token switches it, and the toolbar, the top bar and an alert card leave it", async () => {
+    await setUp({ ...LANDSCAPE, scale: 1 });
+    const id = randomUUID();
+    await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "con" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+    await card(player).waitFor();
+    const thorn = await cellPoint({ x: 8, y: 6 });
+    await touch([thorn]);
+    const bar = player.getByRole("dialog", { name: "Thorn actions" });
+    await bar.waitFor();
+
+    try {
+      const empty = await emptyPoint(player);
+      await touch(along(empty, { x: empty.x + 20, y: empty.y + 10 }));
+      await playerCdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: empty.x, y: empty.y, id: 1 }, { x: empty.x + 40, y: empty.y, id: 2 }] });
+      for (let i = 1; i <= 6; i++) await playerCdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: empty.x - i * 4, y: empty.y, id: 1 }, { x: empty.x + 40 + i * 4, y: empty.y, id: 2 }] });
+      await playerCdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await player.waitForTimeout(150);
+      assert.ok(await bar.isVisible(), "a pan or a pinch closed the bar");
+      // The DM's page hears the ping: the server sends a member's own ping to the others.
+      const pings = dmSocket.received.length;
+      await touch([await emptyPoint(player)], 900);
+      await waitFor("the ping at the DM's page", () => dmSocket.received.slice(pings).some((f) => f.includes('"k":"ping"')) || null, 3_000);
+      assert.ok(await bar.isVisible(), "a held press that pinged closed the bar");
+
+      await player.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Select" }).tap();
+      await player.locator("header h1").tap();
+      await card(player).getByText(/asks for a Constitution saving throw/).tap();
+      await player.waitForTimeout(150);
+      assert.ok(await bar.isVisible(), "a tap on the toolbar, the top bar or an alert card closed the bar");
+
+      // With the card put off, the bar docks in its corner again, clear of the goblin.
+      await card(player).getByRole("button", { name: "Later" }).tap();
+      await touch([await emptyPoint(player)]);
+      await bar.waitFor({ state: "detached" });
+      await player.getByRole("button", { name: "Fit the map to the screen" }).tap();
+      await touch([await cellPoint({ x: 8, y: 6 })]);
+      await bar.waitFor();
+      await touch([await cellPoint({ x: 12, y: 9 })]);
+      await player.getByRole("dialog", { name: "Goblin 1 actions" }).waitFor();
+      await touch([await emptyPoint(player)]);
+      await barFrame(player).waitFor({ state: "detached" });
+    } finally {
+      await ops.send({ t: "roll.close", rollIds: [id] });
+    }
+  });
+
+  test("9. Select several by touch: a tap that moves under 8 px hides the bar and keeps the group, a box drag adds and shows it, and Back then ends the mode and stays in the room", async () => {
+    const extra = randomUUID();
+    await ops.send({ t: "token.create", token: { id: extra, sceneId: run.sceneId, kind: "monster", name: "Goblin 2", x: 3, y: 4, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: actor(7) } } });
+    await waitFor("Goblin 2 on the player's map", () => playerSocket.state?.tokens[extra]);
+    await setUp({ ...LANDSCAPE, scale: 1 });
+    await touch([await cellPoint({ x: 8, y: 6 })]);
+    await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Select several", exact: true }).tap();
+    await touch([await cellPoint({ x: 12, y: 9 })]);
+    await player.getByRole("dialog", { name: "2 selected tokens" }).waitFor();
+
+    const off = await emptyPoint(player);
+    await touch([off, { x: off.x + 3, y: off.y + 2 }, { x: off.x + 4, y: off.y + 3 }]);
+    await barFrame(player).waitFor({ state: "detached" });
+    await player.getByRole("toolbar", { name: "Select options" }).getByText("2 selected.", { exact: true }).waitFor();
+
+    // A box drawn over Goblin 2 adds it and shows the bar again.
+    const from = await cellPoint({ x: 1, y: 3 });
+    const to = await cellPoint({ x: 5, y: 6 });
+    await touch(along(from, to));
+    await player.getByRole("dialog", { name: "3 selected tokens" }).waitFor();
+
+    await touch([await emptyPoint(player)]);
+    await barFrame(player).waitFor({ state: "detached" });
+    const url = player.url();
+    await player.goBack();
+    await player.getByRole("toolbar", { name: "Select options" }).waitFor({ state: "detached" });
+    assert.equal(await barFrame(player).count(), 0, "Back left a bar");
+    assert.equal(player.url(), url, "Back left the room");
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+    await ops.send({ t: "token.delete", tokenId: extra });
+  });
+
+  for (const view of [
+    { width: 320, height: 480, scale: 1.3, insets: { top: 44, bottom: 34 } },
+    { width: 480, height: 320, scale: 1.3, insets: { side: 47, bottom: 21 } },
+    { width: 844, height: 390, scale: 1.3, insets: { side: 47, bottom: 21 } },
+  ]) {
+    const label = `${view.width} x ${view.height} at 130%`;
+    test(`10. the Select several bar is one row with Actions shown: ${label}`, async () => {
+      await insets(view.insets);
+      await setUp(view);
+      await touch([await cellPoint({ x: 8, y: 6 })]);
+      await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Select several", exact: true }).tap();
+      // Off the bar, where the map shows: on an upright phone, whose overlay spans the screen, only the strip under the top bar.
+      await player.waitForTimeout(200);
+      await touch([await emptyPoint(player)]);
+      await barFrame(player).waitFor({ state: "detached" });
+      const options = player.getByRole("toolbar", { name: "Select options" });
+      await options.getByRole("button", { name: "Actions", exact: true }).waitFor();
+      const r = await rectOf(options);
+      assert.ok(r.bottom - r.top <= (44 + 8 + 2) * view.scale + 2, `${label}: the Select several bar wrapped to ${r.bottom - r.top} px`);
+      await shots.take(player, `playerphone-several-row-${view.width}x${view.height}`);
+      await options.getByRole("button", { name: "Done", exact: true }).tap();
+      await insets({});
+    });
+  }
+
+  test("11. on screens too short for the bar, with Select several, the turn band and a roll waiting, it opens compact: the roll stays in sight, every button takes a tap, and Panels comes back after Close", async () => {
+    await ops.send({
+      t: "encounter.start",
+      entries: [
+        { id: randomUUID(), tokenId: run.goblin.id, value: 18 },
+        { id: randomUUID(), tokenId: run.thorn.id, value: 15 },
+      ],
+    });
+    for (const view of [
+      { width: 480, height: 320, scale: 1.3, insets: { side: 47, bottom: 21 } },
+      { width: 844, height: 390, scale: 1.3, insets: { side: 47, bottom: 21 } },
+      { width: 320, height: 480, scale: 1.3, insets: { top: 44, bottom: 34 } },
+    ]) {
+      const label = `${view.width} x ${view.height} at 130%`;
+      await insets(view.insets);
+      await setUp(view);
+      await touch([await cellPoint({ x: 8, y: 6 })]);
+      const bar = player.getByRole("dialog", { name: "Thorn actions" });
+      await bar.getByRole("button", { name: "Select several", exact: true }).tap();
+      const id = randomUUID();
+      await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+      // The roll's card yields to the compact bar at the screen's foot, or waits in the column, and either way the summary row stands for it.
+      const row = player.getByRole("button", { name: /^Roll asked/ });
+      await row.waitFor();
+      assert.equal(await barFrame(player).getAttribute("data-bar-mode"), "compact", `${label}: the bar is not compact`);
+      assert.ok(!intersects(await rectOf(row), await rectOf(bar)), `${label}: the summary row meets the bar`);
+      assert.equal(await card(player).isVisible(), false, `${label}: the roll card shows under the bar`);
+      await shots.take(player, `playerphone-compact-${view.width}x${view.height}`);
+      assert.deepEqual(await unreachable(), [], `${label}: bar buttons that take no tap`);
+
+      // Where the overlay covers the toolbar, it takes what would have reached Panels, and on an upright phone a tool too.
+      const panels = player.locator('nav[aria-label="Tools"] button[title="Panels"]');
+      const p = await rectOf(panels);
+      const over = await rectOf(bar);
+      const centre = { x: (p.left + p.right) / 2, y: (p.top + p.bottom) / 2 };
+      if (intersects(p, over)) {
+        assert.equal(await hit(centre), "bar", `${label}: Panels shows through the overlay`);
+        if (view.width < view.height) {
+          const tool = await rectOf(player.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Select" }));
+          assert.equal(await hit({ x: (tool.left + tool.right) / 2, y: (tool.top + tool.bottom) / 2 }), "bar", `${label}: a tool shows through the overlay`);
+        }
+      }
+
+      // The summary row's tap hides the bar and shows the roll card.
+      if (await row.isVisible()) {
+        await row.tap();
+        await bar.waitFor({ state: "detached" });
+        await card(player).waitFor();
+        await card(player).getByRole("button", { name: "Later" }).tap();
+        await player.getByRole("toolbar", { name: "Select options" }).getByRole("button", { name: "Actions", exact: true }).tap();
+        await bar.waitFor();
+      }
+      await bar.getByRole("button", { name: "Close", exact: true }).tap();
+      await bar.waitFor({ state: "detached" });
+      assert.notEqual(await hit(centre), "bar", `${label}: the closed bar still covers Panels`);
+      await panels.tap();
+      await player.getByRole("region", { name: "Panels" }).waitFor();
+      await player.getByRole("button", { name: "Close Panels" }).tap();
+      await ops.send({ t: "roll.close", rollIds: [id] });
+      await player.evaluate(() => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem("rvtt.uiScale"));
+    }
+    await insets({});
+    await ops.send({ t: "encounter.end" });
+  });
+
+  test("12. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });

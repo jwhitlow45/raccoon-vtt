@@ -583,7 +583,8 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     for (const id of run.goblins) await ops.send({ t: "actor.hp", target: { tokenId: id }, change: { kind: "damage", amount: 1 } });
     await dm.locator('[data-alert="concentration"]').nth(2).waitFor();
     await selectThornAsDm();
-    await panelsButton(dm).click();
+    // This screen is too short to dock the bar, so it opens compact over the toolbar (docs/design-v1-bar-dock.md 1.4), and a pointer reaches Panels only once it closes. The keyboard still does.
+    await panelsButton(dm).press("Enter");
     const sheet = dm.getByRole("region", { name: "Panels" });
     await sheet.waitFor();
     await dm.waitForTimeout(150);
@@ -608,7 +609,7 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     assert.equal((await focused(dm)).name, "Thorn actions");
 
     // A real panel's subpage adds Back to the same header: Menu, then Members.
-    await panelsButton(dm).click();
+    await panelsButton(dm).press("Enter");
     await sheet.getByRole("button", { name: /^Menu/ }).click();
     const menu = dm.getByRole("region", { name: "Menu" });
     await menu.getByRole("button", { name: /^Members/ }).click();
@@ -619,7 +620,7 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
 
     // The encounter editor asking before it discards a change: the question takes the title's place, and the dock's buttons step aside.
     await menu.getByRole("button", { name: "Close Menu" }).click();
-    await panelsButton(dm).click();
+    await panelsButton(dm).press("Enter");
     await sheet.getByRole("button", { name: /^Encounters/ }).click();
     const encounters = dm.getByRole("region", { name: "Encounters" });
     await encounters.getByRole("button", { name: "New encounter" }).click();
@@ -777,7 +778,34 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     await dm.keyboard.press("Escape");
   });
 
-  test("15. no page errors along the way", () => {
+  test("15. an upright tablet at 820 x 1180: the docked bar folds under a sheet, and Show brings it back to its stored spot with focus on its frame", async () => {
+    // A resize, not a reload: this run has loaded the page many times, and the server's snapshot budget would make the next load wait.
+    await dm.setViewportSize({ width: 820, height: 1180 });
+    const p = await pagePoint(dm, run.bounds, { x: run.thorn.x + 0.5, y: run.thorn.y + 0.5 });
+    await dm.mouse.click(p.x, p.y);
+    const bar = barFrame(dm);
+    await bar.waitFor();
+    assert.equal(await bar.getAttribute("data-bar-mode"), "dock", "the tablet's bar does not dock");
+    // Moved off its default spot, so Show's return to it means something.
+    await bar.getByRole("button", { name: "Move bar", exact: true }).click();
+    const spot = '{"corner":"bl","x":0,"y":0}';
+    const docked = await bar.boundingBox();
+    assert.ok(docked, "the bar has no box");
+    await panelsButton(dm).click();
+    await assertDocked(dm, 1, "820 x 1180, a docked bar");
+    assert.equal(await bar.isVisible(), false, "the docked bar did not fold under the sheet");
+    await dm.getByRole("button", { name: "Show Thorn actions" }).click();
+    await dm.getByRole("region", { name: "Panels" }).waitFor({ state: "detached" });
+    const back = await bar.boundingBox();
+    assert.ok(back && Math.abs(back.x - docked.x) < 1 && Math.abs(back.y - docked.y) < 1, `Show did not bring the bar back to its spot: ${JSON.stringify({ docked, back })}`);
+    assert.equal((await focused(dm)).name, "Thorn actions");
+    assert.equal(await dm.evaluate(() => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem("rvtt.tokenBarSpot")), spot, "the stored spot changed");
+    await shots.take(dm, "fold-tablet-docked-back");
+    await bar.getByRole("button", { name: "Reset bar position", exact: true }).click();
+    await dm.keyboard.press("Escape");
+  });
+
+  test("16. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
     assert.deepEqual(playerConsole.errors.filter((e) => e.startsWith("uncaught")), []);
   });
