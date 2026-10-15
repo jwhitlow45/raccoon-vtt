@@ -27,6 +27,22 @@ function readSound(): boolean {
   }
 }
 
+/*
+ * Another tab that changes the setting writes storage, and the browser
+ * tells this tab with a `storage` event, so the cached value and both
+ * controls follow it. A null key means that tab cleared storage, which
+ * puts the default back.
+ */
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key !== SOUND_KEY && e.key !== null) return;
+    const next = e.newValue !== "off";
+    if (next === soundOn) return;
+    soundOn = next;
+    for (const fn of soundListeners) fn();
+  });
+}
+
 export function soundEnabled(): boolean {
   return soundOn;
 }

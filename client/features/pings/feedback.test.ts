@@ -10,7 +10,10 @@ import { test } from "node:test";
 
 const stored = new Map<string, string>();
 const storage = { blocked: false };
+// Every page loaded here listens on one window, as tabs of one browser share a storage.
+const win = new EventTarget();
 Object.assign(globalThis, {
+  window: win,
   localStorage: {
     getItem(k: string) {
       if (storage.blocked) throw new DOMException("blocked", "SecurityError");
@@ -56,4 +59,27 @@ test("with storage blocked the choice still holds for this page", async () => {
   const sound = await loadPage();
   sound.setSoundEnabled(false);
   assert.equal(sound.soundEnabled(), false);
+});
+
+/** What the browser sends every other tab when one writes or clears local storage. */
+function storageEvent(key: string | null, newValue: string | null): void {
+  win.dispatchEvent(Object.assign(new Event("storage"), { key, newValue }));
+}
+
+test("a change made in another tab reaches this one and its controls, and a cleared storage puts the default back", async () => {
+  stored.clear();
+  storage.blocked = false;
+  const here = await loadPage();
+  const there = await loadPage();
+  const seen: boolean[] = [];
+  const stop = here.subscribeSound(() => seen.push(here.soundEnabled()));
+  there.setSoundEnabled(false);
+  storageEvent("rvtt.pingSound", "off");
+  assert.equal(here.soundEnabled(), false, "a ping in this tab stays quiet");
+  storageEvent("rvtt.sound", "on");
+  assert.equal(here.soundEnabled(), false, "another key changes nothing");
+  storageEvent(null, null);
+  assert.equal(here.soundEnabled(), true);
+  stop();
+  assert.deepEqual(seen, [false, true]);
 });

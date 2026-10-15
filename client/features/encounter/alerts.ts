@@ -25,14 +25,33 @@ function readSound(): boolean {
 
 let soundOn = readSound();
 
+/*
+ * Another tab that changes the setting writes storage, and the browser
+ * tells this tab with a `storage` event, so the cached value and the
+ * switches follow it, as the ping sound's do (features/pings/feedback.ts).
+ * A null key means that tab cleared storage, which puts the default back.
+ */
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key !== SOUND_KEY && e.key !== null) return;
+    const next = e.newValue === "on";
+    if (next === soundOn) return;
+    soundOn = next;
+    for (const fn of soundListeners) fn();
+  });
+}
+
+export function isSoundOn(): boolean {
+  return soundOn;
+}
+
+export function subscribeSoundOn(fn: () => void): () => void {
+  soundListeners.add(fn);
+  return () => soundListeners.delete(fn);
+}
+
 export function useSoundOn(): boolean {
-  return useSyncExternalStore(
-    (fn) => {
-      soundListeners.add(fn);
-      return () => soundListeners.delete(fn);
-    },
-    () => soundOn,
-  );
+  return useSyncExternalStore(subscribeSoundOn, isSoundOn);
 }
 
 /** Call from a tap, so the browser lets the audio start. */
