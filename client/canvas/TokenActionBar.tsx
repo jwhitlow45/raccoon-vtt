@@ -760,6 +760,7 @@ function placeBar(input: {
     column: input.column,
     laneLeft: laneLeft(free),
     besideRoom: free.width - LANE_WIDTH,
+    content: input.height,
   });
 }
 

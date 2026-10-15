@@ -263,7 +263,9 @@ export function overlapsLane(hang: Pick<Hang, "left" | "width">, free: Box): boo
  * 1. Stacked: the column keeps at least its first card, and the bar sits
  *    8 px below it, no shorter than its floor, `min(120, L)`. Beyond the
  *    first card the column gives way first (it stops 8 px above the bar),
- *    then the bar down to its floor.
+ *    then the bar down to its floor. A bar hung by its bottom moves down
+ *    first, as far as the lane's bottom, so it keeps its content's height
+ *    where the lane has room for it, and shrinks only past that.
  * 2. Beside: with 230 px or more left of the lane, the bar moves there,
  *    up to 304 px wide, with the lane's whole height, and the column keeps
  *    the lane whole.
@@ -281,15 +283,24 @@ export function shareLane(input: {
   laneLeft: number;
   /** The free width less the lane. */
   besideRoom: number;
+  /** The bar's content height, which a bar hung by its bottom keeps by moving down. */
+  content: number;
 }): { lane: Lane; hang: Hang } {
   const { hang, laneTop, column } = input;
   const height = Math.max(0, input.laneHeight);
   const laneBottom = laneTop + height;
   if (!column || column.first <= 0) return { lane: "none", hang };
-  const below = (floor: number): Hang =>
-    hang.anchor === "top"
-      ? { ...hang, at: Math.max(hang.at, floor), room: Math.max(0, laneBottom - Math.max(hang.at, floor)) }
-      : { ...hang, room: Math.max(0, Math.min(hang.room, hang.at - floor)) };
+  /*
+   * A compact overlay already hangs from the lane's bottom (its lane is the
+   * overlay), so this leaves its bottom where it is. A docked bar in a
+   * bottom corner, or an upright span flipped above its token, moves down
+   * instead of shrinking while the lane has room below it.
+   */
+  const below = (floor: number): Hang => {
+    if (hang.anchor === "top") return { ...hang, at: Math.max(hang.at, floor), room: Math.max(0, laneBottom - Math.max(hang.at, floor)) };
+    const at = Math.min(laneBottom, Math.max(hang.at, floor + Math.min(Math.max(0, input.content), laneBottom - floor)));
+    return { ...hang, at, room: Math.max(0, at - floor) };
+  };
   const firstBottom = column.top + column.first + EDGE;
   if (laneBottom - firstBottom >= Math.min(BAR_FLOOR, height) && height > 0) return { lane: "stacked", hang: below(firstBottom) };
   if (input.besideRoom >= BESIDE_MIN) {

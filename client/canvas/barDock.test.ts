@@ -121,7 +121,7 @@ describe("compact", () => {
   const summary = (chrome: Chrome, viewport: { width: number; height: number }) => {
     const hang = compactHang(viewport, viewport, chrome);
     const free = freeArea(viewport, chrome);
-    const shared = shareLane({ hang, laneTop: free.top, laneHeight: hang.room, column: { top: free.top, content: 200, first: 120 }, laneLeft: laneLeft(free), besideRoom: free.width - 312 });
+    const shared = shareLane({ hang, laneTop: free.top, laneHeight: hang.room, column: { top: free.top, content: 200, first: 120 }, laneLeft: laneLeft(free), besideRoom: free.width - 312, content: 900 });
     return { overlay: hang.room, lane: shared.lane, bar: shared.hang.room, width: hang.width };
   };
 
@@ -151,6 +151,7 @@ describe("compact", () => {
       column: { top: free.top, content: 200, first: 120 },
       laneLeft: laneLeft(free),
       besideRoom: free.width - 312,
+      content: 400,
     });
     assert.equal(docked.lane, "summary");
     assert.equal(docked.hang.room, 99);
@@ -261,7 +262,7 @@ describe("the stored spot", () => {
 describe("the right lane", () => {
   const free: Box = { left: 8, top: 60, width: 904, height: 672 };
   const laneTop = free.top;
-  const lane = { laneTop, laneHeight: free.height, laneLeft: laneLeft(free), besideRoom: free.width - 312 };
+  const lane = { laneTop, laneHeight: free.height, laneLeft: laneLeft(free), besideRoom: free.width - 312, content: 900 };
   const home: Hang = spotHang(DEFAULT_SPOT, free, { width: 304, height: 900 });
 
   test("with no column there is no gap, and the bar takes the whole lane", () => {
@@ -294,16 +295,37 @@ describe("the right lane", () => {
     assert.equal(shared.hang.room, 672 - 158);
   });
 
+  test("a bar hung by its bottom moves down under a tall first card instead of shrinking, as far as the lane's bottom", () => {
+    const short: Box = { left: 8, top: 60, width: 904, height: 400 };
+    const column = { top: 60, content: 300, first: 272 };
+    const at = { laneTop: 60, laneHeight: 400, column, laneLeft: laneLeft(short), besideRoom: short.width - 312 };
+    // A bottom right spot 80 px up: the first card ends at 340, and the lane at 460.
+    const raised = spotHang({ corner: "br", x: 0, y: 80 }, short, { width: 304, height: 300 });
+    assert.equal(raised.at, 380);
+    const tall = shareLane({ ...at, hang: raised, content: 300 });
+    assert.equal(tall.lane, "stacked");
+    assert.deepEqual({ at: tall.hang.at, room: tall.hang.room }, { at: 460, room: 120 }, "the bar keeps its floor at the lane's bottom");
+    const shorter = shareLane({ ...at, hang: raised, content: 100 });
+    assert.deepEqual({ at: shorter.hang.at, room: shorter.hang.room }, { at: 440, room: 100 }, "a short bar moves down only as far as it needs");
+    const clear = shareLane({ ...at, hang: raised, content: 30 });
+    assert.deepEqual({ at: clear.hang.at, room: clear.hang.room }, { at: 380, room: 40 }, "a bar already clear of the card stays where it is");
+    // An upright span flipped above its token hangs by its bottom too.
+    const flipped: Hang = { left: 8, width: 374, anchor: "bottom", at: 300, room: 240 };
+    const span = shareLane({ hang: flipped, laneTop: 60, laneHeight: 600, column, laneLeft: -8, besideRoom: -8, content: 400 });
+    assert.equal(span.lane, "stacked");
+    assert.deepEqual({ at: span.hang.at, room: span.hang.room }, { at: 660, room: 320 });
+  });
+
   test("beside at exactly 230 px left of the lane, and the summary row at 229", () => {
     const short: Box = { left: 8, top: 60, width: 312 + BESIDE_MIN, height: 200 };
     const hang = spotHang(DEFAULT_SPOT, short, { width: 304, height: 400 });
     const column = { top: 60, content: 200, first: 150 };
-    const beside = shareLane({ hang, laneTop: 60, laneHeight: 200, column, laneLeft: laneLeft(short), besideRoom: BESIDE_MIN });
+    const beside = shareLane({ hang, laneTop: 60, laneHeight: 200, column, laneLeft: laneLeft(short), besideRoom: BESIDE_MIN, content: 400 });
     assert.equal(beside.lane, "beside");
     assert.deepEqual({ left: beside.hang.left, width: beside.hang.width, room: beside.hang.room }, { left: 8, width: 230, room: 200 });
     assert.equal(overlapsLane(beside.hang, short), false, "a bar beside the lane leaves the column the lane whole");
     const narrower: Box = { ...short, width: 312 + BESIDE_MIN - 1 };
-    const summary = shareLane({ hang: spotHang(DEFAULT_SPOT, narrower, { width: 304, height: 400 }), laneTop: 60, laneHeight: 200, column, laneLeft: laneLeft(narrower), besideRoom: BESIDE_MIN - 1 });
+    const summary = shareLane({ hang: spotHang(DEFAULT_SPOT, narrower, { width: 304, height: 400 }), laneTop: 60, laneHeight: 200, column, laneLeft: laneLeft(narrower), besideRoom: BESIDE_MIN - 1, content: 400 });
     assert.equal(summary.lane, "summary");
     assert.equal(summary.hang.room, 200 - 52);
     assert.equal(columnRoom({ lane: "summary", columnTop: 60, bar: hangBox(summary.hang, 400) }), 44);
@@ -312,7 +334,7 @@ describe("the right lane", () => {
   test("a lane of 0 or less gives a defined, empty result", () => {
     for (const height of [0, -20]) {
       const hang: Hang = { left: 0, width: 230, anchor: "bottom", at: 60 + height, room: 0 };
-      const shared = shareLane({ hang, laneTop: 60, laneHeight: height, column: { top: 60, content: 100, first: 80 }, laneLeft: -82, besideRoom: -82 });
+      const shared = shareLane({ hang, laneTop: 60, laneHeight: height, column: { top: 60, content: 100, first: 80 }, laneLeft: -82, besideRoom: -82, content: 300 });
       assert.equal(shared.lane, "summary");
       assert.equal(shared.hang.room, 0);
       assert.equal(hangBox(shared.hang, 300).height, 0);
