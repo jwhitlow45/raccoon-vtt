@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { bandFit, overflowRecord, turnPlacement } from "./band.ts";
+import { bandFit, overflowRecord, turnPlacement, type BandTimer } from "./band.ts";
 
 /** The layout size of a window at an interface size (features/device/layout.ts layoutSize). */
 function layout(width: number, height: number, scale = 1): { width: number; height: number } {
@@ -55,7 +55,7 @@ describe("turnPlacement", () => {
 
 describe("bandFit (LPD-DMPHONE-2)", () => {
   // The DM's band has four creatures to come. A player's has none, and End turn on their own turn.
-  const fit = (width: number, scale: number, more: { timer?: "none" | "clock" | "over"; endTurn?: boolean; round?: number } = {}) =>
+  const fit = (width: number, scale: number, more: { timer?: BandTimer; endTurn?: boolean; round?: number } = {}) =>
     bandFit({ width: width / scale, round: more.round ?? 1, timer: more.timer ?? "none", endTurn: more.endTurn ?? false, next: more.endTurn ? 0 : 4 });
 
   test("a phone at 100% shows the DM up to four Next disks, the round and the name", () => {
@@ -77,6 +77,12 @@ describe("bandFit (LPD-DMPHONE-2)", () => {
     assert.deepEqual(fit(320, 1.3, { timer: "over", endTurn: true }), { disks: 0, round: false, stackEnd: true });
     assert.deepEqual(fit(320, 1.3, { endTurn: true }), { disks: 0, round: true, stackEnd: false }, "without the timer everything fits");
     assert.deepEqual(fit(390, 1, { timer: "over", endTurn: true }), { disks: 0, round: true, stackEnd: false });
+  });
+
+  test("a running clock takes the room its text needs, not the room of 10:00 (P3R-4)", () => {
+    assert.deepEqual(fit(320, 1.3, { timer: { clock: "10:00" } }), { disks: 0, round: true, stackEnd: false });
+    assert.deepEqual(fit(320, 1.3, { timer: { clock: "0:30" } }), { disks: 1, round: true, stackEnd: false }, "a short clock leaves a disk room");
+    assert.ok(fit(320, 1.3, { timer: { clock: "1:05" } }).disks >= fit(320, 1.3, { timer: "over" }).disks, "a clock never takes more than the time-up");
   });
 
   test("a long fight's round takes more room, so the disks give way sooner", () => {

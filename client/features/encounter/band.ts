@@ -76,7 +76,10 @@ const ROW = {
   nameFrame: 4,
   roundLetter: 9,
   roundDigit: 7.5,
-  clock: 44,
+  /** A running clock ("1:05", timer.ts clockText) in the band's tabular digits: each digit, its colon, and a little over. */
+  clockDigit: 7.5,
+  clockColon: 12,
+  clockPad: 2,
   timeUp: 68,
   endTurn: 91,
   endTurnStacked: 50,
@@ -86,7 +89,19 @@ const ROW = {
   slack: 4,
 };
 
-export type BandTimer = "none" | "clock" | "over";
+/** The band's timer: none, time up ("Time’s up" over the time past it), or a running clock and its text. */
+export type BandTimer = "none" | "over" | { clock: string };
+
+/**
+ * A running clock's width, from its text, as the round's is from its
+ * digits. Reserving the width of "10:00" for every clock left the DM's band
+ * at 320 px at 130% without a Next disk it had room for.
+ */
+function clockWidth(text: string): number {
+  const digits = text.replace(/\D/g, "").length;
+  const colons = text.length - text.replace(/:/g, "").length;
+  return ROW.clockDigit * digits + ROW.clockColon * colons + ROW.clockPad;
+}
 
 /** How the band's row fits its width: how many of the `next` disks it has show, whether the round shows, and whether End turn stacks its words on two lines. */
 export type BandFit = { disks: number; round: boolean; stackEnd: boolean };
@@ -104,7 +119,7 @@ export type BandFit = { disks: number; round: boolean; stackEnd: boolean };
 export function bandFit(input: { width: number; round: number; timer: BandTimer; endTurn: boolean; next: number }): BandFit {
   const { gap } = ROW;
   const round = gap + ROW.roundLetter + ROW.roundDigit * String(input.round).length;
-  const timer = input.timer === "none" ? 0 : gap + (input.timer === "over" ? ROW.timeUp : ROW.clock);
+  const timer = input.timer === "none" ? 0 : gap + (input.timer === "over" ? ROW.timeUp : clockWidth(input.timer.clock));
   const end = (stacked: boolean) => (input.endTurn ? gap + (stacked ? ROW.endTurnStacked : ROW.endTurn) : 0);
   const base = ROW.gutters + ROW.portrait + gap + ROW.nameFrame + BAND_NAME_MIN_PX + timer + ROW.slack;
   const room = input.width - base - round - end(false);

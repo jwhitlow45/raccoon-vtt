@@ -9,7 +9,8 @@ import { sheetOpen } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { announceTurn, unlockAudioOnTap } from "./alerts.ts";
 import { AutoRollWatch } from "./autoState.ts";
-import { BAND_MAX_DISKS, BAND_NAME_MIN_PX, bandFit, TURN_BAND_PX, useTopBars, type TurnPlacement } from "./band.ts";
+import { BAND_MAX_DISKS, BAND_NAME_MIN_PX, bandFit, TURN_BAND_PX, useTopBars, type BandTimer, type TurnPlacement } from "./band.ts";
+import { clockText } from "./timer.ts";
 import { useConfirmedSeq, useRowFacts, useSend, useSortedEntries, useTurnTimer, useYou } from "./hooks.ts";
 import {
   answersPrompt,
@@ -197,7 +198,7 @@ function Band(props: { notice: boolean }) {
 
   const yours = current !== null && facts.mine(current);
   const { name, line } = whoseTurn({ dm, started, activeName: current ? entryName(facts.view, current) : null, yours });
-  const clock = timer && current ? (timer.over ? "over" : "clock") : "none";
+  const clock: BandTimer = timer && current ? (timer.over ? "over" : { clock: clockText(timer) }) : "none";
   const fit = bandFit({ width, round, timer: clock, endTurn: !dm && yours, next: next.length });
   const shownNext = next.slice(0, fit.disks);
   const gutter = theme.space(3);
