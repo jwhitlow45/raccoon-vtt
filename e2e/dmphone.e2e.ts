@@ -12,13 +12,14 @@ import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type 
  * (docs/design-v1-visual.md), as the live play review found it
  * (LPD-DMPHONE): the bugs it fixed, each checked where a DM meets it.
  *
- * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus seven. The
- * other environment variables are the smoke run's (smoke.e2e.ts).
+ * It runs with `pnpm test:e2e` on E2E_PORT plus seven, which it shares
+ * with playerphone.e2e.ts, since the runs go one after another. The other
+ * environment variables are the smoke run's (smoke.e2e.ts).
  */
 
 const PORT = Number(process.env.E2E_PORT ?? 3100) + 7;
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
-const SHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? "/Users/j/Desktop/screenshots/raccoon-vtt/e2e";
+const SHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? "test-results/e2e-screenshots";
 
 const work = mkdtempSync(path.join(tmpdir(), "raccoon-e2e-dmphone-"));
 const assetDir = path.join(work, "assets");
@@ -35,7 +36,6 @@ const dmConsole = new ConsoleWatch("dm");
 const run = {
   roomId: "",
   roomName: `E2E DM phone ${new Date().toISOString().slice(0, 19)}`,
-  sceneId: "",
 };
 
 /** The few DOM parts the page functions read, typed by hand: the e2e files compile without the DOM library. */
@@ -43,7 +43,6 @@ type El = {
   scrollTop: number;
   scrollHeight: number;
   clientHeight: number;
-  parentElement: El | null;
   getAttribute(name: string): string | null;
   textContent: string | null;
   querySelectorAll(selector: string): ArrayLike<El>;
@@ -156,7 +155,6 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await dm.getByLabel("I saved my DM link").check();
     await dm.getByRole("button", { name: "Continue to the room" }).click();
     await waitFor("the DM's snapshot", () => dmSocket.state);
-    run.sceneId = dmSocket.state!.meta.playerSceneId!;
 
     const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
