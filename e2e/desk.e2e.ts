@@ -18,6 +18,7 @@ import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, wai
  *   gives focus back to the button that opened it, not to the page.
  * - Closing the map import dialog gives focus back to its file picker,
  *   which was disabled while the dialog was open.
+ * - A scene menu that moves to another step keeps focus in its dialog.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus six, which it shares with
  * notes.e2e.ts, since the runs go one after another. The other
@@ -206,7 +207,29 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     await waitFor("focus back on the file picker", async () => (await focused(dm)).name === "From a Universal VTT file", 2_000);
   });
 
-  test("5. no page errors along the way", () => {
+  test("5. a scene menu's steps keep focus in the dialog, on the step it shows", async () => {
+    const more = dm.getByRole("tabpanel").getByRole("button", { name: /^More for / });
+    await more.focus();
+    await dm.keyboard.press("Enter");
+    const menu = dm.locator("dialog[open]");
+    await menu.getByRole("button", { name: /^Duplicate/ }).focus();
+    await dm.keyboard.press("Enter");
+    await waitFor("the Duplicate step focused", async () => {
+      const f = await focused(dm);
+      return f.tag === "dialog" && f.name.startsWith("Duplicate ");
+    });
+    await menu.getByRole("button", { name: "Back to the menu" }).focus();
+    await dm.keyboard.press("Enter");
+    await waitFor("the menu focused again", async () => {
+      const f = await focused(dm);
+      return f.tag === "dialog" && !f.name.startsWith("Duplicate ");
+    });
+    await dm.keyboard.press("Escape");
+    await menu.waitFor({ state: "detached" });
+    assert.match((await focused(dm)).name, /^More for /, "Escape gives focus back to the scene's more button");
+  });
+
+  test("6. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
   });
 });
