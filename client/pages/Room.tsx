@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
@@ -1019,6 +1019,10 @@ function SidePanel(props: { zoom: number; tabs: PanelDef[]; tab: string; badges:
   // Where Back lands when the row that opened the subpage is gone (a page deleted from inside it): the header goes with the subpage, and the panel's tab stays.
   const chosenTabRef = useRef<HTMLButtonElement>(null);
   useSubpageFocus(props.subpage, { title: titleRef, body: bodyRef, fallback: chosenTabRef });
+  // The panel is named by its chosen tab, so a screen reader entering it hears "Initiative" rather than a bare "tab panel".
+  const ids = useId();
+  const tabId = (id: string) => `${ids}-tab-${id}`;
+  const panelId = `${ids}-panel`;
   return (
     <aside
       {...smallUi(props.zoom)}
@@ -1043,9 +1047,11 @@ function SidePanel(props: { zoom: number; tabs: PanelDef[]; tab: string; badges:
             <button
               key={t.id}
               ref={chosen ? chosenTabRef : undefined}
+              id={tabId(t.id)}
               type="button"
               role="tab"
               aria-selected={chosen}
+              aria-controls={chosen ? panelId : undefined}
               onClick={() => props.onTab(t.id)}
               style={{
                 flex: "none",
@@ -1071,7 +1077,7 @@ function SidePanel(props: { zoom: number; tabs: PanelDef[]; tab: string; badges:
           <SheetHeader title={props.subpage.title} back={subpageBack(props.subpage)} titleRef={titleRef} />
         </div>
       ) : null}
-      <div ref={bodyRef} role="tabpanel" style={{ flex: 1, overflowY: "auto", padding: theme.space(4) }}>
+      <div ref={bodyRef} id={panelId} role="tabpanel" aria-labelledby={tabId(props.tab)} style={{ flex: 1, overflowY: "auto", padding: theme.space(4) }}>
         {props.children}
       </div>
     </aside>

@@ -19,6 +19,7 @@ import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, wai
  * - Closing the map import dialog gives focus back to its file picker,
  *   which was disabled while the dialog was open.
  * - A scene menu that moves to another step keeps focus in its dialog.
+ * - The side panel's tab panel is named by its chosen tab.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus six, which it shares with
  * notes.e2e.ts, since the runs go one after another. The other
@@ -170,7 +171,8 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
 
   test("3. a dialog keeps its own field focused and gives focus back to its opener on close", async () => {
     await dm.getByRole("tab", { name: "Journal", exact: true }).click();
-    const newPage = dm.getByRole("tabpanel").getByRole("button", { name: "New page" });
+    // The side panel's tab panel is named by its chosen tab.
+    const newPage = dm.getByRole("tabpanel", { name: "Journal" }).getByRole("button", { name: "New page" });
     await newPage.focus();
     await dm.keyboard.press("Enter");
     await dm.getByRole("dialog", { name: "New page" }).waitFor();
