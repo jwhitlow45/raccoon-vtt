@@ -19,6 +19,7 @@ import {
   noticePlace,
   overlapsLane,
   parseSpot,
+  placeBar,
   pastBars,
   readSpot,
   releaseSpot,
@@ -392,9 +393,23 @@ describe("fit and find keep clear of the bar", () => {
 
   test("a bar about to open rests at its spot with the height it last had, and a spanning one has no place yet", () => {
     const chrome: Chrome = { top: 52, bottom: 60, toolbar: 60, safe: NONE, sheet: 0 };
-    const rest = restingBar({ layout: { width: 1280, height: 800 }, viewport, chrome, spot: DEFAULT_SPOT, height: 250 });
+    const rest = restingBar({ layout: { width: 1280, height: 800 }, viewport, chrome, spot: DEFAULT_SPOT, height: 250, column: null });
     assert.deepEqual(rest, { box: { left: 920 - 8 - 304, top: 800 - 60 - 8 - 250, width: 304, height: 250 }, laneLeft: lane });
-    assert.equal(restingBar({ layout: { width: 390, height: 844 }, viewport: { width: 390, height: 844 }, chrome, spot: DEFAULT_SPOT, height: 250 }), null);
+    assert.equal(restingBar({ layout: { width: 390, height: 844 }, viewport: { width: 390, height: 844 }, chrome, spot: DEFAULT_SPOT, height: 250, column: null }), null);
+  });
+
+  test("a bar about to open shares the lane with the column as the drawn bar will, so a pan never lands a token under it", () => {
+    // 1180 x 390: an 820 px map, and a 150 px first card leaves the bar too little under it, so it moves beside the lane.
+    const chrome: Chrome = { top: 52, bottom: 60, toolbar: 60, safe: NONE, sheet: 0 };
+    const map = { width: 820, height: 390 };
+    const column = { top: 60, content: 150, first: 150 };
+    const input = { layout: { width: 1180, height: 390 }, viewport: map, chrome, spot: DEFAULT_SPOT, height: 300, foot: 0, column };
+    const rest = restingBar(input);
+    const drawn = placeBar({ ...input, anchor: { x: 400, y: 200 } });
+    assert.ok(rest && drawn);
+    assert.equal(drawn.lane, "beside");
+    assert.deepEqual(rest.box, hangBox(drawn.hang, 300));
+    assert.equal(rest.box.left + rest.box.width, 820 - 8 - 312, "the resting bar sits left of the lane, where the drawn one will");
   });
 });
 

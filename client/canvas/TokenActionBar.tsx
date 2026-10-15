@@ -50,39 +50,24 @@ import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope, useScoped } from "../state/scope.ts";
 import { sheetOpen } from "../state/types.ts";
 import {
-  BAR_FLOOR,
-  BAR_WIDTH,
   barDockSlot,
-  barMode,
   clampBox,
-  compactHang,
   DEFAULT_CHROME,
   DEFAULT_SPOT,
-  freeArea,
   hangBox,
   isDefaultSpot,
-  LANE_WIDTH,
   laneLeft,
   nextCorner,
-  overlapsLane,
+  placeBar,
   releaseSpot,
-  shareLane,
-  spotHang,
   writeSpot,
   type BarFacts,
-  type BarMode,
   type Box,
-  type Hang,
-  type Lane,
   type Spot,
 } from "./barDock.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 
 const NO_CHARACTERS = {};
-/** Below the token's name label, which hangs about 30 px under the footprint. */
-const OFFSET_Y = 34;
-/** Room above the token's bottom edge for the token itself when the bar flips above it. */
-const FLIP_CLEARANCE = 40;
 
 type Drawer = "conditions" | null;
 
@@ -569,9 +554,9 @@ function BarFrame(props: {
     return () => observer.disconnect();
   }, []);
 
-  const free = freeArea(props.viewport, chrome, foot);
-  const mode: BarMode = barMode(layout, free.height);
-  const placed = placeBar({ mode, layout, viewport: props.viewport, chrome, free, anchor: props.anchor, spot, height: barHeight, column });
+  // The anchor is always given here, so a placement always comes back.
+  const placed = placeBar({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, height: barHeight, column })!;
+  const { free, mode } = placed;
 
   // Actions in the Select several bar shows the bar and focuses its frame, once it is drawn.
   useLayoutEffect(() => {
@@ -726,63 +711,6 @@ function BarFrame(props: {
       {clipped ? <ScrollForMore /> : null}
     </div>
   );
-}
-
-/**
- * Where a bar hangs in each mode, before a drag: by its token when it
- * spans, at its spot when it docks, and the overlay's place when compact,
- * then shared with the column when they meet across.
- */
-function placeBar(input: {
-  mode: BarMode;
-  layout: Size;
-  viewport: Size;
-  chrome: typeof DEFAULT_CHROME;
-  free: Box;
-  anchor: Point;
-  spot: Spot;
-  height: number;
-  column: { top: number; content: number; first: number } | null;
-}): { hang: Hang; lane: Lane } {
-  const { mode, free } = input;
-  const hang =
-    mode === "span"
-      ? spanHang(input.anchor, free, input.height)
-      : mode === "compact"
-        ? compactHang(input.layout, input.viewport, input.chrome)
-        : spotHang(input.spot, free, { width: BAR_WIDTH, height: input.height });
-  // An upright span crosses the whole map, so it always meets the column.
-  if (!input.column || (mode !== "span" && !overlapsLane(hang, free))) return { hang, lane: "none" };
-  return shareLane({
-    hang,
-    laneTop: free.top,
-    laneHeight: mode === "compact" ? hang.room : free.height,
-    column: input.column,
-    laneLeft: laneLeft(free),
-    besideRoom: free.width - LANE_WIDTH,
-    content: input.height,
-  });
-}
-
-/**
- * An upright phone's bar, the screen's width less the free area's margins:
- * below its token when it fits there, else above it, whichever has more
- * room. Too little room either way, it keeps its floor and slides back
- * inside the free area.
- */
-function spanHang(anchor: Point, free: Box, height: number): Hang {
-  const bottom = free.top + free.height;
-  const floor = Math.min(BAR_FLOOR, free.height);
-  const topBelow = Math.max(free.top, anchor.y + OFFSET_Y);
-  const spaceBelow = bottom - topBelow;
-  const bottomAbove = Math.min(bottom, anchor.y - OFFSET_Y - FLIP_CLEARANCE);
-  const spaceAbove = bottomAbove - free.top;
-  if (height <= spaceBelow || spaceBelow >= spaceAbove) {
-    const at = spaceBelow >= floor ? topBelow : bottom - floor;
-    return { left: free.left, width: free.width, anchor: "top", at, room: bottom - at };
-  }
-  const at = spaceAbove >= floor ? bottomAbove : free.top + floor;
-  return { left: free.left, width: free.width, anchor: "bottom", at, room: at - free.top };
 }
 
 /**

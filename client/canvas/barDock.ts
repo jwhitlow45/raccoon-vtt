@@ -1,5 +1,5 @@
 import { createStore } from "zustand/vanilla";
-import type { Size } from "../lib/camera.ts";
+import type { Point, Size } from "../lib/camera.ts";
 import { scopeSlot } from "../state/scope.ts";
 
 /*
@@ -379,17 +379,84 @@ export function clearAnchor(point: { x: number; y: number }, viewport: Size, bar
   return x === point.x && y === point.y ? point : { x, y };
 }
 
+/** Below the token's name label, which hangs about 30 px under the footprint. */
+export const OFFSET_Y = 34;
+/** Room above the token's bottom edge for the token itself when the bar flips above it. */
+const FLIP_CLEARANCE = 40;
+
 /**
- * Where a docked or compact bar rests before it exists, for a pan that
- * opens it: its spot and the height it last had, with no column. Null
- * where the bar spans, since a spanning bar is placed by its token.
+ * An upright phone's bar, the screen's width less the free area's margins:
+ * below its token when it fits there, else above it, whichever has more
+ * room. Too little room either way, it keeps its floor and slides back
+ * inside the free area.
  */
-export function restingBar(input: { layout: Size; viewport: Size; chrome: Chrome; spot: Spot; height: number; foot?: number }): { box: Box; laneLeft: number } | null {
+function spanHang(anchor: Point, free: Box, height: number): Hang {
+  const bottom = free.top + free.height;
+  const floor = Math.min(BAR_FLOOR, free.height);
+  const topBelow = Math.max(free.top, anchor.y + OFFSET_Y);
+  const spaceBelow = bottom - topBelow;
+  const bottomAbove = Math.min(bottom, anchor.y - OFFSET_Y - FLIP_CLEARANCE);
+  const spaceAbove = bottomAbove - free.top;
+  if (height <= spaceBelow || spaceBelow >= spaceAbove) {
+    const at = spaceBelow >= floor ? topBelow : bottom - floor;
+    return { left: free.left, width: free.width, anchor: "top", at, room: bottom - at };
+  }
+  const at = spaceAbove >= floor ? bottomAbove : free.top + floor;
+  return { left: free.left, width: free.width, anchor: "bottom", at, room: at - free.top };
+}
+
+/**
+ * Where the bar hangs, before a drag: by its token when it spans, at its
+ * spot when it docks, and the overlay's place when compact, then shared
+ * with the column when they meet across. The one rule for the bar drawn
+ * (TokenActionBar.tsx) and for where a pan expects it (restingBar). Null
+ * only where the bar would span and no token is given to hang it by.
+ */
+export function placeBar(input: {
+  layout: Size;
+  viewport: Size;
+  chrome: Chrome;
+  foot: number;
+  /** Under the selected token, for a bar that spans. */
+  anchor: Point | null;
+  spot: Spot;
+  /** The bar's content height. */
+  height: number;
+  column: ColumnFacts | null;
+}): { mode: BarMode; free: Box; hang: Hang; lane: Lane } | null {
   const free = freeArea(input.viewport, input.chrome, input.foot);
   const mode = barMode(input.layout, free.height);
-  if (mode === "span") return null;
-  const hang = mode === "compact" ? compactHang(input.layout, input.viewport, input.chrome) : spotHang(input.spot, free, { width: BAR_WIDTH, height: input.height });
-  return { box: hangBox(hang, input.height), laneLeft: laneLeft(free) };
+  if (mode === "span" && !input.anchor) return null;
+  const hang =
+    mode === "span" && input.anchor
+      ? spanHang(input.anchor, free, input.height)
+      : mode === "compact"
+        ? compactHang(input.layout, input.viewport, input.chrome)
+        : spotHang(input.spot, free, { width: BAR_WIDTH, height: input.height });
+  // An upright span crosses the whole map, so it always meets the column.
+  if (!input.column || (mode !== "span" && !overlapsLane(hang, free))) return { mode, free, hang, lane: "none" };
+  const shared = shareLane({
+    hang,
+    laneTop: free.top,
+    laneHeight: mode === "compact" ? hang.room : free.height,
+    column: input.column,
+    laneLeft: laneLeft(free),
+    besideRoom: free.width - LANE_WIDTH,
+    content: input.height,
+  });
+  return { mode, free, ...shared };
+}
+
+/**
+ * Where a docked or compact bar rests before it exists, for a pan that
+ * opens it: its spot and the height it last had, shared with the column
+ * as the drawn bar will be (placeBar). Null where the bar spans, since a
+ * spanning bar is placed by its token.
+ */
+export function restingBar(input: { layout: Size; viewport: Size; chrome: Chrome; spot: Spot; height: number; foot?: number; column: ColumnFacts | null }): { box: Box; laneLeft: number } | null {
+  const placed = placeBar({ ...input, foot: input.foot ?? 0, anchor: null });
+  if (!placed || placed.mode === "span") return null;
+  return { box: hangBox(placed.hang, input.height), laneLeft: laneLeft(placed.free) };
 }
 
 // ------------------------------------------------------------ notices

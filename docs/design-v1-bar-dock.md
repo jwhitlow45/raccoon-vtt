@@ -93,7 +93,7 @@ While a docked or compact bar shows, it publishes its drawn box to the Room scop
 
 - **Fit the map** fits into the bars plus that cover, the larger on each side. The fit remembers the cover it used, so the bar opening or closing later never moves the fitted map, and a bar that grows still refits as today.
 - **Find my token** and the outliner's show on map pass it to `findCamera` with the open sheet's cover, the larger on each side. The zoom ignores it, as it ignores the sheet, and the token lands centered in what is left.
-- **Pans that bring a token into view** (a tracker row, the party bar, follow the turn) place their anchor in the area the cover leaves. A pan that opens the bar uses the bar's spot and the height it last had, since its box does not exist yet. Without this, a 900 px window, whose map is 540 px wide, centers the token under the bar.
+- **Pans that bring a token into view** (a tracker row, the party bar, follow the turn) place their anchor in the area the cover leaves. A pan that opens the bar uses the bar's spot and the height it last had, since its box does not exist yet, shared with the column by the same placement the drawn bar takes (`placeBar` and `shareLane`), so a bar that will sit beside the lane is expected there. Without this, a 900 px window, whose map is 540 px wide, centers the token under the bar.
 - Panes anchored to a map point (door card, stop note, label, light and pin panes) keep their anchors and draw over the bar, later in the same layer, as today.
 
 ## 5. What stays

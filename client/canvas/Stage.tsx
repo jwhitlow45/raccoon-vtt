@@ -285,7 +285,7 @@ export function MapStage(props: {
         ? null
         : { box: dock.bar.box, laneLeft: dock.bar.laneLeft }
       : opening
-        ? restingBar({ layout, viewport: sizeInZoomed(viewport, z), chrome: dock.chrome ?? DEFAULT_CHROME, spot: dock.spot, height: dock.lastHeight, foot: dock.foot })
+        ? restingBar({ layout, viewport: sizeInZoomed(viewport, z), chrome: dock.chrome ?? DEFAULT_CHROME, spot: dock.spot, height: dock.lastHeight, foot: dock.foot, column: dock.column })
         : null;
     if (!bar) return NO_INSETS;
     const box = { left: bar.box.left * z, top: bar.box.top * z, width: bar.box.width * z, height: bar.box.height * z };
@@ -1129,7 +1129,7 @@ export function MapStage(props: {
 
 /**
  * A phone's spanning action bar hangs OFFSET_Y (34 px) under the token
- * (TokenActionBar.tsx), room for a label of two lines. A taller label
+ * (barDock.ts), room for a label of two lines. A taller label
  * under the token, or its plate, pushes it further down, so the bar never
  * hides it.
  */
