@@ -1,5 +1,4 @@
 import { useMemo, type ReactNode, type RefObject } from "react";
-import { sameImage } from "#shared/imageRef.ts";
 import type { CreatureSize, HpVisibility, Member, Token } from "#shared/model.ts";
 import type { ClientOp, TokenGroupPatch } from "#shared/protocol.ts";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -9,7 +8,7 @@ import { theme } from "../../lib/theme.ts";
 import { dispatchGesture } from "../../state/actions.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { ImageField } from "../images/ImageField.tsx";
-import { ownerOps, ownersLit, shared, updateManyOps, type Lit } from "./groupEdit.ts";
+import { ownerOps, ownersLit, shared, sharedImage, updateManyOps, type Lit } from "./groupEdit.ts";
 import { SheetDialog } from "./SheetDialog.tsx";
 import { FieldRow, Note, Section, Select } from "./ui.tsx";
 
@@ -52,8 +51,7 @@ export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): voi
   const hpVisibility = shared(tokens, (t) => t.hpVisibility);
   const size = shared(tokens, (t) => t.size);
   const layer = shared(tokens, (t) => t.layer);
-  const first = tokens[0]?.image;
-  const image = tokens.every((t) => sameImage(t.image, first)) ? first : undefined;
+  const { same: sameImages, image } = sharedImage(tokens);
   const roster = useMemo(
     () => Object.values(members ?? {}).sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "player" ? -1 : 1)),
     [members],
@@ -96,7 +94,7 @@ export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): voi
             grow
           />
         </FieldRow>
-        <FieldRow label="Image" hint={image ? undefined : "They differ. A new one goes on all of them."}>
+        <FieldRow label="Image" hint={sameImages ? undefined : "They differ. A new one goes on all of them."}>
           <ImageField value={image} onChange={(next) => patch({ image: next })} shape="circle" aspect={1} canEdit />
         </FieldRow>
       </Section>

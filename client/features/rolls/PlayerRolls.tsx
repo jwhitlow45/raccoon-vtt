@@ -28,6 +28,7 @@ import {
   chipsStayShown,
   dcText,
   deskLayout,
+  draftKey,
   finalAnswerText,
   finalForPlayer,
   foldedChips,
@@ -40,8 +41,10 @@ import {
   rollsSummary,
   sheetSummary,
   shownRequest,
+  startingAnswer,
   targetKey,
   targetRef,
+  type AnswerDraft,
 } from "./logic.ts";
 import { cardStyle, focusable } from "./parts.tsx";
 
@@ -84,6 +87,12 @@ export function PlayerRolls() {
   const cardRef = useRef<HTMLElement | null>(null);
   const summaryRef = useRef<HTMLButtonElement | null>(null);
   const firstChip = useRef<HTMLButtonElement | null>(null);
+  // What was typed and not sent, which outlives the card: turning the phone moves the card between the screen's foot and the column.
+  const drafts = useRef(new Map<string, AnswerDraft>());
+  useEffect(() => {
+    const open = new Set(requests.map((r) => r.id));
+    for (const key of drafts.current.keys()) if (!open.has(key.slice(0, key.indexOf(":")))) drafts.current.delete(key);
+  }, [requests]);
 
   // A request that arrives, or one the DM reopened, comes up again (cameUp), counted from the first look with the state loaded.
   // One that arrives under a sheet comes up folded with the card, and still chimes.
@@ -184,6 +193,7 @@ export function PlayerRolls() {
       key={shown.id}
       cardRef={cardRef}
       request={shown}
+      drafts={drafts.current}
       sheet={width < CARD_MIN_WIDTH}
       hidden={cardHidden}
       onFold={() => fold(shown.id)}
@@ -231,6 +241,7 @@ function useCreature(target: RollTarget): { name: string; effects: readonly Effe
 function RollCard(props: {
   cardRef: RefObject<HTMLElement | null>;
   request: RollRequest;
+  drafts: Map<string, AnswerDraft>;
   sheet: boolean;
   /** Folded under a sheet: still mounted, so a typed total and a chosen roll survive, but out of sight, the focus order and the accessibility tree. */
   hidden: boolean;
@@ -266,6 +277,7 @@ function RollCard(props: {
           key={`${targetKey(target)}:${target.total ?? ""}`}
           request={request}
           target={target}
+          drafts={props.drafts}
           several={request.targets.length > 1}
           onEngage={props.onEngage}
           onSent={() => sent(targetKey(target))}
@@ -332,13 +344,23 @@ function RollCard(props: {
  * Send, and on a save "Fail without rolling". Send waits for the server,
  * since a player's view of a request lacks what the reducer reads.
  */
-function CreatureAnswer(props: { request: RollRequest; target: RollTarget; several: boolean; onEngage(): void; onSent(): void }) {
-  const { request, target } = props;
+function CreatureAnswer(props: {
+  request: RollRequest;
+  target: RollTarget;
+  drafts: Map<string, AnswerDraft>;
+  several: boolean;
+  onEngage(): void;
+  onSent(): void;
+}) {
+  const { request, target, drafts } = props;
   const actions = useRoomActions();
   const { name, effects } = useCreature(target);
   const two = request.test.choices.length > 1;
-  const [choice, setChoice] = useState<0 | 1>(target.choice ?? 0);
-  const [text, setText] = useState(target.total !== undefined ? String(target.total) : "");
+  const key = draftKey(request.id, target);
+  const [start] = useState(() => startingAnswer(target, drafts.get(key)));
+  const [choice, setChoice] = useState<0 | 1>(start.choice);
+  const [text, setText] = useState(start.text);
+  const keep = (draft: { text: string; choice: 0 | 1 }) => drafts.set(key, { ...draft, base: target.total });
   const [sending, setSending] = useState(false);
   const connected = useRoomView((s) => s.connection === "open");
   const [error, setError] = useState<string | null>(null);
@@ -354,6 +376,7 @@ function CreatureAnswer(props: { request: RollRequest; target: RollTarget; sever
         setError("Not sent.");
         return;
       }
+      drafts.delete(key);
       props.onSent();
     };
     if (actions.dispatch({ t: "roll.answer", rollId: request.id, target: targetRef(target), ...answer }, { onAnswer }) === null) {
@@ -392,6 +415,7 @@ function CreatureAnswer(props: { request: RollRequest; target: RollTarget; sever
               options={request.test.choices.map((c, i) => ({ value: i as 0 | 1, label: choiceText(c) }))}
               onChange={(i) => {
                 setChoice(i);
+                keep({ text, choice: i });
                 props.onEngage();
               }}
             />
@@ -423,6 +447,7 @@ function CreatureAnswer(props: { request: RollRequest; target: RollTarget; sever
               error={error !== null}
               onChange={(e) => {
                 setText(e.target.value);
+                keep({ text: e.target.value, choice });
                 setError(null);
                 props.onEngage();
               }}

@@ -20,6 +20,7 @@ import {
   ownerOps,
   ownersLit,
   sharedElevation,
+  sharedImage,
   updateManyOps,
 } from "./groupEdit.ts";
 
@@ -190,5 +191,13 @@ describe("the group's other edits", () => {
     assert.deepEqual(started.encounter?.entries.map((e) => e.tokenId), ["g1"]);
     assert.deepEqual(fightCandidates([started.tokens.chest!, started.tokens.g1!], started.encounter), [], "the bar shows no Add to the fight");
     assert.deepEqual(fightCandidates([started.tokens.chest!, started.tokens.g2!], started.encounter).map((t) => t.id), ["g2"]);
+  });
+
+  test("tokens with no image share none, so the More sheet does not call them different (LPD-DMPHONE-5)", () => {
+    const icon = { icon: "goblin", color: "#e5484d" } as const;
+    assert.deepEqual(sharedImage([{}, {}, {}]), { same: true, image: undefined }, "three goblins drawing their initials");
+    assert.deepEqual(sharedImage([{ image: icon }, { image: { ...icon } }]), { same: true, image: icon });
+    assert.deepEqual(sharedImage([{ image: icon }, {}]), { same: false, image: undefined });
+    assert.deepEqual(sharedImage([{ image: icon }, { image: { ...icon, color: "#3e8ef7" } }]), { same: false, image: undefined });
   });
 });

@@ -1,4 +1,4 @@
-import { useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { useLayoutEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { layoutWidth } from "../features/device/layout.ts";
 import { useBackClose } from "../lib/backClose.ts";
@@ -79,6 +79,7 @@ export function Dialog(props: DialogProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   useBackClose(props.backClose === true, onClose);
   useModalDialog(dialog, { onClose, ...(props.opener ? { returnFocus: props.opener } : null), ...(props.zoom === false ? { zoom: false } : null) });
+  useStepFocus(dialog, props.title);
 
   const card: CSSProperties = phone
     ? sheet
@@ -172,4 +173,24 @@ export function Dialog(props: DialogProps) {
     </dialog>,
     document.body,
   );
+}
+
+/**
+ * A dialog that moves to another step in place, such as a scene menu's
+ * Duplicate and Move to folder, swaps its body under the same `<dialog>`,
+ * and the row or back button that had focus goes with it. Focus then fell
+ * to the page under a modal dialog, and a screen reader heard nothing of
+ * the new step. The dialog takes focus as it does when it opens, which
+ * reads out its new title. A title that changes while focus stays inside,
+ * such as a page renamed from another device, moves nothing.
+ */
+function useStepFocus(dialog: RefObject<HTMLDialogElement | null>, title: string): void {
+  const shown = useRef(title);
+  useLayoutEffect(() => {
+    if (shown.current === title) return;
+    shown.current = title;
+    const el = dialog.current;
+    const active = document.activeElement;
+    if (el?.open && (active === null || active === document.body)) el.focus({ preventScroll: true });
+  }, [dialog, title]);
 }
