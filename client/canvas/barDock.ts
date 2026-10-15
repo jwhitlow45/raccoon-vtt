@@ -472,6 +472,22 @@ export function noticePlace(free: Box): { left: number; width: number } | null {
   return room >= NOTICES_BESIDE_MIN ? { left: free.left, width: room } : null;
 }
 
+/**
+ * What the column publishes after it measures itself: its cards' heights
+ * while they are drawn, none when it has no card, and while they are
+ * hidden (folded under a sheet or summarized beside the bar) the last
+ * heights it had, at its top now. A turn band or a lasting notice still
+ * moves the summary row that shows, and the bar must follow it. The same
+ * object back when nothing changed, so nothing renders for nothing.
+ */
+export function columnFacts(prev: ColumnFacts | null, input: { top: number; measured: { content: number; first: number } | null }): ColumnFacts | null {
+  const { top, measured } = input;
+  if (!measured) return prev && prev.top !== top ? { ...prev, top } : prev;
+  if (measured.first <= 0) return null;
+  if (prev && prev.top === top && prev.content === measured.content && prev.first === measured.first) return prev;
+  return { top, content: measured.content, first: measured.first };
+}
+
 /** The column's top: the lane's, or 8 px under the last lasting notice when the notices span over it. Toasts never move it. */
 export function columnTop(laneTop: number, lastingBottom: number | null): number {
   return lastingBottom === null ? laneTop : Math.max(laneTop, lastingBottom + EDGE);

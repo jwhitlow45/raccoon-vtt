@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useStore } from "zustand";
 import type { LogEntry } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
-import { barDockSlot, columnRoom, columnTop, EDGE, SUMMARY_ROW } from "../../canvas/barDock.ts";
+import { barDockSlot, columnFacts, columnRoom, columnTop, EDGE, SUMMARY_ROW } from "../../canvas/barDock.ts";
 import { ScrollForMore } from "../../canvas/TokenActionBar.tsx";
 import { useAlertsSummaryEntry } from "../../components/sheetFocus.ts";
 import { theme } from "../../lib/theme.ts";
@@ -485,7 +485,7 @@ function FightAlerts() {
     [publishColumn],
   );
 
-  // The cards' measures, while they are drawn. Folded or summarized they keep the last ones, so hiding them never reads as having none.
+  // The cards' measures, while they are drawn. Folded or summarized they keep the last ones, so hiding them never reads as having none, at the column's top now (barDock.ts columnFacts).
   useLayoutEffect(() => {
     const cards = cardsRef.current;
     if (!cards || colTop === null) return;
@@ -496,12 +496,10 @@ function FightAlerts() {
         if (prev?.top !== colTop || prev.first !== SUMMARY_ROW || prev.content !== SUMMARY_ROW) dock.setState({ column: { top: colTop, content: SUMMARY_ROW, first: SUMMARY_ROW } });
         return;
       }
-      if (!drawn(cards)) return;
-      const first = firstCardHeight(cards) / zoom;
-      const next = first > 0 ? { top: colTop, content: cards.getBoundingClientRect().height / zoom, first } : null;
+      const measured = drawn(cards) ? { content: cards.getBoundingClientRect().height / zoom, first: firstCardHeight(cards) / zoom } : null;
       const prev = dock.getState().column;
-      if (prev === next || (prev && next && prev.top === next.top && prev.content === next.content && prev.first === next.first)) return;
-      dock.setState({ column: next });
+      const next = columnFacts(prev, { top: colTop, measured });
+      if (next !== prev) dock.setState({ column: next });
     };
     measure();
     const observer = new ResizeObserver(measure);

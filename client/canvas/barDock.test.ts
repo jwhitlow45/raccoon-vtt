@@ -6,6 +6,7 @@ import {
   BESIDE_MIN,
   clampBox,
   clearAnchor,
+  columnFacts,
   columnRoom,
   columnTop,
   compactHang,
@@ -346,6 +347,24 @@ describe("the right lane", () => {
     const left = spotHang({ corner: "bl", x: 0, y: 0 }, free, { width: 304, height: 300 });
     assert.equal(overlapsLane(left, free), false);
     assert.equal(overlapsLane(home, free), true);
+  });
+
+  test("hidden cards keep their heights at the column's new top, so a band or a notice that moves the summary row moves the bar too", () => {
+    const shown = columnFacts(null, { top: 60, measured: { content: 300, first: 150 } });
+    assert.deepEqual(shown, { top: 60, content: 300, first: 150 });
+    assert.equal(columnFacts(shown, { top: 60, measured: { content: 300, first: 150 } }), shown, "nothing changed, the same object");
+    // Summarized: the cards are hidden, and the band arrives, 48 px down.
+    const moved = columnFacts(shown, { top: 108, measured: null });
+    assert.deepEqual(moved, { top: 108, content: 300, first: 150 });
+    assert.equal(columnFacts(moved, { top: 108, measured: null }), moved);
+    assert.equal(columnFacts(null, { top: 108, measured: null }), null, "nothing measured yet stays nothing");
+    assert.equal(columnFacts(moved, { top: 108, measured: { content: 0, first: 0 } }), null, "a drawn column with no card publishes none");
+    // A summary row beside a compact bar: the row moves with the top, and the bar keeps below it.
+    const free: Box = { left: 55, top: 60, width: 259, height: 157 };
+    const hang = compactHang({ width: 369, height: 246 }, { width: 369, height: 246 }, phone({ band: false, options: true, safe: { top: 0, side: 47, bottom: 21 } }));
+    const at = (column: { top: number; content: number; first: number }) =>
+      hangBox(shareLane({ hang, laneTop: free.top, laneHeight: hang.room, column, laneLeft: laneLeft(free), besideRoom: free.width - 312, content: 300 }).hang, 300).top;
+    assert.equal(at(moved), 108 + 52, "the bar starts under the row where it is now");
   });
 
   test("the column starts below lasting notices only, and toasts never move it", () => {
