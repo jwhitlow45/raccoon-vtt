@@ -1,4 +1,5 @@
-import type { Character, Effect, Encounter, MemberId, Token } from "#shared/model.ts";
+import { sameImage } from "#shared/imageRef.ts";
+import type { Character, Effect, Encounter, ImageRef, MemberId, Token } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { MAX_ENTRIES_PER_OP, type ActorTarget, type ClientOp, type TokenGroupPatch } from "#shared/protocol.ts";
 import { tokenAccess, type Role } from "./access.ts";
@@ -162,6 +163,18 @@ export function shared<T>(tokens: readonly Token[], read: (t: Token) => T): T | 
   if (!first) return undefined;
   const value = read(first);
   return tokens.every((t) => read(t) === value) ? value : undefined;
+}
+
+/**
+ * Whether every token shows the same image, and that image, which is
+ * undefined both when they differ and when none has one. So the More
+ * sheet tells "They differ" only for tokens that do, not for three
+ * goblins that all draw their initials.
+ */
+export function sharedImage(tokens: readonly Pick<Token, "image">[]): { same: boolean; image: ImageRef | undefined } {
+  const first = tokens[0]?.image;
+  const same = tokens.every((t) => sameImage(t.image, first));
+  return { same, image: same ? first : undefined };
 }
 
 /**
