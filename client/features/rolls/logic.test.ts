@@ -10,6 +10,7 @@ import { sheetOpen } from "../../state/types.ts";
 import {
   allAnsweredIds,
   answeredCount,
+  answerKey,
   askAnswer,
   askLine,
   askOp,
@@ -27,6 +28,7 @@ import {
   chipStack,
   chipsStayShown,
   foldedChips,
+  forgetStaleDrafts,
   lookAtRequests,
   newestFirst,
   offersRequest,
@@ -43,6 +45,7 @@ import {
   wantsMark,
   withKind,
   withSkill,
+  type AnswerDraft,
 } from "./logic.ts";
 
 const P2: Viewer = { memberId: "p2", role: "player" };
@@ -560,14 +563,44 @@ describe("the DM's cards on a phone with no sheet open (docs/design-v1-visual.md
 
 describe("a total typed into a card and not sent (LPD-PLAYER-1)", () => {
   test("comes back when the card mounts again, as turning the phone does", () => {
-    const draft = { text: "14", choice: 1 as const, base: undefined };
+    const draft = { text: "14", choice: 1 as const, base: answerKey({}) };
     assert.deepEqual(startingAnswer({}, draft), { text: "14", choice: 1 });
     assert.deepEqual(startingAnswer({}, undefined), { text: "", choice: 0 }, "with nothing typed the card starts empty");
   });
 
   test("gives way to an answer sent since it was typed, from this player's other device", () => {
-    assert.deepEqual(startingAnswer({ total: 9, choice: 0 }, { text: "14", choice: 1, base: undefined }), { text: "9", choice: 0 });
-    assert.deepEqual(startingAnswer({ total: 9, choice: 0 }, { text: "12", choice: 1, base: 9 }), { text: "12", choice: 1 }, "a change typed over a sent answer stays");
+    assert.deepEqual(startingAnswer({ total: 9, choice: 0 }, { text: "14", choice: 1, base: answerKey({}) }), { text: "9", choice: 0 });
+    const sent = answerKey({ total: 9, choice: 0 });
+    assert.deepEqual(startingAnswer({ total: 9, choice: 0 }, { text: "12", choice: 1, base: sent }), { text: "12", choice: 1 }, "a change typed over a sent answer stays");
+    assert.deepEqual(startingAnswer({ result: "fail", noRoll: true }, { text: "12", choice: 1, base: answerKey({}) }), { text: "", choice: 0 }, "a save failed without rolling elsewhere wins too");
+  });
+
+  test("is forgotten once the answer changes, so a reopen after an answer from another device starts the card empty", () => {
+    let state = ask(setup());
+    const view = () => projectState(state, P1, { sceneId: null }).rolls.r1!;
+    const target = view().targets[0]!;
+    const key = draftKey("r1", target);
+    // Pat types 16 on the phone and does not send it.
+    const drafts = new Map<string, AnswerDraft>([[key, { text: "16", choice: 0, base: answerKey(target) }]]);
+    forgetStaleDrafts(drafts, [view()]);
+    assert.equal(drafts.get(key)?.text, "16", "a draft over an unchanged answer stays");
+
+    // Pat answers 9 from the laptop. The card on the phone is folded, or shows the 9.
+    state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, total: 9 }, P1, 2);
+    forgetStaleDrafts(drafts, [view()]);
+    assert.equal(drafts.has(key), false, "the answer from the other device drops the draft for good");
+
+    // The DM reopens it: the answer is back where it stood when 16 was typed, and the card starts empty.
+    state = run(state, { t: "roll.reopen", rollId: "r1", target: { characterId: "ayla" } }, DM, 3);
+    const reopened = view();
+    forgetStaleDrafts(drafts, [reopened]);
+    assert.deepEqual(startingAnswer(reopened.targets[0]!, drafts.get(key)), { text: "", choice: 0 });
+  });
+
+  test("is forgotten when its request closes", () => {
+    const drafts = new Map<string, AnswerDraft>([[draftKey("r1", { characterId: "ayla" }), { text: "16", choice: 0, base: answerKey({}) }]]);
+    forgetStaleDrafts(drafts, []);
+    assert.equal(drafts.size, 0);
   });
 
   test("is kept per request and per creature", () => {

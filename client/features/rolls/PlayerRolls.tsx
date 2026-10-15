@@ -19,6 +19,7 @@ import { chromeZoom, screenHeight, smallUi, useLayoutSize } from "../device/layo
 import { useUiScale } from "../device/settings.ts";
 import {
   answered,
+  answerKey,
   answerLabel,
   askLine,
   CARD_MIN_WIDTH,
@@ -32,6 +33,7 @@ import {
   finalAnswerText,
   finalForPlayer,
   foldedChips,
+  forgetStaleDrafts,
   lookAtRequests,
   newestFirst,
   parseTotal,
@@ -89,10 +91,7 @@ export function PlayerRolls() {
   const firstChip = useRef<HTMLButtonElement | null>(null);
   // What was typed and not sent, which outlives the card: turning the phone moves the card between the screen's foot and the column.
   const drafts = useRef(new Map<string, AnswerDraft>());
-  useEffect(() => {
-    const open = new Set(requests.map((r) => r.id));
-    for (const key of drafts.current.keys()) if (!open.has(key.slice(0, key.indexOf(":")))) drafts.current.delete(key);
-  }, [requests]);
+  useEffect(() => forgetStaleDrafts(drafts.current, requests), [requests]);
 
   // A request that arrives, or one the DM reopened, comes up again (cameUp), counted from the first look with the state loaded.
   // One that arrives under a sheet comes up folded with the card, and still chimes.
@@ -360,7 +359,7 @@ function CreatureAnswer(props: {
   const [start] = useState(() => startingAnswer(target, drafts.get(key)));
   const [choice, setChoice] = useState<0 | 1>(start.choice);
   const [text, setText] = useState(start.text);
-  const keep = (draft: { text: string; choice: 0 | 1 }) => drafts.set(key, { ...draft, base: target.total });
+  const keep = (draft: { text: string; choice: 0 | 1 }) => drafts.set(key, { ...draft, base: answerKey(target) });
   const [sending, setSending] = useState(false);
   const connected = useRoomView((s) => s.connection === "open");
   const [error, setError] = useState<string | null>(null);

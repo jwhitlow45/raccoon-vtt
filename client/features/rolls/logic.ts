@@ -364,27 +364,48 @@ export function parseTotal(text: string): { ok: true; total: number } | { ok: fa
 
 /**
  * What a player typed into a card and has not sent: the total and which
- * choice they rolled, and the total the answer stood at when they typed
- * (`base`). Kept by the player's rolls for each creature a request asks
+ * choice they rolled, and the answer it was typed over (`base`, from
+ * answerKey). Kept by the player's rolls for each creature a request asks
  * about, because the card itself can be built again: under 600 layout px
  * it stands across the screen and from 600 px it sits in the alerts
  * column, so turning a phone between portrait and landscape mounts it
  * afresh.
  */
-export type AnswerDraft = { text: string; choice: 0 | 1; base: number | undefined };
+export type AnswerDraft = { text: string; choice: 0 | 1; base: string };
 
 /** The key of one creature's draft on one request. */
 export function draftKey(requestId: string, target: Pick<RollTarget, "tokenId" | "characterId">): string {
   return `${requestId}:${targetKey(target)}`;
 }
 
+/** A target's answer as the player's view holds it, as one value: equal keys mean the server's answer has not changed. */
+export function answerKey(target: RollAnswer): string {
+  return [target.total ?? "", target.choice ?? "", target.result ?? "", target.noRoll ? "no roll" : ""].join("|");
+}
+
+/**
+ * Forgets each draft whose request has closed, or whose creature's answer
+ * changed since it was typed: a total sent from this player's other
+ * device, a DM's mark, a DM's reopen. Checked on every change, folded
+ * card or not: an answer that comes and is then reopened puts the answer
+ * back as it stood when the draft was typed, and the stale draft would
+ * then come back with the card.
+ */
+export function forgetStaleDrafts(drafts: Map<string, AnswerDraft>, requests: readonly RollRequest[]): void {
+  const answers = new Map<string, string>();
+  for (const r of requests) for (const t of r.targets) answers.set(draftKey(r.id, t), answerKey(t));
+  for (const [key, draft] of drafts) if (answers.get(key) !== draft.base) drafts.delete(key);
+}
+
 /**
  * What a creature's answer starts as when its card mounts: the draft, unless
  * the answer changed since it was typed, such as a total sent from this
- * player's other device, which then wins as it does today.
+ * player's other device, which then wins as it does today. The card can
+ * mount in the same render the answer changes, before forgetStaleDrafts
+ * runs, so this checks too.
  */
-export function startingAnswer(target: Pick<RollTarget, "total" | "choice">, draft: AnswerDraft | undefined): { text: string; choice: 0 | 1 } {
-  if (draft && draft.base === target.total) return { text: draft.text, choice: draft.choice };
+export function startingAnswer(target: RollAnswer, draft: AnswerDraft | undefined): { text: string; choice: 0 | 1 } {
+  if (draft && draft.base === answerKey(target)) return { text: draft.text, choice: draft.choice };
   return { text: target.total !== undefined ? String(target.total) : "", choice: target.choice ?? 0 };
 }
 
