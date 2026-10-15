@@ -51,9 +51,11 @@ export function findRect(token: Pick<Token, "x" | "y" | "size" | "w" | "h">): Re
 /**
  * The camera for a found token: zoomed so the token and the room around it
  * fit between the bars, and the token centered in the part of the map a
- * phone's open sheet leaves in view. The zoom ignores the sheet, so a press
- * with the Log open shows the token as large as one without, with some of
- * its surroundings under the sheet.
+ * phone's open sheet and the docked token action bar leave in view
+ * (`cover`, past the bars, the larger of the two on each side,
+ * canvas/barDock.ts barCover). The zoom ignores the cover, so a press with
+ * the Log open shows the token as large as one without, with some of its
+ * surroundings under the sheet.
  */
 export function findCamera(viewport: Size, target: Rect, bars: Insets, cover: Insets): Camera {
   const { scale } = fitRect(viewport, target, 24, bars);

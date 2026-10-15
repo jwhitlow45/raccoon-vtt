@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import type { Character, Token } from "#shared/model.ts";
 import { character, token } from "#shared/testutil.ts";
 import { fitRect, NO_INSETS } from "../../lib/camera.ts";
+import { barCover, largerEach, pastBars } from "../../canvas/barDock.ts";
 import { FIND_ROOM_CELLS, findCamera, findRect, nextOwnToken, sheetCover } from "./findToken.ts";
 
 function view(tokens: Token[], characters: Character[] = []) {
@@ -87,6 +88,19 @@ describe("find my token", () => {
     const cam = findCamera(viewport, target, bars, cover);
     assert.equal(cam.scale, fitRect(viewport, target, 24, bars).scale);
     assert.equal(6.5 * cam.scale + cam.y, 52 + (844 - 52 - 60 - cover.bottom) / 2);
+  });
+
+  test("keeps the zoom with the docked token bar open, and lands the token clear of it", () => {
+    const viewport = { width: 920, height: 800 };
+    const bars = { top: 52, right: 0, bottom: 60, left: 0 };
+    const target = findRect({ x: 30, y: 6, size: "medium" });
+    // The bar in the lane covers the right 312 px and the 8 px margin past the bars (canvas/barDock.ts barCover).
+    const cover = largerEach(NO_INSETS, pastBars(barCover(viewport, bars, { box: { left: 608, top: 300, width: 304, height: 432 }, laneLeft: 600 }), bars));
+    const cam = findCamera(viewport, target, bars, cover);
+    assert.equal(cam.scale, fitRect(viewport, target, 24, bars).scale);
+    const x = 30.5 * cam.scale + cam.x;
+    assert.equal(x, (920 - 320) / 2);
+    assert.ok(x + 0.5 * cam.scale <= 600, "the token ends left of the bar");
   });
 
   test("a sheet that leaves no map centers between the bars instead", () => {

@@ -8,10 +8,12 @@ import { scopeSlot } from "../state/scope.ts";
  * a player" puts a second canvas on the page.
  *
  * - `fit` fits the map, or a player's revealed part of it.
- * - `show` moves to a camera the caller works out from the canvas size and
- *   the bars over it, as "Find my token" does (features/find/findToken.ts).
+ * - `show` moves to a camera the caller works out from the canvas size, the
+ *   bars over it and what the docked token bar covers past those bars
+ *   (canvas/barDock.ts barCover), as "Find my token" does
+ *   (features/find/findToken.ts).
  */
 export const fitSlot = scopeSlot(() => ({
   fit: null as (() => void) | null,
-  show: null as ((camera: (viewport: Size, bars: Insets) => Camera) => void) | null,
+  show: null as ((camera: (viewport: Size, bars: Insets, bar: Insets) => Camera) => void) | null,
 }));

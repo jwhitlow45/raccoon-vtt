@@ -1,5 +1,4 @@
 import { fitSlot } from "../../canvas/fitSlot.ts";
-import { NO_INSETS } from "../../lib/camera.ts";
 import type { RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
@@ -24,9 +23,14 @@ import { frameRect, type OutlineRow } from "./rows.ts";
  * The caller closes a phone's sheet first, so the item is not under it.
  */
 export function focusOutlineRow(row: OutlineRow, env: { scope: RoomScope; ui: RoomUi; actions: RoomActions; sceneId: string }): void {
-  const { scope, ui } = env;
+  pick(row, env);
+  // After the pick, so a token lands clear of the action bar it opens, and nothing else keeps clear of a bar the pick closed (canvas/barDock.ts).
   const target = frameRect(row.rect);
-  scope.get(fitSlot).show?.((viewport, bars) => findCamera(viewport, target, bars, NO_INSETS));
+  env.scope.get(fitSlot).show?.((viewport, bars, bar) => findCamera(viewport, target, bars, bar));
+}
+
+function pick(row: OutlineRow, env: { scope: RoomScope; ui: RoomUi; actions: RoomActions; sceneId: string }): void {
+  const { scope, ui } = env;
   switch (row.kind) {
     case "token":
       ui.setTool("select");

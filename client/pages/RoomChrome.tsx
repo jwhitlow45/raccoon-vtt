@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
+import { largerEach } from "../canvas/barDock.ts";
 import { fitSlot } from "../canvas/fitSlot.ts";
 import { ReconnectBanner } from "../components/ConnectionStatus.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
@@ -294,7 +295,8 @@ export function FindButton(props: { openSheet(): OpenSheet | null }) {
     lastRef.current = token.id;
     const target = findRect(token);
     const cover = sheetCover(props.openSheet());
-    slot.show?.((viewport, bars) => findCamera(viewport, target, bars, cover));
+    // The open sheet's cover and the token bar's, the larger on each side.
+    slot.show?.((viewport, bars, bar) => findCamera(viewport, target, bars, largerEach(cover, bar)));
   };
   return (
     <span style={{ flex: "none", display: "flex", marginRight: -theme.space(2) }}>

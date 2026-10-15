@@ -55,8 +55,10 @@ import { localDragSlot } from "../state/localDrags.ts";
 import { useRoomScope } from "../state/scope.ts";
 import { stageKeysSlot } from "../state/shortcuts.ts";
 import { sheetOpen as sheetIsOpen } from "../state/types.ts";
+import { foldsUnderSheet } from "../pages/fold.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
+import { barCover, barDockSlot, clearAnchor, DEFAULT_CHROME, largerEach, pastBars, restingBar } from "./barDock.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
 import { canDragToken, movesOthers } from "./dragRights.ts";
 import { fitSlot } from "./fitSlot.ts";
@@ -82,15 +84,19 @@ function sceneRect(scene: Scene) {
 /**
  * A fitted camera, the canvas and scene sizes it was fitted to, and what it
  * fits: a part of the scene (a player's "Fit map" under fog), or the whole
- * scene when `target` is null, which follows the scene's size.
+ * scene when `target` is null, which follows the scene's size. `cover` is
+ * the docked token bar's cover the fit kept clear of (canvas/barDock.ts
+ * barCover), kept with it, so the bar opening or closing later never moves
+ * the fitted map, while the bars over the map growing still refit it.
  */
-type Fit = { cam: Camera; key: string; target: Rect | null };
+type Fit = { cam: Camera; key: string; target: Rect | null; cover: Insets };
 
-function fitScene(size: Size, scene: Scene, insets: Insets, target: Rect | null = null): Fit {
+function fitScene(size: Size, scene: Scene, insets: Insets, target: Rect | null = null, cover: Insets = NO_INSETS): Fit {
   return {
-    cam: fitRect(size, target ?? sceneRect(scene), 24, insets),
+    cam: fitRect(size, target ?? sceneRect(scene), 24, largerEach(insets, cover)),
     key: `${size.width}x${size.height}:${scene.bounds.w}x${scene.bounds.h}`,
     target,
+    cover,
   };
 }
 
@@ -245,8 +251,8 @@ export function MapStage(props: {
     const fitted = fittedRef.current;
     const c = pendingCamRef.current ?? camRef.current;
     if (!size || !fitted || !c || !sameCamera(c, fitted.cam) || cameraSceneRef.current !== scene.id) return;
-    const next = fitScene(size, scene, { top, right, bottom, left }, fitted.target);
-    if (next.key === fitted.key && rectClear(c, fitted.target ?? sceneRect(scene), size, { top, right, bottom, left })) return;
+    const next = fitScene(size, scene, { top, right, bottom, left }, fitted.target, fitted.cover);
+    if (next.key === fitted.key && rectClear(c, fitted.target ?? sceneRect(scene), size, largerEach({ top, right, bottom, left }, fitted.cover))) return;
     fittedRef.current = next;
     if (!sameCamera(next.cam, c)) setCam(next.cam);
   }, [size, scene, top, right, bottom, left]);
@@ -256,8 +262,39 @@ export function MapStage(props: {
     if (size) gestureRef.current.minScale = sceneMinScale(size, scene.bounds);
   }, [size, scene.bounds]);
 
+  /*
+   * What the token action bar covers of the map, in screen pixels
+   * (canvas/barDock.ts barCover), for Fit, Find and the pans that bring a
+   * token into view. A docked or compact bar counts by the box it
+   * published. A spanning bar is placed by its token, so it counts for
+   * nothing. `opening` also counts a bar the change that asked for the move
+   * is about to show, as a tracker row's tap does: its box does not exist
+   * yet, so it rests at its spot with the height it last had.
+   */
+  const barCoverRef = useRef<(viewport: Size, opening: boolean) => Insets>(() => NO_INSETS);
+  barCoverRef.current = (viewport, opening) => {
+    const dock = scope.get(barDockSlot).getState();
+    const z = uiScale();
+    const local = store.getState().local;
+    const layout = layoutSize(window, z);
+    // Whether the bar shows follows the room's state at once, ahead of the render that draws or removes it.
+    const shows = local.actionBar && local.selectedId !== null && !activeTool(local.tool, role).pointer && !foldsUnderSheet({ ...layout, sheetOpen: sheetIsOpen(local) });
+    if (!shows) return NO_INSETS;
+    const bar = dock.bar
+      ? dock.bar.mode === "span"
+        ? null
+        : { box: dock.bar.box, laneLeft: dock.bar.laneLeft }
+      : opening
+        ? restingBar({ layout, viewport: sizeInZoomed(viewport, z), chrome: dock.chrome ?? DEFAULT_CHROME, spot: dock.spot, height: dock.lastHeight })
+        : null;
+    if (!bar) return NO_INSETS;
+    const box = { left: bar.box.left * z, top: bar.box.top * z, width: bar.box.width * z, height: bar.box.height * z };
+    return barCover(viewport, insetsRef.current, { box, laneLeft: bar.laneLeft * z });
+  };
+
   // The top bar's "Fit map" button (fitSlot.ts, lib/fitTarget.ts). Its fit
-  // keeps clear of the bars and follows them like a scene's first fit.
+  // keeps clear of the bars and the token bar, and follows the bars like a
+  // scene's first fit.
   useEffect(() => {
     const slot = scope.get(fitSlot);
     const fit = () => {
@@ -271,18 +308,19 @@ export function MapStage(props: {
         : [];
       const target = fitTarget({ bounds: current.bounds, revealed, own });
       const whole = target.width === current.bounds.w && target.height === current.bounds.h;
-      fittedRef.current = fitScene(s, current, insetsRef.current, whole ? null : target);
+      fittedRef.current = fitScene(s, current, insetsRef.current, whole ? null : target, barCoverRef.current(s, false));
       pendingCamRef.current = null;
       setCam(fittedRef.current.cam);
     };
     // "Find my token" (features/find/findToken.ts). A plain camera rather
-    // than a fit, so the bars changing never move it back.
-    const show = (camera: (viewport: Size, bars: Insets) => Camera) => {
+    // than a fit, so the bars changing never move it back. The token bar's
+    // cover goes with it, past the bars, counting a bar about to open.
+    const show = (camera: (viewport: Size, bars: Insets, bar: Insets) => Camera) => {
       const s = sizeRef.current;
       if (!s) return;
       fittedRef.current = null;
       pendingCamRef.current = null;
-      setCam(camera(s, insetsRef.current));
+      setCam(camera(s, insetsRef.current, pastBars(barCoverRef.current(s, true), insetsRef.current)));
     };
     slot.fit = fit;
     slot.show = show;
@@ -312,7 +350,7 @@ export function MapStage(props: {
     setCam(controlled(size));
   }, [controlled, size, scene.id]);
 
-  // A tap on an initiative row brings its token into view, keeping the zoom.
+  // A tap on an initiative row brings its token into view, keeping the zoom, and clear of the token bar it opens.
   useEffect(
     () =>
       watchPans(scope, scene.id, (p) => {
@@ -320,7 +358,8 @@ export function MapStage(props: {
         const c = pendingCamRef.current ?? camRef.current;
         if (!s || !c) return;
         pendingCamRef.current = null;
-        setCam({ ...c, x: s.width * p.anchor.x - p.x * c.scale, y: s.height * p.anchor.y - p.y * c.scale });
+        const at = clearAnchor({ x: s.width * p.anchor.x, y: s.height * p.anchor.y }, s, insetsRef.current, barCoverRef.current(s, true));
+        setCam({ ...c, x: at.x - p.x * c.scale, y: at.y - p.y * c.scale });
       }),
     [scope, scene.id],
   );
