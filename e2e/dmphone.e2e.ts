@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * A DM running a session from a phone, after the whole-app design pass
@@ -529,6 +529,38 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await ops.send({ t: "encounter.end" });
     await dm.getByRole("button", { name: /^Initiative, round/ }).first().waitFor({ state: "detached" });
     await clear("after the band");
+    await framing.getByRole("button", { name: "Cancel" }).tap();
+  });
+
+  test("10. at 480 x 320 at 130% under the Starting view notice, the summary row standing for a check is never under the notice nor over a button, and its tap shows the check", async () => {
+    const label = "480 x 320 at 130% under the Starting view notice";
+    await setUp({ width: 480, height: 320, scale: 1.3, side: 47, bottom: 21 });
+    const scenes = await openPanel(dm, "Scenes");
+    await scenes.getByRole("button", { name: "Save current view" }).tap();
+    const framing = dm.getByRole("group", { name: "Starting view" });
+    await framing.waitFor();
+    await hurtHag();
+    await dm.locator('[data-alert="concentration"]').first().waitFor({ state: "attached" });
+    await dm.waitForTimeout(400);
+    // The notice leaves the column no room for the check, and paints over the column, so the row must find a spot of its own.
+    const row = dm.getByRole("button", { name: /^Concentration check/ });
+    await shots.take(dm, "dmphone-row-under-notice-480x320");
+    assert.ok(await wholeInReach(row), `${label}: the summary row is hidden or cut off`);
+    const r = await rectOf(row);
+    assert.ok(!intersects(r, await rectOf(framing)), `${label}: the row meets the notice`);
+    for (const name of ["Cancel", "Save view"]) {
+      assert.ok(await wholeInReach(framing.getByRole("button", { name, exact: true })), `${label}: the notice's ${name} takes no tap`);
+    }
+    // The top bar's Redo and Fit already overlap by a hair at this size, so the row is checked against each button's box rather than by hit tests.
+    const bars = dm.locator("header button:visible:not([data-rvtt-backdrop])");
+    for (let i = 0; i < (await bars.count()); i++) {
+      const b = bars.nth(i);
+      const name = (await b.getAttribute("aria-label")) ?? (await b.textContent()) ?? "?";
+      if (name.startsWith("Concentration check")) continue;
+      assert.ok(!intersects(r, await rectOf(b)), `${label}: the row covers ${name} in the top bar`);
+    }
+    await row.tap();
+    await dm.locator('[data-alert="concentration"]').first().waitFor();
     await framing.getByRole("button", { name: "Cancel" }).tap();
   });
 });

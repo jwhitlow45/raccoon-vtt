@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useStore } from "zustand";
 import type { LogEntry } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
-import { barDockSlot, columnFacts, columnRoom, columnTop, EDGE, SUMMARY_ROW } from "../../canvas/barDock.ts";
+import { barDockSlot, columnFacts, columnRoom, columnTop, EDGE, raisedRow, SUMMARY_ROW } from "../../canvas/barDock.ts";
 import { ScrollForMore } from "../../canvas/TokenActionBar.tsx";
 import { useAlertsSummaryEntry } from "../../components/sheetFocus.ts";
 import { theme } from "../../lib/theme.ts";
@@ -317,6 +317,8 @@ function TrackerTarget(props: { label: string; reach: number }) {
   return (
     <button
       type="button"
+      // A backdrop to what stands over it: the alerts' summary row may cover part of it (FightAlerts), as the band's own parts do.
+      data-rvtt-backdrop=""
       onClick={() => ui.openPanel("tracker")}
       aria-label={props.label}
       style={{
@@ -490,9 +492,6 @@ function FightAlerts() {
   const forRoom = cramped && !asked && !forFootCard;
   const summary = forRoom ? roomSummary : barSummary;
   const summarized = forFootCard || forRoom || (!folded && bar?.lane === "summary" && summary !== null);
-  // Standing for the cards, the row keeps above the tool's option buttons. Where the room under the top bars is too short for it, as in a fight at 480 x 320 at 130%, it rises over the turn band, never over the top bar's row.
-  const rowRoom = chrome ? height - chrome.top - chrome.controls - push : Infinity;
-  const lift = summarized ? Math.min(Math.max(0, EDGE + SUMMARY_ROW + theme.space(1) - rowRoom), push + EDGE + top - theme.layout.topBar) : 0;
   useLayoutEffect(() => {
     if (dock.getState().columnCramped !== forRoom) dock.setState({ columnCramped: forRoom });
   }, [dock, forRoom]);
@@ -507,37 +506,46 @@ function FightAlerts() {
   const boxRef = useRef<HTMLDivElement | null>(null);
   const cardsRef = useRef<HTMLDivElement>(null);
   /*
-   * Risen over the turn band, the row also keeps 8 px left of any control
-   * there, End turn above all, since a player who chose Later must still be
-   * able to end their turn. It narrows from the right, the side the column
-   * hangs on, and may cover the band's name or Next disks, never a button.
-   * At its narrowest it keeps a touch target's width, which every layout
-   * from 320 px at 150% leaves room for beside End turn. `rowInset` is how
-   * far it stops short of its usual right edge, in the column's own pixels.
+   * Where the summary row stands (barDock.ts raisedRow). Its place is under
+   * the top bars and any lasting notice. Where that would put it over the
+   * tool's option buttons, as in a fight at 480 x 320 at 130%, it rises, over
+   * the turn band and then the top bar's row if it must. It never meets a
+   * lasting notice, which paints above the column and would hide it. Over a
+   * button in the top bars it narrows to stop 8 px left of it, End turn
+   * above all, since a player who chose Later must still be able to end
+   * their turn. `rowPlace` is how far it rose and how far it stops short of
+   * its usual right edge, in the column's own pixels.
    */
   const rowRef = useRef<HTMLButtonElement>(null);
-  const [rowInset, setRowInset] = useState(0);
-  const appliedInset = useRef(0);
-  appliedInset.current = rowInset;
+  const [rowPlace, setRowPlace] = useState(NOT_RAISED);
+  const appliedPlace = useRef(rowPlace);
+  appliedPlace.current = rowPlace;
   useLayoutEffect(() => {
     const row = rowRef.current;
-    const header = boxRef.current?.parentElement;
-    if (!row || !header || lift === 0) {
-      setRowInset(0);
+    const box = boxRef.current;
+    const header = box?.parentElement;
+    if (!row || !box || !header || !chrome) {
+      setRowPlace(NOT_RAISED);
       return;
     }
     const r = row.getBoundingClientRect();
-    const right = r.right + appliedInset.current * zoom;
-    const gap = EDGE * zoom;
-    let limit = right;
-    for (const control of header.querySelectorAll("button")) {
-      if (boxRef.current?.contains(control)) continue;
-      const c = control.getBoundingClientRect();
-      if (c.top < r.bottom && c.bottom > r.top && c.left > r.left && c.left - gap < limit) limit = c.left - gap;
-    }
-    const next = Math.ceil(Math.max(0, Math.min(right - limit, right - r.left - theme.touch * zoom)) / zoom);
-    // A measure taken with the inset applied differs from the last only by rounding, so it keeps the inset and draws nothing again.
-    setRowInset((prev) => (Math.abs(prev - next) <= 1 ? prev : next));
+    const applied = appliedPlace.current;
+    const usual = { left: r.left, right: r.right + applied.inset * zoom, top: r.top + applied.lift * zoom, height: r.height };
+    const controls = Array.from(header.querySelectorAll("button"))
+      .filter((b) => !box.contains(b) && !b.hasAttribute("data-rvtt-backdrop"))
+      .map((b) => b.getBoundingClientRect());
+    const place = raisedRow({
+      row: usual,
+      ceiling: header.firstElementChild?.getBoundingClientRect().top ?? 0,
+      floor: (height - chrome.controls - theme.space(1)) * zoom,
+      taken: lasting === null ? [] : [{ top: chrome.top * zoom, bottom: (lasting + theme.space(1)) * zoom }],
+      controls,
+      gap: EDGE * zoom,
+      minWidth: theme.touch * zoom,
+    });
+    const next = place ? { lift: Math.round((usual.top - place.top) / zoom), inset: Math.ceil((usual.right - place.right) / zoom) } : NOT_RAISED;
+    // A measure taken with the place applied differs from the last only by rounding, so it keeps the place and draws nothing again.
+    setRowPlace((prev) => (Math.abs(prev.lift - next.lift) <= 1 && Math.abs(prev.inset - next.inset) <= 1 ? prev : next));
   });
   // Asked for, the cards stand over the tool's options until a tap lands outside them.
   useEffect(() => {
@@ -622,7 +630,7 @@ function FightAlerts() {
       onScroll={clip}
       style={{
         position: "absolute",
-        top: `calc(100% + ${push - lift}px)`,
+        top: `calc(100% + ${push - rowPlace.lift}px)`,
         right: sheetWidth,
         width: `calc(${cardWidth} + ${leftPad} + ${rightPad})`,
         // Before Room has measured its bars: the screen's height in the zoomed bar's own pixels (features/device/layout.ts), less the bars.
@@ -660,7 +668,7 @@ function FightAlerts() {
             if (forRoom) setAsked(true);
             setShowAfter(rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: summary.first });
           }}
-          style={{ ...card, minHeight: SUMMARY_ROW, padding: `0 ${theme.space(3)}px`, marginRight: rowInset }}
+          style={{ ...card, minHeight: SUMMARY_ROW, padding: `0 ${theme.space(3)}px`, marginRight: rowPlace.inset }}
         />
       ) : null}
       <div ref={cardsRef} hidden={summarized} style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: theme.space(2) }}>
@@ -715,6 +723,9 @@ function firstCardHeight(cards: HTMLElement): number {
   }
   return 0;
 }
+
+/** The summary row at its usual place (FightAlerts `rowPlace`). */
+const NOT_RAISED = { lift: 0, inset: 0 };
 
 /** Room around the alert cards for their shadow (theme.shadow.float reaches about 20 px below a card). */
 const SHADOW_ROOM = theme.space(5);

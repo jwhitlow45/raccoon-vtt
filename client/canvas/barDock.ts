@@ -506,6 +506,44 @@ export function columnFacts(prev: ColumnFacts | null, input: { top: number; meas
   return { top, content: measured.content, first: measured.first };
 }
 
+/**
+ * Where the alerts column's summary row stands (features/encounter
+ * InitiativeStrip.tsx FightAlerts): the lowest spot at or above its usual
+ * place whose foot keeps above the tool's option buttons (`floor`), that
+ * meets no lasting notice (`taken`), and that stands over no button in the
+ * top bars. Where a button stands in its way it narrows from the right to
+ * stop `gap` left of it, keeping `minWidth`, or else rises further. It may
+ * rise over the turn band and then the top bar's row, up to `ceiling`.
+ * Null where no spot is left. Any one unit throughout: screen px as drawn.
+ */
+export function raisedRow(input: {
+  row: { left: number; right: number; top: number; height: number };
+  ceiling: number;
+  floor: number;
+  taken: readonly { top: number; bottom: number }[];
+  controls: readonly { left: number; top: number; right: number; bottom: number }[];
+  gap: number;
+  minWidth: number;
+}): { top: number; right: number } | null {
+  const { row, gap } = input;
+  for (let top = Math.min(row.top, input.floor - row.height); top >= input.ceiling; top -= 1) {
+    const bottom = top + row.height;
+    if (input.taken.some((t) => t.top < bottom && t.bottom > top)) continue;
+    let right = row.right;
+    let blocked = false;
+    for (const c of input.controls) {
+      if (c.top >= bottom || c.bottom <= top || c.right <= row.left) continue;
+      if (c.left - gap < row.left + input.minWidth) {
+        blocked = true;
+        break;
+      }
+      right = Math.min(right, c.left - gap);
+    }
+    if (!blocked) return { top, right };
+  }
+  return null;
+}
+
 /** The column's top: the lane's, or 8 px under the last lasting notice when the notices span over it. Toasts never move it. */
 export function columnTop(laneTop: number, lastingBottom: number | null): number {
   return lastingBottom === null ? laneTop : Math.max(laneTop, lastingBottom + EDGE);

@@ -22,6 +22,7 @@ import {
   parseSpot,
   placeBar,
   pastBars,
+  raisedRow,
   readSpot,
   releaseSpot,
   restingBar,
@@ -455,6 +456,33 @@ describe("fit and find keep clear of the bar", () => {
     assert.equal(drawn.lane, "beside");
     assert.deepEqual(rest.box, hangBox(drawn.hang, 300));
     assert.equal(rest.box.left + rest.box.width, 820 - 8 - 312, "the resting bar sits left of the lane, where the drawn one will");
+  });
+});
+
+describe("the alerts column's summary row on a short screen", () => {
+  // 480 x 320 at 130% as layout px: the row's usual place is 60 to 104, under a 52 px top bar.
+  const row = { left: 55, right: 314, top: 60, height: 44 };
+  const base = { ceiling: 0, taken: [], controls: [], gap: 8, minWidth: 44 };
+
+  test("keeps its place while the tool's buttons stand below it", () => {
+    assert.deepEqual(raisedRow({ ...base, row, floor: 140 }), { top: 60, right: 314 });
+  });
+
+  test("rises just above the tool's buttons, narrowing to stop 8 px left of End turn in the band", () => {
+    const endTurn = { left: 220, top: 58, right: 300, bottom: 102 };
+    assert.deepEqual(raisedRow({ ...base, row: { ...row, top: 108 }, floor: 132, controls: [endTurn] }), { top: 88, right: 212 });
+  });
+
+  test("never meets a lasting notice, and rises over the top bar's row past it, short of its buttons", () => {
+    const notice = { top: 52, bottom: 126 };
+    const find = { left: 280, top: 4, right: 324, bottom: 48 };
+    assert.deepEqual(raisedRow({ ...base, row: { ...row, top: 134 }, floor: 113, taken: [notice], controls: [find] }), { top: 8, right: 272 });
+  });
+
+  test("goes no higher than a spot where a button stands in its first 44 px, and is null with no spot left", () => {
+    const notice = { top: 52, bottom: 126 };
+    const atItsLeft = { left: 60, top: 0, right: 104, bottom: 52 };
+    assert.equal(raisedRow({ ...base, row: { ...row, top: 134 }, floor: 113, taken: [notice], controls: [atItsLeft] }), null);
   });
 });
 

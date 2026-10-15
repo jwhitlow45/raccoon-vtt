@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * A player on a phone after the visual design pass, from the live play
@@ -203,33 +203,6 @@ async function buttonAt(control: Locator): Promise<string | null> {
     const el = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): Node | null } }).document.elementFromPoint(x, y);
     return el?.closest("button")?.textContent?.trim() ?? el?.tagName ?? null;
   }, [(r.left + r.right) / 2, (r.top + r.bottom) / 2] as const);
-}
-
-/**
- * Whether `target` shows whole and takes a tap as things stand, with
- * nothing scrolled first: a tap at its middle, and one just inside the
- * middle of each edge, lands on it. A control cut off by its card's foot
- * can still take a tap at its middle.
- */
-async function wholeInReach(target: Locator): Promise<boolean> {
-  const r = await rectOf(target);
-  const x = (r.left + r.right) / 2;
-  const y = (r.top + r.bottom) / 2;
-  const points = [
-    [x, y],
-    [x, r.top + 3],
-    [x, r.bottom - 3],
-    [r.left + 3, y],
-    [r.right - 3, y],
-  ] as const;
-  return target.evaluate(
-    (el, at) =>
-      at.every(([px, py]) => {
-        const top = el.ownerDocument.elementFromPoint(px, py);
-        return top !== null && el.contains(top);
-      }),
-    points,
-  );
 }
 
 /** Whether the turn band shows under the top bar's row: the turn strip's name stands below the room's name. */

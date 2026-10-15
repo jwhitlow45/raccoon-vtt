@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { BrowserContext, Page } from "playwright-core";
+import type { BrowserContext, Locator, Page } from "playwright-core";
 import WebSocket from "ws";
 import type { RoomState } from "#shared/model.ts";
 import { applyChanges, type ProjectedState } from "#shared/project.ts";
@@ -234,6 +234,34 @@ export class Shots {
 type StageCamera = { x: number; y: number; scale: number };
 
 /** The map stage's camera, read from Konva, which puts itself on the page as a global. */
+/**
+ * Whether `target` shows whole and takes a tap as things stand, with
+ * nothing scrolled first: a tap at its middle, and one just inside the
+ * middle of each edge, lands on it. A control cut off by its card's foot
+ * can still take a tap at its middle.
+ */
+export async function wholeInReach(target: Locator): Promise<boolean> {
+  const b = await target.boundingBox();
+  if (!b) return false;
+  const x = b.x + b.width / 2;
+  const y = b.y + b.height / 2;
+  const points = [
+    [x, y],
+    [x, b.y + 3],
+    [x, b.y + b.height - 3],
+    [b.x + 3, y],
+    [b.x + b.width - 3, y],
+  ] as const;
+  return target.evaluate(
+    (el, at) =>
+      at.every(([px, py]) => {
+        const top = el.ownerDocument.elementFromPoint(px, py);
+        return top !== null && el.contains(top);
+      }),
+    points,
+  );
+}
+
 export function readCamera(page: Page): Promise<StageCamera | null> {
   return page.evaluate(() => {
     const konva = (globalThis as unknown as { Konva?: { stages: { x(): number; y(): number; scaleX(): number }[] } }).Konva;
