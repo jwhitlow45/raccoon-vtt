@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../../components/Button.tsx";
 import { Notice } from "../../components/Notice.tsx";
@@ -9,7 +9,7 @@ import { Room } from "../../pages/Room.tsx";
 import { RoomProvider, useAssets, useRoomStore } from "../../state/view.ts";
 import { useTopBars } from "../encounter/band.ts";
 import { createPreview, type Preview } from "./preview.ts";
-import { PreviewContext } from "./previewContext.ts";
+import { PreviewContext, type PreviewNotice } from "./previewContext.ts";
 
 const FLASH_MS = 2_000;
 
@@ -24,6 +24,15 @@ const FLASH_MS = 2_000;
  * preview. A refused tap makes the banner say so, in place of a toast.
  * The banner is a Notice in the highlight tone, which keeps the cream
  * whatever the DM's color and puts the focus ring on Exit in ink.
+ *
+ * The banner stays here, outside the previewed page, so a blackout and the
+ * ended screen keep its Exit. The page places it among its own notices
+ * (pages/Room.tsx, docs/design-v1-bar-dock.md 1.3): it hears the banner's
+ * height and answers with where it goes, left of the lane the token bar
+ * and the alerts column share, so it never covers a card (LPD-DESK-6).
+ * While the page answers nothing (a blackout, the ended screen, the first
+ * frame) or wants it spanning, it sits centered under the top bars, and
+ * the page's own notices and the column start below it.
  */
 export function PlayerPreview(props: { memberId: string; name: string; onExit(): void }) {
   const source = useRoomStore();
@@ -32,9 +41,28 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
   const [flash, setFlash] = useState(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { memberId, name, onExit } = props;
-  // The bars the previewed page draws over the map: its top bar, and on a phone in a fight the turn band, which is the only
-  // place that says whose turn it is. The DM's own view has a fight exactly when the player's does, outside a blackout.
+  // The bars the previewed page draws over the map, the top bar and a phone's turn band, as the DM's own view has them: a fight shows in both or neither, outside a blackout.
   const topBars = useTopBars();
+  const noticeRef = useRef<HTMLDivElement>(null);
+  const [noticeHeight, setNoticeHeight] = useState(0);
+  const [placed, setPlaced] = useState<{ left: number; width: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = noticeRef.current;
+    if (!el) return;
+    const measure = () => setNoticeHeight(el.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const notice = useMemo<PreviewNotice>(
+    () => ({
+      height: noticeHeight,
+      place: (box) => setPlaced((prev) => (prev === box || (prev && box && prev.left === box.left && prev.width === box.width) ? prev : box)),
+    }),
+    [noticeHeight],
+  );
+  const context = useMemo(() => ({ memberId, name, notice }), [memberId, name, notice]);
 
   // Made in an effect, so a development double mount disposes the first one.
   useEffect(() => {
@@ -83,7 +111,7 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
       }}
     >
       {preview ? (
-        <PreviewContext.Provider value={{ memberId, name }}>
+        <PreviewContext.Provider value={context}>
           <RoomProvider store={preview.store} actions={preview.actions} ui={preview.ui} assets={assets}>
             <Room />
           </RoomProvider>
@@ -91,14 +119,13 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
       ) : null}
       <div aria-hidden style={{ position: "fixed", inset: 0, zIndex: 1, pointerEvents: "none", border: `4px solid ${theme.color.accentSoft}` }} />
       <div
+        ref={noticeRef}
         style={{
           position: "fixed",
           zIndex: 2,
           // Just under the Room page's top bar and its turn band, which take the interface size.
           top: `calc(${theme.safe.top} * ${zoom} + ${(topBars + 8) * zoom}px)`,
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: `min(520px, calc(100% - ${theme.space(6)}px))`,
+          ...(placed ? { left: placed.left, width: placed.width } : { left: "50%", transform: "translateX(-50%)", width: `min(520px, calc(100% - ${theme.space(6)}px))` }),
           fontFamily: theme.font.body,
         }}
       >

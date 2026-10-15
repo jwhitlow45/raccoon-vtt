@@ -25,15 +25,19 @@ export type DockActions = {
   showAlerts(summary: AlertsSummary): void;
 };
 
-/** The dock's summary of the folded alerts: the column's, and the rolls' line that features/rolls publishes. */
-export function useDockSummary(): AlertsSummary | null {
+/**
+ * The dock's summary of the folded alerts: the column's, and the rolls'
+ * line that features/rolls publishes. The column's own summary row beside
+ * the docked token bar reads the same, with the bar's advice (`hides`).
+ */
+export function useDockSummary(hides: "sheet" | "bar" = "sheet"): AlertsSummary | null {
   const alerts = useStore(useScoped(dockSlot), (s) => s.alerts);
   const rolls = useAlertsSummaryEntry();
   const text = rolls?.text ?? null;
   const name = rolls?.name ?? null;
   const waiting = rolls?.waiting ?? false;
   const requests = rolls?.requests ?? 0;
-  return useMemo(() => alertsSummary(text !== null && name !== null ? { text, name, waiting, requests } : null, alerts), [alerts, text, name, waiting, requests]);
+  return useMemo(() => alertsSummary(text !== null && name !== null ? { text, name, waiting, requests } : null, alerts, hides), [alerts, text, name, waiting, requests, hides]);
 }
 
 /**
@@ -135,9 +139,12 @@ export function DockHeaderActions(props: { summary: AlertsSummary | null; action
 /**
  * One button that names the most pressing alert and how many more wait
  * (fold.ts alertsSummary). It is the "sheet" kind, with no
- * `aria-expanded`: a tap closes the sheets and the full column shows.
+ * `aria-expanded`: a tap closes the sheets and the full column shows. The
+ * alerts column draws it too, as its summary row beside the docked token
+ * bar, where a tap hides the bar instead
+ * (features/encounter/InitiativeStrip.tsx).
  */
-function SummaryButton(props: { ref?: Ref<HTMLButtonElement>; summary: AlertsSummary; onClick(): void; style: CSSProperties }) {
+export function SummaryButton(props: { ref?: Ref<HTMLButtonElement>; summary: AlertsSummary; onClick(): void; style: CSSProperties }) {
   const { summary } = props;
   return (
     <button
@@ -216,6 +223,9 @@ const chipStyle: CSSProperties = {
   cursor: "pointer",
 };
 
+/** How long after it arrived an alert that folds away still counts as news. */
+const FRESH_MS = 1_000;
+
 /**
  * Room's one status region for the folded alerts (3.2.1). The column's
  * time-up and notice cards are live regions of their own, and a hidden
@@ -223,13 +233,18 @@ const chipStyle: CSSProperties = {
  * read out here instead. It sits outside the column and outside the
  * summary button: a hidden subtree leaves the accessibility tree, and a
  * live region inside a button reads poorly. It is always on the page, so
- * nothing announced goes quiet as the dock comes or goes.
+ * nothing announced goes quiet as the dock comes or goes. The alerts
+ * column's summary row beside the docked token bar hides the cards the
+ * same way, and Room counts it as folded here too.
  */
 export function FoldStatus(props: { folded: boolean }) {
   const alerts = useStore(useScoped(dockSlot), (s) => s.alerts);
   const rolls = useAlertsSummaryEntry();
   const [text, setText] = useState("");
   const seen = useRef<Set<string> | null>(null);
+  // When each alert first showed, and whether the alerts were folded last time: one that folds away as it arrives was never seen either.
+  const arrived = useRef(new Map<string, number>());
+  const wasFolded = useRef(props.folded);
   const rollsKey = rolls ? `rolls:${rolls.text}:${rolls.name}` : null;
   const rollsSays = rolls ? `${rolls.text}: ${rolls.name}.` : null;
   useEffect(() => {
@@ -237,13 +252,19 @@ export function FoldStatus(props: { folded: boolean }) {
     if (rollsKey !== null && rollsSays !== null) items.push({ id: rollsKey, says: rollsSays });
     const before = seen.current;
     seen.current = new Set(items.map((i) => i.id));
+    const now = Date.now();
+    for (const i of items) if (!arrived.current.has(i.id)) arrived.current.set(i.id, now);
+    for (const id of arrived.current.keys()) if (!seen.current.has(id)) arrived.current.delete(id);
+    const justFolded = props.folded && !wasFolded.current;
+    wasFolded.current = props.folded;
     // What was there when the page opened was never news.
     if (before === null) return;
     if (!props.folded) {
       setText("");
       return;
     }
-    const fresh = items.filter((i) => !before.has(i.id));
+    // The column's summary row beside the token bar can take an alert's place a frame after it arrived (docs/design-v1-bar-dock.md 1.3).
+    const fresh = items.filter((i) => !before.has(i.id) || (justFolded && now - (arrived.current.get(i.id) ?? 0) < FRESH_MS));
     if (fresh.length > 0) setText(fresh.map((i) => i.says).join(" "));
   }, [alerts, rollsKey, rollsSays, props.folded]);
   return (

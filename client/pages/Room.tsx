@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { barDockSlot, type Chrome } from "../canvas/barDock.ts";
+import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, noticePlace, type Chrome } from "../canvas/barDock.ts";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
 import { MapStage } from "../canvas/Stage.tsx";
 import { Button } from "../components/Button.tsx";
@@ -56,6 +56,8 @@ import { Badge, FindButton, FitButton, PauseScreen, Stacked, UndoButtons, useAcc
 import { DockHeaderActions, DockRow, FoldStatus, SAFE_PROBE_STYLE, useDockSummary, useLayoutHeight, useSafeAreas, type DockActions } from "./RoomDock.tsx";
 
 const { topBar: TOP_BAR, toolbar: TOOLBAR } = theme.layout;
+/** "Viewing as Pat" at its widest, in window pixels (features/dm/PlayerPreview.tsx). */
+const PREVIEW_NOTICE_MAX = 520;
 /** Over the whole map, drawing nothing but its focus ring, inside the map's edge. */
 const MAP_FOCUS_STYLE: CSSProperties = { position: "absolute", inset: 0, pointerEvents: "none", outlineOffset: -2 };
 
@@ -200,7 +202,8 @@ function RoomPage() {
   const tools = useRoomView(useShallow((s) => toolsFor(role, s)));
   const tool = activeTool(toolId, role);
   // The keyboard (state/shortcuts.ts). A "view as a player" preview answers no key.
-  const preview = usePreview() !== null;
+  const previewing = usePreview();
+  const preview = previewing !== null;
   useShortcuts({ role, tools, scope, preview });
   const optionsShown = useRoomView((s) => (tool.optionsShown ? tool.optionsShown(s) : true));
   const sheet = !wide && panel ? panels.find((p) => p.id === panel) : undefined;
@@ -301,9 +304,9 @@ function RoomPage() {
   // The bars as drawn, in the chrome's own pixels, so the token bar keeps to the part of the map they leave free.
   const barDock = scope.get(barDockSlot);
   const sheetRight = landscape && sheetOpen ? Math.min(theme.layout.landscapeSheetWidth, width * 0.6) : 0;
-  useLayoutEffect(() => {
-    // Until both bars have a height, the bar keeps its defaults rather than reaching under them.
-    const chrome: Chrome | null =
+  // Until both bars have a height, the bar keeps its defaults rather than reaching under them.
+  const chrome = useMemo<Chrome | null>(
+    () =>
       topBarHeight > 0 && toolbarHeight > 0
         ? {
             top: topBarHeight / zoom,
@@ -312,9 +315,68 @@ function RoomPage() {
             safe: { top: safe.top, right: safe.right, bottom: safe.bottom, left: safe.left },
             sheet: sheetRight,
           }
-        : null;
+        : null,
+    [topBarHeight, toolbarHeight, optionsHeight, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight],
+  );
+  useLayoutEffect(() => {
     barDock.setState({ chrome });
-  }, [barDock, topBarHeight, toolbarHeight, optionsHeight, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight]);
+  }, [barDock, chrome]);
+
+  /*
+   * The notices over the map (design 1.3): with 320 px or more left of the
+   * lane the token bar and the alerts column share, the whole stack, toasts
+   * included, centers there, so nothing moves when an alert arrives.
+   * Otherwise it spans as before, and the column starts below the notices
+   * that last (the offline banner, a layer that did not load, the DM's
+   * frame bar and "Viewing as Pat"), while toasts keep their place, so a
+   * card never jumps under a finger for a toast. "Viewing as Pat" stays in
+   * the preview, outside this page, so a blackout and the ended screen keep
+   * its Exit: the preview tells this page how tall it is, and this page
+   * says where it goes. Spanning, this page's own notices start below it.
+   */
+  const mapWidth = wide ? width - theme.layout.sidePanelWidth : width;
+  const free = freeArea({ width: mapWidth, height }, chrome ?? DEFAULT_CHROME);
+  const beside = chrome ? noticePlace(free) : null;
+  const besideLane = beside !== null;
+  const previewNotice = previewing?.notice ?? null;
+  const previewPush = !beside && previewNotice ? previewNotice.height / zoom + EDGE : 0;
+  const reportsPreview = previewNotice !== null && !ended && gate.kind !== "blackout";
+  useLayoutEffect(() => {
+    if (!previewNotice || !reportsPreview) return;
+    if (beside) {
+      const room = beside.width * zoom;
+      const noticeWidth = Math.min(PREVIEW_NOTICE_MAX, room);
+      previewNotice.place({ left: beside.left * zoom + (room - noticeWidth) / 2, width: noticeWidth });
+    } else {
+      previewNotice.place(null);
+    }
+    return () => previewNotice.place(null);
+  }, [previewNotice, reportsPreview, beside?.left, beside?.width, zoom]);
+  const lastingRef = useRef<HTMLDivElement>(null);
+  const laneTop = free.top;
+  const previewBottom = previewPush > 0 ? laneTop + previewPush - EDGE : null;
+  useLayoutEffect(() => {
+    const lasting = lastingRef.current;
+    if (!lasting || besideLane) {
+      barDock.setState({ notices: null });
+      return;
+    }
+    const measure = () => {
+      const area = lasting.parentElement?.parentElement?.getBoundingClientRect();
+      let bottom: number | null = previewBottom;
+      for (const child of lasting.children) {
+        const r = child.getBoundingClientRect();
+        if (area && r.height > 0) bottom = Math.max(bottom ?? -Infinity, (r.bottom - area.top) / zoom);
+      }
+      if (barDock.getState().notices !== bottom) barDock.setState({ notices: bottom });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(lasting);
+    for (const child of lasting.children) observer.observe(child);
+    return () => observer.disconnect();
+  }, [barDock, besideLane, previewBottom, zoom, role]);
+  const columnSummary = useStore(barDock, (s) => s.bar?.lane === "summary") && summary !== null;
   const mapFocus = scope.get(mapFocusSlot);
   const mapFocusRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -386,22 +448,23 @@ function RoomPage() {
           {...smallUi(zoom)}
           style={{
             position: "absolute",
-            top: `calc(${theme.safe.top} + ${topInset + 8}px)`,
-            left: 0,
-            right: 0,
+            top: `calc(${theme.safe.top} + ${topInset + EDGE + previewPush}px)`,
+            ...(beside ? { left: beside.left, width: beside.width, padding: 0 } : { left: 0, right: 0, padding: `0 ${theme.space(3)}px` }),
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
             gap: theme.space(2),
-            padding: `0 ${theme.space(3)}px`,
             pointerEvents: "none",
             zIndex: theme.z.notices,
             ...chromeZoom(zoom),
           }}
         >
-          <Banner />
-          {role === "dm" ? <FrameViewBar /> : null}
-          <QuietLoadNotice />
+          {/* The notices that last, measured together: the alerts column starts below them while they span the map. */}
+          <div ref={lastingRef} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: theme.space(2), width: "100%" }}>
+            <Banner />
+            {role === "dm" ? <FrameViewBar /> : null}
+            <QuietLoadNotice />
+          </div>
           <Toasts />
         </div>
         {sheet ? (
@@ -470,7 +533,7 @@ function RoomPage() {
           {tabId ? <PanelBody id={tabId} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={setSubpage} /> : null}
         </SidePanel>
       ) : null}
-      <FoldStatus folded={folded} />
+      <FoldStatus folded={folded || columnSummary} />
       <HandoutPopup />
       <ShortcutSheetHost role={role} />
     </div>

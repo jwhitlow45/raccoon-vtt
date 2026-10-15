@@ -98,8 +98,14 @@ function phrase(text: string): string {
  * sheet to see them." It says "see them" whenever the summary stands for
  * more than one thing, the rolls' line of several requests included, and
  * "see it" for one. Null while nothing waits.
+ *
+ * `hides` is what stands over the alerts: the sheet that folded them, or
+ * the docked token bar that leaves the column only this summary row
+ * (docs/design-v1-bar-dock.md 1.3), whose tap hides the bar. Each advice
+ * then says that: "Hide the bar to answer.", "Hide the bar to see them.",
+ * "Hide the bar to see it.".
  */
-export function alertsSummary(rolls: RollsLine | null, alerts: readonly ColumnAlert[]): AlertsSummary | null {
+export function alertsSummary(rolls: RollsLine | null, alerts: readonly ColumnAlert[], hides: "sheet" | "bar" = "sheet"): AlertsSummary | null {
   const items: Item[] = [];
   if (rolls?.waiting) items.push({ kind: "rolls", id: "rolls", text: rolls.text, phrase: rolls.name });
   for (const a of alerts) {
@@ -116,7 +122,8 @@ export function alertsSummary(rolls: RollsLine | null, alerts: readonly ColumnAl
   if (!first) return null;
   const more = items.length > 1 ? `+${items.length - 1}` : "";
   const several = items.length > 1 || (rolls !== null && rolls.requests > 1);
-  const advice = first.kind === "rolls" && rolls?.waiting ? "Close the sheet to answer." : several ? "Close the sheet to see them." : "Close the sheet to see it.";
+  const way = hides === "bar" ? "Hide the bar" : "Close the sheet";
+  const advice = first.kind === "rolls" && rolls?.waiting ? `${way} to answer.` : several ? `${way} to see them.` : `${way} to see it.`;
   const head = more ? `${first.text} ${more}` : first.text;
   return { text: first.text, more, name: `${head}: ${items.map((i) => i.phrase).join(", ")}. ${advice}`, first: { kind: first.kind, id: first.id } };
 }

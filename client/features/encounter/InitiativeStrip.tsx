@@ -1,10 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
+import { useStore } from "zustand";
 import type { LogEntry } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
+import { barDockSlot, columnRoom, columnTop, EDGE, SUMMARY_ROW } from "../../canvas/barDock.ts";
+import { ScrollForMore } from "../../canvas/TokenActionBar.tsx";
+import { useAlertsSummaryEntry } from "../../components/sheetFocus.ts";
 import { theme } from "../../lib/theme.ts";
 import { screenHeight, useLayoutSize } from "../device/layout.ts";
 import { effectChip } from "../../lib/tokenView.ts";
-import { usePublishAlerts, useUnderSheet, type ColumnAlert } from "../../pages/fold.ts";
+import { drawn, focusAlert, usePublishAlerts, useUnderSheet, type AlertsSummary, type ColumnAlert } from "../../pages/fold.ts";
+import { SummaryButton, useDockSummary } from "../../pages/RoomDock.tsx";
+import { useScoped } from "../../state/scope.ts";
+import { useUiScale } from "../device/settings.ts";
 import { sheetOpen } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { announceTurn, unlockAudioOnTap } from "./alerts.ts";
@@ -411,6 +418,16 @@ type Notice = { id: string; text: string };
  * publishes, and Room's status region announces each alert that arrives
  * folded. `data-alert` marks each card's kind, so the summary's tap can
  * show the one it names.
+ *
+ * It shares the right of the map with the docked token action bar
+ * (docs/design-v1-bar-dock.md 1.3, canvas/barDock.ts shareLane). It
+ * publishes its content's height and its first card's, and reads only the
+ * bar's box, so neither feeds back on the other. Stacked, it stops 8 px
+ * above the bar and says "Scroll for more" while that cuts it short.
+ * Where even its first card leaves the bar too little, it shows the same
+ * summary as the dock in one 44 px row, with its cards hidden as under a
+ * sheet, and a tap on the row hides the bar and shows them. It starts
+ * below the notices that last when they span the map over it (Room.tsx).
  */
 function FightAlerts() {
   const { width, height } = useViewport();
@@ -419,6 +436,8 @@ function FightAlerts() {
   const wide = width >= theme.layout.wideMinWidth;
   // A sheet docked on the right in phone landscape would sit under this column, so the column steps left of it.
   const sheetWidth = !wide && width > height && panelOpen ? Math.min(theme.layout.landscapeSheetWidth, width * 0.6) : 0;
+  const zoom = useUiScale();
+  const ui = useRoomUi();
 
   useEffect(() => unlockAudioOnTap(), []);
 
@@ -437,8 +456,65 @@ function FightAlerts() {
     for (const n of notices) list.push({ id: n.id, kind: "notice", text: n.text, says: n.text });
     return list;
   }, [prompts, notices, timeUp.text, timeUp.key, who]);
-  const columnRef = usePublishAlerts(alerts);
+  const publishColumn = usePublishAlerts(alerts);
   const top = useTopBars();
+
+  // ------------------------------------------------ the lane it shares with the token bar
+  const dock = useScoped(barDockSlot);
+  const chrome = useStore(dock, (s) => s.chrome);
+  const lasting = useStore(dock, (s) => s.notices);
+  const bar = useStore(dock, (s) => s.bar);
+  const summary = useDockSummary("bar");
+  const rolls = useAlertsSummaryEntry();
+  const laneTop = chrome ? chrome.top + EDGE : null;
+  const colTop = laneTop === null ? null : columnTop(laneTop, lasting);
+  const push = laneTop !== null && colTop !== null ? colTop - laneTop : 0;
+  const summarized = !folded && bar?.lane === "summary" && summary !== null;
+  const stacked = bar?.lane === "stacked" && colTop !== null ? columnRoom({ lane: "stacked", columnTop: colTop, bar: bar.box }) : null;
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const cardsRef = useRef<HTMLDivElement>(null);
+  const [clipped, setClipped] = useState(false);
+  const columnRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      boxRef.current = el;
+      publishColumn(el);
+    },
+    [publishColumn],
+  );
+
+  // The cards' measures, while they are drawn. Folded or summarized they keep the last ones, so hiding them never reads as having none.
+  useLayoutEffect(() => {
+    const cards = cardsRef.current;
+    if (!cards || colTop === null) return;
+    const measure = () => {
+      if (!drawn(cards)) return;
+      const first = firstCardHeight(cards) / zoom;
+      const next = first > 0 ? { top: colTop, content: cards.getBoundingClientRect().height / zoom, first } : null;
+      const prev = dock.getState().column;
+      if (prev === next || (prev && next && prev.top === next.top && prev.content === next.content && prev.first === next.first)) return;
+      dock.setState({ column: next });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(cards);
+    return () => observer.disconnect();
+  }, [dock, colTop, zoom, alerts, summarized, folded]);
+  useLayoutEffect(() => () => dock.setState({ column: null }), [dock]);
+
+  const clip = () => {
+    const el = boxRef.current;
+    setClipped(!!el && el.scrollHeight - el.clientHeight - el.scrollTop > 4);
+  };
+  useLayoutEffect(clip, [stacked, alerts]);
+
+  // The summary row's tap hides the bar, and once the cards show again, opens a roll that waits for this viewer or focuses the alert it named, as the dock's does.
+  const [showAfter, setShowAfter] = useState<{ kind: "rolls" } | { kind: "alert"; first: AlertsSummary["first"] } | null>(null);
+  useLayoutEffect(() => {
+    if (!showAfter || summarized) return;
+    setShowAfter(null);
+    if (showAfter.kind === "rolls") rolls?.open();
+    else focusAlert(boxRef.current, showAfter.first);
+  }, [showAfter, summarized, rolls]);
 
   /*
    * The column scrolls as a whole once its cards outgrow the room between
@@ -446,26 +522,31 @@ function FightAlerts() {
    * over two chips in a landscape phone, pushed the last button under the
    * toolbar, where it showed through and took no tap. A scrolling box
    * clips what it holds, the cards' shadows included, so the box reaches
-   * past its cards by padding that a negative margin takes back:
-   * SHADOW_ROOM at the sides and the foot, and only the gap under the top
-   * bar at its head. The box itself runs from the top bar to the toolbar
-   * and no further, since what scrolls through its padding shows there,
-   * and scroll-padding keeps a card that takes focus clear of it.
+   * past its cards by padding: SHADOW_ROOM at the left and the foot (but
+   * over a stacked bar), and only the 8 px margin at the right, so it never reaches past the screen
+   * or a landscape sheet and a card scrolled into view never scrolls the
+   * room (LPD-DMPHONE-4). The box itself runs from the top bar to the
+   * toolbar, or to 8 px above a stacked token bar, and no further, since
+   * what scrolls through its padding shows there, and scroll-padding keeps
+   * a card that takes focus clear of it.
    */
+  const rightPad = sheetWidth > 0 ? `${EDGE}px` : `calc(${theme.safe.right} + ${EDGE}px)`;
+  const cardWidth = `min(300px, calc(100% - ${sheetWidth + 2 * EDGE}px - ${theme.safe.left} - ${sheetWidth > 0 ? "0px" : theme.safe.right}))`;
   return (
     <div
       ref={columnRef}
       hidden={folded}
+      onScroll={clip}
       style={{
         position: "absolute",
-        top: `calc(100% + ${theme.space(2)}px)`,
-        right: `calc(${theme.safe.right} + ${sheetWidth + theme.space(2)}px)`,
-        width: `calc(min(300px, calc(100% - ${sheetWidth + theme.space(4)}px)) + ${2 * SHADOW_ROOM}px)`,
+        top: `calc(100% + ${push}px)`,
+        right: sheetWidth,
+        width: `calc(${cardWidth} + ${SHADOW_ROOM}px + ${rightPad})`,
         // The screen's height in the zoomed bar's own pixels (features/device/layout.ts), less the bars.
-        maxHeight: `calc(${screenHeight(100)} - ${theme.safe.top} - ${theme.safe.bottom} - ${top + theme.layout.toolbar}px)`,
-        margin: `-${theme.space(2)}px -${SHADOW_ROOM}px -${SHADOW_ROOM}px`,
-        padding: `${theme.space(2)}px ${SHADOW_ROOM}px ${SHADOW_ROOM}px`,
-        scrollPadding: `${theme.space(2)}px 0 ${SHADOW_ROOM}px`,
+        maxHeight: stacked !== null ? stacked + EDGE : `calc(${screenHeight(100)} - ${theme.safe.top} - ${theme.safe.bottom} - ${top + theme.layout.toolbar + push}px)`,
+        // Stacked over the bar, the foot keeps no shadow room: it would count as more to scroll to, and the bar sits 8 px below anyway.
+        padding: `${EDGE}px ${rightPad} ${stacked !== null ? 0 : SHADOW_ROOM}px ${SHADOW_ROOM}px`,
+        scrollPadding: `${EDGE}px 0 ${stacked !== null ? 0 : SHADOW_ROOM}px`,
         overflowY: "auto",
         overscrollBehavior: "contain",
         display: "flex",
@@ -475,39 +556,67 @@ function FightAlerts() {
         pointerEvents: "none",
       }}
     >
-      {prompts.map((p) => (
-        <ConcentrationCard key={p.logId} prompt={p} onDone={() => dismissPrompt(p.logId)} />
-      ))}
-      {/* No box of its own, so the rolls' cards and chips stay items of the column. */}
-      <div data-alert="rolls" style={{ display: "contents" }}>
-        <RollAlerts />
-      </div>
-      {timeUp.text ? (
-        <button
-          type="button"
-          role="status"
-          data-alert="timeUp"
-          onClick={timeUp.dismiss}
-          style={{ ...card, minHeight: theme.touch, textAlign: "left", fontSize: theme.font.body14, cursor: "pointer", fontFamily: theme.font.body, borderColor: theme.color.danger }}
-        >
-          {timeUp.text}
-        </button>
+      {summarized && summary ? (
+        <SummaryButton
+          summary={summary}
+          onClick={() => {
+            ui.showActions(false);
+            setShowAfter(rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: summary.first });
+          }}
+          style={{ ...card, minHeight: SUMMARY_ROW, padding: `0 ${theme.space(3)}px` }}
+        />
       ) : null}
-      {notices.map((n) => (
-        <button
-          key={n.id}
-          type="button"
-          role="status"
-          data-alert="notice"
-          data-alert-id={n.id}
-          onClick={() => dismissNotice(n.id)}
-          style={{ ...card, minHeight: theme.touch, textAlign: "left", fontSize: theme.font.body14, cursor: "pointer", fontFamily: theme.font.body }}
-        >
-          {n.text}
-        </button>
-      ))}
+      <div ref={cardsRef} hidden={summarized} style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: theme.space(2) }}>
+        {prompts.map((p) => (
+          <ConcentrationCard key={p.logId} prompt={p} onDone={() => dismissPrompt(p.logId)} />
+        ))}
+        {/* No box of its own, so the rolls' cards and chips stay items of the column. */}
+        <div data-alert="rolls" style={{ display: "contents" }}>
+          <RollAlerts />
+        </div>
+        {timeUp.text ? (
+          <button
+            type="button"
+            role="status"
+            data-alert="timeUp"
+            onClick={timeUp.dismiss}
+            style={{ ...card, minHeight: theme.touch, textAlign: "left", fontSize: theme.font.body14, cursor: "pointer", fontFamily: theme.font.body, borderColor: theme.color.danger }}
+          >
+            {timeUp.text}
+          </button>
+        ) : null}
+        {notices.map((n) => (
+          <button
+            key={n.id}
+            type="button"
+            role="status"
+            data-alert="notice"
+            data-alert-id={n.id}
+            onClick={() => dismissNotice(n.id)}
+            style={{ ...card, minHeight: theme.touch, textAlign: "left", fontSize: theme.font.body14, cursor: "pointer", fontFamily: theme.font.body }}
+          >
+            {n.text}
+          </button>
+        ))}
+      </div>
+      {stacked !== null && clipped ? <ScrollForMore /> : null}
     </div>
   );
+}
+
+/** The first card's height as drawn: the first child with a box, looking inside a wrapper with `display: contents`, as the rolls' is. */
+function firstCardHeight(cards: HTMLElement): number {
+  for (const child of cards.children) {
+    if (!(child instanceof HTMLElement)) continue;
+    if (getComputedStyle(child).display === "contents") {
+      const inner = firstCardHeight(child);
+      if (inner > 0) return inner;
+      continue;
+    }
+    const height = child.getBoundingClientRect().height;
+    if (height > 0) return height;
+  }
+  return 0;
 }
 
 /** Room around the alert cards for their shadow (theme.shadow.float reaches about 20 px below a card). */
