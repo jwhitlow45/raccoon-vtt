@@ -360,7 +360,10 @@ function RollCard(props: {
         right: 0,
         bottom: chrome ? chrome.bottom : `calc(${theme.safe.bottom} + ${theme.layout.toolbar}px)`,
         zIndex: theme.z.overBars,
-        maxHeight: screenHeight(70),
+        // At most 70% of the screen, and never past the top bars: standing on the options bar of a short phone, 70% reached above the screen and took the card's Later with it. What does not fit scrolls.
+        maxHeight: chrome
+          ? `min(${screenHeight(70)}, calc(${screenHeight(100)} - ${chrome.top + chrome.bottom}px))`
+          : `min(${screenHeight(70)}, calc(${screenHeight(100)} - ${theme.safe.top} - ${theme.safe.bottom} - ${theme.layout.topBar + theme.layout.toolbar}px))`,
         overflowY: "auto",
         overscrollBehavior: "contain",
         display: "grid",

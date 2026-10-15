@@ -745,7 +745,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     { width: 320, height: 480, scale: 1.3, insets: { top: 44, bottom: 34 } },
   ]) {
     const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
-    test(`12. with a roll card waiting at the screen's foot, Select several's Actions still takes a tap after a tap off: ${label}`, async () => {
+    test(`12. with a roll card waiting at the screen's foot, Select several's Actions and the card's Later each take a tap after a tap off: ${label}`, async () => {
       await insets(view.insets);
       await setUp(view);
       await touch([await cellPoint({ x: 8, y: 6 })]);
@@ -766,8 +766,22 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
           return el?.closest("button")?.textContent ?? el?.tagName ?? null;
         }, [(r.left + r.right) / 2, (r.top + r.bottom) / 2] as const);
         assert.equal(at, "Actions", `${label}: something covers Actions`);
-        assert.ok(!intersects(await rectOf(card(player)), await rectOf(options)), `${label}: the roll card covers the Select several bar`);
+        const held = await rectOf(card(player));
+        assert.ok(!intersects(held, await rectOf(options)), `${label}: the roll card covers the Select several bar`);
+        // The card keeps to the screen, under the top bars, so its own Later stays in reach.
+        assert.ok(held.top >= -0.5, `${label}: the roll card runs above the screen: ${JSON.stringify(held)}`);
+        const later = card(player).getByRole("button", { name: "Later" });
+        await later.scrollIntoViewIfNeeded();
+        const l = await rectOf(later);
+        const onLater = await player.evaluate(([x, y]) => {
+          type Node = { getAttribute(n: string): string | null; closest(s: string): Node | null };
+          const el = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): Node | null } }).document.elementFromPoint(x, y);
+          return el?.closest("button")?.getAttribute("aria-label") ?? null;
+        }, [(l.left + l.right) / 2, (l.top + l.bottom) / 2] as const);
+        assert.match(onLater ?? "", /answer later/, `${label}: Later takes no tap`);
         await shots.take(player, `playerphone-actions-over-card-${view.width}x${view.height}`);
+        await later.tap();
+        await card(player).waitFor({ state: "detached" });
         await actions.tap();
         await player.getByRole("dialog", { name: "Thorn actions" }).waitFor();
       } finally {
