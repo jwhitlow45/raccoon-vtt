@@ -315,7 +315,8 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     const token = (id: string, extra: Record<string, unknown>) => ({ t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", ...extra } });
     await ops.send(token(run.thorn.id, { kind: "pc", name: "Thorn", x: run.thorn.x, y: run.thorn.y, disposition: "ally", actor: { ref: run.thorn.characterId } }));
     for (const [i, g] of run.goblins.entries()) {
-      await ops.send(token(g.id, { kind: "monster", name: `Goblin ${i + 1}`, x: g.x, y: g.y, disposition: "hostile", actor: { inline: actor(7) } }));
+      // Hardy goblins: each step's checks hurt them again.
+      await ops.send(token(g.id, { kind: "monster", name: `Goblin ${i + 1}`, x: g.x, y: g.y, disposition: "hostile", actor: { inline: actor(40) } }));
     }
     await ops.send(token(run.far.id, { kind: "monster", name: "Far goblin", x: run.far.x, y: run.far.y, disposition: "hostile", actor: { inline: actor(7) } }));
     await waitFor("every token in the DM's view", () => [...run.goblins, run.far].every((g) => dmSocket.state?.tokens[g.id]) || null);
@@ -682,7 +683,134 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await ops.send({ t: "view.blackout", blackout: false });
   });
 
-  test("10. nothing went wrong in the browsers", () => {
+  test("10. a press on the header while checks arrive leaves no card on the bar, nor does a drag Escape put back, and a bar raised in its corner moves down under a tall first card", async () => {
+    await setUp(dm, { ...DESK, scale: 1 });
+    await selectThorn();
+    const prompts = dm.locator('[data-alert="concentration"]');
+    const meets = async () => {
+      await dm.waitForTimeout(300);
+      const bar = await barRect(dm);
+      return (await cards(dm)).filter((c) => intersects(c, bar));
+    };
+    // A plain press: down on the header, the checks arrive, then up.
+    let r = await barRect(dm);
+    await dm.mouse.move(r.left + 40, r.top + 26);
+    await dm.mouse.down();
+    await damageGoblins();
+    await prompts.nth(2).waitFor();
+    await dm.mouse.up();
+    assert.deepEqual(await meets(), [], "after a press on the header, a card covers the bar");
+    // A drag put back with Escape.
+    await setUp(dm, { ...DESK, scale: 1 });
+    await selectThorn();
+    r = await barRect(dm);
+    await dm.mouse.move(r.left + 40, r.top + 26);
+    await dm.mouse.down();
+    await dm.mouse.move(r.left - 60, r.top + 60, { steps: 6 });
+    await damageGoblins();
+    await prompts.nth(2).waitFor();
+    await dm.keyboard.press("Escape");
+    await dm.mouse.up();
+    assert.deepEqual(await meets(), [], "after a drag Escape put back, a card covers the bar");
+    await shots.take(dm, "bardock-press-then-checks");
+
+    // A spot 300 px up the bottom right corner: under the first card the bar moves down to the lane's foot rather than shrinking.
+    await setUp(dm, { ...DESK, scale: 1 }, '{"corner":"br","x":0,"y":300}');
+    await selectThorn();
+    await damageGoblins();
+    await prompts.first().waitFor();
+    await dm.waitForTimeout(300);
+    const bar = await barRect(dm);
+    const first = await rectOf(prompts.first());
+    const c = await chrome(dm);
+    assert.ok(bar.top >= first.bottom + 8 - 1, `the bar meets the first card: ${JSON.stringify({ bar, first })}`);
+    const clipped = (await barFrame(dm).getByText("Scroll for more").count()) > 0;
+    assert.ok(!clipped || bar.bottom >= c.toolbar - 8 - 1, `the bar shrank with room left below it: ${JSON.stringify({ bar, c })}`);
+    await shots.take(dm, "bardock-raised-bar-under-first-card");
+  });
+
+  test("11. at 1180 x 390, a token opened from the outliner lands clear of a bar that sits beside the alerts", async () => {
+    // The roll card asked in step 6 waits at the column's head, taller than the room the bar would keep under it.
+    await setUp(dm, { width: 1180, height: 390, scale: 1 });
+    await dm.locator('[data-alert="rolls"] > *').first().waitFor();
+    await dm.getByRole("tab", { name: "Outliner" }).click();
+    await dm.getByRole("tabpanel").getByLabel("Search the scene").fill("Goblin 2");
+    await dm.getByRole("tabpanel").getByRole("button", { name: /^Goblin 2/ }).first().click();
+    await dm.getByRole("dialog", { name: "Goblin 2 actions" }).waitFor();
+    await dm.waitForTimeout(300);
+    const bar = await barRect(dm);
+    const [goblin] = await tokenRects(dm, [run.goblins[1]!.id]);
+    assert.ok(goblin && !intersects(goblin, bar), `the outliner landed the goblin under the bar: ${JSON.stringify({ goblin, bar })}`);
+    for (const card of await cards(dm)) assert.ok(!intersects(card, bar), "the bar meets a card");
+    await shots.take(dm, "bardock-outliner-beside-1180x390");
+    await barFrame(dm).getByRole("button", { name: "Close", exact: true }).click();
+    await dm.getByRole("tab", { name: "Initiative" }).click();
+  });
+
+  test("12. after Fit with the bar docked, turning a tablet upright keeps the map on screen", async () => {
+    await setUp(dm, { width: 1024, height: 768, scale: 1.3 });
+    await selectThorn();
+    await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
+    await dm.waitForTimeout(300);
+    await dm.setViewportSize({ width: 768, height: 1024 });
+    await barFrame(dm).waitFor();
+    await dm.waitForTimeout(400);
+    const a = await pagePoint(dm, run.bounds, { x: 0, y: 0 });
+    const b = await pagePoint(dm, run.bounds, { x: run.bounds.w, y: run.bounds.h });
+    assert.ok(a.x >= -1 && b.x <= 768 + 1 && a.y >= -1 && b.y <= 1024 + 1, `the refit left the map off screen: ${JSON.stringify({ a, b })}`);
+    await shots.take(dm, "bardock-fit-then-upright");
+    await barFrame(dm).getByRole("button", { name: "Close", exact: true }).click();
+  });
+
+  test("13. on a wide screen, Back with Select several's bar hidden ends the mode and stays in the room", async () => {
+    await setUp(dm, { ...DESK, scale: 1 });
+    await selectThorn();
+    await barFrame(dm).getByRole("button", { name: "Select several", exact: true }).click();
+    await clickCell(dm, run.goblins[0]!);
+    await dm.getByRole("dialog", { name: "2 selected tokens" }).waitFor();
+    await clickCell(dm, EMPTY);
+    await barFrame(dm).waitFor({ state: "detached" });
+    const url = dm.url();
+    await dm.goBack();
+    await selectOptions(dm).waitFor({ state: "detached" });
+    assert.equal(dm.url(), url, "Back left the room");
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+  });
+
+  test("14. a summary row the turn band moves down keeps the bar below it", async () => {
+    await ops.send({ t: "encounter.end" });
+    await dmCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 44, bottom: 34, left: 0, right: 0 } });
+    await setUp(dm, { width: 320, height: 480, scale: 1.3 });
+    await damageGoblins();
+    await dm.locator('[data-alert="concentration"]').first().waitFor({ state: "attached" });
+    // The check's card covers most of this small map, so the outliner picks Thorn, as a DM would here.
+    await dm.locator('nav[aria-label="Tools"] button[title="Panels"]').click();
+    await dm.getByRole("region", { name: "Panels" }).getByRole("button", { name: "Outliner", exact: true }).click();
+    const outliner = dm.locator('section[aria-label="Outliner"]');
+    await outliner.getByLabel("Search the scene").fill("Thorn");
+    await outliner.getByRole("button", { name: /^Thorn/ }).first().click();
+    await dm.getByRole("dialog", { name: "Thorn actions" }).waitFor();
+    const row = dm.getByRole("button", { name: /^Concentration check/ });
+    await row.waitFor();
+    const below = async (label: string) => {
+      await dm.waitForTimeout(300);
+      const r = await rectOf(row);
+      const bar = await barRect(dm);
+      assert.ok(bar.top >= r.bottom + 8 * 1.3 - 1, `${label}: the bar meets the summary row: ${JSON.stringify({ r, bar })}`);
+    };
+    await below("before the band");
+    const header = async () => (await rectOf(dm.locator("header").filter({ has: dm.locator("h1") }))).bottom;
+    const without = await header();
+    await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: randomUUID(), tokenId: g.id, value: 15 - i })) });
+    await waitFor("the turn band", async () => ((await header()) > without + 20 ? true : null));
+    await below("with the band");
+    await shots.take(dm, "bardock-summary-row-band-320x480");
+    await ops.send({ t: "encounter.end" });
+    await below("after the band");
+    await dmCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
+  });
+
+  test("15. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });

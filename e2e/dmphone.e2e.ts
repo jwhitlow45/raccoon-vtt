@@ -497,6 +497,33 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await preview.waitFor({ state: "detached" });
     await ops.send({ t: "roll.close", rollIds: [id] });
   });
+
+  test("9. the column stays below a lasting notice as the turn band comes and goes, which moves the notice (LPD-DMPHONE-9)", async () => {
+    await setUp({ width: 390, height: 844, scale: 1 });
+    // Framing a starting view from a phone shows the "Starting view" bar under the top bar, a notice that lasts.
+    const scenes = await openPanel(dm, "Scenes");
+    await scenes.getByRole("button", { name: "Save current view" }).tap();
+    const framing = dm.getByRole("group", { name: "Starting view" });
+    await framing.waitFor();
+    await hurtHag();
+    const check = dm.locator('[data-alert="concentration"]').first();
+    await check.waitFor();
+    const clear = async (label: string) => {
+      await dm.waitForTimeout(300);
+      const notice = await rectOf(framing);
+      const card = await rectOf(check);
+      assert.ok(card.top >= notice.bottom + 8 - 1, `${label}: the check runs under the notice: ${JSON.stringify({ notice, card })}`);
+    };
+    await clear("before the band");
+    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.hag, value: 12 }] });
+    await dm.getByRole("button", { name: /^Initiative, round/ }).first().waitFor();
+    await clear("with the band");
+    await shots.take(dm, "dmphone-notice-band-column");
+    await ops.send({ t: "encounter.end" });
+    await dm.getByRole("button", { name: /^Initiative, round/ }).first().waitFor({ state: "detached" });
+    await clear("after the band");
+    await framing.getByRole("button", { name: "Cancel" }).tap();
+  });
 });
 
 function goblin() {

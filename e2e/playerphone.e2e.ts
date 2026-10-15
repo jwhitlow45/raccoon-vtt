@@ -739,7 +739,45 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await ops.send({ t: "encounter.end" });
   });
 
-  test("12. nothing went wrong in the browsers", () => {
+  for (const view of [
+    { width: 390, height: 844, scale: 1, insets: {} },
+    { width: 480, height: 320, scale: 1.3, insets: { side: 47, bottom: 21 } },
+    { width: 320, height: 480, scale: 1.3, insets: { top: 44, bottom: 34 } },
+  ]) {
+    const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+    test(`12. with a roll card waiting at the screen's foot, Select several's Actions still takes a tap after a tap off: ${label}`, async () => {
+      await insets(view.insets);
+      await setUp(view);
+      await touch([await cellPoint({ x: 8, y: 6 })]);
+      await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Select several", exact: true }).tap();
+      const id = randomUUID();
+      try {
+        await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+        await player.waitForTimeout(300);
+        await touch([await emptyPoint(player)]);
+        await barFrame(player).waitFor({ state: "detached" });
+        await card(player).waitFor();
+        const options = player.getByRole("toolbar", { name: "Select options" });
+        const actions = options.getByRole("button", { name: "Actions", exact: true });
+        const r = await rectOf(actions);
+        const at = await player.evaluate(([x, y]) => {
+          type Node = { tagName: string; textContent: string | null; closest(s: string): Node | null };
+          const el = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): Node | null } }).document.elementFromPoint(x, y);
+          return el?.closest("button")?.textContent ?? el?.tagName ?? null;
+        }, [(r.left + r.right) / 2, (r.top + r.bottom) / 2] as const);
+        assert.equal(at, "Actions", `${label}: something covers Actions`);
+        assert.ok(!intersects(await rectOf(card(player)), await rectOf(options)), `${label}: the roll card covers the Select several bar`);
+        await shots.take(player, `playerphone-actions-over-card-${view.width}x${view.height}`);
+        await actions.tap();
+        await player.getByRole("dialog", { name: "Thorn actions" }).waitFor();
+      } finally {
+        await ops.send({ t: "roll.close", rollIds: [id] });
+        await insets({});
+      }
+    });
+  }
+
+  test("13. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });
