@@ -48,12 +48,28 @@ function extensionFor(type: string): string {
   return EXTENSIONS[mime] ?? DEFAULT_EXTENSION;
 }
 
+/**
+ * The popup's Download, by operation: which press is under way or failed,
+ * and for which handout. Each press gets a new `op`.
+ */
+export type SaveState = { op: number; key: string; state: "busy" | "failed" } | null;
+
+/**
+ * What an operation's end does to the state. Only the operation the state
+ * holds may change it, so a download that ends after a newer one started
+ * never clears or overwrites the newer (P3-ASTRA-03).
+ */
+export function saveSettled(current: SaveState, op: number, outcome: "done" | "failed"): SaveState {
+  if (current?.op !== op) return current;
+  return outcome === "failed" ? { ...current, state: "failed" } : null;
+}
+
 /** How long the object URL outlives the click. Revoked at once, some browsers lose the download. */
 const REVOKE_AFTER_MS = 60_000;
 
 /** Fetches the handout's image and saves it under its title. Throws when the image cannot be fetched. */
-export async function downloadHandout(url: string, title: string, signal: AbortSignal): Promise<void> {
-  const res = await fetch(url, { credentials: "same-origin", signal });
+export async function downloadHandout(url: string, title: string): Promise<void> {
+  const res = await fetch(url, { credentials: "same-origin" });
   if (!res.ok) throw new Error(`The handout's image answered ${res.status}`);
   const blob = await res.blob();
   const objectUrl = URL.createObjectURL(blob);

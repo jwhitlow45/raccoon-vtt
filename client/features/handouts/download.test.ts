@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { handoutFileName } from "./download.ts";
+import { handoutFileName, saveSettled, type SaveState } from "./download.ts";
 
 describe("handoutFileName", () => {
   test("the title, with the extension of the image's type", () => {
@@ -38,5 +38,32 @@ describe("handoutFileName", () => {
     const long = `${"a".repeat(99)}🐉 and more`;
     assert.equal(handoutFileName(long, "image/webp"), `${"a".repeat(99)}🐉.webp`);
     assert.equal(handoutFileName("x".repeat(300), "image/webp").length, 100 + ".webp".length);
+  });
+});
+
+describe("saveSettled (P3-ASTRA-03, P3R-6)", () => {
+  const busy = (op: number, key = "h1:1"): SaveState => ({ op, key, state: "busy" });
+
+  test("a download's end clears its state, or marks it failed", () => {
+    assert.equal(saveSettled(busy(1), 1, "done"), null);
+    assert.deepEqual(saveSettled(busy(1), 1, "failed"), { op: 1, key: "h1:1", state: "failed" });
+  });
+
+  test("a download goes on through the popup closing and opening again, and its end frees Download", () => {
+    // Download 1 is under way when the popup closes. It keeps its state, so the handout opened again shows it working.
+    const state: SaveState = busy(1);
+    assert.equal(saveSettled(state, 1, "done"), null, "once it ends, Download takes a tap again");
+  });
+
+  test("an old download's end never touches a newer one", () => {
+    // Download 1 for one handout, then download 2 for another, which the state now holds.
+    const state = busy(2, "h2:1");
+    assert.deepEqual(saveSettled(state, 1, "done"), state);
+    assert.deepEqual(saveSettled(state, 1, "failed"), state);
+    assert.equal(saveSettled(state, 2, "done"), null);
+  });
+
+  test("an end with nothing under way changes nothing", () => {
+    assert.equal(saveSettled(null, 3, "failed"), null);
   });
 });

@@ -11,7 +11,7 @@ import { useAssets, useRoomView } from "../../state/view.ts";
 import { closedSlot, closedStorageKey, closeHandout, loadClosed } from "./closed.ts";
 import { layoutWidth } from "../device/layout.ts";
 import { useXCard } from "../xcard/XCardHost.tsx";
-import { downloadHandout } from "./download.ts";
+import { downloadHandout, saveSettled, type SaveState } from "./download.ts";
 import { nextPopup, popupShows, showingKey } from "./handouts.ts";
 import { doubleTapView, FIT, isDoubleTap, panView, pinchView, zoomAround, type Point, type ZoomView } from "./zoom.ts";
 
@@ -65,24 +65,29 @@ export function HandoutPopup() {
     if (key && handouts) closeHandout(closedStore, key, handouts);
   };
 
-  // Download's state, for the handout it was pressed for: under way, or failed.
-  const [saving, setSaving] = useState<{ key: string; state: "busy" | "failed" } | null>(null);
-  const abort = useRef<AbortController | null>(null);
-  // A download the popup no longer shows has nothing to report to.
-  useEffect(() => () => abort.current?.abort(), [key]);
+  // Download's state, for the handout it was pressed for: under way, or failed (download.ts SaveState).
+  const [saving, setSaving] = useState<SaveState>(null);
+  const lastOp = useRef(0);
+  /*
+   * A download under way goes on when the popup closes, since the player
+   * asked for the file, and the same handout opened again from the Library
+   * shows it still working until it ends (P3R-6). Cancelled instead, it
+   * left that Download busy for good. A failure belongs to the popup that
+   * saw it, so the handout opened again starts clean.
+   */
+  useEffect(() => () => setSaving((s) => (s?.state === "failed" ? null : s)), [key]);
   const busy = saving?.key === key && saving.state === "busy";
   const download = async () => {
     if (!handout || !key || busy) return;
-    abort.current?.abort();
-    const controller = new AbortController();
-    abort.current = controller;
-    setSaving({ key, state: "busy" });
+    const op = ++lastOp.current;
+    setSaving({ op, key, state: "busy" });
+    let outcome: "done" | "failed" = "done";
     try {
-      await downloadHandout(assets.url(handout.assetId, "full"), handout.title, controller.signal);
-      setSaving(null);
+      await downloadHandout(assets.url(handout.assetId, "full"), handout.title);
     } catch {
-      if (!controller.signal.aborted) setSaving({ key, state: "failed" });
+      outcome = "failed";
     }
+    setSaving((s) => saveSettled(s, op, outcome));
   };
 
   // Android's Back closes the handout before it leaves the room, one Back for each handout shown in turn.

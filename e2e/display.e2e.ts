@@ -291,6 +291,31 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     // The table display has no one with a pointer to save it.
     await tv.getByRole("dialog", { name: "Strange letter" }).waitFor();
     assert.equal(await tv.getByRole("button", { name: "Download" }).count(), 0, "the table display offers a download");
+
+    // A download under way when the popup closes still saves the file, and the same handout opened again from the Library
+    // shows it working until it does, then takes a tap again (P3-ASTRA-03, P3R-6).
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await player.route(image, async (route) => {
+      await held;
+      await route.continue();
+    });
+    await popup.getByRole("button", { name: "Download", exact: true }).tap();
+    await popup.getByRole("button", { name: "Downloading…" }).waitFor();
+    await popup.getByRole("button", { name: "Close" }).tap();
+    await popup.waitFor({ state: "detached" });
+    await player.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
+    await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Library/ }).tap();
+    await player.getByRole("region", { name: "Library" }).getByRole("listitem").filter({ hasText: "Strange letter" }).getByRole("button", { name: "Open" }).tap();
+    await popup.getByRole("button", { name: "Downloading…" }).waitFor();
+    const finished = player.waitForEvent("download");
+    release();
+    const late = await finished;
+    assert.equal(late.suggestedFilename(), "Strange letter.webp");
+    assert.ok(Buffer.from(readFileSync(await late.path())).equals(await stored.body()), "the file saved through the close is not the stored image");
+    await player.unroute(image);
+    const [fresh] = await Promise.all([player.waitForEvent("download"), popup.getByRole("button", { name: "Download", exact: true }).tap()]);
+    assert.equal(fresh.suggestedFilename(), "Strange letter.webp");
     await popup.getByRole("button", { name: "Close" }).tap();
     await dm.getByRole("dialog", { name: "X-card" }).getByRole("button", { name: "Dismiss" }).click();
     await ops.send({ t: "handout.close", handoutId });
