@@ -63,16 +63,21 @@ export function isTextField(target: unknown): boolean {
   return !NOT_TYPED.has(typeof el.type === "string" ? el.type.toLowerCase() : "text");
 }
 
-/** The groups whose arrow and Page keys move their own choice, value or tab. */
-const NAVIGATES = '[role="radiogroup"], [role="slider"], [role="tablist"], [role="listbox"]';
+/**
+ * The groups whose arrow and Page keys move their own choice or value.
+ * Not tab lists: the side panel's tabs and the image picker's sources are
+ * a Tab stop each and answer no arrow key, so a selected token stood
+ * still while the arrows did nothing at all.
+ */
+const NAVIGATES = '[role="radiogroup"], [role="slider"], [role="listbox"]';
 
 /**
  * Whether focus is on a control that answers the arrow and Page keys
  * itself: a native radio (Segmented, Swatches, design 2.3), a range
- * slider, or anything inside a radio group, slider, tab list or list box.
- * There the keys choose, so the map's shortcuts on the same keys stand
- * aside: with a token selected, ArrowRight on the HP modes moved the token
- * and left the mode as it was.
+ * slider, or anything inside a radio group, slider or list box. There the
+ * keys choose, so the map's shortcuts on the same keys stand aside: with a
+ * token selected, ArrowRight on the HP modes moved the token and left the
+ * mode as it was.
  */
 export function ownsNavigationKeys(target: unknown): boolean {
   if (!target || typeof target !== "object") return false;

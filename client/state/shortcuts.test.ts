@@ -212,7 +212,6 @@ describe("the shortcut table", () => {
       { tagName: "input", type: "Range" },
       inside("radiogroup"),
       inside("slider"),
-      inside("tablist"),
       inside("listbox"),
     ];
     for (const target of targets) {
@@ -221,6 +220,10 @@ describe("the shortcut table", () => {
     assert.deepEqual(moves, [], "no token moved");
     assert.equal(run(e, press({ key: "v", code: "KeyV", target: targets[0] })), "tool:select", "letters still pick tools from a radio");
     assert.equal(run(e, press({ key: "ArrowRight", code: "ArrowRight", target: { tagName: "BUTTON", closest: () => null } })), "nudge", "a plain button leaves the arrows to the map");
+    // The side panel's tabs answer no arrow key, so the arrows stay the map's there.
+    const tab = { tagName: "BUTTON", closest: (selector: string) => (selector.includes('[role="tablist"]') ? {} : null) };
+    assert.equal(run(e, press({ key: "ArrowLeft", code: "ArrowLeft", target: tab })), "nudge", "a tab leaves the arrows to the map");
+    assert.equal(run(e, press({ key: "PageDown", code: "PageDown", target: tab })), "elevation", "and the Page keys");
   });
 
   test("N is Next for the DM and End turn for a player only on their own turn", () => {
