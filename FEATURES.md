@@ -262,7 +262,7 @@ The DM asks players for a saving throw or an ability check, and each player type
 
 - "View as a player" shows exactly what a chosen player sees.
 - "Follow me" makes players' maps follow the DM's as they pan and zoom. "Bring everyone here" moves them once. A ping with "Look here" on moves every player's view to that spot.
-- "Black out players' screens" for a break or a reveal. Players see only a black screen that says "The DM has paused the game." Meanwhile their devices receive nothing from the game but the X-card.
+- "Black out players' screens" for a break or a reveal. Players see only a black screen that says "The DM has paused the game." Meanwhile their devices receive nothing from the game but the X-card. When the game resumes, each player's selected token, its action bar and any HP typed into it and not applied come back as they were.
 - Undo and Redo for the DM's changes, each saying what it took back. On a phone or a tablet they sit in the top bar.
 - **Outliner**: a panel listing everything on the scene in view, in groups that fold: Creatures and objects, Map (stamps, labels, pins and lights), Areas, Drawings, and Doors. Each row says what players get, such as Hidden, Under fog, Out of the party's sight, DM only, or a secret door hidden or found. The search filters as you type. A tap shows the item on the map and selects it.
 - **Party bar**: each player character's portrait, HP with temporary HP and a bar, AC, passive Perception, and up to three conditions, or Dying, Stable or Dead. On a wide screen it sits above the side panel and folds to one line. On a phone it is the Party panel. A tap jumps to that character's token and opens its action bar.

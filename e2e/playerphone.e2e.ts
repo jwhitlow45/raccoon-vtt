@@ -26,6 +26,9 @@ import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, tapCell, waitF
  * - A panel picked from the list of panels starts at its sheet's heading,
  *   and "All panels" goes back to its tile (LPD-PLAYER-5). The token
  *   bar's Details starts at the token's sheet too (LPD-DESK-7).
+ * - A DM's blackout keeps the player's selection and the HP typed into the
+ *   token bar, which hides behind the pause and comes back after it
+ *   (LPD-PLAYER-7).
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seven. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
@@ -340,7 +343,38 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await player.getByRole("button", { name: "Close Token" }).tap();
   });
 
-  test("6. nothing went wrong in the browsers", () => {
+  test("6. a DM's blackout keeps the player's selection and typed HP: the bar hides behind the pause and comes back after (LPD-PLAYER-7)", async () => {
+    await setUp({ ...PORTRAIT, scale: 1 });
+    const bounds = playerSocket.state!.scenes[run.sceneId]!.bounds;
+    await tapCell(player, bounds, { x: 8, y: 6 });
+    const bar = player.getByRole("dialog", { name: "Thorn actions" });
+    await bar.waitFor();
+    await bar.getByRole("radiogroup", { name: "What the number does" }).locator("label").filter({ hasText: "Heal" }).tap();
+    await bar.getByRole("textbox", { name: "HP change" }).fill("5");
+
+    await ops.send({ t: "view.blackout", blackout: true });
+    await player.getByText("The DM has paused the game.").waitFor();
+    assert.equal(await bar.count(), 0, "the bar hides behind the pause");
+    await ops.send({ t: "view.blackout", blackout: false });
+
+    await bar.waitFor();
+    assert.equal(await bar.getByRole("textbox", { name: "HP change" }).inputValue(), "5", "the typed HP came back");
+    assert.ok(await bar.getByRole("radio", { name: "Heal" }).isChecked(), "the mode chosen came back");
+    await shots.take(player, "playerphone-bar-after-blackout");
+    await bar.getByRole("button", { name: "Apply" }).tap();
+    await waitFor("no HP typed after Apply", async () => ((await bar.getByRole("textbox", { name: "HP change" }).inputValue()) === "" ? true : null));
+
+    // A bar closed and opened again outside a blackout starts empty, as it always has.
+    await bar.getByRole("textbox", { name: "HP change" }).fill("3");
+    await bar.getByRole("button", { name: "Close", exact: true }).tap();
+    await bar.waitFor({ state: "detached" });
+    await tapCell(player, bounds, { x: 8, y: 6 });
+    await bar.waitFor();
+    assert.equal(await bar.getByRole("textbox", { name: "HP change" }).inputValue(), "");
+    await bar.getByRole("button", { name: "Close", exact: true }).tap();
+  });
+
+  test("7. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });

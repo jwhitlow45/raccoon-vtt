@@ -10,6 +10,7 @@ import {
   footprint,
   mapWorldRect,
   sceneGate,
+  selectionScene,
   snapPosition,
   type ViewToken,
 } from "./scene.ts";
@@ -65,6 +66,29 @@ describe("fail-closed scene gate", () => {
     assert.deepEqual(sceneGate({ view: bad.state, sceneId: bad.sceneId, role: "player" }), { kind: "wait" });
     const huge = stateWithScene({ bounds: { w: 201, h: 10 } });
     assert.deepEqual(sceneGate({ view: huge.state, sceneId: huge.sceneId, role: "dm" }), { kind: "wait" });
+  });
+});
+
+describe("selectionScene (LPD-PLAYER-7)", () => {
+  const { state, sceneId } = stateWithScene();
+  const ready = sceneGate({ view: state, sceneId, role: "player" });
+
+  test("a blackout keeps the selection: the same scene comes back after it", () => {
+    const first = selectionScene(null, ready);
+    assert.deepEqual(first, { scene: sceneId, letGo: true }, "the first scene starts with nothing selected");
+    const paused = selectionScene(first.scene, { kind: "blackout" });
+    assert.deepEqual(paused, { scene: sceneId, letGo: false });
+    assert.deepEqual(selectionScene(paused.scene, ready), { scene: sceneId, letGo: false }, "the pause lifting lets go of nothing");
+  });
+
+  test("a new scene, or losing the scene, still lets go", () => {
+    const other = stateWithScene();
+    other.state.scenes.next = { ...other.state.scenes[other.sceneId]!, id: "next" };
+    const next = sceneGate({ view: other.state, sceneId: "next", role: "player" });
+    assert.deepEqual(selectionScene(sceneId, next), { scene: "next", letGo: true });
+    assert.deepEqual(selectionScene(sceneId, { kind: "noScene" }), { scene: null, letGo: true });
+    assert.deepEqual(selectionScene(sceneId, { kind: "wait" }), { scene: null, letGo: true });
+    assert.deepEqual(selectionScene(null, { kind: "wait" }), { scene: null, letGo: false });
   });
 });
 

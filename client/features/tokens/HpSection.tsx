@@ -9,6 +9,7 @@ import { hpDisplay, hpLabel, hpText, type HpView } from "../../lib/tokenView.ts"
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions } from "../../state/view.ts";
 import { sendHpEntry, type HpTarget } from "./groupHp.ts";
+import { hpDraftKey, useKeepHpDraft, useKeptHpDraft } from "./hpDraft.ts";
 import { HP_MODES, MAX_HP_AMOUNT, modeAfterApply, parseHpInput, type HpMode } from "./hpInput.ts";
 import { FieldRow, Note, NumberField, Section, SmallButton } from "./ui.tsx";
 
@@ -40,9 +41,13 @@ export function HpEntry(props: {
   onApplied?(): void;
 }) {
   const actions = useRoomActions();
-  const [mode, setMode] = useState<HpMode>("damage");
-  const [text, setText] = useState("");
-  const [crit, setCrit] = useState(false);
+  // What was typed before a blackout unmounted the entry comes back with it (hpDraft.ts).
+  const key = hpDraftKey(props.targets);
+  const kept = useKeptHpDraft(key);
+  const [mode, setMode] = useState<HpMode>(kept?.mode ?? "damage");
+  const [text, setText] = useState(kept?.text ?? "");
+  const [crit, setCrit] = useState(kept?.crit ?? false);
+  useKeepHpDraft(key, { mode, text, crit });
   const [error, setError] = useState<string | null>(null);
   const modes = props.access === "all" ? HP_MODES : HP_MODES.filter((m) => m.mode === "damage" || m.mode === "heal");
   const preview = text.trim() ? parseHpInput(text, mode) : null;

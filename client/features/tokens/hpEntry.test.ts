@@ -14,13 +14,15 @@ import { theme } from "../../lib/theme.ts";
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../state/view.ts");
+const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 const { HpEntry, oneTarget } = await import("./HpSection.tsx");
 
 function render(access: "all" | "relative"): string {
   const target = oneTarget({ tokenId: "t1" }, access, false);
-  // HpEntry reads only the room's actions, and only when a change is applied.
+  // HpEntry reads the room's actions only when a change is applied, and the store only as it unmounts. The page's scope holds what a blackout keeps (hpDraft.ts).
+  const entry = createElement(HpEntry, { targets: [target], access });
   return renderToStaticMarkup(
-    createElement(RoomProvider, { store: {} as never, actions: {} as never, ui: {} as never, children: createElement(HpEntry, { targets: [target], access }) }),
+    createElement(RoomProvider, { store: {} as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: entry }) }),
   );
 }
 

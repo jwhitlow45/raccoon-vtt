@@ -78,6 +78,20 @@ export function sceneGate(input: { view: RoomState | null; sceneId: string | nul
 }
 
 /**
+ * The scene a selection belongs to after the gate changes, and whether
+ * the change lets go of the selection: a new scene does, and so does
+ * losing the scene, since the tokens selected stand on the one before. A
+ * player's blackout does neither (LPD-PLAYER-7). It is a pause with the
+ * same scene behind it, and letting go there took each player's selection,
+ * and the token bar with it, whenever the DM paused the game.
+ */
+export function selectionScene(before: string | null, gate: SceneGate): { scene: string | null; letGo: boolean } {
+  if (gate.kind === "blackout") return { scene: before, letGo: false };
+  const scene = gate.kind === "ready" ? gate.scene.id : null;
+  return { scene, letGo: scene !== before };
+}
+
+/**
  * A token as the client's view holds it. Player projections add `aboveFog`
  * (design section 7.3): true when a player owns the token or the DM exempted
  * it from the fog, the tokens drawn above the fog so the party always sees

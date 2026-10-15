@@ -29,13 +29,14 @@ import { FrameViewBar } from "../features/scenes/FrameView.tsx";
 import { barInset, chromeZoom, layoutWidth, screenHeight, smallUi, useLayoutSize } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { activeTool, toolsFor, type ToolDef } from "../features/tools.ts";
+import { useDropHpDraftsOnSelect } from "../features/tokens/hpDraft.ts";
 import { tabKeyIndex, VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { useBackClose } from "../lib/backClose.ts";
 import { useWakeLock } from "../lib/wakeLock.ts";
 import type { Insets } from "../lib/camera.ts";
 import { isCoarsePointer } from "../lib/device.ts";
 import { roomPath } from "../lib/roomId.ts";
-import { sceneGate } from "../lib/scene.ts";
+import { sceneGate, selectionScene } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { PanelBody, RoomLoadNotice } from "../panels/Panels.tsx";
 import { RoomScope, RoomScopeProvider, useRoomScope } from "../state/scope.ts";
@@ -157,10 +158,17 @@ function RoomPage() {
   const { selectedId, panel, tab, tool: toolId, actionBar } = useRoomView(useShallow((s) => s.local));
   const select = useCallback((id: string | null, add?: boolean) => ui.tap(id, add), [ui]);
 
-  const sceneId = gate.kind === "ready" ? gate.scene.id : null;
+  // A change of scene lets go of the selection, and a blackout does not (lib/scene.ts selectionScene).
+  const selectionOn = useRef<string | null>(null);
+  const gateKey = gate.kind === "ready" ? `ready:${gate.scene.id}` : gate.kind;
   useEffect(() => {
-    ui.select(null);
-  }, [sceneId, ui]);
+    const next = selectionScene(selectionOn.current, gate);
+    selectionOn.current = next.scene;
+    if (next.letGo) ui.select(null);
+    // The gate is read through gateKey, which changes exactly when its kind or its scene does.
+  }, [gateKey, ui]);
+  // HP typed before a blackout comes back with the token bar after it, and what no entry took back goes with a new selection (features/tokens/hpDraft.ts).
+  useDropHpDraftsOnSelect();
 
   /*
    * Where focus goes once the render that follows a tap has drawn what the
