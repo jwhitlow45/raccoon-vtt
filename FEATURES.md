@@ -148,7 +148,7 @@ The Builder tool is the DM's. Its modes:
 
 ## Measuring and movement
 
-- Ruler: drag to measure, and tap to add waypoints. It shows the total and each segment's length. Players' rulers show to everyone in their color. The DM's stays private until shared. A double tap keeps a ruler on the map.
+- Ruler: drag to measure, and tap to add waypoints. It shows the total and each segment's length. Players' rulers show to everyone in their color. The DM's stays private until shared. A double tap keeps a ruler on the map. A point on raised or lowered ground stands on it, so the distance counts the height. A player's ruler counts only ground they can see, and everyone reads the same numbers.
 - Dragging a token measures as it goes: green within its walking speed, yellow within a Dash, red beyond.
 - Tokens snap to the grid.
 - Distance between two tokens counts from edge to edge, right for their sizes, and includes height.

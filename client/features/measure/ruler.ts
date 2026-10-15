@@ -12,14 +12,23 @@ import type { Rect } from "#shared/rules/geom.ts";
  * footprint (its edge), so a ruler from one creature to another reads the
  * same distance as `distanceFt`. A free stop sits on the center of the cell
  * it was dropped in, so the line drawn is exactly the cells measured, and it
- * stands on the ground (z 0), the same reading every receiver of the
- * ruler's ephemeral frame gets from its points.
+ * stands on the ground there as the measurer sees it (`z`, in feet,
+ * docs/design-v1-heights-readout.md section 3). The stop carries that
+ * height in the ruler's ephemeral frame and in a kept ruler, so every
+ * receiver reads the measurer's distance, whatever its own fog hides.
  */
 
 export type Point = { x: number; y: number };
 
-/** One ruler point, as the `ruler` ephemeral frame carries it. */
-export type RulerStop = { x: number; y: number; tokenId?: string };
+/** One ruler point, as the `ruler` ephemeral frame carries it. `z` is a free stop's ground in feet, left out at 0. */
+export type RulerStop = { x: number; y: number; z?: number; tokenId?: string };
+
+/**
+ * The ground under a cell in feet, as the measurer may read it: all of it
+ * for the DM, and for a player 0 where their fog hides it, so a ruler
+ * cannot probe the dark (features/builder/heights/ground.ts seenGround).
+ */
+export type GroundReader = (cell: Point) => number;
 
 export type DistanceRules = Pick<RoomSettings, "feetPerCell" | "diagonal">;
 
@@ -29,8 +38,10 @@ export type RulerToken = FootprintToken & { id: string };
 /** A ruler, live or kept, has at most this many stops (shared/protocol.ts). */
 export const MAX_RULER_POINTS = MAX_RULER_STOPS;
 
-export function freeStop(p: Point): RulerStop {
-  return { x: Math.floor(p.x) + 0.5, y: Math.floor(p.y) + 0.5 };
+export function freeStop(p: Point, ground?: GroundReader): RulerStop {
+  const cell = { x: Math.floor(p.x), y: Math.floor(p.y) };
+  const z = ground?.(cell) ?? 0;
+  return z === 0 ? { x: cell.x + 0.5, y: cell.y + 0.5 } : { x: cell.x + 0.5, y: cell.y + 0.5, z };
 }
 
 export function tokenStop(token: RulerToken): RulerStop {
@@ -38,9 +49,9 @@ export function tokenStop(token: RulerToken): RulerStop {
   return { x: r.x + r.w / 2, y: r.y + r.h / 2, tokenId: token.id };
 }
 
-/** The stop for a pointer: on the token under it when there is one. */
-export function stopAt(world: Point, token: RulerToken | undefined): RulerStop {
-  return token ? tokenStop(token) : freeStop(world);
+/** The stop for a pointer: on the token under it when there is one, which stands at its own height, else on the ground. */
+export function stopAt(world: Point, token: RulerToken | undefined, ground?: GroundReader): RulerStop {
+  return token ? tokenStop(token) : freeStop(world, ground);
 }
 
 /**
@@ -49,13 +60,13 @@ export function stopAt(world: Point, token: RulerToken | undefined): RulerStop {
  */
 export function stopBox(stop: RulerStop, tokens: Readonly<Record<string, RulerToken | undefined>>, feetPerCell: number): CellBox {
   const token = stop.tokenId ? tokens[stop.tokenId] : undefined;
-  return token ? tokenCellBox(token, feetPerCell) : pointCellBox({ x: stop.x, y: stop.y }, feetPerCell);
+  return token ? tokenCellBox(token, feetPerCell) : pointCellBox({ x: stop.x, y: stop.y, z: stop.z }, feetPerCell);
 }
 
 /**
  * Feet for each leg and the total. Under fiveTen the diagonal count carries
- * across waypoints, as the DMG variant asks, and elevations count whenever
- * a stop is on a token that stands above or below the ground.
+ * across waypoints, as the DMG variant asks, and heights count: a token's
+ * elevation, and the ground a free stop stands on.
  */
 export function measureStops(
   stops: readonly RulerStop[],
@@ -148,21 +159,35 @@ export function beginGesture(
  * ruler measures afresh from where it started. One that started on the last
  * stop adds a leg to the finger.
  */
-export function dragTo(state: RulerState | null, g: RulerGesture, world: Point, token: RulerToken | undefined, newId: () => string): RulerState {
-  const live = stopAt(world, token);
+export function dragTo(
+  state: RulerState | null,
+  g: RulerGesture,
+  world: Point,
+  token: RulerToken | undefined,
+  newId: () => string,
+  ground?: GroundReader,
+): RulerState {
+  const live = stopAt(world, token, ground);
   if (g.extend && state) return { ...state, live };
-  return { id: state?.id ?? newId(), stops: [stopAt(g.start, g.startToken)], live, shared: state?.shared ?? false };
+  return { id: state?.id ?? newId(), stops: [stopAt(g.start, g.startToken, ground)], live, shared: state?.shared ?? false };
 }
 
 /**
  * The finger lifted. A drag fixes its live end as a stop. A tap adds a
  * waypoint, or starts a ruler when there is none.
  */
-export function release(state: RulerState | null, g: RulerGesture, world: Point, token: RulerToken | undefined, newId: () => string): RulerState {
+export function release(
+  state: RulerState | null,
+  g: RulerGesture,
+  world: Point,
+  token: RulerToken | undefined,
+  newId: () => string,
+  ground?: GroundReader,
+): RulerState {
   if (g.dragging && state?.live) {
     return { ...state, stops: [...state.stops, state.live].slice(0, MAX_RULER_POINTS), live: null };
   }
-  const stop = stopAt(world, token);
+  const stop = stopAt(world, token, ground);
   if (!state) return { id: newId(), stops: [stop], live: null, shared: false };
   // A tap on the last stop would only add a leg of zero length.
   if (g.extend || state.stops.length >= MAX_RULER_POINTS) return { ...state, live: null };
@@ -205,11 +230,12 @@ export function lift(input: {
   world: Point;
   token: RulerToken | undefined;
   newId: () => string;
+  ground?: GroundReader;
 }): { keep: RulerState | null; lastTap: null } | { ruler: RulerState; lastTap: LastTap | null } {
   const { gesture: g, lastTap } = input;
   if (!g.dragging && lastTap && isDoubleTap(lastTap, input.tap)) return { keep: lastTap.before, lastTap: null };
   return {
-    ruler: release(input.state, g, input.world, input.token, input.newId),
+    ruler: release(input.state, g, input.world, input.token, input.newId, input.ground),
     lastTap: g.dragging ? null : { ...input.tap, before: g.before },
   };
 }
@@ -217,8 +243,11 @@ export function lift(input: {
 /**
  * The ruler as a drawing to keep on the map, or null while it measures
  * nothing. A stop on a token stays on it, so the kept ruler reads from
- * where that token stands, as the live one did. It is shared exactly when
- * the live ruler was: always for a player, and for the DM only once Shared.
+ * where that token stands, as the live one did. A free stop keeps the
+ * ground it stood on, one `z` entry per stop with 0 on a token, written
+ * only when some stop stands off the ground at 0. It is shared exactly
+ * when the live ruler was: always for a player, and for the DM only once
+ * Shared.
  */
 export function keptDrawing(input: { id: string; sceneId: string; stops: readonly RulerStop[]; ownerId: string; color: string; shared: boolean }): DrawingInput | null {
   const stops = input.stops.slice(0, MAX_RULER_POINTS);
@@ -233,6 +262,8 @@ export function keptDrawing(input: { id: string; sceneId: string; stops: readonl
     visibility: input.shared ? "all" : "dm",
   };
   if (stops.some((s) => s.tokenId !== undefined)) drawing.anchors = stops.map((s) => s.tokenId ?? null);
+  const z = stops.map((s) => (s.tokenId === undefined ? (s.z ?? 0) : 0));
+  if (z.some((feet) => feet !== 0)) drawing.z = z;
   return drawing;
 }
 
@@ -249,12 +280,14 @@ export function keepPlan(
   return drawing ? { create: drawing } : { leave: ruler };
 }
 
-/** A kept ruler's stops, measured and drawn the same way as a live ruler's. */
-export function keptStops(d: Pick<Drawing, "points" | "anchors">): RulerStop[] {
+/** A kept ruler's stops, measured and drawn the same way as a live ruler's. One kept before stops stood on the ground has no `z`, and reads at 0 as it did. */
+export function keptStops(d: Pick<Drawing, "points" | "anchors" | "z">): RulerStop[] {
   const stops: RulerStop[] = [];
   for (let i = 0; i + 1 < d.points.length; i += 2) {
     const tokenId = d.anchors?.[i / 2];
-    stops.push(tokenId ? { x: d.points[i]!, y: d.points[i + 1]!, tokenId } : { x: d.points[i]!, y: d.points[i + 1]! });
+    const z = d.z?.[i / 2] ?? 0;
+    const at = { x: d.points[i]!, y: d.points[i + 1]! };
+    stops.push(tokenId ? { ...at, tokenId } : z !== 0 ? { ...at, z } : at);
   }
   return stops;
 }

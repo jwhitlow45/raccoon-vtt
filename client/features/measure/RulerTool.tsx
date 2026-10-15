@@ -3,6 +3,7 @@ import { createStore } from "zustand/vanilla";
 import type { EphEvent } from "#shared/protocol.ts";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { theme } from "../../lib/theme.ts";
+import { groundSource, seenGround } from "../builder/heights/ground.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
@@ -17,6 +18,7 @@ import {
   keepPlan,
   lift,
   measureStops,
+  type GroundReader,
   type LastTap,
   type RulerGesture,
   type RulerState,
@@ -66,6 +68,19 @@ function sceneToken(ctx: ToolContext, id: string | null): RulerToken | undefined
   return t && t.sceneId === ctx.scene.id ? t : undefined;
 }
 
+/**
+ * The ground a free stop stands on, read when the stop is placed: all of it
+ * for the DM, and for a player only what their fog shows, 0 elsewhere. The
+ * frame carries it, so a player's ruler never tells anyone what lies under
+ * their fog, and receivers never need the measurer's fog to read it.
+ */
+function groundOf(ctx: ToolContext): GroundReader {
+  const view = ctx.getState().view;
+  if (!view) return () => 0;
+  const src = groundSource(view, ctx.scene, ctx.role);
+  return (cell) => seenGround(src, cell) ?? 0;
+}
+
 /** Shows the ruler here and, when it is shared, everywhere on the scene. */
 function publish(ctx: ToolContext, ruler: RulerState | null): void {
   const rulerStore = ctx.scope.get(rulerSlot).store;
@@ -96,7 +111,7 @@ function onMove(p: ToolPointer, ctx: ToolContext): void {
     if (Math.hypot(p.screen.x - gesture.screen.x, p.screen.y - gesture.screen.y) < TAP_SLOP_PX) return;
     gesture.dragging = true;
   }
-  publish(ctx, dragTo(tool.store.getState().ruler, gesture, p.world, sceneToken(ctx, p.tokenId), ctx.actions.newId));
+  publish(ctx, dragTo(tool.store.getState().ruler, gesture, p.world, sceneToken(ctx, p.tokenId), ctx.actions.newId, groundOf(ctx)));
 }
 
 function onUp(p: ToolPointer, ctx: ToolContext): void {
@@ -112,6 +127,7 @@ function onUp(p: ToolPointer, ctx: ToolContext): void {
     world: p.world,
     token: sceneToken(ctx, p.tokenId),
     newId: ctx.actions.newId,
+    ground: groundOf(ctx),
   });
   tool.lastTap = lifted.lastTap;
   if ("keep" in lifted) keep(ctx, lifted.keep);

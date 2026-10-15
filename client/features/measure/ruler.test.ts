@@ -14,6 +14,7 @@ import {
   lift,
   measureStops,
   release,
+  stopAt,
   tokenStop,
   type LastTap,
   type RulerState,
@@ -78,6 +79,32 @@ describe("ruler measurement", () => {
     assert.equal(measureStops([tokenStop(thorn), tokenStop(vex)], tokens, euclid).totalFt, Math.round(Math.hypot(3, 0, 6) * 5));
     // A free stop stands on the ground.
     assert.equal(measureStops([tokenStop(vex), freeStop({ x: 3, y: 0 })], tokens, five).totalFt, 30);
+  });
+
+  test("a free stop stands on the ground the measurer reads, left out at 0, and a stop on a token on none", () => {
+    // A platform 10 ft up east of column 5, and the measurer cannot see column 8, so it reads 0 there.
+    const ground = (c: { x: number; y: number }) => (c.x >= 8 ? 0 : c.x >= 6 ? 10 : 0);
+    assert.deepEqual(freeStop({ x: 6.2, y: 12.7 }, ground), { x: 6.5, y: 12.5, z: 10 });
+    assert.deepEqual(freeStop({ x: 5.9, y: 12.7 }, ground), { x: 5.5, y: 12.5 }, "no z at 0");
+    assert.deepEqual(freeStop({ x: 8.1, y: 12.7 }, ground), { x: 8.5, y: 12.5 }, "no z on unseen ground");
+    const ogre = tok("ogre", { x: 6, y: 12 });
+    assert.deepEqual(stopAt({ x: 6.2, y: 12.7 }, ogre, ground), { x: 6.5, y: 12.5, tokenId: "ogre" }, "a token stands at its own height");
+    assert.deepEqual(stopAt({ x: 6.2, y: 12.7 }, undefined, ground), { x: 6.5, y: 12.5, z: 10 });
+    // A drag and a tap take the same reading, the start of a drag included.
+    const g = beginGesture(null, { x: 5.5, y: 12.5 }, undefined, 40);
+    assert.deepEqual(dragTo(null, g, { x: 6.5, y: 12.5 }, undefined, newId, ground).live, { x: 6.5, y: 12.5, z: 10 });
+    assert.deepEqual(release(null, g, { x: 7.5, y: 13.5 }, undefined, newId, ground).stops, [{ x: 7.5, y: 13.5, z: 10 }]);
+  });
+
+  test("from a cell at 0 to the next cell 10 ft up reads 10 ft, and 11 ft in true distance", () => {
+    const climb = [{ x: 5.5, y: 12.5 }, { x: 6.5, y: 12.5, z: 10 }];
+    assert.equal(measureStops(climb, none, five).totalFt, 10);
+    assert.equal(measureStops(climb, none, fiveTen).totalFt, 10);
+    assert.equal(measureStops(climb, none, euclid).totalFt, 11);
+    // Without the ground it read one step.
+    assert.equal(measureStops([climb[0]!, { x: 6.5, y: 12.5 }], none, five).totalFt, 5);
+    // A pit 10 ft down reads the same way down.
+    assert.equal(measureStops([climb[0]!, { x: 6.5, y: 12.5, z: -10 }], none, five).totalFt, 10);
   });
 
   test("a stop whose token is gone measures from where it was drawn", () => {
@@ -251,6 +278,19 @@ describe("kept rulers", () => {
     state = dragTo(state, dragged, { x: 5.2, y: 1.2 }, undefined, newId);
     const afterDrag = lift({ state, gesture: dragged, tap: { at: 0, screen: { x: 208, y: 48 } }, lastTap: null, world: { x: 5.2, y: 1.2 }, token: undefined, newId });
     assert.equal(afterDrag.lastTap, null, "a drag is no tap to pair with");
+  });
+
+  test("keeps each free stop's ground, 0 on a token and on ground the measurer could not see, and reads it back", () => {
+    const climb = [tokenStop(thorn), { x: 9.5, y: 5.5, z: 10 }, freeStop({ x: 9, y: 8 }), { x: 2.5, y: 2.5, z: -10 }];
+    const d = keptDrawing({ ...base, stops: climb })!;
+    assert.deepEqual(d.z, [0, 10, 0, -10]);
+    const back = keptStops({ points: d.points, anchors: d.anchors, z: d.z });
+    assert.deepEqual(back, climb);
+    assert.deepEqual(measureStops(back, { thorn }, five), measureStops(climb, { thorn }, five));
+    assert.equal(keptDrawing(base)!.z, undefined, "no z when every stop is at 0");
+    // A ruler kept before stops stood on the ground has no z and reads as it did.
+    assert.deepEqual(keptStops({ points: [0.5, 0.5, 4.5, 0.5] }), [{ x: 0.5, y: 0.5 }, { x: 4.5, y: 0.5 }]);
+    assert.equal(measureStops(keptStops({ points: [0.5, 0.5, 4.5, 0.5] }), none, five).totalFt, 20);
   });
 
   test("measures the same kept as it did live, from where its tokens stand now", () => {

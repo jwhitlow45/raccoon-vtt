@@ -776,7 +776,7 @@ Pure functions over plain data, no DOM or Node APIs, fully unit-tested.
 - `fiveTen`: horizontal first as `max + floor(min / 2)`, then the same rule again with the vertical steps.
 - `euclid`: `hypot(dx, dy, dz) * feetPerCell`, rounded to the nearest whole foot.
 
-The function is symmetric, and the tests check that. The ruler uses the same functions between points. With waypoints it sums the segments, and `fiveTen` carries its diagonal counter across segments, as the DMG variant requires. Under `fiveTen`, a creature two diagonal squares away is 15 ft away, so it is outside 10 ft reach.
+The function is symmetric, and the tests check that. The ruler uses the same functions between points. A point on a token takes the token's box. A free point stands on the ground under it as the measurer saw it when placing it (`pointCellBox` with the point's `z`, section 7.6): all ground for the DM, and for a player only ground their fog shows, 0 elsewhere. So from a cell at 0 to the next cell 10 ft up a ruler reads 10 ft, or 11 ft under `euclid`. With waypoints it sums the segments, and `fiveTen` carries its diagonal counter across segments, as the DMG variant requires. Under `fiveTen`, a creature two diagonal squares away is 15 ft away, so it is outside 10 ft reach.
 
 Movement and range (v1, `client/features/measure/movement.ts` and `rings.ts`):
 
