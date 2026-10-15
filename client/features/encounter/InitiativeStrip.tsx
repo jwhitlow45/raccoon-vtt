@@ -9,7 +9,7 @@ import { sheetOpen } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { announceTurn, unlockAudioOnTap } from "./alerts.ts";
 import { AutoRollWatch } from "./autoState.ts";
-import { TURN_BAND_PX, useTopBars, type TurnPlacement } from "./band.ts";
+import { BAND_MAX_DISKS, BAND_NAME_MIN_PX, bandFit, TURN_BAND_PX, useTopBars, type TurnPlacement } from "./band.ts";
 import { useConfirmedSeq, useRowFacts, useSend, useSortedEntries, useTurnTimer, useYou } from "./hooks.ts";
 import {
   answersPrompt,
@@ -190,13 +190,16 @@ function Band(props: { notice: boolean }) {
   const { width } = useViewport();
   const dm = you.role === "dm";
   const { current, next } = useMemo(
-    () => stripRows({ dm, entries, activeEntryId, count: width < 414 ? 3 : 4, skip: facts.skip }),
-    [entries, activeEntryId, dm, width, facts.skip],
+    () => stripRows({ dm, entries, activeEntryId, count: BAND_MAX_DISKS, skip: facts.skip }),
+    [entries, activeEntryId, dm, facts.skip],
   );
   if (round === null) return null;
 
   const yours = current !== null && facts.mine(current);
   const { name, line } = whoseTurn({ dm, started, activeName: current ? entryName(facts.view, current) : null, yours });
+  const clock = timer && current ? (timer.over ? "over" : "clock") : "none";
+  const fit = bandFit({ width, round, timer: clock, endTurn: !dm && yours, next: next.length });
+  const shownNext = next.slice(0, fit.disks);
   const gutter = theme.space(3);
   return (
     <div
@@ -216,9 +219,11 @@ function Band(props: { notice: boolean }) {
       }}
     >
       <TrackerTarget label={`Initiative, round ${round}. ${line}. Open the tracker.`} reach={0} />
-      <span aria-hidden style={roundStyle}>
-        R{round}
-      </span>
+      {fit.round ? (
+        <span aria-hidden style={roundStyle}>
+          R{round}
+        </span>
+      ) : null}
       {current ? (
         <Portrait entry={current} size={36} ring={theme.color.accentSoft} />
       ) : started ? (
@@ -229,7 +234,8 @@ function Band(props: { notice: boolean }) {
       <span
         style={{
           flex: 1,
-          minWidth: 0,
+          // A few letters of the name stay, and what stands beside it gives way first (band.ts bandFit).
+          minWidth: BAND_NAME_MIN_PX + 2 * PILL_PAD,
           display: "grid",
           gridTemplateColumns: "minmax(0, 1fr)",
           /*
@@ -261,15 +267,15 @@ function Band(props: { notice: boolean }) {
         {current && yours ? <YourTurn notice={props.notice} fontSize={theme.font.small} /> : null}
       </span>
       {timer && current ? <TimerClock state={timer} size={theme.font.body14} stack /> : null}
-      {next.length > 0 ? (
+      {shownNext.length > 0 ? (
         <span aria-hidden style={{ flex: "none", display: "flex", alignItems: "center", gap: theme.space(1) }}>
           <span style={{ fontSize: theme.font.tiny, color: theme.color.textMuted }}>Next</span>
-          {next.map((entry) => (
+          {shownNext.map((entry) => (
             <Portrait key={entry.id} entry={entry} size={24} />
           ))}
         </span>
       ) : null}
-      {dm ? null : <EndTurnButton />}
+      {dm ? null : <EndTurnButton stack={fit.stackEnd} />}
     </div>
   );
 }
@@ -566,7 +572,7 @@ function useTurnNotice(enabled: boolean): boolean {
  * until the server's event moves the turn. The wait lives in this
  * component, so it stays mounted and renders nothing off the turn.
  */
-function EndTurnButton() {
+function EndTurnButton(props: { stack?: boolean }) {
   const store = useRoomStore();
   const entries = useSortedEntries();
   const activeEntryId = useRoomView((s) => s.view?.encounter?.activeEntryId ?? null);
@@ -574,7 +580,7 @@ function EndTurnButton() {
   const { send, waiting } = useSend();
   const status = turnStatus({ entries, activeEntryId, mine: facts.mine });
   if (status !== "yours" && !waiting) return null;
-  return <EndTurnPill waiting={waiting} onClick={() => send(turnOp("encounter.next", store.getState()))} />;
+  return <EndTurnPill waiting={waiting} stack={props.stack} onClick={() => send(turnOp("encounter.next", store.getState()))} />;
 }
 
 /**

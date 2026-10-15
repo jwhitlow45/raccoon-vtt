@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { overflowRecord, turnPlacement } from "./band.ts";
+import { bandFit, overflowRecord, turnPlacement } from "./band.ts";
 
 /** The layout size of a window at an interface size (features/device/layout.ts layoutSize). */
 function layout(width: number, height: number, scale = 1): { width: number; height: number } {
@@ -50,5 +50,37 @@ describe("turnPlacement", () => {
   test("a record never shrinks, so a larger need wins", () => {
     assert.equal(overflowRecord(727, 650, 40), 727);
     assert.equal(overflowRecord(727, 800, 40), 840);
+  });
+});
+
+describe("bandFit (LPD-DMPHONE-2)", () => {
+  // The DM's band has four creatures to come. A player's has none, and End turn on their own turn.
+  const fit = (width: number, scale: number, more: { timer?: "none" | "clock" | "over"; endTurn?: boolean; round?: number } = {}) =>
+    bandFit({ width: width / scale, round: more.round ?? 1, timer: more.timer ?? "none", endTurn: more.endTurn ?? false, next: more.endTurn ? 0 : 4 });
+
+  test("a phone at 100% shows the DM up to four Next disks, the round and the name", () => {
+    assert.deepEqual(fit(390, 1), { disks: 4, round: true, stackEnd: false });
+    assert.deepEqual(fit(320, 1), { disks: 4, round: true, stackEnd: false });
+    assert.equal(bandFit({ width: 390, round: 1, timer: "none", endTurn: false, next: 2 }).disks, 2, "never more than there are");
+  });
+
+  test("the Next disks give way first, one at a time, so the name keeps its letters", () => {
+    assert.deepEqual(fit(320, 1, { timer: "over" }), { disks: 2, round: true, stackEnd: false });
+    assert.deepEqual(fit(390, 1.3, { timer: "over" }), { disks: 1, round: true, stackEnd: false });
+    assert.deepEqual(fit(320, 1.3), { disks: 2, round: true, stackEnd: false });
+    assert.deepEqual(fit(320, 1.3, { timer: "over" }), { disks: 0, round: true, stackEnd: false }, "320 px at 130% with time up: no disks, the name and the timer");
+  });
+
+  test("a player's own turn at 130%: the round gives way, then End turn stacks its words", () => {
+    assert.deepEqual(fit(390, 1.3, { timer: "over", endTurn: true }), { disks: 0, round: false, stackEnd: false });
+    assert.deepEqual(fit(360, 1.3, { timer: "over", endTurn: true }), { disks: 0, round: false, stackEnd: true });
+    assert.deepEqual(fit(320, 1.3, { timer: "over", endTurn: true }), { disks: 0, round: false, stackEnd: true });
+    assert.deepEqual(fit(320, 1.3, { endTurn: true }), { disks: 0, round: true, stackEnd: false }, "without the timer everything fits");
+    assert.deepEqual(fit(390, 1, { timer: "over", endTurn: true }), { disks: 0, round: true, stackEnd: false });
+  });
+
+  test("a long fight's round takes more room, so the disks give way sooner", () => {
+    assert.ok(fit(320, 1.3, { round: 12 }).disks <= fit(320, 1.3, { round: 1 }).disks);
+    assert.deepEqual(fit(320, 1.3, { round: 12, timer: "over" }), { disks: 0, round: true, stackEnd: false });
   });
 });

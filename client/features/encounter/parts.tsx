@@ -204,9 +204,11 @@ export const TURN_PILL_PX = 36;
  * pill the height of the strip's chip, so it reads as part of the turn UI
  * rather than a card over the map. The pill sits inside a transparent 44 px
  * target. While the op waits for the server it spins and takes no second
- * tap, at full strength so the spinner reads.
+ * tap, at full strength so the spinner reads. `stack` puts its two words
+ * on two lines, for the phone's turn band when its row is short of room
+ * (band.ts bandFit), as the timer stacks "Time’s up" over the time past.
  */
-export function EndTurnPill(props: { waiting: boolean; onClick(): void }) {
+export function EndTurnPill(props: { waiting: boolean; stack?: boolean; onClick(): void }) {
   return (
     <button
       type="button"
@@ -236,7 +238,7 @@ export function EndTurnPill(props: { waiting: boolean; onClick(): void }) {
           alignItems: "center",
           gap: theme.space(2),
           height: TURN_PILL_PX,
-          padding: `0 ${theme.space(4)}px`,
+          padding: `0 ${props.stack ? theme.space(2.5) : theme.space(4)}px`,
           borderRadius: theme.radius.pill,
           background: theme.color.accent,
           color: theme.color.onAccent,
@@ -246,7 +248,8 @@ export function EndTurnPill(props: { waiting: boolean; onClick(): void }) {
         }}
       >
         {props.waiting ? <Spinner label="Ending your turn" /> : null}
-        End turn
+        {/* One text node either way, so the button's name stays "End turn". */}
+        {props.stack ? <span style={{ width: "min-content", whiteSpace: "normal", textAlign: "center", lineHeight: 1.05 }}>End turn</span> : "End turn"}
       </span>
     </button>
   );

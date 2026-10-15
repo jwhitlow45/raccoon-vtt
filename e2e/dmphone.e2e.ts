@@ -37,6 +37,7 @@ const run = {
   roomId: "",
   roomName: `E2E DM phone ${new Date().toISOString().slice(0, 19)}`,
   password: "",
+  sceneId: "",
 };
 
 /** The few DOM parts the page functions read, typed by hand: the e2e files compile without the DOM library. */
@@ -53,6 +54,29 @@ type Win = {
   document: { activeElement: El | null; querySelector(selector: string): El | null };
   getComputedStyle(el: El): { overflowY: string };
 };
+
+/** The layout px the band's name always keeps (client/features/encounter/band.ts BAND_NAME_MIN_PX). */
+const BAND_NAME_MIN_PX = 36;
+
+type Box = { left: number; right: number };
+type BandEl = { tagName: string; textContent: string | null; parentElement: BandEl | null; getAttribute(name: string): string | null; getBoundingClientRect(): Box };
+
+/** The turn band's name, timer and Next disks as the page lays them out, and the window's width. */
+function band(page: Page): Promise<{ width: number; name: Box | null; timer: Box | null; next: Box | null; timerText: string }> {
+  return page.evaluate(() => {
+    const g = globalThis as unknown as { innerWidth: number; document: { querySelector(s: string): { querySelectorAll(s: string): ArrayLike<BandEl> } | null } };
+    const all = Array.from(g.document.querySelector("header")?.querySelectorAll("*") ?? []);
+    const box = (el: BandEl | null | undefined): Box | null => (el ? { left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right } : null);
+    const timer = all.find((el) => el.getAttribute("role") === "timer");
+    return {
+      width: g.innerWidth,
+      name: box(all.find((el) => el.getAttribute("data-rvtt-strip-name") !== null)),
+      timer: box(timer),
+      next: box(all.find((el) => el.tagName === "SPAN" && el.textContent === "Next")?.parentElement),
+      timerText: timer?.textContent ?? "",
+    };
+  });
+}
 
 function panelsButton(page: Page): Locator {
   return page.locator('nav[aria-label="Tools"] button[title="Panels"]');
@@ -157,6 +181,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await dm.getByLabel("I saved my DM link").check();
     await dm.getByRole("button", { name: "Continue to the room" }).click();
     await waitFor("the DM's snapshot", () => dmSocket.state);
+    run.sceneId = dmSocket.state!.meta.playerSceneId!;
 
     const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
@@ -248,4 +273,62 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await card("Str save").waitFor({ state: "detached" });
     await waitFor("the map focused", async () => (await focused(dm)).name === "Map");
   });
+
+  test("6. with the turn's time up, the band keeps a few letters of the name and its Next disks on screen, giving the disks up first (LPD-DMPHONE-2)", async () => {
+    const entries = [];
+    for (let i = 1; i <= 5; i++) {
+      const id = randomUUID();
+      await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: `Goblin ${i}`, x: 4 + i, y: 6, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
+      entries.push({ id: randomUUID(), tokenId: id, value: 20 - i });
+    }
+    await ops.send({ t: "room.update", settings: { turnTimerSec: 4 } });
+    await ops.send({ t: "encounter.start", entries });
+    await ops.send({ t: "encounter.next" });
+    const nextShown: Record<string, boolean> = {};
+    for (const view of [
+      { width: 390, height: 844, scale: 1 },
+      { width: 390, height: 844, scale: 1.3 },
+      { width: 320, height: 568, scale: 1 },
+      { width: 320, height: 568, scale: 1.3 },
+    ]) {
+      const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+      await dm.setViewportSize({ width: view.width, height: view.height });
+      await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
+      await dm.reload();
+      await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+      await waitFor(`time up in the band, ${label}`, async () => /Time’s up\s*\+/.test((await band(dm)).timerText) || null, 15_000);
+      const b = await band(dm);
+      assert.ok(b.name && b.timer, `${label}: the band is missing a part: ${JSON.stringify(b)}`);
+      assert.ok(b.name.right - b.name.left >= BAND_NAME_MIN_PX * view.scale - 0.5, `${label}: the name keeps too little: ${JSON.stringify(b)}`);
+      assert.ok(b.name.right <= b.timer.left + 0.5, `${label}: the name runs over the timer: ${JSON.stringify(b)}`);
+      assert.ok(b.timer.right <= b.width + 0.5, `${label}: the timer runs off the screen: ${JSON.stringify(b)}`);
+      if (b.next) assert.ok(b.next.left >= b.timer.right && b.next.right <= b.width + 0.5, `${label}: the Next disks run off the screen: ${JSON.stringify(b)}`);
+      nextShown[label] = b.next !== null;
+      if (view.width === 320 && view.scale === 1.3) await shots.take(dm, "dmphone-band-time-up-320-130");
+    }
+    assert.equal(nextShown["390 x 844 at 100%"], true, "a phone at 100% keeps its Next disks with the time up");
+    assert.equal(nextShown["320 x 568 at 130%"], false, "the disks give way before the name");
+    await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
+    await ops.send({ t: "encounter.end" });
+    await dm.evaluate(() => localStorage.removeItem("rvtt.uiScale"));
+    await dm.setViewportSize({ width: 390, height: 844 });
+    await dm.reload();
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+  });
 });
+
+function goblin() {
+  return {
+    hp: { cur: 7, max: 7, temp: 0 },
+    life: "alive",
+    ac: 15,
+    speeds: { walk: 30 },
+    initBonus: 2,
+    passivePerception: 9,
+    senses: "",
+    effects: [],
+    deathSaves: { ok: 0, fail: 0 },
+    notes: "",
+    dmNotes: "",
+  };
+}

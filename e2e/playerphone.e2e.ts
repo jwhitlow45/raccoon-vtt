@@ -16,7 +16,9 @@ import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, tapCell, waitF
  *   the recipient picker and the times stay on screen (LPD-PLAYER-3).
  * - On the player's own turn with the turn timer over, the phone's turn
  *   band keeps End Turn on screen and the name and "Your turn" clear of
- *   the timer, at 130% on 390 and 360 px phones (LPD-PLAYER-4).
+ *   the timer, at 130% on 390 and 360 px phones (LPD-PLAYER-4), and on a
+ *   320 px phone too, where the name still keeps a few letters
+ *   (LPD-DMPHONE-2).
  * - A total typed into a roll card, and the choice picked in it, survive
  *   turning the phone between portrait and landscape, which moves the card
  *   between the screen's foot and the alerts column (LPD-PLAYER-1). Focus
@@ -38,6 +40,8 @@ const assetDir = path.join(work, "assets");
 const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 
 const PORTRAIT = { width: 390, height: 844 };
+/** The layout px the band's name always keeps (client/features/encounter/band.ts BAND_NAME_MIN_PX). */
+const BAND_NAME_MIN_PX = 36;
 const LANDSCAPE = { width: 844, height: 390 };
 const CARD = "The DM asks for a roll";
 
@@ -234,7 +238,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     });
   }
 
-  test("3. time is up on the player's turn: the band's name gives way and End turn stays on screen at 130% (LPD-PLAYER-4)", async () => {
+  test("3. time is up on the player's turn: End turn stays on screen at 130% and the name keeps a few letters (LPD-PLAYER-4, LPD-DMPHONE-2)", async () => {
     await ops.send({ t: "room.update", settings: { turnTimerSec: 4 } });
     await ops.send({
       t: "encounter.start",
@@ -248,6 +252,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     for (const view of [
       { width: 390, height: 844, scale: 1.3 },
       { width: 360, height: 740, scale: 1.3 },
+      { width: 320, height: 568, scale: 1.3 },
       { width: 390, height: 844, scale: 1 },
     ]) {
       const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
@@ -261,7 +266,10 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       assert.ok(b.name.right <= b.timer.left + 0.5, `${label}: the name runs over the timer: ${JSON.stringify(b)}`);
       assert.ok(b.yourTurn.right <= b.timer.left + 0.5, `${label}: "Your turn" runs over the timer: ${JSON.stringify(b)}`);
       assert.ok(b.timer.right <= b.endTurn.left + 0.5, `${label}: the timer runs under End turn: ${JSON.stringify(b)}`);
+      // The band is zoomed by the interface size, so its layout px are this many screen px.
+      assert.ok(b.name.right - b.name.left >= BAND_NAME_MIN_PX * view.scale - 0.5, `${label}: the name keeps too little: ${JSON.stringify(b)}`);
       if (view.width === 360) await shots.take(player, "playerphone-band-time-up-360-130");
+      if (view.width === 320) await shots.take(player, "playerphone-band-time-up-320-130");
     }
     await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
     await ops.send({ t: "encounter.end" });
