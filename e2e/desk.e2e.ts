@@ -13,7 +13,9 @@ import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, wai
  *
  * - The side panel's tabs are one Tab stop. Left and Right on a focused
  *   tab switch tabs, Home and End go to the ends, and a selected token
- *   stays where it is.
+ *   stays where it is. A tab whose panel shows a subpage, such as a
+ *   journal page, keeps focus when chosen, so the next arrow still moves
+ *   along the tabs.
  * - A dialog with a field that focuses itself (a new journal page's
  *   title, a pasted stat block) keeps that field focused, and closing it
  *   gives focus back to the button that opened it, not to the page.
@@ -217,7 +219,42 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     assert.deepEqual(await focused(dm), { tag: "button", role: null, name: "Paste a stat block" }, "Cancel gives focus back to Paste a stat block");
   });
 
-  test("4. closing the map import dialog gives focus back to its file picker", async () => {
+  test("4. arrowing onto a tab whose panel shows a journal page keeps focus on the tabs, and the selected token stays put", async () => {
+    await ops.send({ t: "journal.create", page: { id: randomUUID(), title: "Lore", access: "all", blocks: [{ id: randomUUID().replace(/-/g, "").slice(0, 12), text: "The citadel fell." }] } });
+    // The Journal tab's name may carry its unread count.
+    const journalTab = dm.getByRole("tab", { name: /^Journal/ });
+    await journalTab.click();
+    await dm.getByRole("tabpanel", { name: /^Journal/ }).getByRole("button", { name: /^Lore/ }).click();
+    await dm.getByRole("heading", { name: "Lore" }).waitFor();
+    assert.deepEqual(await focused(dm), { tag: "h2", role: null, name: "Lore" }, "a page opened from its row still takes focus to its title");
+    const at = goblin();
+    assert.ok(at);
+    const p = await pagePoint(dm, run.bounds, { x: at.x + 0.5, y: at.y + 0.5 });
+    await dm.mouse.click(p.x, p.y);
+    await dm.getByRole("dialog", { name: "Goblin actions" }).waitFor();
+
+    const tabs = dm.getByRole("tablist", { name: "Panels" }).getByRole("tab");
+    const names = (await tabs.allTextContents()).map((t) => t.trim());
+    const journal = names.findIndex((n) => n.startsWith("Journal"));
+    assert.ok(journal !== -1, `the tabs are ${names.join(", ")}`);
+    await tabs.nth((journal + 1) % names.length).click();
+    await dm.keyboard.press("ArrowLeft");
+    await dm.getByRole("heading", { name: "Lore" }).waitFor();
+    assert.deepEqual(await focused(dm), { tag: "button", role: "tab", name: names[journal] }, "choosing Journal left focus on its tab, not on the page's title");
+    await dm.keyboard.press("ArrowLeft");
+    const before = names[(journal - 1 + names.length) % names.length]!;
+    assert.deepEqual(await focused(dm), { tag: "button", role: "tab", name: before }, "the next arrow moved along the tabs");
+    // Nothing comes back to wait for when nothing moves, so this gives a stray move time to reach the DM's view.
+    await dm.waitForTimeout(500);
+    assert.deepEqual(goblin(), at, "the goblin stayed where it was");
+
+    await dm.keyboard.press("Escape");
+    await journalTab.click();
+    await dm.getByRole("button", { name: "Back to Journal" }).click();
+    await dm.getByRole("tabpanel", { name: /^Journal/ }).getByRole("button", { name: "New page" }).waitFor();
+  });
+
+  test("5. closing the map import dialog gives focus back to its file picker", async () => {
     const file = path.join(work, "Desk_keep.dd2vtt");
     await writeUvtt(file);
     await dm.getByRole("tab", { name: "Scenes", exact: true }).click();
@@ -232,7 +269,7 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     await waitFor("focus back on the file picker", async () => (await focused(dm)).name === "From a Universal VTT file", 2_000);
   });
 
-  test("5. a scene menu's steps keep focus in the dialog, on the step it shows", async () => {
+  test("6. a scene menu's steps keep focus in the dialog, on the step it shows", async () => {
     const more = dm.getByRole("tabpanel").getByRole("button", { name: /^More for / });
     await more.focus();
     await dm.keyboard.press("Enter");
@@ -254,7 +291,7 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     assert.match((await focused(dm)).name, /^More for /, "Escape gives focus back to the scene's more button");
   });
 
-  test("6. no page errors along the way", () => {
+  test("7. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
   });
 });

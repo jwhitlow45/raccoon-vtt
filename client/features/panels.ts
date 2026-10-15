@@ -316,6 +316,13 @@ export function useSubpageFocus(
     const active = document.activeElement;
     const lost = active === null || active === document.body;
     if (!lost && !(area?.contains(active) ?? false)) return;
+    /*
+     * A tab chosen by click or arrow key changes the page too, to a panel
+     * that may show a subpage. The tab pattern keeps focus on the tab, and
+     * moved to the subpage's title, the next arrow left the tab list and
+     * moved the selected token.
+     */
+    if (active instanceof Element && active.closest('[role="tablist"]')) return;
     target?.focus({ preventScroll: true });
     /*
      * The row Back found can lie outside the view the offset put back: a
