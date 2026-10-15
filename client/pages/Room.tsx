@@ -262,6 +262,25 @@ function RoomPage() {
   };
   useDockFocus({ folded, sheetOpen, store: dockStore, registry: scope.get(sheetFocusSlot), showing, showRef, summaryRef });
 
+  /*
+   * A tile in the list of panels and an open panel's "All panels" each
+   * unmount with their sheet, and focus fell to the page. So a panel
+   * picked from the list starts at its sheet's heading, and "All panels"
+   * goes back to that panel's tile, as Back from a subpage returns to its
+   * row (features/panels.ts useSubpageFocus). The tap asks, and the render
+   * that draws the new sheet answers. After the dock's focus, which a
+   * sheet opening may also move.
+   */
+  const focusNext = useRef<{ kind: "sheet" } | { kind: "tile"; panelId: string } | null>(null);
+  const sheetTitleRef = useRef<HTMLHeadingElement>(null);
+  useLayoutEffect(() => {
+    const ask = focusNext.current;
+    if (!ask) return;
+    focusNext.current = null;
+    if (ask.kind === "sheet") sheetTitleRef.current?.focus({ preventScroll: true });
+    else sheetRef.current?.querySelector<HTMLElement>(`[data-opener="${panelTile(ask.panelId)}"]`)?.focus();
+  });
+
   if (ended) return <EndedScreen ended={ended} roomId={roomId} role={role} />;
   // A blackout is for a break or a reveal (features section 13), so players
   // see nothing of the table: no map, panels, initiative strip, handouts or
@@ -329,6 +348,7 @@ function RoomPage() {
             inset={{ top: topInset, bottom: TOOLBAR }}
             onClose={() => ui.closePanel()}
             onBack={() => {
+              focusNext.current = { kind: "tile", panelId: sheet.id };
               ui.closePanel();
               setPicker(true);
             }}
@@ -338,6 +358,7 @@ function RoomPage() {
             actions={headerActions}
             backRef={backRef}
             closeRef={closeRef}
+            titleRef={sheetTitleRef}
           >
             <PanelBody id={sheet.id} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={setSubpage} />
           </Sheet>
@@ -354,7 +375,15 @@ function RoomPage() {
             backRef={backRef}
             closeRef={closeRef}
           >
-            <PanelPicker panels={panels} current={tabId} badges={badges} onPick={(id) => ui.openPanel(id)} />
+            <PanelPicker
+              panels={panels}
+              current={tabId}
+              badges={badges}
+              onPick={(id) => {
+                focusNext.current = { kind: "sheet" };
+                ui.openPanel(id);
+              }}
+            />
           </Sheet>
         ) : null}
         {/* After the sheet, so a test's or a screen reader's first "Close" in the page is still the sheet's (docs/design-v1-visual.md 5.4). */}
@@ -935,6 +964,11 @@ function Toolbar(props: {
   );
 }
 
+/** A tile's `data-opener` in the list of panels, which "All panels" finds again. */
+function panelTile(panelId: string): string {
+  return `panel-${panelId}`;
+}
+
 /**
  * Every panel the role has, as large buttons, for the phone's Panels sheet:
  * card rows (components/Row.tsx), the open panel in the pressed look.
@@ -958,6 +992,7 @@ function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Recor
         return (
           <li key={p.id}>
             <Row
+              opener={panelTile(p.id)}
               title={p.title}
               trailing={count > 0 ? <Badge count={count} /> : undefined}
               chosen={current}

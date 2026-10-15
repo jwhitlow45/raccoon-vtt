@@ -21,6 +21,8 @@ import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type 
  *   turning the phone between portrait and landscape, which moves the card
  *   between the screen's foot and the alerts column (LPD-PLAYER-1). Focus
  *   stays in the Total field being typed in.
+ * - A panel picked from the list of panels starts at its sheet's heading,
+ *   and "All panels" goes back to its tile (LPD-PLAYER-5).
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seven. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
@@ -131,6 +133,14 @@ function band(page: Page) {
 
 function card(page: Page) {
   return page.getByRole("dialog", { name: CARD });
+}
+
+/** What has focus: its tag, and its name by its aria-label or its text. */
+function focused(page: Page): Promise<{ tag: string; name: string }> {
+  return page.evaluate(() => {
+    const a = (globalThis as unknown as { document: { activeElement: El | null } }).document.activeElement;
+    return { tag: a?.tagName.toLowerCase() ?? "", name: (a?.getAttribute("aria-label") ?? a?.textContent ?? "").trim() };
+  });
 }
 
 describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_000 }, () => {
@@ -293,7 +303,25 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await ops.send({ t: "roll.close", rollIds: [id] });
   });
 
-  test("5. nothing went wrong in the browsers", () => {
+  test("5. a panel picked from the list starts at its sheet's heading, and All panels goes back to its tile (LPD-PLAYER-5)", async () => {
+    await setUp({ ...PORTRAIT, scale: 1 });
+    await player.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
+    await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: "Menu", exact: true }).tap();
+    await waitFor("the Menu sheet's heading focused", async () => {
+      const f = await focused(player);
+      return f.tag === "h2" && f.name === "Menu";
+    });
+    await player.getByRole("button", { name: "All panels" }).tap();
+    await player.getByRole("list", { name: "Panels" }).waitFor();
+    await waitFor("Menu's tile focused", async () => {
+      const f = await focused(player);
+      return f.tag === "button" && f.name === "Menu";
+    });
+    await shots.take(player, "playerphone-panels-tile-focused");
+    await player.getByRole("button", { name: "Close Panels" }).tap();
+  });
+
+  test("6. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });

@@ -1,4 +1,4 @@
-import { useRef, type ReactNode, type Ref } from "react";
+import { useRef, type ReactNode, type Ref, type RefObject } from "react";
 import { chromeZoom, smallUi } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { subpageBack, useSubpageFocus, type PanelHeader } from "../features/panels.ts";
@@ -45,11 +45,14 @@ export function Sheet(props: {
   /** Focus moves to the back button, or the close button without one, once the token bar's Close leaves the sheet (3.2.1). */
   backRef?: Ref<HTMLButtonElement>;
   closeRef?: Ref<HTMLButtonElement>;
+  /** The header's title, a heading that takes focus from script, for a room that moves focus into the sheet it just opened. */
+  titleRef?: RefObject<HTMLHeadingElement | null>;
   children: ReactNode;
 }) {
   const { placement, inset, subpage } = props;
   const zoom = useUiScale();
-  const titleRef = useRef<HTMLHeadingElement>(null);
+  const ownTitleRef = useRef<HTMLHeadingElement>(null);
+  const titleRef = props.titleRef ?? ownTitleRef;
   const bodyRef = useRef<HTMLDivElement>(null);
   useSubpageFocus(subpage ?? null, { title: titleRef, body: bodyRef });
   const bottom = placement === "bottom";
