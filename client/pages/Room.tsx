@@ -48,10 +48,13 @@ import { useRoomUi, useRoomView } from "../state/view.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
 import { endedText } from "./endedText.ts";
 import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, focusAlert, foldsUnderSheet, type AlertsSummary } from "./fold.ts";
+import { mapFocusSlot } from "./mapFocus.ts";
 import { Badge, FindButton, FitButton, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle } from "./RoomChrome.tsx";
 import { DockHeaderActions, DockRow, FoldStatus, SAFE_PROBE_STYLE, useDockSummary, useLayoutHeight, useSafeAreas, type DockActions } from "./RoomDock.tsx";
 
 const { topBar: TOP_BAR, toolbar: TOOLBAR } = theme.layout;
+/** Over the whole map, drawing nothing but its focus ring, inside the map's edge. */
+const MAP_FOCUS_STYLE: CSSProperties = { position: "absolute", inset: 0, pointerEvents: "none", outlineOffset: -2 };
 
 /**
  * An element's height as drawn, kept up to date. The bars over the map
@@ -270,6 +273,13 @@ function RoomPage() {
     },
   };
   useDockFocus({ folded, sheetOpen, store: dockStore, registry: scope.get(sheetFocusSlot), showing, showRef, summaryRef });
+  const mapFocus = scope.get(mapFocusSlot);
+  const mapFocusRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      mapFocus.el = el;
+    },
+    [mapFocus],
+  );
 
   /*
    * A tile in the list of panels, an open panel's "All panels" and the
@@ -317,6 +327,8 @@ function RoomPage() {
       <div ref={safe.probe} aria-hidden style={SAFE_PROBE_STYLE} />
       <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
         <MapArea gate={gate} role={role} actionBar={actionBar} insets={insets} onSelect={select} onOpenDetails={openDetails} />
+        {/* The map's focus target (mapFocus.ts): after the map, so its ring draws over it, and before the bars, so Tab from it goes on to them. Taps pass through it. */}
+        <div ref={mapFocusRef} tabIndex={-1} role="img" aria-label="Map" style={MAP_FOCUS_STYLE} />
         <TopBar
           ref={topBarRef}
           zoom={zoom}

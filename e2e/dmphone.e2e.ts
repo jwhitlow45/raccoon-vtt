@@ -36,6 +36,7 @@ const dmConsole = new ConsoleWatch("dm");
 const run = {
   roomId: "",
   roomName: `E2E DM phone ${new Date().toISOString().slice(0, 19)}`,
+  password: "",
 };
 
 /** The few DOM parts the page functions read, typed by hand: the e2e files compile without the DOM library. */
@@ -146,6 +147,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await dm.goto(`${server.origin}/`);
     await dm.getByLabel("Room name").fill(run.roomName);
     await dm.getByLabel("Your name").fill("Dana the DM");
+    run.password = await dm.getByLabel("Player password").inputValue();
     await dm.getByRole("button", { name: "Create room" }).click();
     await dm.getByRole("heading", { name: "Save your DM link" }).waitFor();
     const link = (await dm.locator("code").first().textContent()) ?? "";
@@ -199,5 +201,51 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     assert.ok(f.top >= view.viewTop - 1 && f.bottom <= view.viewBottom + 1, `the row that took focus lies at ${Math.round(f.top)}-${Math.round(f.bottom)}, outside the sheet's view ${Math.round(view.viewTop)}-${Math.round(view.viewBottom)}`);
     await shots.take(dm, "dmphone-journal-back-moved");
     await sheet.getByRole("button", { name: "Close Journal" }).click();
+  });
+
+  test("5. closing roll cards puts focus on the next card, then on the map, never on the page (LPD-DMPHONE-7)", async () => {
+    // A character a player plays, which a request may ask. Pat joins with another device's cookies.
+    const pat = await browser.newContext();
+    let patId = "";
+    try {
+      const headers = { Origin: server.origin, "content-type": "application/json" };
+      const joined = await pat.request.post(`${server.origin}/api/rooms/${run.roomId}/join`, { headers, data: { password: run.password } });
+      assert.ok(joined.ok(), `joining answered ${joined.status()}`);
+      const { ticket } = (await joined.json()) as { ticket: string };
+      const done = await pat.request.post(`${server.origin}/api/rooms/${run.roomId}/join/complete`, { headers, data: { ticket, name: "Pat", color: "#30a46c" } });
+      assert.ok(done.ok(), `completing the join answered ${done.status()}`);
+      patId = ((await done.json()) as { member: { id: string } }).member.id;
+    } finally {
+      await pat.close();
+    }
+    const characterId = randomUUID();
+    const actor = { hp: { cur: 20, max: 20, temp: 0 }, life: "alive", ac: 14, speeds: { walk: 30 }, initBonus: 0, passivePerception: 12, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
+    await ops.send({ t: "character.create", character: { id: characterId, name: "Thorn", size: "medium", ownerIds: [patId], actor } });
+
+    // Three requests, oldest first: a Str save, a Dex save the DM marks passed, and a Wis save.
+    const ids = { str: randomUUID(), dex: randomUUID(), wis: randomUUID() };
+    for (const [ability, id] of Object.entries(ids)) {
+      await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability }] }, dcShown: true, resultShown: true, targets: [{ characterId }] } });
+      // Each asked at a time of its own, so the newest is certain.
+      await dm.waitForTimeout(20);
+    }
+    await ops.send({ t: "roll.answer", rollId: ids.dex, target: { characterId }, result: "pass" });
+    const card = (test: string) => dm.getByRole("group", { name: `Roll request: ${test}` });
+    await card("Wis save").waitFor();
+
+    // Close all answered stands above the cards, so focus goes to the first card left.
+    await dm.getByRole("button", { name: "Close all answered (1)" }).tap();
+    await card("Dex save").waitFor({ state: "detached" });
+    await waitFor("the Wis save card focused", async () => (await focused(dm)).name.startsWith("Wis save"));
+
+    // A card's Close: focus goes to the card after it.
+    await dm.getByRole("button", { name: "Close the Wis save request" }).tap();
+    await waitFor("the Str save card focused", async () => (await focused(dm)).name.startsWith("Str save"));
+    await shots.take(dm, "dmphone-next-card-focused");
+
+    // The last card's Close: nothing in the column is left, so the map takes focus.
+    await dm.getByRole("button", { name: "Close the Str save request" }).tap();
+    await card("Str save").waitFor({ state: "detached" });
+    await waitFor("the map focused", async () => (await focused(dm)).name === "Map");
   });
 });

@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { RollRequest, RollTarget } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { useAlertsSummary } from "../../components/sheetFocus.ts";
 import { revealAndFocus } from "../../lib/reveal.ts";
 import { theme } from "../../lib/theme.ts";
+import { dockSlot, focusAlert } from "../../pages/fold.ts";
+import { focusMap, mapFocusSlot } from "../../pages/mapFocus.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { sheetOpen } from "../../state/types.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
@@ -13,6 +15,7 @@ import {
   allAnsweredIds,
   answered,
   answeredCount,
+  cardAfterClose,
   chipStack,
   chipsStayShown,
   deskLayout,
@@ -68,8 +71,14 @@ export function DmDesk() {
     if (!keepShown) setExpanded(false);
   }, [keepShown]);
 
+  // Each card's toggle, by its request, which takes focus for its card.
+  const toggles = useRef(new Map<string, HTMLButtonElement>());
+  const toggleRef = (id: string) => (el: HTMLButtonElement | null) => {
+    if (el) toggles.current.set(id, el);
+    else toggles.current.delete(id);
+  };
+
   // The summary, here or in the dock (3.2.1), closes the sheets and puts focus on the newest card once it shows.
-  const newest = useRef<HTMLButtonElement | null>(null);
   const [focusAfter, setFocusAfter] = useState(false);
   const open = () => {
     ui.closeSheets();
@@ -78,9 +87,33 @@ export function DmDesk() {
   useEffect(() => {
     if (!focusAfter || layout.folded) return;
     // The column scrolls as a whole, and kept its place while the sheet folded it.
-    revealAndFocus(newest.current);
+    const first = cards[0];
+    revealAndFocus(first ? toggles.current.get(first.id) : null);
     setFocusAfter(false);
   }, [focusAfter, layout.folded]);
+
+  /*
+   * Close and "Close all answered" go with the cards they close, and focus
+   * fell to the page. Once those cards are gone, focus goes to the card
+   * after the one closed (the first card left, after Close all answered),
+   * else the column's first alert, else the map. A close the server
+   * refuses leaves its card, and focus stays on its button.
+   */
+  const afterClose = useRef<{ ids: readonly string[]; next: string | null } | null>(null);
+  const close = (ids: readonly string[], by: "card" | "all") => {
+    afterClose.current = { ids, next: cardAfterClose(cards.map((c) => c.id), ids, by) };
+    actions.dispatch({ t: "roll.close", rollIds: [...ids] });
+  };
+  useLayoutEffect(() => {
+    const ask = afterClose.current;
+    if (!ask || cards.some((c) => ask.ids.includes(c.id))) return;
+    afterClose.current = null;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    if (revealAndFocus(ask.next === null ? null : toggles.current.get(ask.next))) return;
+    if (focusAlert(scope.get(dockSlot).getState().column, null)) return;
+    focusMap(scope.get(mapFocusSlot));
+  }, [cards, scope]);
   // Nothing waits for the DM's own answer, so the rolls never lead the dock's summary for a DM.
   useAlertsSummary(cards.length > 0 ? { ...answeredCount(cards), waiting: false, open } : null);
 
@@ -113,14 +146,15 @@ export function DmDesk() {
           }}
         >
           {cards.length > 1 && done.length > 0 ? (
-            <Button size="sm" onClick={() => actions.dispatch({ t: "roll.close", rollIds: done })} style={{ boxShadow: theme.shadow.float }}>
+            <Button size="sm" onClick={() => close(done, "all")} style={{ boxShadow: theme.shadow.float }}>
               Close all answered ({done.length})
             </Button>
           ) : null}
           {cards.slice(0, stack.shown).map((request, i) => (
             <DmCard
               key={request.id}
-              toggleRef={i === 0 ? newest : undefined}
+              toggleRef={toggleRef(request.id)}
+              onClose={() => close([request.id], "card")}
               request={request}
               open={toggled[request.id] ?? layout.startsOpen(i)}
               onToggle={() => setToggled((t) => ({ ...t, [request.id]: !(t[request.id] ?? layout.startsOpen(i)) }))}
@@ -134,9 +168,8 @@ export function DmDesk() {
   );
 }
 
-function DmCard(props: { toggleRef?: RefObject<HTMLButtonElement | null>; request: RollRequest; open: boolean; onToggle(): void }) {
+function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; onClose(): void; request: RollRequest; open: boolean; onToggle(): void }) {
   const { request } = props;
-  const actions = useRoomActions();
   const count = request.targets.filter(answered).length;
   const dc = dcText(request, "dm");
   const title = `${testShortText(request.test)}${dc ? `, ${dc}` : ""}`;
@@ -173,7 +206,7 @@ function DmCard(props: { toggleRef?: RefObject<HTMLButtonElement | null>; reques
           size="sm"
           aria-label={`Close the ${testShortText(request.test)} request`}
           title={`Close the ${testShortText(request.test)} request`}
-          onClick={() => actions.dispatch({ t: "roll.close", rollIds: [request.id] })}
+          onClick={props.onClose}
         >
           Close
         </Button>

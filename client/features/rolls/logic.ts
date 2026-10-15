@@ -223,6 +223,17 @@ export function allAnsweredIds(rolls: Readonly<Record<string, RollRequest | unde
     .map((r) => r.id);
 }
 
+/**
+ * The DM's card that takes focus once others close (DmDesk.tsx): after a
+ * card's own Close, the card after it in `shown` order (newest first), and
+ * after "Close all answered", which stands above the cards, the first card
+ * left. Null when none is left there.
+ */
+export function cardAfterClose(shown: readonly string[], closed: readonly string[], by: "card" | "all"): string | null {
+  const at = by === "card" && closed[0] !== undefined ? shown.indexOf(closed[0]) : -1;
+  return shown.slice(at + 1).find((id) => !closed.includes(id)) ?? null;
+}
+
 /** Newest first, as the cards and chips stack. */
 export function newestFirst(rolls: Readonly<Record<string, RollRequest | undefined>>): RollRequest[] {
   return Object.values(rolls)

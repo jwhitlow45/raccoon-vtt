@@ -12,6 +12,7 @@ import {
   answeredCount,
   answerKey,
   askAnswer,
+  cardAfterClose,
   askLine,
   askOp,
   cameUp,
@@ -316,6 +317,25 @@ describe("the DM's cards on a phone", () => {
     assert.equal(covered({ panel: null, panelList: true }), true, "the list of panels folds the stack");
     assert.equal(covered({ panel: "log", panelList: false }), true);
     assert.equal(covered({ panel: null, panelList: false }), false);
+  });
+});
+
+describe("where focus goes as the DM closes cards (LPD-DMPHONE-7)", () => {
+  test("a card's Close moves to the card after it, newest first", () => {
+    assert.equal(cardAfterClose(["c", "b", "a"], ["c"], "card"), "b");
+    assert.equal(cardAfterClose(["c", "b", "a"], ["b"], "card"), "a");
+  });
+
+  test("the last card closed leaves no card after it, so the column or the map takes focus", () => {
+    assert.equal(cardAfterClose(["c", "b", "a"], ["a"], "card"), null);
+    assert.equal(cardAfterClose(["a"], ["a"], "card"), null);
+  });
+
+  test("Close all answered, above the cards, moves to the first card left", () => {
+    assert.equal(cardAfterClose(["c", "b", "a"], ["b"], "all"), "c");
+    assert.equal(cardAfterClose(["c", "b", "a"], ["c", "a"], "all"), "b");
+    assert.equal(cardAfterClose(["c", "b", "a"], ["b", "c"], "all"), "a");
+    assert.equal(cardAfterClose(["b", "a"], ["b", "a"], "all"), null);
   });
 });
 
