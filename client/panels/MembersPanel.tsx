@@ -13,6 +13,7 @@ import { accentFor } from "../lib/accent.ts";
 import { buttonNote, memberSwatches } from "../lib/memberColor.ts";
 import { theme } from "../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../state/view.ts";
+import { memberRow } from "./memberRow.ts";
 
 /**
  * The roster with who is online (features section 1), your own color
@@ -49,6 +50,7 @@ export default function MembersPanel(_props: PanelProps) {
             const canPick = own && !preview;
             const open = canPick && picking;
             const isOnline = onlineSet.has(m.id);
+            const says = memberRow({ kind: m.kind, own, online: isOnline });
             return (
               <div key={m.id} style={{ display: "grid", gap: theme.space(2), paddingBottom: open || (dm && !own) ? theme.space(2) : 0 }}>
                 <Row
@@ -59,10 +61,10 @@ export default function MembersPanel(_props: PanelProps) {
                       {own ? <span style={{ color: theme.color.textMuted, fontWeight: theme.weight.regular }}> (you)</span> : null}
                     </>
                   }
-                  detail={m.kind === "dm" ? "DM" : "Player"}
+                  detail={says.detail}
                   trailing={
                     <>
-                      <Tag tone={isOnline ? "success" : "muted"}>{isOnline ? "Online" : "Offline"}</Tag>
+                      {says.tag ? <Tag tone={isOnline ? "success" : "muted"}>{says.tag}</Tag> : null}
                       {canPick ? (
                         <Button
                           ref={colorButton}
