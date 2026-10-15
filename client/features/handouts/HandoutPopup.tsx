@@ -12,7 +12,7 @@ import { closedSlot, closedStorageKey, closeHandout, loadClosed } from "./closed
 import { layoutWidth } from "../device/layout.ts";
 import { useXCard } from "../xcard/XCardHost.tsx";
 import { prefersShare, shareFile } from "../mapexport/save.ts";
-import { downloadAction, fetchHandoutImage, handoutFile, saveSettled, saveThroughLink, type SaveState } from "./download.ts";
+import { downloadAction, fetchHandoutImage, handoutFile, saveBegin, saveForget, saveSettled, saveThroughLink, type SaveOutcome, type SaveStates } from "./download.ts";
 import { nextPopup, popupShows, showingKey } from "./handouts.ts";
 import { doubleTapView, FIT, isDoubleTap, panView, pinchView, zoomAround, type Point, type ZoomView } from "./zoom.ts";
 
@@ -66,8 +66,8 @@ export function HandoutPopup() {
     if (key && handouts) closeHandout(closedStore, key, handouts);
   };
 
-  // Download's state, for the handout it was pressed for (download.ts SaveState).
-  const [saving, setSaving] = useState<SaveState>(null);
+  // Each handout's Download, by its key (download.ts SaveStates).
+  const [saving, setSaving] = useState<SaveStates>({});
   const lastOp = useRef(0);
   const url = handout ? assets.url(handout.assetId, "full") : null;
   /*
@@ -97,40 +97,47 @@ export function HandoutPopup() {
    * left that Download busy for good. A failure belongs to the popup that
    * saw it, so the handout opened again starts clean.
    */
-  useEffect(() => () => setSaving((s) => (s?.state === "failed" ? null : s)), [key]);
-  const mine = saving?.key === key ? saving : null;
+  useEffect(
+    () => () => {
+      if (key) setSaving((s) => saveForget(s, key));
+    },
+    [key],
+  );
+  const mine = key ? saving[key] : undefined;
   const busy = mine?.state === "busy";
   const download = async () => {
     if (!handout || !key || !url || busy) return;
     const op = ++lastOp.current;
+    // Every change goes through this handout's entry and this press's number (download.ts saveSettled).
+    const settle = (outcome: SaveOutcome) => setSaving((s) => saveSettled(s, key, op, outcome));
     const blob = ready?.key === key ? ready.blob : null;
     const file = blob ? handoutFile(blob, handout.title) : null;
     const action = downloadAction(file !== null, file !== null && prefersShare(file));
     if (file && action === "share") {
-      setSaving(null);
+      setSaving((s) => saveBegin(s, key, op, "sharing"));
       // Called before any wait, so the share sheet opens within the tap. Closing the sheet is a choice, not a failure.
-      if ((await shareFile(file)) === "failed") setSaving({ op, key, state: "failed", why: "share" });
+      settle((await shareFile(file)) === "failed" ? "share failed" : "done");
       return;
     }
     if (file && action === "link") {
-      setSaving(null);
       saveThroughLink(file);
+      setSaving((s) => saveSettled(saveBegin(s, key, op, "busy"), key, op, "done"));
       return;
     }
-    setSaving({ op, key, state: "busy" });
+    setSaving((s) => saveBegin(s, key, op, "busy"));
     try {
       const fetched = await fetchHandoutImage(url);
       // Kept for a share's second tap, unless another handout's image is in hand by now.
       setReady((r) => (r && r.key !== key ? r : { key, blob: fetched }));
       const made = handoutFile(fetched, handout.title);
       if (prefersShare(made)) {
-        setSaving((s) => saveSettled(s, op, "share"));
+        settle("share");
         return;
       }
       saveThroughLink(made);
-      setSaving((s) => saveSettled(s, op, "done"));
+      settle("done");
     } catch {
-      setSaving((s) => saveSettled(s, op, "failed"));
+      settle("fetch failed");
     }
   };
   const label = busy ? "Downloading…" : mine?.state === "share" ? "Share" : "Download";

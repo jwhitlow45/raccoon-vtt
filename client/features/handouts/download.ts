@@ -58,21 +58,49 @@ function extensionFor(type: string): string {
 }
 
 /**
- * The popup's Download, by operation: which press is fetching, has the
- * file for a share that needs a tap of its own ("share"), or failed, and
- * for which handout. Each press gets a new `op`.
+ * One handout's Download, held by the press that last began on it: what
+ * that press is doing (fetching, sharing, waiting for a second tap to
+ * share) or why it failed. Each press gets a new `op`.
  */
-export type SaveState = { op: number; key: string; state: "busy" | "share" | "failed"; why?: "fetch" | "share" } | null;
+export type SaveEntry = { op: number; state: "busy" | "sharing" | "share" | "failed"; why?: "fetch" | "share" };
 
 /**
- * What an operation's end does to the state. Only the operation the state
- * holds may change it, so a download that ends after a newer one started
- * never clears or overwrites the newer (P3-ASTRA-03).
+ * Every handout's Download, by the handout's key. One handout's press never
+ * touches another's: a download of a handout whose popup has closed goes
+ * on, and saving the next handout meanwhile must not take its "Downloading…"
+ * away, or a second tap would save it twice (P3R-9).
  */
-export function saveSettled(current: SaveState, op: number, outcome: "done" | "share" | "failed"): SaveState {
-  if (current?.op !== op) return current;
-  if (outcome === "done") return null;
-  return outcome === "share" ? { ...current, state: "share" } : { ...current, state: "failed", why: "fetch" };
+export type SaveStates = Readonly<Record<string, SaveEntry>>;
+
+/** A press begins on a handout, and its entry is now this press's. */
+export function saveBegin(states: SaveStates, key: string, op: number, state: "busy" | "sharing"): SaveStates {
+  return { ...states, [key]: { op, state } };
+}
+
+export type SaveOutcome = "done" | "share" | "fetch failed" | "share failed";
+
+/**
+ * A press ends. Only the press a handout's entry holds may change it, so an
+ * older press that ends after a newer one began, a share that fails late
+ * above all, never clears or overwrites the newer (P3-ASTRA-03,
+ * P3-ASTRA-04). Every end goes through here, so no path can skip the check.
+ */
+export function saveSettled(states: SaveStates, key: string, op: number, outcome: SaveOutcome): SaveStates {
+  const entry = states[key];
+  if (entry?.op !== op) return states;
+  if (outcome === "done") {
+    const { [key]: _done, ...rest } = states;
+    return rest;
+  }
+  if (outcome === "share") return { ...states, [key]: { op, state: "share" } };
+  return { ...states, [key]: { op, state: "failed", why: outcome === "share failed" ? "share" : "fetch" } };
+}
+
+/** The popup closed on a handout: a failure there is forgotten, and a download under way goes on (P3R-6). */
+export function saveForget(states: SaveStates, key: string): SaveStates {
+  if (states[key]?.state !== "failed") return states;
+  const { [key]: _failed, ...rest } = states;
+  return rest;
 }
 
 /**
