@@ -180,4 +180,24 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await assertSubpageScroll(dm, "Journal", row, "Back to Journal", /^Lore page 16/);
     await sheet.getByRole("button", { name: "Close Journal" }).click();
   });
+
+  test("4. pages added from another device above the row that opened a page move it down, and Back still brings it into view", async () => {
+    const sheet = await openPanel(dm, "Journal");
+    await scrollAndTap(dm, sheet.getByRole("button", { name: /^Lore page 16/ }).first());
+    await dm.getByRole("button", { name: "Back to Journal" }).waitFor();
+    // Sorted by title, these land above every Lore page, far more than the sheet shows.
+    for (let i = 1; i <= 12; i++) {
+      const blockId = randomUUID().replace(/-/g, "").slice(0, 12);
+      await ops.send({ t: "journal.create", page: { id: randomUUID(), title: `Added page ${String(i).padStart(2, "0")}`, access: "all", blocks: [{ id: blockId, text: "Written at the table." }] } });
+    }
+    await waitFor("the added pages in the DM's view", () => Object.keys(dmSocket.state?.journal ?? {}).length >= 28 || null);
+    await dm.getByRole("button", { name: "Back to Journal" }).click();
+    await sheet.getByRole("button", { name: /^Lore page 16/ }).first().waitFor();
+    const view = await sheetBody(dm, "Journal");
+    const f = await focused(dm);
+    assert.match(f.name, /^Lore page 16/, `focus went back to "${f.name}"`);
+    assert.ok(f.top >= view.viewTop - 1 && f.bottom <= view.viewBottom + 1, `the row that took focus lies at ${Math.round(f.top)}-${Math.round(f.bottom)}, outside the sheet's view ${Math.round(view.viewTop)}-${Math.round(view.viewBottom)}`);
+    await shots.take(dm, "dmphone-journal-back-moved");
+    await sheet.getByRole("button", { name: "Close Journal" }).click();
+  });
 });

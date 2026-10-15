@@ -300,12 +300,13 @@ export function useSubpageFocus(
      */
     const scroller = body.current;
     let target: HTMLElement | null;
+    let back: HTMLElement | null = null;
     if (key !== null) {
       if (was === null) opener.current = pressed;
       target = title.current;
       if (scroller) scroller.scrollTop = 0;
     } else {
-      const back = findOpener(scroller, opener.current);
+      back = findOpener(scroller, opener.current);
       if (back && scroller && opener.current) scroller.scrollTop = opener.current.top;
       // A header drawn only for a subpage is gone with it, and its title with it.
       target = back ?? (title.current?.isConnected ? title.current : null) ?? fallback?.current ?? null;
@@ -316,5 +317,16 @@ export function useSubpageFocus(
     const lost = active === null || active === document.body;
     if (!lost && !(area?.contains(active) ?? false)) return;
     target?.focus({ preventScroll: true });
+    /*
+     * The row Back found can lie outside the view the offset put back: a
+     * journal page another device added above it moved it down, or it was
+     * focused from the keyboard without scrolling there. So it is brought
+     * just into view. Not with lib/reveal.ts, which reads the offset chain:
+     * the body is not its rows' offset parent.
+     */
+    if (!back || !scroller) return;
+    const row = back.getBoundingClientRect();
+    const view = scroller.getBoundingClientRect();
+    if (row.top < view.top || row.bottom > view.bottom) back.scrollIntoView({ block: "nearest" });
   }, [key, title, body, root, fallback]);
 }
