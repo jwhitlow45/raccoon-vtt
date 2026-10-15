@@ -267,6 +267,19 @@ async function heard(page: Page, words: string): Promise<void> {
   await waitFor(`"${words}" on the status line`, async () => (await heightStatus(page).innerText()) === words);
 }
 
+/**
+ * A finger held still on the phone's screen, sent through the DevTools
+ * protocol so the press is a real touch, as a phone sends it. tapCell's
+ * mouse clicks never press long enough to ping, and are no touch.
+ */
+async function holdFinger(page: Page, context: BrowserContext, at: { x: number; y: number }, ms: number): Promise<void> {
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: at.x, y: at.y }] });
+  await page.waitForTimeout(ms);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
+}
+
 /** Whether a pin's label popover shows: a screen-size pill pointing down at the pin (features/pins/PinLayer.tsx). */
 function pinPopover(page: Page, text: string): Promise<boolean> {
   return page.evaluate((label) => {
@@ -464,7 +477,46 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await shots.take(dm, "vision-dm-readout-closet");
   });
 
-  test("7. a ruler stop stands on the ground its measurer sees, and every page reads the measurer's numbers", async () => {
+  test("7. a finger held on the door or on the platform pings and opens nothing, and the DM's held + climbs to 100 ft", async () => {
+    const doorPill = player.getByRole("group", { name: /door$/ });
+    for (const [what, world] of [
+      ["the door", { x: 3.5, y: 10.1 }],
+      ["the platform", { x: 6.5, y: 13.5 }],
+    ] as const) {
+      const dmFrom = dmSocket.received.length;
+      const p = await pagePoint(player, BOUNDS, world);
+      await assertCanvasAt(player, p);
+      await holdFinger(player, playerContext, p, 900);
+      await waitFor(`the ping held on ${what} at the DM`, () => framesFrom(dmFrom, dmSocket).some((f) => f.t === "eph" && f.e?.k === "ping" && f.from === run.patId));
+      await player.waitForTimeout(300);
+      assert.equal(await doorPill.count(), 0, `a finger held on ${what} opened the door's pill`);
+      assert.equal(await heightPill(player).count(), 0, `a finger held on ${what} showed a reading`);
+      assert.equal(await heightStatus(player).innerText(), "");
+    }
+    // A short touch on the platform is still a tap.
+    await holdFinger(player, playerContext, await pagePoint(player, BOUNDS, { x: 6.5, y: 13.5 }), 60);
+    await heard(player, "Ground 10 ft up.");
+    await shots.take(player, "vision-player-touch-tap-after-holds");
+
+    // The DM's + held climbs from 10 ft to 100 ft, and the hold ends there with the finger still down, so the value is spoken.
+    await dm.getByRole("button", { name: "Map builder" }).first().click();
+    await dm.locator("select").filter({ has: dm.locator('option[value="height"]') }).first().selectOption("height");
+    const stepper = dm.getByRole("group", { name: "Height" });
+    const plus = stepper.getByRole("button", { name: "5 ft higher" });
+    assert.equal((await stepper.innerText()).trim(), "10 ft up");
+    const b = await plus.boundingBox();
+    assert.ok(b);
+    await dm.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await dm.mouse.down();
+    await waitFor("the stepper at 100 ft", async () => (await stepper.innerText()).trim() === "100 ft up", 5_000);
+    assert.equal(await plus.isDisabled(), true);
+    await waitFor("the value spoken again before the lift", async () => (await stepper.locator("[aria-live]").getAttribute("aria-live")) === "polite");
+    await shots.take(dm, "vision-dm-stepper-held-to-100");
+    await dm.mouse.up();
+    await dm.getByRole("button", { name: "Select", exact: true }).click();
+  });
+
+  test("8. a ruler stop stands on the ground its measurer sees, and every page reads the measurer's numbers", async () => {
     // The pin's popover would cover the reading in the screenshot.
     await waitFor("the pin's popover to go", async () => !(await pinPopover(player, "Old shrine")), 6_000);
     const dmFrom = dmSocket.received.length;
@@ -509,7 +561,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await dm.getByRole("button", { name: "Select", exact: true }).click();
   });
 
-  test("8. Teleport here after a stopped walk replaces the walk, and only the DM hears of it", async () => {
+  test("9. Teleport here after a stopped walk replaces the walk, and only the DM hears of it", async () => {
     // A phone's usual flow: tap the token, then drag it. The stopped walk's note wins over its action bar (W4-O-1).
     const bar = player.getByRole("dialog", { name: "Thorn actions" });
     await tapCell(player, BOUNDS, { x: 7, y: 14 });
@@ -540,7 +592,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await shots.take(player, "vision-player-teleported");
   });
 
-  test("9. ground the party explored stays revealed after it leaves, with no creature on it", async () => {
+  test("10. ground the party explored stays revealed after it leaves, with no creature on it", async () => {
     // A quarter square in the middle of Thorn's first square: the party saw it, and sees it no longer.
     const sx = START.x * 4 + 2;
     const sy = START.y * 4 + 2;
@@ -563,7 +615,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await shots.take(dm, "vision-dm-explored-outline");
   });
 
-  test("10. no frame the player received held anything out of the party's sight, and every ruler stood on its measurer's ground", () => {
+  test("11. no frame the player received held anything out of the party's sight, and every ruler stood on its measurer's ground", () => {
     const frames = framesFrom(0);
     const start = run.startSight;
     assert.ok(start);
@@ -639,7 +691,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     assert.ok(playerStops > 0, "no stop of the player's stood on raised ground");
   });
 
-  test("11. no page logged an error or a warning", () => {
+  test("12. no page logged an error or a warning", () => {
     for (const c of [dmConsole, playerConsole]) {
       assert.deepEqual(c.errors, [], `${c.label} logged errors`);
       assert.deepEqual(c.warnings, [], `${c.label} logged warnings`);

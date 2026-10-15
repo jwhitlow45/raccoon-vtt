@@ -131,8 +131,9 @@ End to end, all in `e2e/vision.e2e.ts`, which already has the 10 ft platform, th
 Its new steps:
 
 - After the ledge and stair step: the player taps the platform with Select and the status line says "Ground 10 ft up.", taps the stair and hears "Stairs, up to the east.", taps the pin and gets its popover with no readout, and taps the closet and hears nothing. The DM clicks the closet, at (14, 19) beside the boss, and reads "Ground 10 ft down." A screenshot of each pill.
+- With a real touch, sent through the DevTools protocol (`Input.dispatchTouchEvent`), since the run's `tapCell` clicks with the mouse: the player holds a finger 900 ms on the door and then on the platform. Each pings, and neither opens the door's pill nor shows a readout, while a short touch on the platform still reads it. The DM holds + in Height mode from 10 ft to 100 ft: + turns disabled, and the value's live region is polite again before the lift. (Build review round 1, HB-P-4.)
 - The player measures from (5, 12) to the platform cell (6, 12). The ruler's options line reads 10 ft, and the DM's socket gets the frame with `z: 10` on that stop. A player's stop in the closet carries no `z`. The DM shares a ruler that ends in the closet, and the player's frame carries `z: -10`. The player keeps the platform ruler, and both states hold it with `z: [0, 10]`.
-- The leak check (step 8 before the build, step 10 after it) gains:
+- The leak check (step 8 before the build, step 11 after it) gains:
   - Every live ruler frame the player received carries `z` only on stops without a token, and each equals the measurer's ground at that cell when sent. The e2e paints nothing after its layout, so that is the layout's ground.
   - Every ruler frame the DM received from the player carries `z` only on cells that player could see when it was sent.
   - Every kept ruler the player received carries one `z` entry per stop, 0 where its anchor names a token.
