@@ -362,6 +362,32 @@ export function parseTotal(text: string): { ok: true; total: number } | { ok: fa
   return { ok: true, total: n === 0 ? 0 : n };
 }
 
+/**
+ * What a player typed into a card and has not sent: the total and which
+ * choice they rolled, and the total the answer stood at when they typed
+ * (`base`). Kept by the player's rolls for each creature a request asks
+ * about, because the card itself can be built again: under 600 layout px
+ * it stands across the screen and from 600 px it sits in the alerts
+ * column, so turning a phone between portrait and landscape mounts it
+ * afresh.
+ */
+export type AnswerDraft = { text: string; choice: 0 | 1; base: number | undefined };
+
+/** The key of one creature's draft on one request. */
+export function draftKey(requestId: string, target: Pick<RollTarget, "tokenId" | "characterId">): string {
+  return `${requestId}:${targetKey(target)}`;
+}
+
+/**
+ * What a creature's answer starts as when its card mounts: the draft, unless
+ * the answer changed since it was typed, such as a total sent from this
+ * player's other device, which then wins as it does today.
+ */
+export function startingAnswer(target: Pick<RollTarget, "total" | "choice">, draft: AnswerDraft | undefined): { text: string; choice: 0 | 1 } {
+  if (draft && draft.base === target.total) return { text: draft.text, choice: draft.choice };
+  return { text: target.total !== undefined ? String(target.total) : "", choice: target.choice ?? 0 };
+}
+
 /** Whether any of the creatures a request asked this player about, their own alone in their projection, still waits for an answer. */
 export function playerNeedsAnswer(request: RollRequest): boolean {
   return request.targets.some((t) => !answered(t));

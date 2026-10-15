@@ -21,6 +21,7 @@ import {
   dcText,
   defaultTargets,
   dmAnswerText,
+  draftKey,
   emptyDraft,
   finalForPlayer,
   chipStack,
@@ -36,6 +37,7 @@ import {
   rollsSummary,
   sheetSummary,
   shownRequest,
+  startingAnswer,
   targetName,
   testTitle,
   wantsMark,
@@ -553,5 +555,23 @@ describe("the DM's cards on a phone with no sheet open (docs/design-v1-visual.md
     assert.deepEqual(desk(6, true), { shown: 6, button: "less" });
     assert.deepEqual(chipStack({ count: 6, phone: true, underSheet: true, expanded: false }), { shown: 0, button: "sheet" }, "under a portrait sheet the whole stack folds");
     assert.deepEqual(chipStack({ count: 6, phone: false, underSheet: false, expanded: false }), { shown: 6, button: null }, "from 900 px up every card shows");
+  });
+});
+
+describe("a total typed into a card and not sent (LPD-PLAYER-1)", () => {
+  test("comes back when the card mounts again, as turning the phone does", () => {
+    const draft = { text: "14", choice: 1 as const, base: undefined };
+    assert.deepEqual(startingAnswer({}, draft), { text: "14", choice: 1 });
+    assert.deepEqual(startingAnswer({}, undefined), { text: "", choice: 0 }, "with nothing typed the card starts empty");
+  });
+
+  test("gives way to an answer sent since it was typed, from this player's other device", () => {
+    assert.deepEqual(startingAnswer({ total: 9, choice: 0 }, { text: "14", choice: 1, base: undefined }), { text: "9", choice: 0 });
+    assert.deepEqual(startingAnswer({ total: 9, choice: 0 }, { text: "12", choice: 1, base: 9 }), { text: "12", choice: 1 }, "a change typed over a sent answer stays");
+  });
+
+  test("is kept per request and per creature", () => {
+    assert.notEqual(draftKey("r1", { characterId: "ayla" }), draftKey("r1", { tokenId: "ayla" }));
+    assert.notEqual(draftKey("r1", { characterId: "ayla" }), draftKey("r2", { characterId: "ayla" }));
   });
 });

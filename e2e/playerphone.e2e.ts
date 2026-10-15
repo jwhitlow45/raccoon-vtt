@@ -17,6 +17,9 @@ import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type 
  * - On the player's own turn with the turn timer over, the phone's turn
  *   band keeps End Turn on screen and the name and "Your turn" clear of
  *   the timer, at 130% on 390 and 360 px phones (LPD-PLAYER-4).
+ * - A total typed into a roll card, and the choice picked in it, survive
+ *   turning the phone between portrait and landscape, which moves the card
+ *   between the screen's foot and the alerts column (LPD-PLAYER-1).
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seven. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
@@ -31,6 +34,8 @@ const assetDir = path.join(work, "assets");
 const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 
 const PORTRAIT = { width: 390, height: 844 };
+const LANDSCAPE = { width: 844, height: 390 };
+const CARD = "The DM asks for a roll";
 
 let server: Server;
 let browser: Browser;
@@ -121,6 +126,10 @@ function band(page: Page) {
       timerText: all.find((el) => el.getAttribute("role") === "timer")?.textContent ?? "",
     };
   });
+}
+
+function card(page: Page) {
+  return page.getByRole("dialog", { name: CARD });
 }
 
 describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_000 }, () => {
@@ -246,7 +255,37 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await ops.send({ t: "encounter.end" });
   });
 
-  test("4. nothing went wrong in the browsers", () => {
+  test("4. a total typed into the roll card and the choice picked survive turning the phone (LPD-PLAYER-1)", async () => {
+    await setUp({ ...PORTRAIT, scale: 1 });
+    const id = randomUUID();
+    await ops.send({
+      t: "roll.ask",
+      request: { id, test: { kind: "save", choices: [{ ability: "dex" }, { ability: "str" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] },
+    });
+    await card(player).getByText("The DM asks for a Dexterity or Strength saving throw.").waitFor();
+    await card(player).getByRole("radiogroup", { name: "Which one you rolled" }).locator("label").filter({ hasText: "Strength" }).tap();
+    await card(player).getByLabel("Total Thorn rolled").fill("16");
+
+    for (const [view, label] of [
+      [LANDSCAPE, "turned to landscape"],
+      [PORTRAIT, "turned back to portrait"],
+    ] as const) {
+      await player.setViewportSize(view);
+      await card(player).waitFor();
+      assert.equal(await card(player).getByLabel("Total Thorn rolled").inputValue(), "16", `${label}: the typed total is gone`);
+      assert.ok(await card(player).getByRole("radio", { name: "Strength" }).isChecked(), `${label}: the chosen roll is gone`);
+    }
+    await shots.take(player, "playerphone-card-after-turning");
+    await card(player).getByRole("button", { name: "Send", exact: true }).tap();
+    await waitFor("Thorn's answer at the server", () => {
+      const target = dmSocket.state?.rolls[id]?.targets[0];
+      return target?.total === 16 ? target : null;
+    });
+    assert.equal(dmSocket.state?.rolls[id]?.targets[0]?.choice, 1, "Strength was sent");
+    await ops.send({ t: "roll.close", rollIds: [id] });
+  });
+
+  test("5. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });
