@@ -310,8 +310,8 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await ask("save", "dex");
     await ask("save", "con");
     await card(player).getByText("The DM asks for a Constitution saving throw.").waitFor();
-    // The oldest is a chip under the newest two: open it, then put it off.
-    await player.getByRole("button", { name: /^Str save: waiting for your roll\./ }).tap();
+    // The oldest is a chip under the newest two: open it, then put it off. With no answer yet it offers no change (LPD-PLAYER-6).
+    await player.getByRole("button", { name: "Str save: waiting for your roll.", exact: true }).tap();
     await card(player).getByText("The DM asks for a Strength saving throw.").waitFor();
     await card(player).getByRole("button", { name: "Fold it into a chip, to answer later" }).tap();
     await card(player).getByText("The DM asks for a Constitution saving throw.").waitFor();
@@ -342,6 +342,8 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await card(player).getByText("The DM asks for a Wisdom check.").waitFor();
     await card(player).getByLabel("Total Thorn rolled").fill("11");
     await openLog(player);
+    // It names the card its tap brings back, not the newest request (LPD-PLAYER-6).
+    assert.equal(await rollAsked(player).getAttribute("aria-label"), "Roll asked: the DM asks for a Wisdom check and 1 more roll. Close the sheet to answer.");
     await rollAsked(player).tap();
     await card(player).getByText("The DM asks for a Wisdom check.").waitFor();
     assert.equal(await card(player).getByLabel("Total Thorn rolled").inputValue(), "11");

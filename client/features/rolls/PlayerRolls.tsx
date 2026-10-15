@@ -25,6 +25,7 @@ import {
   CARD_MIN_WIDTH,
   cardFoldsUnderSheet,
   chipLine,
+  chipName,
   chipStack,
   chipsStayShown,
   dcText,
@@ -154,7 +155,9 @@ export function PlayerRolls() {
   }, [focusAfter, shown?.id, cardHidden, underSheet]);
 
   // The rolls' part of the dock's alerts summary, which the dock shows while a portrait sheet folds the column (3.2.1).
-  const published = requests.length > 0 ? rollsSummary(requests) : null;
+  // It names the request its tap opens, as this stack's own summary does.
+  const opens = requestToOpen(requests, needs, folded, opened)?.id ?? null;
+  const published = requests.length > 0 ? rollsSummary(requests, opens) : null;
   useAlertsSummary(published ? { ...published, open } : null);
 
   // The card is the first place focus returns to once a sheet that was hiding it closes (3.2.1). A request put off with Later has no card, so it is never a target.
@@ -169,7 +172,7 @@ export function PlayerRolls() {
     revealAndFocus(focusable(summaryRef.current) ? summaryRef.current : dockSummaryButton(sheetFocus));
   }, [cardHidden, sheetFocus]);
 
-  const summary = stack.button === "sheet" ? sheetSummary(requests) : stack.button ? foldedChips(chips.slice(PHONE_CHIPS), stack.button) : null;
+  const summary = stack.button === "sheet" ? sheetSummary(requests, opens) : stack.button ? foldedChips(chips.slice(PHONE_CHIPS), stack.button) : null;
   const tapSummary = () => {
     if (stack.button === "sheet") open();
     else setExpanded(stack.button === "more");
@@ -515,7 +518,7 @@ function RollChip(props: { buttonRef?: RefObject<HTMLButtonElement | null>; requ
     );
   }
   return (
-    <button ref={props.buttonRef} type="button" onClick={props.onOpen} aria-label={`${lines.join(" ")} Open to change it.`} style={{ ...style, cursor: "pointer" }}>
+    <button ref={props.buttonRef} type="button" onClick={props.onOpen} aria-label={chipName(request, lines)} style={{ ...style, cursor: "pointer" }}>
       {text}
     </button>
   );

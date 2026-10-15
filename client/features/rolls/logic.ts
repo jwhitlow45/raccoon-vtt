@@ -356,6 +356,16 @@ export function chipLine(request: Pick<RollRequest, "test" | "dcHidden" | "resul
   return `${lead}: waiting for your roll.`;
 }
 
+/**
+ * The name of a chip a tap opens: its lines, then "Open to change it."
+ * once any creature on it has an answer. A request put off with Later has
+ * nothing to change yet, so its name stops at "waiting for your roll."
+ */
+export function chipName(request: Pick<RollRequest, "targets">, lines: readonly string[]): string {
+  const text = lines.join(" ");
+  return request.targets.some(answered) ? `${text} Open to change it.` : text;
+}
+
 /** What a final answer says on the open card, before "Final. Ask the DM to change it.", read in the chip's order: "Sent Dex 13. Pass". */
 export function finalAnswerText(target: RollTarget, test: RollTest): string {
   if (target.total !== undefined) return `Sent ${answerWords(target, test)}${target.result !== undefined ? `. ${RESULT[target.result]}` : ""}`;
@@ -607,14 +617,19 @@ export function cardFoldsUnderSheet(input: { width: number; height: number; wide
  * for this player's answer, since that is the one thing to act on, else
  * "Rolls d/a" over every request. `name` is the words for a button's name,
  * with no closing advice: the dock adds its own after the other alerts.
+ *
+ * "Roll asked" names the request a tap opens (`opens`, from requestToOpen):
+ * the card mounted under the sheet when there is one, else the newest
+ * waiting. Naming the newest alone told a player who had typed into an
+ * older card that the tap would bring up another roll.
  */
-export function rollsSummary(requests: readonly RollRequest[]): { text: string; name: string; waiting: boolean } {
+export function rollsSummary(requests: readonly RollRequest[], opens: string | null = null): { text: string; name: string; waiting: boolean } {
   const waiting = requests.filter(playerNeedsAnswer);
-  const newest = waiting[0];
-  if (newest) {
-    const more = waiting.length - 1;
+  const named = requests.find((r) => r.id === opens) ?? waiting[0];
+  if (named && waiting.length > 0) {
+    const more = waiting.filter((r) => r.id !== named.id).length;
     const rest = more === 0 ? "" : more === 1 ? " and 1 more roll" : ` and ${more} more rolls`;
-    return { text: "Roll asked", name: `the DM asks for ${testText(newest.test)}${rest}`, waiting: true };
+    return { text: "Roll asked", name: `the DM asks for ${testText(named.test)}${rest}`, waiting: true };
   }
   return { ...answeredCount(requests), waiting: false };
 }
@@ -632,8 +647,8 @@ export function answeredCount(requests: readonly RollRequest[]): { text: string;
  * chips' count (foldedChips). Its tap closes the sheet, so it is no
  * disclosure, and its name starts with its visible text (WCAG 2.5.3).
  */
-export function sheetSummary(requests: readonly RollRequest[]): { text: string; label: string } {
-  const summary = rollsSummary(requests);
+export function sheetSummary(requests: readonly RollRequest[], opens: string | null = null): { text: string; label: string } {
+  const summary = rollsSummary(requests, opens);
   if (!summary.waiting) return foldedChips(requests, "sheet");
   return { text: summary.text, label: `${summary.text}: ${summary.name}. Close the sheet to answer.` };
 }

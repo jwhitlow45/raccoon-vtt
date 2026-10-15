@@ -18,6 +18,7 @@ import {
   cameUp,
   cardFoldsUnderSheet,
   chipLine,
+  chipName,
   deskLayout,
   finalAnswerText,
   dcText,
@@ -524,6 +525,33 @@ describe("the player's card under a sheet (docs/design-v1-visual.md 3.3.1)", () 
     assert.equal(folds(768, 1024), true, "a portrait tablet: the column's card would cover the sheet's header");
     assert.equal(folds(844, 390), false, "a landscape phone from 600 px: the column steps left of the sheet");
     assert.equal(folds(1280, 800), false, "the side panel covers nothing");
+  });
+
+  test("Roll asked names the request its tap opens: the mounted card, else the newest waiting (LPD-PLAYER-6)", () => {
+    const wis = { kind: "check" as const, choices: [{ ability: "wis" as const }] };
+    const requests = newestFirst({ a: request("a", 1), b: request("b", 2, wis) });
+    const needs = new Map([["a", true], ["b", true]]);
+    const opens = (folded: string[], opened: string | null) => requestToOpen(requests, needs, new Set(folded), opened)?.id ?? null;
+    // Card A opened from its chip and typed into, B put off with Later: the tap opens A, so the summary names A.
+    assert.equal(rollsSummary(requests, opens(["b"], "a")).name, "the DM asks for a Dexterity saving throw and 1 more roll");
+    assert.equal(sheetSummary(requests, opens(["b"], "a")).label, "Roll asked: the DM asks for a Dexterity saving throw and 1 more roll. Close the sheet to answer.");
+    // Both put off with Later: the newest waiting comes back, and the summary names it.
+    assert.equal(rollsSummary(requests, opens(["a", "b"], null)).name, "the DM asks for a Wisdom check and 1 more roll");
+    // An answered card opened to change it while another request waits: the tap opens the answered card, and the waiting one is the 1 more.
+    const answeredA = { ...request("a", 1), targets: [{ characterId: "ayla", total: 15 }] };
+    const mixed = newestFirst({ a: answeredA, b: request("b", 2, wis) });
+    const tapOpens = requestToOpen(mixed, new Map([["a", false], ["b", true]]), new Set(["b"]), "a")?.id ?? null;
+    assert.equal(tapOpens, "a");
+    assert.equal(rollsSummary(mixed, tapOpens).name, "the DM asks for a Dexterity saving throw and 1 more roll");
+  });
+
+  test("a chip put off with Later is named by its lines alone, and offers a change only once it has an answer (LPD-PLAYER-6)", () => {
+    const waiting = request("w", 1);
+    assert.equal(chipName(waiting, [chipLine(waiting, waiting.targets[0]!)]), "Dex save: waiting for your roll.");
+    const sent = { ...request("s", 2), targets: [{ characterId: "ayla", total: 15 }] };
+    assert.equal(chipName(sent, [chipLine(sent, sent.targets[0]!)]), "Dex save: sent 15. Open to change it.");
+    const half = { ...request("h", 3), targets: [{ characterId: "ayla", total: 9 }, { tokenId: "wolf" }] };
+    assert.equal(chipName(half, ["Dex save (Ayla): sent 9.", "Dex save (Wolf): waiting for your roll."]), "Dex save (Ayla): sent 9. Dex save (Wolf): waiting for your roll. Open to change it.");
   });
 
   test("the summary opens a mounted card first, else the newest request put off with Later, else nothing", () => {
