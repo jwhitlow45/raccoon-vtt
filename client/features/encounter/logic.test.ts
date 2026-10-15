@@ -17,6 +17,7 @@ import {
   hasStarted,
   hpView,
   onAnotherScene,
+  portraitDisposition,
   ownCandidates,
   ownsEntry,
   parseInitiative,
@@ -284,6 +285,13 @@ describe("whose row it is", () => {
     assert.equal(onAnotherScene(s, { tokenId: "gob" }), false);
     assert.equal(onAnotherScene(s, { tokenId: "elsewhere", label: "Hidden archer" }), false, "the DM's label names it");
     assert.equal(onAnotherScene(s, { label: "Lair action" }), false);
+  });
+
+  test("an unknown creature's picture takes the neutral ring, never the ally's (OP-10)", () => {
+    const s = state();
+    assert.equal(portraitDisposition(s.tokens.elsewhere, onAnotherScene(s, { tokenId: "elsewhere" })), "neutral");
+    assert.equal(portraitDisposition(s.tokens.gob, onAnotherScene(s, { tokenId: "gob" })), s.tokens.gob!.disposition);
+    assert.equal(portraitDisposition(undefined, onAnotherScene(s, {})), "ally", "a party member with no token here is an ally");
   });
 
   test("a player adds only their own creatures that are not in the fight", () => {

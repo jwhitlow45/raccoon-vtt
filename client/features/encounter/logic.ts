@@ -218,6 +218,18 @@ export function onAnotherScene(view: TrackerView, entry: Pick<InitEntry, "tokenI
   return entry.tokenId !== undefined && view.tokens[entry.tokenId] === undefined && entry.label === undefined;
 }
 
+/**
+ * Which disposition a row's picture rings itself with: its token's, or an
+ * ally's for a character with no token here, as party members are. The "?"
+ * of an unknown creature (onAnotherScene) takes the neutral ring (OP-10),
+ * since nothing in this view says whose side it is on, and the ally ring
+ * called it a friend.
+ */
+export function portraitDisposition(token: Pick<Token, "disposition"> | undefined, unknown: boolean): Token["disposition"] {
+  if (unknown) return "neutral";
+  return token?.disposition ?? "ally";
+}
+
 export function isDefeated(actor: Pick<ProjectedActor, "life"> | undefined): boolean {
   return actor?.life === "dead";
 }

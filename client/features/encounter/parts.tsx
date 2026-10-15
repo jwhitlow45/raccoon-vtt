@@ -5,7 +5,7 @@ import { Tag as SharedTag, type TagTone } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
 import { effectChip, effectCount, initials } from "../../lib/tokenView.ts";
 import { useAssets, useRoomView } from "../../state/view.ts";
-import { entryName, onAnotherScene, type HpView } from "./logic.ts";
+import { entryName, onAnotherScene, portraitDisposition, type HpView } from "./logic.ts";
 import { clockText, type TimerState } from "./timer.ts";
 import { isAssetImage } from "#shared/imageRef.ts";
 import { IconDisk } from "../images/IconDisk.tsx";
@@ -33,7 +33,7 @@ export function Portrait(props: { entry: Pick<InitEntry, "tokenId" | "characterI
   const elsewhere = useRoomView((s) => (s.view ? onAnotherScene(s.view, entry) : false));
   const shown = token?.image ?? character?.defaultImage;
   const image = shown && isAssetImage(shown) ? shown : undefined;
-  const color = DISPOSITION[token?.disposition ?? "ally"] ?? theme.color.neutral;
+  const color = DISPOSITION[portraitDisposition(token, elsewhere)] ?? theme.color.neutral;
   // The disposition ring sits just outside the disk, as an outline, which follows the round corners and takes no room in the row.
   const frame: CSSProperties = { outline: `${theme.line.strong}px solid ${props.ring ?? color}`, outlineOffset: 0, opacity: props.dim ? 0.45 : 1 };
   const box: CSSProperties = {
