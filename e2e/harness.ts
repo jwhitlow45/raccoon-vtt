@@ -234,7 +234,7 @@ export class Shots {
 type StageCamera = { x: number; y: number; scale: number };
 
 /** The map stage's camera, read from Konva, which puts itself on the page as a global. */
-function readCamera(page: Page): Promise<StageCamera | null> {
+export function readCamera(page: Page): Promise<StageCamera | null> {
   return page.evaluate(() => {
     const konva = (globalThis as unknown as { Konva?: { stages: { x(): number; y(): number; scaleX(): number }[] } }).Konva;
     const stage = konva?.stages[0];

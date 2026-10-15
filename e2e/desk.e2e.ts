@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, pagePoint, readCamera, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * A DM at a computer with a keyboard, after the design pass's live play:
@@ -28,7 +28,8 @@ import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, wai
  * - A part of a panel that opens in place, such as the X-card's card or
  *   Export as image, takes focus, and its Cancel gives it back to the
  *   button that opened it. The token bar's Details focuses the token's
- *   panel.
+ *   panel's tab, and a click on the panel's blank space leaves Space free
+ *   to pan the map.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus six, which it shares with
  * notes.e2e.ts, since the runs go one after another. The other
@@ -369,14 +370,34 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     await waitFor("Export as image focused again", async () => (await focused(dm)).name === "Export as image");
     await shots.take(dm, "desk-export-closed-focus");
 
-    // The token bar's Details opens the token's panel with focus on it.
+    // The token bar's Details opens the token's panel with focus on its chosen tab, "Token, tab, selected" (P3R-2).
     const p = await pagePoint(dm, run.bounds, { x: goblin()!.x + 0.5, y: goblin()!.y + 0.5 });
     await dm.mouse.click(p.x, p.y);
     const bar = dm.getByRole("dialog", { name: "Goblin actions" });
     await bar.getByRole("button", { name: "Details" }).click();
     await bar.waitFor({ state: "detached" });
-    await waitFor("the Token panel focused", async () => (await focused(dm)).role === "tabpanel");
+    await waitFor("the Token tab focused", async () => {
+      const f = await focused(dm);
+      return f.role === "tab" && f.name === "Token";
+    });
     assert.equal(await dm.getByRole("tab", { name: "Token", exact: true }).getAttribute("aria-selected"), "true");
+
+    // A click on the panel's blank space leaves focus on the page, so Space still holds the map for a drag (P3R-2).
+    const tokenPanel = dm.getByRole("tabpanel", { name: "Token" });
+    const box = await tokenPanel.boundingBox();
+    assert.ok(box, "the Token panel is not on screen");
+    await dm.mouse.click(box.x + box.width - 6, box.y + box.height - 6);
+    assert.equal((await focused(dm)).tag, "body", "a click on the panel's blank space took focus");
+    const camBefore = await readCamera(dm);
+    const mid = await pagePoint(dm, run.bounds, { x: 2, y: 2 });
+    await dm.keyboard.down("Space");
+    await dm.mouse.move(mid.x, mid.y);
+    await dm.mouse.down();
+    await dm.mouse.move(mid.x + 60, mid.y + 40, { steps: 6 });
+    await dm.mouse.up();
+    await dm.keyboard.up("Space");
+    const camAfter = await readCamera(dm);
+    assert.ok(camBefore && camAfter && (camAfter.x !== camBefore.x || camAfter.y !== camBefore.y), `Space and a drag did not move the map: ${JSON.stringify({ camBefore, camAfter })}`);
     await dm.keyboard.press("Escape");
   });
 

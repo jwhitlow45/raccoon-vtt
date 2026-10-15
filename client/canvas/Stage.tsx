@@ -50,6 +50,7 @@ import { followOps, lastMoveSlot } from "../features/tokens/undoMove.ts";
 import { useDragStops } from "../features/movement/stageHooks.ts";
 import { cameraInZoomed, chromeZoom, insetsInZoomed, inZoomed, layoutSize, sizeInZoomed, smallUi } from "../features/device/layout.ts";
 import { stageMountKey, uiScale, useLowPower, useMapVariant, useUiScale } from "../features/device/settings.ts";
+import { mapFocusSlot, spaceMovesMap } from "../pages/mapFocus.ts";
 import { localDragSlot } from "../state/localDrags.ts";
 import { useRoomScope } from "../state/scope.ts";
 import { stageKeysSlot } from "../state/shortcuts.ts";
@@ -486,10 +487,11 @@ export function MapStage(props: {
   const spaceRef = useRef(false);
   const [spaceHeld, setSpaceHeld] = useState(false);
 
-  // Space works as a pan modifier only while nothing has focus, so it never
-  // takes a key press from a field or a button.
+  // Space works as a pan modifier only while nothing has focus, or the map
+  // does (pages/mapFocus.ts spaceMovesMap), so it never takes a key press
+  // from a field or a button.
   useEffect(() => {
-    const free = () => document.activeElement === null || document.activeElement === document.body;
+    const free = () => spaceMovesMap(document.activeElement, document.body, scope.get(mapFocusSlot).el);
     const hold = (held: boolean) => {
       spaceRef.current = held;
       setSpaceHeld(held);
@@ -513,7 +515,7 @@ export function MapStage(props: {
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
     };
-  }, []);
+  }, [scope]);
   /** A press on a token this member may not drag, so moving it says why instead of doing nothing. */
   const refusedPressRef = useRef<{ pointerId: number; start: Point; text: string } | null>(null);
 

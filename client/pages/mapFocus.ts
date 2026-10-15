@@ -13,6 +13,16 @@ import { scopeSlot } from "../state/scope.ts";
  */
 export const mapFocusSlot = scopeSlot(() => ({ el: null as HTMLElement | null }));
 
+/**
+ * Whether Space may hold the map for a drag (canvas/Stage.tsx): while
+ * nothing has focus, or the map itself does. The map's focus target takes
+ * no key press of its own, and focus lands there once the last roll card
+ * closes, where Space stopped panning the map that had focus.
+ */
+export function spaceMovesMap(active: Element | null, body: Element | null, map: Element | null): boolean {
+  return active === null || active === body || (map !== null && active === map);
+}
+
 /** Focuses the map. Returns whether focus landed there. */
 export function focusMap(slot: { el: HTMLElement | null }): boolean {
   const el = slot.el;
