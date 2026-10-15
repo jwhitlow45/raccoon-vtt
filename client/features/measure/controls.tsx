@@ -3,7 +3,7 @@ import { Button } from "../../components/Button.tsx";
 import { Input, Select } from "../../components/Field.tsx";
 import type { IconName } from "../../components/Icon.tsx";
 import { accessibleName } from "../../lib/a11y.ts";
-import { HoldRepeat } from "../../lib/holdRepeat.ts";
+import { HoldRepeat, type RepeatValue } from "../../lib/holdRepeat.ts";
 import { theme } from "../../lib/theme.ts";
 
 /**
@@ -85,7 +85,9 @@ export function OptionsDivider() {
  * `repeat` makes it repeat while held, as a stepper's − and + do
  * (lib/holdRepeat.ts): `onClick` then runs on the press, again 400 ms into
  * the hold and every 80 ms after, until it returns false at a limit.
- * `onHold` hears when a pointer press starts and ends.
+ * `onHold` hears when a pointer press starts and ends. `repeatValue` is
+ * the value it steps, which a press the browser cancels before its first
+ * repeat, a scroll that began on the button, puts back.
  */
 export function OptButton(props: {
   ref?: Ref<HTMLButtonElement>;
@@ -99,9 +101,10 @@ export function OptButton(props: {
   icon?: IconName;
   repeat?: boolean;
   onHold?(holding: boolean): void;
+  repeatValue?: RepeatValue;
 }) {
   const { pressed, tone } = props;
-  const hold = useHoldRepeat(props.onClick, props.onHold);
+  const hold = useHoldRepeat(props.onClick, props.onHold, props.repeatValue);
   return (
     <Button
       ref={props.ref}
@@ -129,15 +132,26 @@ const NO_CALLOUT: CSSProperties = { WebkitTouchCallout: "none", WebkitUserSelect
 /**
  * The hold repeat's wiring to the DOM. The lift is heard on `window`, since
  * a button that turns disabled at its limit may never get its own
- * `pointerup`, and a finger sliding off the button ends the hold, which a
- * touch's implicit pointer capture would otherwise hide.
+ * `pointerup`, and also as the button's `lostpointercapture`, the last word
+ * a touch's implicit capture gives. A finger sliding off the button ends
+ * the hold, which that capture would otherwise hide. A `pointercancel` is
+ * the browser taking the gesture for a scroll, which `cancel` answers.
  */
-function useHoldRepeat(onClick: () => unknown, onHold: ((holding: boolean) => void) | undefined) {
+function useHoldRepeat(onClick: () => unknown, onHold: ((holding: boolean) => void) | undefined, value: RepeatValue | undefined) {
   const clickRef = useRef(onClick);
   clickRef.current = onClick;
   const holdRef = useRef(onHold);
   holdRef.current = onHold;
-  const [repeat] = useState(() => new HoldRepeat({ step: () => clickRef.current() !== false, onHold: (h) => holdRef.current?.(h) }));
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const [repeat] = useState(
+    () =>
+      new HoldRepeat({
+        step: () => clickRef.current() !== false,
+        onHold: (h) => holdRef.current?.(h),
+        value: { read: () => valueRef.current?.read() ?? 0, write: (v) => valueRef.current?.write(v) },
+      }),
+  );
   const endRef = useRef<(() => void) | null>(null);
   useEffect(() => () => endRef.current?.(), []);
   return {
@@ -147,25 +161,30 @@ function useHoldRepeat(onClick: () => unknown, onHold: ((holding: boolean) => vo
       endRef.current?.();
       const button = e.currentTarget;
       const id = e.pointerId;
-      const end = () => {
+      const end = (cancelled = false) => {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onUp);
+        button.removeEventListener("lostpointercapture", onUp);
         endRef.current = null;
-        repeat.release();
+        if (cancelled) repeat.cancel();
+        else repeat.release();
       };
       const onMove = (m: PointerEvent) => {
         if (m.pointerId !== id) return;
         const r = button.getBoundingClientRect();
-        if (m.clientX < r.left || m.clientX > r.right || m.clientY < r.top || m.clientY > r.bottom) end();
+        if (m.clientX >= r.left && m.clientX <= r.right && m.clientY >= r.top && m.clientY <= r.bottom) return;
+        window.removeEventListener("pointermove", onMove);
+        repeat.stop();
       };
       const onUp = (u: PointerEvent) => {
-        if (u.pointerId === id) end();
+        if (u.pointerId === id) end(u.type === "pointercancel");
       };
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
       window.addEventListener("pointercancel", onUp);
-      endRef.current = end;
+      button.addEventListener("lostpointercapture", onUp);
+      endRef.current = () => end();
       repeat.press();
     },
   };
