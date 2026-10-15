@@ -101,6 +101,8 @@ const color = z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/);
 /** A world coordinate in cells. Scenes are at most 200 cells wide, with some room to park things outside. */
 const coord = z.number().min(-1_000).max(1_000);
 const feet = z.number().int().min(-100_000).max(100_000);
+/** A cell's ground height, as `build.height` paints it. */
+const groundFeet = z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT);
 const degrees = z.number().min(-360).max(360);
 /** How far a cone or line aims up (or, negative, down): straight up at most. */
 const pitch = z.number().min(-90).max(90);
@@ -682,6 +684,8 @@ const drawingInput = z.strictObject({
   visibility,
   /** A kept ruler's token under each stop. The reducer checks it matches the stops. */
   anchors: z.array(id.nullable()).max(MAX_RULER_STOPS).optional(),
+  /** A kept ruler's ground under each stop, in feet, 0 on a token. The reducer checks it matches the stops and the anchors. */
+  z: z.array(groundFeet).max(MAX_RULER_STOPS).optional(),
 });
 
 const entryInput = z
@@ -1287,7 +1291,14 @@ export const dmToolSchemas = {
 // Ephemeral events (design 7.6). Never stored, forwarded per scene.
 
 const point = z.strictObject({ x: coord, y: coord });
-const rulerPoint = z.strictObject({ x: coord, y: coord, tokenId: id.optional() });
+/**
+ * A ruler stop. A free one carries `z`, the ground the measurer saw under
+ * it, left out at 0, so every receiver reads the measurer's distance. A
+ * stop on a token takes its height from the token, so it carries none.
+ */
+const rulerPoint = z
+  .strictObject({ x: coord, y: coord, z: groundFeet.optional(), tokenId: id.optional() })
+  .refine((p) => p.z === undefined || p.tokenId === undefined, { message: "a stop on a token takes its height from the token" });
 
 export const ephEventSchema = z.discriminatedUnion("k", [
   z.strictObject({ k: z.literal("dragStart"), tokenId: id, x: coord, y: coord }),

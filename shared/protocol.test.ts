@@ -262,6 +262,29 @@ describe("messages", () => {
     ok(clientMessageSchema, { t: "eph", sceneId: "s", e: { k: "ruler", id: "r", points: points.slice(0, 5) } });
   });
 
+  test("a ruler stop stands on ground from -100 to 200 ft, and a stop on a token on none", () => {
+    const frame = (points: unknown[]) => ({ t: "eph", sceneId: "s", e: { k: "ruler", id: "r", points } });
+    ok(clientMessageSchema, frame([{ x: 1.5, y: 1.5 }, { x: 2.5, y: 1.5, z: 10 }, { x: 3.5, y: 1.5, z: -100 }, { x: 4.5, y: 1.5, z: 200 }]));
+    bad(clientMessageSchema, frame([{ x: 1.5, y: 1.5, z: 201 }]));
+    bad(clientMessageSchema, frame([{ x: 1.5, y: 1.5, z: -101 }]));
+    bad(clientMessageSchema, frame([{ x: 1.5, y: 1.5, z: 2.5 }]));
+    bad(clientMessageSchema, frame([{ x: 1.5, y: 1.5, z: 10, tokenId: "t1" }]));
+    ok(clientMessageSchema, frame([{ x: 1.5, y: 1.5, tokenId: "t1" }]));
+    // The widest free stop, 32 bytes: 50 of them stay well inside the cap, with the longest ids.
+    const widest = Array.from({ length: 50 }, () => ({ x: -999.5, y: -999.5, z: -100 }));
+    assert.equal(JSON.stringify(widest[0]).length, 32);
+    const e = { k: "ruler", id: "r".repeat(64), points: widest, shared: true };
+    assert.ok(JSON.stringify(e).length <= MAX_EPH_BYTES);
+    ok(clientMessageSchema, { t: "eph", sceneId: "s".repeat(64), e });
+
+    const drawing = { id: "d", sceneId: "s", kind: "ruler", points: [0.5, 0.5, 1.5, 0.5], style: { stroke: "#ffffff", width: 3, opacity: 1 }, ownerId: "m", visibility: "all" };
+    ok(clientOpSchema, { t: "drawing.create", drawing: { ...drawing, z: [0, 10] } });
+    ok(clientOpSchema, { t: "drawing.create", drawing: { ...drawing, z: [-100, 200] } });
+    bad(clientOpSchema, { t: "drawing.create", drawing: { ...drawing, z: [0, 201] } });
+    bad(clientOpSchema, { t: "drawing.create", drawing: { ...drawing, z: [0, 0.5] } });
+    bad(clientOpSchema, { t: "drawing.create", drawing: { ...drawing, z: new Array(51).fill(0) } });
+  });
+
   test("server messages", () => {
     ok(serverMessageSchema, { t: "snapshot", seq: 3, state: {}, you: { memberId: "m", role: "dm", sceneId: "s" }, watermark: 0 });
     ok(serverMessageSchema, { t: "ev", seq: 4, changes: [{ key: "token:t", value: {} }, { key: "token:u", deleted: true }], acks: [1], rejects: [{ n: 2, code: "gone", message: "x" }] });

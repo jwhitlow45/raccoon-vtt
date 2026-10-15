@@ -115,6 +115,24 @@ describe("drag previews", () => {
   });
 });
 
+describe("rulers", () => {
+  test("a ruler's ground heights reach every allowed receiver as sent, and a stop on a token a player cannot see still withholds it", () => {
+    const state = room();
+    state.tokens.gob = token("gob", { x: 2, y: 2 });
+    state.tokens.lurker = token("lurker", { x: 5, y: 5, visibility: "dm" });
+    const t = table(state);
+    const climb: EphEvent = { k: "ruler", id: "r1", points: [{ x: 1.5, y: 1.5 }, { x: 2.5, y: 1.5, z: 10 }, { x: 3.5, y: 4.5, z: -5 }, { x: 2.5, y: 2.5, tokenId: "gob" }] };
+    t.send(t.p1.conn, climb);
+    assert.deepEqual(t.dm.got, [climb]);
+    assert.deepEqual(t.p2.got, [climb]);
+
+    const shared: EphEvent = { k: "ruler", id: "r2", points: [{ x: 1.5, y: 1.5, z: 10 }, { x: 5.5, y: 5.5, tokenId: "lurker" }], shared: true };
+    t.send(t.dm.conn, shared);
+    assert.deepEqual(t.p1.got, [], "the ruler ends on a hidden creature");
+    assert.deepEqual(t.p2.got, [climb]);
+  });
+});
+
 describe("drag previews on vision scenes (docs/design-v1-maps-vision.md 4.3.5)", () => {
   /*
    * A dark scene with a corridor one cell wide from x = 5 to 15 between

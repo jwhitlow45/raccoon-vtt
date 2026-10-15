@@ -812,6 +812,32 @@ describe("characters, templates and drawings", () => {
     const line = { ...ruler([0, 0, 1, 1], ["t1", null]), kind: "line" as const };
     assert.equal(refused(fresh(), { t: "drawing.create", drawing: line }).code, "invalid", "only a ruler stands on tokens");
   });
+
+  test("a kept ruler names one ground height per stop, 0 on a token, and keeps it through a repaint and a reveal", () => {
+    const ruler = (z: number[], anchors?: (string | null)[]) => ({
+      id: "k1",
+      sceneId: "s1",
+      kind: "ruler" as const,
+      points: [0.5, 0.5, 4.5, 0.5, 4.5, 3.5],
+      style: { stroke: "#ffffff", width: 3, opacity: 1 },
+      ownerId: "dm1",
+      visibility: "all" as const,
+      z,
+      ...(anchors ? { anchors } : {}),
+    });
+    let state = apply(fresh(), { t: "drawing.create", drawing: ruler([0, 10, -5], ["pc1", null, null]) });
+    assert.deepEqual(state.drawings.k1!.z, [0, 10, -5]);
+    assert.equal(refused(fresh(), { t: "drawing.create", drawing: ruler([0, 10]) }).code, "invalid", "one height short");
+    assert.equal(refused(fresh(), { t: "drawing.create", drawing: ruler([0, 10, 0, 0]) }).code, "invalid", "one height over");
+    assert.equal(refused(fresh(), { t: "drawing.create", drawing: ruler([5, 10, 0], ["pc1", null, null]) }).code, "invalid", "a stop on a token stands on no ground");
+    const line = { ...ruler([0, 10, 0]), kind: "line" as const };
+    assert.equal(refused(fresh(), { t: "drawing.create", drawing: line }).code, "invalid", "only a ruler stands on the ground");
+
+    // The ruler keeps the heights it was measured with, whatever the ground and the fog do after.
+    state = apply(state, { t: "build.height", sceneId: "s1", cells: ["4,0", "4,3"], height: 20 }, DM, 2);
+    state = apply(state, { t: "fog.reset", sceneId: "s1", to: "revealed" }, DM, 3);
+    assert.deepEqual(state.drawings.k1!.z, [0, 10, -5]);
+  });
 });
 
 describe("fog", () => {

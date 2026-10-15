@@ -1314,6 +1314,15 @@ describe("specific rules", () => {
     assert.deepEqual((projectEntity(keys.drawing("r"), moved.state, P1, { sceneId: "s1" }) as Drawing).points, [2.5, 4.5, 3.5, 3.5, 9.5, 2.5, 5, 2]);
   });
 
+  test("a kept ruler's ground heights reach players as stored, in the snapshot a reconnect gets", () => {
+    const state = setup();
+    state.drawings.r = drawing("r", { kind: "ruler", points: [1.5, 1.5, 2.5, 1.5, 6.5, 1.5], anchors: ["pc1", null, null], z: [0, 10, -5] });
+    for (const viewer of [P1, P2, DM]) {
+      const snapshot = JSON.parse(JSON.stringify(projectState(state, viewer, { sceneId: "s1" }))) as { drawings: Record<string, Drawing> };
+      assert.deepEqual(snapshot.drawings.r?.z, [0, 10, -5], viewer.memberId);
+    }
+  });
+
   test("monster images reach only DMs, and players meet one only on a token they see", () => {
     const state = setup();
     state.monsters.mon = customMonster("mon", { defaultImage: imageRef("lurkerpic") });

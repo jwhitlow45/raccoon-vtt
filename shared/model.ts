@@ -981,6 +981,14 @@ export type Drawing = {
    * every token it is on (design 7.3).
    */
   anchors?: (TokenId | null)[];
+  /**
+   * Ruler only: the ground under each stop in feet, as the measurer saw it
+   * when the ruler was kept, so every viewer reads the measurer's distance.
+   * 0 for a stop on a token, which stands at the token's own height, and for
+   * ground the measurer could not see. Left out when every entry is 0. A
+   * later repaint or fog change leaves it as kept.
+   */
+  z?: number[];
 };
 
 export type Encounter = {

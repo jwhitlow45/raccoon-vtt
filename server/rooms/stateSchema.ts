@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CONDITION_KEYS, HEIGHTS_CHARS, STAIRS_CHARS, STATUS_KEYS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
+import { CONDITION_KEYS, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, STAIRS_CHARS, STATUS_KEYS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
 import {
@@ -305,6 +305,7 @@ const drawing = z.strictObject({
   ownerId: id,
   visibility,
   anchors: z.array(id.nullable()).max(MAX_RULER_STOPS).optional(),
+  z: z.array(z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT)).max(MAX_RULER_STOPS).optional(),
 });
 
 const entry = z.strictObject({

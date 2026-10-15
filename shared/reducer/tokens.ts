@@ -426,8 +426,15 @@ export function drawingCreate(tx: Tx, op: OpOf<"drawing.create">): void {
     const stops = input.points.length / 2;
     if (!Number.isInteger(stops) || stops < 2 || stops > MAX_RULER_STOPS) throw invalid(`a kept ruler has 2 to ${MAX_RULER_STOPS} stops`);
     if (input.anchors !== undefined && input.anchors.length !== stops) throw invalid("a kept ruler names one token or none for each stop");
+    if (input.z !== undefined) {
+      if (input.z.length !== stops) throw invalid("a kept ruler names one ground height for each stop");
+      // A stop on a token stands at the token's height, so a ground height there would measure from the wrong place.
+      if (input.z.some((feet, i) => feet !== 0 && input.anchors?.[i] != null)) throw invalid("a kept ruler's stop on a token stands on no ground");
+    }
   } else if (input.anchors !== undefined) {
     throw invalid("only a kept ruler stands on tokens");
+  } else if (input.z !== undefined) {
+    throw invalid("only a kept ruler stands on the ground");
   }
   const drawing: Drawing = { ...input, rev: 0 };
   tx.write(keys.drawing(drawing.id), drawing);

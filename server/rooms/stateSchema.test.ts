@@ -275,6 +275,17 @@ describe("roomStateSchema", () => {
     assert.equal(parseRoomState({ ...state, log: [{ id: "1:0", at: "x", kind: "event", data: { type: "teleport", tokenId: "t", past: "door" } }] }).ok, false);
   });
 
+  test("a kept ruler's ground heights parse within the stepper's model bounds, and a ruler from before them still imports", () => {
+    const state = JSON.parse(JSON.stringify(room()));
+    const ruler = { id: "k", rev: 0, sceneId: "s1", kind: "ruler", points: [0.5, 0.5, 1.5, 0.5], style: { stroke: "#ffffff", width: 3, opacity: 1 }, ownerId: "p1", visibility: "all" };
+    const parses = (patch: Record<string, unknown>) => parseRoomState({ ...state, drawings: { k: { ...ruler, ...patch } } }).ok;
+    assert.ok(parses({}));
+    assert.ok(parses({ z: [0, 10] }));
+    assert.ok(parses({ z: [-100, 200], anchors: [null, null] }));
+    assert.equal(parses({ z: [0, 201] }), false);
+    assert.equal(parses({ z: [0, 2.5] }), false);
+  });
+
   test("every phase fits its scene's grid as the reducer checks it, and the map is the showing phase's image", () => {
     const state = JSON.parse(JSON.stringify(room()));
     const at = (patch: Record<string, unknown>) => parseRoomState({ ...state, scenes: { ...state.scenes, s1: { ...state.scenes.s1, ...patch } } });
