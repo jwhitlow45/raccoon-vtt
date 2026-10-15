@@ -11,6 +11,8 @@ import { useBackClose } from "../../lib/backClose.ts";
 import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { revealAndFocus } from "../../lib/reveal.ts";
+import { useStore } from "zustand";
+import { barDockSlot } from "../../canvas/barDock.ts";
 import { useScoped } from "../../state/scope.ts";
 import { sheetOpen, type OpAnswer } from "../../state/types.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
@@ -113,6 +115,40 @@ export function PlayerRolls() {
     setOpened((o) => (o === id ? null : o));
   };
   const chips = requests.filter((r) => r.id !== shown?.id);
+  /*
+   * A card at a narrow screen's foot and the token action bar must never
+   * cover each other (docs/design-v1-bar-dock.md, LPD-PLAYER-2). The card
+   * says how tall it stands, and a docked or spanning bar keeps above it.
+   * Where that leaves the bar too little room, it opens compact, and then
+   * the card folds as under a sheet, with what was typed kept, and the
+   * alerts column's summary row stands for it. The row's tap hides the bar
+   * and opens the card.
+   */
+  const dockStore = useScoped(barDockSlot);
+  const zoom = useUiScale();
+  const compactBar = useStore(dockStore, (s) => s.bar?.mode === "compact");
+  const atFoot = shown !== undefined && width < CARD_MIN_WIDTH;
+  const yieldsToBar = atFoot && compactBar;
+  useLayoutEffect(() => {
+    dockStore.setState({ footYields: yieldsToBar });
+  }, [dockStore, yieldsToBar]);
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!atFoot || !el) {
+      if (dockStore.getState().foot !== 0) dockStore.setState({ foot: 0 });
+      return;
+    }
+    // Folded, the card has no height: it keeps the last it had, so folding it never moves the bar.
+    const measure = () => {
+      const height = el.getBoundingClientRect().height / zoom;
+      if (height > 0 && dockStore.getState().foot !== height) dockStore.setState({ foot: height });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [dockStore, atFoot, zoom, shown?.id]);
+  useLayoutEffect(() => () => dockStore.setState({ foot: 0, footYields: false }), [dockStore]);
   const foldsUnderSheet = cardFoldsUnderSheet({ width, height: size.height, wideMinWidth: theme.layout.wideMinWidth });
   const cardHidden = shown !== undefined && covered && foldsUnderSheet;
   // As the DM's cards do: the column sits above a phone's sheets in portrait, so everything folds into one summary
@@ -143,7 +179,7 @@ export function PlayerRolls() {
     if ("card" in focusAfter) {
       // A request the DM closed meanwhile leaves nothing to show.
       if (shown?.id === focusAfter.card) {
-        if (cardHidden) return;
+        if (cardHidden || yieldsToBar) return;
         // In the alerts column, which scrolls as a whole, the card may have scrolled out of sight.
         revealAndFocus(cardRef.current);
       }
@@ -152,7 +188,7 @@ export function PlayerRolls() {
       revealAndFocus(firstChip.current);
     }
     setFocusAfter(null);
-  }, [focusAfter, shown?.id, cardHidden, underSheet]);
+  }, [focusAfter, shown?.id, cardHidden, yieldsToBar, underSheet]);
 
   // The rolls' part of the dock's alerts summary, which the dock shows while a portrait sheet folds the column (3.2.1).
   // It names the request its tap opens, as this stack's own summary does.
@@ -199,7 +235,7 @@ export function PlayerRolls() {
       request={shown}
       drafts={drafts.current}
       sheet={width < CARD_MIN_WIDTH}
-      hidden={cardHidden}
+      hidden={cardHidden || yieldsToBar}
       onFold={() => fold(shown.id)}
       onEngage={() => setOpened(shown.id)}
       onFocusWithin={(inside) => {

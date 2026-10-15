@@ -376,7 +376,7 @@ function RoomPage() {
     for (const child of lasting.children) observer.observe(child);
     return () => observer.disconnect();
   }, [barDock, besideLane, previewBottom, zoom, role]);
-  const columnSummary = useStore(barDock, (s) => s.bar?.lane === "summary") && summary !== null;
+  const columnSummary = useStore(barDock, (s) => s.bar !== null && (s.bar.lane === "summary" || s.footYields)) && summary !== null;
   const mapFocus = scope.get(mapFocusSlot);
   const mapFocusRef = useCallback(
     (el: HTMLDivElement | null) => {

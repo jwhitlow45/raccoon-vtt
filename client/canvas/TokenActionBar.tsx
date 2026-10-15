@@ -537,6 +537,7 @@ function BarFrame(props: {
   const chrome = useStore(dockStore, (s) => s.chrome) ?? DEFAULT_CHROME;
   const spot = useStore(dockStore, (s) => s.spot);
   const column = useStore(dockStore, (s) => s.column);
+  const foot = useStore(dockStore, (s) => s.foot);
   const barRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const moveRef = useRef<HTMLButtonElement>(null);
@@ -568,7 +569,7 @@ function BarFrame(props: {
     return () => observer.disconnect();
   }, []);
 
-  const free = freeArea(props.viewport, chrome);
+  const free = freeArea(props.viewport, chrome, foot);
   const mode: BarMode = barMode(layout, free.height);
   const placed = placeBar({ mode, layout, viewport: props.viewport, chrome, free, anchor: props.anchor, spot, height: barHeight, column });
 

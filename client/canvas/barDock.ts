@@ -72,13 +72,15 @@ export const DEFAULT_CHROME: Chrome = { top: 52, bottom: 60, toolbar: 60, safe: 
 /**
  * The part of the map a docked bar lives in: the map less the bars over
  * it, the side safe areas and a landscape sheet, with an 8 px margin all
- * round. Its height may come out at 0 or less on a short screen.
+ * round. Its height may come out at 0 or less on a short screen. `foot` is
+ * a roll card standing on a narrow screen's toolbar
+ * (features/rolls/PlayerRolls.tsx), which the bar keeps above.
  */
-export function freeArea(viewport: Size, chrome: Chrome): Box {
+export function freeArea(viewport: Size, chrome: Chrome, foot = 0): Box {
   const left = chrome.safe.left + EDGE;
   const right = viewport.width - (chrome.sheet > 0 ? chrome.sheet : chrome.safe.right) - EDGE;
   const top = chrome.top + EDGE;
-  const bottom = viewport.height - chrome.bottom - EDGE;
+  const bottom = Math.min(viewport.height - chrome.bottom - EDGE, foot > 0 ? viewport.height - chrome.toolbar - foot - EDGE : Infinity);
   return { left, top, width: right - left, height: bottom - top };
 }
 
@@ -371,8 +373,8 @@ export function clearAnchor(point: { x: number; y: number }, viewport: Size, bar
  * opens it: its spot and the height it last had, with no column. Null
  * where the bar spans, since a spanning bar is placed by its token.
  */
-export function restingBar(input: { layout: Size; viewport: Size; chrome: Chrome; spot: Spot; height: number }): { box: Box; laneLeft: number } | null {
-  const free = freeArea(input.viewport, input.chrome);
+export function restingBar(input: { layout: Size; viewport: Size; chrome: Chrome; spot: Spot; height: number; foot?: number }): { box: Box; laneLeft: number } | null {
+  const free = freeArea(input.viewport, input.chrome, input.foot);
   const mode = barMode(input.layout, free.height);
   if (mode === "span") return null;
   const hang = mode === "compact" ? compactHang(input.layout, input.viewport, input.chrome) : spotHang(input.spot, free, { width: BAR_WIDTH, height: input.height });
@@ -434,11 +436,20 @@ type BarDockState = {
   lastHeight: number;
   /** Set by Actions: the next bar to show takes focus on its frame. */
   focusFrame: boolean;
+  /**
+   * The height of a roll card standing on a narrow screen's toolbar
+   * (features/rolls/PlayerRolls.tsx), or 0: a docked or spanning bar keeps
+   * above it. Measured while it shows and kept while it is folded, so
+   * folding it never changes where the bar goes.
+   */
+  foot: number;
+  /** That card is folded because the bar opened compact, too short a screen for both, and the column's summary row stands for it. */
+  footYields: boolean;
 };
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
-  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, spot: readSpot(), lastHeight: 200, focusFrame: false })),
+  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, spot: readSpot(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false })),
 );
 
 function clamp(n: number, lo: number, hi: number): number {

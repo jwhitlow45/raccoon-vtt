@@ -464,12 +464,15 @@ function FightAlerts() {
   const chrome = useStore(dock, (s) => s.chrome);
   const lasting = useStore(dock, (s) => s.notices);
   const bar = useStore(dock, (s) => s.bar);
+  const footYields = useStore(dock, (s) => s.footYields);
   const summary = useDockSummary("bar");
   const rolls = useAlertsSummaryEntry();
   const laneTop = chrome ? chrome.top + EDGE : null;
   const colTop = laneTop === null ? null : columnTop(laneTop, lasting);
   const push = laneTop !== null && colTop !== null ? colTop - laneTop : 0;
-  const summarized = !folded && bar?.lane === "summary" && summary !== null;
+  // A roll card folded at the screen's foot for a compact bar needs the row to stand for it, room or not (PlayerRolls.tsx).
+  const forFootCard = !folded && bar !== null && footYields && summary !== null;
+  const summarized = forFootCard || (!folded && bar?.lane === "summary" && summary !== null);
   const stacked = bar?.lane === "stacked" && colTop !== null ? columnRoom({ lane: "stacked", columnTop: colTop, bar: bar.box }) : null;
   const boxRef = useRef<HTMLDivElement | null>(null);
   const cardsRef = useRef<HTMLDivElement>(null);
@@ -487,6 +490,12 @@ function FightAlerts() {
     const cards = cardsRef.current;
     if (!cards || colTop === null) return;
     const measure = () => {
+      // The row standing in for a folded foot card is the column's first card then, so the bar keeps below it.
+      if (forFootCard && dock.getState().bar?.lane !== "summary") {
+        const prev = dock.getState().column;
+        if (prev?.top !== colTop || prev.first !== SUMMARY_ROW || prev.content !== SUMMARY_ROW) dock.setState({ column: { top: colTop, content: SUMMARY_ROW, first: SUMMARY_ROW } });
+        return;
+      }
       if (!drawn(cards)) return;
       const first = firstCardHeight(cards) / zoom;
       const next = first > 0 ? { top: colTop, content: cards.getBoundingClientRect().height / zoom, first } : null;
@@ -498,7 +507,7 @@ function FightAlerts() {
     const observer = new ResizeObserver(measure);
     observer.observe(cards);
     return () => observer.disconnect();
-  }, [dock, colTop, zoom, alerts, summarized, folded]);
+  }, [dock, colTop, zoom, alerts, summarized, folded, forFootCard]);
   useLayoutEffect(() => () => dock.setState({ column: null }), [dock]);
 
   const clip = () => {
@@ -522,16 +531,19 @@ function FightAlerts() {
    * over two chips in a landscape phone, pushed the last button under the
    * toolbar, where it showed through and took no tap. A scrolling box
    * clips what it holds, the cards' shadows included, so the box reaches
-   * past its cards by padding: SHADOW_ROOM at the left and the foot (but
-   * over a stacked bar), and only the 8 px margin at the right, so it never reaches past the screen
-   * or a landscape sheet and a card scrolled into view never scrolls the
-   * room (LPD-DMPHONE-4). The box itself runs from the top bar to the
-   * toolbar, or to 8 px above a stacked token bar, and no further, since
-   * what scrolls through its padding shows there, and scroll-padding keeps
-   * a card that takes focus clear of it.
+   * past its cards by padding: SHADOW_ROOM at the left where the window
+   * has it and at the foot (but over a stacked bar), and only the 8 px
+   * margin at the right, so it never reaches past the screen or a
+   * landscape sheet, and a card scrolled into view never scrolls the room
+   * (LPD-DMPHONE-4). The box itself runs from the top bar to the active
+   * tool's options or the toolbar, or to 8 px above a stacked token bar,
+   * and no further, since what scrolls through its padding shows there,
+   * and scroll-padding keeps a card that takes focus clear of it.
    */
   const rightPad = sheetWidth > 0 ? `${EDGE}px` : `calc(${theme.safe.right} + ${EDGE}px)`;
   const cardWidth = `min(300px, calc(100% - ${sheetWidth + 2 * EDGE}px - ${theme.safe.left} - ${sheetWidth > 0 ? "0px" : theme.safe.right}))`;
+  // The shadow's room at the left, but never past the window's left edge on a phone the cards span.
+  const leftPad = `min(${SHADOW_ROOM}px, calc(100% - ${cardWidth} - ${rightPad}))`;
   return (
     <div
       ref={columnRef}
@@ -541,11 +553,18 @@ function FightAlerts() {
         position: "absolute",
         top: `calc(100% + ${push}px)`,
         right: sheetWidth,
-        width: `calc(${cardWidth} + ${SHADOW_ROOM}px + ${rightPad})`,
-        // The screen's height in the zoomed bar's own pixels (features/device/layout.ts), less the bars.
-        maxHeight: stacked !== null ? stacked + EDGE : `calc(${screenHeight(100)} - ${theme.safe.top} - ${theme.safe.bottom} - ${top + theme.layout.toolbar + push}px)`,
+        width: `calc(${cardWidth} + ${leftPad} + ${rightPad})`,
+        // Before Room has measured its bars: the screen's height in the zoomed bar's own pixels (features/device/layout.ts), less the bars.
+        // Summarized, the row is all it holds, and it always shows whole, however little the bars leave.
+        maxHeight: summarized
+          ? undefined
+          : stacked !== null
+            ? stacked + EDGE
+            : chrome
+              ? Math.max(0, height - chrome.top - chrome.bottom - push)
+              : `calc(${screenHeight(100)} - ${theme.safe.top} - ${theme.safe.bottom} - ${top + theme.layout.toolbar + push}px)`,
         // Stacked over the bar, the foot keeps no shadow room: it would count as more to scroll to, and the bar sits 8 px below anyway.
-        padding: `${EDGE}px ${rightPad} ${stacked !== null ? 0 : SHADOW_ROOM}px ${SHADOW_ROOM}px`,
+        padding: `${EDGE}px ${rightPad} ${stacked !== null ? 0 : SHADOW_ROOM}px ${leftPad}`,
         scrollPadding: `${EDGE}px 0 ${stacked !== null ? 0 : SHADOW_ROOM}px`,
         overflowY: "auto",
         overscrollBehavior: "contain",

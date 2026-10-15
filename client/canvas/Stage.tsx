@@ -285,7 +285,7 @@ export function MapStage(props: {
         ? null
         : { box: dock.bar.box, laneLeft: dock.bar.laneLeft }
       : opening
-        ? restingBar({ layout, viewport: sizeInZoomed(viewport, z), chrome: dock.chrome ?? DEFAULT_CHROME, spot: dock.spot, height: dock.lastHeight })
+        ? restingBar({ layout, viewport: sizeInZoomed(viewport, z), chrome: dock.chrome ?? DEFAULT_CHROME, spot: dock.spot, height: dock.lastHeight, foot: dock.foot })
         : null;
     if (!bar) return NO_INSETS;
     const box = { left: bar.box.left * z, top: bar.box.top * z, width: bar.box.width * z, height: bar.box.height * z };

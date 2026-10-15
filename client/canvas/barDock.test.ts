@@ -91,6 +91,14 @@ describe("the free area", () => {
     assert.deepEqual(busy, { left: 55, top: 108, width: 539, height: 51 });
   });
 
+  test("a roll card standing on a narrow screen's toolbar takes the bottom, when it reaches past the bars", () => {
+    const chrome: Chrome = { top: 52, bottom: 60 + 52, toolbar: 60, safe: NONE, sheet: 0 };
+    const viewport = { width: 390, height: 844 };
+    assert.equal(freeArea(viewport, chrome, 250).height, 844 - 60 - 250 - 8 - 60);
+    assert.equal(freeArea(viewport, chrome, 30).height, freeArea(viewport, chrome).height, "a card lower than the options bar takes nothing more");
+    assert.equal(barMode(viewport, freeArea({ width: 390, height: 400 }, chrome, 250).height), "compact", "a card that leaves too little opens the bar compact");
+  });
+
   test("a landscape sheet takes the right, over the right safe area", () => {
     const chrome = { ...phone({ band: false, options: false, safe: { top: 0, side: 47, bottom: 21 } }), sheet: 340 };
     const free = freeArea({ width: 844, height: 390 }, chrome);
