@@ -81,7 +81,20 @@ export function useModalDialog(
       // Closed before focus moves: the control to focus is inert while the dialog is modal.
       if (el.open) el.close();
       const target = latest.current.returnFocus?.current ?? opener;
-      if (target?.isConnected) target.focus({ preventScroll: true });
+      if (!target?.isConnected) return;
+      target.focus({ preventScroll: true });
+      /*
+       * An opener disabled while its dialog is open, such as the file
+       * picker that starts a map import, is enabled again in the commit
+       * that unmounts the dialog, but after this cleanup runs. Its focus()
+       * did nothing and focus fell to the page. Once the commit is done it
+       * can take focus, unless something else took it meanwhile.
+       */
+      if (document.activeElement === target) return;
+      queueMicrotask(() => {
+        const now = document.activeElement;
+        if (target.isConnected && (now === null || now === document.body)) target.focus({ preventScroll: true });
+      });
     };
   }, [dialog, beforeCommit]);
 
