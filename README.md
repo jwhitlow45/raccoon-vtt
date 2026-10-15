@@ -1,4 +1,8 @@
-# raccoon-vtt
+<p align="center">
+  <img src="public/icon.svg" alt="RaccoonVTT logo" width="128" height="128">
+</p>
+
+<h1 align="center">raccoon-vtt</h1>
 
 A self-hosted virtual tabletop for D&D groups playing the 2024 rules
 (5.5e), on a square grid. It is made for phones first, and works on
