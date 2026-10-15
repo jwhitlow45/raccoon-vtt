@@ -173,9 +173,12 @@ export function subpageBack(header: PanelHeader): HeaderBack {
  * The control that opened a subpage, as it can be found again once its
  * page has mounted anew: its element, the `data-opener` id it or its row
  * carries, and else its tag, its name and its place among the controls
- * with that same tag and name.
+ * with that same tag and name. `top` is how far the page was scrolled
+ * when it was pressed, read then, since by the time the subpage mounts
+ * in the same scrolling body the browser has already cut the offset down
+ * to the subpage's height.
  */
-type Opener = { el: HTMLElement; id: string | null; tag: string; name: string; index: number };
+type Opener = { el: HTMLElement; id: string | null; tag: string; name: string; index: number; top: number };
 
 const FOCUSABLE = 'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -191,7 +194,7 @@ function openerOf(body: HTMLElement, el: HTMLElement): Opener {
   const marked = el.closest("[data-opener]");
   const tag = el.tagName.toLowerCase();
   const name = nameOf(el);
-  return { el, id: marked && body.contains(marked) ? marked.getAttribute("data-opener") : null, tag, name, index: sameNamed(body, tag, name).indexOf(el) };
+  return { el, id: marked && body.contains(marked) ? marked.getAttribute("data-opener") : null, tag, name, index: sameNamed(body, tag, name).indexOf(el), top: body.scrollTop };
 }
 
 /**
@@ -287,13 +290,25 @@ export function useSubpageFocus(
      * a subpage opened and closed from outside the panel left the opener
      * of an earlier one behind, and a later Back went to that stale row.
      */
+    /*
+     * The first page and its subpages share one scrolling body, which kept
+     * its offset: a stat block opened from far down the monster list showed
+     * its last lines, and Back left the list where the subpage had been
+     * scrolled, with the row that took focus out of sight. So a subpage
+     * opens at its top, and Back puts the first page where it was when the
+     * row was pressed, when that row is there again.
+     */
+    const scroller = body.current;
     let target: HTMLElement | null;
     if (key !== null) {
       if (was === null) opener.current = pressed;
       target = title.current;
+      if (scroller) scroller.scrollTop = 0;
     } else {
+      const back = findOpener(scroller, opener.current);
+      if (back && scroller && opener.current) scroller.scrollTop = opener.current.top;
       // A header drawn only for a subpage is gone with it, and its title with it.
-      target = findOpener(body.current, opener.current) ?? (title.current?.isConnected ? title.current : null) ?? fallback?.current ?? null;
+      target = back ?? (title.current?.isConnected ? title.current : null) ?? fallback?.current ?? null;
       opener.current = null;
     }
     const area = root?.current ?? body.current?.parentElement ?? null;
