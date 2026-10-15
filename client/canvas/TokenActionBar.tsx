@@ -192,7 +192,7 @@ export function TokenActionBar(props: {
         </ul>
       ) : null}
 
-      {access.hp !== "none" ? <HpEntry targets={[oneTarget(target, access.hp, atZero)]} access={access.hp} /> : null}
+      {access.hp !== "none" ? <HpEntry targets={[oneTarget(target, access.hp, atZero)]} access={access.hp} place="bar" /> : null}
 
       {access.canEditToken("elevation") ? (
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(1) }}>
@@ -325,7 +325,7 @@ export function GroupActionBar(props: {
     >
       <PaneHeader title={`${tokens.length} selected`} onClose={props.onClose} closeLabel="Let go of all of them" />
       <div style={{ color: theme.color.textMuted, overflowWrap: "anywhere" }}>{tokens.map((t) => displayName(t)).join(", ")}</div>
-      <GroupHpEntry tokens={tokens} />
+      <GroupHpEntry tokens={tokens} place="bar" />
       {props.movable >= 2 ? (
         <div style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>
           {props.movable === tokens.length ? "Drag any of them to move them all." : `A drag moves the ${props.movable} of them you may move.`}

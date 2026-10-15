@@ -343,7 +343,7 @@ function SelectedCreatures() {
           <span style={{ overflowWrap: "anywhere" }}>
             <strong>{picked.length} selected:</strong> {picked.map((t) => displayName(t)).join(", ")}
           </span>
-          <GroupHpEntry tokens={picked} />
+          <GroupHpEntry tokens={picked} place="panel" />
           <Wrap>
             <Button size="sm" onClick={() => ui.select(null)}>
               Clear

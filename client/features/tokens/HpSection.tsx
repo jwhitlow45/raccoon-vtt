@@ -9,7 +9,7 @@ import { hpDisplay, hpLabel, hpText, type HpView } from "../../lib/tokenView.ts"
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions } from "../../state/view.ts";
 import { sendHpEntry, type HpTarget } from "./groupHp.ts";
-import { hpDraftKey, useKeepHpDraft, useKeptHpDraft } from "./hpDraft.ts";
+import { hpDraftKey, useKeepHpDraft, useKeptHpDraft, type HpPlace } from "./hpDraft.ts";
 import { HP_MODES, MAX_HP_AMOUNT, modeAfterApply, parseHpInput, type HpMode } from "./hpInput.ts";
 import { FieldRow, Note, NumberField, Section, SmallButton } from "./ui.tsx";
 
@@ -38,11 +38,13 @@ export function HpEntry(props: {
   /** One creature, or each of a multi-selection. */
   targets: readonly HpTarget[];
   access: Exclude<HpAccessLevel, "none">;
+  /** Where it stands, so the token bar and a panel showing the same creature each keep their own typing through a blackout (hpDraft.ts). */
+  place: HpPlace;
   onApplied?(): void;
 }) {
   const actions = useRoomActions();
   // What was typed before a blackout unmounted the entry comes back with it (hpDraft.ts).
-  const key = hpDraftKey(props.targets);
+  const key = hpDraftKey(props.place, props.targets);
   const kept = useKeptHpDraft(key);
   const [mode, setMode] = useState<HpMode>(kept?.mode ?? "damage");
   const [text, setText] = useState(kept?.text ?? "");
@@ -170,7 +172,7 @@ export function HpSection(props: {
         </div>
       )}
 
-      {access.hp !== "none" ? <HpEntry targets={[oneTarget(target, access.hp, atZero)]} access={access.hp} /> : null}
+      {access.hp !== "none" ? <HpEntry targets={[oneTarget(target, access.hp, atZero)]} access={access.hp} place="panel" /> : null}
 
       {access.hp === "all" && hp ? (
         <>

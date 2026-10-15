@@ -371,6 +371,22 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await tapCell(player, bounds, { x: 8, y: 6 });
     await bar.waitFor();
     assert.equal(await bar.getByRole("textbox", { name: "HP change" }).inputValue(), "");
+
+    // The Token sheet open over the folded bar: each keeps its own typing through a blackout (P3-ASTRA-01).
+    await bar.getByRole("textbox", { name: "HP change" }).fill("4");
+    await player.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
+    await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: "Token", exact: true }).tap();
+    const sheet = player.getByRole("region", { name: "Token" });
+    await sheet.getByRole("textbox", { name: "HP change" }).fill("2");
+    await ops.send({ t: "view.blackout", blackout: true });
+    await player.getByText("The DM has paused the game.").waitFor();
+    await ops.send({ t: "view.blackout", blackout: false });
+    await sheet.getByRole("textbox", { name: "HP change" }).waitFor();
+    assert.equal(await sheet.getByRole("textbox", { name: "HP change" }).inputValue(), "2", "the sheet's typing came back");
+    await player.getByRole("button", { name: "Close Token" }).tap();
+    await bar.waitFor();
+    assert.equal(await bar.getByRole("textbox", { name: "HP change" }).inputValue(), "4", "the bar's typing came back under the sheet");
+    await shots.take(player, "playerphone-bar-and-sheet-after-blackout");
     await bar.getByRole("button", { name: "Close", exact: true }).tap();
   });
 

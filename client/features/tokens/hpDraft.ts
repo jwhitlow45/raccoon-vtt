@@ -25,12 +25,38 @@ export type HpDraft = { mode: HpMode; text: string; crit: boolean };
  */
 export const hpDraftSlot = scopeSlot(() => new Map<string, HpDraft>());
 
-/** One draft per set of creatures: the token bar and the token's panel share it, as they show the same entry. */
-export function hpDraftKey(targets: readonly Pick<HpTarget, "holder">[]): string {
-  return targets
+/**
+ * Where an HP entry stands: the token bar over the map, or a panel (the
+ * Token and Characters panels and the tracker's group entry).
+ */
+export type HpPlace = "bar" | "panel";
+
+/**
+ * One draft per place and set of creatures. The token bar and the token's
+ * panel can both be up for one creature, on a desktop with the Token tab
+ * chosen or a phone with the Token sheet open over the folded bar, each
+ * with its own typing. Sharing one draft let the panel's empty entry
+ * overwrite what was typed into the bar behind the blackout, and the panel,
+ * which mounts before the bar once the pause ends, took the draft first.
+ */
+export function hpDraftKey(place: HpPlace, targets: readonly Pick<HpTarget, "holder">[]): string {
+  const holders = targets
     .map((t) => t.holder)
     .sort()
     .join("|");
+  return `${place}:${holders}`;
+}
+
+/** What an entry leaves as it unmounts: its draft for `key`, only behind a blackout (useKeepHpDraft). */
+export function leaveHpDraft(drafts: Map<string, HpDraft>, key: string, draft: HpDraft, paused: boolean): void {
+  if (paused) drafts.set(key, draft);
+}
+
+/** The draft an entry for `key` starts from, if one was left, which it then takes off the shelf (useKeptHpDraft). */
+export function takeHpDraft(drafts: Map<string, HpDraft>, key: string): HpDraft | undefined {
+  const draft = drafts.get(key);
+  drafts.delete(key);
+  return draft;
 }
 
 /** Whether this viewer is behind a blackout now, by the rule the room's gate follows (lib/scene.ts sceneGate). */
@@ -41,9 +67,10 @@ export function behindBlackout(s: Pick<RoomView, "view" | "sceneId" | "you">): b
 /** The draft an entry for `key` starts from, the one it left behind the pause screen, which it takes off the shelf once mounted. */
 export function useKeptHpDraft(key: string): HpDraft | undefined {
   const drafts = useScoped(hpDraftSlot);
+  // Read in render and taken once mounted, since the development double render calls the initializer twice.
   const [kept] = useState(() => drafts.get(key));
   useEffect(() => {
-    drafts.delete(key);
+    takeHpDraft(drafts, key);
   }, [drafts, key]);
   return kept;
 }
@@ -60,7 +87,7 @@ export function useKeepHpDraft(key: string, draft: HpDraft): void {
   latest.current = draft;
   useEffect(
     () => () => {
-      if (behindBlackout(store.getState())) drafts.set(key, latest.current);
+      leaveHpDraft(drafts, key, latest.current, behindBlackout(store.getState()));
     },
     [store, drafts, key],
   );
