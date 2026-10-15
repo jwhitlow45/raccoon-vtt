@@ -4,6 +4,7 @@ import { Icon } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
 import { useAlertsSummaryEntry } from "../components/sheetFocus.ts";
 import { chromeZoom, smallUi } from "../features/device/layout.ts";
+import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { theme } from "../lib/theme.ts";
 import { useScoped } from "../state/scope.ts";
 import { alertsSummary, DOCK_PX, dockSlot, type AlertsSummary } from "./fold.ts";
@@ -213,8 +214,6 @@ const chipStyle: CSSProperties = {
   fontWeight: theme.weight.strong,
   cursor: "pointer",
 };
-
-const VISUALLY_HIDDEN: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
 
 /**
  * Room's one status region for the folded alerts (3.2.1). The column's

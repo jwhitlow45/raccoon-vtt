@@ -29,6 +29,7 @@ import { FrameViewBar } from "../features/scenes/FrameView.tsx";
 import { barInset, chromeZoom, layoutWidth, screenHeight, smallUi, useLayoutSize } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { activeTool, toolsFor, type ToolDef } from "../features/tools.ts";
+import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { useBackClose } from "../lib/backClose.ts";
 import { useWakeLock } from "../lib/wakeLock.ts";
 import type { Insets } from "../lib/camera.ts";
@@ -38,6 +39,7 @@ import { sceneGate } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { PanelBody, RoomLoadNotice } from "../panels/Panels.tsx";
 import { RoomScope, RoomScopeProvider, useRoomScope } from "../state/scope.ts";
+import { TOAST_MS } from "../state/store.ts";
 import { useShortcuts } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
@@ -50,7 +52,6 @@ import { Badge, FindButton, FitButton, PauseScreen, Stacked, UndoButtons, useAcc
 import { DockHeaderActions, DockRow, FoldStatus, SAFE_PROBE_STYLE, useDockSummary, useLayoutHeight, useSafeAreas, type DockActions } from "./RoomDock.tsx";
 
 const { topBar: TOP_BAR, toolbar: TOOLBAR } = theme.layout;
-const TOAST_MS = 5_000;
 
 /**
  * An element's height as drawn, kept up to date. The bars over the map
@@ -740,8 +741,6 @@ function YouChip(props: { dm: boolean; dot: boolean }) {
     </Chip>
   );
 }
-
-const VISUALLY_HIDDEN = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" } as const;
 
 function Banner() {
   const connection = useRoomView((s) => s.connection);

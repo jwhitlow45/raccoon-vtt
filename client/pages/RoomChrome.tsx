@@ -5,6 +5,7 @@ import { usePreview } from "../features/dm/previewContext.ts";
 import { findCamera, findRect, nextOwnToken, sheetCover, type OpenSheet } from "../features/find/findToken.ts";
 import { badgeText } from "../features/log/unread.ts";
 import { XCardButton } from "../features/xcard/XCardButton.tsx";
+import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { accentVars } from "../lib/accent.ts";
 import { escapeTarget } from "../lib/escape.ts";
 import { takeReopen } from "../lib/reopen.ts";
@@ -347,7 +348,7 @@ export function Badge(props: { count: number; corner?: boolean }) {
       }}
     >
       <span aria-hidden>{text}</span>
-      <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>{`${props.count} unread`}</span>
+      <span style={VISUALLY_HIDDEN}>{`${props.count} unread`}</span>
     </span>
   );
 }

@@ -40,6 +40,12 @@ export const OP_ANSWER_MS = 10_000;
 /** Pending ops older than this are dropped on reconnect: the server keeps watermarks much longer, but nobody wants a 12 hour old edit. */
 export const MAX_OP_AGE_MS = 12 * 60 * 60 * 1000;
 const MAX_TOASTS = 3;
+/**
+ * How long a toast (`notify`) stays on screen. The height readout
+ * (features/builder/heights) stays as long, so a note and a reading that
+ * show together go together.
+ */
+export const TOAST_MS = 5_000;
 
 /** Options for one dispatched op. */
 export type DispatchOptions = {

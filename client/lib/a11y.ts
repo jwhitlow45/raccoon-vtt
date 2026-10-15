@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 /**
  * The accessible name of a button with a short visible label and a longer
  * title. The visible words are the name, so a screen reader announces what
@@ -13,3 +15,10 @@ export function accessibleName(label: unknown, title: string | undefined): strin
   if (typeof label !== "string" || !/\p{L}/u.test(label)) return title;
   return title.toLowerCase().includes(label.trim().toLowerCase()) ? title : undefined;
 }
+
+/**
+ * Hides text from sight but not from screen readers: the start of a name
+ * the screen shows only in part, a count a badge shows as a number, a
+ * status line the page speaks.
+ */
+export const VISUALLY_HIDDEN: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
