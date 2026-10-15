@@ -565,14 +565,22 @@ function BarFrame(props: {
     if (!folded) barRef.current?.focus({ preventScroll: true });
   }, [folded, dockStore]);
 
-  // The box the bar draws, for the column, the notices and the camera. A drag publishes nothing new until it lands.
+  /*
+   * The box the bar draws, for the column, the notices and the camera. A
+   * drag publishes nothing new until it ends, so the column does not jump
+   * as the bar passes under it. Only a drag that moved holds it back: a
+   * plain press on the header publishes as ever, and the end of a drag,
+   * dropped, put back by Escape or cancelled, publishes the latest, alerts
+   * that arrived meanwhile included.
+   */
   const facts: BarFacts | null = folded ? null : { box: hangBox(placed.hang, barHeight), mode, lane: placed.lane, laneLeft: laneLeft(free) };
   const factsKey = facts ? JSON.stringify(facts) : "";
+  const dragging = dragBox !== null;
   useLayoutEffect(() => {
-    if (dragRef.current) return;
+    if (dragging) return;
     dockStore.setState({ bar: facts });
     // The facts are read through factsKey, which changes exactly when they do.
-  }, [factsKey, dockStore]);
+  }, [factsKey, dockStore, dragging]);
   useLayoutEffect(() => () => dockStore.setState({ bar: null }), [dockStore]);
 
   const setSpot = (next: Spot) => {
