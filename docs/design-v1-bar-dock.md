@@ -63,7 +63,7 @@ In the height readout build, a tap on empty map reaches `CameraGesture.up` (`lib
 - **Select several on**: a tap off hides the bar and keeps the group, its outlines and the mode. Stage's box release counts a box as that tap when it moved no more than `TAP_SLOP_PX`, was not cancelled or held, and was not made with Shift. It calls `onSelect(null)`, and `tapToken(local, null)` while selecting several now hides the bar (`showActions(false)`) instead of doing nothing. A box tap opens no door or label, as today. A real box drag keeps adding to the group.
 - **A token tap** with one token selected selects that token, and the bar shows it in the same spot. With Select several on, a tap toggles, as today: a token outside the group joins it and shows the bar again, and a token in it leaves the group without reopening a hidden bar (today any toggle reopens it). Taking out the last token empties the selection and closes the bar, and the mode stays on. A box drag that adds tokens shows the bar again too.
 - **Actions.** A button whose name is its text, in the Select several bar, shown while the group has tokens and its bar is hidden. It shows the bar (`showActions(true)`) and focuses the bar's frame.
-- **Done** in the Select several bar: question 1.
+- **Done** in the Select several bar turns the mode off and lets go of the group, closing its bar, as the project owner described it. Today it only turns the mode off and keeps the group and its bar (`setMultiSelect` in `state/selection.ts`, whose test says "Turning the mode off keeps the group, ready to move"). That test changes. The bar's own "Select several" toggle keeps today's behavior, for someone who wants to leave the mode and still act on the group.
 - **Escape and Back** do what the bar's close does, in both modes, as today: they let go.
 - **Off** is whatever reaches the map canvas: empty map, the gaps between alert cards (the column passes taps through), and a map label or door drawn into the map. Everything else acts and leaves the selection alone: the bar, a sheet, the side panel, the toolbar and the Select several bar, the top bar, an alert card, the phone's dock, a notice, and panes on the map such as a door card or a stop note. These are DOM above the canvas, so their taps never reach it.
 - **Not a tap:** a move past 8 px (a pan or a box drag), a second finger (a pinch), a mouse pan with the right or middle button or Space, the wheel, and a press the hold-to-ping fired for. "Held" is the readout build's signal, not a second clock: the ping layer reports each press it pinged (`features/pings/hold.ts`), `CameraGesture.hold(id)` marks it, and `up` reports `held`. This design changes two things in that build. `up` reports `held` for any still one-finger press, not only one on empty map, so the box path can read it. `emptyTap` returns before `deselect` for a held press, so a ping neither deselects, hides the bar nor opens anything (the readout design lets a held press deselect).
@@ -103,7 +103,7 @@ Unit tests, `node:test`:
   - Notices: placement at 319 and 320 px beside the lane, and the column's top below lasting notices only.
 - `client/lib/camera.test.ts`: a still box-mode press the ping reported is held. A pan or a pinch holds nothing.
 - `client/features/builder/heights/tap.test.ts` (the readout build's `emptyTap` tests): a held press calls neither `deselect` nor any step. It counted one deselect before.
-- `client/state/selection.test.ts`: the Select several test changes. A tap on empty map hides the bar and keeps the group. A removal leaves a hidden bar hidden, and an addition shows it. Removing the last token empties the selection and closes the bar. Done follows question 1.
+- `client/state/selection.test.ts`: the Select several test changes. A tap on empty map hides the bar and keeps the group. A removal leaves a hidden bar hidden, and an addition shows it. Removing the last token empties the selection and closes the bar. Done turns the mode off and empties the selection, and the bar's own toggle still keeps the group.
 - `client/features/find/findToken.test.ts`: with a bar cover the zoom is unchanged and the token lands clear of the bar.
 
 e2e, one file after another as docs/design-v1-visual.md 5.3 says:
@@ -115,7 +115,7 @@ e2e, one file after another as docs/design-v1-visual.md 5.3 says:
   4. With the bar open, Fit leaves no token under it, and Find and the outliner land the token clear of it.
   5. In a fight with three concentration prompts and a roll card, the bar's and the column's boxes never intersect, and with Conditions open the clipped column shows "Scroll for more".
   6. One token: a click on empty map closes the bar, and a click on another token switches it. Clicks on a side panel tab, a tool, Fit and an alert card leave it open. So do a right-button pan, the wheel, and a press held until it pings, which keeps the token selected.
-  7. Select several: a click on empty map hides the bar and keeps every outline. Actions brings the bar back and focuses its frame. A click on a token in the group takes it out and leaves the hidden bar hidden. A click on another token adds it and shows the bar. With the mode off, Shift with a click on empty map changes nothing. Done follows question 1.
+  7. Select several: a click on empty map hides the bar and keeps every outline. Actions brings the bar back and focuses its frame. A click on a token in the group takes it out and leaves the hidden bar hidden. A click on another token adds it and shows the bar. With the mode off, Shift with a click on empty map changes nothing. Done ends the mode, every outline goes and the bar closes.
   8. "Viewing as Pat" does not intersect the column, and Later on the previewed roll card takes the click (LPD-DESK-6). In a blackout the preview still shows Exit, and a click on it leaves the preview.
 - `e2e/playerphone.e2e.ts`, at 844 x 390, 390 x 844, and 844 x 390 at 130%:
   - In landscape the bar docks at the bottom right, left of an open sheet. The roll card and the bar never intersect, in landscape and in portrait after Show (LPD-PLAYER-2).
@@ -133,7 +133,7 @@ e2e, one file after another as docs/design-v1-visual.md 5.3 says:
 
 - The line that says "Tapping a token opens a small action bar under it" becomes: "Tapping a token opens its action bar. On a screen 600 px or wider, or a phone on its side, it sits at the bottom right of the map instead of under the token. Drag it by its header, or press "Move bar" to send it to the next corner. This device remembers the spot, and "Reset bar position" puts it back. "Fit the map" keeps the map out from under it. On a phone held upright it spans the screen under the token, and on a screen too short for it, across the bottom."
 - After it: "A tap on empty map closes the action bar. Panning, pinching and holding a finger down to ping leave it open."
-- Under "Several tokens at once": "With Select several on, a tap on empty map hides the group's action bar and keeps the group, and "Actions" in the Select several bar brings it back. A tap on a token in the group takes it out." Then the Done sentence that question 1 settles.
+- Under "Several tokens at once": "With Select several on, a tap on empty map hides the group's action bar and keeps the group, and "Actions" in the Select several bar brings it back. A tap on a token in the group takes it out." Then: "Done ends Select several and lets go of the group."
 - The mouse line that ends "Escape closes a sheet or the token's action bar" gains: "While you drag the action bar, Escape puts it back."
 
 ## 9. Build plan
@@ -147,7 +147,7 @@ One part in one workspace, built once the height readout build has merged:
 - `client/canvas/fitSlot.ts`: `show` hands over the cover.
 - `client/lib/gestures.ts` with `client/lib/camera.test.ts`, and `client/canvas/emptyTap.ts` with `heights/tap.test.ts`: the two `held` changes.
 - `client/state/selection.ts` and its test: the empty tap and the toggle while selecting several.
-- `client/features/select/SelectOptions.tsx`: Actions, Done as question 1 settles, and its comment on `SELECT_OPTIONS_PX`.
+- `client/features/select/SelectOptions.tsx`: Actions, Done letting go of the group, and its comment on `SELECT_OPTIONS_PX`.
 - `client/features/encounter/InitiativeStrip.tsx`: the column's top, max height, right padding and clipped hint, and its published heights.
 - `client/pages/Room.tsx` and `client/pages/RoomDock.tsx`: the notice stack's placement and its lasting notices' measured bottom, the report to PlayerPreview, and `FoldStatus` while the column shows nothing.
 - `client/features/dm/PlayerPreview.tsx` and `client/features/dm/previewContext.ts`: the notice placed from Room's report. Their stale comments `:16-27` and `:35-36` go.
@@ -156,4 +156,4 @@ One part in one workspace, built once the height readout build has merged:
 
 ## 10. Questions for the project owner
 
-1. What should Done in the Select several bar do? The project owner's words take Done as the way to let go of the group. Today it only turns the mode off and keeps the group and its bar (`setMultiSelect` in `state/selection.ts`, whose test says "Turning the mode off keeps the group, ready to move"). Recommended default: Done turns the mode off and lets go of the group, as the project owner described it. The bar's own "Select several" toggle keeps today's behavior, for someone who wants to leave the mode and still act on the group.
+None. What Done does was settled by the project owner's description of it (section 3).
