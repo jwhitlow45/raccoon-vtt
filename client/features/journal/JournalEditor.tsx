@@ -4,7 +4,7 @@ import { LIMITS } from "#shared/limits.ts";
 import { MAX_NAME } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
-import { Dialog } from "../../components/Dialog.tsx";
+import { Dialog, DiscardQuestion } from "../../components/Dialog.tsx";
 import { Field, Select, TextArea } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Notice } from "../../components/Notice.tsx";
@@ -149,7 +149,7 @@ export function JournalEditor(props: { page: JournalPage | null; folders: readon
     </>
   );
   const status = leaving ? (
-    <span style={{ fontSize: theme.font.body14, color: theme.color.text }}>Throw away your changes?</span>
+    <DiscardQuestion />
   ) : saving ? (
     <Loading text={connected ? "Saving the page…" : "Waiting for the connection to save…"} />
   ) : null;

@@ -176,6 +176,21 @@ export function Dialog(props: DialogProps) {
 }
 
 /**
+ * "Throw away your changes?", in an editor's status line once its close
+ * asks before it discards (the journal's and the monster's editors). It is
+ * an alert, so a screen reader hears the question as it appears: an
+ * Escape asks it, and a second Escape discards, which must never happen
+ * unheard.
+ */
+export function DiscardQuestion() {
+  return (
+    <span role="alert" style={{ fontSize: theme.font.body14, color: theme.color.text }}>
+      Throw away your changes?
+    </span>
+  );
+}
+
+/**
  * A dialog that moves to another step in place, such as a scene menu's
  * Duplicate and Move to folder, swaps its body under the same `<dialog>`,
  * and the row or back button that had focus goes with it. Focus then fell

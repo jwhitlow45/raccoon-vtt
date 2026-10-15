@@ -23,6 +23,8 @@ import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, wai
  *   which was disabled while the dialog was open.
  * - A scene menu that moves to another step keeps focus in its dialog.
  * - The side panel's tab panel is named by its chosen tab.
+ * - The question an editor asks before it throws away changes is an
+ *   alert, read out as it appears.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus six, which it shares with
  * notes.e2e.ts, since the runs go one after another. The other
@@ -291,7 +293,20 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     assert.match((await focused(dm)).name, /^More for /, "Escape gives focus back to the scene's more button");
   });
 
-  test("7. no page errors along the way", () => {
+  test("7. the monster editor's question before it throws away a paste is read out, so a second Escape never discards unheard (LPD-DESK-8)", async () => {
+    await dm.getByRole("tab", { name: "Monsters", exact: true }).click();
+    await dm.getByRole("tabpanel").getByRole("button", { name: "Paste a stat block" }).click();
+    const editor = dm.getByRole("dialog", { name: "New monster" });
+    await editor.waitFor();
+    await waitFor("the paste box focused", async () => (await focused(dm)).tag === "textarea");
+    await dm.keyboard.type("Goblin");
+    await dm.keyboard.press("Escape");
+    await editor.getByRole("alert").filter({ hasText: "Throw away your changes?" }).waitFor();
+    await dm.keyboard.press("Escape");
+    await editor.waitFor({ state: "detached" });
+  });
+
+  test("8. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
   });
 });

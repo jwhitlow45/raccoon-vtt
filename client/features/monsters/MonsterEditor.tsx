@@ -18,7 +18,7 @@ import {
   type SectionKey,
 } from "#shared/statBlock.ts";
 import { Button } from "../../components/Button.tsx";
-import { Dialog } from "../../components/Dialog.tsx";
+import { Dialog, DiscardQuestion } from "../../components/Dialog.tsx";
 import { Input, Select, TextArea } from "../../components/Field.tsx";
 import { Markdown } from "../../components/Markdown.tsx";
 import { Notice } from "../../components/Notice.tsx";
@@ -134,7 +134,7 @@ export function MonsterEditor(props: {
       title={title}
       onClose={imageOpen ? () => {} : close}
       footer={footer}
-      status={leaving ? <span style={{ color: theme.color.text, fontSize: theme.font.body14 }}>Throw away your changes?</span> : null}
+      status={leaving ? <DiscardQuestion /> : null}
       phone="fill"
       width="lg"
     >
