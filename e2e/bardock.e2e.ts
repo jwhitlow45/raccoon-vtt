@@ -747,18 +747,62 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await dm.getByRole("tab", { name: "Initiative" }).click();
   });
 
-  test("12. after Fit with the bar docked, turning a tablet upright keeps the map on screen", async () => {
+  test("12. after Fit, turning the screen fits the map again against where the bar ends up, the turn band moving included (BD-ASTRA-03, BD-ASTRA-07)", async () => {
+    const sceneRect = async (): Promise<Rect> => {
+      const a = await pagePoint(dm, run.bounds, { x: 0, y: 0 });
+      const b = await pagePoint(dm, run.bounds, { x: run.bounds.w, y: run.bounds.h });
+      return { left: a.x, top: a.y, right: b.x, bottom: b.y };
+    };
+    // A tablet turned upright: the bar spans now and covers nothing for the map, so the map takes the whole width again.
     await setUp(dm, { width: 1024, height: 768, scale: 1.3 });
     await selectThorn();
     await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
     await dm.waitForTimeout(300);
     await dm.setViewportSize({ width: 768, height: 1024 });
     await barFrame(dm).waitFor();
-    await dm.waitForTimeout(400);
-    const a = await pagePoint(dm, run.bounds, { x: 0, y: 0 });
-    const b = await pagePoint(dm, run.bounds, { x: run.bounds.w, y: run.bounds.h });
-    assert.ok(a.x >= -1 && b.x <= 768 + 1 && a.y >= -1 && b.y <= 1024 + 1, `the refit left the map off screen: ${JSON.stringify({ a, b })}`);
+    await dm.waitForTimeout(1200);
+    assert.equal(await barFrame(dm).getAttribute("data-bar-mode"), "span");
+    const upright = await sceneRect();
+    assert.ok(upright.left >= -1 && upright.right <= 768 + 1, `the refit left the map off screen: ${JSON.stringify(upright)}`);
+    assert.ok(Math.abs((upright.left + upright.right) / 2 - 384) <= 2, `the map keeps a cover for a bar that spans now: ${JSON.stringify(upright)}`);
     await shots.take(dm, "bardock-fit-then-upright");
+    await barFrame(dm).getByRole("button", { name: "Close", exact: true }).click();
+
+    /*
+     * A phone in a fight turned on its side, a concentration check at the
+     * column's head. Measured with the turn band still in its own row, the
+     * bar would sit beside the check. Once the band moves into the top bar,
+     * the free area is 48 px taller and the bar stacks under the check at
+     * the right. The map keeps clear of where the bar ends up.
+     */
+    await setUp(dm, { width: 430, height: 932, scale: 1 });
+    await damageGoblins();
+    await dm.locator('[data-alert="concentration"]').first().waitFor();
+    const thorn = await pagePoint(dm, run.bounds, { x: run.thorn.x + 0.5, y: run.thorn.y + 0.5 });
+    const free = await dm.evaluate(([x, y]) => (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): { tagName: string } | null } }).document.elementFromPoint(x, y)?.tagName ?? null, [thorn.x, thorn.y] as const);
+    if (free === "CANVAS") {
+      await dm.mouse.click(thorn.x, thorn.y);
+    } else {
+      await dm.locator('nav[aria-label="Tools"] button[title="Panels"]').click();
+      await dm.getByRole("region", { name: "Panels" }).getByRole("button", { name: "Outliner", exact: true }).click();
+      const outliner = dm.locator('section[aria-label="Outliner"]');
+      await outliner.getByLabel("Search the scene").fill("Thorn");
+      await outliner.getByRole("button", { name: /^Thorn/ }).first().click();
+    }
+    await dm.getByRole("dialog", { name: "Thorn actions" }).waitFor();
+    await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
+    await dm.waitForTimeout(300);
+    const bandBefore = (await rectOf(dm.locator("header").filter({ has: dm.locator("h1") }))).bottom;
+    await dm.setViewportSize({ width: 932, height: 420 });
+    await dm.waitForTimeout(1200);
+    const bandAfter = (await rectOf(dm.locator("header").filter({ has: dm.locator("h1") }))).bottom;
+    assert.ok(bandAfter < bandBefore - 20, `the turn band did not move into the top bar: ${bandBefore} then ${bandAfter}`);
+    assert.equal(await barFrame(dm).getAttribute("data-bar-mode"), "dock");
+    const bar = await barRect(dm);
+    const map = await sceneRect();
+    assert.ok(!intersects(map, bar), `the refit left the map under the bar: ${JSON.stringify({ map, bar })}`);
+    for (const card of await cards(dm)) assert.ok(!intersects(card, bar), "the bar meets a card");
+    await shots.take(dm, "bardock-fit-then-sideways-932x420");
     await barFrame(dm).getByRole("button", { name: "Close", exact: true }).click();
   });
 

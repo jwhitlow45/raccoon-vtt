@@ -70,6 +70,8 @@ import { GroupActionBar, TokenActionBar } from "./TokenActionBar.tsx";
 import { TokenDecor, TokenInteractionContext, TokenNode, type TokenInteraction } from "./TokenNode.tsx";
 
 const EMPTY_TOKENS: Record<string, Token> = {};
+/** How long after a new size the fitted map follows the measures of the new layout as they arrive. */
+const SETTLE_MS = 1_000;
 const EMPTY_TILES: RoomState["fogTiles"] = {};
 const EMPTY_MAP_LABELS: RoomState["labels"] = {};
 const NOT_CARRIED: ReadonlySet<string> = new Set();
@@ -255,16 +257,20 @@ export function MapStage(props: {
    * is about to show, as a tracker row's tap does: its box does not exist
    * yet, so it rests at its spot with the height it last had. `fresh`
    * places it anew for the canvas as it is now, as a refit after a
-   * rotation needs, since the box it published was for the old size.
+   * rotation needs, since the box it published was for the old size, and
+   * `shows` then says whether the bar showed when the size changed.
    */
-  const barCoverRef = useRef<(viewport: Size, source: "drawn" | "opening" | "fresh") => Insets>(() => NO_INSETS);
-  barCoverRef.current = (viewport, source) => {
+  const barShowsRef = useRef<() => boolean>(() => false);
+  barShowsRef.current = () => {
+    // Whether the bar shows follows the room's state at once, ahead of the render that draws or removes it.
+    const local = store.getState().local;
+    return local.actionBar && local.selectedId !== null && !activeTool(local.tool, role).pointer && !foldsUnderSheet({ ...layoutSize(window, uiScale()), sheetOpen: sheetIsOpen(local) });
+  };
+  const barCoverRef = useRef<(viewport: Size, source: "drawn" | "opening" | "fresh", shows?: boolean) => Insets>(() => NO_INSETS);
+  barCoverRef.current = (viewport, source, shows = barShowsRef.current()) => {
     const dock = scope.get(barDockSlot).getState();
     const z = uiScale();
-    const local = store.getState().local;
     const layout = layoutSize(window, z);
-    // Whether the bar shows follows the room's state at once, ahead of the render that draws or removes it.
-    const shows = local.actionBar && local.selectedId !== null && !activeTool(local.tool, role).pointer && !foldsUnderSheet({ ...layout, sheetOpen: sheetIsOpen(local) });
     if (!shows) return NO_INSETS;
     const resting = () => restingBar({ layout, viewport: sizeInZoomed(viewport, z), chrome: dock.chrome ?? DEFAULT_CHROME, spot: dock.spot, height: dock.lastHeight, foot: dock.foot, column: dock.column });
     const bar =
@@ -282,19 +288,50 @@ export function MapStage(props: {
     return barCover(viewport, insetsRef.current, { box, laneLeft: bar.laneLeft * z });
   };
 
-  const { top, right, bottom, left } = insets;
-  useLayoutEffect(() => {
+  /*
+   * The fitted map follows the canvas and the bars over it. A new size or
+   * interface size, a rotation say, also places the token bar anew: the
+   * cover the fit kept was for the old layout, and could now cover the
+   * whole screen, or belong to a bar that spans now and covers nothing for
+   * the map. The new layout's measures arrive over the next frames, after
+   * this canvas's own: Room's bars, the turn band that may move between the
+   * top bar and its own row, the alerts column's cards. So for a moment
+   * after such a change (`settle`) every one of them fits the map again
+   * against the bar placed afresh, whether or not the bar has opened or
+   * closed since, which never moves a fitted map. Once the moment is over,
+   * or the viewer moved the camera, the fit keeps the cover it had.
+   */
+  const settleRef = useRef<{ until: number; shows: boolean } | null>(null);
+  const refitRef = useRef(() => {});
+  refitRef.current = () => {
+    const s = sizeRef.current;
+    const current = sceneRef.current;
+    const bars = insetsRef.current;
     const fitted = fittedRef.current;
     const c = pendingCamRef.current ?? camRef.current;
-    if (!size || !fitted || !c || !sameCamera(c, fitted.cam) || cameraSceneRef.current !== scene.id) return;
-    // A new size or interface size, a rotation say, places the token bar anew: the cover the fit kept was for the old one, and could now cover the whole screen, or a bar that spans now covers nothing for the map.
+    if (!s || !fitted || !c || !sameCamera(c, fitted.cam) || cameraSceneRef.current !== current.id) return;
+    const now = performance.now();
     const z = uiScale();
-    const moved = fitKey(size, scene) !== fitted.key || z !== fitted.zoom;
-    const next = fitScene(size, scene, { top, right, bottom, left }, fitted.target, moved ? barCoverRef.current(size, "fresh") : fitted.cover);
-    if (!moved && rectClear(c, fitted.target ?? sceneRect(scene), size, largerEach({ top, right, bottom, left }, fitted.cover))) return;
+    if (fitKey(s, current) !== fitted.key || z !== fitted.zoom) settleRef.current = { until: now + SETTLE_MS, shows: barShowsRef.current() };
+    const settle = settleRef.current && now <= settleRef.current.until ? settleRef.current : null;
+    const next = fitScene(s, current, bars, fitted.target, settle ? barCoverRef.current(s, "fresh", settle.shows) : fitted.cover);
+    if (!settle && rectClear(c, fitted.target ?? sceneRect(current), s, largerEach(bars, fitted.cover))) return;
     fittedRef.current = next;
-    if (!sameCamera(next.cam, c)) setCam(next.cam);
-  }, [size, scene, top, right, bottom, left]);
+    if (sameCamera(next.cam, c)) return;
+    // Seen at once, so a second measure in the same frame still finds the camera it fitted.
+    camRef.current = next.cam;
+    setCam(next.cam);
+  };
+  const { top, right, bottom, left } = insets;
+  useLayoutEffect(() => refitRef.current(), [size, scene, top, right, bottom, left]);
+  useEffect(
+    () =>
+      scope.get(barDockSlot).subscribe((now, before) => {
+        if (now.chrome === before.chrome && now.column === before.column && now.bar === before.bar && now.foot === before.foot) return;
+        if (settleRef.current && performance.now() <= settleRef.current.until) refitRef.current();
+      }),
+    [scope],
+  );
 
   // How far out this scene zooms (camera.ts sceneMinScale), for the pinch and the wheel.
   useEffect(() => {
