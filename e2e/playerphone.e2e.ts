@@ -275,25 +275,38 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       if (view.width === 320) await shots.take(player, "playerphone-band-time-up-320-130");
     }
 
-    // Stacked at 320 px at 130%, End turn keeps to the screen while it waits on the server too (P3-ASTRA-02).
-    // Offline, the op waits for a socket: Chrome's offline mode stalls the open one, which the client gives up
-    // on after its heartbeat goes unanswered (smoke.e2e.ts), and the answer waits until the page is back online.
-    await setUp({ width: 320, height: 568, scale: 1.3 });
-    await waitFor("time up in the band, 320 x 568 at 130%", async () => /Time’s up\s*\+/.test((await band(player)).timerText) || null, 15_000);
-    playerConsole.expectSocketFailures = true;
-    const closesBefore = playerSocket.closes;
-    await playerContext.setOffline(true);
-    await waitFor("the player's socket to drop", () => playerSocket.closes > closesBefore || null, 45_000);
-    const endTurn = player.getByRole("button", { name: /End turn$/ });
-    await endTurn.tap();
-    await waitFor("End turn waiting on the server", async () => ((await endTurn.getAttribute("aria-busy")) === "true" ? true : null));
-    const held = await band(player);
-    assert.ok(held.endTurn && held.endTurn.right <= held.width + 0.5 && held.endTurn.left >= -0.5, `End turn runs off the screen while it waits: ${JSON.stringify(held)}`);
-    await shots.take(player, "playerphone-end-turn-waiting-320-130");
-    await playerContext.setOffline(false);
-    await endTurn.waitFor({ state: "detached", timeout: 45_000 });
-    await player.getByRole("status", { name: "Connected" }).first().waitFor({ timeout: 30_000 });
-    playerConsole.expectSocketFailures = false;
+    // End turn keeps to the screen while it waits on the server too: stacked at 320 px at 130%, on one line at 360 px
+    // at 115% (P3-ASTRA-02, P3R-5). Offline, the op waits for a socket: Chrome's offline mode stalls the open one, which
+    // the client gives up on after its heartbeat goes unanswered (smoke.e2e.ts), and the answer waits until the page is
+    // back online.
+    for (const view of [
+      { width: 320, height: 568, scale: 1.3 },
+      { width: 360, height: 740, scale: 1.15 },
+    ]) {
+      const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+      // The last check ended Thorn's turn: the goblin's turn passes back to Thorn.
+      if (dmSocket.state?.encounter?.activeEntryId !== run.thorn.entryId) {
+        await waitFor("the goblin's turn", () => dmSocket.state?.encounter?.activeEntryId === run.goblin.entryId || null);
+        await ops.send({ t: "encounter.next" });
+      }
+      await setUp(view);
+      await player.getByRole("button", { name: "End turn" }).waitFor();
+      await waitFor(`time up in the band, ${label}`, async () => /Time’s up\s*\+/.test((await band(player)).timerText) || null, 15_000);
+      playerConsole.expectSocketFailures = true;
+      const closesBefore = playerSocket.closes;
+      await playerContext.setOffline(true);
+      await waitFor("the player's socket to drop", () => playerSocket.closes > closesBefore || null, 45_000);
+      const endTurn = player.getByRole("button", { name: /End turn$/ });
+      await endTurn.tap();
+      await waitFor("End turn waiting on the server", async () => ((await endTurn.getAttribute("aria-busy")) === "true" ? true : null));
+      const held = await band(player);
+      assert.ok(held.endTurn && held.endTurn.right <= held.width + 0.5 && held.endTurn.left >= -0.5, `${label}: End turn runs off the screen while it waits: ${JSON.stringify(held)}`);
+      await shots.take(player, `playerphone-end-turn-waiting-${view.width}-${Math.round(view.scale * 100)}`);
+      await playerContext.setOffline(false);
+      await endTurn.waitFor({ state: "detached", timeout: 45_000 });
+      await player.getByRole("status", { name: "Connected" }).first().waitFor({ timeout: 30_000 });
+      playerConsole.expectSocketFailures = false;
+    }
     await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
     await ops.send({ t: "encounter.end" });
   });

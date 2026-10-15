@@ -207,10 +207,10 @@ export const TURN_PILL_PX = 36;
  * tap, at full strength so the spinner reads. `stack` puts its two words
  * on two lines, for the phone's turn band when its row is short of room
  * (band.ts bandFit), as the timer stacks "Time’s up" over the time past.
- * Stacked, the spinner stands in the words' place while it waits, since a
- * spinner beside them took the pill past the width the band gave it and
- * off a 320 px screen at 130%. The words stay, unseen, so the pill keeps
- * its width and the button its name.
+ * On one line or two, the spinner stands in the words' place while it
+ * waits: beside them it took the pill past the width the band gave it, off
+ * the screen at 320 px at 130% and at 360 px at 115%. The words stay,
+ * unseen, so the pill keeps its width and the button its name.
  */
 export function EndTurnPill(props: { waiting: boolean; stack?: boolean; onClick(): void }) {
   return (
@@ -251,23 +251,18 @@ export function EndTurnPill(props: { waiting: boolean; stack?: boolean; onClick(
           whiteSpace: "nowrap",
         }}
       >
-        {props.stack ? (
-          <span style={{ position: "relative", display: "grid", placeItems: "center" }}>
-            {/* Before the words, as on one line, so the button's name reads the same either way. */}
-            {props.waiting ? (
-              <span style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
-                <Spinner label="Ending your turn" />
-              </span>
-            ) : null}
-            {/* One text node either way, so the button's name stays "End turn". */}
-            <span style={{ width: "min-content", whiteSpace: "normal", textAlign: "center", lineHeight: 1.05, opacity: props.waiting ? 0 : 1 }}>End turn</span>
-          </span>
-        ) : (
-          <>
-            {props.waiting ? <Spinner label="Ending your turn" /> : null}
+        <span style={{ position: "relative", display: "grid", placeItems: "center" }}>
+          {/* Before the words, so the button's name reads "Ending your turn End turn" while it waits. */}
+          {props.waiting ? (
+            <span style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
+              <Spinner label="Ending your turn" />
+            </span>
+          ) : null}
+          {/* One text node either way, so the button's name stays "End turn". */}
+          <span style={{ opacity: props.waiting ? 0 : 1, ...(props.stack ? { width: "min-content", whiteSpace: "normal", textAlign: "center", lineHeight: 1.05 } : null) }}>
             End turn
-          </>
-        )}
+          </span>
+        </span>
       </span>
     </button>
   );
