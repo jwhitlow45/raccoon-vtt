@@ -1,8 +1,9 @@
-import { useEffect, useState, type ReactNode, type Ref } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
 import { Button } from "../../components/Button.tsx";
 import { Input, Select } from "../../components/Field.tsx";
 import type { IconName } from "../../components/Icon.tsx";
 import { accessibleName } from "../../lib/a11y.ts";
+import { HoldRepeat } from "../../lib/holdRepeat.ts";
 import { theme } from "../../lib/theme.ts";
 
 /**
@@ -80,18 +81,27 @@ export function OptionsDivider() {
  * arrow is called by what it does. `pressed` is an option that applies at
  * once, named by what pressed means ("DM only", "Shared"). A danger
  * button that is pressed is armed: it waits for its second tap.
+ *
+ * `repeat` makes it repeat while held, as a stepper's − and + do
+ * (lib/holdRepeat.ts): `onClick` then runs on the press, again 400 ms into
+ * the hold and every 80 ms after, until it returns false at a limit.
+ * `onHold` hears when a pointer press starts and ends.
  */
 export function OptButton(props: {
   ref?: Ref<HTMLButtonElement>;
-  onClick(): void;
+  /** With `repeat`, a return of false says a limit is reached, which ends the repeat. */
+  onClick(): unknown;
   children?: ReactNode;
   label?: string;
   pressed?: boolean;
   disabled?: boolean;
   tone?: "primary" | "danger";
   icon?: IconName;
+  repeat?: boolean;
+  onHold?(holding: boolean): void;
 }) {
   const { pressed, tone } = props;
+  const hold = useHoldRepeat(props.onClick, props.onHold);
   return (
     <Button
       ref={props.ref}
@@ -103,12 +113,62 @@ export function OptButton(props: {
       disabled={props.disabled}
       aria-label={props.children === undefined ? props.label : accessibleName(props.children, props.label)}
       title={props.label}
-      onClick={props.onClick}
-      style={{ flex: "none", whiteSpace: "nowrap" }}
+      onClick={(e) => (props.repeat ? hold.click(e.detail === 0) : props.onClick())}
+      onPointerDown={props.repeat ? hold.pointerDown : undefined}
+      onContextMenu={props.repeat ? (e) => e.preventDefault() : undefined}
+      style={{ flex: "none", whiteSpace: "nowrap", ...(props.repeat ? NO_CALLOUT : null) }}
     >
       {props.children}
     </Button>
   );
+}
+
+/** A held button opens no callout or text selection on a phone, which would end the hold. */
+const NO_CALLOUT: CSSProperties = { WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" };
+
+/**
+ * The hold repeat's wiring to the DOM. The lift is heard on `window`, since
+ * a button that turns disabled at its limit may never get its own
+ * `pointerup`, and a finger sliding off the button ends the hold, which a
+ * touch's implicit pointer capture would otherwise hide.
+ */
+function useHoldRepeat(onClick: () => unknown, onHold: ((holding: boolean) => void) | undefined) {
+  const clickRef = useRef(onClick);
+  clickRef.current = onClick;
+  const holdRef = useRef(onHold);
+  holdRef.current = onHold;
+  const [repeat] = useState(() => new HoldRepeat({ step: () => clickRef.current() !== false, onHold: (h) => holdRef.current?.(h) }));
+  const endRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => endRef.current?.(), []);
+  return {
+    click: (fromKeyboard: boolean) => repeat.click(fromKeyboard),
+    pointerDown(e: ReactPointerEvent<HTMLButtonElement>) {
+      if (!e.isPrimary || e.button !== 0) return;
+      endRef.current?.();
+      const button = e.currentTarget;
+      const id = e.pointerId;
+      const end = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        endRef.current = null;
+        repeat.release();
+      };
+      const onMove = (m: PointerEvent) => {
+        if (m.pointerId !== id) return;
+        const r = button.getBoundingClientRect();
+        if (m.clientX < r.left || m.clientX > r.right || m.clientY < r.top || m.clientY > r.bottom) end();
+      };
+      const onUp = (u: PointerEvent) => {
+        if (u.pointerId === id) end();
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+      endRef.current = end;
+      repeat.press();
+    },
+  };
 }
 
 /** How long a destructive button stays armed for its second tap. */
@@ -168,11 +228,28 @@ export function Stepper(props: { label: string; value: number; step: number; min
   );
 }
 
-/** The value between a stepper's buttons, in figures of one width, so it does not jitter as it changes. */
-export function StepValue(props: { children: ReactNode; minWidth?: number; live?: boolean }) {
+/**
+ * The value between a stepper's buttons, in figures of one width, so it does
+ * not jitter as it changes. `live` speaks each new value. `hushed` keeps it
+ * quiet while a button is held, so a hold through eighteen steps is not
+ * eighteen announcements, and the value is spoken once when it ends: the
+ * text is put in again, which a screen reader hears as new.
+ */
+export function StepValue(props: { children: ReactNode; minWidth?: number; live?: boolean; hushed?: boolean }) {
+  const [spoken, setSpoken] = useState(0);
+  const wasHushed = useRef(props.hushed === true);
+  useEffect(() => {
+    const was = wasHushed.current;
+    wasHushed.current = props.hushed === true;
+    if (!was || props.hushed) return;
+    // A frame later, so the region is polite again before its text changes.
+    const frame = requestAnimationFrame(() => setSpoken((n) => n + 1));
+    return () => cancelAnimationFrame(frame);
+  }, [props.hushed]);
   return (
     <span
-      aria-live={props.live ? "polite" : undefined}
+      aria-live={props.live ? (props.hushed ? "off" : "polite") : undefined}
+      aria-atomic={props.live ? true : undefined}
       style={{
         minWidth: props.minWidth ?? 56,
         textAlign: "center",
@@ -182,7 +259,7 @@ export function StepValue(props: { children: ReactNode; minWidth?: number; live?
         whiteSpace: "nowrap",
       }}
     >
-      {props.children}
+      <span key={spoken}>{props.children}</span>
     </span>
   );
 }

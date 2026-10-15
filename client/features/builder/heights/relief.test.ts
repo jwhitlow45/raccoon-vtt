@@ -95,6 +95,11 @@ describe("raised areas", () => {
     assert.equal(shadowLength(200), 0.5);
   });
 
+  test("past 30 ft the look stays the same: the stepper's 100 ft tints and shades as 30 ft does", () => {
+    assert.equal(tintOf(100), tintOf(30));
+    assert.equal(shadowLength(100), 0.5);
+  });
+
   test("a raised cell's shadow falls on its lower east, south and south-east neighbors, in bands that fade outward", () => {
     const r = relief(chunk({ heights: { "2,2": 10 } }));
     const e = 0.16;

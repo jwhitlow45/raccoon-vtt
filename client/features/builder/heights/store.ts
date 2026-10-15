@@ -17,10 +17,14 @@ export type HeightShape = BrushSize | "area";
 /** The way marked stairs point: by the rule ("a"), one way, or "remove" to take marks away. */
 export type StairChoice = StairDirection | "remove";
 
-/** The stepper's range and step (section 4.2). The model allows -100 to 200 ft, which other tools may store. */
+/**
+ * The stepper's range and step (section 4.2, raised to 100 ft by
+ * docs/design-v1-heights-readout.md section 5). The model allows -100 to
+ * 200 ft, which other tools may store.
+ */
 export const HEIGHT_STEP_FT = 5;
 export const HEIGHT_MIN_FT = -20;
-export const HEIGHT_MAX_FT = 30;
+export const HEIGHT_MAX_FT = 100;
 
 export type HeightState = {
   paint: HeightPaint;
@@ -60,6 +64,19 @@ export const heightSlot = scopeSlot(
 
 export function useHeightStore(): StoreApi<HeightState> {
   return useScoped(heightSlot).store;
+}
+
+/**
+ * Steps the stepper's height `by` feet within its range. It reads the
+ * store, never a render's value, since a held − or + steps from a timer
+ * that outlives renders. Returns whether another step the same way would
+ * still change it, so a held button stops at -20 and at 100.
+ */
+export function stepHeight(store: StoreApi<HeightState>, by: number): boolean {
+  const now = store.getState().height;
+  const next = Math.min(HEIGHT_MAX_FT, Math.max(HEIGHT_MIN_FT, now + by));
+  if (next !== now) store.setState({ height: next });
+  return by > 0 ? next < HEIGHT_MAX_FT : next > HEIGHT_MIN_FT;
 }
 
 /** How the stepper names a height: "10 ft up", "10 ft down", or ground level. */

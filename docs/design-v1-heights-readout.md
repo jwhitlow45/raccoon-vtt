@@ -91,11 +91,13 @@ At 100 ft:
 - **Sight over ledges** compares an eye with the edge's top and has no cap. From below, a 100 ft cliff hides everything on it, and from the top a creature sees down. The plateau simplification (a flier over a plateau is hidden from beside it, maps-vision 4.2) and horizontal light ranges (4.3) reach further but do not change.
 - **Doors' reach** measures to each door cell at its own ground, so a door at the top of a 100 ft drop opens from either side as it does at 30. No change.
 - **The stepper on a phone** has 25 values, and the default 10 ft takes 18 taps to reach 100. Keep the 5 ft steps J asked for, and make − and + repeat while held: besides the press's own step, one step 400 ms into the hold and one every 80 ms after, so a 1.68 s hold takes 10 to 100. Every tap still steps once, so nothing needs the hold. The rules:
-  - Exactly one step per press, whichever event drives it, and the press's own `click` adds none. Enter and Space keep `click`, and the keyboard's own repeat repeats them.
+  - Exactly one step per press, whichever event drives it, and the press's own `click` adds none. Enter and Space keep `click`. A held Space steps once, since its `click` comes on keyup, and Enter's key repeat repeats it.
   - The timer reads the store through `stepHeight` (`heights/store.ts`), never a render's value.
   - The repeat stops on lift, cancel, a finger sliding off, and at -20 or 100. It hears the lift on `window` or through pointer capture, since a button that turns disabled at the limit may never get its `pointerup`.
   - During a hold the value's live announcement is off (`StepValue live`), and the final value is spoken once on release.
   - The buttons stop the long-press callout. The value's 112 px already fits "100 ft up".
+
+  The build puts the repeat's state machine in `client/lib/holdRepeat.ts`, with its test beside it, since a `.tsx` file cannot load under `node --test`. `controls.tsx` wires it to `OptButton` (`repeat`, `onHold`) and `StepValue` (`hushed`). A pointer press keeps the value quiet from press to lift, a tap included, so each press is spoken once, at its end.
 
   A typed number was the alternative, and it opens the keyboard over the map being painted.
 - **Tests and docs naming 30 ft.** No test pins the stepper's top. `canvas/tokenShadow.test.ts` names 30 ft as a flier's full lift, which stays. The docs that say 30 ft up are `docs/design-v1-maps-vision.md:541` (4.2's "-20 ft to +30 ft"), `docs/design.md:1379`, `docs/features.md:117` and `FEATURES.md:80`.
