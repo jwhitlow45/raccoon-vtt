@@ -167,6 +167,22 @@ describe("camera gesture", () => {
     assert.deepEqual(g.up(1, cam), { tapOnEmpty: true, held: false });
   });
 
+  test("a still press on a token or for a box the ping reported is held, though it is no tap on empty map", () => {
+    const g = new CameraGesture();
+    // Select several's box gesture goes down as "tool", not on empty map (Stage.tsx).
+    g.down(1, { x: 10, y: 10 }, cam, false);
+    g.move(1, { x: 14, y: 13 });
+    g.hold(1);
+    assert.deepEqual(g.up(1, cam), { tapOnEmpty: false, held: true });
+    g.down(1, { x: 10, y: 10 }, cam, false);
+    assert.deepEqual(g.up(1, cam), { tapOnEmpty: false, held: false });
+    // Moved past the slop after the ping: a box drag, not a hold.
+    g.down(1, { x: 10, y: 10 }, cam, false);
+    g.hold(1);
+    g.move(1, { x: 60, y: 10 });
+    assert.deepEqual(g.up(1, cam), { tapOnEmpty: false, held: false });
+  });
+
   test("a ping report for another pointer, for a pan, or for a pinch's finger holds nothing", () => {
     const g = new CameraGesture();
     g.down(1, { x: 10, y: 10 }, cam, true);

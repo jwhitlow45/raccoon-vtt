@@ -3,7 +3,7 @@ import { beforeEach, describe, test } from "node:test";
 import { CHUNK_CELLS, STAIRS_CHARS, type BuildChunk, type RoomState } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { room, scene } from "#shared/testutil.ts";
-import { emptyTap } from "../../../canvas/emptyTap.ts";
+import { emptyTap, putAway } from "../../../canvas/emptyTap.ts";
 import { RoomScope } from "../../../state/scope.ts";
 import type { RoomUi } from "../../../state/store.ts";
 import type { RoomActions, RoomView } from "../../../state/types.ts";
@@ -140,6 +140,24 @@ describe("the height readout's tap", () => {
     assert.ok(popover());
   });
 
+  test("Select several's tap off puts floaters away and opens nothing, and keeps a popover its own pin opened", () => {
+    const popover = () => ctx.scope.get(pinSlot).store.getState().popover;
+    const pinHead = { x: 3.5, y: 3.5 - 14 / 40 };
+    ctx.scope.get(pinSlot).store.setState({ popover: { id: "pin", at: 0 } });
+    putAway(ctx, pinHead);
+    assert.ok(popover(), "the pin's own tap closed its popover");
+    tap(2.5, 5.5);
+    flush();
+    assert.ok(readout());
+    ctx.scope.get(pinSlot).store.setState({ popover: { id: "pin", at: 0 } });
+    putAway(ctx, { x: 6.5, y: 4 });
+    flush();
+    assert.equal(popover(), null);
+    assert.equal(readout(), null);
+    assert.equal(ctx.scope.get(doorPillSlot).getState().pill, null, "a box tap opens no door");
+    assert.equal(deselected, 1, "the helper lets go of nothing itself");
+  });
+
   test("a tap that closes the door pill shows no reading in its place", () => {
     ctx.scope.get(doorPillSlot).setState({ pill: { sceneId: "s1", ref: { edge: "6,4,n" } } });
     tap(2.5, 5.5);
@@ -161,7 +179,7 @@ describe("the height readout's tap", () => {
     assert.equal(readout(), null);
   });
 
-  test("a hold that pinged only deselects: no label, door or reading", (t) => {
+  test("a hold that pinged does nothing: it keeps the selection and opens no label, door or reading", (t) => {
     // A label is measured on a canvas, which Node lacks, so it falls back to its estimate.
     const g = globalThis as { document?: unknown };
     const had = "document" in g;
@@ -176,7 +194,7 @@ describe("the height readout's tap", () => {
     tap(10.6, 6.5, true);
     tap(2.5, 5.5, true);
     flush();
-    assert.equal(deselected, 3);
+    assert.equal(deselected, 0, "a ping neither lets go nor hides the bar");
     assert.equal(ctx.scope.get(doorPillSlot).getState().pill, null);
     assert.equal(ctx.scope.get(labelPaneSlot).getState().labelId, null);
     assert.equal(readout(), null);

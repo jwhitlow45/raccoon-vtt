@@ -81,10 +81,12 @@ export class CameraGesture {
   /**
    * The select tool's hold-to-ping fired for this pointer
    * (features/pings/hold.ts), so its press is a hold: on its lift the
-   * canvas deselects but opens no label, door or height readout, since a
-   * hold that pings should open nothing. "Held" means the ping fired, not
-   * that 500 ms passed: a busy phone can fire the ping's timer late, and a
-   * press lifted before it pinged nothing and stays a tap.
+   * canvas neither lets go of the selection, hides the token bar nor opens
+   * a label, door or height readout, since a hold that pings should do
+   * nothing but ping (docs/design-v1-bar-dock.md section 3). "Held" means
+   * the ping fired, not that 500 ms passed: a busy phone can fire the
+   * ping's timer late, and a press lifted before it pinged nothing and
+   * stays a tap.
    */
   hold(id: number): void {
     if (this.pointers.size === 1 && this.pointers.has(id) && this.tapCandidate) this.held = true;
@@ -93,14 +95,15 @@ export class CameraGesture {
   /**
    * A pointer lifted or was cancelled. `cam` is the camera now on screen, so
    * the pointers that remain continue from it without a jump. Returns whether
-   * the whole gesture was a tap on empty map, and whether that tap was held
-   * until it pinged.
+   * the whole gesture was a tap on empty map, and whether a still press of
+   * one finger was held until it pinged, wherever it went down: Select
+   * several's box tap reads it too (Stage.tsx).
    */
   up(id: number, cam: Camera): { tapOnEmpty: boolean; held: boolean } {
     if (!this.pointers.delete(id)) return { tapOnEmpty: false, held: false };
     if (this.pointers.size === 0) {
       const tapOnEmpty = this.tapCandidate && this.mode === "pan";
-      const held = tapOnEmpty && this.held;
+      const held = this.tapCandidate && this.held;
       this.mode = "idle";
       this.base = { kind: "none" };
       this.tapCandidate = false;

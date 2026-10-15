@@ -46,7 +46,8 @@ import { useShortcuts } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
 import type { Ended } from "../state/types.ts";
-import { useRoomUi, useRoomView } from "../state/view.ts";
+import { dismissal } from "../state/selection.ts";
+import { useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
 import { endedText } from "./endedText.ts";
 import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, focusAlert, foldsUnderSheet, type AlertsSummary } from "./fold.ts";
@@ -144,6 +145,7 @@ function RoomPage() {
   const scope = useRoomScope();
 
   const ui = useRoomUi();
+  const store = useRoomStore();
   const [topBarRef, topBarHeight] = useHeight(zoom);
   const [toolbarRef, toolbarHeight] = useHeight(zoom);
   const [optionsRef, optionsHeight] = useHeight(zoom);
@@ -224,10 +226,22 @@ function RoomPage() {
   // Android's Back closes the sheet before it leaves the room (lib/backClose.ts).
   const sheetOpen = sheet !== undefined || pickerOpen;
   useBackClose(sheetOpen, closeSheets);
-  // On a phone the token's action bar is the sheet a tap opened, so Back closes it too.
-  const closeActionBar = useCallback(() => ui.select(null), [ui]);
-  useBackClose(!wide && actionBar && selectedId !== null, closeActionBar);
-  useEscape(sheetOpen, closeSheets);
+  /*
+   * On a phone the token's action bar is the sheet a tap opened, so Back
+   * closes it too, and with Select several on and the group's bar hidden it
+   * ends the mode as Done does, so Back never leaves the room while a group
+   * is held. Escape does the same everywhere. Neither ends the mode while
+   * the token's panel shows the selection (state/selection.ts dismissal).
+   */
+  const tokenPanelShown = wide ? tabId === "token" : sheet?.id === "token";
+  const away = useRoomView((s) => dismissal(s.local, tokenPanelShown));
+  const putAway = useCallback(() => {
+    const what = dismissal(store.getState().local, tokenPanelShown);
+    if (what === "bar") ui.select(null);
+    else if (what === "group") ui.doneSelecting();
+  }, [store, ui, tokenPanelShown]);
+  useBackClose(!wide && away !== null, putAway);
+  useEscape(sheetOpen, closeSheets, tokenPanelShown);
   // Where the open sheet stands, read when Find my token is pressed, so the found token lands clear of it.
   const sheetRef = useRef<HTMLElement | null>(null);
   const [sheetEl, setSheetEl] = useState<HTMLElement | null>(null);

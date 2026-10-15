@@ -19,21 +19,34 @@ import { worldToScreen, type Point } from "../lib/camera.ts";
  * 3. A door's pill, which takes a tap that opens or closes it.
  * 4. The height readout, which yields to a pin under the tap.
  *
- * A press held until the hold-to-ping fired (`held`, lib/gestures.ts) only
- * deselects: a hold that pings should open nothing, a door's pill included.
- * A tap a label or a door takes still puts a readout away, as every tap on
- * the map does. Any tap but one on a pin puts a pin's popover away too, so
- * one thing floats at a time both ways: the pin layer answers a tap on a
- * pin itself (features/pins/PinLayer.tsx), and the readout yields to it.
+ * A press held until the hold-to-ping fired (`held`, lib/gestures.ts) does
+ * nothing at all: a hold that pings should neither let go of a token, hide
+ * its bar nor open anything, a door's pill included
+ * (docs/design-v1-bar-dock.md section 3). A tap a label or a door takes
+ * still puts a readout away, as every tap on the map does. Any tap but one
+ * on a pin puts a pin's popover away too (putAway).
  */
 export function emptyTap(ctx: ToolContext, tool: string, world: Point, held: boolean, deselect: () => void): void {
-  deselect();
   if (held) return;
-  const camera = ctx.camera();
-  if (!pinUnder(ctx.getState().view, ctx.scene.id, camera, worldToScreen(camera, world))) closePinPopover(ctx.scope);
+  deselect();
+  putAway(ctx, world, { readout: false });
   if (tapMapLabel(ctx, tool, world) || tapDoor(ctx, tool, world)) {
     closeReadout(ctx.scope.get(readoutSlot));
     return;
   }
   tapGround(ctx, tool, world);
+}
+
+/**
+ * Puts away what floats over the map after a tap that opens nothing, such
+ * as Select several's tap off (Stage.tsx), so one thing floats at a time.
+ * A pin's popover stays when a pin is under the tap: the pin layer answers
+ * that tap itself (features/pins/PinLayer.tsx), and closing here would
+ * close the popover the same tap opened. `readout` puts the height readout
+ * away too, which emptyTap leaves to the steps that follow.
+ */
+export function putAway(ctx: ToolContext, world: Point, options: { readout: boolean } = { readout: true }): void {
+  const camera = ctx.camera();
+  if (!pinUnder(ctx.getState().view, ctx.scene.id, camera, worldToScreen(camera, world))) closePinPopover(ctx.scope);
+  if (options.readout) closeReadout(ctx.scope.get(readoutSlot));
 }

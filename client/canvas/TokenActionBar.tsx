@@ -574,9 +574,9 @@ function BarFrame(props: {
 
   // Actions in the Select several bar shows the bar and focuses its frame, once it is drawn.
   useLayoutEffect(() => {
-    if (folded || !dockStore.getState().focusFrame) return;
+    if (!dockStore.getState().focusFrame) return;
     dockStore.setState({ focusFrame: false });
-    barRef.current?.focus({ preventScroll: true });
+    if (!folded) barRef.current?.focus({ preventScroll: true });
   }, [folded, dockStore]);
 
   // The box the bar draws, for the column, the notices and the camera. A drag publishes nothing new until it lands.

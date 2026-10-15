@@ -57,7 +57,7 @@ import { stageKeysSlot } from "../state/shortcuts.ts";
 import { sheetOpen as sheetIsOpen } from "../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
-import { emptyTap } from "./emptyTap.ts";
+import { emptyTap, putAway } from "./emptyTap.ts";
 import { canDragToken, movesOthers } from "./dragRights.ts";
 import { fitSlot } from "./fitSlot.ts";
 import { FogShape } from "./FogShape.tsx";
@@ -465,8 +465,13 @@ export function MapStage(props: {
     /** The rest of the selection, moving with this token (lib/group.ts). */
     followers: { token: ViewToken; node: Konva.Node }[];
   } | null>(null);
-  /** A box being dragged over the map to select the tokens under it, in screen pixels. */
-  const boxRef = useRef<{ pointerId: number; start: Point } | null>(null);
+  /**
+   * A box being dragged over the map to select the tokens under it, in
+   * screen pixels. With Select several on and no Shift, a box that never
+   * moves past the tap slop is a tap off instead (docs/design-v1-bar-dock.md
+   * section 3).
+   */
+  const boxRef = useRef<{ pointerId: number; start: Point; shift: boolean; moved: boolean } | null>(null);
   const boxElRef = useRef<HTMLDivElement>(null);
   /** Set when a gesture became multi-touch, so lifting fingers off a token does not select it. */
   const suppressSelectRef = useRef(false);
@@ -671,7 +676,7 @@ export function MapStage(props: {
         return;
       }
       if (boxing) {
-        boxRef.current = { pointerId: e.pointerId, start: p };
+        boxRef.current = { pointerId: e.pointerId, start: p, shift: e.shiftKey, moved: false };
       } else if (handlers) {
         toolPointerRef.current = e.pointerId;
         handlers.down?.(toolPointer(e, p, c, tokenId), toolContextRef.current);
@@ -708,6 +713,7 @@ export function MapStage(props: {
       }
       const box = boxRef.current;
       if (box && box.pointerId === e.pointerId) {
+        if (distance(box.start, p) > TAP_SLOP_PX) box.moved = true;
         drawBox(box.start, p);
         return;
       }
@@ -740,16 +746,23 @@ export function MapStage(props: {
         if (e.type === "pointercancel") toolRef.current.pointer?.cancel?.(toolContextRef.current);
         else toolRef.current.pointer?.up?.(toolPointer(e, p, c, tokenAt(p)), toolContextRef.current);
       }
+      // Read before the box, which needs to know whether its press was held until it pinged.
+      const { tapOnEmpty, held } = gesture.up(e.pointerId, c);
       const box = boxRef.current;
       if (box && box.pointerId === e.pointerId) {
         const p = local(e);
         endBox();
-        if (e.type !== "pointercancel" && distance(box.start, p) > TAP_SLOP_PX) {
+        // A cancelled press neither selects nor counts as a tap.
+        const lifted = e.type !== "pointercancel";
+        if (lifted && (box.moved || distance(box.start, p) > TAP_SLOP_PX)) {
           const picked = tokensInBox(tokensByIdRef.current.values(), screenToWorld(c, box.start), screenToWorld(c, p));
           if (picked.length > 0) uiRef.current.selectMany(picked.map((t) => t.id));
+        } else if (lifted && !held && !box.shift) {
+          // Select several's tap off hides the group's bar and keeps the group (state/selection.ts tapToken), and opens nothing, as before.
+          onSelectRef.current(null);
+          putAway(toolContextRef.current, screenToWorld(c, p));
         }
       }
-      const { tapOnEmpty, held } = gesture.up(e.pointerId, c);
       if (tapOnEmpty) emptyTap(toolContextRef.current, toolRef.current.id, screenToWorld(c, local(e)), held, () => onSelectRef.current(null));
     };
     const onWheel = (e: WheelEvent) => {

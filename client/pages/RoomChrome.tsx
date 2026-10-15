@@ -13,6 +13,7 @@ import { preloadLazies } from "../lib/retryableLazy.ts";
 import { theme } from "../lib/theme.ts";
 import { APP_TITLE, roomTitle } from "../lib/title.ts";
 import { useAccent } from "../state/accent.ts";
+import { dismissal } from "../state/selection.ts";
 import { useScoped } from "../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 
@@ -97,25 +98,32 @@ export function useNoPageZoom(): void {
   }, []);
 }
 
-/** Escape closes a phone's sheet, then the token action bar (lib/escape.ts). */
-export function useEscape(sheetOpen: boolean, closeSheets: () => void): void {
+/**
+ * Escape closes a phone's sheet, then the token action bar, then lets go
+ * of a Select several group whose bar is hidden (lib/escape.ts), unless the
+ * token's panel shows the selection (`tokenPanelShown`, state/selection.ts
+ * dismissal).
+ */
+export function useEscape(sheetOpen: boolean, closeSheets: () => void, tokenPanelShown: boolean): void {
   const ui = useRoomUi();
   const store = useRoomStore();
-  const latest = useRef({ sheetOpen, closeSheets });
-  latest.current = { sheetOpen, closeSheets };
+  const latest = useRef({ sheetOpen, closeSheets, tokenPanelShown });
+  latest.current = { sheetOpen, closeSheets, tokenPanelShown };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       const target = e.target instanceof HTMLElement ? e.target : null;
-      const local = store.getState().local;
+      const away = dismissal(store.getState().local, latest.current.tokenPanelShown);
       const what = escapeTarget({
         dialogOpen: document.querySelector('[aria-modal="true"]') !== null,
         editing: target !== null && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)),
         sheetOpen: latest.current.sheetOpen,
-        actionBar: local.actionBar && local.selectedId !== null,
+        actionBar: away === "bar",
+        group: away === "group",
       });
       if (what === "sheet") latest.current.closeSheets();
       else if (what === "actionBar") ui.select(null);
+      else if (what === "group") ui.doneSelecting();
       // Marked as used, so the label pane (features/builder/LabelPane.tsx), which listens after this, stays open.
       if (what) e.preventDefault();
     };

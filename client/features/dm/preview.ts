@@ -4,7 +4,7 @@ import type { RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { shareState } from "../../state/share.ts";
 import type { RoomUi } from "../../state/store.ts";
-import { addToSelection, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "../../state/selection.ts";
+import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "../../state/selection.ts";
 import { EMPTY_EPHEMERAL, INITIAL_LOCAL, type RoomActions, type RoomView } from "../../state/types.ts";
 
 /**
@@ -97,6 +97,7 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
     selectMany: (tokenIds) => store.setState({ local: addToSelection(store.getState().local, tokenIds) }),
     keepSelected: (present) => store.setState({ local: keepSelected(store.getState().local, present) }),
     setMultiSelect: (on) => store.setState({ local: setMultiSelect(store.getState().local, on) }),
+    doneSelecting: () => store.setState({ local: doneSelecting(store.getState().local) }),
     showActions: (open) => store.setState({ local: showActions(store.getState().local, open) }),
     openPanel: (id) => setLocal({ panel: id, tab: id, panelList: false }),
     closePanel: () => setLocal({ panel: null }),

@@ -18,7 +18,7 @@ import { applyEph, clearTokens, keepLocal, keepMembers, nextExpiry, sweepEph } f
 import { SCENE_LOAD_IDLE, sceneLoadFailureText, stepSceneLoad, type SceneLoad, type SceneLoadEvent } from "./sceneLoad.ts";
 import { shareRecord, shareState } from "./share.ts";
 import { backoffDelay, realClock, Timer, type Clock } from "./timing.ts";
-import { addToSelection, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
+import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
 import { EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, type Ended, type LocalUi, type OpAnswer, type OpRefusal, type PendingOp, type RoomView, type Toast, type You } from "./types.ts";
 
 export type { PendingOp } from "./types.ts";
@@ -93,6 +93,8 @@ export type RoomUi = {
   /** Drops tokens that are gone from the selection. */
   keepSelected(present: (tokenId: string) => boolean): void;
   setMultiSelect(on: boolean): void;
+  /** Ends "Select several" and lets go of the group, as its Done does (selection.ts doneSelecting). */
+  doneSelecting(): void;
   showActions(open: boolean): void;
   openPanel(id: string): void;
   closePanel(): void;
@@ -424,6 +426,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     },
     setMultiSelect(on) {
       setLocal(setMultiSelect(get().local, on));
+    },
+    doneSelecting() {
+      setLocal(doneSelecting(get().local));
     },
     showActions(open) {
       setLocal(showActions(get().local, open));
