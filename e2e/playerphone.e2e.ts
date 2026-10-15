@@ -1051,7 +1051,61 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     }
   });
 
-  test("18. nothing went wrong in the browsers", () => {
+  for (const tool of ["Select several", "Ruler"] as const) {
+    const label = `480 x 320 at 130% on Thorn's turn with ${tool}`;
+    const shot = tool === "Ruler" ? "ruler" : "several";
+    test(`18. on the player's own turn in a fight at 480 x 320 at 130%, with a roll put off with Later, End turn and the way back to the card are both whole in reach: ${tool}`, async () => {
+      await insets({ side: 47, bottom: 21 });
+      const id = randomUUID();
+      try {
+        await setUp({ width: 480, height: 320, scale: 1.3 });
+        if (tool === "Ruler") {
+          await player.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Ruler" }).tap();
+          await player.getByRole("toolbar", { name: "Ruler options" }).waitFor();
+        } else {
+          await touch([await cellPoint({ x: 8, y: 6 })]);
+          await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Select several", exact: true }).tap();
+          await touch([await emptyPoint(player)]);
+          await barFrame(player).waitFor({ state: "detached" });
+        }
+        // Thorn acts first, so once the fight starts End turn stands in the band.
+        await ops.send({
+          t: "encounter.start",
+          entries: [
+            { id: randomUUID(), tokenId: run.thorn.id, value: 18 },
+            { id: randomUUID(), tokenId: run.goblin.id, value: 15 },
+          ],
+        });
+        await ops.send({ t: "encounter.next" });
+        const endTurn = player.locator("header").getByRole("button", { name: "End turn", exact: true });
+        await endTurn.waitFor();
+        await player.waitForTimeout(300);
+        assert.equal(await bandShows(), true, `${label}: the turn band is missing`);
+        await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+        await player.waitForTimeout(400);
+        await cardInReach(label, `playerphone-own-turn-card-before-later-${shot}-480x320`);
+        await card(player).getByRole("button", { name: "Later" }).tap();
+        await card(player).waitFor({ state: "detached" });
+        await player.waitForTimeout(300);
+        const way = await wayBack(label, /^Wis save: waiting for your roll\./);
+        assert.ok(await wholeInReach(endTurn), `${label}: End turn is covered with the way back showing`);
+        const options = player.getByRole("toolbar", { name: `${tool === "Ruler" ? "Ruler" : "Select"} options` });
+        for (const name of tool === "Ruler" ? ["Keep this ruler on the map", "Clear"] : ["Actions", "Done"]) {
+          assert.ok(await wholeInReach(options.getByRole("button", { name, exact: true })), `${label}: ${name} is covered with the way back showing`);
+        }
+        await shots.take(player, `playerphone-own-turn-way-back-${shot}-480x320`);
+        await way.tap();
+        await player.waitForTimeout(400);
+        assert.ok(await card(player).isVisible(), `${label}: the tap left the card folded`);
+      } finally {
+        await ops.send({ t: "roll.close", rollIds: [id] });
+        await ops.send({ t: "encounter.end" });
+        await insets({});
+      }
+    });
+  }
+
+  test("19. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });

@@ -506,6 +506,39 @@ function FightAlerts() {
   const stacked = bar?.lane === "stacked" && colTop !== null ? columnRoom({ lane: "stacked", columnTop: colTop, bar: bar.box }) : null;
   const boxRef = useRef<HTMLDivElement | null>(null);
   const cardsRef = useRef<HTMLDivElement>(null);
+  /*
+   * Risen over the turn band, the row also keeps 8 px left of any control
+   * there, End turn above all, since a player who chose Later must still be
+   * able to end their turn. It narrows from the right, the side the column
+   * hangs on, and may cover the band's name or Next disks, never a button.
+   * At its narrowest it keeps a touch target's width, which every layout
+   * from 320 px at 150% leaves room for beside End turn. `rowInset` is how
+   * far it stops short of its usual right edge, in the column's own pixels.
+   */
+  const rowRef = useRef<HTMLButtonElement>(null);
+  const [rowInset, setRowInset] = useState(0);
+  const appliedInset = useRef(0);
+  appliedInset.current = rowInset;
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    const header = boxRef.current?.parentElement;
+    if (!row || !header || lift === 0) {
+      setRowInset(0);
+      return;
+    }
+    const r = row.getBoundingClientRect();
+    const right = r.right + appliedInset.current * zoom;
+    const gap = EDGE * zoom;
+    let limit = right;
+    for (const control of header.querySelectorAll("button")) {
+      if (boxRef.current?.contains(control)) continue;
+      const c = control.getBoundingClientRect();
+      if (c.top < r.bottom && c.bottom > r.top && c.left > r.left && c.left - gap < limit) limit = c.left - gap;
+    }
+    const next = Math.ceil(Math.max(0, Math.min(right - limit, right - r.left - theme.touch * zoom)) / zoom);
+    // A measure taken with the inset applied differs from the last only by rounding, so it keeps the inset and draws nothing again.
+    setRowInset((prev) => (Math.abs(prev - next) <= 1 ? prev : next));
+  });
   // Asked for, the cards stand over the tool's options until a tap lands outside them.
   useEffect(() => {
     if (!asked) return;
@@ -615,6 +648,7 @@ function FightAlerts() {
     >
       {summarized && summary ? (
         <SummaryButton
+          ref={rowRef}
           summary={summary}
           onClick={() => {
             ui.showActions(false);
@@ -626,7 +660,7 @@ function FightAlerts() {
             if (forRoom) setAsked(true);
             setShowAfter(rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: summary.first });
           }}
-          style={{ ...card, minHeight: SUMMARY_ROW, padding: `0 ${theme.space(3)}px` }}
+          style={{ ...card, minHeight: SUMMARY_ROW, padding: `0 ${theme.space(3)}px`, marginRight: rowInset }}
         />
       ) : null}
       <div ref={cardsRef} hidden={summarized} style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: theme.space(2) }}>
