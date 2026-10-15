@@ -908,7 +908,30 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     });
   }
 
-  test("15. nothing went wrong in the browsers", () => {
+  test("15. on a screen too short for a roll card, a chip's tap after Later opens the card at once", async () => {
+    await insets({ side: 47, bottom: 21 });
+    const id = randomUUID();
+    try {
+      await setUp({ width: 480, height: 320, scale: 1.3 });
+      await player.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Ruler" }).tap();
+      await player.getByRole("toolbar", { name: "Ruler options" }).waitFor();
+      await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+      await player.waitForTimeout(400);
+      await cardInReach("480 x 320 at 130%", "playerphone-card-before-later-480x320");
+      await card(player).getByRole("button", { name: "Later" }).tap();
+      await card(player).waitFor({ state: "detached" });
+      await player.getByRole("button", { name: /^Wis save: waiting for your roll\./ }).tap();
+      await player.waitForTimeout(400);
+      assert.ok(await card(player).isVisible(), "the chip's tap left the card folded behind the Roll asked row");
+      await cardInReach("480 x 320 at 130%, after a chip", "playerphone-card-from-chip-480x320");
+      await waitFor("focus on the card", async () => ((await focused(player)).name === "The DM asks for a roll" ? true : null));
+    } finally {
+      await ops.send({ t: "roll.close", rollIds: [id] });
+      await insets({});
+    }
+  });
+
+  test("16. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });

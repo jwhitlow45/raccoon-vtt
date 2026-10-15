@@ -221,6 +221,12 @@ export function PlayerRolls() {
     setSummoned(target?.id ?? null);
     setFocusAfter(target ? { card: target.id } : { chip: true });
   };
+  // A chip's tap asks for its card as the Roll asked row does: on a screen too short for the card it still shows, and it takes focus from the chip, which goes as it opens.
+  const openChip = (id: string) => {
+    setOpened(id);
+    setSummoned(id);
+    setFocusAfter({ card: id });
+  };
   useEffect(() => {
     if (!focusAfter) return;
     if ("card" in focusAfter) {
@@ -308,7 +314,7 @@ export function PlayerRolls() {
           }}
         >
           {chips.slice(0, stack.shown).map((r, i) => (
-            <RollChip key={r.id} buttonRef={i === 0 ? firstChip : undefined} request={r} onOpen={() => setOpened(r.id)} />
+            <RollChip key={r.id} buttonRef={i === 0 ? firstChip : undefined} request={r} onOpen={() => openChip(r.id)} />
           ))}
           {summaryButton}
         </div>
