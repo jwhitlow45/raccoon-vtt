@@ -57,6 +57,8 @@ export type Chrome = {
   top: number;
   /** The toolbar, the active tool's options and the bottom safe area. */
   bottom: number;
+  /** As `bottom`, but only up to the highest button or field in the tool's options, so a hint wrapped above them is left out. */
+  controls: number;
   /** The toolbar alone, with the bottom safe area. */
   toolbar: number;
   safe: Sides;
@@ -67,7 +69,7 @@ export type Chrome = {
 export const NO_SIDES: Sides = { top: 0, right: 0, bottom: 0, left: 0 };
 
 /** Until Room has measured: a 52 px top bar and a 60 px toolbar, no safe areas. */
-export const DEFAULT_CHROME: Chrome = { top: 52, bottom: 60, toolbar: 60, safe: NO_SIDES, sheet: 0 };
+export const DEFAULT_CHROME: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NO_SIDES, sheet: 0 };
 
 /**
  * The part of the map a docked bar lives in: the map less the bars over
@@ -555,11 +557,13 @@ type BarDockState = {
   foot: number;
   /** That card is folded because the bar opened compact, too short a screen for both, and the column's summary row stands for it. */
   footYields: boolean;
+  /** The room between the top bars and the tool's options is under one whole alert card, and the column's summary row stands for its cards. */
+  columnCramped: boolean;
 };
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
-  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, spot: readSpot(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false })),
+  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, spot: readSpot(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false })),
 );
 
 function clamp(n: number, lo: number, hi: number): number {

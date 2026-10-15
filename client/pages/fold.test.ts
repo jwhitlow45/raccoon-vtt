@@ -95,6 +95,15 @@ describe("alertsSummary", () => {
     assert.match(alertsSummary(null, [timeUp])?.name ?? "", /Close the sheet to see it\.$/);
   });
 
+  test("for the column's summary row on a screen whose tool options leave it under one card, each advice says to tap it", () => {
+    const answer = alertsSummary({ text: "Roll asked", name: "the DM asks for a Wisdom check", waiting: true, requests: 1 }, [], "room");
+    assert.equal(answer?.name, "Roll asked: the DM asks for a Wisdom check. Tap to answer.");
+    const them = alertsSummary(null, [prompt("p1", "Thorn"), timeUp], "room");
+    assert.equal(them?.name, "Concentration check +1: Thorn checks concentration, time is up. Tap to see them.");
+    const it = alertsSummary(null, [notice("n1", "Bless ended on Thorn.")], "room");
+    assert.equal(it?.name, "Bless ended on Thorn: Bless ended on Thorn. Tap to see it.");
+  });
+
   test("the newest notice leads when nothing else waits", () => {
     const s = alertsSummary(null, [notice("n1", "Bless ended on Thorn."), notice("n2", "Hex ended on Goblin.")]);
     assert.equal(s?.text, "Hex ended on Goblin");

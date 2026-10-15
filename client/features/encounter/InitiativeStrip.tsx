@@ -38,6 +38,7 @@ import {
 } from "./logic.ts";
 import { EndTurnPill, Portrait, TimerClock, TURN_PILL_PX } from "./parts.tsx";
 import { RollAlerts } from "../rolls/RollAlerts.tsx";
+import { CARD_MIN_WIDTH } from "../rolls/logic.ts";
 
 /** How long "Your turn" flares when a player's turn arrives. */
 const TURN_NOTICE_MS = 4_000;
@@ -428,6 +429,14 @@ type Notice = { id: string; text: string };
  * summary as the dock in one 44 px row, with its cards hidden as under a
  * sheet, and a tap on the row hides the bar and shows them. It starts
  * below the notices that last when they span the map over it (Room.tsx).
+ *
+ * It stops at the active tool's options, so it never covers Select
+ * several's Actions. Where that leaves it under one whole card, as with
+ * the Ruler at 480 x 320 at 130%, the row stands for its cards too
+ * (`forRoom`), uncapped, since a card cut to a strip takes no tap. Its tap
+ * opens what it stands for: a waiting roll's card at a phone's foot, or
+ * else the cards, down to the toolbar over the tool's options, until a
+ * tap lands outside them or what waits changes (`asked`).
  */
 function FightAlerts() {
   const { width, height } = useViewport();
@@ -465,17 +474,47 @@ function FightAlerts() {
   const lasting = useStore(dock, (s) => s.notices);
   const bar = useStore(dock, (s) => s.bar);
   const footYields = useStore(dock, (s) => s.footYields);
-  const summary = useDockSummary("bar");
+  const barSummary = useDockSummary("bar");
+  const roomSummary = useDockSummary("room");
   const rolls = useAlertsSummaryEntry();
   const laneTop = chrome ? chrome.top + EDGE : null;
   const colTop = laneTop === null ? null : columnTop(laneTop, lasting);
   const push = laneTop !== null && colTop !== null ? colTop - laneTop : 0;
   // A roll card folded at the screen's foot, for a compact bar or a screen too short for it, needs the row to stand for it, room or not (PlayerRolls.tsx).
-  const forFootCard = !folded && footYields && summary !== null;
-  const summarized = forFootCard || (!folded && bar?.lane === "summary" && summary !== null);
+  const forFootCard = !folded && footYields && barSummary !== null;
+  // The first card's height as last drawn, which the row standing in for the cards keeps: measured afresh whenever what waits changes.
+  const [firstHeight, setFirstHeight] = useState(0);
+  const [asked, setAsked] = useState(false);
+  const toOptions = chrome ? height - chrome.top - chrome.bottom - push : Infinity;
+  const cramped = !folded && roomSummary !== null && firstHeight > 0 && toOptions < EDGE + firstHeight;
+  const forRoom = cramped && !asked && !forFootCard;
+  const summary = forRoom ? roomSummary : barSummary;
+  const summarized = forFootCard || forRoom || (!folded && bar?.lane === "summary" && summary !== null);
+  // Standing for the cards, the row keeps above the tool's option buttons. Where the room under the top bars is too short for it, as in a fight at 480 x 320 at 130%, it rises over the turn band, never over the top bar's row.
+  const rowRoom = chrome ? height - chrome.top - chrome.controls - push : Infinity;
+  const lift = summarized ? Math.min(Math.max(0, EDGE + SUMMARY_ROW + theme.space(1) - rowRoom), push + EDGE + top - theme.layout.topBar) : 0;
+  useLayoutEffect(() => {
+    if (dock.getState().columnCramped !== forRoom) dock.setState({ columnCramped: forRoom });
+  }, [dock, forRoom]);
+  useLayoutEffect(() => () => dock.setState({ columnCramped: false }), [dock]);
+  // What waits changed: the row's tap asks again, and the cards are measured again, which a hidden card cannot be.
+  const waits = roomSummary?.name ?? null;
+  useLayoutEffect(() => {
+    setAsked(false);
+    setFirstHeight(0);
+  }, [waits]);
   const stacked = bar?.lane === "stacked" && colTop !== null ? columnRoom({ lane: "stacked", columnTop: colTop, bar: bar.box }) : null;
   const boxRef = useRef<HTMLDivElement | null>(null);
   const cardsRef = useRef<HTMLDivElement>(null);
+  // Asked for, the cards stand over the tool's options until a tap lands outside them.
+  useEffect(() => {
+    if (!asked) return;
+    const off = (e: PointerEvent) => {
+      if (!boxRef.current?.contains(e.target as Node)) setAsked(false);
+    };
+    document.addEventListener("pointerdown", off, true);
+    return () => document.removeEventListener("pointerdown", off, true);
+  }, [asked]);
   const [clipped, setClipped] = useState(false);
   const columnRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -490,13 +529,14 @@ function FightAlerts() {
     const cards = cardsRef.current;
     if (!cards || colTop === null) return;
     const measure = () => {
-      // The row standing in for a folded foot card is the column's first card then, so the bar keeps below it.
-      if (forFootCard && dock.getState().bar?.lane !== "summary") {
+      // The row standing in for a folded foot card, or for cards with no room, is the column's first card then, so the bar keeps below it.
+      if ((forFootCard || forRoom) && dock.getState().bar?.lane !== "summary") {
         const prev = dock.getState().column;
         if (prev?.top !== colTop || prev.first !== SUMMARY_ROW || prev.content !== SUMMARY_ROW) dock.setState({ column: { top: colTop, content: SUMMARY_ROW, first: SUMMARY_ROW } });
         return;
       }
       const measured = drawn(cards) ? { content: cards.getBoundingClientRect().height / zoom, first: firstCardHeight(cards) / zoom } : null;
+      if (measured) setFirstHeight(measured.first);
       const prev = dock.getState().column;
       const next = columnFacts(prev, { top: colTop, measured });
       if (next !== prev) dock.setState({ column: next });
@@ -505,7 +545,7 @@ function FightAlerts() {
     const observer = new ResizeObserver(measure);
     observer.observe(cards);
     return () => observer.disconnect();
-  }, [dock, colTop, zoom, alerts, summarized, folded, forFootCard]);
+  }, [dock, colTop, zoom, alerts, summarized, folded, forFootCard, forRoom]);
   useLayoutEffect(() => () => dock.setState({ column: null }), [dock]);
 
   const clip = () => {
@@ -549,7 +589,7 @@ function FightAlerts() {
       onScroll={clip}
       style={{
         position: "absolute",
-        top: `calc(100% + ${push}px)`,
+        top: `calc(100% + ${push - lift}px)`,
         right: sheetWidth,
         width: `calc(${cardWidth} + ${leftPad} + ${rightPad})`,
         // Before Room has measured its bars: the screen's height in the zoomed bar's own pixels (features/device/layout.ts), less the bars.
@@ -559,7 +599,7 @@ function FightAlerts() {
           : stacked !== null
             ? stacked + EDGE
             : chrome
-              ? Math.max(0, height - chrome.top - chrome.bottom - push)
+              ? Math.max(0, height - chrome.top - (asked ? chrome.toolbar : chrome.bottom) - push)
               : `calc(${screenHeight(100)} - ${theme.safe.top} - ${theme.safe.bottom} - ${top + theme.layout.toolbar + push}px)`,
         // Stacked over the bar, the foot keeps no shadow room: it would count as more to scroll to, and the bar sits 8 px below anyway.
         padding: `${EDGE}px ${rightPad} ${stacked !== null ? 0 : SHADOW_ROOM}px ${leftPad}`,
@@ -578,9 +618,13 @@ function FightAlerts() {
           summary={summary}
           onClick={() => {
             ui.showActions(false);
-            // A card folded at the foot opens at once, since it may stay folded for want of room until asked for.
-            if (forFootCard) rolls?.open({ barAway: true });
-            else setShowAfter(rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: summary.first });
+            // A card at a phone's foot opens at once, since it may stay folded for want of room until asked for, and the column has no room to show it.
+            if (forFootCard || (forRoom && rolls?.waiting && width < CARD_MIN_WIDTH)) {
+              rolls?.open({ barAway: true });
+              return;
+            }
+            if (forRoom) setAsked(true);
+            setShowAfter(rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: summary.first });
           }}
           style={{ ...card, minHeight: SUMMARY_ROW, padding: `0 ${theme.space(3)}px` }}
         />

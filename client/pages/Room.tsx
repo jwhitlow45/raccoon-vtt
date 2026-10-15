@@ -89,6 +89,39 @@ function useHeight(scale: number): [(el: HTMLElement | null) => (() => void) | u
 }
 
 /**
+ * The active tool's options bar's height, as useHeight measures it, and how
+ * far up from its foot its highest button or field reaches. A hint wraps
+ * above the Ruler's buttons, and what the alerts column lays over the
+ * bar's top may cover a hint but never a control (barDock.ts Chrome).
+ */
+function useOptionsHeights(scale: number): [(el: HTMLElement | null) => (() => void) | undefined, number, number] {
+  const [heights, setHeights] = useState({ height: 0, controls: 0 });
+  const ref = useCallback(
+    (el: HTMLElement | null) => {
+      if (!el) return undefined;
+      const measure = () => {
+        const box = el.getBoundingClientRect();
+        const tops = Array.from(el.querySelectorAll("button, input, select"), (c) => c.getBoundingClientRect().top);
+        const height = barInset(box);
+        // The bar scrolls past half the screen, so a control scrolled out above it reaches no higher than its top.
+        const controls = tops.length > 0 ? Math.round(Math.min(box.height, box.bottom - Math.min(...tops))) : 0;
+        setHeights((h) => (h.height === height && h.controls === controls ? h : { height, controls }));
+      };
+      const observer = new ResizeObserver(measure);
+      observer.observe(el);
+      measure();
+      return () => {
+        observer.disconnect();
+        setHeights({ height: 0, controls: 0 });
+      };
+    },
+    // The scale is read through the element's rectangle, but a change must measure again.
+    [scale],
+  );
+  return [ref, heights.height, heights.controls];
+}
+
+/**
  * The Room page shell (design section 14.4).
  *
  * - Phone portrait: full-screen map, a top bar (room name, connection dot,
@@ -150,7 +183,7 @@ function RoomPage() {
   const store = useRoomStore();
   const [topBarRef, topBarHeight] = useHeight(zoom);
   const [toolbarRef, toolbarHeight] = useHeight(zoom);
-  const [optionsRef, optionsHeight] = useHeight(zoom);
+  const [optionsRef, optionsHeight, optionsControls] = useOptionsHeights(zoom);
   const insets = useMemo<Insets>(
     () => ({ top: topBarHeight, right: 0, bottom: toolbarHeight + optionsHeight, left: 0 }),
     [topBarHeight, toolbarHeight, optionsHeight],
@@ -312,12 +345,13 @@ function RoomPage() {
         ? {
             top: topBarHeight / zoom,
             bottom: (toolbarHeight + optionsHeight) / zoom,
+            controls: (toolbarHeight + optionsControls) / zoom,
             toolbar: toolbarHeight / zoom,
             safe: { top: safe.top, right: safe.right, bottom: safe.bottom, left: safe.left },
             sheet: sheetRight,
           }
         : null,
-    [topBarHeight, toolbarHeight, optionsHeight, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight],
+    [topBarHeight, toolbarHeight, optionsHeight, optionsControls, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight],
   );
   useLayoutEffect(() => {
     barDock.setState({ chrome });
@@ -378,7 +412,7 @@ function RoomPage() {
     return () => observer.disconnect();
     // The observer hears the stack's size only, so what moves it measures again: the turn band coming or going, the notch, the preview's notice.
   }, [barDock, besideLane, previewBottom, zoom, role, topInset, safe.top, laneTop]);
-  const columnSummary = useStore(barDock, (s) => s.bar?.lane === "summary" || s.footYields) && summary !== null;
+  const columnSummary = useStore(barDock, (s) => s.bar?.lane === "summary" || s.footYields || s.columnCramped) && summary !== null;
   const mapFocus = scope.get(mapFocusSlot);
   const mapFocusRef = useCallback(
     (el: HTMLDivElement | null) => {

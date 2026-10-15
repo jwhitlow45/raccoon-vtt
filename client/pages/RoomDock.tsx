@@ -27,10 +27,11 @@ export type DockActions = {
 
 /**
  * The dock's summary of the folded alerts: the column's, and the rolls'
- * line that features/rolls publishes. The column's own summary row beside
- * the docked token bar reads the same, with the bar's advice (`hides`).
+ * line that features/rolls publishes. The column's own summary row reads
+ * the same, with the advice for what leaves it no room (`hides`): the
+ * docked token bar, or a short screen's tool options.
  */
-export function useDockSummary(hides: "sheet" | "bar" = "sheet"): AlertsSummary | null {
+export function useDockSummary(hides: "sheet" | "bar" | "room" = "sheet"): AlertsSummary | null {
   const alerts = useStore(useScoped(dockSlot), (s) => s.alerts);
   const rolls = useAlertsSummaryEntry();
   const text = rolls?.text ?? null;

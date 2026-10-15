@@ -271,6 +271,19 @@ async function cardInReach(label: string, shot: string): Promise<void> {
   await shots.take(player, shot);
 }
 
+/**
+ * The way back to a roll card put off with Later: its chip, or the alerts
+ * column's "Roll asked" row that stands for the chip where the column has
+ * no room for it. It must show whole and take a tap as things stand:
+ * `.tap()` scrolls the column first, which once hid a chip cut to a strip.
+ */
+async function wayBack(label: string, chip: RegExp): Promise<Locator> {
+  const row = player.getByRole("button", { name: /^Roll asked/ });
+  const way = (await row.isVisible()) ? row : player.getByRole("button", { name: chip });
+  assert.ok(await wholeInReach(way), `${label}: the way back to the card is cut off or takes no tap`);
+  return way;
+}
+
 /** Each button in the bar, scrolled into view, takes a tap at its middle: the names of those that do not. */
 async function unreachable(): Promise<string[]> {
   const buttons = barFrame(player).locator("button");
@@ -908,28 +921,49 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     });
   }
 
-  test("15. on a screen too short for a roll card, a chip's tap after Later opens the card at once", async () => {
-    await insets({ side: 47, bottom: 21 });
-    const id = randomUUID();
-    try {
-      await setUp({ width: 480, height: 320, scale: 1.3 });
-      await player.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Ruler" }).tap();
-      await player.getByRole("toolbar", { name: "Ruler options" }).waitFor();
-      await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
-      await player.waitForTimeout(400);
-      await cardInReach("480 x 320 at 130%", "playerphone-card-before-later-480x320");
-      await card(player).getByRole("button", { name: "Later" }).tap();
-      await card(player).waitFor({ state: "detached" });
-      await player.getByRole("button", { name: /^Wis save: waiting for your roll\./ }).tap();
-      await player.waitForTimeout(400);
-      assert.ok(await card(player).isVisible(), "the chip's tap left the card folded behind the Roll asked row");
-      await cardInReach("480 x 320 at 130%, after a chip", "playerphone-card-from-chip-480x320");
-      await waitFor("focus on the card", async () => ((await focused(player)).name === "The DM asks for a roll" ? true : null));
-    } finally {
-      await ops.send({ t: "roll.close", rollIds: [id] });
-      await insets({});
-    }
-  });
+  for (const view of [
+    { width: 480, height: 320, insets: { side: 47, bottom: 21 }, fight: false },
+    { width: 480, height: 320, insets: { side: 47, bottom: 21 }, fight: true },
+    { width: 320, height: 480, insets: { top: 44, bottom: 34 }, fight: true },
+  ]) {
+    const label = `${view.width} x ${view.height} at 130%${view.fight ? " in a fight" : ""}`;
+    const shot = `${view.width}x${view.height}${view.fight ? "-fight" : ""}`;
+    test(`15. with the Ruler on a screen too short for a roll card, after Later the chip, or the row that stands for it, shows whole and takes a tap, which opens the card at once: ${label}`, async () => {
+      if (view.fight) {
+        await ops.send({
+          t: "encounter.start",
+          entries: [
+            { id: randomUUID(), tokenId: run.goblin.id, value: 18 },
+            { id: randomUUID(), tokenId: run.thorn.id, value: 15 },
+          ],
+        });
+      }
+      await insets(view.insets);
+      const id = randomUUID();
+      try {
+        await setUp({ width: view.width, height: view.height, scale: 1.3 });
+        await player.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Ruler" }).tap();
+        await player.getByRole("toolbar", { name: "Ruler options" }).waitFor();
+        await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+        await player.waitForTimeout(400);
+        await cardInReach(label, `playerphone-card-before-later-${shot}`);
+        await card(player).getByRole("button", { name: "Later" }).tap();
+        await card(player).waitFor({ state: "detached" });
+        await player.waitForTimeout(300);
+        const way = await wayBack(label, /^Wis save: waiting for your roll\./);
+        await shots.take(player, `playerphone-way-back-${shot}`);
+        await way.tap();
+        await player.waitForTimeout(400);
+        assert.ok(await card(player).isVisible(), `${label}: the tap left the card folded`);
+        await cardInReach(`${label}, after Later`, `playerphone-card-back-${shot}`);
+        await waitFor(`focus on the card, ${label}`, async () => ((await focused(player)).name === "The DM asks for a roll" ? true : null));
+      } finally {
+        await ops.send({ t: "roll.close", rollIds: [id] });
+        if (view.fight) await ops.send({ t: "encounter.end" });
+        await insets({});
+      }
+    });
+  }
 
   for (const scale of [1, 1.3]) {
     const label = `480 x 320 at ${Math.round(scale * 100)}%`;
@@ -970,7 +1004,54 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     });
   }
 
-  test("17. nothing went wrong in the browsers", () => {
+  test("17. in a fight at 480 x 320 at 130% with Select several, after Later the chip, or the row that stands for it, shows whole and takes a tap without covering Actions, and opens the card", async () => {
+    const label = "480 x 320 at 130% in a fight with Select several";
+    await insets({ side: 47, bottom: 21 });
+    const id = randomUUID();
+    try {
+      await setUp({ width: 480, height: 320, scale: 1.3 });
+      await touch([await cellPoint({ x: 8, y: 6 })]);
+      await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Select several", exact: true }).tap();
+      // The tap off hides the bar and keeps the group, before the turn band takes the map's last room.
+      await touch([await emptyPoint(player)]);
+      await barFrame(player).waitFor({ state: "detached" });
+      await ops.send({
+        t: "encounter.start",
+        entries: [
+          { id: randomUUID(), tokenId: run.goblin.id, value: 18 },
+          { id: randomUUID(), tokenId: run.thorn.id, value: 15 },
+        ],
+      });
+      await player.waitForTimeout(300);
+      assert.equal(await bandShows(), true, `${label}: the turn band is missing`);
+      await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+      await player.waitForTimeout(400);
+      await cardInReach(label, "playerphone-several-fight-card-before-later-480x320");
+      await card(player).getByRole("button", { name: "Later" }).tap();
+      await card(player).waitFor({ state: "detached" });
+      await player.waitForTimeout(300);
+      const options = player.getByRole("toolbar", { name: "Select options" });
+      const actions = options.getByRole("button", { name: "Actions", exact: true });
+      assert.ok(await wholeInReach(actions), `${label}: something covers Actions after Later`);
+      const way = await wayBack(label, /^Wis save: waiting for your roll\./);
+      await shots.take(player, "playerphone-several-fight-way-back-480x320");
+      await way.tap();
+      await player.waitForTimeout(400);
+      assert.ok(await card(player).isVisible(), `${label}: the tap left the card folded`);
+      await cardInReach(`${label}, after Later`, "playerphone-several-fight-card-back-480x320");
+      await waitFor(`focus on the card, ${label}`, async () => ((await focused(player)).name === "The DM asks for a roll" ? true : null));
+      assert.equal(await options.getByText("1 selected.", { exact: true }).count(), 1, `${label}: Select several let go of the group`);
+      await card(player).getByRole("button", { name: "Later" }).tap();
+      await card(player).waitFor({ state: "detached" });
+      assert.ok(await wholeInReach(actions), `${label}: something covers Actions after the second Later`);
+    } finally {
+      await ops.send({ t: "roll.close", rollIds: [id] });
+      await ops.send({ t: "encounter.end" });
+      await insets({});
+    }
+  });
+
+  test("18. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });

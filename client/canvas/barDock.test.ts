@@ -46,6 +46,7 @@ function phone(input: { band: boolean; options: boolean; safe: { top: number; si
   return {
     top: 52 + input.safe.top + (input.band ? 48 : 0),
     bottom: toolbar + (input.options ? OPTIONS : 0),
+    controls: toolbar + (input.options ? OPTIONS : 0),
     toolbar,
     safe: { top: input.safe.top, right: input.safe.side, bottom: input.safe.bottom, left: input.safe.side },
     sheet: 0,
@@ -82,7 +83,7 @@ describe("span, dock or compact", () => {
 
 describe("the free area", () => {
   test("is the map less the bars, the safe areas and an 8 px margin", () => {
-    const free = freeArea({ width: 920, height: 800 }, { top: 52, bottom: 60, toolbar: 60, safe: NONE, sheet: 0 });
+    const free = freeArea({ width: 920, height: 800 }, { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0 });
     assert.deepEqual(free, { left: 8, top: 60, width: 904, height: 672 });
   });
 
@@ -94,7 +95,7 @@ describe("the free area", () => {
   });
 
   test("a roll card standing on a narrow screen's toolbar and options bar takes the bottom above them", () => {
-    const chrome: Chrome = { top: 52, bottom: 60 + 52, toolbar: 60, safe: NONE, sheet: 0 };
+    const chrome: Chrome = { top: 52, bottom: 60 + 52, controls: 60 + 52, toolbar: 60, safe: NONE, sheet: 0 };
     const viewport = { width: 390, height: 844 };
     assert.equal(freeArea(viewport, chrome, 250).height, 844 - 112 - 250 - 8 - 60);
     assert.equal(freeArea(viewport, chrome, 30).height, freeArea(viewport, chrome).height - 30);
@@ -315,7 +316,7 @@ describe("the right lane", () => {
 
   test("an upright span keeps below the column's first card and never covers its token, above it or below it", () => {
     // The DM at 390 x 844 with one 122 px check: the bar may reach up to 190, and the token sits low on the screen.
-    const chrome: Chrome = { top: 52, bottom: 60, toolbar: 60, safe: NONE, sheet: 0 };
+    const chrome: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0 };
     const phoneView = { width: 390, height: 844 };
     const column = { top: 60, content: 122, first: 122 };
     for (const y of [300, 440, 480, 520, 560, 700]) {
@@ -436,7 +437,7 @@ describe("fit and find keep clear of the bar", () => {
   });
 
   test("a bar about to open rests at its spot with the height it last had, and a spanning one has no place yet", () => {
-    const chrome: Chrome = { top: 52, bottom: 60, toolbar: 60, safe: NONE, sheet: 0 };
+    const chrome: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0 };
     const rest = restingBar({ layout: { width: 1280, height: 800 }, viewport, chrome, spot: DEFAULT_SPOT, height: 250, column: null });
     assert.deepEqual(rest, { box: { left: 920 - 8 - 304, top: 800 - 60 - 8 - 250, width: 304, height: 250 }, laneLeft: lane });
     assert.equal(restingBar({ layout: { width: 390, height: 844 }, viewport: { width: 390, height: 844 }, chrome, spot: DEFAULT_SPOT, height: 250, column: null }), null);
@@ -444,7 +445,7 @@ describe("fit and find keep clear of the bar", () => {
 
   test("a bar about to open shares the lane with the column as the drawn bar will, so a pan never lands a token under it", () => {
     // 1180 x 390: an 820 px map, and a 150 px first card leaves the bar too little under it, so it moves beside the lane.
-    const chrome: Chrome = { top: 52, bottom: 60, toolbar: 60, safe: NONE, sheet: 0 };
+    const chrome: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0 };
     const map = { width: 820, height: 390 };
     const column = { top: 60, content: 150, first: 150 };
     const input = { layout: { width: 1180, height: 390 }, viewport: map, chrome, spot: DEFAULT_SPOT, height: 300, foot: 0, column };
