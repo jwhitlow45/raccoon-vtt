@@ -1,4 +1,4 @@
-import { createStore } from "zustand/vanilla";
+import { createStore, type StoreApi } from "zustand/vanilla";
 import { scopeSlot, type RoomScope } from "../../state/scope.ts";
 
 export type PinToolState = {
@@ -35,4 +35,16 @@ export const pinSlot = scopeSlot(() => ({
 export function closePinPopover(scope: RoomScope): void {
   const store = scope.get(pinSlot).store;
   if (store.getState().popover) store.setState({ popover: null });
+}
+
+/**
+ * A tap that selects a token puts a pin's popover away too: the token is on
+ * the map, and its bar now floats there. A token takes its tap itself, so
+ * no tap on empty map (canvas/emptyTap.ts) hears it, and this watches the
+ * selection instead. Returns the way to stop.
+ */
+export function closePopoverOnSelect(room: Pick<StoreApi<{ local: { selectedIds: readonly string[] } }>, "subscribe">, scope: RoomScope): () => void {
+  return room.subscribe((s, prev) => {
+    if (s.local.selectedIds !== prev.local.selectedIds && s.local.selectedIds.length > 0) closePinPopover(scope);
+  });
 }

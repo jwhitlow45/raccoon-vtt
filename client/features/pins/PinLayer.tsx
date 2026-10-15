@@ -11,7 +11,7 @@ import type { LayerProps } from "../layers.ts";
 import { Pill } from "../measure/Pill.tsx";
 import { onHoldPing } from "../pings/hold.ts";
 import { dmOnlyPin, HEAD_CENTER_PX, LABEL_MIN_CELL_PX, pinOutline, pinTapCounts, pinUnder } from "./rules.ts";
-import { pinSlot } from "./store.ts";
+import { closePopoverOnSelect, pinSlot } from "./store.ts";
 
 const OUTLINE = pinOutline();
 /** How long a label-only pin's popover stays after a tap. */
@@ -48,6 +48,9 @@ export const PinLayer = memo(function PinLayer(props: LayerProps) {
   const onScene = useMemo(() => Object.values(pins).filter((p) => p.sceneId === props.scene.id), [pins, props.scene.id]);
 
   useTapPin(groupRef, tool === "select" && !display, props.scene.id);
+  const room = useRoomStore();
+  const scope = useRoomScope();
+  useEffect(() => closePopoverOnSelect(room, scope), [room, scope]);
 
   useEffect(() => {
     if (!popover) return;
