@@ -114,9 +114,11 @@ export type AlertsSummaryEntry = {
   requests: number;
   /**
    * Shows what waits: the card of the request to answer, focused (3.3.1).
-   * The dock closes the sheets first, then calls it.
+   * The dock closes the sheets first, then calls it, and the token bar
+   * comes back as it was. The alerts column's summary row asks with
+   * `barAway`, which puts the token bar away first, as a chip's tap does.
    */
-  open(): void;
+  open(options?: { barAway?: boolean }): void;
 };
 
 function changed(registry: SheetFocusRegistry): void {
@@ -165,7 +167,7 @@ export function useAlertsSummary(entry: AlertsSummaryEntry | null): void {
   const requests = entry?.requests ?? 0;
   useLayoutEffect(() => {
     if (text === null || name === null) return;
-    return publishAlertsSummary(registry, { text, name, waiting, requests, open: () => open.current?.() });
+    return publishAlertsSummary(registry, { text, name, waiting, requests, open: (options) => open.current?.(options) });
   }, [registry, text, name, waiting, requests]);
 }
 

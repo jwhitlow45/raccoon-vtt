@@ -206,6 +206,21 @@ export function PlayerRolls() {
   }, [keepShown]);
 
   /*
+   * The one way a card is asked for, by a summary or a chip. Asked from
+   * the alerts column, by its summary row or a chip, the token bar steps
+   * aside first, keeping its token or group (`barAway`), since a compact
+   * bar keeps a card at a phone's foot folded (`yieldsToBar`) and a card
+   * asked for must show at once. The dock's summary leaves the bar as it
+   * was: closing the sheet brings it back. Asked for, the card shows even
+   * where it is too tall to stand on the tool's options (`onToolbar`).
+   */
+  const summon = (id: string, barAway: boolean) => {
+    if (barAway) ui.showActions(false);
+    setSummoned(id);
+    setFocusAfter({ card: id });
+  };
+
+  /*
    * Activating the summary, here or in the dock (3.2.1), is a request to
    * answer: the sheets close and the card to answer takes focus. A card
    * already mounted under the sheet wins, so an unsent total is never
@@ -213,19 +228,21 @@ export function PlayerRolls() {
    * from Later, as a chip's tap brings it (requestToOpen). Focus moves
    * once the card has unfolded, in the effect after.
    */
-  const open = () => {
+  const open = (options?: { barAway?: boolean }) => {
     const target = requestToOpen(requests, needs, folded, opened);
     ui.closeSheets();
-    if (target && !target.mounted) setOpened(target.id);
-    // Asked for, the card shows even where it is too tall to stand on the tool's options (`onToolbar`).
-    setSummoned(target?.id ?? null);
-    setFocusAfter(target ? { card: target.id } : { chip: true });
+    if (!target) {
+      setSummoned(null);
+      setFocusAfter({ chip: true });
+      return;
+    }
+    if (!target.mounted) setOpened(target.id);
+    summon(target.id, options?.barAway === true);
   };
-  // A chip's tap asks for its card as the Roll asked row does: on a screen too short for the card it still shows, and it takes focus from the chip, which goes as it opens.
+  // A chip's tap asks for its card as the Roll asked row does, and takes focus from the chip, which goes as it opens.
   const openChip = (id: string) => {
     setOpened(id);
-    setSummoned(id);
-    setFocusAfter({ card: id });
+    summon(id, true);
   };
   useEffect(() => {
     if (!focusAfter) return;

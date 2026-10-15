@@ -931,7 +931,46 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     }
   });
 
-  test("16. nothing went wrong in the browsers", () => {
+  for (const scale of [1, 1.3]) {
+    const label = `480 x 320 at ${Math.round(scale * 100)}%`;
+    // No insets: with a landscape phone's, the narrower column folds the chip into its summary row, which already puts the bar away.
+    test(`16. with Select several's bar open over a roll chip, the chip's tap puts the bar away, keeping the group, and opens the card in reach with focus: ${label}`, async () => {
+      const id = randomUUID();
+      try {
+        await setUp({ width: 480, height: 320, scale });
+        await touch([await cellPoint({ x: 8, y: 6 })]);
+        await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Select several", exact: true }).tap();
+        await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+        await player.waitForTimeout(400);
+        await cardInReach(label, `playerphone-several-card-before-later-480x320-${Math.round(scale * 100)}`);
+        await card(player).getByRole("button", { name: "Later" }).tap();
+        await card(player).waitFor({ state: "detached" });
+        const options = player.getByRole("toolbar", { name: "Select options" });
+        await options.getByRole("button", { name: "Actions", exact: true }).tap();
+        await barFrame(player).waitFor();
+        const chip = player.getByRole("button", { name: /^Wis save: waiting for your roll\./ });
+        assert.ok(await wholeInReach(chip), `${label}: the chip is out of reach with the bar open`);
+        await shots.take(player, `playerphone-several-bar-over-chip-480x320-${Math.round(scale * 100)}`);
+
+        await chip.tap();
+        await player.waitForTimeout(400);
+        assert.ok(await card(player).isVisible(), `${label}: the chip's tap left the card folded behind the bar`);
+        assert.equal(await barFrame(player).count(), 0, `${label}: the bar stayed open over the card`);
+        await cardInReach(`${label}, after a chip`, `playerphone-several-card-from-chip-480x320-${Math.round(scale * 100)}`);
+        await waitFor(`focus on the card, ${label}`, async () => ((await focused(player)).name === "The DM asks for a roll" ? true : null));
+        // The group is still held: Select several still counts Thorn, and once the card is put off, Actions brings his bar back.
+        assert.equal(await options.getByText("1 selected.", { exact: true }).count(), 1, `${label}: Select several let go of the group`);
+        await card(player).getByRole("button", { name: "Later" }).tap();
+        await card(player).waitFor({ state: "detached" });
+        await options.getByRole("button", { name: "Actions", exact: true }).tap();
+        await player.getByRole("dialog", { name: "Thorn actions" }).waitFor();
+      } finally {
+        await ops.send({ t: "roll.close", rollIds: [id] });
+      }
+    });
+  }
+
+  test("17. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });

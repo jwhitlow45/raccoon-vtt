@@ -519,7 +519,7 @@ function FightAlerts() {
   useLayoutEffect(() => {
     if (!showAfter || summarized) return;
     setShowAfter(null);
-    if (showAfter.kind === "rolls") rolls?.open();
+    if (showAfter.kind === "rolls") rolls?.open({ barAway: true });
     else focusAlert(boxRef.current, showAfter.first);
   }, [showAfter, summarized, rolls]);
 
@@ -579,7 +579,7 @@ function FightAlerts() {
           onClick={() => {
             ui.showActions(false);
             // A card folded at the foot opens at once, since it may stay folded for want of room until asked for.
-            if (forFootCard) rolls?.open();
+            if (forFootCard) rolls?.open({ barAway: true });
             else setShowAfter(rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: summary.first });
           }}
           style={{ ...card, minHeight: SUMMARY_ROW, padding: `0 ${theme.space(3)}px` }}
