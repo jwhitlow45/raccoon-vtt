@@ -22,6 +22,8 @@ Every size is in layout pixels, the chrome's own (`features/device/layout.ts`), 
 
 ### 1.2 The free area and the default spot
 
+Status: changed by docs/design-v1-token-window.md (3.3, 5, 7). The docked bar, now the token window, is the measured default width, the narrowest that keeps Conditions, Hidden and Multi-select on one line and never under 304 (316 px with the system font on macOS), not `min(304, free width)`. On a computer it resizes, its stored height caps it after the spot and the lane, and its free sides keep 12 px for the resize handle. The header stays sticky, inside a scroller in the frame.
+
 A docked bar lives in the **free area**. That is the map area (which from 900 px up already ends at the side panel), less the measured top inset (top bar, turn band and safe area, Room's `insets.top`), the measured bottom inset (toolbar, the active tool's options such as the Select several bar, and safe area, `insets.bottom`), the side safe areas and a phone's landscape sheet, and an 8 px margin (`space(2)`) all round. Stage passes Room's `insets` to the bar, so `BOTTOM_RESERVE`, `reserveBottom` and `SELECT_OPTIONS_PX` go.
 
 The default spot is the free area's bottom right corner. The bar is `min(304, free width)` wide and grows upward, as tall as its content up to the room it has. "Scroll for more" stays. When docked or spanning, the header is `position: sticky` at the top of the scrolling frame, so the handle and Close never scroll away. It has an opaque `surface` background that reaches across the frame's 12 px side padding, and it clips the name to two lines. The bar still hides during a token drag, so the whole map shows while a token moves.
@@ -48,6 +50,8 @@ The **lane** is the right 312 px of the free area: room for the 304 px bar (the 
 
 ### 1.4 Compact
 
+Status: changed by docs/design-v1-token-window.md (3.3, 5.1). The overlay is the default width where it was 304, and it ignores a stored size.
+
 On a screen too short to dock or span, the bar opens as an overlay.
 
 - **Across**, it takes the dock's place (the free area's right `min(304, free width)`, or left of a landscape sheet), or for an upright layout the span's full width.
@@ -63,6 +67,8 @@ The numbers, with Select several on (its bar one 52 px row, section 3) and the i
 - **320 x 480 at 130%**, upright, 44 px at the top and 34 at the bottom, lays out at 246 x 369. Free height 369 − 96 (top bar and notch) − 48 (band) − 94 (toolbar and home bar) − 52 − 16 = 63: compact, 230 wide. Down to the toolbar leaves 115, so it covers the toolbar too: 369 − 96 − 48 − 34 − 16 = 175 tall, and an alert's summary row leaves the bar 123. Without the band the free height is 111, still compact. Down to the toolbar then leaves 163, so it covers only the Select several bar, and the summary row leaves the bar 111.
 
 ## 2. Moving the bar
+
+Status: changed by docs/design-v1-token-window.md (4). The grip is a button, "Move window", that takes the same drag and, focused, the arrow keys, which move the window and never a token. Move bar and Reset bar position are gone: "Reset window position and size" in the header, left of Close, takes Reset's place.
 
 - **The handle** is the header row. A grip icon at its start shows that it moves (`aria-hidden`). A primary press on the header, outside its buttons, takes `setPointerCapture`. The header has `touch-action: none` and, for a mouse, the `grab` and `grabbing` cursors. The bar moves once the pointer passes `TAP_SLOP_PX` (8 px), so a tap on the header does nothing. Touch, pen and mouse take the same path.
 - **Kept clear.** During the drag the box is clamped into the free area, so it never covers the top bar, the turn band, the toolbar, the options bar, the side panel or a landscape sheet. On release the lane rule applies.
@@ -90,6 +96,8 @@ On main (`ee3d0b82`), a tap on empty map reaches `CameraGesture.up` (`lib/gestur
 - The rules are the same on every device. With Select several off a phone behaves as today, except that a hold to ping no longer lets go.
 
 ## 4. Fit, Find and pans
+
+Status: changed by docs/design-v1-token-window.md (9.1). A window against the free area's right edge, or inside the lane, covers the right side from its own left edge or the lane's, whichever is further left, so a window wider than the lane never leaves a token under it.
 
 While a docked or compact bar shows, it publishes its drawn box to the Room scope. A folded, spanning or hidden bar publishes nothing: a spanning bar is placed by its token, not by the map. `barCover(viewport, bars, box)` turns the box into one inset. A bar in the lane covers the lane's side, the right 312 px plus the margin and safe area, whatever its height. A bar elsewhere covers the side that leaves the largest clear rectangle.
 

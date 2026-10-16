@@ -110,6 +110,8 @@ Each item shows only when the viewer's copy of the actor holds it, and AC, speed
 
 ### 3.3 The token bar
 
+Status: changed by docs/design-v1-token-window.md (3.2, 5.8, 8.9). Undo move, Doesn't count and the door lead on a line of their own, then Conditions, Hidden and Multi-select ("Select several" here) on one line, with Request a roll after them. The less-often row loses Move bar and Reset bar position. The body gains Size after Elevation and the ground notice. A window resized under 300 px tall takes the short layout.
+
 The single-token bar keeps its frame, header, dock behavior and every control (docs/design-v1-bar-dock.md). This doc owns its whole body, the button rows included.
 
 **Its body, in order:**

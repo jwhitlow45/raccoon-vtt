@@ -25,7 +25,7 @@ Any tap in the chain but one on a pin also puts a label-only pin's popover away 
 
 Steps 2 to 4 need a press that was not a hold. A still press of `LONG_PRESS_MS` (500 ms) on empty map is the hold-to-ping (`features/pings/PingLayer.tsx`), and `CameraGesture` reported it as a tap, so a ping on a door opened the door pill. Held means the ping actually fired, not that 500 ms passed: on a busy phone the ping's timer can fire late, and a press lifted before it fired pinged nothing and is still a tap. So the ping layer reports each press it pings (`features/pings/hold.ts`), `CameraGesture` marks that press (`hold`), and `up` reports it as `held` (`lib/gestures.ts`). The label step takes the same rule, since a hold that pings should open nothing. `useTapPin` takes it too, through the same report, so a hold-to-ping on a pin does not open it (`pinTapCounts` in `features/pins/rules.ts`).
 
-Every other tool keeps its tap as it is: the ruler adds a stop, Ping pings, the builder paints, and Fog, Draw, Area, Pin and Place act. "Select several" and a box drawn with Shift, Ctrl or Cmd make no empty tap today, so they show no readout.
+Every other tool keeps its tap as it is: the ruler adds a stop, Ping pings, the builder paints, and Fog, Draw, Area, Pin and Place act. "Multi-select" and a box drawn with Shift, Ctrl or Cmd make no empty tap today, so they show no readout.
 
 **What it shows**, from `seenGround` and the stair marks the viewer holds (directions from the cached `sceneWalls(...).stairAt`, which movement reads):
 

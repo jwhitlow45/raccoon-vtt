@@ -126,6 +126,8 @@ The Select several bar is the mode's status line ("3 selected", Actions, Done), 
 
 ### 3.5 With the bar dock
 
+Status: since docs/design-v1-token-window.md (section 7), a stored window size clamps into the narrower free area as the spot does, and stays stored.
+
 The bar dock's rules stay. They read two new inputs:
 
 - **The rail.** `Chrome` gains `rail`, the rail's drawn width with the left safe area, in layout px, or 0 (`barDock.ts:55-67`). The free area's left edge becomes `(rail > 0 ? rail : safe.left) + 8` (`barDock.ts:82`), as its right edge already takes a sheet in place of the right safe area (`:83`). With the rail, the tool adds nothing at the foot, so `Chrome.bottom` and `Chrome.controls` hold the toolbar alone, and the free area grows taller. `barMode`, `shareLane`, the summary row, the compact overlay, the stored spot, Move bar and `barCover` all take the narrower, taller free area as it is. The lane stays at the right.
@@ -227,6 +229,8 @@ An upright phone (390 x 844), a tablet and a computer look as today.
 - **The party bar** sits at the top of the side panel (`Room.tsx:1289`), and the Party panel is a phone's only (`panels.ts:84`), so it hides with the side panel. Panels brings both back.
 
 ### 4.2 The sheet on a phone held sideways
+
+Status: since docs/design-v1-token-window.md (7.1), a token window beside a sideways sheet narrower than its header's one row stacks its header, and under 166 px it folds into the sheet's header with the dock's other buttons, as under a very short sheet.
 
 - **Hide.** A sheet placed on the right gains an icon button "Hide <panel>", such as "Hide Initiative" (`collapsePanel`, the side panel's Hide icon), named by the panel even on a subpage, as Close is (`Sheet.tsx:102`). It sits in the header between the trailing actions and Close (`SheetHeader.tsx:78-100`, through a new `onHide` on `Sheet`). A bottom sheet has none: the owner asked about the sidebar, and a bottom sheet is not one. The list of panels has none: hiding a list equals closing it.
 - **A narrow header.** One row needs its buttons at 44 px each, a title of at least 40 px (`SheetHeader.tsx:19-26`), a 4 px gap between each two and the header's side padding: 200 px for Back, Hide and Close, or 192 with the 4 px padding of a header that holds actions. Below that the header stacks. Its first row holds Back at the left and the other buttons at the right, each 44 px. Its second row holds the title alone, at the heading's size, one line with an ellipsis: 78 px in all (6 px, the 44 px row, a 22 px title line, 6 px) against a one-row header's 56. Sheet decides it from its width and its buttons (the width less its side padding and borders, which Room knows from the layout and `useSafeAreas`), never from a measurement that could flicker. Every sideways sheet in 8.1 keeps one row: the narrowest, at 480 x 320 at 130%, would have had 172 px, but that size always takes the very short mode below, whose header is 275 px wide, as that mode draws no border. There the header stacks only while it also holds the dock's two buttons (five buttons need 244 px of row and a 40 px title).
