@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
@@ -25,6 +26,47 @@ function devJsonImports(): Plugin {
   };
 }
 
+const PDFJS = new URL("./node_modules/pdfjs-dist/", import.meta.url);
+
+/**
+ * pdf.js's two plain JavaScript image decoders, which a PDF handout's
+ * scanned pages need, and the licenses that cover them and pdf.js
+ * (docs/design-v1-pdf-handouts.md 4.2.4). The job's worker loads the
+ * decoders from the app's own origin, from a folder named by the installed
+ * version, so a new pin is a new URL and a file under one name never
+ * changes. The build writes them there, and the dev server serves the same
+ * path. The decoder files carry no license header, and the bundler may drop
+ * pdf.js's, hence the license files beside them.
+ */
+function pdfjsDecoders(): Plugin {
+  const version = (JSON.parse(readFileSync(new URL("package.json", PDFJS), "utf8")) as { version: string }).version;
+  const folder = `pdfjs/${version}/`;
+  const files: Record<string, string> = {
+    "jbig2_nowasm_fallback.js": "wasm/jbig2_nowasm_fallback.js",
+    "openjpeg_nowasm_fallback.js": "wasm/openjpeg_nowasm_fallback.js",
+    LICENSE: "LICENSE",
+    LICENSE_JBIG2: "wasm/LICENSE_JBIG2",
+    LICENSE_OPENJPEG: "wasm/LICENSE_OPENJPEG",
+    LICENSE_PDFJS_JBIG2: "wasm/LICENSE_PDFJS_JBIG2",
+    LICENSE_PDFJS_OPENJPEG: "wasm/LICENSE_PDFJS_OPENJPEG",
+  };
+  const read = (name: string) => readFileSync(new URL(files[name]!, PDFJS));
+  return {
+    name: "raccoon:pdfjs-decoders",
+    configureServer(server) {
+      server.middlewares.use(`/${folder}`, (req, res, next) => {
+        const name = (req.url ?? "").replace(/^\//, "").split("?")[0] ?? "";
+        if (!Object.hasOwn(files, name)) return next();
+        res.setHeader("content-type", name.endsWith(".js") ? "text/javascript" : "text/plain; charset=utf-8");
+        res.end(read(name));
+      });
+    },
+    generateBundle() {
+      for (const name of Object.keys(files)) this.emitFile({ type: "asset", fileName: `${folder}${name}`, source: read(name) });
+    },
+  };
+}
+
 /**
  * The SPA lives in client/, but public/ and the build output sit at the repo
  * root, where the server and the Dockerfile expect them. Vite resolves both
@@ -47,7 +89,13 @@ const api = `127.0.0.1:${process.env.PORT ?? 3000}`;
 export default defineConfig({
   root: "client",
   publicDir: "../public",
-  plugins: [react(), devJsonImports()],
+  plugins: [react(), devJsonImports(), pdfjsDecoders()],
+  /*
+   * Workers as ES modules, so a worker can load code by `import()`: the PDF
+   * reader's worker loads its decoders and pdf.js only once it runs
+   * (client/features/handouts/pdf/worker.ts).
+   */
+  worker: { format: "es" },
   resolve: {
     /*
      * react-konva's main entry imports all of Konva, Transformer and filters
@@ -79,10 +127,18 @@ export default defineConfig({
          * code, so the bundler moves that code out of LiveRoom into a chunk
          * named after whichever module it meets first (once "closed", once
          * "XCardHost"). Naming it "room" keeps the build's size report
-         * readable from one build to the next. Only the name changes: what
-         * goes in each chunk is the bundler's own split.
+         * readable from one build to the next. pdf.js, which a DM's PDF
+         * upload loads (client/features/handouts/pdf/render.ts), would be
+         * named after the module that imports it, so it is named for itself.
+         * Only the name changes: what goes in each chunk is the bundler's own
+         * split.
          */
-        chunkFileNames: (chunk) => (chunk.moduleIds.some((id) => id.endsWith("/client/canvas/Stage.tsx")) ? "assets/room-[hash].js" : "assets/[name]-[hash].js"),
+        chunkFileNames: (chunk) =>
+          chunk.moduleIds.some((id) => id.endsWith("/client/canvas/Stage.tsx"))
+            ? "assets/room-[hash].js"
+            : chunk.moduleIds.some((id) => id.includes("/node_modules/pdfjs-dist/") || id.includes("/pdfjs-dist@"))
+              ? "assets/pdfjs-[hash].js"
+              : "assets/[name]-[hash].js",
       },
     },
   },
