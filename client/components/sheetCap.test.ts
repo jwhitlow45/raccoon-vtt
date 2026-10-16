@@ -77,31 +77,31 @@ describe("a sideways sheet's mode", () => {
   const mode = (height: number, topBars: number, safeBottom = 21, header = SHEET_HEADER) => sheetMode({ height, safeTop: 0, safeBottom, topBars, header });
 
   test("the doc's sizes, band or not: the very short mode exactly where the body would be under 88 px", () => {
-    // 844 x 390: body 201, 153 with the band.
+    // Bodies inside the sheet's borders. 844 x 390: 199, 151 with the band.
     assert.equal(mode(390, 52), "side");
     assert.equal(mode(390, 100), "side");
-    // 844 x 390 at 130% (300 tall): body 111, or 63 with the band.
+    // 844 x 390 at 130% (300 tall): 109, or 61 with the band.
     assert.equal(mode(300, 52), "side");
     assert.equal(mode(300, 100), "full");
-    // 667 x 375, no insets: 207 and 159. At 130% (288): 120, and 72 with the band.
+    // 667 x 375, no insets: 205 and 157. At 130% (288): 118, and 70 with the band.
     assert.equal(mode(375, 52, 0), "side");
     assert.equal(mode(375, 100, 0), "side");
     assert.equal(mode(288, 52, 0), "side");
     assert.equal(mode(288, 100, 0), "full");
-    // 932 x 430 at 130% (331): 142, and 94 with the band, still a sheet.
+    // 932 x 430 at 130% (331): 139, and 91 with the band, still a sheet.
     assert.equal(mode(331, 52), "side");
     assert.equal(mode(331, 100), "side");
-    // 480 x 320: 131, and 83 with the band. At 130% (246), 57 with no band: always the very short mode.
+    // 480 x 320: 129, and 81 with the band. At 130% (246), 55 with no band: always the very short mode.
     assert.equal(mode(320, 52), "side");
     assert.equal(mode(320, 100), "full");
     assert.equal(mode(246, 52), "full");
     assert.equal(mode(246, 100), "full");
   });
 
-  test("88 px of body is enough, 87 is not, and a stacked header counts its 78 px", () => {
-    // 52 + 60 + 56 + 88 = 256.
-    assert.equal(mode(256, 52, 0), "side");
-    assert.equal(mode(255, 52, 0), "full");
-    assert.equal(mode(256, 52, 0, SHEET_HEADER_STACKED), "full");
+  test("88 px of body inside the sheet's borders is enough, 87 is not, and a stacked header counts its 78 px", () => {
+    // 52 + 60 + 56 + the 1 px border above and below + 88 = 258.
+    assert.equal(mode(258, 52, 0), "side");
+    assert.equal(mode(257, 52, 0), "full");
+    assert.equal(mode(258, 52, 0, SHEET_HEADER_STACKED), "full");
   });
 });

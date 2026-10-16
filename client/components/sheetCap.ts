@@ -87,11 +87,12 @@ export function sideSheetWidth(layoutWidth: number): number {
 /**
  * A sideways sheet runs from under the top bars (52 px, and 48 more while
  * the turn strip is a band) to the toolbar (60 px), inside the safe areas.
- * Where that leaves its body under 88 px below its header, it opens in the
- * very short mode, "full": the whole screen, modal, over the bars. All of
- * it comes from the layout, never from a measure.
+ * Where that leaves its body under 88 px below its header, inside its 1 px
+ * borders, it opens in the very short mode, "full": the whole screen,
+ * modal, over the bars. All of it comes from the layout, never from a
+ * measure.
  */
 export function sheetMode(input: { height: number; safeTop: number; safeBottom: number; topBars: number; header: number }): "side" | "full" {
-  const body = input.height - input.safeTop - input.topBars - input.safeBottom - theme.layout.toolbar - input.header;
+  const body = input.height - input.safeTop - input.topBars - input.safeBottom - theme.layout.toolbar - input.header - 2 * theme.line.border;
   return body < SHEET_BODY_MIN ? "full" : "side";
 }
