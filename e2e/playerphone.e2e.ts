@@ -34,7 +34,7 @@ import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, tap
  *   and a roll card never meets it (LPD-PLAYER-2). Pans, pinches and a
  *   held press leave it open and a quick tap off closes it. Select
  *   several's tap off hides it and keeps the group, and Back then lets go.
- *   The Select several bar stays one row, and on screens too short for the
+ *   The Multi-select bar stays one row, and on screens too short for the
  *   bar it opens compact, where every button still takes a tap.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seven. The other
@@ -681,13 +681,13 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     }
   });
 
-  test("9. Select several by touch: a tap that moves under 8 px hides the bar and keeps the group, a box drag adds and shows it, and Back then ends the mode and stays in the room", async () => {
+  test("9. Multi-select by touch: a tap that moves under 8 px hides the bar and keeps the group, a box drag adds and shows it, and Back then ends the mode and stays in the room", async () => {
     const extra = randomUUID();
     await ops.send({ t: "token.create", token: { id: extra, sceneId: run.sceneId, kind: "monster", name: "Goblin 2", x: 3, y: 4, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: actor(7) } } });
     await waitFor("Goblin 2 on the player's map", () => playerSocket.state?.tokens[extra]);
     await setUp({ ...LANDSCAPE, scale: 1 });
     await touch([await cellPoint({ x: 8, y: 6 })]);
-    await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Select several", exact: true }).tap();
+    await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
     await touch([await cellPoint({ x: 12, y: 9 })]);
     await player.getByRole("dialog", { name: "2 selected tokens" }).waitFor();
 
@@ -719,11 +719,11 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     { width: 844, height: 390, scale: 1.3, insets: { side: 47, bottom: 21 } },
   ]) {
     const label = `${view.width} x ${view.height} at 130%`;
-    test(`10. the Select several bar is one row with Actions shown: ${label}`, async () => {
+    test(`10. the Multi-select bar is one row with Actions shown: ${label}`, async () => {
       await insets(view.insets);
       await setUp(view);
       await touch([await cellPoint({ x: 8, y: 6 })]);
-      await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Select several", exact: true }).tap();
+      await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
       // Off the bar, where the map shows: on an upright phone, whose overlay spans the screen, only the strip under the top bar.
       await player.waitForTimeout(200);
       await touch([await emptyPoint(player)]);
@@ -731,14 +731,14 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       const options = player.getByRole("toolbar", { name: "Select options" });
       await options.getByRole("button", { name: "Actions", exact: true }).waitFor();
       const r = await rectOf(options);
-      assert.ok(r.bottom - r.top <= (44 + 8 + 2) * view.scale + 2, `${label}: the Select several bar wrapped to ${r.bottom - r.top} px`);
+      assert.ok(r.bottom - r.top <= (44 + 8 + 2) * view.scale + 2, `${label}: the Multi-select bar wrapped to ${r.bottom - r.top} px`);
       await shots.take(player, `playerphone-several-row-${view.width}x${view.height}`);
       await options.getByRole("button", { name: "Done", exact: true }).tap();
       await insets({});
     });
   }
 
-  test("11. on screens too short for the bar, with Select several, the turn band and a roll waiting, it opens compact: the roll stays in sight, every button takes a tap, and Panels comes back after Close", async () => {
+  test("11. on screens too short for the bar, with Multi-select, the turn band and a roll waiting, it opens compact: the roll stays in sight, every button takes a tap, and Panels comes back after Close", async () => {
     await ops.send({
       t: "encounter.start",
       entries: [
@@ -756,7 +756,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       await setUp(view);
       await touch([await cellPoint({ x: 8, y: 6 })]);
       const bar = player.getByRole("dialog", { name: "Thorn actions" });
-      await bar.getByRole("button", { name: "Select several", exact: true }).tap();
+      await bar.getByRole("button", { name: "Multi-select", exact: true }).tap();
       const id = randomUUID();
       await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
       // The roll's card yields to the compact bar at the screen's foot, or waits in the column, and either way the summary row stands for it.
@@ -811,11 +811,11 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     { width: 320, height: 480, scale: 1.3, insets: { top: 44, bottom: 34 } },
   ]) {
     const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
-    test(`12. with a roll card waiting at the screen's foot, Select several's Actions takes a tap after a tap off, and the card's title, Later, total and Send show whole and take a tap, or the summary row stands in and opens it so: ${label}`, async () => {
+    test(`12. with a roll card waiting at the screen's foot, Multi-select's Actions takes a tap after a tap off, and the card's title, Later, total and Send show whole and take a tap, or the summary row stands in and opens it so: ${label}`, async () => {
       await insets(view.insets);
       await setUp(view);
       await touch([await cellPoint({ x: 8, y: 6 })]);
-      await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Select several", exact: true }).tap();
+      await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
       const id = randomUUID();
       try {
         await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
@@ -826,7 +826,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         const options = player.getByRole("toolbar", { name: "Select options" });
         const actions = options.getByRole("button", { name: "Actions", exact: true });
         assert.equal(await buttonAt(actions), "Actions", `${label}: something covers Actions while the roll waits`);
-        if (await card(player).isVisible()) assert.ok(!intersects(await rectOf(card(player)), await rectOf(options)), `${label}: the roll card covers the Select several bar`);
+        if (await card(player).isVisible()) assert.ok(!intersects(await rectOf(card(player)), await rectOf(options)), `${label}: the roll card covers the Multi-select bar`);
         await cardInReach(label, `playerphone-card-in-reach-several-${view.width}x${view.height}`);
         await card(player).getByRole("button", { name: "Later" }).tap();
         await card(player).waitFor({ state: "detached" });
@@ -945,12 +945,12 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
   for (const scale of [1, 1.3]) {
     const label = `480 x 320 at ${Math.round(scale * 100)}%`;
     // No insets: with a landscape phone's, the narrower column folds the chip into its summary row, which already puts the bar away.
-    test(`16. with Select several's bar open over a roll chip, the chip's tap puts the bar away, keeping the group, and opens the card in reach with focus: ${label}`, async () => {
+    test(`16. with Multi-select's bar open over a roll chip, the chip's tap puts the bar away, keeping the group, and opens the card in reach with focus: ${label}`, async () => {
       const id = randomUUID();
       try {
         await setUp({ width: 480, height: 320, scale });
         await touch([await cellPoint({ x: 8, y: 6 })]);
-        await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Select several", exact: true }).tap();
+        await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
         await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
         await player.waitForTimeout(400);
         await cardInReach(label, `playerphone-several-card-before-later-480x320-${Math.round(scale * 100)}`);
@@ -969,8 +969,8 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         assert.equal(await barFrame(player).count(), 0, `${label}: the bar stayed open over the card`);
         await cardInReach(`${label}, after a chip`, `playerphone-several-card-from-chip-480x320-${Math.round(scale * 100)}`);
         await waitFor(`focus on the card, ${label}`, async () => ((await focused(player)).name === "The DM asks for a roll" ? true : null));
-        // The group is still held: Select several still counts Thorn, and once the card is put off, Actions brings his bar back.
-        assert.equal(await options.getByText("1 selected.", { exact: true }).count(), 1, `${label}: Select several let go of the group`);
+        // The group is still held: Multi-select still counts Thorn, and once the card is put off, Actions brings his bar back.
+        assert.equal(await options.getByText("1 selected.", { exact: true }).count(), 1, `${label}: Multi-select let go of the group`);
         await card(player).getByRole("button", { name: "Later" }).tap();
         await card(player).waitFor({ state: "detached" });
         await options.getByRole("button", { name: "Actions", exact: true }).tap();
@@ -981,14 +981,14 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     });
   }
 
-  test("17. in a fight at 480 x 320 at 130% with Select several, after Later the chip, or the row that stands for it, shows whole and takes a tap without covering Actions, and opens the card", async () => {
-    const label = "480 x 320 at 130% in a fight with Select several";
+  test("17. in a fight at 480 x 320 at 130% with Multi-select, after Later the chip, or the row that stands for it, shows whole and takes a tap without covering Actions, and opens the card", async () => {
+    const label = "480 x 320 at 130% in a fight with Multi-select";
     await insets({ side: 47, bottom: 21 });
     const id = randomUUID();
     try {
       await setUp({ width: 480, height: 320, scale: 1.3 });
       await touch([await cellPoint({ x: 8, y: 6 })]);
-      await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Select several", exact: true }).tap();
+      await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
       // The tap off hides the bar and keeps the group, before the turn band takes the map's last room.
       await touch([await emptyPoint(player)]);
       await barFrame(player).waitFor({ state: "detached" });
@@ -1017,7 +1017,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       assert.ok(await card(player).isVisible(), `${label}: the tap left the card folded`);
       await cardInReach(`${label}, after Later`, "playerphone-several-fight-card-back-480x320");
       await waitFor(`focus on the card, ${label}`, async () => ((await focused(player)).name === "The DM asks for a roll" ? true : null));
-      assert.equal(await options.getByText("1 selected.", { exact: true }).count(), 1, `${label}: Select several let go of the group`);
+      assert.equal(await options.getByText("1 selected.", { exact: true }).count(), 1, `${label}: Multi-select let go of the group`);
       await card(player).getByRole("button", { name: "Later" }).tap();
       await card(player).waitFor({ state: "detached" });
       assert.ok(await wholeInReach(actions), `${label}: something covers Actions after the second Later`);
@@ -1028,7 +1028,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     }
   });
 
-  for (const tool of ["Select several", "Ruler"] as const) {
+  for (const tool of ["Multi-select", "Ruler"] as const) {
     const label = `480 x 320 at 130% on Thorn's turn with ${tool}`;
     const shot = tool === "Ruler" ? "ruler" : "several";
     test(`18. on the player's own turn in a fight at 480 x 320 at 130%, with a roll put off with Later, End turn and the way back to the card are both whole in reach: ${tool}`, async () => {
@@ -1041,7 +1041,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
           await player.getByRole("toolbar", { name: "Ruler options" }).waitFor();
         } else {
           await touch([await cellPoint({ x: 8, y: 6 })]);
-          await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Select several", exact: true }).tap();
+          await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
           await touch([await emptyPoint(player)]);
           await barFrame(player).waitFor({ state: "detached" });
         }

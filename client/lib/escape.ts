@@ -1,6 +1,6 @@
 /**
  * What Escape closes in the room, nearest first: a phone's panel sheet,
- * then the token action bar, then a Select several group whose bar is
+ * then the token action bar, then a Multi-select group whose bar is
  * hidden, which Escape lets go of as Done does, then a selected token
  * whose bar is hidden, which it lets go of (state/selection.ts
  * dismissal). A modal dialog over the room (a handout, the image picker,

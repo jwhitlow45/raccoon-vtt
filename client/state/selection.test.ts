@@ -91,14 +91,14 @@ describe("taps, the selection and the action bar", () => {
     assert.equal(dismissal(INITIAL_LOCAL, false), null);
   });
 
-  test("with the bar hidden and Select several off, Escape lets go of the token, however the bar was hidden", () => {
+  test("with the bar hidden and Multi-select off, Escape lets go of the token, however the bar was hidden", () => {
     const one = tapToken(INITIAL_LOCAL, "a");
     const hidden = showActions(one, false);
     // barDismiss, Details and the alerts summary all hide the bar the same way.
     assert.equal(dismissal(hidden, true), "token", "the token panel shows it");
     assert.equal(dismissal(hidden, false), "token", "after the alerts summary hid it");
     assert.equal(dismissal(hidden, false, true), null, "a map pane is open, and Escape closes it first");
-    assert.equal(dismissal(showActions(setMultiSelect(one, true), false), true), null, "Select several on");
+    assert.equal(dismissal(showActions(setMultiSelect(one, true), false), true), null, "Multi-select on");
     assert.equal(dismissal(one, true), "bar");
   });
 

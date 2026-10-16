@@ -101,7 +101,7 @@ export function useNoPageZoom(): void {
 
 /**
  * Escape closes a phone's sheet, then the token action bar, then lets go
- * of a Select several group whose bar is hidden, then of a token whose bar
+ * of a Multi-select group whose bar is hidden, then of a token whose bar
  * is hidden (lib/escape.ts), unless the token's panel shows the selection
  * (`tokenPanelShown`, state/selection.ts dismissal). While the panel shows
  * the token, the bar hides and keeps it (barDismiss), through `hideBar`,

@@ -244,10 +244,10 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
         );
       case "light":
         return <LightChip key={id} token={token} />;
-      case "selectSeveral":
+      case "multiSelect":
         return (
           <BarButton key={id} pressed={multi} onClick={() => ui.setMultiSelect(!multi)}>
-            Select several
+            Multi-select
           </BarButton>
         );
       case "locked":
@@ -501,7 +501,7 @@ export function GroupActionBar(props: {
           />
         ) : null}
         <BarButton pressed={multi} onClick={() => ui.setMultiSelect(!multi)}>
-          Select several
+          Multi-select
         </BarButton>
         <BarButton onClick={props.onClose}>Clear</BarButton>
         <PlaceButtons />
@@ -623,7 +623,7 @@ type Drag = { pointerId: number; el: HTMLElement; x: number; y: number; start: B
  * and this device remembers the spot (`rvtt.tokenBarSpot`, barDock.ts). A
  * phone held upright spans the screen under or over its token, as before.
  * A screen too short for either opens it compact: a taller overlay over
- * the Select several bar, and over the toolbar when even that is short,
+ * the Multi-select bar, and over the toolbar when even that is short,
  * which scrolls as a whole and does not move. In each, a bar that meets
  * the fight alerts column across shares the right lane with it
  * (barDock.ts shareLane), and once it is drawn it publishes its box for
@@ -715,7 +715,7 @@ function BarFrame(props: {
   const placed = placeBar({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, height: barHeight, column })!;
   const { free, mode } = placed;
 
-  // Actions in the Select several bar shows the bar and focuses its frame, once it is drawn.
+  // Actions in the Multi-select bar shows the bar and focuses its frame, once it is drawn.
   useLayoutEffect(() => {
     if (!dockStore.getState().focusFrame) return;
     dockStore.setState({ focusFrame: false });

@@ -13,7 +13,7 @@ import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, wai
  * tablet sizes, moving it by its header and with Move bar, what this device
  * remembers, Fit, Find and the outliner keeping tokens out from under it,
  * the right lane it shares with the fight alerts column, taps off the bar
- * with and without Select several, and "Viewing as Pat" beside the column.
+ * with and without Multi-select, and "Viewing as Pat" beside the column.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus seven, which it shares
  * with the phone runs, since the runs go one after another. The other
@@ -603,12 +603,12 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await barFrame(dm).waitFor({ state: "detached" });
   });
 
-  test("8. Select several: a tap off hides the bar and keeps the group, Actions and Done, Escape and a token tapped out, and Details then Escape", async () => {
+  test("8. Multi-select: a tap off hides the bar and keeps the group, Actions and Done, Escape and a token tapped out, and Details then Escape", async () => {
     await setUp(dm, { ...DESK, scale: 1 });
     // A side panel tab other than Token: with the Token tab showing the selection, Escape leaves the group alone.
     await dm.getByRole("tab", { name: "Initiative" }).click();
     await selectThorn();
-    await barFrame(dm).getByRole("button", { name: "Select several", exact: true }).click();
+    await barFrame(dm).getByRole("button", { name: "Multi-select", exact: true }).click();
     await clickCell(dm, run.goblins[0]!);
     await dm.getByRole("dialog", { name: "2 selected tokens" }).waitFor();
 
@@ -621,7 +621,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     // The row's own text, first, before the hidden description that repeats it.
     await selectOptions(dm).getByText("Tap tokens to add or remove them, or drag a box on the map.").first().waitFor();
     const row = await rectOf(selectOptions(dm));
-    assert.ok(row.bottom - row.top <= 60, `the Select several bar wrapped: ${row.bottom - row.top} px`);
+    assert.ok(row.bottom - row.top <= 60, `the Multi-select bar wrapped: ${row.bottom - row.top} px`);
     await shots.take(dm, "bardock-several-tapped-off");
 
     await dm.keyboard.press("Escape");
@@ -630,7 +630,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
 
     // Again, then Actions brings the bar back with focus on its frame.
     await selectThorn();
-    await barFrame(dm).getByRole("button", { name: "Select several", exact: true }).click();
+    await barFrame(dm).getByRole("button", { name: "Multi-select", exact: true }).click();
     await clickCell(dm, run.goblins[0]!);
     await dm.getByRole("dialog", { name: "2 selected tokens" }).waitFor();
     await clickCell(dm, EMPTY);
@@ -661,7 +661,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     assert.ok(await dm.getByRole("dialog", { name: "Thorn actions" }).isVisible(), "Shift and a click on empty map closed the bar");
 
     // One token in the group: Details, then Escape leaves the token panel showing it and the mode on.
-    await barFrame(dm).getByRole("button", { name: "Select several", exact: true }).click();
+    await barFrame(dm).getByRole("button", { name: "Multi-select", exact: true }).click();
     await barFrame(dm).getByRole("button", { name: "Details", exact: true }).click();
     await barFrame(dm).waitFor({ state: "detached" });
     await dm.getByRole("tab", { name: "Token", selected: true }).waitFor();
@@ -834,10 +834,10 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await barFrame(dm).getByRole("button", { name: "Close", exact: true }).click();
   });
 
-  test("13. on a wide screen, Back with Select several's bar hidden ends the mode and stays in the room", async () => {
+  test("13. on a wide screen, Back with Multi-select's bar hidden ends the mode and stays in the room", async () => {
     await setUp(dm, { ...DESK, scale: 1 });
     await selectThorn();
-    await barFrame(dm).getByRole("button", { name: "Select several", exact: true }).click();
+    await barFrame(dm).getByRole("button", { name: "Multi-select", exact: true }).click();
     await clickCell(dm, run.goblins[0]!);
     await dm.getByRole("dialog", { name: "2 selected tokens" }).waitFor();
     await clickCell(dm, EMPTY);

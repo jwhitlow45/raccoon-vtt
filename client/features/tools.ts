@@ -139,7 +139,7 @@ export type ToolDef = {
 
 /**
  * Tap to select, drag a token to move it, drag the map to pan. Its behavior
- * lives in the canvas itself. Its bar shows only while "Select several" is
+ * lives in the canvas itself. Its bar shows only while "Multi-select" is
  * on, so the most used tool keeps the whole map otherwise.
  */
 export const selectTool: ToolDef = {

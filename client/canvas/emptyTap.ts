@@ -39,7 +39,7 @@ export function emptyTap(ctx: ToolContext, tool: string, world: Point, held: boo
 
 /**
  * Puts away what floats over the map after a tap that opens nothing, such
- * as Select several's tap off (Stage.tsx), so one thing floats at a time.
+ * as Multi-select's tap off (Stage.tsx), so one thing floats at a time.
  * A pin's popover stays when a pin is under the tap: the pin layer answers
  * that tap itself (features/pins/PinLayer.tsx), and closing here would
  * close the popover the same tap opened. `readout` puts the height readout

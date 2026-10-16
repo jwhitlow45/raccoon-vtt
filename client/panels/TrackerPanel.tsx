@@ -453,7 +453,7 @@ function ValueEntryFromView(props: { onDone(): void }) {
 }
 
 /**
- * "Select several" for the tracker, and one damage or healing entry for
+ * "Multi-select" for the tracker, and one damage or healing entry for
  * every creature picked (features section 10). Picks can also come from the
  * map, with the same mode or Shift.
  */
@@ -466,7 +466,7 @@ function SelectedCreatures() {
   return (
     <Section label="Several at once" style={COLUMN}>
       <Switch
-        label="Select several"
+        label="Multi-select"
         help="Tap rows or tokens to pick creatures, then enter damage or healing once for all of them."
         checked={multi}
         onChange={(on) => ui.setMultiSelect(on)}

@@ -19,7 +19,7 @@ import { OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInR
  *   and Send; a check's Passed and Failed);
  * - End turn when it shows;
  * - the tool's buttons (the Ruler's, scrolled to the foot of its capped
- *   list of kept rulers, or Select several's Actions and Done);
+ *   list of kept rulers, or Multi-select's Actions and Done);
  * - the token bar's Close when the bar shows.
  *
  * One page per side, resized and changed between steps rather than set up
@@ -35,7 +35,7 @@ import { OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInR
  *   reconnecting notice for the DM, whose sweep keeps the server up so the
  *   checks keep coming (the player's sweep covers that notice);
  * - a roll for the DM and a check for the player, as above;
- * - Select several, and the bar's Close, where the bars and a notice leave
+ * - Multi-select, and the bar's Close, where the bars and a notice leave
  *   no map to select the token on, which a viewer could not do either.
  *
  * A target under a lasting notice is a miss like any other: on a short
@@ -76,7 +76,7 @@ const sizes = (): Size[] => (ONLY_SIZES ? SIZES.filter((s) => ONLY_SIZES.include
 /** Steps skipped because the bars and notices leave no map to select a token on, which a viewer could not do either. */
 const skipped: string[] = [];
 const FIGHTS = ["none", "fight", "own turn"] as const;
-const TOOLS = ["none", "Ruler", "Select several"] as const;
+const TOOLS = ["none", "Ruler", "Multi-select"] as const;
 type Fight = (typeof FIGHTS)[number];
 type Tool = (typeof TOOLS)[number];
 
@@ -208,7 +208,7 @@ async function closeOverlay(page: Page): Promise<void> {
   }
 }
 
-/** The tool's buttons whole in reach: the Ruler's with its capped list scrolled to its foot, or Select several's. */
+/** The tool's buttons whole in reach: the Ruler's with its capped list scrolled to its foot, or Multi-select's. */
 async function expectTool(page: Page, tool: Tool, label: string): Promise<void> {
   if (tool === "none") return;
   const options = page.getByRole("toolbar", { name: tool === "Ruler" ? "Ruler options" : "Select options" });
@@ -247,7 +247,7 @@ async function expectBarClose(page: Page, label: string): Promise<void> {
 }
 
 /**
- * Sets the tool: nothing, the Ruler, or Select several with its bar
+ * Sets the tool: nothing, the Ruler, or Multi-select with its bar
  * hidden by a tap off (or by its Close where the bars leave no map). With
  * nothing, the token's bar is opened, so its Close is checked too.
  */
@@ -265,11 +265,11 @@ async function setTool(page: Page, tool: Tool, label: string, select: () => Prom
   await tools.getByRole("button", { name: "Select" }).first().tap({ force: true });
   if (!(await select())) {
     skipped.push(`${label}: no map left to select the token on`);
-    // With nothing to select, the step still runs without the bar. Select several has nothing to hold.
+    // With nothing to select, the step still runs without the bar. Multi-select has nothing to hold.
     return tool === "none";
   }
   if (tool === "none") return true;
-  await barFrame(page).getByRole("button", { name: "Select several", exact: true }).tap();
+  await barFrame(page).getByRole("button", { name: "Multi-select", exact: true }).tap();
   await page.getByRole("toolbar", { name: "Select options" }).waitFor();
   const off = await emptyPoint(page, []);
   if (off) await page.touchscreen.tap(off.x, off.y);

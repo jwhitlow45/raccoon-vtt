@@ -394,7 +394,7 @@ function RoomPage() {
   useBackClose(sheetOpen, closeSheets);
   /*
    * On a phone the token's action bar is the sheet a tap opened, so Back
-   * closes it too. With Select several on and the group's bar hidden, Back
+   * closes it too. With Multi-select on and the group's bar hidden, Back
    * ends the mode as Done does at any width, a wide Android tablet's
    * included, so Back never leaves the room while a group is held. Escape
    * does both everywhere. Neither ends the mode while the token's panel

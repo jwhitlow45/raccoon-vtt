@@ -8,7 +8,7 @@ import type { LocalUi } from "./types.ts";
  *
  * Several tokens can be selected, to move them as a group or give them all
  * one HP entry (features sections 5 and 10). A phone has no Shift key and no
- * hover, so "Select several" is a mode: while it is on, a tap adds a token
+ * hover, so "Multi-select" is a mode: while it is on, a tap adds a token
  * or takes it out again, and a tap on empty map hides the group's bar and
  * keeps the group, so the tokens under the bar can be tapped
  * (docs/design-v1-bar-dock.md section 3). On a desktop, Shift or Ctrl (Cmd
@@ -21,7 +21,7 @@ import type { LocalUi } from "./types.ts";
  * A tap on a token, on the map or on its initiative row ("tapping a row
  * opens the same menu as tapping the token", features section 10): select
  * it and open its action bar. `add` (Shift or Ctrl with a click, Cmd on a
- * Mac, as addsToSelection reads them, or the "Select several" mode) adds
+ * Mac, as addsToSelection reads them, or the "Multi-select" mode) adds
  * it to the selection or takes it out. A token added shows the bar, and
  * one taken out leaves a hidden bar hidden, so tapping tokens out of a
  * group never covers the next one. Taking out the last lets go. Null is a
@@ -67,15 +67,15 @@ export function keepSelected(local: LocalUi, present: (tokenId: string) => boole
 }
 
 /**
- * Turns "Select several" on or off. The selection stays, so a group picked
- * on a phone can then be moved or hurt: the bar's own "Select several"
+ * Turns "Multi-select" on or off. The selection stays, so a group picked
+ * on a phone can then be moved or hurt: the bar's own "Multi-select"
  * toggle leaves the mode this way.
  */
 export function setMultiSelect(local: LocalUi, on: boolean): LocalUi {
   return local.multi === on ? local : { ...local, multi: on };
 }
 
-/** Done in the Select several bar: ends the mode and lets go of the group, closing its bar. */
+/** Done in the Multi-select bar: ends the mode and lets go of the group, closing its bar. */
 export function doneSelecting(local: LocalUi): LocalUi {
   return withIds(setMultiSelect(local, false), [], false);
 }
@@ -84,14 +84,14 @@ export function doneSelecting(local: LocalUi): LocalUi {
  * What Escape and Android's Back put away from the map, after a sheet, a
  * dialog and a text field have had theirs (lib/escape.ts, lib/backClose.ts):
  * "bar" while the action bar shows, which goes as its close does
- * (barDismiss), and "group" while Select several holds a group whose bar
+ * (barDismiss), and "group" while Multi-select holds a group whose bar
  * is hidden, which ends the mode as Done does, so Back never leaves the
  * room with a group held. Not while the token's panel shows the selection,
  * as after Details or with the side panel on its Token tab: there Escape
  * leaves the panel and the group alone, and Done is the way out.
  *
  * "token" is Escape's alone (docs/design-v1-token-panel.md 3.3): with no
- * bar showing, a token selected and Select several off, Escape lets go of
+ * bar showing, a token selected and Multi-select off, Escape lets go of
  * it, so the keyboard always has a way to deselect before H, L, Delete or
  * the arrow keys act on a token no longer in view. Not while a map pane
  * (a label, pin or light pane) is open, which Escape closes first.

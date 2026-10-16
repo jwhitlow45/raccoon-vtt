@@ -40,7 +40,7 @@ export const SUMMARY_ROW = 44;
 export const SNAP_PX = 24;
 /** The least room left of the lane for the notices to center there instead of spanning. */
 export const NOTICES_BESIDE_MIN = 320;
-/** Below this room inside its padding, the Select several bar shows the short hint, so it stays one row. */
+/** Below this room inside its padding, the Multi-select bar shows the short hint, so it stays one row. */
 export const LONG_HINT_MIN = 600;
 
 export type Box = { left: number; top: number; width: number; height: number };
@@ -668,10 +668,10 @@ export function columnTop(laneTop: number, lastingBottom: number | null): number
   return lastingBottom === null ? laneTop : Math.max(laneTop, lastingBottom + EDGE);
 }
 
-// ------------------------------------------------------------ the Select several hint
+// ------------------------------------------------------------ the Multi-select hint
 
 /**
- * The room the Select several bar's row has inside its padding, which
+ * The room the Multi-select bar's row has inside its padding, which
  * picks its hint (design section 3). From 900 px up the bar sizes to its
  * content, so the room comes from the map's width, never from the bar's
  * own drawn width, which would lock in whichever hint showed first. On a

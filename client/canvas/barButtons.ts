@@ -13,7 +13,7 @@ export type BarButtonId =
   | "requestRoll"
   | "hidden"
   | "light"
-  | "selectSeveral"
+  | "multiSelect"
   | "locked"
   | "duplicate"
   | "delete"
@@ -61,7 +61,7 @@ export function barButtons(input: BarButtonInput): { play: BarButtonId[]; less: 
   if (dm && input.played) play.push("requestRoll");
   if (dm) play.push("hidden");
   if ((dm || owner) && input.light) play.push("light");
-  play.push("selectSeveral");
+  play.push("multiSelect");
   const less: BarButtonId[] = [];
   if (dm) less.push("locked", "duplicate", "delete");
   // The DM keeps Delete and gets no second button.

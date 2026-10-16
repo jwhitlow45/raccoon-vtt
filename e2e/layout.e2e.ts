@@ -474,13 +474,13 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
               assert.equal(await oneLine(options(page, "Pin")), true, `${who}: Pin's controls stand on one line`);
             } else await expectRail(page, "Pin", `${who}, where Pin's row wraps`);
           }
-          // Select several stays at the foot, one row, always.
+          // Multi-select stays at the foot, one row, always.
           await pickTool(page, "Select");
           const bar = role === "dm" ? await selectToken(page, phoneSocket, run.goblin.id, "Goblin 1") : await selectToken(page, playerSocket, run.thorn.id, "Thorn");
-          await bar.getByRole("button", { name: "Select several", exact: true }).tap();
+          await bar.getByRole("button", { name: "Multi-select", exact: true }).tap();
           await expectFoot(page, "Select", who);
-          assert.equal(await oneLine(options(page, "Select")), true, `${who}: Select several is one row`);
-          // A short screen's compact token bar covers the Select several bar (docs/design-v1-bar-dock.md 1.4): Close it first.
+          assert.equal(await oneLine(options(page, "Select")), true, `${who}: Multi-select is one row`);
+          // A short screen's compact token bar covers the Multi-select bar (docs/design-v1-bar-dock.md 1.4): Close it first.
           await bar.getByRole("button", { name: "Close", exact: true }).first().tap();
           await options(page, "Select").getByRole("button", { name: "Done", exact: true }).tap();
           await options(page, "Select").waitFor({ state: "detached" });
@@ -752,10 +752,10 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await endFight();
   });
 
-  test("7. 844 x 390: Escape ends Select several under a hidden Token sheet, Close then Panels opens the list, and upright a hidden sheet shows as a bottom sheet", async () => {
+  test("7. 844 x 390: Escape ends Multi-select under a hidden Token sheet, Close then Panels opens the list, and upright a hidden sheet shows as a bottom sheet", async () => {
     await pickTool(phone, "Select");
     const bar = await selectToken(phone, phoneSocket, run.goblin.id, "Goblin 1");
-    await bar.getByRole("button", { name: "Select several", exact: true }).tap();
+    await bar.getByRole("button", { name: "Multi-select", exact: true }).tap();
     await options(phone, "Select").waitFor();
     await bar.getByRole("button", { name: "Details", exact: true }).tap();
     await sheet(phone, "Token").waitFor();

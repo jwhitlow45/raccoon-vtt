@@ -144,7 +144,7 @@ export function PlayerRolls() {
    * and opens the card.
    *
    * The card's title and Later must always show and take a tap, and the
-   * Select several bar it stands on must stay in reach. So where the room
+   * Multi-select bar it stands on must stay in reach. So where the room
    * between the top bars and that bar is too short for the card's header
    * and all of it down to its first answer row (`need.whole`, measured),
    * the card folds the same way, the row standing in. The row's tap then
@@ -501,7 +501,7 @@ function RollCard(props: {
   }
   // Portaled out of the zoomed room, so it takes the interface size itself, as Sheet does: its bottom inset
   // and text then scale with the toolbar it stands on (docs/design-v1-dm-tools.md 3.16). It stands on the
-  // active tool's options too, once Room has measured them, so Select several's Actions and Done stay in reach.
+  // active tool's options too, once Room has measured them, so Multi-select's Actions and Done stay in reach.
   return (
     <section
       {...common}

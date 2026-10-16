@@ -559,7 +559,7 @@ export function MapStage(props: {
   } | null>(null);
   /**
    * A box being dragged over the map to select the tokens under it, in
-   * screen pixels. With Select several on and no key that adds (`add`), a
+   * screen pixels. With Multi-select on and no key that adds (`add`), a
    * box that never moves past the tap slop is a tap off instead
    * (docs/design-v1-bar-dock.md section 3).
    */
@@ -851,7 +851,7 @@ export function MapStage(props: {
           const picked = tokensInBox(tokensByIdRef.current.values(), screenToWorld(c, box.start), screenToWorld(c, p));
           if (picked.length > 0) uiRef.current.selectMany(picked.map((t) => t.id));
         } else if (lifted && !held && !box.add) {
-          // Select several's tap off hides the group's bar and keeps the group (state/selection.ts tapToken), and opens nothing, as before.
+          // Multi-select's tap off hides the group's bar and keeps the group (state/selection.ts tapToken), and opens nothing, as before.
           onSelectRef.current(null);
           putAway(toolContextRef.current, screenToWorld(c, p));
         }

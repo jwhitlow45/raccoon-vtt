@@ -12,7 +12,7 @@ const WIDE_BAR_PADDING = 2 * theme.space(2) + 2 * theme.line.border;
 const SENTENCE = "Tap tokens to add or remove them, or drag a box on the map.";
 
 /**
- * The select tool's bar while "Select several" is on (state/selection.ts).
+ * The select tool's bar while "Multi-select" is on (state/selection.ts).
  * A phone has no Shift key, so the mode says what a tap does now, and Done
  * ends it and lets go of the group. A tap on empty map hides the group's
  * action bar and keeps the group, and Actions, shown only while the bar is

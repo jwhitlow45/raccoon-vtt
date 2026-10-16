@@ -169,7 +169,7 @@ describe("camera gesture", () => {
 
   test("a still press on a token or for a box the ping reported is held, though it is no tap on empty map", () => {
     const g = new CameraGesture();
-    // Select several's box gesture goes down as "tool", not on empty map (Stage.tsx).
+    // Multi-select's box gesture goes down as "tool", not on empty map (Stage.tsx).
     g.down(1, { x: 10, y: 10 }, cam, false);
     g.move(1, { x: 14, y: 13 });
     g.hold(1);

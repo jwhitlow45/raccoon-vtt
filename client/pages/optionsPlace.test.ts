@@ -65,7 +65,7 @@ describe("where a tool's options go", () => {
     }
   });
 
-  test("Select several stays at the foot always, a record or not", () => {
+  test("Multi-select stays at the foot always, a record or not", () => {
     assert.equal(optionsPlace({ allowed: true, toolId: "select", optionsAt: "foot", footWidth: 513, wrappedAt: null }), "foot");
     assert.equal(optionsPlace({ allowed: true, toolId: "select", optionsAt: "foot", footWidth: 513, wrappedAt: 900 }), "foot");
   });

@@ -462,7 +462,7 @@ export const BEHAVIORS: readonly Behavior[] = [
   {
     id: "escape",
     input: "Escape",
-    does: "Close a sheet, else the token's action bar, else let go of the selection and end Select several. While the token's panel shows the selection, the bar closes and keeps it, and a group stays until Done",
+    does: "Close a sheet, else the token's action bar, else let go of the selection and end Multi-select. While the token's panel shows the selection, the bar closes and keeps it, and a group stays until Done",
     roles: EVERYONE,
     device: "keys",
   },
@@ -473,7 +473,7 @@ export const BEHAVIORS: readonly Behavior[] = [
   {
     id: "selectAdd",
     input: "Shift or Ctrl+click a token (Cmd on a Mac)",
-    does: "Add it to the selection, or take it out",
+    does: "Add it to the selection, or take it out, as Multi-select does",
     roles: EVERYONE,
     when: "with the Select tool",
     device: "mouse",
@@ -492,7 +492,7 @@ export const BEHAVIORS: readonly Behavior[] = [
     input: "Right-click a token",
     does: "Select it alone, whatever the tool. With the Select tool its action bar opens too",
     roles: EVERYONE,
-    when: "with Select several off",
+    when: "with Multi-select off",
     device: "mouse",
   },
   { id: "buttonPan", input: "Drag with the right or middle button", does: "Move the map", roles: EVERYONE, when: "with any tool", device: "mouse" },

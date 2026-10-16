@@ -10,25 +10,25 @@ const OWNER: BarButtonInput = { ...NOTHING, owner: true };
 describe("the bar's two rows", () => {
   test("the DM on a monster, alive or dead, docked: play first, then the setup and destructive row", () => {
     assert.deepEqual(barButtons(DM), {
-      play: ["conditions", "hidden", "selectSeveral"],
+      play: ["conditions", "hidden", "multiSelect"],
       less: ["locked", "duplicate", "delete", "moveBar"],
     });
     assert.deepEqual(barButtons({ ...DM, undoMove: true, movedThisTurn: true, light: true, moved: true }), {
-      play: ["undoMove", "countLeg", "conditions", "hidden", "light", "selectSeveral"],
+      play: ["undoMove", "countLeg", "conditions", "hidden", "light", "multiSelect"],
       less: ["locked", "duplicate", "delete", "moveBar", "resetBar"],
     });
   });
 
   test("the DM on a creature a player plays, such as a companion: Request a roll after Conditions, and Delete, never Dismiss", () => {
     const rows = barButtons({ ...DM, played: true, companion: true });
-    assert.deepEqual(rows.play, ["conditions", "requestRoll", "hidden", "selectSeveral"]);
+    assert.deepEqual(rows.play, ["conditions", "requestRoll", "hidden", "multiSelect"]);
     assert.deepEqual(rows.less, ["locked", "duplicate", "delete", "moveBar"]);
   });
 
-  test("a player on their own character: Undo move, Doesn't count, the door, Conditions, Light, Select several, then Move bar", () => {
-    assert.deepEqual(barButtons(OWNER), { play: ["conditions", "selectSeveral"], less: ["moveBar"] });
+  test("a player on their own character: Undo move, Doesn't count, the door, Conditions, Light, Multi-select, then Move bar", () => {
+    assert.deepEqual(barButtons(OWNER), { play: ["conditions", "multiSelect"], less: ["moveBar"] });
     assert.deepEqual(barButtons({ ...OWNER, undoMove: true, movedThisTurn: true, door: true, light: true, moved: true }), {
-      play: ["undoMove", "countLeg", "door", "conditions", "light", "selectSeveral"],
+      play: ["undoMove", "countLeg", "door", "conditions", "light", "multiSelect"],
       less: ["moveBar", "resetBar"],
     });
   });
@@ -37,10 +37,10 @@ describe("the bar's two rows", () => {
     assert.deepEqual(barButtons({ ...OWNER, companion: true }).less, ["dismiss", "moveBar"]);
   });
 
-  test("a player on another's creature: Undo move when they could move it, Select several, Move bar", () => {
-    assert.deepEqual(barButtons(NOTHING), { play: ["selectSeveral"], less: ["moveBar"] });
+  test("a player on another's creature: Undo move when they could move it, Multi-select, Move bar", () => {
+    assert.deepEqual(barButtons(NOTHING), { play: ["multiSelect"], less: ["moveBar"] });
     assert.deepEqual(barButtons({ ...NOTHING, undoMove: true, movedThisTurn: true, door: true, light: true, played: true, companion: true }), {
-      play: ["undoMove", "selectSeveral"],
+      play: ["undoMove", "multiSelect"],
       less: ["moveBar"],
     });
   });
@@ -65,7 +65,7 @@ describe("the bar's two rows", () => {
   });
 });
 
-/** A phone's chrome at full size, without Select several's bar: the top bar, the toolbar and the safe areas. */
+/** A phone's chrome at full size, without Multi-select's bar: the top bar, the toolbar and the safe areas. */
 function chrome(input: { side: number; bottom: number; sheet?: number }): Chrome {
   const toolbar = 60 + input.bottom;
   return { top: 52, bottom: toolbar, controls: toolbar, toolbar, safe: { top: 0, right: input.side, bottom: input.bottom, left: input.side }, sheet: input.sheet ?? 0, rail: 0 };

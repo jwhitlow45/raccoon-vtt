@@ -47,10 +47,10 @@ import {
 } from "./barDock.ts";
 
 const NONE = { top: 0, right: 0, bottom: 0, left: 0 };
-/** Select several's bar: one 52 px row (docs/design-v1-bar-dock.md section 3). */
+/** Multi-select's bar: one 52 px row (docs/design-v1-bar-dock.md section 3). */
 const OPTIONS = 52;
 
-/** A phone's chrome at full size: the top bar, an optional turn band, the toolbar, Select several's bar and the safe areas. */
+/** A phone's chrome at full size: the top bar, an optional turn band, the toolbar, Multi-select's bar and the safe areas. */
 function phone(input: { band: boolean; options: boolean; safe: { top: number; side: number; bottom: number }; rail?: boolean }): Chrome {
   const toolbar = 60 + input.safe.bottom;
   return {
@@ -122,7 +122,7 @@ describe("the free area", () => {
 });
 
 describe("compact", () => {
-  test("covers only the Select several bar when 148 px reach the toolbar, and the toolbar too when they do not", () => {
+  test("covers only the Multi-select bar when 148 px reach the toolbar, and the toolbar too when they do not", () => {
     const viewport = { width: 649, height: 300 };
     const short = compactHang(viewport, viewport, phone({ band: false, options: true, safe: { top: 0, side: 47, bottom: 21 } }));
     assert.equal(short.coversToolbar, false);
@@ -132,7 +132,7 @@ describe("compact", () => {
     assert.equal(shorter.at, 300 - 21 - 8);
   });
 
-  // The worked examples of design 1.4, Select several on, insets at full size: the overlay's height, then what the summary row leaves the bar.
+  // The worked examples of design 1.4, Multi-select on, insets at full size: the overlay's height, then what the summary row leaves the bar.
   const summary = (chrome: Chrome, viewport: { width: number; height: number }) => {
     const hang = compactHang(viewport, viewport, chrome);
     const free = freeArea(viewport, chrome);
@@ -155,7 +155,7 @@ describe("compact", () => {
     assert.equal(freeArea(viewport, phone({ band: false, options: true, safe })).height, 99);
     assert.deepEqual(summary(phone({ band: false, options: true, safe }), viewport), { overlay: 151, lane: "summary", bar: 99, width: 304 });
     assert.deepEqual(summary(phone({ band: true, options: true, safe }), viewport), { overlay: 163, lane: "summary", bar: 111, width: 304 });
-    // Without Select several the bar docks, and an alert's summary row leaves it the header and a row.
+    // Without Multi-select the bar docks, and an alert's summary row leaves it the header and a row.
     const chrome = phone({ band: false, options: false, safe });
     const free = freeArea(viewport, chrome);
     assert.equal(barMode(viewport, free.height), "dock");
@@ -631,7 +631,7 @@ describe("a summary row risen over the bars (follow-up to docs/design-v1-bar-doc
   });
 });
 
-describe("the Select several hint", () => {
+describe("the Multi-select hint", () => {
   test("from 900 px up the room comes from the map's width, whichever hint shows", () => {
     // 1280 x 800: the map is 920 wide, and the bar's padding and edges take 18.
     assert.equal(hintRoom({ wide: true, mapWidth: 920, padding: 18, inner: 120 }), 622);

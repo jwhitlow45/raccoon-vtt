@@ -93,7 +93,7 @@ export type RoomUi = {
   /** Drops tokens that are gone from the selection. */
   keepSelected(present: (tokenId: string) => boolean): void;
   setMultiSelect(on: boolean): void;
-  /** Ends "Select several" and lets go of the group, as its Done does (selection.ts doneSelecting). */
+  /** Ends "Multi-select" and lets go of the group, as its Done does (selection.ts doneSelecting). */
   doneSelecting(): void;
   showActions(open: boolean): void;
   openPanel(id: string): void;

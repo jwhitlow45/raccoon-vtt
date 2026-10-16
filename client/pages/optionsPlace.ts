@@ -28,7 +28,7 @@ export function railAllowed(input: { width: number; height: number; mapWidth: nu
  * the rail wherever it is allowed. A one-row tool (`optionsAt: "foot"`)
  * stays at the foot, where it costs less map, unless its row wrapped at a
  * foot this wide or narrower (`wrappedAt`, the widest foot it wrapped at,
- * as wrapRecord keeps it). Select several never moves: it is the mode's
+ * as wrapRecord keeps it). Multi-select never moves: it is the mode's
  * one-row status line, and a rail would leave almost no map to tap tokens
  * on beside the token bar.
  */

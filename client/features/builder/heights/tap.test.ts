@@ -140,7 +140,7 @@ describe("the height readout's tap", () => {
     assert.ok(popover());
   });
 
-  test("Select several's tap off puts floaters away and opens nothing, and keeps a popover its own pin opened", () => {
+  test("Multi-select's tap off puts floaters away and opens nothing, and keeps a popover its own pin opened", () => {
     const popover = () => ctx.scope.get(pinSlot).store.getState().popover;
     const pinHead = { x: 3.5, y: 3.5 - 14 / 40 };
     ctx.scope.get(pinSlot).store.setState({ popover: { id: "pin", at: 0 } });

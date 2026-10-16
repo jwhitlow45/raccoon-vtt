@@ -146,7 +146,7 @@ export type LocalUi = {
   selectedId: string | null;
   /** Every selected token, in the order picked (state/selection.ts). */
   selectedIds: readonly string[];
-  /** "Select several": a tap adds a token to the selection or takes it out, instead of picking only it. */
+  /** "Multi-select": a tap adds a token to the selection or takes it out, instead of picking only it. */
   multi: boolean;
   /** Whether the selected token's action bar shows (design 14.3). It opens on a tap and steps aside for the token's panel. */
   actionBar: boolean;

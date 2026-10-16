@@ -527,11 +527,11 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
 
     // The two rows: play first, then setup and Delete apart, starting a line of their own.
     const names = async (row: string) => (await goblin.locator(`[data-bar-row="${row}"] button`).allInnerTexts()).map((t) => t.trim());
-    assert.deepEqual(await names("play"), ["Conditions", "Hidden", "Select several"]);
+    assert.deepEqual(await names("play"), ["Conditions", "Hidden", "Multi-select"]);
     assert.deepEqual(await names("less"), ["Locked", "Duplicate", "Delete", "Move bar"]);
-    const selectSeveral = await rectOf(goblin.getByRole("button", { name: "Select several", exact: true }));
+    const multiSelect = await rectOf(goblin.getByRole("button", { name: "Multi-select", exact: true }));
     const locked = await rectOf(goblin.getByRole("button", { name: "Locked", exact: true }));
-    assert.ok(locked.top >= selectSeveral.bottom, "Locked starts a line of its own");
+    assert.ok(locked.top >= multiSelect.bottom, "Locked starts a line of its own");
     assert.ok(Math.abs(locked.left - (await rectOf(goblin.locator('[data-bar-row="less"]'))).left) < 1);
     await shots.take(dm, "tokenpanel-dm-goblin-bar");
 

@@ -54,7 +54,7 @@ export function EntryRow(props: {
   /** A player's own creature. */
   mine: boolean;
   expanded: boolean;
-  /** "Select several" is on: a tap picks the creature for the shared HP entry instead of showing it. */
+  /** "Multi-select" is on: a tap picks the creature for the shared HP entry instead of showing it. */
   picking: boolean;
   /** Picked for the shared HP entry. */
   selected: boolean;
