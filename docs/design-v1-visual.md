@@ -515,7 +515,7 @@ On a short screen held sideways the options of a tool that runs past one row sta
 | Import a Universal VTT map | fill | lg | Dialog shell. |
 | Export the log | sheet | sm | Dialog shell. A short list of sessions, so it fits its content on a computer, where `fill` left the card mostly empty. |
 | Scene sheet, monster filters | sheet | md | Dialog shell. |
-| Keyboard shortcuts (d-dlg-shortcuts) | fill | sm | Dialog shell. Keys keep their mono `kbd` look at radius `sm`. |
+| Shortcuts (d-dlg-shortcuts) | fill | sm | Dialog shell. Keys keep their mono `kbd` look at radius `sm`. |
 | Handout popup | fill | lg | Dialog shell, close icon in the header, deeper scrim kept. |
 
 Every dialog keeps its accessible name and the structure section 2.3 gives the Dialog, which `e2e/size.e2e.ts` relies on.

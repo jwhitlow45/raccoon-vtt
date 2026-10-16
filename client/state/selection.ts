@@ -20,12 +20,13 @@ import type { LocalUi } from "./types.ts";
 /**
  * A tap on a token, on the map or on its initiative row ("tapping a row
  * opens the same menu as tapping the token", features section 10): select
- * it and open its action bar. `add` (Shift or Ctrl on a desktop, or the
- * "Select several" mode) adds it to the selection or takes it out. A token added
- * shows the bar, and one taken out leaves a hidden bar hidden, so tapping
- * tokens out of a group never covers the next one. Taking out the last
- * lets go. Null is a tap on empty map, which lets go, except while
- * selecting several, where it hides the bar and keeps the group.
+ * it and open its action bar. `add` (Shift or Ctrl with a click, Cmd on a
+ * Mac, as addsToSelection reads them, or the "Select several" mode) adds
+ * it to the selection or takes it out. A token added shows the bar, and
+ * one taken out leaves a hidden bar hidden, so tapping tokens out of a
+ * group never covers the next one. Taking out the last lets go. Null is a
+ * tap on empty map, which lets go, except while selecting several, where
+ * it hides the bar and keeps the group.
  */
 export function tapToken(local: LocalUi, tokenId: string | null, add = false): LocalUi {
   if (tokenId === null) return local.multi ? showActions(local, false) : withIds(local, [], false);
