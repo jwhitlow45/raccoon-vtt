@@ -4,7 +4,8 @@ import { MAX_ENTRIES_PER_OP } from "#shared/protocol.ts";
 import type { ProjectedActor } from "#shared/project.ts";
 import { withheldWhereItStands } from "#shared/project.ts";
 import { hpLess } from "#shared/rules/hp.ts";
-import { advantageHint, compareEntries } from "#shared/rules/initiative.ts";
+import { actsOnCharacterTurn } from "#shared/reducer/companions.ts";
+import { advantageHint, compareEntries, rowCharacter } from "#shared/rules/initiative.ts";
 import { displayName } from "../../lib/scene.ts";
 
 /**
@@ -456,6 +457,8 @@ export function addCandidates(view: RoomState, sceneId: string | null, mode: Add
   const out: Token[] = [];
   for (const token of Object.values(view.tokens)) {
     if (!token || token.sceneId !== sceneId || taken.has(token.id)) continue;
+    // A companion that acts on its character's turn takes no row of its own, which the server refuses anyway (docs/design-v1-combat-flow.md 3.6.7).
+    if (actsOnCharacterTurn(token)) continue;
     if (mode === "selected") {
       if (token.id === selectedId) out.push(token);
       continue;
@@ -472,7 +475,24 @@ export function ownCandidates(view: Pick<RoomState, "tokens" | "characters" | "e
   if (sceneId === null) return [];
   const taken = new Set((view.encounter?.entries ?? []).map((e) => e.tokenId).filter((id) => id !== undefined));
   return Object.values(view.tokens)
-    .filter((t) => t && t.sceneId === sceneId && t.kind !== "object" && !taken.has(t.id) && ownsEntry(view, memberId, { tokenId: t.id }))
+    .filter((t) => t && t.sceneId === sceneId && t.kind !== "object" && !taken.has(t.id) && !actsOnCharacterTurn(t) && ownsEntry(view, memberId, { tokenId: t.id }))
+    .sort(tokenOrder);
+}
+
+/**
+ * The companions listed under a row (docs/design-v1-combat-flow.md 3.6.7):
+ * those in this viewer's copy that act on the row's character's turn,
+ * listed under it, by name. The row's character is `rowCharacter`'s, the
+ * one the server's Reaction reset reads, so a row naming one player's
+ * token and another's character nests its token's character's companions
+ * only. A companion on another scene, or one the viewer cannot see, is not
+ * in the copy, so it is not nested.
+ */
+export function nestedCompanions(view: Pick<RoomState, "tokens">, entry: Pick<InitEntry, "tokenId" | "characterId">): Token[] {
+  const characterId = rowCharacter(view, entry);
+  if (characterId === undefined) return [];
+  return Object.values(view.tokens)
+    .filter((t): t is Token => !!t && t.companion?.turn === "shared" && t.companion.of === characterId)
     .sort(tokenOrder);
 }
 

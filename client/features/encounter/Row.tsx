@@ -1,6 +1,8 @@
-import { useId, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type Ref } from "react";
-import type { Effect, InitEntry } from "#shared/model.ts";
-import { playerPlays } from "#shared/project.ts";
+import { useId, useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type Ref } from "react";
+import type { Effect, InitEntry, Token } from "#shared/model.ts";
+import { playerPlays, type ProjectedActor } from "#shared/project.ts";
+import { hpLess } from "#shared/rules/hp.ts";
+import { rowCharacter } from "#shared/rules/initiative.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { AcBadge } from "../../components/AcBadge.tsx";
 import { Button } from "../../components/Button.tsx";
@@ -11,12 +13,14 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { REVIVE_NOTE, ReviveButton, offersRevive } from "../tokens/Revive.tsx";
+import { ownsToken } from "../tokens/access.ts";
+import { displayName } from "../../lib/scene.ts";
 import { openStatBlock } from "../tokens/statBlockOpen.ts";
 import { RowRollTools } from "./AutoInitiative.tsx";
 import { useSend } from "./hooks.ts";
-import { entryActor, entryName, hpView, parseInitiative, rollReminder, rowAc, valueText } from "./logic.ts";
+import { entryActor, entryName, hpView, nestedCompanions, parseInitiative, rollReminder, rowAc, valueText, type HpView } from "./logic.ts";
 import { Chips, DescribedHp, DescribedItems, Portrait, RollBadge, Spinner } from "./parts.tsx";
-import { readiedEffect, rowTarget } from "./ready.ts";
+import { readiedEffect, rowTarget, type ReactionTarget } from "./ready.ts";
 import { ReadyControls } from "./ReadyControls.tsx";
 
 export type RowDrag = {
@@ -54,6 +58,8 @@ export function EntryRow(props: {
   selected: boolean;
   onExpand(): void;
   onShow(): void;
+  /** A tap on a companion listed under the row, which does what a row tap does for its token. */
+  onShowToken(tokenId: string): void;
   drag: RowDrag | null;
   rowRef: Ref<HTMLLIElement>;
 }) {
@@ -67,10 +73,20 @@ export function EntryRow(props: {
     { tokens: token ? { [token.id]: token } : {}, characters: character ? { [character.id]: character } : {} },
     entry.tokenId !== undefined ? { tokenId: entry.tokenId } : entry.characterId !== undefined ? { characterId: entry.characterId } : {},
   );
-  const hp = hpView(actor);
+  // A creature with no HP to show has no readout (docs/design-v1-combat-flow.md 3.6.6).
+  const hp = hpLess(actor, token) ? NO_HP : hpView(actor);
   // The AC shield, first on the second line, which is the row button's description (docs/design-v1-combat-flow.md 3.3).
   const ac = rowAc(actor, token);
   const lineId = useId();
+  // The companions listed under the row, and whose they are (docs/design-v1-combat-flow.md 3.6.7).
+  const tokens = useRoomView((s) => s.view?.tokens);
+  const companions = useMemo(() => (tokens ? nestedCompanions({ tokens }, entry) : NO_COMPANIONS), [tokens, entry]);
+  const rowOwner = useRoomView((s) => {
+    const id = s.view ? rowCharacter(s.view, entry) : undefined;
+    return id !== undefined ? s.view?.characters[id]?.name : undefined;
+  });
+  // An own-turn companion's row names whose it is, in the words of the token panel's name block, for every viewer whose copy says so.
+  const companionOf = useRoomView((s) => (token?.companion ? s.view?.characters[token.companion.of]?.name : undefined));
   const effects = actor?.effects ?? [];
   // Whoever rolls this creature's initiative sees the reminder: the DM for every row, a player for their own.
   const reminder = dm || mine ? rollReminder(entry, effects) : undefined;
@@ -164,6 +180,11 @@ export function EntryRow(props: {
                       Lair
                     </Tag>
                   ) : null,
+                  companionOf !== undefined ? (
+                    <Tag tone="muted" dense>
+                      Companion of {companionOf}
+                    </Tag>
+                  ) : null,
                   legendary && legendary.actionsMax > 0 ? (
                     <Tag tone="turn" dense>
                       LA {legendary.actionsMax - legendary.actionsUsed}/{legendary.actionsMax}
@@ -204,8 +225,165 @@ export function EntryRow(props: {
           revive={offersRevive(actor?.life, token?.kind)}
         />
       ) : null}
+      {companions.length > 0 ? (
+        // After the row's options, so those stay under the ⋯ that opened them. Inside the row, so its turn's tint covers them.
+        <ul aria-label={`Acting on ${rowOwner ?? name}'s turn`} style={{ margin: 0, padding: `0 0 ${theme.space(1)}px`, display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
+          {companions.map((c) => (
+            <CompanionRow key={c.id} token={c} characterName={rowOwner ?? name} entryId={entry.id} role={role} onShow={() => props.onShowToken(c.id)} />
+          ))}
+        </ul>
+      ) : null}
     </li>
   );
+}
+
+const NO_COMPANIONS: Token[] = [];
+const NO_HP: HpView = { kind: "none" };
+
+/**
+ * A companion that acts on its character's turn, listed under the
+ * character's row (docs/design-v1-combat-flow.md 3.6.7): its picture, name,
+ * AC, HP, conditions and its own Reaction and Ready, struck through when
+ * dead. A tap does what a row tap does. It has no value box and no drag
+ * handle, since it takes its character's place in the order. For the DM
+ * and its owners, a ⋯ opens its Reaction, Ready, and for the DM its stat
+ * block and Revive.
+ */
+function CompanionRow(props: { token: Token; characterName: string; entryId: string; role: "dm" | "player"; onShow(): void }) {
+  const { token, role } = props;
+  const dm = role === "dm";
+  const [open, setOpen] = useState(false);
+  const memberId = useRoomView((s) => s.you?.memberId);
+  const characters = useRoomView((s) => s.view?.characters);
+  const playerOwned = useRoomView((s) => (s.view ? playerPlays(s.view, { token }) : false));
+  const lineId = useId();
+  const name = displayName(token);
+  const actor = "inline" in token.actor ? (token.actor.inline as ProjectedActor) : undefined;
+  const hp = hpLess(actor, token) ? NO_HP : hpView(actor);
+  const ac = rowAc(actor, token);
+  const effects = actor?.effects ?? [];
+  const readied = readiedEffect(effects);
+  const dead = actor?.life === "dead";
+  const owner = ownsToken({ characters: characters ?? {} }, memberId, token);
+  const spent = token.companion?.reactionUsed === true;
+  return (
+    <li style={{ listStyle: "none" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), minHeight: theme.touch, paddingLeft: theme.touch }}>
+        <button
+          type="button"
+          onClick={props.onShow}
+          aria-label={`${name}, acts on ${props.characterName}'s turn. Show it on the map with its actions.`}
+          aria-describedby={lineId}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: theme.space(2),
+            minHeight: theme.touch,
+            padding: `${theme.space(0.5)}px 0`,
+            background: "transparent",
+            border: "none",
+            color: theme.color.text,
+            fontFamily: theme.font.body,
+            textAlign: "left",
+            cursor: "pointer",
+          }}
+        >
+          <Portrait entry={{ tokenId: token.id }} size={28} dim={dead} />
+          <span style={{ flex: 1, minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(0.5) }}>
+            <span
+              style={{
+                fontSize: theme.font.body14,
+                fontWeight: theme.weight.strong,
+                color: dead ? theme.color.textMuted : theme.color.text,
+                textDecoration: dead ? "line-through" : undefined,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {name}
+            </span>
+            <span id={lineId} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), fontSize: theme.font.small, color: theme.color.textMuted }}>
+              <DescribedItems
+                items={[
+                  ac !== null ? <AcBadge ac={ac} size="sm" /> : null,
+                  hp.kind !== "none" ? <DescribedHp hp={hp} /> : null,
+                  dm && token.visibility === "dm" ? (
+                    <Tag tone="muted" dense>
+                      Hidden
+                    </Tag>
+                  ) : null,
+                  readied ? (
+                    <Tag tone="turn" dense>
+                      Readied
+                    </Tag>
+                  ) : null,
+                  spent ? (
+                    <Tag tone="muted" dense>
+                      Reaction used
+                    </Tag>
+                  ) : null,
+                  effects.length > 0 ? <Chips effects={effects} max={6} /> : null,
+                ]}
+              />
+            </span>
+          </span>
+        </button>
+        {dm || owner ? (
+          <IconButton icon="more" label={`${name} options`} onClick={() => setOpen((o) => !o)} pressed={open} aria-pressed={undefined} aria-expanded={open} />
+        ) : (
+          <span style={{ width: theme.touch, flex: "none" }} />
+        )}
+      </div>
+      {open && (dm || owner) ? (
+        <CompanionMenu token={token} entryId={props.entryId} dm={dm} readied={readied} playerOwned={playerOwned} spent={spent} dead={dead} />
+      ) : null}
+    </li>
+  );
+}
+
+/** A listed companion's options: its own Reaction, its Ready on its character's turn, and for the DM its stat block and Revive. */
+function CompanionMenu(props: { token: Token; entryId: string; dm: boolean; readied: Effect | undefined; playerOwned: boolean; spent: boolean; dead: boolean }) {
+  const { token, dm } = props;
+  const actions = useRoomActions();
+  const ui = useRoomUi();
+  const scope = useRoomScope();
+  const reviveNoteId = useId();
+  const target = { tokenId: token.id };
+  return (
+    <div style={{ padding: `0 ${theme.space(2)}px ${theme.space(3)}px ${theme.touch * 2}px`, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
+      {dm && props.dead && offersRevive("dead", token.kind) ? (
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2) }}>
+          <ReviveButton target={target} describedBy={reviveNoteId} />
+          <span id={reviveNoteId} style={{ flex: 1, minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>
+            {REVIVE_NOTE}
+          </span>
+        </div>
+      ) : null}
+      {/* Its own patch, which a device that holds the token predicts at once (shared/reads.ts). */}
+      <Switch
+        label="Reaction used"
+        help="Its own, which clears when its character's turn starts"
+        checked={props.spent}
+        onChange={(on) => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { companionReaction: on } })}
+      />
+      <ReadyControls answer={{ kind: "companion", tokenId: token.id, entryId: props.entryId }} target={target} readied={props.readied} dm={dm} playerOwned={props.playerOwned} />
+      {dm && (token.kind === "monster" || token.kind === "npc") ? (
+        <div style={{ display: "flex" }}>
+          <Button size="sm" onClick={() => openStatBlock(scope, ui, token.id)}>
+            Stat block
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** A row's own Reaction and turn, for its Ready (ready.ts reactionTarget's answer for a creature with its own row). */
+function rowAnswer(entry: InitEntry): ReactionTarget {
+  return entry.tokenId !== undefined ? { kind: "row", entryId: entry.id, tokenId: entry.tokenId } : { kind: "row", entryId: entry.id };
 }
 
 function legendaryTarget(token: { id: string; actor: { ref: string } | { inline: unknown } } | undefined, characterId: string | undefined) {
@@ -405,7 +583,7 @@ function RowMenu(props: {
           <Switch label="Hidden from players" help="Players do not see this row" checked={entry.hidden} onChange={(hidden) => update({ hidden })} />
           <Switch label="Reaction used" help="Clears at the start of its turn" checked={entry.reactionUsed} onChange={(reactionUsed) => update({ reactionUsed })} />
           <Switch label="In lair" checked={entry.inLair} onChange={(inLair) => update({ inLair })} />
-          {props.target ? <ReadyControls entryId={entry.id} target={props.target} readied={props.readied} dm playerOwned={props.playerOwned} /> : null}
+          {props.target ? <ReadyControls answer={rowAnswer(entry)} target={props.target} readied={props.readied} dm playerOwned={props.playerOwned} /> : null}
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
             <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>Initiative roll reminder. Auto follows its conditions.</span>
             <div role="group" aria-label="Initiative roll reminder" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
@@ -468,7 +646,7 @@ function RowMenu(props: {
             busy={reaction.waiting}
             onChange={(reactionUsed) => reaction.send({ t: "encounter.update", entryId: entry.id, patch: { reactionUsed } })}
           />
-          {props.target ? <ReadyControls entryId={entry.id} target={props.target} readied={props.readied} dm={false} playerOwned={props.playerOwned} /> : null}
+          {props.target ? <ReadyControls answer={rowAnswer(entry)} target={props.target} readied={props.readied} dm={false} playerOwned={props.playerOwned} /> : null}
         </>
       )}
       <div style={{ display: "flex", justifyContent: "flex-end" }}>

@@ -74,13 +74,24 @@ export function entryIsSelf(view: View, entry: { tokenId?: string; characterId?:
  * finds that row from the token or character anyway.
  */
 export function anchorOptions(view: View | null | undefined, self: SelfRef, selfLabel: string): AnchorOption[] {
-  const options: AnchorOption[] = [{ key: SELF_KEY, label: `${selfLabel} (this creature)`, anchor: self }];
+  const options: AnchorOption[] = [{ key: SELF_KEY, label: `${selfLabel} (${selfWords(view, self)})`, anchor: self }];
   if (!view?.encounter) return options;
   for (const entry of view.encounter.entries) {
     if (entryIsSelf(view, entry, self)) continue;
     options.push({ key: `entry:${entry.id}`, label: anchorName(view, { entryId: entry.id }), anchor: { entryId: entry.id } });
   }
   return options;
+}
+
+/**
+ * How the effect's own creature reads among the choices: "this creature",
+ * or for a companion that acts on its character's turn, whose turn its
+ * durations count (docs/design-v1-combat-flow.md 3.6.8), "on Bree's turn".
+ */
+function selfWords(view: View | null | undefined, self: SelfRef): string {
+  const companion = "tokenId" in self ? view?.tokens[self.tokenId]?.companion : undefined;
+  if (!companion || companion.turn === "own") return "this creature";
+  return `on ${view?.characters[companion.of]?.name ?? "its character"}'s turn`;
 }
 
 /**

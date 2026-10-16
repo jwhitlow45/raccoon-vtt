@@ -390,6 +390,7 @@ function EntryList(props: { close(): void }) {
             selected={multi && entry.tokenId !== undefined && selectedIds.includes(entry.tokenId)}
             onExpand={() => setExpanded(expanded === entry.id ? null : entry.id)}
             onShow={() => show(entry.tokenId)}
+            onShowToken={show}
             drag={rowDrag}
             rowRef={(el) => {
               if (el) rows.current.set(entry.id, el);

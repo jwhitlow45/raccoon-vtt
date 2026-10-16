@@ -1,4 +1,5 @@
 import { sameImage } from "#shared/imageRef.ts";
+import { actsOnCharacterTurn } from "#shared/reducer/companions.ts";
 import type { Character, Effect, Encounter, ImageRef, MemberId, Token } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { MAX_ENTRIES_PER_OP, type ActorTarget, type ClientOp, type TokenGroupPatch } from "#shared/protocol.ts";
@@ -194,9 +195,10 @@ export function deleteButtonWords(armed: boolean, armedText?: string): { text: s
  * conditions leave them out. A box drawn over a fight often catches a
  * barrel or a marker, which takes no turn (LP5-ROLLS-7).
  */
-export function fightCandidates<T extends Pick<Token, "id" | "kind">>(tokens: readonly T[], encounter: Pick<Encounter, "entries"> | null | undefined): T[] {
+export function fightCandidates<T extends Pick<Token, "id" | "kind"> & { companion?: Token["companion"] }>(tokens: readonly T[], encounter: Pick<Encounter, "entries"> | null | undefined): T[] {
   const taken = new Set((encounter?.entries ?? []).map((e) => e.tokenId));
-  return tokens.filter((t) => t.kind !== "object" && !taken.has(t.id));
+  // A companion that acts on its character's turn takes no row of its own (docs/design-v1-combat-flow.md 3.6.7).
+  return tokens.filter((t) => t.kind !== "object" && !taken.has(t.id) && !actsOnCharacterTurn(t));
 }
 
 /**
@@ -204,7 +206,7 @@ export function fightCandidates<T extends Pick<Token, "id" | "kind">>(tokens: re
  * With no fight on, the same tap starts one with them, as the tracker's
  * "Start a fight with" does.
  */
-export function fightOps(tokens: readonly Pick<Token, "id" | "kind">[], encounter: Pick<Encounter, "entries"> | null | undefined, newId: () => string): ClientOp[] {
+export function fightOps(tokens: readonly (Pick<Token, "id" | "kind"> & { companion?: Token["companion"] })[], encounter: Pick<Encounter, "entries"> | null | undefined, newId: () => string): ClientOp[] {
   const entries = fightCandidates(tokens, encounter).map((t) => ({ id: newId(), tokenId: t.id }));
   const parts = chunks(entries, MAX_ENTRIES_PER_OP);
   if (!encounter) {

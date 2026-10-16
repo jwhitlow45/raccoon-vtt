@@ -10,7 +10,7 @@ import { Icon } from "../../components/Icon.tsx";
 import { buttonLook } from "../../components/looks.ts";
 import { Markdown } from "../../components/Markdown.tsx";
 import { dispatchGesture } from "../../state/actions.ts";
-import { fireOps, MAX_TRIGGER, selfEntryId } from "../encounter/ready.ts";
+import { fireOps, MAX_TRIGGER, reactionTarget } from "../encounter/ready.ts";
 import { effectChip, effectCount } from "../../lib/tokenView.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
@@ -322,9 +322,10 @@ function EffectDetail(props: {
   };
 
   // A readied action that fires spends the creature's Reaction, which lives on its initiative row.
-  const ownEntryId = key === "readied" && existing ? selfEntryId(view, props.self) : undefined;
+  // Whose Reaction it spends: a companion listed under its character spends its own, never Bree's (docs/design-v1-combat-flow.md 3.6.8).
+  const answer = key === "readied" && existing ? reactionTarget(view, props.self) : null;
   const fire = () => {
-    if (existing && ownEntryId !== undefined) dispatchGesture(actions, fireOps({ target, effectId: existing.id, entryId: ownEntryId }));
+    if (existing && answer) dispatchGesture(actions, fireOps({ target, effectId: existing.id, answer }));
     props.onDone();
   };
 
@@ -463,7 +464,7 @@ function EffectDetail(props: {
             <SmallButton tone="primary" grow onClick={submit}>
               {existing ? "Save" : "Add"}
             </SmallButton>
-            {ownEntryId !== undefined ? <SmallButton onClick={fire}>It fired: Reaction used</SmallButton> : null}
+            {answer ? <SmallButton onClick={fire}>It fired: Reaction used</SmallButton> : null}
             {existing ? (
               <SmallButton tone="danger" onClick={remove}>
                 Remove

@@ -43,6 +43,17 @@ describe("duration form options", () => {
     assert.equal(defaultAnchorKey(state, options), SELF_KEY);
   });
 
+  test("a companion that acts on its character's turn reads as on that character's turn, and its durations count that row (docs/design-v1-combat-flow.md 3.6.8)", () => {
+    const state = fixture(true);
+    state.tokens.ws = token("ws", { kind: "npc", name: "Wildfire Spirit", companion: { of: "hero", turn: "shared" } });
+    const options = anchorOptions(state, { tokenId: "ws" }, "Wildfire Spirit");
+    assert.equal(options[0]!.label, "Wildfire Spirit (on Thorn's turn)");
+    const input = durationInput({ mode: "turnEnd", rounds: 1, anchorKey: SELF_KEY }, options)!;
+    assert.deepEqual(resolveDuration(state, input).anchor, { entryId: "e-pc" });
+    state.tokens.ws = { ...state.tokens.ws!, companion: { of: "hero", turn: "own" } };
+    assert.equal(anchorOptions(state, { tokenId: "ws" }, "Wildfire Spirit")[0]!.label, "Wildfire Spirit (this creature)");
+  });
+
   test("in combat the other rows follow, and the creature's own row folds into the first option", () => {
     const state = fixture(true);
     const options = anchorOptions(state, { tokenId: "g2" }, "Goblin 2");

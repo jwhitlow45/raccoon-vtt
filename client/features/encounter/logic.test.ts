@@ -5,6 +5,7 @@ import { projectState } from "#shared/project.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
 import { actor, apply, character, DM, effect, entry, P1, reveal, room, token } from "#shared/testutil.ts";
+import { fightCandidates, fightOps } from "../tokens/groupEdit.ts";
 import {
   addCandidates,
   answersPrompt,
@@ -16,6 +17,7 @@ import {
   groupEntries,
   hasStarted,
   hpView,
+  nestedCompanions,
   onAnotherScene,
   portraitDisposition,
   ownCandidates,
@@ -560,3 +562,51 @@ describe("the AC a row shows (docs/design-v1-combat-flow.md 3.3)", () => {
     assert.equal(rowAc(undefined), null);
   });
 });
+
+describe("companions in the tracker (docs/design-v1-combat-flow.md 3.6.7)", () => {
+  /** Bree (p1) with a spirit listed under her, a weapon not listed, and an owl with its own turn, and Cy's (p2) character. */
+  function party(): RoomState {
+    const state = room({ characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }), cy: character("cy", { name: "Cy", ownerIds: ["p2"] }) } });
+    state.tokens.bt = token("bt", { kind: "pc", name: "Bree", actor: { ref: "bree" }, ownerIds: ["p1"], x: 1, y: 1 });
+    state.tokens.ws = token("ws", { kind: "npc", name: "Wildfire Spirit", ownerIds: ["p1"], companion: { of: "bree", turn: "shared" }, x: 2, y: 1 });
+    state.tokens.ash = token("ash", { kind: "npc", name: "Ash Imp", ownerIds: ["p1"], companion: { of: "bree", turn: "shared" }, x: 3, y: 1 });
+    state.tokens.sw = token("sw", { kind: "object", name: "Spiritual Weapon", ownerIds: ["p1"], companion: { of: "bree", turn: "none" }, x: 4, y: 1 });
+    state.tokens.owl = token("owl", { kind: "npc", name: "Owl", ownerIds: ["p1"], companion: { of: "bree", turn: "own" }, x: 5, y: 1 });
+    state.tokens.far = token("far", { kind: "npc", name: "Far Spirit", sceneId: "s2", ownerIds: ["p1"], companion: { of: "bree", turn: "shared" } });
+    state.tokens.cyc = token("cyc", { kind: "npc", name: "Cy's hawk", ownerIds: ["p2"], companion: { of: "cy", turn: "shared" }, x: 6, y: 1 });
+    return state;
+  }
+
+  test("Everyone here, Visible to players, Selected token, Join the fight and the group's Add to the fight leave out companions on their character's turn", () => {
+    const state = party();
+    for (const mode of ["scene", "visible"] as const) {
+      const ids = addCandidates(state, "s1", mode, null).map((t) => t.id);
+      assert.ok(ids.includes("owl"), mode);
+      for (const id of ["ws", "ash", "sw", "cyc"]) assert.ok(!ids.includes(id), `${mode} ${id}`);
+    }
+    assert.deepEqual(addCandidates(state, "s1", "selected", "ws"), []);
+    assert.deepEqual(addCandidates(state, "s1", "selected", "owl").map((t) => t.id), ["owl"]);
+    assert.deepEqual(ownCandidates(state, "p1", "s1").map((t) => t.id).sort(), ["bt", "owl"]);
+    const all = Object.values(state.tokens);
+    assert.deepEqual(fightCandidates(all, null).map((t) => t.id).sort(), ["bt", "owl"]);
+    const ops = fightOps(all, null, () => "n");
+    assert.ok(ops.every((op) => op.t !== "encounter.start" || op.entries.every((e) => !["ws", "ash", "sw", "cyc", "far"].includes(e.tokenId ?? ""))));
+  });
+
+  test("a row nests the shared companions of its token's character, by name, only those in the view", () => {
+    const state = party();
+    // The DM's view holds the tokens of the scene in view, so the spirit left on s2 is not in it.
+    const dm = projectState(state, DM, { sceneId: "s1" }) as unknown as RoomState;
+    assert.deepEqual(nestedCompanions(dm, { tokenId: "bt" }).map((t) => t.id), ["ash", "ws"], "by name and shared only");
+    assert.deepEqual(nestedCompanions(dm, { characterId: "bree" }).map((t) => t.id), ["ash", "ws"], "a row with no token, by its character");
+    assert.deepEqual(nestedCompanions(dm, { tokenId: "bt", characterId: "cy" }).map((t) => t.id), ["ash", "ws"], "a mixed row nests its token's character's only");
+    assert.deepEqual(nestedCompanions(dm, { tokenId: "owl" }), [], "a token with its own actor has no character");
+    assert.deepEqual(nestedCompanions(dm, { tokenId: "gone" }), []);
+    const p2 = projectState(state, { memberId: "p2", role: "player" }, { sceneId: "s1" }) as unknown as RoomState;
+    assert.deepEqual(nestedCompanions(p2, { tokenId: "bt" }).map((t) => t.id), ["ash", "ws"], "another player sees a party member's companions nested");
+    state.tokens.ws = { ...state.tokens.ws!, visibility: "dm" };
+    const hidden = projectState(state, { memberId: "p2", role: "player" }, { sceneId: "s1" }) as unknown as RoomState;
+    assert.deepEqual(nestedCompanions(hidden, { tokenId: "bt" }).map((t) => t.id), ["ash"], "one they cannot see is not nested");
+  });
+});
+

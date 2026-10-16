@@ -8,7 +8,7 @@ import { Switch } from "../../components/Switch.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions } from "../../state/view.ts";
 import { useSend, useSendAll } from "./hooks.ts";
-import { fireOps, MAX_TRIGGER, readyOp } from "./ready.ts";
+import { fireOps, MAX_TRIGGER, readyOp, type ReactionTarget } from "./ready.ts";
 
 /**
  * A row's Ready action (features section 10), for the DM and the creature's
@@ -19,8 +19,8 @@ import { fireOps, MAX_TRIGGER, readyOp } from "./ready.ts";
  * Players see only that a creature no player owns readied, not its trigger
  * (a design decision), so on such a creature the DM may show it to them.
  */
-export function ReadyControls(props: { entryId: string; target: ActorTarget; readied: Effect | undefined; dm: boolean; playerOwned: boolean }) {
-  const { entryId, target, readied } = props;
+export function ReadyControls(props: { answer: ReactionTarget; target: ActorTarget; readied: Effect | undefined; dm: boolean; playerOwned: boolean }) {
+  const { answer, target, readied } = props;
   const actions = useRoomActions();
   const ready = useSend();
   const fire = useSendAll();
@@ -50,7 +50,7 @@ export function ReadyControls(props: { entryId: string; target: ActorTarget; rea
         ) : null}
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
           {/* Secondary: the tracker's one primary is Next (docs/design-v1-visual.md 3.3). */}
-          <Button size="sm" busy={fire.waiting} onClick={() => fire.send(fireOps({ target, effectId: readied.id, entryId }))}>
+          <Button size="sm" busy={fire.waiting} onClick={() => fire.send(fireOps({ target, effectId: readied.id, answer }))}>
             It fired: Reaction used
           </Button>
           <Button
@@ -75,7 +75,7 @@ export function ReadyControls(props: { entryId: string; target: ActorTarget; rea
   }
 
   const submit = () => {
-    ready.send(readyOp({ target, entryId, trigger, id: actions.newId() }));
+    ready.send(readyOp({ target, answer, trigger, id: actions.newId() }));
     setTrigger("");
   };
 
