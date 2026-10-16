@@ -19,6 +19,23 @@ describe("roomStateSchema", () => {
     }
   });
 
+  test("companions, their spent Reactions, the saved Reactions of a step, the companion line and healing the dead parse, all optional (docs/design-v1-combat-flow.md 4.7)", () => {
+    const state = room({ characters: { bree: character("bree") } });
+    state.meta.settings = { ...state.meta.settings, healRevives: false };
+    state.tokens.ws = token("ws", { kind: "npc", ownerIds: ["p1"], companion: { of: "bree", turn: "shared", reactionUsed: true } });
+    state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [] };
+    state.encounterHistory = [{ encounter: { rev: 0, round: 1, activeEntryId: null, entries: [] }, effects: {}, revealed: [], companionReactions: ["ws"], at: "x" }];
+    state.log = [{ id: "1:0", at: "x", kind: "event", data: { type: "companion", tokenId: "ws", characterId: "bree", memberId: "p1", name: "Wildfire Spirit" } }];
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    const bad = JSON.parse(JSON.stringify(state));
+    bad.tokens.ws.companion.turn = "sometimes";
+    assert.equal(parseRoomState(bad).ok, false);
+    const older = JSON.parse(JSON.stringify(state));
+    delete older.meta.settings.healRevives;
+    assert.ok(parseRoomState(older).ok, "a backup from before the setting");
+  });
+
   test("a room where a member was removed parses, so its backup can be imported", () => {
     const fresh = createInitialState({ roomName: "R", dm: { id: "m1", rev: 1, name: "DM", color: "#f38400", kind: "dm", createdAt: new Date().toISOString() } });
     const removed = { ...fresh, log: [{ id: "1:0", at: new Date().toISOString(), kind: "event", data: { type: "member", memberId: "m2", action: "remove" } }] };

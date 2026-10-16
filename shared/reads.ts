@@ -2,6 +2,7 @@ import { doorChunk, keys, readEntity, type EntityKey } from "./keys.ts";
 import type { RoomState, Viewer } from "./model.ts";
 import type { ActorTarget, Op } from "./protocol.ts";
 import type { ProjectedState } from "./project.ts";
+import { nextTurn } from "./rules/initiative.ts";
 
 /**
  * What an op reads (design 7.4), so the client knows whether its redacted
@@ -79,20 +80,27 @@ export function reads(op: Op, state: RoomState): Reads {
       return of(op.order.map((id) => ({ key: keys.scene(id) })), ["scenes"]);
 
     case "token.create": {
+      // A companion's checks read its character's tokens and the walls, and a player's writes the DM's line, so its
+      // form waits for the server (docs/design-v1-combat-flow.md 4.6).
+      if (op.token.companion) return NEVER;
       const r: Read[] = [{ key: keys.scene(op.token.sceneId) }];
       if ("ref" in op.token.actor) r.push({ key: keys.character(op.token.actor.ref) });
       const numbered = op.token.kind === "npc" || op.token.kind === "monster";
       return of(r, numbered ? [`scene:${op.token.sceneId}`] : []);
     }
     case "token.update": {
-      const r: Read[] = [{ key: keys.token(op.tokenId) }];
+      // Changing what a companion is may remove rows, rewrite the history and bind durations over every actor.
+      if (op.patch.companion !== undefined) return NEVER;
+      // Its Reaction alone reads its `companion` field, so a device that holds the token predicts the switch at once.
+      const r: Read[] = [{ key: keys.token(op.tokenId), ...(op.patch.companionReaction !== undefined ? { fields: ["companion"] } : {}) }];
       if (op.patch.sceneId !== undefined) r.push({ key: keys.scene(op.patch.sceneId) });
       if (op.patch.actor) r.push(holderRead(state, { tokenId: op.tokenId }, op.patch.actor.hp ? ["hp", "life"] : ["life"]));
       return of(r);
     }
+    // A companion's deletion rewrites the fight's history (docs/design-v1-combat-flow.md 3.6.8).
     case "token.delete": {
       const token = state.tokens[op.tokenId];
-      return of([{ key: keys.token(op.tokenId) }], token ? [`scene:${token.sceneId}`, "encounter"] : ["encounter"]);
+      return of([{ key: keys.token(op.tokenId) }, { key: keys.encounterHistory }], token ? [`scene:${token.sceneId}`, "encounter"] : ["encounter"]);
     }
     case "token.move":
       return of([{ key: keys.token(op.tokenId) }]);
@@ -125,10 +133,11 @@ export function reads(op: Op, state: RoomState): Reads {
 
     case "character.create":
       return of([]);
+    // New owners reach the character's companions on every scene, which only a one-scene room viewed whole holds.
     case "character.update":
-      return of([{ key: keys.character(op.characterId), fields: op.patch.actor?.hp ? ["actor.hp", "actor.life"] : [] }]);
+      return of([{ key: keys.character(op.characterId), fields: op.patch.actor?.hp ? ["actor.hp", "actor.life"] : [] }], op.patch.ownerIds !== undefined ? ["tokens"] : []);
     case "character.delete":
-      return of([{ key: keys.character(op.characterId) }], ["tokens", "encounter"]);
+      return of([{ key: keys.character(op.characterId) }, { key: keys.encounterHistory }], ["tokens", "encounter"]);
 
     // A DM's view always holds every monster and SRD image, whatever scene it shows.
     case "monster.create":
@@ -207,10 +216,13 @@ export function reads(op: Op, state: RoomState): Reads {
     case "encounter.setValues":
     case "encounter.reorder":
     case "encounter.update":
-    case "encounter.next":
       return of([], ["encounter"]);
-    case "encounter.prev":
-      return of([{ key: keys.encounterHistory }], ["encounter"]);
+    case "encounter.next":
+      return of([], ["encounter", ...companionScene(state)]);
+    case "encounter.prev": {
+      const saved = state.encounterHistory?.[state.encounterHistory.length - 1]?.companionReactions ?? [];
+      return of([{ key: keys.encounterHistory }, ...saved.map((id) => ({ key: keys.token(id) }))], ["encounter"]);
+    }
 
     case "log.chat":
       return of([]);
@@ -232,7 +244,7 @@ export function reads(op: Op, state: RoomState): Reads {
         if (token) scenes.add(token.sceneId);
       }
       return of(
-        op.tokenIds.map((id) => ({ key: keys.token(id) })),
+        [...op.tokenIds.map((id) => ({ key: keys.token(id) })), { key: keys.encounterHistory }],
         [...[...scenes].map((sceneId): Collection => `scene:${sceneId}`), "encounter"],
       );
     }
@@ -277,6 +289,25 @@ export function reads(op: Op, state: RoomState): Reads {
     case "roll.close":
       return of(op.rollIds.map((id) => ({ key: keys.roll(id) })));
   }
+}
+
+/**
+ * The scene whose `shared` companions a Next clears (docs/design-v1-combat-flow.md
+ * 3.6.8 and 4.6): the landing row token's scene, or the players' scene for
+ * a row with no token. A DM's view that holds every row's token holds the
+ * token's scene whole, so the DM's Next stays predicted there.
+ */
+function companionScene(state: RoomState): Collection[] {
+  const encounter = state.encounter;
+  if (!encounter) return [];
+  const step = nextTurn(state, encounter, state.meta.settings);
+  const landing = step ? encounter.entries.find((e) => e.id === step.landing) : undefined;
+  if (!landing) return [];
+  if (landing.tokenId !== undefined) {
+    const token = state.tokens[landing.tokenId];
+    return token ? [`scene:${token.sceneId}`] : [];
+  }
+  return state.meta.playerSceneId !== null ? [`scene:${state.meta.playerSceneId}`] : [];
 }
 
 function fieldPresent(entity: unknown, path: string): boolean {

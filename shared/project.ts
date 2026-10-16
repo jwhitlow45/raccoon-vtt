@@ -47,7 +47,7 @@ import { autoWallBetween, paintedAt } from "./rules/autoWalls.ts";
 import { visionRules, type PartySight } from "./ruleHooks.ts";
 import { decodeTile, encodeTile, getBit, isAboveFog, isRangeFullyFogged, labelCells, tilesAcross, TILE_CELLS } from "./rules/fog.ts";
 import { footprintRect, occupiedCells, occupiedRange, type CellRange } from "./rules/footprint.ts";
-import { hpBar, hpLabel, type HpLabel } from "./rules/hp.ts";
+import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
 import { compareEntries } from "./rules/initiative.ts";
 import { pathThisTurn, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
 import { sightRect } from "./rules/vision.ts";
@@ -403,18 +403,37 @@ function tokenVisibleById(ctx: Ctx, tokenId: string, revealedSeen = false): bool
   return token !== undefined && tokenVisibleTo(ctx, token, revealedSeen);
 }
 
-/** How much of a creature's HP the viewer may see. */
+/**
+ * How much of a creature's HP the viewer may see. A creature with no HP to
+ * show (hpLess: an effect companion, or a maximum of 0) shows other players
+ * none, so 0 of 0 never reaches them as Bloodied. A creature companion a
+ * player plays is the party's, so its HP follows the party's rule rather
+ * than its own `hpVisibility` (docs/design-v1-combat-flow.md 3.6.5).
+ */
 export function hpAccess(state: RoomState, viewer: Viewer, holder: { token?: Token; character?: Character }): HpAccess {
   if (viewer.role === "dm") return "exact";
   if (holder.character) {
     if (ownsCharacter(viewer, holder.character)) return "exact";
     if (holder.token && ownsToken(state, viewer, holder.token)) return "exact";
+    if (hpLess(holder.character.actor, holder.token)) return "none";
     return state.meta.settings.pcHpVisibleToParty ? "exact" : "label";
   }
   const token = holder.token;
   if (!token) return "none";
   if (ownsToken(state, viewer, token)) return "exact";
+  if ("inline" in token.actor && hpLess(token.actor.inline, token)) return "none";
+  if (token.companion && playersToken(state, token)) return state.meta.settings.pcHpVisibleToParty ? "exact" : "label";
   return token.hpVisibility === "hidden" ? "none" : token.hpVisibility;
+}
+
+/**
+ * An effect companion (docs/design-v1-combat-flow.md 3.6.6), which reaches
+ * every viewer who does not own it alive, whatever its stored life: a
+ * creature made an effect keeps its life underneath, and no device without
+ * its `companion` field may be told it is dead.
+ */
+function effectCompanion(token: Pick<Token, "kind" | "companion">): boolean {
+  return token.companion !== undefined && token.kind === "object";
 }
 
 /**
@@ -470,8 +489,8 @@ export function playersToken(state: Pick<RoomState, "members" | "characters">, t
   return character !== undefined && anyPlayer(state, character.ownerIds);
 }
 
-function projectActorPublic(actor: Actor, access: HpAccess, triggers: () => boolean): ProjectedActor {
-  const out: ProjectedActor = { life: actor.life, effects: publicEffects(actor.effects, triggers) };
+function projectActorPublic(actor: Actor, access: HpAccess, triggers: () => boolean, shownAlive = false): ProjectedActor {
+  const out: ProjectedActor = { life: shownAlive ? "alive" : actor.life, effects: publicEffects(actor.effects, triggers) };
   if (access === "exact") out.hp = actor.hp;
   else if (access === "label") out.hpLabel = hpLabel(actor);
   else if (access === "bar") out.hpBar = hpBar(actor);
@@ -533,7 +552,7 @@ function projectTokenCtx(ctx: Ctx, token: Token): ProjectedToken | null {
     actor:
       "ref" in token.actor
         ? token.actor
-        : { inline: projectActorPublic(token.actor.inline, hpAccess(ctx.state, ctx.viewer, { token }), () => playerPlays(ctx.state, { token })) },
+        : { inline: projectActorPublic(token.actor.inline, hpAccess(ctx.state, ctx.viewer, { token }), () => playerPlays(ctx.state, { token }), effectCompanion(token)) },
     aboveFog,
   };
   if (token.image !== undefined) out.image = token.image;
@@ -549,7 +568,12 @@ function projectTokenCtx(ctx: Ctx, token: Token): ProjectedToken | null {
   // A squeeze changes the footprint every rule reads, so everyone who sees the creature gets it. Its light does not
   // reach them: they see only its effect (docs/design-v1-maps-vision.md 4.3.5).
   if (token.squeeze) out.squeeze = true;
-  if (playersToken(ctx.state, token)) out.party = true;
+  if (playersToken(ctx.state, token)) {
+    out.party = true;
+    // A party member's companion is no secret at the table. One of a character no player plays reaches players as a
+    // plain token, so no link between a DM creature and a character leaks (docs/design-v1-combat-flow.md 3.6.5).
+    if (token.companion) out.companion = token.companion;
+  }
   const path = projectPathCtx(ctx, token, false);
   if (path) out.path = path;
   return out;
@@ -1118,6 +1142,11 @@ function holderOfEvent(ctx: Ctx, data: { tokenId?: string; characterId?: string;
   return holder;
 }
 
+/** Whether the creature's life is shown to this viewer as alive whatever it is: an effect companion the viewer does not own. */
+function hiddenLife(ctx: Ctx, holder: { token?: Token }): boolean {
+  return holder.token !== undefined && effectCompanion(holder.token) && !ownsToken(ctx.state, ctx.viewer, holder.token);
+}
+
 /** Whether the viewer owns the creature on an initiative row, so its turns are part of the viewer's own history. */
 function ownsRow(ctx: Ctx, row: ProjectedEntry): boolean {
   const token = row.tokenId !== undefined ? ctx.state.tokens[row.tokenId] : undefined;
@@ -1177,13 +1206,16 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
     case "deathSave": {
       // Life is public, but how close a creature is to death is as private as its HP.
       const holder = holderOfEvent(ctx, data);
-      if (!holder) return null;
+      if (!holder || hiddenLife(ctx, holder)) return null;
       if (hpAccess(ctx.state, ctx.viewer, holder) === "exact") return data;
       const { ok: _ok, fail: _fail, ...rest } = data;
       return rest;
     }
-    case "life":
-      return holderOfEvent(ctx, data) ? data : null;
+    case "life": {
+      // An effect companion reaches non-owners alive (effectCompanion), so its life lines would say otherwise.
+      const holder = holderOfEvent(ctx, data);
+      return holder && !hiddenLife(ctx, holder) ? data : null;
+    }
     case "turn": {
       const rows = projectEncounterCtx(ctx)?.entries;
       const row = rows?.find((e) => e.id === data.entryId);
@@ -1213,6 +1245,9 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
       return data;
     case "teleport":
       // The DM's note (docs/design-v1-maps-vision.md 4.1). No player gets it, the token's owners included.
+      return null;
+    case "companion":
+      // The DM's note that a player added a companion (docs/design-v1-combat-flow.md 3.6.3). No player gets it.
       return null;
     case "roll": {
       // As the request itself (projectRollCtx): its creature's players now, under the same two switches.

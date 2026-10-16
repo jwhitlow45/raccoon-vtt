@@ -416,6 +416,13 @@ const areaTriggers = z
 
 const actorTarget = z.union([z.strictObject({ tokenId: id }), z.strictObject({ characterId: id })]);
 
+/**
+ * A token's link to its character, as an op sends it (docs/design-v1-combat-flow.md
+ * 4.2): never the stored `reactionUsed`, which only `companionReaction`, Next
+ * and Previous write.
+ */
+const companion = z.strictObject({ of: id, turn: z.enum(["own", "shared", "none"]) });
+
 const tokenInput = z.strictObject({
   id,
   sceneId: id,
@@ -446,6 +453,7 @@ const tokenInput = z.strictObject({
   rangeRings: z.array(z.number().int().min(5).max(MAX_RANGE_RING_FT)).max(MAX_RANGE_RINGS).optional(),
   light: tokenLight.optional(),
   partyVision: z.boolean().optional(),
+  companion: companion.optional(),
 });
 
 const tokenPatch = z.strictObject({
@@ -479,6 +487,10 @@ const tokenPatch = z.strictObject({
   light: tokenLight.nullable().optional(),
   /** DM only. False takes the creature out of the party (section 4.3.2). */
   partyVision: z.boolean().optional(),
+  /** Makes it a companion or changes how it is one. Null detaches it (docs/design-v1-combat-flow.md 3.6.9). */
+  companion: companion.nullable().optional(),
+  /** A `shared` companion's own Reaction spent or not, alone of everything about it (3.6.8). */
+  companionReaction: z.boolean().optional(),
   actor: actorPatch.optional(),
 });
 
@@ -1205,6 +1217,8 @@ export type EffectInput = z.infer<typeof effectInput>;
 export type ActorPatch = z.infer<typeof actorPatch>;
 export type TokenInput = z.infer<typeof tokenInput>;
 export type TokenPatch = z.infer<typeof tokenPatch>;
+/** A companion link as ops send it: `{ of, turn }` alone. */
+export type CompanionLink = z.infer<typeof companion>;
 export type CharacterInput = z.infer<typeof characterInput>;
 export type CharacterPatch = z.infer<typeof characterPatch>;
 export type MonsterInput = z.infer<typeof monsterInput>;

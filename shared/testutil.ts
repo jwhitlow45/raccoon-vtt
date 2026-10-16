@@ -30,6 +30,7 @@ import {
 } from "./model.ts";
 import { wallChunk } from "./keys.ts";
 import { applyOp, type Env } from "./reducer.ts";
+import { normalizeCompanionState } from "./reducer/companions.ts";
 import { hpUndoRestore } from "./reducer/hpUndo.ts";
 import type { Op } from "./protocol.ts";
 import { encodeTile, fullTileBits, rasterizeFogOps, TILE_BYTES } from "./rules/fog.ts";
@@ -571,7 +572,34 @@ export function randomState(r: () => number): RoomState {
   addMapThings(r, state);
   addVisionThings(r, state);
   addDmTools(r, state);
+  addCompanions(r, state);
   return state;
+}
+
+/**
+ * Companions (docs/design-v1-combat-flow.md 3.6): creatures and effects of
+ * random characters, of every turn an effect may take, owned as their
+ * characters are and never numbered, a `shared` one's Reaction spent now
+ * and then. The rows of those that act on their character's turn leave the
+ * fight and its history, as the rules keep them, and saved steps name the
+ * Reactions their Next cleared.
+ */
+function addCompanions(r: () => number, state: RoomState): void {
+  const characterIds = Object.keys(state.characters);
+  if (characterIds.length === 0) return;
+  for (const token of Object.values(state.tokens)) {
+    if (token.kind === "pc" || !("inline" in token.actor) || !chance(r, 0.3)) continue;
+    const of = pick(r, characterIds);
+    const turn = token.kind === "object" ? pick(r, ["shared", "none"] as const) : pick(r, ["own", "shared", "none"] as const);
+    token.companion = { of, turn, ...(turn === "shared" && chance(r, 0.5) ? { reactionUsed: true as const } : {}) };
+    token.ownerIds = [...state.characters[of]!.ownerIds];
+    delete token.number;
+  }
+  Object.assign(state, normalizeCompanionState(state));
+  const shared = Object.values(state.tokens).filter((t) => t.companion?.turn === "shared").map((t) => t.id);
+  for (const step of state.encounterHistory) {
+    if (shared.length > 0 && chance(r, 0.5)) step.companionReactions = [pick(r, shared)];
+  }
 }
 
 const BLOCK_IDS = ["blockaaaaaaa", "blockbbbbbbb", "blockccccccc", "blockddddddd"] as const;
@@ -1068,6 +1096,8 @@ export function randomOp(r: () => number, state: RoomState, who: Viewer): Op {
   if (chance(r, 0.2)) return trackerOp(r, state, who, { anyToken, target, seqId });
   // Wave 5's journal, pins, rolls and group edits (docs/design-v1-dm-tools.md), about one in six.
   if (chance(r, 0.16)) return dmToolOp(r, state, who, { anyToken, target, seqId });
+  // Companions (docs/design-v1-combat-flow.md 3.6), about one in twelve.
+  if (chance(r, 0.08)) return companionOp(r, state, who, { anyToken, anyCharacter, seqId });
 
   if (who.role === "player") {
     // Wave 4's moves, doors and lights, now and then.
@@ -1343,6 +1373,54 @@ function visionOp(r: () => number, state: RoomState, sceneId: string, who: Viewe
 }
 
 /** Ready actions, spent reactions, HP lines taken back, rests and the turn timer, from either role. */
+/**
+ * A companion op, by the DM or a player: making one beside a character's
+ * token, changing its turn, kind or character, detaching it, its own
+ * Reaction, Dismiss, and a character's new owners, which reach its
+ * companions.
+ */
+function companionOp(r: () => number, state: RoomState, who: Viewer, helpers: { anyToken(): string; anyCharacter(): string; seqId: string }): Op {
+  const companions = Object.values(state.tokens).filter((t) => t.companion !== undefined);
+  const anyCompanion = () => (companions.length > 0 && chance(r, 0.8) ? pick(r, companions).id : helpers.anyToken());
+  const link = () => ({ of: helpers.anyCharacter(), turn: pick(r, ["own", "shared", "none"] as const) });
+  switch (int(r, 0, 6)) {
+    case 0: {
+      const of = helpers.anyCharacter();
+      const beside = Object.values(state.tokens).find((t) => "ref" in t.actor && t.actor.ref === of);
+      const effect = chance(r, 0.4);
+      const a = actor({ hp: effect ? { cur: 0, max: 0, temp: 0 } : { cur: 9, max: 9, temp: 0 }, ac: effect ? 0 : 13, dmNotes: "" });
+      return {
+        t: "token.create",
+        token: {
+          id: helpers.seqId,
+          sceneId: beside?.sceneId ?? "s1",
+          kind: effect ? "object" : "npc",
+          name: effect ? "Spiritual Weapon" : "Wildfire Spirit",
+          size: "small",
+          x: (beside?.x ?? 3) + 1,
+          y: beside?.y ?? 3,
+          layer: "token",
+          actor: { inline: a },
+          companion: { of, turn: effect ? pick(r, ["shared", "none"] as const) : pick(r, ["own", "shared", "none"] as const) },
+        },
+      };
+    }
+    case 1:
+      return { t: "token.update", tokenId: anyCompanion(), patch: { companion: chance(r, 0.15) ? null : link() } };
+    case 2:
+      return { t: "token.update", tokenId: anyCompanion(), patch: { companionReaction: chance(r, 0.6) } };
+    case 3:
+      return { t: "token.update", tokenId: anyCompanion(), patch: chance(r, 0.5) ? { kind: pick(r, ["npc", "object"] as const) } : { name: "Renamed spirit" } };
+    case 4:
+      return { t: "token.delete", tokenId: anyCompanion() };
+    case 5:
+      return { t: "character.update", characterId: helpers.anyCharacter(), patch: { ownerIds: pick(r, [[], ["p1"], ["p2"], ["p1", "p2"]]) } };
+    default:
+      // Next clears the Reactions of the landing row's companions, and a player's End Turn too.
+      return who.role === "dm" ? { t: "encounter.next" } : { t: "encounter.next", from: { entry: state.encounter?.activeEntryId ?? null, round: state.encounter?.round ?? 1 } };
+  }
+}
+
 function trackerOp(
   r: () => number,
   state: RoomState,

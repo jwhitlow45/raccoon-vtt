@@ -1,7 +1,7 @@
 import { chunkKey, doorChunk, keys, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
 import type { Actor, BuildChunk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
-import type { ActorTarget, DoorRef, Op, OpOf, RefusalCode } from "./protocol.ts";
+import type { ActorTarget, DoorRef, Op, OpOf, RefusalCode, TokenInput, TokenPatch } from "./protocol.ts";
 import { ownsCharacter, ownsToken, projectEntity, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { LIMITS } from "./limits.ts";
 import { restoreAddedAssets } from "./referencedAssets.ts";
@@ -299,7 +299,6 @@ function forPlayer(op: Op, c: Check): Decision {
     case "scene.setGrid":
     case "scene.setPhase":
     case "scene.duplicate":
-    case "token.delete":
     case "actor.life":
     case "actor.damageMany":
     case "character.delete":
@@ -387,7 +386,15 @@ function forPlayer(op: Op, c: Check): Decision {
     case "character.create":
       return createCharacterCheck(c, op.character);
     case "token.create":
-      return placeTokenCheck(c, op.token);
+      return op.token.companion ? companionCheck(c, op.token, op.token.companion) : placeTokenCheck(c, op.token);
+    case "token.delete": {
+      // Dismiss: a companion's owners delete it, as its character's player (docs/design-v1-combat-flow.md 3.6.4). Every
+      // other token is the DM's.
+      const token = c.visibleToken(op.tokenId);
+      if (!token) return GONE;
+      if (!token.companion) return FORBIDDEN;
+      return ownsToken(c.state, c.actor, token) ? OK : NOT_YOURS;
+    }
 
     case "token.move": {
       const d = moveCheck(c, op.tokenId);
@@ -417,6 +424,7 @@ function forPlayer(op: Op, c: Check): Decision {
       const token = c.visibleToken(op.tokenId);
       if (!token) return GONE;
       if (!ownsToken(c.state, c.actor, token)) return NOT_YOURS;
+      if (token.companion) return companionUpdateCheck(c, token.companion, op.patch);
       for (const field of Object.keys(op.patch)) {
         if (!OWNER_TOKEN_FIELDS.has(field)) return refuse("forbidden", `owners cannot change ${field}`);
         if ((field === "name" || field === "publicName") && token.kind !== "pc") return refuse("forbidden", "only a PC's owner renames it");
@@ -905,6 +913,155 @@ function createCharacterCheck(c: Check, input: Extract<Op, { t: "character.creat
   const plain = a.effects.length === 0 && a.dmNotes === "" && a.legendary === undefined && a.monsterId === undefined;
   if (!unhurt || !plain) return refuse("forbidden", "a new character starts unhurt, with no conditions or DM notes");
   if (!imageUsable(c, input.defaultImage)) return GONE;
+  return OK;
+}
+
+/** What an owner may change on a companion beyond any token's owner fields (docs/design-v1-combat-flow.md 3.6.4). */
+const COMPANION_OWNER_FIELDS = new Set(["name", "actor", "kind", "companion", "companionReaction"]);
+
+/**
+ * An owner's edit of a companion: to its player, a companion is what their
+ * character is. Beyond any token's owner fields they may rename it, edit
+ * the stats an owner edits on a character, make it a creature or an
+ * effect, change its turn, and mark its Reaction. Which character it
+ * belongs to, its owners, its number and the DM's fields stay the DM's.
+ * The reducer's own rules (an effect's turn, owners, numbers) then apply
+ * as for the DM.
+ */
+function companionUpdateCheck(c: Check, link: NonNullable<Token["companion"]>, patch: TokenPatch): Decision {
+  for (const field of Object.keys(patch)) {
+    if (field === "publicName") return refuse("forbidden", "only a PC's owner renames it");
+    if (!OWNER_TOKEN_FIELDS.has(field) && !COMPANION_OWNER_FIELDS.has(field)) return refuse("forbidden", `owners cannot change ${field}`);
+  }
+  for (const field of Object.keys(patch.actor ?? {})) {
+    if (!OWNER_ACTOR_FIELDS.has(field)) return refuse("forbidden", `owners cannot change ${field}`);
+  }
+  if (patch.kind !== undefined && patch.kind !== "npc" && patch.kind !== "object") return refuse("forbidden", "a companion is a creature or an effect");
+  if (patch.companion !== undefined && patch.companion?.of !== link.of) return refuse("forbidden", "only the DM changes whose companion it is");
+  return tokenImagesUsable(c, patch) ? OK : GONE;
+}
+
+/** How near a player's companion lands to its character's token: 5 ft, or one cell where a cell is wider, as a door's reach. */
+export function companionReachFt(feetPerCell: number): number {
+  return doorReachFt(feetPerCell);
+}
+
+/** Whether a footprint is within a companion's reach of its character's token, by the room's own distance rule. */
+export function withinCompanionReach(settings: RoomSettings, spot: Parameters<typeof tokenCellBox>[0], character: Parameters<typeof tokenCellBox>[0]): boolean {
+  return boxDistanceFt(tokenCellBox(spot, settings.feetPerCell), tokenCellBox(character, settings.feetPerCell), settings) <= companionReachFt(settings.feetPerCell);
+}
+
+/**
+ * Whether a token placed as `input` could step to its spot from where the
+ * character's token stands, on a scene that blocks moves: null when it
+ * could, else what stops it. The form's spot finder asks the same, so the
+ * spot it picks is one the server takes.
+ */
+export function companionLegBlocker(state: RoomState, input: TokenInput, from: Pick<Token, "x" | "y" | "elevation">): "wall" | "ledge" | null {
+  const walker = { ...inputAsToken(input), x: from.x, y: from.y, elevation: from.elevation };
+  return movementRules.legBlocker(state, walker, { x: input.x, y: input.y, elevation: input.elevation ?? from.elevation });
+}
+
+/** A token input as the rules that read a placed token see it. Only its place, size and scene matter to them. */
+function inputAsToken(input: TokenInput): Token {
+  return {
+    id: input.id,
+    rev: 0,
+    sceneId: input.sceneId,
+    kind: input.kind,
+    name: input.name,
+    nameHidden: false,
+    size: input.size,
+    ...(input.w !== undefined ? { w: input.w } : {}),
+    ...(input.h !== undefined ? { h: input.h } : {}),
+    x: input.x,
+    y: input.y,
+    elevation: input.elevation ?? 0,
+    ...(input.height !== undefined ? { height: input.height } : {}),
+    rotation: 0,
+    disposition: input.disposition ?? "ally",
+    visibility: "all",
+    fogExempt: false,
+    fogExemptAuto: false,
+    locked: false,
+    layer: "token",
+    ownerIds: [],
+    actor: input.actor,
+    hpVisibility: "label",
+  };
+}
+
+/** The refusals a player's new companion can meet where it lands, which the form shows in the same words. */
+export const companionWords = {
+  noToken: (name: string) => `${name} has no token here.`,
+  tooFar: (name: string) => `Put it next to ${name}.`,
+  full: (name: string) => `${name} has ${LIMITS.companionsPerCharacter} companions here. Ask the DM for more.`,
+};
+
+/**
+ * A player's companion for a character they own (docs/design-v1-combat-flow.md
+ * 3.6.3 and 4.4), with no setting needed: summons arrive mid-turn. It lands
+ * on the scene the player holds, inside the map, within 5 ft of a token of
+ * the character, and on a scene where walls stop moves, where that token's
+ * creature could step. It is a creature with HP or an effect with none,
+ * only a creature takes its own turn, and it starts plain, unhurt and
+ * bare, owned by whoever plays the character, at most
+ * LIMITS.companionsPerCharacter of them on that scene. The DM keeps every
+ * power over it afterwards.
+ */
+function companionCheck(c: Check, input: TokenInput, link: NonNullable<TokenInput["companion"]>): Decision {
+  const character: Character | undefined = c.state.characters[link.of];
+  if (!character) return GONE;
+  if (!ownsCharacter(c.actor, character)) return NOT_YOURS;
+  const scene = c.state.scenes[input.sceneId];
+  if (c.state.tokens[input.id] || !scene || input.sceneId !== viewerSceneId(c.state, c.actor, c.opts)) return GONE;
+  const fp = footprintSize(input);
+  if (input.x < 0 || input.y < 0 || input.x + fp.w > scene.bounds.w || input.y + fp.h > scene.bounds.h) return refuse("forbidden", "place it inside the map");
+  const settings = c.state.meta.settings;
+  const placed = { ...input, elevation: input.elevation ?? 0 };
+  const own = Object.values(c.state.tokens)
+    .filter((t) => t.sceneId === input.sceneId && "ref" in t.actor && t.actor.ref === character.id)
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+  if (own.length === 0) return refuse("forbidden", companionWords.noToken(character.name));
+  const near = own.filter((t) => withinCompanionReach(settings, placed, t));
+  if (near.length === 0) return refuse("forbidden", companionWords.tooFar(character.name));
+  if (scene.blockMovement === true) {
+    const blockers = near.map((t) => companionLegBlocker(c.state, input, t));
+    if (!blockers.includes(null)) return refuse("forbidden", blockers[0] === "ledge" ? LEDGE_IN_THE_WAY : WALL_IN_THE_WAY);
+  }
+  if (!("inline" in input.actor)) return refuse("forbidden", "a companion has stats of its own");
+  const a = input.actor.inline;
+  const creature = input.kind === "npc" && a.hp.max >= 1;
+  const effect = input.kind === "object" && a.hp.max === 0 && a.hp.cur === 0 && a.ac === 0;
+  if (!creature && !effect) return refuse("forbidden", "a companion is a creature with at least 1 HP, or an effect with no HP or AC");
+  if (link.turn === "own" && input.kind !== "npc") return refuse("forbidden", "an effect takes no turn of its own");
+  const special =
+    (input.visibility ?? "all") !== "all" ||
+    input.fogExempt === true ||
+    input.locked === true ||
+    input.nameHidden === true ||
+    input.publicName !== undefined ||
+    input.number !== undefined ||
+    input.layer !== "token" ||
+    input.light !== undefined ||
+    input.partyVision !== undefined ||
+    input.hpVisibility !== undefined;
+  if (special) return refuse("forbidden", "players add only a plain companion");
+  const bare =
+    a.hp.cur === a.hp.max &&
+    a.hp.temp === 0 &&
+    a.life === "alive" &&
+    a.deathSaves.ok === 0 &&
+    a.deathSaves.fail === 0 &&
+    a.effects.length === 0 &&
+    a.dmNotes === "" &&
+    a.legendary === undefined &&
+    a.monsterId === undefined;
+  if (!bare) return refuse("forbidden", "a new companion starts unhurt, with no conditions or DM notes");
+  if (input.ownerIds !== undefined && !sameMembers(input.ownerIds, character.ownerIds)) return refuse("forbidden", "a companion is played by whoever plays its character");
+  if (!tokenImagesUsable(c, input)) return GONE;
+  const here = Object.values(c.state.tokens).filter((t) => t.sceneId === input.sceneId && t.companion?.of === character.id).length;
+  if (here >= LIMITS.companionsPerCharacter) return refuse("forbidden", companionWords.full(character.name));
   return OK;
 }
 

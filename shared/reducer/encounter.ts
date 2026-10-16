@@ -11,7 +11,7 @@ import {
 } from "../rules/durations.ts";
 import { activeRowShownTo, inSightOfNonOwners, rowSeenByNonOwners } from "../project.ts";
 import { effectEvent } from "../rules/hp.ts";
-import { actorOfEntry, groupKeyFor, nextTurn, placeEntry, renumber, scoredValue, sortEntries, turnMovedOn } from "../rules/initiative.ts";
+import { actorOfEntry, groupKeyFor, nextTurn, placeEntry, renumber, rowCharacter, scoredValue, sortEntries, turnMovedOn } from "../rules/initiative.ts";
 import { gone, invalid, type Env, type ResolvedActor, type Tx } from "./tx.ts";
 
 /** How many `next` steps `prev` can walk back. */
@@ -50,6 +50,8 @@ function buildEntry(tx: Tx, input: EntryInput, existing: InitEntry[]): InitEntry
   if (existing.some((e) => e.id === input.id)) throw invalid("entry already exists");
   let token: Token | undefined;
   if (input.tokenId !== undefined) token = tx.token(input.tokenId);
+  // A companion that acts on its character's turn has no row of its own, for anyone (docs/design-v1-combat-flow.md 3.6.7).
+  if (token?.companion && token.companion.turn !== "own") throw invalid("it acts on its character's turn");
   if (input.characterId !== undefined) tx.character(input.characterId);
   const entry: InitEntry = {
     id: input.id,
@@ -73,7 +75,7 @@ function buildEntry(tx: Tx, input: EntryInput, existing: InitEntry[]): InitEntry
 }
 
 /** Binds every paused duration that names the entry's creature to the entry (design 9.5). */
-function bindDurations(tx: Tx, entry: InitEntry): void {
+export function bindDurations(tx: Tx, entry: InitEntry): void {
   const targets = anchorsForEntry(tx.state, entry);
   if (targets.length === 0) return;
   for (const resolved of tx.actors()) {
@@ -294,6 +296,8 @@ export function encounterNext(tx: Tx, op: OpOf<"encounter.next">): void {
     }
   }
 
+  clearCompanionReactions(tx, landing, snapshot);
+
   const crossings = crossingsForNext(encounter, step.skipped, step.landing);
   for (const resolved of tx.actors()) {
     const r = tickEffects(resolved.actor.effects, crossings);
@@ -320,7 +324,35 @@ export function encounterNext(tx: Tx, op: OpOf<"encounter.next">): void {
   tx.addEvent({ type: "turn", entryId: step.landing, round, ...(rowSeenByNonOwners(tx.state, landing, tx.env) ? { seen: true as const } : {}) });
 }
 
-/** Walks one `next` back from the history: the encounter, the effects it ticked, the legendary actions it reset and the tokens it revealed. */
+/**
+ * A `shared` companion keeps a Reaction of its own on its token
+ * (docs/design-v1-combat-flow.md 3.6.8), which its character's turn
+ * starting clears, as the row's own. The landing row's character is
+ * `rowCharacter`'s, the one nesting reads, and only its companions on the
+ * row token's scene, or the players' scene for a row with no token, are
+ * cleared: one left on another scene keeps its flag. The ids go in the
+ * saved step for Previous, which absent means none.
+ */
+function clearCompanionReactions(tx: Tx, landing: InitEntry, snapshot: EncounterSnapshot): void {
+  const characterId = rowCharacter(tx.state, landing);
+  if (characterId === undefined) return;
+  const sceneId = landing.tokenId !== undefined ? tx.state.tokens[landing.tokenId]?.sceneId : tx.state.meta.playerSceneId;
+  const cleared: string[] = [];
+  for (const token of Object.values(tx.state.tokens).sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    const companion = token.companion;
+    if (companion?.of !== characterId || companion.turn !== "shared" || !companion.reactionUsed || token.sceneId !== sceneId) continue;
+    const { reactionUsed: _spent, ...link } = companion;
+    tx.write(keys.token(token.id), { ...token, companion: link });
+    cleared.push(token.id);
+  }
+  if (cleared.length > 0) snapshot.companionReactions = cleared;
+}
+
+/**
+ * Walks one `next` back from the history: the encounter, the effects it
+ * ticked, the legendary actions it reset, the tokens it revealed and the
+ * companion Reactions it cleared.
+ */
 export function encounterPrev(tx: Tx, op: OpOf<"encounter.prev">): void {
   if (pressChangesNothing(tx.state, tx.actor, op, tx.env)) return;
   const encounter = encounterOf(tx);
@@ -342,6 +374,12 @@ export function encounterPrev(tx: Tx, op: OpOf<"encounter.prev">): void {
     const token = tx.state.tokens[revealed.tokenId];
     if (!token) continue;
     tx.write(keys.token(token.id), { ...token, visibility: revealed.visibility, fogExemptAuto: revealed.fogExemptAuto });
+  }
+  // A companion converted, detached or deleted since gets nothing back.
+  for (const tokenId of snapshot.companionReactions ?? []) {
+    const token = tx.state.tokens[tokenId];
+    if (token?.companion?.turn !== "shared" || token.companion.reactionUsed) continue;
+    tx.write(keys.token(token.id), { ...token, companion: { ...token.companion, reactionUsed: true } });
   }
   tx.write(keys.encounterHistory, history.slice(0, -1));
   if (taken) {

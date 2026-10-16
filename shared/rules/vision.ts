@@ -165,10 +165,12 @@ type Candidate = { token: Token; actor: Actor | undefined; group: number; reason
 
 /*
  * Every party member on the scene, sources first in the cap's order (player
- * characters, other player-owned creatures, then creatures the DM marked,
- * each by token ID), with why each other one lends no sight. The cap is
- * taken here, before the step off a wall, so a source standing on a wall
- * keeps its place.
+ * characters, other player-owned creatures, creatures the DM marked, then
+ * companions, each by token ID), with why each other one lends no sight.
+ * Companions come last so a party's familiars never push out a DM's
+ * lantern bearer (docs/design-v1-combat-flow.md 3.6.5). The cap is taken
+ * here, before the step off a wall, so a source standing on a wall keeps
+ * its place.
  */
 function candidatesOf(state: RoomState, tokens: readonly Token[]): Candidate[] {
   const out: Candidate[] = [];
@@ -176,7 +178,7 @@ function candidatesOf(state: RoomState, tokens: readonly Token[]): Candidate[] {
     if (!partyMember(state, token)) continue;
     const owned = playerOwned(state, token);
     const actor = actorOf(state, token);
-    const group = owned && token.kind === "pc" ? 0 : owned ? 1 : 2;
+    const group = token.companion ? 3 : owned && token.kind === "pc" ? 0 : owned ? 1 : 2;
     let reason: NoSightReason | undefined;
     if (token.visibility !== "all") reason = "hidden";
     else if (token.kind === "object" && token.partyVision !== true) reason = "object";

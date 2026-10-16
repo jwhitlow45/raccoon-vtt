@@ -14,6 +14,13 @@ export const LIMITS = {
   charactersPerRoom: 50,
   /** Characters one player may own when the room lets players create their own (shared/permissions.ts). */
   charactersPerPlayer: 3,
+  /**
+   * A character's companions on one scene (docs/design-v1-combat-flow.md
+   * 3.6.3). Only a player's `token.create` counts them, and only on the
+   * scene the new one goes to, so companions left on a scene the party
+   * moved away from never block a new one.
+   */
+  companionsPerCharacter: 10,
   membersPerRoom: 50,
   templatesPerScene: 200,
   drawingsPerScene: 2_000,

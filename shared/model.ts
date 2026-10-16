@@ -617,7 +617,24 @@ export type Token = {
   light?: TokenLight;
   /** DM only: a creature the DM runs that lends the party its sight and is always shown to players (section 4.3.2). */
   partyVision?: boolean;
+  /**
+   * A creature or effect a character brings (docs/design-v1-combat-flow.md
+   * 3.6): a familiar, a summon, a spell's weapon. Its owners are always its
+   * character's owners, it has no number, and it is never a PC. Players
+   * other than its owners get it only while the token is the party's.
+   */
+  companion?: Companion;
 };
+
+/** Whose turn a companion acts on (docs/design-v1-combat-flow.md 3.6.2): its own row, its character's turn listed under it, or its character's turn and not listed. */
+export type CompanionTurn = "own" | "shared" | "none";
+
+/**
+ * A token's link to its character. `reactionUsed` is a `shared`
+ * companion's own Reaction, present only while spent: its character's turn
+ * starting clears it, and Previous sets it again.
+ */
+export type Companion = { of: CharacterId; turn: CompanionTurn; reactionUsed?: true };
 
 /** A carried light in feet, as the SRD words it: bright within `bright`, dim for `dim` beyond it, each at most MAX_LIGHT_FT. */
 export type TokenLight = { bright: number; dim: number };
@@ -1075,6 +1092,8 @@ export type EncounterSnapshot = {
   revealed: { tokenId: TokenId; visibility: "all" | "dm"; fogExemptAuto: boolean }[];
   /** The legendary actions the creature whose turn started had used before `next` reset them. Absent in older rooms. */
   legendary?: { holderId: TokenId | CharacterId; actionsUsed: number };
+  /** The `shared` companions whose Reaction this `next` cleared, so `prev` can set them again. Absent when it cleared none. */
+  companionReactions?: TokenId[];
   at: string;
 };
 
@@ -1326,6 +1345,13 @@ export type LogEvent =
    * projection carries it, the token's owners included.
    */
   | { type: "teleport"; tokenId: TokenId; past: "wall" | "ledge" }
+  /**
+   * A player added a companion beside their character
+   * (docs/design-v1-combat-flow.md 3.6.3). DM only, as the teleport line
+   * is. `name` is the companion's name then, so the line still reads once
+   * it is renamed or dismissed.
+   */
+  | { type: "companion"; tokenId: TokenId; characterId: CharacterId; memberId: MemberId; name: string }
   /**
    * An answer to a roll request, or a DM's mark of one (wave 5,
    * docs/design-v1-dm-tools.md 3.3), as the target stood after it. It

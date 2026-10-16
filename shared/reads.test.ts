@@ -97,7 +97,8 @@ describe("reads", () => {
     delete single.tokens.far;
     single.encounter!.entries = [single.encounter!.entries[0]!];
     const dmFull = view(single, DM, "s1");
-    assert.ok(satisfies(next, dmFull.projected, DM, dmFull.opts));
+    // Next reads the scene of the row it lands on too (its companions' Reactions), so it is asked of this room.
+    assert.ok(satisfies(reads({ t: "encounter.next" }, single), dmFull.projected, DM, dmFull.opts));
     const create = reads({ t: "token.create", token: { id: "x", sceneId: "s1", kind: "monster", name: "G", size: "medium", x: 0, y: 0, actor: { inline: actor() } } }, single);
     assert.ok(!("never" in create) && create.complete.includes("scene:s1"));
     assert.ok(satisfies(create, dmFull.projected, DM, dmFull.opts));
@@ -198,5 +199,70 @@ describe("wave 5 ops (docs/design-v1-dm-tools.md)", () => {
     const one = { ...state, scenes: { s1: state.scenes.s1! } };
     const dm = view(one, DM, "s1");
     assert.ok(satisfies(reads({ t: "journal.delete", pageId: "pg1" }, one), dm.projected, DM, dm.opts));
+  });
+});
+
+describe("companion ops (docs/design-v1-combat-flow.md 4.6)", () => {
+  function party() {
+    const state = setup();
+    state.tokens.ws = token("ws", { kind: "npc", x: 2, y: 3, ownerIds: ["p1"], companion: { of: "c1", turn: "shared", reactionUsed: true } });
+    return state;
+  }
+
+  test("a companion's creation and any change to what it is wait for the server, for the DM too", () => {
+    const state = party();
+    const dm = view(state, DM);
+    const create = reads({ t: "token.create", token: { id: "x", sceneId: "s1", kind: "npc", name: "Owl", size: "tiny", x: 1, y: 2, actor: { inline: actor() }, companion: { of: "c1", turn: "shared" } } }, state);
+    assert.ok("never" in create);
+    const turn = reads({ t: "token.update", tokenId: "ws", patch: { companion: { of: "c1", turn: "own" } } }, state);
+    assert.ok("never" in turn);
+    assert.ok(!satisfies(turn, dm.projected, DM, dm.opts));
+  });
+
+  test("its Reaction alone reads its companion field, so its owner's device predicts it, and an owner or kind change reads the token as before", () => {
+    const state = party();
+    const r = reads({ t: "token.update", tokenId: "ws", patch: { companionReaction: false } }, state);
+    assert.ok(!("never" in r));
+    assert.deepEqual(r.keys, [{ key: "token:ws", fields: ["companion"] }]);
+    const owner = view(state, P1);
+    assert.ok(satisfies(r, owner.projected, P1, owner.opts));
+    // A player who does not get `companion` cannot predict it, which they could not send anyway.
+    const stranger = view(state, { memberId: "p2", role: "player" });
+    state.tokens.ws = { ...state.tokens.ws!, ownerIds: [] };
+    state.characters.c1 = { ...state.characters.c1!, ownerIds: [] };
+    assert.ok(!satisfies(reads({ t: "token.update", tokenId: "ws", patch: { companionReaction: false } }, state), view(state, { memberId: "p2", role: "player" }).projected, stranger.viewer, stranger.opts));
+    assert.deepEqual(reads({ t: "token.update", tokenId: "ws", patch: { kind: "object" } }, party()), { keys: [{ key: "token:ws" }], complete: [] });
+  });
+
+  test("a deletion reads the history, and a character's new owners every token, which only a one-scene room viewed whole holds", () => {
+    const state = party();
+    const del = reads({ t: "token.delete", tokenId: "ws" }, state);
+    assert.ok(!("never" in del) && del.keys.some((k) => k.key === "encounterHistory"));
+    const owners = reads({ t: "character.update", characterId: "c1", patch: { ownerIds: ["p2"] } }, state);
+    assert.ok(!("never" in owners) && owners.complete.includes("tokens"));
+    const two = view(state, DM);
+    assert.ok(!satisfies(owners, two.projected, DM, two.opts), "two scenes");
+    const single = party();
+    delete single.scenes.s2;
+    delete single.tokens.far;
+    single.encounter!.entries = [single.encounter!.entries[0]!];
+    const one = view(single, DM);
+    assert.ok(satisfies(reads({ t: "character.update", characterId: "c1", patch: { ownerIds: ["p2"] } }, single), one.projected, DM, one.opts));
+    assert.deepEqual(reads({ t: "character.update", characterId: "c1", patch: { name: "Bree" } }, state), { keys: [{ key: "character:c1", fields: [] }], complete: [] });
+  });
+
+  test("Next reads the landing row's scene, or the players' scene for a character row, and Previous the companions it set again", () => {
+    const state = party();
+    delete state.tokens.far;
+    state.encounter = { rev: 0, round: 1, activeEntryId: "n1", entries: [entry("n1", { tokenId: "pc1" }), entry("n2", { characterId: "c1", tieOrder: 1 })] };
+    const next = reads({ t: "encounter.next" }, state);
+    assert.ok(!("never" in next) && next.complete.includes("scene:s1"));
+    const onPlayers = view(state, DM, "s1");
+    assert.ok(satisfies(next, onPlayers.projected, DM, onPlayers.opts));
+    const elsewhere = view(state, DM, "s2");
+    assert.ok(!satisfies(next, elsewhere.projected, DM, elsewhere.opts));
+    state.encounterHistory = [{ encounter: structuredClone(state.encounter), effects: {}, revealed: [], companionReactions: ["ws"], at: "x" }];
+    const prev = reads({ t: "encounter.prev" }, state);
+    assert.ok(!("never" in prev) && prev.keys.some((k) => k.key === "token:ws"));
   });
 });

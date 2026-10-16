@@ -38,6 +38,23 @@ export function actorOfEntry(state: RoomState, entry: InitEntry): Actor | undefi
   return undefined;
 }
 
+/**
+ * The character a row stands for, for its companions
+ * (docs/design-v1-combat-flow.md 3.6.7 and 3.6.8): its token's character
+ * when the row has a token, none for a token with its own actor, and the
+ * row's `characterId` only for a row with no token. So a row naming one
+ * player's token and another player's character, which the protocol
+ * allows, is its token's, as its actor and name already are. Nesting and
+ * the Reaction reset both ask this, so they always agree.
+ */
+export function rowCharacter(state: Pick<RoomState, "tokens">, entry: Pick<InitEntry, "tokenId" | "characterId">): string | undefined {
+  if (entry.tokenId !== undefined) {
+    const token = state.tokens[entry.tokenId];
+    return token && "ref" in token.actor ? token.actor.ref : undefined;
+  }
+  return entry.characterId;
+}
+
 export function tieKeyOf(state: RoomState, entry: InitEntry): TieKey {
   const actor = actorOfEntry(state, entry);
   let isPc = false;

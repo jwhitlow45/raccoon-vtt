@@ -112,3 +112,43 @@ describe("re-anchoring", () => {
     assert.equal(r.paused.length, 1);
   });
 });
+
+describe("companions acting on their character's turn (docs/design-v1-combat-flow.md 3.6.8)", () => {
+  /** Bree (c1) with her spirit, which acts on her turn, and a goblin, each with a row but the spirit. */
+  function spirit(turn: "own" | "shared" | "none" = "shared") {
+    const state = fixture();
+    state.tokens.ws = token("ws", { kind: "npc", name: "Wildfire Spirit", ownerIds: ["p1"], companion: { of: "c1", turn } });
+    return state;
+  }
+
+  test("until the end of the companion's next turn is stored against its character's row", () => {
+    for (const turn of ["shared", "none"] as const) {
+      const state = spirit(turn);
+      assert.equal(findEntryFor(state, { tokenId: "ws" })?.id, "n1");
+      assert.deepEqual(resolveDuration(state, { mode: "turnEnd", of: { tokenId: "ws" } }).anchor, { entryId: "n1" });
+    }
+    const own = spirit("own");
+    assert.equal(findEntryFor(own, { tokenId: "ws" }), undefined, "with its own turn and no row it waits");
+  });
+
+  test("its character's row joining binds a duration paused on it, and leaving pauses it on the character as Bree's own", () => {
+    const state = spirit();
+    const anchors = anchorsForEntry(state, state.encounter!.entries[0]!);
+    assert.ok(anchors.some((a) => "tokenId" in a && a.tokenId === "ws"));
+    const paused = [effect("e", { duration: { remaining: 1, boundary: "turnEnd", anchor: { tokenId: "ws" } } })];
+    const bound = bindToEntry(paused, "n1", anchors);
+    assert.deepEqual(bound.effects[0]!.duration!.anchor, { entryId: "n1" });
+    const left = unbindFromEntry(bound.effects, "n1", { tokenId: "t1" });
+    assert.deepEqual(left.effects[0]!.duration!.anchor, { tokenId: "t1" }, "paused on Bree's token, and bound again when she returns");
+    assert.ok(!anchorsForEntry(spirit("own"), spirit("own").encounter!.entries[0]!).some((a) => "tokenId" in a && a.tokenId === "ws"));
+  });
+
+  test("a row naming the character alone stands for its companions too, and a mixed row for its token's character only", () => {
+    const state = spirit();
+    state.encounter!.entries = [entry("c", { characterId: "c1" })];
+    assert.equal(findEntryFor(state, { tokenId: "ws" })?.id, "c");
+    state.characters.c2 = character("c2");
+    state.encounter!.entries = [entry("mixed", { tokenId: "t1", characterId: "c2" })];
+    assert.ok(anchorsForEntry(state, state.encounter!.entries[0]!).some((a) => "tokenId" in a && a.tokenId === "ws"), "the row's token is Bree's");
+  });
+});

@@ -2,6 +2,7 @@ import { keys, parseKey, revOf, type EntityKey, type ParsedKey } from "../keys.t
 import type { AreaTemplate, Encounter, Handout, Pin, Scene, Token } from "../model.ts";
 import type { OpOf, RestoreEntry } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
+import { ON_ITS_TURN_NOW, rowsForSharedCompanions, syncOwners } from "./companions.ts";
 import { writeHpUndoLine } from "./hpUndo.ts";
 import { forgetExplored } from "./map.ts";
 import { gone, guardHash, invalid, type Tx } from "./tx.ts";
@@ -90,10 +91,39 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
   // accepted restores that strand work, and refusing one of those on replay
   // would stop the room's load and leave it read-only.
   if (op.deps) checkReferences(tx, op.entries, before, removed);
+  companionsAfterRestore(tx, op.entries);
   if (op.undid !== undefined) writeHpUndoLine(tx, op.undid);
   for (const sceneId of [...wallsMoved].sort()) {
     if (!scenesWritten.has(sceneId) && tx.state.scenes[sceneId]) tx.bumpWalls(sceneId);
   }
+}
+
+/**
+ * A restore writes saved values, so it could bring back a row for a
+ * companion that now acts on its character's turn, or owners a companion's
+ * character no longer has (docs/design-v1-combat-flow.md 3.6.4 and 3.6.8).
+ * The row is refused: the undo of the companion's own change puts its row
+ * back with its turn, which passes. The owners are reconciled rather than
+ * refused, so an undo is never blocked by a companion: each companion of a
+ * character the restore wrote, or of a companion token it wrote, takes
+ * its character's owners. Stored restores from before companions find
+ * none, so they replay as they applied.
+ */
+function companionsAfterRestore(tx: Tx, entries: RestoreEntry[]): void {
+  const s = tx.state;
+  const written = new Set(entries.map((e) => e.key));
+  if (written.has(keys.encounter) && rowsForSharedCompanions(s, s.encounter)) throw invalid(ON_ITS_TURN_NOW);
+  if (written.has(keys.encounterHistory) && s.encounterHistory.some((step) => rowsForSharedCompanions(s, step.encounter))) throw invalid(ON_ITS_TURN_NOW);
+  const characters = new Set<string>();
+  for (const entry of entries) {
+    const parsed = parseKey(entry.key);
+    if (parsed?.kind === "character") characters.add(parsed.id);
+    if (parsed?.kind === "token") {
+      const of = s.tokens[parsed.id]?.companion?.of;
+      if (of !== undefined) characters.add(of);
+    }
+  }
+  syncOwners(tx, [...characters].sort());
 }
 
 /** The refusal when a restore would take away a scene, character or token that other work still uses. */
@@ -162,7 +192,8 @@ function checkReferences(tx: Tx, entries: RestoreEntry[], before: Map<EntityKey,
   const pages = new Set(removed.flatMap((p) => (p.kind === "journal" ? [p.id] : [])));
   if (pages.size > 0 && Object.values(s.pins).some((pin) => pin.pageId !== undefined && pages.has(pin.pageId))) throw invalid(DEPENDED_ON);
   if (characters.size > 0) {
-    const tokenUses = Object.values(s.tokens).some((t) => "ref" in t.actor && characters.has(t.actor.ref));
+    // A companion uses its character as a character token does (docs/design-v1-combat-flow.md 3.6.4).
+    const tokenUses = Object.values(s.tokens).some((t) => ("ref" in t.actor && characters.has(t.actor.ref)) || (t.companion !== undefined && characters.has(t.companion.of)));
     const entryUses = s.encounter?.entries.some((e) => e.characterId !== undefined && characters.has(e.characterId)) ?? false;
     if (tokenUses || entryUses) throw invalid(DEPENDED_ON);
   }
@@ -185,8 +216,9 @@ function referencesOf(parsed: ParsedKey, value: unknown): EntityKey[] {
   const sceneId = sceneIdOf(parsed, value as Record<string, unknown>);
   if (sceneId !== undefined) refs.push(keys.scene(sceneId));
   if (parsed.kind === "token") {
-    const ref = (value as Partial<Token>).actor;
+    const { actor: ref, companion } = value as Partial<Token>;
     if (ref && "ref" in ref) refs.push(keys.character(ref.ref));
+    if (companion) refs.push(keys.character(companion.of));
   }
   if (parsed.kind === "pin") {
     const { pageId } = value as Partial<Pin>;

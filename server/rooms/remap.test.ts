@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { stableStringify, visibleAssetIds } from "#shared/project.ts";
-import { AT, P1, actor, apply, character, customMonster, drawing, imageRef, randomState, rng, room, srdImage, token } from "#shared/testutil.ts";
+import { AT, DM, P1, actor, apply, character, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token } from "#shared/testutil.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 import { remapState, type ImportedAsset } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
@@ -11,7 +11,7 @@ function allIds(value: unknown, out = new Set<string>()): Set<string> {
   if (Array.isArray(value)) for (const v of value) allIds(v, out);
   else if (value && typeof value === "object") {
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (typeof v === "string" && /Id$|^id$|^ref$|^from$|^attachedTo$|^casterId$/.test(k)) out.add(v);
+      if (typeof v === "string" && /Id$|^id$|^ref$|^from$|^attachedTo$|^casterId$|^of$/.test(k)) out.add(v);
       else allIds(v, out);
     }
   }
@@ -388,3 +388,57 @@ describe("remapState, wave 5 (docs/design-v1-dm-tools.md 2.5)", () => {
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
   });
 });
+
+describe("companions in an import (docs/design-v1-combat-flow.md 4.7)", () => {
+  function party() {
+    const state = room({ characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }), gone: character("gone") } });
+    state.meta.settings = { ...state.meta.settings, healRevives: false };
+    state.tokens.bt = token("bt", { kind: "pc", actor: { ref: "bree" } });
+    state.tokens.ws = token("ws", { kind: "npc", ownerIds: ["p1"], companion: { of: "bree", turn: "shared", reactionUsed: true } });
+    state.tokens.own = token("own", { kind: "npc", ownerIds: ["p1"], companion: { of: "bree", turn: "own" } });
+    state.tokens.orphan = token("orphan", { kind: "npc", companion: { of: "missing", turn: "shared" } });
+    state.log.push({ id: "4:0", at: AT, kind: "event", data: { type: "companion", tokenId: "ws", characterId: "bree", memberId: "p1", name: "Wildfire Spirit" } });
+    // A hand-made fight: the shared spirit holds a row, which the rules never allow, with an effect counting it.
+    state.tokens.gob = token("gob", { actor: { inline: actor({ effects: [{ id: "b", key: "blinded", duration: { remaining: 1, boundary: "turnEnd", anchor: { entryId: "e-ws" } } }] }) } });
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-bree", entries: [entry("e-bree", { tokenId: "bt", value: 20 }), entry("e-ws", { tokenId: "ws", value: 15, tieOrder: 1 }), entry("e-gob", { tokenId: "gob", value: 10, tieOrder: 2 })] };
+    state.encounterHistory = [{ encounter: structuredClone(state.encounter), effects: {}, revealed: [], companionReactions: ["ws", "nowhere"], at: AT }];
+    return state;
+  }
+
+  test("companion.of follows its character, goes with a character that did not come through, and the log line's ids follow", () => {
+    let n = 0;
+    const out = remapState(party(), { assets: new Map(), newId: () => `n${n++}` });
+    const bree = Object.values(out.characters).find((c) => c.name === "Bree")!;
+    const tokens = Object.values(out.tokens);
+    const spirit = tokens.find((t) => t.companion?.turn === "shared")!;
+    assert.equal(spirit.companion!.of, bree.id);
+    assert.equal(spirit.companion!.reactionUsed, true, "a spent Reaction comes with its token");
+    assert.equal(tokens.filter((t) => t.companion).length, 2, "the orphan is a plain token now");
+    const line = out.log.find((e) => e.data?.type === "companion")!.data!;
+    assert.deepEqual(line, { type: "companion", tokenId: spirit.id, characterId: bree.id, memberId: out.characters[bree.id]!.ownerIds[0], name: "Wildfire Spirit" });
+    assert.equal(out.meta.settings.healRevives, false);
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+
+  test("the rules run over the import: the shared spirit's rows leave the fight and its history, saved effects rebound, and saved Reactions are filtered and mapped", () => {
+    let n = 0;
+    const out = remapState(party(), { assets: new Map(), newId: () => `n${n++}` });
+    const spirit = Object.values(out.tokens).find((t) => t.companion?.turn === "shared")!;
+    const breeToken = Object.values(out.tokens).find((t) => t.kind === "pc")!;
+    const breeRow = out.encounter!.entries.find((e) => e.tokenId === breeToken.id)!;
+    assert.equal(out.encounter!.entries.some((e) => e.tokenId === spirit.id), false);
+    assert.equal(out.encounterHistory[0]!.encounter.entries.some((e) => e.tokenId === spirit.id), false);
+    const gob = Object.values(out.tokens).find((t) => "inline" in t.actor && t.actor.inline.effects.length > 0)!;
+    assert.ok("inline" in gob.actor);
+    assert.deepEqual(gob.actor.inline.effects[0]!.duration!.anchor, { entryId: breeRow.id });
+    assert.deepEqual(out.encounterHistory[0]!.companionReactions, [spirit.id]);
+    // Previous after the import sets the flag again on the mapped token.
+    const cleared = { ...out, tokens: { ...out.tokens, [spirit.id]: { ...spirit, companion: { of: spirit.companion!.of, turn: "shared" as const } } } };
+    const dm = Object.keys(out.members)[0]!;
+    cleared.members[dm] = { ...cleared.members[dm]!, kind: "dm" };
+    const back = apply(cleared, { t: "encounter.prev" }, { ...DM, memberId: dm });
+    assert.equal(back.tokens[spirit.id]!.companion!.reactionUsed, true);
+  });
+});
+

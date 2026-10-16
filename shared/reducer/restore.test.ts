@@ -342,3 +342,64 @@ function randomEdit(r: () => number, state: RoomState, id: string): Op {
     }
   }
 }
+
+describe("companions under undo (docs/design-v1-combat-flow.md 3.6.4 and 3.6.8)", () => {
+  const DM: Viewer = { memberId: "dmA", role: "dm" };
+  const CY: Viewer = { memberId: "p2", role: "player" };
+  function breeRoom(): RoomState {
+    const state = twoDms();
+    state.members.p2 = member("p2");
+    state.characters.bree = { id: "bree", rev: 0, ownerIds: ["p1"], name: "Bree", size: "medium", actor: actor() };
+    return state;
+  }
+  const spirit = (id: string, turn: "own" | "shared" | "none" = "shared", of = "bree"): Op => ({
+    t: "token.create",
+    token: { id, sceneId: "s1", kind: "npc", name: "Wildfire Spirit", size: "small", x: 2, y: 2, layer: "token", actor: { inline: actor({ hp: { cur: 9, max: 9, temp: 0 }, dmNotes: "" }) }, companion: { of, turn } },
+  });
+
+  test("Bree's owner changed from Ana to Cy, Cy adds a companion, then the change is undone: both are Ana's after the one restore", () => {
+    const changed = run(breeRoom(), { t: "character.update", characterId: "bree", patch: { ownerIds: ["p2"] } }, DM, 1);
+    const added = run(changed.state, spirit("ws"), CY, 2);
+    assert.deepEqual(added.state.tokens.ws!.ownerIds, ["p2"]);
+    const r = undo(added.state, changed.inverse, 3);
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    assert.deepEqual(r.state.characters.bree!.ownerIds, ["p1"]);
+    assert.deepEqual(r.state.tokens.ws!.ownerIds, ["p1"]);
+  });
+
+  test("a companion deleted, Bree's owners changed, then the delete undone: it comes back with the current owners", () => {
+    const made = run(breeRoom(), spirit("ws"), DM, 1);
+    const deleted = run(made.state, { t: "token.delete", tokenId: "ws" }, DM, 2);
+    const changed = run(deleted.state, { t: "character.update", characterId: "bree", patch: { ownerIds: ["p2"] } }, DM, 3);
+    const r = undo(changed.state, deleted.inverse, 4);
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    assert.deepEqual(r.state.tokens.ws!.ownerIds, ["p2"]);
+  });
+
+  test("a restore writing an encounter with a row for a companion that now acts on its character's turn is refused", () => {
+    let state = run(breeRoom(), spirit("ws", "own"), DM, 1).state;
+    state = run(state, { t: "encounter.start", entries: [{ id: "e-ws", tokenId: "ws", value: 12 }] }, DM, 2).state;
+    const removed = run(state, { t: "encounter.remove", entryIds: ["e-ws"] }, DM, 3);
+    const shared = run(removed.state, { t: "token.update", tokenId: "ws", patch: { companion: { of: "bree", turn: "shared" } } }, DM, 4);
+    const r = undo(shared.state, removed.inverse, 5);
+    assert.ok(!r.ok);
+    assert.match(r.message, /now acts on its character's turn/);
+    // The undo of the turn change itself puts the token and its turn back first, and then the row may return.
+    const back = undo(shared.state, shared.inverse, 6);
+    assert.ok(back.ok, back.ok ? "" : back.message);
+    assert.ok(undo(back.state, removed.inverse, 7).ok);
+  });
+
+  test("an undo that would remove a character a companion names is refused, and one that puts back a companion of a deleted character too", () => {
+    const created = run(breeRoom(), { t: "character.create", character: { id: "cy", name: "Cy", size: "medium", ownerIds: ["p2"], actor: actor() } }, DM, 1);
+    const withCompanion = run(created.state, spirit("cyw", "shared", "cy"), DM, 2);
+    const r = undo(withCompanion.state, created.inverse, 3);
+    assert.ok(!r.ok);
+    assert.equal(r.message, DEPENDED_ON);
+    const deleted = run(withCompanion.state, { t: "token.delete", tokenId: "cyw" }, DM, 4);
+    const gone = run(deleted.state, { t: "character.delete", characterId: "cy" }, DM, 5);
+    const back = undo(gone.state, deleted.inverse, 6);
+    assert.ok(!back.ok);
+    assert.equal(back.message, PARENT_GONE);
+  });
+});

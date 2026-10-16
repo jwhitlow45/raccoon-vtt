@@ -253,6 +253,11 @@ function eventText(data: LogEvent, names: LogNames): string {
       return `${creatureName(names, data)} teleported past a ${data.past}.`;
     case "roll":
       return rollText(data, creatureName(names, data));
+    case "companion": {
+      // Only the DM's log holds it (docs/design-v1-combat-flow.md 3.6.3). The name is the companion's when it came.
+      const character = names.characters[data.characterId]?.name ?? "their character";
+      return `${memberName(names, data.memberId)} added ${data.name} beside ${character}.`;
+    }
   }
 }
 

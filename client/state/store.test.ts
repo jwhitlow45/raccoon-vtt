@@ -234,6 +234,85 @@ describe("which ops are optimistic", () => {
   });
 });
 
+describe("which companion ops are optimistic (docs/design-v1-combat-flow.md 4.6)", () => {
+  /** Bree (Ana, p1) on the players' scene with a spirit whose Reaction is spent, Cy (p2), and a goblin. */
+  const party = () => {
+    const state = room({ characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }) } });
+    state.tokens.bt = token("bt", { kind: "pc", actor: { ref: "bree" }, x: 2, y: 2 });
+    state.tokens.ws = token("ws", { kind: "npc", x: 3, y: 2, ownerIds: ["p1"], companion: { of: "bree", turn: "shared", reactionUsed: true } });
+    state.tokens.g1 = token("g1", { x: 8, y: 8 });
+    return state;
+  };
+  const spiritOp: ClientOp = {
+    t: "token.create",
+    token: { id: "owl", sceneId: "s1", kind: "npc", name: "Owl", size: "tiny", x: 1, y: 2, layer: "token", actor: { inline: actor({ hp: { cur: 1, max: 1, temp: 0 }, dmNotes: "" }) }, companion: { of: "bree", turn: "shared" } },
+  };
+
+  test("a player's companion create and turn change wait for the server, then land", () => {
+    const s = setup(party(), P1);
+    s.connect();
+    s.room.dispatch(spiritOp);
+    assert.equal(s.state().view?.tokens.owl, undefined, "not predicted");
+    s.room.dispatch({ t: "token.update", tokenId: "ws", patch: { companion: { of: "bree", turn: "none" } } });
+    assert.equal(s.state().view?.tokens.ws?.companion?.turn, "shared", "not predicted");
+    s.deliver();
+    assert.ok(s.state().view?.tokens.owl?.companion);
+    assert.equal(s.state().view?.tokens.ws?.companion?.turn, "none");
+  });
+
+  test("a companion's Reaction is predicted by a device that holds the token", () => {
+    const s = setup(party(), P1);
+    s.connect();
+    s.room.dispatch({ t: "token.update", tokenId: "ws", patch: { companionReaction: false } });
+    assert.equal(s.state().view?.tokens.ws?.companion?.reactionUsed, undefined, "cleared at once");
+    s.deliver();
+    assert.equal(s.state().pending.length, 0);
+    assert.equal(s.state().view?.tokens.ws?.companion?.reactionUsed, undefined);
+  });
+
+  test("the DM's character owner change waits in a two-scene room, and is predicted in a one-scene room viewed whole", () => {
+    const two = setup(party(), DM);
+    two.connect();
+    two.room.dispatch({ t: "character.update", characterId: "bree", patch: { ownerIds: ["p2"] } });
+    assert.deepEqual(two.state().view?.tokens.ws?.ownerIds, ["p1"], "not predicted");
+    two.deliver();
+    assert.deepEqual(two.state().view?.tokens.ws?.ownerIds, ["p2"]);
+    const single = party();
+    delete single.scenes.s2;
+    const one = setup(single, DM);
+    one.connect();
+    one.room.dispatch({ t: "character.update", characterId: "bree", patch: { ownerIds: ["p2"] } });
+    assert.deepEqual(one.state().view?.tokens.ws?.ownerIds, ["p2"], "predicted");
+  });
+
+  test("the DM's Next onto a character-only row is predicted while the DM views the players' scene, and clears the spirit's Reaction", () => {
+    const state = party();
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-g1", entries: [entry("e-g1", { tokenId: "g1", value: 20 }), entry("e-bree", { characterId: "bree", value: 10, tieOrder: 1 })] };
+    const s = setup(state, DM, "s1");
+    s.connect();
+    s.room.dispatch({ t: "encounter.next" });
+    assert.equal(s.state().view?.encounter?.activeEntryId, "e-bree", "predicted");
+    assert.equal(s.state().view?.tokens.ws?.companion?.reactionUsed, undefined);
+    const away = setup(state, DM, "s2");
+    away.connect();
+    away.room.dispatch({ t: "encounter.next" });
+    assert.equal(away.state().view?.encounter?.activeEntryId, "e-g1", "waits while the DM views another scene");
+  });
+
+  test("the DM's Next with a companion Reaction spent is predicted when the view holds every row's token", () => {
+    const state = party();
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-g1", entries: [entry("e-g1", { tokenId: "g1", value: 20 }), entry("e-bree", { tokenId: "bt", value: 10, tieOrder: 1 })] };
+    const s = setup(state, DM, "s1");
+    s.connect();
+    s.room.dispatch({ t: "encounter.next" });
+    assert.equal(s.state().view?.encounter?.activeEntryId, "e-bree");
+    assert.equal(s.state().view?.tokens.ws?.companion?.reactionUsed, undefined, "predicted with the turn");
+    s.deliver();
+    assert.equal(s.state().pending.length, 0);
+    assert.equal(s.state().view?.tokens.ws?.companion?.reactionUsed, undefined);
+  });
+});
+
 describe("undo answers", () => {
   const answer = (s: ReturnType<typeof setup>, extra: Partial<Ev>) =>
     s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], ...extra });

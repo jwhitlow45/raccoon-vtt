@@ -2,9 +2,10 @@ import { keys } from "../keys.ts";
 import { healRevivesDead } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
-import { MAX_RULER_STOPS, type ActorPatch, type OpOf } from "../protocol.ts";
+import { MAX_RULER_STOPS, type ActorPatch, type OpOf, type TokenPatch } from "../protocol.ts";
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
 import { pathThisTurn, sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
+import { COMPANION_OWNERS, NO_NUMBER, NOT_SHARED, actsOnCharacterTurn, checkCompanion, dropRows, syncOwners } from "./companions.ts";
 import { removeEntries } from "./encounter.ts";
 import { gone, invalid, type Env, type ResolvedActor, type Tx } from "./tx.ts";
 
@@ -24,8 +25,11 @@ function tokenDefaults(kind: Token["kind"]): Pick<Token, "disposition" | "layer"
  */
 function autoNumber(tx: Tx, token: Token): number | undefined {
   if (token.kind !== "npc" && token.kind !== "monster") return undefined;
+  // A companion is never numbered, nor counted among the siblings: a player's new "Owl 2" would tell them a hidden Owl
+  // stands there (docs/design-v1-combat-flow.md 3.6.3).
+  if (token.companion) return undefined;
   const siblings = Object.values(tx.state.tokens)
-    .filter((t) => t.id !== token.id && t.sceneId === token.sceneId && t.name === token.name && t.kind !== "pc")
+    .filter((t) => t.id !== token.id && t.sceneId === token.sceneId && t.name === token.name && t.kind !== "pc" && !t.companion)
     .sort((a, b) => (a.id < b.id ? -1 : 1));
   if (siblings.length === 0) return undefined;
   const used = new Set(siblings.map((t) => t.number).filter((n): n is number => n !== undefined));
@@ -77,9 +81,26 @@ export function tokenCreate(tx: Tx, op: OpOf<"token.create">): void {
   if (input.rangeRings !== undefined && input.rangeRings.length > 0) token.rangeRings = normalRings(input.rangeRings);
   if (input.light !== undefined) token.light = input.light;
   if (input.partyVision === true) token.partyVision = true;
+  if (input.companion) {
+    // A companion is played by whoever plays its character, and carries no number (docs/design-v1-combat-flow.md 3.6.3).
+    if (input.number !== undefined) throw invalid(NO_NUMBER);
+    const character = tx.character(input.companion.of);
+    if (input.ownerIds !== undefined && !sameMembers(input.ownerIds, character.ownerIds)) throw invalid(COMPANION_OWNERS);
+    token.companion = { of: input.companion.of, turn: input.companion.turn };
+    token.ownerIds = [...character.ownerIds];
+    checkCompanion(tx, token);
+    tx.write(keys.token(token.id), token);
+    // The DM learns that a player brought one, in a line only the DM's log carries.
+    if (tx.actor.role !== "dm") tx.addEvent({ type: "companion", tokenId: token.id, characterId: character.id, memberId: tx.actor.memberId, name: token.name });
+    return;
+  }
   const number = input.number ?? autoNumber(tx, token);
   if (number !== undefined) token.number = number;
   tx.write(keys.token(token.id), token);
+}
+
+function sameMembers(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id) => b.includes(id));
 }
 
 /** Applies the shared actor patch. HP edits go through the rules so life states follow. */
@@ -159,7 +180,10 @@ export function tokenUpdate(tx: Tx, op: OpOf<"token.update">): void {
   else if (p.partyVision === false) delete next.partyVision;
   // A squeeze is where the token stood, at its size: a new size, scene or place leaves it standing full size (section 4.1).
   if (SQUEEZE_FIELDS.some((field) => p[field] !== undefined)) delete next.squeeze;
+  updateCompanion(tx, token, next, p);
   tx.write(keys.token(token.id), withPath(tx, token, next, judgedIn(tx, [next])));
+  // Coming to act on its character's turn takes its rows out of the fight and its history (docs/design-v1-combat-flow.md 3.6.7).
+  if (p.companion && actsOnCharacterTurn(next)) dropRows(tx, tx.token(token.id), true);
   if (next.sceneId !== token.sceneId) {
     // An attached area follows its token, to another scene too, rather than staying behind at a stale origin.
     for (const template of sortedById(Object.values(tx.state.templates))) {
@@ -174,9 +198,39 @@ export function tokenUpdate(tx: Tx, op: OpOf<"token.update">): void {
   }
 }
 
+/**
+ * The companion rules on a token.update (docs/design-v1-combat-flow.md
+ * 3.6.3, 3.6.4 and 3.6.8), applied to `next`, the token as the rest of the
+ * patch leaves it. Attaching clears an inherited number first, then the
+ * result is checked, so a numbered Owl attaches, while a number the op
+ * itself supplies is refused. Owners always come from the character, and a
+ * spent Reaction stays only while the companion acts on its character's
+ * turn listed under it.
+ */
+function updateCompanion(tx: Tx, token: Token, next: Token, p: TokenPatch): void {
+  if (p.companion === null) delete next.companion;
+  else if (p.companion !== undefined) {
+    const keep = token.companion?.turn === "shared" && token.companion.reactionUsed === true && p.companion.turn === "shared";
+    next.companion = { of: p.companion.of, turn: p.companion.turn, ...(keep ? { reactionUsed: true as const } : {}) };
+    delete next.number;
+  }
+  if (p.companionReaction !== undefined) {
+    if (next.companion?.turn !== "shared") throw invalid(NOT_SHARED);
+    const { reactionUsed: _spent, ...link } = next.companion;
+    next.companion = p.companionReaction ? { ...link, reactionUsed: true } : link;
+  }
+  if (!next.companion) return;
+  if (p.number !== undefined && p.number !== null) throw invalid(NO_NUMBER);
+  if (p.ownerIds !== undefined) throw invalid(COMPANION_OWNERS);
+  checkCompanion(tx, next);
+  next.ownerIds = [...tx.character(next.companion.of).ownerIds];
+}
+
 /** Removes a token with what hangs off it: attached templates, caster references and its initiative rows. */
 export function deleteToken(tx: Tx, tokenId: string): void {
   const token = tx.token(tokenId);
+  // A companion's rows leave the fight's history too, so Previous never brings one back (docs/design-v1-combat-flow.md 3.6.8).
+  if (token.companion) dropRows(tx, token, false);
   for (const template of sortedById(Object.values(tx.state.templates))) {
     if (template.attachedTo === tokenId) tx.remove(keys.template(template.id));
     else if (template.casterId === tokenId) {
@@ -352,6 +406,8 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
   setOrDelete(next, "defaultImage", p.defaultImage);
   setOrDelete(next, "level", p.level);
   tx.write(keys.character(character.id), next);
+  // Whoever plays the character plays its companions, on every scene (docs/design-v1-combat-flow.md 3.6.4).
+  if (p.ownerIds !== undefined) syncOwners(tx, [character.id]);
   if (p.actor) {
     const resolved = tx.resolveActor({ characterId: character.id });
     const r = applyActorPatch(tx, resolved, p.actor);
@@ -360,11 +416,12 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
   }
 }
 
-/** Removes a character and every token that points at it, so no token is left with a dangling actor. */
+/** Removes a character with every token that points at it, so no token is left with a dangling actor, and its companions. */
 export function characterDelete(tx: Tx, op: OpOf<"character.delete">): void {
   const character = tx.character(op.characterId);
   for (const token of sortedById(Object.values(tx.state.tokens))) {
-    if ("ref" in token.actor && token.actor.ref === character.id) deleteToken(tx, token.id);
+    const its = ("ref" in token.actor && token.actor.ref === character.id) || token.companion?.of === character.id;
+    if (its) deleteToken(tx, token.id);
   }
   const entryIds = tx.state.encounter?.entries.filter((e) => e.characterId === character.id).map((e) => e.id) ?? [];
   if (entryIds.length > 0) removeEntries(tx, entryIds);

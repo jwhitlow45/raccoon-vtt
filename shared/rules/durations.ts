@@ -1,5 +1,6 @@
 import type { DurationAnchor, Effect, Encounter, EntryId, InitEntry, RoomState } from "../model.ts";
 import type { DurationInput } from "../protocol.ts";
+import { rowCharacter } from "./initiative.ts";
 
 /**
  * Effect durations (design section 9.5). A duration counts crossings of one
@@ -23,13 +24,30 @@ function refOf(state: RoomState, tokenId: string): string | undefined {
   return "ref" in token.actor ? token.actor.ref : undefined;
 }
 
-/** Whether an entry stands for the creature a duration anchor names, through its token or its character. */
+/**
+ * The character whose turn a companion acts on, when it acts on its
+ * character's turn (docs/design-v1-combat-flow.md 3.6.8). Its durations
+ * count that character's row.
+ */
+function actsOnTurnOf(state: RoomState, tokenId: string): string | undefined {
+  const companion = state.tokens[tokenId]?.companion;
+  return companion !== undefined && companion.turn !== "own" ? companion.of : undefined;
+}
+
+/**
+ * Whether an entry stands for the creature a duration anchor names, through
+ * its token or its character. A companion that acts on its character's turn
+ * is stood for by its character's row, so "until the end of Wildfire
+ * Spirit's next turn" counts Bree's turns.
+ */
 export function entryMatchesAnchor(state: RoomState, entry: InitEntry, of: DurationAnchor): boolean {
   if ("entryId" in of) return entry.id === of.entryId;
   if ("tokenId" in of) {
     if (entry.tokenId === of.tokenId) return true;
     const ref = refOf(state, of.tokenId);
-    return ref !== undefined && entry.characterId === ref;
+    if (ref !== undefined && entry.characterId === ref) return true;
+    const character = actsOnTurnOf(state, of.tokenId);
+    return character !== undefined && rowCharacter(state, entry) === character;
   }
   if (entry.characterId === of.characterId) return true;
   return entry.tokenId !== undefined && refOf(state, entry.tokenId) === of.characterId;
@@ -145,7 +163,12 @@ export function sameAnchor(a: DurationAnchor, b: DurationAnchor): boolean {
   return "characterId" in b && a.characterId === b.characterId;
 }
 
-/** The anchors that all name the creature behind an entry, for `bindToEntry`. */
+/**
+ * The anchors that all name the creature behind an entry, for `bindToEntry`:
+ * its token, its character, that character's other tokens, and the
+ * companions that act on that character's turn, so durations paused on a
+ * companion bind when its character joins the fight.
+ */
 export function anchorsForEntry(state: RoomState, entry: InitEntry): DurationAnchor[] {
   const anchors: DurationAnchor[] = [];
   let characterId = entry.characterId;
@@ -159,6 +182,12 @@ export function anchorsForEntry(state: RoomState, entry: InitEntry): DurationAnc
       if ("ref" in token.actor && token.actor.ref === characterId && token.id !== entry.tokenId) {
         anchors.push({ tokenId: token.id });
       }
+    }
+  }
+  const owner = rowCharacter(state, entry);
+  if (owner !== undefined) {
+    for (const token of Object.values(state.tokens)) {
+      if (actsOnTurnOf(state, token.id) === owner) anchors.push({ tokenId: token.id });
     }
   }
   return anchors;

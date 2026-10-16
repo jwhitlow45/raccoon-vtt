@@ -26,6 +26,7 @@ import type {
   Pin,
   Token,
 } from "#shared/model.ts";
+import { normalizeCompanionState } from "#shared/reducer/companions.ts";
 import { phaseMap, withPhaseLight } from "#shared/reducer/phases.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 
@@ -260,6 +261,11 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       ownerIds: memberList(t.ownerIds),
       actor: "ref" in t.actor ? { ref: characters.of(t.actor.ref) } : { inline: actor(t.actor.inline) },
     };
+    // A companion follows its character's new id, and is a plain token once its character did not come through.
+    if (t.companion) {
+      if (characters.has(t.companion.of)) next.companion = { ...t.companion, of: characters.of(t.companion.of) };
+      else delete next.companion;
+    }
     if (t.image) {
       const mapped = image(t.image);
       if (mapped) next.image = mapped;
@@ -330,6 +336,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     };
     const legendaryHolder = snap.legendary ? holder(snap.legendary.holderId) : null;
     if (snap.legendary && legendaryHolder) next.legendary = { holderId: legendaryHolder, actionsUsed: snap.legendary.actionsUsed };
+    const reactions = (snap.companionReactions ?? []).filter((id) => tokens.has(id)).map((id) => tokens.of(id));
+    if (reactions.length > 0) next.companionReactions = reactions;
     return next;
   });
   for (const h of Object.values(state.handouts)) {
@@ -419,6 +427,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
         return data;
       case "teleport":
         return { ...data, tokenId: tokens.of(data.tokenId) };
+      case "companion":
+        return { ...data, tokenId: tokens.of(data.tokenId), characterId: characters.of(data.characterId), memberId: members.of(data.memberId) };
       case "roll": {
         const next = { ...data };
         if (data.tokenId !== undefined) next.tokenId = tokens.of(data.tokenId);
@@ -439,7 +449,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     }
     out.log.push(next);
   }
-  return out;
+  // A hand-made or older file is brought within the companion rules (docs/design-v1-combat-flow.md 4.7).
+  return normalizeCompanionState(out);
 }
 
 /**

@@ -290,6 +290,22 @@ describe("members and sources", () => {
     assert.equal(overCap, 3);
   });
 
+  test("companions rank after the DM's marked creatures under the cap, and an effect companion lends no sight (docs/design-v1-combat-flow.md 3.6.5)", () => {
+    const tokens: Token[] = [];
+    for (let k = 0; k < 11; k++) tokens.push(pc(`p${String(k).padStart(2, "0")}`, 1 + k, 5));
+    // A familiar whose ID sorts first, a creature companion a player owns, still comes after the DM's lantern bearer.
+    tokens.push(token("a-owl", { kind: "npc", ownerIds: ["p1"], companion: { of: "c1", turn: "shared" }, x: 1, y: 9 }));
+    tokens.push(token("lantern", { kind: "npc", partyVision: true, x: 3, y: 9 }));
+    tokens.push(token("b-weapon", { kind: "object", ownerIds: ["p1"], companion: { of: "c1", turn: "none" }, x: 5, y: 9, actor: { inline: actor({ hp: { cur: 0, max: 0, temp: 0 }, ac: 0 }) } }));
+    const s = visionRoom({ tokens });
+    s.characters.c1 = character("c1");
+    const { members } = visionReport(s, "s1", world);
+    const why = Object.fromEntries(members.map((m) => [m.tokenId, m.reason ?? "lends"]));
+    assert.equal(why.lantern, "lends", "the 12th source is the DM's marked creature");
+    assert.equal(why["a-owl"], "cap", "the familiar comes after it");
+    assert.equal(why["b-weapon"], "object", "an effect lends no sight");
+  });
+
   test("carried lights past the cap light in the cap's order, and a token the DM hid takes no place", () => {
     const candle = { light: { bright: 5, dim: 5 } };
     // A party torch whose ID sorts after every monster's, and a candle on each of 20 monsters along a row.

@@ -191,6 +191,7 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
   assert.deepEqual(p.exploredTiles, {}, `${label}: explored layer`);
   for (const [key, tile] of Object.entries(p.fogTiles)) assert.equal(decodeTile(tile.bits)?.join(), decodeTile(fog[key]!.bits)?.join(), `${label}: fog tile ${key} is not the layers merged`);
   for (const e of p.log) assert.notEqual(e.data?.type, "teleport", `${label}: a teleport line leaked`);
+  for (const e of p.log) assert.notEqual(e.data?.type, "companion", `${label}: a companion line leaked`);
   const vision = sceneId !== null && state.scenes[sceneId]!.vision?.on === true;
   for (const key of Object.keys(p.sight)) assert.ok(vision && key.startsWith(`${sceneId}:`), `${label}: sight tile ${key} leaked`);
   for (const [id, pt] of Object.entries(p.tokens)) {
@@ -211,6 +212,9 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
       for (const field of ["ownerIds", "fogExempt", "fogExemptAuto", "nameHidden", "publicName", "visibility", "hpVisibility", "altImages", "light"]) {
         assert.ok(!(field in pt), `${label}: ${field} of ${id} leaked`);
       }
+      // A companion is the table's only while a player plays it (docs/design-v1-combat-flow.md 3.6.5).
+      assert.equal("companion" in pt, t.companion !== undefined && playersToken(state, t), `${label}: companion of ${id}`);
+      if (t.companion && t.kind === "object" && "inline" in pt.actor) assert.equal(pt.actor.inline.life, "alive", `${label}: an effect companion's life of ${id}`);
       if (t.nameHidden) {
         assert.equal(pt.name, t.publicName ?? "Unknown creature", `${label}: hidden name of ${id} leaked`);
         assert.ok(!("number" in pt), `${label}: number of ${id} with a hidden name leaked`);
@@ -1585,5 +1589,99 @@ describe("the stats a player's copy holds, for the stat summary and the AC shiel
     assert.equal(inlineOf(projectState(state, P1, { sceneId: "s1" }).tokens.h)?.ac, 14);
     assert.equal(projectState(state, P2, { sceneId: "s1" }).tokens.h, undefined);
     assert.equal(projectState(state, DISPLAY, { sceneId: "s1" }).tokens.h, undefined);
+  });
+});
+
+describe("companions (docs/design-v1-combat-flow.md 3.6.5 and 4.5)", () => {
+  /** Bree (Ana, p1) with a spirit (a creature) and a weapon (an effect), and Cy (p2), a player who owns neither. */
+  function party(): RoomState {
+    const state = room({ characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }) } });
+    state.tokens.bt = token("bt", { kind: "pc", actor: { ref: "bree" }, x: 2, y: 2 });
+    state.tokens.ws = token("ws", { kind: "npc", ownerIds: ["p1"], hpVisibility: "hidden", companion: { of: "bree", turn: "shared", reactionUsed: true }, actor: { inline: actor({ hp: { cur: 9, max: 15, temp: 0 } }) }, x: 3, y: 2 });
+    state.tokens.sw = token("sw", { kind: "object", ownerIds: ["p1"], hpVisibility: "exact", companion: { of: "bree", turn: "none" }, actor: { inline: actor({ hp: { cur: 0, max: 0, temp: 0 }, ac: 0 }) }, x: 4, y: 2 });
+    return state;
+  }
+  const seen = (state: RoomState, viewer: Viewer, id: string) => projectState(state, viewer, { sceneId: "s1" }).tokens[id];
+  const inline = (t: { actor: { ref: string } | { inline: ProjectedActor } } | undefined): ProjectedActor => {
+    assert.ok(t && "inline" in t.actor);
+    return t.actor.inline;
+  };
+
+  test("owners get companion, its Reaction included, and another player gets it only while a player owns the token", () => {
+    const state = party();
+    assert.deepEqual(seen(state, P1, "ws")?.companion, { of: "bree", turn: "shared", reactionUsed: true });
+    assert.deepEqual(seen(state, P2, "ws")?.companion, { of: "bree", turn: "shared", reactionUsed: true });
+    assert.deepEqual(seen(state, DISPLAY, "ws")?.companion, { of: "bree", turn: "shared", reactionUsed: true });
+    // Ana leaves the roster: the member leaves every owner list, so no player plays the spirit any more.
+    const left = apply(state, { t: "sys.memberRemove", memberId: "p1" });
+    assert.equal(seen(left, P2, "ws")?.companion, undefined);
+    // A companion of a character no player plays reaches players as a plain token.
+    const dms = party();
+    dms.characters.bree = { ...dms.characters.bree!, ownerIds: [] };
+    dms.tokens.ws = { ...dms.tokens.ws!, ownerIds: [] };
+    assert.equal(seen(dms, P2, "ws")?.companion, undefined);
+    assert.equal(seen(dms, P2, "ws")?.party, undefined);
+  });
+
+  test("never to a player who cannot see the token, and the encounter carries no companion ids while saved steps reach only the DM", () => {
+    const state = party();
+    state.tokens.ws = { ...state.tokens.ws!, visibility: "dm" };
+    assert.equal(seen(state, P2, "ws"), undefined);
+    state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("e1", { tokenId: "bt" })] };
+    state.encounterHistory = [{ encounter: structuredClone(state.encounter), effects: {}, revealed: [], companionReactions: ["ws"], at: "x" }];
+    const p = projectState(state, P1, { sceneId: "s1" });
+    assert.deepEqual(p.encounterHistory, []);
+    assert.ok(!JSON.stringify(p.encounter).includes("ws"));
+    assert.deepEqual(projectState(state, DM, { sceneId: "s1" }).encounterHistory[0]?.companionReactions, ["ws"]);
+  });
+
+  test("a creature companion's HP follows Players see the party's HP while a player plays it, and its own setting once none does", () => {
+    const state = party();
+    assert.deepEqual(inline(seen(state, P2, "ws")).hp, { cur: 9, max: 15, temp: 0 }, "hidden on the token, yet the party's rule says exact");
+    state.meta.settings = { ...state.meta.settings, pcHpVisibleToParty: false };
+    assert.equal(inline(seen(state, P2, "ws")).hpLabel, "Healthy");
+    assert.equal(inline(seen(state, P2, "ws")).hp, undefined);
+    const nobody = party();
+    nobody.tokens.ws = { ...nobody.tokens.ws!, ownerIds: [] };
+    nobody.characters.bree = { ...nobody.characters.bree!, ownerIds: [] };
+    const a = inline(seen(nobody, P2, "ws"));
+    assert.equal("hp" in a || "hpLabel" in a || "hpBar" in a, false, "its own hidden HP again");
+  });
+
+  test("hpAccess gives no HP for any token hpLess holds for, and a plain object with HP keeps its own rule", () => {
+    const state = party();
+    assert.equal(hpAccess(state, P2, { token: state.tokens.sw }), "none", "an effect");
+    state.tokens.zero = token("zero", { hpVisibility: "exact", actor: { inline: actor({ hp: { cur: 0, max: 0, temp: 0 } }) } });
+    assert.equal(hpAccess(state, P2, { token: state.tokens.zero }), "none", "a maximum of 0");
+    state.tokens.chest = token("chest", { kind: "object", hpVisibility: "exact", actor: { inline: actor({ hp: { cur: 10, max: 10, temp: 0 } }) } });
+    assert.equal(hpAccess(state, P2, { token: state.tokens.chest }), "exact");
+    assert.equal(hpAccess(state, P1, { token: state.tokens.sw }), "exact", "its owner");
+    const a = inline(seen(state, P2, "sw"));
+    assert.equal("hp" in a || "hpLabel" in a || "hpBar" in a, false, "0 of 0 never reaches them as Bloodied");
+  });
+
+  test("an effect companion reaches a non-owning player and the table display alive, a dead one included, while its owner and the DM get its stored life", () => {
+    const state = party();
+    state.tokens.sw = { ...state.tokens.sw!, actor: { inline: actor({ hp: { cur: 0, max: 15, temp: 0 }, ac: 13, life: "dead" }) } };
+    assert.equal(inline(seen(state, P2, "sw")).life, "alive");
+    assert.equal(inline(seen(state, DISPLAY, "sw")).life, "alive");
+    assert.equal(inline(seen(state, P1, "sw")).life, "dead");
+    assert.equal(inline(seen(state, DM, "sw")).life, "dead");
+    // Its life lines say nothing to non-owners either.
+    state.log = [{ id: "1:0", at: "x", kind: "event", data: { type: "life", tokenId: "sw", seen: true, life: "dead" } }];
+    assert.equal(projectState(state, P2, { sceneId: "s1" }).log.length, 0);
+    assert.equal(projectState(state, P1, { sceneId: "s1" }).log.length, 1);
+    // The control: an ordinary creature with hidden HP keeps its real life for everyone.
+    const control = party();
+    control.tokens.gob = token("gob", { hpVisibility: "hidden", actor: { inline: actor({ hp: { cur: 0, max: 7, temp: 0 }, life: "dead" }) } });
+    assert.equal(inline(seen(control, P2, "gob")).life, "dead");
+  });
+
+  test("the companion line reaches only the DM", () => {
+    const state = party();
+    state.log = [{ id: "1:0", at: "x", kind: "event", data: { type: "companion", tokenId: "ws", characterId: "bree", memberId: "p1", name: "Wildfire Spirit" } }];
+    assert.equal(projectState(state, P1, { sceneId: "s1" }).log.length, 0, "not even the player who added it");
+    assert.equal(projectState(state, P2, { sceneId: "s1" }).log.length, 0);
+    assert.equal(projectState(state, DM, { sceneId: "s1" }).log.length, 1);
   });
 });

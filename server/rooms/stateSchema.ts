@@ -242,6 +242,8 @@ const token = z.strictObject({
   squeeze: z.literal(true).optional(),
   light: mapSchemas.tokenLight.optional(),
   partyVision: z.boolean().optional(),
+  // Backups from before companions have none (docs/design-v1-combat-flow.md 4.7). A spent Reaction comes with its token.
+  companion: z.strictObject({ of: id, turn: z.enum(["own", "shared", "none"]), reactionUsed: z.literal(true).optional() }).optional(),
 });
 
 const character = z.strictObject({
@@ -351,6 +353,7 @@ const encounterSnapshot = z.strictObject({
   effects: z.record(id, z.array(effectStored).max(32)),
   revealed: z.array(z.strictObject({ tokenId: id, visibility, fogExemptAuto: z.boolean() })).max(600),
   legendary: z.strictObject({ holderId: id, actionsUsed: z.number().int().min(0).max(10) }).optional(),
+  companionReactions: z.array(id).max(600).optional(),
   at: iso,
 });
 
@@ -489,6 +492,7 @@ const logEvent = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("handout"), handoutId: id }),
   z.strictObject({ type: z.literal("member"), memberId: id, action: z.enum(["join", "kick", "dm", "undm", "remove"]) }),
   z.strictObject({ type: z.literal("teleport"), tokenId: id, past: z.enum(["wall", "ledge"]) }),
+  z.strictObject({ type: z.literal("companion"), tokenId: id, characterId: id, memberId: id, name }),
   z.strictObject({
     type: z.literal("roll"),
     test: dmToolSchemas.rollTest,

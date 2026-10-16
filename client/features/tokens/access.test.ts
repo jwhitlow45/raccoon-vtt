@@ -47,6 +47,8 @@ const TOKEN_SAMPLES: { [K in keyof TokenPatch]-?: TokenPatch[K] } = {
   rangeRings: [30, 60],
   light: { bright: 20, dim: 20 },
   partyVision: true,
+  companion: { of: "hero", turn: "shared" },
+  companionReaction: true,
   actor: { ac: 15 },
 };
 
