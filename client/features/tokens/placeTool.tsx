@@ -1,17 +1,13 @@
-import type { ReactNode } from "react";
 import { useStore } from "zustand";
 import type { TokenKind } from "#shared/model.ts";
-import { Button } from "../../components/Button.tsx";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
-import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomUi } from "../../state/view.ts";
-import { InfoLine, OptionsColumn } from "../measure/controls.tsx";
+import { ChoiceRows, OptButton, OptionsStrip, PickCloses, ValueChip } from "../measure/controls.tsx";
 import { placeOnGround } from "../movement/ground.ts";
 import type { Point } from "./factory.ts";
 import { pendingTokens } from "./placeInputs.ts";
 import { PLACE_TOOL_ID, describePending, placementSlot, resetPending, setPending, type Pending } from "./placement.ts";
-import { Select } from "./ui.tsx";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /** A tap moves less than this on screen. More is a slip of the finger, and places nothing. */
@@ -81,61 +77,56 @@ const KIND_OPTIONS: { value: TokenKind; label: string }[] = [
   { value: "pc", label: "Blank player character" },
 ];
 
-/** What the next tap will place, and the ways to pick something else. */
+/**
+ * What the next tap will place, and the ways to pick something else
+ * (docs/design-v1-tool-options.md 9.7): the blank kind as a chip, then
+ * Monster… and Character…, or Cancel once something is chosen.
+ */
 function PlaceOptions() {
   const scope = useRoomScope();
   const pending = useStore(scope.get(placementSlot).store, (s) => s.pending);
   const ui = useRoomUi();
   if (pending.kind !== "blank") {
     return (
-      <OptionsLayout hint={`Tap the map to place ${describePending(pending)}.`}>
-        <Group>
-          <Button size="sm" onClick={() => ui.setTool("select")}>
-            Cancel
-          </Button>
-        </Group>
-      </OptionsLayout>
+      <OptionsStrip
+        tool="Add token"
+        task
+        line={{ tone: "hint", content: `Tap the map to place ${describePending(pending)}.` }}
+        slots={[
+          {
+            id: "cancel",
+            priority: 1,
+            control: (
+              <OptButton ends onClick={() => ui.setTool("select")}>
+                Cancel
+              </OptButton>
+            ),
+          },
+        ]}
+      />
     );
   }
+  const kind = KIND_OPTIONS.find((o) => o.value === pending.tokenKind)?.label ?? "";
   return (
-    <OptionsLayout hint="Pick a blank token, a monster or a character, then tap the map.">
-      <Group>
-        <div style={{ minWidth: 170 }}>
-          <Select<TokenKind>
-            label="Blank token kind"
-            value={pending.tokenKind}
-            options={KIND_OPTIONS}
-            onChange={(tokenKind) => setPending(scope, { kind: "blank", tokenKind } satisfies Pending)}
-          />
-        </div>
-      </Group>
-      <Group>
-        <Button size="sm" onClick={() => ui.openPanel("monsters")}>
-          Monster…
-        </Button>
-        <Button size="sm" onClick={() => ui.openPanel("characters")}>
-          Character…
-        </Button>
-      </Group>
-    </OptionsLayout>
+    <OptionsStrip
+      tool="Add token"
+      line={{ tone: "hint", content: "Pick a blank token, a monster or a character, then tap the map." }}
+      slots={[
+        {
+          id: "kind",
+          priority: 1,
+          control: (
+            // No compact form: short words would read "Monster" beside "Monster…".
+            <ValueChip label="Blank token kind" kind="choice" value={pending.tokenKind} valueName={kind} options={KIND_OPTIONS.map((o) => ({ key: o.value, words: o.label }))}>
+              <PickCloses>
+                <ChoiceRows<TokenKind> label="Blank token kind" value={pending.tokenKind} options={KIND_OPTIONS} onChange={(tokenKind) => setPending(scope, { kind: "blank", tokenKind } satisfies Pending)} />
+              </PickCloses>
+            </ValueChip>
+          ),
+        },
+        { id: "monster", priority: 2, control: <OptButton onClick={() => ui.openPanel("monsters")}>Monster…</OptButton> },
+        { id: "character", priority: 3, control: <OptButton onClick={() => ui.openPanel("characters")}>Character…</OptButton> },
+      ]}
+    />
   );
-}
-
-/**
- * The layout every options bar shares (docs/design-v1-visual.md 3.4), from
- * the measure tools' controls so this bar matches theirs: the hint first,
- * so it reads before the controls it explains, then the controls in groups
- * that wrap rather than scroll, so none hides past the edge of a phone.
- */
-function OptionsLayout(props: { hint: string; children: ReactNode }) {
-  return (
-    <OptionsColumn>
-      <InfoLine tone="muted">{props.hint}</InfoLine>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minWidth: 0 }}>{props.children}</div>
-    </OptionsColumn>
-  );
-}
-
-function Group(props: { children: ReactNode }) {
-  return <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), minWidth: 0 }}>{props.children}</div>;
 }
