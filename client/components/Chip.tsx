@@ -14,6 +14,10 @@ import { choiceLook } from "./looks.ts";
  * takes it off (the monster filters under the search): the chosen look
  * and a close icon, and no `aria-pressed`, since the tap removes it rather
  * than toggling it. Its `aria-label` says so ("Remove the filter Large").
+ *
+ * `circle` makes a 44 px circle of a short value, such as a range ring's
+ * distance, so a row of them reads as one set whatever their digits. Four
+ * digits still fit inside it.
  */
 export function Chip(props: {
   ref?: Ref<HTMLButtonElement>;
@@ -21,6 +25,7 @@ export function Chip(props: {
   count?: number | null;
   pressed?: boolean;
   remove?: boolean;
+  circle?: boolean;
   disabled?: boolean;
   title?: string;
   "aria-label"?: string;
@@ -29,6 +34,7 @@ export function Chip(props: {
   onClick(): void;
 }) {
   const remove = props.remove === true;
+  const circle = props.circle === true;
   const on = remove || props.pressed === true;
   const data = Object.fromEntries(Object.entries(props).filter(([key]) => key.startsWith("data-")));
   return (
@@ -44,12 +50,15 @@ export function Chip(props: {
       style={{
         display: "inline-flex",
         alignItems: "center",
+        // A value narrower than the 44 px minimum stays in the middle rather than against the left padding.
+        justifyContent: "center",
         gap: theme.space(1.5),
         flex: "none",
         minHeight: theme.touch,
         minWidth: theme.touch,
+        ...(circle ? { width: theme.touch, height: theme.touch } : null),
         // The close icon carries its own space at the right.
-        padding: remove ? `0 ${theme.space(2)}px 0 ${theme.space(3)}px` : `0 ${theme.space(3)}px`,
+        padding: circle ? 0 : remove ? `0 ${theme.space(2)}px 0 ${theme.space(3)}px` : `0 ${theme.space(3)}px`,
         borderRadius: theme.radius.pill,
         fontSize: theme.font.body14,
         fontWeight: theme.weight.strong,

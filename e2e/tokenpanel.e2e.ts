@@ -216,6 +216,45 @@ async function rectOf(locator: Locator): Promise<Rect> {
   return { left: b.x, top: b.y, right: b.x + b.width, bottom: b.y + b.height, width: b.width, height: b.height };
 }
 
+/** Range rings in one block (docs/design-v1-token-panel.md 3.8): circle presets with their digits centered, and the field for another distance ending their row. */
+async function ringsCompact(panel: Locator, where: string): Promise<void> {
+  const group = panel.getByRole("group", { name: "Range rings in feet", exact: true });
+  const chips = await group.getByRole("button").evaluateAll((els) =>
+    els.map((el) => {
+      const box = (el as unknown as El).getBoundingClientRect();
+      const doc = (el as unknown as { ownerDocument: { createRange(): { selectNodeContents(n: unknown): void; getBoundingClientRect(): Rect } } }).ownerDocument;
+      const range = doc.createRange();
+      range.selectNodeContents(el);
+      const text = range.getBoundingClientRect();
+      return { box, text };
+    }),
+  );
+  assert.equal(chips.length, 8, `${where}: the eight presets`);
+  for (const { box, text } of chips) {
+    assert.ok(Math.abs(box.width - box.height) <= 1, `${where}: a preset is a circle, ${box.width} x ${box.height}`);
+    assert.ok(Math.abs(text.left + text.width / 2 - (box.left + box.width / 2)) <= 1, `${where}: a preset's digits sit in its middle`);
+  }
+  const last = chips[chips.length - 1]!.box;
+  const field = await rectOf(group.getByRole("textbox", { name: "Another range ring in feet", exact: true }));
+  assert.ok(Math.abs(field.top + field.height / 2 - (last.top + last.height / 2)) <= 2 && field.left >= last.right, `${where}: the field ends the presets' row`);
+  assert.equal(await panel.getByText("Another distance", { exact: true }).count(), 0, `${where}: no label or help under the rings`);
+}
+
+/** Max HP and Temp HP side by side at every width (docs/design-v1-token-panel.md 3.7): the fields share a line, and both labels stand beside or above alike. */
+async function hpPairSideBySide(panel: Locator, where: string): Promise<void> {
+  const maxHp = await rectOf(panel.getByRole("textbox", { name: "Max HP", exact: true }));
+  const tempHp = await rectOf(panel.getByRole("textbox", { name: "Temporary HP", exact: true }));
+  assert.ok(Math.abs(maxHp.top - tempHp.top) <= 2, `${where}: Max HP and Temp HP share a line`);
+  assert.ok(tempHp.left >= maxHp.right, `${where}: Temp HP stands right of Max HP`);
+  const labels = await panel
+    .locator("[data-rvtt-hp-pair] > [data-rvtt-labeled] > span:first-child")
+    .evaluateAll((els) => els.map((el) => (el as unknown as El).getBoundingClientRect()));
+  assert.equal(labels.length, 2, `${where}: two labels`);
+  assert.ok(Math.abs(labels[0]!.top - labels[1]!.top) <= 2, `${where}: the labels stand alike`);
+  // Above its field, a label starts where the field starts, as labels do down the rest of the panel.
+  if (labels[0]!.bottom <= maxHp.top + 1) assert.ok(Math.abs(labels[0]!.left - maxHp.left) <= 1 && Math.abs(labels[1]!.left - tempHp.left) <= 1, `${where}: a label above its field starts with it`);
+}
+
 function focused(page: Page): Promise<{ name: string; expanded: string | null; role: string | null }> {
   return page.evaluate(() => {
     const a = (globalThis as unknown as { document: Doc }).document.activeElement;
@@ -512,9 +551,12 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.ok(Math.abs(change.top - anotherBox.top) <= 2, "Change image and Add another image share a line");
     const panelLeft = (await rectOf(panel)).left;
     assert.ok(change.left - panelLeft >= 48 + 16, "the pair sits beside the preview");
-    const maxHp = await rectOf(panel.getByRole("textbox", { name: "Max HP", exact: true }));
-    const tempHp = await rectOf(panel.getByRole("textbox", { name: "Temporary HP", exact: true }));
-    assert.ok(Math.abs(maxHp.top - tempHp.top) <= 2, "Max HP and Temporary HP share a row");
+    await hpPairSideBySide(panel, "the side panel");
+    await ringsCompact(panel, "the side panel");
+    await panel.getByRole("group", { name: "Maximum and temporary HP", exact: true }).scrollIntoViewIfNeeded();
+    await shots.take(dm, "tokenpanel-dm-hp-pair");
+    await panel.getByRole("group", { name: "Range rings in feet", exact: true }).scrollIntoViewIfNeeded();
+    await shots.take(dm, "tokenpanel-dm-range-rings");
     const purpose = "Another image this token can wear, for Wild Shape or a disguise. A tap on it here or in the token's bar puts it on.";
     const describedBy = await another.getAttribute("aria-describedby");
     assert.ok(describedBy);
@@ -790,8 +832,10 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     const change = await rectOf(panel.getByRole("button", { name: "Change image", exact: true }));
     const another = await rectOf(panel.getByRole("button", { name: "Add another image", exact: true }));
     assert.ok(Math.abs(change.top - another.top) <= 2 && change.left - (await rectOf(panel)).left >= 48, "the image row takes one line on a phone held upright");
-    const maxHp = await rectOf(panel.getByRole("textbox", { name: "Max HP", exact: true }));
-    assert.ok(Math.abs(maxHp.top - (await rectOf(panel.getByRole("textbox", { name: "Temporary HP", exact: true }))).top) <= 2, "Max and Temp HP share a row at 356 px");
+    await hpPairSideBySide(panel, "356 px");
+    await ringsCompact(panel, "356 px");
+    await panel.getByRole("group", { name: "Range rings in feet", exact: true }).scrollIntoViewIfNeeded();
+    await shots.take(dm, "tokenpanel-390-range-rings");
     assert.equal(await fold.getAttribute("aria-expanded"), "false", "the block starts folded on a phone");
     await fold.click();
     await panel.getByRole("heading", { name: "Goblin Warrior" }).waitFor();
@@ -848,7 +892,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     }
   });
 
-  test("7. a phone held sideways and a large one in the wide layout: a short bar with Apply in view, More stats, Stat block beside the sheet, and the image and HP rows wrapping", async () => {
+  test("7. a phone held sideways and a large one in the wide layout: a short bar with Apply in view, More stats, Stat block beside the sheet, and the image row wrapping with Max and Temp HP side by side", async () => {
     const sizes: (View & { label: string })[] = [
       { width: 844, height: 390, scale: 1, insets: { side: 47, bottom: 21 }, label: "844 x 390" },
       { width: 844, height: 390, scale: 1.3, insets: { side: 47, bottom: 21 }, label: "844 x 390 at 130%" },
@@ -893,9 +937,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       assert.ok(change.top >= preview.bottom - 1, `${size.label}: the buttons sit beside the preview`);
       const holds = column >= change.width + another.width + 4 - 0.5;
       assert.equal(Math.abs(change.top - another.top) <= 2, holds, `${size.label}: the pair's lines with a ${column} px column`);
-      const maxHp = await rectOf(panel.getByRole("textbox", { name: "Max HP", exact: true }));
-      const tempHp = await rectOf(panel.getByRole("textbox", { name: "Temporary HP", exact: true }));
-      assert.ok(tempHp.top > maxHp.bottom - 1, `${size.label}: Max HP and Temp HP on one row`);
+      await hpPairSideBySide(panel, size.label);
       await noSideScroll(panel, `${size.label}, the panel`);
       const pageWide = await dm.evaluate(() => (globalThis as unknown as { document: { documentElement: El } }).document.documentElement.scrollWidth > (globalThis as unknown as { innerWidth: number }).innerWidth);
       assert.equal(pageWide, false, `${size.label}: the page scrolls sideways`);
@@ -904,9 +946,9 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
   });
 
   test("7b. a phone upright at 130%, short with Apply in view wherever its token stands, and an upright tablet, full: Stat block hiding the bar for the sheet at the block, and the image and HP rows", async () => {
-    const sizes: (View & { label: string; hpRow: boolean })[] = [
-      { width: 390, height: 844, scale: 1.3, label: "390 x 844 at 130%", hpRow: false },
-      { width: 820, height: 1180, scale: 1, label: "820 x 1180", hpRow: true },
+    const sizes: (View & { label: string })[] = [
+      { width: 390, height: 844, scale: 1.3, label: "390 x 844 at 130%" },
+      { width: 820, height: 1180, scale: 1, label: "820 x 1180" },
     ];
     for (const size of sizes) {
       await setUp(dm, dmCdp, size, null);
@@ -954,15 +996,13 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       const gap = await pair.evaluate((el) => Number.parseFloat((el as unknown as { ownerDocument: { defaultView: { getComputedStyle(e: unknown): { columnGap: string } } } }).ownerDocument.defaultView.getComputedStyle(el).columnGap));
       const zoom = size.scale;
       assert.equal(Math.abs(change.top - another.top) <= 2, column >= change.width + another.width + gap * zoom - 0.5, `${size.label}: the pair's lines with a ${column} px column for ${change.width} + ${another.width} + ${gap * zoom}`);
-      const maxHp = await rectOf(panel.getByRole("textbox", { name: "Max HP", exact: true }));
-      const tempHp = await rectOf(panel.getByRole("textbox", { name: "Temporary HP", exact: true }));
-      assert.equal(Math.abs(maxHp.top - tempHp.top) <= 2, size.hpRow, `${size.label}: Max and Temp HP's rows`);
+      await hpPairSideBySide(panel, size.label);
       await noSideScroll(panel, `${size.label}, the panel`);
       await shots.take(dm, `tokenpanel-${size.label.replace(/ /g, "")}-stat-block-sheet`);
     }
   });
 
-  test("7c. the very short mode at 480 x 320 at 130%: Stat block opens the whole-screen sheet at the block with focus on its disclosure, the bar put away, and the image and HP rows wrapping at 241 px", async () => {
+  test("7c. the very short mode at 480 x 320 at 130%: Stat block opens the whole-screen sheet at the block with focus on its disclosure, the bar put away, and the image row wrapping at 241 px with Max and Temp HP side by side", async () => {
     await setUp(dm, dmCdp, { width: 480, height: 320, scale: 1.3, insets: { side: 47, bottom: 21 } }, null);
     await tapToken(dm, run.goblin.at);
     const goblin = bar(dm, "Goblin 4");
@@ -987,9 +1027,9 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     const another = await rectOf(panel.getByRole("button", { name: "Add another image", exact: true }));
     const gap = await pair.evaluate((el) => Number.parseFloat((el as unknown as { ownerDocument: { defaultView: { getComputedStyle(e: unknown): { columnGap: string } } } }).ownerDocument.defaultView.getComputedStyle(el).columnGap));
     assert.equal(Math.abs(change.top - another.top) <= 2, column >= change.width + another.width + gap * 1.3 - 0.5, `the pair's lines with a ${column} px column`);
-    const maxHp = await rectOf(panel.getByRole("textbox", { name: "Max HP", exact: true }));
-    const tempHp = await rectOf(panel.getByRole("textbox", { name: "Temporary HP", exact: true }));
-    assert.ok(tempHp.top > maxHp.bottom - 1, "Max HP and Temp HP take two lines at 241 px");
+    await hpPairSideBySide(panel, "241 px");
+    await panel.getByRole("group", { name: "Maximum and temporary HP", exact: true }).scrollIntoViewIfNeeded();
+    await shots.take(dm, "tokenpanel-480x320at130-hp-pair");
     await noSideScroll(panel, "480 x 320 at 130%, the very short panel");
     // Escape is the modal's own: it closes the sheet.
     await dm.keyboard.press("Escape");

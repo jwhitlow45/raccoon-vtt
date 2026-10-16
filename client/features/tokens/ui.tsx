@@ -159,7 +159,8 @@ type NumberFieldProps = {
   nullable?: boolean;
   placeholder?: string;
   disabled?: boolean;
-  width?: number;
+  /** Pixels, or a length such as "100%" for a field that fills a box its caller sizes. */
+  width?: number | string;
 };
 
 /**

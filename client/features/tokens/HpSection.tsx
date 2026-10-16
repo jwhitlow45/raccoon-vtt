@@ -4,7 +4,7 @@ import type { Actor, HpVisibility, LifeState, TokenKind } from "#shared/model.ts
 import { hpLess } from "#shared/rules/hp.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { Checkbox } from "../../components/Checkbox.tsx";
-import { fieldStyle } from "../../components/Field.tsx";
+import { fieldStyle, NUMBER_FIELD_WIDTH } from "../../components/Field.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { handFocusOn } from "../../lib/handFocus.ts";
@@ -231,11 +231,18 @@ export function HpSection(props: {
       ) : null}
 
       {access.hp === "all" && hp ? (
-        // One row where it fits (docs/design-v1-token-panel.md 3.7): each label stays with its field, and the two wrap between them.
-        <div role="group" aria-label="Maximum and temporary HP" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(4), rowGap: theme.space(2) }}>
+        // Side by side at every width (docs/design-v1-token-panel.md 3.7): two equal columns, and where a column cannot hold a
+        // label beside its field, both labels go above their fields together (globals.css), so the pair never staggers.
+        <div
+          role="group"
+          aria-label="Maximum and temporary HP"
+          data-rvtt-hp-pair=""
+          style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", columnGap: theme.space(4), containerType: "inline-size" }}
+        >
           <LabeledNumber label="Max HP">
             <NumberField
               label="Max HP"
+              width="100%"
               value={hp.max}
               min={0}
               max={MAX_HP_AMOUNT}
@@ -245,6 +252,7 @@ export function HpSection(props: {
           <LabeledNumber label="Temp HP">
             <NumberField
               label="Temporary HP"
+              width="100%"
               value={hp.temp}
               min={0}
               max={MAX_HP_AMOUNT}
@@ -266,18 +274,19 @@ export function HpSection(props: {
 }
 
 /**
- * A number field with its short visible label beside it, one unit that
- * never breaks, so a row of them wraps between units. The field keeps its
- * own accessible name ("Temporary HP" under the visible "Temp HP"). In a
- * box narrower than the unit, the label sits above its field.
+ * A number field with its short visible label beside it, one column of the
+ * HP pair. The field keeps its own accessible name ("Temporary HP" under
+ * the visible "Temp HP"). Its box gives up a few pixels before the label
+ * would push it out of its column, for a font whose label runs wider than
+ * the pair's switch to labels above allows for.
  */
 function LabeledNumber(props: { label: string; children: ReactNode }) {
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), minHeight: theme.touch }}>
+    <div data-rvtt-labeled="" style={{ display: "flex", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1), minHeight: theme.touch, minWidth: 0 }}>
       <span aria-hidden style={{ fontSize: theme.font.body14, color: theme.color.text, whiteSpace: "nowrap" }}>
         {props.label}
       </span>
-      {props.children}
+      <span style={{ display: "flex", width: NUMBER_FIELD_WIDTH, maxWidth: "100%", minWidth: 0, flexShrink: 1 }}>{props.children}</span>
     </div>
   );
 }

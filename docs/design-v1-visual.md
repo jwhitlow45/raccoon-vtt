@@ -361,7 +361,7 @@ Busy: the button that started the work shows `busy`. A form that waits on it (Jo
 - A row that is itself a button (Menu items, the Claim page's "This is me", character cards) is a card: raised, radius `md`, `border` outline.
 - The chosen row (the scene you are on) takes the accent tint and border. The active turn keeps `accentSoft` and `turnTint`.
 
-**Chips** (`Chip.tsx`, new). Filters and quick picks: pill radius, 44 px tall, 14 px weight 600, an optional count in muted. Chosen uses the pressed look. This covers the outliner filters, monster filters, DC chips and range ring presets.
+**Chips** (`Chip.tsx`, new). Filters and quick picks: pill radius, 44 px tall, 14 px weight 600, an optional count in muted, the content centered. Chosen uses the pressed look. This covers the outliner filters, monster filters, DC chips and range ring presets. Range ring presets are 44 px circles, so a row of them reads as one set whatever their digits.
 
 **Tags** (`Tag.tsx`, new). Read-only status: pill radius, a solid `bg` fill, a 1 px outline in the tone color, 13 px weight 600 (`tiny` 11 px in dense rows such as the tracker's legendary counters), padding 1 px `space(2)`. The solid fill keeps the text's contrast the same on any row, the tinted turn row included. Tones, with the text color and its ratio on `bg`:
 
