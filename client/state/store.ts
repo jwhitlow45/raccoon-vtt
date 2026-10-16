@@ -19,7 +19,7 @@ import { SCENE_LOAD_IDLE, sceneLoadFailureText, stepSceneLoad, type SceneLoad, t
 import { shareRecord, shareState } from "./share.ts";
 import { backoffDelay, realClock, Timer, type Clock } from "./timing.ts";
 import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
-import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetHidden, withSidePanelHidden, type Ended, type LocalUi, type OpAnswer, type OpRefusal, type PendingOp, type RoomView, type Toast, type You } from "./types.ts";
+import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetHidden, withSidePanelHidden, type Ended, type LocalUi, type OnAnswer, type OpAnswer, type OpRefusal, type PendingOp, type RoomView, type Toast, type UnknownCause, type You } from "./types.ts";
 
 export type { PendingOp } from "./types.ts";
 
@@ -54,8 +54,8 @@ export type DispatchOptions = {
    * another, undo as one step: one brush stroke, or one room sent in bands.
    */
   group?: string;
-  /** Told what became of the op once it settles (OpAnswer), with the reason when it was refused. */
-  onAnswer?: (answer: OpAnswer, refusal?: OpRefusal) => void;
+  /** Told what became of the op once it settles (OpAnswer), with the reason when it was refused and how an `unknown` came about. */
+  onAnswer?: OnAnswer;
   /**
    * The caller says itself what became of the op, so the store shows no
    * toast for its answer: "Teleport here" takes the stopped walk back with
@@ -276,6 +276,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     connection: "connecting",
     online: [],
     accessVersion: 0,
+    snapshots: 0,
     ephemeral: EMPTY_EPHEMERAL,
     busy: EMPTY_BUSY,
     toasts: [],
@@ -329,8 +330,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
    * store holds the settled state, so a sender that reads the view sees it.
    * Each op is told once: it has left `pending` by then.
    */
-  function tell(ops: readonly PendingOp[], answer: (p: PendingOp) => OpAnswer, refusal?: (p: PendingOp) => OpRefusal | undefined): void {
-    for (const p of ops) p.onAnswer?.(answer(p), refusal?.(p));
+  function tell(ops: readonly PendingOp[], answer: (p: PendingOp) => OpAnswer, refusal?: (p: PendingOp) => OpRefusal | undefined, unknown?: UnknownCause): void {
+    for (const p of ops) {
+      const a = answer(p);
+      if (a === "unknown" && unknown) p.onAnswer?.(a, undefined, unknown);
+      else p.onAnswer?.(a, refusal?.(p));
+    }
   }
 
   function commit(patch: Partial<RoomStoreState>): void {
@@ -514,7 +519,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       if (dropped > 0) {
         for (const p of pending) if (now - p.at > MAX_OP_AGE_MS) sentAt.delete(p.n);
         commit({ pending: fresh });
-        tell(pending.filter((p) => !fresh.includes(p)), () => "unknown");
+        tell(pending.filter((p) => !fresh.includes(p)), () => "unknown", undefined, "expired");
         pushToast(dropped === 1 ? "1 offline edit was too old to save." : `${dropped} offline edits were too old to save.`, "info");
       }
       return { clientId, resumeFrom: fresh[0]?.n ?? nextN };
@@ -552,8 +557,10 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         sceneId,
         ephemeral,
         accessVersion,
+        snapshots: (s.snapshots ?? 0) + 1,
       });
-      tell(lost, () => "unknown");
+      // Told after the commit, so a sender that looks at the view finds this snapshot in it.
+      tell(lost, () => "unknown", undefined, "snapshot");
       armSweep();
       flush();
     },

@@ -281,6 +281,71 @@ export async function retryOn503<T>(attempt: () => Promise<T>, options: RetryOpt
   }
 }
 
+/**
+ * Every upload from this device, one at a time (docs/design-v1-pdf-handouts.md
+ * 4.1.4). The server gives an IP one intake slot, so a second upload would
+ * only wait for this one's 503s to pass. An upload marked `background`, a
+ * PDF's pages, waits behind every other: an image picked in a form goes
+ * before the job's next page. Aborting an upload still waiting here takes
+ * it out and rejects at once, without sending it, so a Cancel never waits
+ * behind another upload.
+ */
+export class UploadQueue {
+  #running = false;
+  readonly #waiting: { background: boolean; start(): void }[] = [];
+
+  run<T>(work: () => Promise<T>, options: { background?: boolean; signal?: AbortSignal } = {}): Promise<T> {
+    const { signal } = options;
+    if (signal?.aborted) return Promise.reject(signal.reason);
+    return new Promise<T>((resolve, reject) => {
+      const entry = {
+        background: options.background === true,
+        start: () => {
+          signal?.removeEventListener("abort", onAbort);
+          work()
+            .then(resolve, reject)
+            .finally(() => this.#next());
+        },
+      };
+      const onAbort = () => {
+        const at = this.#waiting.indexOf(entry);
+        if (at < 0) return;
+        this.#waiting.splice(at, 1);
+        reject(signal?.reason);
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      // Before the first background upload waiting, or last.
+      const firstBackground = entry.background ? -1 : this.#waiting.findIndex((w) => w.background);
+      if (firstBackground < 0) this.#waiting.push(entry);
+      else this.#waiting.splice(firstBackground, 0, entry);
+      if (!this.#running) this.#next();
+    });
+  }
+
+  /** Uploads waiting, the one running not counted. */
+  get waiting(): number {
+    return this.#waiting.length;
+  }
+
+  #next(): void {
+    const entry = this.#waiting.shift();
+    this.#running = entry !== undefined;
+    entry?.start();
+  }
+}
+
+const uploads = new UploadQueue();
+
+/** How an upload goes through the device's queue, beside its 503 retries. */
+export type UploadOptions = RetryOptions & {
+  /** The original file name, sent only so a map's name can hint its grid (design 11.1). */
+  name?: string;
+  /** Waits behind every other upload of this device: a PDF's pages (UploadQueue). */
+  background?: boolean;
+  /** True while a request is on its way and its answer awaited, false while queued or waiting to retry, so a Cancel knows which it stops. */
+  onSending?: (sending: boolean) => void;
+};
+
 const room = (roomId: string) => `/api/rooms/${encodeURIComponent(roomId)}`;
 
 export const api = {
@@ -407,16 +472,23 @@ export const api = {
    */
   deleteAssets: (roomId: string, ids: readonly string[]) => request<unknown>("POST", `${room(roomId)}/assets/delete`, { json: { ids } }),
 
-  /** `name` is the original file name, sent only so a map's name can hint its grid (design 11.1). */
-  uploadAsset: (roomId: string, kind: AssetKind, file: Blob, options: RetryOptions & { name?: string } = {}) =>
-    retryOn503(
+  /** Through the device's one upload queue (UploadQueue), with its 503 retries. */
+  uploadAsset: (roomId: string, kind: AssetKind, file: Blob, options: UploadOptions = {}) =>
+    uploads.run(
       () =>
-        request<AssetRow>("PUT", `${room(roomId)}/assets?kind=${kind}${options.name ? `&name=${encodeURIComponent(options.name.slice(0, 255))}` : ""}`, {
-          body: file,
-          contentType: file.type,
-          signal: options.signal,
-        }),
-      options,
+        retryOn503(async () => {
+          options.onSending?.(true);
+          try {
+            return await request<AssetRow>("PUT", `${room(roomId)}/assets?kind=${kind}${options.name ? `&name=${encodeURIComponent(options.name.slice(0, 255))}` : ""}`, {
+              body: file,
+              contentType: file.type,
+              signal: options.signal,
+            });
+          } finally {
+            options.onSending?.(false);
+          }
+        }, options),
+      { background: options.background, signal: options.signal },
     ),
 
   importAsset: (roomId: string, input: { url: string; fallback?: string; kind: AssetKind }, options: RetryOptions = {}) =>

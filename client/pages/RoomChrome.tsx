@@ -340,11 +340,12 @@ export function Stacked(props: { icon: ReactNode; text: string }) {
 /**
  * A small count of unread messages beside a panel's name, or on the
  * corner of the Panels button so the toolbar keeps its width. Screen
- * readers hear "3 unread". A count is a status, so it never wears the
- * accent: text-colored with dark digits, the same for every member
- * (docs/design-v1-visual.md 2.2).
+ * readers hear "3 unread", or `label` where the count is of something
+ * else, such as "1 upload waiting" (docs/design-v1-pdf-handouts.md 4.1.1).
+ * A count is a status, so it never wears the accent: text-colored with
+ * dark digits, the same for every member (docs/design-v1-visual.md 2.2).
  */
-export function Badge(props: { count: number; corner?: boolean }) {
+export function Badge(props: { count: number; corner?: boolean; label?: string }) {
   const text = badgeText(props.count);
   if (!text) return null;
   return (
@@ -367,7 +368,7 @@ export function Badge(props: { count: number; corner?: boolean }) {
       }}
     >
       <span aria-hidden>{text}</span>
-      <span style={VISUALLY_HIDDEN}>{`${props.count} unread`}</span>
+      <span style={VISUALLY_HIDDEN}>{props.label || `${props.count} unread`}</span>
     </span>
   );
 }

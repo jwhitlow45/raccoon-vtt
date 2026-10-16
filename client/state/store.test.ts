@@ -10,7 +10,7 @@ import { turnOp } from "../features/encounter/logic.ts";
 import { DRAG_END_HOLD_MS, PREVIEW_IDLE_MS } from "./ephemeral.ts";
 import { createRoomStore, MAX_OP_AGE_MS, OP_ANSWER_MS, refusalText, type RoomStore } from "./store.ts";
 import { FakeClock, FakeOutbox } from "./testing.ts";
-import { INITIAL_LOCAL, panelView, sheetOpen, type LocalUi, type OpAnswer, type OpRefusal } from "./types.ts";
+import { INITIAL_LOCAL, panelView, sheetOpen, type LocalUi, type OpAnswer, type OpRefusal, type UnknownCause } from "./types.ts";
 
 type Snapshot = Extract<ServerMessage, { t: "snapshot" }>;
 type Ev = Extract<ServerMessage, { t: "ev" }>;
@@ -550,6 +550,34 @@ describe("reconnect", () => {
     s.clock.advance(MAX_OP_AGE_MS + 1);
     s.room.prepareHello();
     assert.equal(answer, "unknown");
+  });
+
+  test("an unknown answer says how it came about: expired while the hello was prepared, before any new snapshot, or settled by a snapshot already in the view (docs/design-v1-pdf-handouts.md 4.1.5)", () => {
+    const s = setup(room({ tokens: { g1: token("g1") } }));
+    s.connect();
+    const heard: { answer: OpAnswer; cause: UnknownCause | undefined; snapshots: number | undefined }[] = [];
+    const listen = { onAnswer: (answer: OpAnswer, _refusal?: OpRefusal, cause?: UnknownCause) => heard.push({ answer, cause, snapshots: s.state().snapshots }) };
+    const first = s.state().snapshots ?? 0;
+    assert.ok(first >= 1, "connecting applied a snapshot");
+    // Too old to send: dropped while the hello is prepared, before the snapshot that follows it.
+    s.room.suspend();
+    s.room.dispatch(move("g1", 1, 1), listen);
+    s.clock.advance(MAX_OP_AGE_MS + 1);
+    const hello = s.room.prepareHello();
+    assert.deepEqual(heard, [{ answer: "unknown", cause: "expired", snapshots: first }]);
+    s.room.applySnapshot(s.server.hello({ resumeFrom: hello.resumeFrom, sceneId: "s1" }));
+    assert.equal(s.state().snapshots, first + 1);
+    // Sent, then its answer lost with the socket: the next snapshot settles it, and is in the view when the sender hears.
+    s.room.dispatch(move("g1", 2, 2), listen);
+    s.server.batch(s.outbox.sent.flatMap((m) => (m.t === "op" ? [{ n: m.n, op: m.op }] : [])));
+    s.outbox.sent = [];
+    s.room.suspend();
+    s.room.applySnapshot(s.server.hello({ resumeFrom: s.room.prepareHello().resumeFrom, sceneId: "s1" }));
+    assert.deepEqual(heard[1], { answer: "unknown", cause: "snapshot", snapshots: first + 2 });
+    // A taken or refused answer carries no cause.
+    s.room.dispatch(move("g1", 3, 3), listen);
+    s.deliver();
+    assert.deepEqual(heard[2], { answer: "taken", cause: undefined, snapshots: first + 2 });
   });
 
   test("a snapshot never lets the store reuse an n the server settled", () => {

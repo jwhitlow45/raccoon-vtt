@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { ApiError, parseRetryAfter, retryOn503, toApiError } from "./api.ts";
+import { api, ApiError, parseRetryAfter, retryOn503, toApiError, UploadQueue } from "./api.ts";
 
 describe("toApiError", () => {
   test("keeps a code from the server's list and leaves any other out, status and body kept", async () => {
@@ -103,5 +103,100 @@ describe("retryOn503", () => {
     );
     assert.equal(calls, 1);
     assert.deepEqual(time.sleeps, []);
+  });
+});
+
+describe("the device's upload queue (docs/design-v1-pdf-handouts.md 4.1.4)", () => {
+  /** Work that finishes when the test says, recording when it started. */
+  function gate(log: string[], name: string) {
+    let open!: () => void;
+    const done = new Promise<void>((resolve) => (open = resolve));
+    return {
+      open: () => open(),
+      work: async () => {
+        log.push(`start ${name}`);
+        await done;
+        log.push(`end ${name}`);
+        return name;
+      },
+    };
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  test("one upload at a time, and an image picked meanwhile goes before the PDF's next page", async () => {
+    const queue = new UploadQueue();
+    const log: string[] = [];
+    const page1 = gate(log, "page 1");
+    const page2 = gate(log, "page 2");
+    const image = gate(log, "image");
+    const results = [queue.run(page1.work, { background: true }), queue.run(page2.work, { background: true }), queue.run(image.work)];
+    await settle();
+    assert.deepEqual(log, ["start page 1"]);
+    page1.open();
+    await settle();
+    assert.deepEqual(log, ["start page 1", "end page 1", "start image"]);
+    image.open();
+    await settle();
+    page2.open();
+    assert.deepEqual(await Promise.all(results), ["page 1", "page 2", "image"]);
+    assert.deepEqual(log, ["start page 1", "end page 1", "start image", "end image", "start page 2", "end page 2"]);
+  });
+
+  test("an upload aborted while it waits is taken out and rejects at once, never sent, an image's or a page's alike", async () => {
+    const queue = new UploadQueue();
+    const log: string[] = [];
+    const running = gate(log, "running");
+    const first = queue.run(running.work, { background: true });
+    for (const background of [false, true]) {
+      const abort = new AbortController();
+      const waiting = queue.run(async () => log.push("sent"), { background, signal: abort.signal });
+      await settle();
+      assert.equal(queue.waiting, 1);
+      abort.abort(new Error("cancelled"));
+      await assert.rejects(waiting, /cancelled/);
+      assert.equal(queue.waiting, 0, "out of the queue at once, while another upload still runs");
+    }
+    running.open();
+    await first;
+    assert.deepEqual(log, ["start running", "end running"]);
+    // One aborted before it is even queued is never queued.
+    const early = new AbortController();
+    early.abort(new Error("already"));
+    await assert.rejects(queue.run(async () => log.push("sent"), { signal: early.signal }), /already/);
+    assert.equal(queue.waiting, 0);
+  });
+
+  test("a failed upload hands the queue on", async () => {
+    const queue = new UploadQueue();
+    await assert.rejects(queue.run(async () => Promise.reject(new Error("offline"))), /offline/);
+    assert.equal(await queue.run(async () => "next"), "next");
+  });
+
+  test("api.uploadAsset runs through it, says when a request is on its way, and never sends one aborted while it waits", async () => {
+    const original = globalThis.fetch;
+    const sent: string[] = [];
+    let answer!: () => void;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
+    globalThis.fetch = (async (url: string) => {
+      sent.push(String(url));
+      await answered;
+      return new Response(JSON.stringify({ id: "a1", kind: "handout", width: 1, height: 1, variants: ["full"], created: true }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    try {
+      const sending: boolean[] = [];
+      const page = api.uploadAsset("ABCD2345", "handout", new Blob(["x"], { type: "image/webp" }), { background: true, onSending: (s) => sending.push(s) });
+      const abort = new AbortController();
+      const image = api.uploadAsset("ABCD2345", "handout", new Blob(["y"], { type: "image/png" }), { signal: abort.signal });
+      await settle();
+      assert.deepEqual(sending, [true]);
+      abort.abort(new Error("closed"));
+      await assert.rejects(image, /closed/);
+      answer();
+      assert.equal((await page).created, true);
+      assert.deepEqual(sending, [true, false]);
+      assert.equal(sent.length, 1, "the image aborted while it waited was never sent");
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 });

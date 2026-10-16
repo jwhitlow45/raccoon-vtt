@@ -1,9 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "../components/Button.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { Row } from "../components/Row.tsx";
 import ThisDevice from "../features/device/ThisDevice.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
+import { useJobActive } from "../features/handouts/pdf/live.ts";
 import { joinLinkToShare } from "../features/dm/shareLink.ts";
 import { XCardButton } from "../features/xcard/XCardButton.tsx";
 import { usePanelHeader, type PanelProps } from "../features/panels.ts";
@@ -39,6 +40,13 @@ export default function MenuPanel(props: PanelProps) {
   const preview = usePreview();
   const [page, setPage] = useState<Page | null>(null);
   const [copied, setCopied] = useState(false);
+  // Leave room asks once while a PDF upload is under way on this device (docs/design-v1-pdf-handouts.md 4.1.6).
+  const uploading = useJobActive();
+  const [asking, setAsking] = useState(false);
+  const question = useRef<HTMLParagraphElement>(null);
+  useLayoutEffect(() => {
+    if (asking) question.current?.focus();
+  }, [asking]);
   const playerLink = useDmPlayerLink(roomId, role === "dm" && preview === null, page === null);
   // "Copied, with the password" would vouch for a link the server has since replaced.
   useEffect(() => setCopied(false), [playerLink]);
@@ -84,8 +92,31 @@ export default function MenuPanel(props: PanelProps) {
             : "Back to the Home page. This device stays signed in, so you can come back without the password."
         }
         disabled={preview !== null}
-        onClick={() => navigate("/")}
+        opener="menu-leave"
+        onClick={() => (uploading && !asking ? setAsking(true) : navigate("/"))}
       />
+      {asking ? (
+        <div role="group" aria-label="Leave the room" style={{ display: "grid", gap: theme.space(2), padding: `0 ${theme.space(1)}px` }}>
+          <p ref={question} tabIndex={-1} style={{ margin: 0, fontSize: theme.font.body14 }}>
+            A PDF is still uploading. Leave anyway? This device offers to remove its pages next time.
+          </p>
+          <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
+            <Button variant="danger" size="sm" onClick={() => navigate("/")}>
+              Leave anyway
+            </Button>
+            <Button
+              size="sm"
+              onClick={(e) => {
+                // Stay takes the question away, so focus goes back to Leave room rather than to the page.
+                e.currentTarget.closest("nav")?.querySelector<HTMLElement>('[data-opener="menu-leave"]')?.focus();
+                setAsking(false);
+              }}
+            >
+              Stay
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </nav>
   );
 }
@@ -129,13 +160,13 @@ function useDmPlayerLink(roomId: string, dm: boolean, shown: boolean): string | 
  * (features/panels.ts useSubpageFocus), and Leave room, which leaves, does
  * neither.
  */
-function MenuItem(props: { title: string; detail: string; page?: Page; disabled?: boolean; onClick(): void }) {
+function MenuItem(props: { title: string; detail: string; page?: Page; opener?: string; disabled?: boolean; onClick(): void }) {
   return (
     <Row
       title={props.title}
       detail={<span style={{ whiteSpace: "normal" }}>{props.detail}</span>}
       trailing={props.page ? <Icon name="chevronRight" style={{ color: theme.color.textMuted }} /> : undefined}
-      opener={props.page ? `menu-${props.page}` : undefined}
+      opener={props.page ? `menu-${props.page}` : props.opener}
       disabled={props.disabled}
       onClick={props.onClick}
     />

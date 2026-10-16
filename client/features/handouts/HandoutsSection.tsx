@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { Handout, Member } from "#shared/model.ts";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useStore } from "zustand";
+import { handoutPages } from "#shared/handouts.ts";
+import type { Handout, HandoutDoc, Member } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { useExpansionFocus } from "../../components/expansionFocus.ts";
@@ -7,90 +9,181 @@ import { ErrorText, Field } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
 import { Row, RowDot, RowList } from "../../components/Row.tsx";
+import { Tag } from "../../components/Tag.tsx";
 import { api, ApiError, type AssetRow } from "../../lib/api.ts";
 import { theme } from "../../lib/theme.ts";
+import { useScoped } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomView } from "../../state/view.ts";
 import { FileButton, RadioGroup } from "../dm/controls.tsx";
 import { honorsImageOrientation } from "../images/orientation.ts";
 import { checkImageFile, prepareImageUpload } from "../images/upload.ts";
+import { EMPTY_DRAFT, handoutDraftSlot, showDocOp, type HandoutDraft } from "./draft.ts";
 import { HANDOUT_MAX_BYTES, HANDOUT_MAX_SIDE } from "./downscale.ts";
 import { audienceText, showHandoutOp, titleFromFileName } from "./handouts.ts";
+import { HandoutViewer, type ViewerPage } from "./HandoutViewer.tsx";
+import { JobBlock } from "./pdf/JobBlock.tsx";
+import { isPdfFile, jobPageIds, pdfPickRefusal } from "./pdf/job.ts";
+import { usePdfJob } from "./pdf/live.ts";
 
 /** A handout's thumbnail in its row: a picture, so larger than a row's 32 px disk, still inside a 56 px two-line row. */
 const THUMB_PX = 44;
 
+/** "12 pages", for a handout or a document of more than one. */
+const pagesTag = (count: number) => (count === 1 ? "1 page" : `${count} pages`);
+
+type PageRef = { assetId: string; width?: number; height?: number };
+
+/** What the viewer shows: a title and its pages. */
+type Viewing = { title: string; pages: ViewerPage[] };
+
+/** Every page of a handout or a document, for the viewer, each named "Strange letter, page 2 of 5" and laid out at its size. */
+function viewerPages(title: string, pages: readonly PageRef[], url: (id: string) => string): ViewerPage[] {
+  return pages.map((p, i) => ({
+    src: url(p.assetId),
+    alt: pages.length > 1 ? `${title}, page ${i + 1} of ${pages.length}` : title,
+    ...(p.width !== undefined && p.height !== undefined ? { width: p.width, height: p.height } : {}),
+  }));
+}
+
 /**
- * The DM's handouts (features section 16): what is showing now, with a way
- * to close each one for everyone, and a form to show a new one from the
- * room's library or a fresh upload.
+ * The DM's handouts (features section 16): a PDF being uploaded, what is
+ * showing now, with a way to look at each as players see it and to close
+ * it for everyone, and a form to show a new one from the room's library or
+ * a fresh upload (docs/design-v1-pdf-handouts.md 4.1, 8.2 and 8.4).
  */
 export function HandoutsSection() {
   const handouts = useRoomView((s) => s.view?.handouts);
   const members = useRoomView((s) => s.view?.members);
+  const docs = useRoomView((s) => s.view?.handoutDocs);
   const actions = useRoomActions();
   const assets = useAssets();
+  const draft = useScoped(handoutDraftSlot);
+  const [viewing, setViewing] = useState<Viewing | null>(null);
+  const viewOpener = useRef<HTMLElement | null>(null);
+  const showButton = useRef<HTMLButtonElement>(null);
+  const formRef = useRef<HTMLDivElement>(null);
   const showing = useMemo(
     () => Object.values(handouts ?? {}).filter((h): h is Handout => h !== undefined).sort((a, b) => (a.shownAt < b.shownAt ? 1 : -1)),
     [handouts],
   );
+  const full = useCallback((id: string) => assets.url(id, "full"), [assets]);
+  const view = (title: string, pages: readonly PageRef[], opener: HTMLElement | null) => {
+    viewOpener.current = opener;
+    setViewing({ title, pages: viewerPages(title, pages, full) });
+  };
+  // Where focus goes when the upload's block leaves: the form when it is open, else Show a handout (4.1.7).
+  const afterBlock = useCallback(() => {
+    const form = formRef.current;
+    if (form) form.querySelector<HTMLElement>("button, input")?.focus();
+    else showButton.current?.focus();
+  }, []);
+  // Show it: the saved document picked in the form, or listed first in From the library while another pick holds it (4.1.5).
+  const showSaved = useCallback(
+    (docId: string) => {
+      const now = draft.getState();
+      const title = now.title.trim() || docs?.[docId]?.title || "";
+      if (!now.open) draft.setState({ ...now, open: true, pick: { kind: "doc", docId }, title });
+      else if (!now.pick) draft.setState({ ...now, pick: { kind: "doc", docId }, title });
+    },
+    [draft, docs],
+  );
   return (
     <Section label="Handouts" divider={false}>
+      <JobBlock
+        onLeave={afterBlock}
+        onShow={showSaved}
+        onView={(docId, opener) => {
+          const doc = docs?.[docId];
+          if (doc) view(doc.title, doc.pages, opener);
+        }}
+      />
       {showing.length === 0 ? <Help>No handout is showing.</Help> : <Help>Showing now. Players can close their own copy.</Help>}
       {showing.length > 0 ? (
         <RowList label="Handouts showing">
-          {showing.map((h) => (
-            <Row
-              key={h.id}
-              leading={
-                <img
-                  src={assets.url(h.assetId, "thumb")}
-                  alt=""
-                  width={THUMB_PX}
-                  height={THUMB_PX}
-                  style={{ display: "block", objectFit: "cover", borderRadius: theme.radius.sm, background: theme.color.bg }}
-                />
-              }
-              title={h.title}
-              detail={`To ${audienceText(h.to, members ?? {})}`}
-              trailing={
-                <Button variant="danger" size="sm" onClick={() => actions.dispatch({ t: "handout.close", handoutId: h.id })}>
-                  Close
-                </Button>
-              }
-            />
-          ))}
+          {showing.map((h) => {
+            const pages = handoutPages(h);
+            return (
+              <Row
+                key={h.id}
+                leading={
+                  // The DM sees what the players see, at the same showing (8.4).
+                  <button
+                    type="button"
+                    aria-label={`View ${h.title}`}
+                    onClick={(e) => view(h.title, pages, e.currentTarget)}
+                    style={{ display: "block", padding: 0, border: "none", background: "transparent", cursor: "pointer", borderRadius: theme.radius.sm }}
+                  >
+                    <img
+                      src={assets.url(h.assetId, "thumb")}
+                      alt=""
+                      width={THUMB_PX}
+                      height={THUMB_PX}
+                      style={{ display: "block", objectFit: "cover", borderRadius: theme.radius.sm, background: theme.color.bg }}
+                    />
+                  </button>
+                }
+                title={h.title}
+                detail={`To ${audienceText(h.to, members ?? {})}${pages.length > 1 ? `, ${pagesTag(pages.length)}` : ""}`}
+                trailing={
+                  <Button variant="danger" size="sm" onClick={() => actions.dispatch({ t: "handout.close", handoutId: h.id })}>
+                    Close
+                  </Button>
+                }
+              />
+            );
+          })}
         </RowList>
       ) : null}
-      <ShowHandout members={members ?? {}} />
+      <ShowHandout members={members ?? {}} docs={docs ?? {}} opener={showButton} formRef={formRef} onView={view} />
+      {viewing ? <HandoutViewer title={viewing.title} pages={viewing.pages} onClose={() => setViewing(null)} backClose opener={viewOpener} /> : null}
     </Section>
   );
 }
 
-function ShowHandout(props: { members: Record<string, Member | undefined> }) {
+function ShowHandout(props: {
+  members: Record<string, Member | undefined>;
+  docs: Record<string, HandoutDoc | undefined>;
+  opener: RefObject<HTMLButtonElement | null>;
+  formRef: RefObject<HTMLDivElement | null>;
+  onView(title: string, pages: readonly PageRef[], opener: HTMLElement | null): void;
+}) {
   const roomId = useRoomView((s) => s.roomId);
   const actions = useRoomActions();
   const assets = useAssets();
-  const [open, setOpen] = useState(false);
-  const [asset, setAsset] = useState<AssetRow | null>(null);
-  const [title, setTitle] = useState("");
-  const [audience, setAudience] = useState<"all" | "some">("all");
-  const [chosen, setChosen] = useState<string[]>([]);
+  const draftStore = useScoped(handoutDraftSlot);
+  const draft = useStore(draftStore);
+  const set = useCallback((patch: Partial<HandoutDraft>) => draftStore.setState({ ...draftStore.getState(), ...patch }), [draftStore]);
+  const { open, pick, title, audience, chosen } = draft;
+  const pdf = usePdfJob();
   const [library, setLibrary] = useState<AssetRow[] | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The form opens at its first field, and Show or Cancel gives focus back to the button that opened it.
-  const opener = useRef<HTMLButtonElement>(null);
-  const form = useRef<HTMLDivElement>(null);
+  const { opener, formRef: form } = props;
   useExpansionFocus(open, { inside: form, opener });
   // Start the orientation check now, so it has finished by the first upload.
   useEffect(() => void honorsImageOrientation(), []);
   const players = Object.values(props.members)
     .filter((m): m is Member => m !== undefined && m.kind === "player")
     .sort((a, b) => a.name.localeCompare(b.name));
+  // Documents first, newest first, from the DM's state with no request (8.2).
+  const docs = useMemo(() => Object.values(props.docs).filter((d): d is HandoutDoc => d !== undefined).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)), [props.docs]);
+  const picked = pick?.kind === "doc" ? props.docs[pick.docId] : undefined;
+  // A document picked here and deleted on another device lets the form go (8.2).
+  useEffect(() => {
+    if (pick?.kind === "doc" && !props.docs[pick.docId]) {
+      set({ pick: null });
+      setError("That handout was deleted.");
+    }
+  }, [pick, props.docs, set]);
+  // The loose images: none a document names, and none a running upload made or reused on this device (4.1.2).
+  const uploading = jobPageIds(pdf.job);
+  const inDocs = useMemo(() => new Set(docs.flatMap((d) => d.pages.map((p) => p.assetId))), [docs]);
+  const loose = library?.filter((a) => !inDocs.has(a.id) && !uploading.has(a.id)) ?? null;
 
   if (!open) {
     return (
-      <Button ref={opener} size="sm" onClick={() => setOpen(true)} style={{ justifySelf: "start" }}>
+      <Button ref={opener} size="sm" onClick={() => set({ open: true })} style={{ justifySelf: "start" }}>
         Show a handout
       </Button>
     );
@@ -109,8 +202,7 @@ function ShowHandout(props: { members: Record<string, Member | undefined> }) {
     }
   };
 
-  const upload = async (file: File) => {
-    setError(null);
+  const uploadImage = async (file: File) => {
     setStatus("Preparing the image…");
     try {
       checkImageFile(file);
@@ -121,9 +213,9 @@ function ShowHandout(props: { members: Record<string, Member | undefined> }) {
       const row = await api.uploadAsset(roomId, "handout", blob, {
         onWaiting: (w) => setStatus(w ? "Waiting for the server…" : "Uploading…"),
       });
-      setAsset(row);
       setLibrary((list) => (list && !list.some((a) => a.id === row.id) ? [row, ...list] : list));
-      if (!title.trim()) setTitle(titleFromFileName(file.name));
+      const now = draftStore.getState();
+      set({ pick: { kind: "image", asset: row }, title: now.title.trim() ? now.title : titleFromFileName(file.name) });
     } catch (err) {
       setError(err instanceof Error ? err.message : "The upload failed.");
     } finally {
@@ -131,16 +223,29 @@ function ShowHandout(props: { members: Record<string, Member | undefined> }) {
     }
   };
 
+  // An image takes today's path, and a PDF opens in the upload's own block (4.1.3).
+  const upload = (file: File) => {
+    setError(null);
+    if (!isPdfFile(file)) return void uploadImage(file);
+    const refused = pdfPickRefusal(file, pdf.job);
+    if (refused) return setError(refused);
+    pdf.start(file);
+  };
+
   const show = () => {
-    if (!asset) return setError("Pick an image first.");
-    const result = showHandoutOp({ id: actions.newId(), assetId: asset.id, title, audience: audience === "all" ? "all" : chosen });
+    const input = { id: actions.newId(), title, audience: audience === "all" ? ("all" as const) : chosen };
+    const result =
+      pick?.kind === "doc"
+        ? picked
+          ? showDocOp(input, picked)
+          : ({ ok: false, error: "That handout was deleted." } as const)
+        : pick?.kind === "image"
+          ? showHandoutOp({ ...input, assetId: pick.asset.id })
+          : null;
+    if (!result) return setError("Pick an image first.");
     if (!result.ok) return setError(result.error);
     actions.dispatch(result.op);
-    setAsset(null);
-    setTitle("");
-    setChosen([]);
-    setAudience("all");
-    setOpen(false);
+    draftStore.setState(EMPTY_DRAFT);
   };
 
   return (
@@ -150,19 +255,36 @@ function ShowHandout(props: { members: Record<string, Member | undefined> }) {
       aria-label="Show a handout"
       style={{
         display: "grid",
+        // As the upload's block: a column narrower than a field's own width, so nothing runs past the form's edge at 246 px.
+        gridTemplateColumns: "minmax(0, 1fr)",
         gap: theme.space(3),
         padding: theme.space(3),
         borderRadius: theme.radius.md,
         border: `${theme.line.border}px solid ${theme.color.border}`,
         background: theme.color.bg,
+        minWidth: 0,
       }}
     >
       <div style={{ display: "grid", gap: theme.space(2) }}>
-        <strong style={{ fontSize: theme.font.body14 }}>Image</strong>
-        {asset ? (
-          <div style={{ display: "flex", alignItems: "center", gap: theme.space(3) }}>
-            <img src={assets.url(asset.id, "thumb")} alt="" width={72} height={72} style={{ objectFit: "cover", borderRadius: theme.radius.sm }} />
-            <Button size="sm" onClick={() => setAsset(null)}>
+        <strong style={{ fontSize: theme.font.body14 }}>Image or PDF</strong>
+        {pick ? (
+          <div style={{ display: "flex", alignItems: "center", gap: theme.space(3), flexWrap: "wrap" }}>
+            <img
+              src={assets.url(pick.kind === "doc" ? (picked?.pages[0]?.assetId ?? "") : pick.asset.id, "thumb")}
+              alt=""
+              width={72}
+              height={72}
+              style={{ objectFit: "cover", borderRadius: theme.radius.sm }}
+            />
+            {pick.kind === "doc" && picked ? (
+              <>
+                <span style={{ fontSize: theme.font.body14 }}>{pagesTag(picked.pages.length)}</span>
+                <Button size="sm" onClick={(e) => props.onView(picked.title, picked.pages, e.currentTarget)}>
+                  View
+                </Button>
+              </>
+            ) : null}
+            <Button size="sm" onClick={() => set({ pick: null })}>
               Change
             </Button>
           </div>
@@ -172,19 +294,42 @@ function ShowHandout(props: { members: Record<string, Member | undefined> }) {
               <Button size="sm" onClick={() => void loadLibrary()} disabled={status !== null}>
                 From the library
               </Button>
-              <FileButton label="Upload an image" accept="image/*" size="sm" disabled={status !== null} onFile={(file) => void upload(file)} />
+              <FileButton label="Upload a file" accept="image/*,application/pdf,.pdf" size="sm" disabled={status !== null} onFile={upload} />
             </div>
-            {library ? (
-              library.length === 0 ? (
+            {library || docs.length > 0 ? (
+              docs.length === 0 && loose?.length === 0 ? (
                 <Help>No handout images yet. Upload one.</Help>
               ) : (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))", gap: theme.space(2) }}>
-                  {library.map((a) => (
+                  {docs.map((d) => (
+                    <button
+                      key={d.id}
+                      type="button"
+                      aria-label={`Use ${d.title}, ${pagesTag(d.pages.length)}`}
+                      onClick={() => set({ pick: { kind: "doc", docId: d.id }, title: title.trim() ? title : d.title })}
+                      style={{
+                        position: "relative",
+                        padding: 0,
+                        border: `${theme.line.border}px solid ${theme.color.border}`,
+                        borderRadius: theme.radius.sm,
+                        background: "transparent",
+                        cursor: "pointer",
+                        aspectRatio: "1",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <img src={assets.url(d.pages[0]?.assetId ?? "", "thumb")} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: theme.radius.sm }} />
+                      <span aria-hidden style={{ position: "absolute", left: theme.space(1), bottom: theme.space(1), display: "flex", pointerEvents: "none" }}>
+                        <Tag dense>{pagesTag(d.pages.length)}</Tag>
+                      </span>
+                    </button>
+                  ))}
+                  {(loose ?? []).map((a) => (
                     <button
                       key={a.id}
                       type="button"
                       aria-label="Use this image"
-                      onClick={() => setAsset(a)}
+                      onClick={() => set({ pick: { kind: "image", asset: a } })}
                       style={{ padding: 0, border: `${theme.line.border}px solid ${theme.color.border}`, borderRadius: theme.radius.sm, background: "transparent", cursor: "pointer", aspectRatio: "1" }}
                     >
                       <img src={assets.url(a.id, "thumb")} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: theme.radius.sm }} />
@@ -197,7 +342,7 @@ function ShowHandout(props: { members: Record<string, Member | undefined> }) {
         )}
         {status ? <Loading text={status} delay={0} /> : null}
       </div>
-      <Field label="Title" value={title} maxLength={80} onChange={(e) => setTitle(e.target.value)} placeholder="The old map" />
+      <Field label="Title" value={title} maxLength={80} onChange={(e) => set({ title: e.target.value })} placeholder="The old map" />
       <RadioGroup<"all" | "some">
         legend="Show to"
         value={audience}
@@ -205,7 +350,7 @@ function ShowHandout(props: { members: Record<string, Member | undefined> }) {
           { value: "all", label: "Everyone" },
           { value: "some", label: "Chosen players" },
         ]}
-        onChange={setAudience}
+        onChange={(value) => set({ audience: value })}
       />
       {audience === "some" ? (
         players.length === 0 ? (
@@ -222,7 +367,7 @@ function ShowHandout(props: { members: Record<string, Member | undefined> }) {
                   </span>
                 }
                 checked={chosen.includes(p.id)}
-                onChange={(on) => setChosen((list) => (on ? [...list, p.id] : list.filter((id) => id !== p.id)))}
+                onChange={(on) => set({ chosen: on ? [...chosen, p.id] : chosen.filter((id) => id !== p.id) })}
               />
             ))}
           </div>
@@ -230,10 +375,11 @@ function ShowHandout(props: { members: Record<string, Member | undefined> }) {
       ) : null}
       <ErrorText>{error}</ErrorText>
       <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
-        <Button variant="primary" size="sm" onClick={show} disabled={!asset || status !== null}>
+        <Button variant="primary" size="sm" onClick={show} disabled={!pick || status !== null}>
           Show
         </Button>
-        <Button size="sm" onClick={() => setOpen(false)}>
+        {/* Cancel only closes the form and keeps its draft. A PDF upload goes on in its own block. */}
+        <Button size="sm" onClick={() => set({ open: false })}>
           Cancel
         </Button>
       </div>

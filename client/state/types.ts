@@ -98,6 +98,19 @@ export type XCardSignal = { id: number; at: string };
 export type OpAnswer = "taken" | "refused" | "unknown";
 
 /**
+ * How an `unknown` answer came about (docs/design-v1-pdf-handouts.md 4.1.5).
+ * `snapshot`: a reconnect's snapshot settled the op, and the view already
+ * holds that snapshot, so what the op did, if anything, is in it now.
+ * `expired`: the op was too old to send and was dropped while the store
+ * prepared its hello, before any new snapshot, so the view may still lack
+ * an op that did commit, and only the next snapshot says.
+ */
+export type UnknownCause = "snapshot" | "expired";
+
+/** Told once what became of an op: its answer, the reason when refused, and how an `unknown` came about. */
+export type OnAnswer = (answer: OpAnswer, refusal?: OpRefusal, unknown?: UnknownCause) => void;
+
+/**
  * Why the server refused an op, told with a `refused` answer, for a sender
  * that shows the reason itself, such as a dialog over the room where a toast
  * would be out of sight. `text` is the toast's own wording (store.ts refusalText).
@@ -112,7 +125,7 @@ export type PendingOp = {
   /** The undo group it was sent under, if any (design 7.7). */
   group?: string;
   /** Told the op's answer once it settles (OpAnswer), with the reason when it was refused. */
-  onAnswer?: (answer: OpAnswer, refusal?: OpRefusal) => void;
+  onAnswer?: OnAnswer;
   /** No toast answers it: the caller says what became of it (DispatchOptions). */
   quiet?: true;
 };
@@ -280,6 +293,12 @@ export type RoomView = {
   sceneLoad?: SceneLoad;
   /** Members with at least one open socket. */
   online: MemberId[];
+  /**
+   * How many snapshots this page has applied, the first included, so code
+   * that waits on the next one (an `expired` answer, UnknownCause) can tell
+   * when it is in. A player preview, which applies none, leaves it out.
+   */
+  snapshots?: number;
   /** DM views only: how many table displays have a socket open (docs/design-v1-dm-tools.md 3.1). Absent reads as none. */
   displays?: number;
   /**
@@ -339,7 +358,7 @@ export type RoomActions = {
    * undo takes the whole gesture back (design 7.7). `onAnswer` hears once
    * what became of it (OpAnswer).
    */
-  dispatch(op: ClientOp, opts?: { group?: string; onAnswer?: (answer: OpAnswer, refusal?: OpRefusal) => void; quiet?: boolean }): number | null;
+  dispatch(op: ClientOp, opts?: { group?: string; onAnswer?: OnAnswer; quiet?: boolean }): number | null;
   /**
    * Sends an ephemeral event on the current scene, coalesced to one per
    * animation frame (design 7.6), and shows it locally as this member's own.

@@ -332,7 +332,7 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     await waitFor("the handout form's first field focused", async () => (await focused(dm)).name === "From the library");
     const image = path.join(work, "letter.png");
     await sharp({ create: { width: 300, height: 200, channels: 3, background: { r: 230, g: 220, b: 190 } } }).png().toFile(image);
-    await panel.getByLabel("Upload an image").setInputFiles(image);
+    await panel.getByLabel("Upload a file").setInputFiles(image);
     await panel.getByRole("button", { name: "Change" }).waitFor();
     await panel.getByLabel("Title").fill("A letter");
     await panel.getByRole("button", { name: "Show", exact: true }).click();

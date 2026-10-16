@@ -27,6 +27,7 @@ import { panelById, panelsFor, subpageBack, useSubpageFocus, type PanelDef, type
 import { PartyDock } from "../features/party/PartyDock.tsx";
 import type { OpenSheet } from "../features/find/findToken.ts";
 import { HandoutPopup } from "../features/handouts/HandoutPopup.tsx";
+import { useJobWaiting, usePdfJobRoom } from "../features/handouts/pdf/live.ts";
 import { useJournalUnread } from "../features/journal/store.ts";
 import { useLogUnread } from "../features/log/useLogUnread.ts";
 import { PhaseMenu } from "../features/phases/PhaseMenu.tsx";
@@ -64,6 +65,9 @@ import { inModal, ModalSlots, useModalSlot } from "./modalSlot.tsx";
 import { optionsPlace, railAllowed, RAIL_WIDTH, wrapRecord, wrapsLines } from "./optionsPlace.ts";
 import { Badge, FindButton, FitButton, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle } from "./RoomChrome.tsx";
 import { DockHeaderActions, DockRow, FoldStatus, SAFE_PROBE_STYLE, useDockSummary, useLayoutHeight, useSafeAreas, type DockActions } from "./RoomDock.tsx";
+
+/** What the DM panel's count says while a PDF upload waits on the DM. */
+const UPLOAD_WAITING = "1 upload waiting";
 
 const { topBar: TOP_BAR, toolbar: TOOLBAR } = theme.layout;
 /** One row of a tool's options at the foot: a 44 px control and the bar's padding. */
@@ -361,7 +365,12 @@ function RoomPage() {
   // New chat and whispers mark the Log's button while it is not on screen.
   const unread = useLogUnread(wide ? sideShown && tabId === "log" : sheet?.id === "log");
   const journalUnread = useJournalUnread();
-  const badges: Record<string, number> = { log: unread, journal: journalUnread };
+  // A PDF upload waiting on the DM badges the DM panel, and on a phone the Panels button too (docs/design-v1-pdf-handouts.md 4.1.1).
+  const uploadWaiting = useJobWaiting() && role === "dm" ? 1 : 0;
+  const badges: Record<string, number> = { log: unread, journal: journalUnread, dm: uploadWaiting };
+  const badgeLabels: Record<string, string> = { dm: UPLOAD_WAITING };
+  const panelsLabel = [unread + journalUnread > 0 ? `${unread + journalUnread} unread` : "", uploadWaiting ? UPLOAD_WAITING : ""].filter(Boolean).join(", ");
+  usePdfJobRoom();
   // The phone sheet that lists every panel, in the room's local state (state/types.ts sheetOpen), so
   // what floats over the map steps aside for it as for a panel. Opening a panel from anywhere takes its place.
   const picker = useRoomView((s) => s.local.panelList);
@@ -747,6 +756,7 @@ function RoomPage() {
               panels={panels}
               current={tabId}
               badges={badges}
+              badgeLabels={badgeLabels}
               grouped={role === "dm"}
               onPick={(id) => {
                 focusNext.current = { kind: "panel" };
@@ -780,7 +790,8 @@ function RoomPage() {
           panelsOpen={sheet !== undefined || pickerOpen}
           hiddenSheet={mounted && !sheet ? mounted.title : null}
           onPanels={togglePanels}
-          unread={unread + journalUnread}
+          unread={unread + journalUnread + uploadWaiting}
+          unreadLabel={panelsLabel}
           panelsRef={panelsRef}
           sideHidden={wide && sidePanelHidden}
           sidePanelId={sidePanelId}
@@ -798,6 +809,7 @@ function RoomPage() {
           tabs={panels}
           tab={tabId}
           badges={badges}
+          badgeLabels={badgeLabels}
           onTab={(id) => ui.openPanel(id)}
           onHide={hideSidePanel}
           subpage={subpage}
@@ -1499,8 +1511,10 @@ function Toolbar(props: {
   onTool(id: string): void;
   panelsOpen: boolean;
   onPanels(): void;
-  /** Unread messages in the Log and unread journal pages, which sit behind the Panels button on phones. */
+  /** Unread messages in the Log and unread journal pages, and a PDF upload waiting, which sit behind the Panels button on phones. */
   unread: number;
+  /** What the count says to a screen reader, such as "2 unread, 1 upload waiting". */
+  unreadLabel: string;
   panelsRef: Ref<HTMLButtonElement>;
   /** A phone's hidden sheet, which Panels shows again: its button says so. */
   hiddenSheet: string | null;
@@ -1561,7 +1575,7 @@ function Toolbar(props: {
           <div style={{ flex: "none", display: "flex", alignItems: "center", height: "100%" }}>
             <ToolButton ref={props.panelsRef} label="Panels" active={false} expanded={false} controls={props.sidePanelId} onClick={props.onShowSide} floating iconOnly>
               {props.named ? <Stacked icon={panelsIcon} text="Panels" /> : panelsIcon}
-              <Badge count={props.unread} corner />
+              <Badge count={props.unread} corner label={props.unreadLabel} />
             </ToolButton>
           </div>
         ) : null
@@ -1569,7 +1583,7 @@ function Toolbar(props: {
         <div style={{ flex: "none", display: "flex", alignItems: "center", height: "100%", paddingLeft: theme.space(1), borderLeft: `${theme.line.border}px solid ${theme.color.border}` }}>
           <ToolButton ref={props.panelsRef} label="Panels" active={props.panelsOpen} onClick={props.onPanels} describedBy={props.hiddenSheet ? hiddenId : undefined}>
             <Stacked icon={panelsIcon} text="Panels" />
-            <Badge count={props.unread} corner />
+            <Badge count={props.unread} corner label={props.unreadLabel} />
           </ToolButton>
           {props.hiddenSheet ? (
             <span id={hiddenId} hidden>
@@ -1598,7 +1612,7 @@ const GROUP_LABELS: Partial<Record<PanelGroup, string>> = { play: "In play", pre
  * ones for play. The labels are items that span the grid, so it stays one
  * list named "Panels" and its tiles keep their names.
  */
-function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Record<string, number>; grouped: boolean; onPick(id: string): void }) {
+function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Record<string, number>; badgeLabels: Record<string, string>; grouped: boolean; onPick(id: string): void }) {
   const opens = (p: PanelDef, i: number) => props.grouped && props.panels[i - 1]?.group !== p.group;
   return (
     <ul
@@ -1631,7 +1645,7 @@ function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Recor
             <Row
               opener={panelTile(p.id)}
               title={p.title}
-              trailing={count > 0 ? <Badge count={count} /> : undefined}
+              trailing={count > 0 ? <Badge count={count} label={props.badgeLabels[p.id]} /> : undefined}
               chosen={current}
               onClick={() => props.onPick(p.id)}
               style={{ minHeight: 52, ...(current ? { color: theme.color.accent } : null) }}
@@ -1719,6 +1733,8 @@ function SidePanel(props: {
   tabs: PanelDef[];
   tab: string;
   badges: Record<string, number>;
+  /** What a tab's count says to a screen reader where it is not "N unread". */
+  badgeLabels: Record<string, string>;
   onTab(id: string): void;
   subpage: PanelHeader | null;
   /**
@@ -1786,7 +1802,7 @@ function SidePanel(props: {
         }}
       >
         {t.title}
-        <Badge count={props.badges[t.id] ?? 0} />
+        <Badge count={props.badges[t.id] ?? 0} label={props.badgeLabels[t.id]} />
       </button>
     );
   });
