@@ -113,6 +113,43 @@ export function panelsFor(role: "dm" | "player", wide = false): PanelDef[] {
   return PANELS.filter((p) => (!p.dmOnly || role === "dm") && !(wide && p.narrowOnly)).sort((a, b) => a.order - b.order);
 }
 
+/** The labels of a DM's groups of panels (docs/design-v1-layout-hierarchy.md M3). Menu, the room's own, follows a plain line instead. */
+const GROUP_LABELS: Partial<Record<PanelGroup, string>> = { play: "In play", prepare: "Prepare" };
+
+export type PanelSection = {
+  /** The group, or "all" for a list with no groups. */
+  key: PanelGroup | "all";
+  /** "In play" or "Prepare" over the section's panels. */
+  label?: string;
+  /** A plain line before the section, as before Menu. */
+  line: boolean;
+  panels: PanelDef[];
+};
+
+/**
+ * Panels in sections, one rule for a DM's phone list of panels and the
+ * side panel's More (docs/design-v1-panel-tabs.md 4.1), so a phone and a
+ * computer group them one way. Grouped, for a DM, each group in the slice
+ * opens a section, under its label, and Menu after a plain line. A group
+ * with no panel in the slice has no section, so More's list shows a label
+ * only over panels it holds. A player's list is not grouped: five panels
+ * read at a glance. The order stays the slice's, the registry's.
+ */
+export function panelSections(panels: readonly PanelDef[], grouped: boolean): PanelSection[] {
+  if (!grouped) return panels.length > 0 ? [{ key: "all", line: false, panels: [...panels] }] : [];
+  const sections: PanelSection[] = [];
+  for (const p of panels) {
+    const last = sections[sections.length - 1];
+    if (last?.key === p.group) {
+      last.panels.push(p);
+      continue;
+    }
+    const label = GROUP_LABELS[p.group];
+    sections.push({ key: p.group, ...(label ? { label } : null), line: label === undefined, panels: [p] });
+  }
+  return sections;
+}
+
 export function panelById(id: string | null): PanelDef | undefined {
   return id === null ? undefined : PANELS.find((p) => p.id === id);
 }

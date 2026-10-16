@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { panelsFor } from "./panels.ts";
+import { panelSections, panelsFor, type PanelSection } from "./panels.ts";
 
 describe("the panels' order and groups (docs/design-v1-layout-hierarchy.md M3)", () => {
   const titles = (role: "dm" | "player", wide: boolean) => panelsFor(role, wide).map((p) => p.title);
@@ -28,5 +28,51 @@ describe("the panels' order and groups (docs/design-v1-layout-hierarchy.md M3)",
       if (p.group === "prepare") assert.ok(p.order >= 40 && p.order <= 48, p.id);
       if (p.group === "room") assert.equal(p.id, "menu");
     }
+  });
+});
+
+/*
+ * One grouping for a DM's phone list of panels and the side panel's More
+ * (docs/design-v1-panel-tabs.md 4.1), over the whole list and over each
+ * slice the tab row's fit can leave in More.
+ */
+describe("the panels in sections", () => {
+  const shape = (sections: PanelSection[]) => sections.map((s) => [s.label ?? (s.line ? "---" : ""), s.panels.map((p) => p.title)]);
+
+  test("a DM's whole phone list: In play and Prepare over their panels, and Menu after a line", () => {
+    assert.deepEqual(shape(panelSections(panelsFor("dm", false), true)), [
+      ["In play", ["Token", "Initiative", "Party", "Log", "Journal", "Areas", "DM", "Scenes"]],
+      ["Prepare", ["Monsters", "Encounters", "Characters", "Outliner", "Library"]],
+      ["---", ["Menu"]],
+    ]);
+  });
+
+  test("a player's list has no labels and no line", () => {
+    assert.deepEqual(shape(panelSections(panelsFor("player", false), false)), [["", ["Token", "Initiative", "Log", "Journal", "Areas", "Characters", "Library", "Menu"]]]);
+    assert.deepEqual(panelSections([], false), []);
+  });
+
+  test("each slice More can hold keeps the registry's order, with a label only for a group it holds", () => {
+    const dm = panelsFor("dm", true);
+    for (let k = 0; k < dm.length; k++) {
+      const slice = dm.slice(k);
+      const sections = panelSections(slice, true);
+      assert.deepEqual(
+        sections.flatMap((s) => s.panels.map((p) => p.id)),
+        slice.map((p) => p.id),
+        `from ${k}`,
+      );
+      for (const s of sections) assert.ok(s.panels.every((p) => p.group === s.key), `one group a section, from ${k}`);
+      assert.equal(sections.filter((s) => s.label === "In play").length, slice.some((p) => p.group === "play") ? 1 : 0, `In play from ${k}`);
+      assert.equal(sections.filter((s) => s.label === "Prepare").length, slice.some((p) => p.group === "prepare") ? 1 : 0, `Prepare from ${k}`);
+      assert.equal(sections.at(-1)?.line, true, "Menu is last, after a line");
+    }
+    assert.deepEqual(shape(panelSections(dm.slice(3), true)), [
+      ["In play", ["Journal", "Areas", "DM", "Scenes"]],
+      ["Prepare", ["Monsters", "Encounters", "Characters", "Outliner", "Library"]],
+      ["---", ["Menu"]],
+    ], "a DM's More at 1280 x 800");
+    assert.deepEqual(shape(panelSections(dm.slice(8), true)), [["Prepare", ["Encounters", "Characters", "Outliner", "Library"]], ["---", ["Menu"]]]);
+    assert.deepEqual(shape(panelSections(panelsFor("player", true).slice(3), false)), [["", ["Journal", "Areas", "Characters", "Library", "Menu"]]], "a player's More");
   });
 });

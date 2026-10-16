@@ -24,7 +24,7 @@ import { Sheet, paneBodyPadding, type SheetMode } from "../components/Sheet.tsx"
 import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, sheetMode, sideSheetWidth } from "../components/sheetCap.ts";
 import { SHORT_LANDSCAPE_MAX, useRecordOverflow, useTopBars, useTurnPlacement, type TurnPlacement } from "../features/encounter/band.ts";
 import { FightWatch, InitiativeStrip, useYourTurnNotice } from "../features/encounter/InitiativeStrip.tsx";
-import { panelById, panelsFor, subpageBack, useSubpageFocus, type PanelDef, type PanelGroup, type PanelHeader } from "../features/panels.ts";
+import { panelById, panelSections, panelsFor, subpageBack, useSubpageFocus, type PanelDef, type PanelHeader } from "../features/panels.ts";
 import { PartyDock } from "../features/party/PartyDock.tsx";
 import type { OpenSheet } from "../features/find/findToken.ts";
 import { HandoutPopup } from "../features/handouts/HandoutPopup.tsx";
@@ -1604,9 +1604,6 @@ function panelTile(panelId: string): string {
   return `panel-${panelId}`;
 }
 
-/** The labels of a DM's list of panels on a phone (docs/design-v1-layout-hierarchy.md M3). Menu follows a plain divider. */
-const GROUP_LABELS: Partial<Record<PanelGroup, string>> = { play: "In play", prepare: "Prepare" };
-
 /**
  * Every panel the role has, as large buttons, for the phone's Panels sheet:
  * card rows (components/Row.tsx), the open panel in the pressed look.
@@ -1616,7 +1613,6 @@ const GROUP_LABELS: Partial<Record<PanelGroup, string>> = { play: "In play", pre
  * list named "Panels" and its tiles keep their names.
  */
 function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Record<string, number>; badgeLabels: Record<string, string>; grouped: boolean; onPick(id: string): void }) {
-  const opens = (p: PanelDef, i: number) => props.grouped && props.panels[i - 1]?.group !== p.group;
   return (
     <ul
       aria-label="Panels"
@@ -1629,34 +1625,33 @@ function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Recor
         gap: theme.space(2),
       }}
     >
-      {props.panels.map((p, i) => {
-        const current = p.id === props.current;
-        const count = props.badges[p.id] ?? 0;
-        const label = GROUP_LABELS[p.group];
-        return (
-          <Fragment key={p.id}>
-            {opens(p, i) ? (
-              label ? (
-                <li style={{ gridColumn: "1 / -1", paddingTop: i === 0 ? 0 : theme.space(2) }}>
-                  <SectionLabel>{label}</SectionLabel>
-                </li>
-              ) : (
-                <li aria-hidden style={{ gridColumn: "1 / -1", height: theme.line.border, margin: `${theme.space(1)}px 0`, background: theme.color.border }} />
-              )
-            ) : null}
-          <li>
-            <Row
-              opener={panelTile(p.id)}
-              title={p.title}
-              trailing={count > 0 ? <Badge count={count} label={props.badgeLabels[p.id]} /> : undefined}
-              chosen={current}
-              onClick={() => props.onPick(p.id)}
-              style={{ minHeight: 52, ...(current ? { color: theme.color.accent } : null) }}
-            />
-          </li>
-          </Fragment>
-        );
-      })}
+      {panelSections(props.panels, props.grouped).map((section, i) => (
+        <Fragment key={section.key}>
+          {section.label ? (
+            <li style={{ gridColumn: "1 / -1", paddingTop: i === 0 ? 0 : theme.space(2) }}>
+              <SectionLabel>{section.label}</SectionLabel>
+            </li>
+          ) : section.line ? (
+            <li aria-hidden style={{ gridColumn: "1 / -1", height: theme.line.border, margin: `${theme.space(1)}px 0`, background: theme.color.border }} />
+          ) : null}
+          {section.panels.map((p) => {
+            const current = p.id === props.current;
+            const count = props.badges[p.id] ?? 0;
+            return (
+              <li key={p.id}>
+                <Row
+                  opener={panelTile(p.id)}
+                  title={p.title}
+                  trailing={count > 0 ? <Badge count={count} label={props.badgeLabels[p.id]} /> : undefined}
+                  chosen={current}
+                  onClick={() => props.onPick(p.id)}
+                  style={{ minHeight: 52, ...(current ? { color: theme.color.accent } : null) }}
+                />
+              </li>
+            );
+          })}
+        </Fragment>
+      ))}
     </ul>
   );
 }
