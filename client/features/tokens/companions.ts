@@ -1,6 +1,8 @@
-import type { Character, CompanionTurn, CreatureSize, ImageRef, RoomState, Token } from "#shared/model.ts";
+import type { Actor, Character, CompanionTurn, CreatureSize, ImageRef, RoomState, Token } from "#shared/model.ts";
 import { companionLegBlocker, withinCompanionReach } from "#shared/permissions.ts";
 import type { TokenInput } from "#shared/protocol.ts";
+import { fitLine, type StatBlockMonster } from "#shared/srd/monsters.ts";
+import type { BlockLink } from "../monsters/statBlockLink.ts";
 import { footprint } from "../../lib/scene.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { blankActor, firstFreeSpot, occupiedBoxes, sizeFootprint, spreadPositions, type Point } from "./factory.ts";
@@ -15,6 +17,16 @@ import { blankActor, firstFreeSpot, occupiedBoxes, sizeFootprint, spreadPosition
 
 export type CompanionWhat = "creature" | "effect";
 
+/**
+ * A stat block chosen in the add form (docs/design-v1-companion-stat-blocks.md
+ * 5.6): what it links, the block in the SRD monsters' shape, and a stored
+ * block's picture, which a new companion starts with.
+ */
+export type ChosenBlock = { link: BlockLink; view: StatBlockMonster; source: "srd" | "block"; picture?: ImageRef };
+
+/** The form's fields a chosen block fills while the user has left them alone. */
+export type FilledField = "name" | "size" | "hp" | "ac" | "image";
+
 export type CompanionDraft = {
   name: string;
   what: CompanionWhat;
@@ -27,9 +39,13 @@ export type CompanionDraft = {
   image: ImageRef | null;
   /** The user chose a turn, which a change of what it is then keeps where it can. */
   turnPicked: boolean;
+  /** A creature's stat block, kept while "An effect" is chosen and sent only with a creature. */
+  block: ChosenBlock | null;
+  /** The fields the user changed, which a block chosen later leaves as they are. */
+  edited: readonly FilledField[];
 };
 
-export const NEW_COMPANION: CompanionDraft = { name: "", what: "creature", turn: "shared", size: "small", hp: null, ac: null, image: null, turnPicked: false };
+export const NEW_COMPANION: CompanionDraft = { name: "", what: "creature", turn: "shared", size: "small", hp: null, ac: null, image: null, turnPicked: false, block: null, edited: [] };
 
 /**
  * The toast for a creation answer that comes once its form is gone or out
@@ -41,6 +57,30 @@ export function lateCompanionText(name: string, answer: OpAnswer, refusal?: Pick
   if (answer === "unknown") return `The connection dropped before the server answered, so ${name} may not have been added. Check the map.`;
   const why = refusal?.message.trim().replace(/\.$/, "");
   return why ? `${name} was not added. ${why[0]!.toUpperCase()}${why.slice(1)}.` : `${name} was not added.`;
+}
+
+/**
+ * The draft with a stat block chosen (5.6), or none for Remove. A block
+ * fills each field the user has left alone: the name while it is empty,
+ * the size, HP with the block's average, AC, and the picture with a stored
+ * block's when none is chosen. What it filled stays when it is removed.
+ */
+export function withBlock(draft: CompanionDraft, chosen: ChosenBlock | null): CompanionDraft {
+  if (!chosen) return { ...draft, block: null };
+  const left = (field: FilledField) => !draft.edited.includes(field);
+  const next: CompanionDraft = { ...draft, block: chosen };
+  if (draft.name.trim() === "") next.name = chosen.view.name;
+  if (left("size")) next.size = chosen.view.size;
+  if (left("hp") && chosen.view.hp.average >= 1) next.hp = chosen.view.hp.average;
+  if (left("ac")) next.ac = chosen.view.ac;
+  if (left("image") && draft.image === null && chosen.picture) next.image = chosen.picture;
+  return next;
+}
+
+/** HP's help while a block is chosen: "The block's average, 1 (1d4 − 1). Type another for a higher-level casting." */
+export function blockHpHelp(view: StatBlockMonster): string {
+  const formula = view.hp.formula.trim().replace(/ - /g, " − ");
+  return `The block’s average, ${view.hp.average}${formula ? ` (${formula})` : ""}. Type another for a higher-level casting.`;
 }
 
 /** The turn a companion starts at until the user picks one (3.6.2): a creature listed under its character, an effect not listed. */
@@ -55,8 +95,10 @@ export function defaultTurn(what: CompanionWhat): CompanionTurn {
  * an effect takes no turn of its own, which then goes to the effect's
  * default.
  */
-export function draftWith(draft: CompanionDraft, patch: Partial<Omit<CompanionDraft, "turnPicked">>): CompanionDraft {
-  const next: CompanionDraft = { ...draft, ...patch, turnPicked: draft.turnPicked || patch.turn !== undefined };
+export function draftWith(draft: CompanionDraft, patch: Partial<Omit<CompanionDraft, "turnPicked" | "edited" | "block">>): CompanionDraft {
+  const edited = new Set(draft.edited);
+  for (const field of ["name", "size", "hp", "ac", "image"] as const) if (field in patch) edited.add(field);
+  const next: CompanionDraft = { ...draft, ...patch, turnPicked: draft.turnPicked || patch.turn !== undefined, edited: [...edited] };
   if (patch.what !== undefined && patch.turn === undefined && !next.turnPicked) next.turn = defaultTurn(next.what);
   if (next.what === "effect" && next.turn === "own") next.turn = defaultTurn("effect");
   return next;
@@ -99,7 +141,10 @@ export function draftError(draft: CompanionDraft): string | null {
  * The new companion's `token.create` input: a creature as an NPC with its
  * HP full, an effect as an object with 0 of 0 HP and AC 0, either an ally
  * on the creatures layer, plain and bare, owned by whoever plays the
- * character, standing at the character's elevation.
+ * character, standing at the character's elevation. A creature with a
+ * stat block links it and takes its speeds, initiative bonus, Passive
+ * Perception and senses (docs/design-v1-companion-stat-blocks.md 5.6). An
+ * effect sends no block, though its draft keeps one.
  */
 export function companionInput(
   draft: CompanionDraft,
@@ -108,6 +153,12 @@ export function companionInput(
 ): TokenInput {
   const creature = draft.what === "creature";
   const hp = creature ? Math.max(1, Math.min(100_000, Math.floor(draft.hp ?? 1))) : 0;
+  const chosen = creature ? draft.block : null;
+  // The form's picker offers only an SRD block or one of the character's, never a room monster.
+  const link = chosen ? ("blockId" in chosen.link ? { blockId: chosen.link.blockId } : "srdId" in chosen.link ? { srdId: chosen.link.srdId } : {}) : {};
+  const fromBlock: Partial<Actor> = chosen
+    ? { speeds: { ...chosen.view.speeds }, initBonus: chosen.view.initiative.bonus, passivePerception: chosen.view.passivePerception, senses: fitLine(chosen.view.senses), ...link }
+    : {};
   const input: TokenInput = {
     id: at.id,
     sceneId: at.sceneId,
@@ -120,7 +171,7 @@ export function companionInput(
     disposition: "ally",
     layer: "token",
     ownerIds: [...(character.ownerIds ?? [])],
-    actor: { inline: blankActor({ hp: { cur: hp, max: hp, temp: 0 }, ac: creature ? Math.max(0, Math.min(100, Math.floor(draft.ac ?? 0))) : 0 }) },
+    actor: { inline: blankActor({ hp: { cur: hp, max: hp, temp: 0 }, ac: creature ? Math.max(0, Math.min(100, Math.floor(draft.ac ?? 0))) : 0, ...fromBlock }) },
     companion: { of: character.id, turn: creature ? draft.turn : draft.turn === "own" ? "shared" : draft.turn },
   };
   if (draft.image) input.image = draft.image;

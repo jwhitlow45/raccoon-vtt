@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
 import type { Character, CompanionTurn, CreatureSize, Token } from "#shared/model.ts";
 import { playersToken } from "#shared/project.ts";
 import type { ClientOp, TokenPatch } from "#shared/protocol.ts";
@@ -9,6 +9,7 @@ import { Spinner } from "../../components/Loading.tsx";
 import { Help, Section as PanelSection } from "../../components/Panel.tsx";
 import { Row, RowList } from "../../components/Row.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
+import { Tag } from "../../components/Tag.tsx";
 import { layoutSize } from "../device/layout.ts";
 import { uiScale } from "../device/settings.ts";
 import { panAnchor, requestPan } from "../encounter/pan.ts";
@@ -25,8 +26,11 @@ import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import type { TokenAccess } from "./access.ts";
 import { SIZE_OPTIONS } from "./CharacterCard.tsx";
+import { ChooseBlockDialog } from "./CompanionBlocks.tsx";
+import { characterBlocks, fromTheBlock, srdTitle, whose, type PickerRow } from "./companionBlocks.ts";
 import {
   NEW_COMPANION,
+  blockHpHelp,
   companionInput,
   companionWhat,
   companionsOf,
@@ -39,6 +43,8 @@ import {
   playerPlacement,
   turnChoices,
   turnLabel,
+  withBlock,
+  type ChosenBlock,
   type CompanionDraft,
   type CompanionWhat,
 } from "./companions.ts";
@@ -80,12 +86,23 @@ function CompanionPortrait(props: { token: Token; size: number }) {
  * the scene this device holds, each a button that shows it on the map with
  * its bar, as a party bar tap does.
  */
-export function CharacterCompanions(props: { character: Character; canAdd: boolean; onAdd(): void; close(): void }) {
+export function CharacterCompanions(props: { character: Character; canAdd: boolean; onAdd(): void; onBlocks?(): void; close(): void }) {
   const tokens = useRoomView((s) => s.view?.tokens);
+  const blocks = useRoomView((s) => s.view?.companionBlocks);
+  const monsters = useRoomView((s) => s.view?.monsters);
   const ui = useRoomUi();
   const scope = useRoomScope();
   const list = tokens ? companionsOf({ tokens }, props.character.id) : [];
+  const kept = characterBlocks({ companionBlocks: blocks ?? {} }, props.character.id).length;
   if (list.length === 0 && !props.canAdd) return null;
+  // Each companion's block, before its turn (docs/design-v1-companion-stat-blocks.md 6.4). An effect has none to name.
+  const blockName = (t: Token): string | null => {
+    if (t.kind === "object" || !("inline" in t.actor)) return null;
+    const a = t.actor.inline;
+    if (a.blockId !== undefined) return blocks?.[a.blockId]?.name ?? "Stat block deleted";
+    if (a.monsterId !== undefined) return monsters?.[a.monsterId]?.name ?? "Stat block deleted";
+    return a.srdId !== undefined ? srdTitle(a.srdId) : null;
+  };
   const show = (token: Token) => {
     ui.tap(token.id);
     props.close();
@@ -106,7 +123,7 @@ export function CharacterCompanions(props: { character: Character; canAdd: boole
               key={t.id}
               leading={<CompanionPortrait token={t} size={28} />}
               title={displayName(t)}
-              detail={t.companion ? turnLabel(props.character.name, t.companion.turn) : undefined}
+              detail={t.companion ? [blockName(t), turnLabel(props.character.name, t.companion.turn)].filter(Boolean).join(" · ") : undefined}
               label={`${displayName(t)}. Show it on the map with its actions`}
               onClick={() => show(t)}
               trailing={<Icon name="chevronRight" style={{ color: theme.color.textMuted }} />}
@@ -115,10 +132,16 @@ export function CharacterCompanions(props: { character: Character; canAdd: boole
         </RowList>
       ) : null}
       {props.canAdd ? (
-        <div style={{ display: "flex" }}>
+        // Side by side where the width holds both, else one under the other.
+        <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
           <Button size="sm" onClick={props.onAdd} data-opener={`companion:${props.character.id}`}>
             Add a companion
           </Button>
+          {props.onBlocks ? (
+            <Button size="sm" onClick={props.onBlocks} data-opener={`blocks:${props.character.id}`}>
+              {`Stat blocks (${kept})`}
+            </Button>
+          ) : null}
         </div>
       ) : null}
     </PanelSection>
@@ -152,6 +175,11 @@ export function CompanionForm(props: {
   const [draft, setDraft] = useState<CompanionDraft>(NEW_COMPANION);
   const [error, setError] = useState<string | null>(null);
   const [waiting, setWaiting] = useState(false);
+  const [choosing, setChoosing] = useState(false);
+  const [blockGone, setBlockGone] = useState(false);
+  const blocks = useRoomView((s) => s.view?.companionBlocks);
+  const changeRef = useRef<HTMLButtonElement>(null);
+  const focusChange = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   // The opener went with the panel the form replaced, so focus starts at the form's heading.
   useEffect(() => heading.current?.focus(), []);
@@ -170,9 +198,36 @@ export function CompanionForm(props: {
       mounted.current = false;
     };
   }, []);
-  const set = (patch: Partial<Omit<CompanionDraft, "turnPicked">>) => {
+  const set = (patch: Parameters<typeof draftWith>[1]) => {
     setDraft((d) => draftWith(d, patch));
     setError(null);
+  };
+  /*
+   * A chosen block of the character's that leaves the view, deleted by a
+   * co-owner or the DM, is chosen no more, and the numbers it filled stay
+   * (docs/design-v1-companion-stat-blocks.md 6.3).
+   */
+  const chosenBlockId = draft.block && "blockId" in draft.block.link ? draft.block.link.blockId : undefined;
+  const chosenLeft = chosenBlockId !== undefined && blocks !== undefined && blocks[chosenBlockId] === undefined;
+  useEffect(() => {
+    if (!chosenLeft) return;
+    setDraft((d) => withBlock(d, null));
+    setBlockGone(true);
+  }, [chosenLeft]);
+  // Choosing hands focus back to the field's Change, which takes Choose's place.
+  useEffect(() => {
+    if (!focusChange.current || choosing) return;
+    focusChange.current = false;
+    changeRef.current?.focus();
+  });
+  const choose = (row: PickerRow) => {
+    const stored = "blockId" in row.link ? blocks?.[row.link.blockId] : undefined;
+    const chosen: ChosenBlock = { link: row.link, view: row.view, source: row.source, ...(stored?.defaultImage ? { picture: stored.defaultImage } : {}) };
+    setDraft((d) => withBlock(d, chosen));
+    setBlockGone(false);
+    setError(null);
+    focusChange.current = true;
+    setChoosing(false);
   };
   const name = character.name;
   const live = currentStageCamera(scope);
@@ -236,6 +291,19 @@ export function CompanionForm(props: {
       <FieldRow label="It is">
         <Segmented<CompanionWhat> label="What it is" value={draft.what} options={WHAT_OPTIONS} onChange={(what) => set({ what })} />
       </FieldRow>
+      {draft.what === "creature" ? (
+        <BlockField
+          character={character}
+          chosen={draft.block}
+          gone={blockGone}
+          changeRef={changeRef}
+          onChoose={() => setChoosing(true)}
+          onRemove={() => {
+            setDraft((d) => withBlock(d, null));
+            setBlockGone(false);
+          }}
+        />
+      ) : null}
       <TurnField>
         <Select<CompanionTurn> label="Turn" value={chosen.value} options={choices} onChange={(turn) => set({ turn })} />
       </TurnField>
@@ -248,6 +316,7 @@ export function CompanionForm(props: {
           <FieldRow label="HP">
             <NumberField label="HP" value={draft.hp ?? undefined} min={1} max={100_000} nullable onCommit={(hp) => set({ hp })} />
           </FieldRow>
+          {draft.block ? <Help>{blockHpHelp(draft.block.view)}</Help> : null}
           <FieldRow label="AC" hint="Optional">
             <NumberField label="AC" value={draft.ac ?? undefined} min={0} max={100} nullable onCommit={(ac) => set({ ac })} />
           </FieldRow>
@@ -267,6 +336,54 @@ export function CompanionForm(props: {
         {waiting ? "Adding…" : "Add and place"}
       </Button>
       {where ? <Help id="companion-where">{where}</Help> : null}
+      {choosing ? <ChooseBlockDialog character={character} name={draft.name} onChoose={choose} onClose={() => setChoosing(false)} /> : null}
+    </div>
+  );
+}
+
+/**
+ * The add form's Stat block field (6.3), its label above it as Turn's is,
+ * so a long name shortens rather than widening the form: "Choose a stat
+ * block" with none, else its name, its source, Change, Remove and what the
+ * companion takes from it besides the form's own fields.
+ */
+function BlockField(props: {
+  character: Character;
+  chosen: ChosenBlock | null;
+  gone: boolean;
+  changeRef: RefObject<HTMLButtonElement | null>;
+  onChoose(): void;
+  onRemove(): void;
+}) {
+  const { chosen } = props;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1), fontSize: theme.font.body14 }}>
+      <span>Stat block</span>
+      {chosen ? (
+        <>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+            <strong style={{ minWidth: 0, overflowWrap: "anywhere" }}>{chosen.view.name}</strong>
+            <Tag tone="muted">{chosen.source === "srd" ? "SRD" : whose(props.character.name)}</Tag>
+            <span style={{ flex: 1 }} />
+            <Button ref={props.changeRef} size="sm" onClick={props.onChoose}>
+              Change
+            </Button>
+            <Button size="sm" onClick={props.onRemove}>
+              Remove
+            </Button>
+          </div>
+          <Help style={{ overflowWrap: "anywhere" }}>{fromTheBlock(chosen.view)}</Help>
+        </>
+      ) : (
+        <>
+          <div style={{ display: "flex" }}>
+            <Button size="sm" onClick={props.onChoose}>
+              Choose a stat block
+            </Button>
+          </div>
+          <Help>{props.gone ? "The chosen stat block was deleted." : `Optional: an SRD creature, one of ${whose(props.character.name)}, or one you paste.`}</Help>
+        </>
+      )}
     </div>
   );
 }

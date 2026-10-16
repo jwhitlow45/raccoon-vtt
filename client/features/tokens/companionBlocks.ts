@@ -26,6 +26,18 @@ export function whose(name: string): string {
   return `${name}’s`;
 }
 
+/**
+ * An SRD monster's name from its slug, "dire-wolf" read as "Dire Wolf", for
+ * lists that should not load the SRD chunk to name a link. The slug stands
+ * in for the printed name, which it nearly always matches.
+ */
+export function srdTitle(srdId: string): string {
+  return srdId
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 /** A character's blocks this device holds, by name. */
 export function characterBlocks(view: Pick<RoomState, "companionBlocks"> | null | undefined, characterId: string): CompanionBlock[] {
   return Object.values(view?.companionBlocks ?? {})

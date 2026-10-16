@@ -4,9 +4,16 @@ import { chunkKey } from "#shared/keys.ts";
 import type { RoomState } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
-import { character, room, token } from "#shared/testutil.ts";
+import { readFileSync } from "node:fs";
+import { applyOp } from "#shared/reducer.ts";
+import type { SrdMonster } from "#shared/srd/monsters.ts";
+import { monsterView } from "#shared/statBlock.ts";
+import { character, companionBlock, env, imageRef, room, token } from "#shared/testutil.ts";
 import {
   NEW_COMPANION,
+  blockHpHelp,
+  withBlock,
+  type ChosenBlock,
   companionInput,
   companionSpot,
   draftError,
@@ -148,5 +155,66 @@ describe("the links the panel sends", () => {
     assert.ok(clientOpSchema.safeParse({ t: "token.update", tokenId: "ws", patch }).success);
     assert.deepEqual(makeCompanionPatch({ disposition: "hostile" }, "bree", "shared"), { companion: { of: "bree", turn: "shared" }, disposition: "ally" });
     assert.deepEqual(makeCompanionPatch({ disposition: "neutral" }, "bree", "own"), { companion: { of: "bree", turn: "own" } });
+  });
+});
+
+describe("adding a companion from a stat block (docs/design-v1-companion-stat-blocks.md 5.6, 6.3)", () => {
+  const SRD = JSON.parse(readFileSync(new URL("../../../shared/srd/monsters.json", import.meta.url), "utf8")) as SrdMonster[];
+  const owlView = SRD.find((m) => m.srdId === "owl")!;
+  const owl: ChosenBlock = { link: { srdId: "owl" }, view: owlView, source: "srd" };
+  const moth = companionBlock("moth", "bree", { defaultImage: imageRef("moth-art") });
+  const mothChosen: ChosenBlock = { link: { blockId: "moth" }, view: monsterView(moth), source: "block", picture: imageRef("moth-art") };
+
+  test("a block fills each field still as it started: the name when empty, the size, HP with its average, AC and a stored block's picture", () => {
+    const filled = withBlock(NEW_COMPANION, owl);
+    assert.deepEqual([filled.name, filled.size, filled.hp, filled.ac, filled.image], ["Owl", "tiny", 1, 11, null]);
+    const pictured = withBlock(NEW_COMPANION, mothChosen);
+    assert.deepEqual(pictured.image, imageRef("moth-art"));
+    // Fields the user changed stay as they are, and a name typed first is kept.
+    const typed = draftWith(draftWith(draftWith(NEW_COMPANION, { name: "Hoot" }), { hp: 4 }), { image: imageRef("mine") });
+    const kept = withBlock(typed, mothChosen);
+    assert.deepEqual([kept.name, kept.hp, kept.image, kept.size, kept.ac], ["Hoot", 4, imageRef("mine"), "small", 12]);
+    // A second pick refills what the first filled, and Remove keeps it all.
+    const changed = withBlock(filled, mothChosen);
+    assert.deepEqual([changed.name, changed.size, changed.hp, changed.ac], ["Owl", "small", 9, 12], "the name is no longer empty");
+    const removed = withBlock(changed, null);
+    assert.equal(removed.block, null);
+    assert.deepEqual([removed.size, removed.hp, removed.ac], ["small", 9, 12]);
+  });
+
+  test("the new companion carries the link and the block's speeds, Passive Perception, senses and initiative bonus, which the server takes", () => {
+    const state = bree();
+    state.companionBlocks.moth = moth;
+    for (const chosen of [owl, mothChosen]) {
+      const draft = withBlock(NEW_COMPANION, chosen);
+      const input = companionInput(draft, { ...at, x: 6, y: 5 }, state.characters.bree!);
+      assert.ok("inline" in input.actor);
+      const a = input.actor.inline;
+      assert.deepEqual([a.speeds, a.passivePerception, a.senses, a.initBonus], [chosen.view.speeds, chosen.view.passivePerception, chosen.view.senses, chosen.view.initiative.bonus]);
+      assert.deepEqual("srdId" in chosen.link ? a.srdId : a.blockId, "srdId" in chosen.link ? "owl" : "moth");
+      for (const field of ["initScore", "creatureType", "cr", "xp", "legendary", "monsterId"]) assert.equal(field in a, false, field);
+      const op = { t: "token.create" as const, token: input };
+      assert.ok(clientOpSchema.safeParse(op).success);
+      const p1 = { memberId: "p1", role: "player" as const };
+      const allowed = canApply(op, p1, state, { canUseAsset: () => true });
+      assert.ok(allowed.ok, allowed.ok ? "" : allowed.message);
+      assert.ok(applyOp(state, op, p1, env(1)).ok);
+    }
+  });
+
+  test("an effect keeps the choice in its draft and sends no link or block numbers", () => {
+    const draft = draftWith(withBlock(NEW_COMPANION, owl), { what: "effect", turn: "none" });
+    assert.ok(draft.block, "kept in the draft");
+    const input = companionInput(draft, at, bree().characters.bree!);
+    assert.ok("inline" in input.actor);
+    assert.deepEqual([input.actor.inline.srdId, input.actor.inline.blockId, input.actor.inline.passivePerception], [undefined, undefined, 10]);
+    // Back to a creature, it sends the block again.
+    const back = companionInput(draftWith(draft, { what: "creature" }), at, bree().characters.bree!);
+    assert.ok("inline" in back.actor && back.actor.inline.srdId === "owl");
+  });
+
+  test("HP's help names the average and its dice", () => {
+    assert.equal(blockHpHelp(owlView), "The block’s average, 1 (1d4 − 1). Type another for a higher-level casting.");
+    assert.equal(blockHpHelp(monsterView(companionBlock("x", "bree", { hp: { average: 7, formula: "" } }))), "The block’s average, 7. Type another for a higher-level casting.");
   });
 });
