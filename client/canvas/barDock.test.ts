@@ -489,6 +489,13 @@ describe("the alerts column's summary row on a short screen", () => {
     assert.equal(askedAlerts({ first: 121, column: -12, overlay: 100 }), "fullScreen", "under the Starting view notice, which reaches past the toolbar's top");
   });
 
+  test("with no spot above the tool's buttons, as when capped options scroll, the caller lets the floor go and takes the highest spot left of the top bar's buttons", () => {
+    const find = { left: 280, top: 4, right: 324, bottom: 48 };
+    const input = { ...base, row, floor: 38, controls: [find] };
+    assert.equal(raisedRow(input), null);
+    assert.deepEqual(raisedRow({ ...input, floor: Infinity, highest: true }), { top: 0, right: 272 });
+  });
+
   test("goes no higher than a spot where a button stands in its first 44 px, and is null with no spot left", () => {
     const notice = { top: 52, bottom: 126 };
     const atItsLeft = { left: 60, top: 0, right: 104, bottom: 52 };

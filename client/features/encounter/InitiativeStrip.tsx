@@ -546,7 +546,7 @@ function FightAlerts() {
     const controls = Array.from(header.querySelectorAll("button"))
       .filter((b) => !box.contains(b) && !b.hasAttribute("data-rvtt-backdrop"))
       .map((b) => b.getBoundingClientRect());
-    const place = raisedRow({
+    const rules = {
       row: usual,
       ceiling: header.firstElementChild?.getBoundingClientRect().top ?? 0,
       floor: (height - chrome.controls - theme.space(1)) * zoom,
@@ -554,7 +554,9 @@ function FightAlerts() {
       controls,
       gap: EDGE * zoom,
       minWidth: theme.touch * zoom,
-    });
+    };
+    // Where no spot keeps above the tool's buttons, as with capped options scrolled at 130%, the row lets that rule go first and stands as high as the others allow, over as little of them as it can.
+    const place = raisedRow(rules) ?? raisedRow({ ...rules, floor: Infinity, highest: true });
     const next = place ? { lift: Math.round((usual.top - place.top) / zoom), inset: Math.ceil((usual.right - place.right) / zoom) } : NOT_RAISED;
     // A measure taken with the place applied differs from the last only by rounding, so it keeps the place and draws nothing again.
     setRowPlace((prev) => (Math.abs(prev.lift - next.lift) <= 1 && Math.abs(prev.inset - next.inset) <= 1 ? prev : next));

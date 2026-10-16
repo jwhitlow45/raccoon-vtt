@@ -514,7 +514,10 @@ export function columnFacts(prev: ColumnFacts | null, input: { top: number; meas
  * top bars. Where a button stands in its way it narrows from the right to
  * stop `gap` left of it, keeping `minWidth`, or else rises further. It may
  * rise over the turn band and then the top bar's row, up to `ceiling`.
- * Null where no spot is left. Any one unit throughout: screen px as drawn.
+ * Null where no spot is left. `highest` takes the highest spot instead of
+ * the lowest: where no spot keeps above the tool's buttons, the caller lets
+ * the floor go and keeps the row as far from them as it can. Any one unit
+ * throughout: screen px as drawn.
  */
 export function raisedRow(input: {
   row: { left: number; right: number; top: number; height: number };
@@ -524,22 +527,31 @@ export function raisedRow(input: {
   controls: readonly { left: number; top: number; right: number; bottom: number }[];
   gap: number;
   minWidth: number;
+  highest?: boolean;
 }): { top: number; right: number } | null {
   const { row, gap } = input;
-  for (let top = Math.min(row.top, input.floor - row.height); top >= input.ceiling; top -= 1) {
+  const at = (top: number): { top: number; right: number } | null => {
     const bottom = top + row.height;
-    if (input.taken.some((t) => t.top < bottom && t.bottom > top)) continue;
+    if (input.taken.some((t) => t.top < bottom && t.bottom > top)) return null;
     let right = row.right;
-    let blocked = false;
     for (const c of input.controls) {
       if (c.top >= bottom || c.bottom <= top || c.right <= row.left) continue;
-      if (c.left - gap < row.left + input.minWidth) {
-        blocked = true;
-        break;
-      }
+      if (c.left - gap < row.left + input.minWidth) return null;
       right = Math.min(right, c.left - gap);
     }
-    if (!blocked) return { top, right };
+    return { top, right };
+  };
+  const lowest = Math.min(row.top, input.floor - row.height);
+  if (input.highest) {
+    for (let top = input.ceiling; top <= lowest; top += 1) {
+      const spot = at(top);
+      if (spot) return spot;
+    }
+    return null;
+  }
+  for (let top = lowest; top >= input.ceiling; top -= 1) {
+    const spot = at(top);
+    if (spot) return spot;
   }
   return null;
 }
