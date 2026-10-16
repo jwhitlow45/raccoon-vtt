@@ -566,12 +566,21 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
         await tv.keyboard.press("Enter");
         await bar.waitFor();
         await waitFor("focus on Close on the last page", async () => (await focused()) === "Close");
+        // The bar lays itself out again after a resize, so its buttons are read until two reads agree (PB-P-14).
+        const names = ["Previous page", "Next page", "Close"] as const;
+        let last = "";
+        const boxes = await waitFor(`the bar settled at ${size.width} px`, async () => {
+          const read = await Promise.all(names.map((name) => button(name).boundingBox()));
+          const same = JSON.stringify(read) === last;
+          last = JSON.stringify(read);
+          return same ? read : null;
+        });
         const tops = new Set<number>();
-        for (const name of ["Previous page", "Next page", "Close"]) {
-          const b = await button(name).boundingBox();
+        names.forEach((name, i) => {
+          const b = boxes[i];
           assert.ok(b && b.x >= 0 && b.x + b.width <= size.width && b.height >= 56, `${name} at ${size.width} px: ${JSON.stringify(b)}`);
           tops.add(Math.round(b.y));
-        }
+        });
         assert.equal(tops.size, rows, `the bar's buttons are on ${tops.size} rows at ${size.width} px`);
         await assertBarOverPage(await showsPage(3), 3, size);
         await shots.take(tv, `display-pages-bar-${size.width}`);

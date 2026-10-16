@@ -322,6 +322,17 @@ function focusedName(page: Page): Promise<string> {
 }
 
 type Box = { x: number; y: number; width: number; height: number };
+
+/** The boxes of `parts`, read until two reads agree: a resize or a row that wraps lays the controls out again a moment later (PB-P-14). */
+async function settledBoxes(parts: readonly Locator[], what: string): Promise<Box[]> {
+  let last = "";
+  return waitFor(what, async () => {
+    const read = await Promise.all(parts.map((p) => p.boundingBox()));
+    const same = JSON.stringify(read) === last;
+    last = JSON.stringify(read);
+    return same && read.every((r) => r !== null) ? (read as Box[]) : null;
+  });
+}
 function intersects(a: Box, b: Box): boolean {
   return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
@@ -865,8 +876,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await popup.getByRole("button", { name: "Reset zoom" }).waitFor();
     const row = popup.getByRole("button", { name: "Previous page" }).locator("..");
     const zoom = popup.getByRole("button", { name: "Zoom in" }).locator("..");
-    const a = (await row.boundingBox())!;
-    const b = (await zoom.boundingBox())!;
+    const [a, b] = (await settledBoxes([row, zoom], "the page row and the zoom buttons at 320 px")) as [Box, Box];
     assert.equal(intersects(a, b), false, `the page row ${JSON.stringify(a)} meets the zoom buttons ${JSON.stringify(b)}`);
     assert.ok(a.y + a.height <= b.y + 1, "the page row is not above the zoom buttons");
     await shots.take(phone, "pdf-popup-320-magnified");
