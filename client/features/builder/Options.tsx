@@ -1,29 +1,33 @@
+import { useCallback, useRef } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
+import type { TerrainId } from "#shared/model.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
-import { Segmented } from "../../components/Segmented.tsx";
-import { ConfirmButton, InfoLine, OptButton, OptInput, OptionsColumn, OptionsRow, OptSelect } from "../measure/controls.tsx";
+import { ChoiceRows, ChoiceTiles, ConfirmButton, OptButton, OptInput, OptionsStrip, OptSegmented, PickCloses, ValueChip, type Slot } from "../measure/controls.tsx";
+import { theme } from "../../lib/theme.ts";
 import type { BrushSize } from "./cells.ts";
 import { LABEL_SIZES } from "./labelEdit.ts";
 import { lightModeHint, sceneHasLights } from "./lightTap.ts";
 import { TERRAINS, useBuilderStore, type BuildMode, type EdgeKind } from "./store.ts";
+import { TERRAIN_SWATCHES } from "./textures.ts";
 import { closePolygon } from "./tool.tsx";
-import { StampOptions, useCompactStampBar } from "./stamps/StampOptions.tsx";
-import { HeightOptions, useHeightHint } from "./heights/HeightOptions.tsx";
-import { LightOptions } from "../lights/LightOptions.tsx";
+import { useStampSlots } from "./stamps/StampOptions.tsx";
+import { useHeightHint, useHeightSlots } from "./heights/HeightOptions.tsx";
+import { LightChip } from "../lights/LightOptions.tsx";
 
-const MODES: readonly { value: BuildMode; label: string }[] = [
-  { value: "paint", label: "Brush" },
-  { value: "rect", label: "Rectangle room" },
-  { value: "poly", label: "Shape room" },
-  { value: "erase", label: "Erase" },
-  { value: "eraseRect", label: "Erase area" },
-  { value: "edge", label: "Walls and doors" },
-  { value: "height", label: "Heights and stairs" },
-  { value: "label", label: "Label" },
-  { value: "light", label: "Lights" },
-  { value: "stamp", label: "Stamp" },
+/** Each mode's whole name, which its tile and the chip's name keep, and the short word the chip shows (docs/design-v1-tool-options.md 6.2). */
+const MODES: readonly { value: BuildMode; label: string; short: string }[] = [
+  { value: "paint", label: "Brush", short: "Brush" },
+  { value: "rect", label: "Rectangle room", short: "Rect room" },
+  { value: "poly", label: "Shape room", short: "Shape room" },
+  { value: "erase", label: "Erase", short: "Erase" },
+  { value: "eraseRect", label: "Erase area", short: "Erase area" },
+  { value: "edge", label: "Walls and doors", short: "Walls" },
+  { value: "height", label: "Heights and stairs", short: "Heights" },
+  { value: "label", label: "Label", short: "Label" },
+  { value: "light", label: "Lights", short: "Lights" },
+  { value: "stamp", label: "Stamp", short: "Stamp" },
 ];
 
 const EDGES: readonly { value: EdgeKind; label: string }[] = [
@@ -66,9 +70,20 @@ function hint(mode: BuildMode, edge: EdgeKind, secretFound: boolean, hasLights: 
   return EDGE_HINTS[edge];
 }
 
-/** The builder's bar: what a gesture does, then the choices for it. */
+/** A terrain's swatch, in its chip and above its tile's name. */
+function TerrainSwatch(props: { terrain: TerrainId }) {
+  return <span aria-hidden style={{ display: "block", width: theme.icon.md, height: theme.icon.md, boxSizing: "border-box", borderRadius: theme.radius.xs, background: TERRAIN_SWATCHES[props.terrain], border: `${theme.line.border}px solid ${theme.color.border}` }} />;
+}
+
+/**
+ * The builder's options (docs/design-v1-tool-options.md 9.9): what a
+ * gesture does on the line, then the mode, Undo and Redo, and each mode's
+ * own controls, with Clear build always in ⋯. A room with corners or a
+ * selected stamp is a task: its controls lead, and the builder's own drop
+ * by 3.
+ */
 export default function BuilderOptions() {
-  // Everything but the stroke in progress, so painting does not re-render the bar.
+  // Everything but the stroke in progress, so painting does not re-render the row.
   const builderState = useBuilderStore();
   const scope = useRoomScope();
   const s = useStore(
@@ -90,59 +105,119 @@ export default function BuilderOptions() {
   const hasLights = useRoomView((v) => (v.sceneId ? sceneHasLights(v.view?.lights, v.sceneId) : false));
   const actions = useRoomActions();
   const heightHint = useHeightHint(scene?.autoWalls);
-  // A phone's bar with a stamp selected keeps to the stamp's own buttons. Done brings the rest back.
-  const stampCompact = useCompactStampBar() && s.mode === "stamp";
+  const heightSlots = useHeightSlots();
+  // ⋯ in this row, where focus goes back from the stamp picker when the chooser waits behind it.
+  const row = useRef<HTMLDivElement>(null);
+  const more = useCallback(() => row.current?.closest('[role="toolbar"]')?.querySelector<HTMLElement>("[data-rvtt-more] button") ?? null, []);
+  const stamps = useStampSlots({ more });
   if (!sceneId || !scene) return null;
 
   const set = builderState.setState;
-  const terrainPicker = <OptSelect label="Terrain" value={s.terrain} options={TERRAINS} onChange={(terrain) => set({ terrain })} />;
-  const brushPicker = (
-    <Segmented<BrushSize>
-      label="Brush size"
-      value={s.brush}
-      onChange={(brush) => set({ brush })}
-      options={[
-        { value: 1, label: "1", title: "One square" },
-        { value: 2, label: "2", title: "Two squares" },
-        { value: 3, label: "3", title: "Three squares" },
-      ]}
-    />
-  );
+  const corners = s.mode === "poly" && s.poly.length > 0;
+  const stamped = s.mode === "stamp" && stamps.selected;
+  // A task's controls lead, and the builder's standing settings drop by 3 (9, "The task rule").
+  const drop = corners || stamped ? 3 : 0;
+  const terrain = (priority: number): Slot => ({
+    id: "terrain",
+    priority: priority + drop,
+    compact: true,
+    control: (
+      <ValueChip label="Terrain" kind="choice" value={s.terrain} options={TERRAINS.map((t) => ({ key: t.value, words: t.label, swatch: TERRAIN_SWATCHES[t.value] }))}>
+        <PickCloses>
+          <ChoiceTiles<TerrainId> label="Terrain" value={s.terrain} options={TERRAINS.map((t) => ({ value: t.value, label: t.label, glyph: <TerrainSwatch terrain={t.value} /> }))} onChange={(terrain) => set({ terrain })} />
+        </PickCloses>
+      </ValueChip>
+    ),
+  });
+  const brush = (priority: number): Slot => ({
+    id: "brush",
+    priority,
+    compact: true,
+    control: (
+      <OptSegmented<BrushSize>
+        label="Brush size"
+        value={s.brush}
+        onChange={(brush) => set({ brush })}
+        options={[
+          { value: 1, label: "1", title: "One square" },
+          { value: 2, label: "2", title: "Two squares" },
+          { value: 3, label: "3", title: "Three squares" },
+        ]}
+      />
+    ),
+  });
+  const modeName = MODES.find((m) => m.value === s.mode)?.label ?? s.mode;
 
-  return (
-    <OptionsColumn>
-      {stampCompact && !s.note ? null : <InfoLine tone={s.note ? "warning" : "muted"}>{s.note ?? hint(s.mode, s.edge, s.secretFound, hasLights, heightHint)}</InfoLine>}
-      <OptionsRow label="Map builder">
-        <OptSelect<BuildMode> label="Builder mode" value={s.mode} options={MODES} onChange={(mode) => set({ mode, poly: [], rect: null, run: [], note: null })} />
-        <OptButton label="Undo your last change" onClick={() => actions.undo()}>
-          Undo
-        </OptButton>
-        <OptButton label="Redo" onClick={() => actions.redo()}>
-          Redo
-        </OptButton>
-        {s.mode === "paint" ? (
-          <>
-            {terrainPicker}
-            {brushPicker}
-          </>
-        ) : null}
-        {s.mode === "erase" ? brushPicker : null}
-        {s.mode === "rect" ? terrainPicker : null}
-        {s.mode === "poly" ? (
-          <>
-            {terrainPicker}
-            <OptButton tone="primary" disabled={s.poly.length < 3} onClick={() => closePolygon({ scene, actions, scope })}>
-              Close room
-            </OptButton>
-            <OptButton disabled={s.poly.length === 0} onClick={() => set({ poly: s.poly.slice(0, -1) })}>
-              Undo corner
-            </OptButton>
-            {s.poly.length > 0 ? <OptButton onClick={() => set({ poly: [] })}>Cancel</OptButton> : null}
-          </>
-        ) : null}
-        {s.mode === "edge" ? <OptSelect<EdgeKind> label="Edge" value={s.edge} options={EDGES} onChange={(edge) => set({ edge, note: null })} /> : null}
-        {s.mode === "edge" && s.edge === "secret" ? (
-          <Segmented<"hidden" | "found">
+  const slots: (Slot | false)[] = [
+    {
+      id: "mode",
+      priority: 1 + drop,
+      control: (
+        <ValueChip label="Builder mode" kind="choice" value={s.mode} valueName={modeName} options={MODES.map((m) => ({ key: m.value, words: m.short }))}>
+          <PickCloses>
+            <ChoiceTiles<BuildMode> label="Builder mode" value={s.mode} options={MODES.map((m) => ({ value: m.value, label: m.label }))} onChange={(mode) => set({ mode, poly: [], rect: null, run: [], note: null })} />
+          </PickCloses>
+        </ValueChip>
+      ),
+    },
+    { id: "undo", priority: 2 + drop, control: <OptButton icon="undo" label="Undo your last change" rowWords="Undo" onClick={() => actions.undo()} /> },
+    { id: "redo", priority: 4 + drop, control: <OptButton icon="redo" label="Redo" rowWords="Redo" onClick={() => actions.redo()} /> },
+  ];
+  if (s.mode === "paint") slots.push(terrain(1), brush(3));
+  if (s.mode === "rect") slots.push(terrain(1));
+  if (s.mode === "erase") slots.push(brush(2));
+  if (s.mode === "poly") {
+    slots.push(
+      terrain(1),
+      {
+        id: "closeRoom",
+        // The room's own control while it has corners. Before the first corner it does nothing yet, so it waits behind the mode and the terrain.
+        priority: corners ? 1 : 2,
+        control: (
+          <OptButton tone="primary" disabled={s.poly.length < 3} ends onClick={() => closePolygon({ scene, actions, scope })}>
+            Close room
+          </OptButton>
+        ),
+      },
+      {
+        id: "undoCorner",
+        priority: 2,
+        control: (
+          <OptButton disabled={s.poly.length === 0} onClick={() => set({ poly: s.poly.slice(0, -1) })}>
+            Undo corner
+          </OptButton>
+        ),
+      },
+      corners && {
+        id: "roomCancel",
+        priority: 2,
+        control: (
+          <OptButton ends onClick={() => set({ poly: [] })}>
+            Cancel
+          </OptButton>
+        ),
+      },
+    );
+  }
+  if (s.mode === "edge") {
+    slots.push(
+      {
+        id: "edge",
+        priority: 1,
+        control: (
+          <ValueChip label="Edge" kind="choice" value={s.edge} options={EDGES.map((e) => ({ key: e.value, words: e.label }))}>
+            <PickCloses>
+              <ChoiceRows<EdgeKind> label="Edge" value={s.edge} options={EDGES} onChange={(edge) => set({ edge, note: null })} />
+            </PickCloses>
+          </ValueChip>
+        ),
+      },
+      s.edge === "secret" && {
+        id: "secret",
+        priority: 2,
+        compact: true,
+        control: (
+          <OptSegmented<"hidden" | "found">
             label="Secret door"
             value={s.secretFound ? "found" : "hidden"}
             onChange={(v) => set({ secretFound: v === "found", note: null })}
@@ -151,30 +226,49 @@ export default function BuilderOptions() {
               { value: "found", label: "Found", title: "Players see a door" },
             ]}
           />
-        ) : null}
-        {s.mode === "label" ? (
-          <>
-            <OptInput label="Label text" placeholder="Label text" maxLength={80} width={160} value={s.labelText} onChange={(labelText) => set({ labelText })} />
-            <Segmented<number>
-              label="Label size"
-              value={s.labelSize}
-              options={LABEL_SIZES.map((o) => ({ value: o.value, label: o.label, title: `Size ${o.label}` }))}
-              onChange={(labelSize) => set({ labelSize })}
-            />
-          </>
-        ) : null}
-        {s.mode === "stamp" ? <StampOptions /> : null}
-        {s.mode === "height" ? <HeightOptions /> : null}
-        {s.mode === "light" ? <LightOptions /> : null}
-        {stampCompact ? null : (
-          <ConfirmButton
-            label="Clear build"
-            confirm="Tap again to clear"
-            title="Remove every floor, wall, door, height, stair, label, light and stamp on this scene"
-            onConfirm={() => actions.dispatch({ t: "build.clear", sceneId })}
+        ),
+      },
+    );
+  }
+  if (s.mode === "height") slots.push(...heightSlots);
+  if (s.mode === "label") {
+    slots.push(
+      { id: "labelText", priority: 1, flex: theme.layout.options.field, control: <OptInput label="Label text" placeholder="Label text" maxLength={80} width={160} value={s.labelText} onChange={(labelText) => set({ labelText })} /> },
+      {
+        id: "labelSize",
+        priority: 2,
+        compact: true,
+        control: (
+          <OptSegmented<number>
+            label="Label size"
+            value={s.labelSize}
+            options={LABEL_SIZES.map((o) => ({ value: o.value, label: o.label, title: `Size ${o.label}` }))}
+            onChange={(labelSize) => set({ labelSize })}
           />
-        )}
-      </OptionsRow>
-    </OptionsColumn>
+        ),
+      },
+    );
+  }
+  if (s.mode === "light") slots.push({ id: "light", priority: 1, control: <LightChip /> });
+  if (s.mode === "stamp") slots.push(...stamps.slots);
+  slots.push({
+    id: "clearBuild",
+    priority: 9,
+    always: true,
+    control: (
+      <ConfirmButton
+        label="Clear build"
+        confirm="Tap again to clear"
+        title="Remove every floor, wall, door, height, stair, label, light and stamp on this scene"
+        onConfirm={() => actions.dispatch({ t: "build.clear", sceneId })}
+      />
+    ),
+  });
+
+  return (
+    <div ref={row} style={{ display: "contents" }}>
+      <OptionsStrip tool="Map builder" task={corners || stamped} line={{ tone: s.note ? "warning" : "hint", content: s.note ?? hint(s.mode, s.edge, s.secretFound, hasLights, heightHint) }} slots={slots} />
+      {s.mode === "stamp" ? stamps.picker : null}
+    </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { TerrainId } from "#shared/model.ts";
 import type { TexturedTerrain } from "./geometry.ts";
 
 /**
@@ -34,6 +35,14 @@ export const TERRAIN_COLORS: Record<TexturedTerrain, string> = {
   difficult: "#5a6a34",
   rubble: "#76726b",
 };
+
+/**
+ * A terrain's swatch in the builder's terrain chip and tiles
+ * (docs/design-v1-tool-options.md 9.9): the texture's plain color, and for
+ * the marks drawn over a floor the mark's own: a pit's dark, a pillar's
+ * stone, a stair's slab.
+ */
+export const TERRAIN_SWATCHES: Record<TerrainId, string> = { ...TERRAIN_COLORS, pit: "#0b0b0e", pillar: "#8f897e", stairs: "#bdb4a6" };
 
 /** One texture tile spans this many cells, so planks and stones read at a sensible size. */
 export const TEXTURE_CELLS = 2;
