@@ -155,7 +155,7 @@ There is no page for device settings today. The map variant switch (`rvtt.mapVar
 - UI scale (section 3.16).
 - Low power (section 3.15).
 - Map detail: "Phone size" or "Full size", writing `rvtt.mapVariant`, which finally gets the control design.md 11.2 promised.
-- Keyboard shortcuts, a link to the shortcut sheet (section 3.14).
+- Shortcuts, a link to the shortcut sheet (section 3.14).
 - Turn sound and ping sound, mirrored from where they live now, so one page has them all.
 
 Each setting follows the store pattern the sounds use (a module variable, a listener set and `useSyncExternalStore`).
@@ -656,7 +656,7 @@ An arrow press is a drop, so on a creature's turn each press adds a leg to its p
 
 **Tests.** The key table as pure functions, as `undoShortcut` is tested: fields, dialogs, the preview, modifiers, repeats and roles, with AZERTY and Cyrillic layouts for the letters and `?` and `+` typed with Shift for the symbols.
 
-**Mouse, touch and surfaces (2026-10-16).** At the project owner's request the sheet, now "Shortcuts" (Menu, This device: "Show the shortcuts"), also shows common pointer behaviors. Its sections: Keys (the table above, then Escape), Mouse where `(any-pointer: fine)` matches, Touch where `(any-pointer: coarse)` does (both on a laptop with a touch screen), then one section for each surface whose keys or gestures work only inside it, such as Side panel tabs, Handout viewer, Token action bar and Windows. Each row gives what you do, what it does and any condition beyond the role ("with the Select tool"), from `BEHAVIORS`, a second registry beside the keys that also holds each row's roles and device. FEATURES.md mirrors both registries, and a unit test fails when they drift. The sweep found that Ctrl and a click did not add to a selection on Windows and Linux. It now does, and Ctrl with a drag on empty map draws the box as Shift does. On a Mac Ctrl with a click is a right click, so Cmd stays the key there.
+**Keys and key combinations (2026-10-16).** At the project owner's request the sheet, now "Shortcuts" (Menu, This device: "Show the shortcuts"), lists keys and key-plus-pointer combinations only, never a plain click, tap, drag or pinch, which FEATURES.md describes with each feature. Its sections: Keys (the table above, then Escape), "Mouse with keys" where `(any-pointer: fine)` matches (Shift or Ctrl with a click or a drag, Cmd on a Mac, a right-click, a right or middle button drag, Space and a drag, Ctrl and the wheel), Android where Back is the phone's own button, then the keys that work inside one surface, such as Side panel tabs, Handout viewer, Initiative and Dialogs. Each row gives what you do, what it does and any condition beyond the role ("with the Select tool"), from `BEHAVIORS`, a second registry beside the keys that also holds each row's roles and device. The sections are headings, not landmarks. FEATURES.md mirrors both registries, and a unit test fails when they drift. The sweep found that Ctrl and a click did not add to a selection on Windows and Linux. It now does, and Ctrl with a drag on empty map draws the box as Shift does. On a Mac Ctrl with a click is a right click, so Cmd stays the key there.
 
 ### 3.15 Low-power mode
 

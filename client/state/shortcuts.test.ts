@@ -5,7 +5,6 @@ import type { ClientOp } from "#shared/protocol.ts";
 import { RoomScope } from "./scope.ts";
 import {
   BEHAVIORS,
-  behaviorEntries,
   deletedText,
   isTextField,
   sheetSections,
@@ -19,9 +18,10 @@ import {
   undoShortcut,
   whoText,
   ZOOM_STEP,
-  type BehaviorEntry,
+  MOUSE_SECTION,
+  type Behavior,
   type KeyPress,
-  type PointerKinds,
+  type SheetDevice,
   type ShortcutEnv,
 } from "./shortcuts.ts";
 import type { RoomUi } from "./store.ts";
@@ -283,24 +283,23 @@ describe("the shortcut table", () => {
   });
 });
 
-describe("the sheet's mouse, touch and surface rows", () => {
-  const DESKTOP: PointerKinds = { fine: true, coarse: false };
-  const PHONE: PointerKinds = { fine: false, coarse: true };
-  const TOUCH_LAPTOP: PointerKinds = { fine: true, coarse: true };
+describe("the sheet's rows beside the keys", () => {
+  const DESKTOP: SheetDevice = { mouse: true, android: false };
+  const IPHONE: SheetDevice = { mouse: false, android: false };
+  const ANDROID: SheetDevice = { mouse: false, android: true };
   const ROLES = ["dm", "player"] as const;
 
-  const titles = (role: "dm" | "player", kinds: PointerKinds) => sheetSections(role, kinds).map((s) => s.title);
-  const section = (role: "dm" | "player", kinds: PointerKinds, title: string) => sheetSections(role, kinds).find((s) => s.title === title);
-  const inputs = (role: "dm" | "player", kinds: PointerKinds, title: string) => section(role, kinds, title)?.rows.map((r) => r.input) ?? [];
+  const titles = (role: "dm" | "player", device: SheetDevice) => sheetSections(role, device).map((s) => s.title);
+  const section = (role: "dm" | "player", device: SheetDevice, title: string) => sheetSections(role, device).find((s) => s.title === title);
+  const inputs = (role: "dm" | "player", device: SheetDevice, title: string) => section(role, device, title)?.rows.map((r) => r.input) ?? [];
 
-  test("every behavior has a role, a device, words for what you do and what it does, and a known surface", () => {
+  test("every row has a role, a device, words for what you do and what it does, and a known surface", () => {
     const ids = new Set(SHORTCUTS.map((s) => s.id));
     for (const b of BEHAVIORS) {
       assert.ok(b.roles.length > 0 && b.roles.every((r) => r === "dm" || r === "player"), `${b.id} has a role`);
       assert.equal(new Set(b.roles).size, b.roles.length, `${b.id} names each role once`);
-      assert.ok(["mouse", "touch", "both", "keys"].includes(b.device), `${b.id} has a device`);
+      assert.ok(["keys", "mouse", "android"].includes(b.device), `${b.id} has a device`);
       assert.ok(b.input.trim() && b.does.trim(), `${b.id} has words`);
-      assert.ok(b.touchInput === undefined || b.device === "both", `${b.id}: only a behavior on both devices has touch words of its own`);
       assert.ok(b.surface === undefined || (SURFACES as readonly string[]).includes(b.surface), `${b.id} names a known surface`);
       assert.ok(b.when === undefined || /^[a-z]/.test(b.when), `${b.id}: a condition starts in lowercase, as it follows the role`);
       assert.ok(!ids.has(b.id), `${b.id} is used once across both tables`);
@@ -308,79 +307,82 @@ describe("the sheet's mouse, touch and surface rows", () => {
     }
   });
 
+  test("it holds keys and key-plus-pointer combinations only, never a plain click, tap, drag or pinch", () => {
+    for (const b of BEHAVIORS) {
+      if (b.surface !== undefined) assert.equal(b.device, "keys", `${b.id}: a surface lists only its keys`);
+      if (b.device !== "mouse") continue;
+      // A mouse row names a key, or a button other than the left one, or the trackpad's pinch, which arrives as Ctrl and the wheel.
+      assert.match(b.input, /^(Shift|Ctrl|Space|Right-click|Drag with the right or middle button)/, b.id);
+    }
+  });
+
   test("its words keep the house style: no em dash, no semicolon, no full stop at the end", () => {
     for (const b of BEHAVIORS) {
-      for (const text of [b.input, b.touchInput ?? "", b.does, b.when ?? ""]) {
+      for (const text of [b.input, b.does, b.when ?? ""]) {
         assert.ok(!/[\u2014;]/.test(text), `${b.id}: ${text}`);
         assert.ok(!text.endsWith("."), `${b.id}: ${text}`);
       }
     }
   });
 
-  test("a desktop shows Keys and Mouse, a phone Keys and Touch, and a laptop with a touch screen both", () => {
+  test("the mouse's rows show where there is a mouse or trackpad, and the Back button's on Android", () => {
     for (const role of ROLES) {
-      assert.deepEqual(titles(role, DESKTOP).slice(0, 2), ["Keys", "Mouse"], role);
-      assert.ok(!titles(role, DESKTOP).includes("Touch"), role);
-      assert.deepEqual(titles(role, PHONE).slice(0, 2), ["Keys", "Touch"], role);
-      assert.ok(!titles(role, PHONE).includes("Mouse"), role);
-      assert.deepEqual(titles(role, TOUCH_LAPTOP).slice(0, 3), ["Keys", "Mouse", "Touch"], role);
+      assert.deepEqual(titles(role, DESKTOP).slice(0, 2), ["Keys", MOUSE_SECTION], role);
+      assert.ok(!titles(role, DESKTOP).includes("Android"), role);
+      assert.ok(!titles(role, IPHONE).includes(MOUSE_SECTION), role);
+      assert.ok(!titles(role, IPHONE).includes("Android"), `${role}: an iPhone has no Back button of its own`);
+      assert.deepEqual(titles(role, ANDROID).slice(0, 2), ["Keys", "Android"], role);
+      assert.deepEqual(titles(role, { mouse: true, android: true }).slice(0, 3), ["Keys", MOUSE_SECTION, "Android"], role);
     }
-    assert.ok(inputs("dm", DESKTOP, "Mouse").includes("Shift or Ctrl+click a token (Cmd on a Mac)"));
-    assert.ok(inputs("dm", DESKTOP, "Mouse").includes("Click a token"));
-    assert.ok(!inputs("dm", DESKTOP, "Mouse").includes("Tap a token"), "a mouse clicks");
-    assert.ok(inputs("player", PHONE, "Touch").includes("Tap a token"));
-    assert.ok(inputs("player", PHONE, "Touch").includes("Pinch"));
-    assert.ok(!inputs("player", PHONE, "Touch").includes("Click a token"), "a finger taps");
+    assert.deepEqual(inputs("player", DESKTOP, MOUSE_SECTION), [
+      "Shift or Ctrl+click a token (Cmd on a Mac)",
+      "Shift or Ctrl+drag on empty map (Cmd on a Mac)",
+      "Right-click a token",
+      "Drag with the right or middle button",
+      "Space+drag",
+      "Ctrl+wheel, or a pinch on a trackpad",
+    ]);
+    assert.deepEqual(inputs("player", ANDROID, "Android"), ["Back button"]);
   });
 
-  test("the sections come in order, Keys, Mouse, Touch, then each surface, and an empty one is left out", () => {
-    const order = ["Keys", "Mouse", "Touch", ...SURFACES];
+  test("the sections come in order, Keys, the mouse, Android, then each surface, and an empty one is left out", () => {
+    const order = ["Keys", MOUSE_SECTION, "Android", ...SURFACES];
     for (const role of ROLES) {
-      for (const kinds of [DESKTOP, PHONE, TOUCH_LAPTOP]) {
-        const got = titles(role, kinds);
-        assert.deepEqual(got, [...got].sort((a, b) => order.indexOf(a) - order.indexOf(b)), `${role} ${JSON.stringify(kinds)}`);
-        for (const s of sheetSections(role, kinds)) assert.ok(s.rows.length > 0, s.title);
+      for (const device of [DESKTOP, IPHONE, ANDROID]) {
+        const got = titles(role, device);
+        assert.deepEqual(got, [...got].sort((a, b) => order.indexOf(a) - order.indexOf(b)), `${role} ${JSON.stringify(device)}`);
+        for (const s of sheetSections(role, device)) assert.ok(s.rows.length > 0, s.title);
       }
     }
-    assert.ok(titles("dm", DESKTOP).includes("Label, pin and light panes"));
-    assert.ok(!titles("player", DESKTOP).includes("Label, pin and light panes"), "the panes are the DM's");
-    assert.ok(!titles("player", PHONE).includes("Toolbar"), "the toolbar's one row is the wheel's");
+    assert.ok(titles("dm", IPHONE).includes("Label, pin and light panes"));
+    assert.ok(!titles("player", IPHONE).includes("Label, pin and light panes"), "the panes are the DM's");
   });
 
-  test("Keys holds the key table and then Escape, written as keys", () => {
-    const keys = section("player", PHONE, "Keys")!;
+  test("Keys holds the key table and then Escape, written as keys, and a surface's keys show on every device", () => {
+    const keys = section("player", IPHONE, "Keys")!;
     assert.deepEqual(
       keys.rows.map((r) => r.id),
       [...shortcutsFor("player").map((s) => s.id), "escape"],
     );
     assert.ok(keys.rows.every((r) => r.keys));
     assert.ok(keys.intro?.startsWith("On any device with a keyboard."));
+    for (const device of [DESKTOP, IPHONE, ANDROID]) {
+      assert.deepEqual(inputs("player", device, "Handout viewer"), ["+, -", "0", "Arrow keys"]);
+      assert.deepEqual(inputs("player", device, "Side panel tabs"), ["Left, Right", "Home, End"]);
+    }
+    assert.ok(section("dm", DESKTOP, MOUSE_SECTION)!.rows.every((r) => !r.keys), "a mouse row is a phrase, not a key");
   });
 
   test("each role sees its own rows", () => {
-    const dm = inputs("dm", DESKTOP, "Mouse");
-    const player = inputs("player", DESKTOP, "Mouse");
-    for (const input of ["Click a map label", "Drag a corner of the box", "Drag a selected stamp's handle", "Click a builder room"]) {
-      assert.ok(dm.includes(input), input);
-      assert.ok(!player.includes(input), input);
-    }
-    for (const input of ["Double-click the map", "Drag a token", "Space+drag", "Right-click a token"]) assert.ok(player.includes(input), input);
-    assert.deepEqual(inputs("dm", PHONE, "Initiative"), ["Drag a row's grip", "Enter", "Escape", "Enter"]);
-    assert.deepEqual(inputs("player", PHONE, "Initiative"), ["Enter", "Escape"], "only the DM reorders ties");
-    const look = section("player", PHONE, "Touch")!.rows.find((r) => r.when === "with the Ping tool and Look here on");
-    assert.equal(look, undefined, "Look here is the DM's");
-  });
-
-  test("a surface shows its keys everywhere and its gestures on the devices that make them", () => {
-    assert.deepEqual(inputs("player", DESKTOP, "Handout viewer"), ["+, -", "0", "Arrow keys", "Wheel", "Double-click", "Drag"]);
-    assert.deepEqual(inputs("player", PHONE, "Handout viewer"), ["+, -", "0", "Arrow keys", "Pinch", "Double tap", "Drag"]);
-    assert.deepEqual(inputs("player", TOUCH_LAPTOP, "Handout viewer"), ["+, -", "0", "Arrow keys", "Wheel", "Pinch", "Double-click", "Double tap", "Drag"]);
-    assert.deepEqual(inputs("player", PHONE, "Side panel tabs"), ["Left, Right", "Home, End"]);
+    assert.deepEqual(inputs("dm", IPHONE, "Initiative"), ["Enter", "Escape", "Enter"]);
+    assert.deepEqual(inputs("player", IPHONE, "Initiative"), ["Enter", "Escape"], "only the DM types several values");
+    assert.deepEqual(inputs("player", IPHONE, "Dialogs"), ["Escape", "Tab, Shift+Tab"]);
+    assert.deepEqual(inputs("player", IPHONE, "Choose an image"), ["Ctrl+V (Cmd+V on a Mac)"]);
   });
 
   test("no section lists the same thing twice", () => {
     for (const role of ROLES) {
-      for (const s of sheetSections(role, TOUCH_LAPTOP)) {
+      for (const s of sheetSections(role, { mouse: true, android: true })) {
         const ids = s.rows.map((r) => r.id);
         assert.equal(new Set(ids).size, ids.length, `${role} ${s.title} ids`);
         const rows = s.rows.map((r) => `${r.input} | ${r.when ?? ""}`);
@@ -389,39 +391,25 @@ describe("the sheet's mouse, touch and surface rows", () => {
     }
   });
 
-  test("a behavior on both devices with touch words of its own is the mouse's words and the touch screen's", () => {
-    const tap = BEHAVIORS.find((b) => b.id === "rulerKeep")!;
-    assert.deepEqual(
-      behaviorEntries(tap).map((e) => [e.id, e.device, e.input]),
-      [
-        ["rulerKeep:mouse", "mouse", "Double-click the map"],
-        ["rulerKeep:touch", "touch", "Double tap the map"],
-      ],
-    );
-    const drag = BEHAVIORS.find((b) => b.id === "pan")!;
-    assert.deepEqual(behaviorEntries(drag).map((e) => e.device), ["both"]);
-  });
-
   test("FEATURES.md's Shortcuts tables match the registries word for word", () => {
     const tables = shortcutTables(readFileSync(new URL("../../FEATURES.md", import.meta.url), "utf8"));
-    const entries = BEHAVIORS.flatMap(behaviorEntries);
-    const row = (e: BehaviorEntry) => [e.input, e.does, whoText(e)];
-    const room = entries.filter((e) => e.surface === undefined);
+    const row = (b: Behavior) => [b.input, b.does, whoText(b)];
+    const room = BEHAVIORS.filter((b) => b.surface === undefined);
 
     // The keys table words its rows as it always has, so every key in it is the registry's, and every registry key is in it.
     const split = (keys: string) => keys.split(", ");
     const tableKeys = (tables.get("Keys") ?? []).flatMap((r) => split(r[0] ?? ""));
-    const registryKeys = [...SHORTCUTS.map((s) => s.keys), ...room.filter((e) => e.device === "keys").map((e) => e.input)].flatMap(split);
+    const registryKeys = [...SHORTCUTS.map((s) => s.keys), ...room.filter((b) => b.device === "keys").map((b) => b.input)].flatMap(split);
     assert.deepEqual([...tableKeys].sort(), [...registryKeys].sort(), "the Keys table");
     const escape = (tables.get("Keys") ?? []).find((r) => r[0] === "Escape");
-    assert.deepEqual(escape, row(room.find((e) => e.id === "escape")!));
+    assert.deepEqual(escape, row(room.find((b) => b.id === "escape")!));
 
-    assert.deepEqual(tables.get("Mouse"), room.filter((e) => e.device === "mouse" || e.device === "both").map(row), "the Mouse table");
-    assert.deepEqual(tables.get("Touch"), room.filter((e) => e.device === "touch" || e.device === "both").map(row), "the Touch table");
+    assert.deepEqual(tables.get(MOUSE_SECTION), room.filter((b) => b.device === "mouse").map(row), "the mouse table");
+    assert.deepEqual(tables.get("Android"), room.filter((b) => b.device === "android").map(row), "the Android table");
     for (const surface of SURFACES) {
-      assert.deepEqual(tables.get(surface), entries.filter((e) => e.surface === surface).map(row), `the ${surface} table`);
+      assert.deepEqual(tables.get(surface), BEHAVIORS.filter((b) => b.surface === surface).map(row), `the ${surface} table`);
     }
-    assert.deepEqual([...tables.keys()], ["Keys", "Mouse", "Touch", ...SURFACES], "one table under each heading, in the sheet's order");
+    assert.deepEqual([...tables.keys()], ["Keys", MOUSE_SECTION, "Android", ...SURFACES], "one table under each heading, in the sheet's order");
   });
 });
 

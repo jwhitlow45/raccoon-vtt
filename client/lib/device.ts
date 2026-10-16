@@ -59,10 +59,16 @@ export function isAppleDevice(): boolean {
   return typeof navigator !== "undefined" && appleKeys({ platform: navigator.platform, userAgent: navigator.userAgent });
 }
 
-/** Which kinds of pointer this device has: a mouse or trackpad (`fine`), a touch screen (`coarse`), or both. */
-export function pointerKinds(): { fine: boolean; coarse: boolean } {
-  if (typeof matchMedia !== "function") return { fine: true, coarse: false };
-  return { fine: matchMedia("(any-pointer: fine)").matches, coarse: matchMedia("(any-pointer: coarse)").matches };
+/**
+ * What the shortcut sheet shows for this device: the mouse's rows where
+ * there is a mouse or trackpad, even beside a touch screen, and the Back
+ * button's row on Android, where Back is a button of the phone itself.
+ */
+export function sheetDevice(): { mouse: boolean; android: boolean } {
+  return {
+    mouse: typeof matchMedia !== "function" || matchMedia("(any-pointer: fine)").matches,
+    android: typeof navigator !== "undefined" && /Android/.test(navigator.userAgent),
+  };
 }
 
 const NAME_KEY = "rvtt.name";

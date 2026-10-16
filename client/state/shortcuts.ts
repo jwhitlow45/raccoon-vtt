@@ -402,48 +402,47 @@ export function shortcutsFor(role: "dm" | "player"): Shortcut[] {
 // ------------------------------------------------------------ the rest of the sheet
 
 /*
- * Every change to a key or a pointer behavior in the room updates
- * SHORTCUTS or BEHAVIORS here, and FEATURES.md's Shortcuts tables, in the
- * same change (the project owner's standing rule, 2026-10-16). A key or
- * gesture that works only inside one surface, such as a window or the
- * handout viewer, goes in that surface's section. shortcuts.test.ts fails
- * when FEATURES.md and these tables disagree.
+ * The sheet holds keys, and keys or a mouse button other than the left
+ * one with a click, a drag or the wheel (the project owner, 2026-10-16). A
+ * plain click, tap, drag or pinch is described with its feature in
+ * FEATURES.md instead. Every change to a key or a key-plus-pointer
+ * combination updates SHORTCUTS or BEHAVIORS here, and FEATURES.md's
+ * Shortcuts tables, in the same change. A key that works only inside one
+ * surface, such as a dialog or the handout viewer, goes in that surface's
+ * section. shortcuts.test.ts fails when FEATURES.md and these tables
+ * disagree.
  */
 
 /**
- * Where a behavior works: with a mouse or trackpad, on a touch screen, with
- * either, or (`keys`) a key SHORTCUTS does not hold, such as Escape or a
- * key that works inside one surface.
+ * Where a row applies: keys on a keyboard that SHORTCUTS does not hold
+ * (Escape, or the keys inside one surface), a key or a button with the
+ * mouse, or Android's Back button.
  */
-export type BehaviorDevice = "mouse" | "touch" | "both" | "keys";
+export type BehaviorDevice = "keys" | "mouse" | "android";
 
-/** The surfaces whose own keys and gestures get a section of the sheet, in the sheet's order. */
+/** The surfaces whose own keys get a section of the sheet, in the sheet's order. */
 export const SURFACES = [
   "Side panel tabs",
   "Handout viewer",
   "Token action bar",
   "Initiative",
+  "Token and character fields",
   "Label, pin and light panes",
-  "Windows",
+  "Dialogs",
   "Choose an image",
-  "Crop the image",
-  "Toolbar",
 ] as const;
 
 export type Surface = (typeof SURFACES)[number];
 
 /**
- * One behavior the sheet lists beside the keys: a click, a drag, a pinch,
- * or a key that only works inside one surface. Only the words live here.
- * The behavior itself lives in the code each row cites, which is what to
- * read again when either changes.
+ * One row the sheet lists beside SHORTCUTS. Only the words live here. The
+ * behavior itself lives in the code each row cites, which is what to read
+ * again when either changes.
  */
 export type Behavior = {
   id: string;
   /** What you do, as the sheet and FEATURES.md write it: "Shift or Ctrl+click a token (Cmd on a Mac)". */
   input: string;
-  /** For a behavior on both devices, the words on a touch screen where they differ: "Tap a token" for "Click a token". */
-  touchInput?: string;
   /** What it does. */
   does: string;
   roles: readonly ("dm" | "player")[];
@@ -457,42 +456,26 @@ export type Behavior = {
 const EVERYONE = ["dm", "player"] as const;
 const DM = ["dm"] as const;
 
-/** Every behavior beside the keys, in the order the sheet lists them. */
+/** Every row beside the keys, in the order the sheet lists them. */
 export const BEHAVIORS: readonly Behavior[] = [
-  // The whole room: lib/escape.ts, pages/RoomChrome.tsx useEscape, lib/backClose.ts.
+  // The whole room: lib/escape.ts, pages/RoomChrome.tsx useEscape, state/selection.ts dismissal and barDismiss.
   {
     id: "escape",
     input: "Escape",
-    does: "Close a sheet or the token's action bar. With neither open, let go of the selection and end Select several",
+    does: "Close a sheet, else the token's action bar, else let go of the selection and end Select several. While the token's panel shows the selection, the bar closes and keeps it, and a group stays until Done",
     roles: EVERYONE,
     device: "keys",
   },
-  { id: "back", input: "Android's Back button", does: "Close what opened last, such as a sheet, a window, a handout or the action bar", roles: EVERYONE, device: "touch" },
+  // lib/backClose.ts. Only Android has the button.
+  { id: "back", input: "Back button", does: "Close what opened last, such as a sheet, a dialog, a handout or the action bar", roles: EVERYONE, device: "android" },
 
-  // The Select tool: canvas/Stage.tsx, canvas/TokenNode.tsx, state/selection.ts.
-  {
-    id: "select",
-    input: "Click a token",
-    touchInput: "Tap a token",
-    does: "Select it and open its action bar",
-    roles: EVERYONE,
-    when: "with the Select tool and Select several off",
-    device: "both",
-  },
+  // The map with a key or another button: canvas/Stage.tsx, canvas/TokenNode.tsx, state/selection.ts addsToSelection.
   {
     id: "selectAdd",
     input: "Shift or Ctrl+click a token (Cmd on a Mac)",
     does: "Add it to the selection, or take it out",
     roles: EVERYONE,
     when: "with the Select tool",
-    device: "mouse",
-  },
-  {
-    id: "selectMenu",
-    input: "Right-click a token",
-    does: "Select it alone and open its action bar",
-    roles: EVERYONE,
-    when: "with the Select tool and Select several off",
     device: "mouse",
   },
   {
@@ -503,271 +486,31 @@ export const BEHAVIORS: readonly Behavior[] = [
     when: "with the Select tool",
     device: "mouse",
   },
-  { id: "multiTap", input: "Click a token", touchInput: "Tap a token", does: "Add it to the group, or take it out", roles: EVERYONE, when: "with Select several on", device: "both" },
-  { id: "multiBox", input: "Drag on empty map", does: "Draw a box that adds the tokens in it to the group", roles: EVERYONE, when: "with Select several on", device: "both" },
+  // Stage.tsx interaction.menu, which no tool takes over.
   {
-    id: "multiAway",
-    input: "Click empty map",
-    touchInput: "Tap empty map",
-    does: "Hide the group's action bar and keep the group",
+    id: "selectMenu",
+    input: "Right-click a token",
+    does: "Select it alone, whatever the tool. With the Select tool its action bar opens too",
     roles: EVERYONE,
-    when: "with Select several on",
-    device: "both",
+    when: "with Select several off",
+    device: "mouse",
   },
+  { id: "buttonPan", input: "Drag with the right or middle button", does: "Move the map", roles: EVERYONE, when: "with any tool", device: "mouse" },
+  // pages/mapFocus.ts spaceMovesMap.
+  { id: "spacePan", input: "Space+drag", does: "Move the map", roles: EVERYONE, when: "with any tool, while nothing has focus or the map does", device: "mouse" },
+  // lib/camera.ts wheelZoomFactor: a trackpad's pinch arrives as the wheel with Ctrl.
   {
-    id: "dragToken",
-    input: "Drag a token",
-    does: "Move it, and the rest of the selection with it when it is selected",
-    roles: EVERYONE,
-    when: "with the Select tool, on tokens you may move",
-    device: "both",
-  },
-  { id: "pan", input: "Drag on empty map", does: "Move the map", roles: EVERYONE, when: "with the Select tool and Select several off", device: "both" },
-  {
-    id: "letGo",
-    input: "Click empty map",
-    touchInput: "Tap empty map",
-    does: "Let go of the selection",
-    roles: EVERYONE,
-    when: "with the Select tool and Select several off",
-    device: "both",
-  },
-  // features/pings/PingLayer.tsx useHoldToPing.
-  { id: "holdPing", input: "Press and hold on the map", does: "Ping that spot", roles: EVERYONE, when: "with the Select tool, off any token", device: "both" },
-  // features/doors/tap.ts, features/builder/heights/tap.ts, features/pins/PinLayer.tsx, features/builder/labelEdit.ts.
-  {
-    id: "door",
-    input: "Click a door",
-    touchInput: "Tap a door",
-    does: "Show its buttons, such as Open or Close",
-    roles: EVERYONE,
-    when: "with the Select tool and Select several off",
-    device: "both",
-  },
-  {
-    id: "ground",
-    input: "Click raised or lowered ground",
-    touchInput: "Tap raised or lowered ground",
-    does: "Show its height",
-    roles: EVERYONE,
-    when: "with the Select tool and Select several off",
-    device: "both",
-  },
-  { id: "pinPage", input: "Click a pin", touchInput: "Tap a pin", does: "Open its journal page, or show its label", roles: EVERYONE, when: "with the Select tool", device: "both" },
-  {
-    id: "mapLabel",
-    input: "Click a map label",
-    touchInput: "Tap a map label",
-    does: "Open it to change its text and size, or delete it",
-    roles: DM,
-    when: "with the Select tool and Select several off, or the Builder's Label",
-    device: "both",
-  },
-  { id: "hover", input: "Point at a token", does: "Show its whole name", roles: EVERYONE, device: "mouse" },
-
-  // The camera, whatever the tool: canvas/Stage.tsx, lib/camera.ts wheelZoomFactor.
-  {
-    id: "wheel",
-    input: "Wheel, or two fingers on a trackpad",
-    does: "Zoom in or out at the pointer. Ctrl+wheel zooms faster",
+    id: "ctrlWheel",
+    input: "Ctrl+wheel, or a pinch on a trackpad",
+    does: "Zoom in or out at the pointer, faster than the wheel alone",
     roles: EVERYONE,
     when: "with any tool",
     device: "mouse",
   },
-  { id: "buttonPan", input: "Drag with the right or middle button", does: "Move the map", roles: EVERYONE, when: "with any tool", device: "mouse" },
-  { id: "spacePan", input: "Space+drag", does: "Move the map", roles: EVERYONE, when: "with any tool, while no field or button has focus", device: "mouse" },
-  { id: "twoFingers", input: "Drag with two fingers", does: "Move the map", roles: EVERYONE, when: "with any tool", device: "touch" },
-  { id: "pinch", input: "Pinch", does: "Zoom in or out", roles: EVERYONE, when: "with any tool", device: "touch" },
 
-  // The Ruler: features/measure/RulerTool.tsx, ruler.ts.
-  { id: "rulerDrag", input: "Drag on the map", does: "Measure. A drag from the ruler's end adds a leg", roles: EVERYONE, when: "with the Ruler", device: "both" },
-  { id: "rulerTap", input: "Click the map", touchInput: "Tap the map", does: "Add a waypoint", roles: EVERYONE, when: "with the Ruler", device: "both" },
-  {
-    id: "rulerKeep",
-    input: "Double-click the map",
-    touchInput: "Double tap the map",
-    does: "Keep the ruler on the map",
-    roles: EVERYONE,
-    when: "with the Ruler",
-    device: "both",
-  },
-
-  // The Area tool: features/areas/AreaTool.tsx.
-  {
-    id: "areaToken",
-    input: "Click a token",
-    touchInput: "Tap a token",
-    does: "Cast the area from it, or center a sphere or cylinder on it",
-    roles: EVERYONE,
-    when: "with the Area tool",
-    device: "both",
-  },
-  {
-    id: "areaAim",
-    input: "Drag on the map",
-    does: "Aim a cone, line or cube, or move the area's point. Place saves it",
-    roles: EVERYONE,
-    when: "with the Area tool",
-    device: "both",
-  },
-  {
-    id: "areaPick",
-    input: "Click a placed area",
-    touchInput: "Tap a placed area",
-    does: "Pick it to change it, then drag to move or turn it",
-    roles: EVERYONE,
-    when: "with the Area tool, on areas you may change",
-    device: "both",
-  },
-
-  // The Fog tool: features/fog/tool.tsx.
-  { id: "fogDrag", input: "Drag on the map", does: "Clear or add fog with the Rectangle or the Brush", roles: DM, when: "with the Fog tool", device: "both" },
-  {
-    id: "fogPolygon",
-    input: "Click the map",
-    touchInput: "Tap the map",
-    does: "Add a corner. The first corner again closes the shape",
-    roles: DM,
-    when: "with the Fog tool's Polygon",
-    device: "both",
-  },
-  {
-    id: "fogRoom",
-    input: "Click a builder room",
-    touchInput: "Tap a builder room",
-    does: "Clear or add fog in the whole room",
-    roles: DM,
-    when: "with the Fog tool's Builder room",
-    device: "both",
-  },
-
-  // The Draw tool: features/drawings/DrawTool.tsx.
-  { id: "drawDrag", input: "Drag on the map", does: "Draw with the Pen, or a Line, Arrow, Box or Circle", roles: EVERYONE, when: "with the Draw tool", device: "both" },
-  {
-    id: "drawTap",
-    input: "Click the map",
-    touchInput: "Tap the map",
-    does: "Add a Shape's corner, or start a Text there. The first corner again closes the shape",
-    roles: EVERYONE,
-    when: "with the Draw tool",
-    device: "both",
-  },
-  { id: "drawErase", input: "Drag over drawings", does: "Erase them. A player erases only their own", roles: EVERYONE, when: "with the Draw tool's Eraser", device: "both" },
-
-  // The Ping tool: features/pings/PingTool.tsx.
-  { id: "pingTap", input: "Click the map", touchInput: "Tap the map", does: "Ping that spot", roles: EVERYONE, when: "with the Ping tool", device: "both" },
-  { id: "laser", input: "Drag on the map", does: "Draw a laser trail that fades", roles: EVERYONE, when: "with the Ping tool", device: "both" },
-  {
-    id: "lookHere",
-    input: "Click the map",
-    touchInput: "Tap the map",
-    does: "Ping it and move every player's view there",
-    roles: DM,
-    when: "with the Ping tool and Look here on",
-    device: "both",
-  },
-
-  // Add token: features/tokens/placeTool.tsx.
-  {
-    id: "place",
-    input: "Click the map",
-    touchInput: "Tap the map",
-    does: "Place the chosen token or monsters there, then go back to Select",
-    roles: DM,
-    when: "with Add token",
-    device: "both",
-  },
-
-  // The Pin tool: features/pins/PinTool.tsx.
-  { id: "pinPlace", input: "Click the map", touchInput: "Tap the map", does: "Place a pin and open its pane", roles: DM, when: "with the Pin tool", device: "both" },
-  { id: "pinOpen", input: "Click a pin", touchInput: "Tap a pin", does: "Open its pane", roles: DM, when: "with the Pin tool", device: "both" },
-  { id: "pinDrag", input: "Drag a pin", does: "Move it", roles: DM, when: "with the Pin tool", device: "both" },
-
-  // The Builder: features/builder/tool.tsx, heights/pointer.ts, stamps/pointer.ts, features/lights/pointer.ts.
-  {
-    id: "buildStroke",
-    input: "Drag on the map",
-    does: "Paint or erase as you go",
-    roles: DM,
-    when: "with the Builder's Brush, Erase, or Heights and stairs with a brush",
-    device: "both",
-  },
-  {
-    id: "buildRect",
-    input: "Drag on the map",
-    does: "Fill or clear a rectangle from corner to corner",
-    roles: DM,
-    when: "with the Builder's Rectangle room, Erase area, or Heights and stairs with Area",
-    device: "both",
-  },
-  {
-    id: "buildShape",
-    input: "Click the map",
-    touchInput: "Tap the map",
-    does: "Add a room's corner. The first corner again closes the room",
-    roles: DM,
-    when: "with the Builder's Shape room",
-    device: "both",
-  },
-  { id: "buildRun", input: "Drag along a grid line", does: "Draw a run of the chosen wall, door or window", roles: DM, when: "with the Builder's Walls and doors", device: "both" },
-  {
-    id: "buildEdge",
-    input: "Click a square's edge",
-    touchInput: "Tap a square's edge",
-    does: "Set it to the chosen kind, or clear it when it is that kind already. With Door chosen, a door steps through closed, open and locked",
-    roles: DM,
-    when: "with the Builder's Walls and doors",
-    device: "both",
-  },
-  {
-    id: "buildPlace",
-    input: "Click the map",
-    touchInput: "Tap the map",
-    does: "Place a label, a light or a stamp",
-    roles: DM,
-    when: "with the Builder's Label, Lights or Stamp",
-    device: "both",
-  },
-  {
-    id: "buildOpen",
-    input: "Click a label or a light",
-    touchInput: "Tap a label or a light",
-    does: "Open it to change or delete it",
-    roles: DM,
-    when: "with the Builder's Label or Lights",
-    device: "both",
-  },
-  { id: "buildStamp", input: "Click a stamp", touchInput: "Tap a stamp", does: "Select it, to turn, resize, tint or delete it", roles: DM, when: "with the Builder's Stamp", device: "both" },
-  { id: "buildMove", input: "Drag a label, a light or a stamp", does: "Move it", roles: DM, when: "with the Builder's Label, Lights or Stamp", device: "both" },
-  { id: "buildHandle", input: "Drag a selected stamp's handle", does: "Turn or resize it", roles: DM, when: "with the Builder's Stamp", device: "both" },
-  { id: "buildRepeat", input: "Press and hold − or +", does: "Step the height quickly", roles: DM, when: "with the Builder's Heights and stairs", device: "both" },
-
-  // Line up grid: features/grid/tool.tsx.
-  { id: "gridCorner", input: "Drag a corner of the box", does: "Resize the box", roles: DM, when: "with Line up grid", device: "both" },
-  { id: "gridMove", input: "Drag inside the box", does: "Move the box", roles: DM, when: "with Line up grid", device: "both" },
-  { id: "gridNew", input: "Drag elsewhere on the map", does: "Draw a new box", roles: DM, when: "with Line up grid", device: "both" },
-  {
-    id: "gridTap",
-    input: "Click outside the box",
-    touchInput: "Tap outside the box",
-    does: "Move the box there, keeping its size",
-    roles: DM,
-    when: "with Line up grid",
-    device: "both",
-  },
-
-  // The side panel's tabs: pages/Room.tsx, lib/a11y.ts tabKeyIndex, components/ScrollStrip.tsx.
+  // The side panel's tabs: pages/Room.tsx, lib/a11y.ts tabKeyIndex.
   { id: "tabsSide", input: "Left, Right", does: "Switch to the tab beside it, wrapping around at the ends", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
   { id: "tabsEnds", input: "Home, End", does: "Switch to the first or the last tab", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
-  {
-    id: "tabsWheel",
-    input: "Wheel over the tabs",
-    does: "Scroll them sideways",
-    roles: EVERYONE,
-    when: "on a short screen, where they make one row",
-    device: "mouse",
-    surface: "Side panel tabs",
-  },
 
   // The handout viewer: features/handouts/HandoutViewer.tsx, zoom.ts viewerKey.
   { id: "viewerZoom", input: "+, -", does: "Zoom in, zoom out", roles: EVERYONE, device: "keys", surface: "Handout viewer" },
@@ -781,33 +524,11 @@ export const BEHAVIORS: readonly Behavior[] = [
     device: "keys",
     surface: "Handout viewer",
   },
-  { id: "viewerWheel", input: "Wheel", does: "Zoom in or out at the pointer", roles: EVERYONE, device: "mouse", surface: "Handout viewer" },
-  { id: "viewerPinch", input: "Pinch", does: "Zoom in or out", roles: EVERYONE, device: "touch", surface: "Handout viewer" },
-  { id: "viewerDouble", input: "Double-click", touchInput: "Double tap", does: "Zoom in there, or back to fit", roles: EVERYONE, device: "both", surface: "Handout viewer" },
-  {
-    id: "viewerDrag",
-    input: "Drag",
-    does: "Move the zoomed picture",
-    roles: EVERYONE,
-    when: "while it is larger than the viewer",
-    device: "both",
-    surface: "Handout viewer",
-  },
 
-  // The token action bar: canvas/TokenActionBar.tsx, canvas/barDock.ts.
-  {
-    id: "barDrag",
-    input: "Drag its header",
-    does: "Move it to another corner of the map",
-    roles: EVERYONE,
-    when: "where it sits in a corner of the map",
-    device: "both",
-    surface: "Token action bar",
-  },
+  // The token action bar: canvas/TokenActionBar.tsx.
   { id: "barEscape", input: "Escape", does: "Put it back where it was", roles: EVERYONE, when: "while you drag its header", device: "keys", surface: "Token action bar" },
 
-  // The initiative tracker: panels/TrackerPanel.tsx, features/encounter/Row.tsx, ValueEntry.tsx.
-  { id: "initGrip", input: "Drag a row's grip", does: "Reorder creatures tied on initiative", roles: DM, when: "on tied rows", device: "both", surface: "Initiative" },
+  // The initiative tracker: features/encounter/Row.tsx, ValueEntry.tsx.
   { id: "initEnter", input: "Enter", does: "Save the initiative you typed", roles: EVERYONE, when: "in a row's initiative box", device: "keys", surface: "Initiative" },
   { id: "initEscape", input: "Escape", does: "Drop the initiative you typed", roles: EVERYONE, when: "in a row's initiative box", device: "keys", surface: "Initiative" },
   {
@@ -820,63 +541,40 @@ export const BEHAVIORS: readonly Behavior[] = [
     surface: "Initiative",
   },
 
+  // The token's and characters' one-line fields: features/tokens/ui.tsx TextField and NumberField.
+  { id: "fieldEnter", input: "Enter", does: "Save the field and leave it", roles: EVERYONE, when: "in a one-line field", device: "keys", surface: "Token and character fields" },
+  { id: "fieldEscape", input: "Escape", does: "Drop what you typed and leave the field", roles: EVERYONE, when: "in a one-line field", device: "keys", surface: "Token and character fields" },
+
   // The map panes: features/builder/LabelPane.tsx, features/pins/PinPane.tsx, features/lights/LightPane.tsx.
-  {
-    id: "paneEnter",
-    input: "Enter",
-    does: "Finish the text, as Done does, or save a light's name",
-    roles: DM,
-    device: "keys",
-    surface: "Label, pin and light panes",
-  },
+  { id: "paneEnter", input: "Enter", does: "Finish the text, as Done does, or save a light's name", roles: DM, device: "keys", surface: "Label, pin and light panes" },
   { id: "paneEscape", input: "Escape", does: "Close the pane", roles: DM, device: "keys", surface: "Label, pin and light panes" },
 
-  // Every window: components/Dialog.tsx, lib/modalDialog.ts, features/journal/JournalEditor.tsx.
-  { id: "windowEscape", input: "Escape", does: "Close it. A journal page with unsaved changes asks first", roles: EVERYONE, device: "keys", surface: "Windows" },
-  { id: "windowTab", input: "Tab, Shift+Tab", does: "Move through its controls without leaving it", roles: EVERYONE, device: "keys", surface: "Windows" },
-  { id: "windowOutside", input: "Click outside it", touchInput: "Tap outside it", does: "Close it, except a handout", roles: EVERYONE, device: "both", surface: "Windows" },
+  // Every dialog: components/Dialog.tsx, lib/modalDialog.ts, features/journal/JournalEditor.tsx, features/monsters/MonsterEditor.tsx.
+  { id: "dialogEscape", input: "Escape", does: "Close it. A journal page or a monster with unsaved changes asks first", roles: EVERYONE, device: "keys", surface: "Dialogs" },
+  { id: "dialogTab", input: "Tab, Shift+Tab", does: "Move through its controls without leaving it", roles: EVERYONE, device: "keys", surface: "Dialogs" },
 
-  // The image picker and the crop: features/images/ImagePicker.tsx, CropEditor.tsx.
+  // The image picker: features/images/ImagePicker.tsx.
   {
     id: "pickerPaste",
-    input: "Ctrl+V",
+    input: "Ctrl+V (Cmd+V on a Mac)",
     does: "Paste an image to upload it, or an https link to import it",
     roles: EVERYONE,
     when: "with focus outside a text field",
     device: "keys",
     surface: "Choose an image",
   },
-  { id: "cropDrag", input: "Drag the picture", does: "Move it in the frame", roles: EVERYONE, device: "both", surface: "Crop the image" },
-  { id: "cropWheel", input: "Wheel", does: "Zoom in or out", roles: EVERYONE, device: "mouse", surface: "Crop the image" },
-  { id: "cropPinch", input: "Pinch", does: "Zoom in or out", roles: EVERYONE, device: "touch", surface: "Crop the image" },
-
-  // The toolbar: components/ScrollStrip.tsx.
-  { id: "toolbarWheel", input: "Wheel over the toolbar", does: "Scroll it sideways", roles: EVERYONE, when: "where its tools do not all fit", device: "mouse", surface: "Toolbar" },
 ];
-
-/**
- * A behavior as each device words it. One on both devices whose words
- * differ there (`touchInput`) is two: the mouse's words, and the touch
- * screen's.
- */
-export type BehaviorEntry = Omit<Behavior, "touchInput">;
-
-export function behaviorEntries(b: Behavior): BehaviorEntry[] {
-  const { touchInput, ...entry } = b;
-  if (b.device !== "both" || touchInput === undefined) return [entry];
-  return [
-    { ...entry, id: `${b.id}:mouse`, device: "mouse" },
-    { ...entry, id: `${b.id}:touch`, device: "touch", input: touchInput },
-  ];
-}
 
 /** One row of the sheet, from either table. `keys` writes the input as keys on a keyboard. */
 export type SheetRow = { id: string; input: string; does: string; when?: string; keys: boolean };
 
 export type SheetSection = { title: string; intro?: string; rows: SheetRow[] };
 
-/** The pointers a device has: a mouse or trackpad (`fine`), a touch screen (`coarse`), or both. */
-export type PointerKinds = { fine: boolean; coarse: boolean };
+/** What the device has that decides which rows show: a mouse or trackpad, and Android's Back button. */
+export type SheetDevice = { mouse: boolean; android: boolean };
+
+/** The heading of the mouse rows' section. */
+export const MOUSE_SECTION = "Mouse with keys";
 
 /** The sheet's Keys intro, which FEATURES.md repeats. */
 export const KEYS_INTRO = "On any device with a keyboard. They do nothing while you type in a field or a window is open. On a Mac, Cmd works where Ctrl is written.";
@@ -887,40 +585,37 @@ const SURFACE_INTRO: Partial<Record<Surface, string>> = {
   "Handout viewer": "A handout the DM shows, or a picture opened from the Library.",
 };
 
-function sheetRow(e: BehaviorEntry): SheetRow {
-  return { id: e.id, input: e.input, does: e.does, ...(e.when ? { when: e.when } : {}), keys: e.device === "keys" };
+function sheetRow(b: Behavior): SheetRow {
+  return { id: b.id, input: b.input, does: b.does, ...(b.when ? { when: b.when } : {}), keys: b.device === "keys" };
 }
 
 /**
- * The sheet's sections for a role on a device, in order: Keys, Mouse,
- * Touch, then each surface. Mouse shows on a device with a mouse or
- * trackpad, Touch on one with a touch screen, and keys everywhere, as the
- * Keys section always has. A section with no row for the role and the
- * device is left out.
+ * The sheet's sections for a role on a device, in order: Keys, the mouse
+ * with keys where there is a mouse or trackpad, Android's Back button on
+ * Android, then each surface's keys. A section with no row for the role
+ * and the device is left out.
  */
-export function sheetSections(role: "dm" | "player", kinds: PointerKinds): SheetSection[] {
-  const entries = BEHAVIORS.filter((b) => b.roles.includes(role)).flatMap(behaviorEntries);
-  const mouse = (e: BehaviorEntry) => kinds.fine && (e.device === "mouse" || e.device === "both");
-  const touch = (e: BehaviorEntry) => kinds.coarse && (e.device === "touch" || e.device === "both");
-  const room = entries.filter((e) => e.surface === undefined);
+export function sheetSections(role: "dm" | "player", device: SheetDevice): SheetSection[] {
+  const mine = BEHAVIORS.filter((b) => b.roles.includes(role));
+  const room = mine.filter((b) => b.surface === undefined);
   const sections: SheetSection[] = [
     {
       title: "Keys",
       intro: KEYS_INTRO,
-      rows: [...shortcutsFor(role).map((s) => ({ id: s.id, input: s.keys, does: s.does, keys: true })), ...room.filter((e) => e.device === "keys").map(sheetRow)],
+      rows: [...shortcutsFor(role).map((s) => ({ id: s.id, input: s.keys, does: s.does, keys: true })), ...room.filter((b) => b.device === "keys").map(sheetRow)],
     },
-    { title: "Mouse", rows: room.filter(mouse).map(sheetRow) },
-    { title: "Touch", rows: room.filter(touch).map(sheetRow) },
+    { title: MOUSE_SECTION, rows: device.mouse ? room.filter((b) => b.device === "mouse").map(sheetRow) : [] },
+    { title: "Android", rows: device.android ? room.filter((b) => b.device === "android").map(sheetRow) : [] },
     ...SURFACES.map((surface) => ({
       title: surface,
       ...(SURFACE_INTRO[surface] ? { intro: SURFACE_INTRO[surface] } : {}),
-      rows: entries.filter((e) => e.surface === surface && (e.device === "keys" || mouse(e) || touch(e))).map(sheetRow),
+      rows: mine.filter((b) => b.surface === surface).map(sheetRow),
     })),
   ];
   return sections.filter((s) => s.rows.length > 0);
 }
 
-/** Who has a behavior, as FEATURES.md's tables write it: "everyone, with the Select tool". */
+/** Who has a row, as FEATURES.md's tables write it: "everyone, with the Select tool". */
 export function whoText(b: Pick<Behavior, "roles" | "when">): string {
   const who = b.roles.length === 2 ? "everyone" : b.roles[0] === "dm" ? "DM" : "players";
   return b.when ? `${who}, ${b.when}` : who;

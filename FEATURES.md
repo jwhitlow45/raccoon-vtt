@@ -43,7 +43,7 @@ This page lists what RaccoonVTT does today, grouped by area. "The DM" means anyo
 - A small dot shows the connection. A banner appears only after a few seconds offline.
 - On a short screen, a notice that lasts (Reconnecting, the Starting view bar, a part that did not load, "Viewing as") keeps to one line, its buttons in the same row and More to read the rest, so it never stands over the toolbar. Where even that leaves no room for a row of the tool's options, the options stand over it.
 - Other people's token drags move live, with their name over the token in their color.
-- One finger uses the current tool. Two fingers pan and pinch-zoom. Nothing needs a long press.
+- One finger uses the current tool, and with the Select tool a drag on empty map moves the map. Two fingers pan and pinch-zoom. With a mouse, the wheel zooms at the pointer, as two fingers on a trackpad do, and pointing at a token shows its whole name. Nothing needs a long press.
 - Tapping a token opens its action bar. On a screen 600 px or wider, or a phone on its side, it sits at the bottom right of the map instead of under the token. Drag it by its header, or press "Move bar" to send it to the next corner. This device remembers the spot, and "Reset bar position" puts it back. "Fit the map" keeps the map out from under it. On a phone held upright it spans the screen under the token. On a screen too short for either, it opens taller, over the Select several bar and if need be the toolbar. Close it to reach the toolbar again.
 - The action bar opens with a summary: AC, HP, speed and passive Perception for a creature whose stats you have, then the HP entry, then for the DM a monster's or NPC's six saving throws and its resistances, immunities and vulnerabilities from its stat block. On a phone held sideways, or a screen too short for the whole bar, such as a phone held upright at a larger interface size, the bar keeps AC, HP and the HP entry at the top, and "More stats" holds the rest. A phone held upright keeps one layout whichever token you tap, with Apply in view. "Stat block" opens the whole block in the token's panel, with the action bar still open beside it on a wide screen or a phone on its side, except where the panel fills a very short screen. A player's own character offers "Open the sheet". "Details" sits beside them.
 - The action bar's buttons come in two rows. The first holds what play needs: Undo move, Doesn't count and the door when they apply, then Conditions, Request a roll, Hidden, Light and Select several. The second holds Locked, Duplicate, Delete (or Dismiss for a companion's player) and Move bar.
@@ -52,7 +52,7 @@ This page lists what RaccoonVTT does today, grouped by area. "The DM" means anyo
 - On a phone held upright, an open sheet folds the token's action bar and the fight's alerts into one row on the sheet's top edge: a button with the token's name, its Close, and one button that names the most pressing alert and how many more wait. The token's name closes the sheet and brings the bar back as it was, a half-typed HP entry included. The alert button closes the sheet and shows the alerts, or opens a roll waiting for your answer. Where the screen is too short for that row, its buttons sit in the sheet's header.
 - The fit button in the top bar ("Fit the map to the screen") brings the map back into view. A pinch anywhere but the map never zooms the page.
 - Android's Back button and the Escape key close an open sheet, handout or action bar before they leave the room. While the token's panel shows that token, they and the bar's Close put the bar away and keep the token in the panel. With the bar away, Escape lets go of the token.
-- On a phone, panels open as sheets from the bottom, and the toolbar names each tool under its icon, as it does on any touch screen. On a screen 900 px or wider, panels are tabs in a side panel. Hide panels at the end of its tabs, or the S key, hides it, and Panels in the toolbar brings it back. This device remembers the choice. A short screen, such as a large phone held sideways, starts with it hidden, and shows its tabs in one row that scrolls. On a phone held sideways, Hide in a panel's header tucks the panel away with its place kept, and Panels brings it back. Where the screen is too short for a panel beside the map, it opens over the whole screen, with the token's actions and the fight's alerts as buttons in its header, and the room's notices, "Your turn" and messages between the header and the panel.
+- On a phone, panels open as sheets from the bottom, and the toolbar names each tool under its icon, as it does on any touch screen. On a screen 900 px or wider, panels are tabs in a side panel. Hide panels at the end of its tabs, or the S key, hides it, and Panels in the toolbar brings it back. This device remembers the choice. A short screen, such as a large phone held sideways, starts with it hidden, and shows its tabs in one row that scrolls. The toolbar scrolls sideways the same way when its tools do not fit, and with a mouse the wheel scrolls either row. On a phone held sideways, Hide in a panel's header tucks the panel away with its place kept, and Panels brings it back. Where the screen is too short for a panel beside the map, it opens over the whole screen, with the token's actions and the fight's alerts as buttons in its header, and the room's notices, "Your turn" and messages between the header and the panel.
 - On a short screen held sideways, such as a phone, a tool whose options take more than one row opens them in a column on the left of the map that scrolls, so the map keeps its height. Select several, Ping, Pin and Add token keep their one-row bar at the bottom, unless the screen is too narrow for it to stay one row.
 - Panels are listed with the ones used in play first. A DM's phone list groups them under In play and Prepare.
 - A page inside a panel, such as a journal page, a monster's stat block, an area's damage page, the encounter editor or a Menu page like Members, puts its own name at the top, with a back button that says where it goes, such as "Back to Journal".
@@ -83,13 +83,13 @@ The Builder tool is the DM's. Its modes:
 
 - **Brush**, **Rectangle room** and **Shape room** paint floor, and rooms that touch merge into one floor. Floors come in stone, wood, grass, dirt and cave. Terrain comes in water, difficult ground, rubble, pits, pillars and stairs.
 - Walls go up around rooms on their own. The scene's "Automatic walls" setting picks around every painted cell, around floor only (for terrain painted over a map image), or off (for an imported map that brings its own walls).
-- **Walls and doors** draws a Wall, Door, Secret door or Window on a square's edge, marks an edge No wall, or removes it. Doors are open, closed, locked or secret. Players see a locked door as closed, and a hidden secret door as plain wall.
+- **Walls and doors** draws a Wall, Door, Secret door or Window on a square's edge, marks an edge No wall, or removes it. Doors are open, closed, locked or secret. Players see a locked door as closed, and a hidden secret door as plain wall. Drag along a grid line to draw a run. With Door chosen, a tap on a door steps it through closed, open and locked.
 - **Erase** and **Erase area** clear everything in the squares: floor, walls, doors, windows, labels, stamps, lights and heights.
 - **Heights and stairs** paints ground from 20 ft down to 100 ft up in 5 ft steps. Hold + or − to step quickly. It also marks stairs, which point up toward the higher side. Raised ground looks raised, lighter and casting a soft shadow, and stairs draw their treads. Past 30 ft the look stays the same, so tap the ground to read its height. Heights go over a map image too, so a cliff in a drawn map can be raised. A token placed, dropped or duplicated on raised ground stands on it.
 - While Heights and stairs is open, each raised or lowered area shows its height in a pill, such as "↑10 ft". The pills grow and shrink with the map like token names. They draw under token names, condition chips, elevation badges and HP bars, and keep off them. A pill with no free spot at the current zoom shows again once zooming in gives it room.
-- **Label**: type, then tap the map. Tap a label to change its text and size or delete it, or drag it to move it.
-- **Lights**: a tap places a light (Candle, Torch, Lamp, Hooded Lantern, Light or Daylight), up to 100 a scene. Tap one to change its reach, turn it on or off, choose whether walls cast shadows from it, or delete it. Players see only the light it gives, never the light itself.
-- **Stamp** places pictures: 46 shipped top-down stamps (trees, stones, foliage, village pieces, furniture and rocks) or any token image in the room's library. A stamp turns, resizes, takes one of 8 tints, flips, comes to the front, duplicates, hides from players, or is deleted.
+- **Label**: type, then tap the map. Tap a label, here or with the Select tool, to change its text and size or delete it, or drag it to move it.
+- **Lights**: a tap places a light (Candle, Torch, Lamp, Hooded Lantern, Light or Daylight), up to 100 a scene. Tap one to change its reach, turn it on or off, choose whether walls cast shadows from it, or delete it. Drag one to move it. Players see only the light it gives, never the light itself.
+- **Stamp** places pictures: 46 shipped top-down stamps (trees, stones, foliage, village pieces, furniture and rocks) or any token image in the room's library. A stamp moves by dragging, turns and resizes by its handles, takes one of 8 tints, flips, comes to the front, duplicates, hides from players, or is deleted.
 - The builder's bar has Undo and Redo buttons, the same undo as everywhere else. "Clear the build" in the scene's settings removes all of the build.
 
 ## Tokens
@@ -298,7 +298,7 @@ The DM asks players for a saving throw or an ability check, and each player type
 - Pages use Markdown: bold, italic, headings, lists, numbered lists, quotes and https links.
 - A page is made of blocks, and any block can be a secret. Players don't see a secret until the DM taps Reveal on it, and Hide takes it back. Revealed secrets read as ordinary text.
 - When a page a player can read is new or changes, the Journal button shows a dot and the page reads "New" or "Updated".
-- **Map pins**: the Pin tool (DM) places a pin with a tap. Its pane sets a label, a linked page, a color and "DM only", and says who will see the pin. If the server refuses a change, the pane keeps it and says why. Drag a pin to move it. A page's "Pin to the map" places a pin linked to that page.
+- **Map pins**: the Pin tool (DM) places a pin with a tap. Its pane sets a label, a linked page, a color and "DM only", and says who will see the pin. If the server refuses a change, the pane keeps it and says why. Tap a pin to open its pane, or drag it to move it. A page's "Pin to the map" places a pin linked to that page.
 - Players see a pin only on their scene, out of the fog, and when they can read its linked page. Deleting a page makes its pins DM only.
 - With the Select tool, a tap on a pin opens its page, or shows its label when it links none, until a few seconds pass or the next tap elsewhere on the map.
 - A room holds up to 200 pages, and a scene up to 200 pins.
@@ -316,7 +316,7 @@ The DM asks players for a saving throw or an ability check, and each player type
 - The Draw tool: freehand, line, rectangle, circle, polygon, arrow and text, with color, fill, opacity and line width. Everyone draws in their own color by default.
 - Players erase and undo their own drawings. The DM can clear everything and can make drawings DM only.
 - "Who can draw" in Room settings: no one, every player (the default), or chosen players. A player who may not draw keeps the drawings they made. While they have some on the scene, their Draw tool offers only the eraser and "Clear mine". Rulers, pings and the laser stay for everyone.
-- **Ping**: tap a spot to ping it, with a sound and a vibration on Android. The DM's "Look here" moves every player's view there.
+- **Ping**: tap a spot to ping it, with a sound and a vibration on Android. The DM's "Look here" moves every player's view there. With the Select tool, a press held still on the map, off any token, pings that spot too.
 - **Laser**: drag with the Ping tool for a stroke that fades on its own and is never saved.
 - Pings, the laser and rulers show who made them, in their color.
 
@@ -354,11 +354,11 @@ Menu, This device holds settings kept on this device alone:
 - **Low power**: draws the map at a lower resolution, loads the phone size map, and skips small animations, to save battery on long sessions. Text on the map looks softer.
 - **Map detail**: Phone size (up to 4096 pixels across, loads faster) or Full size (sharper on a large screen).
 - **Turn sound** and **Ping sound**.
-- "Show the shortcuts": the keys, and what the mouse and touch do.
+- "Show the shortcuts": the keys, and what a key or another mouse button does with a click, a drag or the wheel.
 
 ## Shortcuts
 
-`?` shows the list for your role, and so does Menu, This device, "Show the shortcuts". It shows the keys, then Mouse on a device with a mouse or trackpad and Touch on one with a touch screen (both on a laptop with a touch screen), then the keys and gestures that work inside one part of the room.
+`?` shows the list for your role, and so does Menu, This device, "Show the shortcuts". It lists the keys, then what a key or another mouse button does with a click, a drag or the wheel (on a device with a mouse or trackpad), then the keys that work inside one part of the room. A plain click, tap, drag or pinch is described with its feature above.
 
 ### Keys
 
@@ -381,196 +381,84 @@ On any device with a keyboard. They do nothing while you type in a field or a wi
 | / | Search the scene in the outliner | DM |
 | S | Hide or show the side panel, on a screen 900 px or wider | everyone |
 | ? | Show the shortcuts | everyone |
-| Escape | Close a sheet or the token's action bar. With neither open, let go of the selection and end Select several | everyone |
+| Escape | Close a sheet, else the token's action bar, else let go of the selection and end Select several. While the token's panel shows the selection, the bar closes and keeps it, and a group stays until Done | everyone |
 
-### Mouse
+### Mouse with keys
 
 | Mouse | Does | Who |
 | --- | --- | --- |
-| Click a token | Select it and open its action bar | everyone, with the Select tool and Select several off |
 | Shift or Ctrl+click a token (Cmd on a Mac) | Add it to the selection, or take it out | everyone, with the Select tool |
-| Right-click a token | Select it alone and open its action bar | everyone, with the Select tool and Select several off |
 | Shift or Ctrl+drag on empty map (Cmd on a Mac) | Draw a box that adds the tokens in it to the selection | everyone, with the Select tool |
-| Click a token | Add it to the group, or take it out | everyone, with Select several on |
-| Drag on empty map | Draw a box that adds the tokens in it to the group | everyone, with Select several on |
-| Click empty map | Hide the group's action bar and keep the group | everyone, with Select several on |
-| Drag a token | Move it, and the rest of the selection with it when it is selected | everyone, with the Select tool, on tokens you may move |
-| Drag on empty map | Move the map | everyone, with the Select tool and Select several off |
-| Click empty map | Let go of the selection | everyone, with the Select tool and Select several off |
-| Press and hold on the map | Ping that spot | everyone, with the Select tool, off any token |
-| Click a door | Show its buttons, such as Open or Close | everyone, with the Select tool and Select several off |
-| Click raised or lowered ground | Show its height | everyone, with the Select tool and Select several off |
-| Click a pin | Open its journal page, or show its label | everyone, with the Select tool |
-| Click a map label | Open it to change its text and size, or delete it | DM, with the Select tool and Select several off, or the Builder's Label |
-| Point at a token | Show its whole name | everyone |
-| Wheel, or two fingers on a trackpad | Zoom in or out at the pointer. Ctrl+wheel zooms faster | everyone, with any tool |
+| Right-click a token | Select it alone, whatever the tool. With the Select tool its action bar opens too | everyone, with Select several off |
 | Drag with the right or middle button | Move the map | everyone, with any tool |
-| Space+drag | Move the map | everyone, with any tool, while no field or button has focus |
-| Drag on the map | Measure. A drag from the ruler's end adds a leg | everyone, with the Ruler |
-| Click the map | Add a waypoint | everyone, with the Ruler |
-| Double-click the map | Keep the ruler on the map | everyone, with the Ruler |
-| Click a token | Cast the area from it, or center a sphere or cylinder on it | everyone, with the Area tool |
-| Drag on the map | Aim a cone, line or cube, or move the area's point. Place saves it | everyone, with the Area tool |
-| Click a placed area | Pick it to change it, then drag to move or turn it | everyone, with the Area tool, on areas you may change |
-| Drag on the map | Clear or add fog with the Rectangle or the Brush | DM, with the Fog tool |
-| Click the map | Add a corner. The first corner again closes the shape | DM, with the Fog tool's Polygon |
-| Click a builder room | Clear or add fog in the whole room | DM, with the Fog tool's Builder room |
-| Drag on the map | Draw with the Pen, or a Line, Arrow, Box or Circle | everyone, with the Draw tool |
-| Click the map | Add a Shape's corner, or start a Text there. The first corner again closes the shape | everyone, with the Draw tool |
-| Drag over drawings | Erase them. A player erases only their own | everyone, with the Draw tool's Eraser |
-| Click the map | Ping that spot | everyone, with the Ping tool |
-| Drag on the map | Draw a laser trail that fades | everyone, with the Ping tool |
-| Click the map | Ping it and move every player's view there | DM, with the Ping tool and Look here on |
-| Click the map | Place the chosen token or monsters there, then go back to Select | DM, with Add token |
-| Click the map | Place a pin and open its pane | DM, with the Pin tool |
-| Click a pin | Open its pane | DM, with the Pin tool |
-| Drag a pin | Move it | DM, with the Pin tool |
-| Drag on the map | Paint or erase as you go | DM, with the Builder's Brush, Erase, or Heights and stairs with a brush |
-| Drag on the map | Fill or clear a rectangle from corner to corner | DM, with the Builder's Rectangle room, Erase area, or Heights and stairs with Area |
-| Click the map | Add a room's corner. The first corner again closes the room | DM, with the Builder's Shape room |
-| Drag along a grid line | Draw a run of the chosen wall, door or window | DM, with the Builder's Walls and doors |
-| Click a square's edge | Set it to the chosen kind, or clear it when it is that kind already. With Door chosen, a door steps through closed, open and locked | DM, with the Builder's Walls and doors |
-| Click the map | Place a label, a light or a stamp | DM, with the Builder's Label, Lights or Stamp |
-| Click a label or a light | Open it to change or delete it | DM, with the Builder's Label or Lights |
-| Click a stamp | Select it, to turn, resize, tint or delete it | DM, with the Builder's Stamp |
-| Drag a label, a light or a stamp | Move it | DM, with the Builder's Label, Lights or Stamp |
-| Drag a selected stamp's handle | Turn or resize it | DM, with the Builder's Stamp |
-| Press and hold − or + | Step the height quickly | DM, with the Builder's Heights and stairs |
-| Drag a corner of the box | Resize the box | DM, with Line up grid |
-| Drag inside the box | Move the box | DM, with Line up grid |
-| Drag elsewhere on the map | Draw a new box | DM, with Line up grid |
-| Click outside the box | Move the box there, keeping its size | DM, with Line up grid |
+| Space+drag | Move the map | everyone, with any tool, while nothing has focus or the map does |
+| Ctrl+wheel, or a pinch on a trackpad | Zoom in or out at the pointer, faster than the wheel alone | everyone, with any tool |
 
-### Touch
+### Android
 
-| Touch | Does | Who |
+| Button | Does | Who |
 | --- | --- | --- |
-| Android's Back button | Close what opened last, such as a sheet, a window, a handout or the action bar | everyone |
-| Tap a token | Select it and open its action bar | everyone, with the Select tool and Select several off |
-| Tap a token | Add it to the group, or take it out | everyone, with Select several on |
-| Drag on empty map | Draw a box that adds the tokens in it to the group | everyone, with Select several on |
-| Tap empty map | Hide the group's action bar and keep the group | everyone, with Select several on |
-| Drag a token | Move it, and the rest of the selection with it when it is selected | everyone, with the Select tool, on tokens you may move |
-| Drag on empty map | Move the map | everyone, with the Select tool and Select several off |
-| Tap empty map | Let go of the selection | everyone, with the Select tool and Select several off |
-| Press and hold on the map | Ping that spot | everyone, with the Select tool, off any token |
-| Tap a door | Show its buttons, such as Open or Close | everyone, with the Select tool and Select several off |
-| Tap raised or lowered ground | Show its height | everyone, with the Select tool and Select several off |
-| Tap a pin | Open its journal page, or show its label | everyone, with the Select tool |
-| Tap a map label | Open it to change its text and size, or delete it | DM, with the Select tool and Select several off, or the Builder's Label |
-| Drag with two fingers | Move the map | everyone, with any tool |
-| Pinch | Zoom in or out | everyone, with any tool |
-| Drag on the map | Measure. A drag from the ruler's end adds a leg | everyone, with the Ruler |
-| Tap the map | Add a waypoint | everyone, with the Ruler |
-| Double tap the map | Keep the ruler on the map | everyone, with the Ruler |
-| Tap a token | Cast the area from it, or center a sphere or cylinder on it | everyone, with the Area tool |
-| Drag on the map | Aim a cone, line or cube, or move the area's point. Place saves it | everyone, with the Area tool |
-| Tap a placed area | Pick it to change it, then drag to move or turn it | everyone, with the Area tool, on areas you may change |
-| Drag on the map | Clear or add fog with the Rectangle or the Brush | DM, with the Fog tool |
-| Tap the map | Add a corner. The first corner again closes the shape | DM, with the Fog tool's Polygon |
-| Tap a builder room | Clear or add fog in the whole room | DM, with the Fog tool's Builder room |
-| Drag on the map | Draw with the Pen, or a Line, Arrow, Box or Circle | everyone, with the Draw tool |
-| Tap the map | Add a Shape's corner, or start a Text there. The first corner again closes the shape | everyone, with the Draw tool |
-| Drag over drawings | Erase them. A player erases only their own | everyone, with the Draw tool's Eraser |
-| Tap the map | Ping that spot | everyone, with the Ping tool |
-| Drag on the map | Draw a laser trail that fades | everyone, with the Ping tool |
-| Tap the map | Ping it and move every player's view there | DM, with the Ping tool and Look here on |
-| Tap the map | Place the chosen token or monsters there, then go back to Select | DM, with Add token |
-| Tap the map | Place a pin and open its pane | DM, with the Pin tool |
-| Tap a pin | Open its pane | DM, with the Pin tool |
-| Drag a pin | Move it | DM, with the Pin tool |
-| Drag on the map | Paint or erase as you go | DM, with the Builder's Brush, Erase, or Heights and stairs with a brush |
-| Drag on the map | Fill or clear a rectangle from corner to corner | DM, with the Builder's Rectangle room, Erase area, or Heights and stairs with Area |
-| Tap the map | Add a room's corner. The first corner again closes the room | DM, with the Builder's Shape room |
-| Drag along a grid line | Draw a run of the chosen wall, door or window | DM, with the Builder's Walls and doors |
-| Tap a square's edge | Set it to the chosen kind, or clear it when it is that kind already. With Door chosen, a door steps through closed, open and locked | DM, with the Builder's Walls and doors |
-| Tap the map | Place a label, a light or a stamp | DM, with the Builder's Label, Lights or Stamp |
-| Tap a label or a light | Open it to change or delete it | DM, with the Builder's Label or Lights |
-| Tap a stamp | Select it, to turn, resize, tint or delete it | DM, with the Builder's Stamp |
-| Drag a label, a light or a stamp | Move it | DM, with the Builder's Label, Lights or Stamp |
-| Drag a selected stamp's handle | Turn or resize it | DM, with the Builder's Stamp |
-| Press and hold − or + | Step the height quickly | DM, with the Builder's Heights and stairs |
-| Drag a corner of the box | Resize the box | DM, with Line up grid |
-| Drag inside the box | Move the box | DM, with Line up grid |
-| Drag elsewhere on the map | Draw a new box | DM, with Line up grid |
-| Tap outside the box | Move the box there, keeping its size | DM, with Line up grid |
+| Back button | Close what opened last, such as a sheet, a dialog, a handout or the action bar | everyone |
 
 ### Side panel tabs
 
 On a screen 900 px or wider, with a tab focused. There, and on a focused choice or slider, the arrow and Page keys never move a token.
 
-| Side panel tabs | Does | Who |
+| Key | Does | Who |
 | --- | --- | --- |
 | Left, Right | Switch to the tab beside it, wrapping around at the ends | everyone |
 | Home, End | Switch to the first or the last tab | everyone |
-| Wheel over the tabs | Scroll them sideways | everyone, on a short screen, where they make one row |
 
 ### Handout viewer
 
 A handout the DM shows, or a picture opened from the Library.
 
-| Handout viewer | Does | Who |
+| Key | Does | Who |
 | --- | --- | --- |
 | +, - | Zoom in, zoom out | everyone |
 | 0 | Reset the zoom | everyone |
 | Arrow keys | Move the zoomed picture | everyone, while it is larger than the viewer |
-| Wheel | Zoom in or out at the pointer | everyone |
-| Pinch | Zoom in or out | everyone |
-| Double-click | Zoom in there, or back to fit | everyone |
-| Double tap | Zoom in there, or back to fit | everyone |
-| Drag | Move the zoomed picture | everyone, while it is larger than the viewer |
 
 ### Token action bar
 
-| Token action bar | Does | Who |
+| Key | Does | Who |
 | --- | --- | --- |
-| Drag its header | Move it to another corner of the map | everyone, where it sits in a corner of the map |
 | Escape | Put it back where it was | everyone, while you drag its header |
 
 ### Initiative
 
-| Initiative | Does | Who |
+| Key | Does | Who |
 | --- | --- | --- |
-| Drag a row's grip | Reorder creatures tied on initiative | DM, on tied rows |
 | Enter | Save the initiative you typed | everyone, in a row's initiative box |
 | Escape | Drop the initiative you typed | everyone, in a row's initiative box |
 | Enter | Go to the next box, and save after the last | DM, while typing several values |
 
+### Token and character fields
+
+| Key | Does | Who |
+| --- | --- | --- |
+| Enter | Save the field and leave it | everyone, in a one-line field |
+| Escape | Drop what you typed and leave the field | everyone, in a one-line field |
+
 ### Label, pin and light panes
 
-| Label, pin and light panes | Does | Who |
+| Key | Does | Who |
 | --- | --- | --- |
 | Enter | Finish the text, as Done does, or save a light's name | DM |
 | Escape | Close the pane | DM |
 
-### Windows
+### Dialogs
 
-| Windows | Does | Who |
+| Key | Does | Who |
 | --- | --- | --- |
-| Escape | Close it. A journal page with unsaved changes asks first | everyone |
+| Escape | Close it. A journal page or a monster with unsaved changes asks first | everyone |
 | Tab, Shift+Tab | Move through its controls without leaving it | everyone |
-| Click outside it | Close it, except a handout | everyone |
-| Tap outside it | Close it, except a handout | everyone |
 
 ### Choose an image
 
-| Choose an image | Does | Who |
+| Key | Does | Who |
 | --- | --- | --- |
-| Ctrl+V | Paste an image to upload it, or an https link to import it | everyone, with focus outside a text field |
-
-### Crop the image
-
-| Crop the image | Does | Who |
-| --- | --- | --- |
-| Drag the picture | Move it in the frame | everyone |
-| Wheel | Zoom in or out | everyone |
-| Pinch | Zoom in or out | everyone |
-
-### Toolbar
-
-| Toolbar | Does | Who |
-| --- | --- | --- |
-| Wheel over the toolbar | Scroll it sideways | everyone, where its tools do not all fit |
+| Ctrl+V (Cmd+V on a Mac) | Paste an image to upload it, or an https link to import it | everyone, with focus outside a text field |
 
 ## Look and accessibility
 
@@ -578,6 +466,7 @@ A handout the DM shows, or a picture opened from the Library.
 - Large touch targets, 16 px text fields so an iPhone doesn't zoom in, and room for the notch and the home bar.
 - Respects the system's reduced-motion setting.
 - In a room, the browser tab reads `RaccoonVTT · <room name>`.
+- A click or tap outside a dialog closes it, except a handout or a picture from the Library.
 
 ## Backups and moving a room
 

@@ -1,22 +1,22 @@
 import { useCallback, useRef, useSyncExternalStore, type CSSProperties } from "react";
 import { Dialog } from "../../components/Dialog.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
-import { pointerKinds } from "../../lib/device.ts";
+import { sheetDevice } from "../../lib/device.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { setShortcutSheet, sheetSections, shortcutSheetSlot } from "../../state/shortcuts.ts";
 
 /**
  * The shortcut sheet (docs/design-v1-dm-tools.md 3.14): the keys this role
- * has, then what the mouse and touch do, then the keys and gestures that
- * work inside one surface, all from the registries in state/shortcuts.ts,
- * so the sheet and the app never disagree. `?` opens it, and so does Menu,
- * This device. Mounted once by the Room page.
+ * has, then the keys and buttons that change a click, a drag or the wheel,
+ * then the keys that work inside one surface, all from the registries in
+ * state/shortcuts.ts, so the sheet and the app never disagree. `?` opens
+ * it, and so does Menu, This device. Mounted once by the Room page.
  *
- * Mouse shows on a device with a mouse or trackpad, Touch on one with a
- * touch screen, and both on a laptop with a touch screen. The sheet reads
- * the device each time it opens, so a mouse paired with a tablet shows on
- * the next look.
+ * The mouse's rows show where there is a mouse or trackpad. The sheet
+ * reads the device each time it opens, so a mouse paired with a tablet
+ * shows on the next look. Each section is a heading and a table, never a
+ * landmark: a dozen landmarks in one dialog would bury the room's own.
  *
  * The shared dialog (docs/design-v1-visual.md 3.5): a narrow card on a
  * computer, the whole screen on a phone, where the list runs long.
@@ -46,11 +46,11 @@ export function ShortcutSheetHost(props: { role: "dm" | "player" }) {
 }
 
 export function ShortcutList(props: { role: "dm" | "player" }) {
-  const sections = sheetSections(props.role, pointerKinds());
+  const sections = sheetSections(props.role, sheetDevice());
   return (
     <div style={{ display: "grid" }}>
       {sections.map((section, i) => (
-        <Section key={section.title} label={section.title} region divider={i > 0}>
+        <Section key={section.title} label={section.title} divider={i > 0}>
           {section.intro ? <Help>{section.intro}</Help> : null}
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: theme.font.body14 }}>
             <tbody>
@@ -84,7 +84,7 @@ const KEY_CELL: CSSProperties = {
   verticalAlign: "top",
 };
 
-/** What you do with a mouse or a finger is a phrase, which wraps in a column of about half the card. */
+/** What you do with the mouse is a phrase, which wraps in a column of about half the card. */
 const INPUT_CELL: CSSProperties = {
   ...KEY_CELL,
   whiteSpace: "normal",

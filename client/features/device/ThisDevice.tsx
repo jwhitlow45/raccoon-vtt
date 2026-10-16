@@ -58,7 +58,7 @@ export default function ThisDevice() {
         />
       </Section>
       <Section label="Shortcuts">
-        <Help>With a keyboard, letters pick tools, arrow keys move the selected tokens, and N moves the turn on. The list also says what a click, a drag or a pinch does.</Help>
+        <Help>With a keyboard, letters pick tools, arrow keys move the selected tokens, and N moves the turn on. The list also says what Shift, Ctrl or Space do with the mouse.</Help>
         <Button size="sm" onClick={() => setShortcutSheet(scope, true)} style={{ justifySelf: "start" }}>
           Show the shortcuts
         </Button>

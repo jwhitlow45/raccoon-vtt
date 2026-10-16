@@ -7,10 +7,11 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 import { ConsoleWatch, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
- * The shortcut sheet (docs/design-v1-dm-tools.md 3.14): on a desktop it
- * shows the keys and what the mouse does, on a phone the keys and what
- * touch does, each for the viewer's role. The DM opens it with `?` on a
- * computer, and a player from Menu, This device, on a phone.
+ * The shortcut sheet (docs/design-v1-dm-tools.md 3.14): the keys, then on
+ * a desktop what a key or another mouse button does with a click, a drag
+ * or the wheel, and on an Android phone its Back button, each for the
+ * viewer's role. The DM opens it with `?` on a computer, and a player from
+ * Menu, This device, on a phone.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus fourteen.
  * The other environment variables are the smoke run's (smoke.e2e.ts).
@@ -41,22 +42,25 @@ const run = {
   password: "",
 };
 
-/** What the sheet's rows in one section say you do: the text of each row's heading cell. */
-function inputs(section: Locator): Promise<string[]> {
-  return section.locator("th").allTextContents();
+/** What the rows under one of the sheet's headings say you do: the text of each row's heading cell. */
+function inputs(sheet: Locator, heading: string): Promise<string[]> {
+  return sheet.getByRole("heading", { name: heading, exact: true }).locator("xpath=ancestor::section[1]").locator("th").allTextContents();
 }
 
 /** The sheet's section headings, in order. */
 function headings(sheet: Locator): Promise<string[]> {
-  return sheet.locator("section h3").allTextContents();
+  return sheet.getByRole("heading", { level: 3 }).allTextContents();
 }
 
-describe("raccoon-vtt shortcut sheet on a desktop and a phone", { timeout: 120_000 }, () => {
+/** Chrome on an Android phone, whose Back button the room answers. */
+const ANDROID_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
+
+describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeout: 120_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
     dmContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-    playerContext = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    playerContext = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, userAgent: ANDROID_UA });
     dm = await dmContext.newPage();
     player = await playerContext.newPage();
     dmConsole.attach(dm);
@@ -111,34 +115,37 @@ describe("raccoon-vtt shortcut sheet on a desktop and a phone", { timeout: 120_0
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
   });
 
-  test("2. on a computer, ? shows the DM's keys and what the mouse does, and nothing for touch", async () => {
+  test("2. on a computer, ? shows the DM's keys, then the mouse with keys, and no Android row", async () => {
     await dm.keyboard.press("?");
     const sheet = dm.getByRole("dialog", { name: "Shortcuts" });
     await sheet.waitFor();
     const titles = await headings(sheet);
-    assert.deepEqual(titles.slice(0, 2), ["Keys", "Mouse"], titles.join(", "));
-    assert.ok(!titles.includes("Touch"), titles.join(", "));
-    for (const surface of ["Side panel tabs", "Handout viewer", "Token action bar", "Initiative", "Label, pin and light panes", "Windows"]) {
+    assert.deepEqual(titles.slice(0, 2), ["Keys", "Mouse with keys"], titles.join(", "));
+    assert.ok(!titles.includes("Android"), titles.join(", "));
+    for (const surface of ["Side panel tabs", "Handout viewer", "Token action bar", "Initiative", "Token and character fields", "Label, pin and light panes", "Dialogs", "Choose an image"]) {
       assert.ok(titles.includes(surface), `${surface} in ${titles.join(", ")}`);
     }
+    assert.equal(await sheet.getByRole("region").count(), 0, "headings, not landmarks");
 
-    const keys = await inputs(sheet.getByRole("region", { name: "Keys" }));
+    const keys = await inputs(sheet, "Keys");
     for (const k of ["Ctrl+Z", "T", "H", "/", "?", "Escape"]) assert.ok(keys.includes(k), `${k} in ${keys.join(", ")}`);
-    const mouse = await inputs(sheet.getByRole("region", { name: "Mouse" }));
-    for (const m of ["Shift or Ctrl+click a token (Cmd on a Mac)", "Shift or Ctrl+drag on empty map (Cmd on a Mac)", "Space+drag", "Click a map label", "Drag a corner of the box"]) {
-      assert.ok(mouse.includes(m), `${m} in the DM's Mouse`);
-    }
-    assert.ok(!mouse.includes("Tap a token"), "a mouse clicks");
-    const initiative = await inputs(sheet.getByRole("region", { name: "Initiative" }));
-    assert.ok(initiative.includes("Drag a row's grip"), "the DM reorders ties");
+    assert.deepEqual(await inputs(sheet, "Mouse with keys"), [
+      "Shift or Ctrl+click a token (Cmd on a Mac)",
+      "Shift or Ctrl+drag on empty map (Cmd on a Mac)",
+      "Right-click a token",
+      "Drag with the right or middle button",
+      "Space+drag",
+      "Ctrl+wheel, or a pinch on a trackpad",
+    ]);
+    assert.deepEqual(await inputs(sheet, "Initiative"), ["Enter", "Escape", "Enter"], "the DM types several values");
     await shots.take(dm, "shortcuts-dm-computer");
-    await sheet.evaluate((el) => el.querySelector("section:nth-of-type(2)")?.scrollIntoView());
+    await sheet.getByRole("heading", { name: "Mouse with keys", exact: true }).scrollIntoViewIfNeeded();
     await shots.take(dm, "shortcuts-dm-computer-mouse");
     await dm.keyboard.press("Escape");
     await sheet.waitFor({ state: "detached" });
   });
 
-  test("3. on a phone, Menu, This device shows a player's keys and what touch does, and nothing for the mouse or the DM", async () => {
+  test("3. on an Android phone, Menu, This device shows a player's keys and the Back button, and nothing for the mouse or the DM", async () => {
     await player.locator('button[title="Panels"]').click();
     await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
     await player.getByRole("button", { name: /^This device/ }).click();
@@ -146,23 +153,19 @@ describe("raccoon-vtt shortcut sheet on a desktop and a phone", { timeout: 120_0
     const sheet = player.getByRole("dialog", { name: "Shortcuts" });
     await sheet.waitFor();
     const titles = await headings(sheet);
-    assert.deepEqual(titles.slice(0, 2), ["Keys", "Touch"], titles.join(", "));
-    assert.ok(!titles.includes("Mouse"), titles.join(", "));
+    assert.deepEqual(titles.slice(0, 2), ["Keys", "Android"], titles.join(", "));
+    assert.ok(!titles.includes("Mouse with keys"), titles.join(", "));
     assert.ok(!titles.includes("Label, pin and light panes"), "the panes are the DM's");
-    assert.ok(!titles.includes("Toolbar"), "the toolbar's only row is the wheel's");
 
-    const keys = await inputs(sheet.getByRole("region", { name: "Keys" }));
+    const keys = await inputs(sheet, "Keys");
     for (const k of ["Ctrl+Z", "V", "N", "Escape"]) assert.ok(keys.includes(k), `${k} in ${keys.join(", ")}`);
     for (const k of ["T", "H", "/"]) assert.ok(!keys.includes(k), `the DM's ${k} is not a player's`);
-    const touch = await inputs(sheet.getByRole("region", { name: "Touch" }));
-    for (const t of ["Tap a token", "Pinch", "Drag with two fingers", "Double tap the map", "Android's Back button"]) assert.ok(touch.includes(t), `${t} in the player's Touch`);
-    for (const t of ["Tap a map label", "Drag a corner of the box", "Click a token"]) assert.ok(!touch.includes(t), `${t} is not in the player's Touch`);
-    assert.deepEqual(await inputs(sheet.getByRole("region", { name: "Initiative" })), ["Enter", "Escape"], "only the DM reorders ties");
-    const viewer = await inputs(sheet.getByRole("region", { name: "Handout viewer" }));
-    assert.ok(viewer.includes("Pinch") && viewer.includes("Double tap") && !viewer.includes("Wheel"), viewer.join(", "));
-    await shots.take(player, "shortcuts-player-phone");
-    await sheet.evaluate((el) => el.querySelector("section:nth-of-type(2)")?.scrollIntoView());
-    await shots.take(player, "shortcuts-player-phone-touch");
+    assert.deepEqual(await inputs(sheet, "Android"), ["Back button"]);
+    assert.deepEqual(await inputs(sheet, "Initiative"), ["Enter", "Escape"], "only the DM types several values");
+    assert.deepEqual(await inputs(sheet, "Handout viewer"), ["+, -", "0", "Arrow keys"]);
+    await shots.take(player, "shortcuts-player-android");
+    await sheet.getByRole("heading", { name: "Android", exact: true }).scrollIntoViewIfNeeded();
+    await shots.take(player, "shortcuts-player-android-back");
     await player.keyboard.press("Escape");
     await sheet.waitFor({ state: "detached" });
   });
