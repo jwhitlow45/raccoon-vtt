@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import type { Actor, HpVisibility, LifeState } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -11,7 +11,7 @@ import { useRoomActions } from "../../state/view.ts";
 import { sendHpEntry, type HpTarget } from "./groupHp.ts";
 import { hpDraftKey, useKeepHpDraft, useKeptHpDraft, type HpPlace } from "./hpDraft.ts";
 import { HP_MODES, MAX_HP_AMOUNT, modeAfterApply, parseHpInput, type HpMode } from "./hpInput.ts";
-import { FieldRow, Note, NumberField, Section, SmallButton } from "./ui.tsx";
+import { Note, NumberField, Section, SmallButton } from "./ui.tsx";
 
 /**
  * HP, temporary HP, death saves and life state (design section 9.6). Every
@@ -186,8 +186,9 @@ export function HpSection(props: {
       {access.hp !== "none" ? <HpEntry targets={[oneTarget(target, access.hp, atZero)]} access={access.hp} place="panel" /> : null}
 
       {access.hp === "all" && hp ? (
-        <>
-          <FieldRow label="Max HP">
+        // One row where it fits (docs/design-v1-token-panel.md 3.7): each label stays with its field, and the two wrap between them.
+        <div role="group" aria-label="Maximum and temporary HP" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(4), rowGap: theme.space(2) }}>
+          <LabeledNumber label="Max HP">
             <NumberField
               label="Max HP"
               value={hp.max}
@@ -195,8 +196,8 @@ export function HpSection(props: {
               max={MAX_HP_AMOUNT}
               onCommit={(n) => n !== null && actions.dispatch({ t: "actor.hp", target, change: { kind: "set", max: n } })}
             />
-          </FieldRow>
-          <FieldRow label="Temporary HP">
+          </LabeledNumber>
+          <LabeledNumber label="Temp HP">
             <NumberField
               label="Temporary HP"
               value={hp.temp}
@@ -204,8 +205,8 @@ export function HpSection(props: {
               max={MAX_HP_AMOUNT}
               onCommit={(n) => n !== null && actions.dispatch({ t: "actor.hp", target, change: { kind: "temp", amount: n } })}
             />
-          </FieldRow>
-        </>
+          </LabeledNumber>
+        </div>
       ) : null}
 
       {life === "dying" && actor?.deathSaves ? (
@@ -215,6 +216,23 @@ export function HpSection(props: {
 
       {access.life ? <LifeControls life={life} onLife={(next) => actions.dispatch({ t: "actor.life", target, life: next })} /> : null}
     </Section>
+  );
+}
+
+/**
+ * A number field with its short visible label beside it, one unit that
+ * never breaks, so a row of them wraps between units. The field keeps its
+ * own accessible name ("Temporary HP" under the visible "Temp HP"). In a
+ * box narrower than the unit, the label sits above its field.
+ */
+function LabeledNumber(props: { label: string; children: ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), minHeight: theme.touch }}>
+      <span aria-hidden style={{ fontSize: theme.font.body14, color: theme.color.text, whiteSpace: "nowrap" }}>
+        {props.label}
+      </span>
+      {props.children}
+    </div>
   );
 }
 

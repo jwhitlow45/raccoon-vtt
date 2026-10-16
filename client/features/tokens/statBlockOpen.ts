@@ -1,12 +1,15 @@
+import { useEffect } from "react";
 import { createStore } from "zustand/vanilla";
 import { BESIDE_MIN, EDGE, barDockSlot } from "../../canvas/barDock.ts";
 import type { Size } from "../../lib/camera.ts";
 import { theme } from "../../lib/theme.ts";
 import { foldsUnderSheet } from "../../pages/fold.ts";
-import { scopeSlot, type RoomScope } from "../../state/scope.ts";
+import { scopeSlot, useScoped, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
+import { useRoomView } from "../../state/view.ts";
 import { layoutSize } from "../device/layout.ts";
 import { uiScale } from "../device/settings.ts";
+import { overrideAfterSelect, statBlockOpenedSlot } from "./panelFolds.ts";
 
 /**
  * A request to show a token's stat block (docs/design-v1-token-panel.md
@@ -54,8 +57,26 @@ export function statBlockHidesBar(input: { width: number; height: number; safeLe
 export function openStatBlock(scope: RoomScope, ui: Pick<RoomUi, "select" | "showActions" | "openPanel">, tokenId: string, layout: Size = layoutSize(window, uiScale())): void {
   ui.select(tokenId);
   requestStatBlock(scope, tokenId);
+  // Open whatever the folds say, without writing them (panelFolds.ts).
+  scope.get(statBlockOpenedSlot).setState({ tokenId });
   ui.openPanel("token");
   const { width, height } = layout;
   const safeLeft = scope.get(barDockSlot).getState().chrome?.safe.left ?? 0;
   if (statBlockHidesBar({ width, height, safeLeft })) ui.showActions(false);
+}
+
+/**
+ * Room's part: a new selection drops a stat block override and a pending
+ * request that name another token, so neither opens a block later.
+ */
+export function useClearStatBlockOnSelect(): void {
+  const opened = useScoped(statBlockOpenedSlot);
+  const request = useScoped(statBlockRequest);
+  const selectedId = useRoomView((s) => s.local.selectedId);
+  useEffect(() => {
+    const next = overrideAfterSelect(opened.getState(), selectedId);
+    if (next !== opened.getState()) opened.setState(next);
+    const pending = request.getState().tokenId;
+    if (pending !== null && pending !== selectedId) request.setState({ tokenId: null });
+  }, [opened, request, selectedId]);
 }

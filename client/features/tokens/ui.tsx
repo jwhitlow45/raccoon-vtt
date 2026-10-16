@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode, type Ref } from "react";
 import { Button } from "../../components/Button.tsx";
 import { FieldRow as PanelFieldRow, fieldStyle, NUMBER_FIELD_WIDTH, Select as FieldSelect } from "../../components/Field.tsx";
 import { Help, Section as PanelSection } from "../../components/Panel.tsx";
@@ -21,9 +21,9 @@ import { theme } from "../../lib/theme.ts";
 
 export const inputStyle: CSSProperties = fieldStyle();
 
-export function Section(props: { title: string; children: ReactNode; aside?: ReactNode }) {
+export function Section(props: { title: string; children: ReactNode; aside?: ReactNode; fold?: ComponentProps<typeof PanelSection>["fold"] }) {
   return (
-    <PanelSection label={props.title} action={props.aside}>
+    <PanelSection label={props.title} action={props.aside} fold={props.fold}>
       {props.children}
     </PanelSection>
   );
@@ -88,6 +88,8 @@ export function TextField(props: {
   placeholder?: string;
   maxLength?: number;
   multiline?: boolean;
+  /** A multiline field's starting height in rows. It still resizes. */
+  rows?: number;
   disabled?: boolean;
   style?: CSSProperties;
 }) {
@@ -111,7 +113,7 @@ export function TextField(props: {
     return (
       <textarea
         {...common}
-        rows={3}
+        rows={props.rows ?? 3}
         onChange={(e) => setDraft(e.target.value)}
         style={{ ...fieldStyle({ disabled: props.disabled }), width: "100%", padding: theme.space(3), resize: "vertical", lineHeight: theme.leading.body, ...props.style }}
       />
@@ -227,6 +229,7 @@ export function Select<T extends string>(props: {
 const BUTTON_VARIANT = { default: "secondary", primary: "primary", danger: "danger" } as const;
 
 export function SmallButton(props: {
+  ref?: Ref<HTMLButtonElement>;
   /** Optional for a submit button, whose form handles the press. */
   onClick?(): void;
   children: ReactNode;
@@ -238,10 +241,13 @@ export function SmallButton(props: {
   disabled?: boolean;
   grow?: boolean;
   type?: "button" | "submit";
+  /** A long label that wraps inside the button, which grows taller, where a line is narrower than it. */
+  wrap?: boolean;
 }) {
   const { onClick } = props;
   return (
     <Button
+      ref={props.ref}
       size="sm"
       variant={BUTTON_VARIANT[props.tone ?? "default"]}
       type={props.type ?? "button"}
@@ -251,7 +257,7 @@ export function SmallButton(props: {
       pressed={props.pressed}
       armed={props.armed}
       disabled={props.disabled}
-      style={{ flex: props.grow ? 1 : "none", whiteSpace: "nowrap" }}
+      style={{ flex: props.grow ? 1 : "none", ...(props.wrap ? { minWidth: 0, maxWidth: "100%", whiteSpace: "normal", textAlign: "center" } : { whiteSpace: "nowrap" }) }}
     >
       {props.children}
     </Button>

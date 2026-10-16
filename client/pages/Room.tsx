@@ -31,6 +31,7 @@ import { barInset, chromeZoom, layoutWidth, screenHeight, smallUi, useLayoutSize
 import { useUiScale } from "../features/device/settings.ts";
 import { activeTool, toolsFor, type ToolDef } from "../features/tools.ts";
 import { useDropHpDraftsOnSelect } from "../features/tokens/hpDraft.ts";
+import { useClearStatBlockOnSelect } from "../features/tokens/statBlockOpen.ts";
 import { tabKeyIndex, VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { useBackClose } from "../lib/backClose.ts";
 import { useWakeLock } from "../lib/wakeLock.ts";
@@ -226,6 +227,8 @@ function RoomPage() {
   }, [gateKey, ui]);
   // HP typed before a blackout comes back with the token bar after it, and what no entry took back goes with a new selection (features/tokens/hpDraft.ts).
   useDropHpDraftsOnSelect();
+  // A stat block a request opened stays open only while its token is the selection (features/tokens/panelFolds.ts).
+  useClearStatBlockOnSelect();
 
   /*
    * Where focus goes once the render that follows a tap has drawn what the

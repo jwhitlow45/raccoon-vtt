@@ -48,6 +48,8 @@ export function ImagePicker(props: {
   /** The image being replaced: an icon opens the Icons tab on it and its color. */
   current?: ImageRef | null;
   onClose(): void;
+  /** What the image is for, a visible line above the tabs, so a phone with no hover reads it on the first tap. */
+  hint?: string;
 }) {
   const roomId = useRoomView((s) => s.roomId);
   const [tab, setTab] = useState<Tab>("icons");
@@ -159,6 +161,7 @@ export function ImagePicker(props: {
       status={busy ? <span role="status">{waiting ? "Waiting for the server…" : busy}</span> : undefined}
       footer={busy ? <Button onClick={() => abortRef.current?.abort()}>Cancel</Button> : undefined}
     >
+      {props.hint ? <p style={{ margin: `0 0 ${theme.space(3)}px`, fontSize: theme.font.body14, color: theme.color.textMuted }}>{props.hint}</p> : null}
       <div role="tablist" aria-label="Where the image comes from" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), marginBottom: theme.space(3) }}>
         {tabs.map((t) => (
           <button

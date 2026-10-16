@@ -106,7 +106,8 @@ The Builder tool is the DM's. Its modes:
 - A token sits on the creatures layer or the objects layer, under creatures.
 - A token at 0 HP shows as dead or dying.
 - Each token has two notes: one that everyone who can see it reads, written by the DM and its owners, and one for the DM alone.
-- Up to 6 other images per token, swapped with one tap for Wild Shape or a disguise. Only the DM and the token's owners get the list.
+- Up to 6 other images per token, swapped with one tap for Wild Shape or a disguise. Only the DM and the token's owners get the list. In the token's panel, "Add another image" sits beside "Change image", and its tooltip and the picker it opens say what other images are for.
+- A token's panel starts with its name, then its image, then for a monster or NPC its stat block, whose header shows its AC, speed and passive Perception even when folded. Then HP, conditions, position, range rings, notes, rest and sight. Stats, token settings, a companion's settings and owners fold away at the foot. This device remembers which you opened, the stat block included. Max HP and temporary HP share one row.
 - Range rings around a token, such as 30, 60 and 120 ft.
 - A token can carry a light (Candle, Torch, Lamp, Hooded Lantern, Light, or a custom one), set by the DM and its owners. A scene lights up to 20 token lights. Past that the DM cannot light another, while a player's torch is never refused: the party's own lights light first, and the scene's Vision settings tell the DM how many light nothing.
 - A character's token can link to its owner's D&D Beyond sheet.

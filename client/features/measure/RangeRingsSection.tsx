@@ -51,11 +51,10 @@ export function RangeRingsSection(props: { token: Pick<Token, "rangeRings">; can
           );
         })}
       </ChipRow>
-      <FieldRow label="Another distance" hint={full ? `At most ${MAX_RANGE_RINGS} rings.` : "Feet"}>
+      <FieldRow label="Another distance" hint={`${full ? `At most ${MAX_RANGE_RINGS} rings.` : "Feet."} Everyone who can see this token sees its rings.`}>
         {/* Keyed by the rings, so the field empties once its distance is added. */}
         <NumberField key={rings.join(",")} label="Another range ring in feet" value={undefined} min={5} max={MAX_RANGE_RING_FT} disabled={full} onCommit={(ft) => ft !== null && set([...rings, ft])} />
       </FieldRow>
-      <Help>Everyone who can see this token sees its rings.</Help>
     </Section>
   );
 }

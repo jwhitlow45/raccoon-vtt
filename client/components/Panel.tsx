@@ -1,5 +1,6 @@
-import { useId, type CSSProperties, type ReactNode } from "react";
+import { useId, type CSSProperties, type ReactNode, type Ref } from "react";
 import { theme } from "../lib/theme.ts";
+import { Icon } from "./Icon.tsx";
 
 /**
  * The parts every panel lays itself out with (docs/design-v1-visual.md
@@ -41,7 +42,8 @@ export function SectionLabel(props: { children: ReactNode; id?: string; tone?: "
   );
   if (!props.action) return label;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), minHeight: theme.touch }}>
+    // The action wraps under the label where a narrow panel has no room for both, rather than run out of the panel.
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: theme.touch }}>
       {label}
       {props.action}
     </div>
@@ -65,16 +67,45 @@ export function Section(props: {
   divider?: boolean;
   /** Makes the section a region named by its label. Rare: for a part a reader would jump to from the landmark list. */
   region?: boolean;
+  /**
+   * Makes the label a disclosure (docs/design-v1-token-panel.md 3.5):
+   * folded, the section's content is not drawn. `summary` sits after the
+   * disclosure, outside it, on the label's row, such as the owners' names.
+   * `foldRef` is the disclosure button, for a caller that moves focus there.
+   */
+  fold?: { open: boolean; onToggle(): void; summary?: ReactNode; foldRef?: Ref<HTMLButtonElement> };
   children: ReactNode;
   style?: CSSProperties;
 }) {
   const id = useId();
   const divider = props.divider !== false;
+  if (props.fold) {
+    const { fold } = props;
+    return (
+      <section
+        aria-labelledby={props.region ? id : undefined}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr)",
+          gap: theme.space(2),
+          paddingTop: divider ? theme.space(2) : 0,
+          paddingBottom: fold.open ? theme.space(4) : theme.space(2),
+          borderTop: divider ? `${theme.line.border}px solid ${theme.color.border}` : undefined,
+          ...props.style,
+        }}
+      >
+        <FoldLabel id={id} label={props.label} tone={props.tone} fold={fold} />
+        {fold.open ? props.children : null}
+      </section>
+    );
+  }
   return (
     <section
       aria-labelledby={props.region && props.label ? id : undefined}
       style={{
         display: "grid",
+        // One column no wider than the panel: an auto column grows to its widest unbreakable child, such as a stat block's ability table, and the whole panel then scrolls sideways.
+        gridTemplateColumns: "minmax(0, 1fr)",
         gap: theme.space(2),
         paddingTop: divider ? theme.space(4) : 0,
         paddingBottom: theme.space(4),
@@ -89,6 +120,52 @@ export function Section(props: {
       ) : null}
       {props.children}
     </section>
+  );
+}
+
+/**
+ * A foldable section's label: a heading holding one full-width 44 px
+ * button with a chevron and the label, `aria-expanded`, named by the label
+ * alone so its name never changes with its state (Button.tsx). The look
+ * is the section label's: 13 px, weight 700, capitals, muted. Whatever a
+ * caller adds after it, a summary, stays outside the button.
+ */
+function FoldLabel(props: { id: string; label: ReactNode; tone?: "danger"; fold: NonNullable<Parameters<typeof Section>[0]["fold"]> }) {
+  const { fold } = props;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2) }}>
+      <h3 id={props.id} style={{ flex: "1 1 auto", minWidth: 0, margin: 0, display: "flex" }}>
+        <button
+          ref={fold.foldRef}
+          type="button"
+          aria-expanded={fold.open}
+          onClick={fold.onToggle}
+          style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            gap: theme.space(1),
+            minHeight: theme.touch,
+            padding: 0,
+            background: "transparent",
+            border: "none",
+            color: props.tone === "danger" ? theme.color.dangerText : theme.color.textMuted,
+            fontSize: theme.font.small,
+            fontWeight: theme.weight.bold,
+            letterSpacing: theme.caps,
+            textTransform: "uppercase",
+            lineHeight: theme.leading.tight,
+            fontFamily: theme.font.body,
+            textAlign: "left",
+            cursor: "pointer",
+          }}
+        >
+          <Icon name={fold.open ? "chevronDown" : "chevronRight"} size="sm" />
+          {props.label}
+        </button>
+      </h3>
+      {fold.summary}
+    </div>
   );
 }
 

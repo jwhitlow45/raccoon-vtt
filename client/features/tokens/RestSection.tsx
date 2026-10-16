@@ -23,7 +23,8 @@ const KINDS: { value: Kind; label: string }[] = [
  *
  * Rolling Initiative stops a rest (SRD 5.2.1 "Short Rest", "Long Rest"),
  * but a table may still want one mid-fight, after a skip ahead or for a
- * creature far from it, so a running fight only says so.
+ * creature far from it, so a running fight only says so, once a rest is
+ * chosen.
  */
 export function RestSection(props: { actor: Pick<Actor, "hp" | "life"> | undefined; target: ActorTarget }) {
   const actions = useRoomActions();
@@ -43,9 +44,10 @@ export function RestSection(props: { actor: Pick<Actor, "hp" | "life"> | undefin
   return (
     <Section title="Rest">
       {!canRest ? <Note>A rest needs at least 1 Hit Point.</Note> : null}
-      {canRest && fighting ? <Note>A fight is running, and rolling Initiative stops a rest. End the fight first, or rest anyway.</Note> : null}
       {/* A tap on the chosen rest keeps it, as with any radio. Cancel below puts the choice away. */}
       <Segmented<Kind> label="Rest" value={kind} options={KINDS} disabled={!canRest} onChange={setKind} grow />
+      {/* Only once a rest is chosen, so it adds nothing to every creature's panel during a fight (docs/design-v1-token-panel.md 3.8). */}
+      {canRest && fighting && kind ? <Note>A fight is running, and rolling Initiative stops a rest. End the fight first, or rest anyway.</Note> : null}
       {canRest && kind === "short" ? (
         <>
           <Note>Roll each Hit Point Die you spend and add your Constitution modifier, at least 1 HP a die. Keep count of the dice on your sheet.</Note>

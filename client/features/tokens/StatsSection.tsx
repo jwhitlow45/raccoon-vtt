@@ -21,6 +21,12 @@ const SPEED_LABELS: Record<(typeof SPEED_KEYS)[number], string> = { walk: "Walk"
 
 export { validSheetUrl } from "./statSummary.ts";
 
+/**
+ * The card whole, for a character's card in the Characters panel: Stats,
+ * the sheet link and the notes. The token panel places the same parts
+ * apart (docs/design-v1-token-panel.md 3.8): the fields folded at its
+ * foot, the link in its summary, and the notes with the token's own.
+ */
 export function StatsSection(props: {
   actor: Partial<Actor>;
   canEdit(field: keyof ActorPatch): boolean;
@@ -28,13 +34,53 @@ export function StatsSection(props: {
   dm: boolean;
   /** Owners see their notes. Others see nothing of the card beyond the public view. */
   full: boolean;
-  /** The notes' heading. The token panel calls them the card's, beside the token's own notes. */
+  /** The notes' heading. */
   notesTitle?: string;
-  /** Whether the DM's notes show here. The token panel shows them with the token's notes instead. */
+  /** Whether the DM's notes show here. */
   dmNotes?: boolean;
 }) {
   const { actor, canEdit, onPatch, dm } = props;
   if (!props.full) return null;
+  return (
+    <>
+      <Section title="Stats">
+        <StatsFields actor={actor} canEdit={canEdit} onPatch={onPatch} dm={dm} />
+      </Section>
+      <SheetLink actor={actor} editable={canEdit("sheetUrl")} onPatch={onPatch} />
+      <Section title={props.notesTitle ?? "Notes"}>
+        <CardNotesField actor={actor} editable={canEdit("notes")} onPatch={onPatch} />
+        {dm && props.dmNotes !== false ? (
+          <>
+            <Note>DM notes, never sent to players</Note>
+            <TextField label="DM notes" multiline value={actor.dmNotes ?? ""} maxLength={4000} placeholder="Only DMs see these" onCommit={(v) => onPatch({ dmNotes: v })} />
+          </>
+        ) : null}
+      </Section>
+    </>
+  );
+}
+
+/** The card's notes, which the DM and the card's owners read: a field where the viewer may write them, else the text. */
+export function CardNotesField(props: { actor: Partial<Actor>; editable: boolean; onPatch(patch: ActorPatch): void; label?: string; rows?: number }) {
+  if (props.editable) {
+    return (
+      <TextField
+        label={props.label ?? "Notes"}
+        multiline
+        rows={props.rows}
+        value={props.actor.notes ?? ""}
+        maxLength={4000}
+        placeholder="Notes everyone with this card can read"
+        onCommit={(v) => props.onPatch({ notes: v })}
+      />
+    );
+  }
+  return <Note>{props.actor.notes || "No notes."}</Note>;
+}
+
+/** The card's numbers as fields where the viewer may change them, else as text, and nothing the projection did not send. */
+export function StatsFields(props: { actor: Partial<Actor>; canEdit(field: keyof ActorPatch): boolean; onPatch(patch: ActorPatch): void; dm: boolean }) {
+  const { actor, canEdit, onPatch, dm } = props;
   const speeds: Speeds = actor.speeds ?? { walk: 30 };
 
   const setSpeed = (key: (typeof SPEED_KEYS)[number], value: number | null) => {
@@ -47,103 +93,87 @@ export function StatsSection(props: {
 
   return (
     <>
-      <Section title="Stats">
-        <Stat label="Armor Class" value={actor.ac} editable={canEdit("ac")}>
-          <NumberField label="Armor Class" value={actor.ac} min={0} max={100} onCommit={(n) => n !== null && onPatch({ ac: n })} />
-        </Stat>
-        {SPEED_KEYS.map((key) => (
-          <Stat key={key} label={`${SPEED_LABELS[key]} speed`} value={speeds[key] === undefined ? undefined : `${speeds[key]} ft`} editable={canEdit("speeds")}>
-            <NumberField
-              label={`${SPEED_LABELS[key]} speed`}
-              value={speeds[key]}
-              min={0}
-              max={1000}
-              nullable={key !== "walk"}
-              placeholder="none"
-              onCommit={(n) => setSpeed(key, n)}
-            />
-            <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>ft</span>
-          </Stat>
-        ))}
-        {canEdit("speeds") ? (
-          <Switch
-            checked={speeds.hover === true}
-            onChange={(on) => {
-              const next: Speeds = { ...speeds };
-              if (on) next.hover = true;
-              else delete next.hover;
-              onPatch({ speeds: next });
-            }}
-            label="Hovers"
-          />
-        ) : speeds.hover ? (
-          <Note>Hovers.</Note>
-        ) : null}
-        <Stat label="Initiative bonus" value={signed(actor.initBonus)} editable={canEdit("initBonus")}>
-          <Stepper label="Initiative bonus" value={actor.initBonus ?? 0} step={1} min={-20} max={40} onChange={(n) => onPatch({ initBonus: n })} />
-        </Stat>
-        {dm || actor.initScore !== undefined ? (
-          <Stat
-            label="Initiative score"
-            hint="10 + Dex modifier, used when the room uses scores for monsters"
-            value={actor.initScore}
-            editable={canEdit("initScore")}
-          >
-            <NumberField
-              label="Initiative score"
-              value={actor.initScore}
-              min={-20}
-              max={60}
-              nullable
-              placeholder="none"
-              onCommit={(n) => onPatch({ initScore: n })}
-            />
-          </Stat>
-        ) : null}
-        <Stat label="Passive Perception" value={actor.passivePerception} editable={canEdit("passivePerception")}>
+      <Stat label="Armor Class" value={actor.ac} editable={canEdit("ac")}>
+        <NumberField label="Armor Class" value={actor.ac} min={0} max={100} onCommit={(n) => n !== null && onPatch({ ac: n })} />
+      </Stat>
+      {SPEED_KEYS.map((key) => (
+        <Stat key={key} label={`${SPEED_LABELS[key]} speed`} value={speeds[key] === undefined ? undefined : `${speeds[key]} ft`} editable={canEdit("speeds")}>
           <NumberField
-            label="Passive Perception"
-            value={actor.passivePerception}
+            label={`${SPEED_LABELS[key]} speed`}
+            value={speeds[key]}
             min={0}
+            max={1000}
+            nullable={key !== "walk"}
+            placeholder="none"
+            onCommit={(n) => setSpeed(key, n)}
+          />
+          <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>ft</span>
+        </Stat>
+      ))}
+      {canEdit("speeds") ? (
+        <Switch
+          checked={speeds.hover === true}
+          onChange={(on) => {
+            const next: Speeds = { ...speeds };
+            if (on) next.hover = true;
+            else delete next.hover;
+            onPatch({ speeds: next });
+          }}
+          label="Hovers"
+        />
+      ) : speeds.hover ? (
+        <Note>Hovers.</Note>
+      ) : null}
+      <Stat label="Initiative bonus" value={signed(actor.initBonus)} editable={canEdit("initBonus")}>
+        <Stepper label="Initiative bonus" value={actor.initBonus ?? 0} step={1} min={-20} max={40} onChange={(n) => onPatch({ initBonus: n })} />
+      </Stat>
+      {dm || actor.initScore !== undefined ? (
+        <Stat
+          label="Initiative score"
+          hint="10 + Dex modifier, used when the room uses scores for monsters"
+          value={actor.initScore}
+          editable={canEdit("initScore")}
+        >
+          <NumberField
+            label="Initiative score"
+            value={actor.initScore}
+            min={-20}
             max={60}
-            onCommit={(n) => n !== null && onPatch({ passivePerception: n })}
+            nullable
+            placeholder="none"
+            onCommit={(n) => onPatch({ initScore: n })}
           />
         </Stat>
-        <Stat label="Senses" value={actor.senses || "None"} editable={canEdit("senses")} wide>
-          <TextField label="Senses" value={actor.senses ?? ""} maxLength={80} placeholder="Darkvision 60 ft." onCommit={(v) => onPatch({ senses: v.trim() })} />
+      ) : null}
+      <Stat label="Passive Perception" value={actor.passivePerception} editable={canEdit("passivePerception")}>
+        <NumberField
+          label="Passive Perception"
+          value={actor.passivePerception}
+          min={0}
+          max={60}
+          onCommit={(n) => n !== null && onPatch({ passivePerception: n })}
+        />
+      </Stat>
+      <Stat label="Senses" value={actor.senses || "None"} editable={canEdit("senses")} wide>
+        <TextField label="Senses" value={actor.senses ?? ""} maxLength={80} placeholder="Darkvision 60 ft." onCommit={(v) => onPatch({ senses: v.trim() })} />
+      </Stat>
+      {dm || actor.creatureType ? (
+        <Stat label="Creature type" value={actor.creatureType} editable={canEdit("creatureType")} wide>
+          <TextField
+            label="Creature type"
+            value={actor.creatureType ?? ""}
+            maxLength={80}
+            placeholder="Humanoid"
+            onCommit={(v) => onPatch({ creatureType: v.trim() || null })}
+          />
         </Stat>
-        {dm || actor.creatureType ? (
-          <Stat label="Creature type" value={actor.creatureType} editable={canEdit("creatureType")} wide>
-            <TextField
-              label="Creature type"
-              value={actor.creatureType ?? ""}
-              maxLength={80}
-              placeholder="Humanoid"
-              onCommit={(v) => onPatch({ creatureType: v.trim() || null })}
-            />
-          </Stat>
-        ) : null}
-        {actor.cr !== undefined || dm ? (
-          <Stat label="Challenge rating" value={actor.cr === undefined ? undefined : `${actor.cr}${actor.xp !== undefined ? ` (${actor.xp.toLocaleString()} XP)` : ""}`} editable={canEdit("cr")}>
-            <TextField label="Challenge rating" value={actor.cr ?? ""} maxLength={8} placeholder="1/4" onCommit={(v) => onPatch({ cr: v.trim() || null })} style={{ maxWidth: 96 }} />
-          </Stat>
-        ) : null}
-        {dm ? <LegendaryFields actor={actor} onPatch={onPatch} /> : null}
-      </Section>
-      <SheetLink actor={actor} editable={canEdit("sheetUrl")} onPatch={onPatch} />
-      <Section title={props.notesTitle ?? "Notes"}>
-        {canEdit("notes") ? (
-          <TextField label="Notes" multiline value={actor.notes ?? ""} maxLength={4000} placeholder="Notes everyone with this card can read" onCommit={(v) => onPatch({ notes: v })} />
-        ) : (
-          <Note>{actor.notes || "No notes."}</Note>
-        )}
-        {dm && props.dmNotes !== false ? (
-          <>
-            <Note>DM notes, never sent to players</Note>
-            <TextField label="DM notes" multiline value={actor.dmNotes ?? ""} maxLength={4000} placeholder="Only DMs see these" onCommit={(v) => onPatch({ dmNotes: v })} />
-          </>
-        ) : null}
-      </Section>
+      ) : null}
+      {actor.cr !== undefined || dm ? (
+        <Stat label="Challenge rating" value={actor.cr === undefined ? undefined : `${actor.cr}${actor.xp !== undefined ? ` (${actor.xp.toLocaleString()} XP)` : ""}`} editable={canEdit("cr")}>
+          <TextField label="Challenge rating" value={actor.cr ?? ""} maxLength={8} placeholder="1/4" onCommit={(v) => onPatch({ cr: v.trim() || null })} style={{ maxWidth: 96 }} />
+        </Stat>
+      ) : null}
+      {dm ? <LegendaryFields actor={actor} onPatch={onPatch} /> : null}
     </>
   );
 }
@@ -230,7 +260,8 @@ function SheetLink(props: { actor: Partial<Actor>; editable: boolean; onPatch(pa
   );
 }
 
-function SheetUrlField(props: { value: string; onPatch(patch: ActorPatch): void }) {
+/** The sheet link as a field, for setup. The link itself is "Open the sheet ↗". */
+export function SheetUrlField(props: { value: string; onPatch(patch: ActorPatch): void }) {
   const [error, setError] = useState(false);
   return (
     <>
