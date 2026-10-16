@@ -301,7 +301,6 @@ function forPlayer(op: Op, c: Check): Decision {
     case "scene.duplicate":
     case "actor.life":
     case "actor.damageMany":
-    case "character.delete":
     case "monster.create":
     case "monster.update":
     case "monster.delete":
@@ -487,6 +486,14 @@ function forPlayer(op: Op, c: Check): Decision {
       }
       if (!imageUsable(c, op.patch.defaultImage)) return GONE;
       return OK;
+    }
+
+    case "character.delete": {
+      // Who plays a character is no secret at the table, so a refusal may say which rule it failed.
+      const character = c.state.characters[op.characterId];
+      if (!character) return GONE;
+      if (!ownsCharacter(c.actor, character)) return NOT_YOURS;
+      return playsAlone(c.actor.memberId, character) ? OK : refuse("forbidden", PLAYED_WITH_OTHERS);
     }
 
     case "template.create": {
@@ -887,6 +894,25 @@ function doorPlace(ref: DoorRef, chunk: BuildChunk): { cells: Point[]; mid: Poin
 function reachFt(state: RoomState, token: Token, cell: Point, settings: RoomSettings): number {
   const z0 = Math.floor(groundAt(state.buildChunks, token.sceneId, cell.x, cell.y) / settings.feetPerCell);
   return boxDistanceFt(tokenCellBox(token, settings.feetPerCell), { x0: cell.x, x1: cell.x + 1, y0: cell.y, y1: cell.y + 1, z0, z1: z0 + 1 }, settings);
+}
+
+/** The refusal of a player's delete of a character someone else also plays. */
+export const PLAYED_WITH_OTHERS = "someone else plays that character too. Ask the DM to delete it";
+
+/**
+ * Whether a player may delete this character: they are its only owner
+ * (decided 2026-10-16). The room does not record who made a character, so
+ * sole ownership is the rule, and it covers one the player made and one
+ * the DM gave to that player alone. It does not depend on
+ * `playersCreateCharacters`. The delete takes what the DM's does, every
+ * token and companion of the character and its rows in the fight, and is
+ * on no undo stack: a player's stack holds only drawings and moves, and a
+ * restore that put a character back would let a player write one. The
+ * Characters panel asks the same, so it offers Delete exactly when the
+ * server would take it.
+ */
+export function playsAlone(memberId: string, character: Pick<Character, "ownerIds">): boolean {
+  return character.ownerIds.length === 1 && character.ownerIds[0] === memberId;
 }
 
 /** Whether the room lets players make their own characters. Rooms from before the setting have none: off. */

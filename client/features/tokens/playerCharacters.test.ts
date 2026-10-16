@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { canApply } from "#shared/permissions.ts";
-import { character, room, token } from "#shared/testutil.ts";
+import { P1, apply, character, room, token } from "#shared/testutil.ts";
 import { newCharacterState, onScene, playerToken } from "./playerCharacters.ts";
 
 describe("a player's own characters", () => {
@@ -21,6 +21,14 @@ describe("a player's own characters", () => {
     assert.deepEqual(newCharacterState(state, "p2"), { allowed: true });
     state.meta.settings.playersCreateCharacters = false;
     assert.deepEqual(newCharacterState(state, "p2"), { allowed: false, reason: "off" });
+  });
+
+  test("deleting one of three brings New character back", () => {
+    const state = setup();
+    state.characters.c2 = character("c2", { ownerIds: ["p1"] });
+    state.characters.c3 = character("c3", { ownerIds: ["p1"] });
+    assert.deepEqual(newCharacterState(state, "p1"), { allowed: false, reason: "full" });
+    assert.deepEqual(newCharacterState(apply(state, { t: "character.delete", characterId: "c3" }, P1), "p1"), { allowed: true });
   });
 
   test("Place my token puts a token the server accepts in the middle of the view, once", () => {

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import type { CustomMonster } from "#shared/model.ts";
-import { blockOf, customMonster } from "#shared/testutil.ts";
+import { PLAYED_WITH_OTHERS } from "#shared/permissions.ts";
+import { blockOf, customMonster, drawing } from "#shared/testutil.ts";
 import type { ProjectedState, ProjectedToken } from "#shared/project.ts";
 import type { Change, Op } from "#shared/protocol.ts";
 import { startEngine, type Engine, type Socket } from "./testing.ts";
@@ -339,5 +340,43 @@ describe("projection over the socket", () => {
     assert.equal(await player.maybe("ev", (m) => m.changes.some((c) => c.key.startsWith("monster:")), 300), null);
     assert.equal(await player2.maybe("ev", (m) => m.changes.some((c) => c.key.startsWith("monster:")), 300), null);
     for (const s of [dm, dm2, player, player2]) s.close();
+  });
+
+  test("a player deletes a character they play alone, with its token, a shared one is refused with why, and it goes on no undo stack", async () => {
+    const { roomId, dm, player, sceneId, playerMemberId } = await setup(t, "Delete");
+    const otherId = await t.client().join(roomId, "Quin");
+    const solo = uuidv7();
+    const shared = uuidv7();
+    const make = (id: string, ownerIds: string[]): Op => ({ t: "character.create", character: { id, name: "Bree", size: "medium", ownerIds, actor } }) as Op;
+    await dm.apply(make(solo, [playerMemberId]));
+    await dm.apply(make(shared, [playerMemberId, otherId]));
+    const pc = tokenOp(sceneId, { kind: "pc", name: "Bree", actor: { ref: solo } });
+    await dm.apply(pc.op);
+    await dm.apply({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: pc.id, value: 12 }] });
+    // A drawing first, so the undo after the delete shows what the player's stack still holds.
+    const { rev: _rev, ...line } = drawing(uuidv7(), { sceneId, ownerId: playerMemberId });
+    await player.apply({ t: "drawing.create", drawing: line });
+
+    const refused = await player.apply({ t: "character.delete", characterId: shared });
+    assert.deepEqual(refused.rejects?.map((r) => [r.code, r.message]), [["forbidden", PLAYED_WITH_OTHERS]]);
+
+    const deleted = await player.apply({ t: "character.delete", characterId: solo });
+    assert.deepEqual(deleted.rejects ?? [], []);
+    assert.deepEqual(deleted.changes.find((c) => c.key === `character:${solo}`), { key: `character:${solo}`, deleted: true });
+    assert.deepEqual(tokenIn(deleted.changes, pc.id), { key: `token:${pc.id}`, deleted: true });
+    const seen = await dm.next("ev", (m) => tokenIn(m.changes, pc.id) !== undefined);
+    assert.deepEqual(tokenIn(seen.changes, pc.id), { key: `token:${pc.id}`, deleted: true });
+    const encounter = seen.changes.find((c) => c.key === "encounter") as { value: { entries: unknown[] } } | undefined;
+    assert.deepEqual(encounter?.value.entries, [], "its row left the fight");
+
+    // The undo takes back the drawing, never the delete.
+    const undone = await player.apply({ t: "undo" });
+    assert.deepEqual(undone.rejects ?? [], []);
+    assert.deepEqual(undone.changes.find((c) => c.key === `drawing:${line.id}`), { key: `drawing:${line.id}`, deleted: true });
+    assert.equal(undone.changes.some((c) => c.key === `character:${solo}` || c.key === `token:${pc.id}`), false);
+    const nothing = await player.apply({ t: "undo" });
+    assert.equal(nothing.rejects?.[0]?.code, "invalid");
+    dm.close();
+    player.close();
   });
 });

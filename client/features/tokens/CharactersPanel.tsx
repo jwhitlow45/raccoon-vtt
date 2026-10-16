@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Character, CreatureSize, Member, RoomState } from "#shared/model.ts";
+import { playsAlone } from "#shared/permissions.ts";
 import type { TokenInput } from "#shared/protocol.ts";
 import type { PanelProps } from "../panels.ts";
 import { Button } from "../../components/Button.tsx";
@@ -7,19 +8,22 @@ import { Checkbox } from "../../components/Checkbox.tsx";
 import { Empty } from "../../components/Empty.tsx";
 import { ErrorText, FieldRow, Input, Select } from "../../components/Field.tsx";
 import { Icon } from "../../components/Icon.tsx";
-import { Help, Section } from "../../components/Panel.tsx";
+import { Help, Note, Section } from "../../components/Panel.tsx";
 import { Row, RowList } from "../../components/Row.tsx";
+import { handFocusOn } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
 import { hpDisplay, hpText, initials } from "../../lib/tokenView.ts";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
 import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import { dispatchGesture } from "../../state/actions.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { useSend } from "../encounter/hooks.ts";
 import { ImageField, type ImageRef } from "../images/ImageField.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import { placeOnGround } from "../movement/ground.ts";
 import { ownsCharacter } from "./access.ts";
 import { CharacterCard, SIZE_OPTIONS } from "./CharacterCard.tsx";
+import { deleteWarning } from "./characterDelete.ts";
 import { CharacterCompanions, CompanionForm } from "./CompanionsSection.tsx";
 import { EffectIcon } from "./EffectIcon.tsx";
 import { newCharacter } from "./factory.ts";
@@ -33,7 +37,8 @@ import { ConfirmButton, NumberField } from "./ui.tsx";
  * and edits their own card, and the rest of the party as the projection
  * shows them: name, conditions and the HP the DM allows. When the room
  * lets players create characters, a player also makes their own (theirs
- * alone, a few at most) and puts their tokens on the players' scene.
+ * alone, a few at most) and puts their tokens on the players' scene. A
+ * player deletes a character they play alone, whoever made it.
  */
 export default function CharactersPanel(props: PanelProps) {
   const you = useRoomView((s) => s.you);
@@ -69,6 +74,19 @@ export default function CharactersPanel(props: PanelProps) {
     returnTo.current = null;
     if (props.shown) root.current.querySelector<HTMLElement>(opener)?.focus();
   });
+
+  /*
+   * A deleted character's card goes with its row, Delete and all, so focus
+   * moves on to the next of the list once it is gone: the next character,
+   * else the one before, else New character, else the empty list's line.
+   * Delete waits for the server, so the hand-off waits too, and a refusal
+   * that keeps the card moves nothing (lib/handFocus.ts).
+   */
+  const handOff = (id: string) => {
+    const at = mine.findIndex((c) => c.id === id);
+    const neighbors = [...mine.slice(at + 1), ...mine.slice(0, Math.max(at, 0)).reverse()];
+    handFocusOn(root.current, [...neighbors.map((c) => `[data-opener="character:${c.id}"]`), '[data-opener="new-character"]', "[data-characters-empty]"]);
+  };
 
   const companionOf = addingFor !== null ? characters?.[addingFor] : undefined;
   if (companionOf) {
@@ -109,13 +127,16 @@ export default function CharactersPanel(props: PanelProps) {
       ) : null}
       {own && !own.allowed && own.reason === "full" ? <Help>You have as many characters as a player can make. Ask the DM for another.</Help> : null}
       {mine.length === 0 ? (
-        <Empty>
-          {dm
-            ? "The party's characters go here. Make one with New character, and pick who plays it."
-            : own?.allowed
-              ? "Make your character, or wait for the DM to give you one."
-              : "The DM has not given you a character yet."}
-        </Empty>
+        // Focusable from script alone: where focus goes when the last character is deleted and there is no New character.
+        <div data-characters-empty="" tabIndex={-1}>
+          <Empty>
+            {dm
+              ? "The party's characters go here. Make one with New character, and pick who plays it."
+              : own?.allowed
+                ? "Make your character, or wait for the DM to give you one."
+                : "The DM has not given you a character yet."}
+          </Empty>
+        </div>
       ) : null}
       {mine.map((c) => (
         <CharacterRow
@@ -125,6 +146,7 @@ export default function CharactersPanel(props: PanelProps) {
           onToggle={() => setOpenId(open === c.id ? null : c.id)}
           close={props.close}
           onAddCompanion={() => setAddingFor(c.id)}
+          onDelete={() => handOff(c.id)}
         />
       ))}
       {/* A long rest comes once a day and the list is read every time, so the rest waits below it (docs/design-v1-layout-hierarchy.md M8). */}
@@ -201,11 +223,11 @@ export function Portrait(props: { character: Pick<Character, "name" | "defaultIm
   return <ImagePreview image={character.defaultImage} shape="circle" aspect={1} width={size} ring={theme.color.ally} initials={initials(character.name)} />;
 }
 
-function CharacterRow(props: { character: Character; open: boolean; onToggle(): void; close(): void; onAddCompanion(): void }) {
+function CharacterRow(props: { character: Character; open: boolean; onToggle(): void; close(): void; onAddCompanion(): void; onDelete(): void }) {
   const { character } = props;
   const members = useRoomView((s) => s.view?.members);
   const role = useRoomView((s) => s.you?.role);
-  const actions = useRoomActions();
+  const memberId = useRoomView((s) => s.you?.memberId);
   const ui = useRoomUi();
   const scope = useRoomScope();
   const hp = hpDisplay({ actor: character.actor, hpVisibility: undefined, fullAccess: true });
@@ -216,6 +238,7 @@ function CharacterRow(props: { character: Character; open: boolean; onToggle(): 
       <Row
         expanded={props.open}
         onClick={props.onToggle}
+        opener={`character:${character.id}`}
         leading={<Portrait character={character} size={32} />}
         title={character.name}
         detail={[hpText(hp) ? `HP ${hpText(hp)}` : null, players ? `played by ${players}` : role === "dm" ? "no player yet" : null].filter(Boolean).join(" · ")}
@@ -242,17 +265,44 @@ function CharacterRow(props: { character: Character; open: boolean; onToggle(): 
           {/* Before the card: in play a player opens their card for companions more often than to edit stats (docs/design-v1-combat-flow.md 3.7.5). */}
           <CharacterCompanions character={character} canAdd onAdd={props.onAddCompanion} close={props.close} />
           <CharacterCard character={character} />
-          {role === "dm" ? (
-            <Section label="Remove">
-              <Help>Deleting the character also removes every token of it, on every scene.</Help>
-              <ConfirmButton confirm="Tap again to delete" onConfirm={() => actions.dispatch({ t: "character.delete", characterId: character.id })}>
-                Delete {character.name}
-              </ConfirmButton>
-            </Section>
-          ) : null}
+          {role === "dm" || (memberId !== undefined && playsAlone(memberId, character)) ? <RemoveCharacter character={character} dm={role === "dm"} onDelete={props.onDelete} /> : null}
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Delete at the foot of a character's card: the DM's for every character,
+ * and a player's for one they play alone. The delete waits for the server,
+ * since only it holds every token of the character on every scene, so the
+ * button is busy until the answer, and a refusal is the store's toast. A
+ * player's delete is on no undo stack (shared/permissions.ts playsAlone),
+ * so their card says first what goes with it and that it cannot be undone.
+ */
+function RemoveCharacter(props: { character: Character; dm: boolean; onDelete(): void }) {
+  const { character } = props;
+  const tokens = useRoomView((s) => s.view?.tokens);
+  const encounter = useRoomView((s) => s.view?.encounter ?? null);
+  const remove = useSend();
+  return (
+    <Section label="Remove">
+      {props.dm ? (
+        <Help>Deleting the character also removes every token of it, on every scene.</Help>
+      ) : (
+        <Note>{deleteWarning({ tokens: tokens ?? {}, encounter }, character)}</Note>
+      )}
+      <ConfirmButton
+        confirm="Tap again to delete"
+        busy={remove.waiting}
+        onConfirm={() => {
+          remove.send({ t: "character.delete", characterId: character.id });
+          props.onDelete();
+        }}
+      >
+        {remove.waiting ? "Deleting…" : `Delete ${character.name}`}
+      </ConfirmButton>
+    </Section>
   );
 }
 

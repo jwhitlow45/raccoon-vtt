@@ -169,6 +169,26 @@ describe("a companion's turn and its rows", () => {
     assert.ok(gone.encounterHistory.every((step) => !step.encounter.entries.some((e) => e.id === "e-ws")), "the companion's saved rows go, as for Dismiss");
   });
 
+  test("Ana's delete of Bree, whom she plays alone, does what the DM's does: every token on every scene, hidden ones too, the companion and every row", () => {
+    const start = () => {
+      const state = fight(withSpirit("own"), "e-bree");
+      state.tokens.away = token("away", { kind: "pc", name: "Bree", actor: { ref: "bree" }, sceneId: "s2", x: 3, y: 3 });
+      state.tokens.veiled = token("veiled", { kind: "pc", name: "Bree", actor: { ref: "bree" }, visibility: "dm", x: 8, y: 8 });
+      state.encounter!.entries.push(entry("e-c", { characterId: "bree", value: 5 }));
+      return run(state, { t: "encounter.next" }).state;
+    };
+    const op: Op = { t: "character.delete", characterId: "bree" };
+    assert.ok(canApply(op, P1, start(), { canUseAsset: () => false }).ok);
+    const byAna = run(start(), op, P1, 2).state;
+    const byDm = run(start(), op, DM, 2).state;
+    assert.deepEqual(byAna, byDm);
+    assert.equal(byAna.characters.bree, undefined);
+    assert.deepEqual(Object.keys(byAna.tokens), ["gob"]);
+    assert.deepEqual(rows(byAna), ["e-gob"]);
+    assert.equal(byAna.encounter!.activeEntryId, "e-gob", "the turn passes on, as when the DM deletes it");
+    assert.ok(byAna.encounterHistory.every((step) => !step.encounter.entries.some((e) => e.id === "e-ws")));
+  });
+
   test("a readied effect saved by Next and counting the companion's row comes back counting Bree's row after a turn change, and paused on the companion after Dismiss", () => {
     const start = () => {
       const state = fight(withSpirit("own"), "e-bree");

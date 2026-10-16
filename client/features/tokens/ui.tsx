@@ -318,8 +318,8 @@ export function Stepper(props: {
   );
 }
 
-/** A button that asks once more before it acts, for deletes. */
-export function ConfirmButton(props: { onConfirm(): void; children: ReactNode; confirm: string; label?: string; grow?: boolean }) {
+/** A button that asks once more before it acts, for deletes. `busy` is a delete that waits for the server, which ignores further taps. */
+export function ConfirmButton(props: { onConfirm(): void; children: ReactNode; confirm: string; label?: string; grow?: boolean; busy?: boolean }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
@@ -332,6 +332,7 @@ export function ConfirmButton(props: { onConfirm(): void; children: ReactNode; c
       size="sm"
       variant="danger"
       armed={armed}
+      busy={props.busy}
       aria-label={label}
       title={label}
       onClick={() => {

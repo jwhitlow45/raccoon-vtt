@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { MoveAnyToken } from "./model.ts";
-import { canApply, movesAnyToken, type PermissionDeps } from "./permissions.ts";
+import { canApply, movesAnyToken, PLAYED_WITH_OTHERS, type PermissionDeps } from "./permissions.ts";
 import type { Op } from "./protocol.ts";
-import { DM, P1, P2, actor, blockOf, character, customMonster, drawing, entry, imageRef, reveal, room, template, token } from "./testutil.ts";
+import { DM, P1, P2, actor, apply, blockOf, character, customMonster, drawing, entry, imageRef, reveal, room, template, token } from "./testutil.ts";
 
 const deps: PermissionDeps = { canUseAsset: (memberId, assetId) => assetId.startsWith(`${memberId}-`) || assetId === "shared" };
 
@@ -117,7 +117,6 @@ describe("player role rules", () => {
       { t: "token.delete", tokenId: "own" },
       { t: "actor.life", target: { tokenId: "own" }, life: "dead" },
       { t: "character.create", character: { id: "c9", name: "n", size: "medium", ownerIds: ["p1"], actor: actor() } },
-      { t: "character.delete", characterId: "c1" },
       { t: "fog.live", sceneId: "s1", ops: [{ id: "a", mode: "reveal", shape: { kind: "all" } }] },
       { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["1,1"] },
       { t: "encounter.start", entries: [] },
@@ -736,8 +735,93 @@ describe("players creating their own characters", () => {
     assert.equal(code({ t: "character.update", characterId: "mine", patch: { ownerIds: ["p2"] } }, DM, state), "ok");
     assert.equal(code({ t: "character.delete", characterId: "mine" }, DM, state), "ok");
     assert.equal(code({ t: "token.delete", tokenId: "pc1" }, DM, state), "ok");
-    assert.equal(code({ t: "character.delete", characterId: "mine" }, P1, state), "forbidden");
+    // The player deletes the character they play alone, never a token of it on its own.
+    assert.equal(code({ t: "character.delete", characterId: "mine" }, P1, state), "ok");
     assert.equal(code({ t: "token.delete", tokenId: "pc1" }, P1, state), "forbidden");
+  });
+});
+
+describe("players deleting characters they play alone", () => {
+  const del = (characterId: string): Op => ({ t: "character.delete", characterId });
+  const why = (op: Op, who = P1, state = setup()) => {
+    const d = canApply(op, who, state, deps);
+    return d.ok ? "ok" : `${d.code}: ${d.message}`;
+  };
+
+  test("a player deletes one they alone play, whether they or the DM made it, with the setting on or off", () => {
+    // c1 is the DM's, given to p1 alone, and the room has players creating their own off.
+    assert.equal(code(del("c1")), "ok");
+    const on = setup();
+    on.meta.settings.playersCreateCharacters = true;
+    on.characters.made = character("made", { ownerIds: ["p1"] });
+    assert.equal(code(del("made"), P1, on), "ok");
+    assert.equal(code(del("c1"), P1, on), "ok");
+  });
+
+  test("not one someone else also plays, nor another player's, nor one nobody plays, nor one that is not there", () => {
+    const state = setup();
+    state.characters.both = character("both", { ownerIds: ["p1", "p2"] });
+    state.characters.theirs = character("theirs", { ownerIds: ["p2"] });
+    state.characters.nobody = character("nobody", { ownerIds: [] });
+    assert.equal(why(del("both"), P1, state), `forbidden: ${PLAYED_WITH_OTHERS}`);
+    assert.equal(why(del("both"), P2, state), `forbidden: ${PLAYED_WITH_OTHERS}`);
+    assert.equal(why(del("theirs"), P1, state), "forbidden: that is not yours");
+    assert.equal(why(del("c1"), P2, state), "forbidden: that is not yours");
+    assert.equal(why(del("nobody"), P1, state), "forbidden: that is not yours");
+    assert.equal(why(del("missing"), P1, state), "gone: that is not here");
+    // A token's id is not a character's, a companion's included.
+    state.tokens.wisp = token("wisp", { ownerIds: ["p1"], companion: { of: "c1", turn: "shared" }, x: 2, y: 1 });
+    assert.equal(why(del("wisp"), P1, state), "gone: that is not here");
+    assert.equal(why(del("pc1"), P1, state), "gone: that is not here");
+  });
+
+  test("the DM keeps every power: shared, another player's, nobody's", () => {
+    const state = setup();
+    state.characters.both = character("both", { ownerIds: ["p1", "p2"] });
+    state.characters.nobody = character("nobody", { ownerIds: [] });
+    for (const id of ["c1", "both", "nobody"]) assert.equal(code(del(id), DM, state), "ok", id);
+  });
+
+  test("reads who plays it now: the DM sharing it or giving it away takes the delete with it, and giving it back returns it", () => {
+    let state = setup();
+    state = apply(state, { t: "character.update", characterId: "c1", patch: { ownerIds: ["p1", "p2"] } }, DM, 1);
+    assert.equal(why(del("c1"), P1, state), `forbidden: ${PLAYED_WITH_OTHERS}`);
+    state = apply(state, { t: "character.update", characterId: "c1", patch: { ownerIds: ["p2"] } }, DM, 2);
+    assert.equal(code(del("c1"), P1, state), "forbidden");
+    assert.equal(code(del("c1"), P2, state), "ok");
+    state = apply(state, { t: "character.update", characterId: "c1", patch: { ownerIds: ["p1"] } }, DM, 3);
+    assert.equal(code(del("c1"), P1, state), "ok");
+  });
+
+  test("whatever goes with it: companions, its row in the fight, its turn, tokens on another scene or hidden, and behind a blackout", () => {
+    const state = setup();
+    state.tokens.wisp = token("wisp", { ownerIds: ["p1"], companion: { of: "c1", turn: "own" }, x: 2, y: 1 });
+    state.tokens.away = token("away", { kind: "pc", actor: { ref: "c1" }, sceneId: "s2", x: 4, y: 4 });
+    state.tokens.veiled = token("veiled", { kind: "pc", actor: { ref: "c1" }, visibility: "dm", x: 5, y: 5 });
+    state.encounter = { rev: 0, round: 1, activeEntryId: "n1", entries: [entry("n1", { tokenId: "pc1" }), entry("n2", { tokenId: "wisp" }), entry("n3", { characterId: "c1" }), entry("n4", { tokenId: "gob" })] };
+    assert.equal(code(del("c1"), P1, state), "ok");
+    state.meta.view.blackout = true;
+    assert.equal(code(del("c1"), P1, state), "ok", "a character is the room's, not the table's");
+  });
+
+  test("no undo of the player's own brings it back", () => {
+    const state = setup();
+    const gone = apply(state, del("c1"), P1, 1);
+    const restore = (key: string, value: unknown): Op => ({ t: "sys.restore", entries: [{ key, value, expectRev: null }], from: "undo" });
+    assert.equal(code(restore("character:c1", state.characters.c1), P1, gone), "forbidden");
+    assert.equal(code(restore("token:pc1", state.tokens.pc1), P1, gone), "gone");
+  });
+
+  test("a delete frees a slot under the cap of three", () => {
+    const state = setup();
+    state.meta.settings.playersCreateCharacters = true;
+    state.characters.c2 = character("c2", { ownerIds: ["p1"] });
+    state.characters.c3 = character("c3", { ownerIds: ["p1"] });
+    const create: Op = { t: "character.create", character: { id: "new", name: "Wren", size: "medium", ownerIds: ["p1"], actor: actor({ dmNotes: "" }) } };
+    const full = canApply(create, P1, state, deps);
+    assert.ok(!full.ok && /at most 3/.test(full.message));
+    const freed = apply(state, del("c2"), P1, 1);
+    assert.equal(code(create, P1, freed), "ok");
   });
 });
 
