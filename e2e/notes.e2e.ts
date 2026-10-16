@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Notes and map pins on a wave 5 build that the live play review after
@@ -274,7 +274,7 @@ describe("raccoon-vtt notes and pins on a wave 5 build", { timeout: 180_000 }, (
     const pageId = randomUUID();
     await otherDevice!.send({ t: "journal.create", page: { id: pageId, title: "Ferry toll", access: "dm", blocks: [] } });
     await waitFor("the page in the DM's state", () => dmSocket.state?.journal[pageId] ?? null);
-    await dm.getByRole("tab", { name: JOURNAL_TAB }).click();
+    await openSideTab(dm, "Journal");
     // Where a row stands in the Journal, by the start of its text.
     const place = async (title: string) => (await dm.getByRole("tabpanel").getByRole("button").evaluateAll((els) => els.map((el) => el.textContent ?? ""))).findIndex((text) => text.startsWith(title));
     const row = dm.getByRole("button", { name: /^Ferry toll/ });
@@ -306,7 +306,7 @@ describe("raccoon-vtt notes and pins on a wave 5 build", { timeout: 180_000 }, (
     const pageId = randomUUID();
     await otherDevice!.send({ t: "journal.create", page: { id: pageId, title: "Lost letter", access: "dm", blocks: [] } });
     await waitFor("the page in the DM's state", () => dmSocket.state?.journal[pageId] ?? null);
-    await dm.getByRole("tab", { name: JOURNAL_TAB }).click();
+    await openSideTab(dm, "Journal");
     await dm.getByRole("button", { name: /^Lost letter/ }).focus();
     await dm.keyboard.press("Enter");
     await dm.getByRole("heading", { name: "Lost letter", exact: true }).waitFor();

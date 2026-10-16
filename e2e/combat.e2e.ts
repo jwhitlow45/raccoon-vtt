@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The combat flow (docs/design-v1-combat-flow.md section 8) on the real
@@ -234,9 +234,8 @@ async function turnShowsWhole(select: Locator, label: string): Promise<void> {
 
 /** Opens a panel: its side panel tab from 900 layout px up, else from the toolbar's list of panels. */
 async function openPanelOn(page: Page, title: string): Promise<void> {
-  const tab = page.getByRole("tab", { name: title });
-  if ((await tab.count()) > 0 && (await tab.first().isVisible())) {
-    await tab.first().click();
+  if (await page.getByRole("tablist", { name: "Panels" }).isVisible()) {
+    await openSideTab(page, title);
     return;
   }
   await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
@@ -730,7 +729,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await waitFor("the goblin dead again after Ctrl+Z", () => (goblinState(11)?.life === "dead" ? true : null));
     await ops.send({ t: "actor.life", target: { tokenId: run.goblins[11]! }, life: "alive" });
     // A chest: its HP shows, and no Revive, Stabilize or Mark dead.
-    await dm.getByRole("tab", { name: "Outliner" }).click();
+    await openSideTab(dm, "Outliner");
     await dm.getByRole("tabpanel", { name: "Outliner" }).getByRole("button", { name: /^Chest/ }).click();
     const chest = bar(dm, "Chest");
     await chest.waitFor();
@@ -800,7 +799,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
 
   test("9. Ana adds Spiritual Weapon and Wildfire Spirit beside Bree without Players can create their own characters, and the DM's log names each", async () => {
     await setUp(ana, await anaContext.newCDPSession(ana), { ...DESK, scale: 1 });
-    await ana.getByRole("tab", { name: "Characters" }).click();
+    await openSideTab(ana, "Characters");
     // A turn of null leaves Turn untouched, so the form's own start for what it is gets sent.
     const add = async (name: string, what: "A creature" | "An effect", turn: string | null, hp?: string) => {
       await ana.getByRole("button", { name: "Add a companion" }).click();
@@ -828,7 +827,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const weapon = await add("Spiritual Weapon", "An effect", null);
     assert.deepEqual(weapon.companion, { of: run.bree.characterId, turn: "none" }, "an effect made without touching Turn is not listed (SOL-04)");
     await bar(ana, "Spiritual Weapon").waitFor();
-    await ana.getByRole("tab", { name: "Characters" }).click();
+    await openSideTab(ana, "Characters");
     const spirit = await add("Wildfire Spirit", "A creature", "On Bree's turn, listed under Bree", "15");
     for (const t of [weapon, spirit]) {
       assert.ok(Math.abs(t.x - 5) <= 1.01 && Math.abs(t.y - 5) <= 1.01, `${t.name} landed within 5 ft of Bree: ${t.x},${t.y}`);
@@ -860,7 +859,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const d = await descriptions(anaCdp, /^Wildfire Spirit, acts on/);
     assert.ok(d.some((x) => x.startsWith("Armor Class 13, HP 15/15")), `the sub-row's description: ${JSON.stringify(d)}`);
     await shots.take(cy, "combat-nested-other-player");
-    await ana.getByRole("tab", { name: "Characters" }).click();
+    await openSideTab(ana, "Characters");
     await ana.getByRole("button", { name: /^Spiritual Weapon\. Show it on the map/ }).click();
     await bar(ana, "Spiritual Weapon").waitFor();
     assert.equal(await bar(ana, "Spiritual Weapon").getByRole("textbox", { name: "HP change" }).count(), 0, "no HP entry on an effect");
@@ -926,7 +925,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
   test("12. switching the spirit to its own turn lets Ana join it, Dismiss takes the weapon away for everyone, and Previous brings back no row of it", async () => {
     const spirit = Object.values(dmSocket.state!.tokens).find((t) => t.companion?.turn === "shared")!;
     // Ana switches it in its panel's Companion section, which waits for the server.
-    await ana.getByRole("tab", { name: "Characters" }).click();
+    await openSideTab(ana, "Characters");
     await ana.getByRole("button", { name: /^Wildfire Spirit\. Show it on the map/ }).click();
     await ana.getByRole("tab", { name: "Token" }).click();
     const panel = ana.getByRole("tabpanel", { name: "Token" });
@@ -950,7 +949,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await waitFor("its value", () => (dmSocket.state?.encounter?.entries.find((e) => e.tokenId === spirit.id)?.value === 13 ? true : null));
     assert.match((await row.textContent()) ?? "", /Companion of Bree/);
     const weapon = Object.values(dmSocket.state!.tokens).find((t) => t.name === "Spiritual Weapon")!;
-    await ana.getByRole("tab", { name: "Characters" }).click();
+    await openSideTab(ana, "Characters");
     await ana.getByRole("button", { name: /^Spiritual Weapon\. Show it on the map/ }).click();
     const b = bar(ana, "Spiritual Weapon");
     await b.getByRole("button", { name: "Dismiss" }).click();
@@ -965,14 +964,14 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const spirit = Object.values(dmSocket.state!.tokens).find((t) => t.name === "Wildfire Spirit")!;
     await ops.send({ t: "token.update", tokenId: spirit.id, patch: { companion: { of: run.bree.characterId, turn: "shared" } } });
     await setUp(dm, dmCdp, { ...DESK, scale: 1 });
-    await dm.getByRole("tab", { name: "DM" }).click();
+    await openSideTab(dm, "DM");
     await dm.getByRole("button", { name: "View", exact: true }).first().click();
     const preview = dm.getByRole("dialog", { name: /^Viewing as / });
     await preview.waitFor();
     await preview.getByRole("tab", { name: "Initiative" }).click();
     await preview.getByRole("button", { name: "Wildfire Spirit, acts on Bree's turn. Show it on the map with its actions." }).waitFor();
     await shots.take(dm, "combat-viewing-as");
-    await preview.getByRole("tab", { name: "Characters" }).click();
+    await openSideTab(preview, "Characters");
     await preview.getByRole("button", { name: "Add a companion" }).click();
     await preview.getByRole("textbox", { name: "Name" }).fill("Owl");
     await preview.getByRole("textbox", { name: "HP" }).fill("1");
@@ -1020,7 +1019,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const spirit = Object.values(dmSocket.state!.tokens).find((t) => t.name === "Wildfire Spirit")!;
     await setUp(dm, dmCdp, { ...DESK, scale: 1 });
     await ops.send({ t: "actor.life", target: { tokenId: spirit.id }, life: "dying" });
-    await ana.getByRole("tab", { name: "Characters" }).click();
+    await openSideTab(ana, "Characters");
     await ana.getByRole("button", { name: /^Wildfire Spirit\. Show it on the map/ }).click();
     const b = bar(ana, "Wildfire Spirit");
     const pips = b.getByRole("button", { name: /^Successes: set to/ });
@@ -1191,7 +1190,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
 
     // Ana's Add a companion: into the form's heading, and back to the opener on Cancel.
     await setUp(ana, await anaContext.newCDPSession(ana), { ...DESK, scale: 1 });
-    await ana.getByRole("tab", { name: "Characters" }).click();
+    await openSideTab(ana, "Characters");
     await press(ana, ana.getByRole("button", { name: "Add a companion" }));
     await lands(ana, /^h3 Add a companion for Bree/, "Add a companion opened");
     await press(ana, ana.getByRole("button", { name: "Cancel" }));
@@ -1199,14 +1198,14 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
 
     // The DM's New character, the same way.
     await setUp(dm, dmCdp, { ...DESK, scale: 1 });
-    await dm.getByRole("tab", { name: "Characters" }).click();
+    await openSideTab(dm, "Characters");
     await press(dm, dm.getByRole("button", { name: "New character" }));
     await lands(dm, /^h3 New character/, "New character opened");
     await press(dm, dm.getByRole("button", { name: "Cancel" }));
     await lands(dm, /^button New character$/, "New character cancelled");
 
     // Make a companion on the chest: the first field, the opener again on Cancel, and done its section's label.
-    await dm.getByRole("tab", { name: "Outliner" }).click();
+    await openSideTab(dm, "Outliner");
     await dm.getByRole("tabpanel", { name: "Outliner" }).getByRole("button", { name: /^Chest/ }).click();
     await bar(dm, "Chest").getByRole("button", { name: "Details" }).click();
     const panel = dm.getByRole("tabpanel", { name: "Token" });

@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, dragWorld, OpSocket, pagePoint, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragWorld, openSideTab, OpSocket, pagePoint, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { A5, LETTER, LETTER_WIDE, pdfOf } from "./pdfFixture.ts";
 
 /**
@@ -115,7 +115,7 @@ function narrow(size: (typeof SIZES)[number], scale: number): boolean {
 /** Opens a panel: the side panel's tab on a computer, or the Panels sheet's button on a phone. */
 async function openPanel(name: string, phone: boolean): Promise<void> {
   if (!phone) {
-    await page.getByRole("tab", { name: new RegExp(`^${name}( ?\\d+ unread)?$`) }).click();
+    await openSideTab(page, name);
     return;
   }
   const picker = page.getByRole("list", { name: "Panels" });

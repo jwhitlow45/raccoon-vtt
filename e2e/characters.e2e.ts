@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Deleting characters (features section 15), on the real server serving
@@ -114,11 +114,11 @@ async function setUp(page: Page, cdp: CDPSession, view: { width: number; height:
   await page.locator(".konvajs-content").first().waitFor();
 }
 
-/** The Characters panel: the side panel's tab where there is one, else a sheet from the tool bar's Panels list. */
+/** The Characters panel: the side panel's tab or More's item where there is a side panel, else a sheet from the tool bar's Panels list. */
 async function openCharacters(page: Page): Promise<Locator> {
-  const tab = page.getByRole("tab", { name: "Characters" });
-  if ((await tab.count()) > 0 && (await tab.first().isVisible())) {
-    await tab.first().click();
+  const tabs = page.getByRole("tablist", { name: "Panels" });
+  if ((await tabs.count()) > 0 && (await tabs.first().isVisible())) {
+    await openSideTab(page, "Characters");
     return page.getByRole("tabpanel", { name: "Characters" });
   }
   const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Characters"]');

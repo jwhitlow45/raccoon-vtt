@@ -233,6 +233,32 @@ export class Shots {
 
 type StageCamera = { x: number; y: number; scale: number };
 
+/** A side panel tab's name: its title, and what its count says when it carries one, "N unread" or the DM panel's "1 upload waiting". */
+export function sideTabName(title: string): RegExp {
+  return new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( \\d+ [a-z ]+)?$`);
+}
+
+/**
+ * Opens a panel in the side panel from 900 px up (docs/design-v1-panel-tabs.md
+ * 11.3): nothing when it is already chosen, a click on its tab where the
+ * row holds it, else More (the tab with a menu) and its item in More's
+ * list. Then waits for the tab panel named by it. `page` may be a part of
+ * the page, such as "view as a player"'s dialog with its own side panel.
+ */
+export async function openSideTab(page: Page | Locator, title: string): Promise<void> {
+  const name = sideTabName(title);
+  const list = page.getByRole("tablist", { name: "Panels" });
+  const tab = list.getByRole("tab", { name });
+  if ((await tab.count()) === 0 || (await tab.getAttribute("aria-selected")) !== "true") {
+    if ((await tab.count()) > 0 && (await tab.getAttribute("aria-haspopup")) === null) await tab.click();
+    else {
+      await list.locator('[role="tab"][aria-haspopup="menu"]').click();
+      await page.getByRole("menu", { name: "More panels" }).getByRole("menuitemradio", { name }).click();
+    }
+  }
+  await page.getByRole("tabpanel", { name }).waitFor();
+}
+
 /** The map stage's camera, read from Konva, which puts itself on the page as a global. */
 /**
  * Whether `target` shows whole and takes a tap as things stand, with

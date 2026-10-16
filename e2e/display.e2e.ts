@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * The table display (docs/design-v1-dm-tools.md 3.1) where the live play
@@ -183,7 +183,7 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
 
-    await dm.getByRole("tab", { name: "DM", exact: true }).click();
+    await openSideTab(dm, "DM");
     await dm.getByRole("button", { name: "Add a TV" }).click();
     const code = (await dm.locator('[aria-label^="Display code "]').textContent()) ?? "";
     await dm.getByRole("button", { name: "Done" }).click();
@@ -226,7 +226,7 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
   });
 
   test("3. a display following the DM shows the DM's view again after it reloads, with the DM's camera at rest", async () => {
-    await dm.getByRole("tab", { name: "DM", exact: true }).click();
+    await openSideTab(dm, "DM");
     await dm.getByRole("switch", { name: /^Show my view on the table display/ }).click();
     await dm.getByRole("switch", { name: /^Show my view on the table display/, checked: true }).waitFor();
     await tv.mouse.click(TV.width / 2, TV.height / 2);
@@ -642,14 +642,14 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
   });
 
   test("8. changing the player password warns that it signs the display out, and does", async () => {
-    await dm.getByRole("tab", { name: "Menu", exact: true }).click();
+    await openSideTab(dm, "Menu");
     await dm.getByRole("button", { name: /^Members/ }).click();
     await dm.getByText(/signs every player and table display out/).waitFor();
     await dm.getByRole("button", { name: "Change the password" }).click();
     await dm.getByText(/Table displays are signed out too and need a new code/).waitFor();
     await dm.getByRole("button", { name: "Change the password" }).last().click();
     await tv.getByRole("heading", { name: "This display was signed out" }).waitFor();
-    await dm.getByRole("tab", { name: "DM", exact: true }).click();
+    await openSideTab(dm, "DM");
     await dm.getByRole("status").filter({ hasText: "No table display is connected." }).waitFor();
   });
 

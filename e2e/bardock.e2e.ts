@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, dragCells, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The docked token action bar (docs/design-v1-bar-dock.md section 7) on the
@@ -675,7 +675,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await shots.take(dm, "bardock-fit-900");
 
     // The outliner's row for the far goblin selects it, opens its bar and frames it clear of where the bar docks.
-    await dm.getByRole("tab", { name: "Outliner" }).click();
+    await openSideTab(dm, "Outliner");
     await dm.getByRole("tabpanel").getByRole("button", { name: /^Far goblin/ }).first().click();
     await dm.getByRole("dialog", { name: "Far goblin actions" }).waitFor();
     await dm.waitForTimeout(300);
@@ -840,7 +840,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
 
   test("9. Viewing as Pat stays clear of the column, so Later on the previewed roll card takes the click, and Exit still works in a blackout (LPD-DESK-6)", async () => {
     await setUp(dm, { ...DESK, scale: 1 });
-    await dm.getByRole("tab", { name: "DM" }).click();
+    await openSideTab(dm, "DM");
     await dm.getByRole("button", { name: "View", exact: true }).click();
     const preview = dm.getByRole("dialog", { name: "Viewing as Pat" });
     await preview.waitFor();
@@ -923,7 +923,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await sidePanelChoice(dm, "shown");
     await setUp(dm, { width: 1180, height: 390, scale: 1 });
     await dm.locator('[data-alert="rolls"] > *').first().waitFor();
-    await dm.getByRole("tab", { name: "Outliner" }).click();
+    await openSideTab(dm, "Outliner");
     await dm.getByRole("tabpanel").getByLabel("Search the scene").fill("Goblin 2");
     await dm.getByRole("tabpanel").getByRole("button", { name: /^Goblin 2/ }).first().click();
     await dm.getByRole("dialog", { name: "Goblin 2 actions" }).waitFor();

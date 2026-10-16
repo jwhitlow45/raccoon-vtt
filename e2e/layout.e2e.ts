@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, readCamera, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pagePoint, readCamera, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * Layout and hierarchy (docs/design-v1-layout-hierarchy.md section 10):
@@ -1207,7 +1207,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     for (const name of ["Undo", "Redo"]) assert.equal(await topBar(desk).getByRole("button", { name, exact: true }).isVisible(), true, `${name} in the top bar`);
     assert.equal(await topBar(desk).getByLabel("Map phase").isVisible(), true, "the Phase menu fits a 1280 px row");
     if (await sidePanel(desk).isHidden()) await toolbar(desk).getByRole("button", { name: "Panels" }).click();
-    await desk.getByRole("tab", { name: "DM", exact: true }).click();
+    await openSideTab(desk, "DM");
     const panel = desk.getByRole("tabpanel", { name: "DM" });
     await panel.getByRole("heading", { name: "Players' screens" }).waitFor();
     assert.equal(await panel.getByRole("heading", { name: "Undo", exact: true }).count(), 0);
@@ -1413,7 +1413,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await side.waitFor({ state: "hidden" });
   });
 
-  test("6. a large phone held sideways starts with the side panel hidden, a rail tool takes the rail, and shown, the panel's tabs scroll in one row", async () => {
+  test("6. a large phone held sideways starts with the side panel hidden, a rail tool takes the rail, and shown, the panel's tabs stand in one row with More", async () => {
     await view(phone, phoneCdp, { width: 932, height: 430 }, { side: 59, bottom: 21 });
     await reloadAt(phone, 1);
     const side = sidePanel(phone);
@@ -1438,23 +1438,27 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
       return { header: parseFloat(w.getComputedStyle(header).paddingRight), toolbar: parseFloat(w.getComputedStyle(nav).paddingRight), left: parseFloat(w.getComputedStyle(header).paddingLeft) };
     });
     assert.deepEqual(pads, { header: 12, toolbar: 4, left: 59 + 12 });
-    // One row of tabs that scrolls, the chosen one in view.
+    // One row of tabs that does not scroll: Token and Initiative, then More (docs/design-v1-panel-tabs.md 9.1).
     const tablist = phone.getByRole("tablist", { name: "Panels" });
     const row = await tablist.evaluate((el) => {
       const e = el as unknown as DomEl;
       const tabs = Array.from(e.querySelectorAll('[role="tab"]'), (t) => t.getBoundingClientRect().top);
       return { scrolls: e.scrollWidth > e.clientWidth, rows: new Set(tabs.map(Math.round)).size };
     });
-    assert.deepEqual(row, { scrolls: true, rows: 1 });
-    // Hide panels draws its own icon, unlike the scrolling row's chevron a few pixels away.
+    assert.deepEqual(row, { scrolls: false, rows: 1 });
+    const more = tablist.locator('[role="tab"][aria-haspopup="menu"]');
+    const rowTabs = await tablist.locator('[role="tab"]:not([aria-haspopup])').allTextContents();
+    assert.deepEqual(rowTabs, ["Token", "Initiative"]);
+    assert.equal(await more.count(), 1, "More ends the row");
+    // Hide panels draws its own icon, unlike More's caret a few pixels away.
     const icons = await tablist.evaluate((el) => {
-      const e = el as unknown as DomEl & { parentElement: DomEl };
-      const hide = (globalThis as unknown as Dom).document.querySelector('button[aria-label="Hide panels"] svg') as unknown as { innerHTML: string } | null;
-      const chevrons = Array.from(e.parentElement.querySelectorAll('button[aria-hidden="true"] svg'), (svg) => (svg as unknown as { innerHTML: string }).innerHTML);
-      return { hide: hide?.innerHTML ?? "", chevrons };
+      const d = (globalThis as unknown as Dom).document;
+      const hide = d.querySelector('button[aria-label="Hide panels"] svg') as unknown as { innerHTML: string } | null;
+      const caret = (el as unknown as DomEl).querySelector('[aria-haspopup="menu"] svg') as unknown as { innerHTML: string } | null;
+      return { hide: hide?.innerHTML ?? "", caret: caret?.innerHTML ?? "" };
     });
-    assert.ok(icons.hide !== "" && icons.chevrons.length > 0, `no icons to compare: ${JSON.stringify(icons)}`);
-    assert.ok(!icons.chevrons.includes(icons.hide), "Hide panels looks like the tab row's scroll chevron");
+    assert.ok(icons.hide !== "" && icons.caret !== "", `no icons to compare: ${JSON.stringify(icons)}`);
+    assert.notEqual(icons.hide, icons.caret, "Hide panels looks like More's caret");
     const listBox = await box(tablist);
     const chosen = phone.getByRole("tab", { selected: true });
     const chosenBox = await box(chosen);
@@ -1465,16 +1469,26 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     assert.equal(await wholeInReach(body.getByRole("button", { name: "Next", exact: true })), true, "Next is in view");
     await shots.take(phone, "layout-932x430-side-panel-shown");
 
-    // The tab keys move along the scrolled row, and the tab they reach scrolls into view.
+    // The tab keys move along Token, Initiative and More, which takes focus and chooses nothing.
     await chosen.focus();
-    for (const key of ["ArrowRight", "End", "Home", "ArrowLeft"]) {
+    const isFocused = (target: Locator) => target.evaluate((el) => el === el.ownerDocument.activeElement);
+    for (const [key, to] of [
+      ["ArrowRight", "More"],
+      ["Home", "Token"],
+      ["ArrowLeft", "More"],
+      ["ArrowLeft", "Initiative"],
+      ["End", "More"],
+    ] as const) {
       await phone.keyboard.press(key);
       const f = await focused(phone);
       assert.equal(f.role, "tab", `${key} left the tabs`);
-      const tab = phone.getByRole("tab", { selected: true });
-      const b = await box(tab);
+      const target = to === "More" ? more : tablist.getByRole("tab", { name: to, exact: true });
+      assert.ok(await isFocused(target), `${key} goes to ${to}: ${JSON.stringify(f)}`);
+      if (to === "More") assert.equal(await more.getAttribute("aria-selected"), "false", `${key}: More chooses nothing`);
+      else assert.equal(await target.getAttribute("aria-selected"), "true", `${key}: ${to} is chosen`);
+      const b = await box(target);
       const list = await box(tablist);
-      assert.ok(b.x >= list.x - 1 && b.x + b.width <= list.x + list.width + 1, `${key}: the tab it chose is in view`);
+      assert.ok(b.x >= list.x - 1 && b.x + b.width <= list.x + list.width + 1, `${key}: ${to} is in view`);
     }
     await phone.getByRole("tab", { name: "Initiative" }).click();
     await endFight();
@@ -1487,7 +1501,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await view(player, playerCdp, { width: 1280, height: 800 });
     await reloadAt(player, 1);
     const side = sidePanel(player);
-    await player.getByRole("tab", { name: /^Journal/ }).click();
+    await openSideTab(player, "Journal");
     await player.getByRole("tabpanel", { name: /^Journal/ }).getByRole("button", { name: /^Lore/ }).click();
     await player.getByRole("heading", { name: "Lore" }).waitFor();
     await player.getByRole("button", { name: "Hide panels" }).click();
@@ -1498,7 +1512,10 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await panels.click();
     await side.waitFor();
     await player.getByText("The citadel fell at dawn.").waitFor();
-    await waitFor("the page read once it shows", async () => ((await player.getByRole("tab", { name: /^Journal/ }).getByText("unread").count()) === 0 ? true : null));
+    // The Journal is in More at 1280 x 800: More says its count in its description, and its corner badge shows it.
+    const more = player.getByRole("tablist", { name: "Panels" }).locator('[role="tab"][aria-haspopup="menu"]');
+    const described = () => more.evaluate((el) => el.ownerDocument.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent ?? "");
+    await waitFor("the page read once it shows", async () => (!(await described()).includes("unread") ? true : null));
     await player.getByRole("button", { name: "Back to Journal" }).click();
   });
 
@@ -1954,7 +1971,7 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
 
     test("8. the DM's Library: handouts first, clean-up at the foot, and every tile opening the viewer", async () => {
       run.tokenImage = await upload(dmContext, "token", await square([200, 160, 60]));
-      await dm.getByRole("tab", { name: "Library", exact: true }).click();
+      await openSideTab(dm, "Library");
       const handouts = dm.getByRole("tabpanel", { name: "Library" }).getByRole("list", { name: "Handouts in this room" });
       await handouts.waitFor();
       // Handouts, Maps, Token images, then the clean-up under its label.
@@ -2022,7 +2039,7 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
       await upload(deskContext, "token", await square([180, 60, 60]));
       await popup(desk).getByRole("button", { name: `Close ${run.handoutTitle}` }).click();
       await popup(desk).waitFor({ state: "detached" });
-      await desk.getByRole("tab", { name: "Library", exact: true }).click();
+      await openSideTab(desk, "Library");
       await desk.getByRole("list", { name: "Token images in this room" }).getByRole("button", { name: /^Token image/ }).first().click();
       const viewer = desk.getByRole("dialog", { name: "Token image" });
       await loaded(viewer, "Token image");
@@ -2151,12 +2168,10 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
     shotsTaken.push(file);
   }
 
-  /** The side panel's tab panel after its tab is chosen, found by the tab's name. */
+  /** The side panel's tab panel after its tab is chosen, or its item in More's list, found by the panel's name. */
   async function sideTab(page: Page, name: string): Promise<Locator> {
-    await page.getByRole("tablist", { name: "Panels" }).getByRole("tab", { name, exact: true }).click();
-    const panel = page.getByRole("tabpanel", { name });
-    await panel.waitFor();
-    return panel;
+    await openSideTab(page, name);
+    return page.getByRole("tabpanel", { name: sideTabName(name) });
   }
 
   /** On a phone: the panel's sheet, opened from the list of panels. */

@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type Request, type Route } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { A5, BANDS, LETTER, LETTER_WIDE, bandProblem, fontBoxDistance, pdfOf, shapeProblem, type PdfPage } from "./pdfFixture.ts";
 
 /**
@@ -153,9 +153,17 @@ function pagesOf(count: number, size: PdfPage): PdfPage[] {
   return Array.from({ length: count }, () => size);
 }
 
-/** The DM panel's tab. Its name gains "1 upload waiting" while a PDF upload waits on the DM. */
-function dmTab(): Locator {
-  return dm.getByRole("tab", { name: /^DM( |$)/ });
+/**
+ * What the DM panel's count says, "1 upload waiting" while a PDF upload
+ * waits on the DM: on its tab where the side panel's row holds it, else in
+ * the description of More, which counts the panels it holds.
+ */
+async function dmCount(): Promise<string> {
+  const list = dm.getByRole("tablist", { name: "Panels" });
+  const tab = list.getByRole("tab", { name: sideTabName("DM") });
+  if ((await tab.count()) > 0 && (await tab.getAttribute("aria-haspopup")) === null) return (await tab.textContent()) ?? "";
+  const described = await list.locator('[role="tab"][aria-haspopup="menu"]').getAttribute("aria-describedby");
+  return described ? ((await dm.locator(`[id="${described}"]`).textContent()) ?? "") : "";
 }
 
 function handoutForm(): Locator {
@@ -164,7 +172,7 @@ function handoutForm(): Locator {
 
 /** Opens Show a handout in the DM panel, ready for Upload a file, letting go of an image the form holds. */
 async function openForm(): Promise<void> {
-  await dmTab().click();
+  await openSideTab(dm, "DM");
   const open = dm.getByRole("button", { name: "Show a handout" });
   // The panel draws a moment after its tab is pressed: the button when the form is closed, else the form.
   await open.or(handoutForm()).first().waitFor();
@@ -696,9 +704,9 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await shown(block, "Preparing page 2 of 30…").waitFor();
 
     // The DM panel closed and opened again: the job went on meanwhile, and its block shows the same progress.
-    await dm.getByRole("tab", { name: "Library", exact: true }).click();
+    await openSideTab(dm, "Library");
     await block.waitFor({ state: "hidden" });
-    await dmTab().click();
+    await openSideTab(dm, "DM");
     await shown(block, "Preparing page 2 of 30…").waitFor();
     assert.equal(await block.getByRole("progressbar", { name: "Pages uploaded" }).getAttribute("aria-valuenow"), "1");
     await shots.take(dm, "pdf-job-panel-reopened");
@@ -739,14 +747,14 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
 
     // Page 4's upload fails while the block is out of sight: a toast, and the DM panel's badge.
     await waitFor("page 4's upload", () => atFourth);
-    await dm.getByRole("tab", { name: "Library", exact: true }).click();
+    await openSideTab(dm, "Library");
     await block.waitFor({ state: "hidden" });
     // The block's sight is read by an observer, which reports on the next frame.
     await dm.waitForTimeout(300);
     consoles.dm.allow = [/net::ERR_INTERNET_DISCONNECTED/];
     fourth.release();
     await dm.getByText("The PDF upload paused at page 4. Open Handouts in the DM panel to go on.").waitFor();
-    await waitFor("the DM panel's badge", async () => /1 upload waiting/.test((await dmTab().textContent()) ?? ""));
+    await waitFor("the DM panel's badge", async () => /1 upload waiting/.test(await dmCount()));
     await shots.take(dm, "pdf-job-paused-toast");
 
     // On a phone's width the Panels button counts the waiting upload.
@@ -757,7 +765,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await dm.setViewportSize({ width: 1280, height: 800 });
 
     // Try again finishes all 30, in order.
-    await dmTab().click();
+    await openSideTab(dm, "DM");
     await shown(block, "The upload stopped at page 4. Check your connection.").waitFor();
     await shots.take(dm, "pdf-job-paused");
     await block.getByRole("button", { name: "Try again", exact: true }).click();
@@ -800,7 +808,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await dm.reload();
     await (hung as Route | null)?.abort().catch(() => {});
     await dm.unroute(HANDOUT_PUT);
-    await dmTab().click();
+    await openSideTab(dm, "DM");
     const recovery = jobBlock("Torn map");
     await shown(recovery, "A PDF upload did not finish: Torn map, 3 pages are in the library.").waitFor({ timeout: 30_000 });
     await shots.take(dm, "pdf-recovery");
@@ -937,7 +945,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
   });
 
   test("7d. the DM's Showing now: the thumbnail opens the viewer at the players' showing with its details, focus comes back to it, and the document's View has a key of its own (8.4)", async () => {
-    await dmTab().click();
+    await openSideTab(dm, "DM");
     const thumb = dm.getByRole("list", { name: "Handouts showing" }).getByRole("button", { name: "View Strange letter" });
     await thumb.click();
     const view = viewer(dm, "Strange letter");
@@ -981,7 +989,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
       await slow.held;
       await route.continue();
     });
-    await dmTab().click();
+    await openSideTab(dm, "DM");
     await dm.getByRole("list", { name: "Handouts showing" }).getByRole("button", { name: "View Strange letter" }).click();
     const view = viewer(dm, "Strange letter");
     await view.waitFor();
@@ -1363,7 +1371,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
 
   test("12. the DM's Library: the document as one tile with its pages, its details in the viewer, no Delete while it shows, then Delete with its pages", async () => {
     const letter = run.letter!;
-    await dm.getByRole("tab", { name: "Library", exact: true }).click();
+    await openSideTab(dm, "Library");
     const library = dm.getByRole("tabpanel", { name: "Library" });
     const handouts = library.getByRole("list", { name: "Handouts in this room" });
     const tile = handouts.getByRole("button", { name: "Strange letter, handout, 3 pages, showing now", exact: true });
@@ -1437,7 +1445,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
   test("13. view as a player: the popup with every page", async () => {
     const doc = await documentOf("Second letter", [await paper(1584, 2048, 1), await paper(1584, 2048, 2), await paper(1584, 2048, 3)]);
     const shown = await show(doc);
-    await dm.getByRole("tab", { name: "DM", exact: true }).click();
+    await openSideTab(dm, "DM");
     await dm.getByLabel("View as a player").selectOption({ label: "Pip" });
     await dm.getByRole("button", { name: "View", exact: true }).click();
     const preview = dm.getByRole("dialog", { name: "Viewing as Pip" });
@@ -1455,7 +1463,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
 
   test("14. every Library tile opens the viewer: the DM's image with its details and Delete in the header, focus on the next tile after, and a player's with neither (8.4)", async () => {
     const loose = [await uploadHandout(await paper(800, 600, 3)), await uploadHandout(await paper(800, 600, 4))];
-    await dm.getByRole("tab", { name: "Library", exact: true }).click();
+    await openSideTab(dm, "Library");
     const library = dm.getByRole("tabpanel", { name: "Library" });
     const handouts = library.getByRole("list", { name: "Handouts in this room" });
     const tileOf = (id: string) => handouts.locator(`li:has(img[src*="${id}"]) > button`);
@@ -1518,7 +1526,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await indicatorIs(popup, "2 of 3", "Next page in the popup");
     await popup.getByRole("button", { name: /^Close/ }).click();
     await popup.waitFor({ state: "detached" });
-    await desk.getByRole("tab", { name: /^Library/ }).click();
+    await openSideTab(desk, "Library");
     await desk.getByRole("list").getByRole("button", { name: "View Last letter" }).click();
     await popup.waitFor();
     await indicatorIs(popup, "2 of 3", "the showing's own page, as the popup left it");
@@ -1614,7 +1622,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     }
 
     // A computer's side panel.
-    await dm.getByRole("tab", { name: "Library", exact: true }).click();
+    await openSideTab(dm, "Library");
     const side = dm.getByRole("tabpanel", { name: "Library" });
     const sideTile = side.getByRole("list", { name: "Handouts in this room" }).getByRole("button", { name: "Loop letter, handout, 2 pages, showing now", exact: true });
     await sideTile.click();

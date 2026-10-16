@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, dragCells, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragCells, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Older features on a wave 4 build that the live play review after wave 4
@@ -196,7 +196,7 @@ describe("raccoon-vtt older features on a wave 4 build", { timeout: 180_000 }, (
     await ops.send(creature(run.litId, "Lit goblin", 5, { disposition: "hostile" }));
     await ops.send(creature(run.darkId, "Dark goblin", 14, { disposition: "hostile" }));
 
-    await dm.getByRole("tab", { name: "Scenes" }).click();
+    await openSideTab(dm, "Scenes");
     await dm.getByRole("button", { name: new RegExp(`^${SCENE_NAME}`) }).click();
     await waitFor("the DM on the vision scene", () => dmSocket.you?.sceneId === run.sceneId || null, 30_000);
     await dm.getByRole("button", { name: `Move players to ${SCENE_NAME}` }).click();
@@ -300,7 +300,7 @@ describe("raccoon-vtt older features on a wave 4 build", { timeout: 180_000 }, (
     await shots.take(player, "regress-member-color-picked");
 
     // The DM's Members list: Pat's dot, and Purple named as Pat's in the DM's own picker.
-    await dm.getByRole("tab", { name: "Menu", exact: true }).click();
+    await openSideTab(dm, "Menu");
     await dm.getByRole("button", { name: /^Members/ }).click();
     const patDot = dm.getByRole("list", { name: "Members" }).getByRole("listitem").filter({ hasText: "Pat" }).locator("span[aria-hidden]").first();
     await waitFor("Pat's purple dot in the DM's list", async () => ((await backgroundOf(patDot)) === "rgb(142, 78, 198)" ? true : null));

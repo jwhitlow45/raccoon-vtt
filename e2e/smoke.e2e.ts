@@ -7,7 +7,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 import sharp from "sharp";
 import type { RoomState, Scene, Token } from "#shared/model.ts";
 import { generatePassphrase } from "#shared/passphrase.ts";
-import { ConsoleWatch, dragCells, dragWorld, measureSnapshot, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragCells, dragWorld, measureSnapshot, openSideTab, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * The Stage 3 smoke run (design section 18): the real server serving the
@@ -202,7 +202,7 @@ describe("raccoon-vtt smoke run", { timeout: 300_000 }, () => {
   test("3. the DM uploads a map, makes a scene of it and moves the players there", async () => {
     const file = path.join(work, MAP.file);
     await makeMap(file);
-    await dm.getByRole("tab", { name: "Scenes" }).click();
+    await openSideTab(dm, "Scenes");
     await dm.getByRole("radio", { name: "Map image" }).click();
     await dm.getByRole("button", { name: "Choose a map image" }).setInputFiles(file);
     await dm.getByRole("button", { name: "Upload and create" }).click();
@@ -225,7 +225,7 @@ describe("raccoon-vtt smoke run", { timeout: 300_000 }, () => {
 
   test("4. the DM places a monster and the player's character, and the player moves it", async () => {
     // The player's character, owned by Pat, placed at cell (2, 3).
-    await dm.getByRole("tab", { name: "Characters" }).click();
+    await openSideTab(dm, "Characters");
     await dm.getByRole("button", { name: "New character" }).click();
     await dm.getByLabel("Name", { exact: true }).fill("Thorn");
     await dm.getByLabel("Pat").check();
@@ -472,7 +472,7 @@ describe("raccoon-vtt smoke run", { timeout: 300_000 }, () => {
 
   test("12. a blackout sends the player none of the table, a reload included, and lifting it brings the table back", async () => {
     const paused = player.getByText("The DM has paused the game.");
-    await dm.getByRole("tab", { name: "DM", exact: true }).click();
+    await openSideTab(dm, "DM");
     const blackout = dm.getByRole("switch", { name: /^Black out players' screens/ });
     await blackout.click();
     await paused.waitFor();
@@ -496,7 +496,7 @@ describe("raccoon-vtt smoke run", { timeout: 300_000 }, () => {
     await dmContext.grantPermissions(["clipboard-read", "clipboard-write"], { origin: server.origin });
     const clipboard = () => dm.evaluate<string>("navigator.clipboard.readText()");
     const passwordIn = (link: string) => new URL(link).hash.slice("#pw=".length);
-    await dm.getByRole("tab", { name: "Menu", exact: true }).click();
+    await openSideTab(dm, "Menu");
     const copy = dm.getByRole("button", { name: "Copy player link" });
     await copy.click();
     assert.equal(decodeURIComponent(passwordIn(await clipboard())), run.password);
@@ -557,7 +557,7 @@ async function setInitiative(page: Page, name: RegExp, value: string): Promise<v
 }
 
 async function placeMonster(name: string, cell: { x: number; y: number }): Promise<void> {
-  await dm.getByRole("tab", { name: "Monsters" }).click();
+  await openSideTab(dm, "Monsters");
   const back = dm.getByRole("button", { name: "Back to Monsters" });
   if (await back.isVisible()) await back.click();
   await dm.getByLabel("Search monsters").fill(name);

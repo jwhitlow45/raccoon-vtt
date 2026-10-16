@@ -5,17 +5,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, readCamera, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
+import { ConsoleWatch, openSideTab, OpSocket, pagePoint, readCamera, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * A DM at a computer with a keyboard, after the design pass's live play:
  *
  * - The side panel's tabs are one Tab stop. Left and Right on a focused
- *   tab switch tabs, Home and End go to the ends, and a selected token
- *   stays where it is. A tab whose panel shows a subpage, such as a
- *   journal page, keeps focus when chosen, so the next arrow still moves
- *   along the tabs.
+ *   tab switch tabs and reach More without choosing, Home and End go to
+ *   the ends, and a selected token stays where it is. A panel picked from
+ *   More by keyboard while it shows a subpage, such as a journal page,
+ *   leaves focus on More, so the next arrow still moves along the tabs.
  * - A dialog with a field that focuses itself (a new journal page's
  *   title, a pasted stat block) keeps that field focused, and closing it
  *   gives focus back to the button that opened it, not to the page.
@@ -163,36 +163,44 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     await waitFor("the goblin in the DM's view", () => goblin());
   });
 
-  test("2. Left and Right on a focused panel tab switch tabs, Home and End go to the ends, and a selected token stays put", async () => {
+  test("2. Left and Right on a focused panel tab switch tabs and reach More without choosing, Home and End go to the ends, and a selected token stays put", async () => {
     const p = await pagePoint(dm, run.bounds, { x: run.goblin.x + 0.5, y: run.goblin.y + 0.5 });
     await dm.mouse.click(p.x, p.y);
     await dm.getByRole("dialog", { name: "Goblin actions" }).waitFor();
-    const tabs = dm.getByRole("tablist", { name: "Panels" }).getByRole("tab");
-    const names = (await tabs.allTextContents()).map((t) => t.trim());
-    const log = names.findIndex((n) => n.startsWith("Log"));
-    assert.ok(log > 0, `the tabs are ${names.join(", ")}`);
-    const chosen = async () => {
-      const f = await focused(dm);
-      assert.equal(f.role, "tab", `focus left the tabs for ${JSON.stringify(f)}`);
-      const selected = await tabs.evaluateAll((els) => els.map((el) => (el as unknown as { getAttribute(n: string): string | null }).getAttribute("aria-selected")));
-      const stops = await tabs.evaluateAll((els) => els.filter((el) => (el as unknown as { tabIndex: number }).tabIndex === 0).length);
-      assert.equal(stops, 1, "the row is one Tab stop");
-      assert.equal(names[selected.indexOf("true")], f.name, "the focused tab is the chosen one");
-      return f.name;
+    const list = dm.getByRole("tablist", { name: "Panels" });
+    const more = list.locator('[role="tab"][aria-haspopup="menu"]');
+    const isFocused = (target: Locator) => target.evaluate((el) => el === el.ownerDocument.activeElement);
+    const oneStop = async () => assert.equal(await list.locator('[role="tab"][tabindex="0"]').count(), 1, "the row is one Tab stop");
+    // On a tab: focused and chosen. On More: focused, choosing nothing, the tab chosen before still chosen.
+    const on = async (name: string) => {
+      const tab = list.getByRole("tab", { name: sideTabName(name) });
+      assert.ok(await isFocused(tab), `focus is on ${name}: ${JSON.stringify(await focused(dm))}`);
+      assert.equal(await tab.getAttribute("aria-selected"), "true", `${name} is chosen`);
+      await oneStop();
+    };
+    const onMore = async (chosen: string) => {
+      assert.ok(await isFocused(more), `focus is on More: ${JSON.stringify(await focused(dm))}`);
+      assert.equal(await more.getAttribute("aria-selected"), "false", "More chooses nothing");
+      assert.equal(await list.getByRole("tab", { name: sideTabName(chosen) }).getAttribute("aria-selected"), "true", `${chosen} stays chosen`);
+      assert.equal(await dm.getByRole("menu").count(), 0, "and opens nothing");
     };
 
-    await tabs.nth(log).focus();
+    await list.getByRole("tab", { name: sideTabName("Log") }).focus();
     await dm.keyboard.press("ArrowLeft");
-    assert.equal(await chosen(), names[log - 1]);
+    await on("Initiative");
     await dm.keyboard.press("ArrowRight");
-    assert.equal(await chosen(), names[log]);
-    await dm.keyboard.press("Home");
-    assert.equal(await chosen(), names[0]);
+    await on("Log");
+    await dm.keyboard.press("ArrowRight");
+    await onMore("Log");
+    await dm.keyboard.press("ArrowRight");
+    await on("Token");
     await dm.keyboard.press("ArrowLeft");
-    assert.equal(await chosen(), names[names.length - 1], "Left from the first wraps to the last");
+    await onMore("Token");
     await dm.keyboard.press("Home");
+    await on("Token");
     await dm.keyboard.press("End");
-    assert.equal(await chosen(), names[names.length - 1]);
+    await onMore("Token");
+    await dm.keyboard.press("Home");
     await dm.keyboard.press("PageDown");
     await dm.keyboard.press("ArrowUp");
     // Nothing comes back to wait for when nothing moves, so this gives a stray move time to reach the DM's view.
@@ -202,7 +210,7 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
   });
 
   test("3. a dialog keeps its own field focused and gives focus back to its opener on close", async () => {
-    await dm.getByRole("tab", { name: "Journal", exact: true }).click();
+    await openSideTab(dm, "Journal");
     // The side panel's tab panel is named by its chosen tab.
     const newPage = dm.getByRole("tabpanel", { name: "Journal" }).getByRole("button", { name: "New page" });
     await newPage.focus();
@@ -213,7 +221,7 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     await dm.getByRole("dialog", { name: "New page" }).waitFor({ state: "detached" });
     assert.deepEqual(await focused(dm), { tag: "button", role: null, name: "New page" }, "Escape gives focus back to New page");
 
-    await dm.getByRole("tab", { name: "Monsters", exact: true }).click();
+    await openSideTab(dm, "Monsters");
     const paste = dm.getByRole("tabpanel").getByRole("button", { name: "Paste a stat block" });
     await paste.focus();
     await dm.keyboard.press("Enter");
@@ -226,12 +234,10 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     assert.deepEqual(await focused(dm), { tag: "button", role: null, name: "Paste a stat block" }, "Cancel gives focus back to Paste a stat block");
   });
 
-  test("4. arrowing onto a tab whose panel shows a journal page keeps focus on the tabs, and the selected token stays put", async () => {
+  test("4. picking from More by keyboard a panel that shows a journal page keeps focus on More, and the selected token stays put", async () => {
     await ops.send({ t: "journal.create", page: { id: randomUUID(), title: "Lore", access: "all", blocks: [{ id: randomUUID().replace(/-/g, "").slice(0, 12), text: "The citadel fell." }] } });
-    // The Journal tab's name may carry its unread count.
-    const journalTab = dm.getByRole("tab", { name: /^Journal/ });
-    await journalTab.click();
-    await dm.getByRole("tabpanel", { name: /^Journal/ }).getByRole("button", { name: /^Lore/ }).click();
+    await openSideTab(dm, "Journal");
+    await dm.getByRole("tabpanel", { name: sideTabName("Journal") }).getByRole("button", { name: /^Lore/ }).click();
     await dm.getByRole("heading", { name: "Lore" }).waitFor();
     assert.deepEqual(await focused(dm), { tag: "h2", role: null, name: "Lore" }, "a page opened from its row still takes focus to its title");
     const at = goblin();
@@ -240,31 +246,38 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     await dm.mouse.click(p.x, p.y);
     await dm.getByRole("dialog", { name: "Goblin actions" }).waitFor();
 
-    const tabs = dm.getByRole("tablist", { name: "Panels" }).getByRole("tab");
-    const names = (await tabs.allTextContents()).map((t) => t.trim());
-    const journal = names.findIndex((n) => n.startsWith("Journal"));
-    assert.ok(journal !== -1, `the tabs are ${names.join(", ")}`);
-    await tabs.nth((journal + 1) % names.length).click();
-    await dm.keyboard.press("ArrowLeft");
+    const list = dm.getByRole("tablist", { name: "Panels" });
+    const more = list.locator('[role="tab"][aria-haspopup="menu"]');
+    const isFocused = (target: Locator) => target.evaluate((el) => el === el.ownerDocument.activeElement);
+    const log = list.getByRole("tab", { name: sideTabName("Log") });
+    await log.click();
+    await dm.keyboard.press("ArrowRight");
+    assert.ok(await isFocused(more), "Right from Log reaches More");
+    await dm.keyboard.press("Enter");
+    const item = dm.getByRole("menu", { name: "More panels" }).getByRole("menuitemradio", { name: sideTabName("Journal") });
+    await waitFor("focus on Journal in More's list", async () => ((await isFocused(item)) ? true : null));
+    await dm.keyboard.press("Enter");
     await dm.getByRole("heading", { name: "Lore" }).waitFor();
-    assert.deepEqual(await focused(dm), { tag: "button", role: "tab", name: names[journal] }, "choosing Journal left focus on its tab, not on the page's title");
+    assert.ok(await isFocused(more), `choosing Journal left focus on More, not on the page's title: ${JSON.stringify(await focused(dm))}`);
+    assert.equal(await more.getAttribute("aria-selected"), "true");
+    assert.ok(await list.getByRole("tab", { name: sideTabName("Journal"), selected: true }).isVisible(), "More is named by the Journal");
     await dm.keyboard.press("ArrowLeft");
-    const before = names[(journal - 1 + names.length) % names.length]!;
-    assert.deepEqual(await focused(dm), { tag: "button", role: "tab", name: before }, "the next arrow moved along the tabs");
+    assert.ok(await isFocused(log), "the next arrow moved along the tabs");
+    assert.equal(await log.getAttribute("aria-selected"), "true");
     // Nothing comes back to wait for when nothing moves, so this gives a stray move time to reach the DM's view.
     await dm.waitForTimeout(500);
     assert.deepEqual(goblin(), at, "the goblin stayed where it was");
 
     await dm.keyboard.press("Escape");
-    await journalTab.click();
+    await openSideTab(dm, "Journal");
     await dm.getByRole("button", { name: "Back to Journal" }).click();
-    await dm.getByRole("tabpanel", { name: /^Journal/ }).getByRole("button", { name: "New page" }).waitFor();
+    await dm.getByRole("tabpanel", { name: sideTabName("Journal") }).getByRole("button", { name: "New page" }).waitFor();
   });
 
   test("5. closing the map import dialog gives focus back to its file picker", async () => {
     const file = path.join(work, "Desk_keep.dd2vtt");
     await writeUvtt(file);
-    await dm.getByRole("tab", { name: "Scenes", exact: true }).click();
+    await openSideTab(dm, "Scenes");
     const picker = dm.getByRole("tabpanel").getByLabel("From a Universal VTT file");
     await picker.focus();
     await picker.setInputFiles(file);
@@ -299,7 +312,7 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
   });
 
   test("7. the monster editor's question before it throws away a paste is read out, so a second Escape never discards unheard (LPD-DESK-8)", async () => {
-    await dm.getByRole("tab", { name: "Monsters", exact: true }).click();
+    await openSideTab(dm, "Monsters");
     await dm.getByRole("tabpanel").getByRole("button", { name: "Paste a stat block" }).click();
     const editor = dm.getByRole("dialog", { name: "New monster" });
     await editor.waitFor();
@@ -316,7 +329,7 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     const section = (heading: string) => panel.locator("section").filter({ has: dm.getByRole("heading", { name: heading, exact: true }) }).last();
 
     // Menu's X-card opens at its words, never at the X that sends it.
-    await dm.getByRole("tab", { name: "Menu", exact: true }).click();
+    await openSideTab(dm, "Menu");
     await panel.getByRole("button", { name: /^X-card/ }).focus();
     await dm.keyboard.press("Enter");
     await waitFor("the X-card's words focused", async () => {
@@ -327,7 +340,7 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     await waitFor("the X-card button focused again", async () => (await focused(dm)).name.startsWith("X-card"));
 
     // The DM panel's handout form opens at its first field, and Show gives focus back to its button.
-    await dm.getByRole("tab", { name: "DM", exact: true }).click();
+    await openSideTab(dm, "DM");
     await panel.getByRole("button", { name: "Show a handout" }).click();
     await waitFor("the handout form's first field focused", async () => (await focused(dm)).name === "From the library");
     const image = path.join(work, "letter.png");
@@ -340,7 +353,7 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     await waitFor("Show a handout focused again", async () => (await focused(dm)).name === "Show a handout");
 
     // On the players' scene the map image's picker comes after a warning, which it names as its description.
-    await dm.getByRole("tab", { name: "Scenes", exact: true }).click();
+    await openSideTab(dm, "Scenes");
     await section("This scene").getByRole("button", { name: "Add a map image" }).click();
     await waitFor("the image picker focused", async () => {
       const f = await focused(dm);

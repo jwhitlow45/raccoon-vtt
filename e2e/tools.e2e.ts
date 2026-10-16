@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Download, type Page } from "playwright-core";
 import sharp from "sharp";
 import type { RoomState } from "#shared/model.ts";
-import { ConsoleWatch, dragCells, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * The v1 wave 5 run (docs/design-v1-dm-tools.md section 4, 5I): the real
@@ -273,7 +273,7 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
   });
 
   test("2. a TV pairs with a code and shows the player scene, its images through its own route", async () => {
-    await dm.getByRole("tab", { name: "DM", exact: true }).click();
+    await openSideTab(dm, "DM");
     await dm.getByRole("button", { name: "Add a TV" }).click();
     const shown = dm.locator('[aria-label^="Display code "]');
     await shown.waitFor();
@@ -401,7 +401,7 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     assert.ok(!playerSocket.everSaw(SECRET), "the secret reached the player before the reveal");
     assert.ok(!tvSocket.everSaw(SECRET), "the secret reached the display before the reveal");
 
-    await dm.getByRole("tab", { name: "Journal" }).click();
+    await openSideTab(dm, "Journal");
     await dm.getByRole("button", { name: /^Old map/ }).click();
     run.revealedAt = playerSocket.received.length;
     await dm.getByRole("region", { name: "Secret" }).getByRole("button", { name: "Reveal" }).click();

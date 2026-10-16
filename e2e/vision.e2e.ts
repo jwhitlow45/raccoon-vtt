@@ -11,7 +11,7 @@ import { decodeTile, getBit, isCellFullyFogged, TILE_CELLS } from "#shared/rules
 import { groundAt } from "#shared/rules/heights.ts";
 import { partyMember, partySight, type VisionWorld } from "#shared/rules/vision.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
-import { assertCanvasAt, ConsoleWatch, dragCells, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { assertCanvasAt, ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * The v1 wave 4 run (docs/design-v1-maps-vision.md section 4): the real
@@ -360,7 +360,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
     await layOut();
 
-    await dm.getByRole("tab", { name: "Scenes" }).click();
+    await openSideTab(dm, "Scenes");
     await dm.getByRole("button", { name: new RegExp(`^${SCENE_NAME}`) }).click();
     await waitFor("the DM on the vision scene", () => dmSocket.you?.sceneId === run.sceneId || null, 30_000);
     await waitFor("the party's sight in the DM's state", () => Object.keys(sightTilesOf(dmSocket.state)).length > 0 || null);
@@ -374,7 +374,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     run.startSight = sightFromDm();
     assert.equal(run.startSight.seesToken({ size: "medium", x: 11, y: 4 }), true, "the torch reaches (11, 4)");
     assert.equal(run.startSight.seesToken({ size: "medium", x: 12, y: 4 }), false, "the torch stops short of (12, 4)");
-    await dm.getByRole("tab", { name: "Scenes" }).click();
+    await openSideTab(dm, "Scenes");
     await shots.take(dm, "vision-dm-scene");
     await shots.take(player, "vision-player-torchlight");
   });

@@ -6,7 +6,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import sharp from "sharp";
 import type { BuildChunk, RoomState, Scene, Stamp } from "#shared/model.ts";
-import { ConsoleWatch, dragWorld, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragWorld, openSideTab, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * The v1 wave 3 run (docs/design-v1-maps-vision.md section 3): the real
@@ -217,7 +217,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
   test("2. the DM imports a Universal VTT file and gets its image, walls, doors and light", async () => {
     const file = path.join(work, UVTT.file);
     await writeUvtt(file);
-    await dm.getByRole("tab", { name: "Scenes" }).click();
+    await openSideTab(dm, "Scenes");
     await dm.getByLabel("From a Universal VTT file").setInputFiles(file);
     const dialog = dm.getByRole("dialog", { name: "Import a Universal VTT map" });
     await dialog.getByText("11 × 9 squares, 500 × 400 pixels.").waitFor({ timeout: 30_000 });
@@ -375,7 +375,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
   test("7. the DM duplicates the scene, which the player never receives", async () => {
     const original = wallsOf(dmSocket.state, run.sceneId);
     const before = sceneOf(dmSocket.state, run.sceneId)!;
-    await dm.getByRole("tab", { name: "Scenes" }).click();
+    await openSideTab(dm, "Scenes");
     await dm.getByRole("button", { name: `More for ${UVTT.name}` }).click();
     await dm.getByRole("button", { name: /^Duplicate…/ }).click();
     await dm.getByRole("button", { name: "Duplicate", exact: true }).click();

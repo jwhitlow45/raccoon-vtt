@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The token panel, the stat summary and AC on tokens
@@ -701,7 +701,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
   });
 
   test("3c. a character's card folded while a changed field holds focus keeps what was typed", async () => {
-    await dm.getByRole("tab", { name: "Characters" }).click();
+    await openSideTab(dm, "Characters");
     const list = dm.getByRole("tabpanel", { name: "Characters" });
     const card = list.getByRole("button", { name: /^Thorn/ }).and(list.locator("[aria-expanded]"));
     await card.click();
@@ -1196,7 +1196,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await dm.route(/\/assets\/monsters-[^/]*\.js$/, (route) => route.abort());
     dmConsole.allow = [/monsters-/, /dynamically imported module/, /ERR_FAILED|net::/];
     await setUp(dm, dmCdp, DESK, null);
-    await dm.getByRole("tab", { name: "Monsters" }).click();
+    await openSideTab(dm, "Monsters");
     const monsters = dm.getByRole("tabpanel", { name: "Monsters" });
     await monsters.getByText("The monster list did not load. Reload to try again.").waitFor();
     assert.equal(await monsters.getByRole("button", { name: "Try again" }).count(), 0);
@@ -1211,14 +1211,14 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await reloaded;
     dmConsole.allow = [];
     await dm.getByRole("status", { name: "Connected" }).first().waitFor();
-    await dm.getByRole("tab", { name: "Monsters" }).click();
+    await openSideTab(dm, "Monsters");
     await dm.getByRole("tabpanel", { name: "Monsters" }).getByText("SRD 5.2.1 (330)", { exact: true }).waitFor();
   });
 
   test("8b. viewing as Pat: Stat block opens the preview's own panel at the SRD block, and nothing there writes the folds", async () => {
     await setUp(dm, dmCdp, DESK, null);
     await dm.getByRole("tab", { name: "Initiative" }).click();
-    await dm.getByRole("tab", { name: "DM" }).click();
+    await openSideTab(dm, "DM");
     await dm.getByRole("button", { name: "View", exact: true }).click();
     const preview = dm.getByRole("dialog", { name: "Viewing as Pat" });
     await preview.waitFor();
@@ -1315,7 +1315,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
 
     // The DM on the new scene, and the players with them.
     await setUp(dm, dmCdp, DESK, null);
-    await dm.getByRole("tab", { name: "Scenes" }).click();
+    await openSideTab(dm, "Scenes");
     await dm.getByRole("button", { name: /^Sizes/ }).first().click();
     await waitFor("the DM on the sizes scene", () => dmSocket.you?.sceneId === sizes.sceneId || null, 30_000);
     await ops.send({ t: "room.setPlayerScene", sceneId: sizes.sceneId });
