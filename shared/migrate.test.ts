@@ -19,7 +19,7 @@ import { opSchema, type Op, type RestoreEntry } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { CHANGED_SINCE, guardMatches } from "./reducer/misc.ts";
 import { guardHash } from "./reducer/tx.ts";
-import { DM, comparable, env, room, token } from "./testutil.ts";
+import { DM, character, companionBlock, comparable, env, room, token } from "./testutil.ts";
 
 /** What the v1 reducer left: today's state without the spot each turn began on. */
 function v1Shape(state: RoomState): RoomState {
@@ -191,8 +191,24 @@ describe("migrations", () => {
   });
 
   test("a version 9 snapshot never migrates down to 8, so going back to an older build is a restore (docs/design-v1-pdf-handouts.md 3.8)", () => {
-    assert.equal(SNAPSHOT_VERSION, 9);
+    assert.ok(SNAPSHOT_VERSION >= 9);
     assert.throws(() => runMigrations(room(), 9, 8, snapshotMigrations), /down/);
+  });
+
+  test("a room from before companion stat blocks gets none, and nothing else about it changes (docs/design-v1-companion-stat-blocks.md 3.6)", () => {
+    const { companionBlocks: _blocks, ...v9 } = room({ characters: { c1: character("c1") } });
+    const migrated = migrateSnapshot(v9, 9);
+    assert.deepEqual(migrated, { ...v9, companionBlocks: {} });
+    const withOne = room({ characters: { c1: character("c1") }, companionBlocks: { b1: companionBlock("b1", "c1") } });
+    assert.equal(migrateSnapshot(withOne, 9), withOne, "a state that has them is left alone");
+    // Every older version reaches it.
+    const { companionBlocks: _c, handoutDocs: _d, journal: _j, pins: _p, rolls: _r, ...v7 } = room();
+    assert.deepEqual(migrateSnapshot(v7, 7), room());
+  });
+
+  test("a version 10 snapshot never migrates down to 9, so going back to an older build is a restore (docs/design-v1-companion-stat-blocks.md 3.6)", () => {
+    assert.equal(SNAPSHOT_VERSION, 10);
+    assert.throws(() => runMigrations(room(), 10, 9, snapshotMigrations), /down/);
   });
 
   test("a room's stored undo from before wave 5 replays onto the migrated room, its guards matching as they did", () => {

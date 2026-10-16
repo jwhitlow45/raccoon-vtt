@@ -428,6 +428,9 @@ const handoutDoc = z.strictObject({ id, rev, title: name, pages: handoutSchemas.
 /** The create op's bounds. The byte limits for one monster and for all of them are `checkLimits`'s. */
 const monster = z.strictObject({ id, rev, ...statBlockFieldsForImport });
 
+/** A companion's stat block, with its create op's bounds. Its size and the character's and room's totals are `checkLimits`'s. */
+const companionBlock = z.strictObject({ id, rev, characterId: id, fromSrd: srdIdSchema.optional(), ...statBlockFieldsForImport });
+
 /** An SRD monster's default image, keyed by its SRD id. The count is `checkLimits`'s. */
 const srdImage = z.strictObject({ id: srdIdSchema, rev, image: imageRef });
 
@@ -559,6 +562,8 @@ export const roomStateSchema = z.strictObject({
   rolls: record(rollRequest),
   // PDF handouts. A backup from before them reaches this schema through the snapshot migration, which adds them empty.
   handoutDocs: record(handoutDoc),
+  // Companion stat blocks. A backup from before them reaches this schema through the snapshot migration, which adds them empty.
+  companionBlocks: record(companionBlock),
 });
 
 export function parseRoomState(value: unknown): { ok: true; state: RoomState } | { ok: false; message: string } {

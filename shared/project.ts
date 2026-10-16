@@ -14,6 +14,7 @@ import {
   type FogDraft,
   type FogTile,
   type FreeWall,
+  type CompanionBlock,
   type Handout,
   type HandoutDoc,
   type InitEntry,
@@ -918,6 +919,21 @@ function projectHandoutDocCtx(ctx: Ctx, doc: HandoutDoc): HandoutDoc | null {
   return ctx.viewer.role === "dm" ? doc : null;
 }
 
+/**
+ * A character's stat blocks for its companions reach the DM and whoever
+ * owns the character, who are exactly the owners of its companions
+ * (docs/design-v1-companion-stat-blocks.md 4.2). The character's ownership
+ * is the only input, so who reads a block never drifts from who plays the
+ * companions. They are not scene data, so a blackout keeps them, as it
+ * keeps the player's characters.
+ */
+function projectCompanionBlockCtx(ctx: Ctx, block: CompanionBlock): CompanionBlock | null {
+  if (ctx.viewer.role === "dm") return block;
+  const character = ctx.state.characters[block.characterId];
+  // Rev 0 for players, as on their characters (projectCharacter).
+  return character !== undefined && ownsCharacter(ctx.viewer, character) ? { ...block, rev: 0 } : null;
+}
+
 /** Whether a player may read a journal page: one shared with every player, or with them alone (docs/design-v1-dm-tools.md 3.7). */
 export function pageReadableBy(page: Pick<JournalPage, "access">, memberId: string): boolean {
   return page.access === "all" || (typeof page.access === "object" && page.access.member === memberId);
@@ -1358,6 +1374,8 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
       return value ? projectRollCtx(ctx, value as RollRequest) : null;
     case "handoutDoc":
       return value ? projectHandoutDocCtx(ctx, value as HandoutDoc) : null;
+    case "companionBlock":
+      return value ? projectCompanionBlockCtx(ctx, value as CompanionBlock) : null;
     case "log":
       return value ? projectLogEntryCtx(ctx, value as LogEntry) : null;
     case "encounter":
@@ -1407,6 +1425,7 @@ export function projectState(state: RoomState, viewer: Viewer, opts: ProjectOpts
     pins: projectMap(state.pins, (pin) => projectPinCtx(ctx, pin)),
     rolls: projectMap(state.rolls, (request) => projectRollCtx(ctx, request)),
     handoutDocs: projectMap(state.handoutDocs, (doc) => projectHandoutDocCtx(ctx, doc)),
+    companionBlocks: projectMap(state.companionBlocks, (block) => projectCompanionBlockCtx(ctx, block)),
     sight: sightTilesCtx(ctx),
   };
 }
@@ -1453,6 +1472,7 @@ export function allKeys(state: RoomState): EntityKey[] {
   for (const id of Object.keys(state.pins)) out.push(keys.pin(id));
   for (const id of Object.keys(state.rolls)) out.push(keys.roll(id));
   for (const id of Object.keys(state.handoutDocs)) out.push(keys.handoutDoc(id));
+  for (const id of Object.keys(state.companionBlocks)) out.push(keys.companionBlock(id));
   for (const e of state.log) out.push(keys.log(e.id));
   return out;
 }
@@ -1686,6 +1706,8 @@ export function visibleAssetIds(state: RoomState, viewer: Viewer, opts: ProjectO
   // Only a DM's projection holds them. A player meets these images on tokens alone.
   for (const monster of Object.values(projected.monsters)) addImage(monster.defaultImage);
   for (const entry of Object.values(projected.srdImages)) addImage(entry.image);
+  // A companion block's picture reaches the DM and the character's owners, the block's readers, and no one else.
+  for (const block of Object.values(projected.companionBlocks)) addImage(block.defaultImage);
   if (viewer.role === "dm") {
     // The DM may use every asset of the room, scenes it is not viewing included, every phase and thumbnail with them.
     for (const scene of Object.values(state.scenes)) {

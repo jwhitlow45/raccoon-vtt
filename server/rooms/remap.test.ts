@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { stableStringify, visibleAssetIds } from "#shared/project.ts";
-import { AT, DM, P1, actor, apply, character, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token } from "#shared/testutil.ts";
+import { AT, DM, P1, actor, apply, character, companionBlock, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token } from "#shared/testutil.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 import { remapState, type ImportedAsset } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
@@ -48,7 +48,7 @@ describe("remapState", () => {
       let n = 0;
       return () => `n${n++}`;
     })() });
-    const oldIds = new Set([...Object.keys(state.members), ...Object.keys(state.scenes), ...Object.keys(state.tokens), ...Object.keys(state.characters), ...Object.keys(state.templates), ...Object.keys(state.drawings), ...Object.keys(state.handouts), ...Object.keys(state.monsters), ...Object.keys(state.savedEncounters)]);
+    const oldIds = new Set([...Object.keys(state.members), ...Object.keys(state.scenes), ...Object.keys(state.tokens), ...Object.keys(state.characters), ...Object.keys(state.templates), ...Object.keys(state.drawings), ...Object.keys(state.handouts), ...Object.keys(state.monsters), ...Object.keys(state.savedEncounters), ...Object.keys(state.companionBlocks)]);
     const referenced = allIds(out);
     for (const id of oldIds) assert.ok(!referenced.has(id), `old id ${id} survived`);
     assert.ok(stableStringify(out) !== stableStringify(state));
@@ -417,6 +417,30 @@ describe("companions in an import (docs/design-v1-combat-flow.md 4.7)", () => {
     const line = out.log.find((e) => e.data?.type === "companion")!.data!;
     assert.deepEqual(line, { type: "companion", tokenId: spirit.id, characterId: bree.id, memberId: out.characters[bree.id]!.ownerIds[0], name: "Wildfire Spirit" });
     assert.equal(out.meta.settings.healRevives, false);
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+
+  test("companion blocks get new ids and follow their character, a block whose character did not come through goes, and a picture follows its image or goes (docs/design-v1-companion-stat-blocks.md 3.6)", () => {
+    const state = party();
+    state.companionBlocks.moth = companionBlock("moth", "bree", { defaultImage: imageRef("moth-art") });
+    state.companionBlocks.owl = companionBlock("owl", "bree", { name: "Owl", fromSrd: "owl", defaultImage: imageRef("lost-art") });
+    state.companionBlocks.stray = companionBlock("stray", "missing");
+    let n = 0;
+    const out = remapState(state, { assets: kinds({ "moth-art": ["moth-art2", "token"], "lost-art": ["lost-art2", "map"] }), newId: () => `n${n++}` });
+    const bree = Object.values(out.characters).find((c) => c.name === "Bree")!;
+    const blocks = Object.values(out.companionBlocks);
+    assert.equal(blocks.length, 2, "the stray block's character is not in the file");
+    for (const b of blocks) {
+      assert.equal(out.companionBlocks[b.id], b);
+      assert.ok(!["moth", "owl"].includes(b.id), `new id for ${b.name}`);
+      assert.equal(b.characterId, bree.id);
+    }
+    const moth = blocks.find((b) => b.name === "Moth Spirit")!;
+    const owl = blocks.find((b) => b.name === "Owl")!;
+    assert.deepEqual(moth.defaultImage, imageRef("moth-art2"));
+    assert.equal("defaultImage" in owl, false, "an image that came through as another kind is dropped");
+    assert.equal(owl.fromSrd, "owl");
     const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
   });

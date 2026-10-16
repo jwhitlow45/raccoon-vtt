@@ -218,12 +218,17 @@ export type SnapshotBudgetLimits = {
   abuseMs: number;
 };
 
+/*
+ * The byte budgets hold ten of the largest DM snapshot a minute per session
+ * and twenty per address: 6 MiB since companion stat blocks ride on top of
+ * the 3 MiB for everything else (docs/design-v1-companion-stat-blocks.md 3.4).
+ */
 export const DEFAULT_SNAPSHOT_BUDGET: SnapshotBudgetLimits = {
   windowMs: 60_000,
   sessionCount: 20,
-  sessionBytes: 30 * 1024 * 1024,
+  sessionBytes: 60 * 1024 * 1024,
   ipCount: 40,
-  ipBytes: 60 * 1024 * 1024,
+  ipBytes: 120 * 1024 * 1024,
   abuseMs: 30_000,
 };
 

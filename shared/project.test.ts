@@ -33,7 +33,7 @@ import { compareEntries } from "./rules/initiative.ts";
 import { applyOp } from "./reducer.ts";
 import { visionRules, type PartySight, type VisionRules } from "./ruleHooks.ts";
 import { derivedId } from "./reducer/duplicate.ts";
-import { DM, P1, P2, actor, apply, chance, character, customMonster, deepClone, drawing, entry, env, imageRef, randomState, reveal, rng, room, srdImage, template, token } from "./testutil.ts";
+import { DM, P1, P2, actor, apply, chance, character, companionBlock, customMonster, member, deepClone, drawing, entry, env, imageRef, randomState, reveal, rng, room, srdImage, template, token } from "./testutil.ts";
 import { imageAssetId } from "./imageRef.ts";
 
 /** A table display's viewer: a player who owns nothing (docs/design-v1-dm-tools.md 3.1). */
@@ -153,11 +153,21 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
   if (state.meta.view.blackout) assertPaused(p, label);
   const sceneId = state.meta.view.blackout ? null : state.meta.playerSceneId!;
   assert.deepEqual(Object.keys(p.scenes), sceneId === null ? [] : [sceneId], `${label}: scenes`);
-  for (const obj of walk(p)) {
+  // The viewer's own characters' companion blocks are theirs to read (docs/design-v1-companion-stat-blocks.md 4.2), and only those.
+  const { companionBlocks: ownBlocks, ...rest } = p;
+  for (const obj of walk(rest)) {
     assert.ok(!("dmNotes" in obj), `${label}: dmNotes leaked`);
     assert.ok(!("groupKey" in obj), `${label}: groupKey leaked`);
     assert.ok(!("hiddenFromPlayers" in obj), `${label}: a hidden effect leaked`);
     assert.ok(!("abilities" in obj) && !("legendaryActions" in obj), `${label}: a custom stat block leaked`);
+  }
+  for (const [id, block] of Object.entries(ownBlocks)) {
+    assert.ok(state.characters[block.characterId]?.ownerIds.includes(viewer.memberId), `${label}: companion block ${id} of another's character leaked`);
+    assert.equal(block.rev, 0, `${label}: rev of companion block ${id}`);
+  }
+  for (const block of Object.values(state.companionBlocks)) {
+    const owned = state.characters[block.characterId]?.ownerIds.includes(viewer.memberId) === true;
+    assert.equal(block.id in ownBlocks, owned, `${label}: companion block ${block.id}`);
   }
   assert.deepEqual(p.encounterHistory, [], `${label}: history`);
   assert.deepEqual(p.monsters, {}, `${label}: custom monsters`);
@@ -170,7 +180,12 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
   assert.deepEqual(p.savedEncounters, {}, `${label}: saved encounters`);
   for (const e of Object.values(state.savedEncounters)) assert.ok(!JSON.stringify(p).includes(e.name), `${label}: saved encounter ${e.id} leaked`);
   const visible = visibleAssetIds(state, viewer, { sceneId: "s2" });
-  const chosen = [...Object.values(state.monsters).flatMap((m) => (m.defaultImage ? [imageAssetId(m.defaultImage)!] : [])), ...Object.values(state.srdImages).map((e) => imageAssetId(e.image)!)];
+  const othersBlocks = Object.values(state.companionBlocks).filter((b) => !state.characters[b.characterId]?.ownerIds.includes(viewer.memberId));
+  const chosen = [
+    ...Object.values(state.monsters).flatMap((m) => (m.defaultImage ? [imageAssetId(m.defaultImage)!] : [])),
+    ...Object.values(state.srdImages).map((e) => imageAssetId(e.image)!),
+    ...othersBlocks.flatMap((b) => (b.defaultImage ? [imageAssetId(b.defaultImage)!] : [])),
+  ];
   for (const assetId of chosen) {
     assert.ok(!JSON.stringify(p).includes(assetId), `${label}: monster image ${assetId} leaked`);
     assert.ok(!visible.has(assetId), `${label}: monster image ${assetId} readable`);
@@ -1772,5 +1787,61 @@ describe("pdf handouts (docs/design-v1-pdf-handouts.md 3.4)", () => {
     state.handouts.h1 = { id: "h1", rev: 0, assetId: "page1", pages, title: "Strange letter", to: ["p1"], shownAt: "" };
     assert.ok(visibleAssetIds(state, P1, ON_S1).has("page2"));
     assert.ok(!visibleAssetIds(state, P2, ON_S1).has("page2"));
+  });
+});
+
+describe("companion stat blocks (docs/design-v1-companion-stat-blocks.md 4.2)", () => {
+  const ON_S1 = { sceneId: "s1" };
+  /** Bree, played by p1 and a third player together, with a token p2 owns but not Bree, and a block with a picture. */
+  function bree(): RoomState {
+    const state = room({
+      members: { dm1: member("dm1", "dm"), p1: member("p1"), p2: member("p2"), p3: member("p3") },
+      characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1", "p3"] }), cy: character("cy", { name: "Cy", ownerIds: ["p2"] }) },
+      tokens: { bt: token("bt", { kind: "pc", actor: { ref: "bree" }, ownerIds: ["p2"] }) },
+    });
+    state.companionBlocks.moth = companionBlock("moth", "bree", { rev: 4, defaultImage: imageRef("moth-picture") });
+    state.companionBlocks.wolf = companionBlock("wolf", "cy", { name: "Wolf" });
+    return state;
+  }
+  const P3: Viewer = { memberId: "p3", role: "player" };
+
+  test("the DM gets every block whole, and the character's owners, co-owners included, theirs with rev 0", () => {
+    const state = bree();
+    assert.deepEqual(projectState(state, DM, ON_S1).companionBlocks, state.companionBlocks);
+    assert.equal(projectEntity(keys.companionBlock("moth"), state, DM, ON_S1), state.companionBlocks.moth);
+    for (const viewer of [P1, P3]) {
+      assert.deepEqual(projectState(state, viewer, ON_S1).companionBlocks, { moth: { ...state.companionBlocks.moth!, rev: 0 } }, viewer.memberId);
+      assert.deepEqual(projectEntity(keys.companionBlock("moth"), state, viewer, ON_S1), { ...state.companionBlocks.moth!, rev: 0 }, viewer.memberId);
+      assert.ok(visibleAssetIds(state, viewer, ON_S1).has("moth-picture"), viewer.memberId);
+    }
+    assert.ok(visibleAssetIds(state, DM, ON_S1).has("moth-picture"));
+    assert.ok(allKeys(state).includes(keys.companionBlock("moth")));
+  });
+
+  test("another player, a player who owns the character's token but not the character, and a display get none, nor their pictures", () => {
+    const state = bree();
+    for (const [viewer, label] of [
+      [P2, "a player who owns Bree's token but not Bree"],
+      [DISPLAY, "a table display"],
+      [{ memberId: "p-nobody", role: "player" } as Viewer, "a player who owns nothing"],
+    ] as const) {
+      const blocks = projectState(state, viewer, ON_S1).companionBlocks;
+      assert.deepEqual(Object.keys(blocks), viewer === P2 ? ["wolf"] : [], label);
+      assert.equal(projectEntity(keys.companionBlock("moth"), state, viewer, ON_S1), null, label);
+      assert.ok(!visibleAssetIds(state, viewer, ON_S1).has("moth-picture"), label);
+    }
+  });
+
+  test("they follow the character's owners: the new owner gets them and the old one does not", () => {
+    const state = apply(bree(), { t: "character.update", characterId: "bree", patch: { ownerIds: ["p2"] } });
+    assert.deepEqual(Object.keys(projectState(state, P2, ON_S1).companionBlocks).sort(), ["moth", "wolf"]);
+    assert.deepEqual(projectState(state, P1, ON_S1).companionBlocks, {});
+  });
+
+  test("behind a blackout a player keeps their characters' blocks, as they keep their characters", () => {
+    const state = bree();
+    state.meta.view.blackout = true;
+    assert.deepEqual(Object.keys(projectState(state, P1, ON_S1).companionBlocks), ["moth"]);
+    assert.ok(projectState(state, P1, ON_S1).characters.bree);
   });
 });

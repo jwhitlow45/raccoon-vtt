@@ -7,7 +7,7 @@ import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { visionRules } from "#shared/ruleHooks.ts";
 import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
-import { actor, character, room, scene, template, token } from "#shared/testutil.ts";
+import { actor, character, companionBlock, room, scene, template, token } from "#shared/testutil.ts";
 import { exploreOp } from "./explore.ts";
 import { checkWholeScenes, growthBound, SizeGuard } from "./sizeGuard.ts";
 
@@ -303,6 +303,36 @@ describe("SizeGuard's room-level part (docs/design-v1-dm-tools.md 2.4)", () => {
     assert.equal(guard.check(shorter.state, ["s2"], shorter.growth, state).ok, true);
     const shorterStill = applied(shorter.state, { t: "token.update", tokenId: "big", patch: { name: "B".repeat(1_960) } }, 2);
     assert.equal(guard.check(shorterStill.state, ["s2"], shorterStill.growth, shorter.state).ok, true);
+  });
+
+  test("companion blocks ride outside the measure, so with 3 MiB of them a map edit that fits without them passes, and one that does not is refused as before (docs/design-v1-companion-stat-blocks.md 3.4)", () => {
+    const state = twoScenes();
+    state.characters.c1 = character("c1", { name: "Bree" });
+    // The measure counts the blocks' field as empty: it is a DM's projection without them, to the byte.
+    const without = serializedBytes(projectState({ ...state, sight: {} } as unknown as RoomState, DM, { sceneId: "s2" }));
+    const blocks: RoomState["companionBlocks"] = {};
+    for (let i = 0; i < 192; i++) blocks[`b${i}`] = companionBlock(`b${i}`, "c1", { traits: [{ name: "", text: "x".repeat(15_000) }] });
+    const heavy = { ...state, companionBlocks: blocks };
+    assert.ok(serializedBytes(blocks) > 2.7 * 1024 * 1024, `${serializedBytes(blocks)} bytes of blocks`);
+    for (const sceneId of ["s1", "s2"]) {
+      const exact = serializedBytes(projectState({ ...state, sight: {} } as unknown as RoomState, DM, { sceneId }));
+      assert.equal(new SizeGuard({ sceneLimit: exact }).check(heavy, [sceneId], 0).ok, true, sceneId);
+      assert.equal(new SizeGuard({ sceneLimit: exact - 1 }).check(heavy, [sceneId], 0).ok, false, sceneId);
+    }
+    // A map edit whose scene part fits passes with all those blocks, and a longer one is refused as today.
+    const limit = without + 10;
+    const fits = applied(heavy, { t: "token.update", tokenId: "big", patch: { name: "B".repeat(2_005) } });
+    assert.equal(new SizeGuard({ sceneLimit: limit }).check(fits.state, ["s2"], fits.growth, heavy).ok, true);
+    const over = applied(heavy, { t: "token.update", tokenId: "big", patch: { name: "B".repeat(2_011) } });
+    const refused = new SizeGuard({ sceneLimit: limit }).check(over.state, ["s2"], over.growth, heavy);
+    assert.deepEqual(refused, { ok: false, code: "quota", message: "this scene is at its 0 MiB size limit" });
+    // A block save touches no scene and grows no scene's measure, so the scene check never refuses it.
+    const { rev: _rev, ...block } = companionBlock("one-more", "c1", { traits: [{ name: "", text: "x".repeat(15_000) }] });
+    const saved = applied(heavy, { t: "companionBlock.create", block });
+    assert.equal(new SizeGuard({ sceneLimit: without }).check(saved.state, [], saved.growth, heavy).ok, true);
+    // The import's whole-room check reads the same measure.
+    assert.equal(checkWholeScenes(heavy, without).ok, true);
+    assert.equal(checkWholeScenes(heavy, without - 1).ok, false);
   });
 
   test("an import is checked with the room-level part and every scene, the journal included", () => {

@@ -248,6 +248,10 @@ function forDm(op: Op, c: Check): Decision {
       return imageUsable(c, op.patch.defaultImage) ? OK : GONE;
     case "monster.setSrdImage":
       return imageUsable(c, op.image) ? OK : GONE;
+    case "companionBlock.create":
+      return imageUsable(c, op.block.defaultImage) ? OK : GONE;
+    case "companionBlock.update":
+      return imageUsable(c, op.patch.defaultImage) ? OK : GONE;
     case "scene.create":
       return op.scene.map && !c.asset(op.scene.map.assetId, "map") ? GONE : OK;
     case "scene.setMap":
@@ -392,6 +396,10 @@ function forPlayer(op: Op, c: Check): Decision {
 
     case "character.create":
       return createCharacterCheck(c, op.character);
+    case "companionBlock.create":
+    case "companionBlock.update":
+    case "companionBlock.delete":
+      return companionBlockCheck(c, op);
     case "token.create":
       return op.token.companion ? companionCheck(c, op.token, op.token.companion) : placeTokenCheck(c, op.token);
     case "token.delete": {
@@ -995,6 +1003,33 @@ function createCharacterCheck(c: Check, input: Extract<Op, { t: "character.creat
   if (!unhurt || !plain) return refuse("forbidden", "a new character starts unhurt, with no conditions or DM notes");
   if (!imageUsable(c, input.defaultImage)) return GONE;
   return OK;
+}
+
+/**
+ * A player's edit of a character's companion stat blocks
+ * (docs/design-v1-companion-stat-blocks.md 4.1), with no room setting, as
+ * adding a companion needs none: a create names a character that exists and
+ * that they own, and an edit or a delete names a block of a character they
+ * own. Any other block answers `gone`, the answer for anything outside
+ * their view, as does a new id that is in use, so no answer tells them that
+ * a block they cannot see exists.
+ */
+function companionBlockCheck(c: Check, op: OpOf<"companionBlock.create" | "companionBlock.update" | "companionBlock.delete">): Decision {
+  if (op.t === "companionBlock.create") {
+    const character = c.state.characters[op.block.characterId];
+    if (!character) return GONE;
+    if (!ownsCharacter(c.actor, character)) return NOT_YOURS;
+    if (c.state.companionBlocks[op.block.id]) return GONE;
+    return imageUsable(c, op.block.defaultImage) ? OK : GONE;
+  }
+  if (!ownsBlock(c, op.blockId)) return GONE;
+  return op.t === "companionBlock.update" && !imageUsable(c, op.patch.defaultImage) ? GONE : OK;
+}
+
+/** Whether a block exists and belongs to a character the player owns: the blocks in their view. */
+function ownsBlock(c: Check, blockId: string): boolean {
+  const block = c.state.companionBlocks[blockId];
+  return block !== undefined && c.ownsCharacterId(block.characterId);
 }
 
 /** What an owner may change on a companion beyond any token's owner fields (docs/design-v1-combat-flow.md 3.6.4). */

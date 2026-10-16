@@ -5,7 +5,7 @@ import { migrateSnapshot } from "#shared/migrate.ts";
 import { MAX_PATH_STOPS } from "#shared/protocol.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { Op } from "#shared/protocol.ts";
-import { actor, apply, character, customMonster, DM, imageRef, randomState, rng, room, srdImage, token } from "#shared/testutil.ts";
+import { actor, apply, character, companionBlock, customMonster, DM, imageRef, randomState, rng, room, srdImage, token } from "#shared/testutil.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
 describe("roomStateSchema", () => {
@@ -460,5 +460,31 @@ describe("roomStateSchema, pdf handouts (docs/design-v1-pdf-handouts.md 3.3)", (
     const parsed = parseRoomState(migrateSnapshot(JSON.parse(JSON.stringify(v8)), 8));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
     assert.deepEqual(parsed.ok && parsed.state.handoutDocs, {});
+  });
+
+  test("companion blocks parse as their ops stored them, with the create op's bounds, and a backup from before them still imports, with none (docs/design-v1-companion-stat-blocks.md 3.6)", () => {
+    let state = room({ characters: { c1: character("c1", { name: "Bree", ownerIds: ["p1"] }) } });
+    const { rev: _rev, ...block } = companionBlock("b1", "c1", { fromSrd: "owl", defaultImage: imageRef("art") });
+    state = apply(state, { t: "companionBlock.create", block }, DM, 1);
+    state = apply(state, { t: "companionBlock.update", blockId: "b1", patch: { ac: 13, sizeAlt: "tiny" } }, DM, 2);
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.deepEqual(parsed.ok && parsed.state, JSON.parse(JSON.stringify(state)));
+    const withBlock = (overrides: Record<string, unknown>) => {
+      const raw = JSON.parse(JSON.stringify(state));
+      raw.companionBlocks.b1 = { ...raw.companionBlocks.b1, ...overrides };
+      return parseRoomState(raw).ok;
+    };
+    assert.equal(withBlock({}), true);
+    assert.equal(withBlock({ characterId: undefined }), false);
+    assert.equal(withBlock({ fromSrd: "Not a slug" }), false);
+    assert.equal(withBlock({ name: "" }), false);
+    assert.equal(withBlock({ ac: 101 }), false);
+    assert.equal(withBlock({ owner: "p1" }), false);
+    const { companionBlocks: _blocks, ...v9 } = room();
+    assert.equal(parseRoomState(JSON.parse(JSON.stringify(v9))).ok, false, "the schema itself is strict");
+    const migrated = parseRoomState(migrateSnapshot(JSON.parse(JSON.stringify(v9)), 9));
+    assert.ok(migrated.ok, migrated.ok ? "" : migrated.message);
+    assert.deepEqual(migrated.ok && migrated.state.companionBlocks, {});
   });
 });

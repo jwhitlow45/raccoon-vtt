@@ -23,6 +23,7 @@ export type AssetId = string;
 export type EntryId = string;
 export type EffectId = string;
 export type MonsterId = string;
+export type CompanionBlockId = string;
 /** An SRD 5.2.1 monster's slug, such as "goblin-warrior" (shared/srd/monsters.ts). */
 export type SrdId = string;
 export type SavedEncounterId = string;
@@ -107,6 +108,13 @@ export type RoomState = {
    * a document. Empty in rooms from before them.
    */
   handoutDocs: Record<HandoutDocId, HandoutDoc>;
+  /**
+   * The stat blocks each character keeps for its companions
+   * (docs/design-v1-companion-stat-blocks.md 3.1). The DM and the
+   * character's owners receive them, and no one else. Empty in rooms from
+   * before them.
+   */
+  companionBlocks: Record<CompanionBlockId, CompanionBlock>;
 };
 
 export type RoomMeta = {
@@ -828,6 +836,24 @@ export type SrdImage = { id: SrdId; rev: number; image: ImageRef };
 
 /** A custom monster's stat block without the fields every entity carries. */
 export type StatBlock = Omit<CustomMonster, "id" | "rev">;
+
+/**
+ * A stat block a character keeps for its companions
+ * (docs/design-v1-companion-stat-blocks.md 3.1): text pasted from a book,
+ * one typed in, or an SRD block copied to be edited. Read by the DM and by
+ * whoever owns the character, who are the owners of its companions. An SRD
+ * block picked as it is stays a link (`Actor.srdId`) and is never copied
+ * here. Its `defaultImage` is the picture a companion added from it starts
+ * with.
+ */
+export type CompanionBlock = StatBlock & {
+  id: CompanionBlockId;
+  rev: number;
+  /** The character that keeps it. It never changes. */
+  characterId: CharacterId;
+  /** The SRD monster it was copied from, so its view keeps the SRD's credit. Absent for a block pasted or typed. */
+  fromSrd?: SrdId;
+};
 
 /**
  * One kind of monster in a saved encounter and how many of it: an SRD

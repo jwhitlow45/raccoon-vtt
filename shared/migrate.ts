@@ -10,7 +10,7 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 9;
+export const SNAPSHOT_VERSION = 10;
 export const OP_VERSION = 6;
 
 export type MigrationStep = {
@@ -85,6 +85,13 @@ export const snapshotMigrations: MigrationStep[] = [
     from: 8,
     to: 9,
     apply: (state) => (state !== null && typeof state === "object" && !("handoutDocs" in state) ? { ...state, handoutDocs: {} } : state),
+  },
+  // v9 had no companion stat blocks (docs/design-v1-companion-stat-blocks.md 3.6). Rooms and backups from before them
+  // start with none, and no actor links one.
+  {
+    from: 9,
+    to: 10,
+    apply: (state) => (state !== null && typeof state === "object" && !("companionBlocks" in state) ? { ...state, companionBlocks: {} } : state),
   },
 ];
 

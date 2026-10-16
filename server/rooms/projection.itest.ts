@@ -4,9 +4,10 @@ import { after, before, describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import type { CustomMonster, Handout, HandoutPage } from "#shared/model.ts";
 import { PLAYED_WITH_OTHERS } from "#shared/permissions.ts";
-import { blockOf, customMonster, drawing } from "#shared/testutil.ts";
+import { blockOf, character as testCharacter, companionBlock, customMonster, drawing } from "#shared/testutil.ts";
 import type { ProjectedState, ProjectedToken } from "#shared/project.ts";
 import type { Change, Op } from "#shared/protocol.ts";
+import { formatDisplayCode } from "../auth/displaySessions.ts";
 import { startEngine, type Engine, type Socket } from "./testing.ts";
 
 /**
@@ -426,5 +427,58 @@ describe("projection over the socket", () => {
     assert.deepEqual(snap.handoutDocs, {});
     assert.equal(JSON.stringify(snap).includes(docId), false);
     for (const s of [dm, player, again]) s.close();
+  });
+
+  test("a player receives their character's companion blocks and no other's, a table display none, and an owner change moves them (docs/design-v1-companion-stat-blocks.md 4.2)", async () => {
+    const dmClient = t.client();
+    const { roomId } = await dmClient.createRoom("Familiars");
+    const anaClient = t.client();
+    const ana = await anaClient.join(roomId, "Ana");
+    const cyClient = t.client();
+    const cy = await cyClient.join(roomId, "Cy");
+    const dm = await t.connect(roomId, dmClient);
+    await dm.snapshot("dm1");
+    const breeId = uuidv7();
+    const cyCharId = uuidv7();
+    const make = (id: string, name: string, ownerIds: string[]) => {
+      const { rev: _rev, ...c } = testCharacter(id, { name, ownerIds });
+      return { t: "character.create", character: c } as Op;
+    };
+    assert.equal((await dm.apply(make(breeId, "Bree", [ana]))).rejects, undefined);
+    assert.equal((await dm.apply(make(cyCharId, "Cy", [cy]))).rejects, undefined);
+    const anaSocket = await t.connect(roomId, anaClient);
+    const cySocket = await t.connect(roomId, cyClient);
+    await anaSocket.snapshot("ana");
+    await cySocket.snapshot("cy");
+    const tv = t.client();
+    const code = (await dmClient.post(`/api/rooms/${roomId}/display/code`)).json<{ code: string }>().code;
+    assert.equal((await tv.post("/api/display/redeem", { code: formatDisplayCode(code) })).statusCode, 200);
+    const display = await t.connectDisplay(roomId, tv);
+    await display.snapshot("tv");
+
+    // Ana saves a block for Bree: it reaches Ana and the DM, and neither Cy nor the display.
+    const blockId = uuidv7();
+    const { rev: _rev, ...block } = companionBlock(blockId, breeId, { name: "Moth Spirit" });
+    assert.equal((await anaSocket.apply({ t: "companionBlock.create", block })).rejects, undefined);
+    const key = `companionBlock:${blockId}`;
+    const ofKey = (m: { changes: Change[] }) => m.changes.some((c) => c.key === key);
+    const toDm = await dm.next("ev", ofKey);
+    assert.equal((toDm.changes.find((c) => c.key === key) as { value: { rev: number } }).value.rev, 1);
+    for (const [socket, who] of [[cySocket, "Cy"], [display, "the display"]] as const) assert.equal(await socket.maybe("ev", ofKey, 300), null, who);
+    const anaAgain = await t.connect(roomId, anaClient);
+    const anaSnap = (await anaAgain.snapshot("ana-again")).state as ProjectedState;
+    assert.equal(anaSnap.companionBlocks[blockId]?.name, "Moth Spirit");
+    assert.equal(anaSnap.companionBlocks[blockId]?.rev, 0);
+    const cySnap = (await (await t.connect(roomId, cyClient)).snapshot("cy-again")).state as ProjectedState;
+    assert.deepEqual(cySnap.companionBlocks, {});
+    assert.equal(JSON.stringify(cySnap).includes("Lantern Wings"), false);
+
+    // The DM gives Bree to Cy: Cy's socket gets the block, Ana's loses it.
+    assert.equal((await dm.apply({ t: "character.update", characterId: breeId, patch: { ownerIds: [cy] } })).rejects, undefined);
+    const gained = await cySocket.next("ev", ofKey);
+    assert.ok(gained.changes.some((c) => c.key === key && "value" in c));
+    const lost = await anaSocket.next("ev", ofKey);
+    assert.ok(lost.changes.some((c) => c.key === key && !("value" in c)));
+    for (const s of [dm, anaSocket, anaAgain, cySocket, display]) s.close();
   });
 });

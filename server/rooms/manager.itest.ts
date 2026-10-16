@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
-import { OP_VERSION } from "#shared/migrate.ts";
+import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
+import { companionBlock } from "#shared/testutil.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
 import { startEngine, type Engine, type Socket } from "./testing.ts";
@@ -256,6 +257,41 @@ describe("idle unload, snapshots and recovery", () => {
       { x: 3, uncounted: false, footprint: large },
       { x: 3, uncounted: true, footprint: undefined },
     ]);
+    again.close();
+    await again.waitClosed();
+  });
+
+  test("a room stored at snapshot version 9 loads at 10 with no companion blocks, and a block saved then is stored and replays (docs/design-v1-companion-stat-blocks.md 3.6)", async () => {
+    const owner = t.client();
+    const { roomId } = await owner.createRoom("Snapshot 9");
+    const s = await t.connect(roomId, owner);
+    await s.snapshot("c1");
+    const characterId = uuidv7();
+    await s.apply({ t: "character.create", character: { id: characterId, name: "Bree", size: "medium", ownerIds: [], actor } });
+    // A clean unload writes the snapshot, which is then put back as a build before blocks stored it.
+    s.close();
+    await s.waitClosed();
+    await t.manager.unload(roomId);
+    const stored = await t.pool.query<{ state: RoomState; schema_version: number }>("select state, schema_version from room_snapshots where room_id = $1", [roomId]);
+    assert.equal(stored.rows[0]?.schema_version, SNAPSHOT_VERSION);
+    const { companionBlocks: _none, ...v9 } = stored.rows[0]!.state;
+    await t.pool.query("update room_snapshots set state = $2::jsonb, schema_version = 9 where room_id = $1", [roomId, JSON.stringify(v9)]);
+
+    const back = await t.connect(roomId, owner);
+    const snap = await back.snapshot("c1", 2);
+    assert.deepEqual((snap.state as ProjectedState).companionBlocks, {});
+    const { rev: _rev, ...block } = companionBlock(uuidv7(), characterId, { name: "Moth Spirit" });
+    back.n = 1;
+    assert.equal((await back.apply({ t: "companionBlock.create", block })).rejects, undefined);
+    const op = await t.pool.query<{ op: { t: string } }>("select op from room_ops where room_id = $1 order by seq desc limit 1", [roomId]);
+    assert.equal(op.rows[0]?.op.t, "companionBlock.create");
+    // A crash: the block comes back by replaying its op over the version 9 snapshot.
+    await t.manager.unload(roomId, 1011, false);
+    await back.waitClosed();
+    const again = await t.connect(roomId, owner);
+    const replayed = (await again.snapshot("c1", 3)).state as ProjectedState;
+    assert.equal(replayed.companionBlocks[block.id]?.name, "Moth Spirit");
+    assert.equal(replayed.companionBlocks[block.id]?.characterId, characterId);
     again.close();
     await again.waitClosed();
   });

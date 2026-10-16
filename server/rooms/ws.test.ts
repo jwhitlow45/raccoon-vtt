@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { LIMITS, utf8Bytes } from "#shared/limits.ts";
 import { clientMessageSchema, clientOpSchema, MAX_HANDOUT_PAGE_PX } from "#shared/protocol.ts";
-import { MAX_FRAME_BYTES } from "./ws.ts";
+import { DEFAULT_BUFFERED_LIMIT, MAX_FRAME_BYTES } from "./ws.ts";
 
 /*
  * The largest op a client can send must fit one frame with room to spare
@@ -33,5 +33,13 @@ describe("a frame holds the largest handout op", () => {
     const event = { t: "ev", seq: Number.MAX_SAFE_INTEGER, changes: [{ key: `handout:${handout.id}`, value }], acks: [Number.MAX_SAFE_INTEGER] };
     const bytes = utf8Bytes(JSON.stringify(event));
     assert.ok(bytes < MAX_FRAME_BYTES / 4, `the event is ${bytes} bytes`);
+  });
+});
+
+describe("the send buffer a slow socket may hold", () => {
+  test("is 1 MiB over the largest DM snapshot, its 3 MiB and the companion blocks' 3 MiB (docs/design-v1-companion-stat-blocks.md 3.4)", () => {
+    const largest = LIMITS.projectedSceneBytes + LIMITS.companionBlocksBytes;
+    assert.equal(largest, 6 * 1024 * 1024);
+    assert.equal(DEFAULT_BUFFERED_LIMIT, largest + 1024 * 1024);
   });
 });

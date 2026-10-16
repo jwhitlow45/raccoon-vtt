@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { after, before, describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
+import { LIMITS, serializedBytes } from "#shared/limits.ts";
+import type { RoomState } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
+import { character, companionBlock, customMonster, token } from "#shared/testutil.ts";
 import type { Op } from "#shared/protocol.ts";
 import { sha256 } from "../auth/tokens.ts";
 import { failCommits, startEngine, type Engine } from "./testing.ts";
@@ -455,6 +459,64 @@ describe("websocket: rates", () => {
     assert.ok(pongs >= 200 && pongs < 240, `pongs: ${pongs}`);
     assert.equal(s.closeCode, null);
     s.close();
+  });
+});
+
+describe("websocket: the largest DM snapshot on a slow device (docs/design-v1-companion-stat-blocks.md 3.4)", () => {
+  let t: Engine;
+  before(async () => {
+    // A short hold, so a socket over its send-buffer limit would be closed well within the test.
+    t = await startEngine({ ws: { bufferedHoldMs: 1_500 } });
+  });
+  after(() => t.close());
+
+  /** Text that deflate cannot shrink much, so the snapshot fills the send buffer as a real one would. */
+  const noise = (chars: number) => randomBytes(Math.ceil((chars * 3) / 4)).toString("base64").slice(0, chars);
+
+  test("a DM snapshot of 6 MiB, 3 MiB of companion blocks on top of everything else, reaches a device that stopped reading past the hold, and its socket stays open", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Heavy");
+    const first = await t.connect(roomId, dm);
+    const sceneId = sceneOf((await first.snapshot("c1")).state as ProjectedState);
+    first.close();
+    await first.waitClosed();
+    await t.manager.unload(roomId);
+    const { rows } = await t.pool.query<{ state: RoomState }>("select state from room_snapshots where room_id = $1", [roomId]);
+    const state = rows[0]!.state;
+    // Six characters with their 512 KiB of blocks each, the monsters' 1 MiB, and the rest of the scene's 3 MiB in tokens.
+    const traits = () => Array.from({ length: 4 }, () => ({ name: "Trait", text: noise(3_700) }));
+    for (let c = 0; c < 6; c++) {
+      const characterId = uuidv7();
+      state.characters[characterId] = character(characterId, { name: `Hero ${c}` });
+      for (let b = 0; b < 32; b++) {
+        const id = uuidv7();
+        state.companionBlocks[id] = companionBlock(id, characterId, { traits: traits() });
+      }
+    }
+    for (let m = 0; m < 64; m++) {
+      const id = uuidv7();
+      state.monsters[id] = customMonster(id, { traits: traits() });
+    }
+    for (let i = 0; i < 480; i++) {
+      const id = uuidv7();
+      state.tokens[id] = token(id, { sceneId, x: i % 40, y: Math.floor(i / 40), notes: noise(4_000) });
+    }
+    const blocks = serializedBytes(state.companionBlocks);
+    assert.ok(blocks > 0.9 * LIMITS.companionBlocksBytes && blocks <= LIMITS.companionBlocksBytes, `${blocks} bytes of blocks`);
+    await t.pool.query("update room_snapshots set state = $2::jsonb where room_id = $1", [roomId, JSON.stringify(state)]);
+
+    const slow = await t.connect(roomId, dm);
+    slow.ws.pause();
+    slow.hello("c1");
+    await new Promise((r) => setTimeout(r, 3_500));
+    assert.equal(slow.closeCode, null, "the socket stays open while its snapshot waits in the send buffer");
+    slow.ws.resume();
+    const snap = await slow.next("snapshot", () => true, 30_000);
+    const bytes = serializedBytes(snap);
+    assert.ok(bytes > 5.5 * 1024 * 1024, `the snapshot is ${bytes} bytes`);
+    assert.equal(Object.keys((snap.state as ProjectedState).companionBlocks).length, 192);
+    assert.equal(slow.closeCode, null);
+    slow.close();
   });
 });
 

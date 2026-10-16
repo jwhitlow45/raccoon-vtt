@@ -4,6 +4,7 @@ import {
   type Actor,
   type AreaTemplate,
   type Character,
+  type CompanionBlock,
   type CustomMonster,
   type Drawing,
   type Effect,
@@ -198,6 +199,32 @@ export function srdImage(srdId: string, assetId: string, overrides: Partial<SrdI
   return { id: srdId, rev: 0, image: imageRef(assetId), ...overrides };
 }
 
+/**
+ * A stat block a character keeps for its companions
+ * (docs/design-v1-companion-stat-blocks.md 3.1), homebrew written for the
+ * tests, with text of its own so a leak check on the room's monsters never
+ * mistakes one for the other.
+ */
+export function companionBlock(id: string, characterId: string, overrides: Partial<CompanionBlock> = {}): CompanionBlock {
+  const block = blockOf(
+    customMonster(id, {
+      name: "Moth Spirit",
+      size: "small",
+      type: "Fey",
+      ac: 12,
+      hp: { average: 9, formula: "2d6 + 2" },
+      speed: "10 ft., Fly 40 ft. (hover)",
+      senses: "Darkvision 60 ft.",
+      passivePerception: 13,
+      cr: "1/4",
+      xp: 50,
+      traits: [{ name: "Lantern Wings", text: "It sheds dim light in a 10-foot radius." }],
+      actions: [{ name: "Dust", text: "Constitution Saving Throw: DC 11, one creature within 5 feet. Failure: The target has the Poisoned condition until the end of its next turn." }],
+    }),
+  );
+  return { ...block, id, rev: 0, characterId, ...overrides };
+}
+
 /** A monster's stat block without its id and rev: what a create op carries beside an id. */
 export function blockOf(m: CustomMonster): StatBlock {
   const { id: _id, rev: _rev, ...block } = m;
@@ -240,6 +267,7 @@ export function room(overrides: Partial<RoomState> = {}): RoomState {
     pins: {},
     rolls: {},
     handoutDocs: {},
+    companionBlocks: {},
     ...overrides,
   };
 }
@@ -584,7 +612,23 @@ export function randomState(r: () => number): RoomState {
   addVisionThings(r, state);
   addDmTools(r, state);
   addCompanions(r, state);
+  addCompanionBlocks(state);
   return state;
+}
+
+/**
+ * Companion stat blocks (docs/design-v1-companion-stat-blocks.md 3.1), with
+ * no draw of their own so the seeds keep what they hold: the first
+ * character keeps one with a picture and one copied from the SRD, and the
+ * second one more.
+ */
+function addCompanionBlocks(state: RoomState): void {
+  const [first, second] = Object.keys(state.characters).sort();
+  if (first !== undefined) {
+    state.companionBlocks.cb0 = companionBlock("cb0", first, { defaultImage: imageRef("img-cb0") });
+    state.companionBlocks.cb1 = companionBlock("cb1", first, { name: "Owl", size: "tiny", type: "Beast", fromSrd: "owl" });
+  }
+  if (second !== undefined) state.companionBlocks.cb2 = companionBlock("cb2", second, { name: "Wolf", size: "medium", type: "Beast" });
 }
 
 /**
@@ -1403,7 +1447,7 @@ function companionOp(r: () => number, state: RoomState, who: Viewer, helpers: { 
   const companions = Object.values(state.tokens).filter((t) => t.companion !== undefined);
   const anyCompanion = () => (companions.length > 0 && chance(r, 0.8) ? pick(r, companions).id : helpers.anyToken());
   const link = () => ({ of: helpers.anyCharacter(), turn: pick(r, ["own", "shared", "none"] as const) });
-  switch (int(r, 0, 6)) {
+  switch (int(r, 0, 7)) {
     case 0: {
       const of = helpers.anyCharacter();
       const beside = Object.values(state.tokens).find((t) => "ref" in t.actor && t.actor.ref === of);
@@ -1435,9 +1479,27 @@ function companionOp(r: () => number, state: RoomState, who: Viewer, helpers: { 
       return { t: "token.delete", tokenId: anyCompanion() };
     case 5:
       return { t: "character.update", characterId: helpers.anyCharacter(), patch: { ownerIds: pick(r, [[], ["p1"], ["p2"], ["p1", "p2"]]) } };
+    case 7:
+      return companionBlockOp(r, state, helpers);
     default:
       // Next clears the Reactions of the landing row's companions, and a player's End Turn too.
       return who.role === "dm" ? { t: "encounter.next" } : { t: "encounter.next", from: { entry: state.encounter?.activeEntryId ?? null, round: state.encounter?.round ?? 1 } };
+  }
+}
+
+/** A character's stat block saved, edited or deleted, by anyone, of a character they may or may not own. */
+function companionBlockOp(r: () => number, state: RoomState, helpers: { anyCharacter(): string; seqId: string }): Op {
+  const blocks = Object.keys(state.companionBlocks);
+  const anyBlock = () => (blocks.length > 0 && chance(r, 0.9) ? pick(r, blocks) : "missing-block");
+  switch (int(r, 0, 2)) {
+    case 0: {
+      const { rev: _rev, ...block } = companionBlock(helpers.seqId, helpers.anyCharacter(), chance(r, 0.3) ? { fromSrd: "owl" } : {});
+      return { t: "companionBlock.create", block };
+    }
+    case 1:
+      return { t: "companionBlock.update", blockId: anyBlock(), patch: chance(r, 0.5) ? { ac: int(r, 10, 20) } : { defaultImage: chance(r, 0.7) ? imageRef(`img-${helpers.seqId}`) : null } };
+    default:
+      return { t: "companionBlock.delete", blockId: anyBlock() };
   }
 }
 

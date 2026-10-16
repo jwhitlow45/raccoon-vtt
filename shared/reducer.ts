@@ -53,6 +53,7 @@ import { rollAnswer, rollAsk, rollClose, rollReopen } from "./reducer/rolls.ts";
 import { handoutClose, handoutDocCreate, handoutDocDelete, handoutShow, logChat, logWhisper, restore } from "./reducer/misc.ts";
 import { sceneSetPhase } from "./reducer/phases.ts";
 import { monsterCreate, monsterDelete, monsterSetSrdImage, monsterUpdate } from "./reducer/monsters.ts";
+import { companionBlockCreate, companionBlockDelete, companionBlockUpdate } from "./reducer/companionBlocks.ts";
 import { savedEncounterCreate, savedEncounterDelete, savedEncounterUpdate } from "./reducer/savedEncounters.ts";
 import {
   memberUpdate,
@@ -213,6 +214,12 @@ function dispatch(tx: Tx, op: Op): void {
       return monsterDelete(tx, op);
     case "monster.setSrdImage":
       return monsterSetSrdImage(tx, op);
+    case "companionBlock.create":
+      return companionBlockCreate(tx, op);
+    case "companionBlock.update":
+      return companionBlockUpdate(tx, op);
+    case "companionBlock.delete":
+      return companionBlockDelete(tx, op);
     case "savedEncounter.create":
       return savedEncounterCreate(tx, op);
     case "savedEncounter.update":

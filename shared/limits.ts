@@ -1,5 +1,6 @@
 import { roomHandoutPages } from "./handouts.ts";
-import { CHUNK_CELLS, HEIGHTS_CHARS, type BuildChunk, type CustomMonster, type JournalPage, type RoomState, type Token } from "./model.ts";
+import { isWritable } from "./writable.ts";
+import { CHUNK_CELLS, HEIGHTS_CHARS, type BuildChunk, type CompanionBlock, type CustomMonster, type JournalPage, type RoomState, type Token } from "./model.ts";
 
 /**
  * Room limits (design section 10.5). Open room creation means every room is
@@ -66,6 +67,28 @@ export const LIMITS = {
    * snapshot, so this keeps them under 256 KB of it.
    */
   savedEncountersPerRoom: 100,
+  /**
+   * Companion stat blocks (docs/design-v1-companion-stat-blocks.md 3.4).
+   * One block has the monsters' bound. A character keeps at most 100 and
+   * 512 KiB of them, so 32 long blocks fill its bytes before its count. A
+   * room keeps six characters at their caps, since 50 characters at theirs
+   * would pass the state limit three times over. Blocks ride in every DM
+   * snapshot on top of its 3 MiB for everything else (`projectedSceneBytes`
+   * leaves them out), so a DM's snapshot is at most 6 MiB.
+   */
+  companionBlockBytes: 16 * 1024,
+  companionBlocksPerCharacter: 100,
+  companionBlockBytesPerCharacter: 512 * 1024,
+  companionBlocksPerRoom: 600,
+  companionBlocksBytes: 3 * 1024 * 1024,
+  /**
+   * A player's block saves (section 3.5): a burst of 10, then one every
+   * 6 s. A save is up to 16 KiB and every op is stored, so the socket's 20
+   * ops a second alone would let one player write about a quarter of a
+   * megabyte a second. The DM's saves are not counted.
+   */
+  companionBlockWriteBurst: 10,
+  companionBlockWriteRefillMs: 6_000,
   logInMemory: 200,
   logStored: 10_000,
   stateBytes: 8 * 1024 * 1024,
@@ -310,6 +333,8 @@ export function checkLimits(state: RoomState, sceneId?: string | null, before?: 
   if (Object.keys(state.savedEncounters).length > LIMITS.savedEncountersPerRoom) return roomFull(`${n(LIMITS.savedEncountersPerRoom)} saved encounters`);
   const journal = checkJournal(state);
   if (!journal.ok) return journal;
+  const blocks = checkCompanionBlocks(state);
+  if (!blocks.ok) return blocks;
   const handoutPages = checkHandoutPages(state, before);
   if (!handoutPages.ok) return handoutPages;
   if (Object.keys(state.rolls).length > LIMITS.openRollsPerRoom) return over(`at most ${n(LIMITS.openRollsPerRoom)} roll requests can be open at once. Close one first`);
@@ -522,6 +547,76 @@ function checkJournal(state: RoomState): LimitCheck {
     total += bytes;
   }
   if (total > LIMITS.journalBytes) return roomFull(`${n(LIMITS.journalBytes / 1024 / 1024)} MiB of journal pages`);
+  return { ok: true };
+}
+
+/** The refusal of a player's block save past their save budget (docs/design-v1-companion-stat-blocks.md 3.5). The editor knows it by these words. */
+export const BLOCK_SAVES_TOO_FAST = "Too many stat block saves at once. Wait a few seconds, then save again.";
+/** A block save the room's state limit refuses, in place of the size guard's words (section 3.4). */
+export const BLOCKS_ROOM_TOO_FULL = "The room is too full to save this stat block. Ask the DM to free some space, then save again.";
+/** A block save at the room's storage quota, in place of the quota's words (section 3.4). Deleting is still accepted. */
+export const BLOCKS_AT_QUOTA = "The room is at its storage limit, so stat blocks cannot be saved until the DM frees space. Deleting a stat block still works.";
+
+/** Sizes of companion blocks already measured, for the same reason as the monsters' (monsterSizes). */
+const blockSizes = new WeakMap<CompanionBlock, number>();
+
+function companionBlockBytes(block: CompanionBlock): number {
+  let bytes = blockSizes.get(block);
+  if (bytes === undefined) {
+    bytes = serializedBytes(block);
+    blockSizes.set(block, bytes);
+  }
+  return bytes;
+}
+
+/*
+ * The verdict for each version of the collection. An op that writes a
+ * block copies the collection first (shared/writable.ts), so an op that
+ * touches no block finds its verdict here and costs a lookup, while one
+ * that does totals the blocks by character again, each block's size
+ * measured once.
+ */
+const blockVerdicts = new WeakMap<object, LimitCheck>();
+
+/**
+ * Companion stat blocks (docs/design-v1-companion-stat-blocks.md 3.4): each
+ * at most 16 KiB, each character's at most 100 and 512 KiB, and the room's
+ * at most 600 and 3 MiB. Every refusal says what to do about blocks, since
+ * the player who meets it can act on their own blocks. Blocks never change
+ * character and go with theirs, so absolute caps refuse only an op that
+ * adds to them.
+ */
+function checkCompanionBlocks(state: RoomState): LimitCheck {
+  const collection = state.companionBlocks;
+  const known = blockVerdicts.get(collection);
+  if (known) return known;
+  const verdict = companionBlocksVerdict(state);
+  if (!isWritable(collection)) blockVerdicts.set(collection, verdict);
+  return verdict;
+}
+
+function companionBlocksVerdict(state: RoomState): LimitCheck {
+  const blocks = Object.values(state.companionBlocks).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  if (blocks.length > LIMITS.companionBlocksPerRoom) return over(`The room can hold at most ${n(LIMITS.companionBlocksPerRoom)} companion stat blocks. Delete one first.`);
+  const perCharacter = new Map<string, { count: number; bytes: number }>();
+  let total = 0;
+  for (const block of blocks) {
+    const bytes = companionBlockBytes(block);
+    if (bytes > LIMITS.companionBlockBytes) return over(`A stat block is at most ${n(LIMITS.companionBlockBytes / 1024)} KiB.`);
+    total += bytes;
+    const held = perCharacter.get(block.characterId) ?? { count: 0, bytes: 0 };
+    held.count++;
+    held.bytes += bytes;
+    perCharacter.set(block.characterId, held);
+  }
+  for (const [characterId, held] of perCharacter) {
+    const name = state.characters[characterId]?.name ?? "A character";
+    if (held.count > LIMITS.companionBlocksPerCharacter) return over(`${name} can keep at most ${n(LIMITS.companionBlocksPerCharacter)} stat blocks. Delete one first.`);
+    if (held.bytes > LIMITS.companionBlockBytesPerCharacter) {
+      return over(`${name}'s stat blocks can take at most ${n(LIMITS.companionBlockBytesPerCharacter / 1024)} KiB together. Delete one first.`);
+    }
+  }
+  if (total > LIMITS.companionBlocksBytes) return over(`The room can hold at most ${n(LIMITS.companionBlocksBytes / 1024 / 1024)} MiB of companion stat blocks. Delete one first.`);
   return { ok: true };
 }
 

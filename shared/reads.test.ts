@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { projectState } from "./project.ts";
 import { reads, satisfies } from "./reads.ts";
-import { DM, P1, actor, blockOf, character, customMonster, entry, reveal, room, token } from "./testutil.ts";
+import { DM, P1, P2, actor, blockOf, character, companionBlock, customMonster, entry, reveal, room, token } from "./testutil.ts";
 
 function setup() {
   const state = room();
@@ -27,6 +27,24 @@ describe("reads", () => {
       assert.ok("never" in r);
       assert.ok(!satisfies(r, v.projected, DM, v.opts));
     }
+  });
+
+  test("a companion block's save is predicted by the DM on any scene and the character's owners, and by no other player (docs/design-v1-companion-stat-blocks.md 4.4)", () => {
+    const state = setup();
+    state.companionBlocks.b1 = companionBlock("b1", "c1");
+    const { rev: _rev, ...block } = companionBlock("b2", "c1");
+    const create = { t: "companionBlock.create" as const, block };
+    const edit = { t: "companionBlock.update" as const, blockId: "b1", patch: { ac: 13 } };
+    const remove = { t: "companionBlock.delete" as const, blockId: "b1" };
+    assert.deepEqual(reads(create, state), { keys: [{ key: "character:c1" }], complete: [] });
+    assert.deepEqual(reads(edit, state), { keys: [{ key: "companionBlock:b1" }], complete: [] });
+    assert.deepEqual(reads(remove, state), { keys: [{ key: "companionBlock:b1" }], complete: [] });
+    for (const [viewer, sceneId] of [[DM, "s1"], [DM, "s2"], [P1, "s1"]] as const) {
+      const v = view(state, viewer, sceneId);
+      for (const op of [create, edit, remove]) assert.ok(satisfies(reads(op, state), v.projected, viewer, v.opts), `${op.t} by ${viewer.memberId} on ${sceneId}`);
+    }
+    const other = view(state, P2);
+    for (const op of [edit, remove]) assert.ok(!satisfies(reads(op, state), other.projected, P2, other.opts), op.t);
   });
 
   test("a DM on any scene replays custom monster edits, a player never holds one to replay", () => {

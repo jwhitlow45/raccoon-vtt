@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { collectionOf, compareLogIds, doorChunk, keys, parseKey, readEntity, revOf, sightOf, writeEntity } from "./keys.ts";
-import { room, token } from "./testutil.ts";
+import { companionBlock, room, token } from "./testutil.ts";
 
 describe("keys", () => {
   test("build and parse round trip for every kind", () => {
@@ -15,7 +15,7 @@ describe("keys", () => {
     assert.deepEqual(parseKey(keys.encounter), { kind: "encounter" });
     assert.deepEqual(parseKey(keys.encounterHistory), { kind: "encounterHistory" });
     assert.deepEqual(parseKey(keys.meta), { kind: "meta" });
-    for (const kind of ["scene", "member", "character", "template", "drawing", "label", "handout", "journal", "pin", "roll", "handoutDoc"] as const) {
+    for (const kind of ["scene", "member", "character", "template", "drawing", "label", "handout", "journal", "pin", "roll", "handoutDoc", "companionBlock"] as const) {
       assert.deepEqual(parseKey(keys[kind]("x")), { kind, id: "x" });
     }
   });
@@ -46,6 +46,18 @@ describe("keys", () => {
     assert.equal(collectionOf(key), "handoutDocs");
     const next = writeEntity(state, key, doc);
     assert.equal(readEntity(next, key), doc);
+    assert.equal(readEntity(state, key), null);
+    assert.equal(readEntity(writeEntity(next, key, null), key), null);
+  });
+
+  test("companion stat blocks read and write by key (docs/design-v1-companion-stat-blocks.md 3.6)", () => {
+    const state = room();
+    const block = companionBlock("b1", "c1");
+    const key = keys.companionBlock("b1");
+    assert.equal(key, "companionBlock:b1");
+    assert.equal(collectionOf(key), "companionBlocks");
+    const next = writeEntity(state, key, block);
+    assert.equal(readEntity(next, key), block);
     assert.equal(readEntity(state, key), null);
     assert.equal(readEntity(writeEntity(next, key, null), key), null);
   });

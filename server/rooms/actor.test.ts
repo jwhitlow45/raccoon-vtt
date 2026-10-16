@@ -3,7 +3,18 @@ import { describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import { createInitialState } from "#shared/initial.ts";
 import { chunkKey } from "#shared/keys.ts";
-import { exploredReserve, HANDOUT_PAGES_FULL, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes, SHOWING_COUNTS_AGAIN, utf8Bytes } from "#shared/limits.ts";
+import {
+  BLOCK_SAVES_TOO_FAST,
+  BLOCKS_AT_QUOTA,
+  BLOCKS_ROOM_TOO_FULL,
+  exploredReserve,
+  HANDOUT_PAGES_FULL,
+  LIMITS,
+  NO_ROOM_TO_EXPLORE,
+  serializedBytes,
+  SHOWING_COUNTS_AGAIN,
+  utf8Bytes,
+} from "#shared/limits.ts";
 import { partySight, type VisionWorld } from "#shared/rules/vision.ts";
 import { sceneWalls, splitRefusal } from "#shared/rules/walls.ts";
 import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
@@ -11,7 +22,7 @@ import type { Actor, Member, RoomState } from "#shared/model.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { actor as testActor, character as testCharacter, token as testToken } from "#shared/testutil.ts";
+import { actor as testActor, character as testCharacter, companionBlock as testBlock, token as testToken } from "#shared/testutil.ts";
 import { RoomActor, RoomReplayFailed, SysOpRefused, type ActorDeps } from "./actor.ts";
 import { SnapshotBudget } from "./budgets.ts";
 import { Connection } from "./connection.ts";
@@ -2181,6 +2192,152 @@ describe("every op's growth counts on the scenes it wrote into (docs/design-v1-d
         assert.equal(await send({ t: "actor.effects", add: [{ target: { tokenId: ids[0]! }, effect: { id: uuidv7(), key: "prone" } }] }), null, "one small one still fits");
       },
       { sizeLimits: { sceneLimit } },
+    );
+  });
+});
+
+describe("companion stat blocks at the room actor (docs/design-v1-companion-stat-blocks.md 3.4 to 3.6)", () => {
+  /** Bree, the player's character, with her token on the players' scene and one block. */
+  function breeRoom(dm: Member, player: Member): { state: RoomState; characterId: string; pcId: string } {
+    const state = createInitialState({ roomName: "Familiars", dm });
+    state.members[player.id] = player;
+    const characterId = uuidv7();
+    state.characters[characterId] = testCharacter(characterId, { name: "Bree", ownerIds: [player.id] });
+    const pcId = uuidv7();
+    state.tokens[pcId] = testToken(pcId, { sceneId: state.meta.playerSceneId!, kind: "pc", name: "Bree", x: 2, y: 2, actor: { ref: characterId } });
+    state.companionBlocks.moth = testBlock("moth", characterId);
+    return { state, characterId, pcId };
+  }
+
+  const create = (characterId: string, id = uuidv7()): Op => {
+    const { rev: _rev, ...block } = testBlock(id, characterId);
+    return { t: "companionBlock.create", block };
+  };
+
+  async function withSockets(
+    state: RoomState,
+    dm: Member,
+    player: Member,
+    run: (actor: RoomActor, sockets: { dm: ReturnType<typeof connect>; player: ReturnType<typeof connect> }) => Promise<void>,
+    info: Partial<ActorDeps["info"]> = {},
+    options: Partial<ActorDeps["options"]> = {},
+  ): Promise<void> {
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const base = deps(db, info);
+    const actor = await RoomActor.load({ ...base, options: { ...base.options, ...options } });
+    assert.ok(actor);
+    try {
+      const sockets = { dm: connect(actor, dm), player: connect(actor, player, "player") };
+      await actor.hello(sockets.dm.conn, { clientId: "c1", resumeFrom: 1 });
+      await actor.hello(sockets.player.conn, { clientId: "c2", resumeFrom: 1 });
+      await run(actor, sockets);
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  }
+
+  /** The answer to op `n`: null when taken, else its refusal. */
+  async function answer(sent: ServerMessage[], n: number): Promise<{ code: string; message: string } | null> {
+    const ev = await answerTo(sent, n);
+    assert.ok(ev !== "stuck", `op ${n} got no answer`);
+    const refusal = ev.rejects?.find((r) => r.n === n);
+    return refusal ? { code: refusal.code, message: refusal.message } : null;
+  }
+
+  test("a player's eleventh save in a burst is refused, never busy, the moves and HP changes after it go on at once, and one passes again 6 s later", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, characterId, pcId } = breeRoom(dm, player);
+    const clock = { now: Date.now() };
+    await withSockets(
+      state,
+      dm,
+      player,
+      async (actor, { dm: dmSocket, player: p }) => {
+        // Ten saves, a delete among them, then the eleventh, then a move and an HP change, all sent before any answer.
+        for (let n = 1; n <= 9; n++) await actor.op(p.conn, n, create(characterId));
+        await actor.op(p.conn, 10, { t: "companionBlock.delete", blockId: "moth" });
+        await actor.op(p.conn, 11, create(characterId));
+        await actor.op(p.conn, 12, { t: "token.move", tokenId: pcId, x: 3, y: 2 });
+        await actor.op(p.conn, 13, { t: "actor.hp", target: { tokenId: pcId }, change: { kind: "damage", amount: 2 } });
+        for (let n = 1; n <= 10; n++) assert.equal(await answer(p.sent, n), null, `save ${n}`);
+        assert.deepEqual(await answer(p.sent, 11), { code: "quota", message: BLOCK_SAVES_TOO_FAST });
+        assert.equal(await answer(p.sent, 12), null, "the move after it is taken");
+        assert.equal(await answer(p.sent, 13), null, "and the HP change");
+        assert.ok(!p.sent.some((m) => m.t === "retry"), "no busy and no gap");
+        assert.equal(actor.committed.state.tokens[pcId]!.x, 3);
+        assert.equal(Object.keys(actor.committed.state.companionBlocks).length, 9);
+        // One more after 6 s, and not two.
+        clock.now += LIMITS.companionBlockWriteRefillMs;
+        await actor.op(p.conn, 14, create(characterId));
+        await actor.op(p.conn, 15, create(characterId));
+        assert.equal(await answer(p.sent, 14), null);
+        assert.deepEqual(await answer(p.sent, 15), { code: "quota", message: BLOCK_SAVES_TOO_FAST });
+        // The DM's saves are not counted.
+        for (let n = 1; n <= 15; n++) await actor.op(dmSocket.conn, n, create(characterId));
+        for (let n = 1; n <= 15; n++) assert.equal(await answer(dmSocket.sent, n), null, `the DM's save ${n}`);
+      },
+      {},
+      { now: () => clock.now },
+    );
+  });
+
+  test("a room at its storage quota takes a block's delete from its player and the DM, and refuses a save in the blocks' words", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, characterId } = breeRoom(dm, player);
+    state.companionBlocks.owl = testBlock("owl", characterId, { name: "Owl" });
+    await withSockets(
+      state,
+      dm,
+      player,
+      async (actor, { dm: d, player: p }) => {
+        await actor.op(p.conn, 1, create(characterId));
+        assert.deepEqual(await answer(p.sent, 1), { code: "quota", message: BLOCKS_AT_QUOTA });
+        await actor.op(p.conn, 2, { t: "companionBlock.update", blockId: "moth", patch: { ac: 13 } });
+        assert.deepEqual(await answer(p.sent, 2), { code: "quota", message: BLOCKS_AT_QUOTA });
+        await actor.op(p.conn, 3, { t: "companionBlock.delete", blockId: "moth" });
+        assert.equal(await answer(p.sent, 3), null);
+        await actor.op(d.conn, 1, { t: "companionBlock.update", blockId: "owl", patch: { ac: 13 } });
+        assert.deepEqual(await answer(d.sent, 1), { code: "quota", message: BLOCKS_AT_QUOTA });
+        await actor.op(d.conn, 2, { t: "companionBlock.delete", blockId: "owl" });
+        assert.equal(await answer(d.sent, 2), null);
+        assert.deepEqual(actor.committed.state.companionBlocks, {});
+        // Other ops keep the room's own words.
+        await actor.op(d.conn, 3, { t: "log.chat", text: "hi" });
+        assert.equal((await answer(d.sent, 3))?.message, "the room is full: it is at its storage quota, so only deletions are accepted");
+      },
+      { readOnly: true },
+    );
+  });
+
+  test("a block save the room's state limit refuses says what to do about it, keeping the code, and other ops keep the guard's words", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, characterId, pcId } = breeRoom(dm, player);
+    const stateLimit = serializedBytes(state) + 2_500;
+    await withSockets(
+      state,
+      dm,
+      player,
+      async (actor, { player: p }) => {
+        // A small block fits, and one that carries the room past its limit does not.
+        await actor.op(p.conn, 1, { t: "companionBlock.update", blockId: "moth", patch: { ac: 13 } });
+        assert.equal(await answer(p.sent, 1), null);
+        const { rev: _rev, ...big } = testBlock(uuidv7(), characterId, { traits: [{ name: "", text: "x".repeat(3_000) }] });
+        await actor.op(p.conn, 2, { t: "companionBlock.create", block: big });
+        assert.deepEqual(await answer(p.sent, 2), { code: "quota", message: BLOCKS_ROOM_TOO_FULL });
+        await actor.op(p.conn, 3, { t: "companionBlock.update", blockId: "moth", patch: { traits: [{ name: "", text: "x".repeat(3_000) }] } });
+        assert.deepEqual(await answer(p.sent, 3), { code: "quota", message: BLOCKS_ROOM_TOO_FULL });
+        await actor.op(p.conn, 4, { t: "token.update", tokenId: pcId, patch: { notes: "n".repeat(3_000) } });
+        assert.deepEqual(await answer(p.sent, 4), { code: "quota", message: "the room is full: it is at its 0 MiB size limit" });
+        // A delete never grows the room.
+        await actor.op(p.conn, 5, { t: "companionBlock.delete", blockId: "moth" });
+        assert.equal(await answer(p.sent, 5), null);
+      },
+      {},
+      { sizeLimits: { stateLimit } },
     );
   });
 });

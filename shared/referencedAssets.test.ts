@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { keys } from "./keys.ts";
 import type { RoomState } from "./model.ts";
 import { referencedAssetIds, restoreAddedAssets } from "./referencedAssets.ts";
-import { character, customMonster, imageRef, room, scene, srdImage, token } from "./testutil.ts";
+import { character, companionBlock, customMonster, imageRef, room, scene, srdImage, token } from "./testutil.ts";
 
 const page = (assetId: string) => ({ assetId, width: 1584, height: 2048 });
 
@@ -27,6 +27,7 @@ function everyReference(): RoomState {
   state.handouts.h1 = { id: "h1", rev: 0, assetId: "handout", title: "Letter", to: "all", shownAt: "2026-10-14T00:00:00.000Z" };
   state.handouts.h2 = { id: "h2", rev: 0, assetId: "page1", pages: [page("page1"), page("page2"), page("page1")], title: "Strange letter", to: "all", shownAt: "2026-10-14T00:00:00.000Z" };
   state.handoutDocs.d1 = { id: "d1", rev: 0, title: "Strange letter", pages: [page("docPage1"), page("docPage2")], createdAt: "2026-10-14T00:00:00.000Z" };
+  state.companionBlocks.b1 = companionBlock("b1", "c1", { defaultImage: imageRef("blockImage") });
   return state;
 }
 
@@ -48,7 +49,7 @@ describe("referencedAssetIds (docs/design-v1-dm-tools.md 3.19)", () => {
     const found = referencedAssetIds(state);
     // A field added to the model that names an asset shows here first, and fails until the walk knows it.
     assert.deepEqual([...found].sort(), [...namedAssets(state)].sort());
-    assert.deepEqual([...found].sort(), ["altImage", "docPage1", "docPage2", "handout", "map", "monsterImage", "page1", "page2", "phase", "portrait", "srdImage", "stampImage", "thumb", "tokenImage"]);
+    assert.deepEqual([...found].sort(), ["altImage", "blockImage", "docPage1", "docPage2", "handout", "map", "monsterImage", "page1", "page2", "phase", "portrait", "srdImage", "stampImage", "thumb", "tokenImage"]);
   });
 
   test("a restore adds only references the entity does not hold now, and never a thumbnail", () => {
@@ -89,5 +90,13 @@ describe("referencedAssetIds (docs/design-v1-dm-tools.md 3.19)", () => {
       { assetId: "docPage2", kind: "handout" },
     ]);
     assert.deepEqual(restoreAddedAssets([{ key: keys.handoutDoc("d1"), value: doc }], state), []);
+  });
+
+  test("a companion block's picture is a token image, which putting the deleted block back adds (docs/design-v1-companion-stat-blocks.md 4.3)", () => {
+    const state = everyReference();
+    const block = state.companionBlocks.b1!;
+    const deleted = { ...state, companionBlocks: {} };
+    assert.deepEqual(restoreAddedAssets([{ key: keys.companionBlock("b1"), value: block }], deleted), [{ assetId: "blockImage", kind: "token" }]);
+    assert.deepEqual(restoreAddedAssets([{ key: keys.companionBlock("b1"), value: block }], state), []);
   });
 });

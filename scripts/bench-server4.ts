@@ -98,6 +98,7 @@ function benchRoom(level: "bright" | "dark", feetPerCell: number): RoomState {
     pins: {},
     rolls: {},
     handoutDocs: {},
+    companionBlocks: {},
   };
 }
 

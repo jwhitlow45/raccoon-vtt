@@ -8,9 +8,9 @@ import type { RestoreEntry } from "./protocol.ts";
  * Every place the room's state names an image row (docs/design-v1-dm-tools.md
  * 2.6 and 3.19), with the kind of asset that place takes: scene maps, map
  * phases and thumbnails, token images and other images, character
- * portraits, monsters' and SRD monsters' default images, stamps from the
- * library, and every page of a handout and of a document in the DM's
- * library. Shipped icons name no row.
+ * portraits, monsters', SRD monsters' and companion blocks' default
+ * images, stamps from the library, and every page of a handout and of a
+ * document in the DM's library. Shipped icons name no row.
  *
  * Cleanup asks it which images a room still uses, and the permissions ask
  * it which images an undo would put back. Both must know every reference,
@@ -56,6 +56,7 @@ export function entityAssetRefs(key: EntityKey, value: unknown): AssetRef[] {
       break;
     case "character":
     case "monster":
+    case "companionBlock":
       image(v.defaultImage as ImageRef | undefined);
       break;
     case "srdImage":
@@ -90,6 +91,7 @@ const IMAGE_COLLECTIONS = [
   ["stamps", "stamp"],
   ["handouts", "handout"],
   ["handoutDocs", "handoutDoc"],
+  ["companionBlocks", "companionBlock"],
 ] as const satisfies readonly (readonly [keyof RoomState, string])[];
 
 /** Every asset id the state names, whatever kind its place takes. A thumbnail of a scene counts as used while the scene names it. */

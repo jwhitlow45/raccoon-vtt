@@ -81,6 +81,7 @@ function room(): RoomState {
     pins: {},
     rolls: {},
     handoutDocs: {},
+    companionBlocks: {},
   };
   for (let i = 0; i < 500; i++) {
     const x = (i * 37) % SIZE;

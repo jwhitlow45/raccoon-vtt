@@ -6,6 +6,7 @@ import { MAX_RULER_STOPS, type ActorPatch, type OpOf, type TokenPatch } from "..
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
 import { footprintSize } from "../rules/footprint.ts";
 import { oneSize, pathThisTurn, sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
+import { deleteCharacterBlocks } from "./companionBlocks.ts";
 import { COMPANION_OWNERS, NO_NUMBER, NOT_SHARED, actsOnCharacterTurn, checkCompanion, dropRows, syncOwners } from "./companions.ts";
 import { removeEntries } from "./encounter.ts";
 import { gone, invalid, type Env, type ResolvedActor, type Tx } from "./tx.ts";
@@ -435,7 +436,11 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
   }
 }
 
-/** Removes a character with every token that points at it, so no token is left with a dangling actor, and its companions. */
+/**
+ * Removes a character with every token that points at it, so no token is
+ * left with a dangling actor, its companions, and the stat blocks it kept
+ * for them (docs/design-v1-companion-stat-blocks.md 3.3).
+ */
 export function characterDelete(tx: Tx, op: OpOf<"character.delete">): void {
   const character = tx.character(op.characterId);
   const rowsBefore = tx.state.encounter?.entries.length ?? 0;
@@ -450,6 +455,7 @@ export function characterDelete(tx: Tx, op: OpOf<"character.delete">): void {
   }
   const entryIds = tx.state.encounter?.entries.filter((e) => e.characterId === character.id).map((e) => e.id) ?? [];
   if (entryIds.length > 0) removeEntries(tx, entryIds);
+  deleteCharacterBlocks(tx, character.id);
   tx.remove(keys.character(character.id));
   // The DM learns that a player deleted one, and what went with it, in a line only the DM's log carries: the DM cannot undo it.
   if (tx.actor.role !== "dm") {

@@ -39,7 +39,7 @@ export type WsOptions = {
   caps?: Partial<SocketCaps>;
   /** Protocol-level ping interval (design 7.5): 30 s. */
   pingMs?: number;
-  /** A socket whose send buffer stays above this for `bufferedHoldMs` is closed (design 10.4): 4 MiB for 10 s. */
+  /** A socket whose send buffer stays above this for `bufferedHoldMs` is closed (design 10.4): 7 MiB for 10 s. */
   bufferedLimit?: number;
   bufferedHoldMs?: number;
   /** `scene` rate: 1 per 2 s per socket and 4 per 10 s per session. */
@@ -53,6 +53,13 @@ export type WsOptions = {
 };
 
 export const MAX_FRAME_BYTES = 64 * 1024;
+/**
+ * The send buffer a socket may hold for `bufferedHoldMs` before it is
+ * closed: 1 MiB over the largest DM snapshot, 6 MiB with companion stat
+ * blocks (docs/design-v1-companion-stat-blocks.md 3.4), so one snapshot
+ * alone never closes a slow socket.
+ */
+export const DEFAULT_BUFFERED_LIMIT = 7 * 1024 * 1024;
 
 /** The grant a socket is bound to. A table display's has the role `'player'` and `display` set. */
 type SocketGrant = Omit<GrantContext, "role"> & { role: GrantContext["role"]; display: boolean };
@@ -71,7 +78,7 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
   const sceneSocket = new SlidingWindow(opts.scenePerSocketMs ?? 2_000, 1);
   const sceneSession = new SlidingWindow(opts.scenePerSessionWindowMs ?? 10_000, opts.scenePerSession ?? 4);
   const pingMs = opts.pingMs ?? 30_000;
-  const bufferedLimit = opts.bufferedLimit ?? 4 * 1024 * 1024;
+  const bufferedLimit = opts.bufferedLimit ?? DEFAULT_BUFFERED_LIMIT;
   const bufferedHoldMs = opts.bufferedHoldMs ?? 10_000;
   const pendingFrames = opts.pendingFrames ?? 64;
   const trustCf = config.TRUST_CF_CONNECTING_IP === "1";

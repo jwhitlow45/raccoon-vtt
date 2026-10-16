@@ -48,6 +48,12 @@ import { isWritable } from "#shared/writable.ts";
  * A DM's projection of a scene is exactly the two parts with the JSON around
  * them (and an empty sight map, whose real tiles the sight reserve covers),
  * so the measure is the projection's size, every whisper counted.
+ *
+ * Companion stat blocks ride in every DM projection too, but outside this
+ * measure (docs/design-v1-companion-stat-blocks.md 3.4): the measure counts
+ * their field as empty, and the room's caps hold them to 3 MiB on their own
+ * (shared/limits.ts). So a map, a monster or a journal page never grows
+ * into the blocks' room, and a DM's snapshot is at most 3 MiB plus theirs.
  */
 
 function roomFull(limit: number): LimitCheck {
@@ -253,17 +259,20 @@ const SCENE_LEVEL = [
 
 type SceneLevel = (typeof SCENE_LEVEL)[number];
 
+/** Room-level collections every DM projection holds that the measure counts as empty, with caps of their own. */
+const OUTSIDE = ["companionBlocks"] as const satisfies readonly (keyof RoomState)[];
+
 /** `"name":` before a collection. */
 function fieldBytes(name: string): number {
   return utf8Bytes(JSON.stringify(name)) + 1;
 }
 
 /**
- * The braces, the commas between the top-level fields, and the empty
- * sight map: what is around the two parts. A field per collection, plus
- * `sight`.
+ * The braces, the commas between the top-level fields, the empty sight map
+ * and the collections counted as empty: what is around the two parts. A
+ * field per collection, plus `sight`.
  */
-const SHELL_BYTES = 2 + (ROOM_LEVEL.length + SCENE_LEVEL.length + 1 - 1) + fieldBytes("sight") + 2;
+const SHELL_BYTES = 2 + (ROOM_LEVEL.length + SCENE_LEVEL.length + OUTSIDE.length + 1 - 1) + fieldBytes("sight") + 2 + OUTSIDE.reduce((sum, name) => sum + fieldBytes(name) + 2, 0);
 
 /*
  * Sizes kept per entity object and per collection object, which are

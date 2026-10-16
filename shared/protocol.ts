@@ -605,6 +605,18 @@ const monsterPatch = z
   })
   .refine((p) => serializedBytes(p) <= LIMITS.monsterBytes, withinMonsterBytes);
 
+const withinBlockBytes = { message: `a stat block is at most ${LIMITS.companionBlockBytes / 1024} KiB` };
+
+/**
+ * A stat block a character keeps for its companions, as its create op
+ * carries it (docs/design-v1-companion-stat-blocks.md 3.3): the monsters'
+ * lines and bounds, with the character that keeps it and the SRD monster
+ * it was copied from. The reducer sets `rev`.
+ */
+const companionBlockInput = z
+  .strictObject({ id, characterId: id, fromSrd: srdId.optional(), ...statBlockFields })
+  .refine((b) => serializedBytes(b) <= LIMITS.companionBlockBytes, withinBlockBytes);
+
 /**
  * A saved encounter's monsters: an SRD monster by its id or one of the
  * room's own, each with a count, and at most MAX_ENCOUNTER_CREATURES in all.
@@ -1000,6 +1012,15 @@ export const clientOps = [
   op("monster.delete", { monsterId: id }),
   /** The image an SRD monster's new tokens start with, or null to go back to none. */
   op("monster.setSrdImage", { srdId, image: imageRef.nullable() }),
+  /**
+   * A character's stat blocks for its companions
+   * (docs/design-v1-companion-stat-blocks.md 3.3), the DM's and the
+   * character's owners'. An edit sends the changed lines, as a monster's
+   * does, and never names the character or the SRD source, which stay.
+   */
+  op("companionBlock.create", { block: companionBlockInput }),
+  op("companionBlock.update", { blockId: id, patch: monsterPatch }),
+  op("companionBlock.delete", { blockId: id }),
   op("savedEncounter.create", { encounter: savedEncounterInput }),
   /** `party: null` goes back to the room's characters. */
   op("savedEncounter.update", { encounterId: id, patch: savedEncounterPatch }),
@@ -1258,6 +1279,7 @@ export type CharacterInput = z.infer<typeof characterInput>;
 export type CharacterPatch = z.infer<typeof characterPatch>;
 export type MonsterInput = z.infer<typeof monsterInput>;
 export type MonsterPatch = z.infer<typeof monsterPatch>;
+export type CompanionBlockInput = z.infer<typeof companionBlockInput>;
 export type SavedEncounterInput = z.infer<typeof savedEncounterInput>;
 export type SavedEncounterPatch = z.infer<typeof savedEncounterPatch>;
 export type TemplateInput = z.infer<typeof templateInput>;
@@ -1290,6 +1312,8 @@ export const actorSchemaForImport = actorSchema;
 export const statBlockFieldsForImport = statBlockFields;
 /** A custom monster as a create op carries it, for the editor to check a draft before it saves. */
 export const monsterInputSchema = monsterInput;
+/** A companion's stat block as a create op carries it, for the editor to check a draft before it saves. */
+export const companionBlockInputSchema = companionBlockInput;
 /** The SRD id rule, so the stored-state schema checks imported SRD images the same way. */
 export const srdIdSchema = srdId;
 /** An area's reminders, so the stored-state schema checks imports the same way. */

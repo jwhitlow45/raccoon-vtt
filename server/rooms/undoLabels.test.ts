@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { clientOps } from "#shared/protocol.ts";
-import { actor, apply, character, room, scene, token } from "#shared/testutil.ts";
+import { actor, apply, character, companionBlock, room, scene, token } from "#shared/testutil.ts";
 import { UndoStacks } from "./undo.ts";
 import { addTally, describeOp, describeTally, tallyOf } from "./undoLabels.ts";
 
@@ -55,6 +55,19 @@ describe("undo step labels", () => {
     assert.equal(describeOp({ t: "handout.show", handout: { id: "h1", pages, title: "Strange letter", to: "all" } }, s), "showing the handout Strange letter");
   });
 
+  test("a companion block is added, changed and deleted by its name, and goes on the DM's stack alone (docs/design-v1-companion-stat-blocks.md 3.3)", () => {
+    const s = { ...state(), companionBlocks: { b1: companionBlock("b1", "c1", { name: "Owl" }) } };
+    const { rev: _rev, ...block } = companionBlock("b2", "c1", { name: "Owl" });
+    assert.equal(describeOp({ t: "companionBlock.create", block }, s), "adding the stat block Owl");
+    assert.equal(describeOp({ t: "companionBlock.update", blockId: "b1", patch: { ac: 13 } }, s), "changing the stat block Owl");
+    assert.equal(describeOp({ t: "companionBlock.delete", blockId: "b1" }, s), "deleting the stat block Owl");
+    assert.equal(describeOp({ t: "companionBlock.delete", blockId: "gone" }, s), "deleting a stat block");
+    for (const op of [{ t: "companionBlock.create", block } as const, { t: "companionBlock.delete", blockId: "b1" } as const]) {
+      assert.equal(UndoStacks.records("dm", op), true, op.t);
+      assert.equal(UndoStacks.records("player", op), false, op.t);
+    }
+  });
+
   test("cut long names, so the toast stays short", () => {
     const label = describeOp({ t: "token.move", tokenId: "long", x: 1, y: 1 }, state());
     assert.ok(label.length < 60, label);
@@ -66,7 +79,7 @@ describe("undo step labels", () => {
     for (const schema of clientOps) {
       const t = schema.shape.t.value;
       // The smallest op of each type the label can read: fields it does not use stay unset.
-      const label = describeOp({ t, sceneId: "s1", tokenId: "g2", target: { tokenId: "g2" }, moves: [], hits: [], patch: {}, change: { kind: "heal", amount: 1 }, effect: { key: "prone" }, token: { name: "x" }, scene: { name: "x" }, character: { name: "x" }, monster: { name: "x" }, encounter: { name: "x" }, srdId: "goblin-warrior", image: null, template: {}, drawing: {}, handout: { title: "x" }, doc: { title: "x" }, label: null, door: { edge: "0,0,n" }, tokenIds: ["g2"], rollIds: ["r1"], page: { title: "x" }, pin: { id: "p1" }, request: { test: { kind: "save", choices: [{ ability: "dex" }] } } } as never, s);
+      const label = describeOp({ t, sceneId: "s1", tokenId: "g2", target: { tokenId: "g2" }, moves: [], hits: [], patch: {}, change: { kind: "heal", amount: 1 }, effect: { key: "prone" }, token: { name: "x" }, scene: { name: "x" }, character: { name: "x" }, monster: { name: "x" }, block: { name: "x" }, encounter: { name: "x" }, srdId: "goblin-warrior", image: null, template: {}, drawing: {}, handout: { title: "x" }, doc: { title: "x" }, label: null, door: { edge: "0,0,n" }, tokenIds: ["g2"], rollIds: ["r1"], page: { title: "x" }, pin: { id: "p1" }, request: { test: { kind: "save", choices: [{ ability: "dex" }] } } } as never, s);
       assert.ok(label.length > 0 && label.length <= 200, `${t}: ${label}`);
     }
   });

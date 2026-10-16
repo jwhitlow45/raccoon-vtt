@@ -8,7 +8,8 @@ import {
   serverMessageSchema,
   serverOnlyOpSchema,
 } from "./protocol.ts";
-import { blockOf, customMonster } from "./testutil.ts";
+import { serializedBytes } from "./limits.ts";
+import { blockOf, companionBlock, customMonster } from "./testutil.ts";
 
 const ok = (schema: { safeParse: (v: unknown) => { success: boolean } }, value: unknown) => assert.ok(schema.safeParse(value).success, JSON.stringify(value));
 const bad = (schema: { safeParse: (v: unknown) => { success: boolean } }, value: unknown) => assert.ok(!schema.safeParse(value).success, JSON.stringify(value));
@@ -556,5 +557,42 @@ describe("pdf handout ops (docs/design-v1-pdf-handouts.md 3.3)", () => {
     ok(clientOpSchema, { t: "handoutDoc.delete", docId: "d1" });
     bad(clientOpSchema, { t: "handoutDoc.delete", docId: "" });
     bad(clientOpSchema, { t: "handoutDoc.delete", docId: "d1", pages: [] });
+  });
+});
+
+describe("companion block ops", () => {
+  test("a companion block op carries the monsters' lines with its character, at most 16 KiB, far inside the 64 KiB frame (docs/design-v1-companion-stat-blocks.md 3.3)", () => {
+    const { rev: _rev, ...plain } = companionBlock("b1", "c1");
+    /** The block with its traits' text grown to exactly `bytes` serialized, in three-byte characters where it can. */
+    const sized = (bytes: number) => {
+      const traits = Array.from({ length: 5 }, () => ({ name: "Trait", text: "" }));
+      const size = () => serializedBytes({ ...plain, traits });
+      for (const [char, width] of [["梟", 3], ["x", 1]] as const) {
+        for (const trait of traits) trait.text += char.repeat(Math.max(0, Math.min(4_000 - trait.text.length, Math.floor((bytes - size()) / width))));
+      }
+      assert.equal(size(), bytes);
+      return { ...plain, traits };
+    };
+    ok(clientOpSchema, { t: "companionBlock.create", block: plain });
+    ok(clientOpSchema, { t: "companionBlock.create", block: { ...plain, fromSrd: "owl" } });
+    const full = sized(16 * 1024);
+    const op = { t: "companionBlock.create", block: full };
+    ok(clientOpSchema, op);
+    const frame = { t: "op", n: Number.MAX_SAFE_INTEGER, op, g: "x".repeat(64) };
+    ok(clientMessageSchema, frame);
+    assert.ok(serializedBytes(frame) < 17 * 1024, "a full block op is about a quarter of the frame");
+    bad(clientOpSchema, { t: "companionBlock.create", block: sized(16 * 1024 + 4) });
+    // The reducer sets rev, and the SRD source is a slug.
+    bad(clientOpSchema, { t: "companionBlock.create", block: { ...plain, rev: 0 } });
+    bad(clientOpSchema, { t: "companionBlock.create", block: { ...plain, fromSrd: "Owl!" } });
+    bad(clientOpSchema, { t: "companionBlock.create", block: { ...plain, name: "Moth\u202E" } });
+    const { characterId: _c, ...orphan } = plain;
+    bad(clientOpSchema, { t: "companionBlock.create", block: orphan });
+    // An edit sends lines and never names the character or the SRD source, which stay.
+    ok(clientOpSchema, { t: "companionBlock.update", blockId: "b1", patch: { ac: 13, defaultImage: null } });
+    bad(clientOpSchema, { t: "companionBlock.update", blockId: "b1", patch: { characterId: "c2" } });
+    bad(clientOpSchema, { t: "companionBlock.update", blockId: "b1", patch: { fromSrd: "owl" } });
+    ok(clientOpSchema, { t: "companionBlock.delete", blockId: "b1" });
+    bad(clientOpSchema, { t: "companionBlock.delete", blockId: "" });
   });
 });

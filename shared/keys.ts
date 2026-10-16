@@ -43,6 +43,7 @@ export type ParsedKey =
   | { kind: "pin"; id: string }
   | { kind: "roll"; id: string }
   | { kind: "handoutDoc"; id: string }
+  | { kind: "companionBlock"; id: string }
   | { kind: "log"; id: string }
   | { kind: "chunk"; sceneId: string; cx: number; cy: number }
   | { kind: "fog"; sceneId: string; tx: number; ty: number }
@@ -76,6 +77,8 @@ export const keys = {
   roll: (id: string): EntityKey => `roll:${id}`,
   /** A document of handout pages in the DM's library (RoomState.handoutDocs). */
   handoutDoc: (id: string): EntityKey => `handoutDoc:${id}`,
+  /** A stat block a character keeps for its companions (RoomState.companionBlocks). */
+  companionBlock: (id: string): EntityKey => `companionBlock:${id}`,
   log: (id: string): EntityKey => `log:${id}`,
   chunk: (sceneId: string, cx: number, cy: number): EntityKey => `chunk:${sceneId}:${cx},${cy}`,
   fog: (sceneId: string, tx: number, ty: number): EntityKey => `fog:${sceneId}:${tx},${ty}`,
@@ -173,6 +176,7 @@ export function parseKey(key: EntityKey): ParsedKey | null {
     case "pin":
     case "roll":
     case "handoutDoc":
+    case "companionBlock":
     case "log":
       return { kind, id: rest };
     case "fogDraft":
@@ -234,6 +238,8 @@ export function collectionOf(key: EntityKey): keyof RoomState | null {
       return "rolls";
     case "handoutDoc":
       return "handoutDocs";
+    case "companionBlock":
+      return "companionBlocks";
     case "chunk":
       return "buildChunks";
     case "fog":
@@ -291,6 +297,8 @@ export function readEntity(state: RoomState, key: EntityKey): unknown {
       return state.rolls[parsed.id] ?? null;
     case "handoutDoc":
       return state.handoutDocs[parsed.id] ?? null;
+    case "companionBlock":
+      return state.companionBlocks[parsed.id] ?? null;
     case "log":
       return state.log.find((e) => e.id === parsed.id) ?? null;
     case "chunk":
@@ -371,6 +379,8 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
       return { ...state, rolls: withEntry(state.rolls, parsed.id, value as RoomState["rolls"][string] | null) };
     case "handoutDoc":
       return { ...state, handoutDocs: withEntry(state.handoutDocs, parsed.id, value as RoomState["handoutDocs"][string] | null) };
+    case "companionBlock":
+      return { ...state, companionBlocks: withEntry(state.companionBlocks, parsed.id, value as RoomState["companionBlocks"][string] | null) };
     case "chunk":
       return {
         ...state,

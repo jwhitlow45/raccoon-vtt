@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { roomHandoutPages } from "./handouts.ts";
 import { HANDOUT_PAGES_FULL, LIMITS, SHOWING_COUNTS_AGAIN, checkLimits, serializedBytes, utf8Bytes } from "./limits.ts";
-import type { EdgeFeature, FreeWall } from "./model.ts";
-import { customMonster, drawing, room, srdImage, token } from "./testutil.ts";
+import type { CompanionBlock, EdgeFeature, FreeWall, RoomState } from "./model.ts";
+import { actor, character, companionBlock, customMonster, drawing, room, srdImage, token } from "./testutil.ts";
 
 describe("checkLimits", () => {
   test("passes an ordinary room and fails past each count", () => {
@@ -176,5 +176,109 @@ describe("checkLimits", () => {
     const notes = { notes: "梟".repeat(4_000) };
     assert.equal(serializedBytes(notes), Buffer.byteLength(JSON.stringify(notes)));
     assert.equal(serializedBytes(notes), 12_012);
+  });
+});
+
+describe("companion stat blocks (docs/design-v1-companion-stat-blocks.md 3.4)", () => {
+  /** A block of exactly `bytes` serialized, its padding split into traits of the protocol's 4,000 characters. */
+  function blockOfBytes(id: string, characterId: string, bytes: number): CompanionBlock {
+    const plain = companionBlock(id, characterId, { traits: [] });
+    const traits: { name: string; text: string }[] = [];
+    let block: CompanionBlock = plain;
+    while (serializedBytes(block) < bytes) {
+      const room = bytes - serializedBytes(block);
+      const last = traits[traits.length - 1];
+      if (last && last.text.length < 4_000) last.text += "x".repeat(Math.min(room, 4_000 - last.text.length));
+      else traits.push({ name: "", text: "x".repeat(Math.max(0, Math.min(room - 23, 4_000))) });
+      block = { ...plain, traits: traits.map((t) => ({ ...t })) };
+    }
+    assert.equal(serializedBytes(block), bytes);
+    return block;
+  }
+
+  /** The state with these blocks, as a new collection: an op that writes a block copies the collection. */
+  function withBlocks(state: RoomState, blocks: readonly CompanionBlock[]): RoomState {
+    return { ...state, companionBlocks: { ...state.companionBlocks, ...Object.fromEntries(blocks.map((b) => [b.id, b])) } };
+  }
+
+  function characters(count: number): RoomState {
+    const state = room();
+    for (let i = 0; i < count; i++) state.characters[`c${i}`] = character(`c${i}`, { name: i === 0 ? "Bree" : `Hero ${i}` });
+    return state;
+  }
+
+  test("a character keeps at most 100 blocks, and the 101st is refused in its words", () => {
+    const base = characters(2);
+    const hundred = withBlocks(base, Array.from({ length: 100 }, (_, i) => companionBlock(`b${i}`, "c0")));
+    assert.deepEqual(checkLimits(hundred), { ok: true });
+    assert.deepEqual(checkLimits(withBlocks(hundred, [companionBlock("b100", "c0")])), { ok: false, code: "quota", message: "Bree can keep at most 100 stat blocks. Delete one first." });
+    // Another character's blocks count apart.
+    assert.deepEqual(checkLimits(withBlocks(hundred, [companionBlock("other", "c1")])), { ok: true });
+  });
+
+  test("a character's blocks take at most 512 KiB together, so 32 long blocks fill its bytes before its count", () => {
+    const base = characters(1);
+    const full = withBlocks(base, Array.from({ length: 32 }, (_, i) => blockOfBytes(`b${i}`, "c0", LIMITS.companionBlockBytes)));
+    assert.equal(32 * LIMITS.companionBlockBytes, LIMITS.companionBlockBytesPerCharacter);
+    assert.deepEqual(checkLimits(full), { ok: true });
+    assert.deepEqual(checkLimits(withBlocks(full, [companionBlock("b32", "c0")])), {
+      ok: false,
+      code: "quota",
+      message: "Bree's stat blocks can take at most 512 KiB together. Delete one first.",
+    });
+  });
+
+  test("one block is at most 16 KiB", () => {
+    const base = characters(1);
+    assert.deepEqual(checkLimits(withBlocks(base, [blockOfBytes("b0", "c0", LIMITS.companionBlockBytes)])), { ok: true });
+    assert.deepEqual(checkLimits(withBlocks(base, [blockOfBytes("b0", "c0", LIMITS.companionBlockBytes + 1)])), { ok: false, code: "quota", message: "A stat block is at most 16 KiB." });
+  });
+
+  test("a room keeps at most 600 blocks and 3 MiB, six characters at their caps, each refused in the room's words", () => {
+    const base = characters(7);
+    const many = withBlocks(base, Array.from({ length: 600 }, (_, i) => companionBlock(`b${i}`, `c${Math.floor(i / 100)}`)));
+    assert.deepEqual(checkLimits(many), { ok: true });
+    assert.deepEqual(checkLimits(withBlocks(many, [companionBlock("b600", "c6")])), {
+      ok: false,
+      code: "quota",
+      message: "The room can hold at most 600 companion stat blocks. Delete one first.",
+    });
+    const heavy = withBlocks(base, Array.from({ length: 192 }, (_, i) => blockOfBytes(`b${i}`, `c${Math.floor(i / 32)}`, LIMITS.companionBlockBytes)));
+    assert.equal(192 * LIMITS.companionBlockBytes, LIMITS.companionBlocksBytes);
+    assert.deepEqual(checkLimits(heavy), { ok: true });
+    assert.deepEqual(checkLimits(withBlocks(heavy, [companionBlock("small", "c6")])), {
+      ok: false,
+      code: "quota",
+      message: "The room can hold at most 3 MiB of companion stat blocks. Delete one first.",
+    });
+  });
+
+  test("an SRD link on a companion is no block and counts nothing", () => {
+    const base = characters(1);
+    const full = withBlocks(base, Array.from({ length: 100 }, (_, i) => companionBlock(`b${i}`, "c0")));
+    const owl = { ...full, tokens: { owl: token("owl", { kind: "npc", companion: { of: "c0", turn: "shared" }, actor: { inline: actor({ srdId: "owl" }) } }) } };
+    assert.deepEqual(checkLimits(owl), { ok: true });
+  });
+
+  test("fifty characters each adding long blocks up to their caps stop at the room's caps, within the state limit", () => {
+    let state = characters(LIMITS.charactersPerRoom);
+    let refusals = 0;
+    for (let c = 0; c < LIMITS.charactersPerRoom; c++) {
+      for (let i = 0; i < 40; i++) {
+        const next = withBlocks(state, [blockOfBytes(`c${c}-b${i}`, `c${c}`, LIMITS.companionBlockBytes)]);
+        const r = checkLimits(next);
+        if (r.ok) {
+          state = next;
+          continue;
+        }
+        refusals++;
+        // A character under its own caps meets the room's, and one at its own meets its own.
+        assert.match(r.message, i >= 32 ? /stat blocks can take at most 512 KiB together|The room can hold/ : /The room can hold at most 3 MiB/);
+        break;
+      }
+    }
+    assert.equal(refusals, LIMITS.charactersPerRoom);
+    assert.equal(Object.keys(state.companionBlocks).length, 192);
+    assert.ok(serializedBytes(state) < LIMITS.stateBytes, `${serializedBytes(state)} bytes`);
   });
 });

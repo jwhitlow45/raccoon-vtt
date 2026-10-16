@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
-import { checkLimits, type LimitCheck } from "#shared/limits.ts";
+import { BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, checkLimits, LIMITS, type LimitCheck } from "#shared/limits.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { HandoutPage, LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { canApply, type PermissionDeps } from "#shared/permissions.ts";
@@ -192,7 +192,19 @@ const DELETIONS = new Set<Op["t"]>([
   "roll.close",
   // A document's images are freed through the library's delete, which works at the quota too (docs/design-v1-pdf-handouts.md 3.3).
   "handoutDoc.delete",
+  // The space a room at its quota most needs back, which a block's players may free too (docs/design-v1-companion-stat-blocks.md 3.6).
+  "companionBlock.delete",
 ]);
+
+/** A companion stat block's ops, which a player's save budget counts and the size refusals word for blocks. */
+function isBlockOp(op: Op): boolean {
+  return op.t === "companionBlock.create" || op.t === "companionBlock.update" || op.t === "companionBlock.delete";
+}
+
+/** A block save, which a guard's refusal answers in the block's own words (docs/design-v1-companion-stat-blocks.md 3.4). */
+function isBlockSave(op: Op): boolean {
+  return op.t === "companionBlock.create" || op.t === "companionBlock.update";
+}
 
 const NO_FACTS: Map<string, AssetFact> = new Map();
 const NO_IDS: ReadonlySet<string> = new Set();
@@ -244,6 +256,8 @@ export class RoomActor {
   #undo = new UndoStacks();
   #sizes: SizeGuard;
   #roomRate: TokenBucket;
+  /** Each member's budget of block saves (docs/design-v1-companion-stat-blocks.md 3.5), made at their first save. */
+  #blockSaves = new Map<string, TokenBucket>();
   #recheckTimer: NodeJS.Timeout | null = null;
   #reconciling: Promise<void> | null = null;
   #visibleCache = new Map<string, { seq: number; ids: Set<string> }>();
@@ -858,7 +872,16 @@ export class RoomActor {
       return;
     }
     if (this.readOnly && !DELETIONS.has(op.t)) {
-      this.#refuse(key, wm, n, "quota", "the room is full: it is at its storage quota, so only deletions are accepted");
+      this.#refuse(key, wm, n, "quota", isBlockSave(op) ? BLOCKS_AT_QUOTA : "the room is full: it is at its storage quota, so only deletions are accepted");
+      return;
+    }
+    /*
+     * A player's block saves past their budget (docs/design-v1-companion-stat-blocks.md 3.5) are refused, never answered
+     * `busy`: a refusal advances the op sequence, so the device's moves and HP changes after it go on at once, while `busy`
+     * would hold every later op behind the save. A delete counts, so creating and deleting cannot churn the op log.
+     */
+    if (viewer.role === "player" && isBlockOp(op) && !this.#blockSaveBudget(viewer.memberId).take()) {
+      this.#refuse(key, wm, n, "quota", BLOCK_SAVES_TOO_FAST);
       return;
     }
     op = withAssetSizes(op, facts);
@@ -896,6 +919,15 @@ export class RoomActor {
       this.#undo.push(viewer.memberId, inverse, describeOp(clientOp, before, viewer, this.#staged.state), cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport);
     }
     this.#scheduleCommit();
+  }
+
+  #blockSaveBudget(memberId: string): TokenBucket {
+    let bucket = this.#blockSaves.get(memberId);
+    if (!bucket) {
+      bucket = new TokenBucket(1000 / LIMITS.companionBlockWriteRefillMs, LIMITS.companionBlockWriteBurst, this.#opts.now);
+      this.#blockSaves.set(memberId, bucket);
+    }
+    return bucket;
   }
 
   #refuse(key: ClientKey, wm: Watermark, n: number, code: RefusalCode, message: string): void {
@@ -937,7 +969,8 @@ export class RoomActor {
     // Every scene the op wrote into, read from what it touched, so no op's growth escapes its scenes' bounds.
     const grown = [...new Set([...sceneIds, ...touchedScenes(this.#staged.state, result.state, result.touched)])];
     const size = this.#sizes.check(result.state, grown, growthBound(this.#staged.state, result.state, result.touched), this.#staged.state);
-    if (!size.ok) return size;
+    // The state limit is what refuses a block save here, since the projected scene leaves blocks out: it says what to do.
+    if (!size.ok) return isBlockSave(op) ? { ...size, message: BLOCKS_ROOM_TOO_FULL } : size;
     this.#staged = { state: result.state, seq };
     const batch = this.#ensureBatch();
     batch.ops.push({ seq, at, actor: viewer, op, log: result.log });

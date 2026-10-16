@@ -121,6 +121,12 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `changing ${the("monster", before.monsters[op.monsterId]?.name)}`;
     case "monster.delete":
       return `deleting ${the("monster", before.monsters[op.monsterId]?.name)}`;
+    case "companionBlock.create":
+      return `adding ${the("stat block", op.block.name)}`;
+    case "companionBlock.update":
+      return `changing ${the("stat block", before.companionBlocks[op.blockId]?.name)}`;
+    case "companionBlock.delete":
+      return `deleting ${the("stat block", before.companionBlocks[op.blockId]?.name)}`;
     case "monster.setSrdImage":
       return `${op.image ? "setting" : "removing"} the image of ${srdName(op.srdId)}`;
     case "savedEncounter.create":

@@ -3,6 +3,7 @@ import { chunkKey, tileKey } from "#shared/keys.ts";
 import type {
   AreaTemplate,
   Character,
+  CompanionBlock,
   CustomMonster,
   Drawing,
   Effect,
@@ -96,12 +97,15 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   const entries = new Ids(newId);
   const monsters = new Ids(newId);
   const pages = new Ids(newId);
+  const blocks = new Ids(newId);
   members.assign(Object.keys(state.members));
   // Before the actors, which name the room monster a token was placed from (Actor.monsterId).
   monsters.assign(Object.keys(state.monsters));
   pages.assign(Object.keys(state.journal));
   scenes.assign(Object.keys(state.scenes));
   characters.assign(Object.keys(state.characters));
+  // A companion block goes with its character, so one whose character did not come through is dropped.
+  blocks.assign(Object.values(state.companionBlocks).filter((b) => characters.has(b.characterId)).map((b) => b.id));
   // A token whose character is gone would be a dangling actor, which only a live room may hold.
   const liveTokens = Object.values(state.tokens).filter((t) => scenes.has(t.sceneId) && ("inline" in t.actor || characters.has(t.actor.ref)));
   tokens.assign(liveTokens.map((t) => t.id));
@@ -190,6 +194,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     // Open roll requests belong to a moment of play, and their targets' players have new member ids anyway (section 2.5).
     rolls: {},
     handoutDocs: {},
+    companionBlocks: {},
   };
 
   const moveAny = state.meta.settings.playersMoveAny;
@@ -415,6 +420,17 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     if (pages.length === 0) continue;
     const next: HandoutDoc = { ...d, id: newId(), pages };
     out.handoutDocs[next.id] = next;
+  }
+  // A companion block follows its character's new id, and its picture follows its image or goes (docs/design-v1-companion-stat-blocks.md 3.6).
+  for (const b of Object.values(state.companionBlocks)) {
+    if (!blocks.has(b.id)) continue;
+    const next: CompanionBlock = { ...b, id: blocks.of(b.id), characterId: characters.of(b.characterId) };
+    if (b.defaultImage) {
+      const mapped = image(b.defaultImage);
+      if (mapped) next.defaultImage = mapped;
+      else delete next.defaultImage;
+    }
+    out.companionBlocks[next.id] = next;
   }
   // SRD monsters keep their ids. A room monster follows its new id, and one that is not in the backup was deleted before it.
   for (const e of Object.values(state.savedEncounters)) {

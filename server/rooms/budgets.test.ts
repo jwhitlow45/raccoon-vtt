@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { FrameBudget, OpRate, SlidingWindow, SnapshotBudget, SocketRegistry, SustainedViolation, TokenBucket } from "./budgets.ts";
+import { LIMITS } from "#shared/limits.ts";
+import { DEFAULT_SNAPSHOT_BUDGET, FrameBudget, OpRate, SlidingWindow, SnapshotBudget, SocketRegistry, SustainedViolation, TokenBucket } from "./budgets.ts";
 
 function clock(start = 0): { now: () => number; tick: (ms: number) => void } {
   let t = start;
@@ -151,6 +152,27 @@ describe("SnapshotBudget", () => {
     assert.equal(b.delay(keys), 40_000);
     c.tick(40_000);
     assert.equal(b.delay(keys), 0);
+  });
+
+  test("the default takes ten of the largest DM snapshot, 6 MiB with companion blocks, a minute per session and twenty per address", () => {
+    const largest = LIMITS.projectedSceneBytes + LIMITS.companionBlocksBytes;
+    assert.equal(DEFAULT_SNAPSHOT_BUDGET.sessionBytes, 10 * largest);
+    assert.equal(DEFAULT_SNAPSHOT_BUDGET.ipBytes, 20 * largest);
+    const c = clock(100_000);
+    const b = new SnapshotBudget({}, c.now);
+    const keys = b.keys("s1", "ip1", false);
+    for (let i = 0; i < 10; i++) {
+      assert.equal(b.delay(keys), 0, `snapshot ${i + 1}`);
+      b.record(keys, largest);
+      c.tick(1_000);
+    }
+    assert.ok(b.delay(keys) > 0, "the eleventh waits");
+    // A second session at the same address still gets its ten.
+    const other = b.keys("s2", "ip1", false);
+    for (let i = 0; i < 10; i++) {
+      assert.equal(b.delay(other), 0, `second session's snapshot ${i + 1}`);
+      b.record(other, largest);
+    }
   });
 
   test("bytes delay too, and a pinned room counts the IP share per session", () => {

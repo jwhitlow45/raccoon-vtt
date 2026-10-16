@@ -146,6 +146,13 @@ export function reads(op: Op, state: RoomState): Reads {
     case "monster.update":
     case "monster.delete":
       return of([{ key: keys.monster(op.monsterId) }]);
+    // A companion's stat blocks (docs/design-v1-companion-stat-blocks.md 4.4). The DM's and the character's owners'
+    // views hold the character and its blocks, so both predict a save at once.
+    case "companionBlock.create":
+      return of([{ key: keys.character(op.block.characterId) }]);
+    case "companionBlock.update":
+    case "companionBlock.delete":
+      return of([{ key: keys.companionBlock(op.blockId) }]);
     // Saved encounters too.
     case "savedEncounter.create":
       return of([]);

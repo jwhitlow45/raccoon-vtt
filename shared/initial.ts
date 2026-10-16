@@ -55,5 +55,6 @@ export function createInitialState(input: { roomName: string; dm: Member; now?: 
     pins: {},
     rolls: {},
     handoutDocs: {},
+    companionBlocks: {},
   };
 }
