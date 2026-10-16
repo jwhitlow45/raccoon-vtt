@@ -1,7 +1,7 @@
 import { AnnotationMode, getDocument, InvalidPDFException, PasswordException, PDFWorker, type PDFDocumentLoadingTask, type PDFDocumentProxy, type RenderTask } from "pdfjs-dist";
 import { isFromReader, PDF_OPTIONS, type FromReader, type ToReader } from "./options.ts";
 import { renderSize } from "./encode.ts";
-import { DrawCancelled, isDynamicXfa, PageDrawFailure, ReaderRefusal, WORKER_READY_MS, type PdfDocument } from "./reader.ts";
+import { DESTROY_GRACE_MS, DrawCancelled, endWithin, isDynamicXfa, OpenCancelled, PageDrawFailure, ReaderRefusal, WORKER_READY_MS, type PdfDocument } from "./reader.ts";
 
 /**
  * pdf.js for the upload job (docs/design-v1-pdf-handouts.md 4.2): the job's
@@ -10,14 +10,15 @@ import { DrawCancelled, isDynamicXfa, PageDrawFailure, ReaderRefusal, WORKER_REA
  * when a DM picks a PDF, in chunks players and displays never download.
  */
 
-/** Starts the job's worker and waits until it says its decoders and pdf.js are loaded. */
-function startWorker(timeoutMs: number): Promise<Worker> {
+/** Starts the job's worker and waits until it says its decoders and pdf.js are loaded. An abort ends the worker at once. */
+function startWorker(timeoutMs: number, signal: AbortSignal): Promise<Worker> {
   const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module", name: "pdf-reader" });
   return new Promise((resolve, reject) => {
-    const done = (err: ReaderRefusal | null) => {
+    const done = (err: Error | null) => {
       clearTimeout(timer);
       worker.removeEventListener("message", onMessage);
       worker.removeEventListener("error", onError);
+      signal.removeEventListener("abort", onAbort);
       if (!err) return resolve(worker);
       worker.terminate();
       reject(err);
@@ -29,9 +30,22 @@ function startWorker(timeoutMs: number): Promise<Worker> {
       else if (message.rvtt === "failed") done(new ReaderRefusal("reader", `${message.step}: ${message.detail}`));
     };
     const onError = () => done(new ReaderRefusal("reader", "the worker did not start"));
+    const onAbort = () => done(new OpenCancelled());
     const timer = setTimeout(() => done(new ReaderRefusal("reader", "the worker did not answer")), timeoutMs);
     worker.addEventListener("message", onMessage);
     worker.addEventListener("error", onError);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+}
+
+/** `promise`, or OpenCancelled as soon as `signal` aborts. */
+function unlessAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new OpenCancelled());
+    if (signal.aborted) return onAbort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
   });
 }
 
@@ -42,9 +56,11 @@ function text(value: unknown): string | null {
 /**
  * Opens a PDF's bytes in a fresh worker of the job's own (4.2.1). Every way
  * it can fail is a ReaderRefusal of one kind, and none uploads anything.
+ * `signal` is the caller's from the worker's start: an abort while it opens
+ * ends the worker at once and throws OpenCancelled.
  */
-export async function openPdf(data: ArrayBuffer, timeoutMs: number = WORKER_READY_MS): Promise<PdfDocument> {
-  const worker = await startWorker(timeoutMs);
+export async function openPdf(data: ArrayBuffer, signal: AbortSignal, timeoutMs: number = WORKER_READY_MS): Promise<PdfDocument> {
+  const worker = await startWorker(timeoutMs, signal);
   let doc: PDFDocumentProxy;
   let pdfWorker: PDFWorker;
   let task: PDFDocumentLoadingTask;
@@ -52,29 +68,38 @@ export async function openPdf(data: ArrayBuffer, timeoutMs: number = WORKER_READ
     // pdf.js runs in this worker as its port, so it never starts one of its own nor falls back to this thread.
     pdfWorker = PDFWorker.create({ port: worker, verbosity: PDF_OPTIONS.verbosity });
     task = getDocument({ ...PDF_OPTIONS, data: new Uint8Array(data), worker: pdfWorker });
-    try {
-      doc = await task.promise;
-    } catch (err) {
-      await task.destroy().catch(() => undefined);
-      if (err instanceof PasswordException) throw new ReaderRefusal("password", err.message);
-      throw new ReaderRefusal("invalid", err instanceof Error ? err.message : String(err));
-    }
   } catch (err) {
     worker.terminate();
-    throw err instanceof ReaderRefusal ? err : new ReaderRefusal(err instanceof InvalidPDFException ? "invalid" : "reader", String(err));
+    throw new ReaderRefusal(err instanceof InvalidPDFException ? "invalid" : "reader", String(err));
   }
-  const end = async () => {
-    await task.destroy().catch(() => undefined);
+  const kill = () => {
     pdfWorker.destroy();
     worker.terminate();
   };
+  // Graceful first, but a worker that never answers is ended anyway, so Done never waits on it.
+  const end = () => endWithin(() => task.destroy(), kill, DESTROY_GRACE_MS);
+  // Cancel while it opens ends the worker at once, with no grace: nothing it holds is wanted.
+  const cancelled = (err: OpenCancelled) => {
+    kill();
+    void task.destroy().catch(() => undefined);
+    return err;
+  };
+  try {
+    doc = await unlessAborted(task.promise, signal);
+  } catch (err) {
+    if (err instanceof OpenCancelled) throw cancelled(err);
+    await end();
+    if (err instanceof PasswordException) throw new ReaderRefusal("password", err.message);
+    throw new ReaderRefusal("invalid", err instanceof Error ? err.message : String(err));
+  }
   let title: PdfDocument["title"];
   try {
-    const { info, metadata } = await doc.getMetadata();
+    const { info, metadata } = await unlessAborted(doc.getMetadata(), signal);
     const fields = info as Record<string, unknown>;
     if (isDynamicXfa(fields)) throw new ReaderRefusal("xfa", "a dynamic XFA form");
     title = { xmp: text(metadata?.get("dc:title")), info: text(fields.Title) };
   } catch (err) {
+    if (err instanceof OpenCancelled) throw cancelled(err);
     await end();
     throw err instanceof ReaderRefusal ? err : new ReaderRefusal("invalid", String(err));
   }

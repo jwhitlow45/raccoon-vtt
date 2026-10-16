@@ -27,6 +27,14 @@ export class PageDrawFailure extends Error {
   }
 }
 
+/** Opening stopped by Cancel, Done or the room going away. The worker is ended by then. */
+export class OpenCancelled extends Error {
+  constructor() {
+    super("Opening the PDF was cancelled.");
+    this.name = "OpenCancelled";
+  }
+}
+
 /** A draw stopped by Cancel upload. */
 export class DrawCancelled extends Error {
   constructor() {
@@ -60,4 +68,25 @@ export const WORKER_READY_MS = 15_000;
  */
 export function isDynamicXfa(info: Readonly<Record<string, unknown>>): boolean {
   return info.IsXFAPresent === true && info.IsAcroFormPresent !== true;
+}
+
+/**
+ * How long pdf.js gets to end a document gracefully. Its `destroy()` waits
+ * for the worker to answer, which a stuck worker never does, so after this
+ * the worker is ended regardless (4.2.1).
+ */
+export const DESTROY_GRACE_MS = 2_000;
+
+/**
+ * Ends a reader: the graceful end, given at most `graceMs`, then `terminate`
+ * whatever came of it. Never throws, and never waits longer than the grace.
+ */
+export async function endWithin(graceful: () => Promise<unknown>, terminate: () => void, graceMs: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([graceful().catch(() => undefined), new Promise<void>((resolve) => (timer = setTimeout(resolve, graceMs)))]);
+  } finally {
+    clearTimeout(timer);
+    terminate();
+  }
 }

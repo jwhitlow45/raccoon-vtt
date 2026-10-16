@@ -39,7 +39,7 @@ function liveDeps(roomId: string, memberId: string, store: RoomViewStore, action
     memberId,
     newId: () => actions.newId(),
     // The reader and pdf.js load only here, when a DM picks a PDF (4.2.5).
-    open: async (file) => (await import("./render.ts")).openPdf(await file.arrayBuffer()),
+    open: async (file, signal) => (await import("./render.ts")).openPdf(await file.arrayBuffer(), signal),
     canvas: () => document.createElement("canvas"),
     encode: (canvas) => encodeWithin(canvasSource(canvas)),
     thumb: (canvas) => pageThumb(canvas),

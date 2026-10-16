@@ -23,7 +23,7 @@ import {
   type PdfJob,
 } from "./job.ts";
 import { ledgerKey, readLedger, recoveryOf, writeLedger, type LedgerStorage } from "./ledger.ts";
-import { DrawCancelled, PageDrawFailure, ReaderRefusal, type PdfDocument } from "./reader.ts";
+import { DrawCancelled, endWithin, OpenCancelled, PageDrawFailure, ReaderRefusal, type PdfDocument } from "./reader.ts";
 import { JobRunner, type JobDeps } from "./run.ts";
 
 const ROOM = "ABCD2345";
@@ -41,7 +41,7 @@ type Sent = { op: ClientOp; onAnswer: OnAnswer };
  * A room, a PDF and a server for one job: every upload, op and wait is the
  * test's to answer, unless it says to answer them as they come.
  */
-function world(opts: { pages?: number; title?: string | null; failDraw?: number[]; tooLarge?: number[]; openFails?: ReaderRefusal; autoUpload?: boolean } = {}) {
+function world(opts: { pages?: number; title?: string | null; failDraw?: number[]; tooLarge?: number[]; openFails?: ReaderRefusal; autoUpload?: boolean; holdDraw?: number[]; holdOpen?: boolean; holdDestroy?: boolean } = {}) {
   const numPages = opts.pages ?? 3;
   const state: { view: RoomState; online: string[]; connection: string; snapshots: number } = { view: testRoom(), online: [ME], connection: "open", snapshots: 1 };
   const listeners = new Set<() => void>();
@@ -65,6 +65,12 @@ function world(opts: { pages?: number; title?: string | null; failDraw?: number[
   let docs = 0;
   let holdSleeps = false;
   let cancelled: (() => void) | null = null;
+  const holdDraw = new Set(opts.holdDraw ?? []);
+  const releases = new Map<number, () => void>();
+  let drawing = 0;
+  let mostDrawing = 0;
+  const openSignals: AbortSignal[] = [];
+  const destroys: (() => void)[] = [];
   const failDraw = new Set(opts.failDraw ?? []);
   const tooLarge = new Set(opts.tooLarge ?? []);
   let lastPage = 0;
@@ -78,18 +84,34 @@ function world(opts: { pages?: number; title?: string | null; failDraw?: number[
       async drawPage(page, canvas) {
         drawn++;
         lastPage = page;
-        canvas.width = 1583;
-        canvas.height = 2048;
-        if (failDraw.has(page)) throw new PageDrawFailure(page, 'Warning: Unable to decode image "img_p0_1"');
-        await new Promise<void>((resolve, reject) => {
-          cancelled = () => reject(new DrawCancelled());
-          setTimeout(resolve, 0);
-        });
-        cancelled = null;
+        mostDrawing = Math.max(mostDrawing, ++drawing);
+        try {
+          canvas.width = 1583;
+          canvas.height = 2048;
+          if (failDraw.has(page)) throw new PageDrawFailure(page, 'Warning: Unable to decode image "img_p0_1"');
+          // A held page stands for the encode after a draw, which no cancel reaches: it ends only when released.
+          if (holdDraw.has(page)) await new Promise<void>((resolve) => releases.set(page, resolve));
+          else
+            await new Promise<void>((resolve, reject) => {
+              cancelled = () => reject(new DrawCancelled());
+              setTimeout(resolve, 0);
+            });
+          cancelled = null;
+        } finally {
+          drawing--;
+        }
       },
       cancelDraw: () => cancelled?.(),
       cleanup: async () => void cleaned.push(lastPage),
-      destroy: async () => void destroyed.push(id),
+      destroy: () =>
+        opts.holdDestroy
+          ? new Promise<void>((resolve) =>
+              destroys.push(() => {
+                destroyed.push(id);
+                resolve();
+              }),
+            )
+          : Promise.resolve(void destroyed.push(id)),
     };
   };
 
@@ -97,8 +119,10 @@ function world(opts: { pages?: number; title?: string | null; failDraw?: number[
     roomId: ROOM,
     memberId: ME,
     newId: () => "doc-1",
-    async open() {
+    async open(_file, signal) {
       opened.push("open");
+      openSignals.push(signal);
+      if (opts.holdOpen) await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new OpenCancelled()), { once: true }));
       if (opts.openFails) throw opts.openFails;
       return doc();
     },
@@ -192,6 +216,13 @@ function world(opts: { pages?: number; title?: string | null; failDraw?: number[
     storage,
     ledger: () => readLedger(storage, ledgerKey(ROOM, ME)),
     drawn: () => drawn,
+    /** The most draws under way at once. */
+    mostDrawing: () => mostDrawing,
+    /** Lets a held page's draw finish. */
+    releaseDraw: (page: number) => releases.get(page)?.(),
+    openSignals,
+    /** Lets every held destroy finish. */
+    finishDestroys: () => destroys.splice(0).forEach((f) => f()),
     setHidden(on: boolean) {
       hidden = on;
       for (const l of [...visibility]) l();
@@ -433,6 +464,75 @@ describe("pausing and stopping (docs/design-v1-pdf-handouts.md 4.1.6)", () => {
       assert.equal(w.uploads.at(-1)!.page, 2, "on from page 2");
     }
     assert.deepEqual(stopFor(new DOMException("x", "AbortError")), null);
+  });
+
+  test("an upload that fails while the next page draws: Try again waits for that draw and encode to settle before drawing again", async () => {
+    const w = world({ pages: 3, autoUpload: false, holdDraw: [2] });
+    await w.open();
+    w.runner.upload();
+    await settle();
+    // Page 1 uploads while page 2 draws, held past any cancel.
+    w.uploads[0]!.reject(new ApiError(0, "x", "network", null));
+    await settle();
+    assert.equal(w.phase().k, "paused");
+    void w.runner.tryAgain();
+    await settle();
+    const drawn = w.drawn();
+    assert.equal(w.uploads.length, 1, "nothing new before page 2's draw settles");
+    w.releaseDraw(2);
+    await settle();
+    assert.ok(w.drawn() > drawn, "drawing goes on once it settled");
+    assert.equal(w.mostDrawing(), 1, "never two draws at once on the one canvas");
+    assert.equal(w.uploads.at(-1)!.page, 1, "on from page 1");
+  });
+
+  test("Leave this page out after a failed draw also waits for the reader to be free", async () => {
+    const w = world({ pages: 3, failDraw: [2] });
+    await w.throughUpload();
+    assert.equal(w.phase().k, "paused");
+    await w.runner.leaveOut();
+    await settle();
+    assert.equal(w.mostDrawing(), 1);
+    assert.deepEqual(w.job().leftOut, [2]);
+  });
+
+  test("an upload failure and the next page's failed draw at once: the failed reader is closed, and Try again opens a fresh one", async () => {
+    const w = world({ pages: 3, autoUpload: false, failDraw: [2] });
+    await w.open();
+    w.runner.upload();
+    await settle();
+    w.uploads[0]!.reject(new ApiError(0, "x", "network", null));
+    await settle();
+    assert.deepEqual(w.phase(), { k: "paused", page: 1, stop: { k: "offline" } }, "the upload's stop is the one said");
+    assert.deepEqual(w.destroyed, [1], "the reader whose page failed is closed");
+    void w.runner.tryAgain();
+    await settle();
+    assert.equal(w.opened.length, 2, "a fresh reader");
+  });
+
+  test("Cancel while the file opens ends its worker then, not when it has opened", async () => {
+    const w = world({ holdOpen: true });
+    void w.runner.start(new Blob(["%PDF-"]), "Strange letter.pdf");
+    await settle();
+    assert.equal(w.phase().k, "loading");
+    assert.equal(w.openSignals[0]!.aborted, false);
+    await w.runner.cancel();
+    await settle();
+    assert.equal(w.openSignals[0]!.aborted, true, "the opening was aborted");
+    assert.equal(w.store.getState().job, null);
+  });
+
+  test("a reader whose worker never answers its end is ended after the grace anyway", async () => {
+    let ended = false;
+    const started = Date.now();
+    await endWithin(() => new Promise(() => {}), () => (ended = true), 30);
+    assert.ok(ended && Date.now() - started < 1_000);
+    let order: string[] = [];
+    await endWithin(async () => void order.push("graceful"), () => void order.push("terminate"), 1_000);
+    assert.deepEqual(order, ["graceful", "terminate"], "a prompt end does not wait out the grace");
+    order = [];
+    await endWithin(() => Promise.reject(new Error("gone")), () => void order.push("terminate"), 1_000);
+    assert.deepEqual(order, ["terminate"]);
   });
 
   test("a page that cannot draw pauses, never uploads, and Try again goes on in a fresh worker; Leave this page out goes on without it", async () => {

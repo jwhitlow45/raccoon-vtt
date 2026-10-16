@@ -60,8 +60,11 @@ export type JobDeps = {
   roomId: string;
   memberId: string;
   newId(): string;
-  /** Opens the file in a fresh worker of the job's own. Throws ReaderRefusal. */
-  open(file: Blob): Promise<PdfDocument>;
+  /**
+   * Opens the file in a fresh worker of the job's own. Throws ReaderRefusal,
+   * or OpenCancelled once `signal` aborts, by which time the worker is ended.
+   */
+  open(file: Blob, signal: AbortSignal): Promise<PdfDocument>;
   /** The job's one canvas. */
   canvas(): HTMLCanvasElement;
   /** The drawn page encoded under the upload cap, or null when it cannot fit (encode.ts). */
@@ -102,6 +105,15 @@ export class JobRunner implements JobControl {
   /** Aborts the waits of the current run: a share pause, a hidden page. */
   #waits = new AbortController();
   #inflight: Inflight | null = null;
+  /** The file opening now, which Cancel, Done and the room going away abort, ending its worker (4.2.1). */
+  #opening: AbortController | null = null;
+  /**
+   * The loop running now, or the last one. A new loop starts only once the
+   * last has stopped, so two never draw on the one canvas and reader: a
+   * pause stops its draw, and Try again or Leave this page out waits for
+   * the draw and the encode to settle first.
+   */
+  #looping: Promise<void> = Promise.resolve();
   #cancelling = false;
   #disposed = false;
   /** The create sent again once after an `unknown` that never applied (4.1.5). */
@@ -159,9 +171,9 @@ export class JobRunner implements JobControl {
     const run = this.#run;
     let doc: PdfDocument;
     try {
-      doc = await this.#deps.open(file);
+      doc = await this.#openFile(file);
     } catch (err) {
-      if (run !== this.#run) return;
+      if (run !== this.#run || this.#disposed) return;
       const kind = err instanceof ReaderRefusal ? err.kind : "reader";
       this.#set({ phase: { k: "refused", kind } });
       this.#say(REFUSALS[kind]);
@@ -217,9 +229,35 @@ export class JobRunner implements JobControl {
     void this.#loop();
   }
 
+  /** Opens the file under a controller that Cancel, Done and the room going away abort, from the worker's start on. */
+  async #openFile(file: Blob): Promise<PdfDocument> {
+    const opening = new AbortController();
+    this.#opening = opening;
+    try {
+      return await this.#deps.open(file, opening.signal);
+    } finally {
+      if (this.#opening === opening) this.#opening = null;
+    }
+  }
+
   // The pages.
 
-  async #loop(): Promise<void> {
+  /** A new run of the pages, once the one before has stopped. */
+  #loop(): Promise<void> {
+    const before = this.#looping;
+    this.#looping = before.then(() => this.#pages());
+    return this.#looping;
+  }
+
+  /** Stops a draw under way and waits until the loop has stopped, its draw and encode settled. */
+  async #quiet(): Promise<void> {
+    this.#doc?.cancelDraw();
+    await this.#looping;
+  }
+
+  async #pages(): Promise<void> {
+    // Cancel or Done came while the last loop was stopping.
+    if (this.#cancelling || this.#disposed || !this.#store.getState().job) return;
     const run = ++this.#run;
     this.#waits = new AbortController();
     const live = () => run === this.#run && !this.#disposed;
@@ -234,11 +272,13 @@ export class JobRunner implements JobControl {
       try {
         drawn = await this.#draw(page);
       } catch (err) {
+        const failed = !(err instanceof DrawCancelled);
+        // A reader whose page failed is never drawn with again, whatever stops the job first (4.2.1).
+        if (failed) await this.#closeDoc();
         // The page uploading first is told first: its stop comes before this one.
         if (pending && !(await pending)) return;
-        if (!live() || err instanceof DrawCancelled) return;
+        if (!live() || !failed) return;
         this.#pause(run, page, { k: "drawFailed" });
-        await this.#closeDoc();
         return;
       }
       if (pending && !(await pending)) return;
@@ -347,6 +387,8 @@ export class JobRunner implements JobControl {
     if (run !== this.#run || this.#disposed) return;
     this.#run++;
     this.#waits.abort();
+    // The next page may be drawing while this one's upload failed: it stops now and draws again on Try again.
+    this.#doc?.cancelDraw();
     this.#set({ phase: { k: "paused", page, stop } });
     this.#say(stopWords(this.#job, page, stop), stopToast(this.#job, page, stop));
   }
@@ -380,7 +422,7 @@ export class JobRunner implements JobControl {
     await this.#closeDoc();
     if (!this.#file) return false;
     try {
-      const doc = await this.#deps.open(this.#file);
+      const doc = await this.#openFile(this.#file);
       if (run !== this.#run || this.#disposed) {
         void doc.destroy();
         return false;
@@ -389,6 +431,7 @@ export class JobRunner implements JobControl {
       this.#sinceCleanup = 0;
       return true;
     } catch (err) {
+      if (run !== this.#run || this.#disposed) return false;
       const first = pagesToDo(this.#job)[0] ?? this.#job.range?.from ?? 1;
       this.#pause(run, first, { k: "failed", words: err instanceof ReaderRefusal ? REFUSALS[err.kind] : REFUSALS.reader });
       return false;
@@ -408,6 +451,7 @@ export class JobRunner implements JobControl {
     const job = this.#job;
     switch (job.phase.k) {
       case "paused":
+        await this.#quiet();
         return this.#loop();
       case "saveFailed":
         if (!job.phase.gone) return this.#save();
@@ -421,11 +465,12 @@ export class JobRunner implements JobControl {
   }
 
   /** Leave this page out: on without it (4.1.6). */
-  leaveOut(): void {
+  async leaveOut(): Promise<void> {
     const job = this.#job;
     if (job.phase.k !== "paused") return;
     this.#set({ leftOut: [...job.leftOut, job.phase.page] });
-    void this.#loop();
+    await this.#quiet();
+    return this.#loop();
   }
 
   /** Save, once the title is fixed (4.1.5). */
@@ -561,6 +606,7 @@ export class JobRunner implements JobControl {
     if (from === "saving" || from === "checking") return;
     this.#run++;
     this.#waits.abort();
+    this.#opening?.abort();
     this.#doc?.cancelDraw();
     const inflight = this.#inflight;
     if (inflight) {
@@ -678,6 +724,7 @@ export class JobRunner implements JobControl {
     if (!failed && job.phase.k !== "recovery" && job.pages.every((p) => !p.created || job.phase.k === "saved")) clearLedger(this.#deps.storage, this.#ledgerKey);
     this.#run++;
     this.#waits.abort();
+    this.#opening?.abort();
     await this.#closeDoc();
     if (!this.#disposed) this.#store.setState({ job: null });
   }
@@ -688,6 +735,7 @@ export class JobRunner implements JobControl {
     this.#disposed = true;
     this.#run++;
     this.#waits.abort();
+    this.#opening?.abort();
     this.#inflight?.controller.abort(aborted());
     this.#doc?.cancelDraw();
     void this.#closeDoc();
