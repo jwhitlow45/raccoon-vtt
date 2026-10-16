@@ -1,8 +1,10 @@
-import { useMemo, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react";
 import type { Actor, CreatureSize, HpVisibility, Token, TokenKind } from "#shared/model.ts";
 import type { ActorPatch, TokenPatch } from "#shared/protocol.ts";
 import { hpLess } from "#shared/rules/hp.ts";
+import type { NextSize } from "#shared/rules/resize.ts";
 import { isCompanion } from "../canvas/barButtons.ts";
+import { Button } from "../components/Button.tsx";
 import { Checkbox } from "../components/Checkbox.tsx";
 import { Empty } from "../components/Empty.tsx";
 import { Section as PanelSection } from "../components/Panel.tsx";
@@ -22,10 +24,12 @@ import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
 import { HpSection } from "../features/tokens/HpSection.tsx";
 import { usePanelFolds, type FoldKey } from "../features/tokens/panelFolds.ts";
 import { offersMakeCompanion, panelSections, type PanelSectionId } from "../features/tokens/panelOrder.ts";
+import { backTo, baseSize, customWords, SIZE_WORDS } from "../features/tokens/resize.ts";
 import { RestSection } from "../features/tokens/RestSection.tsx";
 import { StatBlockSection } from "../features/tokens/StatBlockSection.tsx";
 import { CardNotesField, SheetUrlField, StatsFields } from "../features/tokens/StatsSection.tsx";
-import { VitalsLine } from "../features/tokens/StatSummary.tsx";
+import { useSrdList, VitalsLine } from "../features/tokens/StatSummary.tsx";
+import { useResize } from "../features/tokens/useResize.ts";
 import { vitals } from "../features/tokens/statSummary.ts";
 import { TokenNotes } from "../features/tokens/TokenNotes.tsx";
 import { TokenSight } from "../features/vision/TokenSight.tsx";
@@ -169,6 +173,7 @@ function TokenDetails(props: PanelProps) {
       case "stats":
         return actor ? (
           <Section key={id} title="Stats" fold={fold("stats")}>
+            <SizeField token={token} actor={actor} access={access} feetPerCell={feetPerCell} />
             <StatsFields actor={actor} canEdit={access.canEditActor} onPatch={patchActor} dm={access.dm} noAc={hpLess(actor, token)} />
             {access.canEditActor("sheetUrl") ? (
               <FieldRow label="Sheet link">
@@ -321,21 +326,6 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
       <FieldRow label="Kind">
         <Select<TokenKind> label="Kind" value={token.kind} options={KIND_OPTIONS} onChange={(kind) => update({ kind })} />
       </FieldRow>
-      <FieldRow label="Size">
-        <Select<CreatureSize>
-          label="Size"
-          value={token.size}
-          options={SIZE_OPTIONS}
-          onChange={(size) => (size === "custom" ? update({ size, w: fp.w, h: fp.h }) : update({ size, w: null, h: null }))}
-        />
-      </FieldRow>
-      {token.size === "custom" ? (
-        <FieldRow label="Width by height" hint="Squares, 0.5 to 20">
-          <CellsField label="Width in squares" value={token.w ?? fp.w} onCommit={(w) => update({ w })} />
-          <span style={{ color: theme.color.textMuted }}>by</span>
-          <CellsField label="Height in squares" value={token.h ?? fp.h} onCommit={(h) => update({ h })} />
-        </FieldRow>
-      ) : null}
       <FieldRow label="Ring">
         <Select<Token["disposition"]>
           label="Disposition"
@@ -383,6 +373,65 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
         <NumberField label="Height" value={token.height} min={0} max={10_000} nullable placeholder={`${autoHeight}`} onCommit={(height) => update({ height })} />
       </FieldRow>
       {offersMakeCompanion({ dm: true, kind: token.kind, companion: isCompanion(token) }) ? <MakeCompanion token={token} /> : null}
+    </>
+  );
+}
+
+/**
+ * The creature's size on the map, first in Stats (docs/design-v1-token-window.md
+ * 8.10), the one place that edits it: for the DM the six sizes and Custom
+ * with its width by height, for an owner who may resize the six, and
+ * read-only for an owner of a locked or a Custom token. "Back to Medium"
+ * follows where the creature's own size is known and the token is neither
+ * of it (8.8). Every change goes through the one resize patch
+ * (features/tokens/resize.ts), so the panel and the window place the
+ * footprint alike, and a refusal's words show under the field.
+ */
+function SizeField(props: { token: Token; actor: Partial<Actor>; access: TokenAccess; feetPerCell: number }) {
+  const { token, access } = props;
+  const resize = useResize();
+  const [refused, setRefused] = useState<string | null>(null);
+  const characters = useRoomView((s) => s.view?.characters);
+  const monsters = useRoomView((s) => s.view?.monsters);
+  const srd = useSrdList(props.actor.srdId !== undefined && props.actor.monsterId === undefined);
+  // A refusal belongs to the size it was about: a new size, or a new token, clears it.
+  useEffect(() => setRefused(null), [token.id, token.size, token.w, token.h]);
+  const fp = footprint(token);
+  const send = (next: NextSize) => setRefused(resize(token, next, { toast: false }));
+  if (!access.dm && token.size === "custom") return <FieldRow label="Size">{customWords(token, true)}</FieldRow>;
+  if (!access.dm && (token.locked || !access.resize)) {
+    return (
+      <FieldRow label="Size">
+        {SIZE_WORDS[token.size]} ({fp.w * props.feetPerCell} ft), locked by the DM
+      </FieldRow>
+    );
+  }
+  const base = backTo(token.size, baseSize({ token, actor: props.actor, characters, monsters, srd: srd.list }));
+  const options = access.dm ? SIZE_OPTIONS : SIZE_OPTIONS.filter((o) => o.value !== "custom");
+  return (
+    <>
+      <FieldRow label="Size" hint={refused ? <span role="alert">{refused}</span> : undefined}>
+        <Select<CreatureSize>
+          label="Size"
+          value={token.size}
+          options={options}
+          onChange={(size) => send(size === "custom" ? { size, w: fp.w, h: fp.h } : { size })}
+        />
+      </FieldRow>
+      {access.dm && token.size === "custom" ? (
+        <FieldRow label="Width by height" hint="Squares, 0.5 to 20">
+          <CellsField label="Width in squares" value={token.w ?? fp.w} onCommit={(w) => send({ size: "custom", w, h: token.h ?? fp.h })} />
+          <span style={{ color: theme.color.textMuted }}>by</span>
+          <CellsField label="Height in squares" value={token.h ?? fp.h} onCommit={(h) => send({ size: "custom", w: token.w ?? fp.w, h })} />
+        </FieldRow>
+      ) : null}
+      {base ? (
+        <div>
+          <Button size="sm" onClick={() => send({ size: base })}>
+            Back to {SIZE_WORDS[base]}
+          </Button>
+        </div>
+      ) : null}
     </>
   );
 }

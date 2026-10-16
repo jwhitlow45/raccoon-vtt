@@ -79,13 +79,26 @@ export type TokenAccess = {
   companion: boolean;
   /** A companion's owner who is not the DM: Dismiss in Delete's place. */
   dismiss: boolean;
+  /** Changes the creature's size on the fly (canResize). */
+  resize: boolean;
 };
+
+/**
+ * Who changes a creature's size on the fly (docs/design-v1-token-window.md
+ * 8.1, shared/permissions.ts resizeCheck): the DM, on any token, and the
+ * token's owners, companions included, while it is unlocked and its size
+ * is one of the six. A Custom size is the DM's, and the DM's lock keeps a
+ * token where it is. A player who may move any token does not own it.
+ */
+export function canResize(who: Pick<TokenAccess, "dm" | "owner">, token: { locked?: boolean; size?: Token["size"] }): boolean {
+  return who.dm || (who.owner && token.locked !== true && token.size !== "custom");
+}
 
 export function tokenAccess(input: {
   role: Role;
   memberId: MemberId | null | undefined;
   view: (View & { meta?: { settings?: { playersApplyDamage?: boolean } } }) | null | undefined;
-  token: Pick<Token, "ownerIds" | "actor" | "kind"> & { companion?: Token["companion"] };
+  token: Pick<Token, "ownerIds" | "actor" | "kind"> & { companion?: Token["companion"]; locked?: boolean; size?: Token["size"] };
 }): TokenAccess {
   const { role, memberId, view, token } = input;
   const dm = role === "dm";
@@ -115,6 +128,7 @@ export function tokenAccess(input: {
     life: dm,
     companion: token.companion !== undefined && full,
     dismiss: companionOwner,
+    resize: canResize({ dm, owner }, token),
   };
 }
 

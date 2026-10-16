@@ -6,6 +6,7 @@ import type { ActorPatch, TokenPatch } from "#shared/protocol.ts";
 import type { RoomState } from "#shared/model.ts";
 import { DM, P1, P2, character, room, token } from "#shared/testutil.ts";
 import { characterAccess, ownsToken, tokenAccess } from "./access.ts";
+import { resizePatch } from "./resize.ts";
 
 const deps = { canUseAsset: () => true };
 
@@ -109,6 +110,22 @@ describe("token access mirrors the server's permissions", () => {
       }
     });
   }
+
+  test("resize mirrors the server's resize rule: the DM, or an owner of an unlocked token of the six sizes (docs/design-v1-token-window.md 8.6)", () => {
+    for (const variant of [{}, { locked: true }, { size: "custom" as const, w: 2, h: 3 }]) {
+      const state = fixture();
+      for (const id of ["pc", "familiar", "goblin", "spirit"]) state.tokens[id] = { ...state.tokens[id]!, ...variant };
+      for (const viewer of [DM, P1, P2]) {
+        for (const tokenId of ["pc", "familiar", "goblin", "spirit"]) {
+          const t = state.tokens[tokenId]!;
+          const access = tokenAccess({ role: viewer.role, memberId: viewer.memberId, view: state, token: t });
+          const answer = resizePatch(state, t, { size: "large" }, viewer.role);
+          const allowed = !("refused" in answer) && canApply({ t: "token.update", tokenId, patch: answer.patch }, viewer, state, deps).ok;
+          assert.equal(access.resize, allowed, `${viewer.memberId} resizes ${tokenId} ${JSON.stringify(variant)}`);
+        }
+      }
+    }
+  });
 
   test("a companion's owner dismisses it, and the DM deletes instead", () => {
     const state = fixture();

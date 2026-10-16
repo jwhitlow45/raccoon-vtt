@@ -6,9 +6,10 @@ import { RowDot } from "../../components/Row.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { theme } from "../../lib/theme.ts";
 import { dispatchGesture } from "../../state/actions.ts";
-import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { ImageField } from "../images/ImageField.tsx";
 import { ownerOps, ownersLit, shared, sharedImage, updateManyOps, type Lit } from "./groupEdit.ts";
+import { resizePatch } from "./resize.ts";
 import { SheetDialog } from "./SheetDialog.tsx";
 import { FieldRow, Note, Section, Select } from "./ui.tsx";
 
@@ -34,7 +35,8 @@ const HP_VISIBILITY: { value: HpVisibility; label: string }[] = [
  * The group action bar's More (docs/design-v1-dm-tools.md 3.5), the DM's:
  * what makes sense to set alike on every selected token. Each control
  * shows the value all of them share, or that they differ, and a change is
- * one `token.updateMany` for all of them, one undo step. Names, notes,
+ * one `token.updateMany` for all of them, one undo step, but for the size,
+ * one resize patch each in one gesture. Names, notes,
  * numbers and places stay per creature, in each token's own panel.
  */
 export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): void; opener: RefObject<HTMLElement | null> }) {
@@ -46,6 +48,23 @@ export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): voi
     if (ops.length > 0) dispatchGesture(actions, ops);
   };
   const patch = (p: TokenGroupPatch) => send(updateManyOps(ids, p));
+  /*
+   * One resize patch for each token, sent as one gesture, one undo step:
+   * each keeps its own middle (docs/design-v1-token-window.md 8.6), which
+   * one patch for all of them could not. The DM's resizes are never
+   * checked against walls.
+   */
+  const store = useRoomStore();
+  const resizeAll = (size: Exclude<CreatureSize, "custom">) => {
+    const view = store.getState().view;
+    if (!view) return;
+    send(
+      tokens.flatMap((t) => {
+        const answer = resizePatch(view, t, { size }, "dm");
+        return "refused" in answer ? [] : [{ t: "token.update" as const, tokenId: t.id, patch: answer.patch }];
+      }),
+    );
+  };
 
   const disposition = shared(tokens, (t) => t.disposition);
   const hpVisibility = shared(tokens, (t) => t.hpVisibility);
@@ -79,7 +98,7 @@ export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): voi
             label="Size"
             value={size === undefined || size === "custom" ? MIXED : size}
             options={[...(size === undefined || size === "custom" ? [{ value: MIXED, label: size === "custom" ? "Custom" : "Mixed" }] : []), ...SIZES]}
-            onChange={(next) => next !== MIXED && patch({ size: next as CreatureSize, w: null, h: null })}
+            onChange={(next) => next !== MIXED && resizeAll(next as Exclude<CreatureSize, "custom">)}
           />
         </FieldRow>
         <FieldRow label="Layer">

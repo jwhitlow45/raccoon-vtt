@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The token panel, the stat summary and AC on tokens
@@ -1266,6 +1266,241 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.equal(await group.locator("[data-saves]").count(), 0);
     assert.equal((await group.innerText()).includes("Saves"), false);
     await shots.take(dm, "tokenpanel-dm-group-bar");
+  });
+
+  test("9c. sizes on the fly (docs/design-v1-token-window.md 8): the DM's steps and Stats, Pat's growth away from walls and back, no room in a corridor, undo keeping damage, an unchecked scene, a locked and a Custom token, a turn's trail kept through a resize, and the row on phones", async () => {
+    const SIZES = { w: 20, h: 14 };
+    const sizes = { sceneId: randomUUID(), thorn: randomUUID(), goblin: randomUUID(), owl: randomUUID() };
+    const wall = { kind: "wall" } as const;
+    const edges: { key: string; feature: typeof wall }[] = [];
+    // A corner at (4, 4): walls down the west side of column 4 and along the north side of row 4.
+    for (let i = 4; i <= 9; i++) edges.push({ key: `4,${i},w`, feature: wall }, { key: `${i},4,n`, feature: wall });
+    // A 5 ft corridor along row 11.
+    for (let x = 10; x <= 17; x++) edges.push({ key: `${x},11,n`, feature: wall }, { key: `${x},12,n`, feature: wall });
+    await ops.send({ t: "scene.create", scene: { id: sizes.sceneId, name: "Sizes", bounds: SIZES, background: "#2b2b31", fogEnabled: false, autoWalls: "off", blockMovement: true } });
+    await ops.send({ t: "build.edge", sceneId: sizes.sceneId, edges });
+    const token = (id: string, at: { x: number; y: number }, extra: Record<string, unknown>) => ({
+      t: "token.create",
+      token: { id, sceneId: sizes.sceneId, size: "medium", visibility: "all", x: at.x, y: at.y, disposition: "ally", kind: "monster", ...extra },
+    });
+    await ops.send(token(sizes.thorn, { x: 4, y: 4 }, { kind: "pc", name: "Thorn", actor: { ref: run.thorn.characterId } }));
+    await ops.send(token(sizes.goblin, { x: 12, y: 4 }, { name: "Sizes goblin", disposition: "hostile", actor: { inline: actor({ ac: 15, srdId: "goblin-warrior" }) } }));
+    await ops.send(token(sizes.owl, { x: 15, y: 7 }, { kind: "npc", name: "Owl", size: "tiny", ownerIds: [run.patId], actor: { inline: actor({ ac: 11, speeds: { walk: 5, fly: 60 } }) } }));
+    const dmToken = (id: string) => dmSocket.state?.tokens[id];
+    const pose = (id: string) => {
+      const t = dmToken(id);
+      return t ? { x: t.x, y: t.y, size: t.size } : null;
+    };
+    const until = (what: string, id: string, want: { x: number; y: number; size: string }) =>
+      waitFor(what, () => {
+        const p = pose(id);
+        return p && p.x === want.x && p.y === want.y && p.size === want.size ? true : null;
+      });
+    const tapAt = async (page: Page, at: { x: number; y: number }, size = 1) => {
+      const p = await pagePoint(page, SIZES, { x: at.x + size / 2, y: at.y + size / 2 });
+      await page.mouse.click(p.x, p.y);
+    };
+    const boardTexts = (page: Page) =>
+      page.evaluate(() => {
+        const k = (globalThis as unknown as { Konva?: { stages: { find(s: string): { text(): string }[] }[] } }).Konva;
+        return (k?.stages ?? []).flatMap((st) => st.find("Text").map((t) => t.text())).join("\n");
+      });
+    const sizeRow = (b: Locator) => b.getByRole("group", { name: "Size", exact: true });
+    const openStats = async (page: Page) => {
+      if ((await page.getByRole("tab", { name: "Token" }).count()) > 0) await page.getByRole("tab", { name: "Token" }).click();
+      const stats = tokenPanel(page).getByRole("button", { name: "Stats", exact: true });
+      await stats.waitFor();
+      if ((await stats.getAttribute("aria-expanded")) === "false") await stats.click();
+    };
+
+    // The DM on the new scene, and the players with them.
+    await setUp(dm, dmCdp, DESK, null);
+    await dm.getByRole("tab", { name: "Scenes" }).click();
+    await dm.getByRole("button", { name: /^Sizes/ }).first().click();
+    await waitFor("the DM on the sizes scene", () => dmSocket.you?.sceneId === sizes.sceneId || null, 30_000);
+    await ops.send({ t: "room.setPlayerScene", sceneId: sizes.sceneId });
+    await waitFor("the players on the sizes scene", () => (dmSocket.state?.meta.playerSceneId === sizes.sceneId ? true : null));
+
+    // The DM steps the goblin up twice from its window, keeping its middle, and back down to its own square.
+    await tapAt(dm, { x: 12, y: 4 });
+    const goblin = bar(dm, "Sizes goblin");
+    await goblin.waitFor();
+    await sizeRow(goblin).getByRole("button", { name: "One size larger" }).click();
+    await until("a Large goblin", sizes.goblin, { x: 12, y: 4, size: "large" });
+    await sizeRow(goblin).getByRole("button", { name: "One size larger" }).click();
+    // The Large's middle (13, 5) sits on a grid line for a Huge, so the tie keeps its top-left corner, over the Large's squares.
+    await until("a Huge goblin, its middle kept", sizes.goblin, { x: 12, y: 4, size: "huge" });
+    await shots.take(dm, "token-window-size-huge-goblin");
+    await sizeRow(goblin).getByRole("button", { name: "One size smaller" }).click();
+    await sizeRow(goblin).getByRole("button", { name: "One size smaller" }).click();
+    await until("the goblin back on its own square", sizes.goblin, { x: 12, y: 4, size: "medium" });
+    // Stats holds Size with Custom, and Back to its block's size, Small, for a Large goblin. Token settings has none.
+    await sizeRow(goblin).getByRole("button", { name: "One size larger" }).click();
+    await until("a Large goblin again", sizes.goblin, { x: 12, y: 4, size: "large" });
+    await openStats(dm);
+    const sizeSelect = tokenPanel(dm).getByRole("combobox", { name: "Size", exact: true });
+    await sizeSelect.waitFor();
+    assert.ok((await sizeSelect.locator("option").allInnerTexts()).includes("Custom"), "the DM's Size has no Custom");
+    await tokenPanel(dm).getByRole("button", { name: "Back to Small", exact: true }).click();
+    await until("the goblin back to Small", sizes.goblin, { x: 12, y: 4, size: "small" });
+    const settings = tokenPanel(dm).getByRole("button", { name: "Token settings", exact: true });
+    if ((await settings.getAttribute("aria-expanded")) === "false") await settings.click();
+    assert.equal(await tokenPanel(dm).getByRole("combobox", { name: "Size", exact: true }).count(), 1, "Size is in Token settings as well as Stats");
+    await ops.send({ t: "token.update", tokenId: sizes.goblin, patch: { size: "custom", w: 2, h: 3 } });
+    await goblin.getByText("Custom, 2 by 3 squares", { exact: true }).waitFor();
+    await ops.send({ t: "token.update", tokenId: sizes.goblin, patch: { size: "medium", w: null, h: null } });
+    await goblin.getByRole("button", { name: "Close", exact: true }).click();
+
+    // Pat grows Thorn in the walled corner: right and down, away from both walls, and shrunk back to his own square.
+    await setUp(player, playerCdp, DESK, null);
+    await waitFor("Thorn in Pat's view", () => playerSocket.state?.tokens[sizes.thorn]);
+    await tapAt(player, { x: 4, y: 4 });
+    const thorn = bar(player, "Thorn");
+    await thorn.waitFor();
+    const larger = sizeRow(thorn).getByRole("button", { name: "One size larger" });
+    const smaller = sizeRow(thorn).getByRole("button", { name: "One size smaller" });
+    await larger.click();
+    await until("Thorn Large", sizes.thorn, { x: 4, y: 4, size: "large" });
+    await larger.click();
+    await until("Thorn Huge, grown right and down", sizes.thorn, { x: 4, y: 4, size: "huge" });
+    await shots.take(player, "token-window-size-huge-in-a-corner");
+    await smaller.click();
+    await smaller.click();
+    await until("Thorn back to Medium on his square", sizes.thorn, { x: 4, y: 4, size: "medium" });
+
+    // In a 5 ft corridor a Large has no room: the words, and nothing changes.
+    await ops.send({ t: "token.update", tokenId: sizes.thorn, patch: { x: 12, y: 11 } });
+    await waitFor("Thorn in the corridor for Pat", () => (playerSocket.state?.tokens[sizes.thorn]?.y === 11 ? true : null));
+    await larger.click();
+    await player.getByText("No room to grow here.").first().waitFor();
+    await player.waitForTimeout(300);
+    assert.deepEqual(pose(sizes.thorn), { x: 12, y: 11, size: "medium" }, "a refused growth changed Thorn");
+    await ops.send({ t: "token.update", tokenId: sizes.thorn, patch: { x: 4, y: 4 } });
+    await waitFor("Thorn back in the corner for Pat", () => (playerSocket.state?.tokens[sizes.thorn]?.y === 4 ? true : null));
+
+    // Ctrl+Z after a growth and a hit from the DM: back to Medium where he stood, the damage kept.
+    // Temporary HP goes first, so the hit counts on both.
+    const hpNow = () => {
+      const hp = dmSocket.state?.characters[run.thorn.characterId]?.actor.hp;
+      return (hp?.cur ?? 0) + (hp?.temp ?? 0);
+    };
+    const hpBefore = hpNow();
+    await larger.click();
+    await until("Thorn Large to undo", sizes.thorn, { x: 4, y: 4, size: "large" });
+    await ops.send({ t: "actor.hp", target: { tokenId: sizes.thorn }, change: { kind: "damage", amount: 3 } });
+    await waitFor("the hit", () => (hpNow() < hpBefore ? true : null));
+    await player.keyboard.press("Control+z");
+    await until("Thorn's growth undone", sizes.thorn, { x: 4, y: 4, size: "medium" });
+    assert.equal(hpNow(), hpBefore - 3, "the undo took the damage back");
+
+    // On a scene that does not block moves, Huge takes the base spot, centered on his square.
+    await ops.send({ t: "scene.update", sceneId: sizes.sceneId, patch: { blockMovement: false } });
+    await tapAt(player, { x: 4, y: 4 });
+    await thorn.waitFor();
+    await larger.click();
+    await until("Thorn Large, unchecked", sizes.thorn, { x: 4, y: 4, size: "large" });
+    await larger.click();
+    await until("Thorn Huge at the base spot", sizes.thorn, { x: 4, y: 4, size: "huge" });
+    await ops.send({ t: "token.update", tokenId: sizes.thorn, patch: { size: "medium", x: 4, y: 4 } });
+    await until("Thorn Medium", sizes.thorn, { x: 4, y: 4, size: "medium" });
+    // Straight from Medium in Stats: the base spot is centered on his square, over both walls.
+    await openStats(player);
+    await tokenPanel(player).getByRole("combobox", { name: "Size", exact: true }).selectOption("huge");
+    await until("Thorn Huge from Medium at the base spot", sizes.thorn, { x: 3, y: 3, size: "huge" });
+    await ops.send({ t: "token.update", tokenId: sizes.thorn, patch: { size: "medium", x: 4, y: 4 } });
+    await ops.send({ t: "scene.update", sceneId: sizes.sceneId, patch: { blockMovement: true } });
+    await until("Thorn Medium again", sizes.thorn, { x: 4, y: 4, size: "medium" });
+
+    // Locked: no Size row for Pat, and Stats reads it. Custom: read-only in both, set by the DM.
+    await ops.send({ t: "token.update", tokenId: sizes.thorn, patch: { locked: true } });
+    await waitFor("Thorn locked for Pat", () => (playerSocket.state?.tokens[sizes.thorn]?.locked ? true : null));
+    await thorn.waitFor();
+    assert.equal(await sizeRow(thorn).count(), 0, "a locked token shows its players a Size row");
+    await openStats(player);
+    await tokenPanel(player).getByText("Medium (5 ft), locked by the DM", { exact: true }).waitFor();
+    await ops.send({ t: "token.update", tokenId: sizes.thorn, patch: { locked: false, size: "custom", w: 2, h: 3 } });
+    await thorn.getByText("Custom, 2 by 3 squares, set by the DM", { exact: true }).waitFor();
+    await tokenPanel(player).getByText("Custom, 2 by 3 squares, set by the DM", { exact: true }).waitFor();
+    await ops.send({ t: "token.update", tokenId: sizes.thorn, patch: { size: "medium", w: null, h: null } });
+    await until("Thorn Medium after Custom", sizes.thorn, { x: 4, y: 4, size: "medium" });
+
+    // In a fight on his turn: 15 ft moved, then Huge, and the trail still reads 15 ft for Pat, the DM, and Pat again after a reload.
+    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: sizes.thorn, value: 20 }, { id: randomUUID(), tokenId: sizes.owl, value: 10 }] });
+    await ops.send({ t: "encounter.next" });
+    await waitFor("Thorn's turn for Pat", () => (playerSocket.state?.encounter?.activeEntryId ? true : null));
+    const from = await pagePoint(player, SIZES, { x: 4.5, y: 4.5 });
+    const to = await pagePoint(player, SIZES, { x: 7.5, y: 4.5 });
+    await player.mouse.move(from.x, from.y);
+    await player.mouse.down();
+    await player.mouse.move(to.x, to.y, { steps: 12 });
+    await player.mouse.up();
+    await until("Thorn moved 15 ft", sizes.thorn, { x: 7, y: 4, size: "medium" });
+    await waitFor("Moved 15 ft for Pat", async () => ((await boardTexts(player)).includes("Moved 15 ft") ? true : null));
+    await tapAt(player, { x: 7, y: 4 });
+    await thorn.waitFor();
+    await larger.click();
+    await waitFor("Thorn Large on his turn", () => (pose(sizes.thorn)?.size === "large" ? true : null));
+    await larger.click();
+    await waitFor("Thorn Huge on his turn", () => (pose(sizes.thorn)?.size === "huge" ? true : null));
+    await player.waitForTimeout(500);
+    assert.ok((await boardTexts(player)).includes("Moved 15 ft"), `after the resize Pat reads: ${await boardTexts(player)}`);
+    assert.ok((await boardTexts(dm)).includes("Moved 15 ft"), `after the resize the DM reads: ${await boardTexts(dm)}`);
+    await shots.take(player, "token-window-size-trail-kept");
+    await setUp(player, playerCdp, DESK, null);
+    await waitFor("Moved 15 ft after a reload", async () => ((await boardTexts(player)).includes("Moved 15 ft") ? true : null));
+
+    // The owl's turn: a half-square move, then a growth to Small, still 2.5 ft.
+    await ops.send({ t: "encounter.next" });
+    await waitFor("the owl's turn", () => {
+      const e = playerSocket.state?.encounter;
+      return e && e.entries.find((x) => x.id === e.activeEntryId)?.tokenId === sizes.owl ? true : null;
+    });
+    const owlFrom = await pagePoint(player, SIZES, { x: 15.25, y: 7.25 });
+    const owlTo = await pagePoint(player, SIZES, { x: 15.75, y: 7.25 });
+    await player.mouse.move(owlFrom.x, owlFrom.y);
+    await player.mouse.down();
+    await player.mouse.move(owlFrom.x + 12, owlFrom.y, { steps: 3 });
+    await player.mouse.move(owlTo.x, owlTo.y, { steps: 8 });
+    await player.mouse.up();
+    await until("the owl moved half a square", sizes.owl, { x: 15.5, y: 7, size: "tiny" });
+    await waitFor("Moved 2.5 ft for Pat", async () => ((await boardTexts(player)).includes("Moved 2.5 ft") ? true : null));
+    await tapAt(player, { x: 15.5, y: 7 }, 0.5);
+    const owl = bar(player, "Owl");
+    await owl.waitFor();
+    await sizeRow(owl).getByRole("button", { name: "One size larger" }).click();
+    await waitFor("the owl Small", () => (pose(sizes.owl)?.size === "small" ? true : null));
+    await player.waitForTimeout(500);
+    assert.ok((await boardTexts(player)).includes("Moved 2.5 ft"), `after the owl grew Pat reads: ${await boardTexts(player)}`);
+    assert.ok((await boardTexts(dm)).includes("Moved 2.5 ft"), `after the owl grew the DM reads: ${await boardTexts(dm)}`);
+    await ops.send({ t: "encounter.end" });
+    await ops.send({ t: "token.update", tokenId: sizes.thorn, patch: { size: "medium", x: 4, y: 4 } });
+
+    // On phones: the row's buttons take a tap with no sideways scroll, wrapped under the label on the narrowest.
+    for (const view of [
+      { width: 844, height: 390, scale: 1, insets: { side: 47, bottom: 21 } },
+      { width: 320, height: 480, scale: 1.3 },
+    ] as View[]) {
+      const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+      await setUp(player, playerCdp, view, null);
+      await tapAt(player, { x: 4, y: 4 });
+      await thorn.waitFor();
+      const row = sizeRow(thorn);
+      await row.scrollIntoViewIfNeeded();
+      for (const name of ["One size smaller", "One size larger"]) {
+        const button = row.getByRole("button", { name });
+        await button.scrollIntoViewIfNeeded();
+        assert.ok(await wholeInReach(button), `${label}: ${name} is cut off or takes no tap`);
+      }
+      const wide = await thorn.locator("[data-bar-scroll]").evaluate((el) => (el as unknown as El).scrollWidth > (el as unknown as El).clientWidth + 1);
+      assert.equal(wide, false, `${label}: the window scrolls sideways`);
+      const words = await rectOf(row.getByText("Size", { exact: true }));
+      const stepper = await rectOf(row.getByRole("button", { name: "One size larger" }));
+      if (view.width === 320) assert.ok(stepper.top >= words.bottom - 1, `${label}: the stepper does not wrap under its label`);
+      else assert.ok(Math.abs(stepper.top + (stepper.bottom - stepper.top) / 2 - (words.top + (words.bottom - words.top) / 2)) < 12, `${label}: the stepper left its label's line`);
+      await shots.take(player, `token-window-size-row-${view.width}x${view.height}-${Math.round(view.scale * 100)}`);
+      await thorn.getByRole("button", { name: "Close", exact: true }).first().click();
+    }
+    await dmCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
   });
 
   test("10. no page errors along the way", () => {

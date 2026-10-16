@@ -1,8 +1,9 @@
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { useStore } from "zustand";
 import { healRevivesDead } from "#shared/migrate.ts";
-import { CONDITION_KEYS, STATUS_KEYS, type Actor, type Effect } from "#shared/model.ts";
+import { CONDITION_KEYS, STATUS_KEYS, type Actor, type Effect, type Token } from "#shared/model.ts";
 import { hpLess, shownLife } from "#shared/rules/hp.ts";
+import { oneSize } from "#shared/rules/path.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
 import { RETURN_RANK, useSheetReturnFocus } from "../components/sheetFocus.ts";
@@ -48,6 +49,8 @@ import { GroupHpEntry } from "../features/tokens/GroupHpEntry.tsx";
 import { GroupMoreSheet } from "../features/tokens/GroupMoreSheet.tsx";
 import { DeathSaves, HpEntry, oneTarget } from "../features/tokens/HpSection.tsx";
 import { pathNow } from "../features/measure/movement.ts";
+import { customWords, SIZE_WORDS, stepSize } from "../features/tokens/resize.ts";
+import { useResize } from "../features/tokens/useResize.ts";
 import { REVIVE_NOTE, ReviveButton, offersRevive } from "../features/tokens/Revive.tsx";
 import { lastMoveSlot, offered, offersMarkUndo, offersUndo, undoOf } from "../features/tokens/undoMove.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
@@ -387,6 +390,9 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
 
       <GroundNotice token={token} />
 
+      {/* With the rows that change how the map draws the creature: how high, how big, which picture (docs/design-v1-token-window.md 8.9). */}
+      {access.dm || (access.owner && !token.locked) ? <SizeRow token={token} owner={access.owner} canResize={access.resize} /> : null}
+
       {access.canEditToken("altImages") ? (
         <AltImagesRow
           token={token}
@@ -575,7 +581,9 @@ function CountLegButton(props: { token: ViewToken }) {
   const undoing = useStore(slot, (s) => s.undoing !== null);
   const path = pathNow(encounter, props.token, role);
   const last = path && path.stops.length >= 2 ? path.stops[path.stops.length - 1] : undefined;
-  if (!last) return null;
+  const before = path && path.stops.length >= 2 ? path.stops[path.stops.length - 2] : undefined;
+  // A resize's leg is no move, so it has nothing to stop counting (docs/design-v1-token-window.md 8.7).
+  if (!last || !before || !oneSize(before, last)) return null;
   const off = last.uncounted === true;
   const press = () => {
     // The bar's undo waits for the server, and a second press meanwhile would act on a mark about to change.
@@ -1293,15 +1301,62 @@ function DeleteButton(props: { onDelete(): void; armedText?: string }) {
 }
 
 /**
+ * The creature's size on the map (docs/design-v1-token-window.md 8.9): a
+ * stepper as Elevation is, one size a press, Reduce and Enlarge being one
+ * size, with the size between the buttons in a slot as wide as
+ * "Gargantuan", so the buttons never move under the thumb. A Custom size
+ * is shown, set by the DM in Stats. A refusal is the room's toast, and the
+ * size stays. Focus stays on the button pressed, or moves to the other one
+ * where a press reaches Tiny or Gargantuan and disables it.
+ */
+function SizeRow(props: { token: ViewToken; owner: boolean; canResize: boolean }) {
+  const { token } = props;
+  const resize = useResize();
+  const smaller = useRef<HTMLButtonElement>(null);
+  const larger = useRef<HTMLButtonElement>(null);
+  if (token.size === "custom" || !props.canResize) {
+    return (
+      <StepperRow label="Size" group>
+        <span style={{ fontWeight: theme.weight.bold, overflowWrap: "anywhere" }}>{token.size === "custom" ? customWords(token, props.owner) : SIZE_WORDS[token.size]}</span>
+      </StepperRow>
+    );
+  }
+  const down = stepSize(token.size, -1);
+  const up = stepSize(token.size, 1);
+  const press = (to: Exclude<Token["size"], "custom">, by: 1 | -1) => {
+    // The button pressed is disabled once the size reaches an end, so focus moves to the other, before the render that disables it.
+    if (resize(token, { size: to }) === null && stepSize(to, by) === null) (by === 1 ? smaller : larger).current?.focus();
+  };
+  return (
+    <StepperRow label="Size" group>
+      <BarButton ref={smaller} label="One size smaller" disabled={down === null} onClick={() => down && press(down, -1)}>
+        −
+      </BarButton>
+      <span style={{ display: "inline-grid", textAlign: "center", fontWeight: theme.weight.bold }}>
+        <span aria-hidden style={{ gridArea: "1 / 1", visibility: "hidden" }}>
+          Gargantuan
+        </span>
+        <span aria-live="polite" style={{ gridArea: "1 / 1" }}>
+          {SIZE_WORDS[token.size]}
+        </span>
+      </span>
+      <BarButton ref={larger} label="One size larger" disabled={up === null} onClick={() => up && press(up, 1)}>
+        +
+      </BarButton>
+    </StepperRow>
+  );
+}
+
+/**
  * A label and its stepper, such as Elevation's −5 and +5, on one line, or
  * the stepper under the label, right-aligned, where the window is too
  * narrow for both, as beside a phone's sideways sheet or on the narrowest
  * phone's spanning bar (docs/design-v1-token-window.md 8.9). One rule keeps
  * every stepper row inside the window at any width and font.
  */
-function StepperRow(props: { label: string; children: ReactNode }) {
+function StepperRow(props: { label: string; children: ReactNode; group?: boolean }) {
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
+    <div role={props.group ? "group" : undefined} aria-label={props.group ? props.label : undefined} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
       <span style={{ flex: "1 1 auto", color: theme.color.textMuted }}>{props.label}</span>
       <div style={{ flex: "none", marginLeft: "auto", display: "flex", alignItems: "center", gap: theme.space(1) }}>{props.children}</div>
     </div>
@@ -1324,12 +1379,14 @@ function BarButton(props: {
   danger?: boolean;
   armed?: boolean;
   grow?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <Button
       ref={props.ref}
       size="sm"
       variant={props.danger ? "danger" : "secondary"}
+      disabled={props.disabled}
       armed={props.armed}
       pressed={props.half ? undefined : props.pressed}
       aria-pressed={props.half ? "mixed" : props.pressed}

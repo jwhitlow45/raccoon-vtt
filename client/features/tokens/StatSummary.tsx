@@ -25,7 +25,7 @@ import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 let srdLoaded: readonly SrdMonster[] | null = null;
 
 /** The SRD's blocks while `active`: loaded on first need and kept for the page. A failure stays until a reload (monsters/SrdLoadFailed.tsx). */
-function useSrdList(active: boolean): { list: readonly SrdMonster[] | null; failed: boolean } {
+export function useSrdList(active: boolean): { list: readonly SrdMonster[] | null; failed: boolean } {
   const [list, setList] = useState(srdLoaded);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
