@@ -181,7 +181,9 @@ function candidatesOf(state: RoomState, tokens: readonly Token[]): Candidate[] {
     const group = token.companion ? 3 : owned && token.kind === "pc" ? 0 : owned ? 1 : 2;
     let reason: NoSightReason | undefined;
     if (token.visibility !== "all") reason = "hidden";
-    else if (token.kind === "object" && token.partyVision !== true) reason = "object";
+    // An effect companion has no eyes, whatever party mark it carries (docs/design-v1-combat-flow.md 3.6.5). Its mark
+    // stays stored, so a companion made a creature again lends sight as the DM marked it.
+    else if (token.kind === "object" && (token.companion !== undefined || token.partyVision !== true)) reason = "object";
     else if (!actor || actor.life !== "alive" || hasEffect(actor, "unconscious")) reason = "down";
     else if (standing(token.elevation, footprintGround(state.buildChunks, token)) === "inside") reason = "ground";
     out.push({ token, actor, group, reason });

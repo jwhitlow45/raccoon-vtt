@@ -1685,3 +1685,27 @@ describe("companions (docs/design-v1-combat-flow.md 3.6.5 and 4.5)", () => {
     assert.equal(projectState(state, DM, { sceneId: "s1" }).log.length, 1);
   });
 });
+
+describe("an effect companion lends no sight (docs/design-v1-combat-flow.md 3.6.5, SOL-01)", () => {
+  /** A bright vision scene with no player character on it: Ana's companion beside a goblin is the party's only member there. */
+  function weaponBeside(kind: "object" | "npc", partyVision: boolean): RoomState {
+    const state = room({ characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }) } });
+    state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true, vision: { on: true, light: "bright" } };
+    state.tokens.sw = token("sw", { kind, name: "Spiritual Weapon", ownerIds: ["p1"], x: 5, y: 5, companion: { of: "bree", turn: "none" }, ...(partyVision ? { partyVision: true } : {}) });
+    state.tokens.gob = token("gob", { name: "Goblin", x: 7, y: 5 });
+    return state;
+  }
+
+  test("even with the DM's party mark, the goblin beside a Spiritual Weapon stays withheld, and the mark is kept for a creature again", () => {
+    for (const viewer of [P1, P2]) {
+      assert.equal(projectState(weaponBeside("object", true), viewer, { sceneId: "s1" }).tokens.gob, undefined, `${viewer.memberId}: marked effect`);
+      assert.equal(projectState(weaponBeside("object", false), viewer, { sceneId: "s1" }).tokens.gob, undefined, `${viewer.memberId}: unmarked effect`);
+      assert.ok(projectState(weaponBeside("npc", true), viewer, { sceneId: "s1" }).tokens.gob, `${viewer.memberId}: a creature companion lends sight`);
+    }
+    // A plain object the DM marked still lends sight, as before companions.
+    const lamp = weaponBeside("object", true);
+    delete lamp.tokens.sw!.companion;
+    lamp.tokens.sw!.ownerIds = [];
+    assert.ok(projectState(lamp, P2, { sceneId: "s1" }).tokens.gob, "a marked plain object lends sight");
+  });
+});
