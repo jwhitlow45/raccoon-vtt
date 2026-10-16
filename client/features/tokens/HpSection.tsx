@@ -41,6 +41,12 @@ export function HpEntry(props: {
   /** Where it stands, so the token bar and a panel showing the same creature each keep their own typing through a blackout (hpDraft.ts). */
   place: HpPlace;
   onApplied?(): void;
+  /**
+   * The field and Apply above the mode buttons, for a short bar, so Apply
+   * shows without a scroll on a phone held sideways
+   * (docs/design-v1-token-panel.md 3.3). Typed math works from the field alone.
+   */
+  fieldFirst?: boolean;
 }) {
   const actions = useRoomActions();
   // What was typed before a blackout unmounted the entry comes back with it (hpDraft.ts).
@@ -76,6 +82,16 @@ export function HpEntry(props: {
     props.onApplied?.();
   };
 
+  const modeButtons = (
+    <Segmented<HpMode>
+      label="What the number does"
+      even
+      value={mode}
+      options={modes.map((m) => ({ value: m.mode, label: m.label, chosenStyle: modeLook(m.mode) }))}
+      onChange={setMode}
+    />
+  );
+
   return (
     <form
       onSubmit={(e) => {
@@ -84,13 +100,7 @@ export function HpEntry(props: {
       }}
       style={{ display: "grid", gap: theme.space(1) }}
     >
-      <Segmented<HpMode>
-        label="What the number does"
-        even
-        value={mode}
-        options={modes.map((m) => ({ value: m.mode, label: m.label, chosenStyle: modeLook(m.mode) }))}
-        onChange={setMode}
-      />
+      {props.fieldFirst ? null : modeButtons}
       <div style={{ display: "flex", gap: theme.space(1) }}>
         <input
           aria-label="HP change"
@@ -109,6 +119,7 @@ export function HpEntry(props: {
           Apply
         </SmallButton>
       </div>
+      {props.fieldFirst ? modeButtons : null}
       {showCrit ? (
         <Checkbox checked={crit} onChange={setCrit} label="Critical hit (two failed death saves)" />
       ) : null}

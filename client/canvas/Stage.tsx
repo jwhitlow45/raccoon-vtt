@@ -53,6 +53,7 @@ import { stageMountKey, uiScale, useLowPower, useMapVariant, useUiScale } from "
 import { mapFocusSlot, spaceMovesMap } from "../pages/mapFocus.ts";
 import { localDragSlot } from "../state/localDrags.ts";
 import { useRoomScope } from "../state/scope.ts";
+import { barDismiss } from "../state/selection.ts";
 import { stageKeysSlot } from "../state/shortcuts.ts";
 import { sheetOpen as sheetIsOpen } from "../state/types.ts";
 import { foldsUnderSheet } from "../pages/fold.ts";
@@ -136,6 +137,10 @@ export function MapStage(props: {
   /** A tap on a token or on empty map. `add` adds the token to the selection or takes it out. */
   onSelect(tokenId: string | null, add?: boolean): void;
   onOpenDetails(tokenId: string): void;
+  /** Whether the token's panel shows the selection, where the bar's Close hides the bar and keeps the token (state/selection.ts barDismiss). */
+  tokenPanelShown?: boolean;
+  /** Hides the bar and keeps the token, sending focus to its panel (pages/Room.tsx). */
+  onHideBar?(): void;
   /**
    * A table display's camera (features/display): when set, the canvas shows
    * what it gives for the canvas size, again whenever it or the size
@@ -1145,7 +1150,10 @@ export function MapStage(props: {
               viewport={sizeInZoomed(size, zoom)}
               fullAccess={role === "dm" || ownsToken(selected)}
               onDetails={() => onOpenDetails(selected.id)}
-              onClose={() => ui.select(null)}
+              onClose={() => {
+                if (barDismiss(store.getState().local, props.tokenPanelShown === true) === "hide") (props.onHideBar ?? (() => ui.showActions(false)))();
+                else ui.select(null);
+              }}
             />
           ) : null}
           {role === "dm" ? <LabelPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}

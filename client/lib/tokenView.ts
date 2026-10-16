@@ -47,7 +47,8 @@ export function hpDisplay(input: {
   const { actor, hpVisibility, fullAccess } = input;
   const hp = actor?.hp;
   const hasHp = !!hp && Number.isFinite(hp.cur) && Number.isFinite(hp.max) && hp.max > 0;
-  const mode: HpVisibility = fullAccess ? "exact" : (hpVisibility ?? projectedMode(actor, hasHp));
+  // Where the numbers should be but did not arrive, the shape of what did decides, not the token's setting: a player who owns a character's token but not the character holds that character's HP as the party's rule sends it.
+  const mode: HpVisibility = fullAccess ? (hasHp ? "exact" : projectedMode(actor, hasHp)) : (hpVisibility ?? projectedMode(actor, hasHp));
   if (mode === "hidden") return { kind: "none" };
   if (mode === "label") {
     if (hasHp) return { kind: "label", label: hpLabel({ hp: hp!, life: actor?.life ?? "alive" }) };

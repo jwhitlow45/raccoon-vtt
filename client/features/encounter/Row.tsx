@@ -9,7 +9,7 @@ import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
-import { requestStatBlock } from "../tokens/statBlockOpen.ts";
+import { openStatBlock } from "../tokens/statBlockOpen.ts";
 import { RowRollTools } from "./AutoInitiative.tsx";
 import { useSend } from "./hooks.ts";
 import { entryActor, entryName, hpView, parseInitiative, rollReminder, valueText } from "./logic.ts";
@@ -403,13 +403,7 @@ function RowMenu(props: {
             <div style={{ display: "flex" }}>
               <Button
                 size="sm"
-                onClick={() => {
-                  const tokenId = props.statBlockTokenId!;
-                  ui.select(tokenId);
-                  ui.showActions(false);
-                  requestStatBlock(scope, tokenId);
-                  ui.openPanel("token");
-                }}
+                onClick={() => openStatBlock(scope, ui, props.statBlockTokenId!)}
               >
                 Stat block
               </Button>

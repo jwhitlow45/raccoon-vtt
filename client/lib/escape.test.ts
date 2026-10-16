@@ -34,4 +34,31 @@ describe("Escape in the room", () => {
     assert.equal(escapeTarget({ ...none, ...keys(true) }), null);
     assert.equal(escapeTarget({ ...none, ...keys(false), actionBar: dismissal(showActions(local, true), false) === "bar" }), "actionBar");
   });
+
+  test("lets go of a token whose bar is hidden, last, and not while a map pane is open", () => {
+    const hidden = showActions(tapToken(INITIAL_LOCAL, "a"), false);
+    const keys = (tokenPanelShown: boolean, pane = false) => {
+      const what = dismissal(hidden, tokenPanelShown, pane);
+      return { actionBar: what === "bar", group: what === "group", token: what === "token" };
+    };
+    // After Details, or with the token panel open beside the hidden bar.
+    assert.equal(escapeTarget({ ...none, ...keys(true) }), "token");
+    assert.equal(escapeTarget({ ...none, ...keys(false) }), "token");
+    assert.equal(escapeTarget({ ...none, ...keys(false), sheetOpen: true }), "sheet");
+    assert.equal(escapeTarget({ ...none, ...keys(false), dialogOpen: true }), null);
+    assert.equal(escapeTarget({ ...none, ...keys(false), editing: true }), null);
+    // A label, pin or light pane closes on Escape itself, and the token stays selected.
+    assert.equal(escapeTarget({ ...none, ...keys(false, true) }), null);
+    assert.equal(escapeTarget({ ...none, actionBar: true, token: true }), "actionBar");
+    assert.equal(escapeTarget({ ...none, group: true, token: true }), "group");
+  });
+
+  test("Back's rule does not change with it: it puts away only a group, or a phone's bar", () => {
+    // Room.tsx closes on Back for "group", and for "bar" under 900 px, never for "token".
+    const backCloses = (what: ReturnType<typeof dismissal>, wide: boolean) => what === "group" || (!wide && what === "bar");
+    const hidden = showActions(tapToken(INITIAL_LOCAL, "a"), false);
+    assert.equal(dismissal(hidden, false), "token");
+    assert.equal(backCloses(dismissal(hidden, false), false), false);
+    assert.equal(backCloses(dismissal(tapToken(INITIAL_LOCAL, "a"), false), false), true);
+  });
 });

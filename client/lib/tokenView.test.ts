@@ -49,6 +49,19 @@ describe("HP readout from a player's projection", () => {
     assert.deepEqual(hpDisplay({ actor: a, hpVisibility: undefined, fullAccess: false }), { kind: "label", label: "Bloodied" });
   });
 
+  test("a character's token owned without the character shows the character's HP as the party's rule sends it", () => {
+    const state = room();
+    state.characters.hero = character("hero", { ownerIds: ["p2"], actor: actor({ hp: { cur: 4, max: 20, temp: 0 } }) });
+    state.tokens.t = token("t", { kind: "pc", ownerIds: ["p1"], hpVisibility: "exact", actor: { ref: "hero" } });
+    for (const party of [false, true]) {
+      state.meta.settings.pcHpVisibleToParty = party;
+      const view = projectState(state, P1, { sceneId: null });
+      const t = view.tokens.t!;
+      const shown = hpDisplay({ actor: view.characters.hero!.actor, hpVisibility: t.hpVisibility, fullAccess: true });
+      assert.deepEqual(shown, party ? { kind: "bar", fraction: 0.2, text: "4/20" } : { kind: "label", label: "Bloodied" });
+    }
+  });
+
   test("one line of text for lists", () => {
     assert.equal(hpText({ kind: "none" }), null);
     assert.equal(hpText({ kind: "label", label: "Dying" }), "Dying");

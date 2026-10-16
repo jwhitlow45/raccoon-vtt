@@ -46,7 +46,7 @@ import { useShortcuts } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
 import type { Ended } from "../state/types.ts";
-import { dismissal } from "../state/selection.ts";
+import { barDismiss, dismissal } from "../state/selection.ts";
 import { useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
 import { endedText } from "./endedText.ts";
@@ -291,13 +291,26 @@ function RoomPage() {
    */
   const tokenPanelShown = wide ? tabId === "token" : sheet?.id === "token";
   const away = useRoomView((s) => dismissal(s.local, tokenPanelShown));
+  /*
+   * While the token's panel shows the token, the bar's Close, Escape and
+   * Back put the bar away and keep the token, so the panel the DM is
+   * reading stays filled (state/selection.ts barDismiss), and focus, which
+   * was on the bar or nowhere, goes to the panel.
+   */
+  const hideBar = useCallback(() => {
+    ui.showActions(false);
+    focusNext.current = { kind: "panel" };
+  }, [ui]);
   const putAway = useCallback(() => {
-    const what = dismissal(store.getState().local, tokenPanelShown);
-    if (what === "bar" && !wide) ui.select(null);
-    else if (what === "group") ui.doneSelecting();
-  }, [store, ui, tokenPanelShown, wide]);
+    const local = store.getState().local;
+    const what = dismissal(local, tokenPanelShown);
+    if (what === "bar" && !wide) {
+      if (barDismiss(local, tokenPanelShown) === "hide") hideBar();
+      else ui.select(null);
+    } else if (what === "group") ui.doneSelecting();
+  }, [store, ui, tokenPanelShown, wide, hideBar]);
   useBackClose(away === "group" || (!wide && away === "bar"), putAway);
-  useEscape(sheetOpen, closeSheets, tokenPanelShown);
+  useEscape(sheetOpen, closeSheets, tokenPanelShown, hideBar);
   // Where the open sheet stands, read when Find my token is pressed, so the found token lands clear of it.
   const sheetRef = useRef<HTMLElement | null>(null);
   const [sheetEl, setSheetEl] = useState<HTMLElement | null>(null);
@@ -491,7 +504,7 @@ function RoomPage() {
     >
       <div ref={safe.probe} aria-hidden style={SAFE_PROBE_STYLE} />
       <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
-        <MapArea gate={gate} role={role} actionBar={actionBar} insets={insets} onSelect={select} onOpenDetails={openDetails} />
+        <MapArea gate={gate} role={role} actionBar={actionBar} insets={insets} onSelect={select} onOpenDetails={openDetails} tokenPanelShown={tokenPanelShown} onHideBar={hideBar} />
         {/* The map's focus target (mapFocus.ts): after the map, so its ring draws over it, and before the bars, so Tab from it goes on to them. Taps pass through it. */}
         <div ref={mapFocusRef} tabIndex={-1} role="img" aria-label="Map" style={MAP_FOCUS_STYLE} />
         <TopBar
@@ -687,6 +700,8 @@ function MapArea(props: {
   insets: Insets;
   onSelect(id: string | null, add?: boolean): void;
   onOpenDetails(id: string): void;
+  tokenPanelShown: boolean;
+  onHideBar(): void;
 }) {
   const { gate, role } = props;
   if (gate.kind === "ready") {
@@ -700,6 +715,8 @@ function MapArea(props: {
           insets={props.insets}
           onSelect={props.onSelect}
           onOpenDetails={props.onOpenDetails}
+          tokenPanelShown={props.tokenPanelShown}
+          onHideBar={props.onHideBar}
         />
         <SceneLoadingOverlay insets={props.insets} />
       </>

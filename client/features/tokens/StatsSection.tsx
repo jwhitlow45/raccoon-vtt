@@ -3,6 +3,7 @@ import type { Actor } from "#shared/model.ts";
 import type { ActorPatch } from "#shared/protocol.ts";
 import { Switch } from "../../components/Switch.tsx";
 import { theme } from "../../lib/theme.ts";
+import { validSheetUrl } from "./statSummary.ts";
 import { FieldRow, Note, NumberField, Section, Stepper, TextField } from "./ui.tsx";
 
 /**
@@ -18,17 +19,7 @@ type Speeds = Actor["speeds"];
 const SPEED_KEYS = ["walk", "fly", "swim", "climb", "burrow"] as const;
 const SPEED_LABELS: Record<(typeof SPEED_KEYS)[number], string> = { walk: "Walk", fly: "Fly", swim: "Swim", climb: "Climb", burrow: "Burrow" };
 
-/** https only and at most 500 characters, as the protocol and design 10.7 require. */
-export function validSheetUrl(raw: string): string | null {
-  const text = raw.trim();
-  if (text.length > 500) return null;
-  try {
-    const url = new URL(text);
-    return url.protocol === "https:" ? url.href : null;
-  } catch {
-    return null;
-  }
-}
+export { validSheetUrl } from "./statSummary.ts";
 
 export function StatsSection(props: {
   actor: Partial<Actor>;

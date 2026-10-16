@@ -14,7 +14,7 @@ import { preloadLazies } from "../lib/retryableLazy.ts";
 import { theme } from "../lib/theme.ts";
 import { APP_TITLE, roomTitle } from "../lib/title.ts";
 import { useAccent } from "../state/accent.ts";
-import { dismissal } from "../state/selection.ts";
+import { barDismiss, dismissal } from "../state/selection.ts";
 import { useScoped } from "../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 
@@ -101,30 +101,38 @@ export function useNoPageZoom(): void {
 
 /**
  * Escape closes a phone's sheet, then the token action bar, then lets go
- * of a Select several group whose bar is hidden (lib/escape.ts), unless the
- * token's panel shows the selection (`tokenPanelShown`, state/selection.ts
- * dismissal).
+ * of a Select several group whose bar is hidden, then of a token whose bar
+ * is hidden (lib/escape.ts), unless the token's panel shows the selection
+ * (`tokenPanelShown`, state/selection.ts dismissal). While the panel shows
+ * the token, the bar hides and keeps it (barDismiss), through `hideBar`,
+ * which also sends focus to the panel. A map pane (a label, pin or light
+ * pane) takes Escape before a token is let go, and closes on it.
  */
-export function useEscape(sheetOpen: boolean, closeSheets: () => void, tokenPanelShown: boolean): void {
+export function useEscape(sheetOpen: boolean, closeSheets: () => void, tokenPanelShown: boolean, hideBar: () => void): void {
   const ui = useRoomUi();
   const store = useRoomStore();
-  const latest = useRef({ sheetOpen, closeSheets, tokenPanelShown });
-  latest.current = { sheetOpen, closeSheets, tokenPanelShown };
+  const latest = useRef({ sheetOpen, closeSheets, tokenPanelShown, hideBar });
+  latest.current = { sheetOpen, closeSheets, tokenPanelShown, hideBar };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       const target = e.target instanceof HTMLElement ? e.target : null;
-      const away = dismissal(store.getState().local, latest.current.tokenPanelShown);
+      const local = store.getState().local;
+      const away = dismissal(local, latest.current.tokenPanelShown, document.querySelector("[data-map-pane]") !== null);
       const what = escapeTarget({
         dialogOpen: document.querySelector('[aria-modal="true"]') !== null,
         editing: target !== null && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)),
         sheetOpen: latest.current.sheetOpen,
         actionBar: away === "bar",
         group: away === "group",
+        token: away === "token",
       });
       if (what === "sheet") latest.current.closeSheets();
-      else if (what === "actionBar") ui.select(null);
-      else if (what === "group") ui.doneSelecting();
+      else if (what === "actionBar") {
+        if (barDismiss(local, latest.current.tokenPanelShown) === "hide") latest.current.hideBar();
+        else ui.select(null);
+      } else if (what === "group") ui.doneSelecting();
+      else if (what === "token") ui.select(null);
       // Marked as used, so the label pane (features/builder/LabelPane.tsx), which listens after this, stays open.
       if (what) e.preventDefault();
     };

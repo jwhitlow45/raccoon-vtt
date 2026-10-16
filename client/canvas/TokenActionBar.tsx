@@ -1,11 +1,11 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { useStore } from "zustand";
-import { CONDITION_KEYS, STATUS_KEYS, type Actor, type Effect, type LifeState } from "#shared/model.ts";
+import { CONDITION_KEYS, STATUS_KEYS, type Actor, type Effect } from "#shared/model.ts";
+import { hpLess } from "#shared/rules/hp.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
 import { RETURN_RANK, useSheetReturnFocus } from "../components/sheetFocus.ts";
 import { PaneHeader, type PaneHandle } from "../components/SheetHeader.tsx";
-import { Tag } from "../components/Tag.tsx";
 import { useLayoutSize } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
@@ -18,6 +18,11 @@ import { offersRequest } from "../features/rolls/logic.ts";
 import { openAsk } from "../features/rolls/open.ts";
 import { EffectIcon } from "../features/tokens/EffectIcon.tsx";
 import { duplicateToken, occupiedBoxes, spreadPositions } from "../features/tokens/factory.ts";
+import { DefenseLines, MoreStats, SavesLine, SheetAnchor, useLinkedBlock, VitalsLine } from "../features/tokens/StatSummary.tsx";
+import { openStatBlock } from "../features/tokens/statBlockOpen.ts";
+import { shortSplit, validSheetUrl, vitals } from "../features/tokens/statSummary.ts";
+import { statBlockShown, tokenStatBlock } from "../features/monsters/statBlockLink.ts";
+import { visionOn } from "../features/vision/sightMode.ts";
 import {
   conditionLit,
   conditionOps,
@@ -44,7 +49,7 @@ import type { Point, Size } from "../lib/camera.ts";
 import { TAP_SLOP_PX } from "../lib/gestures.ts";
 import { displayName, footprint, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
-import { effectChip, elevationBadge, hpDisplay, hpText } from "../lib/tokenView.ts";
+import { effectChip, elevationBadge } from "../lib/tokenView.ts";
 import { foldsUnderSheet, usePublishBar } from "../pages/fold.ts";
 import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope, useScoped } from "../state/scope.ts";
@@ -65,6 +70,7 @@ import {
   type Box,
   type Spot,
 } from "./barDock.ts";
+import { barButtons, barShort, isCompanion, type BarButtonId } from "./barButtons.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 
 const NO_CHARACTERS = {};
@@ -72,10 +78,17 @@ const NO_CHARACTERS = {};
 type Drawer = "conditions" | null;
 
 /**
- * The bar that opens under a tapped token (design section 14.3): the
- * token's HP and effects at a glance, quick HP entry, condition toggles,
- * elevation, and for the DM hide, lock, duplicate and delete. Everything
- * else is one tap away in Details.
+ * The bar that opens under a tapped token (design section 14.3), in the
+ * order docs/design-v1-token-panel.md 3.3 ranks by use: the header, the
+ * stat summary's vitals (AC, HP, speed, Passive Perception), the HP entry
+ * right after them, death saves, the effects, a linked block's saves and
+ * defenses, then "Stat block", the sheet link and Details beside the
+ * summary they expand, elevation, other images, the Conditions drawer,
+ * and the buttons in two rows: what play needs, then setup and Delete
+ * apart from it. On a short bar (barButtons.ts barShort) the vitals keep
+ * to AC and HP, the HP entry puts its field and Apply first, and "More
+ * stats" holds the rest, so Apply shows without a scroll on a phone held
+ * sideways.
  *
  * It lists every effect with its full name, since the chips on the token
  * itself overflow into "+N".
@@ -90,6 +103,22 @@ export function TokenActionBar(props: {
   onClose(): void;
 }) {
   const { token } = props;
+  return (
+    <BarFrame
+      anchor={props.anchor}
+      viewport={props.viewport}
+      label={`${displayName(token)} actions`}
+      dock={{ text: displayName(token), show: `Show ${displayName(token)} actions`, closeLabel: "Close", close: props.onClose }}
+    >
+      <TokenBarBody token={token} fullAccess={props.fullAccess} onDetails={props.onDetails} onClose={props.onClose} />
+    </BarFrame>
+  );
+}
+
+/** The single token's bar inside its frame, which tells it whether it is short and whether it docks. */
+function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(): void; onClose(): void }) {
+  const { token } = props;
+  const frame = useContext(FrameContext);
   const actions = useRoomActions();
   const ui = useRoomUi();
   const store = useRoomStore();
@@ -99,10 +128,13 @@ export function TokenActionBar(props: {
   const scene = useRoomView((s) => s.view?.scenes[token.sceneId]);
   const tokens = useRoomView((s) => s.view?.tokens);
   const multi = useRoomView((s) => s.local.multi);
+  const encounter = useRoomView((s) => s.view?.encounter);
+  const monsters = useRoomView((s) => s.view?.monsters);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const scope = useRoomScope();
   // Only a creature a player plays, askable where it stands, offers a roll request (docs/design-v1-dm-tools.md 3.3, rolls/logic.ts askTarget).
   const played = useRoomView((s) => (s.view ? offersRequest(s.view, [token]) : false));
+  const undoOffer = useStore(useScoped(lastMoveSlot), offered);
 
   const access = useMemo(
     () =>
@@ -116,14 +148,17 @@ export function TokenActionBar(props: {
   );
   const actor: Partial<Actor> | undefined = "inline" in token.actor ? token.actor.inline : character?.actor;
   const effects = actor?.effects ?? [];
-  const hp = hpDisplay({ actor, hpVisibility: token.hpVisibility, fullAccess: props.fullAccess || access.full });
   const badge = elevationBadge(token.elevation);
   const target = { tokenId: token.id };
   const life = actor?.life ?? "alive";
   const atZero = actor?.hp?.cur === 0 && (life === "dying" || life === "stable");
-  // A label already says Dying or Dead, so the life state stands in for it rather than beside it.
-  const hpLine = hp.kind === "label" ? (LIFE_WORD[life] || hp.label) : hpText(hp) ? `HP ${hpText(hp)}` : null;
-  const lifeChip = hp.kind === "label" ? "" : LIFE_WORD[life];
+  const short = frame.short;
+  const items = vitals({ actor, token, fullAccess: props.fullAccess || access.full, place: "bar" });
+  const split = shortSplit(items);
+  const { block, retry } = useLinkedBlock(token, actor, access);
+  const link = tokenStatBlock(actor, monsters);
+  const statBlock = statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor }) && (link.kind === "room" || link.kind === "srd");
+  const sheetUrl = actor?.sheetUrl ? validSheetUrl(actor.sheetUrl) : null;
 
   const toggleEffect = (key: Effect["key"]) => {
     const existing = effects.find((e) => e.key === key);
@@ -143,25 +178,112 @@ export function TokenActionBar(props: {
     }
   };
 
+  const path = pathNow(encounter, token, you?.role ?? "player");
+  const rows = barButtons({
+    dm: access.dm,
+    owner: access.owner,
+    undoMove: offersUndo(undoOffer, [token.id]),
+    movedThisTurn: path !== null && path.stops.length >= 2,
+    // A player's own token: the door button finds the nearest door in reach itself, and shows nothing without one.
+    door: true,
+    light: (scene !== undefined && visionOn(scene)) || (token.light !== undefined && (token.light.bright > 0 || token.light.dim > 0)),
+    played,
+    companion: isCompanion(token),
+    docked: frame.place !== null,
+    moved: frame.place?.moved ?? false,
+  });
+  const button = (id: BarButtonId): ReactNode => {
+    switch (id) {
+      case "undoMove":
+        return <UndoMoveButton key={id} tokenIds={[token.id]} />;
+      case "countLeg":
+        return <CountLegButton key={id} token={token} />;
+      case "door":
+        return <DoorButton key={id} token={token} />;
+      case "conditions":
+        return (
+          <BarButton key={id} pressed={drawer === "conditions"} onClick={() => setDrawer((d) => (d === "conditions" ? null : "conditions"))}>
+            Conditions
+          </BarButton>
+        );
+      case "requestRoll":
+        return (
+          <BarButton key={id} onClick={() => openAsk(scope, { kind: "selection", tokenIds: [token.id] })}>
+            Request a roll
+          </BarButton>
+        );
+      // Toggles named for the state they are in, lit while it holds, so a lit button never reads as the opposite.
+      case "hidden":
+        return (
+          <BarButton
+            key={id}
+            pressed={token.visibility === "dm"}
+            onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { visibility: token.visibility === "dm" ? "all" : "dm" } })}
+          >
+            Hidden
+          </BarButton>
+        );
+      case "light":
+        return <LightChip key={id} token={token} />;
+      case "selectSeveral":
+        return (
+          <BarButton key={id} pressed={multi} onClick={() => ui.setMultiSelect(!multi)}>
+            Select several
+          </BarButton>
+        );
+      case "locked":
+        return (
+          <BarButton key={id} pressed={token.locked} onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { locked: !token.locked } })}>
+            Locked
+          </BarButton>
+        );
+      case "duplicate":
+        return (
+          <BarButton key={id} onClick={duplicate}>
+            Duplicate
+          </BarButton>
+        );
+      case "delete":
+        return (
+          <DeleteButton
+            key={id}
+            onDelete={() => {
+              actions.dispatch({ t: "token.delete", tokenId: token.id });
+              props.onClose();
+            }}
+          />
+        );
+      // A companion's Dismiss for its owners who are not the DM is docs/design-v1-combat-flow.md 3.6.9's, and stands here when that lands.
+      case "dismiss":
+        return null;
+      case "moveBar":
+        return <MoveBarButton key={id} />;
+      case "resetBar":
+        return <ResetBarButton key={id} />;
+    }
+  };
+
+  const savesAndDefenses = short ? (
+    <MoreStats more={split.more} block={block} retry={retry} />
+  ) : (
+    <>
+      <SavesLine block={block} retry={retry} />
+      <DefenseLines block={block} clamp />
+    </>
+  );
+
   return (
-    <BarFrame
-      anchor={props.anchor}
-      viewport={props.viewport}
-      label={`${displayName(token)} actions`}
-      dock={{ text: displayName(token), show: `Show ${displayName(token)} actions`, closeLabel: "Close", close: props.onClose }}
-    >
+    <>
       <BarHeader
         // Two lines of the name at most: the frame's name holds all of it, and the token's plate shows it on the map.
         title={displayName(token)}
         actions={badge ? <span style={{ flex: "none", color: theme.color.accentSoft, fontWeight: theme.weight.bold }}>{badge} ft</span> : null}
         onClose={props.onClose}
       />
-      {hpLine || lifeChip ? (
-        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2), color: theme.color.textMuted }}>
-          {hpLine ? <span>{hpLine}</span> : null}
-          {lifeChip ? <Tag tone={life === "stable" ? "warning" : "danger"}>{lifeChip}</Tag> : null}
-        </div>
-      ) : null}
+      <VitalsLine items={short ? split.line : items} />
+
+      {access.hp !== "none" && !hpLess(actor, token) ? <HpEntry targets={[oneTarget(target, access.hp, atZero)]} access={access.hp} place="bar" fieldFirst={short} /> : null}
+
       {life === "dying" && access.deathSaves && actor?.deathSaves ? (
         <DeathSaves
           saves={actor.deathSaves}
@@ -192,7 +314,14 @@ export function TokenActionBar(props: {
         </ul>
       ) : null}
 
-      {access.hp !== "none" ? <HpEntry targets={[oneTarget(target, access.hp, atZero)]} access={access.hp} place="bar" /> : null}
+      {savesAndDefenses}
+
+      {/* Stat block and Details both open the panel, so they sit with the summary they expand. */}
+      <div role="group" aria-label="Read more" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
+        {statBlock ? <BarButton onClick={() => openStatBlock(scope, ui, token.id)}>Stat block</BarButton> : null}
+        {sheetUrl ? <SheetAnchor url={sheetUrl} /> : null}
+        <BarButton onClick={props.onDetails}>Details</BarButton>
+      </div>
 
       {access.canEditToken("elevation") ? (
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(1) }}>
@@ -219,52 +348,15 @@ export function TokenActionBar(props: {
 
       {drawer === "conditions" ? <QuickConditions lit={(key) => (effects.some((e) => e.key === key) ? "all" : "none")} onToggle={toggleEffect} /> : null}
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
-        <UndoMoveButton tokenIds={[token.id]} />
-        {access.dm || access.owner ? <CountLegButton token={token} /> : null}
-        <DoorButton token={token} />
-        {access.effects ? (
-          <BarButton pressed={drawer === "conditions"} onClick={() => setDrawer((d) => (d === "conditions" ? null : "conditions"))}>
-            Conditions
-          </BarButton>
-        ) : null}
-        {/* Toggles named for the state they are in, lit while it holds, so a lit button never reads as the opposite. */}
-        {access.canEditToken("light") ? <LightChip token={token} /> : null}
-        {access.dm ? (
-          <BarButton
-            pressed={token.visibility === "dm"}
-            onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { visibility: token.visibility === "dm" ? "all" : "dm" } })}
-          >
-            Hidden
-          </BarButton>
-        ) : null}
-        {access.dm ? (
-          <BarButton
-            pressed={token.locked}
-            onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { locked: !token.locked } })}
-          >
-            Locked
-          </BarButton>
-        ) : null}
-        {access.dm && played ? <BarButton onClick={() => openAsk(scope, { kind: "selection", tokenIds: [token.id] })}>Request a roll</BarButton> : null}
-        {access.dm ? <BarButton onClick={duplicate}>Duplicate</BarButton> : null}
-        {access.dm ? (
-          <DeleteButton
-            onDelete={() => {
-              actions.dispatch({ t: "token.delete", tokenId: token.id });
-              props.onClose();
-            }}
-          />
-        ) : null}
-        <BarButton pressed={multi} onClick={() => ui.setMultiSelect(!multi)}>
-          Select several
-        </BarButton>
-        <BarButton grow onClick={props.onDetails}>
-          Details
-        </BarButton>
-        <PlaceButtons />
+      <div data-bar-row="play" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
+        {rows.play.map(button)}
       </div>
-    </BarFrame>
+      {rows.less.length > 0 ? (
+        <div data-bar-row="less" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
+          {rows.less.map(button)}
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -446,9 +538,11 @@ type FrameControls = {
   handle: PaneHandle | null;
   sticky: boolean;
   place: { moveRef: RefObject<HTMLButtonElement | null>; moved: boolean; move(): void; reset(): void } | null;
+  /** The bar has under 300 px where it stands (barButtons.ts barShort), whatever its content. */
+  short: boolean;
 };
 
-const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null });
+const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, short: false });
 
 /** The bar's header: its name on at most two lines, the grip and handle while it docks, sticky while it docks or spans. */
 function BarHeader(props: { title: string; actions?: ReactNode; onClose(): void; closeLabel?: string }) {
@@ -466,12 +560,26 @@ function PlaceButtons() {
   if (!place) return null;
   return (
     <>
-      <BarButton ref={place.moveRef} onClick={place.move}>
-        Move bar
-      </BarButton>
-      {place.moved ? <BarButton onClick={place.reset}>Reset bar position</BarButton> : null}
+      <MoveBarButton />
+      {place.moved ? <ResetBarButton /> : null}
     </>
   );
+}
+
+function MoveBarButton() {
+  const { place } = useContext(FrameContext);
+  if (!place) return null;
+  return (
+    <BarButton ref={place.moveRef} onClick={place.move}>
+      Move bar
+    </BarButton>
+  );
+}
+
+function ResetBarButton() {
+  const { place } = useContext(FrameContext);
+  if (!place?.moved) return null;
+  return <BarButton onClick={place.reset}>Reset bar position</BarButton>;
 }
 
 /** A drag of the bar by its header, in progress: the pointer, where it went down, and the box the bar had then and has now. */
@@ -688,7 +796,9 @@ function BarFrame(props: {
           },
         }
       : null;
-  const controls: FrameControls = { handle, sticky: mode !== "compact", place };
+  // Read from where the bar stands, never from its content, so the short layout and an opened "More stats" never flip it.
+  const short = barShort({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, column });
+  const controls: FrameControls = { handle, sticky: mode !== "compact", place, short };
 
   const { hang } = placed;
   const where = dragBox
@@ -770,8 +880,6 @@ export function ScrollForMore() {
     </div>
   );
 }
-
-const LIFE_WORD: Record<LifeState, string> = { alive: "", dying: "Dying", stable: "Stable", dead: "Dead" };
 
 /**
  * One tap adds or removes. Each button shows its name under the icon,

@@ -70,19 +70,38 @@ export function doneSelecting(local: LocalUi): LocalUi {
 /**
  * What Escape and Android's Back put away from the map, after a sheet, a
  * dialog and a text field have had theirs (lib/escape.ts, lib/backClose.ts):
- * "bar" while the action bar shows, which lets go as its close does, and
- * "group" while Select several holds a group whose bar is hidden, which
- * ends the mode as Done does, so Back never leaves the room with a group
- * held. Not while the token's panel shows the selection, as after Details
- * or with the side panel on its Token tab: there Escape leaves the panel
- * and the group alone, and Done is the way out. The rule reads what shows
- * rather than how the bar was hidden, so it holds after the alerts summary
- * hid it too.
+ * "bar" while the action bar shows, which goes as its close does
+ * (barDismiss), and "group" while Select several holds a group whose bar
+ * is hidden, which ends the mode as Done does, so Back never leaves the
+ * room with a group held. Not while the token's panel shows the selection,
+ * as after Details or with the side panel on its Token tab: there Escape
+ * leaves the panel and the group alone, and Done is the way out.
+ *
+ * "token" is Escape's alone (docs/design-v1-token-panel.md 3.3): with no
+ * bar showing, a token selected and Select several off, Escape lets go of
+ * it, so the keyboard always has a way to deselect before H, L, Delete or
+ * the arrow keys act on a token no longer in view. Not while a map pane
+ * (a label, pin or light pane) is open, which Escape closes first.
+ *
+ * The rule reads what shows rather than how the bar was hidden, so it
+ * holds after Details, `barDismiss` and the alerts summary hid it alike.
  */
-export function dismissal(local: LocalUi, tokenPanelShown: boolean): "bar" | "group" | null {
+export function dismissal(local: LocalUi, tokenPanelShown: boolean, mapPaneOpen = false): "bar" | "group" | "token" | null {
   if (local.actionBar && local.selectedId !== null) return "bar";
   if (local.multi && local.selectedIds.length > 0 && !tokenPanelShown) return "group";
+  if (!local.multi && local.selectedId !== null && !mapPaneOpen) return "token";
   return null;
+}
+
+/**
+ * What the single token's bar does on its Close (the dock's too), Escape
+ * and Back (docs/design-v1-token-panel.md 3.3): while the token's panel
+ * shows that token, it hides and keeps the selection, so the panel the DM
+ * is reading stays filled. Elsewhere it lets go, as it always has. A
+ * group's bar is unchanged: it lets go of all of them.
+ */
+export function barDismiss(local: LocalUi, tokenPanelShown: boolean): "hide" | "letGo" {
+  return tokenPanelShown && local.selectedIds.length === 1 ? "hide" : "letGo";
 }
 
 /** Opens or closes the selection's action bar, which steps aside once the token's panel is open. */

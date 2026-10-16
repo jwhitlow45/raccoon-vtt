@@ -87,6 +87,7 @@ export default function LabelPane(props: { label: Label; camera: Camera; viewpor
       ref={paneRef}
       role="dialog"
       aria-label="Edit label"
+      data-map-pane=""
       style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text }}
     >
       {/* Keyed by label, so a draft or an armed Delete never carries over to the next label tapped. */}

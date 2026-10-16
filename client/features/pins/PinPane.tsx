@@ -85,7 +85,7 @@ export default function PinPane(props: { pin: Pin; camera: Camera; viewport: Siz
   });
 
   return (
-    <div ref={paneRef} role="dialog" aria-label="Edit pin" style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text }}>
+    <div ref={paneRef} role="dialog" aria-label="Edit pin" data-map-pane="" style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text }}>
       {/* Keyed by pin, so a draft or an armed Delete never carries over to the next pin tapped. */}
       <PinEditor key={pin.id} pin={pin} onClose={props.onClose} dismissRef={dismissRef} />
     </div>

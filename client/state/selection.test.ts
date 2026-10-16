@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { addToSelection, dismissal, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
+import { addToSelection, barDismiss, dismissal, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
 import { INITIAL_LOCAL } from "./types.ts";
 
 describe("taps, the selection and the action bar", () => {
@@ -86,9 +86,30 @@ describe("taps, the selection and the action bar", () => {
     assert.equal(dismissal(showActions(tapToken(setMultiSelect(one, true), "b"), false), false), "group", "after the alerts summary hid it");
     // Details hides the bar, and the token panel shows the selection.
     assert.equal(dismissal(showActions(setMultiSelect(one, true), false), true), null);
-    assert.equal(dismissal(showActions(one, false), false), null, "one token's hidden bar, with the mode off");
     assert.equal(dismissal(setMultiSelect(INITIAL_LOCAL, true), false), null, "the mode on with nothing held");
     assert.equal(dismissal(INITIAL_LOCAL, false), null);
+  });
+
+  test("with the bar hidden and Select several off, Escape lets go of the token, however the bar was hidden", () => {
+    const one = tapToken(INITIAL_LOCAL, "a");
+    const hidden = showActions(one, false);
+    // barDismiss, Details and the alerts summary all hide the bar the same way.
+    assert.equal(dismissal(hidden, true), "token", "the token panel shows it");
+    assert.equal(dismissal(hidden, false), "token", "after the alerts summary hid it");
+    assert.equal(dismissal(hidden, false, true), null, "a map pane is open, and Escape closes it first");
+    assert.equal(dismissal(showActions(setMultiSelect(one, true), false), true), null, "Select several on");
+    assert.equal(dismissal(one, true), "bar");
+  });
+
+  test("the bar's Close, Escape and Back hide it and keep the token while its panel shows it, and let go otherwise", () => {
+    const one = tapToken(INITIAL_LOCAL, "a");
+    assert.equal(barDismiss(one, true), "hide");
+    assert.equal(barDismiss(one, false), "letGo");
+    const kept = showActions(one, false);
+    assert.equal(kept.selectedId, "a", "hiding keeps the selection");
+    assert.equal(kept.actionBar, false);
+    const group = tapToken(one, "b", true);
+    assert.equal(barDismiss(group, true), "letGo", "a group's bar is unchanged");
   });
 
   test("a box adds what it covers, and gone tokens drop out", () => {

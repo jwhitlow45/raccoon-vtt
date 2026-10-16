@@ -82,7 +82,7 @@ export default function LightPane(props: { light: Light; camera: Camera; viewpor
   });
 
   return (
-    <div ref={paneRef} role="dialog" aria-label="Edit light" style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text }}>
+    <div ref={paneRef} role="dialog" aria-label="Edit light" data-map-pane="" style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text }}>
       {/* Keyed by light, so a half-typed name or an armed Delete never carries over to the next light tapped. */}
       <LightEditor key={light.id} light={light} onClose={props.onClose} />
     </div>
