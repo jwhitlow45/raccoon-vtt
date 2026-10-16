@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { downloadAction, handoutFile, handoutFileName, saveBegin, saveForget, saveSettled, type SaveStates } from "./download.ts";
+import { downloadAction, handoutFile, handoutFileName, pdfBuildStep, pdfProgressText, PREPARED_MS, saveBegin, saveForget, saveSettled, type PdfBuild, type PdfBuildEvent, type SaveStates } from "./download.ts";
 
 describe("handoutFileName", () => {
   test("the title, with the extension of the image's type", () => {
@@ -8,6 +8,11 @@ describe("handoutFileName", () => {
     assert.equal(handoutFileName("Letter", "image/png"), "Letter.png");
     assert.equal(handoutFileName("Letter", "image/jpeg"), "Letter.jpg");
     assert.equal(handoutFileName("Letter", "IMAGE/WEBP; charset=binary"), "Letter.webp");
+  });
+
+  test("a handout of pages saves as <title>.pdf (docs/design-v1-pdf-handouts.md 6)", () => {
+    assert.equal(handoutFileName("Strange letter", "application/pdf"), "Strange letter.pdf");
+    assert.equal(handoutFileName("CON", "application/pdf"), "CON handout.pdf");
   });
 
   test("a type that says nothing usable saves as WebP, as the server stores every image", () => {
@@ -106,5 +111,59 @@ describe("downloadAction (P3R-7)", () => {
     assert.equal(file.name, "Strange letter.webp");
     assert.equal(file.type, "image/webp");
     assert.equal(handoutFile(new Blob(["x"]), "Letter").type, "image/webp", "a blob with no type is the WebP the server stores");
+  });
+});
+
+describe("a handout of pages built as a PDF: its lifecycle (docs/design-v1-pdf-handouts.md 6)", () => {
+  const file = new File(["%PDF-"], "Strange letter.pdf", { type: "application/pdf" });
+  const run = (events: PdfBuildEvent[], from: PdfBuild | null = null) => events.reduce<PdfBuild | null>(pdfBuildStep, from);
+  const building = run([{ t: "start", key: "a", op: 1, pages: 12 }]);
+
+  test("progress counts the pages done, as its own press's alone, and says the page being prepared", () => {
+    const two = run([{ t: "progress", op: 1, done: 2 }], building);
+    assert.deepEqual(two, { t: "building", key: "a", op: 1, done: 2, pages: 12 });
+    assert.equal(pdfProgressText(two as Extract<PdfBuild, { t: "building" }>), "Preparing the PDF: page 3 of 12");
+    assert.equal(run([{ t: "progress", op: 9, done: 5 }], two), two, "another press's progress");
+  });
+
+  test("one build at a time: a new press's build takes the place, and the old one's end changes nothing", () => {
+    const next = run([{ t: "start", key: "a", op: 2, pages: 12 }], building);
+    assert.equal(run([{ t: "built", op: 1, file, keep: true, at: 0 }], next), next);
+    assert.equal(run([{ t: "failed", op: 1, why: "fetch" }], next), next);
+  });
+
+  test("a computer saves it at once and keeps nothing, and a phone that shares keeps it for the Share tap", () => {
+    assert.equal(run([{ t: "built", op: 1, file, keep: false, at: 0 }], building), null);
+    assert.deepEqual(run([{ t: "built", op: 1, file, keep: true, at: 5 }], building), { t: "ready", key: "a", op: 1, file, at: 5 });
+  });
+
+  test("Cancel, the popup closing and the popup moving to another showing each stop a build", () => {
+    assert.equal(run([{ t: "cancel" }], building), null);
+    assert.equal(run([{ t: "showing", key: null }], building), null);
+    assert.equal(run([{ t: "showing", key: "b" }], building), null);
+    assert.equal(run([{ t: "showing", key: "a" }], building), building, "a resync of the same showing keeps it");
+  });
+
+  test("the prepared file is kept for its showing alone, and dropped, its Share with it, on each listed event", () => {
+    const ready = run([{ t: "built", op: 1, file, keep: true, at: 1_000 }], building);
+    assert.equal(run([{ t: "showing", key: null }], ready), null, "the popup closed");
+    assert.equal(run([{ t: "showing", key: "b" }], ready), null, "the popup moved to another showing");
+    assert.equal(run([{ t: "open", keys: new Set(["b"]) }], ready), null, "its handout closed");
+    assert.equal(run([{ t: "open", keys: new Set(["a", "b"]) }], ready), ready, "another handout closed");
+    assert.equal(run([{ t: "time", now: 1_000 + PREPARED_MS }], ready), null, "unused for a few minutes");
+    assert.equal(run([{ t: "time", now: 1_000 + PREPARED_MS - 1 }], ready), ready);
+    // A share counts as a use, so the clock starts again.
+    const used = run([{ t: "used", at: 50_000 }], ready);
+    assert.equal(run([{ t: "time", now: 1_000 + PREPARED_MS }], used), used);
+    assert.equal(run([{ t: "cancel" }], ready), ready, "Cancel shows only while it builds");
+  });
+
+  test("a failure belongs to its showing, says why, and a new press starts again", () => {
+    const failed = run([{ t: "failed", op: 1, why: "fetch" }], building);
+    assert.deepEqual(failed, { t: "failed", key: "a", op: 1, why: "fetch" });
+    assert.equal(run([{ t: "showing", key: null }], failed), null);
+    assert.equal(run([{ t: "start", key: "a", op: 2, pages: 12 }], failed)?.t, "building");
+    const ready = run([{ t: "built", op: 1, file, keep: true, at: 0 }], building);
+    assert.deepEqual(run([{ t: "failed", op: 1, why: "share" }], ready), { t: "failed", key: "a", op: 1, why: "share" });
   });
 });

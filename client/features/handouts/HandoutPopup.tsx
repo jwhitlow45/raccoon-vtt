@@ -10,7 +10,23 @@ import { useAssets, useRoomView } from "../../state/view.ts";
 import { closedSlot, closedStorageKey, closeHandout, loadClosed } from "./closed.ts";
 import { useXCard } from "../xcard/XCardHost.tsx";
 import { prefersShare, shareFile } from "../mapexport/save.ts";
-import { downloadAction, fetchHandoutImage, handoutFile, saveBegin, saveForget, saveSettled, saveThroughLink, type SaveOutcome, type SaveStates } from "./download.ts";
+import {
+  buildHandoutPdf,
+  downloadAction,
+  fetchHandoutImage,
+  handoutFile,
+  pdfBuildStep,
+  pdfProgressText,
+  PREPARED_MS,
+  saveBegin,
+  saveForget,
+  saveSettled,
+  saveThroughLink,
+  type PdfBuild,
+  type PdfBuildEvent,
+  type SaveOutcome,
+  type SaveStates,
+} from "./download.ts";
 import { nextPopup, pageName, popupShows, showingKey } from "./handouts.ts";
 import { HandoutViewer } from "./HandoutViewer.tsx";
 
@@ -66,6 +82,7 @@ export function HandoutPopup() {
   const [saving, setSaving] = useState<SaveStates>({});
   const lastOp = useRef(0);
   const url = handout ? assets.url(handout.assetId, "full") : null;
+  const pageCount = handout ? handoutPages(handout).length : 0;
   /*
    * The image in hand, fetched as the popup opens, so a tap on Download can
    * open the share sheet at once, inside the tap (download.ts). It comes
@@ -75,7 +92,8 @@ export function HandoutPopup() {
    */
   const [ready, setReady] = useState<{ key: string; blob: Blob } | null>(null);
   useEffect(() => {
-    if (!key || !url) return;
+    // A handout of pages fetches nothing as it opens: every player would fetch every page, and most never download (docs/design-v1-pdf-handouts.md 6).
+    if (!key || !url || pageCount > 1) return;
     const controller = new AbortController();
     fetchHandoutImage(url, controller.signal).then(
       (blob) => setReady({ key, blob }),
@@ -85,7 +103,7 @@ export function HandoutPopup() {
       controller.abort();
       setReady((r) => (r?.key === key ? null : r));
     };
-  }, [key, url]);
+  }, [key, url, pageCount]);
   /*
    * A download under way goes on when the popup closes, since the player
    * asked for the file, and the same handout opened again from the Library
@@ -136,7 +154,70 @@ export function HandoutPopup() {
       settle("fetch failed");
     }
   };
-  const label = busy ? "Downloading…" : mine?.state === "share" ? "Share" : "Download";
+
+  /*
+   * A handout of pages downloads as a PDF built here (download.ts
+   * PdfBuild): one build at a time, owned by the showing in the popup and
+   * the press that started it, with its progress and Cancel in the lead
+   * line. Unlike one image's, it stops when the popup closes or moves on,
+   * since it holds every page's JPEG until the file is saved.
+   */
+  const [pdf, setPdf] = useState<PdfBuild | null>(null);
+  const pdfStep = (e: PdfBuildEvent) => setPdf((s) => pdfBuildStep(s, e));
+  const builds = useRef(new Map<number, AbortController>());
+  useEffect(() => pdfStep({ t: "showing", key }), [key]);
+  useEffect(() => {
+    if (handouts) pdfStep({ t: "open", keys: new Set(Object.values(handouts).flatMap((h) => (h ? [showingKey(h)] : []))) });
+  }, [handouts]);
+  useEffect(() => {
+    // A build that is no longer the one under way stops, and lets go of its pages.
+    for (const [op, controller] of builds.current) {
+      if (pdf?.t === "building" && pdf.op === op) continue;
+      controller.abort();
+      builds.current.delete(op);
+    }
+    if (pdf?.t !== "ready") return;
+    const timer = setTimeout(() => pdfStep({ t: "time", now: Date.now() }), Math.max(0, pdf.at + PREPARED_MS - Date.now()));
+    return () => clearTimeout(timer);
+  }, [pdf]);
+  useEffect(
+    () => () => {
+      for (const controller of builds.current.values()) controller.abort();
+    },
+    [],
+  );
+  const pdfMine = pdf && pdf.key === key ? pdf : null;
+  const downloadPdf = async () => {
+    if (!handout || !key || pdfMine?.t === "building") return;
+    if (pdfMine?.t === "ready") {
+      // Called before any wait, so the share sheet opens within the tap. Closing the sheet is a choice, not a failure.
+      const outcome = await shareFile(pdfMine.file);
+      if (outcome === "failed") pdfStep({ t: "failed", op: pdfMine.op, why: "share" });
+      else pdfStep({ t: "used", at: Date.now() });
+      return;
+    }
+    const op = ++lastOp.current;
+    const controller = new AbortController();
+    builds.current.set(op, controller);
+    const urls = handoutPages(handout).map((p) => assets.url(p.assetId, "full"));
+    pdfStep({ t: "start", key, op, pages: urls.length });
+    try {
+      const file = await buildHandoutPdf({ urls, title: handout.title, signal: controller.signal, onPage: (done) => pdfStep({ t: "progress", op, done }) });
+      if (controller.signal.aborted) return;
+      // A computer saves it at once. A phone that shares files waits for a tap on Share, since the sheet opens only inside a tap.
+      const share = prefersShare(file);
+      if (!share) saveThroughLink(file);
+      pdfStep({ t: "built", op, file, keep: share, at: Date.now() });
+    } catch {
+      if (!controller.signal.aborted) pdfStep({ t: "failed", op, why: "fetch" });
+    }
+  };
+
+  const several = pageCount > 1;
+  const pdfBusy = pdfMine?.t === "building";
+  const failure = several ? (pdfMine?.t === "failed" ? pdfMine.why : null) : mine?.state === "failed" ? (mine.why ?? "fetch") : null;
+  const press = () => void (several ? downloadPdf() : download());
+  const label = several ? (pdfBusy ? "Preparing…" : pdfMine?.t === "ready" ? "Share" : "Download") : busy ? "Downloading…" : mine?.state === "share" ? "Share" : "Download";
 
   // Android's Back closes the handout before it leaves the room, one Back for each handout shown in turn.
   useBackClose(key, close);
@@ -158,19 +239,27 @@ export function HandoutPopup() {
       showing={key}
       headerActions={
         // A busy button says so in its own words at once, and takes no second tap (components/Loading.tsx).
-        <Button size="sm" busy={busy} onClick={() => void download()}>
+        <Button size="sm" busy={several ? pdfBusy : busy} onClick={press}>
           {label}
         </Button>
       }
       lead={
         <>
           <Help>The DM shows you</Help>
-          {mine?.state === "failed" ? (
-            <div role="alert" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), fontSize: theme.font.body14, color: theme.color.dangerText }}>
-              <span style={{ flex: "1 1 200px" }}>
-                {mine.why === "share" ? "The handout could not be shared." : "The handout could not be downloaded. Check your connection."}
+          {pdfMine?.t === "building" ? (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), fontSize: theme.font.body14, color: theme.color.textMuted }}>
+              <span role="status" style={{ flex: "1 1 200px" }}>
+                {pdfProgressText(pdfMine)}
               </span>
-              <Button size="sm" onClick={() => void download()}>
+              <Button size="sm" onClick={() => pdfStep({ t: "cancel" })}>
+                Cancel
+              </Button>
+            </div>
+          ) : null}
+          {failure ? (
+            <div role="alert" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), fontSize: theme.font.body14, color: theme.color.dangerText }}>
+              <span style={{ flex: "1 1 200px" }}>{failure === "share" ? "The handout could not be shared." : "The handout could not be downloaded. Check your connection."}</span>
+              <Button size="sm" onClick={press}>
                 Try again
               </Button>
             </div>
