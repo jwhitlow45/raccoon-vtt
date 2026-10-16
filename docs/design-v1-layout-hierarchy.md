@@ -291,7 +291,7 @@ A computer, 1280 x 800, the side panel shown and hidden:
 ```
 +------------------------------------------------+-----------------------+
 | o Crypt  (DM)        undo redo [Goblin 2 R3] Fit| PARTY  v              |
-|                                                | [Token][Init][Log] (>)|
+|                                                | [Token][Init][Log][|>]|
 |                                                | [Journal][Areas][DM]  |
 |                    map                         | ...                   |
 |                                                | Initiative            |
@@ -308,7 +308,7 @@ A computer, 1280 x 800, the side panel shown and hidden:
 +------------------------------------------------------------------------+
 ```
 
-`(>)` is "Hide panels". "2" is the unread badge.
+`[|>]` is "Hide panels", drawn with the collapse-panel icon, not a chevron. "2" is the unread badge.
 
 A large phone held sideways, 932 x 430 at 100%, first visit (hidden, so a rail tool uses the rail):
 
@@ -328,7 +328,7 @@ A phone held sideways, 844 x 390, Initiative open, then hidden:
 
 ```
 +---------------------------------------------+----------------------+
-| o Crypt (DM)              [Goblin 2 R3] Fit |(<) Initiative  (>) X |
+| o Crypt (DM)              [Goblin 2 R3] Fit |(<) Initiative [|>] X |
 |                                             | Round 3   [Next]     |
 |              map                            | Goblin 2   7/7  ...  |
 |                                             | Thorn     22/30 ...  |
@@ -346,7 +346,7 @@ A phone held sideways, 844 x 390, Initiative open, then hidden:
 +--------------------------------------------------------------------+
 ```
 
-`(<)` is "All panels", `(>)` "Hide Initiative", `X` "Close Initiative". Panels in the second picture brings Initiative back where it was.
+`(<)` is "All panels", `[|>]` "Hide Initiative" with the collapse-panel icon, `X` "Close Initiative". Panels in the second picture brings Initiative back where it was.
 
 ## 5. The handout viewer
 

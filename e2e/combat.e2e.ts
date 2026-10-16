@@ -445,15 +445,15 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await openTracker(dm);
     await sheet.waitFor();
     /*
-     * The sheet's body is about 168 layout px, or 170 with no border on the
-     * full-screen dialog (docs/design-v1-layout-hierarchy.md 4.2). That
+     * The sheet's body is about 169 layout px, the full-screen dialog
+     * drawing no border (docs/design-v1-layout-hierarchy.md 4.2). That
      * holds the compact header (49) and two standard rows (116), not the
      * full header (56) and two, so the header sticks as one compact row
      * (logic.ts roundHeaderForm).
      */
     const rest = await measure(dm);
     const body = (await headerRoom(dm)).scroller;
-    assert.ok(body >= 166 && body <= 171, `the very short sheet's body is ${body} layout px, not about 168 to 170`);
+    assert.ok(body >= 166 && body <= 171, `the very short sheet's body is ${body} layout px, not about 169`);
     assert.ok(rest.sticky, "the header does not stick in the very short sheet");
     assert.equal((await headerRoom(dm)).form, "compact", "the very short sheet's header is the compact row");
     await scrollPane(dm, 220);
