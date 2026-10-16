@@ -1069,6 +1069,65 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await log.getByRole("button", { name: "Close Log" }).tap();
   });
 
+  test("7. a change of mode saves no draft: a partial initiative and a partial Armor Class stay unsaved and in their fields, side to very short and back", async () => {
+    // 480 x 380 leaves a side sheet a body even with the turn band, and 480 x 260 does not, so a resize switches the mode with the band in place.
+    const tall = { width: 480, height: 380 };
+    const short = { width: 480, height: 260 };
+    const insets = { side: 47, bottom: 21 };
+    const modal = async (title: string, want: boolean) =>
+      waitFor(`${title} ${want ? "in the very short mode" : "beside the map"}`, async () => (((await sheet(phone, title).getAttribute("aria-modal")) === "true") === want ? true : null));
+    const initiativeOf = () => phoneSocket.state!.encounter!.entries.find((e) => e.id === run.goblin.entryId)!.value;
+    const acOf = () => (phoneSocket.state!.tokens[run.goblin.id]!.actor as unknown as { inline: { ac: number } }).inline.ac;
+    await view(phone, phoneCdp, tall, insets);
+    await reloadAt(phone, 1);
+    await startFight();
+
+    await openPanel(phone, "Initiative");
+    await modal("Initiative", false);
+    await sheet(phone, "Initiative").getByRole("button", { name: /^Goblin 1 initiative 18, tap to type it$/ }).tap();
+    const editor = sheet(phone, "Initiative").getByRole("textbox", { name: "Goblin 1 initiative", exact: true });
+    await editor.fill("1");
+    await view(phone, phoneCdp, short, insets);
+    await modal("Initiative", true);
+    assert.equal(await editor.count(), 1, "the editor stayed open");
+    assert.deepEqual([(await focused(phone)).tag, await editor.inputValue()], ["input", "1"], "the editor keeps focus and its draft");
+    assert.equal(initiativeOf(), 18, "the change of mode saved the draft");
+    await phone.keyboard.type("2");
+    await view(phone, phoneCdp, tall, insets);
+    await modal("Initiative", false);
+    assert.deepEqual([(await focused(phone)).tag, await editor.inputValue()], ["input", "12"], "back beside the map, the editor keeps focus and its draft");
+    assert.equal(initiativeOf(), 18);
+    await phone.keyboard.press("Enter");
+    await waitFor("the initiative saved by Enter", async () => (initiativeOf() === 12 ? true : null));
+    await sheet(phone, "Initiative").getByRole("button", { name: "Close Initiative" }).tap();
+
+    const bar = await selectToken(phone, phoneSocket, run.goblin.id, "Goblin 1");
+    await bar.getByRole("button", { name: "Details", exact: true }).tap();
+    await modal("Token", false);
+    const stats = sheet(phone, "Token").getByRole("button", { name: "Stats", exact: true });
+    if ((await stats.getAttribute("aria-expanded")) === "false") await stats.tap();
+    const ac = sheet(phone, "Token").getByRole("textbox", { name: "Armor Class", exact: true });
+    await ac.fill("1");
+    await view(phone, phoneCdp, short, insets);
+    await modal("Token", true);
+    assert.deepEqual([(await focused(phone)).name, await ac.inputValue()], ["Armor Class", "1"], "the field keeps focus and its draft");
+    assert.equal(acOf(), 15, "the change of mode saved the draft");
+    await phone.keyboard.type("7");
+    await view(phone, phoneCdp, tall, insets);
+    await modal("Token", false);
+    assert.deepEqual([(await focused(phone)).name, await ac.inputValue()], ["Armor Class", "17"]);
+    assert.equal(acOf(), 15);
+    await phone.keyboard.press("Enter");
+    await waitFor("the Armor Class saved by Enter", async () => (acOf() === 17 ? true : null));
+    await ac.fill("15");
+    await ac.press("Enter");
+    await waitFor("the Armor Class put back", async () => (acOf() === 15 ? true : null));
+    await sheet(phone, "Token").getByRole("button", { name: "Close Token" }).tap();
+    await sheet(phone, "Token").waitFor({ state: "detached" });
+    if (await bar.isVisible()) await phone.keyboard.press("Escape");
+    await endFight();
+  });
+
   // ------------------------------------------------ the hierarchy moves (case 9)
 
   test("9. the DM's toolbar has the play tools first with Fog fourth, a divider, then the setup tools, and a player's order is as before", async () => {

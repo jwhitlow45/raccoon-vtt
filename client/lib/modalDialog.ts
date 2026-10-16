@@ -253,17 +253,25 @@ export function useSheetDialog(
     if (steps.length === 0) return;
     const active = focusedElement();
     const before = active === null || active === document.body ? "page" : el.contains(active) ? "inside" : "outside";
+    const focus = sheetFocusAfter({ steps, before, hiding: !shown });
+    const keep = held.current;
+    held.current = null;
+    /*
+     * Focus that will go back to the element that had it never left, as
+     * far as the page can tell: the browser's moves on the way are not
+     * heard, so a field does not save or drop its draft on a blur the
+     * viewer never made, as a change of mode would otherwise make it.
+     */
+    const roundTrip = focus === "before" && keep === null && active !== null && canTakeFocus(active);
+    const hear = roundTrip ? deafToFocus() : null;
     stepping++;
     try {
       applySheetDialogSteps(el, steps, ledger);
       state.current = !shown ? "closed" : modal ? "modal" : "shown";
-      const keep = held.current;
-      held.current = null;
       if (shown && keep?.isConnected && el.contains(keep)) {
         keep.focus({ preventScroll: true });
         return;
       }
-      const focus = sheetFocusAfter({ steps, before, hiding: !shown });
       if (focus === "before") {
         if (active?.isConnected) active.focus({ preventScroll: true });
         // What had it may be gone or hidden by this same render, such as a token bar folded under the sheet. Focus then goes to the page, as before sheets were dialogs, for the room to place.
@@ -275,6 +283,7 @@ export function useSheetDialog(
       } else if (focus === "page") focusedElement()?.blur();
     } finally {
       stepping--;
+      hear?.();
     }
   }, [dialog, shown, modal, ledger]);
 
@@ -360,6 +369,26 @@ export function inertOutside(root: HTMLElement): () => void {
   return () => {
     arrivals.disconnect();
     for (const el of made) el.removeAttribute("inert");
+  };
+}
+
+/** Whether focus put on `el` now would land: it is on the page, drawn and not inert. One that this render hid, such as a field in a folded token bar, would not. */
+function canTakeFocus(el: HTMLElement): boolean {
+  return el.isConnected && el.getClientRects().length > 0 && el.closest("[inert]") === null;
+}
+
+const FOCUS_EVENTS = ["focus", "blur", "focusin", "focusout"] as const;
+
+/**
+ * Stops every focus event before the page's own listeners hear it, React's
+ * included, until the returned function runs. Window's capture comes first
+ * on every event's path.
+ */
+function deafToFocus(): () => void {
+  const swallow = (e: Event) => e.stopImmediatePropagation();
+  for (const type of FOCUS_EVENTS) window.addEventListener(type, swallow, true);
+  return () => {
+    for (const type of FOCUS_EVENTS) window.removeEventListener(type, swallow, true);
   };
 }
 
