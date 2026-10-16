@@ -1,7 +1,7 @@
 import { useId, useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type Ref } from "react";
 import type { Effect, InitEntry, Token } from "#shared/model.ts";
 import { playerPlays, type ProjectedActor } from "#shared/project.ts";
-import { hpLess } from "#shared/rules/hp.ts";
+import { hpLess, shownLife } from "#shared/rules/hp.ts";
 import { rowCharacter } from "#shared/rules/initiative.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { AcBadge } from "../../components/AcBadge.tsx";
@@ -98,7 +98,9 @@ export function EntryRow(props: {
     if (token && "inline" in token.actor) return playerPlays(s.view, { token });
     return character ? playerPlays(s.view, { character }) : false;
   });
-  const dead = actor?.life === "dead";
+  // An HP-less creature is never drawn dead, whatever it stores (docs/design-v1-combat-flow.md 3.6.6).
+  const life = shownLife(actor, token);
+  const dead = life === "dead";
   const drag = props.drag;
 
   const rowStyle: CSSProperties = {
@@ -222,7 +224,7 @@ export function EntryRow(props: {
           readied={readied}
           playerOwned={playerOwned}
           statBlockTokenId={token && (token.kind === "monster" || token.kind === "npc") ? token.id : null}
-          revive={offersRevive(actor?.life, token?.kind)}
+          revive={offersRevive(life, token?.kind)}
         />
       ) : null}
       {companions.length > 0 ? (
@@ -263,7 +265,7 @@ function CompanionRow(props: { token: Token; characterName: string; entryId: str
   const ac = rowAc(actor, token);
   const effects = actor?.effects ?? [];
   const readied = readiedEffect(effects);
-  const dead = actor?.life === "dead";
+  const dead = shownLife(actor, token) === "dead";
   const owner = ownsToken({ characters: characters ?? {} }, memberId, token);
   const spent = token.companion?.reactionUsed === true;
   return (

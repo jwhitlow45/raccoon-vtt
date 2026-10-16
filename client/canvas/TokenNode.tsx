@@ -2,6 +2,7 @@ import type Konva from "konva";
 import { createContext, memo, useContext, useMemo } from "react";
 import { Arc, Circle, Ellipse, Group, Image as KImage, Line, Rect, Shape, Text } from "react-konva";
 import type { Actor, Effect } from "#shared/model.ts";
+import { shownLife } from "#shared/rules/hp.ts";
 import { boardSizes } from "../lib/boardScale.ts";
 import { lineHeight, type LabelLine } from "../lib/boardText.ts";
 import { displayName, footprint, type ViewToken } from "../lib/scene.ts";
@@ -276,8 +277,9 @@ function TokenBody(props: {
   const square = token.kind === "object";
   const drawn = imageFace(token.image, image !== null, glyph) !== "initials";
   const crop = useMemo(() => (image ? cropSourceRect(image, upload?.crop, w / h) : undefined), [image, upload?.crop, w, h]);
-  // No HP rule kills an object, so the map draws no dead or dying mark on one, an effect companion included (docs/design-v1-combat-flow.md 3.6.6).
-  const life = token.kind === "object" ? undefined : actor?.life;
+  // No HP rule kills an object, so the map draws no dead or dying mark on one, and an HP-less creature shows no life it
+  // stores underneath (docs/design-v1-combat-flow.md 3.6.6).
+  const life = token.kind === "object" ? undefined : shownLife(actor, token);
   const ring = RING[token.disposition] ?? theme.color.neutral;
   const ringPx = boardSizes(scale).ringPx;
   return (

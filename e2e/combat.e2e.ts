@@ -740,6 +740,39 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await sheet.waitFor({ state: "detached" });
   });
 
+  test("13c. a dying spirit made an effect offers no death save pips or AC to Ana or the DM, and does again as a creature (SOL-03)", async () => {
+    const spirit = Object.values(dmSocket.state!.tokens).find((t) => t.name === "Wildfire Spirit")!;
+    await setUp(dm, dmCdp, { ...DESK, scale: 1 });
+    await ops.send({ t: "actor.life", target: { tokenId: spirit.id }, life: "dying" });
+    await ana.getByRole("tab", { name: "Characters" }).click();
+    await ana.getByRole("button", { name: /^Wildfire Spirit\. Show it on the map/ }).click();
+    const b = bar(ana, "Wildfire Spirit");
+    const pips = b.getByRole("button", { name: /^Successes: set to/ });
+    await pips.first().waitFor();
+    const statsAc = async (page: Page) => {
+      await page.getByRole("tab", { name: "Token" }).click();
+      const panel = page.getByRole("tabpanel", { name: "Token" });
+      await openFold(panel, "Stats");
+      return panel.getByRole("textbox", { name: "Armor Class" }).count();
+    };
+    assert.equal(await statsAc(ana), 1, "a creature companion's AC is Ana's to edit");
+    await ops.send({ t: "token.update", tokenId: spirit.id, patch: { kind: "object" } });
+    await waitFor("an effect on Ana's page", () => (anaSocket.state?.tokens[spirit.id]?.kind === "object" ? true : null));
+    await pips.first().waitFor({ state: "detached" });
+    assert.equal(await statsAc(ana), 0, "an effect has no AC field");
+    await shots.take(ana, "combat-effect-no-life");
+    // The DM's bar on it neither.
+    await openTracker(dm);
+    await dm.getByRole("button", { name: /^Wildfire Spirit, acts on Bree's turn/ }).click();
+    await bar(dm, "Wildfire Spirit").waitFor();
+    assert.equal(await bar(dm, "Wildfire Spirit").getByRole("button", { name: /^Successes: set to/ }).count(), 0);
+    // A creature again: the pips and the AC come back as they were.
+    await ops.send({ t: "token.update", tokenId: spirit.id, patch: { kind: "npc" } });
+    await pips.first().waitFor();
+    assert.equal(await statsAc(ana), 1);
+    await ops.send({ t: "actor.life", target: { tokenId: spirit.id }, life: "alive" });
+  });
+
   test("14. no page logged an error", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(anaConsole.errors, [], "Ana's page logged errors");

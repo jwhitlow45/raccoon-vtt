@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, 
 import { useStore } from "zustand";
 import { healRevivesDead } from "#shared/migrate.ts";
 import { CONDITION_KEYS, STATUS_KEYS, type Actor, type Effect } from "#shared/model.ts";
-import { hpLess } from "#shared/rules/hp.ts";
+import { hpLess, shownLife } from "#shared/rules/hp.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
 import { RETURN_RANK, useSheetReturnFocus } from "../components/sheetFocus.ts";
@@ -154,7 +154,8 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const effects = actor?.effects ?? [];
   const badge = elevationBadge(token.elevation);
   const target = { tokenId: token.id };
-  const life = actor?.life ?? "alive";
+  // What an HP-less token stores underneath shows nowhere and takes no life control (docs/design-v1-combat-flow.md 3.6.6).
+  const life = shownLife(actor, token) ?? "alive";
   const atZero = actor?.hp?.cur === 0 && (life === "dying" || life === "stable");
   const short = frame.short;
   const items = vitals({ actor, token, fullAccess: props.fullAccess || access.full, place: "bar" });

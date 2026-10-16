@@ -1,4 +1,5 @@
 import type { Character, Effect, LifeState, RoomState } from "#shared/model.ts";
+import { shownLife } from "#shared/rules/hp.ts";
 import { hpLabel, type HpLabel } from "../../lib/tokenView.ts";
 import { characterToken, partyCharacters } from "../rolls/logic.ts";
 
@@ -36,7 +37,8 @@ export function partyEntries(view: Pick<RoomState, "members" | "characters" | "t
       character,
       hp: actor.hp,
       label: hpLabel(actor),
-      life: actor.life,
+      // A character with no HP to show is never drawn dying or dead (docs/design-v1-combat-flow.md 3.6.6).
+      life: shownLife(actor) ?? "alive",
       fraction: actor.hp.max > 0 ? Math.max(0, Math.min(1, actor.hp.cur / actor.hp.max)) : 0,
       ac: actor.ac,
       passivePerception: actor.passivePerception,

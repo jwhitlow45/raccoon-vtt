@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { hpLess } from "#shared/rules/hp.ts";
 import type { Actor } from "#shared/model.ts";
 import type { ActorPatch } from "#shared/protocol.ts";
 import { Switch } from "../../components/Switch.tsx";
@@ -44,7 +45,7 @@ export function StatsSection(props: {
   return (
     <>
       <Section title="Stats">
-        <StatsFields actor={actor} canEdit={canEdit} onPatch={onPatch} dm={dm} />
+        <StatsFields actor={actor} canEdit={canEdit} onPatch={onPatch} dm={dm} noAc={hpLess(actor)} />
       </Section>
       <SheetLink actor={actor} editable={canEdit("sheetUrl")} onPatch={onPatch} />
       <Section title={props.notesTitle ?? "Notes"}>
@@ -79,7 +80,14 @@ export function CardNotesField(props: { actor: Partial<Actor>; editable: boolean
 }
 
 /** The card's numbers as fields where the viewer may change them, else as text, and nothing the projection did not send. */
-export function StatsFields(props: { actor: Partial<Actor>; canEdit(field: keyof ActorPatch): boolean; onPatch(patch: ActorPatch): void; dm: boolean }) {
+export function StatsFields(props: {
+  actor: Partial<Actor>;
+  canEdit(field: keyof ActorPatch): boolean;
+  onPatch(patch: ActorPatch): void;
+  dm: boolean;
+  /** No AC to show while `hpLess` holds, an effect's stored AC included (docs/design-v1-combat-flow.md 3.6.6). */
+  noAc?: boolean;
+}) {
   const { actor, canEdit, onPatch, dm } = props;
   const speeds: Speeds = actor.speeds ?? { walk: 30 };
 
@@ -93,9 +101,11 @@ export function StatsFields(props: { actor: Partial<Actor>; canEdit(field: keyof
 
   return (
     <>
-      <Stat label="Armor Class" value={actor.ac} editable={canEdit("ac")}>
-        <NumberField label="Armor Class" value={actor.ac} min={0} max={100} onCommit={(n) => n !== null && onPatch({ ac: n })} />
-      </Stat>
+      {props.noAc ? null : (
+        <Stat label="Armor Class" value={actor.ac} editable={canEdit("ac")}>
+          <NumberField label="Armor Class" value={actor.ac} min={0} max={100} onCommit={(n) => n !== null && onPatch({ ac: n })} />
+        </Stat>
+      )}
       {SPEED_KEYS.map((key) => (
         <Stat key={key} label={`${SPEED_LABELS[key]} speed`} value={speeds[key] === undefined ? undefined : `${speeds[key]} ft`} editable={canEdit("speeds")}>
           <NumberField

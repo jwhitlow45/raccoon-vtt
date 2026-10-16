@@ -1,6 +1,7 @@
 import { useMemo, type ComponentProps, type ReactNode } from "react";
 import type { Actor, CreatureSize, HpVisibility, Token, TokenKind } from "#shared/model.ts";
 import type { ActorPatch, TokenPatch } from "#shared/protocol.ts";
+import { hpLess } from "#shared/rules/hp.ts";
 import { isCompanion } from "../canvas/barButtons.ts";
 import { Checkbox } from "../components/Checkbox.tsx";
 import { Empty } from "../components/Empty.tsx";
@@ -168,7 +169,7 @@ function TokenDetails(props: PanelProps) {
       case "stats":
         return actor ? (
           <Section key={id} title="Stats" fold={fold("stats")}>
-            <StatsFields actor={actor} canEdit={access.canEditActor} onPatch={patchActor} dm={access.dm} />
+            <StatsFields actor={actor} canEdit={access.canEditActor} onPatch={patchActor} dm={access.dm} noAc={hpLess(actor, token)} />
             {access.canEditActor("sheetUrl") ? (
               <FieldRow label="Sheet link">
                 <SheetUrlField value={actor.sheetUrl ?? ""} onPatch={patchActor} />

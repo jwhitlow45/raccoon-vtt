@@ -61,6 +61,18 @@ export function hpLess(
   return actor?.hp !== undefined && actor.hp.max === 0;
 }
 
+/**
+ * The life state a view draws: the stored one, or alive while `hpLess`
+ * holds. A creature made an effect keeps its stored life and death saves
+ * underneath (docs/design-v1-combat-flow.md 3.6.6), and every life control
+ * and decoration (death save pips, Revive, a dead row's dim and strike, the
+ * map's marks) reads this, so none of them shows or changes it until the
+ * companion is a creature again.
+ */
+export function shownLife(actor: { hp?: Pick<Actor["hp"], "max">; life?: LifeState } | undefined, token?: { kind: TokenKind; companion?: unknown }): LifeState | undefined {
+  return hpLess(actor, token) ? "alive" : actor?.life;
+}
+
 export function isBloodied(actor: Pick<Actor, "hp">): boolean {
   return actor.hp.cur <= Math.floor(actor.hp.max / 2);
 }
