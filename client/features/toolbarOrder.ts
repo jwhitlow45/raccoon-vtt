@@ -31,3 +31,21 @@ export function setupDivider(tools: readonly { id: string }[]): number | null {
   const at = tools.findIndex((t) => SETUP_TOOLS.has(t.id));
   return at > 0 ? at : null;
 }
+
+/** Setup in the toolbar, which stands for the setup tools on a phone (docs/design-v1-tool-options.md 5.1). */
+export const SETUP_BUTTON = "setup";
+
+/**
+ * The buttons a toolbar draws for a role's tools, in order, and where its
+ * divider stands. On the phone layout a DM's setup tools stand behind one
+ * Setup button after the divider, so seven buttons and Panels fit a 390 px
+ * phone. From 900 px up every tool shows, as a computer has the room and a
+ * DM preparing a scene switches between them often. A player has no setup
+ * tools, so nothing changes for them.
+ */
+export function toolbarButtons(tools: readonly { id: string }[], wide: boolean): { ids: string[]; divider: number | null } {
+  const setup = tools.filter((t) => SETUP_TOOLS.has(t.id));
+  const play = tools.filter((t) => !SETUP_TOOLS.has(t.id));
+  if (wide || setup.length === 0 || play.length === 0) return { ids: tools.map((t) => t.id), divider: setupDivider(tools) };
+  return { ids: [...play.map((t) => t.id), SETUP_BUTTON], divider: play.length };
+}

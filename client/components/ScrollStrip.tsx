@@ -25,6 +25,8 @@ export function ScrollStrip(props: {
   "aria-label"?: string;
   /** On the row itself, for a role whose keys move along it, such as a tab list's arrows. */
   onKeyDown?(e: KeyboardEvent<HTMLDivElement>): void;
+  /** Between its buttons. */
+  gap?: number;
   style?: CSSProperties;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -88,7 +90,7 @@ export function ScrollStrip(props: {
           flex: 1,
           display: "flex",
           alignItems: "center",
-          gap: theme.space(1),
+          gap: props.gap ?? theme.space(1),
           minWidth: 0,
           overflowX: "auto",
           overflowY: "hidden",

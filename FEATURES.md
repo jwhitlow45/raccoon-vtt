@@ -53,7 +53,8 @@ This page lists what RaccoonVTT does today, grouped by area. "The DM" means anyo
 - The fit button in the top bar ("Fit the map to the screen") brings the map back into view. A pinch anywhere but the map never zooms the page.
 - Android's Back button and the Escape key close an open sheet, handout or action bar before they leave the room. While the token's panel shows that token, they and the bar's Close put the bar away and keep the token in the panel. With the bar away, Escape lets go of the token.
 - On a phone, panels open as sheets from the bottom, and the toolbar names each tool under its icon, as it does on any touch screen. On a screen 900 px or wider, panels are tabs in a side panel, in one row: the most used first, as many as fit, then More, which lists the rest. A panel opened from More shows its name on More, and the tabs never move. A long name there may end in "…", and the panel then shows its full name at its top. A count on a panel inside More shows on More too. Hide panels at the end of the tabs, or the S key, hides the side panel, and Panels in the toolbar brings it back. This device remembers the choice. A short screen, such as a large phone held sideways, starts with it hidden. The toolbar scrolls sideways when its tools do not fit, and with a mouse the wheel scrolls it. On a phone held sideways, Hide in a panel's header tucks the panel away with its place kept, and Panels brings it back. Where the screen is too short for a panel beside the map, it opens over the whole screen, with the token's actions and the fight's alerts as buttons in its header, and the room's notices, "Your turn" and messages between the header and the panel.
-- A tool's options take one row. On a phone it sits above the toolbar. On a computer it floats above the toolbar. What does not fit the row waits behind ⋯ (More options), and a wider screen shows more of it. Choices with many values, such as the drawing tool, a color or an area's shape, show their value on a button that opens a small pop-up above the row, and the map stays live under it: two fingers still pan and zoom, and a tap on the map closes it without drawing or pinging. The tool's hint or reading floats above the row on one line, and a tap shows all of it when it is cut. Buttons that show a value, such as an area's shape, add their icon where the row has room.
+- On a phone, the DM's setup tools (Add token, Pin, Map builder and Line up grid) sit behind Setup in the toolbar, which then shows the one in use. Their keys still pick them directly. On a computer all ten tools stay in the toolbar.
+- A tool's options take one row. On a phone held upright it sits above the toolbar. On a phone held sideways it shares the toolbar's row, so the map keeps its whole height, and where the tools and the options do not fit side by side the toolbar shows Select and the last tool you used, whose second tap opens every tool. On a computer it floats above the toolbar. What does not fit the row waits behind ⋯ (More options), and a wider screen shows more of it. Choices with many values, such as the drawing tool, a color or an area's shape, show their value on a button that opens a small pop-up above the row, and the map stays live under it: two fingers still pan and zoom, and a tap on the map closes it without drawing or pinging. The tool's hint or reading floats above the row on one line, and a tap shows all of it when it is cut. A second tap on the active tool hides its options, and another brings them back, while the tool stays in use. For a tool behind Setup or the tool menu, picking it again there does the same. While a task is under way, such as an area not yet placed, a small "options hidden" line stays, and a tap on it brings them back. Buttons that show a value, such as an area's shape, add their icon where the row has room.
 - Panels are listed with the ones used in play first, in an order that never changes with use. A DM's phone list and the side panel's More group them under In play and Prepare.
 - A page inside a panel, such as a journal page, a monster's stat block, an area's damage page, the encounter editor or a Menu page like Members, puts its own name at the top, with a back button that says where it goes, such as "Back to Journal".
 - Add to Home Screen installs it as a full-screen app on an iPhone. The screen stays awake during a session.
@@ -403,6 +404,15 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | Button | Does | Who |
 | --- | --- | --- |
 | Back button | Close what opened last, such as a pop-up, a sheet, a dialog, a handout or the action bar | everyone |
+
+### Toolbar
+
+Each tool key picks its tool, also one behind Setup or the tool menu.
+
+| Key | Does | Who |
+| --- | --- | --- |
+| The tool's key | Show its hidden options again. It never hides them | everyone, for the tool in use |
+| Arrow keys, Home, End | Move to a tool, as a letter does to one whose name starts with it. Enter or Space picks it, or on the tool in use hides or shows its options. Escape closes the menu, and Tab closes it and moves on | everyone, in Setup or the tool menu |
 
 ### Tool options
 

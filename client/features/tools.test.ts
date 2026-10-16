@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { SETUP_TOOLS, setupDivider, TOOL_ORDER } from "./toolbarOrder.ts";
+import { SETUP_BUTTON, SETUP_TOOLS, setupDivider, TOOL_ORDER, toolbarButtons } from "./toolbarOrder.ts";
 
 /** A role's toolbar as toolsFor sorts it, from the order table (features/tools.ts cannot load under node --test: its tools are .tsx). */
 function toolbar(ids: readonly (keyof typeof TOOL_ORDER)[]) {
@@ -31,5 +31,22 @@ describe("the toolbar's order (docs/design-v1-layout-hierarchy.md M1)", () => {
     assert.equal(setupDivider([{ id: "select" }, { id: "ruler" }]), null);
     assert.equal(setupDivider([]), null);
     assert.deepEqual([...SETUP_TOOLS].sort(), ["add-token", "build", "grid", "pin"]);
+  });
+});
+
+describe("the buttons a toolbar draws (docs/design-v1-tool-options.md 5.1)", () => {
+  const dm = toolbar(["select", "add-token", "ruler", "area", "draw", "ping", "pin", "fog", "build", "grid"]);
+  const player = toolbar(["select", "ruler", "area", "draw", "ping"]);
+
+  test("on a phone the DM's setup tools stand behind Setup, after the divider", () => {
+    assert.deepEqual(toolbarButtons(dm, false), { ids: ["select", "ruler", "area", "fog", "draw", "ping", SETUP_BUTTON], divider: 6 });
+  });
+
+  test("from 900 px up every tool shows, with the divider before the setup tools", () => {
+    assert.deepEqual(toolbarButtons(dm, true), { ids: dm.map((t) => t.id), divider: 6 });
+  });
+
+  test("a player's toolbar is the same on every layout", () => {
+    for (const wide of [false, true]) assert.deepEqual(toolbarButtons(player, wide), { ids: ["select", "ruler", "area", "draw", "ping"], divider: null });
   });
 });

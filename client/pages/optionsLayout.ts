@@ -1,6 +1,6 @@
 import type { Rect } from "../components/popoverPlace.ts";
 import { SHORT_LANDSCAPE_MAX } from "../features/encounter/band.ts";
-import { SETUP_TOOLS } from "../features/toolbarOrder.ts";
+import { toolbarButtons } from "../features/toolbarOrder.ts";
 import { theme } from "../lib/theme.ts";
 
 /*
@@ -53,10 +53,8 @@ export type ToolbarShape = { buttons: number; divider: boolean };
  * setup tools.
  */
 export function toolbarShape(tools: readonly { id: string }[], wide: boolean): ToolbarShape {
-  const setup = tools.filter((t) => SETUP_TOOLS.has(t.id)).length;
-  const play = tools.length - setup;
-  if (setup === 0 || play === 0) return { buttons: tools.length, divider: false };
-  return wide ? { buttons: tools.length, divider: true } : { buttons: play + 1, divider: true };
+  const { ids, divider } = toolbarButtons(tools, wide);
+  return { buttons: ids.length, divider: divider !== null };
 }
 
 /** The pair: Select and the last tool. */
@@ -106,9 +104,8 @@ export function panelsShown(input: Pick<ArrangementInput, "width" | "sidePanel">
 export function mergedRoom(input: ArrangementInput, toolbar: ToolbarShape): number {
   const button = input.named ? TOOL_BUTTON_NAMED : TOOL_BUTTON_ICON;
   const right = input.sidePanel ? 0 : input.safeRight;
-  const buttons = toolbar.buttons * button + Math.max(0, toolbar.buttons - 1) * TOOL_GAP + (toolbar.divider ? TOOL_DIVIDER : 0);
   const panels = panelsShown(input) ? button + PANELS_EXTRA : 0;
-  return mapWidthOf(input) - input.safeLeft - right - buttons - MERGED_LEAD - panels;
+  return mapWidthOf(input) - input.safeLeft - right - toolbarWidth(toolbar, input.named) - MERGED_LEAD - panels;
 }
 
 /**
@@ -130,6 +127,26 @@ export function optionsArrangement(input: ArrangementInput): OptionsPlace {
   const across = mapWidthOf(input) - input.safeLeft - (input.sidePanel ? 0 : input.safeRight);
   if (input.width >= theme.layout.wideMinWidth) return { arrangement: "floating", room: Math.min(FLOAT_MAX, across - STACKED_PADDING) - FLOAT_PADDING };
   return { arrangement: "stacked", room: across - STACKED_PADDING };
+}
+
+/** The buttons' width in the toolbar's row, with their gaps and divider. */
+export function toolbarWidth(toolbar: ToolbarShape, named: boolean): number {
+  const button = named ? TOOL_BUTTON_NAMED : TOOL_BUTTON_ICON;
+  return toolbar.buttons * button + Math.max(0, toolbar.buttons - 1) * TOOL_GAP + (toolbar.divider ? TOOL_DIVIDER : 0);
+}
+
+/**
+ * Where the row's element stands in the toolbar's row (5.3), in from the
+ * map's left and right safe edges: 6 px after the last tool, where its
+ * 1 px divider and 8 px padding lead to its first control, and 8 px
+ * before Panels where Panels shows. Its controls then have `mergedRoom`.
+ */
+export function mergedEdges(input: ArrangementInput, toolbar: ToolbarShape): { left: number; right: number } {
+  const button = input.named ? TOOL_BUTTON_NAMED : TOOL_BUTTON_ICON;
+  return {
+    left: theme.space(1) + toolbarWidth(toolbar, input.named) + theme.space(1.5),
+    right: theme.space(1) + (panelsShown(input) ? button + PANELS_EXTRA : 0) + theme.space(2),
+  };
 }
 
 /** Whether the toolbar shows only Select and the last tool. */

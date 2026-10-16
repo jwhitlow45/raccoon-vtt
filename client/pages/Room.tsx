@@ -34,7 +34,11 @@ import { FrameViewBar } from "../features/scenes/FrameView.tsx";
 import { barInset, chromeZoom, layoutWidth, smallUi, useLayoutSize } from "../features/device/layout.ts";
 import { uiScale as uiScaleNow, useUiScale } from "../features/device/settings.ts";
 import { activeTool, toolsFor, type ToolDef } from "../features/tools.ts";
-import { setupDivider } from "../features/toolbarOrder.ts";
+import { SETUP_BUTTON, SETUP_TOOLS, toolbarButtons } from "../features/toolbarOrder.ts";
+import { Icon } from "../components/Icon.tsx";
+import { Menu, type MenuItem, type MenuSection } from "../components/Menu.tsx";
+import { Popover, usePopover, type PopoverHandle } from "../components/Popover.tsx";
+import { toolbarSlot, toolChanged, tuckEvent } from "../state/toolbar.ts";
 import { useDropHpDraftsOnSelect } from "../features/tokens/hpDraft.ts";
 import { useClearStatBlockOnSelect } from "../features/tokens/statBlockOpen.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
@@ -62,7 +66,23 @@ import { mapFocusSlot } from "./mapFocus.ts";
 import { firstSidePanel, readSidePanel, writeSidePanel } from "./sidePanel.ts";
 import { SideTabs } from "./SideTabs.tsx";
 import { inModal, ModalSlots, useModalSlot } from "./modalSlot.tsx";
-import { FLOAT_MAX, mapWidthOf, optionsArrangement, toolbarShape, toolPopoverFrame, type OptionsPlace } from "./optionsLayout.ts";
+import {
+  FLOAT_MAX,
+  inToolbarRow,
+  lastToolIn,
+  mapWidthOf,
+  mergedEdges,
+  optionsArrangement,
+  PAIR,
+  POPOVER_MIN,
+  TOOL_BUTTON_ICON,
+  TOOL_BUTTON_NAMED,
+  TOOL_GAP,
+  toolbarShape,
+  toolPopoverFrame,
+  type Arrangement,
+  type OptionsPlace,
+} from "./optionsLayout.ts";
 import { OptionsFrameContext, type OptionsFrame } from "../features/measure/controls.tsx";
 import type { Rect } from "../components/popoverPlace.ts";
 import { Badge, FindButton, FitButton, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle } from "./RoomChrome.tsx";
@@ -469,8 +489,28 @@ function RoomPage() {
   const mapWidth = mapWidthOf({ width, sidePanel: sideShown });
   const optionsDrawn = tool.Options !== undefined && optionsShown && !sheet && !pickerOpen;
   const named = !wide || touchFirst;
-  // The toolbar's own row comes with the toolbar that makes room for it.
-  const optionsPlaceNow = optionsArrangement({ width, height: Math.max(height, SHORT_LANDSCAPE_MAX), sidePanel: sideShown, safeLeft: safe.left, safeRight: safe.right, toolbar: toolbarShape(tools, wide), named });
+  const arrangementInput = { width, height, sidePanel: sideShown, safeLeft: safe.left, safeRight: safe.right, toolbar: toolbarShape(tools, wide), named };
+  const optionsPlaceNow = optionsArrangement(arrangementInput);
+  const optionsEdges = mergedEdges(arrangementInput, optionsPlaceNow.arrangement === "pair" ? PAIR : arrangementInput.toolbar);
+  /*
+   * The pair's last tool and tuck (docs/design-v1-tool-options.md 5.2, 5.4),
+   * this page's own, in its scope. Any way a tool becomes active makes it
+   * the last tool, Select aside, and ends another tool's tuck.
+   */
+  const toolbarState = useStore(scope.get(toolbarSlot));
+  useLayoutEffect(() => toolChanged(scope, tool.id), [scope, tool.id]);
+  const lastShown = lastToolIn(toolbarState.last, tools);
+  const tucked = toolbarState.tucked === tool.id;
+  const pressTool = useCallback(
+    (id: string) => {
+      if (id === store.getState().local.tool) tuckEvent(scope, id, { kind: "press", tool: id });
+      else ui.setTool(id);
+    },
+    [scope, store, ui],
+  );
+  const showOptions = useCallback(() => tuckEvent(scope, tool.id, { kind: "show", tool: tool.id }), [scope, tool.id]);
+  const [toolbarMenu, setToolbarMenu] = useState(false);
+  const optionsId = useId();
   const sideRoom = useSideSheetRoom();
   const folded = foldsUnderSheet({ width, height, sheetOpen, full, sideRoom });
   const docked = folded && (hasBar || summary !== null);
@@ -603,6 +643,8 @@ function RoomPage() {
   // Where the row and its line would stand above the last lasting notice's foot, they stand over it, so the tool's controls stay in reach (8).
   const lastingBottom = useStore(barDock, (s) => s.lasting);
   const overNotice = chrome !== null && lastingBottom !== null && height - chrome.bottom < lastingBottom;
+  // The line floats over the map. Where the map between the top bars and the row is shorter than the line, as at 480 x 320 at 130% in a fight, it would cover the turn band's End turn, so there it hides from sight as under a popover and stays a live region (8). Its reserve keeps its last measure while hidden, so this never flips back and forth.
+  const lineCramped = chrome !== null && optionsBox.reserve > 0 && height - chrome.top - chrome.bottom < 0;
   // What the options' popovers read as they open and when the layout moves (7.3), in the chrome's own px.
   const popoverInputs = useRef({ mapWidth, height, safe, sideShown, top: chrome?.top ?? TOP_BAR, lasting: lastingBottom });
   popoverInputs.current = { mapWidth, height, safe, sideShown, top: chrome?.top ?? TOP_BAR, lasting: lastingBottom };
@@ -767,6 +809,11 @@ function RoomPage() {
         {optionsDrawn ? (
           <ToolOptions
             ref={optionsRef}
+            id={optionsId}
+            edges={optionsEdges}
+            tucked={tucked}
+            covered={toolbarMenu || lineCramped}
+            onShow={showOptions}
             tool={tool}
             role={role}
             zoom={zoom}
@@ -788,7 +835,15 @@ function RoomPage() {
           wide={wide}
           tools={tools}
           tool={tool.id}
-          onTool={(id) => ui.setTool(id)}
+          arrangement={optionsPlaceNow.arrangement}
+          last={lastShown}
+          tucked={tucked}
+          optionsId={optionsDrawn ? optionsId : undefined}
+          onPress={pressTool}
+          onPick={pressTool}
+          onMenu={setToolbarMenu}
+          popover={popoverInputs}
+          toolbar={toolbarEl}
           panelsOpen={sheet !== undefined || pickerOpen}
           hiddenSheet={mounted && !sheet ? mounted.title : null}
           onPanels={togglePanels}
@@ -1351,14 +1406,22 @@ type PopoverInputs = { mapWidth: number; height: number; safe: { top: number; ri
  */
 function ToolOptions(props: {
   ref?: Ref<HTMLDivElement>;
+  id: string;
   tool: ToolDef;
   role: "dm" | "player";
   zoom: number;
   place: OptionsPlace;
+  /** Where the element stands in the toolbar's row, in from the map's safe edges (pages/optionsLayout.ts mergedEdges). */
+  edges: { left: number; right: number };
   wide: boolean;
   mapWidth: number;
   safe: { top: number; right: number; bottom: number; left: number };
   overNotice: boolean;
+  /** The options are tucked (5.4): the row hides, and the line too unless a task is under way. */
+  tucked: boolean;
+  /** Setup or Tools stands where the line floats, or the top bars do, where the map is shorter than the line. */
+  covered: boolean;
+  onShow(): void;
   popover: RefObject<PopoverInputs>;
   toolbar: RefObject<HTMLElement | null>;
 }) {
@@ -1376,11 +1439,25 @@ function ToolOptions(props: {
   );
   const [raised, setRaised] = useState(false);
   const [description, setDescription] = useState<string | null>(null);
+  // A state with no row (6.6) draws only its line, 6 px above the toolbar, unless the row stacks, where the map keeps its 53 px.
+  const [rowless, setRowless] = useState(false);
   const descriptionId = useId();
   const { arrangement, room } = props.place;
+  const inRow = inToolbarRow(arrangement);
+  const boxless = props.tucked || (rowless && arrangement !== "stacked");
+  // On a computer the toolbar has no fill, so a row in its row takes the floating row's box (4.2), 3 px in from the toolbar's edges.
+  const boxed = inRow && props.wide;
   const lineMax = props.mapWidth - props.safe.left - props.safe.right - 2 * theme.space(2);
-  const line = arrangement === "floating" ? { left: -theme.line.border, maxWidth: lineMax } : { left: props.safe.left + theme.space(2), maxWidth: lineMax };
+  const lift = boxed ? (TOOLBAR - theme.layout.options.row - theme.line.border) / 2 : 0;
+  const line =
+    arrangement === "floating" && !boxless
+      ? { left: -theme.line.border, maxWidth: lineMax, lift: 0 }
+      : inRow && !boxless
+        ? // 6 px above the toolbar, from the left safe area plus 8 px (4.2).
+          { left: theme.space(2) - props.edges.left - theme.line.border, maxWidth: lineMax, lift }
+        : { left: props.safe.left + theme.space(2), maxWidth: lineMax, lift: 0 };
   const popoverInputs = props.popover;
+  const { toolbar, onShow, tucked, covered } = props;
   const frame = useMemo<OptionsFrame>(() => {
     const popover = () => {
       const p = popoverInputs.current;
@@ -1392,51 +1469,77 @@ function ToolOptions(props: {
       popover: {
         bound: () => popover().bound,
         rise: () => popover().rise,
-        // 6 px above the row's top, whatever the control's place inside it (7.3).
+        // 6 px above the row's top, or the toolbar's in its row, whatever the control's place inside them (7.3).
         gap: (anchor: Rect) => {
-          const el = own.current;
-          if (!el) return theme.layout.popover.gap;
-          return anchor.top - el.getBoundingClientRect().top / uiScaleNow() + theme.layout.popover.gap;
+          const edge = inRow ? toolbar.current : own.current;
+          if (!edge) return theme.layout.popover.gap;
+          return anchor.top - edge.getBoundingClientRect().top / uiScaleNow() + theme.layout.popover.gap;
         },
       },
       line,
-      tucked: false,
-      covered: false,
-      show: () => {},
+      tucked,
+      covered,
+      show: onShow,
       raise: setRaised,
       task: () => {},
+      rowless: setRowless,
       describe: setDescription,
-      toolButton: () => props.toolbar.current?.querySelector<HTMLElement>('button[data-active="true"]') ?? null,
+      toolButton: () => toolbar.current?.querySelector<HTMLElement>('button[data-active="true"]') ?? null,
     };
     // `line` is rebuilt each render from these numbers.
-  }, [room, arrangement, line.left, line.maxWidth, popoverInputs, props.toolbar]);
+  }, [room, arrangement, inRow, line.left, line.maxWidth, line.lift, popoverInputs, toolbar, tucked, covered, onShow]);
   if (!Options) return null;
-  const floating = arrangement === "floating";
-  const place: CSSProperties = floating
-    ? {
-        left: `calc(${theme.safe.left} + ${theme.space(2)}px)`,
-        right: "auto",
-        bottom: `calc(${theme.safe.bottom} + ${TOOLBAR + theme.layout.popover.gap}px)`,
-        maxWidth: FLOAT_MAX,
-        padding: `${theme.space(1)}px ${theme.space(2)}px`,
-        border: `${theme.line.border}px solid ${theme.color.border}`,
-        borderRadius: theme.radius.md,
-      }
-    : {
-        left: 0,
-        right: 0,
-        bottom: `calc(${theme.safe.bottom} + ${TOOLBAR}px)`,
-        minHeight: theme.layout.options.row,
-        padding: `${theme.space(1)}px calc(${theme.safe.mapRight} + ${theme.space(2)}px) ${theme.space(1)}px calc(${theme.safe.left} + ${theme.space(2)}px)`,
-        borderTop: `${theme.line.border}px solid ${theme.color.border}`,
-      };
+  const place: CSSProperties = boxless
+    ? // Tucked, or with no row, the options take no height: only the line, or the "options hidden" pill, stands above the toolbar (5.4, 6.6).
+      { left: 0, right: 0, bottom: `calc(${theme.safe.bottom} + ${TOOLBAR}px)`, height: 0, background: "transparent" }
+    : arrangement === "floating"
+      ? {
+          left: `calc(${theme.safe.left} + ${theme.space(2)}px)`,
+          right: "auto",
+          bottom: `calc(${theme.safe.bottom} + ${TOOLBAR + theme.layout.popover.gap}px)`,
+          maxWidth: FLOAT_MAX,
+          padding: `${theme.space(1)}px ${theme.space(2)}px`,
+          border: `${theme.line.border}px solid ${theme.color.border}`,
+          borderRadius: theme.radius.md,
+        }
+      : boxed
+        ? {
+            left: `calc(${theme.safe.left} + ${props.edges.left}px)`,
+            // Its own padding and border at the right take the 8 px before Panels, so its controls keep the room.
+            right: `calc(${theme.safe.mapRight} + ${props.edges.right - theme.space(2) - theme.line.border}px)`,
+            bottom: `calc(${theme.safe.bottom} + ${lift}px)`,
+            padding: `${theme.space(1)}px ${theme.space(2)}px`,
+            border: `${theme.line.border}px solid ${theme.color.border}`,
+            borderRadius: theme.radius.md,
+          }
+        : inRow
+          ? {
+              // In the toolbar's row, over its backdrop, from 6 px after the last tool, its 1 px divider and 8 px padding before its first control.
+              left: `calc(${theme.safe.left} + ${props.edges.left}px)`,
+              right: `calc(${theme.safe.mapRight} + ${props.edges.right}px)`,
+              bottom: theme.safe.bottom,
+              height: TOOLBAR,
+              paddingLeft: theme.space(2),
+              borderLeft: `${theme.line.border}px solid ${theme.color.border}`,
+              background: "transparent",
+            }
+          : {
+              left: 0,
+              right: 0,
+              bottom: `calc(${theme.safe.bottom} + ${TOOLBAR}px)`,
+              minHeight: theme.layout.options.row,
+              padding: `${theme.space(1)}px calc(${theme.safe.mapRight} + ${theme.space(2)}px) ${theme.space(1)}px calc(${theme.safe.left} + ${theme.space(2)}px)`,
+              borderTop: `${theme.line.border}px solid ${theme.color.border}`,
+            };
   return (
     <div
       ref={ref}
+      id={props.id}
       role="toolbar"
       aria-label={`${props.tool.label} options`}
       aria-describedby={description ? descriptionId : undefined}
       data-rvtt-arrangement={arrangement}
+      data-rvtt-tucked={tucked ? "" : undefined}
       {...smallUi(props.zoom)}
       style={{
         ...chromeZoom(props.zoom),
@@ -1491,13 +1594,60 @@ function ToolbarBackdrop(props: { zoom: number }) {
   );
 }
 
+/** The descriptions a toolbar button carries for tuck and its menus (docs/design-v1-tool-options.md 11). */
+const TOOLBAR_LINES = {
+  shown: "Press again to hide its options.",
+  hidden: "Its options are hidden. Press again to show them.",
+  menuTucked: "Its options are hidden. Pick it again in the menu to show them.",
+  again: "Tap again for all tools.",
+  tileShown: "Pick again to hide its options.",
+  tileHidden: "Its options are hidden. Pick again to show them.",
+} as const;
+
+/**
+ * The toolbar (docs/design-v1-tool-options.md 5): the role's tools, and
+ * Panels at its right end on a phone.
+ *
+ * - On a phone, the DM's setup tools stand behind Setup, a menu of tiles,
+ *   so seven buttons and Panels fit a 390 px phone without scrolling. The
+ *   buttons share the row, each from 44 px up to 68 px, and scroll where
+ *   even 44 px each do not fit (components/ScrollStrip.tsx).
+ * - From 900 px up every tool shows, with a divider before the setup tools.
+ * - Where the options share the toolbar's row (the merged and pair
+ *   arrangements), every button is 56 px with its name, or 44 px icons
+ *   alone for a mouse, and the tools end at the last one. In the pair
+ *   only Select and the last tool show, and the last tool's second tap
+ *   opens Tools, every tool as tiles.
+ * - A tap on the active tool's own button tucks its options, and the next
+ *   brings them back, marked by an up chevron. Through Setup or Tools,
+ *   picking the active tool's tile does the same.
+ *
+ * Keys pick every tool directly whatever the toolbar shows
+ * (state/shortcuts.ts reads the role's tools, not these buttons). Its fill
+ * is the backdrop's, under the options (ToolbarBackdrop), so only its
+ * buttons take taps.
+ */
 function Toolbar(props: {
   ref?: Ref<HTMLElement>;
   zoom: number;
   wide: boolean;
   tools: ToolDef[];
   tool: string;
-  onTool(id: string): void;
+  arrangement: Arrangement;
+  /** The pair's second button (state/toolbar.ts). */
+  last: string;
+  /** The active tool's options are tucked. */
+  tucked: boolean;
+  /** The options element, which the active tool's button controls, while it is drawn. */
+  optionsId: string | undefined;
+  /** A press on a tool's own button: picks it, or on the active tool tucks or shows its options. */
+  onPress(id: string): void;
+  /** A pick of a tile in Setup or Tools. */
+  onPick(id: string): void;
+  /** Setup or Tools opened or closed: the toolbar rises over the notices and the line hides under it (7.6, 8). */
+  onMenu(open: boolean): void;
+  popover: RefObject<PopoverInputs>;
+  toolbar: RefObject<HTMLElement | null>;
   panelsOpen: boolean;
   onPanels(): void;
   /** Unread messages in the Log and unread journal pages, and a PDF upload waiting, which sit behind the Panels button on phones. */
@@ -1519,13 +1669,106 @@ function Toolbar(props: {
    */
   named: boolean;
 }) {
-  const { wide, tools } = props;
-  const divider = setupDivider(tools);
-  const hiddenId = useId();
+  const { wide, tools, arrangement, tucked } = props;
+  const ids = useId();
+  const setup = usePopover({ kind: "menu" });
+  const all = usePopover({ kind: "menu" });
+  const menuOpen = setup.open || all.open;
+  const { onMenu } = props;
+  useLayoutEffect(() => {
+    onMenu(menuOpen);
+  }, [onMenu, menuOpen]);
+  // Any change of tool closes them, whatever made it: a key, a tile, a panel.
+  const closeSetup = setup.close;
+  const closeAll = all.close;
+  useLayoutEffect(() => {
+    closeSetup("state");
+    closeAll("state");
+  }, [props.tool, closeSetup, closeAll]);
+
+  const inRow = inToolbarRow(arrangement);
+  const setupTools = tools.filter((t) => SETUP_TOOLS.has(t.id));
+  const layout = toolbarButtons(tools, wide);
+  const grouped = layout.ids.includes(SETUP_BUTTON);
+  const lastTool = tools.find((t) => t.id === props.last) ?? tools.find((t) => t.id !== "select");
+  const shown = arrangement === "pair" ? tools.filter((t) => t.id === "select" || t.id === lastTool?.id) : tools.filter((t) => layout.ids.includes(t.id));
+  const divider = arrangement === "pair" ? null : layout.divider;
+  const activeSetup = setupTools.find((t) => t.id === props.tool) ?? null;
+  // The width of a button: fixed where the options share the row, shared and capped on a phone's own row, as before from 900 px up.
+  const size: ButtonSize = inRow ? { fixed: props.named ? TOOL_BUTTON_NAMED : TOOL_BUTTON_ICON } : wide ? "floating" : "shared";
+  const line = (key: keyof typeof TOOLBAR_LINES) => `${ids}-${key}`;
+  const frame = useMemo(() => toolbarPopoverFrame(props.popover, props.toolbar), [props.popover, props.toolbar]);
+
+  const tile = (t: ToolDef): MenuItem => ({
+    id: t.id,
+    title: t.label,
+    checked: t.id === props.tool,
+    glyph: <ToolIcon tool={t} />,
+    ...(t.id === props.tool && t.id !== "select" ? { description: tucked ? TOOLBAR_LINES.tileHidden : TOOLBAR_LINES.tileShown } : {}),
+  });
+  const content = (t: ToolDef) => (props.named ? <Stacked icon={<ToolIcon tool={t} />} text={t.shortLabel ?? t.label} /> : <ToolIcon tool={t} />);
+
+  const buttons = shown.map((t, i) => {
+    const active = props.tool === t.id;
+    const second = arrangement === "pair" && t.id !== "select";
+    const opensMenu = second && active;
+    const own = active && t.id !== "select" && !opensMenu;
+    return (
+      // The pair's second button keeps its element as its tool changes, so focus stays on it after a pick in Tools.
+      <Fragment key={second ? "pair-second" : t.id}>
+        {/* The play tools, then the setup tools past a divider (docs/design-v1-layout-hierarchy.md M1): a line in a phone's strip, a 12 px gap between the floating buttons. */}
+        {i === divider ? <ToolbarDivider wide={wide && !inRow} /> : null}
+        <ToolButton
+          label={t.label}
+          active={active}
+          onClick={() => props.onPress(t.id)}
+          popup={opensMenu ? all : undefined}
+          floating={wide}
+          iconOnly
+          size={size}
+          mark={opensMenu ? (tucked ? "tucked" : "caret") : own && tucked ? "tucked" : null}
+          controls={active ? props.optionsId : undefined}
+          describedBy={own ? line(tucked ? "hidden" : "shown") : opensMenu ? [line("again"), tucked ? line("menuTucked") : ""].filter(Boolean).join(" ") : undefined}
+        >
+          {content(t)}
+        </ToolButton>
+      </Fragment>
+    );
+  });
+  if (grouped && arrangement !== "pair") {
+    const shownTool = activeSetup;
+    buttons.push(
+      <ToolbarDivider key="divider" wide={wide && !inRow} />,
+      <ToolButton
+        key="setup"
+        label={shownTool ? `Setup tools: ${shownTool.label}` : "Setup tools"}
+        active={shownTool !== null}
+        onClick={() => {}}
+        popup={setup}
+        floating={wide}
+        iconOnly
+        size={size}
+        mark={shownTool && tucked ? "tucked" : "caret"}
+        controls={shownTool ? props.optionsId : undefined}
+        describedBy={shownTool && tucked ? line("menuTucked") : undefined}
+      >
+        {shownTool ? content(shownTool) : <Stacked icon={<Icon name="sliders" size="lg" />} text="Setup" />}
+      </ToolButton>,
+    );
+  }
+
   const panelsIcon = (
     <svg aria-hidden viewBox="0 0 24 24" width={22} height={22} style={{ display: "block" }}>
       <path d="M4 5h16v2H4zm0 6h16v2H4zm0 6h16v2H4z" fill="currentColor" />
     </svg>
+  );
+  const menuPopover = (handle: PopoverHandle, label: string, sections: readonly MenuSection[]) => (
+    // The nav takes no taps of its own, so its menus take theirs back. No box of its own, so it takes no gap in the row.
+    <div style={{ display: "contents", pointerEvents: "auto" }}>
+      <Popover handle={handle} side="above" bound={frame.bound} rise={frame.rise} gap={frame.gap} minHeight={POPOVER_MIN} title={label}>
+        <Menu label={label} tiles sections={sections} onPick={props.onPick} />
+      </Popover>
+    </div>
   );
   return (
     <nav
@@ -1536,7 +1779,7 @@ function Toolbar(props: {
         left: 0,
         right: 0,
         bottom: 0,
-        zIndex: theme.z.bars,
+        zIndex: menuOpen ? theme.z.popover : theme.z.bars,
         display: "flex",
         alignItems: "center",
         gap: theme.space(1),
@@ -1549,21 +1792,28 @@ function Toolbar(props: {
         ...chromeZoom(props.zoom),
       }}
     >
-      <ScrollStrip active={props.tool} style={{ flex: "1 1 auto", height: "100%", pointerEvents: wide ? "none" : "auto" }}>
-        {tools.map((t, i) => (
-          <Fragment key={t.id}>
-            {/* The play tools, then the setup tools past a divider (docs/design-v1-layout-hierarchy.md M1): a line in a phone's strip, a 12 px gap between the floating buttons. */}
-            {i === divider ? <span aria-hidden data-rvtt-divider="" style={wide ? { flex: "none", width: theme.space(1) } : { flex: "none", width: theme.line.border, height: 32, background: theme.color.border }} /> : null}
-            <ToolButton label={t.label} active={props.tool === t.id} onClick={() => props.onTool(t.id)} floating={wide} iconOnly>
-              {props.named ? <Stacked icon={<ToolIcon tool={t} />} text={t.shortLabel ?? t.label} /> : <ToolIcon tool={t} />}
-            </ToolButton>
-          </Fragment>
-        ))}
-      </ScrollStrip>
+      {inRow ? (
+        // Fixed widths, so the row beside them is known before paint (pages/optionsLayout.ts mergedEdges).
+        <div data-rvtt-tools="" style={{ flex: "none", display: "flex", alignItems: "center", gap: TOOL_GAP, height: "100%" }}>
+          {buttons}
+        </div>
+      ) : (
+        <ScrollStrip active={props.tool} gap={wide ? theme.space(1) : theme.space(0.5)} style={{ flex: "1 1 auto", height: "100%", pointerEvents: wide ? "none" : "auto" }}>
+          {buttons}
+        </ScrollStrip>
+      )}
+      {grouped && arrangement !== "pair" ? menuPopover(setup, "Setup tools", [{ key: "setup", items: setupTools.map(tile) }]) : null}
+      {arrangement === "pair"
+        ? menuPopover(all, "Tools", [
+            { key: "play", items: tools.filter((t) => !SETUP_TOOLS.has(t.id)).map(tile) },
+            ...(setupTools.length > 0 ? [{ key: "setup", separator: true, items: setupTools.map(tile) }] : []),
+          ])
+        : null}
+      {inRow ? <div style={{ flex: "1 1 auto" }} /> : null}
       {wide ? (
         props.sideHidden ? (
           <div style={{ flex: "none", display: "flex", alignItems: "center", height: "100%" }}>
-            <ToolButton ref={props.panelsRef} label="Panels" active={false} expanded={false} controls={props.sidePanelId} onClick={props.onShowSide} floating iconOnly>
+            <ToolButton ref={props.panelsRef} label="Panels" active={false} expanded={false} controls={props.sidePanelId} onClick={props.onShowSide} floating iconOnly size={inRow ? size : "floating"}>
               {props.named ? <Stacked icon={panelsIcon} text="Panels" /> : panelsIcon}
               <Badge count={props.unread} corner label={props.unreadLabel} />
             </ToolButton>
@@ -1571,19 +1821,42 @@ function Toolbar(props: {
         ) : null
       ) : (
         <div style={{ flex: "none", display: "flex", alignItems: "center", height: "100%", paddingLeft: theme.space(1), borderLeft: `${theme.line.border}px solid ${theme.color.border}`, pointerEvents: "auto" }}>
-          <ToolButton ref={props.panelsRef} label="Panels" active={props.panelsOpen} onClick={props.onPanels} describedBy={props.hiddenSheet ? hiddenId : undefined}>
+          <ToolButton ref={props.panelsRef} label="Panels" active={props.panelsOpen} onClick={props.onPanels} describedBy={props.hiddenSheet ? `${ids}-sheet` : undefined} size={inRow ? size : "panels"}>
             <Stacked icon={panelsIcon} text="Panels" />
             <Badge count={props.unread} corner label={props.unreadLabel} />
           </ToolButton>
-          {props.hiddenSheet ? (
-            <span id={hiddenId} hidden>
-              {`Shows ${props.hiddenSheet} again.`}
-            </span>
-          ) : null}
         </div>
       )}
+      {/* What the buttons' descriptions say, hidden. */}
+      <span hidden>
+        <span id={line("shown")}>{TOOLBAR_LINES.shown}</span>
+        <span id={line("hidden")}>{TOOLBAR_LINES.hidden}</span>
+        <span id={line("menuTucked")}>{TOOLBAR_LINES.menuTucked}</span>
+        <span id={line("again")}>{TOOLBAR_LINES.again}</span>
+        {props.hiddenSheet ? <span id={`${ids}-sheet`}>{`Shows ${props.hiddenSheet} again.`}</span> : null}
+      </span>
     </nav>
   );
+}
+
+/** Where Setup and Tools stand (7.3): above the toolbar by 6 px, over a stacked row, within the map less the safe areas and under the top bars. */
+function toolbarPopoverFrame(inputs: RefObject<PopoverInputs>, toolbar: RefObject<HTMLElement | null>) {
+  const frame = () => {
+    const p = inputs.current;
+    return toolPopoverFrame({ mapWidth: p.mapWidth, height: p.height, safe: { ...p.safe, right: p.sideShown ? 0 : p.safe.right }, top: p.top, lasting: p.lasting });
+  };
+  return {
+    bound: () => frame().bound,
+    rise: () => frame().rise,
+    gap: (anchor: Rect) => {
+      const nav = toolbar.current;
+      return nav ? anchor.top - nav.getBoundingClientRect().top / uiScaleNow() + theme.layout.popover.gap : theme.layout.popover.gap;
+    },
+  };
+}
+
+function ToolbarDivider(props: { wide: boolean }) {
+  return <span aria-hidden data-rvtt-divider="" style={props.wide ? { flex: "none", width: theme.space(1) } : { flex: "none", width: theme.line.border, height: 32, background: theme.color.border }} />;
 }
 
 /** A tile's `data-opener` in the list of panels, which "All panels" finds again. */
@@ -1643,6 +1916,26 @@ function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Recor
   );
 }
 
+/**
+ * How wide a toolbar button is. On a phone's own row the buttons share it,
+ * from 44 px up to 68 px with 4 px of padding inside, so seven buttons and
+ * Panels fit a 390 px phone (5.1), with Panels at 44 px there. Where the
+ * options share the toolbar's row they take a fixed width (5.3). A
+ * computer's floating buttons stay as before.
+ */
+type ButtonSize = "shared" | "panels" | "floating" | { fixed: number };
+
+/** The most a shared toolbar button grows to on a phone. */
+const SHARED_MAX = 68;
+
+function sizeStyle(size: ButtonSize | undefined): CSSProperties {
+  if (size === "shared") return { flex: "1 1 0", minWidth: theme.touch, maxWidth: SHARED_MAX, padding: `0 ${theme.space(1)}px` };
+  // Panels' word fills its 44 px with no padding of its own, so seven tools and Panels fit a 390 px phone to the pixel.
+  if (size === "panels") return { flex: "none", minWidth: theme.touch, padding: 0 };
+  if (typeof size === "object") return { flex: "none", width: size.fixed, minWidth: size.fixed, padding: 0 };
+  return { flex: "none", minWidth: theme.touch, padding: `0 ${theme.space(2)}px` };
+}
+
 function ToolButton(props: {
   ref?: Ref<HTMLButtonElement>;
   label: string;
@@ -1654,39 +1947,64 @@ function ToolButton(props: {
   expanded?: boolean;
   controls?: string;
   describedBy?: string;
+  /** A menu it opens (Setup, Tools), whose base gives it `aria-haspopup`, `aria-expanded` and its keys, in place of a pressed state. */
+  popup?: PopoverHandle;
+  size?: ButtonSize;
+  /** In its top right corner: a caret for a menu it opens, an up chevron while the options are tucked (5.1, 5.4). */
+  mark?: "caret" | "tucked" | null;
   children: ReactNode;
 }) {
+  const popup = props.popup;
+  const { ref: outer } = props;
+  const anchorRef = popup?.anchorProps.ref;
+  const ref = useCallback(
+    (el: HTMLButtonElement | null) => {
+      anchorRef?.(el);
+      if (typeof outer === "function") return outer(el);
+      if (outer) outer.current = el;
+      return undefined;
+    },
+    [outer, anchorRef],
+  );
+  const expanded = popup ? undefined : props.expanded;
   return (
     <button
-      ref={props.ref}
+      ref={ref}
       type="button"
       data-active={props.active}
-      aria-pressed={props.expanded === undefined ? props.active : undefined}
-      aria-expanded={props.expanded}
-      aria-controls={props.controls}
+      aria-pressed={expanded === undefined && !popup ? props.active : undefined}
+      aria-expanded={expanded}
+      aria-haspopup={popup?.anchorProps["aria-haspopup"]}
+      {...(popup ? { "aria-expanded": popup.anchorProps["aria-expanded"] } : null)}
+      aria-controls={popup?.open ? popup.anchorProps["aria-controls"] : props.controls}
       aria-describedby={props.describedBy}
       aria-label={props.iconOnly ? props.label : undefined}
       title={props.label}
-      onClick={props.onClick}
+      onClick={popup ? popup.anchorProps.onClick : props.onClick}
+      onKeyDown={popup?.anchorProps.onKeyDown}
       style={{
-        flex: "none",
         position: "relative",
         display: "grid",
         placeItems: "center",
-        minWidth: theme.touch,
+        boxSizing: "border-box",
         minHeight: theme.touch,
-        padding: `0 ${theme.space(2)}px`,
         borderRadius: theme.radius.md,
-        border: `${theme.line.border}px solid ${props.active ? theme.color.accent : props.floating ? theme.color.border : "transparent"}`,
-        background: props.active ? theme.color.accentTint : props.floating ? theme.color.overlay : "transparent",
-        color: props.active ? theme.color.accent : theme.color.text,
+        border: `${theme.line.border}px solid ${props.active || popup?.open ? theme.color.accent : props.floating ? theme.color.border : "transparent"}`,
+        background: props.active || popup?.open ? theme.color.accentTint : props.floating ? theme.color.overlay : "transparent",
+        color: props.active || popup?.open ? theme.color.accent : theme.color.text,
         fontSize: theme.font.small,
         fontWeight: theme.weight.strong,
         cursor: "pointer",
         pointerEvents: "auto",
+        ...sizeStyle(props.size),
       }}
     >
       {props.children}
+      {props.mark ? (
+        <span aria-hidden style={{ position: "absolute", top: theme.space(0.5), right: theme.space(0.5), display: "grid" }}>
+          <Icon name={props.mark === "tucked" ? "chevronUp" : "caret"} size={theme.icon.sm - 4} />
+        </span>
+      ) : null}
     </button>
   );
 }

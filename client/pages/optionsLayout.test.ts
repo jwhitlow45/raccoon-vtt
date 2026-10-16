@@ -7,6 +7,7 @@ import {
   lastToolAfter,
   lastToolIn,
   MERGE_MIN,
+  mergedEdges,
   mergedRoom,
   MORE_ROOM,
   optionsArrangement,
@@ -104,6 +105,17 @@ describe("where the options stand (4.1, 4.3)", () => {
     const shown = mergedRoom(at(932, 430, 1, 59, PLAYER, { sidePanel: true }), PAIR);
     // 360 for the panel, 59 back from the right inset and 65 back from Panels.
     assert.equal(hidden - shown, 360 - 59 - 65);
+  });
+
+  test("the row's element stands 6 px after the last tool and 8 px before Panels, and its controls have the room", () => {
+    const input = at(844, 390, 1, 47, PLAYER);
+    const edges = mergedEdges(input, input.toolbar);
+    // 4 px of padding, five 56 px tools and their gaps, then 6 px.
+    assert.deepEqual(edges, { left: 4 + 296 + 6, right: 4 + 65 + 8 });
+    // Less its 1 px divider and 8 px padding, the element holds the room.
+    assert.equal(844 - 47 - 47 - edges.left - edges.right - 1 - 8, optionsArrangement(input).room);
+    const shown = at(932, 430, 1, 59, PLAYER, { sidePanel: true });
+    assert.equal(mergedEdges(shown, PAIR).right, 4 + 8, "no Panels beside the side panel");
   });
 
   test("labelled buttons are 56 px and a mouse's icons 44", () => {

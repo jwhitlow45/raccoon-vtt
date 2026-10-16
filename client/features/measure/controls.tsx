@@ -103,11 +103,11 @@ export type OptionsFrame = {
   room: number;
   arrangement: Arrangement;
   popover: PopoverFrame;
-  /** Where the line floats, from the options element's left edge, and how wide it may grow. Null draws it in flow above the row. */
-  line: { left: number; maxWidth: number } | null;
+  /** Where the line floats, from the options element's left edge, how wide it may grow, and how far its foot stands above the element's top past the 6 px gap. Null draws it in flow above the row. */
+  line: { left: number; maxWidth: number; lift?: number } | null;
   /** The tool's options are tucked (5.4): the row hides, and the line too unless a task is under way. */
   tucked: boolean;
-  /** Something stands where the line floats: a popover of the toolbar's, Setup or Tools. */
+  /** Something stands where the line floats: a popover of the toolbar's, Setup or Tools, or the top bars, where the map is shorter than the line. */
   covered: boolean;
   /** Shows tucked options again, from the "options hidden" pill. */
   show(): void;
@@ -115,6 +115,8 @@ export type OptionsFrame = {
   raise(open: boolean): void;
   /** Whether a task is under way (5.4), which keeps the "options hidden" pill while tucked. */
   task(under: boolean): void;
+  /** Whether the tool's state has no row (6.6): then only its line shows, 6 px above the toolbar, where the row does not stack. */
+  rowless(none: boolean): void;
   /** The options element's description (Multi-select's whole sentence, 9.1). */
   describe(text: string | null): void;
   /** The active tool's button, where focus goes when nothing in the row is left to take it. */
@@ -324,6 +326,12 @@ export function OptionsStrip(props: {
     return () => task?.(false);
   }, [task, under]);
   const description = useStripDescription(frame, outer, props.description ?? null);
+  const rowless = frame?.rowless;
+  const none = slots.length === 0;
+  useLayoutEffect(() => {
+    rowless?.(none);
+    return () => rowless?.(false);
+  }, [rowless, none]);
 
   const popover = frame?.popover ?? WINDOW_POPOVER;
   const homes = fit?.homes ?? {};
@@ -698,7 +706,7 @@ function OptionsLine(props: { line: StripLine | null; tool: string; frame: Optio
     minHeight: theme.font.body14 * theme.leading.body + 2 * theme.space(1.5) + 2 * theme.line.border,
     color: pill ? theme.color.text : LINE_COLORS[tone],
     pointerEvents: "auto",
-    ...(floating ? { position: "absolute", left: floating.left, bottom: `calc(100% + ${theme.layout.options.lineGap}px)` } : null),
+    ...(floating ? { position: "absolute", left: floating.left, bottom: `calc(100% + ${theme.layout.options.lineGap + (floating.lift ?? 0)}px)` } : null),
   };
   const text: CSSProperties = open
     ? { display: "block", maxHeight: `calc(4 * ${theme.leading.body}em)`, overflowY: "auto", whiteSpace: "normal", overscrollBehavior: "contain" }

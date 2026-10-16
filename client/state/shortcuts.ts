@@ -8,6 +8,7 @@ import { tokenAccess } from "../features/tokens/access.ts";
 import { PLACE_TOOL_ID } from "../features/tokens/placement.ts";
 import { displayName } from "../lib/scene.ts";
 import { scopeSlot, type RoomScope } from "./scope.ts";
+import { tuckEvent } from "./toolbar.ts";
 import type { RoomUi } from "./store.ts";
 import type { RoomActions, RoomView } from "./types.ts";
 import { useRoomActions, useRoomStore, useRoomUi } from "./view.ts";
@@ -190,7 +191,11 @@ function toolShortcut(id: string, key: string, does: string, roles: Shortcut["ro
       const s = env.getState();
       return drawsAllowed(s.view?.meta.settings ?? {}, s.you?.memberId ?? "");
     },
-    run: (env) => env.ui.setTool(id),
+    // The key of the tool in use shows its tucked options again, and never tucks them, so a held or repeated key never hides them (docs/design-v1-tool-options.md 5.5).
+    run: (env) => {
+      if (env.getState().local.tool === id) tuckEvent(env.scope, id, { kind: "show", tool: id });
+      else env.ui.setTool(id);
+    },
   };
 }
 
@@ -423,6 +428,7 @@ export type BehaviorDevice = "keys" | "mouse" | "android";
 
 /** The surfaces whose own keys get a section of the sheet, in the sheet's order. */
 export const SURFACES = [
+  "Toolbar",
   "Tool options",
   "Side panel tabs",
   "Handout viewer",
@@ -517,6 +523,19 @@ export const BEHAVIORS: readonly Behavior[] = [
     roles: EVERYONE,
     when: "in the handout viewer",
     device: "mouse",
+  },
+
+  // The toolbar: state/shortcuts.ts toolShortcut, components/Menu.tsx in Setup and the tool menu (pages/Room.tsx Toolbar).
+  // Keys are drawn whole on one line in the sheet, so a row's key stays short and its condition goes in `when`.
+  { id: "toolKeyShow", input: "The tool's key", does: "Show its hidden options again. It never hides them", roles: EVERYONE, when: "for the tool in use", device: "keys", surface: "Toolbar" },
+  {
+    id: "toolMenuKeys",
+    input: "Arrow keys, Home, End",
+    does: "Move to a tool, as a letter does to one whose name starts with it. Enter or Space picks it, or on the tool in use hides or shows its options. Escape closes the menu, and Tab closes it and moves on",
+    roles: EVERYONE,
+    when: "in Setup or the tool menu",
+    device: "keys",
+    surface: "Toolbar",
   },
 
   // A tool's options row and its pop-ups: components/Popover.tsx, features/measure/controls.tsx ValueChip and PickCloses.
@@ -661,6 +680,7 @@ export const KEYS_INTRO = "On any device with a keyboard. They do nothing while 
 
 /** A line under a surface's heading, where its rows do not say where it is. */
 const SURFACE_INTRO: Partial<Record<Surface, string>> = {
+  Toolbar: "Each tool key picks its tool, also one behind Setup or the tool menu.",
   "Tool options": "A tool's options row, its More options and the pop-ups its buttons open.",
   "Side panel tabs":
     "On a screen 900 px or wider, with a tab or More's list focused. There, and on a focused choice or slider, the arrow and Page keys never move a token, and in the list a letter goes to a panel instead of running a shortcut.",

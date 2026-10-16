@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import type { ClientOp } from "#shared/protocol.ts";
 import { RoomScope } from "./scope.ts";
+import { toolbarSlot } from "./toolbar.ts";
 import {
   BEHAVIORS,
   deletedText,
@@ -72,7 +73,7 @@ describe("undo shortcuts", () => {
 describe("the shortcut table", () => {
   type Calls = { tool: string[]; ops: { op: ClientOp; group?: string }[]; notes: string[]; panels: string[]; undo: number; selected: (string | null)[] };
 
-  function env(input: { role?: "dm" | "player"; selected?: string[]; playersDraw?: "none" | "all" | string[]; turn?: "mine" | "theirs" | null } = {}) {
+  function env(input: { role?: "dm" | "player"; selected?: string[]; playersDraw?: "none" | "all" | string[]; turn?: "mine" | "theirs" | null; tool?: string } = {}) {
     const role = input.role ?? "dm";
     const calls: Calls = { tool: [], ops: [], notes: [], panels: [], undo: 0, selected: [] };
     const tokens: Record<string, unknown> = {
@@ -86,7 +87,7 @@ describe("the shortcut table", () => {
       you: { memberId: role === "dm" ? "dm1" : "p1", role },
       sceneId: "s1",
       pending: [],
-      local: { selectedIds: input.selected ?? [], selectedId: input.selected?.at(-1) ?? null },
+      local: { selectedIds: input.selected ?? [], selectedId: input.selected?.at(-1) ?? null, tool: input.tool ?? "" },
       view: { tokens, characters: {}, encounter, meta: { settings: input.playersDraw === undefined ? {} : { playersDraw: input.playersDraw } } },
     };
     const scope = new RoomScope();
@@ -120,6 +121,20 @@ describe("the shortcut table", () => {
     s?.run(e, p);
     return s?.id ?? null;
   };
+
+  test("a key picks a setup tool and a tool the pair hides, and the key of the tool in use shows its tucked options and never tucks (docs/design-v1-tool-options.md 5.5)", () => {
+    const dm = env({ tool: "ruler" });
+    assert.equal(run(dm.env, press({ key: "b", code: "KeyB" })), "tool:build", "behind Setup on a phone");
+    assert.equal(run(dm.env, press({ key: "f", code: "KeyF" })), "tool:fog", "hidden by the pair");
+    assert.deepEqual(dm.calls.tool, ["build", "fog"]);
+    const toolbar = dm.scope.get(toolbarSlot);
+    toolbar.setState({ tucked: "ruler" });
+    assert.equal(run(dm.env, press({ key: "r", code: "KeyR" })), "tool:ruler");
+    assert.equal(toolbar.getState().tucked, null, "shown again");
+    assert.deepEqual(dm.calls.tool, ["build", "fog"], "the tool stays as it was");
+    run(dm.env, press({ key: "r", code: "KeyR" }));
+    assert.equal(toolbar.getState().tucked, null, "a second press never hides them");
+  });
 
   test("letters pick tools by role, where they are printed or by their place on a non-Latin layout", () => {
     const dm = env();
