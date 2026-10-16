@@ -175,6 +175,41 @@ async function sweepRowInterval(page: Page, from: number, label: string): Promis
   }
 }
 
+/**
+ * The pane holding `inner` scrolls only down, and every control and line
+ * of text in it lies within the pane's width: nothing runs out of it
+ * sideways (SFB-P-1).
+ */
+async function fitsSideways(inner: Locator, label: string): Promise<void> {
+  const wide = await inner.evaluate((el) => {
+    type Box = { scrollWidth: number; clientWidth: number; tagName: string; textContent: string | null; getBoundingClientRect(): Rect; closest(s: string): Box | null; querySelectorAll(s: string): ArrayLike<Box>; getAttribute(n: string): string | null };
+    const scroller = (el as unknown as Box).closest("[data-pane-body]")!;
+    const pane = scroller.getBoundingClientRect();
+    const out: string[] = [];
+    if (scroller.scrollWidth > scroller.clientWidth + 1) out.push(`the pane scrolls sideways: ${scroller.scrollWidth} > ${scroller.clientWidth}`);
+    for (const c of Array.from(scroller.querySelectorAll("select, input, button, p, h3, label"))) {
+      const r = c.getBoundingClientRect();
+      if (r.width > 0 && (r.left < pane.left - 1 || r.right > pane.right + 1)) {
+        out.push(`${c.tagName} ${c.getAttribute("aria-label") ?? (c.textContent ?? "").slice(0, 30)}: ${Math.round(r.left)} to ${Math.round(r.right)}, the pane ${Math.round(pane.left)} to ${Math.round(pane.right)}`);
+      }
+    }
+    return out;
+  });
+  assert.deepEqual(wide, [], `${label}: content runs out of the pane sideways`);
+}
+
+/** Opens a panel: its side panel tab from 900 layout px up, else from the toolbar's list of panels. */
+async function openPanelOn(page: Page, title: string): Promise<void> {
+  const tab = page.getByRole("tab", { name: title });
+  if ((await tab.count()) > 0 && (await tab.first().isVisible())) {
+    await tab.first().click();
+    return;
+  }
+  await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+  await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: new RegExp(`^${title}`) }).click();
+  await page.locator(`dialog[data-rvtt-sheet][aria-label="${title}"]`).waitFor();
+}
+
 function scrollPane(page: Page, to: number): Promise<void> {
   return page.evaluate((top) => {
     const g = globalThis as unknown as { document: { querySelector(s: string): { closest(s: string): { scrollTop: number } } } };
@@ -908,6 +943,40 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     } finally {
       await context.close();
     }
+  });
+
+  test("13e. Add a companion and Make a companion fit their pane, with no sideways scroll, at 1280 x 800, at 844 x 390 and at 480 x 320 at 130% (SFB-P-1)", async () => {
+    const anaCdp = await anaContext.newCDPSession(ana);
+    const goblin = goblinName(4);
+    for (const view of [
+      { width: 1280, height: 800, scale: 1 },
+      { width: 844, height: 390, scale: 1, side: 47, bottom: 21 },
+      { width: 480, height: 320, scale: 1.3, side: 47, bottom: 21 },
+    ]) {
+      const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+      // Ana's Add a companion, with its longest turn label chosen.
+      await setUp(ana, anaCdp, view);
+      await openPanelOn(ana, "Characters");
+      await ana.getByRole("button", { name: "Add a companion" }).click();
+      const turn = ana.getByRole("combobox", { name: "Turn" });
+      await turn.selectOption({ label: "On Bree's turn, listed under Bree" });
+      await fitsSideways(turn, `Add a companion at ${label}`);
+      await shots.take(ana, `combat-companion-form-fits-${view.width}`);
+      await ana.getByRole("button", { name: "Cancel" }).first().click();
+      // The DM's Make a companion in a goblin's Token settings, with Bree chosen.
+      await setUp(dm, dmCdp, view);
+      await openTracker(dm);
+      await (await rowButton(dm, goblin)).click();
+      await bar(dm, goblin).getByRole("button", { name: "Details", exact: true }).click();
+      await dm.getByRole("heading", { name: goblin }).first().waitFor();
+      await openFold(dm.locator("body"), "Token settings");
+      await dm.getByRole("button", { name: "Make a companion", exact: true }).click();
+      await dm.getByRole("combobox", { name: "Belongs to", exact: true }).selectOption({ label: "Bree" });
+      await fitsSideways(dm.getByRole("combobox", { name: "Turn", exact: true }), `Make a companion at ${label}`);
+      await shots.take(dm, `combat-make-companion-fits-${view.width}`);
+      await dm.getByRole("button", { name: "Cancel", exact: true }).click();
+    }
+    assert.equal(dmSocket.state!.tokens[run.goblins[4]!]!.companion, undefined, "nothing was sent");
   });
 
   test("14. no page logged an error", () => {

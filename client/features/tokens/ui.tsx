@@ -215,7 +215,7 @@ export function Select<T extends string>(props: {
       value={props.value}
       disabled={props.disabled}
       onChange={(e) => props.onChange(e.target.value as T)}
-      style={{ flex: 1, maxWidth: "100%" }}
+      style={{ flex: 1, minWidth: 0, width: "100%", maxWidth: "100%" }}
     >
       {props.options.map((o) => (
         <option key={o.value} value={o.value}>

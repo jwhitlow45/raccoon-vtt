@@ -75,7 +75,7 @@ export default function CharactersPanel(props: PanelProps) {
   }
 
   return (
-    <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14 }}>
       {dm || own?.allowed ? (
         <Button variant="primary" size="sm" block onClick={() => setCreating(true)}>
           New character
@@ -351,7 +351,7 @@ function NewCharacter(props: { onDone(id: string | null): void; close(): void; o
   };
 
   return (
-    <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
         <h3 style={{ margin: 0, flex: 1, fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>New character</h3>
         <Button size="sm" onClick={() => props.onDone(null)}>

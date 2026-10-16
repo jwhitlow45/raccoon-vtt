@@ -216,7 +216,8 @@ export function CompanionForm(props: {
   };
 
   return (
-    <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
+    // One column no wider than the pane, so a long turn label shortens its Select rather than widening the form.
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
         <h3 style={{ margin: 0, flex: 1, fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>Add a companion for {name}</h3>
         <Button size="sm" onClick={props.onDone}>
@@ -395,7 +396,7 @@ export function MakeCompanion(props: { token: Token }) {
     setTurn("shared");
   };
   return (
-    <div style={{ display: "grid", gap: theme.space(2) }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
       <FieldRow label="Belongs to">
         <Select<string>
           label="Belongs to"
