@@ -316,18 +316,38 @@ export type RoundHeaderForm = "full" | "compact" | "static";
 /** The compact header's one row: the buttons' touch height. */
 export const COMPACT_HEADER_PX = 44;
 
-/** A sticky header leaves at least this share of its scroller to the rows under it, so one whole row always shows. */
-const ROOM_PER_HEADER = 3;
+/** What the header's form is measured from, in the scroller's pixels, borders included. */
+export type RoundHeaderRoom = {
+  /** The scroller's whole height with its padding: `clientHeight`. */
+  scroller: number;
+  /** The header in full, as it sticks: the pane's top padding it takes back, its rows and its bottom border. */
+  fullHeader: number;
+  /** The header as one compact row, measured the same way. */
+  compactHeader: number;
+  /** A standard row, one with no companions under it and its options closed, with the gap to the next row. */
+  row: number;
+};
+
+/** Standard rows a sticky header leaves room for under it. With two, any scroll offset shows one whole row. */
+export const ROWS_UNDER_HEADER = 2;
 
 /**
- * The header's form for a scroller of `scrollerPx`, its whole height with
- * its padding, and a full header of `fullHeaderPx`: full while the scroller
- * holds three full headers, compact while it holds three compact ones, and
- * otherwise not sticky, so a short panel still shows its rows.
+ * The header's form (docs/design-v1-combat-flow.md 3.1): full and sticky
+ * while the scroller holds the full header and two standard rows, one
+ * compact sticky row while it holds the compact header and two rows, and
+ * otherwise full and scrolling with the list, so a short panel still
+ * shows its rows.
+ *
+ * Two rows are enough because a stuck header hides at most the part of
+ * one row above it: the next row starts within one row interval of the
+ * header's bottom and ends within two. A taller row, with companions
+ * under it, may not fit whole, and focus reaches its controls through
+ * their scroll margin.
  */
-export function roundHeaderForm(scrollerPx: number, fullHeaderPx: number): RoundHeaderForm {
-  if (scrollerPx >= ROOM_PER_HEADER * fullHeaderPx) return "full";
-  if (scrollerPx >= ROOM_PER_HEADER * COMPACT_HEADER_PX) return "compact";
+export function roundHeaderForm(room: RoundHeaderRoom): RoundHeaderForm {
+  const rows = ROWS_UNDER_HEADER * room.row;
+  if (room.scroller >= room.fullHeader + rows) return "full";
+  if (room.scroller >= room.compactHeader + rows) return "compact";
   return "static";
 }
 

@@ -528,25 +528,49 @@ describe("a hidden creature revealed on its turn", () => {
 });
 
 describe("the round header's form (docs/design-v1-combat-flow.md 3.1)", () => {
-  test("full and sticky from three full headers, compact from three 44 px rows, and scrolling with the list below that", () => {
-    const forms = [111, 131, 132, 147, 167, 168, 169, 223, 400].map((px) => [px, roundHeaderForm(px, 56)]);
+  // The sheet's header: 56 px in full, 49 compact (4 px of pane padding, the 44 px row and its border), over 58 px rows.
+  const sheet = { fullHeader: 56, compactHeader: 49, row: 58 };
+
+  test("full and sticky from the full header and two standard rows, compact from the compact header and two, and scrolling with the list below that", () => {
+    const forms = [0, 120, 164, 165, 171, 172, 223, 400].map((px) => [px, roundHeaderForm({ ...sheet, scroller: px })]);
     assert.deepEqual(forms, [
-      [111, "static"],
-      [131, "static"],
-      [132, "compact"],
-      [147, "compact"],
-      [167, "compact"],
-      [168, "full"],
-      [169, "full"],
+      [0, "static"],
+      [120, "static"],
+      [164, "static"],
+      [165, "compact"],
+      [171, "compact"],
+      [172, "full"],
       [223, "full"],
       [400, "full"],
     ]);
   });
 
-  test("the side panel's taller header asks for more room before it sticks in full", () => {
-    assert.equal(roundHeaderForm(203, 68), "compact");
-    assert.equal(roundHeaderForm(204, 68), "full");
-    assert.equal(roundHeaderForm(0, 56), "static", "a hidden pane measures 0");
+  test("the side panel's taller header and padding ask for more room, and taller standard rows for more again", () => {
+    const side = { fullHeader: 68, compactHeader: 61, row: 58 };
+    assert.equal(roundHeaderForm({ ...side, scroller: 176 }), "static");
+    assert.equal(roundHeaderForm({ ...side, scroller: 177 }), "compact");
+    assert.equal(roundHeaderForm({ ...side, scroller: 184 }), "full");
+    assert.equal(roundHeaderForm({ ...sheet, row: 70, scroller: 196 }), "full");
+    assert.equal(roundHeaderForm({ ...sheet, row: 70, scroller: 195 }), "compact");
+  });
+
+  test("at the least room each form needs, every scroll offset across a whole row interval shows a whole standard row under the stuck header (SOL-05)", () => {
+    for (const row of [58, 66]) {
+      for (const gap of [0, 8]) {
+        const room = { ...sheet, row: row + gap };
+        for (const [scroller, header] of [
+          [room.fullHeader + 2 * room.row, room.fullHeader],
+          [room.compactHeader + 2 * room.row, room.compactHeader],
+        ] as const) {
+          assert.notEqual(roundHeaderForm({ ...room, scroller }), "static");
+          // Rows from the list's top at i * (row + gap), scrolled by `offset`, seen between the header's bottom and the scroller's.
+          for (let offset = 0; offset <= room.row; offset += 0.5) {
+            const whole = Array.from({ length: 12 }, (_, i) => i * room.row - offset).some((top) => top >= 0 && top + row <= scroller - header);
+            assert.ok(whole, `no whole row at offset ${offset} with ${row} px rows and a ${gap} px gap in ${scroller} px under ${header}`);
+          }
+        }
+      }
+    }
   });
 });
 

@@ -130,6 +130,51 @@ function measure(page: Page): Promise<Measured> {
   });
 }
 
+type HeaderRoom = { form: string; scroller: number; header: number; compactHeader: number; row: number };
+
+/**
+ * The round header's form and what it is picked from, in the page's layout
+ * px (client/features/encounter/logic.ts roundHeaderForm): the scroller's
+ * height, the header's as drawn, the compact header's (the pane's top
+ * padding, the 44 px row and the border) and a standard row's with its gap.
+ */
+function headerRoom(page: Page): Promise<HeaderRoom> {
+  return page.evaluate((compactRow) => {
+    type El = { offsetHeight: number; clientHeight: number; dataset: Record<string, string | undefined>; parentElement: El | null; closest(s: string): El | null; querySelectorAll(s: string): ArrayLike<El> };
+    const g = globalThis as unknown as { document: { querySelector(s: string): El | null }; getComputedStyle(e: El): { paddingTop: string; rowGap: string; borderBottomWidth: string } };
+    const header = g.document.querySelector("[data-round-header]")!;
+    const scroller = header.closest("[data-pane-body]")!;
+    const rows = Array.from(header.closest("[data-round-section]")!.querySelectorAll("[data-standard-row]"));
+    const order = rows[0]?.parentElement;
+    const gap = order ? parseFloat(g.getComputedStyle(order).rowGap) || 0 : 0;
+    const style = g.getComputedStyle(header);
+    return {
+      form: header.dataset.form ?? "",
+      scroller: scroller.clientHeight,
+      header: header.offsetHeight,
+      compactHeader: parseFloat(style.paddingTop) + compactRow + parseFloat(style.borderBottomWidth),
+      row: Math.min(...rows.map((r) => r.offsetHeight)) + gap,
+    };
+  }, 44);
+}
+
+/**
+ * Scrolls the order through one whole standard row interval from `from`,
+ * 2 px at a time, and fails at an offset where the stuck header leaves the
+ * scroller's top or no whole row shows under it (docs/design-v1-combat-flow.md 3.1).
+ */
+async function sweepRowInterval(page: Page, from: number, label: string): Promise<void> {
+  const { row } = await headerRoom(page);
+  for (let d = 0; d <= Math.ceil(row); d += 2) {
+    await scrollPane(page, from + d);
+    const m = await measure(page);
+    const at = `${label}, scrolled to ${from + d}`;
+    assert.ok(m.sticky, `${at}: the header does not stick`);
+    assert.ok(Math.abs(m.header.top - m.scroller.top) <= 1, `${at}: the header left the scroller's top: ${JSON.stringify({ header: m.header, scroller: m.scroller })}`);
+    assert.ok(m.row, `${at}: no whole row under the stuck header: ${JSON.stringify({ header: m.header, scroller: m.scroller })}`);
+  }
+}
+
 function scrollPane(page: Page, to: number): Promise<void> {
   return page.evaluate((top) => {
     const g = globalThis as unknown as { document: { querySelector(s: string): { closest(s: string): { scrollTop: number } } } };
@@ -286,21 +331,19 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       await setUp(dm, dmCdp, view);
       await openTracker(dm);
       await scrollPane(dm, 0);
-      const rest = await measure(dm);
-      const scroller = rest.scroller.height;
-      // The form follows the scroller's measured height (client/features/encounter/logic.ts roundHeaderForm).
-      if (rest.sticky && rest.compactRow > 0 && rest.header.height >= rest.compactRow + 8) {
-        assert.ok(scroller >= 3 * rest.header.height - 1, `${label}: a full header sticks in a scroller of ${scroller}, under three of it (${rest.header.height})`);
-      }
-      // The page measures in its own layout pixels, which the interface size scales on screen.
-      if (!rest.sticky) assert.ok(scroller / view.scale < 132 + 1, `${label}: a scroller of ${scroller / view.scale} layout px should hold a sticky header`);
-      if (rest.sticky && scroller / view.scale < 132 - 1) assert.fail(`${label}: a header sticks in a scroller of ${scroller / view.scale} layout px`);
-      // Scrolled into the list, the header keeps the scroller's top, and a whole row shows under it.
+      // The form follows the measured room: the header and two standard rows (client/features/encounter/logic.ts roundHeaderForm).
+      const room = await headerRoom(dm);
+      const scroller = room.scroller;
+      const need = { full: room.header + 2 * room.row, compact: room.compactHeader + 2 * room.row };
+      if (room.form === "full") assert.ok(scroller >= need.full, `${label}: a full header sticks in ${scroller} px, under its ${need.full}`);
+      if (room.form === "compact") assert.ok(scroller >= need.compact, `${label}: a compact header sticks in ${scroller} px, under its ${need.compact}`);
+      // A header that scrolls is drawn in full, so its height is the full one.
+      if (room.form === "static") assert.ok(scroller < need.compact, `${label}: ${scroller} px holds a compact header (${need.compact}) and should stick`);
+      // Scrolled into the list, through a whole row interval, the header keeps the scroller's top and a whole row shows under it.
       await scrollPane(dm, 220);
       const mid = await measure(dm);
       if (mid.sticky) {
-        assert.ok(Math.abs(mid.header.top - mid.scroller.top) <= 1, `${label}: the header left the scroller's top: ${JSON.stringify({ header: mid.header, scroller: mid.scroller })}`);
-        assert.ok(mid.row, `${label}: no whole row under the stuck header: ${JSON.stringify({ header: mid.header, scroller: mid.scroller })}`);
+        await sweepRowInterval(dm, 220, label);
         assert.ok(await wholeInReach(dm.locator("[data-round-header]").getByRole("button", { name: "Next" })), `${label}: Next does not take a tap at this scroll`);
       }
       if (view.width === 390 && view.scale === 1) {
@@ -333,14 +376,19 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await openTracker(dm);
     await sheet.waitFor();
     /*
-     * The sheet's body is about 169 layout px (docs/design-v1-layout-hierarchy.md
-     * 4.2, which leaves out the dialog's two 1 px borders), right at three
-     * full headers, so the header sticks in full or as one compact row,
-     * whichever the measured body allows (logic.ts roundHeaderForm).
+     * The sheet's body is about 168 layout px, or 170 with no border on the
+     * full-screen dialog (docs/design-v1-layout-hierarchy.md 4.2). That
+     * holds the compact header (49) and two standard rows (116), not the
+     * full header (56) and two, so the header sticks as one compact row
+     * (logic.ts roundHeaderForm).
      */
     const rest = await measure(dm);
-    assert.ok(Math.abs(rest.scroller.height / view.scale - 168) <= 1.5, `the very short sheet's body is ${rest.scroller.height / view.scale} px, not about 169`);
+    const body = (await headerRoom(dm)).scroller;
+    assert.ok(body >= 166 && body <= 171, `the very short sheet's body is ${body} layout px, not about 168 to 170`);
     assert.ok(rest.sticky, "the header does not stick in the very short sheet");
+    assert.equal((await headerRoom(dm)).form, "compact", "the very short sheet's header is the compact row");
+    await scrollPane(dm, 220);
+    await sweepRowInterval(dm, 220, "the very short sheet");
     for (const row of [5, 9]) assert.ok(await valueBoxInReach(row), `row ${row}'s value box is out of reach under the header`);
     assert.ok(await wholeInReach(dm.locator("[data-round-header]").getByRole("button", { name: "Next" })), "Next is out of reach");
     await shots.take(dm, "combat-header-480-130-very-short");
@@ -365,22 +413,55 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await dm.keyboard.press("Escape");
   });
 
-  test("3. on a sheet between three compact rows and three full headers tall, the header is one 44 px row, still sticky", async () => {
+  test("3. a sheet just tall enough for the compact header and two rows sticks it as one 44 px row, a whole row showing at every offset, and 2 px less scrolls it with the order", async () => {
+    /*
+     * The same phone held sideways, resized with the sheet open until its
+     * scroller is a given height, as the turn band does. A resize, not a
+     * reload: the server delays a session's snapshots past 20 a minute.
+     */
     await setUp(dm, dmCdp, { width: 844, height: 390, scale: 1 });
     await openTracker(dm);
-    const at390 = (await measure(dm)).scroller.height;
-    // The same phone shorter by what brings its sheet's scroller to 150 px, as the turn band does at 844 x 390.
-    await setUp(dm, dmCdp, { width: 844, height: 390 - Math.round(at390 - 150), scale: 1 });
-    await openTracker(dm);
-    await scrollPane(dm, 200);
+    const sized = async (target: number): Promise<HeaderRoom> => {
+      let height = dm.viewportSize()!.height;
+      let room = await headerRoom(dm);
+      for (let i = 0; i < 6 && room.scroller !== target; i++) {
+        height -= room.scroller - target;
+        await dm.setViewportSize({ width: 844, height });
+        // Settled once two frames apart measure the same.
+        let last = -1;
+        room = await headerRoom(dm);
+        while (room.scroller !== last) {
+          last = room.scroller;
+          await dm.waitForTimeout(50);
+          room = await headerRoom(dm);
+        }
+      }
+      assert.equal(room.scroller, target, `no height gives a ${target} px scroller: the last was ${room.scroller} px at ${height}`);
+      return room;
+    };
+    const tall = await sized(300);
+    assert.equal(tall.form, "full");
+    const full = tall.header;
+    const compactNeed = tall.compactHeader + 2 * tall.row;
+    assert.ok(compactNeed < full + 2 * tall.row, "the compact header is shorter than the full one");
+    // At exactly the compact header and two rows, the tightest a sticky header gets.
+    const tight = await sized(compactNeed);
+    assert.equal(tight.form, "compact");
     const m = await measure(dm);
-    assert.ok(m.scroller.height >= 132 && m.scroller.height < 168, `the scroller is ${m.scroller.height}, not between 132 and 168`);
     assert.ok(m.sticky, "the compact header sticks");
     assert.ok(Math.abs(m.compactRow - 44) <= 1, `the compact header's row is ${m.compactRow} px, not 44`);
-    assert.ok(m.row, "a whole row shows under the compact header");
+    await sweepRowInterval(dm, 200, `a ${compactNeed} px sheet`);
     // The whole whose-turn line stays in the header for a screen reader, ending in an ellipsis on screen.
     assert.match((await dm.locator("[data-round-header]").textContent()) ?? "", /Round 1.*Bree's turn|Round 1.*Press Start/);
     await shots.take(dm, "combat-header-compact");
+    // At exactly the full header and two rows, it sticks in full, with a whole row at every offset.
+    const fullTight = await sized(full + 2 * tall.row);
+    assert.equal(fullTight.form, "full");
+    await sweepRowInterval(dm, 200, `a ${full + 2 * tall.row} px sheet`);
+    // 2 px under the compact need, it scrolls with the order in full.
+    const short = await sized(compactNeed - 2);
+    assert.equal(short.form, "static");
+    assert.equal((await measure(dm)).sticky, false);
   });
 
   test("4. scrolling to Auto initiative takes the header away, and focus moving through the rows never lands under it", async () => {

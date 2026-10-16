@@ -116,7 +116,8 @@ export function EntryRow(props: {
   };
 
   return (
-    <li ref={props.rowRef} style={rowStyle} aria-current={active ? "step" : undefined}>
+    // A standard row, with no companions and its options closed, is what the round header leaves room for (3.1).
+    <li ref={props.rowRef} style={rowStyle} aria-current={active ? "step" : undefined} data-standard-row={companions.length === 0 && !props.expanded ? "" : undefined}>
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), minHeight: 56 }}>
         {dm ? <DragHandle drag={drag} name={name} /> : null}
         <button

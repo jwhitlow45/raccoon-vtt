@@ -108,6 +108,9 @@ function Wrap(props: { children: ReactNode }) {
 /** A full header's height before it is first measured: the sheet's 56 px. */
 const FULL_HEADER_GUESS = 56;
 
+/** A standard row's height while the order has none to measure: its 56 px line and two borders, with no gap. */
+const STANDARD_ROW_GUESS = 56 + 2 * theme.line.border;
+
 /**
  * The round section: the turn controls as its header, then the order
  * (docs/design-v1-combat-flow.md 3.1). The header sticks to the top of the
@@ -116,16 +119,16 @@ const FULL_HEADER_GUESS = 56;
  * with no script. The section is a plain block, since a sticky grid item
  * could not move outside its own row.
  *
- * It measures the pane's scroller (`data-pane-body`) and the header, and
- * picks the header's form so a whole row always shows under it: full while
- * the scroller holds three full headers, one compact row while it holds
- * three of those, and otherwise full and scrolling with the order. The
- * full header's height is kept from when it last showed full, since the
- * compact one cannot measure it.
+ * It measures the pane's scroller (`data-pane-body`), the header and the
+ * order's standard rows (`data-standard-row`), and picks the header's form
+ * by the rule in roundHeaderForm, so a whole standard row always shows
+ * under a stuck header. The full header's height is kept from when it last
+ * showed full, since the compact one cannot measure it.
  */
 function RoundSection(props: { children: ReactNode }) {
   const sectionRef = useRef<HTMLElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const [form, setForm] = useState<RoundHeaderForm>("full");
   const [headerPx, setHeaderPx] = useState(0);
   const formRef = useRef(form);
@@ -134,14 +137,21 @@ function RoundSection(props: { children: ReactNode }) {
 
   useLayoutEffect(() => {
     const header = headerRef.current;
+    const list = listRef.current;
     const scroller = sectionRef.current?.closest<HTMLElement>("[data-pane-body]");
-    if (!header || !scroller) {
+    if (!header || !list || !scroller) {
       setForm("static");
       return;
     }
     const measure = () => {
       if (formRef.current !== "compact" && header.offsetHeight > 0) fullPx.current = header.offsetHeight;
-      const next = roundHeaderForm(scroller.clientHeight, fullPx.current || FULL_HEADER_GUESS);
+      const next = roundHeaderForm({
+        scroller: scroller.clientHeight,
+        fullHeader: fullPx.current || FULL_HEADER_GUESS,
+        // The compact form's bottom padding is 0, so its height follows from the pane's top padding it takes back.
+        compactHeader: (parseFloat(getComputedStyle(header).paddingTop) || 0) + COMPACT_HEADER_PX + theme.line.border,
+        row: standardRowPx(list),
+      });
       formRef.current = next;
       setForm(next);
       setHeaderPx(header.offsetHeight);
@@ -149,6 +159,8 @@ function RoundSection(props: { children: ReactNode }) {
     const observer = new ResizeObserver(measure);
     observer.observe(scroller);
     observer.observe(header);
+    // The order's own size changes as rows come, go, open their options or gain companions.
+    observer.observe(list);
     measure();
     return () => observer.disconnect();
   }, []);
@@ -163,6 +175,7 @@ function RoundSection(props: { children: ReactNode }) {
       <div
         ref={headerRef}
         data-round-header=""
+        data-form={form}
         style={{
           // The pane's padding taken back by the margin and given back as padding, so at rest the header sits where it
           // always did, and stuck its opaque fill meets the scroller's top and sides with no row showing past it.
@@ -175,9 +188,20 @@ function RoundSection(props: { children: ReactNode }) {
       >
         <TurnControls compact={form === "compact"} />
       </div>
-      <div style={{ display: "grid", ...COLUMN, gap: theme.space(2) }}>{props.children}</div>
+      <div ref={listRef} style={{ display: "grid", ...COLUMN, gap: theme.space(2) }}>
+        {props.children}
+      </div>
     </section>
   );
+}
+
+/** The shortest standard row in the order with the gap after it, or a row's usual height while there is none. */
+function standardRowPx(list: HTMLElement): number {
+  const rows = Array.from(list.querySelectorAll<HTMLElement>("[data-standard-row]"), (row) => row.offsetHeight).filter((px) => px > 0);
+  if (rows.length === 0) return STANDARD_ROW_GUESS;
+  const order = list.querySelector<HTMLElement>("[data-standard-row]")!.parentElement;
+  const gap = order ? parseFloat(getComputedStyle(order).rowGap) || 0 : 0;
+  return Math.min(...rows) + gap;
 }
 
 /** The scrolling pane's padding, which its body publishes (components/Sheet.tsx paneBodyPadding). 0 outside a pane. */
