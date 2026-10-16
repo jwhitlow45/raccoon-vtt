@@ -749,7 +749,7 @@ function PageOverlay(props: {
       <div aria-hidden style={{ position: "absolute", left: rect.left, top: rect.top, width: rect.width, height: rect.height, outline: `${theme.line.border}px solid ${theme.color.border}` }} />
       {props.state === undefined && visible.height >= LOADING_ROOM ? (
         <div style={{ position: "absolute", ...visible, display: "grid", placeItems: "center" }}>
-          <Loading text={`Loading page ${props.number}…`} style={{ padding: `${theme.space(1)}px ${theme.space(2)}px`, borderRadius: theme.radius.sm, background: theme.color.overlay }} />
+          <Loading live={false} text={`Loading page ${props.number}…`} style={{ padding: `${theme.space(1)}px ${theme.space(2)}px`, borderRadius: theme.radius.sm, background: theme.color.overlay }} />
         </div>
       ) : props.state === "failed" && visible.height >= FAILURE_ROOM ? (
         <div style={{ position: "absolute", ...visible, display: "grid", placeItems: "center", padding: theme.space(2) }}>

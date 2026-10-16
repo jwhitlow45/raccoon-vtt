@@ -53,13 +53,17 @@ export function Spinner(props: { size?: number; label?: string }) {
 /**
  * A spinner and a sentence ("Loading the monsters…"), after the delay. The
  * caller keeps it mounted only while something loads, or passes `active`.
+ * It is a status, so its words are read out as they change. `live` false
+ * draws the same line without that, for a line that changes too often to
+ * hear, such as a count of pages, whose owner says its start and its end
+ * in a status line of its own.
  */
-export function Loading(props: { text: string; detail?: string | null; active?: boolean; delay?: number; style?: CSSProperties }) {
+export function Loading(props: { text: string; detail?: string | null; active?: boolean; delay?: number; live?: boolean; style?: CSSProperties }) {
   const shown = useDelayed(props.active ?? true, props.delay);
   if (!shown) return null;
   return (
     <div
-      role="status"
+      role={props.live === false ? undefined : "status"}
       style={{
         display: "flex",
         alignItems: "center",

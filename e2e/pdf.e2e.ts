@@ -440,6 +440,8 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await shots.take(dm, "pdf-upload-range");
     await block.getByRole("button", { name: "Upload 3 pages", exact: true }).click();
     await shown(block, "Preparing page 2 of 3…").waitFor();
+    // The progress line is not live, so a screen reader is not told every page (4.1.4).
+    assert.equal(await shown(block, "Preparing page 2 of 3…").evaluate((el) => (el as unknown as { closest(s: string): unknown }).closest('[role="status"], [aria-live]') === null), true, "the progress line is a live region");
     await shots.take(dm, "pdf-upload-preparing");
     second.release();
     await shown(block, "Saved as Strange letter, 3 pages.").waitFor({ timeout: 60_000 });
@@ -936,6 +938,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     const view = viewer(dm, "Strange letter");
     await view.waitFor();
     await view.locator(`img[src$="/${letter.pages[0]!.assetId}/thumb"]`).waitFor();
+    assert.equal(await view.getByRole("status").filter({ hasText: /^Loading page/ }).count(), 0, "a page's loading line is a live region");
     await shots.take(dm, "pdf-dm-view-thumb-first");
     slow.release();
     await waitFor("page 1's full image", () => loaded(pageImage(view, "Strange letter", 1, 3)));
@@ -1263,6 +1266,29 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     }
     await ops.send({ t: "handoutDoc.delete", docId: again.id });
     await deleteImages(again.pages.map((p) => p.assetId));
+  });
+
+  test("11c. a PDF download is heard once as it starts and once as it is ready, never page by page", async () => {
+    const letter = run.letter!;
+    const popup = viewer(desk, "Strange letter");
+    await popup.waitFor();
+    const second = `**/api/assets/${letter.pages[1]!.assetId}/full`;
+    const hold = gate();
+    await desk.route(second, async (route) => {
+      if (route.request().resourceType() === "fetch") await hold.held;
+      await route.continue().catch(() => {});
+    });
+    const [saved] = await Promise.all([desk.waitForEvent("download"), (async () => {
+      await popup.getByRole("button", { name: "Download", exact: true }).click();
+      const line = popup.getByText("Preparing the PDF: page 2 of 3");
+      await line.waitFor();
+      assert.equal(await line.evaluate((el) => (el as unknown as { closest(s: string): unknown }).closest('[role="status"], [aria-live]') === null), true, "the progress line is a live region");
+      await popup.getByRole("status").filter({ hasText: "Preparing the PDF." }).waitFor();
+      hold.release();
+    })()]);
+    assert.equal(saved.suggestedFilename(), "Strange letter.pdf");
+    await popup.getByRole("status").filter({ hasText: "The PDF is ready." }).waitFor();
+    await desk.unroute(second);
   });
 
   test("12. the DM's Library: the document as one tile with its pages, its details in the viewer, no Delete while it shows, then Delete with its pages", async () => {

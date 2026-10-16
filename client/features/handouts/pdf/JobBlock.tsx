@@ -234,7 +234,8 @@ function Body(props: {
       const words = progressWords(job);
       return (
         <>
-          {phase.k === "preparing" ? <Loading text={words} detail={phase.waiting ? "Waiting for the server…" : null} delay={0} /> : null}
+          {/* Not live: the block's own status line says the start, each pause or stop, and the end, never every page (4.1.4). */}
+          {phase.k === "preparing" ? <Loading live={false} text={words} detail={phase.waiting ? "Waiting for the server…" : null} delay={0} /> : null}
           {phase.k === "paused" ? <Line strong>{stopWords(job, phase.page, phase.stop)}</Line> : null}
           {phase.k === "titleInvalid" ? <Line strong>Fix the title to save.</Line> : null}
           <div

@@ -29,6 +29,7 @@ import {
 } from "./download.ts";
 import { nextPopup, pageName, popupShows, showingKey } from "./handouts.ts";
 import { HandoutViewer } from "./HandoutViewer.tsx";
+import { PDF_READY, PdfSpoken, PREPARING_PDF, useSpoken } from "./PdfSpoken.tsx";
 
 /**
  * A handout the DM shows pops up over the map for the players it was shown
@@ -163,6 +164,7 @@ export function HandoutPopup() {
    * since it holds every page's JPEG until the file is saved.
    */
   const [pdf, setPdf] = useState<PdfBuild | null>(null);
+  const spoken = useSpoken();
   const pdfStep = (e: PdfBuildEvent) => setPdf((s) => pdfBuildStep(s, e));
   const builds = useRef(new Map<number, AbortController>());
   useEffect(() => pdfStep({ t: "showing", key }), [key]);
@@ -201,6 +203,7 @@ export function HandoutPopup() {
     builds.current.set(op, controller);
     const urls = handoutPages(handout).map((p) => assets.url(p.assetId, "full"));
     pdfStep({ t: "start", key, op, pages: urls.length });
+    spoken.say(PREPARING_PDF);
     try {
       const file = await buildHandoutPdf({ urls, title: handout.title, signal: controller.signal, onPage: (done) => pdfStep({ t: "progress", op, done }) });
       if (controller.signal.aborted) return;
@@ -208,6 +211,7 @@ export function HandoutPopup() {
       const share = prefersShare(file);
       if (!share) saveThroughLink(file);
       pdfStep({ t: "built", op, file, keep: share, at: Date.now() });
+      spoken.say(PDF_READY);
     } catch {
       if (!controller.signal.aborted) pdfStep({ t: "failed", op, why: "fetch" });
     }
@@ -246,9 +250,10 @@ export function HandoutPopup() {
       lead={
         <>
           <Help>The DM shows you</Help>
+          <PdfSpoken said={spoken.said} build={pdfMine} />
           {pdfMine?.t === "building" ? (
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), fontSize: theme.font.body14, color: theme.color.textMuted }}>
-              <span role="status" style={{ flex: "1 1 200px" }}>
+              <span style={{ flex: "1 1 200px" }}>
                 {pdfProgressText(pdfMine)}
               </span>
               <Button size="sm" onClick={() => pdfStep({ t: "cancel" })}>
