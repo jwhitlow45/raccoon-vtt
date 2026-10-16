@@ -8,7 +8,7 @@ import { deleteImages, rememberAsset, uploadingSlot } from "../../images/library
 import { canvasSource, encodeWithin, pageThumb } from "./encode.ts";
 import { jobActive, jobPageIds, pdfJobSlot, waitsOnDm } from "./job.ts";
 import { clearLedger, ledgerKey, localLedgerStorage, readLedger, recoveryOf } from "./ledger.ts";
-import { JobRunner, type JobDeps } from "./run.ts";
+import { JobRunner, roomReadOf, type JobDeps } from "./run.ts";
 
 /**
  * The PDF upload job in the page (docs/design-v1-pdf-handouts.md 4.1): its
@@ -48,10 +48,7 @@ function liveDeps(roomId: string, memberId: string, store: RoomViewStore, action
     deleteImages: (ids) => deleteImages(roomId, ids),
     listAssets: async () => (await api.listAssets(roomId)).assets,
     dispatch: (op, opts) => actions.dispatch(op, opts),
-    room: () => {
-      const s = store.getState();
-      return { view: s.view, online: s.online, connection: s.connection, snapshots: s.snapshots ?? 0 };
-    },
+    room: () => roomReadOf(store.getState()),
     subscribe: (listener) => store.subscribe(listener),
     storage: localLedgerStorage(),
     notify: (text) => ui.notify(text),
@@ -148,8 +145,8 @@ export function usePdfJobRoom(): void {
     checked.current = key;
     const storage = localLedgerStorage();
     const ledger = readLedger(storage, key);
-    const view = store.getState().view;
-    const found = recoveryOf(ledger, view?.handoutDocs);
+    // What the server is known to hold, not this device's pending changes.
+    const found = recoveryOf(ledger, roomReadOf(store.getState()).savedDocs ?? undefined);
     if (found === "saved") clearLedger(storage, key);
     if (found !== "offer" || !ledger) return;
     const runner = new JobRunner(liveDeps(roomId, memberId, store, actions, ui), slot.store);

@@ -1,5 +1,6 @@
 import type { MemberId, RoomState, SceneId } from "#shared/model.ts";
 import type { ClientOp, EphEvent, RefusalCode } from "#shared/protocol.ts";
+import type { ProjectedState } from "#shared/project.ts";
 import type { ConnectionState } from "../lib/connection.ts";
 import type { SceneLoad } from "./sceneLoad.ts";
 
@@ -293,6 +294,13 @@ export type RoomView = {
   sceneLoad?: SceneLoad;
   /** Members with at least one open socket. */
   online: MemberId[];
+  /**
+   * What the server is known to hold: the projected state before this
+   * device's pending ops. A player preview leaves it out. Read it only to
+   * learn what happened on the server, as a PDF upload's save does
+   * (docs/design-v1-pdf-handouts.md 4.1.5). Everything shown reads `view`.
+   */
+  confirmed?: ProjectedState | null;
   /**
    * How many snapshots this page has applied, the first included, so code
    * that waits on the next one (an `expired` answer, UnknownCause) can tell

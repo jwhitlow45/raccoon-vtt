@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { RoomState } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
-import { room as testRoom } from "#shared/testutil.ts";
+import { DM as DM_VIEWER, room as testRoom } from "#shared/testutil.ts";
 import { ApiError, type AssetRow, type UploadOptions } from "../../../lib/api.ts";
 import type { OnAnswer, OpRefusal } from "../../../state/types.ts";
 import {
@@ -24,7 +24,10 @@ import {
 } from "./job.ts";
 import { ledgerKey, readLedger, recoveryOf, writeLedger, type LedgerStorage } from "./ledger.ts";
 import { DrawCancelled, endWithin, OpenCancelled, PageDrawFailure, ReaderRefusal, type PdfDocument } from "./reader.ts";
-import { JobRunner, type JobDeps } from "./run.ts";
+import { JobRunner, roomReadOf, type JobDeps } from "./run.ts";
+import { LocalServer } from "../../../dev/localServer.ts";
+import { createRoomStore } from "../../../state/store.ts";
+import { FakeClock, FakeOutbox } from "../../../state/testing.ts";
 
 const ROOM = "ABCD2345";
 const ME = "dm1";
@@ -174,7 +177,8 @@ function world(opts: { pages?: number; title?: string | null; failDraw?: number[
       sent.push({ op, onAnswer: options.onAnswer });
       return sent.length;
     },
-    room: () => state,
+    // The fake's view is its confirmed state: no pending ops here.
+    room: () => ({ ...state, savedDocs: state.view.handoutDocs }),
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -681,6 +685,28 @@ describe("saving under a stable id (docs/design-v1-pdf-handouts.md 4.1.5)", () =
   });
 });
 
+describe("what the server holds decides a save (docs/design-v1-pdf-handouts.md 4.1.5)", () => {
+  test("an unknown create that committed is saved even while a Library delete of it is pending, read from the room's real store", async () => {
+    const withDoc = { ...testRoom(), handoutDocs: { "doc-1": { id: "doc-1", rev: 1, title: "Strange letter", pages: [{ assetId: "img-1", width: 1583, height: 2048 }], createdAt: "2026-10-16T00:00:00.000Z" } } } as RoomState;
+    const server = new LocalServer(structuredClone(withDoc), DM_VIEWER, "s1");
+    const roomStore = createRoomStore({ roomId: "R1", you: DM_VIEWER, clock: new FakeClock(), random: () => 0.5, clientId: "c1" });
+    roomStore.setOutbox(new FakeOutbox());
+    roomStore.applySnapshot(server.hello({ resumeFrom: roomStore.prepareHello().resumeFrom, sceneId: "s1" }));
+    // The DM deletes it in the Library on this device, and the op is still pending: the view no longer has it.
+    roomStore.dispatch({ t: "handoutDoc.delete", docId: "doc-1" });
+    assert.equal(roomStore.store.getState().view?.handoutDocs["doc-1"], undefined);
+
+    const w = world({ pages: 1 });
+    w.deps.room = () => roomReadOf(roomStore.store.getState());
+    w.deps.subscribe = (listener) => roomStore.store.subscribe(listener);
+    await w.throughUpload();
+    answer(w.sent[0]!, "unknown", undefined, "snapshot");
+    await settle();
+    assert.equal(w.phase().k, "saved", "the server holds it, so it saved");
+    assert.equal(w.sent.filter((x) => x.op.t === "handoutDoc.create").length, 1, "no second create to bring back what the DM deleted");
+  });
+});
+
 describe("Cancel upload (docs/design-v1-pdf-handouts.md 4.1.6)", () => {
   test("before the create: Cancelling… until the summary, its own pages deleted and a reused one never, the ledger cleared", async () => {
     const w = world({ pages: 3, autoUpload: false });
@@ -822,6 +848,24 @@ describe("Cancel upload (docs/design-v1-pdf-handouts.md 4.1.6)", () => {
       assert.deepEqual(w.deleted, [["img-1"]]);
       assert.equal(w.phase().k, "cancelled");
     }
+  });
+
+  test("Cancel pressed after the create is taken but while the reader still closes deletes the saved document", async () => {
+    const w = world({ pages: 2, holdDestroy: true });
+    await w.throughUpload();
+    answer(w.sent[0]!, "taken");
+    await settle();
+    assert.equal(w.phase().k, "saving", "still closing the reader");
+    void w.runner.cancel();
+    await settle();
+    w.finishDestroys();
+    await settle();
+    const del = w.sent.find((x) => x.op.t === "handoutDoc.delete");
+    assert.ok(del, "the saved document is deleted");
+    answer(del, "taken");
+    await settle();
+    assert.equal(w.phase().k, "cancelled");
+    assert.deepEqual(w.deleted, [["img-1", "img-2"]]);
   });
 
   test("a saved document whose delete stays undone leaves the pages to it, and says so", async () => {

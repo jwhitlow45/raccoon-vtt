@@ -3,7 +3,7 @@ import { roomHandoutPages } from "#shared/handouts.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { ClientOp, OpOf } from "#shared/protocol.ts";
 import type { AssetRow, UploadOptions } from "../../../lib/api.ts";
-import type { OnAnswer, OpAnswer, OpRefusal, UnknownCause } from "../../../state/types.ts";
+import type { OnAnswer, OpAnswer, OpRefusal, RoomView, UnknownCause } from "../../../state/types.ts";
 import type { Encoded } from "./encode.ts";
 import {
   CANCEL_GRACE_MS,
@@ -45,13 +45,26 @@ import { pdfTitle, titleProblem } from "./title.ts";
  * so a test drives it with fakes.
  */
 
-/** The room as the job reads it. */
+/**
+ * The room as the job reads it. `view` is optimistic, with this device's
+ * pending ops applied, which is right for the limits a new upload checks.
+ * `savedDocs` is the confirmed state's documents, what the server is known
+ * to hold, which is what decides whether a save happened (4.1.5): a pending
+ * Library delete hides a saved document from the view, not from the server.
+ */
 export type RoomRead = {
   view: RoomState | null;
+  savedDocs: Readonly<Record<string, unknown>> | null;
   online: readonly string[];
   connection: string;
   snapshots: number;
 };
+
+/** The job's read of the room's store state. A view with no confirmed state, a player preview's, has only its view to go by. */
+export function roomReadOf(s: Pick<RoomView, "view" | "confirmed" | "online" | "connection" | "snapshots">): RoomRead {
+  const saved = s.confirmed === undefined ? s.view : s.confirmed;
+  return { view: s.view, savedDocs: saved ? (saved.handoutDocs ?? {}) : null, online: s.online, connection: s.connection, snapshots: s.snapshots ?? 0 };
+}
 
 /** The image delete's answer (images/library.ts deleteImages). */
 export type Deleted = { deleted: number; inUse: boolean; error: unknown };
@@ -553,7 +566,7 @@ export class JobRunner implements JobControl {
   }
 
   #docSaved(): boolean {
-    return this.#deps.room().view?.handoutDocs[this.#job.docId] !== undefined;
+    return this.#deps.room().savedDocs?.[this.#job.docId] !== undefined;
   }
 
   async #saveAnswered(run: number, answer: OpAnswer, refusal: OpRefusal | undefined, settled: Promise<boolean>): Promise<void> {
@@ -582,9 +595,10 @@ export class JobRunner implements JobControl {
   }
 
   async #savedOrCancel(saved: boolean): Promise<void> {
+    if (!this.#cancelling) await this.#closeDoc();
+    // Cancel may come while the reader closes, after the answer it would have waited for: the save is known, so Cancel deletes it.
     if (this.#cancelling) return this.#finishCancel(saved);
     clearLedger(this.#deps.storage, this.#ledgerKey);
-    await this.#closeDoc();
     this.#set({ phase: { k: "saved" } });
     this.#say(savedWords(this.#job).join(" "), savedToast(this.#job));
   }
