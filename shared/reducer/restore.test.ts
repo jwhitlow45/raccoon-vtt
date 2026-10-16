@@ -357,6 +357,37 @@ describe("companions under undo (docs/design-v1-combat-flow.md 3.6.4 and 3.6.8)"
     token: { id, sceneId: "s1", kind: "npc", name: "Wildfire Spirit", size: "small", x: 2, y: 2, layer: "token", actor: { inline: actor({ hp: { cur: 9, max: 9, temp: 0 }, dmNotes: "" }) }, companion: { of, turn } },
   });
 
+  test("across two DMs, a token-only undo or redo that would leave a listed companion with its own row, live or saved, is refused (SOL-02)", () => {
+    const toOwn: Op = { t: "token.update", tokenId: "ws", patch: { companion: { of: "bree", turn: "own" } } };
+    const toShared: Op = { t: "token.update", tokenId: "ws", patch: { companion: { of: "bree", turn: "shared" } } };
+    // A shared spirit and a fight with no rows yet.
+    const start = () => run(run(breeRoom(), spirit("ws"), DM, 1).state, { t: "encounter.start", entries: [] }, DM, 2).state;
+    // Undo: DM A makes it take its own turn, DM B adds its row, then A undoes the turn change alone.
+    const own = run(start(), toOwn, A, 3);
+    assert.deepEqual(own.inverse.map((e) => e.key), ["token:ws"], "the turn change wrote the token alone");
+    const added = run(own.state, { t: "encounter.add", entries: [{ id: "e-ws", tokenId: "ws", value: 12 }] }, B, 4);
+    const undone = undo(added.state, own.inverse, 5);
+    assert.ok(!undone.ok);
+    assert.match(undone.message, /now acts on its character's turn/);
+    // The same with the row only in the saved history: B adds the row, takes a turn, and removes the row again.
+    let saved = run(added.state, { t: "encounter.next" }, B, 6).state;
+    saved = run(saved, { t: "encounter.remove", entryIds: ["e-ws"] }, B, 7).state;
+    assert.ok(saved.encounterHistory.some((step) => step.encounter.entries.some((e) => e.id === "e-ws")));
+    const savedUndo = undo(saved, own.inverse, 8);
+    assert.ok(!savedUndo.ok, "a saved row counts too");
+    // Redo: A lists it under Bree, undoes that, B adds its row, and A's redo would list it again.
+    const shared = run(run(start(), toOwn, A, 3).state, toShared, A, 4);
+    const back = undo(shared.state, shared.inverse, 5);
+    assert.ok(back.ok, back.ok ? "" : back.message);
+    const withRow = run(back.state, { t: "encounter.add", entries: [{ id: "e-ws", tokenId: "ws", value: 12 }] }, B, 6);
+    const redo = applyOp(withRow.state, { t: "sys.restore", entries: back.inverse!, from: "redo", deps: true }, A, env(7));
+    assert.ok(!redo.ok);
+    assert.match(redo.message, /now acts on its character's turn/);
+    // Without B's row, both go through.
+    assert.ok(applyOp(back.state, { t: "sys.restore", entries: back.inverse!, from: "redo", deps: true }, A, env(7)).ok);
+    assert.ok(undo(own.state, own.inverse, 5).ok);
+  });
+
   test("Bree's owner changed from Ana to Cy, Cy adds a companion, then the change is undone: both are Ana's after the one restore", () => {
     const changed = run(breeRoom(), { t: "character.update", characterId: "bree", patch: { ownerIds: ["p2"] } }, DM, 1);
     const added = run(changed.state, spirit("ws"), CY, 2);

@@ -2,7 +2,7 @@ import { keys, parseKey, revOf, type EntityKey, type ParsedKey } from "../keys.t
 import type { AreaTemplate, Encounter, Handout, Pin, Scene, Token } from "../model.ts";
 import type { OpOf, RestoreEntry } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
-import { ON_ITS_TURN_NOW, rowsForSharedCompanions, syncOwners } from "./companions.ts";
+import { ON_ITS_TURN_NOW, actsOnCharacterTurn, rowsForSharedCompanions, syncOwners } from "./companions.ts";
 import { writeHpUndoLine } from "./hpUndo.ts";
 import { forgetExplored } from "./map.ts";
 import { gone, guardHash, invalid, type Tx } from "./tx.ts";
@@ -111,9 +111,16 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
  */
 function companionsAfterRestore(tx: Tx, entries: RestoreEntry[]): void {
   const s = tx.state;
-  const written = new Set(entries.map((e) => e.key));
-  if (written.has(keys.encounter) && rowsForSharedCompanions(s, s.encounter)) throw invalid(ON_ITS_TURN_NOW);
-  if (written.has(keys.encounterHistory) && s.encounterHistory.some((step) => rowsForSharedCompanions(s, step.encounter))) throw invalid(ON_ITS_TURN_NOW);
+  // A restore that writes the fight, its history, or a companion that now acts on its character's turn is checked
+  // against both: a token-only undo of a turn change can bring back a `shared` companion while another DM added its row.
+  const touches = entries.some((e) => {
+    if (e.key === keys.encounter || e.key === keys.encounterHistory) return true;
+    const parsed = parseKey(e.key);
+    return parsed?.kind === "token" && actsOnCharacterTurn(s.tokens[parsed.id]);
+  });
+  if (touches && (rowsForSharedCompanions(s, s.encounter) || s.encounterHistory.some((step) => rowsForSharedCompanions(s, step.encounter)))) {
+    throw invalid(ON_ITS_TURN_NOW);
+  }
   const characters = new Set<string>();
   for (const entry of entries) {
     const parsed = parseKey(entry.key);
