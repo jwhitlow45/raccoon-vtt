@@ -18,6 +18,7 @@ import {
   entryBatches,
   entryName,
   hasStarted,
+  keepsDragSlot,
   ownCandidates,
   reorderTie,
   roundHeaderForm,
@@ -309,6 +310,19 @@ function EntryList(props: { close(): void }) {
   const dragRef = useRef<DragState | null>(null);
   dragRef.current = drag;
   const rows = useRef(new Map<string, HTMLLIElement>());
+  // The order's width, which decides whether untied rows keep the handle's slot (logic.ts keepsDragSlot).
+  const orderRef = useRef<HTMLOListElement>(null);
+  const [orderPx, setOrderPx] = useState(0);
+  const listed = entries.length > 0;
+  useLayoutEffect(() => {
+    const order = orderRef.current;
+    if (!order) return;
+    const measure = () => setOrderPx(order.clientWidth);
+    const observer = new ResizeObserver(measure);
+    observer.observe(order);
+    measure();
+    return () => observer.disconnect();
+  }, [listed]);
 
   // A change from the server mid-drag can move rows under the finger, so the drag gives up.
   useEffect(() => setDrag(null), [entries]);
@@ -388,13 +402,14 @@ function EntryList(props: { close(): void }) {
   }
 
   return (
-    <ol style={{ margin: 0, padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 0 }}>
+    <ol ref={orderRef} style={{ margin: 0, padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 0 }}>
       {entries.map((entry, index) => {
         const run = tieRun(entries, index);
         const tied = run.end - run.start > 1;
         const rowDrag: RowDrag | null = dm
           ? {
               ...(tied ? { handle: handleFor(index) } : {}),
+              slot: keepsDragSlot(orderPx, tied),
               offset: offsetOf(index),
               dragging: drag?.id === entry.id,
               canMoveUp: tied && index > run.start,

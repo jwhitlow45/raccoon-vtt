@@ -24,6 +24,7 @@ import {
   ownsEntry,
   parseInitiative,
   reorderTie,
+  keepsDragSlot,
   roundHeaderForm,
   rowAc,
   turnOp,
@@ -524,6 +525,16 @@ describe("a hidden creature revealed on its turn", () => {
     assert.equal(line(), "Another creature's turn");
     state = apply(state, { t: "token.move", tokenId: "lurker", x: 3, y: 3 }, DM, 4);
     assert.equal(line(), "Lurker's turn");
+  });
+});
+
+describe("the drag handle's slot (SFB-P-13)", () => {
+  test("a tied row keeps it for its handle, an untied row only in an order 320 px wide or more, and an unmeasured order keeps it", () => {
+    assert.equal(keepsDragSlot(241, true), true);
+    assert.equal(keepsDragSlot(241, false), false);
+    assert.equal(keepsDragSlot(319, false), false);
+    assert.equal(keepsDragSlot(320, false), true);
+    assert.equal(keepsDragSlot(0, false), true);
   });
 });
 

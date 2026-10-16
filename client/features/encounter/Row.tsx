@@ -31,6 +31,8 @@ export type RowDrag = {
     onPointerUp(e: ReactPointerEvent<HTMLElement>): void;
     onPointerCancel(e: ReactPointerEvent<HTMLElement>): void;
   };
+  /** Whether the row keeps the handle's slot with no handle in it, lining its name up with tied rows (logic.ts keepsDragSlot). */
+  slot: boolean;
   /** Pixels the row is shifted while a drag is in progress. */
   offset: number;
   dragging: boolean;
@@ -102,6 +104,7 @@ export function EntryRow(props: {
   const life = shownLife(actor, token);
   const dead = life === "dead";
   const drag = props.drag;
+  const slotted = handleSlot(dm, drag);
 
   const rowStyle: CSSProperties = {
     position: "relative",
@@ -125,7 +128,7 @@ export function EntryRow(props: {
       data-standard-row={companions.length === 0 && !props.expanded ? "" : undefined}
     >
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), minHeight: 56 }}>
-        {dm ? <DragHandle drag={drag} name={name} /> : null}
+        {slotted ? <DragHandle drag={drag} name={name} /> : null}
         <button
           type="button"
           data-row-button=""
@@ -140,7 +143,7 @@ export function EntryRow(props: {
             alignItems: "center",
             gap: theme.space(2),
             minHeight: theme.touch,
-            padding: `${theme.space(1)}px ${dm ? 0 : theme.space(2)}px`,
+            padding: `${theme.space(1)}px ${slotted ? 0 : theme.space(2)}px`,
             background: "transparent",
             border: "none",
             color: theme.color.text,
@@ -152,6 +155,7 @@ export function EntryRow(props: {
           <Portrait entry={entry} size={36} ring={active ? theme.color.accentSoft : undefined} dim={dead} />
           <span style={{ flex: 1, minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(0.5) }}>
             <span
+              data-row-name=""
               style={{
                 fontSize: theme.font.input,
                 fontWeight: active ? theme.weight.bold : theme.weight.strong,
@@ -408,10 +412,16 @@ function legendaryTarget(token: { id: string; actor: { ref: string } | { inline:
   return null;
 }
 
+/** Whether a row draws the drag handle's slot: the DM's, tied or in a wide order (RowDrag.slot). */
+function handleSlot(dm: boolean, drag: RowDrag | null): boolean {
+  return dm && (drag === null || drag.handle !== undefined || drag.slot);
+}
+
 function DragHandle(props: { drag: RowDrag | null; name: string }) {
   const handle = props.drag?.handle;
   return (
     <span
+      data-drag-slot=""
       role={handle ? "button" : undefined}
       aria-label={handle ? `Drag to reorder ${props.name} within its tie` : undefined}
       aria-hidden={handle ? undefined : true}
@@ -585,7 +595,15 @@ function RowMenu(props: {
   };
 
   return (
-    <div style={{ padding: `0 ${theme.space(2)}px ${theme.space(3)}px ${dm ? theme.touch + theme.space(1) : theme.space(2)}px`, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
+    <div
+      style={{
+        // Lined up with the row's name, after the handle's slot where the row has one.
+        padding: `0 ${theme.space(2)}px ${theme.space(3)}px ${handleSlot(dm, drag) ? theme.touch + theme.space(1) : theme.space(2)}px`,
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr)",
+        gap: theme.space(1),
+      }}
+    >
       {dm && props.revive && props.target ? (
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2) }}>
           <ReviveButton target={props.target} describedBy={reviveNoteId} focusTo={REVIVE_FOCUS_IN_ROW} />

@@ -482,6 +482,32 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await dm.keyboard.press("Escape");
   });
 
+  test("2c. in the very short sheet the DM's untied rows give the drag handle's slot to their names, which show whole, and the side panel keeps the slot (SFB-P-13)", async () => {
+    const rowsOf = () =>
+      dm.evaluate(() => {
+        type El = { querySelector(s: string): El | null; querySelectorAll(s: string): ArrayLike<El>; getAttribute(n: string): string | null; scrollWidth: number; clientWidth: number; textContent: string | null };
+        const g = globalThis as unknown as { document: { querySelectorAll(s: string): ArrayLike<El> } };
+        return Array.from(g.document.querySelectorAll("[data-round-section] [data-entry-row]")).map((li) => {
+          const slot = li.querySelector(":scope > div > [data-drag-slot]");
+          const name = li.querySelector("[data-row-name]");
+          return { tied: slot?.getAttribute("role") === "button", slot: slot !== null, name: name?.textContent ?? "", room: name ? name.clientWidth - name.scrollWidth : -1 };
+        });
+      });
+    await setUp(dm, dmCdp, { width: 480, height: 320, scale: 1.3, side: 47, bottom: 21 });
+    await openTracker(dm);
+    const narrow = await rowsOf();
+    assert.ok(narrow.some((r) => !r.tied), "no untied row to look at");
+    for (const r of narrow.filter((row) => !row.tied)) {
+      assert.equal(r.slot, false, `${r.name} keeps the empty slot in the very short sheet`);
+      assert.ok(r.room >= 0, `${r.name} is cut off by ${-r.room} px`);
+    }
+    await shots.take(dm, "combat-very-short-rows");
+    await dm.keyboard.press("Escape");
+    await setUp(dm, dmCdp, { ...DESK, scale: 1 });
+    await openTracker(dm);
+    for (const r of await rowsOf()) assert.equal(r.slot, true, `${r.name} lost the slot in the side panel`);
+  });
+
   test("3. a sheet just tall enough for the compact header and two rows sticks it as one 44 px row, a whole row showing at every offset, and 2 px less scrolls it with the order", async () => {
     /*
      * The same phone held sideways, resized with the sheet open until its

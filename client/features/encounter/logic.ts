@@ -351,6 +351,19 @@ export function roundHeaderForm(room: RoundHeaderRoom): RoundHeaderForm {
   return "static";
 }
 
+/** An order narrower than this, such as the very short sheet's 241 px, has no room to spare beside a row's name. */
+export const NARROW_ORDER_PX = 320;
+
+/**
+ * Whether a DM's row keeps the drag handle's 44 px slot (design 9.4): a
+ * tied row draws its handle there, and in a wide order an untied row keeps
+ * the empty slot so every name lines up. A narrow order gives an untied
+ * row's slot to its name. A width of 0, not yet measured, keeps it.
+ */
+export function keepsDragSlot(orderPx: number, tied: boolean): boolean {
+  return tied || orderPx === 0 || orderPx >= NARROW_ORDER_PX;
+}
+
 type TurnPress = Extract<ClientOp, { t: "encounter.next" | "encounter.prev" }>;
 
 /**
