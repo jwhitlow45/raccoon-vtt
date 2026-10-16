@@ -35,6 +35,14 @@ import { LEDGE, sceneWalls, type WallSet } from "./walls.ts";
 /** The token fields the movement rule reads. */
 export type MovingToken = PlacedToken & Pick<Token, "sceneId" | "elevation">;
 
+/**
+ * What a player hears when a wall or a ledge stops a move, or a resize,
+ * which is judged as one (resize.ts). A secret door not yet found answers as
+ * a wall, as players see it.
+ */
+export const WALL_IN_THE_WAY = "A wall is in the way.";
+export const LEDGE_IN_THE_WAY = "A ledge is in the way.";
+
 /** How much narrower than its footprint a core is per axis: one cell, and a 1/32 cell margin so a core never fills an opening exactly. */
 export const CORE_MARGIN = 1 + 1 / 32;
 
@@ -445,6 +453,45 @@ export function coreBlocked(state: BuildState, token: MovingToken, at: Point): b
   if (!scene) return false;
   const walls = sceneWalls(scene, state.buildChunks);
   return coreTouchesAt(walls, token, at, ledgeFloor(walls, scene, token, token.elevation));
+}
+
+// ---------------------------------------------------------------------------
+// Resizing
+
+/*
+ * A resize on a scene that blocks moves is judged by two of the move rules'
+ * own tests (docs/design-v1-token-window.md 8.3), so a resize and the next
+ * move always agree on where a creature may stand. `token` is the creature
+ * as it stands now and `to` its footprint at the new size and spot. Ledges
+ * count by where it stands now, at its elevation, as for a move's start.
+ */
+
+/** Standing: the new size's core at the new spot touches no movement blocker, the test a move ends on. */
+export function resizeStands(state: BuildState, token: MovingToken, to: PlacedToken): boolean {
+  const scene = state.scenes[token.sceneId];
+  if (!scene) return true;
+  const walls = sceneWalls(scene, state.buildChunks);
+  const c = storedCenter(to);
+  const { w, h } = coreSize(to);
+  return touching(walls, c.x, c.y, c.x, c.y, w / 2, h / 2, ledgeFloor(walls, scene, token, token.elevation)).length === 0;
+}
+
+/**
+ * Not crossing: what stops the new size's core swept along the leg from the
+ * token's middle now to the new spot's middle, or null when the leg is
+ * clear. It is a move's leg with a core of the new size, so a wall that core
+ * already touches at the middle now may be left toward the middle's side
+ * and never crossed (partClear), and a resize that keeps the middle passes.
+ */
+export function resizeLegStop(state: BuildState, token: MovingToken, to: PlacedToken): Blocker | null {
+  const scene = state.scenes[token.sceneId];
+  if (!scene) return null;
+  const walls = sceneWalls(scene, state.buildChunks);
+  const p = storedCenter(token);
+  const q = storedCenter(to);
+  const { w, h } = coreSize(to);
+  const leg: Leg = { walls, px: p.x, py: p.y, qx: q.x, qy: q.y, hx: w / 2, hy: h / 2, floor: ledgeFloor(walls, scene, token, token.elevation) };
+  return legClear(leg) ? null : firstStop(leg).blocker;
 }
 
 /*

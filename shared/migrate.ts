@@ -11,7 +11,7 @@ import type { Op } from "./protocol.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 9;
-export const OP_VERSION = 5;
+export const OP_VERSION = 6;
 
 export type MigrationStep = {
   from: number;
@@ -217,6 +217,25 @@ export const opMigrations: MigrationStep[] = [
     to: 5,
     apply: (op) => op,
   },
+  {
+    // v5 ops ran while a size change on the acting creature's turn was a
+    // move: a token update with a size and a place recorded a counted stop
+    // on its path, and one with a size alone recorded nothing. From v6 a
+    // resize is not movement: the old size goes on every earlier stop
+    // (PathStop.footprint) and the resize appends an uncounted stop
+    // (docs/design-v1-token-window.md 8.7). The shape of every op is
+    // unchanged, so as in step 4 to 5, replay hands the reducer the stored
+    // version (`resizeStop`), and a v5 op makes the state it made then.
+    //
+    // Deploy: nothing to run. Rollback: an older build refuses to migrate a
+    // version 6 op down (runMigrations), and its state schema refuses a
+    // path stop holding `footprint`, so a room that stored either loads only
+    // on this build or later. Rolling back past it needs the backup taken
+    // before the update.
+    from: 5,
+    to: 6,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -246,6 +265,15 @@ export function healRevivesDead(settings: Pick<RoomSettings, "healRevives">, opV
  */
 export function reviveToOne(opVersion: number | undefined): boolean {
   return opVersion === undefined || opVersion >= 5;
+}
+
+/**
+ * Whether a size change on the acting creature's turn records a resize's
+ * stop, uncounted, with the old size on the earlier stops, rather than a
+ * move's counted stop (step 5 to 6). Ops stored before version 6 did not.
+ */
+export function resizeStop(opVersion: number | undefined): boolean {
+  return opVersion === undefined || opVersion >= 6;
 }
 
 /** Runs the steps that lead from `from` to `to`, in order, and refuses a version with no path. */

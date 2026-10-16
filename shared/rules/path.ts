@@ -33,24 +33,42 @@ export function pathThisTurn(encounter: Pick<Encounter, "activeEntryId" | "turnS
 }
 
 /**
+ * Whether two stops were made at one size: neither holds a footprint, or
+ * both hold the same one (docs/design-v1-token-window.md 8.7). A leg whose
+ * ends differ is a resize's, or legs joined across one.
+ */
+export function oneSize(a: Pick<PathStop, "footprint">, b: Pick<PathStop, "footprint">): boolean {
+  if (!a.footprint || !b.footprint) return a.footprint === b.footprint;
+  return a.footprint.w === b.footprint.w && a.footprint.h === b.footprint.h;
+}
+
+/**
  * The path with one more stop. Once it holds MAX_PATH_STOPS, the oldest
- * corner goes, so its two legs read as one straight leg, and the start
- * and the latest moves stay as they were.
+ * corner whose two legs lie at one size goes, so they read as one straight
+ * leg, and the start and the latest moves stay as they were. A resize's
+ * stop and the stop before it are never such a corner, so a joined leg
+ * never spans a resize while another corner remains. Where none does, as
+ * in a turn of a move and a resize after another until the path is full,
+ * the oldest corner goes all the same.
  *
  * The joined leg does not count only when neither leg counted, so the
  * distance never drops a leg that did. And the corner players who do not
  * own the creature could not see keeps them from the joined leg's mark, as
  * it did while it was there: their line already joined the two legs, and
  * the mark would now tell them how the creature moved out of their sight.
+ * The joined stop keeps the later stop's other fields, its size with them.
  */
 export function withStop(path: TokenPath, stop: PathStop): TokenPath {
   const stops = [...path.stops, stop];
   while (stops.length > MAX_PATH_STOPS) {
-    const corner = stops[1]!;
-    const { uncounted: _uncounted, ...next } = stops[2]!;
-    const joined: PathStop = corner.uncounted === true && stops[2]!.uncounted === true ? { ...next, uncounted: true } : next;
+    let i = 1;
+    while (i < stops.length - 1 && !(oneSize(stops[i - 1]!, stops[i]!) && oneSize(stops[i]!, stops[i + 1]!))) i++;
+    if (i === stops.length - 1) i = 1;
+    const corner = stops[i]!;
+    const { uncounted: _uncounted, ...next } = stops[i + 1]!;
+    const joined: PathStop = corner.uncounted === true && stops[i + 1]!.uncounted === true ? { ...next, uncounted: true } : next;
     if (corner.seen !== true || corner.joinedUnseen === true) joined.joinedUnseen = true;
-    stops.splice(1, 2, joined);
+    stops.splice(i, 2, joined);
   }
   return { turn: path.turn, stops };
 }
@@ -78,8 +96,15 @@ export function stopsForOwners(stops: readonly PathStop[]): PathStop[] {
   return stops.map((stop) => plainStop(stop, stop.uncounted === true));
 }
 
+/*
+ * A stop without the marks of who could see it. Its size goes with it to
+ * owners and others alike: it is the size the creature had where they saw
+ * it, so it tells them nothing they could not see, and every viewer's
+ * trail and feet read each stop at its own size.
+ */
 function plainStop(stop: PathStop, uncounted: boolean): PathStop {
   const out: PathStop = { x: stop.x, y: stop.y, elevation: stop.elevation };
   if (uncounted) out.uncounted = true;
+  if (stop.footprint) out.footprint = { w: stop.footprint.w, h: stop.footprint.h };
   return out;
 }

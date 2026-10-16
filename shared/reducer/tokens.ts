@@ -1,10 +1,11 @@
 import { keys } from "../keys.ts";
-import { healRevivesDead } from "../migrate.ts";
+import { healRevivesDead, resizeStop } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import { MAX_RULER_STOPS, type ActorPatch, type OpOf, type TokenPatch } from "../protocol.ts";
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
-import { pathThisTurn, sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
+import { footprintSize } from "../rules/footprint.ts";
+import { oneSize, pathThisTurn, sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
 import { COMPANION_OWNERS, NO_NUMBER, NOT_SHARED, actsOnCharacterTurn, checkCompanion, dropRows, syncOwners } from "./companions.ts";
 import { removeEntries } from "./encounter.ts";
 import { gone, invalid, type Env, type ResolvedActor, type Tx } from "./tx.ts";
@@ -308,10 +309,19 @@ function placeMoved(tx: Tx, { move, token, next }: { move: Move; token: Token; n
  * of this turn and starts one where the turn began. A move outside its
  * turn, or to another scene, drops the path, which counts as empty by then
  * anyway. A change of facing alone is not movement and leaves it be.
+ *
+ * A resize, a change of the footprint's size, is not movement either
+ * (docs/design-v1-token-window.md 8.7): its old size goes on every earlier
+ * stop that holds none, so those legs keep the feet and the look they had,
+ * and it appends an uncounted stop where it leaves the creature, even in
+ * place. Ops stored before version 6 recorded it as a move (`resizeStop`).
  */
 function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted = false): Token {
   if (after.sceneId !== before.sceneId) return withoutPath(after);
-  if (sameSpot(before, after)) return after;
+  const from = footprintSize(before);
+  const to = footprintSize(after);
+  const resized = (from.w !== to.w || from.h !== to.h) && resizeStop(tx.env.opVersion);
+  if (!resized && sameSpot(before, after)) return after;
   const encounter = tx.state.encounter;
   const turn = turnUnderWay(encounter);
   if (!turn) {
@@ -327,6 +337,10 @@ function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted
   if (!last || !sameSpot(last, before)) path = withStop(path, stopAt(judged.before, before, tx.env));
   // Where it stops is judged as the finished move will be: with it and every token moving with it there, their lights too.
   const stop = stopAt(judged.after(), after, tx.env);
+  if (resized) {
+    const sized = { turn: path.turn, stops: path.stops.map((s): PathStop => (s.footprint ? s : { ...s, footprint: { w: from.w, h: from.h } })) };
+    return { ...after, path: withStop(sized, { ...stop, uncounted: true }) };
+  }
   return { ...after, path: withStop(path, uncounted ? { ...stop, uncounted: true } : stop) };
 }
 
@@ -362,6 +376,9 @@ export function tokenMoveMany(tx: Tx, op: OpOf<"token.moveMany">): void {
   for (const moved of moves) placeMoved(tx, moved, judged);
 }
 
+/** The refusal of "Doesn't count" on a resize's leg, which is no move and counts no movement. */
+export const RESIZE_NOT_A_MOVE = "its last change was a resize, not a move";
+
 /**
  * "Doesn't count" (features section 4): the last leg of the active
  * creature's path this turn stops counting against its speed, or counts
@@ -374,6 +391,8 @@ export function tokenCountLeg(tx: Tx, op: OpOf<"token.countLeg">): void {
   const path = pathThisTurn(tx.state.encounter, token);
   const last = path?.stops[path.stops.length - 1];
   if (!path || !last || path.stops.length < 2) throw invalid("it has not moved this turn");
+  // A resize's leg never counts (docs/design-v1-token-window.md 8.7). Only paths from version 6 on hold one, so replay is unchanged.
+  if (!oneSize(path.stops[path.stops.length - 2]!, last)) throw invalid(RESIZE_NOT_A_MOVE);
   if ((last.uncounted !== true) === op.counts) return;
   const { uncounted: _uncounted, ...counted } = last;
   const stops = [...path.stops.slice(0, -1), op.counts ? counted : { ...counted, uncounted: true as const }];

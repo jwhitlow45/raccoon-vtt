@@ -218,6 +218,10 @@ describe("roomStateSchema", () => {
     assert.equal(withPath([]).ok, false);
     assert.equal(withPath([{ ...stop, seen: false }]).ok, false, "marks are present or absent, never false");
     assert.equal(withPath([{ ...stop, why: "x" }]).ok, false);
+    assert.equal(withPath([{ ...stop, footprint: { w: 0.5, h: 0.5 } }, { ...stop, footprint: { w: 20, h: 3 } }, stop]).ok, true, "each stop's size, from a resize (docs/design-v1-token-window.md 8.7)");
+    assert.equal(withPath([{ ...stop, footprint: { w: 0, h: 1 } }]).ok, false);
+    assert.equal(withPath([{ ...stop, footprint: { w: 1 } }]).ok, false);
+    assert.equal(withPath([{ ...stop, footprint: { w: 1, h: 1, d: 1 } }]).ok, false);
     assert.equal(parseRoomState(JSON.parse(JSON.stringify(room({ tokens: { t1: token("t1") } })))).ok, true);
   });
 

@@ -6,6 +6,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { CHANGED_SINCE } from "#shared/reducer/misc.ts";
 import { guardHash } from "#shared/reducer/tx.ts";
 import { canApply } from "#shared/permissions.ts";
+import { NO_ROOM_TO_GROW } from "#shared/rules/resize.ts";
 import { actor, apply, DM, env, member, P1, room, scene, token } from "#shared/testutil.ts";
 import { MOVED_SINCE, mergeInverses, poseRestore, posesAfter, UNDO_DEPTH, UndoStacks } from "./undo.ts";
 import { tallyOf } from "./undoLabels.ts";
@@ -231,7 +232,7 @@ describe("a player's move undo", () => {
 
   test("puts the token back and keeps what others changed since", () => {
     const { state, step } = moved();
-    assert.deepEqual(step.poses, { wolf: { sceneId: "s1", x: 5, y: 5, elevation: 0, rotation: 0, path: "null" } });
+    assert.deepEqual(step.poses, { wolf: { sceneId: "s1", x: 5, y: 5, elevation: 0, rotation: 0, size: "medium", path: "null" } });
     const hurt = applyOp(state, { t: "actor.hp", target: { tokenId: "wolf" }, change: { kind: "damage", amount: 5 } }, { memberId: "dm1", role: "dm" }, env(2));
     assert.ok(hurt.ok);
     const built = poseRestore(hurt.state, { ...step, poses: step.poses! }, visible);
@@ -299,7 +300,7 @@ describe("a player's move undo", () => {
 
   test("a group's moves merge into one step that keeps where the last op left each token", () => {
     const stacks = new UndoStacks();
-    const at = (x: number) => ({ sceneId: "s1", x, y: 0, elevation: 0, rotation: 0, path: "null" });
+    const at = (x: number) => ({ sceneId: "s1", x, y: 0, elevation: 0, rotation: 0, size: "medium" as const, path: "null" });
     stacks.push("p1", [{ key: "token:a", value: null, expectHash: "a".repeat(32) }], "moving 3 tokens", "g", { a: at(1) });
     stacks.push("p1", [{ key: "token:b", value: null, expectHash: "b".repeat(32) }], "moving 3 tokens", "g", { b: at(2) });
     stacks.push("p1", [{ key: "drawing:d", value: null, expectHash: "c".repeat(32) }], "drawing", "g");
@@ -458,5 +459,110 @@ describe("squeezes and teleports on a player's move undo (docs/design-v1-maps-vi
       assert.equal(state.log.filter((e) => e.data?.type === "teleport").length, lines, "undo and redo write no new line");
       if (fight) assert.deepEqual(state.tokens.thorn!.path!.stops.map((s) => s.uncounted === true), [false, true]);
     }
+  });
+});
+
+describe("a player's resize undo (docs/design-v1-token-window.md 8.7)", () => {
+  const visible = () => true;
+  const deps = { canUseAsset: () => true };
+  const DM_VIEWER: Viewer = { memberId: "dm1", role: "dm" };
+
+  /** P1's bear, Medium at 4,4, on a scene that blocks moves, and a wolf of theirs. */
+  function bear() {
+    const state = room({ tokens: { bear: token("bear", { name: "Bear", ownerIds: ["p1"], x: 4, y: 4 }), wolf: token("wolf", { name: "Wolf", ownerIds: ["p1"], x: 10, y: 4 }) } });
+    state.scenes.s1 = { ...state.scenes.s1!, blockMovement: true, autoWalls: "off" };
+    return state;
+  }
+
+  /** A player's op, checked and applied as the actor does, its step recorded with poses for a move or a resize. */
+  function play(state: ReturnType<typeof room>, op: Op, stacks: UndoStacks, seq: number) {
+    assert.ok(canApply(op, P1, state, deps).ok, `${op.t} is allowed`);
+    const result = applyOp(state, op, P1, env(seq));
+    assert.ok(result.ok, `${op.t}: ${result.ok ? "" : result.message}`);
+    assert.ok(UndoStacks.records("player", op));
+    stacks.push("p1", result.inverse!, "resizing Bear to Large", undefined, posesAfter(result.state, result.inverse!));
+    return result.state;
+  }
+
+  /** An undo or redo as the actor builds and checks it: the answer's words, or the state after it. */
+  function restore(state: ReturnType<typeof room>, stacks: UndoStacks, from: "undo" | "redo", seq: number): { state: ReturnType<typeof room> } | { refused: string } {
+    const step = from === "undo" ? stacks.popUndo("p1")! : stacks.popRedo("p1")!;
+    const built = poseRestore(state, { ...step, poses: step.poses! }, visible);
+    if (!built.ok) return { refused: built.message };
+    const op: Op = { t: "sys.restore", entries: built.entries, from, deps: true };
+    const decision = canApply(op, P1, state, deps);
+    if (!decision.ok) return { refused: decision.message };
+    const result = applyOp(state, op, P1, env(seq));
+    assert.ok(result.ok);
+    stacks.pushRestored("p1", from, result.inverse!, step.label, posesAfter(result.state, result.inverse!), step.origin);
+    return { state: result.state };
+  }
+  const settled = (r: ReturnType<typeof restore>) => {
+    assert.ok("state" in r, "refused" in r ? r.refused : "");
+    return r.state;
+  };
+  const grow: Op = { t: "token.update", tokenId: "bear", patch: { size: "large" } };
+
+  test("takes back the size and the place alone, damage dealt since kept, and redo grows it again", () => {
+    const stacks = new UndoStacks();
+    let state = play(bear(), { t: "token.update", tokenId: "bear", patch: { size: "huge", x: 3, y: 3 } }, stacks, 1);
+    assert.deepEqual(stacks.peek("p1", "undo")!.poses!.bear, { sceneId: "s1", x: 3, y: 3, elevation: 0, rotation: 0, size: "huge", path: "null" });
+    state = apply(state, { t: "actor.hp", target: { tokenId: "bear" }, change: { kind: "damage", amount: 6 } }, DM_VIEWER, 2);
+    state = settled(restore(state, stacks, "undo", 3));
+    const bearNow = state.tokens.bear!;
+    assert.deepEqual([bearNow.size, bearNow.x, bearNow.y], ["medium", 4, 4]);
+    assert.equal("inline" in bearNow.actor && bearNow.actor.inline.hp.cur, 14, "the damage stays");
+    state = settled(restore(state, stacks, "redo", 4));
+    assert.deepEqual([state.tokens.bear!.size, state.tokens.bear!.x, state.tokens.bear!.y], ["huge", 3, 3]);
+    assert.equal("inline" in state.tokens.bear!.actor && state.tokens.bear!.actor.inline.hp.cur, 14);
+  });
+
+  test("is refused once someone moved or resized the token since", () => {
+    for (const since of [
+      { t: "token.move", tokenId: "bear", x: 6, y: 4 },
+      { t: "token.update", tokenId: "bear", patch: { size: "huge", x: 3, y: 3 } },
+      { t: "token.update", tokenId: "bear", patch: { size: "custom", w: 2, h: 2 } },
+    ] as Op[]) {
+      const stacks = new UndoStacks();
+      let state = play(bear(), grow, stacks, 1);
+      state = apply(state, since, DM_VIEWER, 2);
+      assert.deepEqual(restore(state, stacks, "undo", 3), { refused: MOVED_SINCE }, JSON.stringify(since));
+    }
+    // A move's undo is refused the same way once the DM resized the token, as the size is part of where it stands.
+    const stacks = new UndoStacks();
+    let state = play(bear(), { t: "token.move", tokenId: "bear", x: 6, y: 4 }, stacks, 1);
+    state = apply(state, { t: "token.update", tokenId: "bear", patch: { size: "large" } }, DM_VIEWER, 2);
+    assert.deepEqual(restore(state, stacks, "undo", 3), { refused: MOVED_SINCE });
+  });
+
+  test("a wall drawn between a growth's undo and its redo refuses the redo", () => {
+    const stacks = new UndoStacks();
+    let state = play(bear(), grow, stacks, 1);
+    state = settled(restore(state, stacks, "undo", 2));
+    state = apply(state, { t: "build.walls", sceneId: "s1", put: [{ id: "wall00000001", a: [5, 4], b: [5, 6], f: { kind: "wall" } }] }, DM_VIEWER, 3);
+    assert.deepEqual(restore(state, stacks, "redo", 4), { refused: NO_ROOM_TO_GROW });
+  });
+
+  test("a token given to another player since refuses the undo and the redo, while a move's undo in the same room passes", () => {
+    const give = (state: ReturnType<typeof room>, seq: number) => {
+      let next = apply(state, { t: "room.update", settings: { playersMoveAny: "all" } }, DM_VIEWER, seq);
+      next = apply(next, { t: "token.update", tokenId: "bear", patch: { ownerIds: ["p2"] } }, DM_VIEWER, seq + 1);
+      return apply(next, { t: "token.update", tokenId: "wolf", patch: { ownerIds: ["p2"] } }, DM_VIEWER, seq + 2);
+    };
+    const undoStacks = new UndoStacks();
+    let state = play(bear(), grow, undoStacks, 1);
+    state = give(state, 2);
+    assert.deepEqual(restore(state, undoStacks, "undo", 5), { refused: "that is not yours" });
+
+    const redoStacks = new UndoStacks();
+    let again = play(bear(), grow, redoStacks, 1);
+    again = settled(restore(again, redoStacks, "undo", 2));
+    again = give(again, 3);
+    assert.deepEqual(restore(again, redoStacks, "redo", 6), { refused: "that is not yours" });
+
+    const moveStacks = new UndoStacks();
+    let moved = play(bear(), { t: "token.move", tokenId: "wolf", x: 12, y: 4 }, moveStacks, 1);
+    moved = give(moved, 2);
+    settled(restore(moved, moveStacks, "undo", 5));
   });
 });

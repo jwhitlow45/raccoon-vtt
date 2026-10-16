@@ -812,7 +812,7 @@ describe("a player's undo", () => {
       await actor.op(phone.conn, 6, { t: "undo" });
       const refused = await answerTo(phone.sent, 6);
       assert.ok(refused !== "stuck");
-      assert.deepEqual(refused.rejects, [{ n: 6, code: "invalid", message: "could not undo moving Goblin: it was moved since" }]);
+      assert.deepEqual(refused.rejects, [{ n: 6, code: "invalid", message: "could not undo moving Goblin: it was moved or resized since" }]);
       assert.deepEqual([goblin().x, goblin().y], [8, 8]);
       const restores = db.storedOps.filter((op) => (op as { t: string }).t === "sys.restore");
       assert.ok(restores.length >= 3 && restores.every((op) => (op as { deps?: boolean }).deps === true));
@@ -982,7 +982,7 @@ describe("a player's undo", () => {
       await actor.op(phone.conn, 2, { t: "undo" });
       const refused = await answerTo(phone.sent, 2);
       assert.ok(refused !== "stuck");
-      assert.deepEqual(refused.rejects, [{ n: 2, code: "invalid", message: "could not undo moving Goblin: it was moved since" }]);
+      assert.deepEqual(refused.rejects, [{ n: 2, code: "invalid", message: "could not undo moving Goblin: it was moved or resized since" }]);
       const goblin = actor.committed.state.tokens[tokenId]!;
       assert.deepEqual([goblin.sceneId, goblin.x, goblin.y], [crypt, 5, 5]);
     } finally {

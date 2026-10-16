@@ -100,7 +100,8 @@ describe("token access mirrors the server's permissions", () => {
       for (const viewer of [DM, P1, P2]) {
         const access = tokenAccess({ role: viewer.role, memberId: viewer.memberId, view: state, token: state.tokens[tokenId]! });
         for (const field of Object.keys(TOKEN_SAMPLES) as (keyof TokenPatch)[]) {
-          if (field === "actor") continue;
+          // A size is no field an owner edits but a resize, judged by its own rule (shared/rules/resize.ts).
+          if (field === "actor" || field === "size") continue;
           const patch = { [field]: TOKEN_SAMPLES[field] } as TokenPatch;
           const allowed = canApply({ t: "token.update", tokenId, patch }, viewer, state, deps).ok;
           assert.equal(access.canEditToken(field), allowed, `${viewer.memberId} ${field} on ${tokenId}`);

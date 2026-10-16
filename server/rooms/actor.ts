@@ -5,7 +5,7 @@ import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { HandoutPage, LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { canApply, type PermissionDeps } from "#shared/permissions.ts";
 import { projectEntity, visibleAssetIds } from "#shared/project.ts";
-import { clientOpSchema, isPoseOp, serverOnlyOpSchema, type Op, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
+import { clientOpSchema, isPoseOp, isResizeOp, serverOnlyOpSchema, type Op, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { restoreAddedAssets } from "#shared/referencedAssets.ts";
 import { hpUndoRestore } from "#shared/reducer/hpUndo.ts";
@@ -888,8 +888,9 @@ export class RoomActor {
       if (inverse && !fromLog) this.#undo.pushRestored(viewer.memberId, restoredFrom, inverse, step.label, step.poses ? posesAfter(this.#staged.state, inverse) : undefined, step.origin, step.teleport === true);
     } else if (UndoStacks.records(viewer.role, op) && reduced.inverse) {
       const inverse = reduced.inverse;
-      // A player's move takes back only the move (undo.ts poseRestore). The DM's undo restores whole values, as for every other op.
-      const poses = viewer.role === "player" && isPoseOp(op) ? posesAfter(this.#staged.state, inverse) : undefined;
+      // A player's move or resize takes back only the move or the resize (undo.ts poseRestore). The DM's undo restores whole
+      // values, as for every other op.
+      const poses = viewer.role === "player" && (isPoseOp(op) || isResizeOp(op)) ? posesAfter(this.#staged.state, inverse) : undefined;
       // A teleport's step remembers it, so its redo passes the wall again (docs/design-v1-maps-vision.md 4.1).
       const teleport = op.t === "token.move" && op.teleport !== undefined;
       this.#undo.push(viewer.memberId, inverse, describeOp(clientOp, before, viewer, this.#staged.state), cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport);

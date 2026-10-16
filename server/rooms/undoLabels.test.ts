@@ -93,6 +93,15 @@ describe("undo step labels", () => {
     assert.equal(describeOp({ t: "scene.update", sceneId: "s1", patch: { blockMovement: true, name: "Lair" } }, s), "changing the scene Goblin cave");
   });
 
+  test("a resize names the new size (docs/design-v1-token-window.md 8.7)", () => {
+    const s = state();
+    s.tokens.thorn = token("thorn", { kind: "pc", name: "Thorn", ownerIds: ["p1"] });
+    assert.equal(describeOp({ t: "token.update", tokenId: "thorn", patch: { size: "large" } }, s), "resizing Thorn to Large");
+    assert.equal(describeOp({ t: "token.update", tokenId: "thorn", patch: { size: "huge", x: 2, y: 2 } }, s, { memberId: "p1", role: "player" }), "resizing Thorn to Huge");
+    assert.equal(describeOp({ t: "token.update", tokenId: "g2", patch: { size: "custom", w: 2, h: 3 } }, s), "resizing Goblin 2 to 2 by 3 squares");
+    assert.equal(describeOp({ t: "token.update", tokenId: "g2", patch: { size: "large", locked: true } }, s), "changing Goblin 2", "a patch with more than a resize is a change");
+  });
+
   test("vision settings, a token's light and a teleport say what they did", () => {
     const s = state();
     assert.equal(describeOp({ t: "scene.update", sceneId: "s1", patch: { vision: { on: true, light: "bright" } } }, s), "turning on party vision on the scene Goblin cave");

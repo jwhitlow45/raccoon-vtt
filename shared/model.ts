@@ -683,6 +683,15 @@ export type PathStop = {
    * there (rules/path.ts).
    */
   joinedUnseen?: true;
+  /**
+   * The footprint in cells the creature had when the stop was made, where
+   * that differs from its size now: a resize on its turn writes its old
+   * size here on every earlier stop that holds none
+   * (docs/design-v1-token-window.md 8.7). A stop without it was made at the
+   * token's size now. So each leg is measured and drawn at the sizes it was
+   * made at, and a resize never changes the feet moved before it.
+   */
+  footprint?: { w: number; h: number };
 };
 
 export type LifeState = "alive" | "dying" | "stable" | "dead";

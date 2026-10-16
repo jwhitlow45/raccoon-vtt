@@ -1,7 +1,7 @@
 import { chunkKey, doorChunk, keys } from "#shared/keys.ts";
 import type { Actor, LogEvent, RoomState, Token, Viewer } from "#shared/model.ts";
 import { projectEntity, type ProjectedToken } from "#shared/project.ts";
-import type { ActorTarget, ClientOp, OpOf } from "#shared/protocol.ts";
+import { isResizeOp, type ActorTarget, type ClientOp, type OpOf, type TokenPatch } from "#shared/protocol.ts";
 import { testText } from "#shared/rules/skills.ts";
 
 /**
@@ -69,6 +69,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `adding ${tokenName(op.token)}`;
     case "token.update": {
       if (op.patch.name !== undefined) return `renaming ${token(op.tokenId)} to ${quoted(op.patch.name, "nothing")}`;
+      if (isResizeOp(op)) return `resizing ${token(op.tokenId)} to ${sizeWords(op.patch, before.tokens[op.tokenId])}`;
       const only = Object.keys(op.patch).length === 1;
       if (only && op.patch.light !== undefined) {
         const lit = (l: { bright: number; dim: number } | null | undefined) => !!l && (l.bright > 0 || l.dim > 0);
@@ -536,4 +537,13 @@ function doorPhrase(op: OpOf<"door.set">, before: RoomState): string {
   if (op.state === "open") return "opening a door";
   if (op.state === "locked") return "locking a door";
   return was === "locked" ? "unlocking a door" : "closing a door";
+}
+
+/** A resize's new size as its step names it: "Large", or a Custom size's squares, its width and height from the patch or the token. */
+function sizeWords(patch: TokenPatch, token: Token | undefined): string {
+  const size = patch.size ?? token?.size ?? "medium";
+  if (size !== "custom") return size.charAt(0).toUpperCase() + size.slice(1);
+  const w = patch.w ?? token?.w ?? 1;
+  const h = patch.h ?? token?.h ?? 1;
+  return `${w} by ${h} squares`;
 }

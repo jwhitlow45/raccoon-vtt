@@ -5,7 +5,7 @@ import type { BuildState } from "../ruleHooks.ts";
 import { computeCoverage, creaturesInArea, defaultIncludeOrigin, type AreaTemplateInput } from "./aoe.ts";
 import { boxDistanceFt, tokenCellBox } from "./distance.ts";
 import { encodeHeights } from "./heights.ts";
-import { coreBlocked, coreSize, crossesInterior, landing, legStop, lineClear, previewSqueezed, squeezeFits, sweptTouches, type MovingToken } from "./movement.ts";
+import { coreBlocked, coreSize, crossesInterior, landing, legStop, lineClear, previewSqueezed, resizeLegStop, resizeStands, squeezeFits, sweptTouches, type MovingToken } from "./movement.ts";
 import { sceneWalls } from "./walls.ts";
 
 type Spec = {
@@ -512,6 +512,39 @@ describe("the wall set across moves", () => {
     const moved = applyOp(state, { t: "token.move", tokenId: "t1", x: 2, y: 2 }, DM, env(1));
     assert.ok(moved.ok);
     assert.equal(sceneWalls(moved.state.scenes.s1!, moved.state.buildChunks), before);
+  });
+});
+
+describe("after a resize (docs/design-v1-token-window.md 8.3 and 8.5)", () => {
+  test("the next leg is judged at the new size", () => {
+    // A wall along x = 10 with a 10 ft opening at y 5 to 7.
+    const s = world({ edges: { ...line("w", 10, 0, 5), ...line("w", 10, 7, 20) } });
+    assert.equal(legStop(s, tok(s, { size: "large", x: 7, y: 5 }), go(12, 5)), null, "a Large creature passes");
+    assert.equal(legStop(s, tok(s, { size: "huge", x: 6, y: 5 }), go(12, 5)), null, "grown to Huge, it still fits");
+    assert.equal(legStop(s, tok(s, { size: "gargantuan", x: 5, y: 4.5 }), go(12, 4.5))?.blocker, "wall", "grown to Gargantuan, it does not");
+  });
+
+  test("a footprint the DM grew over a wall steps off only toward its middle's side", () => {
+    const s = world({ edges: line("w", 4, 0, 20) });
+    const huge = tok(s, { size: "huge", x: 3, y: 3 });
+    assert.equal(coreBlocked(s, huge, { x: 3, y: 3 }), true, "its core lies over the wall at x 4");
+    assert.equal(legStop(s, huge, go(4, 3)), null, "its middle at x 4.5 is right of the wall, so it steps off to the right");
+    assert.equal(legStop(s, huge, go(2, 3))?.blocker, "wall", "and never crosses to the left");
+  });
+
+  test("a resize's own tests: the new core standing, and its leg from the middle now, naming a ledge as a move does", () => {
+    const s = world({ edges: line("w", 5, 0, 20) });
+    const medium = tok(s, { x: 4, y: 4 });
+    assert.equal(resizeStands(s, medium, { size: "large", x: 4, y: 4 }), false);
+    assert.equal(resizeStands(s, medium, { size: "large", x: 3, y: 4 }), true);
+    assert.equal(resizeLegStop(s, medium, { size: "large", x: 3, y: 4 }), null);
+    assert.equal(resizeLegStop(s, tok(s, { size: "large", x: 4, y: 4 }), { size: "tiny", x: 5, y: 4 }), null, "a shrink whose middle stays on the wall's line steps off either way");
+    const ledge = world({ heights: Object.fromEntries(Array.from({ length: 100 }, (_, k) => [`${5 + (k % 10)},${Math.floor(k / 10)}`, 10])) });
+    // A Huge creature standing at 10 ft over the ledge's edge at x 5, its middle left of it.
+    const walker = tok(ledge, { size: "huge", x: 3, y: 3, elevation: 10 });
+    assert.equal(resizeLegStop(ledge, walker, { size: "medium", x: 5, y: 4 }), "ledge", "its middle would cross the ledge's edge");
+    assert.equal(resizeLegStop(ledge, walker, { size: "medium", x: 4, y: 4 }), null, "a shrink that keeps its middle");
+    assert.equal(resizeLegStop(ledge, { ...walker, elevation: 20 }, { size: "medium", x: 5, y: 4 }), null, "a flier above it");
   });
 });
 

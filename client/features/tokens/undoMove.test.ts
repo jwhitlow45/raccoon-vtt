@@ -90,6 +90,11 @@ describe("Undo move in the token bar", () => {
     assert.deepEqual(noted.offers, [{ tokenIds: ["a"], ns: [1] }]);
   });
 
+  test("a resize goes on the player's stack but is no move, so the bar offers no Undo move after it (docs/design-v1-token-window.md 8.7)", () => {
+    const resized = after([move("a"), { t: "token.update", tokenId: "a", patch: { size: "large", x: 0, y: 0 } }]);
+    assert.deepEqual(resized.offers, []);
+  });
+
   test("the bands of one gesture are one offer, named by the last band", () => {
     const s = after([move("x"), queued(2, move("a"), "g"), queued(3, move("b"), "g")]);
     assert.deepEqual(s.offers, [{ tokenIds: ["x"], ns: [1] }, { tokenIds: ["a", "b"], ns: [2, 3], group: "g" }]);

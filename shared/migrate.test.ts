@@ -8,6 +8,7 @@ import {
   migrateOp,
   migrateSnapshot,
   opMigrations,
+  resizeStop,
   reviveToOne,
   runMigrations,
   snapshotMigrations,
@@ -374,7 +375,6 @@ describe("migrations", () => {
 
 describe("op version 5: healing the dead and Revive (docs/design-v1-combat-flow.md 4.7)", () => {
   test("the step from 4 returns every op unchanged", () => {
-    assert.equal(OP_VERSION, 5);
     const ops: unknown[] = [
       { t: "actor.hp", target: { tokenId: "g1" }, change: { kind: "heal", amount: 5 } },
       { t: "actor.life", target: { tokenId: "g1" }, life: "alive" },
@@ -400,5 +400,25 @@ describe("op version 5: healing the dead and Revive (docs/design-v1-combat-flow.
     assert.equal(reviveToOne(1), false);
     assert.equal(reviveToOne(5), true);
     assert.equal(reviveToOne(undefined), true);
+  });
+});
+
+describe("op version 6: a resize is not movement (docs/design-v1-token-window.md 8.7)", () => {
+  test("is the version now, and the step from 5 returns every op unchanged", () => {
+    assert.equal(OP_VERSION, 6);
+    const ops: unknown[] = [
+      { t: "token.update", tokenId: "g1", patch: { size: "large", x: 3, y: 0 } },
+      { t: "token.update", tokenId: "g1", patch: { size: "huge" } },
+      { t: "sys.restore", entries: [{ key: "token:g1", value: null, expectHash: "abc" }], from: "undo", deps: true },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 5, 6, opMigrations), op);
+    assert.equal(migrateOp(ops[0], 5), ops[0]);
+  });
+
+  test("resizeStop is false before version 6, and true at 6 and for a live op", () => {
+    assert.equal(resizeStop(5), false);
+    assert.equal(resizeStop(1), false);
+    assert.equal(resizeStop(6), true);
+    assert.equal(resizeStop(undefined), true);
   });
 });

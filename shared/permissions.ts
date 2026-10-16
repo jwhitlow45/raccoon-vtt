@@ -11,6 +11,8 @@ import { boxDistanceFt, tokenCellBox } from "./rules/distance.ts";
 import { footprintSize } from "./rules/footprint.ts";
 import { groundAt } from "./rules/heights.ts";
 import type { Point } from "./rules/geom.ts";
+import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY } from "./rules/movement.ts";
+import { OWNER_SIZES, resizeRefusal } from "./rules/resize.ts";
 import { turnMovedOn } from "./rules/initiative.ts";
 import { EXHAUSTION_MAX_LEVEL, levelFits } from "./srd/conditions.ts";
 
@@ -429,7 +431,8 @@ function forPlayer(op: Op, c: Check): Decision {
       const token = c.visibleToken(op.tokenId);
       if (!token) return GONE;
       if (!ownsToken(c.state, c.actor, token)) return NOT_YOURS;
-      if (token.companion) return companionUpdateCheck(c, token.companion, op.patch);
+      if (token.companion) return companionUpdateCheck(c, token, token.companion, op.patch);
+      if (op.patch.size !== undefined) return resizeCheck(c, token, op.patch);
       for (const field of Object.keys(op.patch)) {
         if (!OWNER_TOKEN_FIELDS.has(field)) return refuse("forbidden", `owners cannot change ${field}`);
         if ((field === "name" || field === "publicName") && token.kind !== "pc") return refuse("forbidden", "only a PC's owner renames it");
@@ -615,19 +618,13 @@ function forPlayer(op: Op, c: Check): Decision {
       return OK;
 
     case "sys.restore": {
-      // A player's stack holds only their own drawings and token moves (design 7.7), so that is all a restore may touch.
+      // A player's stack holds only their own drawings and token moves and resizes (design 7.7), so that is all a restore may touch.
       for (const entry of op.entries) {
         if (entry.key.startsWith("token:")) {
-          const tokenId = entry.key.slice("token:".length);
-          const d = restoreMoveCheck(c, tokenId, entry.value);
-          if (!d.ok) return d;
           // An undo retraces a move that was allowed when made. A redo makes it again, so walls stop it as they would a new
           // move, except a teleport's, which passed them the first time too (docs/design-v1-maps-vision.md 4.1).
-          if (op.from === "redo" && !op.teleport) {
-            const restored = entry.value as Token;
-            const r = legCheck(c, tokenId, restored, false);
-            if (!r.ok) return r;
-          }
+          const d = restorePoseCheck(c, entry.key.slice("token:".length), entry.value, op.from === "redo" && !op.teleport);
+          if (!d.ok) return d;
           continue;
         }
         if (!entry.key.startsWith("drawing:")) return FORBIDDEN;
@@ -746,9 +743,9 @@ export function movesAnyToken(settings: Partial<Pick<RoomSettings, "playersMoveA
  */
 const POSE_FIELDS = ["x", "y", "elevation", "rotation", "path", "squeeze", "rev"] as const;
 
-function withoutPose(token: Token): string {
+function withoutPose(token: Token, also: readonly string[] = []): string {
   const rest: Record<string, unknown> = { ...token };
-  for (const field of POSE_FIELDS) delete rest[field];
+  for (const field of [...POSE_FIELDS, ...also]) delete rest[field];
   return stableStringify(rest);
 }
 
@@ -777,9 +774,61 @@ function restoreMoveCheck(c: Check, tokenId: string, value: unknown): Decision {
   return withoutPose(restored) === withoutPose(current) ? OK : refuse("forbidden", "an undo of yours only moves tokens back");
 }
 
-/** What a player hears when a wall or a ledge stops a move. A secret door not yet found answers as a wall, as players see it. */
-export const WALL_IN_THE_WAY = "A wall is in the way.";
-export const LEDGE_IN_THE_WAY = "A ledge is in the way.";
+/** The fields a resize sets beside a move's, which a player's undo or redo of a resize may also put back. */
+const SIZE_FIELDS = ["size", "w", "h"] as const;
+
+/**
+ * A player's undo or redo of a move or a resize (docs/design-v1-token-window.md
+ * 8.7), judged two ways by whether it changes the token's size. One that
+ * keeps the size is a move's, judged by restoreMoveCheck as before, and its
+ * redo meets the walls as a new move would (`redo`, false for a teleport's).
+ * One that changes the size needs the rights of a resize now, not when the
+ * step was made: the player owns the token, it is unlocked, and neither its
+ * size now nor the one put back is Custom. So a token given to another
+ * player since refuses it, even where this player may still move any token.
+ * Then the footprint put back is judged as a resize to it (resizeRefusal),
+ * and nothing but the pose and the size may differ.
+ */
+function restorePoseCheck(c: Check, tokenId: string, value: unknown, redo: boolean): Decision {
+  const current = c.state.tokens[tokenId];
+  const restored = value && typeof value === "object" ? (value as Token) : null;
+  if (!current || !restored || SIZE_FIELDS.every((field) => restored[field] === current[field])) {
+    const d = restoreMoveCheck(c, tokenId, value);
+    return d.ok && redo && restored ? legCheck(c, tokenId, restored, false) : d;
+  }
+  const token = c.visibleToken(tokenId);
+  if (!token) return GONE;
+  if (!ownsToken(c.state, c.actor, token)) return NOT_YOURS;
+  if (token.locked) return refuse("forbidden", "that token is locked");
+  if (current.size === "custom" || restored.size === "custom") return refuse("forbidden", OWNER_SIZES);
+  if (withoutPose(restored, SIZE_FIELDS) !== withoutPose(current, SIZE_FIELDS)) return refuse("forbidden", "an undo of yours only moves or resizes tokens back");
+  const refusal = resizeRefusal(c.state, current, restored);
+  return refusal === null ? OK : refuse("forbidden", refusal);
+}
+
+/**
+ * A player's resize (docs/design-v1-token-window.md 8.6): a `token.update`
+ * whose patch holds `size`, from the owner branch and from
+ * companionUpdateCheck, so a companion and any other owned token are judged
+ * by one rule. The player owns the token and it is unlocked, as for a move,
+ * since a resize can shift it. The patch holds the size and the place
+ * alone, one of the six sizes, and a Custom token stays the DM's. Then the
+ * spot is judged by rules 4 and 5 (resize.ts resizeRefusal), a place left
+ * out of the patch read as the current one. The client runs the same check
+ * on its own copy, so a device sends only a spot the server takes, unless
+ * its view lacks a wall.
+ */
+function resizeCheck(c: Check, token: Token, patch: TokenPatch): Decision {
+  if (!ownsToken(c.state, c.actor, token)) return NOT_YOURS;
+  if (token.locked) return refuse("forbidden", "that token is locked");
+  const sizeAndPlace = Object.keys(patch).every((field) => field === "size" || field === "x" || field === "y");
+  if (!sizeAndPlace || patch.size === undefined || patch.size === "custom" || token.size === "custom") return refuse("forbidden", OWNER_SIZES);
+  const refusal = resizeRefusal(c.state, token, { size: patch.size, x: patch.x ?? token.x, y: patch.y ?? token.y });
+  return refusal === null ? OK : refuse("forbidden", refusal);
+}
+
+// What a player hears when a wall or a ledge stops a move, kept with the move rules since a resize says it too.
+export { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY };
 /** A teleport lands on the map, wherever the walls are (section 4.1). */
 export const TELEPORT_OFF_MAP = "a teleport lands inside the map";
 
@@ -960,7 +1009,9 @@ const COMPANION_OWNER_FIELDS = new Set(["name", "actor", "kind", "companion", "c
  * The reducer's own rules (an effect's turn, owners, numbers) then apply
  * as for the DM.
  */
-function companionUpdateCheck(c: Check, link: NonNullable<Token["companion"]>, patch: TokenPatch): Decision {
+function companionUpdateCheck(c: Check, token: Token, link: NonNullable<Token["companion"]>, patch: TokenPatch): Decision {
+  // A companion's size is its owners' through the one rule every owned token's resize takes (docs/design-v1-token-window.md 8.6).
+  if (patch.size !== undefined) return resizeCheck(c, token, patch);
   for (const field of Object.keys(patch)) {
     if (field === "publicName") return refuse("forbidden", "only a PC's owner renames it");
     if (!OWNER_TOKEN_FIELDS.has(field) && !COMPANION_OWNER_FIELDS.has(field)) return refuse("forbidden", `owners cannot change ${field}`);

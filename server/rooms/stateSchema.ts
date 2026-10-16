@@ -207,6 +207,7 @@ const pathStop = z.strictObject({
   uncounted: z.literal(true).optional(),
   seen: z.literal(true).optional(),
   joinedUnseen: z.literal(true).optional(),
+  footprint: z.strictObject({ w: z.number().min(0.5).max(20), h: z.number().min(0.5).max(20) }).optional(),
 });
 
 const token = z.strictObject({

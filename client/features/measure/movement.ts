@@ -1,6 +1,6 @@
 import type { PathStop, TokenPath, TurnStart } from "#shared/model.ts";
 import { legFeet, type DiagonalCounter } from "#shared/rules/distance.ts";
-import { footprintRect, type PlacedToken } from "#shared/rules/footprint.ts";
+import { footprintRect, footprintSize, type PlacedToken } from "#shared/rules/footprint.ts";
 import type { Rect } from "#shared/rules/geom.ts";
 import { pathThisTurn, sameSpot } from "#shared/rules/path.ts";
 import { formatFeet, type DistanceRules, type Point } from "./ruler.ts";
@@ -32,20 +32,44 @@ export type TurnView = {
 };
 
 /**
+ * A spot with the footprint the creature had there, where that differs
+ * from the token's size now (PathStop.footprint). Without it, the spot is
+ * read at the token's size now.
+ */
+export type SizedSpot = Spot & Pick<PathStop, "footprint">;
+
+/** The token as it stood at a spot, at the size it had there. */
+function standingAt(token: PlacedToken, spot: SizedSpot): PlacedToken {
+  return spot.footprint ? { size: "custom", w: spot.footprint.w, h: spot.footprint.h, x: spot.x, y: spot.y } : { ...token, x: spot.x, y: spot.y };
+}
+
+/** The footprint a trail draws at a spot, in cells, at the size the creature had there. */
+export function spotRect(token: PlacedToken, spot: SizedSpot): Rect {
+  return footprintRect(standingAt(token, spot));
+}
+
+/**
  * Feet between two spots of one token: the steps its snapped top-left
  * corner takes, with its change of elevation as the vertical steps. Counting
  * the corner means a Large creature moved one square has moved 5 ft, where
  * an edge-to-edge reading would call its old and new footprints overlapping.
+ * Each end is snapped and measured at its own size, so a Tiny's half-square
+ * leg keeps its 2.5 ft after it grows. A leg whose ends differ in size,
+ * which only legs joined across a resize are once the path is full
+ * (rules/path.ts withStop), runs between the two footprints' middles.
  *
  * `counter` carries the diagonals of earlier legs under the 5-10-5 rule,
  * which counts every second diagonal of the whole move double, and is
  * updated in place, as a ruler's legs do (rules/distance.ts).
  */
-export function movedFeet(token: PlacedToken, from: Spot, to: Spot, rules: DistanceRules, counter?: DiagonalCounter): number {
-  const a = footprintRect({ ...token, x: from.x, y: from.y });
-  const b = footprintRect({ ...token, x: to.x, y: to.y });
+export function movedFeet(token: PlacedToken, from: SizedSpot, to: SizedSpot, rules: DistanceRules, counter?: DiagonalCounter): number {
+  const a = spotRect(token, from);
+  const b = spotRect(token, to);
+  const sizeA = footprintSize(standingAt(token, from));
+  const sizeB = footprintSize(standingAt(token, to));
+  const across = sizeA.w !== sizeB.w || sizeA.h !== sizeB.h ? { x: (b.w - a.w) / 2, y: (b.h - a.h) / 2 } : { x: 0, y: 0 };
   const dz = Math.abs(to.elevation - from.elevation) / rules.feetPerCell;
-  const ft = legFeet(Math.abs(b.x - a.x), Math.abs(b.y - a.y), dz, rules.diagonal, rules.feetPerCell, counter);
+  const ft = legFeet(Math.abs(b.x - a.x + across.x), Math.abs(b.y - a.y + across.y), dz, rules.diagonal, rules.feetPerCell, counter);
   return rules.diagonal === "euclid" ? Math.round(ft) : ft;
 }
 
@@ -71,13 +95,15 @@ export type TrailLeg = { from: Spot; to: Spot; counted: boolean };
 export type TurnTrail = {
   /** Where the turn began, each stop since, and where the creature stands now, in order. */
   spots: Spot[];
+  /** The footprint at each spot, in cells, at the size the creature had there. */
+  rects: Rect[];
   /** `legs[i]` joins `spots[i]` and `spots[i + 1]`. */
   legs: TrailLeg[];
   /** The counted legs' feet. */
   movedFt: number;
   /** The diagonals the counted legs took, for a drag to count on from under the 5-10-5 rule. */
   diagonals: DiagonalCounter;
-  /** The footprints where the turn began and where the creature stands now, in cells. */
+  /** The footprints where the turn began, at the size it began at, and where the creature stands now, in cells. */
   from: Rect;
   to: Rect;
 };
@@ -103,7 +129,7 @@ export function turnTrail(input: {
   if (!encounter || !token || token.sceneId !== input.sceneId) return null;
   const path = pathNow(encounter, token, input.role);
   const start = encounter.turnStart;
-  let stops: (Spot & Pick<PathStop, "uncounted">)[];
+  let stops: (SizedSpot & Pick<PathStop, "uncounted">)[];
   if (path) stops = [...path.stops];
   else if (start && start.entryId === encounter.activeEntryId && start.tokenId === token.id && start.sceneId === token.sceneId) stops = [start];
   else return null;
@@ -112,10 +138,11 @@ export function turnTrail(input: {
   if (stops.length < 2) return null;
   const spots = stops.map((s): Spot => ({ x: s.x, y: s.y, elevation: s.elevation }));
   const legs = spots.slice(1).map((to, i): TrailLeg => ({ from: spots[i]!, to, counted: stops[i + 1]!.uncounted !== true }));
-  // A leg that does not count takes no diagonals either, so the 5-10-5 count runs on across it.
+  // A leg that does not count takes no diagonals either, so the 5-10-5 count runs on across it, a resize's leg included.
   const diagonals: DiagonalCounter = { h: 0, v: 0 };
-  const movedFt = legs.reduce((sum, leg) => (leg.counted ? sum + movedFeet(token, leg.from, leg.to, input.rules, diagonals) : sum), 0);
-  return { spots, legs, movedFt, diagonals, from: footprintRect({ ...token, x: spots[0]!.x, y: spots[0]!.y }), to: footprintRect(token) };
+  const movedFt = legs.reduce((sum, leg, i) => (leg.counted ? sum + movedFeet(token, stops[i]!, stops[i + 1]!, input.rules, diagonals) : sum), 0);
+  const rects = stops.map((stop) => spotRect(token, stop));
+  return { spots, rects, legs, movedFt, diagonals, from: rects[0]!, to: footprintRect(token) };
 }
 
 /**

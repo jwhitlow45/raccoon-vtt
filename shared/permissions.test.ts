@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { MoveAnyToken } from "./model.ts";
-import { canApply, movesAnyToken, PLAYED_WITH_OTHERS, type AssetKind, type PermissionDeps } from "./permissions.ts";
-import type { Op, RestoreEntry } from "./protocol.ts";
+import type { MoveAnyToken, RoomState } from "./model.ts";
+import { canApply, movesAnyToken, PLAYED_WITH_OTHERS, WALL_IN_THE_WAY, type AssetKind, type PermissionDeps } from "./permissions.ts";
+import { projectState } from "./project.ts";
+import { isPoseOp, isResizeOp, onPlayerUndoStack, type Op, type RestoreEntry } from "./protocol.ts";
+import { NO_ROOM_TO_GROW, OWNER_SIZES, RESIZE_KEEPS_PLACE, resizeSpot } from "./rules/resize.ts";
 import { DM, P1, P2, actor, apply, blockOf, character, customMonster, drawing, entry, imageRef, reveal, room, template, token } from "./testutil.ts";
 
 const deps: PermissionDeps = { canUseAsset: (memberId, assetId) => assetId.startsWith(`${memberId}-`) || assetId === "shared" };
@@ -904,5 +906,180 @@ describe("pdf handouts (docs/design-v1-pdf-handouts.md 3.3)", () => {
     assert.equal(back([{ key: "handoutDoc:d1", value: { ...doc, pages: pages("h1", "h2") }, expectRev: null }]), "ok");
     const handout = { id: "h9", rev: 1, assetId: "h1", pages: pages("h1", "deleted"), title: "Strange letter", to: "all", shownAt: "" };
     assert.equal(back([{ key: "handout:h9", value: handout, expectRev: null }]), "gone: its image was deleted since");
+  });
+});
+
+describe("a player's resize (docs/design-v1-token-window.md 8.6)", () => {
+  /**
+   * Scene s1, which blocks moves: P1's familiar at 4,4 with a free wall at
+   * x 4.375 inside its square, a Large of theirs at 4,10, one in a walled
+   * corner at 30,10, their PC through its character, its companion, and
+   * the DM's goblin, a locked token and a Custom one.
+   */
+  function sized() {
+    const state = room();
+    state.scenes.s1 = { ...state.scenes.s1!, blockMovement: true, autoWalls: "off" };
+    state.buildChunks["s1:0,0"] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, walls: [{ id: "free", a: [4.375, 4], b: [4.375, 5], f: { kind: "wall" } }] };
+    state.buildChunks["s1:1,0"] = { sceneId: "s1", cx: 1, cy: 0, rev: 1, cells: {}, edges: { "30,10,w": { kind: "wall" }, "30,10,n": { kind: "wall" } } };
+    state.characters.c1 = character("c1", { ownerIds: ["p1"] });
+    state.tokens.own = token("own", { kind: "npc", name: "Owl", ownerIds: ["p1"], x: 4, y: 4 });
+    state.tokens.big = token("big", { kind: "npc", name: "Bear", size: "large", ownerIds: ["p1"], x: 4, y: 10 });
+    state.tokens.cornered = token("cornered", { kind: "npc", name: "Thorn", ownerIds: ["p1"], x: 30, y: 10 });
+    state.tokens.pc1 = token("pc1", { kind: "pc", name: "Ayla", actor: { ref: "c1" }, x: 12, y: 4 });
+    state.tokens.spirit = token("spirit", { kind: "npc", name: "Spirit", ownerIds: ["p1"], x: 16, y: 4, companion: { of: "c1", turn: "shared" } });
+    state.tokens.gob = token("gob", { x: 20, y: 4 });
+    state.tokens.locked = token("locked", { kind: "npc", name: "Statue", ownerIds: ["p1"], locked: true, x: 22, y: 4 });
+    state.tokens.custom = token("custom", { kind: "npc", name: "Wagon", ownerIds: ["p1"], size: "custom", w: 2, h: 3, x: 24, y: 4 });
+    return state;
+  }
+  const resize = (tokenId: string, patch: object): Op => ({ t: "token.update", tokenId, patch: patch as never });
+  /** The answer on the server's state and on the player's own projected copy, which the device checks before it sends. */
+  const both = (op: Op, state = sized(), who = P1): string => {
+    const words = (d: ReturnType<typeof canApply>) => (d.ok ? "ok" : d.message);
+    const server = words(canApply(op, who, state, deps));
+    const copy = projectState(state, who, { sceneId: state.meta.playerSceneId }) as unknown as RoomState;
+    assert.equal(words(canApply(op, who, copy, deps)), server, `the device's check agrees on ${JSON.stringify(op)}`);
+    return server;
+  };
+
+  test("an owner resizes their own token, their PC through its character, and their companion, by one rule", () => {
+    assert.equal(both(resize("own", { size: "large" })), "ok");
+    assert.equal(both(resize("pc1", { size: "huge", x: 11, y: 3 })), "ok");
+    assert.equal(both(resize("spirit", { size: "large" })), "ok");
+    assert.equal(both(resize("big", { size: "medium" })), "ok", "a shrink to its top-left square, the place left out");
+    assert.equal(both(resize("own", { size: "small" })), "ok", "Small and Medium are one footprint");
+  });
+
+  test("a token they do not own is not theirs, even where they may move any token, and a locked one keeps its size", () => {
+    // The device offers no resize on a token it does not own, so only the server answers these.
+    const server = (state: RoomState) => {
+      const d = canApply(resize("gob", { size: "large" }), P1, state, deps);
+      return d.ok ? "ok" : d.message;
+    };
+    assert.equal(server(sized()), "that is not yours");
+    const state = sized();
+    state.meta.settings.playersMoveAny = "all";
+    assert.equal(server(state), "that is not yours");
+    assert.equal(both(resize("locked", { size: "large" })), "that token is locked");
+  });
+
+  test("owners pick one of the six sizes, never Custom, and send the size and the place alone", () => {
+    assert.equal(both(resize("own", { size: "custom", w: 2, h: 2 })), OWNER_SIZES);
+    assert.equal(both(resize("custom", { size: "large" })), OWNER_SIZES, "a Custom token is the DM's to resize");
+    assert.equal(both(resize("own", { size: "large", w: 2 })), OWNER_SIZES);
+    assert.equal(both(resize("own", { size: "large", h: null })), OWNER_SIZES);
+    assert.equal(both(resize("own", { size: "large", name: "Big Owl" })), OWNER_SIZES);
+    assert.equal(both(resize("own", { size: "large", elevation: 10 })), OWNER_SIZES);
+    assert.equal(both(resize("spirit", { size: "large", actor: { ac: 15 } })), OWNER_SIZES, "a companion's numbers never ride with its size");
+  });
+
+  test("a spot the resize may not take keeps the creature where it stands, on the device too", () => {
+    assert.equal(both(resize("big", { size: "large", x: 3 })), RESIZE_KEEPS_PLACE, "keeping its size keeps its place");
+    assert.equal(both(resize("own", { size: "small", y: 5 })), RESIZE_KEEPS_PLACE);
+    assert.equal(both(resize("own", { size: "large", x: 3.5 })), RESIZE_KEEPS_PLACE, "off the new size's grid");
+    assert.equal(both(resize("own", { size: "huge", x: 38, y: 28 })), RESIZE_KEEPS_PLACE, "not over its square");
+    assert.equal(both(resize("big", { size: "huge", x: 5, y: 9 })), RESIZE_KEEPS_PLACE, "holding its middle but not every old square");
+    assert.equal(both(resize("big", { size: "medium", x: 6, y: 10 })), RESIZE_KEEPS_PLACE, "a shrink outside its footprint");
+    const edge = sized();
+    edge.tokens.own = { ...edge.tokens.own!, x: 39, y: 29 };
+    assert.equal(both(resize("own", { size: "large", x: 39, y: 29 }), edge), RESIZE_KEEPS_PLACE, "outside the scene");
+    assert.equal(both(resize("own", { size: "large", x: 38, y: 28 }), edge), "ok");
+  });
+
+  test("on a scene that blocks moves, a growth with no room and a shrink across a wall are refused, and allowed where nothing blocks", () => {
+    assert.equal(both(resize("cornered", { size: "huge", x: 29, y: 9 })), NO_ROOM_TO_GROW);
+    assert.equal(both(resize("cornered", { size: "huge", x: 30, y: 10 })), "ok", "the spot the search finds");
+    assert.deepEqual(resizeSpot(sized(), sized().tokens.cornered!, { size: "huge" }, { checked: true }), { x: 30, y: 10, shifted: true });
+    assert.equal(both(resize("own", { size: "tiny", x: 4, y: 4 })), WALL_IN_THE_WAY, "its middle would cross the free wall at x 4.375");
+    assert.equal(both(resize("own", { size: "tiny", x: 4.5, y: 4 })), "ok");
+    assert.deepEqual(resizeSpot(sized(), sized().tokens.own!, { size: "tiny" }, { checked: true }), { x: 4.5, y: 4, shifted: true }, "the device never sends (4, 4)");
+    const open = sized();
+    open.scenes.s1!.blockMovement = false;
+    assert.equal(both(resize("cornered", { size: "huge", x: 29, y: 9 }), open), "ok");
+    assert.equal(both(resize("own", { size: "tiny", x: 4, y: 4 }), open), "ok");
+  });
+
+  test("a companion's owner is judged the same way, through companionUpdateCheck", () => {
+    const state = sized();
+    state.tokens.spirit = { ...state.tokens.spirit!, x: 30, y: 10 };
+    delete state.tokens.cornered;
+    assert.equal(both(resize("spirit", { size: "huge", x: 29, y: 9 }), state), NO_ROOM_TO_GROW);
+    assert.equal(both(resize("spirit", { size: "huge", x: 30, y: 10 }), state), "ok");
+    assert.equal(both(resize("spirit", { size: "large", x: 31 }), state), RESIZE_KEEPS_PLACE);
+    state.tokens.spirit!.locked = true;
+    assert.equal(both(resize("spirit", { size: "large" }), state), "that token is locked");
+  });
+
+  test("the DM is never refused", () => {
+    const dm = (op: Op) => canApply(op, DM, sized(), deps).ok;
+    assert.ok(dm(resize("cornered", { size: "huge", x: 29, y: 9 })));
+    assert.ok(dm(resize("own", { size: "tiny", x: 4, y: 4 })));
+    assert.ok(dm(resize("gob", { size: "custom", w: 3, h: 2, x: 7, y: 1 })));
+    assert.ok(dm(resize("locked", { size: "gargantuan", x: 0, y: 0, name: "Colossus" })));
+  });
+
+  test("a resize patch goes on a player's undo stack, a patch with another field does not", () => {
+    assert.equal(isResizeOp(resize("own", { size: "large", x: 4, y: 4 })), true);
+    assert.equal(onPlayerUndoStack(resize("own", { size: "large" })), true);
+    assert.equal(onPlayerUndoStack(resize("own", { size: "custom", w: 2, h: 3 })), true, "the DM's Custom fields belong to it");
+    assert.equal(onPlayerUndoStack(resize("own", { size: "large", name: "Big Owl" })), false);
+    assert.equal(onPlayerUndoStack(resize("own", { x: 4, y: 4 })), false);
+    assert.equal(isPoseOp(resize("own", { size: "large" })), false, "a resize is not a move");
+  });
+});
+
+describe("a player's undo or redo of a resize (restorePoseCheck)", () => {
+  /** P1's bear grown from Medium at 4,4 to Large at 4,4, on a scene that blocks moves. */
+  function grown() {
+    const state = room();
+    state.scenes.s1 = { ...state.scenes.s1!, blockMovement: true, autoWalls: "off" };
+    state.tokens.bear = token("bear", { kind: "npc", name: "Bear", size: "large", ownerIds: ["p1"], x: 4, y: 4 });
+    state.tokens.wolf = token("wolf", { kind: "npc", name: "Wolf", ownerIds: ["p1"], x: 10, y: 4 });
+    return state;
+  }
+  const restore = (state: RoomState, id: string, value: object, from: "undo" | "redo" = "undo"): Op => ({ t: "sys.restore", entries: [{ key: `token:${id}`, value: { ...state.tokens[id]!, ...value } }], from, deps: true });
+  const answer = (op: Op, state: RoomState) => {
+    const d = canApply(op, P1, state, deps);
+    return d.ok ? "ok" : d.message;
+  };
+
+  test("an undo of a growth puts back the size and the place, and nothing else", () => {
+    const state = grown();
+    assert.equal(answer(restore(state, "bear", { size: "medium" }), state), "ok");
+    assert.equal(answer(restore(state, "bear", { size: "medium", path: { turn: 3, stops: [{ x: 4, y: 4, elevation: 0 }] } }), state), "ok", "with the path it had");
+    assert.equal(answer(restore(state, "bear", { size: "medium", name: "Cub" }), state), "an undo of yours only moves or resizes tokens back");
+    assert.equal(answer(restore(state, "bear", { size: "medium", visibility: "dm" }), state), "an undo of yours only moves or resizes tokens back");
+    assert.equal(answer(restore(state, "bear", { size: "medium", x: 6 }), state), RESIZE_KEEPS_PLACE, "judged as a shrink to that footprint");
+    assert.equal(answer(restore(state, "bear", { size: "custom", w: 1, h: 1 }), state), OWNER_SIZES);
+  });
+
+  test("needs the rights of a resize at the undo and the redo: owned now, unlocked, not Custom", () => {
+    const locked = grown();
+    locked.tokens.bear!.locked = true;
+    assert.equal(answer(restore(locked, "bear", { size: "medium" }), locked), "that token is locked");
+    const custom = grown();
+    custom.tokens.bear = { ...custom.tokens.bear!, size: "custom", w: 2, h: 2 };
+    assert.equal(answer(restore(custom, "bear", { size: "medium", w: undefined, h: undefined }), custom), OWNER_SIZES);
+    for (const from of ["undo", "redo"] as const) {
+      const given = grown();
+      given.meta.settings.playersMoveAny = "all";
+      given.tokens.bear!.ownerIds = ["p2"];
+      given.tokens.wolf!.ownerIds = ["p2"];
+      const value = from === "undo" ? { size: "medium" } : { size: "huge", x: 3, y: 3 };
+      assert.equal(answer(restore(given, "bear", value, from), given), "that is not yours", `the ${from} of a resize`);
+      assert.equal(answer(restore(given, "wolf", { x: 12 }, from), given), "ok", `while the ${from} of a move passes, as the player may move any token`);
+    }
+  });
+
+  test("a redo of a growth needs room again, and a restore that keeps the size is a move's, as before", () => {
+    const medium = grown();
+    medium.tokens.bear = { ...medium.tokens.bear!, size: "medium" };
+    assert.equal(answer(restore(medium, "bear", { size: "large" }, "redo"), medium), "ok");
+    // A new chunk collection, as the reducer writes one: the walls are worked out once per collection.
+    medium.buildChunks = { "s1:0,0": { sceneId: "s1", cx: 0, cy: 0, rev: 2, cells: {}, edges: { "5,4,w": { kind: "wall" }, "5,5,w": { kind: "wall" } } } };
+    assert.equal(answer(restore(medium, "bear", { size: "large" }, "redo"), medium), NO_ROOM_TO_GROW, "a wall drawn since through the grown footprint");
+    assert.equal(answer(restore(medium, "bear", { x: 6 }, "redo"), medium), WALL_IN_THE_WAY, "a move's redo meets the wall as a move");
+    medium.tokens.bear!.locked = true;
+    assert.equal(answer(restore(medium, "bear", { elevation: 20 }), medium), "ok", "an owner's undo in place on a locked token, as before");
   });
 });

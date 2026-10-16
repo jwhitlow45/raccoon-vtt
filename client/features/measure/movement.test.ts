@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { PathStop, TurnStart } from "#shared/model.ts";
+import type { PathStop, RoomState, Token, TurnStart } from "#shared/model.ts";
+import { projectState } from "#shared/project.ts";
+import type { Op } from "#shared/protocol.ts";
+import { applyOp } from "#shared/reducer.ts";
+import { DM, P1, P2, room, token } from "#shared/testutil.ts";
 import { dragReading, ellipseExit, leftText, movedFeet, movementText, pathNow, speedsLeft, turnTrail, type MovingToken, type TurnView } from "./movement.ts";
 
 const five = { feetPerCell: 5, diagonal: "five" as const };
@@ -142,5 +146,81 @@ describe("movement since the turn began", () => {
     assert.equal(leftText({ kind: "walk", speed: 30, leftFt: 5, band: "walk" }), "5 ft left");
     assert.equal(leftText({ kind: "fly", speed: 60, leftFt: 5, band: "dash" }), "Fly: 5 ft left with Dash");
     assert.equal(leftText({ kind: "walk", speed: 30, leftFt: 10, band: "over" }), "10 ft past Dash");
+  });
+});
+
+describe("a resize on the turn (docs/design-v1-token-window.md 8.7)", () => {
+  const MEDIUM = { w: 1, h: 1 };
+  const TINY = { w: 0.5, h: 0.5 };
+
+  test("each end of a leg is measured at its own stop's size, and a leg across sizes between the two middles", () => {
+    const familiar = tok({ size: "medium" });
+    assert.equal(movedFeet(familiar, { ...stop(4, 4), footprint: TINY }, { ...stop(4.5, 4), footprint: TINY }, five), 2.5, "a Tiny's half-square leg after it grew");
+    assert.equal(movedFeet(familiar, stop(4, 4), stop(4.5, 4), five), 5, "read at the size now, it would be a whole square");
+    assert.equal(movedFeet(tok({ size: "large" }), { ...stop(4, 4), footprint: MEDIUM }, stop(4, 4), five), 2.5, "Medium to Large in place: the middle moves half a square each way");
+    assert.equal(movedFeet(tok({ size: "huge" }), { ...stop(4, 4), footprint: MEDIUM }, stop(3, 3), five), 0, "Medium to Huge keeps the middle");
+  });
+
+  /** Thorn, P1's druid at 1,1, whose turn it is, a goblin far off, every op through the reducer with the next seq. */
+  function played(ops: Op[], over: Partial<Token> = {}): RoomState {
+    let state = room({ tokens: { thorn: token("thorn", { kind: "npc", name: "Thorn", ownerIds: ["p1"], x: 1, y: 1, ...over }), gob: token("gob", { x: 20, y: 1 }) } });
+    const all: Op[] = [{ t: "encounter.start", entries: [{ id: "n1", tokenId: "thorn", value: 20 }, { id: "n2", tokenId: "gob", value: 10 }] }, { t: "encounter.next" }, ...ops];
+    for (const [i, op] of all.entries()) {
+      const r = applyOp(state, op, DM, { seq: i + 1, at: "2026-10-12T20:00:00.000Z" });
+      assert.ok(r.ok, `${op.t}: ${r.ok ? "" : r.message}`);
+      state = r.state;
+    }
+    return state;
+  }
+
+  /** Thorn's trail as the DM, his owner and another player who saw him move read it, each from their own copy. */
+  function trails(state: RoomState) {
+    const rules = state.meta.settings;
+    return [DM, P1, P2].map((viewer) => {
+      const copy = projectState(state, viewer, { sceneId: state.meta.playerSceneId }) as unknown as RoomState;
+      const encounter = copy.encounter as unknown as TurnView;
+      return turnTrail({ encounter, sceneId: "s1", token: copy.tokens.thorn as MovingToken, rules: { feetPerCell: rules.feetPerCell, diagonal: rules.diagonal }, role: viewer.role })!;
+    });
+  }
+
+  test("Thorn moves 15 ft and grows to Huge: his trail still reads 15 ft, its legs drawn at Medium, the resize's faint, for everyone", () => {
+    const state = played([
+      { t: "token.move", tokenId: "thorn", x: 4, y: 1 },
+      { t: "token.update", tokenId: "thorn", patch: { size: "huge", x: 3, y: 0 } },
+    ]);
+    for (const [i, trail] of trails(state).entries()) {
+      const who = ["the DM", "his owner", "another player"][i];
+      assert.equal(trail.movedFt, 15, who);
+      assert.deepEqual(trail.legs.map((l) => l.counted), [true, false], `${who}: the resize's leg does not count`);
+      assert.deepEqual(trail.rects, [{ x: 1, y: 1, w: 1, h: 1 }, { x: 4, y: 1, w: 1, h: 1 }, { x: 3, y: 0, w: 3, h: 3 }], `${who}: each stop at its own size`);
+      assert.deepEqual(trail.from, { x: 1, y: 1, w: 1, h: 1 }, `${who}: the ring at the size the turn began at`);
+    }
+  });
+
+  test("a diagonal before the resize and one after count 5 then 10 under 5-10-5", () => {
+    const state = played([
+      { t: "room.update", settings: { diagonal: "fiveTen" } },
+      { t: "token.move", tokenId: "thorn", x: 2, y: 2 },
+      { t: "token.update", tokenId: "thorn", patch: { size: "large" } },
+      { t: "token.move", tokenId: "thorn", x: 3, y: 3 },
+    ]);
+    for (const trail of trails(state)) {
+      assert.equal(trail.movedFt, 15);
+      assert.deepEqual(trail.diagonals, { h: 2, v: 0 }, "the resize took no diagonal");
+    }
+  });
+
+  test("a Tiny familiar's half-square move, then its growth to Medium, still reads 2.5 ft", () => {
+    const state = played(
+      [
+        { t: "token.move", tokenId: "thorn", x: 4.5, y: 4 },
+        { t: "token.update", tokenId: "thorn", patch: { size: "medium", x: 4, y: 4 } },
+      ],
+      { size: "tiny", x: 4, y: 4 },
+    );
+    for (const trail of trails(state)) {
+      assert.equal(trail.movedFt, 2.5);
+      assert.deepEqual(trail.rects.map((r) => r.w), [0.5, 0.5, 1]);
+    }
   });
 });

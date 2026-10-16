@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
+import { OP_VERSION } from "#shared/migrate.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
 import { startEngine, type Engine, type Socket } from "./testing.ts";
@@ -142,7 +143,7 @@ describe("idle unload, snapshots and recovery", () => {
     assert.equal(snap3.rows[0]?.state.tokens[goblinId]?.x, 4);
   });
 
-  test("version 4 heal, set and Revive ops on the dead replay as they applied then, and a new op is stored at version 5", async () => {
+  test("version 4 heal, set and Revive ops on the dead replay as they applied then, and a new op is stored at the current version", async () => {
     const owner = t.client();
     const { roomId } = await owner.createRoom("Op version 4");
     const s = await t.connect(roomId, owner);
@@ -190,9 +191,73 @@ describe("idle unload, snapshots and recovery", () => {
     back.n = 3;
     await back.apply({ t: "actor.hp", target: { tokenId: healed }, change: { kind: "heal", amount: 5 } });
     const newest = await t.pool.query<{ op_version: number }>("select op_version from room_ops where room_id = $1 and seq = 7", [roomId]);
-    assert.equal(newest.rows[0]?.op_version, 5);
+    assert.equal(newest.rows[0]?.op_version, OP_VERSION);
     back.close();
     await back.waitClosed();
+  });
+
+  test("a version 5 size and place update on the acting creature replays as a move, and a new resize is stored at version 6 as no movement", async () => {
+    const owner = t.client();
+    const { roomId } = await owner.createRoom("Op version 5");
+    const s = await t.connect(roomId, owner);
+    const sceneId = ((await s.snapshot("c1")).state as ProjectedState).meta.playerSceneId!;
+    const [thorn, gob] = [uuidv7(), uuidv7()];
+    await s.apply({ t: "token.create", token: { id: thorn, sceneId, kind: "npc", name: "Thorn", size: "medium", x: 1, y: 1, actor: { inline: actor } } });
+    await s.apply({ t: "token.create", token: { id: gob, sceneId, kind: "monster", name: "Goblin", size: "medium", x: 20, y: 1, actor: { inline: actor } } });
+    await s.apply({ t: "encounter.start", entries: [{ id: uuidv7(), tokenId: thorn, value: 20 }, { id: uuidv7(), tokenId: gob, value: 10 }] });
+    // Three ops: the snapshot schedule fires, so the ops below come after the snapshot, as a crash leaves them.
+    await new Promise((r) => setTimeout(r, 300));
+    await t.manager.unload(roomId, 1011, false);
+    await s.waitClosed();
+    const { rows } = await t.pool.query<{ seq: string; member: string }>(
+      "select s.seq::text, (select actor_member_id from room_ops where room_id = $1 limit 1) as member from room_snapshots s where s.room_id = $1",
+      [roomId],
+    );
+    assert.equal(rows[0]?.seq, "3");
+    const stored = [
+      { t: "encounter.next" },
+      { t: "token.move", tokenId: thorn, x: 4, y: 1 },
+      { t: "token.update", tokenId: thorn, patch: { size: "large", x: 3, y: 0 } },
+    ];
+    for (const [i, op] of stored.entries()) {
+      await t.pool.query(
+        `insert into room_ops (room_id, seq, at, actor_member_id, actor_role, op, op_version)
+         values ($1, $2, now(), $3, 'dm', $4::jsonb, 5)`,
+        [roomId, 4 + i, rows[0]!.member, JSON.stringify(op)],
+      );
+    }
+
+    const back = await t.connect(roomId, owner);
+    const snap = await back.snapshot("c1", 4);
+    assert.equal(snap.seq, 6);
+    const stops = (state: ProjectedState) => state.tokens[thorn]!.path!.stops.map((stop) => ({ x: stop.x, uncounted: stop.uncounted === true, footprint: stop.footprint }));
+    assert.deepEqual(
+      stops(snap.state as ProjectedState),
+      [
+        { x: 1, uncounted: false, footprint: undefined },
+        { x: 4, uncounted: false, footprint: undefined },
+        { x: 3, uncounted: false, footprint: undefined },
+      ],
+      "the growth with a place was a counted leg then",
+    );
+
+    back.n = 3;
+    await back.apply({ t: "token.update", tokenId: thorn, patch: { size: "huge" } });
+    const newest = await t.pool.query<{ op_version: number }>("select op_version from room_ops where room_id = $1 and seq = 7", [roomId]);
+    assert.equal(newest.rows[0]?.op_version, 6);
+    back.close();
+    await back.waitClosed();
+    const again = await t.connect(roomId, owner);
+    const reloaded = await again.snapshot("c2");
+    const large = { w: 2, h: 2 };
+    assert.deepEqual(stops(reloaded.state as ProjectedState), [
+      { x: 1, uncounted: false, footprint: large },
+      { x: 4, uncounted: false, footprint: large },
+      { x: 3, uncounted: false, footprint: large },
+      { x: 3, uncounted: true, footprint: undefined },
+    ]);
+    again.close();
+    await again.waitClosed();
   });
 
   test("a replay that fails serves the room read-only", async () => {

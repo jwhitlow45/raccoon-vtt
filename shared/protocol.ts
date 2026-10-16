@@ -1226,9 +1226,24 @@ export function isPoseOp(op: Op): op is OpOf<"token.move" | "token.moveMany" | "
   return fields.length > 0 && fields.every((field) => field === "elevation" || field === "rotation");
 }
 
-/** Whether a player's applied op goes on their undo stack (design 7.7): their drawing ops and their moves. */
+/** The fields of a resize patch: the size, the place it takes, and Custom's width and height, which only the DM sends. */
+const RESIZE_FIELDS = new Set(["size", "x", "y", "w", "h"]);
+
+/**
+ * Whether an op is a resize patch (docs/design-v1-token-window.md 8.6): a
+ * token update of its size and nothing but the place it takes there, and
+ * for Custom its width and height. A player's undo takes it back as it
+ * takes back a move, the size with the place, keeping later edits
+ * (server/rooms/undo.ts). It is not a move, so the token bar's "Undo move"
+ * does not offer it.
+ */
+export function isResizeOp(op: Op): boolean {
+  return op.t === "token.update" && op.patch.size !== undefined && Object.keys(op.patch).every((field) => RESIZE_FIELDS.has(field));
+}
+
+/** Whether a player's applied op goes on their undo stack (design 7.7): their drawing ops, their moves and their resizes. */
 export function onPlayerUndoStack(op: Op): boolean {
-  return op.t === "drawing.create" || op.t === "drawing.delete" || op.t === "drawing.clear" || isPoseOp(op);
+  return op.t === "drawing.create" || op.t === "drawing.delete" || op.t === "drawing.clear" || isPoseOp(op) || isResizeOp(op);
 }
 
 export type ActorTarget = z.infer<typeof actorTarget>;

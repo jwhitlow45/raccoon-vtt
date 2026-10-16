@@ -83,7 +83,7 @@ export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
         dash={[6, 4]}
         listening={false}
       />
-      <TrailLines trail={trail} token={token} color={color} scale={scale} />
+      <TrailLines trail={trail} color={color} scale={scale} />
       <Pill x={marker.x} y={marker.y} scale={scale} value={marker.value} size="screen" color={color} small below={marker.below} above={!marker.below} />
     </>
   );
@@ -114,13 +114,14 @@ function markerPlace(input: { from: { x: number; y: number; w: number; h: number
 }
 
 /**
- * The legs between footprint centers, the first and last cut back to the
- * round edges of the start ring and the token so the line never crosses
- * their art, and a dot where each leg turns.
+ * The legs between footprint centers, each stop's footprint at the size
+ * the creature had there, the first and last cut back to the round edges of
+ * the start ring and the token so the line never crosses their art, and a
+ * dot where each leg turns. A resize that kept the middle leaves no line.
  */
-function TrailLines(props: { trail: TurnTrail; token: MovingToken; color: string; scale: number }) {
-  const { trail, token, color, scale } = props;
-  const centers = trail.spots.map((spot) => center(footprintRect({ ...token, x: spot.x, y: spot.y })));
+function TrailLines(props: { trail: TurnTrail; color: string; scale: number }) {
+  const { trail, color, scale } = props;
+  const centers = trail.rects.map(center);
   const last = centers.length - 1;
   return (
     <>
