@@ -1118,7 +1118,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await log.getByRole("button", { name: "Close Log" }).tap();
   });
 
-  test("7. a change of mode saves no draft: a partial initiative and a partial Armor Class stay unsaved and in their fields, side to very short and back", async () => {
+  test("7. a change of mode saves no draft: a partial initiative and a partial Armor Class stay unsaved and in their fields, side to very short and back, and a fold closed over the kept draft saves it", async () => {
     // 480 x 380 leaves a side sheet a body even with the turn band, and 480 x 260 does not, so a resize switches the mode with the band in place.
     const tall = { width: 480, height: 380 };
     const short = { width: 480, height: 260 };
@@ -1171,6 +1171,19 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await ac.fill("15");
     await ac.press("Enter");
     await waitFor("the Armor Class put back", async () => (acOf() === 15 ? true : null));
+    // Kept through a change of mode, a draft is saved when a fold closes over it (docs/design-v1-token-panel.md 3.5).
+    await ac.fill("1");
+    await view(phone, phoneCdp, short, insets);
+    await modal("Token", true);
+    assert.equal(acOf(), 15, "the change of mode saved the draft");
+    await stats.tap();
+    await waitFor("the draft saved by the fold that closed over it", async () => (acOf() === 1 ? true : null));
+    await stats.tap();
+    await ac.fill("15");
+    await ac.press("Enter");
+    await waitFor("the Armor Class put back again", async () => (acOf() === 15 ? true : null));
+    await view(phone, phoneCdp, tall, insets);
+    await modal("Token", false);
     await sheet(phone, "Token").getByRole("button", { name: "Close Token" }).tap();
     await sheet(phone, "Token").waitFor({ state: "detached" });
     if (await bar.isVisible()) await phone.keyboard.press("Escape");
