@@ -184,6 +184,14 @@ export const theme = {
     right: "env(safe-area-inset-right, 0px)",
     bottom: "env(safe-area-inset-bottom, 0px)",
     left: "env(safe-area-inset-left, 0px)",
+    /**
+     * The right safe area as the map's own chrome sees it (the top bar, the
+     * toolbar, the tool's options and the alerts column): the inset where
+     * the map reaches the right edge, and none beside the side panel, which
+     * holds it (docs/design-v1-layout-hierarchy.md 4.3). Room sets the
+     * property on the map's area.
+     */
+    mapRight: "var(--rvtt-map-safe-right, env(safe-area-inset-right, 0px))",
   },
 } as const;
 

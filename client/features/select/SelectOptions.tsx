@@ -7,7 +7,7 @@ import { useRoomUi, useRoomView } from "../../state/view.ts";
 import { useLayoutSize } from "../device/layout.ts";
 import { OptButton } from "../measure/controls.tsx";
 
-/** The options bar's padding and edges from 900 px up, before the safe areas (pages/Room.tsx OptionsBar). */
+/** The options bar's padding and edges from 900 px up, which hold no safe area (pages/Room.tsx OptionsBar). */
 const WIDE_BAR_PADDING = 2 * theme.space(2) + 2 * theme.line.border;
 const SENTENCE = "Tap tokens to add or remove them, or drag a box on the map.";
 
@@ -53,11 +53,11 @@ export function SelectOptions() {
     };
   }, [descId]);
 
-  const sides = safe ? safe.left + safe.right : 0;
-  // Before a phone's row is measured its room reads as 0, so the first frame shows the short hint and never wraps.
-  // The side panel takes its width only while it shows (docs/design-v1-layout-hierarchy.md 4.1).
+  // The side panel takes its width only while it shows, and the bar floats right of the left safe area with no safe area in its own padding (docs/design-v1-layout-hierarchy.md 4.1, 4.3).
   const sidePanelHidden = useRoomView((s) => s.local.sidePanelHidden);
-  const short = shortHint(hintRoom({ wide, mapWidth: width - (sidePanelHidden ? 0 : theme.layout.sidePanelWidth), padding: WIDE_BAR_PADDING + sides, inner }));
+  const mapWidth = width - (sidePanelHidden ? 0 : theme.layout.sidePanelWidth) - (safe?.left ?? 0);
+  // Before a phone's row is measured its room reads as 0, so the first frame shows the short hint and never wraps.
+  const short = shortHint(hintRoom({ wide, mapWidth, padding: WIDE_BAR_PADDING, inner }));
   return (
     <div ref={rowRef} style={{ display: "flex", alignItems: "center", gap: theme.space(2), width: "100%", minWidth: 0 }}>
       <span style={{ flex: 1, minWidth: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.textMuted }}>

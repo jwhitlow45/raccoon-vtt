@@ -781,8 +781,9 @@ function FightAlerts() {
    * and no further, since what scrolls through its padding shows there,
    * and scroll-padding keeps a card that takes focus clear of it.
    */
-  const rightPad = sheetWidth > 0 ? `${EDGE}px` : `calc(${theme.safe.right} + ${EDGE}px)`;
-  const cardWidth = `min(300px, calc(100% - ${sheetWidth + 2 * EDGE}px - ${theme.safe.left} - ${sheetWidth > 0 ? "0px" : theme.safe.right}))`;
+  // The right safe area as the map sees it: none beside the side panel (theme.safe.mapRight).
+  const rightPad = sheetWidth > 0 ? `${EDGE}px` : `calc(${theme.safe.mapRight} + ${EDGE}px)`;
+  const cardWidth = `min(300px, calc(100% - ${sheetWidth + 2 * EDGE}px - ${theme.safe.left} - ${sheetWidth > 0 ? "0px" : theme.safe.mapRight}))`;
   // The shadow's room at the left, but never past the window's left edge on a phone the cards span.
   const leftPad = `min(${SHADOW_ROOM}px, calc(100% - ${cardWidth} - ${rightPad}))`;
   return (
@@ -842,7 +843,7 @@ function FightAlerts() {
             flex: "none",
             boxSizing: "border-box",
             height: OVERLAY_HEAD,
-            padding: `0 calc(${theme.safe.right} + ${theme.space(3)}px) 0 calc(${theme.safe.left} + ${theme.space(3)}px)`,
+            padding: `0 calc(${theme.safe.mapRight} + ${theme.space(3)}px) 0 calc(${theme.safe.left} + ${theme.space(3)}px)`,
             borderBottom: `${theme.line.border}px solid ${theme.color.border}`,
           }}
         >
@@ -885,7 +886,7 @@ function FightAlerts() {
                 minHeight: 0,
                 overflowY: "auto",
                 overscrollBehavior: "contain",
-                padding: `${OVERLAY_PAD}px calc(${theme.safe.right} + ${theme.space(3)}px) ${asked === "fullScreen" ? `calc(${theme.safe.bottom} + ${OVERLAY_PAD}px)` : `${OVERLAY_PAD}px`} calc(${theme.safe.left} + ${theme.space(3)}px)`,
+                padding: `${OVERLAY_PAD}px calc(${theme.safe.mapRight} + ${theme.space(3)}px) ${asked === "fullScreen" ? `calc(${theme.safe.bottom} + ${OVERLAY_PAD}px)` : `${OVERLAY_PAD}px`} calc(${theme.safe.left} + ${theme.space(3)}px)`,
               }
             : null),
         }}

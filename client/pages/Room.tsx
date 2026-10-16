@@ -469,11 +469,12 @@ function RoomPage() {
             bottom: (toolbarHeight + optionsHeight) / zoom,
             controls: (toolbarHeight + optionsControls) / zoom,
             toolbar: toolbarHeight / zoom,
-            safe: { top: safe.top, right: safe.right, bottom: safe.bottom, left: safe.left },
+            // Beside the side panel the map never touches the right edge, so its free area keeps no right inset.
+            safe: { top: safe.top, right: sideShown ? 0 : safe.right, bottom: safe.bottom, left: safe.left },
             sheet: sheetRight,
           }
         : null,
-    [topBarHeight, toolbarHeight, optionsHeight, optionsControls, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight],
+    [topBarHeight, toolbarHeight, optionsHeight, optionsControls, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight, sideShown],
   );
   useLayoutEffect(() => {
     barDock.setState({ chrome });
@@ -604,7 +605,8 @@ function RoomPage() {
       }}
     >
       <div ref={safe.probe} aria-hidden style={SAFE_PROBE_STYLE} />
-      <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
+      {/* The map's chrome pads for the right safe area only where the map reaches that edge: not beside the side panel, which holds it (theme.safe.mapRight). */}
+      <div style={{ position: "relative", flex: 1, minWidth: 0, ["--rvtt-map-safe-right" as string]: sideShown ? "0px" : theme.safe.right }}>
         <MapArea gate={gate} role={role} actionBar={actionBar} insets={insets} onSelect={select} onOpenDetails={openDetails} tokenPanelShown={tokenPanelShown} onHideBar={hideBar} />
         {/* The map's focus target (mapFocus.ts): after the map, so its ring draws over it, and before the bars, so Tab from it goes on to them. Taps pass through it. */}
         <div ref={mapFocusRef} tabIndex={-1} role="img" aria-label="Map" style={MAP_FOCUS_STYLE} />
@@ -960,7 +962,7 @@ function TopBar(props: {
         left: 0,
         right: 0,
         zIndex: alertsOverlay ? theme.z.alertsOverlay : theme.z.bars,
-        padding: `${theme.safe.top} calc(${theme.safe.right} + ${theme.space(3)}px) 0 calc(${theme.safe.left} + ${theme.space(3)}px)`,
+        padding: `${theme.safe.top} calc(${theme.safe.mapRight} + ${theme.space(3)}px) 0 calc(${theme.safe.left} + ${theme.space(3)}px)`,
         background: theme.color.overlay,
         borderBottom: `${theme.line.border}px solid ${theme.color.border}`,
         ...chromeZoom(props.zoom),
@@ -1268,7 +1270,8 @@ function OptionsBar(props: { ref?: Ref<HTMLDivElement>; tool: ToolDef; role: "dm
       style={{
         ...chromeZoom(props.zoom),
         position: "absolute",
-        left: props.wide ? theme.space(2) : 0,
+        // From 900 px up the bar floats clear of every side, 8 px right of the left safe area, so its content pads 8 px with no safe area.
+        left: props.wide ? `calc(${theme.safe.left} + ${theme.space(2)}px)` : 0,
         right: props.wide ? undefined : 0,
         bottom: `calc(${theme.safe.bottom} + ${TOOLBAR}px)`,
         zIndex: theme.z.options,
@@ -1278,7 +1281,7 @@ function OptionsBar(props: { ref?: Ref<HTMLDivElement>; tool: ToolDef; role: "dm
         gap: theme.space(2),
         minHeight: theme.touch + theme.space(2),
         maxWidth: props.wide ? 640 : undefined,
-        padding: `${theme.space(1)}px calc(${theme.safe.right} + ${theme.space(2)}px) ${theme.space(1)}px calc(${theme.safe.left} + ${theme.space(2)}px)`,
+        padding: props.wide ? `${theme.space(1)}px ${theme.space(2)}px` : `${theme.space(1)}px calc(${theme.safe.right} + ${theme.space(2)}px) ${theme.space(1)}px calc(${theme.safe.left} + ${theme.space(2)}px)`,
         background: theme.color.overlay,
         // Longhands only: React warns when a rerender changes a shorthand mixed with its longhands, as crossing the wide breakpoint did.
         borderTop: `${theme.line.border}px solid ${theme.color.border}`,
@@ -1342,7 +1345,7 @@ function Toolbar(props: {
         alignItems: "center",
         gap: theme.space(1),
         height: `calc(${theme.safe.bottom} + ${TOOLBAR}px)`,
-        padding: `0 calc(${theme.safe.right} + ${theme.space(1)}px) ${theme.safe.bottom} calc(${theme.safe.left} + ${theme.space(1)}px)`,
+        padding: `0 calc(${theme.safe.mapRight} + ${theme.space(1)}px) ${theme.safe.bottom} calc(${theme.safe.left} + ${theme.space(1)}px)`,
         background: wide ? "transparent" : theme.color.overlay,
         borderTop: wide ? "none" : `${theme.line.border}px solid ${theme.color.border}`,
         pointerEvents: wide ? "none" : "auto",
