@@ -574,6 +574,19 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     assert.equal(await alerts.count(), 1, `${label}: the alerts did not open over the screen`);
     await check.getByRole("button", { name: "Passed", exact: true }).tap();
     await waitFor(`one check left, ${label}`, async () => ((await alerts.locator('[data-alert="concentration"]').count()) === 1 ? true : null));
+    // Modal: the page behind takes no focus, and Tab and Shift+Tab wrap inside.
+    const inAlerts = () =>
+      dm.evaluate(() => {
+        const a = (globalThis as unknown as { document: { activeElement: { closest(s: string): unknown } | null } }).document.activeElement;
+        return a?.closest('[aria-modal="true"]') != null;
+      });
+    await alerts.getByRole("button", { name: "Close", exact: true }).focus();
+    for (const key of ["Shift+Tab", "Shift+Tab", "Shift+Tab", "Shift+Tab", "Tab", "Tab", "Tab", "Tab", "Tab"]) {
+      await dm.keyboard.press(key);
+      assert.equal(await inAlerts(), true, `${label}: ${key} took focus out of the alerts`);
+    }
+    const fit = dm.getByRole("button", { name: "Fit the map to the screen" });
+    assert.equal(await fit.evaluate((el) => el.closest("[inert]") !== null), true, `${label}: Fit behind the alerts is not inert`);
     await alerts.getByRole("button", { name: "Close", exact: true }).tap();
     await alerts.waitFor({ state: "detached" });
     await waitFor(`focus back on the row, ${label}`, async () => ((await focused(dm)).name.startsWith("Concentration check") ? true : null));

@@ -66,14 +66,7 @@ export function useModalDialog(
     const onNativeClose = () => {
       if (!el.open) latest.current.onClose();
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Tab") return;
-      const stops = tabStops(focusableIn(el), radioOf);
-      const next = wrapFocusIndex(stops.length, stopIndex(stops, document.activeElement as HTMLElement | null, radioOf), e.shiftKey);
-      if (next === null) return;
-      e.preventDefault();
-      stops[next]?.focus();
-    };
+    const onKey = (e: KeyboardEvent) => containTab(el, e);
     el.addEventListener("cancel", onCancel);
     el.addEventListener("close", onNativeClose);
     el.addEventListener("keydown", onKey);
@@ -109,6 +102,43 @@ export function useModalDialog(
     el.style.setProperty("--rvtt-ui", scale === 1 ? "" : String(scale));
     el.toggleAttribute("data-rvtt-small-ui", scale < 1);
   }, [dialog, scale]);
+}
+
+/**
+ * Keeps Tab and Shift+Tab inside `root`: from its last control to its
+ * first, and back. useModalDialog's `<dialog>` does it, and so does a modal
+ * layer that cannot be one, such as the fight's alerts opened over the
+ * screen, whose cards must stay mounted (InitiativeStrip.tsx FightAlerts).
+ */
+export function containTab(root: HTMLElement, e: KeyboardEvent): void {
+  if (e.key !== "Tab") return;
+  const stops = tabStops(focusableIn(root), radioOf);
+  const next = wrapFocusIndex(stops.length, stopIndex(stops, document.activeElement as HTMLElement | null, radioOf), e.shiftKey);
+  if (next === null) return;
+  e.preventDefault();
+  stops[next]?.focus();
+}
+
+/**
+ * Everything on the page but `root` made inert, as showModal() makes it
+ * for a `<dialog>`: the siblings of `root` and of each of its ancestors up
+ * to the body, so nothing behind takes focus, a tap or a screen reader's
+ * attention. Returns the undo, which leaves alone what was inert already.
+ */
+export function inertOutside(root: HTMLElement): () => void {
+  const made: Element[] = [];
+  for (let node: HTMLElement | null = root; node && node !== document.body; node = node.parentElement) {
+    const parent: HTMLElement | null = node.parentElement;
+    if (!parent) break;
+    for (const sibling of Array.from(parent.children)) {
+      if (sibling === node || sibling.hasAttribute("inert")) continue;
+      sibling.setAttribute("inert", "");
+      made.push(sibling);
+    }
+  }
+  return () => {
+    for (const el of made) el.removeAttribute("inert");
+  };
 }
 
 function focusedElement(): HTMLElement | null {

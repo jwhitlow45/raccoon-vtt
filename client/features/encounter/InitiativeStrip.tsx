@@ -6,6 +6,7 @@ import { askedAlerts, barDockSlot, columnFacts, columnRoom, columnTop, EDGE, rai
 import { ScrollForMore } from "../../canvas/TokenActionBar.tsx";
 import { useAlertsSummaryEntry } from "../../components/sheetFocus.ts";
 import { useBackClose } from "../../lib/backClose.ts";
+import { containTab, inertOutside } from "../../lib/modalDialog.ts";
 import { theme } from "../../lib/theme.ts";
 import { screenHeight, useLayoutSize } from "../device/layout.ts";
 import { effectChip } from "../../lib/tokenView.ts";
@@ -596,6 +597,18 @@ function FightAlerts() {
     focusRow.current = true;
   }, []);
   useBackClose(overlay, closeOverlay);
+  // Modal as a <dialog> is (lib/modalDialog.ts) without becoming one, which would mount its cards afresh and drop a half-typed total: the page behind takes no focus and no tap, and Tab keeps inside.
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    if (!overlay || !box) return;
+    const undo = inertOutside(box);
+    const onKey = (e: KeyboardEvent) => containTab(box, e);
+    box.addEventListener("keydown", onKey);
+    return () => {
+      box.removeEventListener("keydown", onKey);
+      undo();
+    };
+  }, [overlay]);
   useEffect(() => {
     if (!overlay) return;
     const onKey = (e: KeyboardEvent) => {
