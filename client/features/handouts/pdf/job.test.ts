@@ -8,7 +8,7 @@ import { ApiError, type AssetRow, type UploadOptions } from "../../../lib/api.ts
 import type { OnAnswer, OpRefusal } from "../../../state/types.ts";
 import {
   CANCEL_GRACE_MS,
-  SHARE_EVERY_PAGES,
+  SHARE_EVERY_MS,
   SHARE_PAUSE_MS,
   checkRange,
   isPdfFile,
@@ -46,7 +46,7 @@ type Sent = { op: ClientOp; onAnswer: OnAnswer };
  * A room, a PDF and a server for one job: every upload, op and wait is the
  * test's to answer, unless it says to answer them as they come.
  */
-function world(opts: { pages?: number; title?: string | null; failDraw?: number[]; tooLarge?: number[]; openFails?: ReaderRefusal; autoUpload?: boolean; holdDraw?: number[]; holdOpen?: boolean; holdDestroy?: boolean } = {}) {
+function world(opts: { pages?: number; title?: string | null; failDraw?: number[]; tooLarge?: number[]; openFails?: ReaderRefusal; autoUpload?: boolean; holdDraw?: number[]; holdOpen?: boolean; holdDestroy?: boolean; pageMs?: number } = {}) {
   const numPages = opts.pages ?? 3;
   const state: { view: RoomState; online: string[]; connection: string; snapshots: number } = { view: testRoom(), online: [ME], connection: "open", snapshots: 1 };
   const listeners = new Set<() => void>();
@@ -80,6 +80,8 @@ function world(opts: { pages?: number; title?: string | null; failDraw?: number[
   const tooLarge = new Set(opts.tooLarge ?? []);
   let lastPage = 0;
   let ids = 0;
+  /** The fake clock, which each upload moves on by `pageMs`, as a link of that speed would. */
+  let clock = 0;
 
   const doc = (): PdfDocument => {
     const id = ++docs;
@@ -138,6 +140,7 @@ function world(opts: { pages?: number; title?: string | null; failDraw?: number[
     },
     thumb: () => `data:image/jpeg;base64,page${lastPage}`,
     upload(blob, options) {
+      clock += opts.pageMs ?? 0;
       return blob.text().then(
         (text) =>
           new Promise<AssetRow>((resolve, reject) => {
@@ -200,7 +203,7 @@ function world(opts: { pages?: number; title?: string | null; failDraw?: number[
         signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
       });
     },
-    now: () => 0,
+    now: () => clock,
   };
   const runner = new JobRunner(deps, store);
   const job = () => store.getState().job as PdfJob;
@@ -429,20 +432,27 @@ describe("drawing and uploading (docs/design-v1-pdf-handouts.md 4.1.4)", () => {
     assert.equal(w.uploads.length, 2);
   });
 
-  test("with another member online, a pause every few pages for their uploads, and none alone", async () => {
-    for (const others of [true, false]) {
-      const w = world({ pages: 13 });
+  test("with another member online, a pause each time about 20 s have passed, so on a slow link too, and none alone", async () => {
+    // Before which uploads a pause comes, counted from 1.
+    const pausedBefore = async (pageMs: number, pages: number, others = true) => {
+      const w = world({ pages, pageMs });
       if (others) w.state.online.push("p1");
-      const asked: number[] = [];
+      const before: number[] = [];
       const sleep = w.deps.sleep;
       w.deps.sleep = (ms, signal) => {
-        asked.push(ms);
+        assert.equal(ms, SHARE_PAUSE_MS);
+        before.push(w.uploads.length + 1);
         return sleep(ms, signal);
       };
       await w.throughUpload();
-      assert.equal(w.uploads.length, 13);
-      assert.deepEqual(asked, others ? [SHARE_PAUSE_MS, SHARE_PAUSE_MS] : [], `pauses after pages ${SHARE_EVERY_PAGES} and ${2 * SHARE_EVERY_PAGES}`);
-    }
+      for (let i = 0; i < 50 && w.phase().k !== "saving"; i++) await settle();
+      assert.equal(w.uploads.length, pages);
+      return before;
+    };
+    assert.deepEqual(await pausedBefore(1_000, 45), [21, 41], "a fast link: a pause about every 20 pages, once 20 s have passed");
+    assert.deepEqual(await pausedBefore(10_000, 6), [3, 5], "a slow link: a pause every 2 pages, so another device never waits past its retries");
+    assert.deepEqual(await pausedBefore(10_000, 6, false), [], "alone, none");
+    assert.ok(SHARE_EVERY_MS < 60_000, "under another device's minute of retries");
   });
 
   test("the document's caches are cleaned every few pages, between draws", async () => {
@@ -832,16 +842,17 @@ describe("Cancel upload (docs/design-v1-pdf-handouts.md 4.1.6)", () => {
   });
 
   test("a waiting retry or a share pause stops at once", async () => {
-    const w = world({ pages: 8 });
+    const w = world({ pages: 8, pageMs: 10_000 });
     w.state.online.push("p1");
     w.holdSleeps();
     await w.open();
     w.runner.upload();
     await settle();
-    assert.equal(w.sleeps.length, 1, "the share pause after six pages");
+    assert.equal(w.sleeps.length, 1, "the share pause once 20 s have passed");
+    const sent = w.uploads.length;
     await w.runner.cancel();
     assert.equal(w.phase().k, "cancelled");
-    assert.equal(w.uploads.length, SHARE_EVERY_PAGES);
+    assert.equal(w.uploads.length, sent, "nothing more sent");
   });
 
   test("cancelling offline keeps the ledger for the recovery", async () => {

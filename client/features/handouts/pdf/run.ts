@@ -133,6 +133,8 @@ export class JobRunner implements JobControl {
   #resent = false;
   /** Pages drawn since the document's caches were last cleaned (4.2.3). */
   #sinceCleanup = 0;
+  /** When the job last paused for other devices, or its run of pages began (4.1.4). */
+  #lastShare = 0;
 
   constructor(deps: JobDeps, store: StoreApi<JobSlotState>) {
     this.#deps = deps;
@@ -286,6 +288,7 @@ export class JobRunner implements JobControl {
     // Cancel or Done came while the last loop was stopping.
     if (this.#cancelling || this.#disposed || !this.#store.getState().job) return;
     const run = ++this.#run;
+    this.#lastShare = this.#deps.now();
     this.#waits = new AbortController();
     const live = () => run === this.#run && !this.#disposed;
     this.#set({ phase: { k: "preparing", waiting: false } });
@@ -312,13 +315,14 @@ export class JobRunner implements JobControl {
       if (!live()) return;
       if (!drawn.encoded) return this.#pause(run, page, { k: "tooLarge" });
       const job = this.#job;
-      if (sharePause(job.pages.length, this.#othersOnline(), pagesToDo(job).length)) {
+      if (sharePause(this.#deps.now() - this.#lastShare, this.#othersOnline(), pagesToDo(job).length)) {
         try {
           await this.#deps.sleep(SHARE_PAUSE_MS, this.#waits.signal);
         } catch {
           return;
         }
         if (!live()) return;
+        this.#lastShare = this.#deps.now();
       }
       if (drawn.slow || ++this.#sinceCleanup >= CLEANUP_EVERY_PAGES) {
         this.#sinceCleanup = 0;

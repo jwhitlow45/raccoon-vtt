@@ -103,20 +103,22 @@ export const CANCEL_GRACE_MS = 10_000;
 /**
  * The pause a job takes for other devices on the room's one upload slot
  * (4.1.4): a little longer than their 503 retries, so the next one finds the
- * slot free. It comes after every few pages rather than after each, so the
- * job loses little time: SHARE_EVERY_PAGES pages between pauses bound how
- * long another device waits, and a 100-page PDF spends about 40 s on them.
+ * slot free. It comes once SHARE_EVERY_MS have passed since the last, not
+ * after a count of pages: on a slow link a few pages already take longer
+ * than another device's minute of retries, and time bounds its wait there.
+ * On a fast link it costs an eighth of the time, about 40 s over a 100-page
+ * PDF that takes five minutes.
  */
 export const SHARE_PAUSE_MS = 2_500;
-export const SHARE_EVERY_PAGES = 6;
+export const SHARE_EVERY_MS = 20_000;
 
 /** The document's caches are cleaned every few pages, and after a page that took long to draw (4.2.3). */
 export const CLEANUP_EVERY_PAGES = 5;
 export const SLOW_DRAW_MS = 3_000;
 
-/** Whether the job pauses for other devices after this many pages uploaded. */
-export function sharePause(uploaded: number, othersOnline: boolean, remaining: number): boolean {
-  return othersOnline && remaining > 0 && uploaded > 0 && uploaded % SHARE_EVERY_PAGES === 0;
+/** Whether the job pauses for other devices before its next upload, `sinceMs` after its last pause or its start. */
+export function sharePause(sinceMs: number, othersOnline: boolean, remaining: number): boolean {
+  return othersOnline && remaining > 0 && sinceMs >= SHARE_EVERY_MS;
 }
 
 /** The range's PDF page numbers still to upload, in order: not left out, not uploaded. */
