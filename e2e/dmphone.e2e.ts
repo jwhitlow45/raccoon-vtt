@@ -532,15 +532,17 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await framing.getByRole("button", { name: "Cancel" }).tap();
   });
 
-  test("10. at 480 x 320 at 130% under the Starting view notice, the summary row standing for a check is never under the notice nor over a button, and its tap shows the check", async () => {
+  test("10. at 480 x 320 at 130% under the Starting view notice, the summary row standing for the checks is never under the notice nor over a button, and its tap opens the alerts over the screen, where Passed answers a check and Close goes back to the row", async () => {
     const label = "480 x 320 at 130% under the Starting view notice";
     await setUp({ width: 480, height: 320, scale: 1.3, side: 47, bottom: 21 });
     const scenes = await openPanel(dm, "Scenes");
     await scenes.getByRole("button", { name: "Save current view" }).tap();
     const framing = dm.getByRole("group", { name: "Starting view" });
     await framing.waitFor();
+    // Two checks, so the alerts stay open once one is answered.
     await hurtHag();
-    await dm.locator('[data-alert="concentration"]').first().waitFor({ state: "attached" });
+    await hurtHag();
+    await dm.locator('[data-alert="concentration"]').nth(1).waitFor({ state: "attached" });
     await dm.waitForTimeout(400);
     // The notice leaves the column no room for the check, and paints over the column, so the row must find a spot of its own.
     const row = dm.getByRole("button", { name: /^Concentration check/ });
@@ -559,8 +561,22 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       if (name.startsWith("Concentration check")) continue;
       assert.ok(!intersects(r, await rectOf(b)), `${label}: the row covers ${name} in the top bar`);
     }
+    // The notice leaves the column no room for a whole check either, so the row's tap opens the alerts over the screen.
     await row.tap();
-    await dm.locator('[data-alert="concentration"]').first().waitFor();
+    const check = dm.locator('[data-alert="concentration"]').first();
+    await check.waitFor();
+    await dm.waitForTimeout(300);
+    await shots.take(dm, "dmphone-alerts-over-notice-480x320");
+    for (const name of ["Passed", "Failed"]) {
+      assert.ok(await wholeInReach(check.getByRole("button", { name, exact: true })), `${label}: ${name} is cut off or takes no tap after the row's tap`);
+    }
+    const alerts = dm.getByRole("dialog", { name: "Alerts" });
+    assert.equal(await alerts.count(), 1, `${label}: the alerts did not open over the screen`);
+    await check.getByRole("button", { name: "Passed", exact: true }).tap();
+    await waitFor(`one check left, ${label}`, async () => ((await alerts.locator('[data-alert="concentration"]').count()) === 1 ? true : null));
+    await alerts.getByRole("button", { name: "Close", exact: true }).tap();
+    await alerts.waitFor({ state: "detached" });
+    await waitFor(`focus back on the row, ${label}`, async () => ((await focused(dm)).name.startsWith("Concentration check") ? true : null));
     await framing.getByRole("button", { name: "Cancel" }).tap();
   });
 

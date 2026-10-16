@@ -544,6 +544,27 @@ export function raisedRow(input: {
   return null;
 }
 
+/** Where the cards a summary row stands for show once its tap asks for them (askedAlerts). */
+export type AskedAlerts = "column" | "overlay" | "fullScreen";
+
+/**
+ * Where the summary row's tap shows the cards it stands for, on a screen
+ * whose tool options leave the column under one whole card, so that the
+ * first card always shows whole. `first` is its height as last drawn.
+ * - `column`: where they are, the column reaching down to the toolbar,
+ *   where the first card fits there (`column`, the room from the column's
+ *   usual top, its 8 px top padding included).
+ * - `overlay`: over the screen from its safe top down to the toolbar, where
+ *   no lasting notice or bar can squeeze it, when the first card fits in
+ *   its body (`overlay`, that body's room).
+ * - `fullScreen`: the same down to the screen's foot, over the toolbar too,
+ *   where even that is short. It is modal, and Close is one tap away.
+ */
+export function askedAlerts(input: { first: number; column: number; overlay: number }): AskedAlerts {
+  if (EDGE + input.first <= input.column) return "column";
+  return input.first <= input.overlay ? "overlay" : "fullScreen";
+}
+
 /** The column's top: the lane's, or 8 px under the last lasting notice when the notices span over it. Toasts never move it. */
 export function columnTop(laneTop: number, lastingBottom: number | null): number {
   return lastingBottom === null ? laneTop : Math.max(laneTop, lastingBottom + EDGE);
@@ -597,11 +618,13 @@ type BarDockState = {
   footYields: boolean;
   /** The room between the top bars and the tool's options is under one whole alert card, and the column's summary row stands for its cards. */
   columnCramped: boolean;
+  /** The column's alerts show over the screen (askedAlerts), so the top bars rise over the notices with them. */
+  alertsOverlay: boolean;
 };
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
-  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, spot: readSpot(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false })),
+  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, spot: readSpot(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false })),
 );
 
 function clamp(n: number, lo: number, hi: number): number {

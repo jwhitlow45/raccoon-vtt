@@ -146,6 +146,8 @@ export const theme = {
     /** The token action bar on a screen too short to dock it (docs/design-v1-bar-dock.md 1.4): over the toolbar and the options it covers, under the notices. */
     barOverlay: 16,
     notices: 20,
+    /** The top bar while it holds the fight's alerts opened over the screen: over the notices, which would hide the alerts' buttons. */
+    alertsOverlay: 22,
     overBars: 25,
   },
   /** Minimum touch target, per Apple's and Google's guidance. */

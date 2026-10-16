@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
 import { useStore } from "zustand";
 import type { LogEntry } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
-import { barDockSlot, columnFacts, columnRoom, columnTop, EDGE, raisedRow, SUMMARY_ROW } from "../../canvas/barDock.ts";
+import { askedAlerts, barDockSlot, columnFacts, columnRoom, columnTop, EDGE, raisedRow, SUMMARY_ROW, type AskedAlerts } from "../../canvas/barDock.ts";
 import { ScrollForMore } from "../../canvas/TokenActionBar.tsx";
 import { useAlertsSummaryEntry } from "../../components/sheetFocus.ts";
+import { useBackClose } from "../../lib/backClose.ts";
 import { theme } from "../../lib/theme.ts";
 import { screenHeight, useLayoutSize } from "../device/layout.ts";
 import { effectChip } from "../../lib/tokenView.ts";
@@ -436,9 +437,15 @@ type Notice = { id: string; text: string };
  * several's Actions. Where that leaves it under one whole card, as with
  * the Ruler at 480 x 320 at 130%, the row stands for its cards too
  * (`forRoom`), uncapped, since a card cut to a strip takes no tap. Its tap
- * opens what it stands for: a waiting roll's card at a phone's foot, or
- * else the cards, down to the toolbar over the tool's options, until a
- * tap lands outside them or what waits changes (`asked`).
+ * opens what it stands for (`asked`, barDock.ts askedAlerts): a waiting
+ * roll's card at a phone's foot; or the cards where they are, down to the
+ * toolbar over the tool's options, until a tap lands outside them or what
+ * waits changes, when the first card fits whole there; or else the alerts
+ * over the screen, a dialog from the safe top to the toolbar, or to the
+ * screen's foot where even that is too short for the first card, with
+ * Close, which Escape and Back close too, as does nothing left waiting. The
+ * column's cards are the ones it shows, never copies, so a half-answered
+ * roll keeps its total.
  */
 function FightAlerts() {
   const { width, height } = useViewport();
@@ -486,7 +493,7 @@ function FightAlerts() {
   const forFootCard = !folded && footYields && barSummary !== null;
   // The first card's height as last drawn, which the row standing in for the cards keeps: measured afresh whenever what waits changes.
   const [firstHeight, setFirstHeight] = useState(0);
-  const [asked, setAsked] = useState(false);
+  const [asked, setAsked] = useState<AskedAlerts | null>(null);
   const toOptions = chrome ? height - chrome.top - chrome.bottom - push : Infinity;
   const cramped = !folded && roomSummary !== null && firstHeight > 0 && toOptions < EDGE + firstHeight;
   const forRoom = cramped && !asked && !forFootCard;
@@ -496,12 +503,17 @@ function FightAlerts() {
     if (dock.getState().columnCramped !== forRoom) dock.setState({ columnCramped: forRoom });
   }, [dock, forRoom]);
   useLayoutEffect(() => () => dock.setState({ columnCramped: false }), [dock]);
-  // What waits changed: the row's tap asks again, and the cards are measured again, which a hidden card cannot be.
+  // What waits changed: the row's tap asks again, and the cards are measured again, which a hidden card cannot be. The alerts over the screen stay open while anything waits.
   const waits = roomSummary?.name ?? null;
   useLayoutEffect(() => {
-    setAsked(false);
+    setAsked((a) => (a !== "column" && waits !== null ? a : null));
     setFirstHeight(0);
   }, [waits]);
+  const overlay = asked !== null && asked !== "column" && !folded;
+  useLayoutEffect(() => {
+    if (dock.getState().alertsOverlay !== overlay) dock.setState({ alertsOverlay: overlay });
+  }, [dock, overlay]);
+  useLayoutEffect(() => () => dock.setState({ alertsOverlay: false }), [dock]);
   const stacked = bar?.lane === "stacked" && colTop !== null ? columnRoom({ lane: "stacked", columnTop: colTop, bar: bar.box }) : null;
   const boxRef = useRef<HTMLDivElement | null>(null);
   const cardsRef = useRef<HTMLDivElement>(null);
@@ -547,15 +559,39 @@ function FightAlerts() {
     // A measure taken with the place applied differs from the last only by rounding, so it keeps the place and draws nothing again.
     setRowPlace((prev) => (Math.abs(prev.lift - next.lift) <= 1 && Math.abs(prev.inset - next.inset) <= 1 ? prev : next));
   });
-  // Asked for, the cards stand over the tool's options until a tap lands outside them.
+  // Asked for where they are, the cards stand over the tool's options until a tap lands outside them.
   useEffect(() => {
-    if (!asked) return;
+    if (asked !== "column") return;
     const off = (e: PointerEvent) => {
-      if (!boxRef.current?.contains(e.target as Node)) setAsked(false);
+      if (!boxRef.current?.contains(e.target as Node)) setAsked(null);
     };
     document.addEventListener("pointerdown", off, true);
     return () => document.removeEventListener("pointerdown", off, true);
   }, [asked]);
+  // The alerts over the screen close with Close, Escape or Back, and focus goes back to the row that opened them.
+  const focusRow = useRef(false);
+  const closeOverlay = useCallback(() => {
+    setAsked(null);
+    focusRow.current = true;
+  }, []);
+  useBackClose(overlay, closeOverlay);
+  useEffect(() => {
+    if (!overlay) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      closeOverlay();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [overlay, closeOverlay]);
+  // Measured again once closed, the cards stand in the column for a moment before the row returns, so focus waits for it.
+  useLayoutEffect(() => {
+    if (!focusRow.current || !rowRef.current) return;
+    focusRow.current = false;
+    rowRef.current.focus({ preventScroll: true });
+  });
+  const overlayTitle = useId();
   const [clipped, setClipped] = useState(false);
   const columnRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -576,6 +612,8 @@ function FightAlerts() {
         if (prev?.top !== colTop || prev.first !== SUMMARY_ROW || prev.content !== SUMMARY_ROW) dock.setState({ column: { top: colTop, content: SUMMARY_ROW, first: SUMMARY_ROW } });
         return;
       }
+      // Over the screen the cards are as wide as it, so they say nothing of the column: its last measures stand.
+      if (overlay) return;
       const measured = drawn(cards) ? { content: cards.getBoundingClientRect().height / zoom, first: firstCardHeight(cards) / zoom } : null;
       if (measured) setFirstHeight(measured.first);
       const prev = dock.getState().column;
@@ -586,7 +624,7 @@ function FightAlerts() {
     const observer = new ResizeObserver(measure);
     observer.observe(cards);
     return () => observer.disconnect();
-  }, [dock, colTop, zoom, alerts, summarized, folded, forFootCard, forRoom]);
+  }, [dock, colTop, zoom, alerts, summarized, folded, forFootCard, forRoom, overlay]);
   useLayoutEffect(() => () => dock.setState({ column: null }), [dock]);
 
   const clip = () => {
@@ -604,51 +642,6 @@ function FightAlerts() {
     else focusAlert(boxRef.current, showAfter.first);
   }, [showAfter, summarized, rolls]);
 
-  /*
-   * Asked for on a short screen, the first card shows whole, its buttons
-   * included, such as a check's Passed and Failed. Where the room down to
-   * the toolbar is too short for it, the column rises as the summary row
-   * does (raisedRow), never over a button in the top bars or a lasting
-   * notice. A card cannot narrow, so its whole width must be clear. Where
-   * no spot is left, the column scrolls to the card's foot, so its buttons
-   * show. Runs after the focus above, which shows a tall card's head.
-   */
-  const [askedLift, setAskedLift] = useState(0);
-  const appliedAskedLift = useRef(askedLift);
-  appliedAskedLift.current = askedLift;
-  useLayoutEffect(() => {
-    const box = boxRef.current;
-    const cards = cardsRef.current;
-    const header = box?.parentElement;
-    const first = cards ? firstCard(cards) : null;
-    if (!asked || summarized || !box || !header || !first || !chrome) {
-      setAskedLift(0);
-      return;
-    }
-    const b = box.getBoundingClientRect();
-    const c = first.getBoundingClientRect();
-    const usualTop = b.top + (appliedAskedLift.current + EDGE) * zoom;
-    const controls = Array.from(header.querySelectorAll("button"))
-      .filter((el) => !box.contains(el) && !el.hasAttribute("data-rvtt-backdrop"))
-      .map((el) => el.getBoundingClientRect());
-    const place = raisedRow({
-      row: { left: c.left, right: c.right, top: usualTop, height: c.height },
-      ceiling: header.firstElementChild?.getBoundingClientRect().top ?? 0,
-      floor: (height - chrome.toolbar) * zoom,
-      taken: lasting === null ? [] : [{ top: chrome.top * zoom, bottom: (lasting + theme.space(1)) * zoom }],
-      controls,
-      gap: EDGE * zoom,
-      minWidth: c.right - c.left,
-    });
-    if (place) {
-      const next = Math.max(0, Math.ceil((usualTop - place.top) / zoom));
-      setAskedLift((prev) => (Math.abs(prev - next) <= 1 ? prev : next));
-      return;
-    }
-    setAskedLift(0);
-    const foot = first.offsetTop + first.offsetHeight - box.clientHeight;
-    if (foot > box.scrollTop) box.scrollTop = foot;
-  }, [asked, summarized, chrome, lasting, height, zoom, alerts]);
 
   /*
    * The column scrolls as a whole once its cards outgrow the room between
@@ -674,9 +667,10 @@ function FightAlerts() {
       ref={columnRef}
       hidden={folded}
       onScroll={clip}
+      {...(overlay ? { role: "dialog", "aria-modal": true, "aria-labelledby": overlayTitle } : null)}
       style={{
         position: "absolute",
-        top: `calc(100% + ${push - (summarized ? rowPlace.lift : askedLift)}px)`,
+        top: `calc(100% + ${push - (summarized ? rowPlace.lift : 0)}px)`,
         right: sheetWidth,
         width: `calc(${cardWidth} + ${leftPad} + ${rightPad})`,
         // Before Room has measured its bars: the screen's height in the zoomed bar's own pixels (features/device/layout.ts), less the bars.
@@ -686,7 +680,7 @@ function FightAlerts() {
           : stacked !== null
             ? stacked + EDGE
             : chrome
-              ? Math.max(0, height - chrome.top - (asked ? chrome.toolbar - askedLift : chrome.bottom) - push)
+              ? Math.max(0, height - chrome.top - (asked === "column" ? chrome.toolbar : chrome.bottom) - push)
               : `calc(${screenHeight(100)} - ${theme.safe.top} - ${theme.safe.bottom} - ${top + theme.layout.toolbar + push}px)`,
         // Stacked over the bar, the foot keeps no shadow room: it would count as more to scroll to, and the bar sits 8 px below anyway.
         padding: `${EDGE}px ${rightPad} ${stacked !== null ? 0 : SHADOW_ROOM}px ${leftPad}`,
@@ -698,8 +692,45 @@ function FightAlerts() {
         alignItems: "stretch",
         gap: theme.space(2),
         pointerEvents: "none",
+        // Over the screen: from the safe top to the toolbar, or to the screen's foot, edge to edge on an opaque fill, its body scrolling under its header.
+        ...(overlay && chrome
+          ? {
+              top: theme.safe.top,
+              left: 0,
+              right: 0,
+              width: "auto",
+              height: `calc(${asked === "fullScreen" ? height : height - chrome.toolbar}px - ${theme.safe.top})`,
+              maxHeight: undefined,
+              padding: 0,
+              overflowY: "hidden",
+              gap: 0,
+              background: theme.color.surface,
+              pointerEvents: "auto",
+            }
+          : null),
       }}
     >
+      {overlay ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: theme.space(2),
+            flex: "none",
+            boxSizing: "border-box",
+            height: OVERLAY_HEAD,
+            padding: `0 calc(${theme.safe.right} + ${theme.space(3)}px) 0 calc(${theme.safe.left} + ${theme.space(3)}px)`,
+            borderBottom: `${theme.line.border}px solid ${theme.color.border}`,
+          }}
+        >
+          <h2 id={overlayTitle} style={{ flex: 1, margin: 0, fontSize: theme.font.input, fontWeight: theme.weight.bold }}>
+            Alerts
+          </h2>
+          <Button size="sm" onClick={closeOverlay}>
+            Close
+          </Button>
+        </div>
+      ) : null}
       {summarized && summary ? (
         <SummaryButton
           ref={rowRef}
@@ -711,13 +742,35 @@ function FightAlerts() {
               rolls?.open({ barAway: true });
               return;
             }
-            if (forRoom) setAsked(true);
+            if (forRoom && chrome) {
+              const column = height - chrome.top - chrome.toolbar - push;
+              const overlayRoom = height - chrome.safe.top - chrome.toolbar - OVERLAY_HEAD - 2 * OVERLAY_PAD;
+              setAsked(askedAlerts({ first: firstHeight, column, overlay: overlayRoom }));
+            }
             setShowAfter(rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: summary.first });
           }}
           style={{ ...card, minHeight: SUMMARY_ROW, padding: `0 ${theme.space(3)}px`, marginRight: rowPlace.inset }}
         />
       ) : null}
-      <div ref={cardsRef} hidden={summarized} style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: theme.space(2) }}>
+      <div
+        ref={cardsRef}
+        hidden={summarized}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "stretch",
+          gap: theme.space(2),
+          ...(overlay
+            ? {
+                flex: 1,
+                minHeight: 0,
+                overflowY: "auto",
+                overscrollBehavior: "contain",
+                padding: `${OVERLAY_PAD}px calc(${theme.safe.right} + ${theme.space(3)}px) ${asked === "fullScreen" ? `calc(${theme.safe.bottom} + ${OVERLAY_PAD}px)` : `${OVERLAY_PAD}px`} calc(${theme.safe.left} + ${theme.space(3)}px)`,
+              }
+            : null),
+        }}
+      >
         {prompts.map((p) => (
           <ConcentrationCard key={p.logId} prompt={p} onDone={() => dismissPrompt(p.logId)} />
         ))}
@@ -773,6 +826,10 @@ function firstCard(cards: HTMLElement): HTMLElement | null {
 function firstCardHeight(cards: HTMLElement): number {
   return firstCard(cards)?.getBoundingClientRect().height ?? 0;
 }
+
+/** The alerts over the screen: their header's height, a touch target and a little, with its rule, and the padding above and below their cards. */
+const OVERLAY_HEAD = theme.touch + theme.space(1) + theme.line.border;
+const OVERLAY_PAD = theme.space(2);
 
 /** The summary row at its usual place (FightAlerts `rowPlace`). */
 const NOT_RAISED = { lift: 0, inset: 0 };

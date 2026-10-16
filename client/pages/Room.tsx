@@ -40,7 +40,7 @@ import { roomPath } from "../lib/roomId.ts";
 import { sceneGate, selectionScene } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { PanelBody, RoomLoadNotice } from "../panels/Panels.tsx";
-import { RoomScope, RoomScopeProvider, useRoomScope } from "../state/scope.ts";
+import { RoomScope, RoomScopeProvider, useRoomScope, useScoped } from "../state/scope.ts";
 import { TOAST_MS } from "../state/store.ts";
 import { useShortcuts } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
@@ -760,6 +760,8 @@ function TopBar(props: {
   const role = useRoomView((s) => s.you?.role);
   const connection = useRoomView((s) => s.connection);
   const blackout = useRoomView((s) => s.view?.meta.view.blackout === true);
+  // The alerts it holds may open over the screen (FightAlerts), and then the bar rises over the notices with them.
+  const alertsOverlay = useStore(useScoped(barDockSlot), (s) => s.alertsOverlay);
   const activeEntryId = useRoomView((s) => s.view?.encounter?.activeEntryId ?? null);
   const round = useRoomView((s) => s.view?.encounter?.round ?? null);
   const notice = useYourTurnNotice();
@@ -802,7 +804,7 @@ function TopBar(props: {
         top: 0,
         left: 0,
         right: 0,
-        zIndex: theme.z.bars,
+        zIndex: alertsOverlay ? theme.z.alertsOverlay : theme.z.bars,
         padding: `${theme.safe.top} calc(${theme.safe.right} + ${theme.space(3)}px) 0 calc(${theme.safe.left} + ${theme.space(3)}px)`,
         background: theme.color.overlay,
         borderBottom: `${theme.line.border}px solid ${theme.color.border}`,

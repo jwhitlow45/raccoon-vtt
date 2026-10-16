@@ -781,12 +781,14 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         }
       }
 
-      // The summary row's tap hides the bar and shows the roll card.
+      // The summary row's tap hides the bar and shows the roll card: at its foot, in the column, or with the alerts over the screen where the column has no room, which Close puts away.
       if (await row.isVisible()) {
         await row.tap();
         await bar.waitFor({ state: "detached" });
         await card(player).waitFor();
         await card(player).getByRole("button", { name: "Later" }).tap();
+        const alerts = player.getByRole("dialog", { name: "Alerts" });
+        if ((await alerts.count()) > 0) await alerts.getByRole("button", { name: "Close", exact: true }).tap();
         await player.getByRole("toolbar", { name: "Select options" }).getByRole("button", { name: "Actions", exact: true }).tap();
         await bar.waitFor();
       }

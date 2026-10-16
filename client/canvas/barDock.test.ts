@@ -23,6 +23,7 @@ import {
   placeBar,
   pastBars,
   raisedRow,
+  askedAlerts,
   readSpot,
   releaseSpot,
   restingBar,
@@ -477,6 +478,15 @@ describe("the alerts column's summary row on a short screen", () => {
     const notice = { top: 52, bottom: 126 };
     const find = { left: 280, top: 4, right: 324, bottom: 48 };
     assert.deepEqual(raisedRow({ ...base, row: { ...row, top: 134 }, floor: 113, taken: [notice], controls: [find] }), { top: 8, right: 272 });
+  });
+
+  test("its tap shows the cards in the column where the first fits whole down to the toolbar, and over the screen otherwise", () => {
+    // The column's room from its usual top, its 8 px top padding included, and the room in the alerts' body over the screen down to the toolbar.
+    assert.equal(askedAlerts({ first: 80, column: 113, overlay: 100 }), "column");
+    assert.equal(askedAlerts({ first: 105, column: 113, overlay: 100 }), "column");
+    assert.equal(askedAlerts({ first: 100, column: 98, overlay: 100 }), "overlay");
+    assert.equal(askedAlerts({ first: 121, column: 113, overlay: 100 }), "fullScreen", "a check at 480 x 320 at 130% with the Ruler");
+    assert.equal(askedAlerts({ first: 121, column: -12, overlay: 100 }), "fullScreen", "under the Starting view notice, which reaches past the toolbar's top");
   });
 
   test("goes no higher than a spot where a button stands in its first 44 px, and is null with no spot left", () => {
