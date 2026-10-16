@@ -605,6 +605,52 @@ function FightAlerts() {
   }, [showAfter, summarized, rolls]);
 
   /*
+   * Asked for on a short screen, the first card shows whole, its buttons
+   * included, such as a check's Passed and Failed. Where the room down to
+   * the toolbar is too short for it, the column rises as the summary row
+   * does (raisedRow), never over a button in the top bars or a lasting
+   * notice. A card cannot narrow, so its whole width must be clear. Where
+   * no spot is left, the column scrolls to the card's foot, so its buttons
+   * show. Runs after the focus above, which shows a tall card's head.
+   */
+  const [askedLift, setAskedLift] = useState(0);
+  const appliedAskedLift = useRef(askedLift);
+  appliedAskedLift.current = askedLift;
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const cards = cardsRef.current;
+    const header = box?.parentElement;
+    const first = cards ? firstCard(cards) : null;
+    if (!asked || summarized || !box || !header || !first || !chrome) {
+      setAskedLift(0);
+      return;
+    }
+    const b = box.getBoundingClientRect();
+    const c = first.getBoundingClientRect();
+    const usualTop = b.top + (appliedAskedLift.current + EDGE) * zoom;
+    const controls = Array.from(header.querySelectorAll("button"))
+      .filter((el) => !box.contains(el) && !el.hasAttribute("data-rvtt-backdrop"))
+      .map((el) => el.getBoundingClientRect());
+    const place = raisedRow({
+      row: { left: c.left, right: c.right, top: usualTop, height: c.height },
+      ceiling: header.firstElementChild?.getBoundingClientRect().top ?? 0,
+      floor: (height - chrome.toolbar) * zoom,
+      taken: lasting === null ? [] : [{ top: chrome.top * zoom, bottom: (lasting + theme.space(1)) * zoom }],
+      controls,
+      gap: EDGE * zoom,
+      minWidth: c.right - c.left,
+    });
+    if (place) {
+      const next = Math.max(0, Math.ceil((usualTop - place.top) / zoom));
+      setAskedLift((prev) => (Math.abs(prev - next) <= 1 ? prev : next));
+      return;
+    }
+    setAskedLift(0);
+    const foot = first.offsetTop + first.offsetHeight - box.clientHeight;
+    if (foot > box.scrollTop) box.scrollTop = foot;
+  }, [asked, summarized, chrome, lasting, height, zoom, alerts]);
+
+  /*
    * The column scrolls as a whole once its cards outgrow the room between
    * the bars: a concentration card over the DM's roll desk, or a roll card
    * over two chips in a landscape phone, pushed the last button under the
@@ -630,7 +676,7 @@ function FightAlerts() {
       onScroll={clip}
       style={{
         position: "absolute",
-        top: `calc(100% + ${push - rowPlace.lift}px)`,
+        top: `calc(100% + ${push - (summarized ? rowPlace.lift : askedLift)}px)`,
         right: sheetWidth,
         width: `calc(${cardWidth} + ${leftPad} + ${rightPad})`,
         // Before Room has measured its bars: the screen's height in the zoomed bar's own pixels (features/device/layout.ts), less the bars.
@@ -640,7 +686,7 @@ function FightAlerts() {
           : stacked !== null
             ? stacked + EDGE
             : chrome
-              ? Math.max(0, height - chrome.top - (asked ? chrome.toolbar : chrome.bottom) - push)
+              ? Math.max(0, height - chrome.top - (asked ? chrome.toolbar - askedLift : chrome.bottom) - push)
               : `calc(${screenHeight(100)} - ${theme.safe.top} - ${theme.safe.bottom} - ${top + theme.layout.toolbar + push}px)`,
         // Stacked over the bar, the foot keeps no shadow room: it would count as more to scroll to, and the bar sits 8 px below anyway.
         padding: `${EDGE}px ${rightPad} ${stacked !== null ? 0 : SHADOW_ROOM}px ${leftPad}`,
@@ -709,19 +755,23 @@ function FightAlerts() {
   );
 }
 
-/** The first card's height as drawn: the first child with a box, looking inside a wrapper with `display: contents`, as the rolls' is. */
-function firstCardHeight(cards: HTMLElement): number {
+/** The first card as drawn: the first child with a box, looking inside a wrapper with `display: contents`, as the rolls' is. */
+function firstCard(cards: HTMLElement): HTMLElement | null {
   for (const child of cards.children) {
     if (!(child instanceof HTMLElement)) continue;
     if (getComputedStyle(child).display === "contents") {
-      const inner = firstCardHeight(child);
-      if (inner > 0) return inner;
+      const inner = firstCard(child);
+      if (inner) return inner;
       continue;
     }
-    const height = child.getBoundingClientRect().height;
-    if (height > 0) return height;
+    if (child.getBoundingClientRect().height > 0) return child;
   }
-  return 0;
+  return null;
+}
+
+/** The first card's height as drawn (firstCard). */
+function firstCardHeight(cards: HTMLElement): number {
+  return firstCard(cards)?.getBoundingClientRect().height ?? 0;
 }
 
 /** The summary row at its usual place (FightAlerts `rowPlace`). */

@@ -563,6 +563,27 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await dm.locator('[data-alert="concentration"]').first().waitFor();
     await framing.getByRole("button", { name: "Cancel" }).tap();
   });
+
+  test("11. at 480 x 320 at 130% with the Ruler, the summary row's tap shows the check whole, Passed and Failed taking a tap", async () => {
+    const label = "480 x 320 at 130% with the Ruler";
+    await setUp({ width: 480, height: 320, scale: 1.3, side: 47, bottom: 21 });
+    await dm.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Ruler" }).tap();
+    await dm.getByRole("toolbar", { name: "Ruler options" }).waitFor();
+    await hurtHag();
+    await dm.locator('[data-alert="concentration"]').first().waitFor({ state: "attached" });
+    await dm.waitForTimeout(400);
+    const row = dm.getByRole("button", { name: /^Concentration check/ });
+    assert.ok(await wholeInReach(row), `${label}: the summary row is hidden or cut off`);
+    await row.tap();
+    const check = dm.locator('[data-alert="concentration"]').first();
+    await check.waitFor();
+    await dm.waitForTimeout(300);
+    await shots.take(dm, "dmphone-check-asked-480x320");
+    for (const name of ["Passed", "Failed"]) {
+      assert.ok(await wholeInReach(check.getByRole("button", { name, exact: true })), `${label}: ${name} is cut off or takes no tap after the row's tap`);
+    }
+    await check.getByRole("button", { name: "Passed", exact: true }).tap();
+  });
 });
 
 function goblin() {
