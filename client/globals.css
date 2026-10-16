@@ -232,3 +232,11 @@ summary::-webkit-details-marker {
     flex: 1 1 calc(50% - 4px) !important;
   }
 }
+
+/* The token window's resize handle shows the accent under a hovering mouse
+   and while focused (canvas/TokenActionBar.tsx). It shows at rest too, so
+   nothing depends on hover. Its inline muted color would otherwise win. */
+[data-resize-handle]:hover,
+[data-resize-handle]:focus-visible {
+  color: var(--rvtt-accent, #f7df00) !important;
+}

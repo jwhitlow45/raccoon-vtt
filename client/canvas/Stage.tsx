@@ -282,7 +282,7 @@ export function MapStage(props: {
     const z = uiScale();
     const layout = layoutSize(window, z);
     if (!shows) return NO_INSETS;
-    const resting = () => restingBar({ layout, viewport: sizeInZoomed(viewport, z), chrome: barChrome(dock), spot: dock.spot, height: dock.lastHeight, foot: dock.foot, column: dock.column, width: dock.defaultWidth });
+    const resting = () => restingBar({ layout, viewport: sizeInZoomed(viewport, z), chrome: barChrome(dock), spot: dock.spot, height: dock.lastHeight, foot: dock.foot, column: dock.column, width: dock.defaultWidth, size: dock.size, resizable: dock.finePointer });
     const bar =
       source === "fresh"
         ? resting()

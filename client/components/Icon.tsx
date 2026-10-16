@@ -12,7 +12,7 @@ import { theme } from "../lib/theme.ts";
  * readers.
  */
 
-export type IconName = "close" | "back" | "more" | "chevronRight" | "chevronDown" | "plus" | "minus" | "check" | "copy" | "filter" | "expand" | "collapsePanel" | "resetZoom" | "grip" | "windowHome";
+export type IconName = "close" | "back" | "more" | "chevronRight" | "chevronDown" | "plus" | "minus" | "check" | "copy" | "filter" | "expand" | "collapsePanel" | "resetZoom" | "grip" | "windowHome" | "resize";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -70,6 +70,8 @@ const SHAPES: Record<IconName, ReactNode> = {
       <rect x="14" y="13" width="5" height="5" rx="1" fill="currentColor" />
     </g>
   ),
+  // A double arrow on the top-left to bottom-right diagonal, for the token window's resize handle: turned a quarter for the other diagonal.
+  resize: <path {...STROKE} d="M6 6l12 12M6 6v6M6 6h6M18 18v-6M18 18h-6" />,
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];

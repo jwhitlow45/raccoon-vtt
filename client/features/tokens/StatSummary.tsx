@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { Actor, Token } from "#shared/model.ts";
 import { loadMonsters, type SrdMonster } from "#shared/srd/monsters.ts";
 import { AcBadge } from "../../components/AcBadge.tsx";
@@ -211,9 +211,14 @@ export function DefenseLines(props: { block: LinkedBlock; clamp?: boolean }) {
  */
 export function MoreStats(props: { more: readonly VitalItem[]; block: LinkedBlock }) {
   const [open, setOpen] = useState(false);
+  // Opened in a window that scrolls, what it shows scrolls itself into view (docs/design-v1-token-window.md 5.7).
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (open) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [open]);
   if (!moreStatsShown(props.more, props.block)) return null;
   return (
-    <div style={{ display: "grid", gap: theme.space(2) }}>
+    <div ref={ref} style={{ display: "grid", gap: theme.space(2) }}>
       <Button size="sm" expanded={open} onClick={() => setOpen((o) => !o)} style={{ justifyContent: "space-between", width: "100%" }}>
         More stats
         <Icon name={open ? "chevronDown" : "chevronRight"} size="sm" />

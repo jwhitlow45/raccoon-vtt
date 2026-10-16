@@ -226,6 +226,8 @@ export type PaneHandle = {
 
 /** Marks the grip, so the header's handle takes a press on it while it skips the header's other buttons. */
 export const GRIP_ATTR = "data-pane-grip";
+/** Marks a sticky header, so the frame that scrolls under it can keep a control it scrolls into view clear of it. */
+export const STICKY_HEADER_ATTR = "data-sticky-header";
 
 /**
  * The header of a pane over the map (docs/design-v1-visual.md 2.3): the
@@ -297,6 +299,7 @@ export function PaneHeader(props: {
   const row = { display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0 } as const;
   return (
     <div
+      {...(sticky ? { [STICKY_HEADER_ATTR]: "" } : {})}
       onPointerDown={handle?.onPointerDown}
       onPointerMove={handle?.onPointerMove}
       onPointerUp={handle?.onPointerUp}

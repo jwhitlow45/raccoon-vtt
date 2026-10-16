@@ -119,6 +119,19 @@ describe("a short bar", () => {
     assert.equal(barShort(small), true);
   });
 
+  test("a resized window's height caps its capacity: 299 is short and 300 not, a cap above the room leaves the room deciding, and a touch device or the compact overlay ignores it (docs/design-v1-token-window.md 5.8)", () => {
+    const desk800 = { ...desk(800), width: 316 };
+    assert.equal(barCapacity({ ...desk800, resizable: true, size: { h: 299 } }), 299);
+    assert.equal(barShort({ ...desk800, resizable: true, size: { h: 299 } }), true);
+    assert.equal(barCapacity({ ...desk800, resizable: true, size: { h: 300 } }), 300);
+    assert.equal(barShort({ ...desk800, resizable: true, size: { h: 300 } }), false);
+    // The room, less the handle's 4 px at the top.
+    assert.equal(barCapacity({ ...desk800, resizable: true, size: { h: 4096 } }), 800 - 52 - 60 - 16 - 4);
+    assert.equal(barCapacity({ ...desk800, resizable: false, size: { h: 200 } }), 800 - 52 - 60 - 16);
+    const small: BarRoom = { ...desk(246), layout: { width: 369, height: 246 }, viewport: { width: 369, height: 246 }, chrome: chrome({ side: 47, bottom: 21 }) };
+    assert.equal(barCapacity({ ...small, resizable: true, size: { h: 40 } }), barCapacity(small));
+  });
+
   test("a docked bar on a desktop is short while tall alert cards push it down, and not once they go", () => {
     const column = { top: 60, content: 640, first: 400 };
     assert.equal(barCapacity(desk(800, column)), 264);

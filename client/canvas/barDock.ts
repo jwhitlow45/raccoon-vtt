@@ -1,5 +1,7 @@
 import { createStore } from "zustand/vanilla";
 import type { Point, Size } from "../lib/camera.ts";
+import { isFinePointer } from "../lib/device.ts";
+import { TAP_SLOP_PX } from "../lib/gestures.ts";
 import { scopeSlot } from "../state/scope.ts";
 
 /*
@@ -325,6 +327,212 @@ export function headerBand(width: number): "row" | "stacked" | "fold" {
   return width >= WINDOW_FOLD_BELOW ? "stacked" : "fold";
 }
 
+// ------------------------------------------------------------ the stored size
+
+/**
+ * The size this device gave the token window on a computer, as
+ * `rvtt.tokenBarSize` stores it (docs/design-v1-token-window.md 6): a
+ * width, which the window takes exactly within its limits, and a height,
+ * which caps it. Either may be missing, which is the default: the default
+ * width, and as tall as the content up to the room.
+ */
+export type BarSize = { w?: number; h?: number };
+
+export const SIZE_KEY = "rvtt.tokenBarSize";
+export const NO_SIZE: BarSize = Object.freeze({});
+const SIZE_MAX = 4096;
+
+/** The stored size, or the default for anything else: a missing key, bad JSON, a fraction, a negative, zero, over 4096, a string, or no field at all. */
+export function parseSize(raw: string | null): BarSize {
+  if (raw === null) return NO_SIZE;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return NO_SIZE;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return NO_SIZE;
+  const { w, h } = value as Record<string, unknown>;
+  const ok = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= SIZE_MAX;
+  if ((w !== undefined && !ok(w)) || (h !== undefined && !ok(h))) return NO_SIZE;
+  return { ...(ok(w) ? { w } : {}), ...(ok(h) ? { h } : {}) };
+}
+
+export function hasSize(size: BarSize): boolean {
+  return size.w !== undefined || size.h !== undefined;
+}
+
+/** What to store for a size: null for the default, which is stored as no key. */
+export function sizeText(size: BarSize): string | null {
+  return hasSize(size) ? JSON.stringify({ ...(size.w !== undefined ? { w: size.w } : {}), ...(size.h !== undefined ? { h: size.h } : {}) }) : null;
+}
+
+/** The size this device stored. Storage can throw, which reads as the default. */
+export function readSize(storage?: Pick<Storage, "getItem">): BarSize {
+  try {
+    const from = storage ?? (typeof localStorage === "undefined" ? undefined : localStorage);
+    return parseSize(from?.getItem(SIZE_KEY) ?? null);
+  } catch {
+    return NO_SIZE;
+  }
+}
+
+export function writeSize(size: BarSize, storage?: Pick<Storage, "setItem" | "removeItem">): void {
+  try {
+    const to = storage ?? (typeof localStorage === "undefined" ? undefined : localStorage);
+    const text = sizeText(size);
+    if (text === null) to?.removeItem(SIZE_KEY);
+    else to?.setItem(SIZE_KEY, text);
+  } catch {
+    // The size then lasts as long as the page.
+  }
+}
+
+/** The shortest a resized window gets: its header and two rows of buttons, the least a docked bar needs. */
+export const MIN_WINDOW_HEIGHT = MIN_BAR_HEIGHT;
+/**
+ * How far the resize handle reaches past the window's corner: half its
+ * 24 px disc. The free area's margin and the lane's gap are 8, so a
+ * resizable window's free sides keep 4 px more from whatever clips or
+ * covers, and the whole handle stays on the map and on top (5.3).
+ */
+export const HANDLE_REACH = 12;
+const REACH_EXTRA = HANDLE_REACH - EDGE;
+/** A width or height that ends within this of its default stores none (5.4). */
+export const SIZE_SNAP = 24;
+
+/** Where the resize handle stands: the window's corner diagonally opposite its spot's corner (5.3). */
+export function handleCorner(corner: Corner): Corner {
+  return `${corner[0] === "t" ? "b" : "t"}${corner[1] === "l" ? "r" : "l"}`;
+}
+
+/** The window's sides away from its spot's corner, where the handle and its bands stand. */
+export function freeSides(corner: Corner): Sides {
+  return { top: corner[0] === "b" ? 1 : 0, bottom: corner[0] === "t" ? 1 : 0, left: corner[1] === "r" ? 1 : 0, right: corner[1] === "l" ? 1 : 0 };
+}
+
+/** The extra room each side keeps for the handle: 4 px on the free sides of a resizable window, none on its anchored sides or anywhere else. */
+export function handleReach(corner: Corner, resizable: boolean): Sides {
+  if (!resizable) return NO_SIDES;
+  const f = freeSides(corner);
+  return { top: f.top * REACH_EXTRA, right: f.right * REACH_EXTRA, bottom: f.bottom * REACH_EXTRA, left: f.left * REACH_EXTRA };
+}
+
+/** A box less some room on each side. */
+export function insetBox(box: Box, by: Sides): Box {
+  return { left: box.left + by.left, top: box.top + by.top, width: Math.max(0, box.width - by.left - by.right), height: Math.max(0, box.height - by.top - by.bottom) };
+}
+
+/**
+ * The room a window may move in: the free area, less the handle's reach on
+ * the free sides of the corner nearest its middle, the corner a drop or a
+ * key step will store.
+ */
+export function moveRoom(box: Box, free: Box, resizable: boolean): Box {
+  return insetBox(free, handleReach(cornerSpot(box, free, 0).corner, resizable));
+}
+
+/** A box dragged or stepped past its room, pulled back inside it. */
+export function clampMove(box: Box, free: Box, resizable: boolean): Box {
+  return clampBox(box, moveRoom(box, free, resizable));
+}
+
+export type ResizePart = "corner" | "width" | "height";
+
+/** The limits a resize meets, from the window's anchored edges (5.6): the default width and 148 px at least, the room and the content at most. */
+export type ResizeLimits = { minWidth: number; maxWidth: number; minHeight: number; maxHeight: number };
+
+/**
+ * The limits for a window anchored at `corner` with this box, in `room`
+ * (the free area less the handle's reach), with `content` the height of
+ * all it holds. Where the room is less than a least, the room wins.
+ */
+export function resizeLimits(input: { box: Box; corner: Corner; room: Box; defaultWidth: number; content: number }): ResizeLimits {
+  const { box, corner, room } = input;
+  const maxWidth = Math.max(0, corner[1] === "r" ? box.left + box.width - room.left : room.left + room.width - box.left);
+  const roomHeight = Math.max(0, corner[0] === "b" ? box.top + box.height - room.top : room.top + room.height - box.top);
+  const maxHeight = Math.min(roomHeight, input.content);
+  return { minWidth: Math.min(input.defaultWidth, maxWidth), maxWidth, minHeight: Math.min(MIN_WINDOW_HEIGHT, maxHeight), maxHeight };
+}
+
+/**
+ * The box a resize draws (5.4): the edges at the spot's corner stay put,
+ * and the far edges follow the pointer, or the arrow keys' step. The handle
+ * changes both dimensions, a band one. Each is held to its limits.
+ */
+export function resizeBox(input: { start: Box; corner: Corner; part: ResizePart; dx: number; dy: number; limits: ResizeLimits }): Box {
+  const { start, corner, part, limits } = input;
+  const right = corner[1] === "r";
+  const bottom = corner[0] === "b";
+  const width = part === "height" ? start.width : clamp(start.width + (right ? -input.dx : input.dx), limits.minWidth, limits.maxWidth);
+  const height = part === "width" ? start.height : clamp(start.height + (bottom ? -input.dy : input.dy), limits.minHeight, limits.maxHeight);
+  return { left: right ? start.left + start.width - width : start.left, top: bottom ? start.top + start.height - height : start.top, width, height };
+}
+
+/**
+ * The spot a resize stores: the drawn box's anchored edges, keeping its
+ * corner, unsnapped, so a window clamped against the free area never jumps
+ * on release by the clamp it had.
+ */
+export function anchoredSpot(box: Box, free: Box, corner: Corner): Spot {
+  const x = corner[1] === "r" ? free.left + free.width - (box.left + box.width) : box.left - free.left;
+  const y = corner[0] === "b" ? free.top + free.height - (box.top + box.height) : box.top - free.top;
+  return { corner, x: clamp(Math.round(x), 0, SPOT_MAX), y: clamp(Math.round(y), 0, SPOT_MAX) };
+}
+
+/**
+ * The size a pointer resize stores on release (5.4). A dimension the drag
+ * changed by no more than the 8 px slop keeps its stored value, so a
+ * clamped stored width is never written down as the clamp. A width within
+ * 24 px of the default stores none, and a height within 24 px of the most
+ * it may take (`tallest`: the content or the room) stores none, so the
+ * window grows with its content again. Otherwise whole px.
+ */
+export function releaseSize(input: { stored: BarSize; start: Box; box: Box; defaultWidth: number; tallest: number }): BarSize {
+  const { stored, start, box } = input;
+  const w = Math.abs(box.width - start.width) <= TAP_SLOP_PX ? stored.w : Math.abs(box.width - input.defaultWidth) <= SIZE_SNAP ? undefined : Math.round(box.width);
+  const h = Math.abs(box.height - start.height) <= TAP_SLOP_PX ? stored.h : input.tallest - box.height <= SIZE_SNAP ? undefined : Math.round(box.height);
+  return withSize(w, h);
+}
+
+/**
+ * The size a key step of the handle stores (5.5): the dimensions it
+ * changed, unsnapped, so a width exactly at the default stores none and a
+ * height at the most it may take stores none. The other keeps its value.
+ */
+export function keySize(input: { stored: BarSize; start: Box; box: Box; defaultWidth: number; tallest: number }): BarSize {
+  const { stored, start, box } = input;
+  const w = box.width === start.width ? stored.w : Math.round(box.width) === input.defaultWidth ? undefined : Math.round(box.width);
+  const h = box.height === start.height ? stored.h : Math.round(box.height) >= Math.floor(input.tallest) ? undefined : Math.round(box.height);
+  return withSize(w, h);
+}
+
+function withSize(w: number | undefined, h: number | undefined): BarSize {
+  return { ...(w !== undefined ? { w: clamp(w, 1, SIZE_MAX) } : {}), ...(h !== undefined ? { h: clamp(h, 1, SIZE_MAX) } : {}) };
+}
+
+/** Which limit a key step met, the first of width then height, or null. */
+export function limitMet(input: { start: Box; box: Box; dx: number; dy: number; corner: Corner; limits: ResizeLimits }): "narrowest" | "widest" | "shortest" | "tallest" | null {
+  const { box, limits, corner } = input;
+  const wantWider = (corner[1] === "r" ? -input.dx : input.dx) > 0;
+  const wantTaller = (corner[0] === "b" ? -input.dy : input.dy) > 0;
+  if (input.dx !== 0) {
+    if (wantWider && box.width >= limits.maxWidth) return "widest";
+    if (!wantWider && box.width <= limits.minWidth) return "narrowest";
+  }
+  if (input.dy !== 0) {
+    if (wantTaller && box.height >= limits.maxHeight) return "tallest";
+    if (!wantTaller && box.height <= limits.minHeight) return "shortest";
+  }
+  return null;
+}
+
+/** What the status says after the handle's keys: "Window 316 by 400 px", and the limit a press met. */
+export function sizeWords(box: Pick<Box, "width" | "height">, limit: ReturnType<typeof limitMet>): string {
+  const words = `Window ${Math.round(box.width)} by ${Math.round(box.height)} px`;
+  return limit ? `${words}, ${limit} it can be here` : words;
+}
+
 // ------------------------------------------------------------ the right lane
 
 export type Lane = "none" | "stacked" | "beside" | "summary";
@@ -379,6 +587,8 @@ export function shareLane(input: {
   besideRoom: number;
   /** The bar's content height, which a bar hung by its bottom keeps by moving down. */
   content: number;
+  /** More room a stacked bar keeps below the first card: the handle's reach, when its top is a free side (handleReach). */
+  floorGap?: number;
 }): { lane: Lane; hang: Hang } {
   const { hang, laneTop } = input;
   const laneBottom = laneTop + Math.max(0, input.laneHeight);
@@ -401,12 +611,12 @@ export function shareLane(input: {
  * when stacked, the summary row's when summarized, and the lane's own top
  * beside it or with no card.
  */
-export function laneChoice(input: { laneTop: number; laneHeight: number; column: ColumnFacts | null; besideRoom: number }): { lane: Lane; floor: number } {
+export function laneChoice(input: { laneTop: number; laneHeight: number; column: ColumnFacts | null; besideRoom: number; floorGap?: number }): { lane: Lane; floor: number } {
   const { laneTop, column } = input;
   const height = Math.max(0, input.laneHeight);
   if (!column || column.first <= 0) return { lane: "none", floor: laneTop };
   // Never above the lane: a column that has risen over the bars leaves the bar the lane's whole height, no more.
-  const firstBottom = Math.max(laneTop, column.top + column.first + EDGE);
+  const firstBottom = Math.max(laneTop, column.top + column.first + EDGE + (input.floorGap ?? 0));
   if (laneTop + height - firstBottom >= Math.min(BAR_FLOOR, height) && height > 0) return { lane: "stacked", floor: firstBottom };
   if (input.besideRoom >= BESIDE_MIN) return { lane: "beside", floor: laneTop };
   return { lane: "summary", floor: Math.max(laneTop, (column.row ?? column.top) + SUMMARY_ROW + EDGE) };
@@ -548,7 +758,11 @@ export function placeBar(input: {
   column: ColumnFacts | null;
   /** The default width (defaultBarWidth), which every bar that does not span takes. */
   width?: number;
-}): { mode: BarMode; free: Box; hang: Hang; lane: Lane } | null {
+  /** The size this device stored (BarSize), which a resizable window takes: its width, and its height as a cap. */
+  size?: BarSize;
+  /** The window resizes here: on a computer, where it docks (5.1). Elsewhere the size is ignored and stays stored. */
+  resizable?: boolean;
+}): { mode: BarMode; free: Box; hang: Hang; lane: Lane; resizable: boolean; room: Box } | null {
   const barWidth = input.width ?? BAR_WIDTH;
   const free = freeArea(input.viewport, input.chrome, input.foot);
   const mode = barMode(input.layout, free.height);
@@ -557,22 +771,39 @@ export function placeBar(input: {
     // An upright span crosses the whole map, so it always meets the column: it keeps below the first card, or moves beside the lane, and never covers its token either way.
     const { lane, floor } = laneChoice({ laneTop: free.top, laneHeight: free.height, column: input.column, besideRoom: free.width - LANE_WIDTH });
     const hang = spanHang(input.anchor, free, input.height, floor);
-    if (lane !== "beside") return { mode, free, hang, lane };
+    if (lane !== "beside") return { mode, free, hang, lane, resizable: false, room: free };
     const width = Math.min(barWidth, free.width - LANE_WIDTH);
-    return { mode, free, hang: { ...hang, left: laneLeft(free) - width, width }, lane };
+    return { mode, free, hang: { ...hang, left: laneLeft(free) - width, width }, lane, resizable: false, room: free };
   }
-  const hang = mode === "compact" ? compactHang(input.layout, input.viewport, input.chrome, barWidth) : spotHang(input.spot, free, { width: barWidth, height: input.height });
-  if (!input.column || !overlapsLane(hang, free)) return { mode, free, hang, lane: "none" };
+  /*
+   * A resizable window takes its stored width, never under the default,
+   * and keeps the handle's reach on its free sides (5.3). The stored
+   * height caps it last, after the spot and the lane (6): whatever room
+   * they give, it takes at most that, and a window the lane moves down
+   * keeps min(content, cap) of height, as it kept its content's.
+   */
+  const resizable = mode === "dock" && input.resizable === true;
+  const reach = handleReach(input.spot.corner, resizable);
+  const room = insetBox(free, reach);
+  // A stored height under the shortest is drawn at the shortest (5.6).
+  const cap = resizable && input.size?.h !== undefined ? Math.max(MIN_WINDOW_HEIGHT, input.size.h) : undefined;
+  const content = cap === undefined ? input.height : Math.min(input.height, cap);
+  const width = resizable ? Math.max(barWidth, input.size?.w ?? barWidth) : barWidth;
+  const hang = mode === "compact" ? compactHang(input.layout, input.viewport, input.chrome, barWidth) : spotHang(input.spot, room, { width, height: content });
+  const capped = (h: Hang): Hang => (cap === undefined ? h : { ...h, room: Math.min(h.room, cap) });
+  if (!input.column || !overlapsLane(hang, free)) return { mode, free, hang: capped(hang), lane: "none", resizable, room };
+  const left = laneLeft(free) - reach.right;
   const shared = shareLane({
     hang,
-    laneTop: free.top,
-    laneHeight: mode === "compact" ? hang.room : free.height,
+    laneTop: mode === "compact" ? free.top : room.top,
+    laneHeight: mode === "compact" ? hang.room : room.height,
     column: input.column,
-    laneLeft: laneLeft(free),
-    besideRoom: free.width - LANE_WIDTH,
-    content: input.height,
+    laneLeft: left,
+    besideRoom: left - room.left,
+    content,
+    floorGap: reach.top,
   });
-  return { mode, free, ...shared };
+  return { mode, free, lane: shared.lane, hang: capped(shared.hang), resizable, room };
 }
 
 /**
@@ -581,7 +812,18 @@ export function placeBar(input: {
  * as the drawn bar will be (placeBar). Null where the bar spans, since a
  * spanning bar is placed by its token.
  */
-export function restingBar(input: { layout: Size; viewport: Size; chrome: Chrome; spot: Spot; height: number; foot?: number; column: ColumnFacts | null; width?: number }): { box: Box; laneLeft: number; freeRight: number } | null {
+export function restingBar(input: {
+  layout: Size;
+  viewport: Size;
+  chrome: Chrome;
+  spot: Spot;
+  height: number;
+  foot?: number;
+  column: ColumnFacts | null;
+  width?: number;
+  size?: BarSize;
+  resizable?: boolean;
+}): { box: Box; laneLeft: number; freeRight: number } | null {
   const placed = placeBar({ ...input, foot: input.foot ?? 0, anchor: null });
   if (!placed || placed.mode === "span") return null;
   return { box: hangBox(placed.hang, input.height), laneLeft: laneLeft(placed.free), freeRight: placed.free.left + placed.free.width };
@@ -782,6 +1024,10 @@ type BarDockState = {
   spot: Spot;
   /** The default width this page measured (defaultBarWidth). */
   defaultWidth: number;
+  /** This Room's stored window size, read with the spot, and kept to itself by a preview as the spot is. */
+  size: BarSize;
+  /** The device's main pointer is fine, read once with the page: the window resizes only here (docs/design-v1-token-window.md 5.1). */
+  finePointer: boolean;
   /** The content height the bar last had, for where it will rest before it opens. */
   lastHeight: number;
   /** Set by Actions: the next bar to show takes focus on its frame. */
@@ -803,7 +1049,7 @@ type BarDockState = {
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
-  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false })),
+  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false })),
 );
 
 function clamp(n: number, lo: number, hi: number): number {

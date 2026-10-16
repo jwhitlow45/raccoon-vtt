@@ -204,7 +204,8 @@ function tokenPanel(page: Page): Locator {
 
 /** Apply shows whole inside the bar's box with the bar at its top, so an HP change needs no scroll. */
 async function applyInView(b: Locator, label: string): Promise<void> {
-  assert.equal(await b.evaluate((el) => (el as unknown as El).scrollTop), 0, `${label}: the bar opened scrolled`);
+  // The window scrolls inside its frame, in its scroller (docs/design-v1-token-window.md 5.7).
+  assert.equal(await b.locator("[data-bar-scroll]").evaluate((el) => (el as unknown as El).scrollTop), 0, `${label}: the bar opened scrolled`);
   const frame = await rectOf(b);
   const apply = await rectOf(b.getByRole("button", { name: "Apply", exact: true }));
   assert.ok(apply.top >= frame.top && apply.bottom <= frame.bottom + 1, `${label}: Apply is out of the bar's view: ${JSON.stringify({ apply, frame })}`);
@@ -975,7 +976,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       const frame = await rectOf(goblin);
       const apply = await rectOf(goblin.getByRole("button", { name: "Apply", exact: true }));
       assert.ok(apply.bottom <= frame.bottom + 1 && apply.top >= frame.top, `${size.label}: Apply is out of the bar's box`);
-      assert.equal(await goblin.evaluate((el) => (el as unknown as El).scrollTop), 0);
+      assert.equal(await goblin.locator("[data-bar-scroll]").evaluate((el) => (el as unknown as El).scrollTop), 0);
       const more = goblin.getByRole("button", { name: "More stats", exact: true });
       assert.equal(await more.getAttribute("aria-expanded"), "false", `${size.label}: More stats starts open`);
       assert.ok((await rectOf(more)).top > apply.bottom, "More stats sits under the HP entry");

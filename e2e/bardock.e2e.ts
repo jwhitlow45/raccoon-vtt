@@ -30,6 +30,7 @@ const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 
 const DESK = { width: 1280, height: 800 };
 const SPOT_KEY = "rvtt.tokenBarSpot";
+const SIZE_KEY = "rvtt.tokenBarSize";
 
 let server: Server;
 let browser: Browser;
@@ -88,17 +89,20 @@ function actor(hp = 20) {
   };
 }
 
-/** Sets the window, the interface size and the spot, then loads the room again. */
-async function setUp(page: Page, view: { width: number; height: number; scale: number }, spot: string | null = null): Promise<void> {
+/** Sets the window, the interface size, the spot and the window's size, then loads the room again. */
+async function setUp(page: Page, view: { width: number; height: number; scale: number }, spot: string | null = null, size: string | null = null): Promise<void> {
   await page.setViewportSize({ width: view.width, height: view.height });
   await page.evaluate(
-    ([s, key, value]) => {
+    ([s, keys, values]) => {
       const g = globalThis as unknown as { localStorage: { setItem(k: string, v: string): void; removeItem(k: string): void } };
       g.localStorage.setItem("rvtt.uiScale", String(s));
-      if (value === null) g.localStorage.removeItem(key as string);
-      else g.localStorage.setItem(key as string, value as string);
+      (keys as readonly string[]).forEach((key, i) => {
+        const value = (values as readonly (string | null)[])[i] ?? null;
+        if (value === null) g.localStorage.removeItem(key);
+        else g.localStorage.setItem(key, value);
+      });
     },
-    [view.scale, SPOT_KEY, spot] as const,
+    [view.scale, [SPOT_KEY, SIZE_KEY], [spot, size]] as const,
   );
   await page.reload();
   await page.getByRole("status", { name: "Connected" }).first().waitFor();
@@ -231,6 +235,52 @@ async function touchDrag(cdp: CDPSession, from: { x: number; y: number }, to: { 
 
 function storedSpot(page: Page): Promise<string | null> {
   return page.evaluate((key) => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem(key), SPOT_KEY);
+}
+
+function storedSize(page: Page): Promise<string | null> {
+  return page.evaluate((key) => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem(key), SIZE_KEY);
+}
+
+/** The window's resize handle. */
+function resizeHandle(page: Page): Locator {
+  return barFrame(page).getByRole("button", { name: "Resize window", exact: true });
+}
+
+/** The window's scroller, which scrolls inside its frame. */
+function scroller(page: Page): Locator {
+  return barFrame(page).locator("[data-bar-scroll]");
+}
+
+/** A mouse drag from a point by a distance, past the slop first, in small steps. Escape before the release puts the window back. */
+async function dragBy(page: Page, from: { x: number; y: number }, dx: number, dy: number, opts: { escape?: boolean } = {}): Promise<void> {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + Math.sign(dx || 1) * 12, from.y + Math.sign(dy || 1) * 12, { steps: 2 });
+  await page.mouse.move(from.x + dx, from.y + dy, { steps: 10 });
+  if (opts.escape) await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await page.waitForTimeout(150);
+}
+
+function middle(r: Rect): { x: number; y: number } {
+  return { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 };
+}
+
+/** The resize bands, top or bottom first, then left or right, as the frame draws them. */
+function bands(page: Page): Locator {
+  return barFrame(page).locator("[data-resize-band]");
+}
+
+/** Whether the handle or a band is what a pointer at each point would reach. */
+function handleOnTop(page: Page, points: readonly { x: number; y: number }[]): Promise<boolean[]> {
+  return page.evaluate(
+    (pts) =>
+      pts.map((p) => {
+        const top = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): El | null } }).document.elementFromPoint(p.x, p.y);
+        return top !== null && top.closest("[data-resize-handle], [data-resize-band]") !== null;
+      }),
+    points,
+  );
 }
 
 function focusedName(page: Page): Promise<string> {
@@ -1081,7 +1131,257 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     }
   });
 
-  test("16. nothing went wrong in the browsers", () => {
+  test("16. resizing with a mouse and with the handle's keys, on a computer, and none on a touch tablet", async () => {
+    await setUp(dm, { ...DESK, scale: 1 });
+    // The handle stands at the corner opposite the spot's, at each of the four corners.
+    for (const [corner, at] of [
+      ["br", "tl"],
+      ["bl", "tr"],
+      ["tl", "br"],
+      ["tr", "bl"],
+    ] as const) {
+      await setUp(dm, { ...DESK, scale: 1 }, corner === "br" ? null : `{"corner":"${corner}","x":0,"y":0}`);
+      await selectThorn();
+      const r = await barRect(dm);
+      const h = middle(await rectOf(resizeHandle(dm)));
+      const x = at[1] === "l" ? r.left : r.right;
+      const y = at[0] === "t" ? r.top : r.bottom;
+      assert.ok(Math.abs(h.x - x) <= 1.5 && Math.abs(h.y - y) <= 1.5, `spot ${corner}: the handle is not at the ${at} corner: ${JSON.stringify({ h, r })}`);
+      assert.equal(await bands(dm).count(), 2);
+    }
+
+    // The top-left handle dragged to 400 x 300.
+    await setUp(dm, { ...DESK, scale: 1 });
+    await selectThorn();
+    const home = await barRect(dm);
+    const thornBefore = { x: dmSocket.state?.tokens[run.thorn.id]?.x, y: dmSocket.state?.tokens[run.thorn.id]?.y };
+    await dragBy(dm, middle(await rectOf(resizeHandle(dm))), -(400 - (home.right - home.left)), home.bottom - home.top - 300);
+    let r = await barRect(dm);
+    assert.ok(Math.abs(r.right - r.left - 400) <= 1 && Math.abs(r.bottom - r.top - 300) <= 1, `the drag did not draw 400 x 300: ${JSON.stringify(r)}`);
+    assert.ok(Math.abs(r.right - home.right) < 1 && Math.abs(r.bottom - home.bottom) < 1, "the anchored edges moved");
+    assert.equal(await storedSize(dm), '{"w":400,"h":300}');
+    assert.equal(await storedSpot(dm), null, "the spot stayed the default");
+    // It scrolls inside, its header stays at its top, and "Scroll for more" shows.
+    const grip = barFrame(dm).getByRole("button", { name: "Move window", exact: true });
+    const gripTop = (await rectOf(grip)).top;
+    assert.ok(await barFrame(dm).getByText("Scroll for more").isVisible(), "no Scroll for more");
+    assert.ok(await scroller(dm).evaluate((el) => (el as unknown as { scrollHeight: number; clientHeight: number }).scrollHeight > (el as unknown as { clientHeight: number }).clientHeight), "the scroller does not scroll");
+    await scroller(dm).evaluate((el) => ((el as unknown as { scrollTop: number; scrollHeight: number }).scrollTop = (el as unknown as { scrollHeight: number }).scrollHeight));
+    await dm.waitForTimeout(150);
+    assert.ok(Math.abs((await rectOf(grip)).top - gripTop) < 1, "the header scrolled away");
+    await shots.take(dm, "token-window-resized-400x300-scrolled");
+    await scroller(dm).evaluate((el) => ((el as unknown as { scrollTop: number }).scrollTop = 0));
+
+    // 400 x 250: the short layout, the HP field and Apply in the scroller's view at its top.
+    await dragBy(dm, middle(await rectOf(resizeHandle(dm))), 0, 50);
+    r = await barRect(dm);
+    assert.ok(Math.abs(r.bottom - r.top - 250) <= 1, `not 250 tall: ${JSON.stringify(r)}`);
+    assert.equal(await storedSize(dm), '{"w":400,"h":250}');
+    const view = await rectOf(scroller(dm));
+    const field = await rectOf(barFrame(dm).getByRole("textbox", { name: "HP change" }));
+    const apply = await rectOf(barFrame(dm).getByRole("button", { name: "Apply", exact: true }));
+    assert.equal(await scroller(dm).evaluate((el) => (el as unknown as { scrollTop: number }).scrollTop), 0);
+    assert.ok(apply.bottom <= view.bottom && field.top >= view.top, `Apply or the field is out of view: ${JSON.stringify({ view, field, apply })}`);
+    const damage = await rectOf(barFrame(dm).getByText("Damage", { exact: true }));
+    assert.ok(field.top < damage.top, "the short layout does not put the field first");
+    await shots.take(dm, "token-window-resized-400x250-short");
+    // The Conditions drawer opens above the rows, and scrolls itself into the shrunk window's view (docs/design-v1-token-window.md 5.7).
+    await barFrame(dm).getByRole("button", { name: "Conditions", exact: true }).click();
+    const drawer = barFrame(dm).getByRole("group", { name: "Conditions", exact: true });
+    await drawer.waitFor();
+    await dm.waitForTimeout(200);
+    const drawn = await rectOf(drawer);
+    const shown = await rectOf(scroller(dm));
+    assert.ok(drawn.top < shown.bottom - 20 && drawn.bottom > shown.top + 20, `the drawer opened out of the window's view: ${JSON.stringify({ drawn, shown })}`);
+    await barFrame(dm).getByRole("button", { name: "Conditions", exact: true }).click();
+    await drawer.waitFor({ state: "detached" });
+
+    // A reload, another token's window and the group window open at 400 wide.
+    await dm.reload();
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    await dm.locator(".konvajs-content").first().waitFor();
+    await selectThorn();
+    assert.ok(Math.abs((await barRect(dm)).right - (await barRect(dm)).left - 400) <= 1, "a reload lost the width");
+    await clickCell(dm, run.goblins[0]!);
+    await dm.getByRole("dialog", { name: "Goblin 1 actions" }).waitFor();
+    r = await barRect(dm);
+    assert.ok(Math.abs(r.right - r.left - 400) <= 1, "another token's window is not 400 wide");
+    await clickCell(dm, run.thorn, ["Shift"]);
+    await dm.getByRole("dialog", { name: "2 selected tokens" }).waitFor();
+    r = await barRect(dm);
+    assert.ok(Math.abs(r.right - r.left - 400) <= 1, "the group window is not 400 wide");
+    await clickCell(dm, EMPTY);
+    await barFrame(dm).waitFor({ state: "detached" });
+    await selectThorn();
+
+    // The top band changes only the height, the left band only the width.
+    const before = await barRect(dm);
+    await dragBy(dm, middle(await rectOf(bands(dm).nth(0))), 30, -40);
+    let after = await barRect(dm);
+    assert.ok(Math.abs(after.bottom - after.top - (before.bottom - before.top) - 40) <= 1 && Math.abs(after.right - after.left - (before.right - before.left)) < 1, `the top band: ${JSON.stringify({ before, after })}`);
+    await dragBy(dm, middle(await rectOf(bands(dm).nth(1))), -40, 30);
+    const widened = await barRect(dm);
+    assert.ok(Math.abs(widened.right - widened.left - (after.right - after.left) - 40) <= 1 && Math.abs(widened.bottom - widened.top - (after.bottom - after.top)) < 1, `the left band: ${JSON.stringify({ after, widened })}`);
+    assert.equal(await storedSize(dm), '{"w":440,"h":290}');
+
+    // A short press of the handle changes nothing, and Escape mid-drag puts the size back and stores nothing.
+    const stored = await storedSize(dm);
+    const h = middle(await rectOf(resizeHandle(dm)));
+    await dm.mouse.move(h.x, h.y);
+    await dm.mouse.down();
+    await dm.mouse.move(h.x - 5, h.y - 3, { steps: 2 });
+    await dm.mouse.up();
+    after = await barRect(dm);
+    assert.ok(Math.abs(after.left - widened.left) < 0.5 && Math.abs(after.top - widened.top) < 0.5, "a short press of the handle resized the window");
+    await dragBy(dm, middle(await rectOf(resizeHandle(dm))), -120, -60, { escape: true });
+    after = await barRect(dm);
+    assert.ok(Math.abs(after.left - widened.left) < 0.5 && Math.abs(after.top - widened.top) < 0.5, `Escape did not put the size back: ${JSON.stringify({ widened, after })}`);
+    assert.equal(await storedSize(dm), stored);
+    assert.ok(await barFrame(dm).isVisible(), "Escape mid-resize closed the window");
+
+    // To the room's top: no height stored. Back within 24 px of the default width: no key. Narrower than the default: it stops there.
+    await dragBy(dm, middle(await rectOf(resizeHandle(dm))), 0, -2000);
+    assert.equal(await storedSize(dm), '{"w":440}');
+    const defaultWidth = await probeWidth(dm, 1);
+    await dragBy(dm, middle(await rectOf(resizeHandle(dm))), 440 - defaultWidth - 10, 0);
+    assert.equal(await storedSize(dm), null);
+    await dragBy(dm, middle(await rectOf(resizeHandle(dm))), 300, 0);
+    r = await barRect(dm);
+    assert.ok(Math.abs(r.right - r.left - defaultWidth) <= 1, `a drag narrower than the default did not stop at it: ${r.right - r.left}`);
+    assert.equal(await storedSize(dm), null);
+
+    // The focused handle's keys: Left widens by 8, Shift and Up heightens by 64, each stored, and no token moves.
+    await dragBy(dm, middle(await rectOf(resizeHandle(dm))), 0, (await barRect(dm)).bottom - (await barRect(dm)).top - 300);
+    const keyStart = await barRect(dm);
+    await resizeHandle(dm).focus();
+    await dm.keyboard.press("ArrowLeft");
+    let keyed = await barRect(dm);
+    assert.ok(Math.abs(keyed.right - keyed.left - (keyStart.right - keyStart.left) - 8) <= 1, "ArrowLeft did not widen by 8");
+    assert.equal(await storedSize(dm), `{"w":${defaultWidth + 8},"h":300}`);
+    await dm.keyboard.press("Shift+ArrowUp");
+    keyed = await barRect(dm);
+    assert.ok(Math.abs(keyed.bottom - keyed.top - 364) <= 1, "Shift+ArrowUp did not heighten by 64");
+    assert.equal(await storedSize(dm), `{"w":${defaultWidth + 8},"h":364}`);
+    await dm.waitForTimeout(800);
+    assert.equal((await barFrame(dm).getByRole("status").textContent())?.trim(), `Window ${defaultWidth + 8} by 364 px`);
+    await dm.waitForTimeout(300);
+    assert.deepEqual({ x: dmSocket.state?.tokens[run.thorn.id]?.x, y: dmSocket.state?.tokens[run.thorn.id]?.y }, thornBefore, "the handle's keys moved the selected token");
+    await shots.take(dm, "token-window-handle-keys");
+
+    // Reset removes both keys and brings the window home at its default size.
+    await barFrame(dm).getByRole("button", { name: "Reset window position and size", exact: true }).click();
+    assert.equal(await storedSize(dm), null);
+    assert.equal(await storedSpot(dm), null);
+    r = await barRect(dm);
+    assert.ok(Math.abs(r.right - home.right) < 1 && Math.abs(r.bottom - home.bottom) < 1 && Math.abs(r.top - home.top) < 1 && Math.abs(r.left - home.left) < 1, "Reset did not bring the window home at its size");
+
+    // A touch tablet: no handle, no band, and a stored size neither applied nor shown as Reset.
+    await setUp(player, { width: 820, height: 1180, scale: 1 }, null, '{"w":600,"h":200}');
+    await selectThorn(player);
+    assert.equal(await resizeHandle(player).count(), 0, "a touch tablet has a resize handle");
+    assert.equal(await bands(player).count(), 0);
+    const touchBar = await barRect(player);
+    assert.ok(Math.abs(touchBar.right - touchBar.left - (await probeWidth(player, 1))) <= 1, "a touch tablet took the stored width");
+    assert.ok(touchBar.bottom - touchBar.top > 200, "a touch tablet took the stored height");
+    assert.equal(await barFrame(player).getByRole("button", { name: "Reset window position and size" }).count(), 0, "a size a touch device ignores shows Reset");
+    await clickCell(player, EMPTY);
+    await player.evaluate((key) => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem(key), SIZE_KEY);
+  });
+
+  test("17. the handle's reach: at the largest size, at each corner, with the side panel shown and hidden, and stacked under a check, the whole disc and both bands are on top", async () => {
+    const huge = '{"w":4096,"h":4096}';
+    for (const panel of ["shown", "hidden"] as const) {
+      await sidePanelChoice(dm, panel);
+      for (const corner of ["br", "bl", "tl", "tr"] as const) {
+        await setUp(dm, { ...DESK, scale: 1 }, corner === "br" ? null : `{"corner":"${corner}","x":0,"y":0}`, huge);
+        await selectThorn();
+        await expectHandleOnTop(`side panel ${panel}, ${corner}`);
+      }
+    }
+    await sidePanelChoice(dm, null);
+    // Stacked under a concentration check's card.
+    await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblins[0]!.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } }).catch(() => undefined);
+    await setUp(dm, { ...DESK, scale: 1 }, null, huge);
+    await ops.send({ t: "actor.hp", target: { tokenId: run.goblins[0]!.id }, change: { kind: "damage", amount: 1 } });
+    const card = dm.locator('[data-alert="concentration"]').first();
+    await card.waitFor();
+    await selectThorn();
+    const bar = await barRect(dm);
+    const first = await rectOf(card);
+    assert.ok(bar.top >= first.bottom + 12 - 1, `the stacked window keeps less than 12 px under the card: ${JSON.stringify({ first, bar })}`);
+    await expectHandleOnTop("stacked under a check");
+    await shots.take(dm, "token-window-largest-stacked");
+    await dm.getByRole("button", { name: "Passed" }).first().click();
+    await card.waitFor({ state: "detached" });
+    await setUp(dm, { ...DESK, scale: 1 });
+
+    async function expectHandleOnTop(label: string): Promise<void> {
+      const disc = await rectOf(resizeHandle(dm));
+      const c = middle(disc);
+      const r = (disc.right - disc.left) / 2 - 0.75;
+      const points = [c, { x: c.x - r, y: c.y }, { x: c.x + r, y: c.y }, { x: c.x, y: c.y - r }, { x: c.x, y: c.y + r }];
+      for (let i = 0; i < 2; i++) points.push(middle(await rectOf(bands(dm).nth(i))));
+      const onTop = await handleOnTop(dm, points);
+      assert.deepEqual(onTop, points.map(() => true), `${label}: part of the handle or a band is covered or off the map: ${JSON.stringify({ points, onTop })}`);
+    }
+  });
+
+  test("18. a smaller room clamps the stored size for the opening and keeps it stored, and the window and the alert cards never meet", async () => {
+    const stored = '{"w":1100,"h":700}';
+    await sidePanelChoice(dm, "hidden");
+    await setUp(dm, { ...DESK, scale: 1 }, null, stored);
+    await selectThorn();
+    let r = await barRect(dm);
+    assert.ok(Math.abs(r.right - r.left - 1100) <= 1, `with the side panel hidden it is not 1100 wide: ${r.right - r.left}`);
+    // S shows the side panel: the window takes its room, 920 less the margins and the handle's reach, and the key stays.
+    await dm.keyboard.press("s");
+    await dm.waitForTimeout(300);
+    r = await barRect(dm);
+    assert.ok(Math.abs(r.right - r.left - 900) <= 1, `beside the side panel it is not its room's 900 wide: ${r.right - r.left}`);
+    assert.equal(await storedSize(dm), stored);
+    await dm.keyboard.press("s");
+    await dm.waitForTimeout(300);
+    r = await barRect(dm);
+    assert.ok(Math.abs(r.right - r.left - 1100) <= 1, `S again did not bring back 1100: ${r.right - r.left}`);
+    // At 130%, 605 x 482, with Reset shown.
+    await sidePanelChoice(dm, null);
+    await setUp(dm, { ...DESK, scale: 1.3 }, null, stored);
+    await selectThorn();
+    r = await barRect(dm);
+    // 605 x 482 is its room: as wide as that, and as tall as its content up to that.
+    assert.ok(Math.abs((r.right - r.left) / 1.3 - 605) <= 1.5 && (r.bottom - r.top) / 1.3 <= 482 + 1.5, `at 130% it is ${(r.right - r.left) / 1.3} x ${(r.bottom - r.top) / 1.3}`);
+    const shortOfRoom = (r.bottom - r.top) / 1.3 < 480;
+    if (shortOfRoom) assert.ok(await scroller(dm).evaluate((el) => (el as unknown as { scrollHeight: number; clientHeight: number }).scrollHeight <= (el as unknown as { clientHeight: number }).clientHeight + 1), "shorter than its room yet cut off");
+    assert.equal(await barFrame(dm).getByRole("button", { name: "Reset window position and size" }).count(), 1);
+    await shots.take(dm, "token-window-stored-1100x700-at-130");
+
+    // In a fight with three checks: the default spot with the stored size, after a resize dropped on the column, and at the smallest.
+    await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: randomUUID(), tokenId: g.id, value: 15 - i })) });
+    for (const g of run.goblins) await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } }).catch(() => undefined);
+    await setUp(dm, { ...DESK, scale: 1 }, null, '{"w":600,"h":500}');
+    await damageGoblins();
+    await dm.locator('[data-alert="concentration"]').nth(2).waitFor();
+    await selectThorn();
+    const apart = async (label: string) => {
+      await dm.waitForTimeout(300);
+      const bar = await barRect(dm);
+      for (const card of await cards(dm)) assert.ok(!intersects(card, bar), `${label}: a card meets the window: ${JSON.stringify({ card, bar })}`);
+    };
+    await apart("the stored size");
+    const firstCard = await rectOf(dm.locator('[data-alert="concentration"]').first());
+    const handle = middle(await rectOf(resizeHandle(dm)));
+    await dragBy(dm, handle, 0, firstCard.top + 10 - handle.y);
+    await apart("a resize dropped on the column");
+    await dragBy(dm, middle(await rectOf(resizeHandle(dm))), 2000, 2000);
+    r = await barRect(dm);
+    assert.ok(Math.abs(r.bottom - r.top - 148) <= 1, `the smallest is not 148 tall: ${r.bottom - r.top}`);
+    await apart("the smallest");
+    await shots.take(dm, "token-window-smallest-in-a-fight");
+    await ops.send({ t: "encounter.end" });
+    await setUp(dm, { ...DESK, scale: 1 });
+  });
+
+  test("19. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });

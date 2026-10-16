@@ -92,6 +92,13 @@ export function HpEntry(props: {
     props.onApplied?.();
   };
 
+  /*
+   * The mode buttons and the field stay mounted in one order and swap
+   * places by CSS order, so the short layout flipping as the window is
+   * resized or alert cards come and go never drops focus from a mode button
+   * or the field (docs/design-v1-token-window.md 5.8). Tab follows the
+   * modes, then the field, in both.
+   */
   const modeButtons = (
     <Segmented<HpMode>
       label="What the number does"
@@ -99,6 +106,7 @@ export function HpEntry(props: {
       value={mode}
       options={modes.map((m) => ({ value: m.mode, label: m.label, chosenStyle: modeLook(m.mode) }))}
       onChange={setMode}
+      style={{ order: props.fieldFirst ? 1 : 0 }}
     />
   );
 
@@ -110,26 +118,27 @@ export function HpEntry(props: {
       }}
       style={{ display: "grid", gap: theme.space(1) }}
     >
-      {props.fieldFirst ? null : modeButtons}
-      <div style={{ display: "flex", gap: theme.space(1) }}>
-        <input
-          aria-label="HP change"
-          value={text}
-          inputMode="numeric"
-          enterKeyHint="done"
-          autoComplete="off"
-          placeholder={mode === "damage" ? "7 or -7" : mode === "heal" ? "5 or +5" : mode === "set" ? "20 or =20" : "5 or t5"}
-          onChange={(e) => {
-            setText(e.target.value);
-            setError(null);
-          }}
-          style={{ ...fieldStyle(), flex: 1, width: 0 }}
-        />
-        <SmallButton type="submit" tone="primary" disabled={!text.trim() || refusal !== null}>
-          Apply
-        </SmallButton>
+      <div style={{ display: "grid", gap: theme.space(1) }}>
+        {modeButtons}
+        <div style={{ display: "flex", gap: theme.space(1), order: props.fieldFirst ? 0 : 1 }}>
+          <input
+            aria-label="HP change"
+            value={text}
+            inputMode="numeric"
+            enterKeyHint="done"
+            autoComplete="off"
+            placeholder={mode === "damage" ? "7 or -7" : mode === "heal" ? "5 or +5" : mode === "set" ? "20 or =20" : "5 or t5"}
+            onChange={(e) => {
+              setText(e.target.value);
+              setError(null);
+            }}
+            style={{ ...fieldStyle(), flex: 1, width: 0 }}
+          />
+          <SmallButton type="submit" tone="primary" disabled={!text.trim() || refusal !== null}>
+            Apply
+          </SmallButton>
+        </div>
       </div>
-      {props.fieldFirst ? modeButtons : null}
       {showCrit ? (
         <Checkbox checked={crit} onChange={setCrit} label="Critical hit (two failed death saves)" />
       ) : null}

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject } from "react";
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { useStore } from "zustand";
 import { healRevivesDead } from "#shared/migrate.ts";
 import { CONDITION_KEYS, STATUS_KEYS, type Actor, type Effect } from "#shared/model.ts";
@@ -6,8 +6,9 @@ import { hpLess, shownLife } from "#shared/rules/hp.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
 import { RETURN_RANK, useSheetReturnFocus } from "../components/sheetFocus.ts";
+import { Icon } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
-import { GRIP_ATTR, PaneHeader, type PaneHandle } from "../components/SheetHeader.tsx";
+import { GRIP_ATTR, PaneHeader, STICKY_HEADER_ATTR, type PaneHandle } from "../components/SheetHeader.tsx";
 import { useLayoutSize } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
@@ -60,23 +61,38 @@ import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope, useScoped } from "../state/scope.ts";
 import { sheetOpen } from "../state/types.ts";
 import {
+  anchoredSpot,
   arrowStep,
   barDockSlot,
-  clampBox,
   barChrome,
+  clampMove,
   DEFAULT_SPOT,
+  handleCorner,
   hangBox,
+  hasSize,
   headerBand,
   isDefaultSpot,
+  keySize,
   keySpot,
   laneLeft,
+  limitMet,
+  NO_SIZE,
   placeBar,
+  releaseSize,
   releaseSpot,
   RESET_WORDS,
+  resizeBox,
+  resizeLimits,
+  sizeWords,
   spotWords,
+  writeSize,
   writeSpot,
   type BarFacts,
+  type BarSize,
   type Box,
+  type Corner,
+  type ResizeLimits,
+  type ResizePart,
   type Spot,
 } from "./barDock.ts";
 import { barButtons, barShort, isCompanion, type BarButtonId } from "./barButtons.ts";
@@ -451,7 +467,7 @@ export function GroupActionBar(props: {
     >
       <BarHeader title={`${tokens.length} selected`} onClose={props.onClose} closeLabel="Let go of all of them" />
       <div style={{ color: theme.color.textMuted, overflowWrap: "anywhere" }}>{tokens.map((t) => displayName(t)).join(", ")}</div>
-      <GroupHpEntry tokens={tokens} place="bar" />
+      <GroupBarHp tokens={tokens} />
       {props.movable >= 2 ? (
         <div style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>
           {props.movable === tokens.length ? "Drag any of them to move them all." : `A drag moves the ${props.movable} of them you may move.`}
@@ -517,6 +533,12 @@ export function GroupActionBar(props: {
       {more ? <GroupMoreSheet tokens={tokens} opener={moreButton} onClose={() => setMore(false)} /> : null}
     </BarFrame>
   );
+}
+
+/** The group's HP entry, field and Apply first while the window is short, as the frame decides (5.8). */
+function GroupBarHp(props: { tokens: readonly ViewToken[] }) {
+  const frame = useContext(FrameContext);
+  return <GroupHpEntry tokens={props.tokens} place="bar" fieldFirst={frame.short} />;
 }
 
 /**
@@ -619,8 +641,12 @@ function BarHeader(props: { title: string; actions?: ReactNode; onClose(): void;
 /** How long the window's keys rest before its status speaks. */
 const KEYS_REST_MS = 500;
 
-/** A drag of the bar by its header, in progress: the pointer, where it went down, and the box the bar had then and has now. */
-type Drag = { pointerId: number; el: HTMLElement; x: number; y: number; start: Box; box: Box | null };
+/**
+ * A drag in progress: a move of the window by its header or grip, or a
+ * resize by its handle or a band, with the pointer, where it went down,
+ * the box the window had then and has now, and the limits a resize meets.
+ */
+type Drag = { kind: "move" | ResizePart; pointerId: number; el: HTMLElement; x: number; y: number; start: Box; box: Box | null; limits: ResizeLimits };
 
 /**
  * Where a bar sits (docs/design-v1-bar-dock.md). From 600 layout px up, and
@@ -663,7 +689,7 @@ function BarFrame(props: {
   const zoom = useUiScale();
   const anySheet = useRoomView((s) => sheetOpen(s.local));
   const full = useStore(useScoped(dockSlot), (s) => s.sheetFull);
-  // "View as a player" reads this device's spot and keeps its own moves to itself, since nothing done there is saved.
+  // "View as a player" reads this device's spot and size and keeps its own changes to itself, since nothing done there is saved.
   const preview = usePreview() !== null;
   const dockStore = useScoped(barDockSlot);
   const measured = useStore(dockStore, (s) => s.chrome);
@@ -672,16 +698,21 @@ function BarFrame(props: {
   // Beside a sideways sheet that leaves it too little room for its header, the window folds into the sheet's header (docs/design-v1-token-window.md 7.1).
   const folded = foldsUnderSheet({ ...layout, sheetOpen: anySheet, full, sideRoom: sideSheetRoom(props.viewport, chrome) });
   const spot = useStore(dockStore, (s) => s.spot);
+  const size = useStore(dockStore, (s) => s.size);
+  const finePointer = useStore(dockStore, (s) => s.finePointer);
   const width = useStore(dockStore, (s) => s.defaultWidth);
   const column = useStore(dockStore, (s) => s.column);
   const foot = useStore(dockStore, (s) => s.foot);
   const barRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [barHeight, setBarHeight] = useState(() => dockStore.getState().lastHeight);
   const [clipped, setClipped] = useState(false);
+  const [pad, setPad] = useState({ top: 0, bottom: 0 });
   const [status, setStatus] = useState("");
   const statusSeq = useRef(0);
+  const handleDescription = useId();
   /*
    * What the window's status says after its keys or Reset. It is cleared,
    * then set on the next frame, so the same words twice are spoken again
@@ -715,30 +746,43 @@ function BarFrame(props: {
   const dragRef = useRef<Drag | null>(null);
   useSheetReturnFocus(barRef, RETURN_RANK.tokenBar);
   usePublishBar({ label: props.label, ...props.dock, frame: barRef });
+  /*
+   * The content's whole height, whether anything is cut off below, and the
+   * scroll padding that keeps a control scrolled into view clear of the
+   * sticky header above and the "Scroll for more" fade below (5.7).
+   */
   const measure = () => {
-    const el = barRef.current;
+    const scroller = scrollRef.current;
     const content = contentRef.current;
     // Folded, the bar has no size: it keeps the last one it had, for where it unfolds.
-    if (!el || !content || content.offsetHeight === 0) return;
+    if (!scroller || !content || content.offsetHeight === 0) return;
     const height = content.offsetHeight + 2;
     setBarHeight(height);
     if (dockStore.getState().lastHeight !== height) dockStore.setState({ lastHeight: height });
-    setClipped(el.scrollHeight - el.clientHeight - el.scrollTop > 4);
+    const cut = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop > 4;
+    setClipped(cut);
+    const header = content.querySelector<HTMLElement>(`[${STICKY_HEADER_ATTR}]`);
+    // The fade is the scroller's last child, a zero-height row whose one child is the drawn fade.
+    const fade = cut ? (scroller.lastElementChild?.firstElementChild as HTMLElement | null | undefined) : null;
+    const next = { top: header?.offsetHeight ?? 0, bottom: fade?.offsetHeight ?? 0 };
+    setPad((prev) => (prev.top === next.top && prev.bottom === next.bottom ? prev : next));
   };
   // One wrapper holds every section, so a section that opens after the bar does (the conditions drawer, death saves) resizes it too.
   useLayoutEffect(() => {
-    const el = barRef.current;
+    const scroller = scrollRef.current;
     const content = contentRef.current;
-    if (!el || !content) return;
+    if (!scroller || !content) return;
     const observer = new ResizeObserver(measure);
-    observer.observe(el);
+    observer.observe(scroller);
     observer.observe(content);
     return () => observer.disconnect();
   }, []);
+  // The fade's height, once it shows.
+  useLayoutEffect(measure, [clipped]);
 
   // The anchor is always given here, so a placement always comes back.
-  const placed = placeBar({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, height: barHeight, column, width })!;
-  const { free, mode } = placed;
+  const placed = placeBar({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, height: barHeight, column, width, size, resizable: finePointer })!;
+  const { free, mode, resizable } = placed;
 
   // Actions in the Multi-select bar shows the bar and focuses its frame, once it is drawn.
   useLayoutEffect(() => {
@@ -749,11 +793,11 @@ function BarFrame(props: {
 
   /*
    * The box the bar draws, for the column, the notices and the camera. A
-   * drag publishes nothing new until it ends, so the column does not jump
-   * as the bar passes under it. Only a drag that moved holds it back: a
-   * plain press on the header publishes as ever, and the end of a drag,
-   * dropped, put back by Escape or cancelled, publishes the latest, alerts
-   * that arrived meanwhile included.
+   * drag or a resize publishes nothing new until it ends, so the column does
+   * not jump as the bar passes under it. Only a drag that moved holds it
+   * back: a plain press on the header publishes as ever, and the end of a
+   * drag, dropped, put back by Escape or cancelled, publishes the latest,
+   * alerts that arrived meanwhile included.
    */
   const facts: BarFacts | null = folded ? null : { box: hangBox(placed.hang, barHeight), mode, lane: placed.lane, laneLeft: laneLeft(free), freeRight: free.left + free.width };
   const factsKey = facts ? JSON.stringify(facts) : "";
@@ -769,12 +813,17 @@ function BarFrame(props: {
     dockStore.setState({ spot: next });
     if (!preview) writeSpot(next);
   };
+  const setSize = (next: BarSize) => {
+    dockStore.setState({ size: next });
+    if (!preview) writeSize(next);
+  };
   /*
-   * Escape or a cancelled pointer during a drag puts the bar back where the
-   * drag began and keeps it open. A press on the header focuses the frame,
-   * so the header never sees the key: a capture listener on the window,
-   * there only while a drag is under way, takes it first, and its
-   * preventDefault leaves Room's Escape (RoomChrome.tsx useEscape) alone.
+   * Escape or a cancelled pointer during a drag or a resize puts the window
+   * back as the drag began and keeps it open, storing nothing. A press on
+   * the header focuses the frame, so the header never sees the key: a
+   * capture listener on the window, there only while a drag is under way,
+   * takes it first, and its preventDefault leaves Room's Escape
+   * (RoomChrome.tsx useEscape) alone.
    */
   const endDrag = useRef(() => {});
   const onEscape = useRef((e: KeyboardEvent) => {
@@ -790,6 +839,10 @@ function BarFrame(props: {
     setDragBox(null);
   };
   useEffect(() => () => window.removeEventListener("keydown", onEscape.current, true), []);
+  // A rotation that changes how the window opens ends a drag under way, storing nothing (5.4).
+  useEffect(() => {
+    if (dragRef.current) endDrag.current();
+  }, [mode, resizable]);
   const layerBox = (el: HTMLElement): Box | null => {
     const layer = el.offsetParent;
     if (!layer) return null;
@@ -797,6 +850,60 @@ function BarFrame(props: {
     const l = layer.getBoundingClientRect();
     return { left: (r.left - l.left) / zoom, top: (r.top - l.top) / zoom, width: r.width / zoom, height: r.height / zoom };
   };
+
+  /** A press that may become a move of the window, or a resize by its handle or a band. */
+  const startDrag = (e: ReactPointerEvent<HTMLElement>, kind: Drag["kind"]) => {
+    const frame = barRef.current;
+    const start = frame ? layerBox(frame) : null;
+    if (!start) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const limits = resizeLimits({ box: start, corner: spot.corner, room: placed.room, defaultWidth: width, content: barHeight });
+    dragRef.current = { kind, pointerId: e.pointerId, el: e.currentTarget, x: e.clientX, y: e.clientY, start, box: null, limits };
+  };
+  const dragMove = (e: ReactPointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const dx = e.clientX - drag.x;
+    const dy = e.clientY - drag.y;
+    // A short press moves and resizes nothing: the window changes once the pointer passes the slop a tap on the map has.
+    if (!drag.box && Math.hypot(dx, dy) <= TAP_SLOP_PX) return;
+    if (!drag.box) window.addEventListener("keydown", onEscape.current, true);
+    drag.box =
+      drag.kind === "move"
+        ? clampMove({ ...drag.start, left: drag.start.left + dx / zoom, top: drag.start.top + dy / zoom }, free, resizable)
+        : resizeBox({ start: drag.start, corner: spot.corner, part: drag.kind, dx: dx / zoom, dy: dy / zoom, limits: drag.limits });
+    setDragBox(drag.box);
+  };
+  const dragUp = (e: ReactPointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    if (drag.box && drag.kind === "move") {
+      setSpot(releaseSpot(drag.box, free));
+      say("");
+    } else if (drag.box) {
+      // The anchored edges keep the spot's corner, and the far edges store the new size (5.4).
+      setSize(releaseSize({ stored: size, start: drag.start, box: drag.box, defaultWidth: width, tallest: drag.limits.maxHeight }));
+      setSpot(anchoredSpot(drag.box, free, spot.corner));
+      revealFocusSoon.current = true;
+    }
+    endDrag.current();
+  };
+  const dragCancel = (e: ReactPointerEvent<HTMLElement>) => {
+    if (dragRef.current?.pointerId === e.pointerId) endDrag.current();
+  };
+  /*
+   * After a resize ends, a focused control the new size hides scrolls into
+   * view, inside the scroll padding (5.8). It runs after the render that
+   * draws the new size.
+   */
+  const revealFocusSoon = useRef(false);
+  useLayoutEffect(() => {
+    if (!revealFocusSoon.current) return;
+    revealFocusSoon.current = false;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && scrollRef.current?.contains(active)) active.scrollIntoView({ block: "nearest" });
+  });
+
   const handle: PaneHandle | null =
     mode === "dock"
       ? {
@@ -805,35 +912,11 @@ function BarFrame(props: {
             if (e.button !== 0 || dragRef.current) return;
             // The grip is a button that takes the drag too. The header's other buttons keep their presses.
             if (e.target instanceof Element && e.target.closest("button, a, input, select, textarea") && !e.target.closest(`[${GRIP_ATTR}]`)) return;
-            const frame = barRef.current;
-            const start = frame ? layerBox(frame) : null;
-            if (!start) return;
-            e.currentTarget.setPointerCapture(e.pointerId);
-            dragRef.current = { pointerId: e.pointerId, el: e.currentTarget, x: e.clientX, y: e.clientY, start, box: null };
+            startDrag(e, "move");
           },
-          onPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
-            const drag = dragRef.current;
-            if (!drag || drag.pointerId !== e.pointerId) return;
-            const dx = e.clientX - drag.x;
-            const dy = e.clientY - drag.y;
-            // A tap on the header moves nothing: the bar moves once the pointer passes the slop a tap on the map has.
-            if (!drag.box && Math.hypot(dx, dy) <= TAP_SLOP_PX) return;
-            if (!drag.box) window.addEventListener("keydown", onEscape.current, true);
-            drag.box = clampBox({ ...drag.start, left: drag.start.left + dx / zoom, top: drag.start.top + dy / zoom }, free);
-            setDragBox(drag.box);
-          },
-          onPointerUp(e: ReactPointerEvent<HTMLDivElement>) {
-            const drag = dragRef.current;
-            if (!drag || drag.pointerId !== e.pointerId) return;
-            if (drag.box) {
-              setSpot(releaseSpot(drag.box, free));
-              say("");
-            }
-            endDrag.current();
-          },
-          onPointerCancel(e: ReactPointerEvent<HTMLDivElement>) {
-            if (dragRef.current?.pointerId === e.pointerId) endDrag.current();
-          },
+          onPointerMove: dragMove,
+          onPointerUp: dragUp,
+          onPointerCancel: dragCancel,
           grip: {
             label: "Move window",
             description: "Drag to move the window. With this focused, the arrow keys move it, and Shift moves it faster. Reset, beside Close, puts it back.",
@@ -844,9 +927,9 @@ function BarFrame(props: {
   /*
    * The grip's arrow keys (docs/design-v1-token-window.md 4.3): each step
    * starts from the box as drawn, so a step the lane took back starts from
-   * where the lane put the window, is clamped into the free area, and is
-   * stored at once as the nearest corner's spot, unsnapped. The handled
-   * key's default is prevented, so the room's shortcuts pass over it and no
+   * where the lane put the window, is clamped into its room, and is stored
+   * at once as the nearest corner's spot, unsnapped. The handled key's
+   * default is prevented, so the room's shortcuts pass over it and no
    * selected token moves. Escape is left to close the bar.
    */
   function moveByKeys(e: ReactKeyboardEvent<HTMLButtonElement>) {
@@ -856,10 +939,33 @@ function BarFrame(props: {
     const frame = barRef.current;
     const box = frame ? layerBox(frame) : null;
     if (!box) return;
-    setSpot(keySpot(clampBox({ ...box, left: box.left + step.dx, top: box.top + step.dy }, free), free));
+    setSpot(keySpot(clampMove({ ...box, left: box.left + step.dx, top: box.top + step.dy }, free, resizable), free));
     sayAtRest(() => spotWords(dockStore.getState().spot));
   }
-  const moved = !isDefaultSpot(spot);
+  /*
+   * The handle's arrow keys (5.5) move its corner 8 px, or 64 with Shift,
+   * with the sense of a drag of it, and store each press at once, unsnapped.
+   * A press against a limit changes nothing, and the status says which.
+   */
+  function resizeByKeys(e: ReactKeyboardEvent<HTMLButtonElement>) {
+    const step = arrowStep(e.key, e.shiftKey);
+    if (!step || e.altKey || e.ctrlKey || e.metaKey) return;
+    e.preventDefault();
+    const frame = barRef.current;
+    const box = frame ? layerBox(frame) : null;
+    if (!box) return;
+    const limits = resizeLimits({ box, corner: spot.corner, room: placed.room, defaultWidth: width, content: barHeight });
+    const next = resizeBox({ start: box, corner: spot.corner, part: "corner", dx: step.dx, dy: step.dy, limits });
+    const limit = limitMet({ start: box, box: next, dx: step.dx, dy: step.dy, corner: spot.corner, limits });
+    if (Math.abs(next.width - box.width) > 0.5 || Math.abs(next.height - box.height) > 0.5) {
+      setSize(keySize({ stored: size, start: box, box: next, defaultWidth: width, tallest: limits.maxHeight }));
+      setSpot(anchoredSpot(next, free, spot.corner));
+      revealFocusSoon.current = true;
+    }
+    sayAtRest(() => sizeWords(next, limit));
+  }
+  // A size stored on a device whose window does not resize counts as none (4.4).
+  const moved = !isDefaultSpot(spot) || (finePointer && hasSize(size));
   /*
    * Reset leaves with the press that brings the window home, or with a drag
    * back to its default. Whatever takes it away while it has focus, focus
@@ -885,12 +991,13 @@ function BarFrame(props: {
             resetFocused.current = false;
             closeRef.current?.focus();
             setSpot(DEFAULT_SPOT);
+            setSize(NO_SIZE);
             say(RESET_WORDS);
           },
         }
       : null;
-  // Read from where the bar stands, never from its content, so the short layout and an opened "More stats" never flip it.
-  const short = barShort({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, column, width });
+  // Read from where the bar stands at rest, never from its content or a drag under way, so the short layout, an opened "More stats" and a resize never flip it mid-gesture.
+  const short = barShort({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, column, width, size, resizable: finePointer });
   const stacked = mode === "dock" && headerBand(placed.hang.width) !== "row";
   const controls: FrameControls = { handle, sticky: mode !== "compact", place, stacked, short };
 
@@ -900,6 +1007,17 @@ function BarFrame(props: {
     : hang.anchor === "top"
       ? { left: hang.left, top: hang.at, width: hang.width, maxHeight: hang.room }
       : { left: hang.left, bottom: props.viewport.height - hang.at, width: hang.width, maxHeight: hang.room };
+  // The handle stands at the corner opposite the spot's, and its bands along the two edges that meet there (5.3).
+  const handleAt = handleCorner(spot.corner);
+  const resizeHandlers = (kind: ResizePart) => ({
+    onPointerDown(e: ReactPointerEvent<HTMLElement>) {
+      if (e.button !== 0 || dragRef.current) return;
+      startDrag(e, kind);
+    },
+    onPointerMove: dragMove,
+    onPointerUp: dragUp,
+    onPointerCancel: dragCancel,
+  });
   return (
     <div
       ref={barRef}
@@ -909,12 +1027,12 @@ function BarFrame(props: {
       data-bar-mode={mode}
       // Focusable from script, not by Tab: the dock's Show, a closing sheet and Actions move focus here, which announces the bar and opens no keyboard.
       tabIndex={-1}
-      onScroll={measure}
       style={{
         position: "absolute",
         ...where,
-        overflowY: "auto",
-        overscrollBehavior: "contain",
+        // The frame keeps the box, and a scroller inside it scrolls, so the handle and its bands stand outside what scrolls and clips (5.7).
+        display: "flex",
+        flexDirection: "column",
         background: theme.color.surface,
         border: `${theme.line.border}px solid ${theme.color.border}`,
         borderRadius: theme.radius.lg,
@@ -924,26 +1042,100 @@ function BarFrame(props: {
         zIndex: mode === "compact" ? theme.z.barOverlay : theme.z.pane,
       }}
     >
-      <FrameContext.Provider value={controls}>
-        <div
-          ref={contentRef}
-          style={{
-            padding: `${theme.space(1)}px ${theme.space(3)}px ${theme.space(3)}px`,
-            display: "grid",
-            // One column no wider than the bar: an auto column grows to its widest unbreakable child, such as a long name, and pushes the buttons out of view.
-            gridTemplateColumns: "minmax(0, 1fr)",
-            gap: theme.space(2),
-          }}
-        >
-          {props.children}
-        </div>
-      </FrameContext.Provider>
+      <div
+        ref={scrollRef}
+        data-bar-scroll=""
+        onScroll={measure}
+        style={{
+          flex: "1 1 auto",
+          minHeight: 0,
+          overflowY: "auto",
+          overscrollBehavior: "contain",
+          borderRadius: theme.radius.lg - theme.line.border,
+          scrollbarWidth: "thin",
+          scrollPaddingTop: pad.top,
+          scrollPaddingBottom: pad.bottom,
+        }}
+      >
+        <FrameContext.Provider value={controls}>
+          <div
+            ref={contentRef}
+            style={{
+              padding: `${theme.space(1)}px ${theme.space(3)}px ${theme.space(3)}px`,
+              display: "grid",
+              // One column no wider than the bar: an auto column grows to its widest unbreakable child, such as a long name, and pushes the buttons out of view.
+              gridTemplateColumns: "minmax(0, 1fr)",
+              gap: theme.space(2),
+            }}
+          >
+            {props.children}
+          </div>
+        </FrameContext.Provider>
+        {clipped ? <ScrollForMore /> : null}
+      </div>
+      {resizable && !folded ? (
+        <>
+          <div aria-hidden data-resize-band="" {...resizeHandlers("height")} style={bandStyle(handleAt, "height")} />
+          <div aria-hidden data-resize-band="" {...resizeHandlers("width")} style={bandStyle(handleAt, "width")} />
+          <button
+            type="button"
+            aria-label="Resize window"
+            title="Resize window"
+            aria-describedby={handleDescription}
+            data-resize-handle=""
+            {...resizeHandlers("corner")}
+            onKeyDown={resizeByKeys}
+            style={handleStyle(handleAt, dragBox !== null)}
+          >
+            <Icon name="resize" size={16} style={handleAt === "tr" || handleAt === "bl" ? { transform: "rotate(90deg)" } : undefined} />
+          </button>
+          <span id={handleDescription} style={VISUALLY_HIDDEN}>
+            Drag to resize the window. With this focused, the arrow keys resize it, and Shift resizes it faster. Reset, beside Close, puts it back.
+          </span>
+        </>
+      ) : null}
       <div role="status" style={VISUALLY_HIDDEN}>
         {status}
       </div>
-      {clipped ? <ScrollForMore /> : null}
     </div>
   );
+}
+
+/** The resize handle's disc. Its center sits on the frame's outer corner, so half of it lies past the window, inside the handle's reach (barDock.ts HANDLE_REACH). */
+const HANDLE_PX = 24;
+/** The edges' bands, just outside the border. */
+const BAND_PX = 8;
+
+function handleStyle(at: Corner, dragging: boolean): CSSProperties {
+  const off = -(HANDLE_PX / 2) - theme.line.border;
+  return {
+    position: "absolute",
+    [at[0] === "t" ? "top" : "bottom"]: off,
+    [at[1] === "l" ? "left" : "right"]: off,
+    width: HANDLE_PX,
+    height: HANDLE_PX,
+    padding: 0,
+    display: "grid",
+    placeItems: "center",
+    borderRadius: theme.radius.pill,
+    background: theme.color.surface,
+    border: `${theme.line.border}px solid ${theme.color.border}`,
+    color: theme.color.textMuted,
+    cursor: at === "tl" || at === "br" ? "nwse-resize" : "nesw-resize",
+    touchAction: "none",
+    zIndex: 2,
+    ...(dragging ? { color: theme.color.accent } : null),
+  };
+}
+
+/** A band along the edge at the handle's side: across the top or bottom for the height, down the left or right for the width. */
+function bandStyle(at: Corner, part: "width" | "height"): CSSProperties {
+  const off = -BAND_PX - theme.line.border;
+  const band: CSSProperties =
+    part === "height"
+      ? { left: 0, right: 0, height: BAND_PX, [at[0] === "t" ? "top" : "bottom"]: off, cursor: "ns-resize" }
+      : { top: 0, bottom: 0, width: BAND_PX, [at[1] === "l" ? "left" : "right"]: off, cursor: "ew-resize" };
+  return { position: "absolute", touchAction: "none", zIndex: 1, ...band };
 }
 
 /**
@@ -985,6 +1177,11 @@ export function ScrollForMore(props: { fill?: string }) {
  * with the map for everyone, carries no SRD text.
  */
 function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Effect["key"]): void }) {
+  // In a window shrunk short the drawer opens above the rows, out of sight without this (docs/design-v1-token-window.md 5.7).
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    ref.current?.scrollIntoView({ block: "nearest" });
+  }, []);
   const group = (title: string, keys: readonly Effect["key"][]) => (
     <div role="group" aria-label={title} style={{ display: "grid", gap: theme.space(1) }}>
       <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{title}</div>
@@ -1028,7 +1225,7 @@ function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Ef
     </div>
   );
   return (
-    <div style={{ display: "grid", gap: theme.space(2) }}>
+    <div ref={ref} style={{ display: "grid", gap: theme.space(2) }}>
       {group("Conditions", CONDITION_KEYS)}
       {group("Other statuses", STATUS_KEYS)}
     </div>

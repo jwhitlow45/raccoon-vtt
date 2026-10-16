@@ -46,6 +46,15 @@ export function isCoarsePointer(): boolean {
 }
 
 /**
+ * A computer: a device whose main pointer is fine, a mouse or a trackpad.
+ * The token window resizes only here (docs/design-v1-token-window.md 5.1),
+ * since its 24 px handle is a fine pointer's target.
+ */
+export function isFinePointer(): boolean {
+  return typeof matchMedia === "function" && matchMedia("(pointer: fine)").matches;
+}
+
+/**
  * Whether Ctrl with a click is a right click here, as on a Mac, an iPad
  * and an iPhone, where Cmd takes the part Ctrl has on Windows and Linux.
  * An iPad asks for desktop pages and calls itself a Mac, so it counts

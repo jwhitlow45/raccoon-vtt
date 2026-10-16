@@ -562,8 +562,9 @@ export const BEHAVIORS: readonly Behavior[] = [
   },
 
   // The token window, the action bar where it docks: canvas/TokenActionBar.tsx BarFrame.
-  { id: "barEscape", input: "Escape", does: "Put it back where it was", roles: EVERYONE, when: "while you drag its header", device: "keys", surface: "Token window" },
+  { id: "barEscape", input: "Escape", does: "Put it back where it was", roles: EVERYONE, when: "while you drag its header or resize it", device: "keys", surface: "Token window" },
   { id: "windowMoveKeys", input: "Arrow keys", does: "Move it 8 px, or 64 px with Shift", roles: EVERYONE, when: "with its grip focused", device: "keys", surface: "Token window" },
+  { id: "windowResizeKeys", input: "Arrow keys", does: "Resize it 8 px, or 64 px with Shift", roles: EVERYONE, when: "with its corner handle focused, on a computer", device: "keys", surface: "Token window" },
 
   // The initiative tracker: features/encounter/Row.tsx, ValueEntry.tsx.
   { id: "initEnter", input: "Enter", does: "Save the initiative you typed", roles: EVERYONE, when: "in a row's initiative box", device: "keys", surface: "Initiative" },
@@ -620,7 +621,7 @@ export const KEYS_INTRO = "On any device with a keyboard. They do nothing while 
 const SURFACE_INTRO: Partial<Record<Surface, string>> = {
   "Side panel tabs": "On a screen 900 px or wider, with a tab focused. There, and on a focused choice or slider, the arrow and Page keys never move a token.",
   "Handout viewer": "A handout the DM shows, or a picture or a PDF opened from the Library.",
-  "Token window": "Where the action bar opens as a window: on a screen 600 px or wider, or a phone on its side. With its grip focused, the arrow keys move it and never move a token.",
+  "Token window": "Where the action bar opens as a window: on a screen 600 px or wider, or a phone on its side. With its grip or corner handle focused, the arrow keys move or resize it and never move a token.",
 };
 
 function sheetRow(b: Behavior): SheetRow {

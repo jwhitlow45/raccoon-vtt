@@ -382,7 +382,7 @@ describe("the sheet's rows beside the keys", () => {
     assert.ok(!(SURFACES as readonly string[]).includes("Token action bar"), "the sheet never says window for two things");
     for (const role of ROLES) {
       const tokenWindow = section(role, IPHONE, "Token window")!;
-      assert.deepEqual(tokenWindow.rows.map((r) => r.id).slice(0, 2), ["barEscape", "windowMoveKeys"]);
+      assert.deepEqual(tokenWindow.rows.map((r) => r.id), ["barEscape", "windowMoveKeys", "windowResizeKeys"]);
       assert.ok(tokenWindow.intro?.includes("never move a token"));
       assert.deepEqual(inputs(role, IPHONE, "Dialogs"), ["Escape", "Tab, Shift+Tab"]);
     }

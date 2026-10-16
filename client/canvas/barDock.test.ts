@@ -17,9 +17,28 @@ import {
   columnFacts,
   columnRoom,
   columnTop,
+  anchoredSpot,
+  clampMove,
   compactHang,
   DEFAULT_SPOT,
   defaultBarWidth,
+  handleCorner,
+  keySize,
+  limitMet,
+  moveRoom,
+  NO_SIZE,
+  parseSize,
+  readSize,
+  releaseSize,
+  resizeBox,
+  resizeLimits,
+  SIZE_KEY,
+  sizeText,
+  sizeWords,
+  writeSize,
+  type BarSize,
+  type Corner,
+  type ResizePart,
   freeArea,
   hangBox,
   hintRoom,
@@ -340,6 +359,180 @@ describe("the stored spot", () => {
     assert.equal(headerBand(264), "stacked");
     assert.equal(headerBand(166), "stacked");
     assert.equal(headerBand(165), "fold");
+  });
+});
+
+describe("the window's size on a computer (docs/design-v1-token-window.md 5 and 6)", () => {
+  test("the size key reads a width, a height or both, and anything else as the default, stored as no key", () => {
+    assert.deepEqual(parseSize('{"w":400,"h":300}'), { w: 400, h: 300 });
+    assert.deepEqual(parseSize('{"w":400}'), { w: 400 });
+    assert.deepEqual(parseSize('{"h":300}'), { h: 300 });
+    assert.deepEqual(parseSize('{"w":1,"h":4096}'), { w: 1, h: 4096 });
+    for (const bad of [null, "", "{", "[]", "null", "{}", '"400"', '{"w":1.5}', '{"w":-1}', '{"w":0}', '{"w":4097}', '{"w":"400"}', '{"w":400,"h":0}', '{"x":3}']) {
+      assert.deepEqual(parseSize(bad), NO_SIZE, String(bad));
+    }
+    assert.equal(sizeText(NO_SIZE), null);
+    assert.equal(sizeText({ w: 400 }), '{"w":400}');
+    assert.equal(sizeText({ w: 400, h: 300 }), '{"w":400,"h":300}');
+    const kept = new Map<string, string>();
+    const storage = { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v), removeItem: (k: string) => void kept.delete(k) };
+    writeSize({ h: 300 }, storage);
+    assert.equal(kept.get(SIZE_KEY), '{"h":300}');
+    assert.deepEqual(readSize(storage), { h: 300 });
+    writeSize(NO_SIZE, storage);
+    assert.equal(kept.has(SIZE_KEY), false);
+    const blocked = {
+      getItem: (): string | null => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+      removeItem: () => {
+        throw new Error("blocked");
+      },
+    };
+    assert.deepEqual(readSize(blocked), NO_SIZE);
+    assert.doesNotThrow(() => writeSize({ w: 1 }, blocked));
+  });
+
+  // 1280 x 800 with the side panel shown: a 920 px map, its free area 904 x 672 from (8, 60).
+  const chrome: Chrome = { ...DEFAULT_CHROME, top: 52, bottom: 60 };
+  const base = { layout: { width: 1280, height: 800 }, viewport: { width: 920, height: 800 }, chrome, foot: 0, anchor: null, spot: DEFAULT_SPOT, column: null, width: 316 };
+  const boxOf = (placed: ReturnType<typeof placeBar>, height: number) => hangBox(placed!.hang, height);
+
+  test("the width is the stored one, never under the default, at most the room, and the height a cap after everything else", () => {
+    const plain = placeBar({ ...base, height: 548, resizable: true });
+    assert.deepEqual(boxOf(plain, 548), { left: 912 - 316, top: 732 - 548, width: 316, height: 548 });
+    // The free sides of a resizable window keep 12 px for its handle: its room is 4 px less at the top.
+    assert.equal(plain!.hang.room, 668);
+    assert.deepEqual(plain!.room, { left: 12, top: 64, width: 900, height: 668 });
+    const sized = placeBar({ ...base, height: 548, resizable: true, size: { w: 600, h: 400 } });
+    assert.deepEqual(boxOf(sized, 548), { left: 912 - 600, top: 732 - 400, width: 600, height: 400 });
+    // The largest: the room, 12 px from the free area's far edges and 8 from its anchored ones.
+    const largest = placeBar({ ...base, height: 2000, resizable: true, size: { w: 4096, h: 4096 } });
+    assert.deepEqual(boxOf(largest, 2000), { left: 12, top: 64, width: 900, height: 668 });
+    assert.equal(placeBar({ ...base, height: 548, resizable: true, size: { w: 200 } })!.hang.width, 316, "never under the default width");
+    assert.deepEqual(boxOf(placeBar({ ...base, height: 548, resizable: true, size: { w: 1, h: 1 } }), 548), { left: 912 - 316, top: 732 - 148, width: 316, height: 148 }, "the smallest: the default width by 148");
+    // At the top left, the far sides are the right and the bottom.
+    const topLeft = placeBar({ ...base, spot: { corner: "tl", x: 0, y: 0 }, height: 2000, resizable: true, size: { w: 4096, h: 4096 } });
+    assert.deepEqual(boxOf(topLeft, 2000), { left: 8, top: 60, width: 900, height: 668 });
+    // A touch device keeps today's sizes, and the stored size stays stored.
+    const touch = placeBar({ ...base, height: 548, resizable: false, size: { w: 600, h: 200 } });
+    assert.deepEqual(boxOf(touch, 548), { left: 912 - 316, top: 732 - 548, width: 316, height: 548 });
+    assert.equal(touch!.hang.room, 672);
+    // Compact ignores it too.
+    const short = { width: 844, height: 200 };
+    const compact = placeBar({ ...base, layout: short, viewport: short, height: 300, resizable: true, size: { w: 600, h: 100 } });
+    assert.equal(compact!.mode, "compact");
+    assert.equal(compact!.hang.width, 316);
+    assert.equal(compact!.resizable, false);
+    assert.equal(compact!.hang.room, compactHang(short, short, chrome, 316).room);
+  });
+
+  test("the cap applies after the lane, stacked, beside and summarized, and a window the lane moves down keeps min(content, cap)", () => {
+    // Stacked under a 150 px first card: 12 px below it for a resizable window whose top is free, 8 for a touch one.
+    const column = { top: 60, content: 300, first: 150 };
+    const stacked = placeBar({ ...base, column, height: 548, resizable: true, size: { h: 400 } });
+    assert.equal(stacked!.lane, "stacked");
+    assert.deepEqual(boxOf(stacked, 548), { left: 912 - 316, top: 732 - 400, width: 316, height: 400 });
+    const tall = placeBar({ ...base, column, height: 2000, resizable: true });
+    assert.equal(boxOf(tall, 2000).top, 60 + 150 + 12);
+    assert.equal(boxOf(placeBar({ ...base, column, height: 2000, resizable: false }), 2000).top, 60 + 150 + 8);
+    // Raised 200 px in its corner, the lane moves it down: it keeps min(content, cap) of height.
+    const raised = placeBar({ ...base, spot: { corner: "br", x: 0, y: 200 }, column, height: 548, resizable: true, size: { h: 400 } });
+    assert.equal(boxOf(raised, 548).height, 400);
+    assert.ok(boxOf(raised, 548).top >= 60 + 150 + 12);
+    // Beside the lane, at most the room left of it, 12 px from the free area's left edge.
+    const deep = { top: 60, content: 700, first: 700 };
+    const beside = placeBar({ ...base, column: deep, height: 548, resizable: true, size: { w: 600, h: 300 } });
+    assert.equal(beside!.lane, "beside");
+    assert.deepEqual(boxOf(beside, 548), { left: 12, top: 732 - 300, width: 600 - 12, height: 300 });
+    // Summarized on a narrow map, the cap still applies.
+    const narrow = { width: 540, height: 800 };
+    const summary = placeBar({ ...base, viewport: narrow, column: deep, height: 548, resizable: true, size: { h: 200 } });
+    assert.equal(summary!.lane, "summary");
+    assert.equal(boxOf(summary, 548).height, 200);
+    // Where a pan expects it: the same box.
+    const rest = restingBar({ ...base, column, height: 548, resizable: true, size: { h: 400 } });
+    assert.deepEqual(rest!.box, boxOf(stacked, 548));
+  });
+
+  test("a resize keeps the edges at the spot's corner and moves the far ones, within its limits, from every corner", () => {
+    const room = { left: 12, top: 64, width: 900, height: 668 };
+    const start = { left: 596, top: 184, width: 316, height: 548 };
+    const limits = resizeLimits({ box: start, corner: "br", room, defaultWidth: 316, content: 548 });
+    assert.deepEqual(limits, { minWidth: 316, maxWidth: 900, minHeight: 148, maxHeight: 548 });
+    const at = (corner: Corner, part: ResizePart, dx: number, dy: number, box = start, l = limits) => resizeBox({ start: box, corner, part, dx, dy, limits: l });
+    assert.deepEqual(at("br", "corner", -100, 200), { left: 496, top: 384, width: 416, height: 348 });
+    assert.deepEqual(at("br", "corner", 100, -50), start, "no narrower than the default, no taller than the content");
+    assert.deepEqual(at("br", "width", -100, 200), { ...start, left: 496, width: 416 }, "a band changes one dimension");
+    assert.deepEqual(at("br", "height", -100, 200), { ...start, top: 384, height: 348 });
+    assert.deepEqual(at("br", "corner", -5000, 5000), { left: 12, top: 732 - 148, width: 900, height: 148 }, "the room and the shortest");
+    const corner = { left: 100, top: 100, width: 316, height: 300 };
+    const loose = { minWidth: 316, maxWidth: 800, minHeight: 148, maxHeight: 500 };
+    assert.deepEqual(at("tl", "corner", 100, 100, corner, loose), { left: 100, top: 100, width: 416, height: 400 });
+    assert.deepEqual(at("tr", "corner", -100, 100, corner, loose), { left: 0, top: 100, width: 416, height: 400 });
+    assert.deepEqual(at("bl", "corner", 100, -100, corner, loose), { left: 100, top: 0, width: 416, height: 400 });
+    assert.equal(handleCorner("br"), "tl");
+    assert.equal(handleCorner("tl"), "br");
+    assert.equal(handleCorner("tr"), "bl");
+    assert.equal(handleCorner("bl"), "tr");
+    // A room narrower than the default leaves the room as the narrowest, and content under 148 px the shortest.
+    assert.equal(resizeLimits({ box: start, corner: "br", room: { ...room, left: 912 - 250, width: 250 }, defaultWidth: 316, content: 548 }).minWidth, 250);
+    assert.equal(resizeLimits({ box: start, corner: "br", room, defaultWidth: 316, content: 120 }).minHeight, 120);
+  });
+
+  test("on release, a dimension changed by no more than the slop keeps its stored value, near-defaults store none, and the spot comes from the drawn box", () => {
+    const start = { left: 12, top: 184, width: 900, height: 548 };
+    const release = (box: Partial<Box>, stored: BarSize = NO_SIZE) => releaseSize({ stored, start, box: { ...start, ...box }, defaultWidth: 316, tallest: 548 });
+    // A stored width clamped to 900 is never written down as 900.
+    assert.deepEqual(release({ height: 400 }, { w: 1100 }), { w: 1100, h: 400 });
+    assert.deepEqual(release({ width: 905 }, { w: 1100 }), { w: 1100 });
+    assert.deepEqual(release({ width: 340 }), {}, "24 px from the default stores none");
+    assert.deepEqual(release({ width: 341 }), { w: 341 }, "25 px stores the width");
+    assert.deepEqual(release({ width: 400.4, height: 524 }), { w: 400 }, "24 px from the most it may take stores no height");
+    assert.deepEqual(release({ width: 400, height: 523 }), { w: 400, h: 523 });
+    assert.equal(sizeText(release({ width: 320, height: 540 })), null, "both at their defaults: no key");
+    const free = { left: 8, top: 60, width: 904, height: 672 };
+    assert.deepEqual(anchoredSpot({ left: 596, top: 384, width: 316, height: 348 }, free, "br"), DEFAULT_SPOT);
+    assert.deepEqual(anchoredSpot({ left: 400.4, top: 300, width: 316, height: 348 }, free, "br"), { corner: "br", x: 196, y: 84 }, "no snap");
+    assert.deepEqual(anchoredSpot({ left: 20, top: 70, width: 316, height: 348 }, free, "tl"), { corner: "tl", x: 12, y: 10 });
+  });
+
+  test("a key step of the handle stores what it changed, unsnapped, and the status names the size and any limit met", () => {
+    const start = { left: 596, top: 184, width: 316, height: 548 };
+    const keys = (box: Partial<Box>, stored: BarSize = NO_SIZE) => keySize({ stored, start, box: { ...start, ...box }, defaultWidth: 316, tallest: 548 });
+    assert.deepEqual(keys({ left: 588, width: 324 }), { w: 324 });
+    assert.deepEqual(keys({ left: 588, width: 324 }, { h: 300 }), { w: 324, h: 300 }, "the other dimension keeps its value");
+    assert.deepEqual(keys({ top: 192, height: 540 }), { h: 540 }, "8 px stores the height, no snap");
+    const wide = { ...start, left: 588, width: 324 };
+    assert.deepEqual(keySize({ stored: { w: 324 }, start: wide, box: start, defaultWidth: 316, tallest: 548 }), {}, "back exactly at the default stores none");
+    const shorter = { ...start, top: 192, height: 540 };
+    assert.deepEqual(keySize({ stored: { h: 540 }, start: shorter, box: start, defaultWidth: 316, tallest: 548 }), {}, "back at the tallest stores none");
+    const limits = { minWidth: 316, maxWidth: 900, minHeight: 148, maxHeight: 548 };
+    const met = (dx: number, dy: number, box = start) => limitMet({ start: box, box, dx, dy, corner: "br", limits });
+    assert.equal(met(8, 0), "narrowest");
+    assert.equal(met(0, -8), "tallest");
+    assert.equal(met(-8, 0, { ...start, width: 900 }), "widest");
+    assert.equal(met(0, 8, { ...start, height: 148 }), "shortest");
+    assert.equal(met(-8, 0, { ...start, width: 400 }), null);
+    assert.equal(sizeWords({ width: 316, height: 400 }, null), "Window 316 by 400 px");
+    assert.equal(sizeWords({ width: 316, height: 400 }, "narrowest"), "Window 316 by 400 px, narrowest it can be here");
+    assert.equal(sizeWords({ width: 900.2, height: 668 }, "tallest"), "Window 900 by 668 px, tallest it can be here");
+  });
+
+  test("a move by pointer or key is clamped into the room, the handle's reach on its free sides", () => {
+    const free = { left: 8, top: 60, width: 904, height: 672 };
+    // Nearest the bottom right: the free sides are the top and the left.
+    assert.deepEqual(moveRoom({ left: 590, top: 300, width: 316, height: 400 }, free, true), { left: 12, top: 64, width: 900, height: 668 });
+    assert.deepEqual(moveRoom({ left: 20, top: 70, width: 316, height: 200 }, free, true), { left: 8, top: 60, width: 900, height: 668 });
+    assert.deepEqual(moveRoom({ left: 20, top: 70, width: 316, height: 200 }, free, false), free, "a touch device keeps 8 all round");
+    // A wide window nearest the bottom right, pushed toward its free left side: 12 px from the free area's edge, and its anchored sides at 8.
+    assert.deepEqual(clampMove({ left: 11, top: 300, width: 900, height: 400 }, free, true), { left: 12, top: 300, width: 900, height: 400 });
+    assert.deepEqual(clampMove({ left: 11, top: 300, width: 900, height: 400 }, free, false), { left: 11, top: 300, width: 900, height: 400 });
+    // Pushed up past the middle, its top becomes an anchored side: 8 px, as a window at a top corner keeps.
+    assert.equal(clampMove({ left: 590, top: 0, width: 316, height: 400 }, free, true).top, 60);
   });
 });
 

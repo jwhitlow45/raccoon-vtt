@@ -11,9 +11,11 @@ const NO_CHARACTERS = {};
 /**
  * One damage or healing entry for every selected creature, in the group's
  * action bar and the initiative tracker. It names whoever this viewer may
- * not change, so a player sees why their friend's HP stayed put.
+ * not change, so a player sees why their friend's HP stayed put. A short
+ * group window puts the field and Apply first, as the single token's does
+ * (`fieldFirst`, docs/design-v1-token-window.md 5.8).
  */
-export function GroupHpEntry(props: { tokens: readonly Token[]; place: HpPlace }) {
+export function GroupHpEntry(props: { tokens: readonly Token[]; place: HpPlace; fieldFirst?: boolean }) {
   const you = useRoomView((s) => s.you);
   const characters = useRoomView((s) => s.view?.characters ?? NO_CHARACTERS);
   const playersApplyDamage = useRoomView((s) => s.view?.meta.settings.playersApplyDamage ?? false);
@@ -26,7 +28,7 @@ export function GroupHpEntry(props: { tokens: readonly Token[]; place: HpPlace }
   if (access === "none") return <Note>You cannot change the HP of any of them.</Note>;
   return (
     <>
-      <HpEntry targets={targets} access={access} place={props.place} />
+      <HpEntry targets={targets} access={access} place={props.place} fieldFirst={props.fieldFirst} />
       {left.length > 0 ? <Note>Leaves out {left.join(", ")}: you cannot change their HP.</Note> : null}
       {access === "relative" && targets.some((t) => t.access === "all") ? <Note>Damage and healing only, since some of them are not yours.</Note> : null}
     </>
