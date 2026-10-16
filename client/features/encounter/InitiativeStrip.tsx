@@ -695,6 +695,12 @@ function FightAlerts() {
    * have no room for one whole card, the column's own row stands for them
    * now, and the tap asks as that row's tap would, so one tap is enough.
    */
+  // Asked for, the cards keep to where they fit as the room changes, such as a turn band arriving over an open column: the first card goes over the screen where the column no longer holds it whole, and back.
+  useLayoutEffect(() => {
+    if (!asked || !chrome || firstHeight <= 0) return;
+    const where = askedWhere();
+    if (where !== asked) setAsked(where);
+  });
   // A roll's card opened in the column by its chip asks as the row's tap would, the chip being in the column too: once, so Close on the alerts over the screen holds.
   const rollPending = useRef(false);
   const rollBefore = useRef(false);

@@ -613,6 +613,33 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     }
     await check.getByRole("button", { name: "Passed", exact: true }).tap();
   });
+
+  test("12. at 320 x 420 at 130% with the Ruler, a check opened in the column moves over the screen when a turn band arrives and leaves the column too short for it", async () => {
+    // A height where the check fits whole from the column's place down to the toolbar without the band, and not with it.
+    const label = "320 x 420 at 130% with the Ruler";
+    await setUp({ width: 320, height: 420, scale: 1.3, top: 44, bottom: 34 });
+    await dm.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Ruler" }).tap();
+    await dm.getByRole("toolbar", { name: "Ruler options" }).waitFor();
+    await hurtHag();
+    await dm.locator('[data-alert="concentration"]').first().waitFor({ state: "attached" });
+    await dm.waitForTimeout(400);
+    await dm.getByRole("button", { name: /^Concentration check/ }).tap();
+    const check = dm.locator('[data-alert="concentration"]').first();
+    await check.waitFor();
+    await dm.waitForTimeout(300);
+    assert.equal(await dm.getByRole("dialog", { name: "Alerts" }).count(), 0, `${label}: the check did not open in the column, so the band has nothing to change`);
+    assert.ok(await wholeInReach(check.getByRole("button", { name: "Passed", exact: true })), `${label}: Passed is cut off in the column`);
+    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.hag, value: 12 }] });
+    await dm.getByRole("button", { name: /^Initiative, round/ }).first().waitFor();
+    await dm.waitForTimeout(400);
+    await shots.take(dm, "dmphone-check-band-arrives-320x420");
+    assert.equal(await dm.getByRole("dialog", { name: "Alerts" }).count(), 1, `${label}: the check stayed in a column too short for it`);
+    for (const name of ["Passed", "Failed"]) {
+      assert.ok(await wholeInReach(check.getByRole("button", { name, exact: true })), `${label}: ${name} is cut off once the band arrives`);
+    }
+    await check.getByRole("button", { name: "Passed", exact: true }).tap();
+    await ops.send({ t: "encounter.end" });
+  });
 });
 
 function goblin() {
