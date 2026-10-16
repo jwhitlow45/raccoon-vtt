@@ -474,6 +474,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await sheet.waitFor();
     await sheet.getByRole("button", { name: "Show Goblin 3 actions" }).waitFor();
     assert.ok((await measure(dm)).sticky, "the header does not stick with the bar's button in the sheet's header");
+    // The bar's button alone does not stack the sheet's header (docs/design-v1-layout-hierarchy.md 4.2), so the body keeps room for the compact header.
+    assert.equal((await headerRoom(dm)).form, "compact", "the bar's button took the compact header's room");
     assert.ok(await valueBoxInReach(7), "a value box is out of reach under the header");
     assert.ok(await wholeInReach(dm.locator("[data-round-header]").getByRole("button", { name: "Next" })), "Next is out of reach");
     await shots.take(dm, "combat-header-480-130-very-short-bar-folded");
