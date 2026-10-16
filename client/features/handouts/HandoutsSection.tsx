@@ -34,7 +34,7 @@ export function HandoutsSection() {
     [handouts],
   );
   return (
-    <Section label="Handouts">
+    <Section label="Handouts" divider={false}>
       {showing.length === 0 ? <Help>No handout is showing.</Help> : <Help>Showing now. Players can close their own copy.</Help>}
       {showing.length > 0 ? (
         <RowList label="Handouts showing">

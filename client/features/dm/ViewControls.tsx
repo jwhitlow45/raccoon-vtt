@@ -13,8 +13,10 @@ import { PlayerPreview } from "./PlayerPreview.tsx";
 import { PartySightToggle } from "../vision/PartySightToggle.tsx";
 
 /**
- * The DM's view tools (features section 13): view as a player, follow me,
- * bring everyone here, black out the players' screens, and undo and redo.
+ * The DM's view tools (features section 13), in two groups by what they do
+ * (docs/design-v1-layout-hierarchy.md M4). "Players' screens" acts on the
+ * table: follow me, bring everyone here, black out. "Check their view"
+ * only looks: view as a player and party sight. Undo and redo follow.
  */
 export function ViewControls() {
   const actions = useRoomActions();
@@ -32,9 +34,7 @@ export function ViewControls() {
   if (!view) return null;
   return (
     <>
-      <Section label="Players' view" divider={false}>
-        <ViewAsPlayer members={members} onPlayerScene={onPlayerScene} playerSceneId={playerSceneId} />
-        <PartySightToggle />
+      <Section label="Players' screens">
         {!onPlayerScene ? (
           <Notice role="status">
             You are looking at a different scene than the players{playerSceneName ? `, who are on ${playerSceneName}` : ""}. Follow
@@ -69,6 +69,10 @@ export function ViewControls() {
           checked={view.blackout}
           onChange={(blackout) => actions.dispatch({ t: "view.blackout", blackout })}
         />
+      </Section>
+      <Section label="Check their view">
+        <ViewAsPlayer members={members} onPlayerScene={onPlayerScene} playerSceneId={playerSceneId} />
+        <PartySightToggle />
       </Section>
       <Section label="Undo">
         <Help>Undo or redo your own last changes, one at a time.</Help>
