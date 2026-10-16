@@ -214,15 +214,16 @@ The Builder tool is the DM's. Its modes:
 ## Combat and initiative
 
 - The DM starts a fight with the selected tokens, every token on the scene, or only the visible ones. Players add their own character with "Join the fight".
-- Players type in their own initiative. The DM types in the monsters', or uses **Auto initiative**: by creature (identical monsters share a roll), one each, or all at once. Each roll is a d20 plus the creature's modifier, with advantage or disadvantage from its conditions. Players see the totals, never the dice.
+- Players type in their own initiative. The DM types in the monsters', or uses **Auto initiative**: by creature (identical monsters share a roll), one each, or all at once. Each roll is a d20 plus the creature's modifier, with advantage or disadvantage from its conditions. Players see the totals, never the dice. It sits right after the order, with what it rolled.
 - "Use initiative scores for monsters" gives them 10 + their Dexterity modifier instead of a roll.
-- The order runs high to low. Dragging rows settles ties. A round counter, Start, Next and Previous run the fight.
+- The order runs high to low. Dragging rows settles ties. A round counter, Start, Next and Previous run the fight. The round counter and its buttons, or End turn, stay at the top while the order scrolls under them, and scroll away once the order has passed. On a short screen they shrink to one line, and on a very short one they scroll with the order.
 - The active token gets a turn marker. With "Camera follows the turn" on, the DM's map pans to whoever acts. Players' maps stay where they are, unless the DM uses Follow me or Look here.
 - Players see the turn order, names and conditions. With "Reveal hidden combatants on their turn" on, a hidden creature appears when its first turn comes, but only where players could see it: on revealed ground, and with party vision only while the party can see it. While it acts out of their view, they see "Another creature's turn".
 - A strip across the top of a phone shows whose turn it is. On a phone held sideways it sits in the top bar when the bar has room for it. Only the DM's strip shows who comes next. On their own turn a player gets "Your turn" in the strip, a vibration on Android or a chime, and an "End turn" button.
-- Rows show HP, conditions and, for the DM, AC. Tapping a row opens the same menu as tapping the token.
+- Rows show AC, HP and conditions. The DM sees every creature's AC, and a player their own creatures'. Tapping a row opens the same menu as tapping the token.
 - Damage and healing take math, and one entry can apply to several creatures. "Players can apply damage and healing" lets players do it too.
 - At 0 HP, monsters die ("Monsters die at 0 HP") and characters get death save pips that their player fills in. "Skip defeated creatures" passes over the dead.
+- Healing a dead creature brings it back with the HP healed ("Healing brings back the dead", on by default). Off, healing does nothing to the dead, and the HP entry says so. The DM's Revive is in a dead creature's action bar and its tracker row's options, and brings it back with 1 HP.
 - Per-turn resources: Reaction used clears at the start of the creature's turn, Legendary Action pips refill, Legendary Resistance counts uses per day, and an "in lair" switch.
 - A Ready marker (Hold is the same thing) records the trigger and shows on the row and the token until the creature's next turn. Players learn only that a monster readied, not its trigger.
 - The combat log keeps each HP change ("Goblin 2 takes 7 damage, 3/7 left"). The DM can take any one back while the creature is still as that change left it.
@@ -235,6 +236,16 @@ The Builder tool is the DM's. Its modes:
 - It shows the 2024 XP budgets (Low, Moderate, High) for the party, from each character's level, and which budget the encounter fits. The DM can change the party for one encounter.
 - Saved encounters drop onto any map, hidden from players if the DM asks. In a running fight their creatures can join the tracker. One undo takes it all back.
 - With unsaved changes, the editor's back button asks "Discard changes?" first, and a second tap leaves.
+
+### Companions
+
+- A companion is a token that belongs to a character: a creature such as a familiar or a summoned spirit, or an effect with no HP such as Spiritual Weapon. Whoever plays the character controls it: moves it, changes its HP, conditions and stats, renames it and dismisses it.
+- Each companion takes its own turn with its own initiative, acts on its character's turn listed under it in the order, or acts on its character's turn and stays out of the order. Only a creature takes its own turn.
+- A player adds a companion from their character in the Characters panel. It goes right next to the character's token, up to 10 per character on a scene, and the DM's log says so. The DM can make any token a companion in its panel.
+- A companion listed under its character keeps its own Reaction and Ready action in the order.
+- Other players see a party member's companions, under the character in the order, with HP as "Players see the party's HP" allows. A creature companion lends the party its sight, an effect does not.
+- Effects on a companion that acts on its character's turn count that character's turns.
+- A companion stays on its scene when the party moves on. The DM finds the ones left behind by searching "companion" in that scene's outliner.
 
 ## Rolls
 
@@ -257,7 +268,7 @@ The DM asks players for a saving throw or an ability check, and each player type
 - The DM sees every card. A player sees and edits their own character's card. Other players see only the name, conditions and whatever HP the DM allows.
 - Player characters belong to the room, so their HP and conditions follow their tokens to every scene. Monster tokens are independent copies.
 - "Players see the party's HP" shows every player the exact HP of the other player characters. Off, they see only Healthy, Bloodied or Dying.
-- The Characters panel lists the party. With "Players can create their own characters" on, each player can make up to 3 and place their tokens on the players' scene. The DM can still edit, take over or delete them.
+- The Characters panel lists the party. With "Players can create their own characters" on, each player can make up to 3 and place their tokens on the players' scene. The DM can still edit, take over or delete them. A character's card lists its companions and adds new ones.
 - Short rest and Long rest follow the SRD. A short rest adds the HP the player rolled on Hit Point Dice. A long rest restores all HP, ends temporary HP, removes one Exhaustion level and resets legendary uses. The DM can rest the whole party at once.
 - The Monsters panel (DM) holds all 330 SRD 5.2.1 stat blocks. Search, then drop one on the map with average HP (or a typed number), AC, speed, size, initiative and senses.
 - Filters like D&D Beyond's: challenge rating, creature type, legendary, lair, size, condition and damage immunities, resistances, vulnerabilities, movement, senses and alignment. Or type it in the search: "cr 5", "cr 1-5", "cr 1/2-3", "cr 10-".
