@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { imageAssetId } from "#shared/imageRef.ts";
 import { Button } from "../../components/Button.tsx";
 import { Empty } from "../../components/Empty.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help, SectionLabel } from "../../components/Panel.tsx";
 import { Tag } from "../../components/Tag.tsx";
-import type { AssetKind, AssetRow } from "../../lib/api.ts";
+import type { AssetKind, AssetRow, AssetVariant } from "../../lib/api.ts";
 import { theme } from "../../lib/theme.ts";
 import { useAssets, useRoomView } from "../../state/view.ts";
+import { HandoutViewer } from "../handouts/HandoutViewer.tsx";
 import { formatBytes } from "../settings/backup.ts";
 import { CreditLine } from "./CreditLine.tsx";
 import { imageErrorMessage } from "./errors.ts";
@@ -36,10 +37,12 @@ export const tileImage = { width: "100%", height: "100%", objectFit: "cover", di
  * The image picker's Library tab passes `onPick`, and each image is a
  * button. The Library panel shows the same grid without it: a tap shows the
  * image larger with its credit when it has one (docs/design-v1-dm-tools.md
- * 3.13). For the DM the panel lists maps and handouts too, marks each image
- * the room's state does not use as "Not in use", and deletes those on a
- * second tap, one or all at once (section 3.19), since only the DM can tell
- * a handout kept for later from one nobody needs.
+ * 3.13), and its View opens it in the handout viewer
+ * (docs/design-v1-layout-hierarchy.md 5.3). For the DM the panel lists
+ * maps and handouts too, marks each image the room's state does not use as
+ * "Not in use", and deletes those on a second tap, one or all at once
+ * (section 3.19), since only the DM can tell a handout kept for later from
+ * one nobody needs.
  */
 export function LibraryGrid(props: {
   roomId: string;
@@ -200,13 +203,40 @@ function Browse(props: { label: string; entries: { id: string; row: AssetRow | u
   );
 }
 
+/** What the image is: its tile's name, and its viewer's title unless a handout shows it under one. */
+function kindName(row: AssetRow | undefined): string {
+  return row?.kind === "map" ? "Map" : row?.kind === "handout" ? "Handout" : "Token image";
+}
+
 function tileLabel(row: AssetRow | undefined): string {
-  const name = row?.kind === "map" ? "Map" : row?.kind === "handout" ? "Handout" : "Token image";
+  const name = kindName(row);
   return row?.inUse === false ? `${name}, not in use` : name;
+}
+
+/**
+ * The variant to look at large: `full` when the row lists it, else the
+ * largest it lists. With no row (an image only seen on a token, the list
+ * not loaded) `full`, which every kind but a scene's thumbnail has.
+ */
+export function viewVariant(row: Pick<AssetRow, "variants"> | undefined): AssetVariant {
+  const listed = row?.variants ?? ["full"];
+  return (["full", "mobile", "thumb"] as const).find((v) => listed.includes(v)) ?? "full";
+}
+
+/** The viewer's title: a handout's that shows this image, the one shown last, else what the image is. */
+export function viewTitle(id: string, row: AssetRow | undefined, handouts: readonly { assetId: string; title: string; shownAt: string }[]): string {
+  let shown: { title: string; shownAt: string } | null = null;
+  for (const h of handouts) if (h.assetId === id && (!shown || h.shownAt > shown.shownAt)) shown = h;
+  return shown?.title ?? kindName(row);
 }
 
 function Detail(props: { id: string; row: AssetRow | undefined; actions: ReactNode }) {
   const { row } = props;
+  const [viewing, setViewing] = useState(false);
+  const viewRef = useRef<HTMLButtonElement>(null);
+  const assets = useAssets();
+  const handouts = useRoomView((s) => s.view?.handouts);
+  const title = viewTitle(props.id, row, Object.values(handouts ?? {}));
   return (
     <div
       style={{
@@ -219,9 +249,16 @@ function Detail(props: { id: string; row: AssetRow | undefined; actions: ReactNo
         border: `${theme.line.border}px solid ${theme.color.border}`,
       }}
     >
-      <span style={{ flex: "none", width: 96, height: 96, borderRadius: theme.radius.sm, overflow: "hidden", background: theme.color.surfaceRaised }}>
+      {/* A pointer shortcut to View, which is the one named control and keyboard stop. */}
+      <button
+        type="button"
+        aria-hidden
+        tabIndex={-1}
+        onClick={() => setViewing(true)}
+        style={{ flex: "none", display: "block", width: 96, height: 96, padding: 0, border: "none", borderRadius: theme.radius.sm, overflow: "hidden", background: theme.color.surfaceRaised, cursor: "zoom-in" }}
+      >
         <Thumb id={props.id} />
-      </span>
+      </button>
       <div style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(2), alignContent: "start" }}>
         {row ? (
           <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
@@ -231,8 +268,17 @@ function Detail(props: { id: string; row: AssetRow | undefined; actions: ReactNo
           </span>
         ) : null}
         {row?.credit ? <CreditLine credit={row.credit} stored={row} /> : null}
-        {props.actions ? <div>{props.actions}</div> : null}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+          <Button ref={viewRef} size="sm" onClick={() => setViewing(true)}>
+            View
+          </Button>
+          {props.actions}
+        </div>
       </div>
+      {viewing ? (
+        // No Download: the popup's stays the players' way to save a handout, and the DM holds the images already.
+        <HandoutViewer title={title} onClose={() => setViewing(false)} pages={[{ src: assets.url(props.id, viewVariant(row)), alt: title }]} backClose opener={viewRef} />
+      ) : null}
     </div>
   );
 }
