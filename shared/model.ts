@@ -1237,10 +1237,20 @@ export type Pin = {
   visibility: "all" | "dm";
 };
 
+/** One page of a handout: a `handout` image and its canonical size, the `full` variant's pixels. */
+export type HandoutPage = { assetId: AssetId; width: number; height: number };
+
 export type Handout = {
   id: HandoutId;
   rev: number;
+  /** The first page. A handout without `pages` is this one image, as every handout from before PDFs is. */
   assetId: AssetId;
+  /**
+   * Every page in order, the first included (docs/design-v1-pdf-handouts.md
+   * 3.1). Absent for one image. The reducer writes `assetId` from the first,
+   * so a reader that knows only `assetId` still shows the first page.
+   */
+  pages?: HandoutPage[];
   title: string;
   to: "all" | MemberId[];
   shownAt: string;

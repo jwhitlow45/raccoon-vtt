@@ -504,3 +504,38 @@ describe("wave 5 ops and messages (docs/design-v1-dm-tools.md)", () => {
     ok(serverMessageSchema, { t: "snapshot", seq: 1, state: {}, you: { memberId: "display:abcdefghijkl", role: "display", sceneId: "s1" }, watermark: 0 });
   });
 });
+
+describe("pdf handout ops (docs/design-v1-pdf-handouts.md 3.3)", () => {
+  const page = (assetId: string, width = 1584, height = 2048) => ({ assetId, width, height });
+  const pages = (n: number) => Array.from({ length: n }, (_, i) => page(`a${i}`));
+  const show = (handout: Record<string, unknown>) => ({ t: "handout.show", handout: { id: "h", title: "Strange letter", to: "all", ...handout } });
+
+  test("a show is one image or its pages in order, never both or neither", () => {
+    ok(clientOpSchema, show({ assetId: "a" }));
+    ok(clientOpSchema, show({ pages: [page("a")] }));
+    bad(clientOpSchema, show({ assetId: "a", pages: [page("a")] }));
+    bad(clientOpSchema, show({}));
+    bad(clientOpSchema, show({ pages: [] }));
+  });
+
+  test("a show holds 1 to 100 pages, each sized 1 to 8,192 px", () => {
+    ok(clientOpSchema, show({ pages: pages(100) }));
+    bad(clientOpSchema, show({ pages: pages(101) }));
+    for (const size of [0, 8193, 1.5, -1]) {
+      bad(clientOpSchema, show({ pages: [page("a", size, 100)] }));
+      bad(clientOpSchema, show({ pages: [page("a", 100, size)] }));
+    }
+    ok(clientOpSchema, show({ pages: [page("a", 1, 8192)] }));
+    bad(clientOpSchema, show({ pages: [{ ...page("a"), rev: 1 }] }));
+  });
+
+  test("a title is the protocol's name: 1 to 80 characters with no control or direction characters", () => {
+    ok(clientOpSchema, show({ pages: [page("a")], title: "x".repeat(80) }));
+    bad(clientOpSchema, show({ pages: [page("a")], title: "x".repeat(81) }));
+    bad(clientOpSchema, show({ pages: [page("a")], title: "" }));
+    // zod counts a string's code points past its bound, so 80 dragons (160 UTF-16 units) pass, and a title cut to 80 UTF-16 units always does.
+    ok(clientOpSchema, show({ pages: [page("a")], title: "\u{1F409}".repeat(80) }));
+    bad(clientOpSchema, show({ pages: [page("a")], title: "\u{1F409}".repeat(81) }));
+    bad(clientOpSchema, show({ pages: [page("a")], title: "Letter\u202E" }));
+  });
+});

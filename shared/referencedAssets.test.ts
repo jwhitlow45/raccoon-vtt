@@ -5,6 +5,8 @@ import type { RoomState } from "./model.ts";
 import { referencedAssetIds, restoreAddedAssets } from "./referencedAssets.ts";
 import { character, customMonster, imageRef, room, scene, srdImage, token } from "./testutil.ts";
 
+const page = (assetId: string) => ({ assetId, width: 1584, height: 2048 });
+
 /** Every place a room names an image, each with its own asset id: the walk must find them all. */
 function everyReference(): RoomState {
   const state = room();
@@ -23,6 +25,7 @@ function everyReference(): RoomState {
   state.stamps.st1 = { id: "st1", rev: 0, sceneId: "s1", art: { assetId: "stampImage" }, x: 1, y: 1, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" };
   state.stamps.st2 = { id: "st2", rev: 0, sceneId: "s1", art: { key: "oak-tree" }, x: 1, y: 1, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" };
   state.handouts.h1 = { id: "h1", rev: 0, assetId: "handout", title: "Letter", to: "all", shownAt: "2026-10-14T00:00:00.000Z" };
+  state.handouts.h2 = { id: "h2", rev: 0, assetId: "page1", pages: [page("page1"), page("page2"), page("page1")], title: "Strange letter", to: "all", shownAt: "2026-10-14T00:00:00.000Z" };
   return state;
 }
 
@@ -44,7 +47,7 @@ describe("referencedAssetIds (docs/design-v1-dm-tools.md 3.19)", () => {
     const found = referencedAssetIds(state);
     // A field added to the model that names an asset shows here first, and fails until the walk knows it.
     assert.deepEqual([...found].sort(), [...namedAssets(state)].sort());
-    assert.deepEqual([...found].sort(), ["altImage", "handout", "map", "monsterImage", "phase", "portrait", "srdImage", "stampImage", "thumb", "tokenImage"]);
+    assert.deepEqual([...found].sort(), ["altImage", "handout", "map", "monsterImage", "page1", "page2", "phase", "portrait", "srdImage", "stampImage", "thumb", "tokenImage"]);
   });
 
   test("a restore adds only references the entity does not hold now, and never a thumbnail", () => {
@@ -60,5 +63,19 @@ describe("referencedAssetIds (docs/design-v1-dm-tools.md 3.19)", () => {
     const sceneState = { ...state, scenes: { ...state.scenes, s1: sceneNow } };
     assert.deepEqual(restoreAddedAssets([{ key: keys.scene("s1"), value: state.scenes.s1 }], sceneState), []);
     assert.deepEqual(restoreAddedAssets([{ key: keys.handout("h2"), value: { ...state.handouts.h1, id: "h2", assetId: "other" } }], state), [{ assetId: "other", kind: "handout" }]);
+  });
+
+  test("a handout's every page is a handout image, each once, and a restore adds the pages it does not hold now (docs/design-v1-pdf-handouts.md 3.5)", () => {
+    const state = everyReference();
+    const before = state.handouts.h2!;
+    const now = { ...before, assetId: "page2", pages: [page("page2")] };
+    const changed = { ...state, handouts: { ...state.handouts, h2: now } };
+    assert.deepEqual(restoreAddedAssets([{ key: keys.handout("h2"), value: before }], changed), [{ assetId: "page1", kind: "handout" }]);
+    assert.deepEqual(restoreAddedAssets([{ key: keys.handout("h2"), value: before }], state), []);
+    const gone = { ...state, handouts: { h1: state.handouts.h1! } };
+    assert.deepEqual(restoreAddedAssets([{ key: keys.handout("h2"), value: before }], gone), [
+      { assetId: "page1", kind: "handout" },
+      { assetId: "page2", kind: "handout" },
+    ]);
   });
 });

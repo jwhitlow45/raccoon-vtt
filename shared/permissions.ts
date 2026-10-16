@@ -5,6 +5,7 @@ import type { ActorTarget, DoorRef, Op, OpOf, RefusalCode, TokenInput, TokenPatc
 import { ownsCharacter, ownsToken, projectEntity, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { LIMITS } from "./limits.ts";
 import { restoreAddedAssets } from "./referencedAssets.ts";
+import { handoutPages } from "./handouts.ts";
 import { movementRules, type LegEnd } from "./ruleHooks.ts";
 import { boxDistanceFt, tokenCellBox } from "./rules/distance.ts";
 import { footprintSize } from "./rules/footprint.ts";
@@ -258,7 +259,8 @@ function forDm(op: Op, c: Check): Decision {
       // A stamp from the room's library wears a token image, as a token does (design 8.2).
       return (op.put ?? []).every((stamp) => !("assetId" in stamp.art) || c.asset(stamp.art.assetId, "token")) ? OK : GONE;
     case "handout.show":
-      return c.asset(op.handout.assetId, "handout") ? OK : GONE;
+      // Every page a handout image of this room, so a map, a token image or another room's image among them is not here.
+      return handoutPages(op.handout).every((page) => c.asset(page.assetId, "handout")) ? OK : GONE;
     case "journal.create":
       return pageReader(c, op.page.access);
     case "journal.update":

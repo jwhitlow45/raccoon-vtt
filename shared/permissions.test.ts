@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { MoveAnyToken } from "./model.ts";
-import { canApply, movesAnyToken, PLAYED_WITH_OTHERS, type PermissionDeps } from "./permissions.ts";
+import { canApply, movesAnyToken, PLAYED_WITH_OTHERS, type AssetKind, type PermissionDeps } from "./permissions.ts";
 import type { Op } from "./protocol.ts";
 import { DM, P1, P2, actor, apply, blockOf, character, customMonster, drawing, entry, imageRef, reveal, room, template, token } from "./testutil.ts";
 
@@ -855,5 +855,25 @@ describe("wave 3 map ops", () => {
     assert.equal(dmCode({ t: "scene.update", sceneId: "s1", patch: { phases: [phase("map-1"), { ...phase("token-2"), id: "q" }] } }), "gone");
     assert.equal(dmCode({ t: "build.stamps", sceneId: "s1", put: [stamp({ key: "oak" }), stamp({ assetId: "token-1" })] }), "ok");
     assert.equal(dmCode({ t: "build.stamps", sceneId: "s1", put: [stamp({ assetId: "map-1" })] }), "gone");
+  });
+});
+
+describe("pdf handouts (docs/design-v1-pdf-handouts.md 3.3)", () => {
+  // The room's rows by kind. Any other id is another room's image, or none.
+  const rows: Record<string, AssetKind> = { h1: "handout", h2: "handout", map: "map", tok: "token" };
+  const byKind: PermissionDeps = { canUseAsset: (_member, assetId, kind) => rows[assetId] === kind };
+  const kindCode = (op: Op, who = DM) => {
+    const d = canApply(op, who, setup(), byKind);
+    return d.ok ? "ok" : d.code;
+  };
+  const pages = (...ids: string[]) => ids.map((assetId) => ({ assetId, width: 1584, height: 2048 }));
+  const show = (...ids: string[]): Op => ({ t: "handout.show", handout: { id: "h", pages: pages(...ids), title: "Strange letter", to: "all" } });
+
+  test("a show checks every page as a handout image of the room, a repeated page included", () => {
+    assert.equal(kindCode(show("h1", "h2", "h1")), "ok");
+    assert.equal(kindCode(show("h1", "map")), "gone");
+    assert.equal(kindCode(show("tok", "h1")), "gone");
+    assert.equal(kindCode(show("h1", "elsewhere")), "gone");
+    assert.equal(kindCode(show("h1"), P1), "forbidden");
   });
 });

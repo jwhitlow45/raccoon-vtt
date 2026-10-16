@@ -9,6 +9,7 @@ import {
   type Effect,
   type FreeWall,
   type AssetImage,
+  type HandoutPage,
   type InitEntry,
   type JournalPage,
   type LogEntry,
@@ -185,6 +186,11 @@ export function customMonster(id: string, overrides: Partial<CustomMonster> = {}
 /** A token image of the given asset, centered. */
 export function imageRef(assetId: string, zoom = 1): AssetImage {
   return { assetId, crop: { cx: 0, cy: 0, zoom } };
+}
+
+/** One page of a handout: a portrait Letter page drawn at 2048 px on its long side unless sized. */
+export function handoutPage(assetId: string, width = 1584, height = 2048): HandoutPage {
+  return { assetId, width, height };
 }
 
 /** The DM's default image for an SRD monster, as the room stores it. */
@@ -506,6 +512,8 @@ export function randomState(r: () => number): RoomState {
   for (let i = 0; i < int(r, 0, 3); i++) {
     const id = `h${i}`;
     state.handouts[id] = { id, rev: 0, assetId: `img-${id}`, title: "Map", to: pick(r, ["all", ["p1"], ["p2"], ["dm1"]]), shownAt: AT };
+    // The second is a handout of pages (docs/design-v1-pdf-handouts.md 3.1), with no draw of its own so the seeds keep what they hold.
+    if (i === 1) state.handouts[id]!.pages = [handoutPage(`img-${id}`), handoutPage(`img-${id}-2`)];
   }
 
   for (let i = 0; i < int(r, 0, 3); i++) {
@@ -1191,7 +1199,10 @@ export function randomOp(r: () => number, state: RoomState, who: Viewer): Op {
     case 20:
       return drawingIds.length > 0 ? { t: "drawing.delete", drawingId: pick(r, drawingIds) } : { t: "drawing.clear", sceneId, scope: "all" };
     case 21:
-      return { t: "handout.show", handout: { id: seqId, assetId: "img-h", title: "Letter", to: pick(r, ["all", ["p1"], ["p2"]]) } };
+      return {
+        t: "handout.show",
+        handout: { id: seqId, ...(n < 50 ? { assetId: "img-h" } : { pages: [handoutPage("img-h"), handoutPage("img-h-2")] }), title: "Letter", to: pick(r, ["all", ["p1"], ["p2"]]) },
+      };
     case 22:
       return { t: "log.whisper", to: [pick(r, ["p1", "p2"])], text: "dm whisper" };
     case 23:

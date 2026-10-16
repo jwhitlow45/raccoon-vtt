@@ -38,6 +38,7 @@ import {
   type Viewer,
   type WallFeature,
 } from "./model.ts";
+import { handoutPages } from "./handouts.ts";
 import { imageAssetId } from "./imageRef.ts";
 import { revealSeenAnywhere } from "./migrate.ts";
 import type { Change } from "./protocol.ts";
@@ -1666,7 +1667,8 @@ export function visibleAssetIds(state: RoomState, viewer: Viewer, opts: ProjectO
     for (const image of token.altImages ?? []) addImage(image);
   }
   for (const character of Object.values(projected.characters)) addImage(character.defaultImage);
-  for (const handout of Object.values(projected.handouts)) ids.add(handout.assetId);
+  // Every page of each handout the viewer gets, and no page of one they do not (docs/design-v1-pdf-handouts.md 3.4).
+  for (const handout of Object.values(projected.handouts)) for (const page of handoutPages(handout)) ids.add(page.assetId);
   // A stamp's image while the stamp is in the projection, so a stamp withheld under fog keeps its picture back too.
   for (const stamp of Object.values(projected.stamps)) if ("assetId" in stamp.art) ids.add(stamp.art.assetId);
   // Only a DM's projection holds them. A player meets these images on tokens alone.

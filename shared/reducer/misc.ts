@@ -16,14 +16,22 @@ export function logWhisper(tx: Tx, op: OpOf<"log.whisper">): void {
   tx.addLog({ kind: "whisper", from: tx.actor.memberId, to: op.to, text: op.text });
 }
 
-/** Showing a handout again updates it in place, so a re-show is one upsert and one log line. */
+/**
+ * Showing a handout again updates it in place, so a re-show is one upsert
+ * and one log line. A handout of pages names its first page as `assetId`
+ * too, written here so the two never drift, and a re-show as one image
+ * drops the pages it had (docs/design-v1-pdf-handouts.md 3.3).
+ */
 export function handoutShow(tx: Tx, op: OpOf<"handout.show">): void {
   const input = op.handout;
   const existing = tx.state.handouts[input.id];
+  const first = "pages" in input ? input.pages[0]?.assetId : input.assetId;
+  if (first === undefined) throw invalid("a handout has at least one page");
   const handout: Handout = {
     id: input.id,
     rev: existing?.rev ?? 0,
-    assetId: input.assetId,
+    assetId: first,
+    ...("pages" in input ? { pages: input.pages } : {}),
     title: input.title,
     to: input.to,
     shownAt: tx.env.at,

@@ -48,14 +48,17 @@ class FakeDb {
   readonly snapshot: { state: RoomState; seq: number };
   readonly opRows: unknown[];
   readonly dmGrants: string[];
+  /** The asset rows the room's lookups find (persistence.ts loadAssetFacts). */
+  readonly assetRows: { id: string; room_id: string; kind: string; width: number; height: number; uploaders: string[] }[];
   readonly hooks: { commit?: (n: number) => void; verify?: (n: number) => void } = {};
   #commits = 0;
   #verifies = 0;
 
-  constructor(opts: { state: RoomState; opRows?: unknown[]; dmGrants: string[] }) {
+  constructor(opts: { state: RoomState; opRows?: unknown[]; dmGrants: string[]; assetRows?: FakeDb["assetRows"] }) {
     this.snapshot = { state: opts.state, seq: 0 };
     this.opRows = opts.opRows ?? [];
     this.dmGrants = opts.dmGrants;
+    this.assetRows = opts.assetRows ?? [];
     this.durableMax = this.opRows.length;
   }
 
@@ -88,7 +91,8 @@ class FakeDb {
     if (sql.includes("from room_ops")) return { rows: this.opRows };
     if (sql.includes("from assets")) {
       this.assetLookups++;
-      return { rows: [] };
+      const ids = new Set((params[0] as string[] | undefined) ?? []);
+      return { rows: this.assetRows.filter((row) => ids.has(row.id)) };
     }
     if (sql.includes("from grants")) return { rows: this.dmGrants.map((member_id) => ({ member_id })) };
     if (sql.startsWith("insert into room_ops")) {
@@ -361,6 +365,59 @@ describe("op admission", () => {
       await actor.op(conn, 2, { t: "token.update", tokenId, patch: { image } });
       assert.equal(db.assetLookups, 1);
       assert.deepEqual(sent.at(-1), { t: "retry", n: 2, code: "busy" });
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+});
+
+describe("handout pages (docs/design-v1-pdf-handouts.md 3.1)", () => {
+  /** A room with two handout images and a map, by id. */
+  function handoutRoom() {
+    const dm = member("DM", "dm");
+    const state = createInitialState({ roomName: "Handouts", dm });
+    const ids = { first: uuidv7(), second: uuidv7(), map: uuidv7() };
+    const row = (id: string, kind: string, width: number, height: number) => ({ id, room_id: ROOM, kind, width, height, uploaders: [dm.id] });
+    const assetRows = [row(ids.first, "handout", 1584, 2048), row(ids.second, "handout", 2048, 1448), row(ids.map, "map", 4096, 4096)];
+    return { dm, ids, db: new FakeDb({ state, dmGrants: [dm.id], assetRows }) };
+  }
+  const page = (assetId: string, width = 1, height = 1) => ({ assetId, width, height });
+
+  test("a show of pages takes each page's size from its row, whatever the client sent", async () => {
+    const { dm, ids, db } = handoutRoom();
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const { conn, sent } = connect(actor, dm);
+      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      const pages = [page(ids.first, 9, 9), page(ids.second), page(ids.first, 8192, 1)];
+      await actor.op(conn, 1, { t: "handout.show", handout: { id: "h1", pages, title: "Strange letter", to: "all" } });
+      const ev = await answerTo(sent, 1);
+      assert.ok(ev !== "stuck" && ev.rejects === undefined);
+      const shown = actor.committed.state.handouts.h1;
+      assert.equal(shown?.assetId, ids.first);
+      assert.deepEqual(shown?.pages, [page(ids.first, 1584, 2048), page(ids.second, 2048, 1448), page(ids.first, 1584, 2048)]);
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("a page with no row, or a row of another kind, keeps the client's size and the show is refused as not here", async () => {
+    const { dm, ids, db } = handoutRoom();
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const { conn, sent } = connect(actor, dm);
+      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      for (const [n, other] of [[1, uuidv7()], [2, ids.map]] as const) {
+        await actor.op(conn, n, { t: "handout.show", handout: { id: `h${n}`, pages: [page(ids.first), page(other)], title: "Strange letter", to: "all" } });
+        const ev = await answerTo(sent, n);
+        assert.ok(ev !== "stuck");
+        assert.equal(ev.rejects?.[0]?.code, "gone");
+      }
+      assert.deepEqual(actor.committed.state.handouts, {});
     } finally {
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });

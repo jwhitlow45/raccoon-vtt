@@ -30,6 +30,13 @@ export const LIMITS = {
   buildCellsPerOp: 2_000,
   fogDraftOpsPerScene: 500,
   handoutsPerRoom: 200,
+  /**
+   * Pages in one handout (docs/design-v1-pdf-handouts.md 3.7). A handout
+   * pack is a few pages and a player's guide a few dozen, and the largest
+   * show of them, with long ids and every recipient, stays under a quarter
+   * of the socket's frame.
+   */
+  handoutPages: 100,
   monstersPerRoom: 200,
   /**
    * One custom monster, serialized. The longest SRD 5.2.1 stat block is

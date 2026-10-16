@@ -1710,3 +1710,49 @@ describe("an effect companion lends no sight (docs/design-v1-combat-flow.md 3.6.
     assert.ok(projectState(lamp, P2, { sceneId: "s1" }).tokens.gob, "a marked plain object lends sight");
   });
 });
+
+describe("pdf handouts (docs/design-v1-pdf-handouts.md 3.4)", () => {
+  const pages = [
+    { assetId: "page1", width: 1584, height: 2048 },
+    { assetId: "page2", width: 2048, height: 1584 },
+    { assetId: "page3", width: 1448, height: 2048 },
+  ];
+  function shown(to: "all" | string[]): RoomState {
+    const state = room();
+    state.handouts.h1 = { id: "h1", rev: 0, assetId: "page1", pages, title: "Strange letter", to, shownAt: "" };
+    return state;
+  }
+  const ON_S1 = { sceneId: "s1" };
+
+  test("a player shown the handout gets it whole, every page with its size, and every page in their visible set", () => {
+    const state = shown(["p1"]);
+    assert.deepEqual(projectState(state, P1, ON_S1).handouts.h1?.pages, pages);
+    for (const id of ["page1", "page2", "page3"]) assert.ok(visibleAssetIds(state, P1, ON_S1).has(id), id);
+    // A table display gets the handouts shown to everyone, by the same set.
+    const all = shown("all");
+    assert.deepEqual(projectState(all, DISPLAY, ON_S1).handouts.h1?.pages, pages);
+    for (const id of ["page1", "page2", "page3"]) assert.ok(visibleAssetIds(all, DISPLAY, ON_S1).has(id), `display: ${id}`);
+  });
+
+  test("a player not shown it, a display for chosen players and anyone behind a blackout get no handout and no page", () => {
+    const chosen = shown(["p1"]);
+    const blackout = shown("all");
+    blackout.meta.view.blackout = true;
+    for (const [state, viewer, label] of [
+      [chosen, P2, "a player not shown it"],
+      [chosen, DISPLAY, "a display, for chosen players"],
+      [blackout, P1, "a player behind a blackout"],
+      [blackout, DISPLAY, "a display behind a blackout"],
+    ] as const) {
+      assert.deepEqual(projectState(state, viewer, ON_S1).handouts, {}, label);
+      const visible = visibleAssetIds(state, viewer, ON_S1);
+      for (const id of ["page1", "page2", "page3"]) assert.ok(!visible.has(id), `${label}: ${id}`);
+    }
+  });
+
+  test("closed, it takes every page out of the visible set", () => {
+    const state = shown("all");
+    delete state.handouts.h1;
+    for (const id of ["page1", "page2", "page3"]) assert.ok(!visibleAssetIds(state, P1, ON_S1).has(id), id);
+  });
+});

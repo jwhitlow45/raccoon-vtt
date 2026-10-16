@@ -9,7 +9,7 @@ import type { RestoreEntry } from "./protocol.ts";
  * 2.6 and 3.19), with the kind of asset that place takes: scene maps, map
  * phases and thumbnails, token images and other images, character
  * portraits, monsters' and SRD monsters' default images, stamps from the
- * library, and handouts. Shipped icons name no row.
+ * library, and every page of a handout. Shipped icons name no row.
  *
  * Cleanup asks it which images a room still uses, and the permissions ask
  * it which images an undo would put back. Both must know every reference,
@@ -27,6 +27,16 @@ export function entityAssetRefs(key: EntityKey, value: unknown): AssetRef[] {
   const image = (ref: ImageRef | null | undefined) => {
     const assetId = imageAssetId(ref);
     if (assetId !== undefined) out.push({ assetId, kind: "token" });
+  };
+  // Every page of a handout, each image once (docs/design-v1-pdf-handouts.md 3.5).
+  const pages = (list: unknown, ...seen: unknown[]) => {
+    if (!Array.isArray(list)) return;
+    const named = new Set(seen);
+    for (const page of list as { assetId?: unknown }[]) {
+      if (typeof page?.assetId !== "string" || named.has(page.assetId)) continue;
+      named.add(page.assetId);
+      out.push({ assetId: page.assetId, kind: "handout" });
+    }
   };
   const v = value as Record<string, unknown>;
   switch (parsed.kind) {
@@ -56,7 +66,9 @@ export function entityAssetRefs(key: EntityKey, value: unknown): AssetRef[] {
       break;
     }
     case "handout":
+      // `assetId` is the first page, so a handout of pages names it twice: each image is listed once.
       if (typeof v.assetId === "string") out.push({ assetId: v.assetId, kind: "handout" });
+      pages(v.pages, v.assetId);
       break;
     default:
       break;

@@ -2,7 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { checkLimits, type LimitCheck } from "#shared/limits.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
-import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
+import type { HandoutPage, LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { canApply, type PermissionDeps } from "#shared/permissions.ts";
 import { projectEntity, visibleAssetIds } from "#shared/project.ts";
 import { clientOpSchema, isPoseOp, serverOnlyOpSchema, type Op, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
@@ -1451,12 +1451,15 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * `scene.setMap`, `scene.create` and a phase list carry the map's
- * canonical size, which only the asset row knows (design 5). The row's
+ * canonical size, and a handout's pages each page's, which only the asset
+ * row knows (design 5). The row's
  * values replace whatever the client sent, before authorization sees the
  * op. An asset the room cannot use keeps the client's numbers, and
  * authorization refuses it.
  */
 function withAssetSizes(op: Op, facts: Map<string, AssetFact>): Op {
+  // A handout's page sizes lay out the viewer before any image loads (docs/design-v1-pdf-handouts.md 3.1).
+  if (op.t === "handout.show" && "pages" in op.handout) return { ...op, handout: { ...op.handout, pages: pagesWithSizes(op.handout.pages, facts) } };
   // A phase's size decides its grid, so it comes from the asset row too (docs/design-v1-maps-vision.md 3.4).
   if (op.t === "scene.update" && op.patch.phases) {
     const phases = op.patch.phases.map((phase) => {
@@ -1474,6 +1477,14 @@ function withAssetSizes(op: Op, facts: Map<string, AssetFact>): Op {
     if (fact && fact.kind === "map") return { ...op, scene: { ...op.scene, map: { ...op.scene.map, widthPx: fact.width, heightPx: fact.height } } };
   }
   return op;
+}
+
+/** Each page's size from its asset row, where the row is a handout image. */
+function pagesWithSizes(pages: HandoutPage[], facts: Map<string, AssetFact>): HandoutPage[] {
+  return pages.map((page) => {
+    const fact = facts.get(page.assetId.toLowerCase());
+    return fact && fact.kind === "handout" ? { ...page, width: fact.width, height: fact.height } : page;
+  });
 }
 
 /**

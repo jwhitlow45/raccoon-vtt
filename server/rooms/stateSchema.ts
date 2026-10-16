@@ -16,6 +16,7 @@ import {
   areaTriggersSchema,
   moveAnyTokenSchema,
   fogOpSchema,
+  handoutSchemas,
   mapSchemas,
   savedEncounterFieldsForImport,
   srdIdSchema,
@@ -409,12 +410,14 @@ const rollRequest = z.strictObject({
   targets: z.array(rollTarget).min(1).max(LIMITS.rollTargets),
 });
 
+/** A handout of pages has them in order (docs/design-v1-pdf-handouts.md 3.3). One image has none. */
 const handout = z.strictObject({
   id,
   rev,
   assetId: id,
+  pages: handoutSchemas.handoutPages.optional(),
   title: name,
-  to: z.union([z.literal("all"), z.array(id).min(1).max(50)]),
+  to: handoutSchemas.handoutTo,
   shownAt: iso,
 });
 

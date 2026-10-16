@@ -1404,6 +1404,23 @@ describe("log and handouts", () => {
     assert.equal(closed.handouts.h1, undefined);
     assert.equal(refused(closed, { t: "handout.close", handoutId: "h1" }).code, "gone");
   });
+
+  test("a show of pages names its first page as the handout's image, and a re-show as one image drops the pages (docs/design-v1-pdf-handouts.md 3.3)", () => {
+    const pages = [
+      { assetId: "p1", width: 1584, height: 2048 },
+      { assetId: "p2", width: 2048, height: 1584 },
+      { assetId: "p1", width: 1584, height: 2048 },
+    ];
+    const shown = applyOp(fresh(), { t: "handout.show", handout: { id: "h1", pages, title: "Strange letter", to: "all" } }, DM, env(1));
+    assert.ok(shown.ok);
+    assert.deepEqual(shown.state.handouts.h1, { id: "h1", rev: 1, assetId: "p1", pages, title: "Strange letter", to: "all", shownAt: AT });
+    assert.deepEqual(shown.log[0]!.data, { type: "handout", handoutId: "h1" });
+    const image = apply(shown.state, { t: "handout.show", handout: { id: "h1", assetId: "img", title: "Letter", to: "all" } }, DM, 2);
+    assert.deepEqual(image.handouts.h1, { id: "h1", rev: 2, assetId: "img", title: "Letter", to: "all", shownAt: AT });
+    const again = apply(image, { t: "handout.show", handout: { id: "h1", pages: pages.slice(1), title: "Strange letter", to: ["p1"] } }, DM, 3);
+    assert.equal(again.handouts.h1!.assetId, "p2");
+    assert.deepEqual(again.handouts.h1!.pages, pages.slice(1));
+  });
 });
 
 describe("saved encounters", () => {

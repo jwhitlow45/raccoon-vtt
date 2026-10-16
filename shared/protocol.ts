@@ -738,12 +738,23 @@ const stairDirection = z.enum(["a", "n", "e", "s", "w"]);
 /** A fog tile's bits: 512 bytes as base64 (shared/rules/fog.ts encodeTile). */
 const tileBits = z.string().regex(/^[A-Za-z0-9+/]{683}=$/, "not a tile of bits");
 
-const handoutInput = z.strictObject({
-  id,
-  assetId: id,
-  title: name,
-  to: z.union([z.literal("all"), z.array(id).min(1).max(50)]),
-});
+/** A page's size bound: the map cap, so a later change to the handout pipeline needs no schema change. */
+export const MAX_HANDOUT_PAGE_PX = 8_192;
+const handoutPagePx = z.number().int().min(1).max(MAX_HANDOUT_PAGE_PX);
+/** One page of a handout (docs/design-v1-pdf-handouts.md 3.3). The server puts the asset row's size over the client's. */
+const handoutPage = z.strictObject({ assetId: id, width: handoutPagePx, height: handoutPagePx });
+const handoutPages = z.array(handoutPage).min(1).max(LIMITS.handoutPages);
+const handoutTo = z.union([z.literal("all"), z.array(id).min(1).max(50)]);
+
+/**
+ * One image, as every stored show has it, or the pages in order. Both are
+ * strict, so a show with both `assetId` and `pages`, or with neither, is
+ * refused rather than read one way or the other.
+ */
+const handoutInput = z.union([
+  z.strictObject({ id, assetId: id, title: name, to: handoutTo }),
+  z.strictObject({ id, pages: handoutPages, title: name, to: handoutTo }),
+]);
 
 const hpChange = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("damage"), amount: z.number().int().min(0).max(100_000), crit: z.boolean().optional() }),
@@ -1244,6 +1255,7 @@ export type JournalBlockInput = z.infer<typeof journalBlockInput>;
 export type PinInput = z.infer<typeof pinInput>;
 export type RollRequestInput = z.infer<typeof rollRequestInput>;
 export type TokenGroupPatch = z.infer<typeof tokenGroupPatch>;
+export type HandoutInput = z.infer<typeof handoutInput>;
 
 export const actorTargetSchema = actorTarget;
 export const fogOpSchema = fogOp;
@@ -1303,6 +1315,8 @@ export const dmToolSchemas = {
   rollChoiceIndex,
   whichPlayers: moveAnyToken,
 };
+/** A handout's pages and audience, so the stored-state schema checks imports by the same bounds (docs/design-v1-pdf-handouts.md 3.3). */
+export const handoutSchemas = { handoutPage, handoutPages, handoutTo };
 
 // Ephemeral events (design 7.6). Never stored, forwarded per scene.
 

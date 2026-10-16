@@ -9,6 +9,7 @@ import type {
   Encounter,
   EncounterSnapshot,
   Handout,
+  HandoutPage,
   ImageRef,
   InitEntry,
   JournalPage,
@@ -113,7 +114,26 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     return imported?.kind === kind ? imported.id : undefined;
   };
   labels.assign(Object.values(state.labels).filter((l) => scenes.has(l.sceneId)).map((l) => l.id));
-  handouts.assign(Object.values(state.handouts).filter((h) => asset(h.assetId, "handout") !== undefined).map((h) => h.id));
+  /*
+   * A handout's pages in order, each page that came through
+   * as a handout image under its new id and the rest dropped
+   * (docs/design-v1-pdf-handouts.md 3.6). One image is the list of its one page.
+   */
+  const handoutPagesOf = (list: readonly HandoutPage[]): HandoutPage[] =>
+    list.flatMap((page) => {
+      const mapped = asset(page.assetId, "handout");
+      return mapped ? [{ ...page, assetId: mapped }] : [];
+    });
+  // A handout's images under their new ids, `assetId` its first page as the reducer writes it, or null with none left.
+  const handoutImages = (h: Handout): Pick<Handout, "assetId" | "pages"> | null => {
+    if (!h.pages) {
+      const assetId = asset(h.assetId, "handout");
+      return assetId ? { assetId } : null;
+    }
+    const pages = handoutPagesOf(h.pages);
+    return pages[0] ? { assetId: pages[0].assetId, pages } : null;
+  };
+  handouts.assign(Object.values(state.handouts).filter((h) => handoutImages(h) !== null).map((h) => h.id));
   const liveEntries = (state.encounter?.entries ?? []).filter((e) => (e.tokenId === undefined || tokens.has(e.tokenId)) && (e.characterId === undefined || characters.has(e.characterId)));
   entries.assign(liveEntries.map((e) => e.id));
 
@@ -344,7 +364,9 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     if (!handouts.has(h.id)) continue;
     const to = h.to === "all" ? "all" : memberList(h.to);
     if (to !== "all" && to.length === 0) continue;
-    const next: Handout = { ...h, id: handouts.of(h.id), assetId: asset(h.assetId, "handout")!, to };
+    const images = handoutImages(h);
+    if (!images) continue;
+    const next: Handout = { ...h, ...images, id: handouts.of(h.id), to };
     out.handouts[next.id] = next;
   }
   // Tokens made from a custom monster are copies, linked back only by their actor's `monsterId`, remapped above.

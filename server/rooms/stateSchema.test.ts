@@ -400,3 +400,28 @@ describe("roomStateSchema, wave 5 (docs/design-v1-dm-tools.md 2.5)", () => {
     assert.equal(parseRoomState(badIcon).ok, false);
   });
 });
+
+describe("roomStateSchema, pdf handouts (docs/design-v1-pdf-handouts.md 3.3)", () => {
+  const page = (assetId: string) => ({ assetId, width: 1584, height: 2048 });
+  const withHandout = (handout: Record<string, unknown>) => {
+    const state = JSON.parse(JSON.stringify(room()));
+    state.handouts.h1 = { id: "h1", rev: 0, assetId: "a1", title: "Strange letter", to: "all", shownAt: "2026-10-16T00:00:00.000Z", ...handout };
+    return parseRoomState(state);
+  };
+
+  test("a stored handout without pages loads, as every handout from before them, and one with pages loads", () => {
+    const one = withHandout({});
+    assert.ok(one.ok, one.ok ? "" : one.message);
+    const many = withHandout({ pages: [page("a1"), page("a2"), page("a1")] });
+    assert.ok(many.ok, many.ok ? "" : many.message);
+  });
+
+  test("pages keep the op's bounds: 1 to 100, each sized 1 to 8,192 px and nothing more", () => {
+    assert.equal(withHandout({ pages: Array.from({ length: 100 }, (_, i) => page(`a${i}`)) }).ok, true);
+    assert.equal(withHandout({ pages: Array.from({ length: 101 }, (_, i) => page(`a${i}`)) }).ok, false);
+    assert.equal(withHandout({ pages: [] }).ok, false);
+    assert.equal(withHandout({ pages: [{ ...page("a1"), width: 0 }] }).ok, false);
+    assert.equal(withHandout({ pages: [{ ...page("a1"), height: 8193 }] }).ok, false);
+    assert.equal(withHandout({ pages: [{ ...page("a1"), kind: "handout" }] }).ok, false);
+  });
+});

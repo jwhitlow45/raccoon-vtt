@@ -455,3 +455,33 @@ describe("companions in an import (docs/design-v1-combat-flow.md 4.7)", () => {
   });
 });
 
+
+describe("remapState, pdf handouts (docs/design-v1-pdf-handouts.md 3.6)", () => {
+  const page = (assetId: string, width = 1584, height = 2048) => ({ assetId, width, height });
+
+  test("a handout's pages follow their new ids in order, a page that did not come through or came as another kind is dropped, and its image is its first page left", () => {
+    const state = room();
+    state.handouts.h1 = { id: "h1", rev: 0, assetId: "p1", pages: [page("p1"), page("p2", 2048, 1584), page("p3"), page("p2", 2048, 1584), page("p4")], title: "Strange letter", to: "all", shownAt: AT };
+    state.log = [{ id: "1:0", at: AT, kind: "event", data: { type: "handout", handoutId: "h1" } }];
+    const assets = kinds({ p2: ["n2", "handout"], p3: ["n3", "map"], p4: ["n4", "handout"] });
+    const out = remapState(state, { assets });
+    const [h] = Object.values(out.handouts);
+    assert.ok(h);
+    assert.notEqual(h.id, "h1");
+    assert.equal(h.assetId, "n2");
+    assert.deepEqual(h.pages, [page("n2", 2048, 1584), page("n2", 2048, 1584), page("n4")]);
+    assert.deepEqual(out.log.map((e) => e.data), [{ type: "handout", handoutId: h.id }]);
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+
+  test("a handout left with no page is dropped with its log line, and one image keeps today's shape", () => {
+    const state = room();
+    state.handouts.h1 = { id: "h1", rev: 0, assetId: "p1", pages: [page("p1"), page("p2")], title: "Strange letter", to: "all", shownAt: AT };
+    state.handouts.h2 = { id: "h2", rev: 0, assetId: "img", title: "Letter", to: "all", shownAt: AT };
+    state.log = [{ id: "1:0", at: AT, kind: "event", data: { type: "handout", handoutId: "h1" } }];
+    const out = remapState(state, { assets: kinds({ p1: ["n1", "token"], img: ["n9", "handout"] }) });
+    assert.deepEqual(Object.values(out.handouts).map(({ id: _id, ...h }) => h), [{ rev: 0, assetId: "n9", title: "Letter", to: "all", shownAt: AT }]);
+    assert.deepEqual(out.log, []);
+  });
+});
