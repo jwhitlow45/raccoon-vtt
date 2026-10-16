@@ -430,7 +430,8 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     for (let i = 0; i < (await controls.count()); i++) {
       const c = controls.nth(i);
       await c.scrollIntoViewIfNeeded();
-      if (!(await wholeInReach(c))) assert.fail(`${label}: ${tool}'s control "${(await c.getAttribute("aria-label")) ?? (await c.textContent())?.trim()}" takes no tap once scrolled to: ${await whatTakes(c)}`);
+      // Read until the rail settles, as the other reach checks here do: a read the moment the scroll lands can catch the rail mid-layout, with every point on the control a moment later.
+      if (!(await waitFor(`${tool}'s control in reach`, () => wholeInReach(c), 2000).catch(() => false))) assert.fail(`${label}: ${tool}'s control "${(await c.getAttribute("aria-label")) ?? (await c.textContent())?.trim()}" takes no tap once scrolled to: ${await whatTakes(c)}`);
     }
   }
 
