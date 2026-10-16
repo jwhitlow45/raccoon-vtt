@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { Token } from "#shared/model.ts";
 import { MAX_ENTRIES_PER_OP } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
@@ -12,6 +12,7 @@ import { HpLog } from "../features/encounter/HpLog.tsx";
 import { setFollowTurn, useFollowTurn } from "../features/encounter/followTurn.ts";
 import { useRowFacts, useSend, useSortedEntries, useTurnTimer, useYou } from "../features/encounter/hooks.ts";
 import {
+  COMPACT_HEADER_PX,
   addCandidates,
   dropIndex,
   entryBatches,
@@ -19,12 +20,14 @@ import {
   hasStarted,
   ownCandidates,
   reorderTie,
+  roundHeaderForm,
   scoreFills,
   tieRun,
   turnOp,
   turnStatus,
   whoseTurn,
   type AddMode,
+  type RoundHeaderForm,
 } from "../features/encounter/logic.ts";
 import { panAnchor, requestPan } from "../features/encounter/pan.ts";
 import { EndTurnPill, TimerClock } from "../features/encounter/parts.tsx";
@@ -71,24 +74,18 @@ export default function TrackerPanel(props: PanelProps) {
     );
   }
 
+  // Ranked by use (docs/design-v1-combat-flow.md 3.2): the order under its sticky header, then what sets the order up, then the rest.
   return (
     <Stack>
-      <Section divider={false} style={COLUMN}>
-        <TurnControls />
-        {dm ? <AutoInitiativeResult /> : null}
-        {dm && editingValues ? <ValueEntryFromView onDone={() => setEditingValues(false)} /> : <EntryList close={props.close} />}
-      </Section>
+      <RoundSection>{dm && editingValues ? <ValueEntryFromView onDone={() => setEditingValues(false)} /> : <EntryList close={props.close} />}</RoundSection>
+      {dm ? <DmSetup selectedTokenId={props.selectedTokenId} editingValues={editingValues} onEditValues={() => setEditingValues(true)} /> : <JoinFight />}
       {editingValues ? null : <SelectedCreatures />}
       {editingValues ? null : (
         <Section label="HP changes" style={COLUMN}>
           <HpLog />
         </Section>
       )}
-      {dm ? (
-        <DmTools selectedTokenId={props.selectedTokenId} editingValues={editingValues} onEditValues={() => setEditingValues(true)} />
-      ) : (
-        <JoinFight />
-      )}
+      {dm ? <DmSettings /> : null}
       <SoundSwitch />
     </Stack>
   );
@@ -108,7 +105,86 @@ function Wrap(props: { children: ReactNode }) {
 
 // ---------------------------------------------------------------- turns
 
-function TurnControls() {
+/** A full header's height before it is first measured: the sheet's 56 px. */
+const FULL_HEADER_GUESS = 56;
+
+/**
+ * The round section: the turn controls as its header, then the order
+ * (docs/design-v1-combat-flow.md 3.1). The header sticks to the top of the
+ * pane while the order scrolls under it. A sticky box never leaves its
+ * parent, so once the order's end scrolls past, the header leaves with it,
+ * with no script. The section is a plain block, since a sticky grid item
+ * could not move outside its own row.
+ *
+ * It measures the pane's scroller (`data-pane-body`) and the header, and
+ * picks the header's form so a whole row always shows under it: full while
+ * the scroller holds three full headers, one compact row while it holds
+ * three of those, and otherwise full and scrolling with the order. The
+ * full header's height is kept from when it last showed full, since the
+ * compact one cannot measure it.
+ */
+function RoundSection(props: { children: ReactNode }) {
+  const sectionRef = useRef<HTMLElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [form, setForm] = useState<RoundHeaderForm>("full");
+  const [headerPx, setHeaderPx] = useState(0);
+  const formRef = useRef(form);
+  formRef.current = form;
+  const fullPx = useRef(0);
+
+  useLayoutEffect(() => {
+    const header = headerRef.current;
+    const scroller = sectionRef.current?.closest<HTMLElement>("[data-pane-body]");
+    if (!header || !scroller) {
+      setForm("static");
+      return;
+    }
+    const measure = () => {
+      if (formRef.current !== "compact" && header.offsetHeight > 0) fullPx.current = header.offsetHeight;
+      const next = roundHeaderForm(scroller.clientHeight, fullPx.current || FULL_HEADER_GUESS);
+      formRef.current = next;
+      setForm(next);
+      setHeaderPx(header.offsetHeight);
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    observer.observe(header);
+    measure();
+    return () => observer.disconnect();
+  }, []);
+
+  const sticks = form !== "static";
+  return (
+    <section
+      ref={sectionRef}
+      data-round-section=""
+      style={{ display: "block", paddingBottom: theme.space(4), ["--round-header-h" as string]: `${sticks ? headerPx : 0}px` }}
+    >
+      <div
+        ref={headerRef}
+        data-round-header=""
+        style={{
+          // The pane's padding taken back by the margin and given back as padding, so at rest the header sits where it
+          // always did, and stuck its opaque fill meets the scroller's top and sides with no row showing past it.
+          margin: `calc(-1 * ${PAD_TOP}) calc(-1 * ${PAD_X}) ${theme.space(2)}px`,
+          padding: `${PAD_TOP} ${PAD_X} ${form === "compact" ? 0 : theme.space(2) - theme.line.border}px`,
+          background: theme.color.surface,
+          borderBottom: `${theme.line.border}px solid ${theme.color.border}`,
+          ...(sticks ? { position: "sticky", top: `calc(-1 * ${PAD_TOP})`, zIndex: theme.z.stickyHeader } : null),
+        }}
+      >
+        <TurnControls compact={form === "compact"} />
+      </div>
+      <div style={{ display: "grid", ...COLUMN, gap: theme.space(2) }}>{props.children}</div>
+    </section>
+  );
+}
+
+/** The scrolling pane's padding, which its body publishes (components/Sheet.tsx paneBodyPadding). 0 outside a pane. */
+const PAD_TOP = "var(--pane-pad-top, 0px)";
+const PAD_X = "var(--pane-pad-x, 0px)";
+
+function TurnControls(props: { compact: boolean }) {
   const you = useYou();
   const actions = useRoomActions();
   const store = useRoomStore();
@@ -123,22 +199,34 @@ function TurnControls() {
   const active = entries.find((e) => e.id === activeEntryId);
   const status = turnStatus({ entries, activeEntryId, mine: facts.mine });
 
-  const heading = (
+  const line = whoseTurn({ dm: you.role === "dm", started, activeName: active ? entryName(facts.view, active) : null, yours: status === "yours" }).line;
+  const heading = props.compact ? (
+    // One line that ends in an ellipsis on a short panel. The whole whose-turn text stays in it, so a screen reader reads all of it.
+    <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <span style={{ fontWeight: theme.weight.bold }}>Round {round}</span>
+      {timer && active ? (
+        <>
+          {" "}
+          <TimerClock state={timer} size={theme.font.body14} />
+        </>
+      ) : null}{" "}
+      <span style={{ color: theme.color.textMuted }}>{line}</span>
+    </div>
+  ) : (
     <div style={{ flex: 1, minWidth: 0 }}>
       {/* Beside the DM's Previous and Next, "Time's up +1:05" leaves no room, so the clock goes under the round rather than splitting "Round" from its number. */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: theme.space(2) }}>
         <span style={{ fontSize: theme.font.title, fontWeight: theme.weight.bold, whiteSpace: "nowrap" }}>Round {round}</span>
         {timer && active ? <TimerClock state={timer} size={theme.font.body14} /> : null}
       </div>
-      <div style={{ color: theme.color.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {whoseTurn({ dm: you.role === "dm", started, activeName: active ? entryName(facts.view, active) : null, yours: status === "yours" }).line}
-      </div>
+      <div style={{ color: theme.color.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line}</div>
     </div>
   );
+  const row: CSSProperties = { display: "flex", alignItems: "center", gap: theme.space(2), minHeight: props.compact ? COMPACT_HEADER_PX : undefined };
 
   if (you.role === "dm") {
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+      <div style={row}>
         {heading}
         <Button size="sm" disabled={!canGoBack} onClick={() => actions.dispatch(turnOp("encounter.prev", store.getState()))} aria-label="Previous turn">
           Previous
@@ -151,7 +239,7 @@ function TurnControls() {
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+    <div style={row}>
       {heading}
       {status === "yours" || endTurn.waiting ? <EndTurnPill waiting={endTurn.waiting} onClick={() => endTurn.send(turnOp("encounter.next", store.getState()))} /> : null}
     </div>
@@ -419,21 +507,19 @@ function AddButtons(props: { candidates: Record<AddMode, Token[]>; onAdd(tokens:
   );
 }
 
-function DmTools(props: { selectedTokenId: string | null; editingValues: boolean; onEditValues(): void }) {
+/**
+ * What the DM uses to set the order up, right after it: Auto initiative
+ * with the card of what it rolled under its button, where the DM just
+ * pressed, then the other ways to set values, then Add to the fight
+ * (docs/design-v1-combat-flow.md 3.2).
+ */
+function DmSetup(props: { selectedTokenId: string | null; editingValues: boolean; onEditValues(): void }) {
   const actions = useRoomActions();
   const candidates = useCandidates(props.selectedTokenId);
   const entries = useSortedEntries();
   const facts = useRowFacts();
   const scores = useRoomView((s) => s.view?.meta.settings.monsterInitScore ?? false);
-  const timerSec = useRoomView((s) => s.view?.meta.settings.turnTimerSec ?? 0);
   const fills = useMemo(() => (scores ? scoreFills(facts.view, entries) : []), [scores, facts.view, entries]);
-  const [confirmEnd, setConfirmEnd] = useState(false);
-
-  useEffect(() => {
-    if (!confirmEnd) return;
-    const t = setTimeout(() => setConfirmEnd(false), 4000);
-    return () => clearTimeout(t);
-  }, [confirmEnd]);
 
   const add = (tokens: Token[]) => {
     for (const batch of entryBatches(tokens, actions.newId)) actions.dispatch({ t: "encounter.add", entries: batch });
@@ -441,13 +527,9 @@ function DmTools(props: { selectedTokenId: string | null; editingValues: boolean
 
   return (
     <>
-      <Section label="Add to the fight" style={COLUMN}>
-        <Wrap>
-          <AddButtons candidates={candidates} onAdd={add} />
-        </Wrap>
-      </Section>
       <Section label="Auto initiative" style={COLUMN}>
         <AutoInitiativeControls />
+        <AutoInitiativeResult />
       </Section>
       <Section label="Initiative" style={COLUMN}>
         <Wrap>
@@ -474,6 +556,29 @@ function DmTools(props: { selectedTokenId: string | null; editingValues: boolean
           onChange={(on) => actions.dispatch({ t: "room.update", settings: { monsterInitScore: on } })}
         />
       </Section>
+      <Section label="Add to the fight" style={COLUMN}>
+        <Wrap>
+          <AddButtons candidates={candidates} onAdd={add} />
+        </Wrap>
+      </Section>
+    </>
+  );
+}
+
+/** The DM's rarely used parts, low in the panel: the turn timer, a setting, and ending the fight, which is destructive and armed. */
+function DmSettings() {
+  const actions = useRoomActions();
+  const timerSec = useRoomView((s) => s.view?.meta.settings.turnTimerSec ?? 0);
+  const [confirmEnd, setConfirmEnd] = useState(false);
+
+  useEffect(() => {
+    if (!confirmEnd) return;
+    const t = setTimeout(() => setConfirmEnd(false), 4000);
+    return () => clearTimeout(t);
+  }, [confirmEnd]);
+
+  return (
+    <>
       <Section label="Turn timer" style={COLUMN}>
         <Help>Counts each turn down for everyone, and nudges whoever acts when time is up. It never ends a turn.</Help>
         <Segmented

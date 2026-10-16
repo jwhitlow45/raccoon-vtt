@@ -16,7 +16,7 @@ import { NOTICE_TONES } from "../components/tones.ts";
 import { QuietLoadNotice } from "./QuietLoadNotice.tsx";
 import { Loading } from "../components/Loading.tsx";
 import { ScrollStrip } from "../components/ScrollStrip.tsx";
-import { Sheet } from "../components/Sheet.tsx";
+import { Sheet, paneBodyPadding } from "../components/Sheet.tsx";
 import { useRecordOverflow, useTopBars, useTurnPlacement, type TurnPlacement } from "../features/encounter/band.ts";
 import { FightWatch, InitiativeStrip, useYourTurnNotice } from "../features/encounter/InitiativeStrip.tsx";
 import { panelById, panelsFor, subpageBack, useSubpageFocus, type PanelDef, type PanelHeader } from "../features/panels.ts";
@@ -1388,7 +1388,14 @@ function SidePanel(props: {
           <SheetHeader title={props.subpage.title} back={subpageBack(props.subpage)} titleRef={titleRef} />
         </div>
       ) : null}
-      <div ref={bodyRef} id={panelId} role="tabpanel" aria-labelledby={tabId(props.tab)} style={{ flex: 1, overflowY: "auto", padding: theme.space(4) }}>
+      <div
+        ref={bodyRef}
+        id={panelId}
+        role="tabpanel"
+        aria-labelledby={tabId(props.tab)}
+        data-pane-body=""
+        style={{ ...paneBodyPadding(theme.space(4), theme.space(4)), flex: 1, overflowY: "auto", padding: theme.space(4) }}
+      >
         {props.children}
       </div>
     </aside>

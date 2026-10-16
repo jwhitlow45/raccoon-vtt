@@ -1,4 +1,4 @@
-import { useRef, type ReactNode, type Ref, type RefObject } from "react";
+import { useRef, type CSSProperties, type ReactNode, type Ref, type RefObject } from "react";
 import { chromeZoom, smallUi } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { subpageBack, useSubpageFocus, type PanelHeader } from "../features/panels.ts";
@@ -105,9 +105,26 @@ export function Sheet(props: {
         titleRef={titleRef}
       />
       {/* The 4 px on top hold the focus ring of a first full-width control (2 px out, 2 px wide), which the scrolling body would clip. */}
-      <div ref={bodyRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: `${theme.space(1)}px ${theme.space(4)}px ${theme.space(4)}px`, overscrollBehavior: "contain" }}>
+      {/* data-pane-body and the padding variables let a sticky header inside meet the scroller's edges (docs/design-v1-combat-flow.md 3.1). */}
+      <div
+        ref={bodyRef}
+        data-pane-body=""
+        style={{ ...paneBodyPadding(theme.space(1), theme.space(4)), flex: 1, minHeight: 0, overflowY: "auto", padding: `${theme.space(1)}px ${theme.space(4)}px ${theme.space(4)}px`, overscrollBehavior: "contain" }}
+      >
         {props.children}
       </div>
     </section>
   );
+}
+
+/**
+ * A scrolling pane body's top and side padding as CSS variables, for a
+ * sticky header inside it. A sticky box keeps inside its scroller's
+ * padding, so the header takes the padding back with a negative margin and
+ * gives it back as its own padding (docs/design-v1-combat-flow.md 3.1).
+ * Mark the body `data-pane-body` too, which the header looks for to
+ * measure the room it has.
+ */
+export function paneBodyPadding(top: number, x: number): CSSProperties {
+  return { ["--pane-pad-top" as string]: `${top}px`, ["--pane-pad-x" as string]: `${x}px` };
 }

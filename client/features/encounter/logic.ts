@@ -293,6 +293,27 @@ export function whoseTurn(input: { dm: boolean; started: boolean; activeName: st
   return { name: "Another creature", line: "Another creature's turn" };
 }
 
+/** How the tracker's round header shows (docs/design-v1-combat-flow.md 3.1): full and sticky, one compact sticky row, or full and scrolling with the list. */
+export type RoundHeaderForm = "full" | "compact" | "static";
+
+/** The compact header's one row: the buttons' touch height. */
+export const COMPACT_HEADER_PX = 44;
+
+/** A sticky header leaves at least this share of its scroller to the rows under it, so one whole row always shows. */
+const ROOM_PER_HEADER = 3;
+
+/**
+ * The header's form for a scroller of `scrollerPx`, its whole height with
+ * its padding, and a full header of `fullHeaderPx`: full while the scroller
+ * holds three full headers, compact while it holds three compact ones, and
+ * otherwise not sticky, so a short panel still shows its rows.
+ */
+export function roundHeaderForm(scrollerPx: number, fullHeaderPx: number): RoundHeaderForm {
+  if (scrollerPx >= ROOM_PER_HEADER * fullHeaderPx) return "full";
+  if (scrollerPx >= ROOM_PER_HEADER * COMPACT_HEADER_PX) return "compact";
+  return "static";
+}
+
 type TurnPress = Extract<ClientOp, { t: "encounter.next" | "encounter.prev" }>;
 
 /**

@@ -139,6 +139,8 @@ export const theme = {
    * component (1 or 2) and the table display's own order stay local.
    */
   z: {
+    /** The tracker's round header while it sticks (docs/design-v1-combat-flow.md 3.1): above a row being dragged (2), so a row dragged upward passes under it. */
+    stickyHeader: 3,
     pane: 5,
     sheet: 10,
     options: 14,

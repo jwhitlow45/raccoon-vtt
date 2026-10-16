@@ -22,6 +22,7 @@ import {
   ownsEntry,
   parseInitiative,
   reorderTie,
+  roundHeaderForm,
   turnOp,
   rollReminder,
   scoreFills,
@@ -520,5 +521,28 @@ describe("a hidden creature revealed on its turn", () => {
     assert.equal(line(), "Another creature's turn");
     state = apply(state, { t: "token.move", tokenId: "lurker", x: 3, y: 3 }, DM, 4);
     assert.equal(line(), "Lurker's turn");
+  });
+});
+
+describe("the round header's form (docs/design-v1-combat-flow.md 3.1)", () => {
+  test("full and sticky from three full headers, compact from three 44 px rows, and scrolling with the list below that", () => {
+    const forms = [111, 131, 132, 147, 167, 168, 169, 223, 400].map((px) => [px, roundHeaderForm(px, 56)]);
+    assert.deepEqual(forms, [
+      [111, "static"],
+      [131, "static"],
+      [132, "compact"],
+      [147, "compact"],
+      [167, "compact"],
+      [168, "full"],
+      [169, "full"],
+      [223, "full"],
+      [400, "full"],
+    ]);
+  });
+
+  test("the side panel's taller header asks for more room before it sticks in full", () => {
+    assert.equal(roundHeaderForm(203, 68), "compact");
+    assert.equal(roundHeaderForm(204, 68), "full");
+    assert.equal(roundHeaderForm(0, 56), "static", "a hidden pane measures 0");
   });
 });

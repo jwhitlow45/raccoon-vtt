@@ -113,14 +113,16 @@ const MODE_LABEL: Record<RollMode, string> = { creature: "by creature", each: "o
 
 /**
  * What the last roll rolled, for the DM only: each shared roll's dice,
- * modifier and total, and who took it. It stays until dismissed, and goes
- * when it no longer describes the fight: the fight ended, another began, or
- * an undo took the roll back (useShownRoll).
+ * modifier and total, and who took it. It sits under the Auto initiative
+ * button, where the DM just pressed, so the order starts right under the
+ * round header (docs/design-v1-combat-flow.md 3.2). It stays until
+ * dismissed, and goes when it no longer describes the fight: the fight
+ * ended, another began, or an undo took the roll back (useShownRoll).
  */
 export function AutoInitiativeResult() {
   const { store, roll: last } = useShownRoll();
   if (!last) return null;
-  // Highest first, as the tracker below lists them. A joined line has no dice of its own.
+  // Highest first, as the order above lists them. A joined line has no dice of its own.
   const lines = [
     ...last.groups.map((group) => ({ rows: group.rows, total: group.total, group })),
     ...last.joined.map((joined) => ({ rows: joined.rows, total: joined.total, group: null })),
