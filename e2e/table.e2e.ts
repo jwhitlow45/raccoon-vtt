@@ -5,7 +5,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, dragWorld, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragWorld, pickOption, pickTool, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { imageAssetId } from "../shared/imageRef.ts";
 
 /**
@@ -231,8 +231,8 @@ describe("raccoon-vtt table basics", { timeout: 120_000 }, () => {
   test("4. on a phone, Back closes a token's action bar instead of leaving the room (LP3-TABLE-4)", async () => {
     // Escape closes a sheet an earlier step may have left open, so the map takes the taps.
     await dm.keyboard.press("Escape");
-    await dm.getByRole("button", { name: "Add token" }).tap();
-    await dm.locator("select").filter({ has: dm.locator('option[value="object"]') }).selectOption("object");
+    await pickTool(dm, "Add token");
+    await pickOption(dm, "Add token", "Blank token kind", "Blank object");
     const scene = dmSocket.state!.scenes[run.mapSceneId]!;
     await tapCell(dm, scene.bounds, { x: 3, y: 3 });
     const token = await waitFor("the object", () => Object.values(dmSocket.state?.tokens ?? {}).find((t) => t?.kind === "object"));

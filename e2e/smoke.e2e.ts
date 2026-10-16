@@ -7,7 +7,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 import sharp from "sharp";
 import type { RoomState, Scene, Token } from "#shared/model.ts";
 import { generatePassphrase } from "#shared/passphrase.ts";
-import { ConsoleWatch, dragCells, dragWorld, measureSnapshot, openSideTab, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragCells, dragWorld, measureSnapshot, openSideTab, pickOption, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * The Stage 3 smoke run (design section 18): the real server serving the
@@ -288,7 +288,7 @@ describe("raccoon-vtt smoke run", { timeout: 300_000 }, () => {
   test("6. the player aims a cone from their token and sees what it catches", async () => {
     await player.getByRole("button", { name: "Area", exact: true }).click();
     const bar = player.getByRole("toolbar", { name: "Area options" });
-    await bar.getByLabel("Shape").selectOption("cone");
+    await pickOption(player, "Area", "Shape", "Cone");
     await dragCells(player, run.bounds, { x: 3, y: 5 }, { x: 6, y: 5 });
     await bar.getByText(/In area \(1\): Goblin Warrior( \d+)?$/).waitFor();
     await shots.take(player, "player-cone");

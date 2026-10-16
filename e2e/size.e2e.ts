@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, dragWorld, openSideTab, OpSocket, pagePoint, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragWorld, openSideTab, OpSocket, pagePoint, pickOption, pickTool, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { A5, LETTER, LETTER_WIDE, pdfOf } from "./pdfFixture.ts";
 
 /**
@@ -249,6 +249,31 @@ async function checkDialog(dialog: Locator, label: string, main: { name: string 
   assertInside(await button.boundingBox(), `${label}: ${main.name}`, owner);
 }
 
+/** A popover above the tool's row (docs/design-v1-tool-options.md 7.1): on the screen, no side scroll, and every control a 44 px target. */
+async function checkPopover(popover: Locator, label: string): Promise<void> {
+  const owner = popover.page();
+  await popover.waitFor();
+  await owner.waitForTimeout(150);
+  assertInside(await popover.boundingBox(), `${label}: the popover`, owner);
+  const sideways = await popover.evaluate((el) => {
+    const box = el as unknown as { scrollWidth: number; clientWidth: number };
+    return box.scrollWidth > box.clientWidth + 1;
+  });
+  assert.equal(sideways, false, `${label}: the popover scrolls sideways`);
+  await checkTargets(popover, label);
+}
+
+/** Done in the row, or behind ⋯ where the row has no room for it. */
+async function pressDone(bar: Locator, owner: Page): Promise<void> {
+  const done = bar.getByRole("button", { name: "Done", exact: true });
+  if ((await done.count()) > 0 && (await done.first().isVisible())) {
+    await done.first().click();
+    return;
+  }
+  await bar.getByRole("button", { name: "More options" }).click();
+  await owner.getByRole("dialog", { name: "More Map builder options" }).getByRole("button", { name: "Done", exact: true }).click();
+}
+
 async function closeDialog(dialog: Locator): Promise<void> {
   await dialog.page().keyboard.press("Escape");
   await dialog.waitFor({ state: "detached" });
@@ -489,9 +514,9 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await shoot("shortcuts");
         await closeDialog(keys);
 
-        // The stamp picker, then on a phone the sheets of the selected stamp's bar, which only a narrow bar has.
-        await page.getByRole("button", { name: "Map builder" }).click();
-        await page.getByLabel("Builder mode").selectOption("stamp");
+        // The stamp picker, then the selected stamp's tint and ⋯, pop-ups above its row on every screen.
+        await pickTool(page, "Map builder");
+        await pickOption(page, "Map builder", "Builder mode", "Stamp");
         await page.getByRole("button", { name: /Choose a stamp/ }).click();
         const stamps = page.getByRole("dialog", { name: "Stamps" });
         await checkDialog(stamps, `${label}, Stamps`, null);
@@ -499,16 +524,18 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await closeDialog(stamps);
         await tapCell(page, run.bounds, run.stamp);
         const bar = page.getByRole("toolbar", { name: "Map builder options" });
-        if (phone) {
-          for (const [button, title] of [[/^Tint:/, "Tint"], ["More", "More"]] as const) {
-            await bar.getByRole("button", { name: button, exact: true }).click();
-            const sheet = page.getByRole("dialog", { name: title, exact: true });
-            await checkDialog(sheet, `${label}, the stamp's ${title}`, null);
-            if (title === "Tint") await shoot("stamp-tint");
-            await closeDialog(sheet);
-          }
+        for (const [button, title] of [[/^Tint:/, "Tint"], ["More options", "More Map builder options"]] as const) {
+          const anchor = bar.getByRole("button", { name: button, exact: true });
+          // Tint waits behind ⋯ where the row has no room for it, and shows inline there.
+          if ((await anchor.count()) === 0 || !(await anchor.first().isVisible())) continue;
+          await anchor.first().click();
+          const popover = page.getByRole("dialog", { name: title, exact: true });
+          await checkPopover(popover, `${label}, the stamp's ${title}`);
+          if (title === "Tint") await shoot("stamp-tint");
+          await page.keyboard.press("Escape");
+          await popover.waitFor({ state: "detached" });
         }
-        await bar.getByRole("button", { name: "Done", exact: true }).click();
+        await pressDone(bar, page);
         await page.getByRole("button", { name: "Select", exact: true }).click();
 
         // A handout, on Pat's device at the same size and interface size.

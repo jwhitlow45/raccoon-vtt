@@ -778,14 +778,16 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
 
     await clickCell(dm, EMPTY);
     await barFrame(dm).waitFor({ state: "detached" });
-    await selectOptions(dm).getByText("2 selected.", { exact: true }).waitFor();
+    await selectOptions(dm).getByText("2 selected.", { exact: true }).filter({ visible: true }).waitFor();
     const actions = selectOptions(dm).getByRole("button", { name: "Actions", exact: true });
     await actions.waitFor();
-    // At 1280 x 800 with Actions shown, the whole hint shows and the bar stays one row.
-    // The row's own text, first, before the hidden description that repeats it.
-    await selectOptions(dm).getByText("Tap tokens to add or remove them, or drag a box on the map.").first().waitFor();
+    // At 1280 x 800 with Actions shown, the whole sentence shows, uncut, and the row stays one row (docs/design-v1-tool-options.md 9.1).
+    // The row's own words, not the hidden description that repeats them or the copy the row measures.
+    const words = selectOptions(dm).getByText("Tap tokens to add or remove them, or drag a box on the map.").filter({ visible: true }).first();
+    await words.waitFor();
+    assert.equal(await words.evaluate((el) => (el as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth <= (el as unknown as { clientWidth: number }).clientWidth + 1), true, "the sentence is cut");
     const row = await rectOf(selectOptions(dm));
-    assert.ok(row.bottom - row.top <= 60, `the Multi-select bar wrapped: ${row.bottom - row.top} px`);
+    assert.ok(row.bottom - row.top <= 60, `the Multi-select row wrapped: ${row.bottom - row.top} px`);
     await shots.take(dm, "bardock-several-tapped-off");
 
     await dm.keyboard.press("Escape");
@@ -807,7 +809,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await clickCell(dm, EMPTY);
     await barFrame(dm).waitFor({ state: "detached" });
     await clickCell(dm, run.goblins[0]!);
-    await selectOptions(dm).getByText("1 selected.", { exact: true }).waitFor();
+    await selectOptions(dm).getByText("1 selected.", { exact: true }).filter({ visible: true }).waitFor();
     await dm.waitForTimeout(150);
     assert.equal(await barFrame(dm).count(), 0, "taking a token out showed the bar");
     await clickCell(dm, run.goblins[1]!);
@@ -831,7 +833,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await dm.getByRole("tab", { name: "Token", selected: true }).waitFor();
     await dm.keyboard.press("Escape");
     await dm.waitForTimeout(150);
-    await selectOptions(dm).getByText("1 selected.", { exact: true }).waitFor();
+    await selectOptions(dm).getByText("1 selected.", { exact: true }).filter({ visible: true }).waitFor();
     assert.ok(await dm.getByRole("tab", { name: "Token", selected: true }).isVisible(), "Escape left the token panel");
     await selectOptions(dm).getByRole("button", { name: "Done", exact: true }).click();
     await selectOptions(dm).waitFor({ state: "detached" });

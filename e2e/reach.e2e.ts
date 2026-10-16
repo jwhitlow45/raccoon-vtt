@@ -18,8 +18,8 @@ import { OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInR
  * - once tapped, the card's own controls (what to roll, Later, the total
  *   and Send; a check's Passed and Failed);
  * - End turn when it shows;
- * - the tool's buttons (the Ruler's, scrolled to the foot of its capped
- *   list of kept rulers, or Multi-select's Actions and Done);
+ * - the tool's controls in its one row and ⋯ (the Ruler's, with its kept
+ *   rulers behind their chip, or Multi-select's Actions and Done);
  * - the token bar's Close when the bar shows, and Move window beside it
  *   wherever the bar docks as the token window;
  * - beside a phone's sideways sheet, the token window's header at each
@@ -212,7 +212,7 @@ async function closeOverlay(page: Page): Promise<void> {
   }
 }
 
-/** The tool's buttons whole in reach: the Ruler's with its capped list scrolled to its foot, or Multi-select's. */
+/** The tool's controls whole in reach as drawn, in its one row, and ⋯ (docs/design-v1-tool-options.md 14): nothing scrolls there any more. */
 async function expectTool(page: Page, tool: Tool, label: string): Promise<void> {
   if (tool === "none") return;
   const options = page.getByRole("toolbar", { name: tool === "Ruler" ? "Ruler options" : "Select options" });
@@ -220,22 +220,10 @@ async function expectTool(page: Page, tool: Tool, label: string): Promise<void> 
     await miss(`${label}: the ${tool} options are gone`);
     return;
   }
-  if (tool === "Ruler") {
-    await options.evaluate((el) => {
-      const box = el as unknown as { scrollTop: number; scrollHeight: number };
-      box.scrollTop = box.scrollHeight;
-    });
-    await page.waitForTimeout(150);
-  }
-  const bar = await options.boundingBox();
-  if (!bar) return;
-  const buttons = options.getByRole("button");
-  for (let i = 0; i < (await buttons.count()); i++) {
-    const b = buttons.nth(i);
-    const r = await b.boundingBox();
-    // Only what the bar shows whole: it clips the rest itself, and they scroll into reach.
-    if (!r || r.y < bar.y + 1 || r.y + r.height > bar.y + bar.height - 1) continue;
-    await expectReach(label, `the ${tool} button "${(await b.getAttribute("aria-label")) ?? (await b.textContent())?.trim()}"`, b);
+  const controls = options.locator("[data-options-row] > [data-rvtt-slot] button, [data-rvtt-more] button");
+  for (let i = 0; i < (await controls.count()); i++) {
+    const b = controls.nth(i);
+    await expectReach(label, `the ${tool} control "${(await b.getAttribute("aria-label")) ?? (await b.textContent())?.trim()}"`, b);
   }
 }
 

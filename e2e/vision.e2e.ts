@@ -11,7 +11,7 @@ import { decodeTile, getBit, isCellFullyFogged, TILE_CELLS } from "#shared/rules
 import { groundAt } from "#shared/rules/heights.ts";
 import { partyMember, partySight, type VisionWorld } from "#shared/rules/vision.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
-import { assertCanvasAt, ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { assertCanvasAt, ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoint, pickOption, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * The v1 wave 4 run (docs/design-v1-maps-vision.md section 4): the real
@@ -500,7 +500,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
 
     // The DM's + held climbs from 10 ft to 100 ft, and the hold ends there with the finger still down, so the value is spoken.
     await dm.getByRole("button", { name: "Map builder" }).first().click();
-    await dm.locator("select").filter({ has: dm.locator('option[value="height"]') }).first().selectOption("height");
+    await pickOption(dm, "Map builder", "Builder mode", "Heights and stairs");
     const stepper = dm.getByRole("group", { name: "Height" });
     const plus = stepper.getByRole("button", { name: "5 ft higher" });
     assert.equal((await stepper.innerText()).trim(), "10 ft up");

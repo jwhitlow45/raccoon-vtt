@@ -203,6 +203,90 @@ export class ConsoleWatch {
   }
 }
 
+/**
+ * Picks an option of a tool's choice wherever the row put it
+ * (docs/design-v1-tool-options.md 14): through its chip's popover, which a
+ * pick closes, in the row as a choice of its own, or behind ⋯, which it
+ * closes after. `group` is the choice's name ("Drawing tool", "Shape"), and
+ * `option` the option's.
+ */
+export async function pickOption(page: Page, tool: string, group: string, option: string): Promise<void> {
+  const bar = page.getByRole("toolbar", { name: `${tool} options` });
+  const chip = bar.getByRole("button", { name: new RegExp(`^${group.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:`) });
+  const inRow = bar.locator("[data-options-row]").getByRole("radiogroup", { name: group }).getByRole("radio", { name: option, exact: true });
+  // A tool that loads its options on first use draws its row a moment after it is picked, and the row settles once measured.
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    if ((await chip.count()) > 0 && (await chip.first().isVisible())) {
+      await chip.first().click();
+      const popover = page.getByRole("dialog", { name: group });
+      await popover.getByRole("radio", { name: option, exact: true }).click();
+      await popover.waitFor({ state: "detached" });
+      return;
+    }
+    if ((await inRow.count()) > 0 && (await inRow.first().isVisible())) {
+      await inRow.first().click();
+      return;
+    }
+    if (Date.now() > deadline) break;
+    await sleep(100);
+  }
+  await bar.getByRole("button", { name: "More options" }).click();
+  const more = page.getByRole("dialog", { name: `More ${tool} options` });
+  await more.getByRole("radiogroup", { name: group }).getByRole("radio", { name: option, exact: true }).click();
+  await page.keyboard.press("Escape");
+  await more.waitFor({ state: "detached" });
+}
+
+/** Presses a button among a tool's options, in the row where it fits, else behind ⋯, which it then closes. */
+export async function pressOption(page: Page, tool: string, name: string): Promise<void> {
+  const bar = page.getByRole("toolbar", { name: `${tool} options` });
+  const own = bar.locator("[data-options-row]").getByRole("button", { name, exact: true });
+  // A row that just changed, as when a tap selects a stamp, settles once measured.
+  const deadline = Date.now() + 2_000;
+  for (;;) {
+    if ((await own.count()) > 0 && (await own.first().isVisible())) {
+      await own.first().click();
+      return;
+    }
+    if (Date.now() > deadline) break;
+    await sleep(100);
+  }
+  await bar.getByRole("button", { name: "More options" }).click();
+  const more = page.getByRole("dialog", { name: `More ${tool} options` });
+  await more.getByRole("button", { name, exact: true }).click();
+  if (await more.isVisible()) await page.keyboard.press("Escape");
+  await more.waitFor({ state: "detached" });
+}
+
+/**
+ * Makes a tool active whatever the toolbar shows (docs/design-v1-tool-options.md
+ * 5): its own button, else its tile behind Setup on a phone, else, in the
+ * pair, the Tools menu the last tool opens. A tool already active is left
+ * as it is, since picking it again would hide its options.
+ */
+export async function pickTool(page: Page, label: string, within?: Locator): Promise<void> {
+  // A preview such as "Viewing as Pat" draws a second toolbar of its own.
+  const nav = (within ?? page).locator('nav[aria-label="Tools"]');
+  const own = nav.getByRole("button", { name: label, exact: true });
+  if ((await own.count()) > 0 && (await own.first().isVisible())) {
+    if ((await own.first().getAttribute("data-active")) !== "true") await own.first().click();
+    return;
+  }
+  const setup = nav.getByRole("button", { name: /^Setup tools/ });
+  if ((await setup.count()) > 0 && (await setup.first().isVisible())) {
+    if ((await setup.first().getAttribute("aria-label")) === `Setup tools: ${label}`) return;
+    await setup.first().click();
+    await page.getByRole("menu", { name: "Setup tools" }).getByRole("menuitemradio", { name: label, exact: true }).click();
+    return;
+  }
+  // The pair: its second button opens Tools once its own tool is active.
+  const second = nav.locator("button[data-active]").nth(1);
+  if ((await second.getAttribute("data-active")) !== "true") await second.click();
+  await second.click();
+  await page.getByRole("menu", { name: "Tools" }).getByRole("menuitemradio", { name: label, exact: true }).click();
+}
+
 /** Numbered screenshots that never overwrite an earlier run's. */
 export class Shots {
   private next: number | null = null;

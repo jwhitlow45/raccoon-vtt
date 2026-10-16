@@ -694,7 +694,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     const off = await emptyPoint(player);
     await touch([off, { x: off.x + 3, y: off.y + 2 }, { x: off.x + 4, y: off.y + 3 }]);
     await barFrame(player).waitFor({ state: "detached" });
-    await player.getByRole("toolbar", { name: "Select options" }).getByText("2 selected.", { exact: true }).waitFor();
+    await player.getByRole("toolbar", { name: "Select options" }).getByText("2 selected.", { exact: true }).filter({ visible: true }).waitFor();
 
     // A box drawn over Goblin 2 adds it and shows the bar again.
     const from = await cellPoint({ x: 1, y: 3 });
@@ -719,7 +719,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     { width: 844, height: 390, scale: 1.3, insets: { side: 47, bottom: 21 } },
   ]) {
     const label = `${view.width} x ${view.height} at 130%`;
-    test(`10. the Multi-select bar is one row with Actions shown: ${label}`, async () => {
+    test(`10. the Multi-select row stands on one line with Actions and Done in it: ${label}`, async () => {
       await insets(view.insets);
       await setUp(view);
       await touch([await cellPoint({ x: 8, y: 6 })]);
@@ -730,8 +730,16 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       await barFrame(player).waitFor({ state: "detached" });
       const options = player.getByRole("toolbar", { name: "Select options" });
       await options.getByRole("button", { name: "Actions", exact: true }).waitFor();
-      const r = await rectOf(options);
-      assert.ok(r.bottom - r.top <= (44 + 8 + 2) * view.scale + 2, `${label}: the Multi-select bar wrapped to ${r.bottom - r.top} px`);
+      // Actions and Done stay in the row at every size, and its controls stand on one line (docs/design-v1-tool-options.md 9.1).
+      const row = options.locator("[data-options-row]");
+      for (const name of ["Actions", "Done"]) assert.equal(await row.getByRole("button", { name, exact: true }).count(), 1, `${label}: ${name} left the row`);
+      const middles = await row.locator(":scope > [data-rvtt-slot]").evaluateAll((slots) =>
+        slots.map((el) => {
+          const r = (el as unknown as { getBoundingClientRect(): { top: number; bottom: number } }).getBoundingClientRect();
+          return (r.top + r.bottom) / 2;
+        }),
+      );
+      assert.ok(Math.max(...middles) - Math.min(...middles) <= 1, `${label}: the Multi-select row stands on more than one line`);
       await shots.take(player, `playerphone-several-row-${view.width}x${view.height}`);
       await options.getByRole("button", { name: "Done", exact: true }).tap();
       await insets({});
@@ -746,9 +754,19 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         { id: randomUUID(), tokenId: run.thorn.id, value: 15 },
       ],
     });
+    // At 844 x 390 at 130% Multi-select's row stands in the toolbar's own row, so the bar has its 151 px and docks (docs/design-v1-tool-options.md 10.3).
+    {
+      await insets({ side: 47, bottom: 21 });
+      await setUp({ width: 844, height: 390, scale: 1.3 });
+      await touch([await cellPoint({ x: 8, y: 6 })]);
+      await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+      await player.getByRole("toolbar", { name: "Select options" }).waitFor();
+      assert.equal(await player.getByRole("toolbar", { name: "Select options" }).getAttribute("data-rvtt-arrangement"), "pair");
+      assert.equal(await barFrame(player).getAttribute("data-bar-mode"), "dock", "844 x 390 at 130%: the bar does not dock");
+      await player.getByRole("toolbar", { name: "Select options" }).getByRole("button", { name: "Done", exact: true }).tap();
+    }
     for (const view of [
       { width: 480, height: 320, scale: 1.3, insets: { side: 47, bottom: 21 } },
-      { width: 844, height: 390, scale: 1.3, insets: { side: 47, bottom: 21 } },
       { width: 320, height: 480, scale: 1.3, insets: { top: 44, bottom: 34 } },
     ]) {
       const label = `${view.width} x ${view.height} at 130%`;
@@ -970,7 +988,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         await cardInReach(`${label}, after a chip`, `playerphone-several-card-from-chip-480x320-${Math.round(scale * 100)}`);
         await waitFor(`focus on the card, ${label}`, async () => ((await focused(player)).name === "The DM asks for a roll" ? true : null));
         // The group is still held: Multi-select still counts Thorn, and once the card is put off, Actions brings his bar back.
-        assert.equal(await options.getByText("1 selected.", { exact: true }).count(), 1, `${label}: Multi-select let go of the group`);
+        assert.equal(await options.getByText("1 selected.", { exact: true }).filter({ visible: true }).count(), 1, `${label}: Multi-select let go of the group`);
         await card(player).getByRole("button", { name: "Later" }).tap();
         await card(player).waitFor({ state: "detached" });
         await options.getByRole("button", { name: "Actions", exact: true }).tap();
@@ -1017,7 +1035,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       assert.ok(await card(player).isVisible(), `${label}: the tap left the card folded`);
       await cardInReach(`${label}, after Later`, "playerphone-several-fight-card-back-480x320");
       await waitFor(`focus on the card, ${label}`, async () => ((await focused(player)).name === "The DM asks for a roll" ? true : null));
-      assert.equal(await options.getByText("1 selected.", { exact: true }).count(), 1, `${label}: Multi-select let go of the group`);
+      assert.equal(await options.getByText("1 selected.", { exact: true }).filter({ visible: true }).count(), 1, `${label}: Multi-select let go of the group`);
       await card(player).getByRole("button", { name: "Later" }).tap();
       await card(player).waitFor({ state: "detached" });
       assert.ok(await wholeInReach(actions), `${label}: something covers Actions after the second Later`);
@@ -1085,7 +1103,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
   for (const scale of [1, 1.3]) {
     const label = `480 x 320 at ${Math.round(scale * 100)}% with kept rulers`;
     const shot = `480x320-${Math.round(scale * 100)}`;
-    test(`19. with the Ruler's options capped at half the screen and scrolled past kept rulers, the row standing for a roll put off with Later covers none of their buttons: ${label}`, async () => {
+    test(`19. with the kept rulers behind their chip and a roll put off with Later, the way back covers no control in the row nor ⋯, and the kept rulers in their pop-up are in reach: ${label}`, async () => {
       await insets({ side: 47, bottom: 21 });
       const id = randomUUID();
       const kept = Array.from({ length: 10 }, () => randomUUID());
@@ -1105,28 +1123,28 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         await cardInReach(label, `playerphone-kept-rulers-card-before-later-${shot}`);
         await card(player).getByRole("button", { name: "Later" }).tap();
         await card(player).waitFor({ state: "detached" });
-        // Scrolled to its foot, the capped bar moves the kept rulers up to where its hint was.
-        const scrolls = await options.evaluate((el) => {
-          const box = el as unknown as { scrollTop: number; scrollHeight: number; clientHeight: number };
-          box.scrollTop = box.scrollHeight;
-          return box.scrollHeight > box.clientHeight + 1;
-        });
-        assert.ok(scrolls, `${label}: the options bar does not scroll, so this step tests nothing`);
         await player.waitForTimeout(300);
         await wayBack(label, /^Wis save: waiting for your roll\./);
-        await shots.take(player, `playerphone-kept-rulers-scrolled-${shot}`);
-        const bar = await rectOf(options);
-        const buttons = options.getByRole("button");
-        let checked = 0;
-        for (let i = 0; i < (await buttons.count()); i++) {
-          const b = buttons.nth(i);
-          const r = await b.boundingBox();
-          // Only the buttons the scrolled bar shows whole: the rest it clips itself.
-          if (!r || r.y < bar.top + 1 || r.y + r.height > bar.bottom - 1) continue;
-          checked += 1;
-          assert.ok(await wholeInReach(b), `${label}: the row covers ${(await b.getAttribute("aria-label")) ?? (await b.textContent())} once the options scroll`);
+        await shots.take(player, `playerphone-kept-rulers-way-back-${shot}`);
+        // Every control in the row, and ⋯, takes a tap with the way back showing.
+        const controls = options.locator("[data-options-row] > [data-rvtt-slot] button, [data-rvtt-more] button");
+        assert.ok((await controls.count()) > 0, `${label}: the row shows no control`);
+        for (let i = 0; i < (await controls.count()); i++) {
+          const b = controls.nth(i);
+          assert.ok(await wholeInReach(b), `${label}: the way back covers ${(await b.getAttribute("aria-label")) ?? (await b.textContent())}`);
         }
-        assert.ok(checked > 0, `${label}: no option button shows whole`);
+        // The kept rulers in their chip's pop-up, or in ⋯ where the chip waits there, each in reach once the pop-up scrolls to it.
+        const chip = options.locator("[data-options-row]").getByRole("button", { name: /^Kept/ });
+        if ((await chip.count()) > 0) await chip.tap();
+        else await options.getByRole("button", { name: "More options" }).tap();
+        const remove = player.getByRole("dialog").getByRole("button", { name: /^Remove the kept ruler/ });
+        assert.equal(await remove.count(), kept.length, `${label}: the pop-up lists every kept ruler`);
+        for (let i = 0; i < (await remove.count()); i++) {
+          const b = remove.nth(i);
+          await b.evaluate((el) => (el as unknown as { scrollIntoView(o: object): void }).scrollIntoView({ block: "nearest" }));
+          assert.ok(await wholeInReach(b), `${label}: kept ruler ${i + 1} is out of reach in the pop-up`);
+        }
+        await player.keyboard.press("Escape");
       } finally {
         await ops.send({ t: "roll.close", rollIds: [id] });
         for (const drawingId of kept) await ops.send({ t: "drawing.delete", drawingId });

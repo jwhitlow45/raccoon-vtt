@@ -6,18 +6,20 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, readCamera, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickTool, readCamera, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * Layout and hierarchy (docs/design-v1-layout-hierarchy.md section 10):
  *
- * 1. On a short screen held sideways a tool whose options run past one row
- *    opens them in a rail on the left of the map, and the one-row tools
- *    keep their bar at the foot until their row wraps.
- * 2. Everywhere else the options stay at the foot.
+ * 1. On a short screen held sideways the tool's options stand in the
+ *    toolbar's own row, beside the whole toolbar or Select and the last
+ *    tool, on one line, and take none of the map's height
+ *    (docs/design-v1-tool-options.md 4, which replaced the rail).
+ * 2. Everywhere else they stack on the toolbar or float above it, and a
+ *    rotation keeps the same element.
  * 3. The alerts column, its summary row, "Viewing as Pat" and a player's
- *    roll card keep right of the rail.
- * 4. Fit keeps the scene clear of the rail.
+ *    roll card keep clear of the tool's row and its line.
+ * 4. Fit keeps the scene clear of the row and the line.
  * 5. From 900 px up the side panel hides and comes back, by its buttons
  *    and by S, and this device remembers it.
  * 6. A short wide layout starts with it hidden, and shown, its tabs scroll
@@ -189,10 +191,6 @@ function topBar(page: Page): Locator {
 
 function toolbar(page: Page): Locator {
   return page.getByRole("navigation", { name: "Tools" });
-}
-
-async function pickTool(page: Page, name: string): Promise<void> {
-  await toolbar(page).getByRole("button", { name, exact: true }).click();
 }
 
 function options(page: Page, tool: string): Locator {
@@ -379,21 +377,27 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await ops.send({ t: "journal.update", pageId: run.lore, patch: { blocks: [{ id: randomUUID().replace(/-/g, "").slice(0, 12), text }] } });
   }
 
-  // ------------------------------------------------ the rail (cases 1, 2 and 4)
+  // ------------------------------------------------ where the tool's options stand (cases 1, 2 and 4, docs/design-v1-tool-options.md 4)
 
-  const RAIL_TOOLS = { dm: ["Ruler", "Area", "Draw", "Fog", "Map builder", "Line up grid"], player: ["Ruler", "Area", "Draw"] } as const;
-  /** The map's height between the top bar and the toolbar with no options, in layout px (section 2.1), which the rail leaves whole. */
-  const MAP_HEIGHT: Record<string, number> = { "844x390@1": 256, "844x390@1.3": 166, "667x375@1": 262, "667x375@1.3": 176 };
-  const RAIL_SIZES = [
-    { width: 844, height: 390, insets: { side: 47, bottom: 21 } },
-    { width: 667, height: 375, insets: {} },
-  ];
+  const TOOLS = { dm: ["Ruler", "Area", "Draw", "Ping", "Fog", "Map builder", "Line up grid", "Add token", "Pin"], player: ["Ruler", "Area", "Draw", "Ping"] } as const;
+  /**
+   * The sideways phones of 4.3: where the options stand for each role at
+   * 100% and 130%, and the map's height between the top bar and the
+   * toolbar in layout px (section 2.1), which the toolbar's own row leaves whole.
+   */
+  const SIDEWAYS = [
+    { width: 844, height: 390, insets: { side: 47, bottom: 21 }, player: ["merged", "pair"], dm: ["pair", "pair"], map: [256, 166] },
+    { width: 667, height: 375, insets: {}, player: ["merged", "pair"], dm: ["pair", "pair"], map: [262, 176] },
+  ] as const;
 
-  /** Whether controls stand on more than one line, by their boxes as drawn. */
+  /** Whether the row's controls stand on one line, by their boxes as drawn, and the row never scrolls sideways. */
   function oneLine(target: Locator): Promise<boolean> {
     return target.evaluate((el) => {
-      const boxes = Array.from((el as unknown as DomEl).querySelectorAll("button, input, select"), (c) => c.getBoundingClientRect()).filter((r) => r.height > 0);
-      return !boxes.some((a) => boxes.some((b) => a.top >= b.bottom - 0.5));
+      const row = (el as unknown as DomEl).querySelector("[data-options-row]");
+      if (!row) return true;
+      const boxes = Array.from(row.querySelectorAll(":scope > [data-rvtt-slot]"), (c) => c.getBoundingClientRect()).filter((r) => r.height > 0);
+      const flat = !boxes.some((a) => boxes.some((b) => a.top >= b.bottom - 0.5));
+      return flat && (row as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth <= (row as unknown as { clientWidth: number }).clientWidth + 1;
     });
   }
 
@@ -411,40 +415,19 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     return bar;
   }
 
-  /** A rail tool's options in the rail: left of the map's middle, from under the top bars to the toolbar, never sideways, each control in reach once scrolled to. */
-  async function expectRail(page: Page, tool: string, label: string): Promise<void> {
-    const rail = options(page, tool);
-    await rail.waitFor();
-    assert.equal(await rail.getAttribute("data-rvtt-options"), "rail", `${label}: ${tool} is in the rail`);
-    const b = await box(rail);
-    const viewport = page.viewportSize()!;
-    const top = await box(topBar(page));
-    const bar = await box(toolbar(page));
-    assert.ok(Math.abs(b.x) <= 0.5, `${label}: ${tool}'s rail starts at the screen's left edge`);
-    assert.ok(b.x + b.width <= viewport.width / 2 + 0.5, `${label}: ${tool}'s rail is ${b.width} px wide, past the map's middle`);
-    assert.ok(Math.abs(b.y - (top.y + top.height)) <= 1.5, `${label}: ${tool}'s rail starts at ${b.y}, under the top bars at ${top.y + top.height}`);
-    assert.ok(Math.abs(b.y + b.height - bar.y) <= 1.5, `${label}: ${tool}'s rail ends at ${b.y + b.height}, the toolbar starts at ${bar.y}`);
-    const sideways = await rail.evaluate((el) => (el as unknown as DomEl).scrollWidth - (el as unknown as DomEl).clientWidth);
-    assert.ok(sideways <= 0, `${label}: ${tool}'s rail scrolls sideways by ${sideways} px`);
-    const controls = rail.locator("button:visible, input:visible, select:visible");
-    for (let i = 0; i < (await controls.count()); i++) {
-      const c = controls.nth(i);
-      await c.scrollIntoViewIfNeeded();
-      // Read until the rail settles, as the other reach checks here do: a read the moment the scroll lands can catch the rail mid-layout, with every point on the control a moment later.
-      if (!(await waitFor(`${tool}'s control in reach`, () => wholeInReach(c), 2000).catch(() => false))) assert.fail(`${label}: ${tool}'s control "${(await c.getAttribute("aria-label")) ?? (await c.textContent())?.trim()}" takes no tap once scrolled to: ${await whatTakes(c)}`);
-    }
+  /** What stands over the map's foot: the options element's top where it stacks or floats, else the toolbar's, and the line's top above either. */
+  async function foot(page: Page, tool: string): Promise<{ row: number; line: number | null }> {
+    const el = options(page, tool);
+    const arrangement = await el.getAttribute("data-rvtt-arrangement");
+    const row = arrangement === "stacked" || arrangement === "floating" ? (await box(el)).y : (await box(toolbar(page))).y;
+    const pill = el.locator("[data-options-line]");
+    return { row, line: (await pill.count()) > 0 ? (await box(pill)).y : null };
   }
 
-  async function expectFoot(page: Page, tool: string, label: string): Promise<void> {
-    const foot = options(page, tool);
-    await foot.waitFor();
-    assert.equal(await foot.getAttribute("data-rvtt-options"), "foot", `${label}: ${tool} is at the foot`);
-  }
-
-  for (const size of RAIL_SIZES) {
-    for (const scale of [1, 1.3]) {
+  for (const size of SIDEWAYS) {
+    for (const [i, scale] of [1, 1.3].entries()) {
       const label = `${size.width} x ${size.height} at ${Math.round(scale * 100)}%`;
-      test(`1. ${label}: the rail tools open their options in the rail, and the one-row tools keep the foot`, async () => {
+      test(`1. ${label}: every tool's options stand in the toolbar's row, on one line, and take none of the map's height`, async () => {
         for (const [page, cdp, role] of [
           [phone, phoneCdp, "dm"],
           [player, playerCdp, "player"],
@@ -454,33 +437,24 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
           const who = `${label}, ${role === "dm" ? "the DM" : "a player"}`;
           await pickTool(page, "Select");
           const bare = await mapBetweenBars(page);
-          const doc = MAP_HEIGHT[`${size.width}x${size.height}@${scale}`]! * scale;
+          const doc = size.map[i]! * scale;
           assert.ok(Math.abs(bare - doc) <= 2, `${who}: the map between the bars is ${bare} px, section 2.1 measured ${doc}`);
-          for (const tool of RAIL_TOOLS[role]) {
+          for (const tool of TOOLS[role]) {
             await pickTool(page, tool);
-            await expectRail(page, tool, who);
-            assert.ok(Math.abs((await mapBetweenBars(page)) - bare) <= 1, `${who}: ${tool} in the rail takes none of the map's height`);
+            const el = options(page, tool);
+            await el.waitFor();
+            assert.equal(await el.getAttribute("data-rvtt-arrangement"), size[role][i], `${who}: ${tool}'s options stand ${size[role][i]}`);
+            assert.equal(await oneLine(el), true, `${who}: ${tool}'s controls stand on one line`);
+            assert.ok(Math.abs((await mapBetweenBars(page)) - bare) <= 1, `${who}: ${tool}'s options take none of the map's height`);
           }
-          if (scale === 1.3 && size.width === 844) await shots.take(page, `layout-rail-${role}-844x390-130-${RAIL_TOOLS[role].at(-1)!.replace(/ /g, "-")}`);
-          for (const tool of role === "dm" ? ["Ping", "Add token"] : ["Ping"]) {
-            await pickTool(page, tool);
-            await expectFoot(page, tool, who);
-            assert.equal(await oneLine(options(page, tool)), true, `${who}: ${tool}'s controls stand on one line`);
-          }
-          if (role === "dm") {
-            await pickTool(page, "Pin");
-            if (scale === 1) {
-              await expectFoot(page, "Pin", who);
-              assert.equal(await oneLine(options(page, "Pin")), true, `${who}: Pin's controls stand on one line`);
-            } else await expectRail(page, "Pin", `${who}, where Pin's row wraps`);
-          }
-          // Multi-select stays at the foot, one row, always.
+          if (scale === 1.3 && size.width === 844) await shots.take(page, `layout-options-${role}-844x390-130-pin-or-ping`);
+          // Multi-select's row stands there too.
           await pickTool(page, "Select");
           const bar = role === "dm" ? await selectToken(page, phoneSocket, run.goblin.id, "Goblin 1") : await selectToken(page, playerSocket, run.thorn.id, "Thorn");
           await bar.getByRole("button", { name: "Multi-select", exact: true }).tap();
-          await expectFoot(page, "Select", who);
+          await options(page, "Select").waitFor();
+          assert.equal(await options(page, "Select").getAttribute("data-rvtt-arrangement"), size[role][i], `${who}: Multi-select stands with the tools`);
           assert.equal(await oneLine(options(page, "Select")), true, `${who}: Multi-select is one row`);
-          // A short screen's compact token bar covers the Multi-select bar (docs/design-v1-bar-dock.md 1.4): Close it first.
           await bar.getByRole("button", { name: "Close", exact: true }).first().tap();
           await options(page, "Select").getByRole("button", { name: "Done", exact: true }).tap();
           await options(page, "Select").waitFor({ state: "detached" });
@@ -489,7 +463,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     }
   }
 
-  test("1. 844 x 390 at 130%: Pin picked for the first time is never painted at the foot", async () => {
+  test("1. 844 x 390 at 130%: Pin picked for the first time is never painted anywhere but the toolbar's row", async () => {
     await view(phone, phoneCdp, { width: 844, height: 390 }, { side: 47, bottom: 21 });
     await reloadAt(phone, 1.3);
     await phone.evaluate(() => {
@@ -497,7 +471,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
       w.placesSeen = [];
       const look = () => {
         const bar = w.document.querySelector('[role="toolbar"][aria-label="Pin options"]');
-        if (bar) w.placesSeen.push(bar.dataset.rvttOptions ?? "none");
+        if (bar) w.placesSeen.push(bar.dataset.rvttArrangement ?? "none");
         w.requestAnimationFrame(look);
       };
       w.requestAnimationFrame(look);
@@ -507,11 +481,11 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await phone.waitForTimeout(500);
     const seen = await phone.evaluate(() => (globalThis as unknown as { placesSeen: string[] }).placesSeen);
     assert.ok(seen.length > 0, "no frame was seen");
-    assert.deepEqual([...new Set(seen)], ["rail"], "a frame showed Pin's options at the foot");
+    assert.deepEqual([...new Set(seen)], ["pair"], "a frame showed Pin's options anywhere else");
     await pickTool(phone, "Select");
   });
 
-  test("2. the options stay at the foot at 480 x 320, upright and on a computer", async () => {
+  test("2. the options stack at 480 x 320 and upright, and float on a computer", async () => {
     const sizes = [
       { size: { width: 480, height: 320 }, insets: { side: 47, bottom: 21 }, scales: [1, 1.3] },
       { size: { width: 390, height: 844 }, insets: { top: 47, bottom: 34 }, scales: [1] },
@@ -522,44 +496,49 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
         await reloadAt(phone, scale);
         for (const tool of ["Ruler", "Area"]) {
           await pickTool(phone, tool);
-          await expectFoot(phone, tool, `${size.width} x ${size.height} at ${Math.round(scale * 100)}%`);
+          await options(phone, tool).waitFor();
+          assert.equal(await options(phone, tool).getAttribute("data-rvtt-arrangement"), "stacked", `${size.width} x ${size.height} at ${Math.round(scale * 100)}%: ${tool} stacks`);
         }
         await pickTool(phone, "Select");
       }
     }
     await pickTool(desk, "Ruler");
-    await expectFoot(desk, "Ruler", "1280 x 800");
+    assert.equal(await options(desk, "Ruler").getAttribute("data-rvtt-arrangement"), "floating", "1280 x 800: the Ruler floats");
     await pickTool(desk, "Select");
   });
 
-  test("2. turning the phone with a rail tool moves its options between the rail and the foot on the same element", async () => {
+  test("2. turning the phone moves the options between the toolbar's row and the stack on the same element", async () => {
     await view(phone, phoneCdp, { width: 844, height: 390 }, { side: 47, bottom: 21 });
     await reloadAt(phone, 1);
     await pickTool(phone, "Area");
-    await expectRail(phone, "Area", "844 x 390");
+    await options(phone, "Area").waitFor();
+    assert.equal(await options(phone, "Area").getAttribute("data-rvtt-arrangement"), "pair");
     await options(phone, "Area").evaluate((el) => ((el as unknown as { marked: boolean }).marked = true));
     await view(phone, phoneCdp, { width: 390, height: 844 }, { top: 47, bottom: 34 });
-    await expectFoot(phone, "Area", "turned upright");
+    assert.equal(await options(phone, "Area").getAttribute("data-rvtt-arrangement"), "stacked", "turned upright");
     await view(phone, phoneCdp, { width: 844, height: 390 }, { side: 47, bottom: 21 });
-    await expectRail(phone, "Area", "turned back");
+    assert.equal(await options(phone, "Area").getAttribute("data-rvtt-arrangement"), "pair", "turned back");
     assert.equal(await options(phone, "Area").evaluate((el) => (el as unknown as { marked?: boolean }).marked === true), true, "the options were never mounted again");
     await pickTool(phone, "Select");
   });
 
   /*
-   * Case 3. Every rail tool takes the pointer, so the token bar never shows
-   * beside the rail: the column shares the right with nothing but notices.
+   * Case 3. With the Area tool the token bar never shows, so the column
+   * shares the right with nothing but notices. Its cards and its summary
+   * row stop above the tool's row and its line (docs/design-v1-tool-options.md 10.3).
    */
   for (const size of [
     { width: 844, height: 390, insets: { side: 47, bottom: 21 } },
     { width: 667, height: 375, insets: {} },
   ]) {
-    test(`3. ${size.width} x ${size.height} at 130%: the alerts column and its summary row keep right of the rail, every card's buttons in reach, and a spanning notice starts right of it`, async () => {
+    test(`3. ${size.width} x ${size.height} at 130%: the alerts column and its summary row stop above the tool's row and line, every card's buttons in reach, and the row stays in reach under a lasting notice`, async () => {
       await view(phone, phoneCdp, size, size.insets);
       await reloadAt(phone, 1.3);
       await startFight();
       await pickTool(phone, "Area");
-      const rail = await box(options(phone, "Area"));
+      await options(phone, "Area").waitFor();
+      const line = options(phone, "Area").locator("[data-options-line]");
+      const lineBox = await box(line);
       await ops.send({ t: "actor.hp", target: { tokenId: run.hag.id }, change: { kind: "damage", amount: 1 } });
       await ops.send({ t: "actor.hp", target: { tokenId: run.hag.id }, change: { kind: "damage", amount: 1 } });
       const cards = phone.locator('[data-alert="concentration"]');
@@ -567,19 +546,23 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
       await phone.waitForTimeout(400);
       const row = phone.getByRole("button", { name: /^Concentration check/ });
       const label = `${size.width} x ${size.height} at 130%`;
+      const controls = options(phone, "Area").locator("[data-options-row] > [data-rvtt-slot] button, [data-rvtt-more] button");
       const checkColumn = async (when: string) => {
         for (let i = 0; i < (await cards.count()); i++) {
           const card = cards.nth(i);
           if (!(await card.isVisible())) continue;
           // The column scrolls as a whole: a card below its foot comes into view first.
           await card.scrollIntoViewIfNeeded();
-          assert.ok(!intersects(await box(card), rail), `${label}, ${when}: a card meets the rail`);
+          // The column stops above the line. Opened from its summary row, the cards stand over the options down to the toolbar until a tap elsewhere (bar dock 1.3).
+          if (when === "the column") assert.ok(!intersects(await box(card), lineBox), `${label}, ${when}: a card meets the tool's line`);
           for (const name of ["Passed", "Failed"]) {
             const b = card.getByRole("button", { name, exact: true });
             if (!(await waitFor(`${name} in reach`, () => reachable(b), 2000).catch(() => false))) assert.fail(`${label}, ${when}: ${name} takes no tap: ${await whatTakes(b)}`);
           }
         }
-        if ((await row.count()) > 0 && (await row.first().isVisible())) assert.ok(!intersects(await box(row.first()), rail), `${label}, ${when}: the summary row meets the rail`);
+        if ((await row.count()) > 0 && (await row.first().isVisible())) {
+          for (let i = 0; i < (await controls.count()); i++) assert.ok(!intersects(await box(row.first()), await box(controls.nth(i))), `${label}, ${when}: the summary row meets a control in the row`);
+        }
       };
       await checkColumn("the column");
       if ((await row.count()) > 0 && (await row.first().isVisible())) {
@@ -587,14 +570,14 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
         await phone.waitForTimeout(300);
         await checkColumn("opened from its summary row");
       }
-      await shots.take(phone, `layout-rail-column-${size.width}x${size.height}-130`);
+      await shots.take(phone, `layout-options-column-${size.width}x${size.height}-130`);
       for (let i = 0; i < 2; i++) {
         const card = cards.first();
         if ((await card.count()) > 0 && (await card.isVisible())) await card.getByRole("button", { name: "Passed", exact: true }).tap();
         await phone.waitForTimeout(200);
       }
       await endFight();
-      // A notice that lasts spans the free area, right of the rail.
+      // A notice that lasts spans the map or stands beside the lane, and the tool's controls stay in reach under it.
       await pickTool(phone, "Select");
       await openPanel(phone, "Scenes");
       await sheet(phone, "Scenes").getByRole("button", { name: "Save current view" }).tap();
@@ -602,27 +585,38 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
       await framing.waitFor();
       await pickTool(phone, "Area");
       await phone.waitForTimeout(300);
-      const notice = await box(framing);
-      const railNow = await box(options(phone, "Area"));
-      assert.ok(notice.x >= railNow.x + railNow.width - 0.5, `${label}: the Starting view notice starts at ${notice.x}, over the rail that ends at ${railNow.x + railNow.width}`);
-      await shots.take(phone, `layout-rail-notice-${size.width}x${size.height}-130`);
+      for (let i = 0; i < (await controls.count()); i++) assert.ok(await reachable(controls.nth(i)), `${label}: a control in the row takes no tap under the Starting view notice: ${await whatTakes(controls.nth(i))}`);
+      await shots.take(phone, `layout-options-notice-${size.width}x${size.height}-130`);
       await framing.getByRole("button", { name: "Cancel" }).tap();
       await pickTool(phone, "Select");
     });
   }
 
-  test("3. 667 x 375 at 130%: a player's roll card at the foot starts right of the rail, and \"Viewing as Pat\" keeps off the preview's rail", async () => {
+  test("3. 667 x 375 at 130%: a player's roll card at the foot stands above the tool's line, and \"Viewing as Pat\" keeps off the preview's options", async () => {
     await view(player, playerCdp, { width: 667, height: 375 });
     await reloadAt(player, 1.3);
     await pickTool(player, "Area");
-    const rail = await box(options(player, "Area"));
+    await options(player, "Area").waitFor();
     const id = randomUUID();
     await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
     const card = player.getByRole("dialog", { name: "The DM asks for a roll" });
-    await card.waitFor();
-    const cardBox = await box(card);
-    assert.ok(cardBox.x >= rail.x + rail.width - 0.5, `the roll card starts at ${cardBox.x}, over the rail that ends at ${rail.x + rail.width}`);
-    await shots.take(player, "layout-rail-roll-card-667x375-130");
+    const row = player.getByRole("button", { name: /^Roll asked/ });
+    await waitFor("the card or the row that stands for it", async () => ((await card.isVisible()) || (await row.isVisible()) ? true : null));
+    const below = await foot(player, "Area");
+    if (await card.isVisible()) {
+      // At the foot it stands on the row and the line (docs/design-v1-tool-options.md 10.3).
+      const cardBox = await box(card);
+      assert.ok(cardBox.y + cardBox.height <= (below.line ?? below.row) + 0.5, `the roll card's foot at ${cardBox.y + cardBox.height} stands over the tool's line at ${below.line ?? below.row}`);
+      assert.ok(Math.abs(cardBox.x) <= 0.5, "the roll card starts at the left edge");
+    } else {
+      // Too short for it there: its row stands in, and its tap stands the card on the toolbar, from the left edge.
+      await row.tap();
+      await card.waitFor();
+      const cardBox = await box(card);
+      assert.ok(cardBox.y + cardBox.height <= (await box(toolbar(player))).y + 0.5, "the summoned card stands on the toolbar");
+      assert.ok(Math.abs(cardBox.x) <= 0.5, "the roll card starts at the left edge");
+    }
+    await shots.take(player, "layout-options-roll-card-667x375-130");
     await ops.send({ t: "roll.close", rollIds: [id] });
     await pickTool(player, "Select");
 
@@ -632,35 +626,40 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await sheet(phone, "DM").getByRole("button", { name: "View", exact: true }).tap();
     const preview = phone.locator('dialog[aria-label="Viewing as Pat"]');
     await preview.waitFor();
-    await preview.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: "Area", exact: true }).click();
-    const previewRail = preview.getByRole("toolbar", { name: "Area options" });
-    await previewRail.waitFor();
+    await pickTool(phone, "Area", preview);
+    const previewOptions = preview.getByRole("toolbar", { name: "Area options" });
+    await previewOptions.waitFor();
     await phone.waitForTimeout(300);
     const banner = preview.getByText(/^Viewing as Pat/);
-    assert.ok(!intersects(await box(banner), await box(previewRail)), "\"Viewing as Pat\" meets the rail");
-    await shots.take(phone, "layout-rail-preview-notice-667x375-130");
+    assert.ok(!intersects(await box(banner), await box(previewOptions)), "\"Viewing as Pat\" meets the options");
+    assert.ok(!intersects(await box(banner), await box(previewOptions.locator("[data-options-line]"))), "\"Viewing as Pat\" meets the options' line");
+    await shots.take(phone, "layout-options-preview-notice-667x375-130");
     await preview.getByRole("button", { name: "Exit", exact: true }).click();
     await preview.waitFor({ state: "detached" });
     await sheet(phone, "DM").getByRole("button", { name: "Close DM" }).tap();
   });
 
-  test("4. Fit with a rail tool leaves no part of the scene under the rail", async () => {
-    await view(phone, phoneCdp, { width: 667, height: 375 });
-    await reloadAt(phone, 1.3);
-    await pickTool(phone, "Area");
-    const rail = await box(options(phone, "Area"));
-    await phone.getByRole("button", { name: "Fit the map to the screen" }).tap();
-    await phone.waitForTimeout(400);
-    const cam = await readCamera(phone);
-    assert.ok(cam);
-    const canvas = await box(phone.locator(".konvajs-content").first());
-    const bounds = phoneSocket.state!.scenes[run.sceneId]!.bounds;
-    const sceneLeft = canvas.x + cam.x;
-    const sceneRight = canvas.x + cam.x + bounds.w * cam.scale;
-    assert.ok(sceneLeft >= rail.x + rail.width - 0.5, `the scene starts at ${sceneLeft}, under the rail that ends at ${rail.x + rail.width}`);
-    assert.ok(sceneRight <= canvas.x + canvas.width + 0.5, "the scene fits the map's width right of the rail");
-    await shots.take(phone, "layout-rail-fit-667x375-130");
-    await pickTool(phone, "Select");
+  test("4. Fit with a tool's options leaves no part of the scene under the row or the line", async () => {
+    for (const size of [
+      { width: 667, height: 375, insets: {}, scale: 1.3 },
+      { width: 390, height: 844, insets: { top: 47, bottom: 34 }, scale: 1 },
+    ]) {
+      await view(phone, phoneCdp, size, size.insets);
+      await reloadAt(phone, size.scale);
+      await pickTool(phone, "Area");
+      await options(phone, "Area").waitFor();
+      await phone.getByRole("button", { name: "Fit the map to the screen" }).tap();
+      await phone.waitForTimeout(400);
+      const cam = await readCamera(phone);
+      assert.ok(cam);
+      const canvas = await box(phone.locator(".konvajs-content").first());
+      const bounds = phoneSocket.state!.scenes[run.sceneId]!.bounds;
+      const sceneBottom = canvas.y + cam.y + bounds.h * cam.scale;
+      const below = await foot(phone, "Area");
+      assert.ok(sceneBottom <= (below.line ?? below.row) + 0.5, `${size.width} x ${size.height}: the scene ends at ${sceneBottom}, under the tool's line at ${below.line ?? below.row}`);
+      await shots.take(phone, `layout-options-fit-${size.width}x${size.height}`);
+      await pickTool(phone, "Select");
+    }
   });
 
   // ------------------------------------------------ a phone's sideways sheet (case 7)
@@ -701,7 +700,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await pickTool(phone, "Ruler");
     await openPanel(phone, "Initiative");
     const initiative = sheet(phone, "Initiative");
-    assert.equal(await options(phone, "Ruler").count(), 0, "the sheet hides the rail");
+    assert.equal(await options(phone, "Ruler").count(), 0, "the sheet hides the options");
     await initiative.locator(":scope > section").evaluate((el) => {
       const scroller = Array.from((el as unknown as DomEl).querySelectorAll("div")).find((d) => d.scrollHeight > d.clientHeight + 10) as unknown as { scrollTop: number } | undefined;
       if (scroller) scroller.scrollTop = 120;
@@ -720,7 +719,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     assert.ok(described);
     assert.equal(await phone.locator(`[id="${described}"]`).textContent(), "Shows Initiative again.");
     await options(phone, "Ruler").waitFor();
-    assert.equal(await options(phone, "Ruler").getAttribute("data-rvtt-options"), "rail", "the rail comes back");
+    assert.equal(await options(phone, "Ruler").getAttribute("data-rvtt-arrangement"), "pair", "the options come back in the toolbar's row");
     // The docked token bar and the alerts column keep the same right edge, the map's, with no sheet there.
     await pickTool(phone, "Select");
     const bar = await selectToken(phone, phoneSocket, run.goblin.id, "Goblin 1");
@@ -1452,23 +1451,24 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await side.waitFor({ state: "hidden" });
   });
 
-  test("6. a large phone held sideways starts with the side panel hidden, a rail tool takes the rail, and shown, the panel's tabs stand in one row with More", async () => {
+  test("6. a large phone held sideways starts with the side panel hidden, the DM's options take the toolbar's row beside Select and the last tool, and shown, the panel's tabs stand in one row with More", async () => {
     await view(phone, phoneCdp, { width: 932, height: 430 }, { side: 59, bottom: 21 });
     await reloadAt(phone, 1);
     const side = sidePanel(phone);
     assert.equal(await side.isHidden(), true, "a short layout with no stored choice starts hidden");
     assert.equal(await phone.evaluate(() => localStorage.getItem("rvtt.sidePanel")), null, "the default is not stored");
     // M10: a touch screen from 900 px up names each tool under its icon.
-    for (const name of ["Select", "Ruler", "Fog"]) assert.match((await toolbar(phone).getByRole("button", { name, exact: true }).textContent()) ?? "", new RegExp(name));
+    for (const name of ["Select", "Ruler"]) assert.match((await toolbar(phone).getByRole("button", { name, exact: true }).textContent()) ?? "", new RegExp(name));
     assert.match((await toolbar(phone).getByRole("button", { name: "Panels" }).textContent()) ?? "", /Panels/);
     await pickTool(phone, "Ruler");
-    assert.equal(await options(phone, "Ruler").getAttribute("data-rvtt-options"), "rail");
-    await shots.take(phone, "layout-932x430-hidden-rail");
+    // The DM's ten tools leave the row 117 px, so the toolbar shows Select and the last tool (docs/design-v1-tool-options.md 4.3).
+    assert.equal(await options(phone, "Ruler").getAttribute("data-rvtt-arrangement"), "pair");
+    await shots.take(phone, "layout-932x430-hidden-pair");
 
     await startFight();
     await toolbar(phone).getByRole("button", { name: "Panels" }).click();
     await side.waitFor();
-    assert.equal(await options(phone, "Ruler").getAttribute("data-rvtt-options"), "foot", "beside the side panel the rail would take over half the map");
+    assert.equal(await options(phone, "Ruler").getAttribute("data-rvtt-arrangement"), "pair", "beside the side panel, the pair's row is 366 px");
     // The map no longer reaches the right edge, so its chrome drops the 59 px inset there.
     const pads = await phone.evaluate(() => {
       const w = globalThis as unknown as Dom;

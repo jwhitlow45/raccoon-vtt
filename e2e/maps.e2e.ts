@@ -6,7 +6,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import sharp from "sharp";
 import type { BuildChunk, RoomState, Scene, Stamp } from "#shared/model.ts";
-import { ConsoleWatch, dragWorld, openSideTab, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragWorld, openSideTab, pickOption, pressOption, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * The v1 wave 3 run (docs/design-v1-maps-vision.md section 3): the real
@@ -332,7 +332,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
 
   test("6. a stamp reaches the player once its cell is revealed, and a DM-only one never does", async () => {
     await dm.getByRole("button", { name: "Map builder" }).click();
-    await dm.getByLabel("Builder mode").selectOption("stamp");
+    await pickOption(dm, "Map builder", "Builder mode", "Stamp");
     await dm.getByRole("button", { name: /Choose a stamp/ }).click();
     const picker = dm.getByRole("dialog", { name: "Stamps" });
     await picker.getByLabel("Search stamps").fill("barrel");
@@ -355,16 +355,15 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
 
     // DM only takes it from the player, and its duplicate is DM only from the start.
     await dm.getByRole("button", { name: "Map builder" }).click();
-    await dm.getByLabel("Builder mode").selectOption("stamp");
+    await pickOption(dm, "Map builder", "Builder mode", "Stamp");
     await tapCell(dm, run.bounds, { x: 2, y: 2 });
-    const bar = dm.getByRole("toolbar", { name: "Map builder options" });
-    await bar.getByRole("button", { name: "DM only" }).click();
+    await pressOption(dm, "Map builder", "DM only");
     await waitFor("the stamp to leave the player's state", () => (playerSocket.state?.stamps[run.stampId] ? null : true));
-    await bar.getByRole("button", { name: "Duplicate" }).click();
+    await pressOption(dm, "Map builder", "Duplicate");
     const hidden = await waitFor("the duplicate", () => stampsOf(dmSocket.state, run.sceneId).find((s) => s.id !== run.stampId));
     run.hiddenStampId = hidden.id;
     assert.equal(hidden.visibility, "dm");
-    await bar.getByRole("button", { name: "Done" }).click();
+    await pressOption(dm, "Map builder", "Done");
     await dm.getByRole("button", { name: "Select", exact: true }).click();
     await dm.waitForTimeout(500);
     assert.equal(playerSocket.everSaw(run.hiddenStampId), false, "a DM-only stamp reached the player");
