@@ -18,8 +18,10 @@ import { memberRow } from "./memberRow.ts";
 /**
  * The roster with who is online (features section 1), your own color
  * (docs/design-v1-visual.md section 4), and for the DM the access tools:
- * kick, remove DM, the player password, DM devices, the DM link and
- * deleting the room (design 10.2).
+ * kick, remove and remove DM behind each row's Manage, the player
+ * password, DM devices, the DM link and deleting the room (design 10.2).
+ * The roster is for seeing who is here, so the actions that cannot be
+ * undone wait one tap away (docs/design-v1-layout-hierarchy.md M7).
  */
 export default function MembersPanel(_props: PanelProps) {
   const members = useRoomView((s) => s.view?.members);
@@ -30,6 +32,14 @@ export default function MembersPanel(_props: PanelProps) {
   const [picking, setPicking] = useState(false);
   const colorButton = useRef<HTMLButtonElement>(null);
   const pickerId = useId();
+  const manageId = useId();
+  const [managing, setManaging] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleManage = (memberId: string) =>
+    setManaging((before) => {
+      const next = new Set(before);
+      if (!next.delete(memberId)) next.add(memberId);
+      return next;
+    });
 
   const roster = useMemo(() => {
     const list = Object.values(members ?? {}).filter((m): m is Member => m !== undefined);
@@ -51,8 +61,11 @@ export default function MembersPanel(_props: PanelProps) {
             const open = canPick && picking;
             const isOnline = onlineSet.has(m.id);
             const says = memberRow({ kind: m.kind, own, online: isOnline });
+            const manages = dm && !own;
+            const managed = manages && managing.has(m.id);
+            const actionsId = `${manageId}-${m.id}`;
             return (
-              <div key={m.id} style={{ display: "grid", gap: theme.space(2), paddingBottom: open || (dm && !own) ? theme.space(2) : 0 }}>
+              <div key={m.id} style={{ display: "grid", gap: theme.space(2), paddingBottom: open ? theme.space(2) : 0 }}>
                 <Row
                   leading={<RowDot color={m.color} />}
                   title={
@@ -78,6 +91,17 @@ export default function MembersPanel(_props: PanelProps) {
                           Color
                         </Button>
                       ) : null}
+                      {manages ? (
+                        <Button
+                          size="sm"
+                          aria-label={`Manage ${m.name}`}
+                          aria-expanded={managed}
+                          aria-controls={managed ? actionsId : undefined}
+                          onClick={() => toggleManage(m.id)}
+                        >
+                          Manage
+                        </Button>
+                      ) : null}
                     </>
                   }
                 />
@@ -92,11 +116,7 @@ export default function MembersPanel(_props: PanelProps) {
                     }}
                   />
                 ) : null}
-                {dm && !own ? (
-                  <div style={{ padding: `0 ${theme.space(3)}px` }}>
-                    <MemberActions memberId={m.id} name={m.name} kind={m.kind} />
-                  </div>
-                ) : null}
+                {manages ? <MemberActions memberId={m.id} name={m.name} kind={m.kind} open={managed} id={actionsId} /> : null}
               </div>
             );
           })}

@@ -37,8 +37,14 @@ function errorText(err: unknown): string {
   return "Something went wrong. Try again.";
 }
 
-/** Kick, remove from the roster, and remove DM for one roster row. */
-export function MemberActions(props: { memberId: string; name: string; kind: "dm" | "player" }) {
+/**
+ * Kick, remove from the roster, and remove DM for one roster row, shown
+ * while the row's Manage is open (docs/design-v1-layout-hierarchy.md M7).
+ * It stays mounted while closed, so an answer that comes after Manage
+ * closes still says what happened. `id` names the buttons' group for
+ * Manage's `aria-controls`.
+ */
+export function MemberActions(props: { memberId: string; name: string; kind: "dm" | "player"; open: boolean; id: string }) {
   const roomId = useRoomView((s) => s.roomId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +59,12 @@ export function MemberActions(props: { memberId: string; name: string; kind: "dm
     const timer = setTimeout(() => setDone(null), 60_000);
     return () => clearTimeout(timer);
   }, [done]);
+  const box = useRef<HTMLDivElement>(null);
+  // A phone sheet is at most 60% of the screen, and under a lower row the actions would open out of sight.
+  // Braces, since Chrome's scrollIntoView now returns a promise, which React would take for a cleanup.
+  useEffect(() => {
+    if (props.open) void box.current?.scrollIntoView({ block: "nearest" });
+  }, [props.open]);
   const run = async (action: () => Promise<void>, message: string) => {
     setBusy(true);
     setError(null);
@@ -65,34 +77,37 @@ export function MemberActions(props: { memberId: string; name: string; kind: "dm
       setBusy(false);
     }
   };
+  if (!props.open && !done && !error) return null;
   return (
-    <div style={{ display: "grid", gap: theme.space(2) }}>
-      <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
-        {props.kind === "dm" ? (
+    <div ref={box} style={{ display: "grid", gap: theme.space(2), padding: `0 ${theme.space(3)}px ${theme.space(2)}px` }}>
+      {props.open ? (
+        <div id={props.id} role="group" aria-label={`Manage ${props.name}`} style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
+          {props.kind === "dm" ? (
+            <ConfirmAction
+              label="Remove DM"
+              busy={busy}
+              danger
+              warning={`${props.name} loses DM on every device and becomes a player. Their sockets close now. They can rejoin as a player with the password.`}
+              onConfirm={() => run(() => api.removeDm(roomId, props.memberId), `${props.name} is no longer a DM.`)}
+            />
+          ) : null}
           <ConfirmAction
-            label="Remove DM"
+            label="Kick"
             busy={busy}
             danger
-            warning={`${props.name} loses DM on every device and becomes a player. Their sockets close now. They can rejoin as a player with the password.`}
-            onConfirm={() => run(() => api.removeDm(roomId, props.memberId), `${props.name} is no longer a DM.`)}
+            warning={`Sign ${props.name} out on every device? They stay in this list and can rejoin with the player password. To keep them out, change the password too.`}
+            onConfirm={() => run(() => api.kick(roomId, props.memberId), `${props.name} was signed out.`)}
           />
-        ) : null}
-        <ConfirmAction
-          label="Kick"
-          busy={busy}
-          danger
-          warning={`Sign ${props.name} out on every device? They stay in this list and can rejoin with the player password. To keep them out, change the password too.`}
-          onConfirm={() => run(() => api.kick(roomId, props.memberId), `${props.name} was signed out.`)}
-        />
-        <ConfirmAction
-          label="Remove"
-          confirmLabel="Remove"
-          busy={busy}
-          danger
-          warning={`Sign ${props.name} out on every device and take them off this list? Their drawings and areas are deleted, and their tokens and characters lose them as an owner. This cannot be undone. With the player password they can only join again as someone new.`}
-          onConfirm={() => run(() => api.removeMember(roomId, props.memberId), `${props.name} was removed.`)}
-        />
-      </div>
+          <ConfirmAction
+            label="Remove"
+            confirmLabel="Remove"
+            busy={busy}
+            danger
+            warning={`Sign ${props.name} out on every device and take them off this list? Their drawings and areas are deleted, and their tokens and characters lose them as an owner. This cannot be undone. With the player password they can only join again as someone new.`}
+            onConfirm={() => run(() => api.removeMember(roomId, props.memberId), `${props.name} was removed.`)}
+          />
+        </div>
+      ) : null}
       {done ? <Notice role="status">{done}</Notice> : null}
       <ErrorText>{error}</ErrorText>
     </div>
