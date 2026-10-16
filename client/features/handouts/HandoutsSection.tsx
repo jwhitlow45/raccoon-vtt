@@ -18,7 +18,7 @@ import { FileButton, RadioGroup } from "../dm/controls.tsx";
 import { honorsImageOrientation } from "../images/orientation.ts";
 import { docShowing } from "../images/library.ts";
 import { checkImageFile, prepareImageUpload } from "../images/upload.ts";
-import { EMPTY_DRAFT, handoutDraftSlot, type HandoutDraft } from "./draft.ts";
+import { EMPTY_DRAFT, handoutDraftSlot, withPick, withTypedTitle, type HandoutDraft } from "./draft.ts";
 import { HANDOUT_MAX_BYTES, HANDOUT_MAX_SIDE } from "./downscale.ts";
 import { audienceText, pageCountText, showHandoutOp, showingKey, TITLE_FIELD_MAX, titleFromFileName, viewerPagesOf } from "./handouts.ts";
 import { HandoutViewer, type ViewerPage } from "./HandoutViewer.tsx";
@@ -130,7 +130,7 @@ export function HandoutsSection() {
   const showSaved = useCallback(
     (docId: string) => {
       const now = draft.getState();
-      draft.setState({ ...now, open: true, pick: { kind: "doc", docId }, title: now.title.trim() ? now.title : (docs?.[docId]?.title ?? "") });
+      draft.setState({ ...withPick(now, { kind: "doc", docId }, docs?.[docId]?.title ?? ""), open: true });
     },
     [draft, docs],
   );
@@ -230,7 +230,7 @@ function ShowHandout(props: {
     autoPicked.current = savedDocId;
     const now = draftStore.getState();
     if (!now.open || now.pick) return;
-    draftStore.setState({ ...now, pick: { kind: "doc", docId: savedDocId }, title: now.title.trim() ? now.title : (props.docs[savedDocId]?.title ?? "") });
+    draftStore.setState(withPick(now, { kind: "doc", docId: savedDocId }, props.docs[savedDocId]?.title ?? ""));
   }, [savedDocId, savedDocHere, draftStore, props.docs]);
   // The form opens at its first field, and Show or Cancel gives focus back to the button that opened it.
   const { opener, formRef: form } = props;
@@ -289,7 +289,7 @@ function ShowHandout(props: {
       });
       setLibrary((list) => (list && !list.some((a) => a.id === row.id) ? [row, ...list] : list));
       const now = draftStore.getState();
-      set({ pick: { kind: "image", asset: row }, title: now.title.trim() ? now.title : titleFromFileName(file.name) });
+      draftStore.setState(withPick(now, { kind: "image", asset: row }, titleFromFileName(file.name)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "The upload failed.");
     } finally {
@@ -387,7 +387,7 @@ function ShowHandout(props: {
                       key={d.id}
                       type="button"
                       aria-label={`Use ${d.title}, ${pageCountText(d.pages.length)}`}
-                      onClick={() => set({ pick: { kind: "doc", docId: d.id }, title: title.trim() ? title : d.title })}
+                      onClick={() => draftStore.setState(withPick(draftStore.getState(), { kind: "doc", docId: d.id }, d.title))}
                       style={{
                         position: "relative",
                         padding: 0,
@@ -410,7 +410,7 @@ function ShowHandout(props: {
                       key={a.id}
                       type="button"
                       aria-label="Use this image"
-                      onClick={() => set({ pick: { kind: "image", asset: a } })}
+                      onClick={() => draftStore.setState(withPick(draftStore.getState(), { kind: "image", asset: a }, ""))}
                       style={{ padding: 0, border: `${theme.line.border}px solid ${theme.color.border}`, borderRadius: theme.radius.sm, background: "transparent", cursor: "pointer", aspectRatio: "1" }}
                     >
                       <img src={assets.url(a.id, "thumb")} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: theme.radius.sm }} />
@@ -423,7 +423,7 @@ function ShowHandout(props: {
         )}
         {status ? <Loading text={status} delay={0} /> : null}
       </div>
-      <Field label="Title" value={title} maxLength={TITLE_FIELD_MAX} onChange={(e) => set({ title: e.target.value })} placeholder="The old map" />
+      <Field label="Title" value={title} maxLength={TITLE_FIELD_MAX} onChange={(e) => draftStore.setState(withTypedTitle(draftStore.getState(), e.target.value))} placeholder="The old map" />
       <RadioGroup<"all" | "some">
         legend="Show to"
         value={audience}

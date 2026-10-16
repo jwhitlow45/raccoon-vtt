@@ -681,8 +681,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     const form = handoutForm();
     await form.getByRole("button", { name: "From the library" }).click();
     await form.getByRole("button", { name: "Use Long book, 3 pages" }).click();
-    // A title the form already holds stays, so this one is typed.
-    await form.getByLabel("Title").fill("Long book");
+
     await form.getByRole("button", { name: "Show", exact: true }).click();
     const showing = dm.getByRole("list", { name: "Handouts showing" }).getByRole("listitem").filter({ hasText: "Long book" });
     await showing.waitFor();
@@ -737,10 +736,10 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await shots.take(dm, "pdf-job-paused");
     await block.getByRole("button", { name: "Try again", exact: true }).click();
     await shown(block, "Saved as Thirty, 30 pages.").waitFor({ timeout: 90_000 });
-    // Show it puts the document in the form in place of the image picked there, and keeps the title there (the project owner, 2026-10-16).
+    // Show it puts the document in the form in place of the image picked there. The title the form filled in from the image's name gives way to the document's, as only a typed one stays (the project owner, 2026-10-16).
     await block.getByRole("button", { name: "Show it" }).click();
     await handoutForm().getByText("30 pages", { exact: true }).waitFor();
-    assert.equal(await handoutForm().getByLabel("Title").inputValue(), "Map scrap");
+    assert.equal(await handoutForm().getByLabel("Title").inputValue(), "Thirty");
     await shots.take(dm, "pdf-job-show-it");
     const thirty = { pages: Object.values(dmSocket.state?.handoutDocs ?? {}).find((d) => d?.title === "Thirty")!.pages };
     await handoutForm().getByRole("button", { name: "Change" }).click();
