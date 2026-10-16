@@ -1,5 +1,9 @@
 import { useEffect, useSyncExternalStore } from "react";
+import { createStore } from "zustand/vanilla";
+import { handoutPages } from "#shared/handouts.ts";
+import type { Handout, HandoutDoc } from "#shared/model.ts";
 import { ApiError, api, type AssetRow } from "../../lib/api.ts";
+import { scopeSlot } from "../../state/scope.ts";
 
 /**
  * The room's images as the server lists them for this member (design 11.2:
@@ -81,7 +85,8 @@ export function forgetAssets(roomId: string, ids: readonly string[]): void {
 export type LibraryState = { rows: readonly AssetRow[] | null; loading: boolean; failed: boolean };
 
 function useEntry(roomId: string): Entry {
-  useSyncExternalStore(subscribe, () => version);
+  // The same snapshot on a server render, which only tests do.
+  useSyncExternalStore(subscribe, () => version, () => version);
   return entryFor(roomId);
 }
 
@@ -117,9 +122,16 @@ export function resetLibraryForTest(): void {
 
 // ---------------------------------------------------------------- the DM's cleanup (docs/design-v1-dm-tools.md 3.19)
 
-/** The library images the DM can delete: those the room's state does not use. Scene thumbnails are cleaned up on their own. */
-export function notInUse(rows: readonly AssetRow[]): AssetRow[] {
-  return rows.filter((r) => r.inUse === false && r.kind !== "thumb");
+/**
+ * The library images the DM can delete: those the room's state does not use.
+ * Scene thumbnails are cleaned up on their own. `held` names images this
+ * device knows are taken though the listing may not say so yet: a
+ * document's pages, which a listing fetched before the document was saved
+ * still calls unused, and a running upload's (docs/design-v1-pdf-handouts.md
+ * 4.1.2 and 8.1).
+ */
+export function notInUse(rows: readonly AssetRow[], held: ReadonlySet<string> = new Set()): AssetRow[] {
+  return rows.filter((r) => r.inUse === false && r.kind !== "thumb" && !held.has(r.id));
 }
 
 /** The server takes at most this many ids a request. */
@@ -141,7 +153,8 @@ export function totalBytes(rows: readonly AssetRow[]): number | null {
   return total;
 }
 
-export type DeleteResult = { deleted: number; inUse: boolean; error: unknown };
+/** `remaining` lists the ids the fresh list still holds: those kept as in use, or left by a failure. */
+export type DeleteResult = { deleted: number; inUse: boolean; error: unknown; remaining: string[] };
 
 /**
  * Deletes the images in batches the server accepts. An image the state
@@ -178,5 +191,74 @@ export async function deleteImages(roomId: string, ids: readonly string[]): Prom
   // Counted from the fresh list, so the count is what the server removed whatever it refused.
   const rows = entryFor(roomId).rows;
   const deleted = rows ? ids.filter((id) => !rows.has(id)).length : 0;
-  return { deleted, inUse, error };
+  // With no list at all, only the server's refusals say what stayed.
+  const remaining = rows ? ids.filter((id) => rows.has(id)) : error !== null || inUse ? [...ids] : [];
+  return { deleted, inUse, error, remaining };
+}
+
+// ---------------------------------------------------------------- handout documents (docs/design-v1-pdf-handouts.md 8.1)
+
+/**
+ * The images a running PDF upload on this device holds, the pages it made
+ * and those it reused alike (docs/design-v1-pdf-handouts.md 4.1.2). The
+ * upload job (features/handouts/pdf) writes it: it adds each page's id once
+ * the page's upload answers, and empties it when the job ends, saved,
+ * cancelled or dismissed. The Library reads it. Until the job ends its
+ * pages are not loose on this device, so they are tagged "Uploading" and
+ * kept out of "Not in use" and Clean up, where a tap could delete a page
+ * the job is about to save. Another DM device has no such slot and lists
+ * them as loose images, which the job's save meets as `gone`.
+ */
+export type Uploading = { ids: ReadonlySet<string> };
+
+export const uploadingSlot = scopeSlot(() => createStore<Uploading>(() => ({ ids: new Set<string>() })));
+
+/** A document's images, each once, in the order of the first page that names it. A blank page can repeat (section 3.1). */
+export function docAssetIds(doc: Pick<HandoutDoc, "pages">): string[] {
+  return [...new Set(doc.pages.map((p) => p.assetId))];
+}
+
+/**
+ * Whether a handout showing has exactly this document's pages: the same
+ * images in the same order, one image counting as the one page it is. One
+ * shared page, such as a blank page two documents both hold, does not
+ * count. This only describes the document. Which images may be deleted is
+ * the server's question, answered from the whole state (section 3.5).
+ */
+export function docShowing(doc: Pick<HandoutDoc, "pages">, handouts: Iterable<Handout | undefined>): boolean {
+  for (const h of handouts) {
+    if (!h) continue;
+    const pages = handoutPages(h);
+    if (pages.length === doc.pages.length && pages.every((p, i) => p.assetId === doc.pages[i]?.assetId)) return true;
+  }
+  return false;
+}
+
+/** The DM's documents, newest first. */
+export function docsNewestFirst(docs: Readonly<Record<string, HandoutDoc | undefined>> | undefined): HandoutDoc[] {
+  return Object.values(docs ?? {})
+    .filter((d): d is HandoutDoc => d !== undefined)
+    .sort((a, b) => (a.createdAt === b.createdAt ? (a.id < b.id ? 1 : -1) : a.createdAt < b.createdAt ? 1 : -1));
+}
+
+/**
+ * The handout images listed loose, after the documents: those no document
+ * names, since a document shows as one item with its pages. `hidden` takes
+ * out more, such as the pages of a document being deleted, which go with it.
+ */
+export function looseHandouts(rows: readonly AssetRow[], docs: readonly Pick<HandoutDoc, "pages">[], hidden: ReadonlySet<string> = new Set()): AssetRow[] {
+  const named = new Set(docs.flatMap((d) => d.pages.map((p) => p.assetId)));
+  return rows.filter((r) => r.kind === "handout" && !named.has(r.id) && !hidden.has(r.id));
+}
+
+/** A document's size, each image counted once however many pages it fills, and null until the list holds every image with its size. */
+export function docBytes(doc: Pick<HandoutDoc, "pages">, rows: ReadonlyMap<string, AssetRow> | null): number | null {
+  if (!rows) return null;
+  const listed: AssetRow[] = [];
+  for (const id of docAssetIds(doc)) {
+    const row = rows.get(id);
+    if (!row) return null;
+    listed.push(row);
+  }
+  return totalBytes(listed);
 }

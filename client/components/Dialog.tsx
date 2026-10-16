@@ -37,6 +37,8 @@ export type DialogProps = {
   back?: HeaderBack | null;
   /** Between the title and the close button. */
   headerActions?: ReactNode;
+  /** Lines under the title inside the header, such as the handout viewer's details (SheetHeader `detail`). */
+  headerDetail?: ReactNode;
   /** Where focus returns on close, when not to whatever had it as the dialog opened. */
   opener?: RefObject<HTMLElement | null>;
   /** Android's Back closes the dialog (lib/backClose.ts) rather than leaving the room. */
@@ -172,7 +174,7 @@ export function Dialog(props: DialogProps) {
           ...card,
         }}
       >
-        {header ? <SheetHeader title={props.title} back={props.back} actions={props.headerActions} onClose={onClose} divider /> : null}
+        {header ? <SheetHeader title={props.title} back={props.back} actions={props.headerActions} detail={props.headerDetail} onClose={onClose} divider /> : null}
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", padding: theme.space(4), ...props.bodyStyle }}>{props.children}</div>
         {props.footer || props.status ? (
           <footer

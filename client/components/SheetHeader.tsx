@@ -84,6 +84,12 @@ export function SheetHeader(props: {
    * buttons at the right, then the title alone on one line. 78 px in all.
    */
   stacked?: boolean;
+  /**
+   * Lines under the title row, inside the header: what the dialog shows,
+   * such as the handout viewer's size, bytes and credit
+   * (docs/design-v1-pdf-handouts.md 8.4). In line with the title's text.
+   */
+  detail?: ReactNode;
 }) {
   const { back, level = 2 } = props;
   const Heading = level === 2 ? "h2" : "h3";
@@ -129,25 +135,24 @@ export function SheetHeader(props: {
       </header>
     );
   }
-  return (
-    <header
-      style={{
-        flex: "none",
-        display: "flex",
-        alignItems: "center",
-        gap: theme.space(1),
-        // A row that never wraps would otherwise ask its parent for the title's whole width, before the title's ellipsis can act.
-        minWidth: 0,
-        minHeight: 56,
-        padding: `0 ${padding}px`,
-        borderBottom: divider,
-      }}
-    >
+  const row = (
+    <>
       {backButton}
       {heading(false)}
       {trailing}
-    </header>
+    </>
   );
+  // A row that never wraps would otherwise ask its parent for the title's whole width, before the title's ellipsis can act.
+  const rowStyle: CSSProperties = { flex: "none", display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0, minHeight: 56, padding: `0 ${padding}px` };
+  if (props.detail) {
+    return (
+      <header style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, borderBottom: divider }}>
+        <div style={rowStyle}>{row}</div>
+        <div style={{ minWidth: 0, padding: `0 ${padding + theme.space(2)}px ${theme.space(2)}px`, marginTop: -theme.space(2) }}>{props.detail}</div>
+      </header>
+    );
+  }
+  return <header style={{ ...rowStyle, borderBottom: divider }}>{row}</header>;
 }
 
 /** The stacked header's padding above and below, and its title's line: 6 + 44 + 22 + 6 = 78 px (sheetCap.ts SHEET_HEADER_STACKED). */

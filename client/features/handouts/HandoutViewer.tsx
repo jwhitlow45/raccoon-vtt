@@ -116,8 +116,14 @@ export function HandoutViewer(props: {
    * as a reconnect's resync, keeps the page, the zoom and any gesture.
    */
   showing: string;
-  /** Header buttons before Expand, such as the popup's Download. */
+  /** Header buttons before Expand, such as the popup's Download or the Library's Delete. */
   headerActions?: ReactNode;
+  /**
+   * What is shown, in the header under the title: the Library's size,
+   * bytes, use and credit (docs/design-v1-pdf-handouts.md 8.4). Small and
+   * muted, wrapping as it needs.
+   */
+  details?: ReactNode;
   /** Lines between the header and the image, such as "The DM shows you". */
   lead?: ReactNode;
   /** Android's Back closes the viewer (lib/backClose.ts). */
@@ -524,6 +530,9 @@ export function HandoutViewer(props: {
             {expand}
           </>
         ) : undefined
+      }
+      headerDetail={
+        props.details ? <div style={{ display: "grid", gap: theme.space(1), fontSize: theme.font.small, color: theme.color.textMuted, lineHeight: theme.leading.body }}>{props.details}</div> : undefined
       }
       bodyStyle={{ display: "flex", flexDirection: "column", padding: 0 }}
     >

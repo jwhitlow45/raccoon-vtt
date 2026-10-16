@@ -1,9 +1,11 @@
 import { useMemo } from "react";
+import { handoutPages } from "#shared/handouts.ts";
 import type { Handout } from "#shared/model.ts";
 import { Button } from "../components/Button.tsx";
 import { Section } from "../components/Panel.tsx";
 import { Row, RowList } from "../components/Row.tsx";
 import { closedSlot, openHandout } from "../features/handouts/closed.ts";
+import { pageCountText } from "../features/handouts/handouts.ts";
 import { LibraryGrid } from "../features/images/LibraryGrid.tsx";
 import type { PanelProps } from "../features/panels.ts";
 import { theme } from "../lib/theme.ts";
@@ -59,6 +61,7 @@ function ShowingHandouts(props: { close(): void }) {
               />
             }
             title={h.title}
+            detail={pagesDetail(h)}
             style={{ padding: `${theme.space(2)}px 0` }}
             trailing={
               <Button
@@ -76,4 +79,10 @@ function ShowingHandouts(props: { close(): void }) {
       </RowList>
     </Section>
   );
+}
+
+/** "12 pages" under a handout of two or more pages (docs/design-v1-pdf-handouts.md 5.9). One image says nothing more, as before. */
+function pagesDetail(h: Handout): string | undefined {
+  const count = handoutPages(h).length;
+  return count > 1 ? pageCountText(count) : undefined;
 }
