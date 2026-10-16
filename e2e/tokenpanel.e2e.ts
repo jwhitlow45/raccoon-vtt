@@ -235,7 +235,19 @@ async function ringsCompact(panel: Locator, where: string): Promise<void> {
     assert.ok(Math.abs(text.left + text.width / 2 - (box.left + box.width / 2)) <= 1, `${where}: a preset's digits sit in its middle`);
   }
   const last = chips[chips.length - 1]!.box;
-  const field = await rectOf(group.getByRole("textbox", { name: "Another range ring in feet", exact: true }));
+  const fieldBox = group.getByRole("textbox", { name: "Custom ring distance in feet", exact: true });
+  assert.equal(await fieldBox.getAttribute("placeholder"), "Custom ft", `${where}: the field's placeholder`);
+  const room = await fieldBox.evaluate((el) => {
+    type Input = { placeholder: string; clientWidth: number; ownerDocument: Doc & { createElement(t: string): { getContext(k: string): { font: string; measureText(t: string): { width: number } } } }; };
+    const input = el as unknown as Input;
+    const view = (input.ownerDocument as unknown as { defaultView: { getComputedStyle(e: unknown): Record<string, string> } }).defaultView;
+    const cs = view.getComputedStyle(el);
+    const pen = input.ownerDocument.createElement("canvas").getContext("2d");
+    pen.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    return { inside: input.clientWidth - Number.parseFloat(cs.paddingLeft!) - Number.parseFloat(cs.paddingRight!), text: pen.measureText(input.placeholder).width };
+  });
+  assert.ok(room.inside >= room.text, `${where}: the placeholder is cut, ${room.text} px in ${room.inside}`);
+  const field = await rectOf(fieldBox);
   assert.ok(Math.abs(field.top + field.height / 2 - (last.top + last.height / 2)) <= 2 && field.left >= last.right, `${where}: the field ends the presets' row`);
   assert.equal(await panel.getByText("Another distance", { exact: true }).count(), 0, `${where}: no label or help under the rings`);
 }
@@ -253,6 +265,45 @@ async function hpPairSideBySide(panel: Locator, where: string): Promise<void> {
   assert.ok(Math.abs(labels[0]!.top - labels[1]!.top) <= 2, `${where}: the labels stand alike`);
   // Above its field, a label starts where the field starts, as labels do down the rest of the panel.
   if (labels[0]!.bottom <= maxHp.top + 1) assert.ok(Math.abs(labels[0]!.left - maxHp.left) <= 1 && Math.abs(labels[1]!.left - tempHp.left) <= 1, `${where}: a label above its field starts with it`);
+}
+
+/**
+ * With four rings on (docs/design-v1-token-panel.md 3.8), one muted line says so, and the presets that are off and the
+ * field stay in the tab order, aria-disabled and described by that line, doing nothing when pressed. Clear empties it again.
+ */
+async function ringsFull(panel: Locator, where: string): Promise<void> {
+  const group = panel.getByRole("group", { name: "Range rings in feet", exact: true });
+  for (const ft of ["5", "10", "15", "30"]) await group.getByRole("button", { name: ft, exact: true }).click();
+  const line = panel.getByText("At most 4 rings. Turn one off to add another.", { exact: true });
+  await line.waitFor();
+  const lineId = await line.getAttribute("id");
+  assert.ok(lineId, `${where}: the line has an id`);
+  const off = group.getByRole("button", { name: "60", exact: true });
+  const field = group.getByRole("textbox", { name: "Custom ring distance in feet", exact: true });
+  for (const control of [off, field]) {
+    assert.equal(await control.getAttribute("aria-disabled"), "true", `${where}: aria-disabled`);
+    assert.equal(await control.getAttribute("aria-describedby"), lineId, `${where}: described by the line`);
+    // Not the `disabled` attribute, which would take it out of the tab order. Playwright's isDisabled counts aria-disabled too.
+    assert.equal(await control.evaluate((el) => (el as unknown as { disabled: boolean }).disabled), false, `${where}: still in the tab order`);
+    await control.focus();
+    assert.ok(await control.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement), `${where}: takes focus`);
+  }
+  assert.equal(await field.evaluate((el) => (el as unknown as { readOnly: boolean }).readOnly), true, `${where}: the field takes no typing`);
+  // By keyboard, as the person who found them would try them: neither adds a fifth ring.
+  const keyboard = panel.page().keyboard;
+  await off.focus();
+  await keyboard.press("Enter");
+  await field.focus();
+  await keyboard.type("45");
+  await keyboard.press("Enter");
+  await settle(panel);
+  assert.equal(await off.getAttribute("aria-pressed"), "false", `${where}: a fifth ring stays off`);
+  assert.equal(await field.inputValue(), "", `${where}: the field took no distance`);
+  assert.equal(await group.getByRole("button", { pressed: true }).count(), 4, `${where}: still four rings`);
+  await group.scrollIntoViewIfNeeded();
+  await shots.take(panel.page(), "tokenpanel-range-rings-full");
+  await panel.getByRole("button", { name: "Remove every range ring", exact: true }).click();
+  await line.waitFor({ state: "detached" });
 }
 
 function focused(page: Page): Promise<{ name: string; expanded: string | null; role: string | null }> {
@@ -553,6 +604,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.ok(change.left - panelLeft >= 48 + 16, "the pair sits beside the preview");
     await hpPairSideBySide(panel, "the side panel");
     await ringsCompact(panel, "the side panel");
+    await ringsFull(panel, "the side panel");
     await panel.getByRole("group", { name: "Maximum and temporary HP", exact: true }).scrollIntoViewIfNeeded();
     await shots.take(dm, "tokenpanel-dm-hp-pair");
     await panel.getByRole("group", { name: "Range rings in feet", exact: true }).scrollIntoViewIfNeeded();

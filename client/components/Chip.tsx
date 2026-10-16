@@ -18,6 +18,12 @@ import { choiceLook } from "./looks.ts";
  * `circle` makes a 44 px circle of a short value, such as a range ring's
  * distance, so a row of them reads as one set whatever their digits. Four
  * digits still fit inside it.
+ *
+ * `unavailable` is off for now but stays in the tab order: the disabled
+ * look, `aria-disabled` and a tap that does nothing, with `describedBy`
+ * naming the line that says why, such as the range rings' limit. A truly
+ * disabled chip would leave the keyboard and a screen reader no way to
+ * find it or the reason.
  */
 export function Chip(props: {
   ref?: Ref<HTMLButtonElement>;
@@ -27,6 +33,8 @@ export function Chip(props: {
   remove?: boolean;
   circle?: boolean;
   disabled?: boolean;
+  unavailable?: boolean;
+  describedBy?: string;
   title?: string;
   "aria-label"?: string;
   /** Marks for the caller's own queries, such as finding the chip to focus after one is removed. */
@@ -36,6 +44,7 @@ export function Chip(props: {
   const remove = props.remove === true;
   const circle = props.circle === true;
   const on = remove || props.pressed === true;
+  const off = props.disabled === true || props.unavailable === true;
   const data = Object.fromEntries(Object.entries(props).filter(([key]) => key.startsWith("data-")));
   return (
     <button
@@ -44,9 +53,13 @@ export function Chip(props: {
       type="button"
       aria-pressed={remove ? undefined : props.pressed}
       aria-label={props["aria-label"]}
+      aria-disabled={props.unavailable && !props.disabled ? true : undefined}
+      aria-describedby={props.describedBy}
       title={props.title}
       disabled={props.disabled}
-      onClick={props.onClick}
+      onClick={() => {
+        if (!off) props.onClick();
+      }}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -64,15 +77,15 @@ export function Chip(props: {
         fontWeight: theme.weight.strong,
         fontFamily: theme.font.body,
         whiteSpace: "nowrap",
-        cursor: props.disabled ? "default" : "pointer",
-        ...choiceLook(on, props.disabled),
+        cursor: off ? "default" : "pointer",
+        ...choiceLook(on, off),
       }}
     >
       {props.children}
       {props.count !== undefined && props.count !== null ? (
-        <span style={{ color: props.disabled ? theme.color.textDisabled : theme.color.textMuted, fontWeight: theme.weight.regular }}>{props.count}</span>
+        <span style={{ color: off ? theme.color.textDisabled : theme.color.textMuted, fontWeight: theme.weight.regular }}>{props.count}</span>
       ) : null}
-      {remove ? <Icon name="close" size="sm" style={{ color: props.disabled ? theme.color.textDisabled : theme.color.textMuted }} /> : null}
+      {remove ? <Icon name="close" size="sm" style={{ color: off ? theme.color.textDisabled : theme.color.textMuted }} /> : null}
     </button>
   );
 }

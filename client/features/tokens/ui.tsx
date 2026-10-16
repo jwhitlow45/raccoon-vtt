@@ -159,6 +159,13 @@ type NumberFieldProps = {
   nullable?: boolean;
   placeholder?: string;
   disabled?: boolean;
+  /**
+   * Off for now but still in the tab order, as Chip's `unavailable` is:
+   * read only, `aria-disabled` and the disabled look, with `describedBy`
+   * naming the line that says why.
+   */
+  unavailable?: boolean;
+  describedBy?: string;
   /** Pixels, or a length such as "100%" for a field that fills a box its caller sizes. */
   width?: number | string;
 };
@@ -203,6 +210,9 @@ function DraftNumber(props: NumberFieldProps & { align: "right" | "center" }) {
       value={draft}
       placeholder={props.placeholder}
       disabled={props.disabled}
+      readOnly={props.unavailable}
+      aria-disabled={props.unavailable && !props.disabled ? true : undefined}
+      aria-describedby={props.describedBy}
       onFocus={focus.onFocus}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {
@@ -212,7 +222,7 @@ function DraftNumber(props: NumberFieldProps & { align: "right" | "center" }) {
         if (e.key === "Enter") e.currentTarget.blur();
         if (e.key === "Escape") focus.discard(e.currentTarget);
       }}
-      style={{ ...fieldStyle({ disabled: props.disabled }), width: props.width ?? NUMBER_FIELD_WIDTH, textAlign: props.align }}
+      style={{ ...fieldStyle({ disabled: props.disabled || props.unavailable }), width: props.width ?? NUMBER_FIELD_WIDTH, textAlign: props.align }}
     />
   );
 }

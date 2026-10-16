@@ -1,3 +1,4 @@
+import { useId } from "react";
 import type { Token } from "#shared/model.ts";
 import { MAX_RANGE_RINGS, MAX_RANGE_RING_FT, type TokenPatch } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
@@ -16,10 +17,17 @@ import { RING_PRESETS, ringsText } from "./rings.ts";
  * a name that stays the same on and off (3.7), in a group named "Range
  * rings in feet". The field for another distance ends the same row, its
  * placeholder saying what it takes, so the section is one block of
- * controls with no lines of help under it.
+ * controls with no lines of help under it. Its name starts with the
+ * placeholder's words, so a voice user says what they see.
+ *
+ * With four rings on, one muted line says so. The presets that are off and
+ * the field stay in the tab order, `aria-disabled` and described by that
+ * line, so a keyboard or screen reader user finds them and learns why
+ * they do nothing.
  */
 export function RangeRingsSection(props: { token: Pick<Token, "rangeRings">; canEdit: boolean; update(patch: TokenPatch): void }) {
   const rings = props.token.rangeRings ?? [];
+  const fullId = useId();
   if (!props.canEdit) {
     return rings.length > 0 ? (
       <Section label="Range rings">
@@ -46,7 +54,7 @@ export function RangeRingsSection(props: { token: Pick<Token, "rangeRings">; can
         {[...RING_PRESETS, ...custom].map((ft) => {
           const on = rings.includes(ft);
           return (
-            <Chip key={ft} circle pressed={on} disabled={!on && full} title={`A ring at ${ft} ft`} onClick={() => toggle(ft)}>
+            <Chip key={ft} circle pressed={on} unavailable={!on && full} describedBy={!on && full ? fullId : undefined} title={`A ring at ${ft} ft`} onClick={() => toggle(ft)}>
               {ft}
             </Chip>
           );
@@ -54,15 +62,19 @@ export function RangeRingsSection(props: { token: Pick<Token, "rangeRings">; can
         {/* Keyed by the rings, so the field empties once its distance is added. */}
         <NumberField
           key={rings.join(",")}
-          label="Another range ring in feet"
-          placeholder={full ? `${MAX_RANGE_RINGS} max` : "Other ft"}
+          label="Custom ring distance in feet"
+          placeholder="Custom ft"
+          // Wide enough for its placeholder at the 16 px fields keep, which the number fields' 88 px cuts.
+          width="calc(9.5ch + 26px)"
           value={undefined}
           min={5}
           max={MAX_RANGE_RING_FT}
-          disabled={full}
-          onCommit={(ft) => ft !== null && set([...rings, ft])}
+          unavailable={full}
+          describedBy={full ? fullId : undefined}
+          onCommit={(ft) => !full && ft !== null && set([...rings, ft])}
         />
       </ChipRow>
+      {full ? <Help id={fullId}>At most {MAX_RANGE_RINGS} rings. Turn one off to add another.</Help> : null}
     </Section>
   );
 }
