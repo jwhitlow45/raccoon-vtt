@@ -75,7 +75,8 @@ function useHeight(scale: number): [(el: HTMLElement | null) => (() => void) | u
       if (!el) return undefined;
       const measure = () => setHeight(barInset(el.getBoundingClientRect()));
       const observer = new ResizeObserver(measure);
-      observer.observe(el);
+      // The border box, since the safe areas pad the bars: a home bar or notch that comes or goes leaves their content the same size.
+      observer.observe(el, { box: "border-box" });
       measure();
       return () => {
         observer.disconnect();
@@ -103,8 +104,8 @@ function useOptionsHeights(scale: number): [(el: HTMLElement | null) => (() => v
         const box = el.getBoundingClientRect();
         const tops = Array.from(el.querySelectorAll("button, input, select"), (c) => c.getBoundingClientRect().top);
         const height = barInset(box);
-        // The bar scrolls past half the screen, so a control scrolled out above it reaches no higher than its top.
-        const controls = tops.length > 0 ? Math.round(Math.min(box.height, box.bottom - Math.min(...tops))) : 0;
+        // The bar scrolls once capped, so a control scrolled out above it reaches no higher than its top, and one below no lower than its foot.
+        const controls = tops.length > 0 ? Math.round(Math.max(0, Math.min(box.height, box.bottom - Math.min(...tops)))) : 0;
         setHeights((h) => (h.height === height && h.controls === controls ? h : { height, controls }));
       };
       /*
@@ -115,7 +116,7 @@ function useOptionsHeights(scale: number): [(el: HTMLElement | null) => (() => v
        */
       const observer = new ResizeObserver(measure);
       const watch = () => {
-        observer.observe(el);
+        observer.observe(el, { box: "border-box" });
         for (const row of el.children) observer.observe(row);
       };
       const changes = new MutationObserver(() => {
@@ -410,8 +411,8 @@ function RoomPage() {
   const previewBottom = previewPush > 0 ? laneTop + previewPush - EDGE : null;
   useLayoutEffect(() => {
     const lasting = lastingRef.current;
-    if (!lasting || besideLane) {
-      barDock.setState({ notices: null });
+    if (!lasting) {
+      barDock.setState({ notices: null, lasting: null });
       return;
     }
     const measure = () => {
@@ -421,7 +422,10 @@ function RoomPage() {
         const r = child.getBoundingClientRect();
         if (area && r.height > 0) bottom = Math.max(bottom ?? -Infinity, (r.bottom - area.top) / zoom);
       }
-      if (barDock.getState().notices !== bottom) barDock.setState({ notices: bottom });
+      // Spanning the map, they push the alerts column down. Beside its lane they leave the column be, but the token bar and the tool's options keep clear of them either way.
+      const notices = besideLane ? null : bottom;
+      const state = barDock.getState();
+      if (state.notices !== notices || state.lasting !== bottom) barDock.setState({ notices, lasting: bottom });
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -431,6 +435,9 @@ function RoomPage() {
     // The observer hears the stack's size only, so what moves it measures again: the turn band coming or going, the notch, the preview's notice.
   }, [barDock, besideLane, previewBottom, zoom, role, topInset, safe.top, laneTop]);
   const columnSummary = useStore(barDock, (s) => s.bar?.lane === "summary" || s.footYields || s.columnCramped) && summary !== null;
+  // The tool's options grow up from the toolbar, but never under the top bars or a lasting notice, which stand over them: past that they scroll.
+  const lastingBottom = useStore(barDock, (s) => s.lasting);
+  const optionsRoom = chrome ? height - chrome.toolbar - Math.max(chrome.top, lastingBottom ?? 0) - EDGE : null;
   const mapFocus = scope.get(mapFocusSlot);
   const mapFocusRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -569,7 +576,7 @@ function RoomPage() {
         ) : null}
         {/* After the sheet, so a test's or a screen reader's first "Close" in the page is still the sheet's (docs/design-v1-visual.md 5.4). */}
         {docked && !dockInHeader ? <DockRow zoom={zoom} sheetHeight={sheetHeight} summary={summary} actions={dockActions} showRef={showRef} summaryRef={summaryRef} /> : null}
-        {tool.Options && optionsShown && !sheet && !pickerOpen ? <OptionsBar ref={optionsRef} tool={tool} role={role} wide={wide} zoom={zoom} /> : null}
+        {tool.Options && optionsShown && !sheet && !pickerOpen ? <OptionsBar ref={optionsRef} tool={tool} role={role} wide={wide} zoom={zoom} room={optionsRoom} /> : null}
         <Toolbar
           ref={toolbarRef}
           zoom={zoom}
@@ -1043,12 +1050,39 @@ function ToolIcon(props: { tool: ToolDef }) {
  * above it on wide screens. They wrap onto more rows rather than scroll, so
  * no option hides past the edge of a phone.
  */
-function OptionsBar(props: { ref?: Ref<HTMLDivElement>; tool: ToolDef; role: "dm" | "player"; wide: boolean; zoom: number }) {
+function OptionsBar(props: { ref?: Ref<HTMLDivElement>; tool: ToolDef; role: "dm" | "player"; wide: boolean; zoom: number; room: number | null }) {
   const Options = props.tool.Options;
+  const own = useRef<HTMLDivElement | null>(null);
+  const { ref: outer } = props;
+  const ref = useCallback(
+    (el: HTMLDivElement | null) => {
+      own.current = el;
+      if (typeof outer === "function") return outer(el);
+      if (outer) outer.current = el;
+      return undefined;
+    },
+    [outer],
+  );
+  // Capped, the bar shows its buttons rather than the hint above them, which scrolls back into view: the Ruler's Keep and Clear stay in reach on a short screen.
+  useLayoutEffect(() => {
+    const el = own.current;
+    if (!el) return;
+    const reveal = () => {
+      const first = el.querySelector<HTMLElement>("button, input, select");
+      if (!first || el.scrollHeight <= el.clientHeight + 1) return;
+      const top = first.offsetTop - theme.space(1);
+      if (el.scrollTop < top) el.scrollTop = top;
+    };
+    reveal();
+    const observer = new ResizeObserver(reveal);
+    observer.observe(el);
+    for (const row of el.children) observer.observe(row);
+    return () => observer.disconnect();
+  }, [props.tool.id]);
   if (!Options) return null;
   return (
     <div
-      ref={props.ref}
+      ref={ref}
       role="toolbar"
       aria-label={`${props.tool.label} options`}
       {...smallUi(props.zoom)}
@@ -1074,8 +1108,10 @@ function OptionsBar(props: { ref?: Ref<HTMLDivElement>; tool: ToolDef; role: "dm
         borderLeft: props.wide ? `${theme.line.border}px solid ${theme.color.border}` : "none",
         borderRadius: props.wide ? theme.radius.md : 0,
         // Rows wrap (measure/controls.tsx), so the bar grows upward. Past
-        // half the screen it scrolls, so the map always keeps the other half.
-        maxHeight: screenHeight(50),
+        // half the screen it scrolls, so the map always keeps the other half,
+        // and past the room under the top bars and any lasting notice too,
+        // which would stand over its buttons, keeping one row at least.
+        maxHeight: props.room === null ? screenHeight(50) : `min(${screenHeight(50)}, ${Math.max(theme.touch + theme.space(2), props.room)}px)`,
         overflowX: "auto",
         overflowY: "auto",
       }}

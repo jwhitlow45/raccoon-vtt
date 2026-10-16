@@ -58,7 +58,7 @@ import { sheetOpen as sheetIsOpen } from "../state/types.ts";
 import { foldsUnderSheet } from "../pages/fold.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
-import { barCover, barDockSlot, clearAnchor, DEFAULT_CHROME, largerEach, pastBars, restingBar } from "./barDock.ts";
+import { barChrome, barCover, barDockSlot, clearAnchor, largerEach, pastBars, restingBar } from "./barDock.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
 import { canDragToken, movesOthers } from "./dragRights.ts";
 import { fitSlot } from "./fitSlot.ts";
@@ -272,7 +272,7 @@ export function MapStage(props: {
     const z = uiScale();
     const layout = layoutSize(window, z);
     if (!shows) return NO_INSETS;
-    const resting = () => restingBar({ layout, viewport: sizeInZoomed(viewport, z), chrome: dock.chrome ?? DEFAULT_CHROME, spot: dock.spot, height: dock.lastHeight, foot: dock.foot, column: dock.column });
+    const resting = () => restingBar({ layout, viewport: sizeInZoomed(viewport, z), chrome: barChrome(dock), spot: dock.spot, height: dock.lastHeight, foot: dock.foot, column: dock.column });
     const bar =
       source === "fresh"
         ? resting()

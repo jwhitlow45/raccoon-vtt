@@ -439,8 +439,8 @@ type Notice = { id: string; text: string };
  * (`forRoom`), uncapped, since a card cut to a strip takes no tap. Its tap
  * opens what it stands for (`asked`, barDock.ts askedAlerts): a waiting
  * roll's card at a phone's foot; or the cards where they are, down to the
- * toolbar over the tool's options, until a tap lands outside them or what
- * waits changes, when the first card fits whole there; or else the alerts
+ * toolbar over the tool's options, until a tap lands outside them or
+ * nothing waits, when the first card fits whole there; or else the alerts
  * over the screen, a dialog from the safe top to the toolbar, or to the
  * screen's foot where even that is too short for the first card, with
  * Close, which Escape and Back close too, as does nothing left waiting. The
@@ -483,6 +483,7 @@ function FightAlerts() {
   const lasting = useStore(dock, (s) => s.notices);
   const bar = useStore(dock, (s) => s.bar);
   const footYields = useStore(dock, (s) => s.footYields);
+  const rollAsked = useStore(dock, (s) => s.columnRollAsked);
   const barSummary = useDockSummary("bar");
   const roomSummary = useDockSummary("room");
   const rolls = useAlertsSummaryEntry();
@@ -503,10 +504,10 @@ function FightAlerts() {
     if (dock.getState().columnCramped !== forRoom) dock.setState({ columnCramped: forRoom });
   }, [dock, forRoom]);
   useLayoutEffect(() => () => dock.setState({ columnCramped: false }), [dock]);
-  // What waits changed: the row's tap asks again, and the cards are measured again, which a hidden card cannot be. The alerts over the screen stay open while anything waits.
+  // What waits changed: the cards are measured again, which a hidden card cannot be. Asked for, they stay shown while anything waits, since opening a roll's card changes the summary's words too.
   const waits = roomSummary?.name ?? null;
   useLayoutEffect(() => {
-    setAsked((a) => (a !== "column" && waits !== null ? a : null));
+    if (waits === null) setAsked(null);
     setFirstHeight(0);
   }, [waits]);
   const overlay = asked !== null && asked !== "column" && !folded;
@@ -523,13 +524,15 @@ function FightAlerts() {
    * tool's option buttons, as in a fight at 480 x 320 at 130%, it rises, over
    * the turn band and then the top bar's row if it must. It never meets a
    * lasting notice, which paints above the column and would hide it. Over a
-   * button in the top bars it narrows to stop 8 px left of it, End turn
-   * above all, since a player who chose Later must still be able to end
-   * their turn. `rowPlace` is how far it rose and how far it stops short of
-   * its usual right edge, in the column's own pixels.
+   * button in the top bars it moves left into a gap between them, 8 px
+   * clear of each, End turn above all, since a player who chose Later must
+   * still be able to end their turn. `rowPlace` is how far it rose and
+   * moved left, and how far in from its usual edges it stops, in the
+   * column's own pixels. It never moves right, which would take the
+   * column past the window: a gap to its right narrows it from the left.
    */
   const rowRef = useRef<HTMLButtonElement>(null);
-  const [rowPlace, setRowPlace] = useState(NOT_RAISED);
+  const [rowPlace, setRowPlace] = useState<RowPlace>(NOT_RAISED);
   const appliedPlace = useRef(rowPlace);
   appliedPlace.current = rowPlace;
   useLayoutEffect(() => {
@@ -542,12 +545,19 @@ function FightAlerts() {
     }
     const r = row.getBoundingClientRect();
     const applied = appliedPlace.current;
-    const usual = { left: r.left, right: r.right + applied.inset * zoom, top: r.top + applied.lift * zoom, height: r.height };
+    const usual = {
+      left: r.left + (applied.shift - applied.insetLeft) * zoom,
+      right: r.right + (applied.shift + applied.insetRight) * zoom,
+      top: r.top + applied.lift * zoom,
+      height: r.height,
+    };
     const controls = Array.from(header.querySelectorAll("button"))
       .filter((b) => !box.contains(b) && !b.hasAttribute("data-rvtt-backdrop"))
       .map((b) => b.getBoundingClientRect());
     const rules = {
       row: usual,
+      // Its shadow keeps inside the window.
+      minLeft: (chrome.safe.left + SHADOW_ROOM) * zoom,
       ceiling: header.firstElementChild?.getBoundingClientRect().top ?? 0,
       floor: (height - chrome.controls - theme.space(1)) * zoom,
       taken: lasting === null ? [] : [{ top: chrome.top * zoom, bottom: (lasting + theme.space(1)) * zoom }],
@@ -557,9 +567,18 @@ function FightAlerts() {
     };
     // Where no spot keeps above the tool's buttons, as with capped options scrolled at 130%, the row lets that rule go first and stands as high as the others allow, over as little of them as it can.
     const place = raisedRow(rules) ?? raisedRow({ ...rules, floor: Infinity, highest: true });
-    const next = place ? { lift: Math.round((usual.top - place.top) / zoom), inset: Math.ceil((usual.right - place.right) / zoom) } : NOT_RAISED;
+    const shift = place ? Math.max(0, Math.round((usual.left - place.left) / zoom)) : 0;
+    const next = place
+      ? {
+          lift: Math.round((usual.top - place.top) / zoom),
+          shift,
+          insetLeft: Math.max(0, Math.ceil((place.left - (usual.left - shift * zoom)) / zoom)),
+          insetRight: Math.max(0, Math.ceil((usual.right - shift * zoom - place.right) / zoom)),
+        }
+      : NOT_RAISED;
     // A measure taken with the place applied differs from the last only by rounding, so it keeps the place and draws nothing again.
-    setRowPlace((prev) => (Math.abs(prev.lift - next.lift) <= 1 && Math.abs(prev.inset - next.inset) <= 1 ? prev : next));
+    const near = (a: RowPlace, b: RowPlace) => Math.abs(a.lift - b.lift) <= 1 && Math.abs(a.shift - b.shift) <= 1 && Math.abs(a.insetLeft - b.insetLeft) <= 1 && Math.abs(a.insetRight - b.insetRight) <= 1;
+    setRowPlace((prev) => (near(prev, next) ? prev : next));
   });
   // Asked for where they are, the cards stand over the tool's options until a tap lands outside them.
   useEffect(() => {
@@ -639,10 +658,50 @@ function FightAlerts() {
   const [showAfter, setShowAfter] = useState<{ kind: "rolls" } | { kind: "alert"; first: AlertsSummary["first"] } | null>(null);
   useLayoutEffect(() => {
     if (!showAfter || summarized) return;
+    // Drawn again once the bar steps aside, the cards may turn out to have no room for one whole card: measured now, they open where they fit before the request is met.
+    const cards = cardsRef.current;
+    const first = cards ? firstCardHeight(cards) / zoom : 0;
+    const footRoll = showAfter.kind === "rolls" && width < CARD_MIN_WIDTH;
+    if (!asked && !footRoll && chrome && first > 0 && toOptions < EDGE + first) {
+      setAsked(askedWhere(first));
+      return;
+    }
     setShowAfter(null);
     if (showAfter.kind === "rolls") rolls?.open({ barAway: true });
     else focusAlert(boxRef.current, showAfter.first);
-  }, [showAfter, summarized, rolls]);
+  });
+
+  // Where the cards show once asked for (barDock.ts askedAlerts), from the first card's height and the room the bars leave.
+  const askedWhere = (first = firstHeight): AskedAlerts =>
+    chrome
+      ? askedAlerts({ first, column: height - chrome.top - chrome.toolbar - push, overlay: height - chrome.safe.top - chrome.toolbar - OVERLAY_HEAD - 2 * OVERLAY_PAD })
+      : "column";
+  /*
+   * The tap on the row beside the token bar asks for the cards it stands
+   * for, and the bar steps aside. Where the cards, drawn again, turn out to
+   * have no room for one whole card, the column's own row stands for them
+   * now, and the tap asks as that row's tap would, so one tap is enough.
+   */
+  // A roll's card opened in the column by its chip asks as the row's tap would, the chip being in the column too: once, so Close on the alerts over the screen holds.
+  const rollPending = useRef(false);
+  const rollBefore = useRef(false);
+  useLayoutEffect(() => {
+    if (rollAsked && !rollBefore.current) rollPending.current = true;
+    if (!rollAsked) rollPending.current = false;
+    rollBefore.current = rollAsked;
+    if (rollPending.current && forRoom) {
+      rollPending.current = false;
+      setAsked(askedWhere());
+      return;
+    }
+    if (!showAfter || !forRoom) return;
+    if (showAfter.kind === "rolls" && width < CARD_MIN_WIDTH) {
+      setShowAfter(null);
+      rolls?.open({ barAway: true });
+      return;
+    }
+    setAsked(askedWhere());
+  });
 
 
   /*
@@ -673,7 +732,7 @@ function FightAlerts() {
       style={{
         position: "absolute",
         top: `calc(100% + ${push - (summarized ? rowPlace.lift : 0)}px)`,
-        right: sheetWidth,
+        right: sheetWidth + (summarized ? rowPlace.shift : 0),
         width: `calc(${cardWidth} + ${leftPad} + ${rightPad})`,
         // Before Room has measured its bars: the screen's height in the zoomed bar's own pixels (features/device/layout.ts), less the bars.
         // Summarized, the row is all it holds, and it always shows whole, however little the bars leave.
@@ -744,14 +803,10 @@ function FightAlerts() {
               rolls?.open({ barAway: true });
               return;
             }
-            if (forRoom && chrome) {
-              const column = height - chrome.top - chrome.toolbar - push;
-              const overlayRoom = height - chrome.safe.top - chrome.toolbar - OVERLAY_HEAD - 2 * OVERLAY_PAD;
-              setAsked(askedAlerts({ first: firstHeight, column, overlay: overlayRoom }));
-            }
+            if (forRoom) setAsked(askedWhere());
             setShowAfter(rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: summary.first });
           }}
-          style={{ ...card, minHeight: SUMMARY_ROW, padding: `0 ${theme.space(3)}px`, marginRight: rowPlace.inset }}
+          style={{ ...card, minHeight: SUMMARY_ROW, padding: `0 ${theme.space(3)}px`, marginLeft: rowPlace.insetLeft, marginRight: rowPlace.insetRight }}
         />
       ) : null}
       <div
@@ -833,8 +888,9 @@ function firstCardHeight(cards: HTMLElement): number {
 const OVERLAY_HEAD = theme.touch + theme.space(1) + theme.line.border;
 const OVERLAY_PAD = theme.space(2);
 
-/** The summary row at its usual place (FightAlerts `rowPlace`). */
-const NOT_RAISED = { lift: 0, inset: 0 };
+/** Where the summary row stands against its usual place (FightAlerts `rowPlace`): how far it rose and moved left, and how far in from each edge it stops. */
+type RowPlace = { lift: number; shift: number; insetLeft: number; insetRight: number };
+const NOT_RAISED: RowPlace = { lift: 0, shift: 0, insetLeft: 0, insetRight: 0 };
 
 /** Room around the alert cards for their shadow (theme.shadow.float reaches about 20 px below a card). */
 const SHADOW_ROOM = theme.space(5);

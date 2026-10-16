@@ -72,6 +72,17 @@ export const NO_SIDES: Sides = { top: 0, right: 0, bottom: 0, left: 0 };
 export const DEFAULT_CHROME: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NO_SIDES, sheet: 0 };
 
 /**
+ * The bars a token bar keeps clear of: the measured chrome, with its top
+ * past the lasting notices, spanning the map or beside the alerts' lane.
+ * They paint over the bar, and under the Starting view notice its header
+ * and Close took no tap.
+ */
+export function barChrome(state: { chrome: Chrome | null; lasting: number | null }): Chrome {
+  const chrome = state.chrome ?? DEFAULT_CHROME;
+  return state.lasting === null || state.lasting <= chrome.top ? chrome : { ...chrome, top: state.lasting };
+}
+
+/**
  * The part of the map a docked bar lives in: the map less the bars over
  * it, the side safe areas and a landscape sheet, with an 8 px margin all
  * round. Its height may come out at 0 or less on a short screen. `foot` is
@@ -511,16 +522,18 @@ export function columnFacts(prev: ColumnFacts | null, input: { top: number; meas
  * InitiativeStrip.tsx FightAlerts): the lowest spot at or above its usual
  * place whose foot keeps above the tool's option buttons (`floor`), that
  * meets no lasting notice (`taken`), and that stands over no button in the
- * top bars. Where a button stands in its way it narrows from the right to
- * stop `gap` left of it, keeping `minWidth`, or else rises further. It may
- * rise over the turn band and then the top bar's row, up to `ceiling`.
- * Null where no spot is left. `highest` takes the highest spot instead of
- * the lowest: where no spot keeps above the tool's buttons, the caller lets
- * the floor go and keeps the row as far from them as it can. Any one unit
- * throughout: screen px as drawn.
+ * top bars. Across, it takes the rightmost gap between those buttons, `gap`
+ * clear of each, as wide as it is or at least `minWidth`, from its own
+ * right edge leftward as far as `minLeft`: over a room's name or the band's
+ * portrait, never a button. It may rise over the turn band and then the
+ * top bar's row, up to `ceiling`. Null where no spot is left. `highest`
+ * takes the highest spot instead of the lowest: where no spot keeps above
+ * the tool's buttons, the caller lets the floor go and keeps the row as
+ * far from them as it can. Any one unit throughout: screen px as drawn.
  */
 export function raisedRow(input: {
   row: { left: number; right: number; top: number; height: number };
+  minLeft: number;
   ceiling: number;
   floor: number;
   taken: readonly { top: number; bottom: number }[];
@@ -528,18 +541,30 @@ export function raisedRow(input: {
   gap: number;
   minWidth: number;
   highest?: boolean;
-}): { top: number; right: number } | null {
+}): { top: number; left: number; right: number } | null {
   const { row, gap } = input;
-  const at = (top: number): { top: number; right: number } | null => {
+  const width = row.right - row.left;
+  const at = (top: number): { top: number; left: number; right: number } | null => {
     const bottom = top + row.height;
     if (input.taken.some((t) => t.top < bottom && t.bottom > top)) return null;
-    let right = row.right;
-    for (const c of input.controls) {
-      if (c.top >= bottom || c.bottom <= top || c.right <= row.left) continue;
-      if (c.left - gap < row.left + input.minWidth) return null;
-      right = Math.min(right, c.left - gap);
+    // What it may not cover in this band: each button and a gap either side.
+    const blocks = input.controls
+      .filter((c) => c.top < bottom && c.bottom > top)
+      .map((c) => ({ left: c.left - gap, right: c.right + gap }))
+      .sort((x, y) => x.left - y.left);
+    const free: { left: number; right: number }[] = [];
+    let from = input.minLeft;
+    for (const b of blocks) {
+      if (from >= row.right) break;
+      if (b.left > from) free.push({ left: from, right: Math.min(b.left, row.right) });
+      from = Math.max(from, b.right);
     }
-    return { top, right };
+    if (from < row.right) free.push({ left: from, right: row.right });
+    // The rightmost gap wide enough, as near its own place as the buttons let it stand.
+    for (const f of free.reverse()) {
+      if (f.right - f.left >= input.minWidth) return { top, left: Math.max(f.left, f.right - width), right: f.right };
+    }
+    return null;
   };
   const lowest = Math.min(row.top, input.floor - row.height);
   if (input.highest) {
@@ -613,6 +638,10 @@ type BarDockState = {
   column: ColumnFacts | null;
   /** The bottom of the lasting notices while they span the map, which the column starts below. */
   notices: number | null;
+  /** The bottom of the lasting notices wherever they stand, which the token bar and the tool's options keep clear of. */
+  lasting: number | null;
+  /** A roll's card in the alerts column was asked for, by its chip or a summary (features/rolls/PlayerRolls.tsx). */
+  columnRollAsked: boolean;
   /** This Room's spot. A "view as a player" preview reads the device's and keeps its own changes to itself. */
   spot: Spot;
   /** The content height the bar last had, for where it will rest before it opens. */
@@ -636,7 +665,7 @@ type BarDockState = {
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
-  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, spot: readSpot(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false })),
+  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false })),
 );
 
 function clamp(n: number, lo: number, hi: number): number {

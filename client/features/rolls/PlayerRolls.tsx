@@ -177,6 +177,12 @@ export function PlayerRolls() {
   useLayoutEffect(() => {
     dockStore.setState({ footYields: yieldsToBar });
   }, [dockStore, yieldsToBar]);
+  // Asked for in the alerts column, by its chip or a summary, the card must show whole there or over the screen (InitiativeStrip.tsx FightAlerts).
+  const columnRollAsked = shown !== undefined && summoned === shown.id && width >= CARD_MIN_WIDTH;
+  useLayoutEffect(() => {
+    if (dockStore.getState().columnRollAsked !== columnRollAsked) dockStore.setState({ columnRollAsked });
+  }, [dockStore, columnRollAsked]);
+  useLayoutEffect(() => () => dockStore.setState({ columnRollAsked: false }), [dockStore]);
   useLayoutEffect(() => {
     const el = cardRef.current;
     if (!atFoot || !el) {

@@ -463,21 +463,21 @@ describe("fit and find keep clear of the bar", () => {
 describe("the alerts column's summary row on a short screen", () => {
   // 480 x 320 at 130% as layout px: the row's usual place is 60 to 104, under a 52 px top bar.
   const row = { left: 55, right: 314, top: 60, height: 44 };
-  const base = { ceiling: 0, taken: [], controls: [], gap: 8, minWidth: 44 };
+  const base = { minLeft: 20, ceiling: 0, taken: [], controls: [], gap: 8, minWidth: 44 };
 
   test("keeps its place while the tool's buttons stand below it", () => {
-    assert.deepEqual(raisedRow({ ...base, row, floor: 140 }), { top: 60, right: 314 });
+    assert.deepEqual(raisedRow({ ...base, row, floor: 140 }), { top: 60, left: 55, right: 314 });
   });
 
-  test("rises just above the tool's buttons, narrowing to stop 8 px left of End turn in the band", () => {
+  test("rises just above the tool's buttons, stopping 8 px left of End turn in the band and sliding left over the band's name", () => {
     const endTurn = { left: 220, top: 58, right: 300, bottom: 102 };
-    assert.deepEqual(raisedRow({ ...base, row: { ...row, top: 108 }, floor: 132, controls: [endTurn] }), { top: 88, right: 212 });
+    assert.deepEqual(raisedRow({ ...base, row: { ...row, top: 108 }, floor: 132, controls: [endTurn] }), { top: 88, left: 20, right: 212 });
   });
 
   test("never meets a lasting notice, and rises over the top bar's row past it, short of its buttons", () => {
     const notice = { top: 52, bottom: 126 };
     const find = { left: 280, top: 4, right: 324, bottom: 48 };
-    assert.deepEqual(raisedRow({ ...base, row: { ...row, top: 134 }, floor: 113, taken: [notice], controls: [find] }), { top: 8, right: 272 });
+    assert.deepEqual(raisedRow({ ...base, row: { ...row, top: 134 }, floor: 113, taken: [notice], controls: [find] }), { top: 8, left: 20, right: 272 });
   });
 
   test("its tap shows the cards in the column where the first fits whole down to the toolbar, and over the screen otherwise", () => {
@@ -493,13 +493,20 @@ describe("the alerts column's summary row on a short screen", () => {
     const find = { left: 280, top: 4, right: 324, bottom: 48 };
     const input = { ...base, row, floor: 38, controls: [find] };
     assert.equal(raisedRow(input), null);
-    assert.deepEqual(raisedRow({ ...input, floor: Infinity, highest: true }), { top: 0, right: 272 });
+    assert.deepEqual(raisedRow({ ...input, floor: Infinity, highest: true }), { top: 0, left: 20, right: 272 });
   });
 
-  test("goes no higher than a spot where a button stands in its first 44 px, and is null with no spot left", () => {
+  test("takes the rightmost gap between the top bar's buttons wide enough, over the room's name or a chip that is not a button, and is null with none", () => {
     const notice = { top: 52, bottom: 126 };
     const atItsLeft = { left: 60, top: 0, right: 104, bottom: 52 };
-    assert.equal(raisedRow({ ...base, row: { ...row, top: 134 }, floor: 113, taken: [notice], controls: [atItsLeft] }), null);
+    assert.deepEqual(raisedRow({ ...base, row: { ...row, top: 134 }, floor: 113, taken: [notice], controls: [atItsLeft] }), { top: 8, left: 112, right: 314 });
+    // A DM's top bar on a wide phone: the turn strip spans the row's own place, so it moves left to the gap between the DM chip and the strip.
+    const wide = { left: 300, right: 600, top: 60, height: 44 };
+    const chip = { left: 180, top: 4, right: 230, bottom: 48 };
+    const strip = { left: 320, top: 4, right: 620, bottom: 48 };
+    assert.deepEqual(raisedRow({ ...base, row: wide, floor: 50, controls: [chip, strip], highest: true }), { top: 0, left: 238, right: 312 });
+    const wall = { left: 0, top: 0, right: 700, bottom: 52 };
+    assert.equal(raisedRow({ ...base, row: { ...row, top: 134 }, floor: 113, taken: [notice], controls: [wall] }), null);
   });
 });
 

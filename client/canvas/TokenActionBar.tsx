@@ -52,7 +52,7 @@ import { sheetOpen } from "../state/types.ts";
 import {
   barDockSlot,
   clampBox,
-  DEFAULT_CHROME,
+  barChrome,
   DEFAULT_SPOT,
   hangBox,
   isDefaultSpot,
@@ -519,7 +519,9 @@ function BarFrame(props: {
   // "View as a player" reads this device's spot and keeps its own moves to itself, since nothing done there is saved.
   const preview = usePreview() !== null;
   const dockStore = useScoped(barDockSlot);
-  const chrome = useStore(dockStore, (s) => s.chrome) ?? DEFAULT_CHROME;
+  const measured = useStore(dockStore, (s) => s.chrome);
+  const lasting = useStore(dockStore, (s) => s.lasting);
+  const chrome = useMemo(() => barChrome({ chrome: measured, lasting }), [measured, lasting]);
   const spot = useStore(dockStore, (s) => s.spot);
   const column = useStore(dockStore, (s) => s.column);
   const foot = useStore(dockStore, (s) => s.foot);
