@@ -4,14 +4,15 @@ import { createStore } from "zustand/vanilla";
 import type { DrawingKind, RoomState } from "#shared/model.ts";
 import type { DrawingInput } from "#shared/protocol.ts";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
+import { Icon, type IconName } from "../../components/Icon.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
-import { Swatches } from "../../components/Swatches.tsx";
+import { memberColorName } from "../../components/Swatches.tsx";
 import { MEMBER_COLORS, theme } from "../../lib/theme.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import type { RoomView } from "../../state/types.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
-import { InfoLine, OptButton, OptInput, OptionsColumn, OptionsRow, OptSelect } from "../measure/controls.tsx";
+import { ChoiceTiles, ConfirmButton, Labelled, OptButton, OptInput, OptionsStrip, PickCloses, PopoverSwatches, ValueChip, type Slot } from "../measure/controls.tsx";
 import { DRAWING_TURNED_OFF, drawAccess, type DrawAccess } from "./gate.ts";
 import { eraseTarget, estimateEm, fillable, fillFor, simplifyStroke } from "./geometry.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
@@ -45,8 +46,6 @@ type DrawToolState = {
   /** Where a text goes, waiting for its words. */
   textAt: { x: number; y: number } | null;
   text: string;
-  /** "Clear all" asks for a second tap. */
-  clearArmed: boolean;
 };
 
 /** `told` is set once the eraser has said it cannot erase someone else's drawing, so a stroke says it once. */
@@ -64,7 +63,6 @@ const drawSlot = scopeSlot(() => ({
     draft: null,
     textAt: null,
     text: "",
-    clearArmed: false,
   })),
   gesture: null as DrawGesture | null,
   /** Room.tsx renders Options without a tool context, so the buttons reach the tool through this. */
@@ -291,6 +289,21 @@ const MODES: readonly { value: DrawMode; label: string }[] = [
   { value: "erase", label: "Eraser" },
 ];
 
+/** The tiles' glyphs where a plain one shows the thing itself (docs/design-v1-tool-options.md 17.2). Pen, Text and Eraser have none, so the chip keeps its words. */
+const MODE_GLYPHS: Partial<Record<DrawMode, IconName>> = { line: "shapeLine", arrow: "shapeArrow", rect: "shapeBox", ellipse: "shapeCircle", polygon: "shapePolygon" };
+
+const WIDTHS = [
+  { value: "2", label: "Thin" },
+  { value: "4", label: "Mid" },
+  { value: "8", label: "Thick" },
+] as const;
+
+const OPACITIES = [
+  { value: "1", label: "Solid" },
+  { value: "0.6", label: "60%" },
+  { value: "0.3", label: "30%" },
+] as const;
+
 const HINTS: Record<DrawMode, string> = {
   free: "Draw with one finger.",
   line: "Drag from one end to the other.",
@@ -304,6 +317,25 @@ const HINTS: Record<DrawMode, string> = {
 
 const ERASE_OTHERS = "You can only erase your own drawings.";
 
+/** How long Clear all waits for its second tap. */
+const CLEAR_ALL_ARMED_MS = 3000;
+
+/** The stroke as it will draw: a bar 2, 4 or 8 px tall in the color, at the opacity. */
+function StrokeBar(props: { width: number; color: string; opacity: number }) {
+  return (
+    <span aria-hidden style={{ flex: "none", display: "grid", alignItems: "center", width: theme.icon.lg, height: theme.icon.md }}>
+      <span style={{ display: "block", height: props.width, borderRadius: theme.radius.xs, background: props.color, opacity: props.opacity }} />
+    </span>
+  );
+}
+
+/**
+ * Draw's options (docs/design-v1-tool-options.md 9.4): the drawing tool,
+ * the color and the stroke as chips, then Fill, Undo, Redo, DM only and
+ * Clear mine by priority, with Clear all always in ⋯. Text being typed or
+ * a shape with corners comes first, as its own task, and the settings
+ * drop behind it.
+ */
 function DrawOptions(props: { role: "dm" | "player" }) {
   const tool = useScoped(drawSlot);
   const drawStore = tool.store;
@@ -332,110 +364,181 @@ function DrawOptions(props: { role: "dm" | "player" }) {
   const sceneId = useRoomView((s) => s.sceneId);
   const color = st.color ?? memberColor;
 
-  useEffect(() => {
-    if (!st.clearArmed) return;
-    const t = setTimeout(() => drawStore.setState({ clearArmed: false }), 3000);
-    return () => clearTimeout(t);
-  }, [st.clearArmed]);
+  const clearMine = (
+    <OptButton tone="danger" disabled={!sceneId} onClick={() => sceneId && actions.dispatch({ t: "drawing.clear", sceneId, scope: "own" })}>
+      Clear mine
+    </OptButton>
+  );
 
   if (access !== "draw") {
     return (
-      <OptionsColumn>
-        <InfoLine tone="muted">The DM has not let you draw. You can still erase your own drawings: tap or drag over one, or clear them all.</InfoLine>
-        <OptionsRow label="Your drawings">
-          <OptButton label="Undo your last change" onClick={() => actions.undo()}>
-            Undo
-          </OptButton>
-          <OptButton tone="danger" disabled={!sceneId} onClick={() => sceneId && actions.dispatch({ t: "drawing.clear", sceneId, scope: "own" })}>
-            Clear mine
-          </OptButton>
-        </OptionsRow>
-      </OptionsColumn>
+      <OptionsStrip
+        tool="Draw"
+        line={{ tone: "hint", content: "The DM has not let you draw. You can still erase your own drawings: tap or drag over one, or clear them all." }}
+        slots={[
+          {
+            id: "undo",
+            priority: 1,
+            control: (
+              <OptButton label="Undo your last change" onClick={() => actions.undo()}>
+                Undo
+              </OptButton>
+            ),
+          },
+          { id: "clearMine", priority: 1, control: clearMine },
+        ]}
+      />
     );
   }
 
   const polygonVertices = st.draft?.kind === "polygon" ? st.draft.points.length / 2 : 0;
+  const typing = st.textAt !== null;
+  const task = typing || polygonVertices > 0;
+  // While a task is under way its controls lead, and the tool's standing settings drop by 3 (9, "The task rule").
+  const drop = task ? 3 : 0;
+  const widthName = WIDTHS.find((w) => w.value === String(st.width))?.label ?? "Mid";
+  const opacityName = OPACITIES.find((o) => o.value === String(st.opacity))?.label ?? "Solid";
+  const taskSlots: Slot[] = typing
+    ? [
+        {
+          id: "text",
+          priority: 1,
+          flex: theme.layout.options.field,
+          control: <OptInput label="Text" placeholder="Text on the map" value={st.text} autoFocus width={200} onChange={(text) => drawStore.setState({ text })} onEnter={() => withTool(addText)} />,
+        },
+        {
+          id: "add",
+          priority: 1,
+          control: (
+            <OptButton tone="primary" disabled={!st.text.trim()} ends onClick={() => withTool(addText)}>
+              Add
+            </OptButton>
+          ),
+        },
+        {
+          id: "textCancel",
+          priority: 2,
+          control: (
+            <OptButton ends onClick={() => drawStore.setState({ textAt: null, text: "" })}>
+              Cancel
+            </OptButton>
+          ),
+        },
+      ]
+    : polygonVertices > 0
+      ? [
+          {
+            id: "finish",
+            priority: 1,
+            control: (
+              <OptButton tone="primary" disabled={polygonVertices < 3} ends onClick={() => withTool(finishPolygon)}>
+                Finish
+              </OptButton>
+            ),
+          },
+          {
+            id: "undoCorner",
+            priority: 1,
+            control: <OptButton onClick={() => drawStore.setState({ draft: { kind: "polygon", points: st.draft!.points.slice(0, -2) } })}>Undo corner</OptButton>,
+          },
+          {
+            id: "shapeCancel",
+            priority: 2,
+            control: (
+              <OptButton ends onClick={() => drawStore.setState({ draft: null })}>
+                Cancel
+              </OptButton>
+            ),
+          },
+        ]
+      : [];
+
   return (
-    <OptionsColumn>
-      <InfoLine tone="muted">{st.mode === "erase" && props.role === "player" ? "Tap or drag over one of your own drawings to erase it." : HINTS[st.mode]}</InfoLine>
-      {st.textAt ? (
-        <OptionsRow label="Text">
-          <OptInput label="Text" placeholder="Text on the map" value={st.text} autoFocus width={200} onChange={(text) => drawStore.setState({ text })} onEnter={() => withTool(addText)} />
-          <OptButton tone="primary" disabled={!st.text.trim()} onClick={() => withTool(addText)}>
-            Add
-          </OptButton>
-          <OptButton onClick={() => drawStore.setState({ textAt: null, text: "" })}>Cancel</OptButton>
-        </OptionsRow>
-      ) : null}
-      {polygonVertices > 0 ? (
-        <OptionsRow label="Shape">
-          <OptButton tone="primary" disabled={polygonVertices < 3} onClick={() => withTool(finishPolygon)}>
-            Finish
-          </OptButton>
-          <OptButton onClick={() => drawStore.setState({ draft: { kind: "polygon", points: st.draft!.points.slice(0, -2) } })}>Undo corner</OptButton>
-          <OptButton onClick={() => drawStore.setState({ draft: null })}>Cancel</OptButton>
-        </OptionsRow>
-      ) : null}
-      <OptionsRow label="Drawing">
-        <OptSelect<DrawMode> label="Drawing tool" value={st.mode} options={MODES} onChange={(mode) => drawStore.setState({ mode, draft: null, textAt: null })} />
-        <OptButton label="Undo your last change" onClick={() => actions.undo()}>
-          Undo
-        </OptButton>
-        <OptButton label="Redo" onClick={() => actions.redo()}>
-          Redo
-        </OptButton>
-        <Swatches label="Color" value={color} options={MEMBER_COLORS} onChange={(c) => drawStore.setState({ color: c })} />
-        <Segmented
-          label="Width"
-          value={String(st.width)}
-          options={[
-            { value: "2", label: "Thin" },
-            { value: "4", label: "Mid" },
-            { value: "8", label: "Thick" },
-          ]}
-          onChange={(w) => drawStore.setState({ width: Number(w) })}
-        />
-        <Segmented
-          label="Opacity"
-          value={String(st.opacity)}
-          options={[
-            { value: "1", label: "Solid" },
-            { value: "0.6", label: "60%" },
-            { value: "0.3", label: "30%" },
-          ]}
-          onChange={(o) => drawStore.setState({ opacity: Number(o) })}
-        />
-        <OptButton pressed={st.fill} onClick={() => drawStore.setState({ fill: !st.fill })}>
-          Fill
-        </OptButton>
-        {props.role === "dm" ? (
-          <OptButton pressed={st.dmOnly} label="Only the DM sees new drawings" onClick={() => drawStore.setState({ dmOnly: !st.dmOnly })}>
-            DM only
-          </OptButton>
-        ) : null}
-        <OptButton tone="danger" disabled={!sceneId} onClick={() => sceneId && actions.dispatch({ t: "drawing.clear", sceneId, scope: "own" })}>
-          Clear mine
-        </OptButton>
-        {props.role === "dm" ? (
-          <OptButton
-            tone="danger"
-            pressed={st.clearArmed}
-            disabled={!sceneId}
-            onClick={() => {
-              if (!sceneId) return;
-              if (!st.clearArmed) {
-                drawStore.setState({ clearArmed: true });
-                return;
-              }
-              drawStore.setState({ clearArmed: false });
-              actions.dispatch({ t: "drawing.clear", sceneId, scope: "all" });
-            }}
-          >
-            {st.clearArmed ? "Tap again to clear all" : "Clear all"}
-          </OptButton>
-        ) : null}
-      </OptionsRow>
-    </OptionsColumn>
+    <OptionsStrip
+      tool="Draw"
+      task={task}
+      line={{ tone: "hint", content: st.mode === "erase" && props.role === "player" ? "Tap or drag over one of your own drawings to erase it." : HINTS[st.mode] }}
+      slots={[
+        ...taskSlots,
+        {
+          id: "mode",
+          priority: 1 + drop,
+          control: (
+            <ValueChip label="Drawing tool" kind="choice" value={st.mode} options={MODES.map((m) => ({ key: m.value, words: m.label }))}>
+              <PickCloses>
+                <ChoiceTiles<DrawMode>
+                  label="Drawing tool"
+                  value={st.mode}
+                  options={MODES.map((m) => {
+                    const glyph = MODE_GLYPHS[m.value];
+                    return { value: m.value, label: m.label, ...(glyph ? { glyph: <Icon name={glyph} /> } : {}) };
+                  })}
+                  onChange={(mode) => drawStore.setState({ mode, draft: null, textAt: null })}
+                />
+              </PickCloses>
+            </ValueChip>
+          ),
+        },
+        {
+          id: "color",
+          priority: 1 + drop,
+          control: (
+            <ValueChip label="Color" kind="choice" value={color} valueName={memberColorName(color) ?? color} disk={color} options={MEMBER_COLORS.map((c) => ({ key: c, words: memberColorName(c) ?? c }))}>
+              <PopoverSwatches label="Color" value={color} options={MEMBER_COLORS} onChange={(c) => drawStore.setState({ color: c })} />
+            </ValueChip>
+          ),
+        },
+        {
+          id: "stroke",
+          priority: 1 + drop,
+          compact: true,
+          control: (
+            <ValueChip
+              label="Stroke"
+              kind="setting"
+              value={String(st.width)}
+              valueName={`${widthName}, ${opacityName}`}
+              options={WIDTHS.map((w) => ({ key: w.value, words: w.label }))}
+              preview={<StrokeBar width={st.width} color={color} opacity={st.opacity} />}
+            >
+              <Labelled label="Width">
+                <Segmented label="Width" value={String(st.width)} options={WIDTHS} onChange={(w) => drawStore.setState({ width: Number(w) })} />
+              </Labelled>
+              <Labelled label="Opacity">
+                <Segmented label="Opacity" value={String(st.opacity)} options={OPACITIES} onChange={(o) => drawStore.setState({ opacity: Number(o) })} />
+              </Labelled>
+            </ValueChip>
+          ),
+        },
+        {
+          id: "fill",
+          priority: 4 + drop,
+          control: (
+            <OptButton pressed={st.fill} onClick={() => drawStore.setState({ fill: !st.fill })}>
+              Fill
+            </OptButton>
+          ),
+        },
+        { id: "undo", priority: 2 + drop, control: <OptButton icon="undo" label="Undo your last change" rowWords="Undo" onClick={() => actions.undo()} /> },
+        { id: "redo", priority: 3 + drop, control: <OptButton icon="redo" label="Redo" rowWords="Redo" onClick={() => actions.redo()} /> },
+        props.role === "dm" && {
+          id: "dmOnly",
+          priority: 5 + drop,
+          control: (
+            <OptButton pressed={st.dmOnly} label="Only the DM sees new drawings" onClick={() => drawStore.setState({ dmOnly: !st.dmOnly })}>
+              DM only
+            </OptButton>
+          ),
+        },
+        { id: "clearMine", priority: 6 + drop, control: clearMine },
+        props.role === "dm" && {
+          id: "clearAll",
+          priority: 9,
+          always: true,
+          control: <ConfirmButton label="Clear all" confirm="Tap again to clear all" armedMs={CLEAR_ALL_ARMED_MS} disabled={!sceneId} onConfirm={() => sceneId && actions.dispatch({ t: "drawing.clear", sceneId, scope: "all" })} />,
+        },
+      ]}
+    />
   );
 }
 
@@ -467,7 +570,7 @@ export const drawTool: ToolDef = {
   deactivate(ctx) {
     const tool = ctx.scope.get(drawSlot);
     tool.gesture = null;
-    tool.store.setState({ draft: null, textAt: null, text: "", clearArmed: false });
+    tool.store.setState({ draft: null, textAt: null, text: "" });
     if (tool.activeCtx === ctx) tool.activeCtx = null;
     // The next opening decides afresh, so an eraser opened later never reads as drawing taken away.
     tool.openedAs = null;
