@@ -60,6 +60,8 @@ describe("a document delete, step by step", () => {
     assert.deepEqual(effect, { t: "dispatch" });
     assert.equal(flow.phase.t, "sending");
     assert.deepEqual(docDeleteNote(flow), { text: "Deleting Strange letter…", error: false, busy: true, retry: false });
+    // Offline, the op waits in the outbox, and the note says why nothing happens yet.
+    assert.equal(docDeleteNote(flow, false).text, "Waiting for the connection to delete Strange letter.");
   });
 
   test("taken: the document's images go, each once, and the note says so", () => {
@@ -126,6 +128,7 @@ describe("a document delete, step by step", () => {
     assert.deepEqual(waiting.flow.phase, { t: "checking", after: 4 });
     assert.equal(waiting.last.effect, null);
     assert.deepEqual(docDeleteNote(waiting.flow), { text: "Checking whether the handout was deleted…", error: false, busy: true, retry: false });
+    assert.deepEqual(docDeleteNote(waiting.flow, false), { text: "Waiting for the connection to check whether the handout was deleted.", error: false, busy: true, retry: false });
     // The stale state says absent, then present, then the socket opens: none of it is a new snapshot.
     for (const r of [room({ accessVersion: 4, open: false, present: false }), room({ accessVersion: 4, open: false, present: true }), room({ accessVersion: 4, open: true, present: false })]) {
       const step = docDeleteStep(waiting.flow, { t: "room", room: r });

@@ -592,7 +592,8 @@ export function viewTitle(id: string, row: AssetRow | undefined, handouts: reado
 }
 
 function DeleteNote(props: { flow: DocDelete; onRetry(): void }) {
-  const note = docDeleteNote(props.flow);
+  const connected = useRoomView((s) => s.connection === "open");
+  const note = docDeleteNote(props.flow, connected);
   const focus = useHandsFocusTo<HTMLDivElement>();
   return (
     <div ref={focus.target} tabIndex={-1} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), outline: "none" }}>

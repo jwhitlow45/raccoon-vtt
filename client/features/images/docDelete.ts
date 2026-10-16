@@ -159,16 +159,21 @@ export function pageList(numbers: readonly number[]): string {
 
 export type DocDeleteNote = { text: string; error: boolean; busy: boolean; retry: boolean };
 
-/** The note under the Handouts grid for one delete. */
-export function docDeleteNote(flow: DocDelete): DocDeleteNote {
+/**
+ * The note under the Handouts grid for one delete. While the connection is
+ * not open, a delete waiting on the server says so, or "Checking…" would
+ * spin with no reason given until a reconnect (PB-P-10).
+ */
+export function docDeleteNote(flow: DocDelete, connected = true): DocDeleteNote {
   const { title, pages, phase } = flow;
   const note = (text: string, more: Partial<DocDeleteNote> = {}): DocDeleteNote => ({ text, error: false, busy: false, retry: false, ...more });
   switch (phase.t) {
     case "sending":
+      return note(connected ? `Deleting ${title}…` : `Waiting for the connection to delete ${title}.`, { busy: true });
     case "deleting":
       return note(`Deleting ${title}…`, { busy: true });
     case "checking":
-      return note("Checking whether the handout was deleted…", { busy: true });
+      return note(connected ? "Checking whether the handout was deleted…" : "Waiting for the connection to check whether the handout was deleted.", { busy: true });
     case "deleted": {
       if (phase.kept.length === 0) return note(`Deleted ${title} and ${pages.length === 1 ? "its page" : `its ${pages.length} pages`}.`);
       const kept = new Set(phase.kept);
