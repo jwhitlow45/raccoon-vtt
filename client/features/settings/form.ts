@@ -1,5 +1,6 @@
 import type { AoeCoverage, AoeInclusion, DiagonalRule, MemberId, MoveAnyToken, RoomSettings, WhichPlayers } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
+import { healRevivesDead } from "#shared/migrate.ts";
 import { MAX_NAME, type ClientOp } from "#shared/protocol.ts";
 import { TIMER_CHOICES } from "../encounter/timer.ts";
 
@@ -11,7 +12,7 @@ import { TIMER_CHOICES } from "../encounter/timer.ts";
  * forgotten in the form without a failing test.
  */
 
-type BoolKey = { [K in keyof RoomSettings]-?: RoomSettings[K] extends boolean ? K : never }[keyof RoomSettings];
+type BoolKey = { [K in keyof RoomSettings]-?: NonNullable<RoomSettings[K]> extends boolean ? K : never }[keyof RoomSettings];
 type ChoiceKey = "diagonal" | "aoeCoverage" | "aoeInclusion";
 
 export type Choice<V extends string> = { value: V; label: string; help: string };
@@ -90,6 +91,12 @@ export const SETTING_GROUPS: SettingGroup[] = [
         key: "monstersDieAtZero",
         label: "Monsters die at 0 HP",
         help: "Off makes monsters and NPCs fall unconscious and make death saves at 0 HP, like player characters.",
+      },
+      {
+        kind: "toggle",
+        key: "healRevives",
+        label: "Healing brings back the dead",
+        help: "Healing a dead creature, or setting its HP above 0, brings it back with that HP. Off follows the rules as written: healing does nothing to the dead, and only the DM's Revive brings a creature back.",
       },
       {
         kind: "toggle",
@@ -181,6 +188,16 @@ export type MoveAnyMode = "none" | "all" | "some";
 /** Who can draw, as the room reads it: absent, in rooms from before the setting, is every player (docs/design-v1-dm-tools.md 3.9). */
 export function drawersOf(settings: Pick<RoomSettings, "playersDraw">): WhichPlayers {
   return settings.playersDraw ?? "all";
+}
+
+/**
+ * Whether a switch shows on. A setting a room may lack reads as its rule
+ * reads it, so "Healing brings back the dead" shows on in a room from
+ * before it, as healing there does bring back the dead.
+ */
+export function toggleOn(settings: RoomSettings, key: BoolKey): boolean {
+  if (key === "healRevives") return healRevivesDead(settings);
+  return settings[key] === true;
 }
 
 export function moveAnyMode(value: MoveAnyToken): MoveAnyMode {

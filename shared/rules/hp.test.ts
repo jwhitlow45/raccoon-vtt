@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { DEFAULT_SETTINGS } from "../model.ts";
+import { DEFAULT_SETTINGS, type Actor } from "../model.ts";
 import { actor, effect } from "../testutil.ts";
 import {
   ZERO_HP_UNCONSCIOUS_ID,
@@ -14,6 +14,7 @@ import {
   endConcentration,
   hpBar,
   hpLabel,
+  hpLess,
 } from "./hp.ts";
 
 const settings = { ...DEFAULT_SETTINGS };
@@ -224,5 +225,119 @@ describe("labels", () => {
     const r = endConcentration(a);
     assert.deepEqual(r.actor.effects.map((e) => e.id), ["x"]);
     assert.equal(r.events.length, 1);
+  });
+});
+
+describe("healing brings back the dead (docs/design-v1-combat-flow.md 3.4)", () => {
+  const dead = (overrides: Partial<Actor> = {}) =>
+    actor({ hp: { cur: 0, max: 20, temp: 0 }, life: "dead", deathSaves: { ok: 1, fail: 3 }, effects: [effect("p", { key: "poisoned" })], ...overrides });
+
+  test("a heal with the setting on brings it back at min(max, cur + amount), saves cleared, then the life line", () => {
+    const r = applyHeal(dead(), 5, true);
+    assert.equal(r.actor.life, "alive");
+    assert.equal(r.actor.hp.cur, 5);
+    assert.deepEqual(r.actor.deathSaves, { ok: 0, fail: 0 });
+    assert.deepEqual(r.events, [
+      { type: "hp", change: "heal", amount: 5, label: "Bloodied" },
+      { type: "life", life: "alive" },
+    ]);
+    assert.equal(applyHeal(dead({ hp: { cur: 12, max: 20, temp: 0 } }), 50, true).actor.hp.cur, 20, "capped at the maximum");
+  });
+
+  test("conditions applied by hand survive, the 0 HP Unconscious goes, and concentration stays ended", () => {
+    const r = applyHeal(dead({ effects: [effect("p", { key: "poisoned" }), effect(ZERO_HP_UNCONSCIOUS_ID, { key: "unconscious" })] }), 3, true);
+    assert.deepEqual(r.actor.effects.map((e) => e.id), ["p"]);
+    assert.equal(r.events.some((e) => e.type === "concentration"), false);
+  });
+
+  test("a maximum of 0 leaves it dead and writes nothing, and with the setting off a heal does nothing", () => {
+    const zero = dead({ hp: { cur: 0, max: 0, temp: 0 } });
+    assert.equal(applyHeal(zero, 5, true).actor, zero);
+    assert.deepEqual(applyHeal(zero, 5, true).events, []);
+    const corpse = dead();
+    assert.equal(applyHeal(corpse, 5, false).actor, corpse);
+    assert.deepEqual(applyHeal(corpse, 5).events, []);
+  });
+
+  test("with it on, a set of a current HP above 0 brings it back at that HP, the set line first, and an over-cap set at the maximum", () => {
+    const r = applyHpSet(dead(), { cur: 7 }, "monster", settings, true);
+    assert.equal(r.actor.life, "alive");
+    assert.equal(r.actor.hp.cur, 7);
+    assert.deepEqual(r.actor.deathSaves, { ok: 0, fail: 0 });
+    assert.deepEqual(r.events, [
+      { type: "hp", change: "set", amount: 7, label: "Bloodied" },
+      { type: "life", life: "alive" },
+    ]);
+    const over = applyHpSet(dead(), { cur: 99 }, "monster", settings, true).actor;
+    assert.deepEqual([over.life, over.hp.cur], ["alive", 20]);
+  });
+
+  test("with it on, a set that clamps to 0, of the maximum alone or of temporary HP alone leaves it dead", () => {
+    assert.equal(applyHpSet(dead(), { cur: 0 }, "monster", settings, true).actor.life, "dead");
+    assert.equal(applyHpSet(dead({ hp: { cur: 0, max: 0, temp: 0 } }), { cur: 5 }, "monster", settings, true).actor.life, "dead");
+    assert.equal(applyHpSet(dead(), { max: 30 }, "monster", settings, true).actor.life, "dead");
+    assert.equal(applyHpSet(dead(), { temp: 5 }, "monster", settings, true).actor.life, "dead");
+    const holding = applyHpSet(dead({ hp: { cur: 12, max: 20, temp: 0 } }), { max: 30 }, "monster", settings, true);
+    assert.deepEqual([holding.actor.life, holding.actor.hp.cur], ["dead", 12], "a dead creature holding HP stays dead under a set of the maximum");
+  });
+
+  test("with it off, a set on the dead changes the HP, keeps it dead and writes the set line, as before", () => {
+    const r = applyHpSet(dead(), { cur: 9 }, "monster", settings, false);
+    assert.equal(r.actor.life, "dead");
+    assert.equal(r.actor.hp.cur, 9);
+    assert.deepEqual(r.events, [{ type: "hp", change: "set", amount: 9, label: "Dead" }]);
+  });
+
+  test("a dying or stable creature heals as before either way", () => {
+    const dying = applyDamage(actor(), 20, "pc", settings).actor;
+    for (const revives of [true, false]) {
+      const healed = applyHeal(dying, 4, revives);
+      assert.deepEqual([healed.actor.life, healed.actor.hp.cur], ["alive", 4]);
+      const stable = actor({ hp: { cur: 0, max: 20, temp: 0 }, life: "stable", effects: [effect("manual", { key: "frightened" })] });
+      const up = applyHeal(stable, 2, revives).actor;
+      assert.deepEqual([up.life, up.effects.map((e) => e.id)], ["alive", ["manual"]]);
+      assert.equal(applyHpSet(dying, { cur: 3 }, "pc", settings, revives).actor.life, "alive");
+    }
+  });
+});
+
+describe("Revive gives exactly 1 HP (docs/design-v1-combat-flow.md 3.5)", () => {
+  test("a dead creature holding 12 HP comes back at 1 with reviveToOne, and keeps 12 without", () => {
+    const dead = actor({ hp: { cur: 12, max: 20, temp: 0 }, life: "dead", deathSaves: { ok: 0, fail: 3 }, effects: [effect("p", { key: "poisoned" })] });
+    const now = applyLife(dead, "alive", true);
+    assert.deepEqual([now.actor.life, now.actor.hp.cur, now.actor.deathSaves], ["alive", 1, { ok: 0, fail: 0 }]);
+    assert.deepEqual(now.actor.effects.map((e) => e.id), ["p"], "every condition applied by hand stays");
+    assert.deepEqual(now.events, [{ type: "life", life: "alive" }]);
+    assert.equal(applyLife(dead, "alive", false).actor.hp.cur, 12);
+  });
+
+  test("a dying creature at 0 gets 1 either way, and an alive creature keeps its HP either way", () => {
+    const dying = applyDamage(actor(), 20, "pc", settings).actor;
+    assert.equal(applyLife(dying, "alive", true).actor.hp.cur, 1);
+    assert.equal(applyLife(dying, "alive", false).actor.hp.cur, 1);
+    const hurt = actor({ hp: { cur: 7, max: 20, temp: 0 } });
+    assert.equal(applyLife(hurt, "alive", true).actor.hp.cur, 7);
+    assert.equal(applyLife(hurt, "alive", false).actor.hp.cur, 7);
+  });
+});
+
+describe("hpLess (docs/design-v1-combat-flow.md 3.6.6)", () => {
+  const companion = { of: "c1", turn: "none" as const };
+  test("an effect companion and any actor at max HP 0", () => {
+    assert.equal(hpLess(actor({ hp: { cur: 0, max: 0, temp: 0 }, ac: 0 }), { kind: "object", companion }), true);
+    assert.equal(hpLess(actor(), { kind: "object", companion }), true, "an effect whatever its actor stores");
+    const empty = actor({ hp: { cur: 0, max: 0, temp: 0 } });
+    assert.equal(hpLess(empty, { kind: "pc" }), true, "a character-linked token, through its character's actor");
+    assert.equal(hpLess(empty), true, "a character card with no token");
+    assert.equal(hpLess(empty, { kind: "npc", companion: { of: "c1", turn: "shared" } }), true, "a creature companion at 0");
+  });
+
+  test("not an ordinary object with HP, a partial actor without hp, hidden HP, or an effect whose companion the caller lacks", () => {
+    assert.equal(hpLess(actor({ hp: { cur: 5, max: 10, temp: 0 } }), { kind: "object" }), false);
+    assert.equal(hpLess({}, { kind: "monster" }), false, "a projected actor with no hp");
+    assert.equal(hpLess({ hpLabel: "Healthy" } as { hp?: Actor["hp"] }, { kind: "monster" }), false, "hidden HP is not HP-less");
+    assert.equal(hpLess(undefined, { kind: "monster" }), false);
+    assert.equal(hpLess({}, { kind: "object" }), false, "an effect token without its companion field");
+    assert.equal(hpLess(actor(), { kind: "npc", companion }), false, "a creature companion with HP");
   });
 });

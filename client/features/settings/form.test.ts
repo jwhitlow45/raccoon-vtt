@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DEFAULT_SETTINGS, type RoomSettings } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
-import { allFields, drawersOf, moveAnyFor, moveAnyMode, parseFeetPerCell, parseRoomName, settingsOp, settingsPatch, withMover } from "./form.ts";
+import { allFields, drawersOf, moveAnyFor, moveAnyMode, parseFeetPerCell, parseRoomName, settingsOp, settingsPatch, toggleOn, withMover } from "./form.ts";
 
 describe("settings form", () => {
   test("lists every room setting exactly once", () => {
@@ -25,6 +25,23 @@ describe("settings form", () => {
       assert.ok(op && clientOpSchema.safeParse(op).success, option.value);
     }
     assert.deepEqual(settingsOp({ ...DEFAULT_SETTINGS, playersDraw: [] }, { playersDraw: withMover([], "p1", true) }), { t: "room.update", settings: { playersDraw: ["p1"] } });
+  });
+
+  test("healing brings back the dead sits after Monsters die at 0 HP, and reads an absent value as on (docs/design-v1-combat-flow.md 3.4)", () => {
+    const combat = allFields().map((f) => f.key);
+    assert.equal(combat.indexOf("healRevives"), combat.indexOf("monstersDieAtZero") + 1);
+    const field = allFields().find((f) => f.key === "healRevives")!;
+    assert.equal(field.kind, "toggle");
+    assert.equal(field.label, "Healing brings back the dead");
+    assert.match(field.help, /only the DM's Revive/);
+    const { healRevives: _absent, ...older } = DEFAULT_SETTINGS;
+    assert.equal(toggleOn(older as RoomSettings, "healRevives"), true, "a room from before the setting");
+    assert.equal(toggleOn({ ...DEFAULT_SETTINGS, healRevives: false }, "healRevives"), false);
+    assert.equal(toggleOn({ ...DEFAULT_SETTINGS, healRevives: true }, "healRevives"), true);
+    assert.equal(toggleOn({ ...DEFAULT_SETTINGS, skipDefeated: false }, "skipDefeated"), false);
+    const off = settingsOp(older as RoomSettings, { healRevives: false });
+    assert.deepEqual(off, { t: "room.update", settings: { healRevives: false } });
+    assert.ok(clientOpSchema.safeParse(off).success);
   });
 
   test("Skip defeated says what Next passes over: any dead creature, a player character's row included", () => {

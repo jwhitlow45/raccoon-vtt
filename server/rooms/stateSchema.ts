@@ -65,6 +65,8 @@ const settings = z.strictObject({
   turnTimerSec: z.number().int().min(0).max(MAX_TURN_TIMER_SEC).default(0),
   // Backups from before wave 5 have none, which reads as every player (docs/design-v1-dm-tools.md 3.9).
   playersDraw: dmToolSchemas.whichPlayers.optional(),
+  // Backups from before it have none, which reads as on (docs/design-v1-combat-flow.md 3.4).
+  healRevives: z.boolean().optional(),
 });
 
 const meta = z.strictObject({

@@ -41,16 +41,22 @@ export function hpLabel(actor: Pick<Actor, "hp" | "life">): HpLabel {
 }
 
 /**
- * Whether a token, or a character card with no token, has no HP to show
- * (docs/design-v1-combat-flow.md 3.6.6): a companion that is an effect, or
- * any token with max HP 0, such as Spiritual Weapon. It takes the resolved
- * actor (a token's own, or its character's) and the token where there is
- * one, and decides only from what the caller holds. HP this viewer may not
- * see never counts as 0, so a creature whose numbers the projection held
- * back is not HP-less. An ordinary object keeps HP of its own, such as a
+ * A creature with no HP to show (docs/design-v1-combat-flow.md 3.6.6): a
+ * companion that is an effect, such as Spiritual Weapon, or any token whose
+ * maximum is 0. Every view that draws HP, life marks or AC asks this one
+ * predicate, so the token panel, its bar, the tracker, the map and the
+ * projection agree.
+ *
+ * It decides only from what the caller holds: the effect clause needs the
+ * token's `companion` and `kind`, the maximum clause the actor's `hp`.
+ * Missing HP never counts as 0, so a creature whose HP the viewer may not
+ * see is not HP-less. An ordinary object may have HP of its own, such as a
  * door the DM tracks, so being an object alone does not make it HP-less.
  */
-export function hpLess(actor: { hp?: Pick<Actor["hp"], "max"> } | undefined, token?: { kind: TokenKind; companion?: unknown }): boolean {
+export function hpLess(
+  actor: { hp?: Pick<Actor["hp"], "max"> } | undefined,
+  token?: { kind: TokenKind; companion?: unknown },
+): boolean {
   if (token?.companion !== undefined && token.kind === "object") return true;
   return actor?.hp !== undefined && actor.hp.max === 0;
 }
@@ -206,17 +212,28 @@ function revive(actor: Actor): Actor {
   return withoutZeroUnconscious({ ...actor, life: "alive", deathSaves: { ok: 0, fail: 0 } });
 }
 
-export function applyHeal(actor: Actor, amount: number): HpResult {
-  if (amount <= 0 || actor.life === "dead") return { actor, events: [] };
+/**
+ * Whether HP rising to `cur` brings the creature back: from 0 while dying
+ * or stable, as the rules say, and from death when the room lets healing
+ * bring back the dead (`revivesDead`, docs/design-v1-combat-flow.md 3.4).
+ * A dead creature may hold HP, set while that was off, so death is judged
+ * on its life alone.
+ */
+function comesBack(actor: Actor, cur: number, revivesDead: boolean): boolean {
+  if (cur <= 0) return false;
+  if (actor.life === "dead") return revivesDead;
+  return actor.hp.cur === 0 && (actor.life === "dying" || actor.life === "stable");
+}
+
+export function applyHeal(actor: Actor, amount: number, revivesDead = false): HpResult {
+  if (amount <= 0) return { actor, events: [] };
   const cur = Math.min(actor.hp.max, actor.hp.cur + amount);
+  const back = comesBack(actor, cur, revivesDead);
+  if (actor.life === "dead" && !back) return { actor, events: [] };
   let next: Actor = { ...actor, hp: { ...actor.hp, cur } };
-  const events: ActorEvent[] = [];
-  const wasDown = actor.hp.cur === 0 && (actor.life === "dying" || actor.life === "stable");
-  if (wasDown && cur > 0) {
-    next = revive(next);
-  }
-  events.push({ type: "hp", change: "heal", amount, label: hpLabel(next) });
-  if (wasDown && cur > 0) events.push({ type: "life", life: "alive" });
+  if (back) next = revive(next);
+  const events: ActorEvent[] = [{ type: "hp", change: "heal", amount, label: hpLabel(next) }];
+  if (back) events.push({ type: "life", life: "alive" });
   return { actor: next, events };
 }
 
@@ -229,13 +246,17 @@ export function applyTemp(actor: Actor, amount: number): HpResult {
 /**
  * An absolute HP edit. Dropping to 0 follows the reaching-0 rules without the
  * massive-damage check, and rising from 0 revives like healing. A dead
- * creature stays dead: only `actor.life` brings it back.
+ * creature comes back only from a set that names a current HP above 0, and
+ * only when the room lets healing bring back the dead (`revivesDead`). A
+ * set of the maximum or temporary HP alone is a correction, not healing,
+ * so it leaves the dead dead whatever the room says.
  */
 export function applyHpSet(
   actor: Actor,
   values: { cur?: number; max?: number; temp?: number },
   kind: TokenKind,
   settings: RoomSettings,
+  revivesDead = false,
 ): HpResult {
   const max = values.max ?? actor.hp.max;
   const requestedCur = values.cur ?? actor.hp.cur;
@@ -243,16 +264,18 @@ export function applyHpSet(
   const temp = values.temp ?? actor.hp.temp;
   let next: Actor = { ...actor, hp: { cur, max, temp } };
   const events: ActorEvent[] = [];
-  const wasDown = actor.hp.cur === 0 && (actor.life === "dying" || actor.life === "stable");
   if (actor.life !== "dead") {
     if (actor.hp.cur > 0 && cur === 0) {
       const zero = reachZero(next, kind, settings);
       next = zero.actor;
       events.push(...zero.events);
-    } else if (wasDown && cur > 0) {
+    } else if (comesBack(actor, cur, false)) {
       next = revive(next);
       events.push({ type: "life", life: "alive" });
     }
+  } else if (values.cur !== undefined && comesBack(actor, cur, revivesDead)) {
+    next = revive(next);
+    events.push({ type: "life", life: "alive" });
   }
   const hp: ActorEvent = { type: "hp", change: "set", label: hpLabel(next) };
   if (values.cur !== undefined) hp.amount = cur;
@@ -276,12 +299,15 @@ export function applyDeathSaves(actor: Actor, ok: number, fail: number): HpResul
 }
 
 /**
- * The DM's direct life change. Reviving a creature at 0 HP gives it 1 HP, so
- * it does not sit alive at 0. Killing sets HP to 0.
+ * The DM's direct life change. Revive gives a creature that is not alive
+ * exactly 1 HP, as Revivify does (docs/design-v1-combat-flow.md 3.5), even a
+ * dead one holding HP set while healing could not bring it back. Ops stored
+ * before op version 5 kept that HP, at least 1 (`toOne` false). A creature
+ * already alive keeps its HP, at least 1, either way. Killing sets HP to 0.
  */
-export function applyLife(actor: Actor, life: LifeState): HpResult {
+export function applyLife(actor: Actor, life: LifeState, toOne = false): HpResult {
   if (life === "alive") {
-    const cur = Math.max(1, actor.hp.cur);
+    const cur = toOne && actor.life !== "alive" ? 1 : Math.max(1, actor.hp.cur);
     const next = revive({ ...actor, hp: { ...actor.hp, cur } });
     return { actor: next, events: [{ type: "life", life }] };
   }

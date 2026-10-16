@@ -155,6 +155,15 @@ export type RoomSettings = {
    * every room from before it keeps letting everyone draw.
    */
   playersDraw?: WhichPlayers;
+  /**
+   * Healing a dead creature, or setting its current HP above 0, brings it
+   * back with that HP (docs/design-v1-combat-flow.md 3.4). Off follows the
+   * rules as written, where only the DM's Revive does. Absent reads as on,
+   * so rooms from before it bring back the dead too. Rules read it through
+   * `healRevivesDead` (shared/migrate.ts), which keeps ops stored before op
+   * version 5 on the rule they were applied under.
+   */
+  healRevives?: boolean;
 };
 
 /** The 2024 defaults. See design section 6 for what each one means. */
@@ -173,6 +182,7 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   monsterInitScore: false,
   revealHiddenOnTurn: true,
   turnTimerSec: 0,
+  healRevives: true,
 };
 
 /**

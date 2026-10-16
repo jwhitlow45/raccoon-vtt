@@ -12,7 +12,7 @@ import { RadioGroup } from "../features/dm/controls.tsx";
 import type { PanelProps } from "../features/panels.ts";
 import { timerChoices } from "../features/encounter/timer.ts";
 import { ExportSection } from "../features/settings/ExportSection.tsx";
-import { drawersOf, moveAnyFor, moveAnyMode, parseFeetPerCell, parseRoomName, SETTING_GROUPS, settingsOp, withMover, type MoveAnyMode, type SettingField } from "../features/settings/form.ts";
+import { drawersOf, moveAnyFor, moveAnyMode, parseFeetPerCell, parseRoomName, SETTING_GROUPS, settingsOp, toggleOn, withMover, type MoveAnyMode, type SettingField } from "../features/settings/form.ts";
 import { theme } from "../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../state/view.ts";
 
@@ -59,7 +59,7 @@ function SettingControl(props: { field: SettingField; settings: RoomSettings; on
   const { field, settings, onChange } = props;
   switch (field.kind) {
     case "toggle":
-      return <Switch label={field.label} help={field.help} checked={settings[field.key] === true} onChange={(v) => onChange({ [field.key]: v })} />;
+      return <Switch label={field.label} help={field.help} checked={toggleOn(settings, field.key)} onChange={(v) => onChange({ [field.key]: v })} />;
     case "number":
       return <FeetPerCell label={field.label} help={field.help} value={settings.feetPerCell} onSave={(v) => onChange({ feetPerCell: v })} />;
     case "seconds":

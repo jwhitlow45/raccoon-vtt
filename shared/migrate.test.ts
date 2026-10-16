@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { readEntity } from "./keys.ts";
-import { OP_VERSION, SNAPSHOT_VERSION, migrateOp, migrateSnapshot, opMigrations, runMigrations, type MigrationStep } from "./migrate.ts";
+import {
+  OP_VERSION,
+  SNAPSHOT_VERSION,
+  healRevivesDead,
+  migrateOp,
+  migrateSnapshot,
+  opMigrations,
+  reviveToOne,
+  runMigrations,
+  type MigrationStep,
+} from "./migrate.ts";
 import type { Encounter, RoomState } from "./model.ts";
 import { opSchema, type Op, type RestoreEntry } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
@@ -341,5 +351,36 @@ describe("migrations", () => {
     assert.throws(() => runMigrations({}, 3, 1, steps), /down/);
     assert.throws(() => runMigrations({}, 1, 2, [{ from: 1, to: 1, apply: (v) => v }]), /no migration/);
     assert.throws(() => migrateSnapshot({}, 0), /no migration/);
+  });
+});
+
+describe("op version 5: healing the dead and Revive (docs/design-v1-combat-flow.md 4.7)", () => {
+  test("the step from 4 returns every op unchanged", () => {
+    assert.equal(OP_VERSION, 5);
+    const ops: unknown[] = [
+      { t: "actor.hp", target: { tokenId: "g1" }, change: { kind: "heal", amount: 5 } },
+      { t: "actor.life", target: { tokenId: "g1" }, life: "alive" },
+      { t: "sys.restore", entries: [{ key: "token:g1", value: null, expectHash: "abc" }], from: "undo", deps: true },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 4, 5, opMigrations), op);
+  });
+
+  test("healRevivesDead is false for a version 4 op whatever the setting, and otherwise reads absent as on", () => {
+    assert.equal(healRevivesDead({ healRevives: true }, 4), false);
+    assert.equal(healRevivesDead({}, 4), false);
+    assert.equal(healRevivesDead({}, 3), false);
+    assert.equal(healRevivesDead({ healRevives: true }, 5), true);
+    assert.equal(healRevivesDead({}, 5), true);
+    assert.equal(healRevivesDead({}), true, "a live op carries no version");
+    assert.equal(healRevivesDead({ healRevives: true }), true);
+    assert.equal(healRevivesDead({ healRevives: false }), false);
+    assert.equal(healRevivesDead({ healRevives: false }, 5), false);
+  });
+
+  test("reviveToOne is false at version 4 and true at 5 and for a live op", () => {
+    assert.equal(reviveToOne(4), false);
+    assert.equal(reviveToOne(1), false);
+    assert.equal(reviveToOne(5), true);
+    assert.equal(reviveToOne(undefined), true);
   });
 });

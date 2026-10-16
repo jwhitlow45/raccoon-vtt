@@ -282,6 +282,8 @@ const settingsPatch = z.strictObject({
   turnTimerSec: z.number().int().min(0).max(MAX_TURN_TIMER_SEC).optional(),
   /** Who may draw (wave 5, section 3.9). */
   playersDraw: moveAnyToken.optional(),
+  /** Healing brings back the dead (docs/design-v1-combat-flow.md 3.4). */
+  healRevives: z.boolean().optional(),
 });
 
 const fogShape = z.discriminatedUnion("kind", [

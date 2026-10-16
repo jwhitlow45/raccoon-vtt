@@ -1,3 +1,4 @@
+import { healRevivesDead, reviveToOne } from "../migrate.ts";
 import type { Effect } from "../model.ts";
 import { MAX_EFFECTS, type DurationInput, type OpOf } from "../protocol.ts";
 import { resolveDuration } from "../rules/durations.ts";
@@ -20,15 +21,16 @@ import { Refuse, gone, invalid, type Tx } from "./tx.ts";
 export function actorHp(tx: Tx, op: OpOf<"actor.hp">): void {
   const resolved = tx.resolveActor(op.target);
   const settings = tx.state.meta.settings;
+  const revivesDead = healRevivesDead(settings, tx.env.opVersion);
   const c = op.change;
   const r =
     c.kind === "damage"
       ? applyDamage(resolved.actor, c.amount, resolved.kind, settings, c.crit ?? false)
       : c.kind === "heal"
-        ? applyHeal(resolved.actor, c.amount)
+        ? applyHeal(resolved.actor, c.amount, revivesDead)
         : c.kind === "temp"
           ? applyTemp(resolved.actor, c.amount)
-          : applyHpSet(resolved.actor, c, resolved.kind, settings);
+          : applyHpSet(resolved.actor, c, resolved.kind, settings, revivesDead);
   if (r.actor === resolved.actor) return;
   tx.putActor(resolved, r.actor);
   // The HP after the change, and what it replaced, so the log reads "3/7 left" and the DM can take it back (features section 10).
@@ -75,7 +77,7 @@ export function actorDeathSave(tx: Tx, op: OpOf<"actor.deathSave">): void {
 
 export function actorLife(tx: Tx, op: OpOf<"actor.life">): void {
   const resolved = tx.resolveActor(op.target);
-  const r = applyLife(resolved.actor, op.life);
+  const r = applyLife(resolved.actor, op.life, reviveToOne(tx.env.opVersion));
   tx.putActor(resolved, r.actor);
   tx.addActorEvents(resolved, r.events);
 }

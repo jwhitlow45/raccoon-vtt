@@ -1,4 +1,4 @@
-import type { RoomState } from "./model.ts";
+import type { RoomSettings, RoomState } from "./model.ts";
 import type { Op } from "./protocol.ts";
 
 /**
@@ -11,7 +11,7 @@ import type { Op } from "./protocol.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 8;
-export const OP_VERSION = 4;
+export const OP_VERSION = 5;
 
 export type MigrationStep = {
   from: number;
@@ -186,6 +186,30 @@ export const opMigrations: MigrationStep[] = [
     to: 4,
     apply: (op) => op,
   },
+  {
+    // v4 ops ran while healing did nothing to the dead, a set of HP left a
+    // dead creature dead, and the DM's Revive kept whatever HP a dead
+    // creature held (docs/design-v1-combat-flow.md 3.4 and 3.5). Their shape
+    // is unchanged. As in step 3 to 4, replay hands the reducer the stored
+    // version (`healRevivesDead`, `reviveToOne`), so a v4 op makes the state
+    // it made then, and a later restore's guard still matches.
+    //
+    // Deploy: nothing to run. The first op after it is stored at version 5.
+    // Rollback: an older build refuses to migrate a version 5 op down
+    // (runMigrations), so a room whose log holds one would not load there.
+    // Rolling back past this build needs a snapshot taken after the last op,
+    // which a clean shutdown writes, or a backup from before the deploy.
+    // An older build reads such a snapshot without checking its schema
+    // (server/rooms/persistence.ts) and ignores the new fields: companions
+    // act as plain tokens, `healRevives` does nothing, Revive keeps the HP
+    // it found, and a party companion's HP follows its own `hpVisibility`.
+    // Nothing new reaches players there, since the older token projection
+    // lists the fields it sends and saved steps are the DM's. An export from
+    // this build is refused by an older build's import, whose schema is strict.
+    from: 4,
+    to: 5,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -195,6 +219,26 @@ export const opMigrations: MigrationStep[] = [
  */
 export function revealSeenAnywhere(opVersion: number | undefined): boolean {
   return opVersion !== undefined && opVersion < 4;
+}
+
+/**
+ * Whether healing, or a set of current HP above 0, brings a dead creature
+ * back (RoomSettings.healRevives, absent read as on). Ops stored before
+ * version 5 never did (step 4 to 5 above), whatever the setting reads now.
+ * Every reader asks this, the rules and the client's lines alike, so an
+ * absent value means the same everywhere.
+ */
+export function healRevivesDead(settings: Pick<RoomSettings, "healRevives">, opVersion?: number): boolean {
+  if (opVersion !== undefined && opVersion < 5) return false;
+  return settings.healRevives !== false;
+}
+
+/**
+ * Whether the DM's Revive gives a creature that is not alive exactly 1 HP.
+ * Ops stored before version 5 kept the HP it held, at least 1 (step 4 to 5).
+ */
+export function reviveToOne(opVersion: number | undefined): boolean {
+  return opVersion === undefined || opVersion >= 5;
 }
 
 /** Runs the steps that lead from `from` to `to`, in order, and refuses a version with no path. */

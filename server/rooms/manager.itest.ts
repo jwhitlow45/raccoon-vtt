@@ -142,6 +142,59 @@ describe("idle unload, snapshots and recovery", () => {
     assert.equal(snap3.rows[0]?.state.tokens[goblinId]?.x, 4);
   });
 
+  test("version 4 heal, set and Revive ops on the dead replay as they applied then, and a new op is stored at version 5", async () => {
+    const owner = t.client();
+    const { roomId } = await owner.createRoom("Op version 4");
+    const s = await t.connect(roomId, owner);
+    const sceneId = ((await s.snapshot("c1")).state as ProjectedState).meta.playerSceneId!;
+    const goblin = (hp: number) => ({ ...actor, hp: { cur: hp, max: 20, temp: 0 }, life: "dead" });
+    const [healed, set, revived] = [uuidv7(), uuidv7(), uuidv7()];
+    for (const [id, hp] of [[healed, 0], [set, 0], [revived, 12]] as const) {
+      await s.apply({ t: "token.create", token: { id, sceneId, kind: "monster", name: "Goblin", size: "medium", x: 1, y: 1, actor: { inline: goblin(hp) } } });
+    }
+    // Three ops: the snapshot schedule fires, so the ops below come after the snapshot, as a crash leaves them.
+    await new Promise((r) => setTimeout(r, 300));
+    await t.manager.unload(roomId, 1011, false);
+    await s.waitClosed();
+    const { rows } = await t.pool.query<{ seq: string; member: string }>(
+      "select s.seq::text, (select actor_member_id from room_ops where room_id = $1 limit 1) as member from room_snapshots s where s.room_id = $1",
+      [roomId],
+    );
+    assert.equal(rows[0]?.seq, "3");
+    const stored = [
+      { t: "actor.hp", target: { tokenId: healed }, change: { kind: "heal", amount: 5 } },
+      { t: "actor.hp", target: { tokenId: set }, change: { kind: "set", cur: 9 } },
+      { t: "actor.life", target: { tokenId: revived }, life: "alive" },
+    ];
+    for (const [i, op] of stored.entries()) {
+      await t.pool.query(
+        `insert into room_ops (room_id, seq, at, actor_member_id, actor_role, op, op_version)
+         values ($1, $2, now(), $3, 'dm', $4::jsonb, 4)`,
+        [roomId, 4 + i, rows[0]!.member, JSON.stringify(op)],
+      );
+    }
+
+    const back = await t.connect(roomId, owner);
+    const snap = await back.snapshot("c1", 4);
+    assert.equal(snap.seq, 6);
+    const vitals = (state: ProjectedState, id: string) => {
+      const a = state.tokens[id]?.actor;
+      assert.ok(a && "inline" in a);
+      return [a.inline.life, a.inline.hp?.cur];
+    };
+    const state = snap.state as ProjectedState;
+    assert.deepEqual(vitals(state, healed), ["dead", 0], "healing did nothing to the dead then");
+    assert.deepEqual(vitals(state, set), ["dead", 9], "a set left it dead at the set HP");
+    assert.deepEqual(vitals(state, revived), ["alive", 12], "Revive kept the HP it held");
+
+    back.n = 3;
+    await back.apply({ t: "actor.hp", target: { tokenId: healed }, change: { kind: "heal", amount: 5 } });
+    const newest = await t.pool.query<{ op_version: number }>("select op_version from room_ops where room_id = $1 and seq = 7", [roomId]);
+    assert.equal(newest.rows[0]?.op_version, 5);
+    back.close();
+    await back.waitClosed();
+  });
+
   test("a replay that fails serves the room read-only", async () => {
     const owner = t.client();
     const { roomId } = await owner.createRoom("Broken");

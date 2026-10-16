@@ -1,4 +1,5 @@
 import { keys } from "../keys.ts";
+import { healRevivesDead } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import { MAX_RULER_STOPS, type ActorPatch, type OpOf } from "../protocol.ts";
@@ -86,7 +87,8 @@ export function applyActorPatch(tx: Tx, resolved: ResolvedActor, patch: ActorPat
   let actor: Actor = { ...resolved.actor };
   const events: ActorEvent[] = [];
   if (patch.hp) {
-    const r = applyHpSet(actor, patch.hp, resolved.kind, tx.state.meta.settings);
+    const settings = tx.state.meta.settings;
+    const r = applyHpSet(actor, patch.hp, resolved.kind, settings, healRevivesDead(settings, tx.env.opVersion));
     actor = r.actor;
     events.push(...r.events);
   }
