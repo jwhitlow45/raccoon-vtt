@@ -58,7 +58,7 @@ export default function CharactersPanel(props: PanelProps) {
 
   const companionOf = addingFor !== null ? characters?.[addingFor] : undefined;
   if (companionOf) {
-    return <CompanionForm character={companionOf} close={props.close} onDone={() => setAddingFor(null)} />;
+    return <CompanionForm character={companionOf} shown={props.shown} close={props.close} onDone={() => setAddingFor(null)} />;
   }
 
   if (creating) {

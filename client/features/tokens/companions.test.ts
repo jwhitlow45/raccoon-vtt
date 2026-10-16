@@ -11,6 +11,7 @@ import {
   companionSpot,
   draftError,
   draftWith,
+  lateCompanionText,
   linkPatch,
   makeCompanionPatch,
   playerPlacement,
@@ -76,6 +77,15 @@ describe("the companion form (docs/design-v1-combat-flow.md 3.6.3)", () => {
     assert.equal(draftWith(picked, { what: "creature" }).turn, "shared");
     assert.equal(draftWith(draftWith(NEW_COMPANION, { turn: "own" }), { what: "effect" }).turn, "none", "an effect takes no turn of its own");
     assert.equal(draftWith(draftWith(NEW_COMPANION, { what: "effect" }), { turn: "own" }).turn, "none");
+  });
+});
+
+describe("a creation answer that comes after its form is gone (ASTRA-07)", () => {
+  test("says nothing once added, since the token shows on the map, and says why it was not otherwise", () => {
+    assert.equal(lateCompanionText("Flaming Sphere", "taken"), null);
+    assert.equal(lateCompanionText("Flaming Sphere", "refused", { message: "no room next to Bree" }), "Flaming Sphere was not added. No room next to Bree.");
+    assert.equal(lateCompanionText("Flaming Sphere", "refused"), "Flaming Sphere was not added.");
+    assert.match(lateCompanionText("Flaming Sphere", "unknown") ?? "", /may not have been added/);
   });
 });
 

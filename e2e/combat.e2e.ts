@@ -856,6 +856,60 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await ops.send({ t: "actor.life", target: { tokenId: spirit.id }, life: "alive" });
   });
 
+  test("13d. on Ana's phone, Add a companion's answer held back until after Cancel and opening Log neither selects the new token nor closes the Log (ASTRA-07)", async () => {
+    // A second device of Ana's whose room socket goes through a route, so the server's frames can wait.
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    await context.addCookies(await anaContext.cookies(server.origin));
+    const page = await context.newPage();
+    const watch = new ConsoleWatch("ana-phone");
+    watch.attach(page);
+    let hold = false;
+    const held: (string | Buffer)[] = [];
+    let toPage: ((m: string | Buffer) => void) | null = null;
+    await page.routeWebSocket(/\/ws\?room=/, (ws) => {
+      const upstream = ws.connectToServer();
+      upstream.onMessage((m) => (hold ? held.push(m) : ws.send(m)));
+      toPage = (m) => ws.send(m);
+    });
+    try {
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      // From the toolbar's Panels, or from an open sheet's All panels, since Panels closes an open sheet.
+      const openPanel = async (title: string, from?: Locator) => {
+        if (from) await from.getByRole("button", { name: "All panels" }).click();
+        else await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+        await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: new RegExp(`^${title}`) }).click();
+        const sheet = page.locator(`dialog[data-rvtt-sheet][aria-label="${title}"]`);
+        await sheet.waitFor();
+        return sheet;
+      };
+      const characters = await openPanel("Characters");
+      await characters.getByRole("button", { name: "Add a companion" }).click();
+      await characters.getByRole("textbox", { name: "Name" }).fill("Flaming Sphere");
+      await characters.getByRole("radio", { name: "An effect" }).check();
+      hold = true;
+      await characters.getByRole("button", { name: "Add and place" }).click();
+      await characters.getByRole("button", { name: "Adding…" }).waitFor();
+      // The server takes it while its answer waits on the way back.
+      const sphere = await waitFor("Flaming Sphere in the DM's view", () => Object.values(dmSocket.state?.tokens ?? {}).find((t) => t.name === "Flaming Sphere"));
+      await characters.getByRole("button", { name: "Cancel" }).first().click();
+      await characters.getByRole("button", { name: "Add a companion" }).waitFor();
+      const log = await openPanel("Log", characters);
+      hold = false;
+      for (const m of held.splice(0)) toPage!(m);
+      // The answer arrives with the frames held back, and the page has it within moments: the Log stays open, nothing selected.
+      await page.waitForTimeout(500);
+      assert.equal(await log.count(), 1, "the late answer closed the Log");
+      assert.ok(await log.evaluate((el) => (el as unknown as { open: boolean }).open), "the late answer hid the Log");
+      assert.equal(await bar(page, "Flaming Sphere").count(), 0, "the late answer selected the new token");
+      assert.deepEqual(watch.errors, []);
+      await shots.take(page, "combat-companion-late-answer-log-open");
+      await ops.send({ t: "token.delete", tokenId: sphere.id });
+    } finally {
+      await context.close();
+    }
+  });
+
   test("14. no page logged an error", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(anaConsole.errors, [], "Ana's page logged errors");

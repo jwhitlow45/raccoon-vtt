@@ -1,4 +1,4 @@
-import { useState, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import type { Character, CompanionTurn, CreatureSize, Token } from "#shared/model.ts";
 import { playersToken } from "#shared/project.ts";
 import type { ClientOp, TokenPatch } from "#shared/protocol.ts";
@@ -32,6 +32,7 @@ import {
   dmPlacement,
   draftError,
   draftWith,
+  lateCompanionText,
   linkPatch,
   makeCompanionPatch,
   playerPlacement,
@@ -133,7 +134,13 @@ export function CharacterCompanions(props: { character: Character; canAdd: boole
  * It is busy until the server answers, and a refusal keeps the form open
  * with the reason.
  */
-export function CompanionForm(props: { character: Character; close(): void; onDone(): void }) {
+export function CompanionForm(props: {
+  character: Character;
+  /** Whether the panel holding the form is on screen (PanelProps.shown). */
+  shown: boolean;
+  close(): void;
+  onDone(): void;
+}) {
   const { character } = props;
   const view = useRoomView((s) => s.view);
   const sceneId = useRoomView((s) => s.sceneId);
@@ -144,6 +151,21 @@ export function CompanionForm(props: { character: Character; close(): void; onDo
   const [draft, setDraft] = useState<CompanionDraft>(NEW_COMPANION);
   const [error, setError] = useState<string | null>(null);
   const [waiting, setWaiting] = useState(false);
+  /*
+   * An answer moves the screen only while this form is still open and in
+   * sight. After Cancel, or with another panel opened since, a late one may
+   * not select the new token or close what the user has moved on to, and
+   * Cancel cannot take back an op the server may already hold.
+   */
+  const mounted = useRef(true);
+  const inSight = useRef(props.shown);
+  inSight.current = props.shown;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const set = (patch: Partial<Omit<CompanionDraft, "turnPicked">>) => {
     setDraft((d) => draftWith(d, patch));
     setError(null);
@@ -169,7 +191,18 @@ export function CompanionForm(props: { character: Character; close(): void; onDo
     if (!placement?.ok || waiting) return;
     const id = actions.newId();
     const op: ClientOp = { t: "token.create", token: companionInput(draft, { id, sceneId: placement.sceneId, x: placement.x, y: placement.y, elevation: placement.elevation }, character) };
+    const sentName = op.token.name;
     const onAnswer = (answer: OpAnswer, refusal?: OpRefusal) => {
+      if (!mounted.current || !inSight.current) {
+        const text = lateCompanionText(sentName, answer, refusal);
+        if (text) ui.notify(text, "error");
+        if (!mounted.current) return;
+        // Still open out of sight: done once added, else showing why for when the user comes back.
+        setWaiting(false);
+        if (answer === "taken") props.onDone();
+        else setError(answer === "refused" && refusal?.message ? capitalized(refusal.message) : "It may not have been added. Check the map before trying again.");
+        return;
+      }
       setWaiting(false);
       if (answer === "taken") {
         // Selected with its bar open on the map, as a tap on it does, and the sheet gets out of the way so the player can drag it on.

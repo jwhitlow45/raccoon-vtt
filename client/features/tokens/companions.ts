@@ -2,6 +2,7 @@ import type { Character, CompanionTurn, CreatureSize, ImageRef, RoomState, Token
 import { companionLegBlocker, withinCompanionReach } from "#shared/permissions.ts";
 import type { TokenInput } from "#shared/protocol.ts";
 import { footprint } from "../../lib/scene.ts";
+import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { blankActor, firstFreeSpot, occupiedBoxes, sizeFootprint, spreadPositions, type Point } from "./factory.ts";
 
 /**
@@ -29,6 +30,18 @@ export type CompanionDraft = {
 };
 
 export const NEW_COMPANION: CompanionDraft = { name: "", what: "creature", turn: "shared", size: "small", hp: null, ac: null, image: null, turnPicked: false };
+
+/**
+ * The toast for a creation answer that comes once its form is gone or out
+ * of sight, where no form is left to show why: none when it was added,
+ * since the token shows on the map.
+ */
+export function lateCompanionText(name: string, answer: OpAnswer, refusal?: Pick<OpRefusal, "message">): string | null {
+  if (answer === "taken") return null;
+  if (answer === "unknown") return `The connection dropped before the server answered, so ${name} may not have been added. Check the map.`;
+  const why = refusal?.message.trim().replace(/\.$/, "");
+  return why ? `${name} was not added. ${why[0]!.toUpperCase()}${why.slice(1)}.` : `${name} was not added.`;
+}
 
 /** The turn a companion starts at until the user picks one (3.6.2): a creature listed under its character, an effect not listed. */
 export function defaultTurn(what: CompanionWhat): CompanionTurn {
