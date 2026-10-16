@@ -2,6 +2,7 @@ import { useId, useState, type CSSProperties, type PointerEvent as ReactPointerE
 import type { Effect, InitEntry } from "#shared/model.ts";
 import { playerPlays } from "#shared/project.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
+import { AcBadge } from "../../components/AcBadge.tsx";
 import { Button } from "../../components/Button.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
 import { Switch } from "../../components/Switch.tsx";
@@ -13,8 +14,8 @@ import { REVIVE_NOTE, ReviveButton, offersRevive } from "../tokens/Revive.tsx";
 import { openStatBlock } from "../tokens/statBlockOpen.ts";
 import { RowRollTools } from "./AutoInitiative.tsx";
 import { useSend } from "./hooks.ts";
-import { entryActor, entryName, hpView, parseInitiative, rollReminder, valueText } from "./logic.ts";
-import { Chips, HpReadout, Portrait, RollBadge, Spinner } from "./parts.tsx";
+import { entryActor, entryName, hpView, parseInitiative, rollReminder, rowAc, valueText } from "./logic.ts";
+import { Chips, DescribedHp, DescribedItems, Portrait, RollBadge, Spinner } from "./parts.tsx";
 import { readiedEffect, rowTarget } from "./ready.ts";
 import { ReadyControls } from "./ReadyControls.tsx";
 
@@ -35,8 +36,8 @@ export type RowDrag = {
 };
 
 /**
- * One initiative row: picture, name, HP as the viewer may see it, AC for
- * the DM, condition chips, roll reminders and the typed value. The DM's
+ * One initiative row: picture, name, AC and HP as the viewer may see them,
+ * condition chips, roll reminders and the typed value. The DM's
  * controls (hidden, reaction, lair, legendary pips, reminders, tie order,
  * removal) open under the row, at full touch size, instead of crowding it.
  */
@@ -67,6 +68,9 @@ export function EntryRow(props: {
     entry.tokenId !== undefined ? { tokenId: entry.tokenId } : entry.characterId !== undefined ? { characterId: entry.characterId } : {},
   );
   const hp = hpView(actor);
+  // The AC shield, first on the second line, which is the row button's description (docs/design-v1-combat-flow.md 3.3).
+  const ac = rowAc(actor, token);
+  const lineId = useId();
   const effects = actor?.effects ?? [];
   // Whoever rolls this creature's initiative sees the reminder: the DM for every row, a player for their own.
   const reminder = dm || mine ? rollReminder(entry, effects) : undefined;
@@ -101,6 +105,7 @@ export function EntryRow(props: {
           type="button"
           onClick={props.onShow}
           aria-label={`${name}${active ? ", acting now" : ""}. ${props.picking ? "Pick for the shared HP entry" : "Show it on the map with its actions"}`}
+          aria-describedby={lineId}
           aria-pressed={props.picking ? props.selected : undefined}
           style={{
             flex: 1,
@@ -133,41 +138,45 @@ export function EntryRow(props: {
             >
               {name}
             </span>
-            <span style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), fontSize: theme.font.small, color: theme.color.textMuted }}>
-              <HpReadout hp={hp} />
-              {dm && actor?.ac !== undefined ? <span>AC {actor.ac}</span> : null}
-              {reminder ? <RollBadge kind={reminder} /> : null}
-              {dm && entry.hidden ? (
-                <Tag tone="muted" dense>
-                  Hidden
-                </Tag>
-              ) : null}
-              {readied ? (
-                <Tag tone="turn" dense>
-                  Readied
-                </Tag>
-              ) : null}
-              {entry.reactionUsed ? (
-                <Tag tone="muted" dense>
-                  Reaction used
-                </Tag>
-              ) : null}
-              {entry.inLair ? (
-                <Tag tone="muted" dense>
-                  Lair
-                </Tag>
-              ) : null}
-              {legendary && legendary.actionsMax > 0 ? (
-                <Tag tone="turn" dense>
-                  LA {legendary.actionsMax - legendary.actionsUsed}/{legendary.actionsMax}
-                </Tag>
-              ) : null}
-              {legendary && legendary.resistMax > 0 ? (
-                <Tag tone="turn" dense>
-                  LR {legendary.resistMax - legendary.resistUsed}/{legendary.resistMax}
-                </Tag>
-              ) : null}
-              <Chips effects={effects} max={6} />
+            <span id={lineId} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), fontSize: theme.font.small, color: theme.color.textMuted }}>
+              <DescribedItems
+                items={[
+                  ac !== null ? <AcBadge ac={ac} size="sm" /> : null,
+                  hp.kind !== "none" ? <DescribedHp hp={hp} /> : null,
+                  reminder ? <RollBadge kind={reminder} /> : null,
+                  dm && entry.hidden ? (
+                    <Tag tone="muted" dense>
+                      Hidden
+                    </Tag>
+                  ) : null,
+                  readied ? (
+                    <Tag tone="turn" dense>
+                      Readied
+                    </Tag>
+                  ) : null,
+                  entry.reactionUsed ? (
+                    <Tag tone="muted" dense>
+                      Reaction used
+                    </Tag>
+                  ) : null,
+                  entry.inLair ? (
+                    <Tag tone="muted" dense>
+                      Lair
+                    </Tag>
+                  ) : null,
+                  legendary && legendary.actionsMax > 0 ? (
+                    <Tag tone="turn" dense>
+                      LA {legendary.actionsMax - legendary.actionsUsed}/{legendary.actionsMax}
+                    </Tag>
+                  ) : null,
+                  legendary && legendary.resistMax > 0 ? (
+                    <Tag tone="turn" dense>
+                      LR {legendary.resistMax - legendary.resistUsed}/{legendary.resistMax}
+                    </Tag>
+                  ) : null,
+                  effects.length > 0 ? <Chips effects={effects} max={6} /> : null,
+                ]}
+              />
             </span>
           </span>
         </button>

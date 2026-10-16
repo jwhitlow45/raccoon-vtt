@@ -1,7 +1,8 @@
-import type { CSSProperties } from "react";
+import { Fragment, type CSSProperties, type ReactNode } from "react";
 import type { Effect, InitEntry } from "#shared/model.ts";
 import { Spinner as SharedSpinner } from "../../components/Loading.tsx";
 import { Tag as SharedTag, type TagTone } from "../../components/Tag.tsx";
+import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { effectChip, effectCount, initials } from "../../lib/tokenView.ts";
 import { useAssets, useRoomView } from "../../state/view.ts";
@@ -184,6 +185,38 @@ export function RollBadge(props: { kind: "adv" | "dis" }) {
     <SharedTag tone={adv ? "success" : "danger"} dense title={adv ? "Rolls initiative with advantage" : "Rolls initiative with disadvantage"}>
       {adv ? "Adv" : "Dis"}
     </SharedTag>
+  );
+}
+
+/**
+ * A row's second line as the row's description (docs/design-v1-combat-flow.md
+ * 3.3): its items in order, with an unseen ", " between them, so a screen
+ * reader hears "Armor Class 15, HP 7/7, Reaction used" after the row's name.
+ * Absent items are left out, so no separator stands alone. The separators
+ * are absolutely placed, so the line's flex gap is unchanged.
+ */
+export function DescribedItems(props: { items: readonly (ReactNode | null | false | undefined)[] }) {
+  const present = props.items.filter((item) => item !== null && item !== false && item !== undefined);
+  return (
+    <>
+      {present.map((item, i) => (
+        <Fragment key={i}>
+          {i > 0 ? <span style={VISUALLY_HIDDEN}>, </span> : null}
+          {item}
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+/** The HP readout for a row's description: "HP 7/7" to a screen reader, "7/7" on screen. */
+export function DescribedHp(props: { hp: HpView }) {
+  if (props.hp.kind === "none") return null;
+  return (
+    <span>
+      {props.hp.kind === "exact" ? <span style={VISUALLY_HIDDEN}>HP </span> : null}
+      <HpReadout hp={props.hp} />
+    </span>
   );
 }
 

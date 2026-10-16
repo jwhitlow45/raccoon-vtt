@@ -23,6 +23,7 @@ import {
   parseInitiative,
   reorderTie,
   roundHeaderForm,
+  rowAc,
   turnOp,
   rollReminder,
   scoreFills,
@@ -544,5 +545,18 @@ describe("the round header's form (docs/design-v1-combat-flow.md 3.1)", () => {
     assert.equal(roundHeaderForm(203, 68), "compact");
     assert.equal(roundHeaderForm(204, 68), "full");
     assert.equal(roundHeaderForm(0, 56), "static", "a hidden pane measures 0");
+  });
+});
+
+describe("the AC a row shows (docs/design-v1-combat-flow.md 3.3)", () => {
+  test("whatever AC the viewer's copy holds, above 0, alive, and with HP to show", () => {
+    assert.equal(rowAc(actor({ ac: 15 })), 15);
+    assert.equal(rowAc({ life: "alive", effects: [], hpLabel: "Healthy" }), null, "a player's copy of a monster holds no AC");
+    assert.equal(rowAc(actor({ ac: 0 })), null);
+    assert.equal(rowAc(actor({ ac: 15, life: "dead" })), null, "a corpse's AC answers nothing");
+    assert.equal(rowAc(actor({ ac: 15, hp: { cur: 0, max: 0, temp: 0 } })), null, "a creature at max HP 0");
+    assert.equal(rowAc(actor({ ac: 13 }), { kind: "object", companion: { of: "c1", turn: "none" } }), null, "an effect");
+    assert.equal(rowAc(actor({ ac: 13 }), { kind: "npc", companion: { of: "c1", turn: "shared" } }), 13, "a creature companion");
+    assert.equal(rowAc(undefined), null);
   });
 });

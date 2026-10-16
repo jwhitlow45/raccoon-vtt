@@ -3,6 +3,7 @@ import type { ClientOp, EntryInput } from "#shared/protocol.ts";
 import { MAX_ENTRIES_PER_OP } from "#shared/protocol.ts";
 import type { ProjectedActor } from "#shared/project.ts";
 import { withheldWhereItStands } from "#shared/project.ts";
+import { hpLess } from "#shared/rules/hp.ts";
 import { advantageHint, compareEntries } from "#shared/rules/initiative.ts";
 import { displayName } from "../../lib/scene.ts";
 
@@ -259,6 +260,21 @@ export function hpView(actor: ProjectedActor | undefined): HpView {
   if (actor?.life === "dead") return { kind: "label", label: "Dead" };
   if (actor?.life === "dying" || actor?.life === "stable") return { kind: "label", label: "Dying" };
   return { kind: "none" };
+}
+
+/**
+ * The AC a row shows in its shield (docs/design-v1-combat-flow.md 3.3):
+ * whatever AC this viewer's copy holds, which is every creature's for the
+ * DM and a player's own creatures' for them, since the projection sends no
+ * other. None for an AC of 0, a dead creature (a corpse's AC answers
+ * nothing, and the map's badge hides on the dead too), or a creature with
+ * no HP to show, such as an effect (hpLess).
+ */
+export function rowAc(actor: ProjectedActor | undefined, token?: Pick<Token, "kind"> & { companion?: unknown }): number | null {
+  const ac = actor?.ac;
+  if (typeof ac !== "number" || !(ac > 0)) return null;
+  if (actor?.life === "dead" || hpLess(actor, token)) return null;
+  return ac;
 }
 
 /**
