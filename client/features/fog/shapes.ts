@@ -152,6 +152,14 @@ export function publishLabel(ops: readonly { mode: FogMode }[]): string {
   return `Show players the changes (${n})`;
 }
 
+/** The publish button's short words where the row is narrow (docs/design-v1-tool-options.md 9.6): "Reveal (4)", "Fog (4)" or "Show (4)". Its tooltip keeps the whole sentence. */
+export function publishShort(ops: readonly { mode: FogMode }[]): string {
+  const n = ops.length;
+  if (ops.every((o) => o.mode === "reveal")) return `Reveal (${n})`;
+  if (ops.every((o) => o.mode === "hide")) return `Fog (${n})`;
+  return `Show (${n})`;
+}
+
 /** A brush width, in cells, as the room measures: "10 ft" at 5 ft a square. */
 export function brushLabel(cells: number, feetPerCell: number): string {
   return `${cells * feetPerCell} ft`;

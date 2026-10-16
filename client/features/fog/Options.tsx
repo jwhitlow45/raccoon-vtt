@@ -1,11 +1,10 @@
-import { useState } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
+import { Icon, type IconName } from "../../components/Icon.tsx";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
-import { Segmented } from "../../components/Segmented.tsx";
-import { ConfirmButton, InfoLine, OptButton, OptionsColumn, OptionsRow, OptSelect } from "../measure/controls.tsx";
-import { brushLabel, publishLabel, type FogMode } from "./shapes.ts";
+import { ChoiceTiles, ConfirmButton, OptButton, OptionsStrip, OptSegmented, PickCloses, ValueChip } from "../measure/controls.tsx";
+import { brushLabel, publishLabel, publishShort, type FogMode } from "./shapes.ts";
 import { BRUSH_WIDTHS, useFogStore, type FogShapeKind } from "./store.ts";
 import { closeFogPolygon } from "./tool.tsx";
 import { EXPLORED_UNDO_HINT, visionOn } from "../vision/sightMode.ts";
@@ -17,10 +16,19 @@ const HINTS: Record<FogShapeKind, string> = {
   room: "Tap a room made with the map builder.",
 };
 
+const SHAPES: readonly { value: FogShapeKind; label: string; glyph: IconName }[] = [
+  { value: "rect", label: "Rectangle", glyph: "shapeBox" },
+  { value: "poly", label: "Polygon", glyph: "shapePolygon" },
+  { value: "brush", label: "Brush", glyph: "fogBrush" },
+  { value: "room", label: "Builder room", glyph: "fogRoom" },
+];
+
 /**
- * The fog tool's bar: what a drag does now, then reveal or hide, the
- * shape, draft or live, and the draft's Reveal and Discard. Resets are a
- * second tap away, because they change what players see at once.
+ * The fog tool's options (docs/design-v1-tool-options.md 9.6): what a drag
+ * does now on the line, then reveal or hide, the shape, draft or live, and
+ * the draft's Reveal, Undo and Discard by priority. Fog all and Reveal all
+ * are always in ⋯, a second tap away, because they change what players
+ * see at once.
  */
 export default function FogOptions() {
   const fogState = useFogStore();
@@ -35,83 +43,112 @@ export default function FogOptions() {
   const draft = useRoomView((v) => (v.sceneId ? v.view?.fogDrafts[v.sceneId] : undefined));
   const store = useRoomStore();
   const actions = useRoomActions();
-  const [more, setMore] = useState(false);
   if (!scene || !sceneId) return null;
   const set = fogState.setState;
   const drafted = draft?.ops.length ?? 0;
 
   if (!scene.fogEnabled) {
     return (
-      <OptionsColumn>
-        <InfoLine tone="warning">Fog is off for this scene, so players see all of it.</InfoLine>
-        <OptionsRow label="Fog">
-          <OptButton tone="primary" onClick={() => actions.dispatch({ t: "scene.update", sceneId, patch: { fogEnabled: true } })}>
-            Turn fog on
-          </OptButton>
-        </OptionsRow>
-      </OptionsColumn>
+      <OptionsStrip
+        tool="Fog"
+        line={{ tone: "warning", content: "Fog is off for this scene, so players see all of it." }}
+        slots={[
+          {
+            id: "fogOn",
+            priority: 1,
+            control: (
+              <OptButton tone="primary" ends onClick={() => actions.dispatch({ t: "scene.update", sceneId, patch: { fogEnabled: true } })}>
+                Turn fog on
+              </OptButton>
+            ),
+          },
+        ]}
+      />
     );
   }
 
   const hint = s.note ?? `${s.live ? `${HINTS[s.shape]} Players see it at once.` : HINTS[s.shape]}${visionOn(scene) ? ` ${EXPLORED_UNDO_HINT}` : ""}`;
+  const corners = s.shape === "poly" && s.poly.length > 0;
+  // A polygon with corners is a task: its controls lead, and the standing settings drop by 3 (9, "The task rule").
+  const drop = corners ? 3 : 0;
+  const ops = draft?.ops ?? [];
   return (
-    <OptionsColumn>
-      <InfoLine tone={s.note ? "warning" : "muted"}>{hint}</InfoLine>
-      <OptionsRow label="Fog">
-        {/* Named for the fog itself, so they never read like the publish button. */}
-        <Segmented<FogMode>
-          label="Clear or add fog"
-          value={s.mode}
-          onChange={(mode) => set({ mode })}
-          options={[
-            { value: "reveal", label: "Clear fog", title: "Clear fog" },
-            { value: "hide", label: "Add fog", title: "Add fog" },
-          ]}
-        />
-        <OptSelect<FogShapeKind>
-          label="Shape"
-          value={s.shape}
-          onChange={(shape) => set({ shape, poly: [], rect: null, stroke: [], note: null })}
-          options={[
-            { value: "rect", label: "Rectangle" },
-            { value: "poly", label: "Polygon" },
-            { value: "brush", label: "Brush" },
-            { value: "room", label: "Builder room" },
-          ]}
-        />
-        {s.shape === "brush" ? (
-          <Segmented<number>
-            label="Brush width"
-            value={s.width}
-            onChange={(width) => set({ width })}
-            options={BRUSH_WIDTHS.map((w) => ({ value: w, label: brushLabel(w, feetPerCell), title: `${w} ${w === 1 ? "square" : "squares"} wide` }))}
-          />
-        ) : null}
-        {s.shape === "poly" ? (
-          <>
-            {/* One main action in the bar: closing the shape, unless a draft waits to be revealed. */}
-            <OptButton tone={drafted > 0 ? undefined : "primary"} disabled={s.poly.length < 3} onClick={() => closeFogPolygon({ scene, actions, getState: store.getState, scope })}>
+    <OptionsStrip
+      tool="Fog"
+      task={drafted > 0 || corners}
+      line={{ tone: s.note ? "warning" : "hint", content: hint }}
+      slots={[
+        {
+          id: "mode",
+          priority: 1 + drop,
+          compact: true,
+          control: (
+            // Named for the fog itself, so they never read like the publish button.
+            <OptSegmented<FogMode>
+              label="Clear or add fog"
+              value={s.mode}
+              onChange={(mode) => set({ mode })}
+              options={[
+                { value: "reveal", label: "Clear fog", title: "Clear fog" },
+                { value: "hide", label: "Add fog", title: "Add fog" },
+              ]}
+            />
+          ),
+        },
+        {
+          id: "shape",
+          priority: 2 + drop,
+          compact: true,
+          glyph: true,
+          control: (
+            <ValueChip label="Shape" kind="choice" value={s.shape} options={SHAPES.map((o) => ({ key: o.value, words: o.label, glyph: <Icon name={o.glyph} /> }))}>
+              <PickCloses>
+                <ChoiceTiles<FogShapeKind>
+                  label="Shape"
+                  value={s.shape}
+                  options={SHAPES.map((o) => ({ value: o.value, label: o.label, glyph: <Icon name={o.glyph} /> }))}
+                  onChange={(shape) => set({ shape, poly: [], rect: null, stroke: [], note: null })}
+                />
+              </PickCloses>
+            </ValueChip>
+          ),
+        },
+        s.shape === "brush" && {
+          id: "brushWidth",
+          priority: 3,
+          compact: true,
+          control: (
+            <OptSegmented<number>
+              label="Brush width"
+              value={s.width}
+              onChange={(width) => set({ width })}
+              options={BRUSH_WIDTHS.map((w) => ({ value: w, label: brushLabel(w, feetPerCell), title: `${w} ${w === 1 ? "square" : "squares"} wide` }))}
+            />
+          ),
+        },
+        s.shape === "poly" && {
+          id: "closeShape",
+          priority: 1,
+          control: (
+            // One main action in the row: closing the shape, unless a draft waits to be revealed.
+            <OptButton tone={drafted > 0 ? undefined : "primary"} disabled={s.poly.length < 3} ends onClick={() => closeFogPolygon({ scene, actions, getState: store.getState, scope })}>
               Close shape
             </OptButton>
+          ),
+        },
+        s.shape === "poly" && {
+          id: "undoCorner",
+          priority: 2,
+          control: (
             <OptButton disabled={s.poly.length === 0} onClick={() => set({ poly: s.poly.slice(0, -1) })}>
               Undo corner
             </OptButton>
-          </>
-        ) : null}
-        <Segmented<"draft" | "live">
-          label="When players see edits"
-          value={s.live ? "live" : "draft"}
-          onChange={(v) => set({ live: v === "live" })}
-          options={[
-            { value: "draft", label: "Draft", title: "Edit privately, then reveal" },
-            { value: "live", label: "Live", title: "Players see each edit at once" },
-          ]}
-        />
-        {drafted > 0 ? (
-          <>
-            <OptButton tone="primary" onClick={() => actions.dispatch({ t: "fog.publish", sceneId })}>
-              {publishLabel(draft?.ops ?? [])}
-            </OptButton>
+          ),
+        },
+        drafted > 0 && {
+          id: "undo",
+          priority: 3,
+          control: (
             <OptButton
               label="Take back the last draft edit"
               onClick={() => {
@@ -121,21 +158,56 @@ export default function FogOptions() {
             >
               Undo
             </OptButton>
-            <OptButton tone="danger" label="Throw the draft away" onClick={() => actions.dispatch({ t: "fog.discard", sceneId })}>
+          ),
+        },
+        drafted > 0 && {
+          id: "publish",
+          priority: 1,
+          compact: true,
+          control: (
+            <OptButton tone="primary" short={publishShort(ops)} ends onClick={() => actions.dispatch({ t: "fog.publish", sceneId })}>
+              {publishLabel(ops)}
+            </OptButton>
+          ),
+        },
+        {
+          id: "live",
+          priority: 4 + drop,
+          compact: true,
+          control: (
+            <OptSegmented<"draft" | "live">
+              label="When players see edits"
+              value={s.live ? "live" : "draft"}
+              onChange={(v) => set({ live: v === "live" })}
+              options={[
+                { value: "draft", label: "Draft", title: "Edit privately, then reveal" },
+                { value: "live", label: "Live", title: "Players see each edit at once" },
+              ]}
+            />
+          ),
+        },
+        drafted > 0 && {
+          id: "discard",
+          priority: 5,
+          control: (
+            <OptButton tone="danger" label="Throw the draft away" ends onClick={() => actions.dispatch({ t: "fog.discard", sceneId })}>
               Discard
             </OptButton>
-          </>
-        ) : null}
-        <OptButton label={more ? "Hide the reset buttons" : "Fog or reveal the whole scene"} pressed={more} onClick={() => setMore(!more)}>
-          {more ? "Less" : "More"}
-        </OptButton>
-        {more ? (
-          <>
-            <ConfirmButton label="Fog all" confirm="Tap again: fog all" title="Cover the whole scene for the players now" onConfirm={() => actions.dispatch({ t: "fog.reset", sceneId, to: "hidden" })} />
-            <ConfirmButton label="Reveal all" confirm="Tap again: reveal all" title="Clear the whole scene for the players now" onConfirm={() => actions.dispatch({ t: "fog.reset", sceneId, to: "revealed" })} />
-          </>
-        ) : null}
-      </OptionsRow>
-    </OptionsColumn>
+          ),
+        },
+        {
+          id: "fogAll",
+          priority: 9,
+          always: true,
+          control: <ConfirmButton label="Fog all" confirm="Tap again: fog all" title="Cover the whole scene for the players now" onConfirm={() => actions.dispatch({ t: "fog.reset", sceneId, to: "hidden" })} />,
+        },
+        {
+          id: "revealAll",
+          priority: 9,
+          always: true,
+          control: <ConfirmButton label="Reveal all" confirm="Tap again: reveal all" title="Clear the whole scene for the players now" onConfirm={() => actions.dispatch({ t: "fog.reset", sceneId, to: "revealed" })} />,
+        },
+      ]}
+    />
   );
 }

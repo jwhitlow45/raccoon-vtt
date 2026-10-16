@@ -5,7 +5,7 @@ import { clientOpSchema, MAX_FOG_CELLS, MAX_STROKE_POINTS } from "#shared/protoc
 import { isCellFullyFogged } from "#shared/rules/fog.ts";
 import { indexBuild } from "#shared/rules/walls.ts";
 import { apply, room } from "#shared/testutil.ts";
-import { brushLabel, cellsOutline, fogOps, polyShape, publishLabel, rectShape, roomShapes, simplify, strokeShapes, type Point } from "./shapes.ts";
+import { brushLabel, cellsOutline, fogOps, polyShape, publishLabel, publishShort, rectShape, roomShapes, simplify, strokeShapes, type Point } from "./shapes.ts";
 
 let ids = 0;
 const newId = () => `f${++ids}`;
@@ -145,6 +145,12 @@ describe("fog wording", () => {
     assert.equal(publishLabel([{ mode: "reveal" }, { mode: "reveal" }]), "Reveal to players (2)");
     assert.equal(publishLabel([{ mode: "hide" }]), "Fog for players (1)");
     assert.equal(publishLabel([{ mode: "reveal" }, { mode: "hide" }, { mode: "reveal" }]), "Show players the changes (3)");
+  });
+
+  test("its short words keep the verb and the count", () => {
+    assert.equal(publishShort([{ mode: "reveal" }, { mode: "reveal" }, { mode: "reveal" }, { mode: "reveal" }]), "Reveal (4)");
+    assert.equal(publishShort([{ mode: "hide" }]), "Fog (1)");
+    assert.equal(publishShort([{ mode: "reveal" }, { mode: "hide" }]), "Show (2)");
   });
 
   test("brush widths are in feet, as the room measures", () => {
