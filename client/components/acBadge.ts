@@ -9,6 +9,14 @@
 /** The shield outline, in a 24 px box: the D&D sign for AC, first drawn by the party bar. */
 export const SHIELD_PATH = "M12 2 4 5v6c0 5.2 3.4 9.8 8 11 4.6-1.2 8-5.8 8-11V5z";
 
+/**
+ * The outline's own bounds in that box (x 4 to 20, y 2 to 22) with half a
+ * unit to spare. A badge stretches these to its box, so the outline fills
+ * it, its 1 px line is not cut at the edges, and a wider box for three
+ * digits widens the shield around them, on the map as in the page.
+ */
+export const SHIELD_BOUNDS = { x: 3.5, y: 1.5, width: 17, height: 21 } as const;
+
 /** `md` for the bar and the panel, `sm` for dense rows such as the tracker's and the party bar's. */
 export type AcBadgeSize = "sm" | "md";
 

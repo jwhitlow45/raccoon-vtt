@@ -20,9 +20,10 @@ import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, wai
  * It runs with `pnpm test:e2e` on E2E_PORT plus ten. The other environment
  * variables are the smoke run's (smoke.e2e.ts).
  *
- * Not here: the very short sideways sheet with the turn band in a band
- * (docs/design-v1-layout-hierarchy.md 4.2) is that design's, and its rows
- * of step 7 run once both land.
+ * The very short sideways sheet (docs/design-v1-layout-hierarchy.md 4.2)
+ * is checked at 480 x 320 at 130%, where it always applies (steps 5 and
+ * 7c). With the turn band it applies at larger sizes only where the strip
+ * cannot stay in the top bar, which that design's own e2e reaches.
  */
 
 const PORT = Number(process.env.E2E_PORT ?? 3100) + 10;
@@ -546,6 +547,32 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await dm.keyboard.press("Escape");
   });
 
+  test("3b. the DM's Make a companion in Token settings starts with no character and the turn listed under it, waits for a character, and Cancel starts it again", async () => {
+    await tapToken(dm, run.villager.at);
+    await bar(dm, "Villager").getByRole("button", { name: "Details", exact: true }).click();
+    const panel = tokenPanel(dm);
+    await panel.getByRole("heading", { name: "Villager" }).first().waitFor();
+    await panel.getByRole("button", { name: "Token settings", exact: true }).click();
+    const chosen = (name: string) => panel.getByRole("combobox", { name, exact: true }).locator("option:checked").textContent();
+    await panel.getByRole("button", { name: "Make a companion", exact: true }).click();
+    assert.equal(await chosen("Belongs to"), "Choose a character");
+    assert.match((await chosen("Turn")) ?? "", /listed under/);
+    const confirm = panel.getByRole("button", { name: "Make a companion", exact: true });
+    assert.equal(await confirm.isDisabled(), true, "the confirm waits for a character");
+    await panel.getByRole("combobox", { name: "Belongs to", exact: true }).selectOption({ label: "Thorn" });
+    assert.equal(await chosen("Turn"), "On Thorn's turn, listed under Thorn");
+    assert.equal(await confirm.isDisabled(), false);
+    await shots.take(dm, "tokenpanel-dm-make-a-companion");
+    await panel.getByRole("button", { name: "Cancel", exact: true }).click();
+    await panel.getByRole("button", { name: "Make a companion", exact: true }).click();
+    assert.equal(await chosen("Belongs to"), "Choose a character", "Cancel starts the form again");
+    await panel.getByRole("button", { name: "Cancel", exact: true }).click();
+    assert.equal(dmSocket.state!.tokens[run.villager.id]!.companion, undefined, "nothing was sent");
+    await panel.getByRole("button", { name: "Token settings", exact: true }).click();
+    await dm.keyboard.press("Escape");
+    await dm.keyboard.press("Escape");
+  });
+
   test("4. a long Immunities line clamps in the bar and shows whole in the block; an unlinked NPC offers Attach; the lock stands above the shield; AC 9 and 100 fit their shields", async () => {
     await setUp(dm, dmCdp, DESK, null);
     await dm.getByRole("tab", { name: "Initiative" }).click();
@@ -656,15 +683,10 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
         await b.getByRole("button", { name: "Details", exact: true }).click();
         const panel = tokenPanel(dm);
         await panel.getByRole("heading", { name, exact: true }).first().waitFor();
-        if (size.width === 480) {
-          // This size's panel is the very short mode's, 241 px inside (docs/design-v1-layout-hierarchy.md 4.2), which lands with that design. Until then its side sheet is 141 px inside, under the HP entry's four modes, so this design's own parts are checked there.
-          for (const part of ["[data-stat-block]", "[data-image-pair]", '[role="group"][aria-label="Maximum and temporary HP"]']) {
-            await noSideScroll(panel.locator(part).first(), `${size.label}, ${name}'s ${part}`);
-          }
-        } else {
-          await noSideScroll(panel, `${size.label}, ${name}'s panel`);
-          await speedUnitsWhole(panel, `${size.label}, ${name}'s panel`);
-        }
+        // At 480 x 320 at 130% the panel takes the very short mode, over the whole screen with 241 px inside (docs/design-v1-layout-hierarchy.md 4.2).
+        if (size.width === 480) assert.equal(await dm.locator('dialog[data-rvtt-sheet][aria-modal="true"]').count(), 1, `${size.label}: the panel opens over the whole screen`);
+        await noSideScroll(panel, `${size.label}, ${name}'s panel`);
+        await speedUnitsWhole(panel, `${size.label}, ${name}'s panel`);
         await shots.take(dm, `tokenpanel-${size.width}x${size.height}-${name.split(" ")[0]!.toLowerCase()}-panel`);
         // Let go, and on a phone close the sheet first.
         for (let i = 0; i < 3 && (await panel.count()) > 0 && (await panel.getByText("Tap a token to see it here.").count()) === 0; i++) await dm.keyboard.press("Escape");
@@ -780,7 +802,8 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     ];
     for (const size of sizes) {
       await setUp(dm, dmCdp, size, null);
-      if (size.width >= 900) await dm.getByRole("tab", { name: "Initiative" }).click();
+      // A short wide layout starts with its side panel hidden (docs/design-v1-layout-hierarchy.md 4.1), and Stat block shows it below.
+      if (size.width >= 900) assert.equal(await dm.getByRole("tab", { name: "Token" }).count(), 0, `${size.label}: the side panel starts shown`);
       await tapToken(dm, run.goblin.at);
       const goblin = bar(dm, "Goblin 4");
       await goblin.waitFor();
@@ -861,6 +884,41 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await noSideScroll(panel, `${size.label}, the panel`);
       await shots.take(dm, `tokenpanel-${size.label.replace(/ /g, "")}-stat-block-sheet`);
     }
+  });
+
+  test("7c. the very short mode at 480 x 320 at 130%: Stat block opens the whole-screen sheet at the block with focus on its disclosure, the bar put away, and the image and HP rows wrapping at 241 px", async () => {
+    await setUp(dm, dmCdp, { width: 480, height: 320, scale: 1.3, insets: { side: 47, bottom: 21 } }, null);
+    await tapToken(dm, run.goblin.at);
+    const goblin = bar(dm, "Goblin 4");
+    await goblin.waitFor();
+    await goblin.getByRole("button", { name: "Stat block", exact: true }).click();
+    const sheet = dm.locator('dialog[data-rvtt-sheet][aria-modal="true"]');
+    await sheet.waitFor();
+    const panel = tokenPanel(dm);
+    await panel.getByRole("heading", { name: "Goblin Warrior" }).waitFor();
+    await waitFor("focus on the stat block's disclosure", async () => {
+      const f = await focused(dm);
+      return f.name === "Stat block" && f.expanded === "true";
+    });
+    // The bar cannot stand beside a panel that covers the screen, so Stat block puts it away (docs/design-v1-token-panel.md 3.4).
+    assert.equal(await goblin.isVisible(), false, "the bar still shows");
+    await shots.take(dm, "tokenpanel-480x320at130-very-short-stat-block");
+    await panel.evaluate((el) => ((el as unknown as El).scrollTop = 0));
+    await settle(panel);
+    const pair = panel.locator("[data-image-pair]");
+    const column = await pair.evaluate((el) => (el.parentElement as unknown as El).getBoundingClientRect().width);
+    const change = await rectOf(panel.getByRole("button", { name: "Change image", exact: true }));
+    const another = await rectOf(panel.getByRole("button", { name: "Add another image", exact: true }));
+    const gap = await pair.evaluate((el) => Number.parseFloat((el as unknown as { ownerDocument: { defaultView: { getComputedStyle(e: unknown): { columnGap: string } } } }).ownerDocument.defaultView.getComputedStyle(el).columnGap));
+    assert.equal(Math.abs(change.top - another.top) <= 2, column >= change.width + another.width + gap * 1.3 - 0.5, `the pair's lines with a ${column} px column`);
+    const maxHp = await rectOf(panel.getByRole("textbox", { name: "Max HP", exact: true }));
+    const tempHp = await rectOf(panel.getByRole("textbox", { name: "Temporary HP", exact: true }));
+    assert.ok(tempHp.top > maxHp.bottom - 1, "Max HP and Temp HP take two lines at 241 px");
+    await noSideScroll(panel, "480 x 320 at 130%, the very short panel");
+    // Escape is the modal's own: it closes the sheet.
+    await dm.keyboard.press("Escape");
+    await sheet.waitFor({ state: "detached" });
+    await dm.keyboard.press("Escape");
   });
 
   test("8. Pat on a phone: their character's summary and sheet link, Bree's HP alone, the goblin's label, the HP entry when the room allows it, and the Wild Shape's saves after loading", async () => {

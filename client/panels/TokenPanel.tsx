@@ -198,9 +198,12 @@ function TokenDetails(props: PanelProps) {
 /** The name at the very top, whole and wrapping, then the size and the tags on one wrapping line. */
 function NameBlock(props: { token: Token; name: string; feetPerCell: number }) {
   const { token } = props;
+  // A companion names its character in the tracker's words (docs/design-v1-combat-flow.md 3.6.7), for whoever's copy holds the link.
+  const companionOf = useRoomView((s) => (token.companion ? s.view?.characters[token.companion.of]?.name : undefined));
   const fp = footprint(token);
   const sizeText = fp.w === fp.h ? `${fp.w * props.feetPerCell} ft` : `${fp.w * props.feetPerCell} by ${fp.h * props.feetPerCell} ft`;
   const badges: string[] = [];
+  if (companionOf !== undefined) badges.push(`Companion of ${companionOf}`);
   if (token.visibility === "dm") badges.push("Hidden from players");
   if (token.locked) badges.push("Locked");
   if (token.nameHidden) badges.push("Name hidden");

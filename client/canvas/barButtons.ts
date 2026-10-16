@@ -73,7 +73,7 @@ export function barButtons(input: BarButtonInput): { play: BarButtonId[]; less: 
   return { play, less };
 }
 
-/** A token that belongs to a character as its companion, read without needing the field in this build's model. */
+/** A token that belongs to a character as its companion (docs/design-v1-combat-flow.md 3.6), whose owners who are not the DM dismiss it. */
 export function isCompanion(token: object): boolean {
   return "companion" in token && token.companion !== undefined && token.companion !== null;
 }

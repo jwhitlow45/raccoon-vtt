@@ -247,6 +247,7 @@ The Builder tool is the DM's. Its modes:
 - Each companion takes its own turn with its own initiative, acts on its character's turn listed under it in the order, or acts on its character's turn and stays out of the order. Only a creature takes its own turn.
 - A player adds a companion from their character in the Characters panel. It goes right next to the character's token, up to 10 per character on a scene, and the DM's log says so. The DM can make any token a companion in its panel.
 - A companion listed under its character keeps its own Reaction and Ready action in the order.
+- A companion's token panel says whose it is ("Companion of Bree"), as its own row in the order does.
 - Other players see a party member's companions, under the character in the order, with HP as "Players see the party's HP" allows. A creature companion lends the party its sight, an effect does not.
 - Effects on a companion that acts on its character's turn count that character's turns.
 - A companion stays on its scene when the party moves on. The DM finds the ones left behind by searching "companion" in that scene's outliner.
@@ -288,7 +289,7 @@ The DM asks players for a saving throw or an ability check, and each player type
 - Undo and Redo for the DM's changes, each saying what it took back. They sit in the top bar.
 - The DM panel leads with Handouts, then Players' screens (Follow me, Bring everyone here and Black out), then Check their view (View as a player and Party sight), then the player link and the table display.
 - **Outliner**: a panel listing everything on the scene in view, in groups that fold: Creatures and objects, Map (stamps, labels, pins and lights), Areas, Drawings, and Doors. Each row says what players get, such as Hidden, Under fog, Out of the party's sight, DM only, or a secret door hidden or found. The search filters as you type. A tap shows the item on the map and selects it.
-- **Party bar**: each player character's portrait, HP with temporary HP and a bar, AC on the same shield as the tokens', passive Perception as "PP 13", and up to three conditions, or Dying, Stable or Dead. On a wide screen it sits above the side panel and folds to one line. On a phone it is the Party panel. A tap jumps to that character's token and opens its action bar.
+- **Party bar**: each player character's portrait, HP with temporary HP and a bar, AC on the same shield as the tokens', hidden while dead as theirs is, passive Perception as "PP 13", and up to three conditions, or Dying, Stable or Dead. On a wide screen it sits above the side panel and folds to one line. On a phone it is the Party panel. A tap jumps to that character's token and opens its action bar.
 
 ## Journal and map pins
 

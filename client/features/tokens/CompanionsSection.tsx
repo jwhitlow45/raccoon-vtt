@@ -322,12 +322,17 @@ export function CompanionSection(props: {
   );
 }
 
+/** The empty choice "Belongs to" starts at, which no character id can be. */
+const NO_CHARACTER = "";
+
 /**
  * The DM's "Make a companion" in Token settings, on any token that is not
  * a PC, has stats of its own and is not yet a companion (3.6.9): it opens
- * whose it is and its turn in place, starting at one listed under its
- * character, and sends nothing until its own button. The one update also
- * gives a hostile token the ally ring.
+ * whose it is and its turn in place, with no character chosen and the turn
+ * listed under its character (docs/design-v1-token-panel.md 3.8), and
+ * sends nothing until its own button, which waits for a character. Cancel
+ * starts the form again from there. The one update also gives a hostile
+ * token the ally ring.
  */
 export function MakeCompanion(props: { token: Token }) {
   const { token } = props;
@@ -336,7 +341,7 @@ export function MakeCompanion(props: { token: Token }) {
   const list = Object.values(characters ?? {})
     .filter((c): c is Character => !!c)
     .sort((a, b) => a.name.localeCompare(b.name));
-  const [of, setOf] = useState<string | null>(null);
+  const [of, setOf] = useState<string>(NO_CHARACTER);
   const [turn, setTurn] = useState<CompanionTurn>("shared");
   const make = useSend();
   // A companion has stats of its own, so a token that reads a character's cannot be one.
@@ -351,24 +356,39 @@ export function MakeCompanion(props: { token: Token }) {
     );
   }
   if (list.length === 0) return <Help>A companion belongs to a character. Make a character first.</Help>;
-  const characterId = of ?? list[0]!.id;
-  const name = list.find((c) => c.id === characterId)?.name ?? "its character";
-  const choices = turnChoices(name, companionWhat(token.kind));
+  const character = list.find((c) => c.id === of);
+  const choices = turnChoices(character?.name ?? "its character", companionWhat(token.kind));
   const chosen = choices.find((c) => c.value === turn) ?? choices[0]!;
+  const cancel = () => {
+    setOpen(false);
+    setOf(NO_CHARACTER);
+    setTurn("shared");
+  };
   return (
     <div style={{ display: "grid", gap: theme.space(2) }}>
       <FieldRow label="Belongs to">
-        <Select<string> label="Belongs to" value={characterId} options={list.map((c) => ({ value: c.id, label: c.name }))} onChange={setOf} />
+        <Select<string>
+          label="Belongs to"
+          value={character ? character.id : NO_CHARACTER}
+          options={[...(character ? [] : [{ value: NO_CHARACTER, label: "Choose a character" }]), ...list.map((c) => ({ value: c.id, label: c.name }))]}
+          onChange={setOf}
+        />
       </FieldRow>
       <FieldRow label="Turn">
         <Select<CompanionTurn> label="Turn" value={chosen.value} options={choices} onChange={setTurn} />
       </FieldRow>
       <Help>{chosen.help}</Help>
       <div style={{ display: "flex", gap: theme.space(2) }}>
-        <Button size="sm" variant="primary" busy={make.waiting} onClick={() => make.send({ t: "token.update", tokenId: token.id, patch: makeCompanionPatch(token, characterId, chosen.value) })}>
+        <Button
+          size="sm"
+          variant="primary"
+          busy={make.waiting}
+          disabled={!character}
+          onClick={() => character && make.send({ t: "token.update", tokenId: token.id, patch: makeCompanionPatch(token, character.id, chosen.value) })}
+        >
           Make a companion
         </Button>
-        <Button size="sm" onClick={() => setOpen(false)}>
+        <Button size="sm" onClick={cancel}>
           Cancel
         </Button>
       </div>

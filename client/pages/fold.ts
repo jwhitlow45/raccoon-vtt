@@ -157,12 +157,18 @@ type DockState = {
   column: HTMLElement | null;
   /** A sheet shows in the very short mode, over the whole screen (Room sets it): what floats over the map folds as under an upright sheet. */
   sheetFull: boolean;
+  /**
+   * A sheet opened now would take the very short mode, whether one shows or
+   * not (Room sets it), so the stat block's button knows the bar will fold
+   * once the panel it opens covers the screen (features/tokens/statBlockOpen.ts).
+   */
+  sheetFullMode: boolean;
 };
 
 const NO_ALERTS: readonly ColumnAlert[] = [];
 
 /** Per Room page (state/scope.ts): "view as a player" draws a second room with a bar and a column of its own. */
-export const dockSlot = scopeSlot(() => createStore<DockState>(() => ({ bar: null, alerts: NO_ALERTS, column: null, sheetFull: false })));
+export const dockSlot = scopeSlot(() => createStore<DockState>(() => ({ bar: null, alerts: NO_ALERTS, column: null, sheetFull: false, sheetFullMode: false })));
 
 /**
  * Publishes the token bar for the dock while it is mounted, or nothing for

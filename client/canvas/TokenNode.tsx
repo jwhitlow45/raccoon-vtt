@@ -13,7 +13,7 @@ import { useChipIcon } from "./chipIcons.ts";
 import { PLATE_STROKE, plateRect } from "./textBoxes.ts";
 import { TokenShadow } from "./TokenShadow.tsx";
 import { numberBadgeWidth, type Notch, type TokenMarks } from "./tokenMarks.ts";
-import { SHIELD_PATH } from "../components/acBadge.ts";
+import { SHIELD_BOUNDS, SHIELD_PATH } from "../components/acBadge.ts";
 import type { PlacedLines, TokenText } from "./useBoardText.ts";
 import { useTokenImage } from "./useImage.ts";
 import { isAssetImage } from "#shared/imageRef.ts";
@@ -173,8 +173,9 @@ let shieldPath: Path2D | null = null;
  */
 function AcMark(props: { ac: NonNullable<TokenMarks["ac"]> }) {
   const { ac } = props;
-  const sx = ac.width / 24;
-  const sy = ac.height / 24;
+  // The outline stretched to fill the badge's box, as the page's AcBadge draws it.
+  const sx = ac.width / SHIELD_BOUNDS.width;
+  const sy = ac.height / SHIELD_BOUNDS.height;
   return (
     <Group name="ac-badge" x={ac.x} y={ac.y}>
       {/* A plain Shape over the outline's Path2D, as IconGlyph draws, so the board needs no Konva Path and its SVG parser (konvaSetup.ts). */}
@@ -185,6 +186,7 @@ function AcMark(props: { ac: NonNullable<TokenMarks["ac"]> }) {
           shieldPath ??= new Path2D(SHIELD_PATH);
           ctx.save();
           ctx.scale(sx, sy);
+          ctx.translate(-SHIELD_BOUNDS.x, -SHIELD_BOUNDS.y);
           ctx.setAttr("fillStyle", theme.color.surfaceRaised);
           ctx.fill(shieldPath);
           ctx.setAttr("strokeStyle", theme.color.text);

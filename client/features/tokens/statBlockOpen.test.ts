@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { barDockSlot } from "../../canvas/barDock.ts";
+import { dockSlot } from "../../pages/fold.ts";
 import { RoomScope } from "../../state/scope.ts";
 import { openStatBlock, statBlockHidesBar, statBlockRequest } from "./statBlockOpen.ts";
 
@@ -52,6 +53,19 @@ describe("openStatBlock", () => {
     assert.equal(at(844, 390, 47), false, "a phone held sideways: 441 px beside the sheet");
     assert.equal(at(649, 300, 47), false, "844 x 390 at 130% without the band: 246 px");
     assert.equal(at(1280, 800), false, "the side panel");
+  });
+
+  test("hides the bar where Room says a sheet would open over the whole screen, and only there", () => {
+    const at = (sheetFullMode: boolean) => {
+      const scope = new RoomScope();
+      scope.get(barDockSlot).setState({ chrome: { top: 100, bottom: 81, controls: 81, toolbar: 81, safe: { top: 0, right: 47, bottom: 21, left: 47 }, sheet: 0, rail: 0 } });
+      scope.get(dockSlot).setState({ sheetFullMode });
+      const { calls, ui } = recorder();
+      openStatBlock(scope, ui, "g1", { width: 649, height: 300 });
+      return calls.includes("showActions false");
+    };
+    assert.equal(at(true), true, "844 x 390 at 130% with the turn band: the very short mode");
+    assert.equal(at(false), false, "the same size without the band keeps the bar beside the right sheet");
   });
 });
 

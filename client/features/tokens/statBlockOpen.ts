@@ -3,7 +3,7 @@ import { createStore } from "zustand/vanilla";
 import { BESIDE_MIN, EDGE, barDockSlot } from "../../canvas/barDock.ts";
 import type { Size } from "../../lib/camera.ts";
 import { theme } from "../../lib/theme.ts";
-import { foldsUnderSheet } from "../../pages/fold.ts";
+import { dockSlot, foldsUnderSheet } from "../../pages/fold.ts";
 import { scopeSlot, useScoped, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -40,7 +40,7 @@ export function requestStatBlock(scope: RoomScope, tokenId: string, focus = true
  */
 export function statBlockHidesBar(input: { width: number; height: number; safeLeft: number; veryShort?: boolean }): boolean {
   const { width, height } = input;
-  if (input.veryShort || foldsUnderSheet({ width, height, sheetOpen: true })) return true;
+  if (foldsUnderSheet({ width, height, sheetOpen: true, full: input.veryShort })) return true;
   if (width >= theme.layout.wideMinWidth) return false;
   const sheet = Math.min(theme.layout.landscapeSheetWidth, width * 0.6);
   return width - sheet - input.safeLeft - 2 * EDGE < BESIDE_MIN;
@@ -62,7 +62,9 @@ export function openStatBlock(scope: RoomScope, ui: Pick<RoomUi, "select" | "sho
   ui.openPanel("token");
   const { width, height } = layout;
   const safeLeft = scope.get(barDockSlot).getState().chrome?.safe.left ?? 0;
-  if (statBlockHidesBar({ width, height, safeLeft })) ui.showActions(false);
+  // Room knows whether the Token sheet would open over the whole screen, from the bars, the band and the safe areas (components/sheetCap.ts sheetMode).
+  const veryShort = scope.get(dockSlot).getState().sheetFullMode;
+  if (statBlockHidesBar({ width, height, safeLeft, veryShort })) ui.showActions(false);
 }
 
 /**

@@ -446,10 +446,12 @@ function RoomPage() {
   const sheetModeNow: SheetMode = !landscape ? "bottom" : sheetMode({ height, safeTop: safe.top, safeBottom: safe.bottom, topBars: topInset, header: sideHeader });
   const full = sheetModeNow === "full" && sheetOpen;
   const headerWidth = (sheetModeNow === "side" ? sideWidth - safe.right : width - safe.left - safe.right) - 2 * theme.line.border;
+  const fullMode = sheetModeNow === "full";
   useLayoutEffect(() => {
-    if (dockStore.getState().sheetFull !== full) dockStore.setState({ sheetFull: full });
-  }, [dockStore, full]);
-  useLayoutEffect(() => () => dockStore.setState({ sheetFull: false }), [dockStore]);
+    const now = dockStore.getState();
+    if (now.sheetFull !== full || now.sheetFullMode !== fullMode) dockStore.setState({ sheetFull: full, sheetFullMode: fullMode });
+  }, [dockStore, full, fullMode]);
+  useLayoutEffect(() => () => dockStore.setState({ sheetFull: false, sheetFullMode: false }), [dockStore]);
   /*
    * The tool's options in a rail on the left of the map, on a short screen
    * held sideways (docs/design-v1-layout-hierarchy.md 3, pages/optionsPlace.ts).

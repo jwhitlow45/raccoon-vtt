@@ -1,14 +1,9 @@
 import { theme } from "../lib/theme.ts";
-import { acBadgeBox, SHIELD_PATH, type AcBadgeSize } from "./acBadge.ts";
+import { acBadgeBox, SHIELD_BOUNDS, SHIELD_PATH, type AcBadgeSize } from "./acBadge.ts";
 
 export { acBadgeBox, SHIELD_PATH, type AcBadgeSize } from "./acBadge.ts";
 
-/*
- * The viewBox is the shield's own bounds (x 4 to 20, y 2 to 22) with half a
- * unit to spare, so the outline fills the box and its 1 px line is not cut
- * at the edges. A wider box for three digits stretches the shield across.
- */
-const VIEW_BOX = "3.5 1.5 17 21";
+const VIEW_BOX = `${SHIELD_BOUNDS.x} ${SHIELD_BOUNDS.y} ${SHIELD_BOUNDS.width} ${SHIELD_BOUNDS.height}`;
 
 /**
  * A creature's AC on the shield, sized to its number (acBadge.ts): `md` in

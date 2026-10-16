@@ -87,7 +87,13 @@ async function setUp(page: Page, cdp: CDPSession, view: { width: number; height:
   await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: view.bottom ?? 0, left: view.side ?? 0, right: view.side ?? 0 } });
   await page.setViewportSize({ width: view.width, height: view.height });
   await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
-  await page.reload();
+  /*
+   * A fresh load of the room's address rather than a reload: a page
+   * reloaded with a sheet open finds the sheet's history entry on top and
+   * steps back off it (lib/backClose.ts), which can land mid-navigation on
+   * the page before the room.
+   */
+  await page.goto(`${server.origin}/r/${run.roomId}`);
   await page.getByRole("status", { name: "Connected" }).first().waitFor();
   await page.locator(".konvajs-content").first().waitFor();
 }
@@ -147,6 +153,12 @@ function headings(page: Page): Promise<string[]> {
     const root = (panel as unknown as { parentElement: { querySelectorAll(s: string): ArrayLike<{ textContent: string | null }> } }).parentElement;
     return Array.from(root.querySelectorAll("h3")).map((h) => (h.textContent ?? "").trim());
   });
+}
+
+/** Opens one of the token panel's folds (docs/design-v1-token-panel.md 3.5), unless this device already keeps it open. */
+async function openFold(panel: Locator, name: string): Promise<void> {
+  const fold = panel.getByRole("button", { name, exact: true });
+  if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
 }
 
 function bar(page: Page, name: string): Locator {
@@ -288,7 +300,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       const mid = await measure(dm);
       if (mid.sticky) {
         assert.ok(Math.abs(mid.header.top - mid.scroller.top) <= 1, `${label}: the header left the scroller's top: ${JSON.stringify({ header: mid.header, scroller: mid.scroller })}`);
-        assert.ok(mid.row, `${label}: no whole row under the stuck header`);
+        assert.ok(mid.row, `${label}: no whole row under the stuck header: ${JSON.stringify({ header: mid.header, scroller: mid.scroller })}`);
         assert.ok(await wholeInReach(dm.locator("[data-round-header]").getByRole("button", { name: "Next" })), `${label}: Next does not take a tap at this scroll`);
       }
       if (view.width === 390 && view.scale === 1) {
@@ -305,6 +317,52 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       }
       if (view.width === 480) await shots.take(dm, "combat-header-480-130");
     }
+  });
+
+  test("2b. at 480 x 320 at 130% the tracker opens as the very short sheet, its header sticky with a row's value box in reach under it, with the bar folded into the sheet's header or not", async () => {
+    const view = { width: 480, height: 320, scale: 1.3, side: 47, bottom: 21 };
+    const sheet = dm.locator('dialog[data-rvtt-sheet][aria-modal="true"]');
+    // A value box focused deep in the order scrolls into view under the stuck header (its scroll margin), where a tap reaches it.
+    const valueBoxInReach = async (row: number) => {
+      const box = dm.locator("[data-round-section] ol > li").nth(row).getByRole("button", { name: /initiative \d+/ });
+      await box.focus();
+      await dm.waitForTimeout(100);
+      return wholeInReach(box);
+    };
+    await setUp(dm, dmCdp, view);
+    await openTracker(dm);
+    await sheet.waitFor();
+    /*
+     * The sheet's body is about 169 layout px (docs/design-v1-layout-hierarchy.md
+     * 4.2, which leaves out the dialog's two 1 px borders), right at three
+     * full headers, so the header sticks in full or as one compact row,
+     * whichever the measured body allows (logic.ts roundHeaderForm).
+     */
+    const rest = await measure(dm);
+    assert.ok(Math.abs(rest.scroller.height / view.scale - 168) <= 1.5, `the very short sheet's body is ${rest.scroller.height / view.scale} px, not about 169`);
+    assert.ok(rest.sticky, "the header does not stick in the very short sheet");
+    for (const row of [5, 9]) assert.ok(await valueBoxInReach(row), `row ${row}'s value box is out of reach under the header`);
+    assert.ok(await wholeInReach(dm.locator("[data-round-header]").getByRole("button", { name: "Next" })), "Next is out of reach");
+    await shots.take(dm, "combat-header-480-130-very-short");
+    /*
+     * A tap on a row selects its creature and closes the sheet. Opened again,
+     * the sheet's header holds the folded bar's button, and the round header
+     * still sticks with the order in reach under it. The sheet's header
+     * stacks only with the alerts' button beside it too
+     * (docs/design-v1-layout-hierarchy.md 4.2), which layout.e2e.ts checks.
+     */
+    await dm.getByRole("button", { name: /^Goblin 3[.,]/ }).first().click();
+    await bar(dm, "Goblin 3").waitFor();
+    await openTracker(dm);
+    await sheet.waitFor();
+    await sheet.getByRole("button", { name: "Show Goblin 3 actions" }).waitFor();
+    assert.ok((await measure(dm)).sticky, "the header does not stick with the bar's button in the sheet's header");
+    assert.ok(await valueBoxInReach(7), "a value box is out of reach under the header");
+    assert.ok(await wholeInReach(dm.locator("[data-round-header]").getByRole("button", { name: "Next" })), "Next is out of reach");
+    await shots.take(dm, "combat-header-480-130-very-short-bar-folded");
+    await dm.keyboard.press("Escape");
+    await sheet.waitFor({ state: "detached" });
+    await dm.keyboard.press("Escape");
   });
 
   test("3. on a sheet between three compact rows and three full headers tall, the header is one 44 px row, still sticky", async () => {
@@ -569,8 +627,10 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await ana.getByRole("button", { name: "It fired: Reaction used" }).click();
     await waitFor("its own Reaction spent", () => (spirit().companion?.reactionUsed ? true : null));
     assert.equal(dmSocket.state!.encounter!.entries.find((e) => e.id === "e-bree")!.reactionUsed, false, "Bree's Reaction is untouched");
-    // Its player renames it and edits its AC, in its panel.
+    // Its player renames it in Token settings and edits its AC in Stats, both folded at the panel's foot.
     const panel = ana.getByRole("tabpanel", { name: "Token" });
+    await openFold(panel, "Token settings");
+    await openFold(panel, "Stats");
     await panel.getByRole("textbox", { name: "Name" }).fill("Ember");
     await panel.getByRole("textbox", { name: "Armor Class" }).click();
     await waitFor("renamed", () => (spirit().name === "Ember" ? true : null));
@@ -594,6 +654,9 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await ana.getByRole("button", { name: /^Wildfire Spirit\. Show it on the map/ }).click();
     await ana.getByRole("tab", { name: "Token" }).click();
     const panel = ana.getByRole("tabpanel", { name: "Token" });
+    // Folded, the section names the character beside its label.
+    assert.match((await panel.getByRole("heading", { name: "Companion", exact: true }).locator("..").textContent()) ?? "", /Bree/);
+    await openFold(panel, "Companion");
     await panel.getByText("Belongs to Bree. Whoever plays Bree controls it.").waitFor();
     await shots.take(ana, "combat-companion-section");
     await panel.getByRole("combobox", { name: "Turn" }).selectOption({ label: "Its own turn" });
@@ -648,6 +711,33 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await preview.getByText("Read-only: nothing you do here is saved.").waitFor();
     assert.ok(dmSocket.state!.tokens[spirit.id], "nothing was dismissed");
     await preview.getByRole("button", { name: "Exit", exact: true }).click();
+  });
+
+  test("13b. a companion in the very short sheet at 480 x 320 at 130%: its panel names Bree, and its Companion section folds with Bree beside it and opens within the sheet's width", async () => {
+    await setUp(dm, dmCdp, { width: 480, height: 320, scale: 1.3, side: 47, bottom: 21 });
+    await openTracker(dm);
+    await dm.getByRole("button", { name: "Wildfire Spirit, acts on Bree's turn. Show it on the map with its actions." }).click();
+    const b = bar(dm, "Wildfire Spirit");
+    await b.waitFor();
+    await b.getByRole("button", { name: "Details", exact: true }).click();
+    const sheet = dm.locator('dialog[data-rvtt-sheet][aria-modal="true"]');
+    await sheet.waitFor();
+    const panel = sheet.getByRole("region", { name: "Token" });
+    // The name block's tag, in the tracker's words (docs/design-v1-token-panel.md 3.6).
+    await panel.getByText("Companion of Bree", { exact: true }).waitFor();
+    const heading = panel.getByRole("heading", { name: "Companion", exact: true });
+    assert.equal(await heading.getByRole("button").getAttribute("aria-expanded"), "false", "the Companion section starts folded");
+    assert.match((await heading.locator("..").textContent()) ?? "", /Bree/, "folded, it names its character");
+    await openFold(panel, "Companion");
+    await panel.getByRole("combobox", { name: "Belongs to" }).waitFor();
+    await panel.getByRole("button", { name: "Stop being a companion" }).scrollIntoViewIfNeeded();
+    const body = sheet.locator("[data-pane-body]");
+    assert.equal(await body.evaluate((el) => (el as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth <= (el as unknown as { clientWidth: number }).clientWidth + 1), true, "the very short sheet scrolls sideways");
+    await shots.take(dm, "combat-companion-very-short-sheet");
+    // Folded again, as this device kept it.
+    await heading.getByRole("button").click();
+    await dm.keyboard.press("Escape");
+    await sheet.waitFor({ state: "detached" });
   });
 
   test("14. no page logged an error", () => {
