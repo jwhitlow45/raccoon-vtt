@@ -2,11 +2,11 @@ import { useStore } from "zustand";
 import { LIMITS } from "#shared/limits.ts";
 import type { Pin } from "#shared/model.ts";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
-import { Swatches } from "../../components/Swatches.tsx";
+import { memberColorName } from "../../components/Swatches.tsx";
 import { MEMBER_COLORS, theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
-import { InfoLine, OptButton, OptionsColumn, OptionsRow } from "../measure/controls.tsx";
+import { OptButton, OptionsStrip, PopoverSwatches, ValueChip } from "../measure/controls.tsx";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import { pinAt, pinToolTap } from "./rules.ts";
 import { pinSlot } from "./store.ts";
@@ -107,6 +107,11 @@ function withoutRev(pin: Pin) {
   return rest;
 }
 
+/**
+ * The pin tool's options (docs/design-v1-tool-options.md 9.8): a new pin's
+ * color and DM only, nothing while a pin's pane is open, or Cancel while a
+ * journal page waits for its spot.
+ */
 function PinOptions() {
   const store = useScoped(pinSlot).store;
   const ui = useRoomUi();
@@ -118,39 +123,58 @@ function PinOptions() {
 
   if (placing) {
     return (
-      <OptionsColumn>
-        <InfoLine>Tap the map to place the pin for {placing.title}.</InfoLine>
-        <OptionsRow label="Pin to the map">
-          <OptButton
-            onClick={() => {
-              store.setState({ placing: null });
-              ui.setTool("select");
-            }}
-          >
-            Cancel
-          </OptButton>
-        </OptionsRow>
-      </OptionsColumn>
+      <OptionsStrip
+        tool="Pin"
+        task
+        line={{ tone: "reading", content: `Tap the map to place the pin for ${placing.title}.` }}
+        slots={[
+          {
+            id: "cancel",
+            priority: 1,
+            control: (
+              <OptButton
+                ends
+                onClick={() => {
+                  store.setState({ placing: null });
+                  ui.setTool("select");
+                }}
+              >
+                Cancel
+              </OptButton>
+            ),
+          },
+        ]}
+      />
     );
   }
-  // The pin's pane has its own color and DM only, so the bar keeps to one line while it is open.
-  if (editing) {
-    return (
-      <OptionsColumn>
-        <InfoLine tone="muted">Tap another pin to edit it, or drag a pin to move it.</InfoLine>
-      </OptionsColumn>
-    );
-  }
+  // The pin's pane has its own color and DM only, so the row stands aside while it is open.
+  if (editing) return <OptionsStrip tool="Pin" line={{ tone: "hint", content: "Tap another pin to edit it, or drag a pin to move it." }} slots={[]} />;
+  const pinColor = color ?? mine;
   return (
-    <OptionsColumn>
-      <InfoLine tone="muted">Tap the map to place a pin. Tap a pin to edit it, or drag it to move it.</InfoLine>
-      <OptionsRow label="New pins">
-        <Swatches label="Pin color" value={color ?? mine} options={MEMBER_COLORS} onChange={(c) => store.setState({ color: c })} />
-        <OptButton pressed={dmOnly} label="New pins start DM only" onClick={() => store.setState({ dmOnly: !dmOnly })}>
-          DM only
-        </OptButton>
-      </OptionsRow>
-    </OptionsColumn>
+    <OptionsStrip
+      tool="Pin"
+      line={{ tone: "hint", content: "Tap the map to place a pin. Tap a pin to edit it, or drag it to move it." }}
+      slots={[
+        {
+          id: "color",
+          priority: 1,
+          control: (
+            <ValueChip label="Pin color" kind="choice" value={pinColor} valueName={memberColorName(pinColor) ?? pinColor} disk={pinColor} options={MEMBER_COLORS.map((c) => ({ key: c, words: memberColorName(c) ?? c }))}>
+              <PopoverSwatches label="Pin color" value={pinColor} options={MEMBER_COLORS} onChange={(c) => store.setState({ color: c })} />
+            </ValueChip>
+          ),
+        },
+        {
+          id: "dmOnly",
+          priority: 1,
+          control: (
+            <OptButton pressed={dmOnly} label="New pins start DM only" onClick={() => store.setState({ dmOnly: !dmOnly })}>
+              DM only
+            </OptButton>
+          ),
+        },
+      ]}
+    />
   );
 }
 
