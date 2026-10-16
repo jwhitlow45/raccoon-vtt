@@ -244,7 +244,7 @@ The Builder tool is the DM's. Its modes:
 ### Companions
 
 - A companion is a token that belongs to a character: a creature such as a familiar or a summoned spirit, or an effect with no HP such as Spiritual Weapon. Whoever plays the character controls it: moves it, changes its HP, conditions and stats, renames it and dismisses it.
-- Each companion takes its own turn with its own initiative, acts on its character's turn listed under it in the order, or acts on its character's turn and stays out of the order. Only a creature takes its own turn.
+- Each companion takes its own turn with its own initiative, acts on its character's turn listed under it in the order, or acts on its character's turn and stays out of the order. Only a creature takes its own turn. A new creature starts listed under its character and a new effect out of the order, unless its maker picks another turn.
 - A player adds a companion from their character in the Characters panel. It goes right next to the character's token, up to 10 per character on a scene, and the DM's log says so. The DM can make any token a companion in its panel.
 - A companion listed under its character keeps its own Reaction and Ready action in the order.
 - A companion's token panel says whose it is ("Companion of Bree"), as its own row in the order does.
