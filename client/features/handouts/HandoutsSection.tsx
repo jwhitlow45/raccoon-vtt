@@ -20,7 +20,7 @@ import { docShowing } from "../images/library.ts";
 import { checkImageFile, prepareImageUpload } from "../images/upload.ts";
 import { EMPTY_DRAFT, handoutDraftSlot, type HandoutDraft } from "./draft.ts";
 import { HANDOUT_MAX_BYTES, HANDOUT_MAX_SIDE } from "./downscale.ts";
-import { audienceText, pageCountText, pageName, showHandoutOp, showingKey, TITLE_FIELD_MAX, titleFromFileName } from "./handouts.ts";
+import { audienceText, pageCountText, showHandoutOp, showingKey, TITLE_FIELD_MAX, titleFromFileName, viewerPagesOf } from "./handouts.ts";
 import { HandoutViewer, type ViewerPage } from "./HandoutViewer.tsx";
 import { JobBlock } from "./pdf/JobBlock.tsx";
 import { isPdfFile, jobPageIds, pdfPickRefusal } from "./pdf/job.ts";
@@ -29,23 +29,17 @@ import { usePdfJob } from "./pdf/live.ts";
 /** A handout's thumbnail in its row: a picture, so larger than a row's 32 px disk, still inside a 56 px two-line row. */
 const THUMB_PX = 44;
 
-type PageRef = { assetId: string; width?: number; height?: number };
-
 /**
- * What the viewer shows: a title, its pages, the showing it is (a
- * handout's own key, which the players' popup uses, or `doc:<id>`), and the
- * lines under its title (docs/design-v1-pdf-handouts.md 8.4).
+ * What the viewer shows, by its identity only: a showing or a document.
+ * Its pages and the lines under its title are read from the room as it is
+ * now, so they follow a change made elsewhere, and the viewer closes when
+ * the item goes, as the Library's does (docs/design-v1-pdf-handouts.md 5.9
+ * and 8.4).
  */
-type Viewing = { title: string; pages: ViewerPage[]; showing: string; details: string };
+type Viewing = { kind: "handout"; id: string } | { kind: "doc"; id: string };
 
-/** Every page of a handout or a document, for the viewer, each named "Strange letter, page 2 of 5" and laid out at its size. */
-function viewerPages(title: string, pages: readonly PageRef[], url: (id: string) => string): ViewerPage[] {
-  return pages.map((p, i) => ({
-    src: url(p.assetId),
-    alt: pageName(title, i, pages.length),
-    ...(p.width !== undefined && p.height !== undefined ? { width: p.width, height: p.height } : {}),
-  }));
-}
+/** What the viewer draws for the item: its title, its pages, the showing it is (the players' key, or `doc:<id>`), and its details. */
+type Viewed = { title: string; pages: ViewerPage[]; showing: string; details: string };
 
 /**
  * The DM's handouts (features section 16): a PDF being uploaded, what is
@@ -68,18 +62,54 @@ export function HandoutsSection() {
     () => Object.values(handouts ?? {}).filter((h): h is Handout => h !== undefined).sort((a, b) => (a.shownAt < b.shownAt ? 1 : -1)),
     [handouts],
   );
-  const full = useCallback((id: string) => assets.url(id, "full"), [assets]);
-  const view = (title: string, pages: readonly PageRef[], opener: HTMLElement | null, showing: string, details: string) => {
+  const view = (next: Viewing, opener: HTMLElement | null) => {
     viewOpener.current = opener;
-    setViewing({ title, pages: viewerPages(title, pages, full), showing, details });
+    setViewing(next);
   };
   /** A document's View: every page, under the Library's key for it, with its page count and whether it shows. */
-  const viewDoc = (docId: string, opener: HTMLElement | null) => {
-    const doc = docs?.[docId];
-    if (!doc) return;
-    const shown = docShowing(doc, Object.values(handouts ?? {}));
-    view(doc.title, doc.pages, opener, `doc:${doc.id}`, `${pageCountText(doc.pages.length)}.${shown ? " Showing now." : ""}`);
-  };
+  const viewDoc = useCallback((docId: string, opener: HTMLElement | null) => view({ kind: "doc", id: docId }, opener), []);
+  const viewedHandout = viewing?.kind === "handout" ? handouts?.[viewing.id] : undefined;
+  const viewedDoc = viewing?.kind === "doc" ? docs?.[viewing.id] : undefined;
+  // A document's "Showing now." changes only with the showings, which the memo below follows through `handouts`.
+  const viewed = useMemo((): Viewed | null => {
+    const url = (id: string, variant: "full" | "thumb") => assets.url(id, variant);
+    if (viewedHandout) {
+      const h = viewedHandout;
+      const pages = handoutPages(h);
+      return {
+        title: h.title,
+        pages: viewerPagesOf(h.title, pages, url),
+        showing: showingKey(h),
+        details: `To ${audienceText(h.to, members ?? {})}${pages.length > 1 ? `, ${pageCountText(pages.length)}` : ""}. Showing now.`,
+      };
+    }
+    if (viewedDoc) {
+      const shown = docShowing(viewedDoc, Object.values(handouts ?? {}));
+      return {
+        title: viewedDoc.title,
+        pages: viewerPagesOf(viewedDoc.title, viewedDoc.pages, url),
+        showing: `doc:${viewedDoc.id}`,
+        details: `${pageCountText(viewedDoc.pages.length)}.${shown ? " Showing now." : ""}`,
+      };
+    }
+    return null;
+  }, [viewedHandout, viewedDoc, handouts, members, assets]);
+  // Closed or deleted elsewhere while open: the viewer closes, and focus goes back to its opener if that is still there, else on in the section.
+  useEffect(() => {
+    if (!viewing || viewed) return;
+    setViewing(null);
+    /*
+     * The opener may go with the item: a Showing now row, or the form's
+     * pick of a deleted document, which the form drops in an effect of its
+     * own after this one. So the place for focus is chosen once both have
+     * settled, and only when focus was left nowhere.
+     */
+    setTimeout(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body && active.isConnected) return;
+      (formRef.current?.querySelector<HTMLElement>("button, input") ?? showButton.current)?.focus();
+    }, 0);
+  }, [viewing, viewed]);
   // Where focus goes when the upload's block leaves: the form when it is open, else Show a handout (4.1.7).
   const afterBlock = useCallback(() => {
     const form = formRef.current;
@@ -116,7 +146,7 @@ export function HandoutsSection() {
                   <button
                     type="button"
                     aria-label={`View ${h.title}`}
-                    onClick={(e) => view(h.title, pages, e.currentTarget, showingKey(h), `To ${audienceText(h.to, members ?? {})}${pages.length > 1 ? `, ${pageCountText(pages.length)}` : ""}. Showing now.`)}
+                    onClick={(e) => view({ kind: "handout", id: h.id }, e.currentTarget)}
                     style={{ display: "block", padding: 0, border: "none", background: "transparent", cursor: "pointer", borderRadius: theme.radius.sm }}
                   >
                     <img
@@ -141,12 +171,12 @@ export function HandoutsSection() {
         </RowList>
       ) : null}
       <ShowHandout members={members ?? {}} docs={docs ?? {}} opener={showButton} formRef={formRef} onViewDoc={viewDoc} />
-      {viewing ? (
+      {viewed ? (
         <HandoutViewer
-          title={viewing.title}
-          pages={viewing.pages}
-          showing={viewing.showing}
-          details={<span>{viewing.details}</span>}
+          title={viewed.title}
+          pages={viewed.pages}
+          showing={viewed.showing}
+          details={<span>{viewed.details}</span>}
           onClose={() => setViewing(null)}
           backClose
           opener={viewOpener}

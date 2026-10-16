@@ -898,6 +898,60 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await handoutForm().getByRole("button", { name: "Cancel", exact: true }).click();
   });
 
+  test("7e. the DM panel's viewer is the Library's: thumbs stand in on a slow link, and a document deleted on another device closes it from either View (8.4, 5.9)", async () => {
+    const letter = run.letter!;
+    const isFocused = (l: Locator) => l.evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement);
+    // Showing now's view on a slow link: page 1's thumb stands in until its full image arrives.
+    const first = `**/api/assets/${letter.pages[0]!.assetId}/full`;
+    const slow = gate();
+    await dm.route(first, async (route) => {
+      await slow.held;
+      await route.continue();
+    });
+    await dmTab().click();
+    await dm.getByRole("list", { name: "Handouts showing" }).getByRole("button", { name: "View Strange letter" }).click();
+    const view = viewer(dm, "Strange letter");
+    await view.waitFor();
+    await view.locator(`img[src$="/${letter.pages[0]!.assetId}/thumb"]`).waitFor();
+    await shots.take(dm, "pdf-dm-view-thumb-first");
+    slow.release();
+    await waitFor("page 1's full image", () => loaded(pageImage(view, "Strange letter", 1, 3)));
+    await dm.unroute(first);
+    await view.getByRole("button", { name: "Close Strange letter" }).click();
+    await view.waitFor({ state: "detached" });
+
+    // The form's View of a document another DM device deletes: the viewer closes, and focus lands on the form, whose pick went with it.
+    const spare = await documentOf("Spare notes", [await paper(1000, 1300, 4), await paper(1000, 1300, 5)]);
+    await openForm();
+    await handoutForm().getByRole("button", { name: "Use Spare notes, 2 pages" }).click();
+    await handoutForm().getByRole("button", { name: "View", exact: true }).click();
+    const spareView = viewer(dm, "Spare notes");
+    await spareView.waitFor();
+    await ops.send({ t: "handoutDoc.delete", docId: spare.id });
+    await spareView.waitFor({ state: "detached" });
+    await handoutForm().getByText("That handout was deleted.").waitFor();
+    await waitFor("focus on the form", () => handoutForm().evaluate((el) => (el as unknown as { contains(n: unknown): boolean }).contains((globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement)));
+    await handoutForm().getByRole("button", { name: "Cancel", exact: true }).click();
+
+    // The saved upload's View, the same: the viewer closes and focus goes back to View, still there.
+    await pickFile(pdfFile("Spare.pdf", pdfOf([{ width: 300, height: 420 }], "Spare")));
+    const block = jobBlock("Spare.pdf");
+    await block.getByRole("button", { name: "Upload 1 page", exact: true }).click();
+    await shown(block, "Saved as Spare, 1 page.").waitFor({ timeout: 60_000 });
+    const viewButton = block.getByRole("button", { name: "View", exact: true });
+    await viewButton.click();
+    const saved = viewer(dm, "Spare");
+    await saved.waitFor();
+    const doc = Object.values(dmSocket.state?.handoutDocs ?? {}).find((d) => d?.title === "Spare")!;
+    await ops.send({ t: "handoutDoc.delete", docId: doc.id });
+    await saved.waitFor({ state: "detached" });
+    await waitFor("focus back on View", () => isFocused(viewButton));
+    await block.getByRole("button", { name: "Done" }).click();
+    await block.waitFor({ state: "detached" });
+    await handoutForm().getByRole("button", { name: "Cancel", exact: true }).click();
+    await deleteImages(doc.pages.map((p) => p.assetId).concat(spare.pages.map((p) => p.assetId)));
+  });
+
   test("8. Pat at a computer: the page keys and their words, the page buttons across mixed heights, zoom out to a whole page, and a line-mode wheel", async () => {
     run.mixed = await documentOf("Mixed pages", [await paper(1000, 1000, 1), await paper(1000, 772, 2), await paper(1000, 1000, 3), await paper(1000, 1000, 4)]);
     await show(run.mixed, [run.patId]);

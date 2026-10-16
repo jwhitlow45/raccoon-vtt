@@ -1,5 +1,6 @@
 import type { Handout, HandoutPage, Member } from "#shared/model.ts";
 import { MAX_NAME, textSchemas, type ClientOp } from "#shared/protocol.ts";
+import type { ViewerPage } from "./HandoutViewer.tsx";
 
 /**
  * Handouts (features section 16): the DM shows an image to everyone or to
@@ -121,6 +122,22 @@ export function showHandoutOp(input: ShowInput): { ok: true; op: Extract<ClientO
  */
 export function pageName(title: string, index: number, count: number): string {
   return count > 1 ? `${title}, page ${index + 1} of ${count}` : title;
+}
+
+/**
+ * Every page of a handout or a document, as the viewer takes them: each
+ * named once ("Strange letter, page 2 of 5"), laid out at its size before
+ * it loads, and with its thumb, which stands in while a slow link brings
+ * the full image (docs/design-v1-pdf-handouts.md 5.4). The DM panel, the
+ * Library and the players' popup all give the viewer the same pages.
+ */
+export function viewerPagesOf(title: string, pages: readonly { assetId: string; width?: number; height?: number }[], url: (assetId: string, variant: "full" | "thumb") => string): ViewerPage[] {
+  return pages.map((p, i) => ({
+    src: url(p.assetId, "full"),
+    thumb: url(p.assetId, "thumb"),
+    alt: pageName(title, i, pages.length),
+    ...(p.width !== undefined && p.height !== undefined ? { width: p.width, height: p.height } : {}),
+  }));
 }
 
 /** "12 pages", for a handout's or a document's row. */
