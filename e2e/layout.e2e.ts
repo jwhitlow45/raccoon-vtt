@@ -1018,6 +1018,47 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await endFight();
   });
 
+  test("7. 480 x 320 at 130%: with Initiative open and scrolled, \"Your turn\" and a toast push the body down, each whole and clear of the round header", async () => {
+    await view(player, playerCdp, { width: 480, height: 320 }, { side: 47, bottom: 21 });
+    await reloadAt(player, 1.3);
+    await startFight();
+    await openPanel(player, "Initiative");
+    const dialog = modal(player);
+    await dialog.waitFor();
+    const header = dialog.locator("[data-round-header]");
+    await header.waitFor();
+    const body = dialog.locator("[data-pane-body]");
+    // To the order's end, where the round header sticks over the rows while the rule gives it room to.
+    const scrollToEnd = () => dialog.locator("[data-round-section]").evaluate((el) => (el as unknown as { scrollIntoView(o: { block: string }): void }).scrollIntoView({ block: "end" }));
+    await scrollToEnd();
+    /** The notice shows whole and takes a tap, side by side with the round header, which shows whole too while it is stuck at the body's top. */
+    const bothShow = async (notice: Locator, label: string) => {
+      assert.equal(await reachable(notice), true, `${label} shows whole, nothing over it: ${await whatTakes(notice)}`);
+      const h = await rect(header);
+      assert.equal(intersects(await rect(notice), h), false, `${label} meets the round header`);
+      const b = await rect(body);
+      const sticky = await header.evaluate((el) => (globalThis as unknown as { getComputedStyle(el: unknown): { position: string } }).getComputedStyle(el).position === "sticky");
+      if (sticky && h.y >= b.y - 1 && h.y + h.height <= b.y + b.height + 1) assert.equal(await reachable(header), true, `the round header is covered while ${label} shows: ${await whatTakes(header)}`);
+    };
+
+    await ops.send({ t: "encounter.next" });
+    const turn = dialog.locator('[role="status"][aria-live="assertive"]', { hasText: "Your turn" });
+    await turn.waitFor();
+    await scrollToEnd();
+    await bothShow(turn, "Your turn");
+    await shots.take(player, "layout-very-short-your-turn-over-scrolled-initiative");
+
+    // A whisper's notice, which goes through the same toasts as a refusal does.
+    await ops.send({ t: "log.whisper", to: [run.patId], text: "Behind you!" });
+    const toast = dialog.locator('[data-rvtt-modal-slot="toasts"] button[role="status"]');
+    await toast.first().waitFor({ timeout: 10_000 });
+    await scrollToEnd();
+    await bothShow(toast.first(), "the toast");
+    await shots.take(player, "layout-very-short-toast-over-scrolled-initiative");
+    await dialog.getByRole("button", { name: "Close Initiative" }).tap();
+    await endFight();
+  });
+
   test("7. a DM's \"view as a player\" at 480 x 320 at 130%: \"Viewing as Pat\" stands above the very short sheet, and its Exit leaves", async () => {
     await openPanel(phone, "DM");
     await modal(phone).getByRole("button", { name: "View", exact: true }).tap();

@@ -43,8 +43,8 @@ export type SheetMode = "bottom" | "side" | "full";
  * a body of 88 px beside the map, the very short mode (`full`) opens it
  * modal over the whole screen, inside the safe areas on every side, with
  * the room's notices inside it, which the modal would otherwise leave out
- * of reach: `lasting` between the header and the body, and `notices` laid
- * over the top of the body (pages/modalSlot.tsx).
+ * of reach: `notices`, between the header and the body, which they push
+ * down (pages/modalSlot.tsx).
  */
 export function Sheet(props: {
   ref?: Ref<HTMLElement>;
@@ -74,8 +74,6 @@ export function Sheet(props: {
   /** The header's width in layout px, the sheet less its side padding and borders, which decides whether it stacks (sheetCap.ts headerStacks). */
   headerWidth: number;
   /** Under the header, above the body, in the very short mode. */
-  lasting?: ReactNode;
-  /** Laid over the top of the body in the very short mode. */
   notices?: ReactNode;
   children: ReactNode;
 }) {
@@ -183,7 +181,7 @@ export function Sheet(props: {
           closeRef={props.closeRef}
           titleRef={titleRef}
         />
-        {mode === "full" ? props.lasting : null}
+        {mode === "full" ? props.notices : null}
         {/* Every mode keeps this shape, so a change of mode never mounts the panel again. */}
         <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
           {/* The 4 px on top hold the focus ring of a first full-width control (2 px out, 2 px wide), which the scrolling body would clip. */}
@@ -195,7 +193,6 @@ export function Sheet(props: {
           >
             {props.children}
           </div>
-          {mode === "full" && props.notices ? <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 1, pointerEvents: "none" }}>{props.notices}</div> : null}
         </div>
       </section>
     </dialog>

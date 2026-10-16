@@ -643,8 +643,7 @@ function RoomPage() {
   const reserveTop = docked && !dockInHeader ? DOCK_PX + DOCK_GAP : undefined;
   const headerActions = dockInHeader ? <DockHeaderActions summary={summary} actions={dockActions} showRef={showRef} summaryRef={summaryRef} /> : undefined;
   const headerActionCount = dockInHeader ? (hasBar ? 1 : 0) + (summary ? 1 : 0) : 0;
-  const lasting = full ? <ModalSlots part="lasting" /> : undefined;
-  const notices = full ? <ModalSlots part="over" /> : undefined;
+  const notices = full ? <ModalSlots /> : undefined;
   return (
     <div
       style={{
@@ -721,7 +720,6 @@ function RoomPage() {
             actions={headerActions}
             actionCount={headerActionCount}
             headerWidth={headerWidth}
-            lasting={lasting}
             notices={notices}
             backRef={backRef}
             closeRef={closeRef}
@@ -741,7 +739,6 @@ function RoomPage() {
             actions={headerActions}
             actionCount={headerActionCount}
             headerWidth={headerWidth}
-            lasting={lasting}
             notices={notices}
             backRef={backRef}
             closeRef={closeRef}

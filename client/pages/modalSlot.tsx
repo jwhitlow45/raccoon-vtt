@@ -14,14 +14,14 @@ import { scopeSlot, useScoped } from "../state/scope.ts";
  * where it is, keeping its own state, and while the modal shows it renders
  * its output through a portal into its place here, inside the dialog:
  *
- * - The notices that last, under the sheet's header and above its body:
- *   "Viewing as Pat" first, then the connection banner, the DM's frame bar
- *   and a map layer that did not load. They push the body down rather
- *   than lie over it, so the body still scrolls every control into reach,
- *   which a notice that lasts would otherwise cover for as long as it
- *   shows: on a 480 x 320 phone at 130% two of them covered the Log's Send.
- * - "Your turn" and the toasts over the top of the body, as toasts lie
- *   over the map: they go by themselves within seconds.
+ * - Every notice under the sheet's header and above its body: "Viewing as
+ *   Pat" first, then the connection banner, the DM's frame bar, a map
+ *   layer that did not load, "Your turn" and the toasts. They push the
+ *   body down rather than lie over it, so the body still scrolls every
+ *   control into reach, and nothing in it covers them: on a 480 x 320
+ *   phone at 130% two lasting notices covered the Log's Send, and the
+ *   tracker's sticky round header covered "Your turn" and the toasts. The
+ *   short ones take their room for the few seconds they show.
  * - The folded alerts' status region, visually hidden.
  *
  * A live region speaks what changes in it, not what it holds as it
@@ -31,8 +31,8 @@ import { scopeSlot, useScoped } from "../state/scope.ts";
 
 export type ModalSlotName = "preview" | "connection" | "frame" | "quiet" | "turn" | "toasts" | "status";
 
-const LASTING: readonly ModalSlotName[] = ["preview", "connection", "frame", "quiet"];
-const OVER: readonly ModalSlotName[] = ["turn", "toasts"];
+const SHOWN: readonly ModalSlotName[] = ["preview", "connection", "frame", "quiet", "turn", "toasts"];
+const NAMES: readonly ModalSlotName[] = [...SHOWN, "status"];
 
 type Slots = Readonly<Partial<Record<ModalSlotName, HTMLElement>>>;
 
@@ -52,19 +52,15 @@ export function inModal(node: ReactNode, slot: HTMLElement | null): ReactNode {
 const COLUMN: CSSProperties = { display: "flex", flexDirection: "column", alignItems: "center", gap: theme.space(2), width: "100%" };
 
 /**
- * One part of the places: `lasting` under the header, `over` laid over the
- * top of the body with the status region. Each publishes its places in a
- * layout effect, so a notice moves in before the modal paints. Empty
- * places take no room (globals.css), and only what they hold takes a tap,
- * so the panel under the toasts stays in reach.
+ * The places, under the header in the order above. They publish themselves
+ * in a layout effect, so a notice moves in before the modal paints. Empty
+ * places take no room (globals.css).
  */
-export function ModalSlots(props: { part: "lasting" | "over" }) {
+export function ModalSlots() {
   const store = useScoped(modalSlotsSlot);
   const refs = useRef<Partial<Record<ModalSlotName, HTMLElement | null>>>({});
-  const names = props.part === "lasting" ? LASTING : [...OVER, "status" as const];
-  const key = names.join(" ");
   useLayoutEffect(() => {
-    const found = key.split(" ").map((name) => [name as ModalSlotName, refs.current[name as ModalSlotName]] as const);
+    const found = NAMES.map((name) => [name, refs.current[name]] as const);
     if (found.some(([, el]) => !el)) return;
     store.setState((s) => ({ slots: { ...s.slots, ...Object.fromEntries(found) } }));
     return () =>
@@ -73,22 +69,13 @@ export function ModalSlots(props: { part: "lasting" | "over" }) {
         for (const [name] of found) delete slots[name];
         return { slots };
       });
-  }, [store, key]);
+  }, [store]);
   const place = (name: ModalSlotName) => (el: HTMLDivElement | null) => {
     refs.current[name] = el;
   };
-  if (props.part === "lasting") {
-    return (
-      <div data-rvtt-modal-lasting="" style={{ ...COLUMN, flex: "none", padding: `0 ${theme.space(3)}px` }}>
-        {LASTING.map((name) => (
-          <div key={name} ref={place(name)} data-rvtt-modal-slot={name} style={COLUMN} />
-        ))}
-      </div>
-    );
-  }
   return (
-    <div style={{ ...COLUMN, padding: `${theme.space(2)}px ${theme.space(3)}px 0` }}>
-      {OVER.map((name) => (
+    <div data-rvtt-modal-notices="" style={{ ...COLUMN, flex: "none", padding: `0 ${theme.space(3)}px` }}>
+      {SHOWN.map((name) => (
         <div key={name} ref={place(name)} data-rvtt-modal-slot={name} style={COLUMN} />
       ))}
       <div ref={place("status")} data-rvtt-modal-slot="status" style={VISUALLY_HIDDEN} />

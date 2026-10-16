@@ -55,9 +55,9 @@ dialog[data-rvtt-sheet]:not([open]) {
   display: none !important;
 }
 
-/* The notices that last, under the very short sheet's header, keep a gap
-   above its body while any shows. */
-[data-rvtt-modal-lasting]:has(> :not(:empty)) {
+/* The notices under the very short sheet's header keep a gap above its
+   body while any shows. */
+[data-rvtt-modal-notices]:has(> :not(:empty):not([data-rvtt-modal-slot="status"])) {
   padding-bottom: 8px;
 }
 
