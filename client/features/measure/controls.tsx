@@ -57,6 +57,8 @@ export function InfoLine(props: { children: ReactNode; tone?: "muted" | "warning
   return (
     <div
       aria-live="polite"
+      // A reading or a warning is what the person came for, so the alerts' summary row never stands over it, as over a control (pages/Room.tsx useOptionsHeights). A muted hint it may cover.
+      data-options-reading={props.tone === "muted" ? undefined : ""}
       style={{
         fontSize: hint ? theme.font.small : theme.font.body14,
         lineHeight: theme.leading.body,

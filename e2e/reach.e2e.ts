@@ -38,9 +38,9 @@ import { OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInR
  * - Select several, and the bar's Close, where the bars and a notice leave
  *   no map to select the token on, which a viewer could not do either.
  *
- * Listed apart, not failing: a target under a lasting notice that is
- * taller than the room between the top bars and the toolbar, which then
- * stands over what is below it (noticeCovers).
+ * A target under a lasting notice is a miss like any other: on a short
+ * screen the notices that last keep to one line (components/Notice.tsx
+ * `compact`), so none stands over the tool's buttons or the toolbar.
  */
 
 const PORT = Number(process.env.E2E_PORT ?? 3100) + 8;
@@ -142,37 +142,9 @@ async function miss(text: string): Promise<void> {
       ),
     );
 }
-/**
- * Misses where a lasting notice covers the target: on the shortest screens
- * the Reconnecting or Starting view notice is taller than the room between
- * the top bars and the toolbar, and stands over whatever is below. That is
- * the notices' own layout, not the alerts' or the bar's, so these are
- * listed apart and do not fail the sweep.
- */
-const underNotice: string[] = [];
-function noticeCovers(target: Locator): Promise<boolean> {
-  return target.evaluate((el) => {
-    const r = el.getBoundingClientRect();
-    const points = [
-      [r.left + r.width / 2, r.top + r.height / 2],
-      [r.left + r.width / 2, r.top + 3],
-      [r.left + r.width / 2, r.bottom - 3],
-      [r.left + 3, r.top + r.height / 2],
-      [r.right - 3, r.top + r.height / 2],
-    ];
-    return points.some(([x, y]) => {
-      const top = el.ownerDocument.elementFromPoint(x!, y!);
-      if (!top || el.contains(top)) return false;
-      if (top.closest('[aria-label="Starting view"]')) return true;
-      return /^Reconnecting/.test(top.closest('[role="status"]')?.textContent ?? "");
-    });
-  });
-}
 async function expectReach(label: string, what: string, target: Locator): Promise<void> {
   if (await wholeInReach(target)) return;
-  const text = `${label}: ${what} is cut off or takes no tap`;
-  if ((await target.count()) > 0 && (await noticeCovers(target))) underNotice.push(text);
-  else await miss(text);
+  await miss(`${label}: ${what} is cut off or takes no tap`);
 }
 
 async function view(page: Page, cdp: CDPSession, size: Size): Promise<void> {
@@ -606,7 +578,6 @@ describe("raccoon-vtt short-screen reach", { timeout: 1_800_000 }, () => {
 
   test("4. nothing is out of reach", () => {
     if (skipped.length > 0) console.error(`skipped ${skipped.length} steps with no map left to select on:\n${skipped.join("\n")}`);
-    if (underNotice.length > 0) console.error(`${underNotice.length} targets under a lasting notice too tall for the screen:\n${underNotice.join("\n")}`);
     assert.deepEqual(misses, []);
   });
 });

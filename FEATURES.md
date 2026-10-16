@@ -41,6 +41,7 @@ This page lists what RaccoonVTT does today, grouped by area. "The DM" means anyo
 - Every change shows on every device at once, and your own edits show before the server confirms them.
 - The connection mends itself. A dead connection is noticed within about 35 seconds. The app reconnects when the phone wakes or the network comes back, and catches up without a reload. Edits made offline are sent once it is back.
 - A small dot shows the connection. A banner appears only after a few seconds offline.
+- On a short screen, a notice that lasts (Reconnecting, the Starting view bar, a part that did not load, "Viewing as") keeps to one line, its buttons in the same row and More to read the rest, so it never stands over the toolbar. Where even that leaves no room for a row of the tool's options, the options stand over it.
 - Other people's token drags move live, with their name over the token in their color.
 - One finger uses the current tool. Two fingers pan and pinch-zoom. Nothing needs a long press.
 - Tapping a token opens its action bar. On a screen 600 px or wider, or a phone on its side, it sits at the bottom right of the map instead of under the token. Drag it by its header, or press "Move bar" to send it to the next corner. This device remembers the spot, and "Reset bar position" puts it back. "Fit the map" keeps the map out from under it. On a phone held upright it spans the screen under the token. On a screen too short for either, it opens taller, over the Select several bar and if need be the toolbar. Close it to reach the toolbar again.

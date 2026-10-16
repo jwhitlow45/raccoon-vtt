@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
   BAR_WIDTH,
+  laneChoice,
+  SUMMARY_ROW,
   barCover,
   barMode,
   BESIDE_MIN,
@@ -607,6 +609,25 @@ describe("with the tool's options in a rail (docs/design-v1-layout-hierarchy.md 
     assert.equal(spotHang({ corner: "bl", x: 0, y: 0 }, withRail, size).left, 295 + EDGE);
     const without = freeArea({ width: 844, height: 390 }, phone({ band: false, options: false, safe: SAFE }));
     assert.equal(spotHang({ corner: "bl", x: 0, y: 0 }, without, size).left, 47 + EDGE);
+  });
+});
+
+describe("a summary row risen over the bars (follow-up to docs/design-v1-bar-dock.md 1.3)", () => {
+  test("the bar under a summary row that rose leaves its old place to the bar, never past the lane's top", () => {
+    const lane = { laneTop: 122, laneHeight: 95, besideRoom: 0 };
+    assert.deepEqual(laneChoice({ ...lane, column: { top: 122, content: 110, first: 110 } }), { lane: "summary", floor: 122 + SUMMARY_ROW + EDGE }, "the row at its place");
+    assert.deepEqual(laneChoice({ ...lane, column: { top: 122, content: 110, first: 110, row: 8 } }), { lane: "summary", floor: 122 }, "the row in the top bar's row");
+    assert.deepEqual(laneChoice({ ...lane, column: { top: 100, content: 44, first: 44 } }), { lane: "summary", floor: 152 }, "a row at its place above the lane keeps the bar under it");
+    assert.deepEqual(laneChoice({ ...lane, column: { top: 8, content: 44, first: 44 } }), { lane: "stacked", floor: 122 }, "a row standing for the cards, risen above the lane");
+  });
+
+  test("the column's facts keep the row's place, and the same object when nothing changed", () => {
+    const facts = columnFacts(null, { top: 122, measured: { content: 110, first: 110 } })!;
+    assert.equal(facts.row, undefined);
+    const raised = columnFacts(facts, { top: 122, measured: null, row: 8 })!;
+    assert.equal(raised.row, 8);
+    assert.equal(columnFacts(raised, { top: 122, measured: null, row: 8 }), raised);
+    assert.equal(columnFacts(raised, { top: 122, measured: null })!.row, undefined, "back at its place");
   });
 });
 

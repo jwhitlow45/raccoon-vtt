@@ -1143,6 +1143,78 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     assert.deepEqual(await list(player), ["Token", "Initiative", "Log", "Journal", "Areas", "Characters", "Library", "Menu"]);
   });
 
+  // ------------------------------------------------ the bar dock review's follow-ups in the notices and modal layers
+
+  test("follow-up: a roll card that arrives at a phone's foot while the alerts are open over the screen is inert under them", async () => {
+    await view(player, playerCdp, { width: 480, height: 320 }, { side: 47, bottom: 21 });
+    await reloadAt(player, 1.3);
+    await endFight();
+    await pickTool(player, "Ruler");
+    await ops.send({ t: "actor.effect.add", target: { tokenId: run.thorn.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Bless" } });
+    await ops.send({ t: "actor.hp", target: { tokenId: run.thorn.id }, change: { kind: "damage", amount: 1 } });
+    const row = player.getByRole("button", { name: /^Concentration check/ });
+    await row.waitFor();
+    await row.tap();
+    const alerts = player.getByRole("dialog", { name: "Alerts" });
+    await alerts.waitFor();
+    // Anything that arrives on the page while the alerts are over the screen is made inert as it arrives, as a portal's card would be.
+    await player.evaluate(() => {
+      const d = (globalThis as unknown as { document: { createElement(t: string): DomEl & { id: string }; body: { append(el: unknown): void } } }).document;
+      const late = d.createElement("div");
+      late.id = "rvtt-e2e-late";
+      d.body.append(late);
+    });
+    await waitFor("the late arrival made inert", async () => ((await player.locator("#rvtt-e2e-late").evaluate((el) => (el as unknown as DomEl).closest("[inert]") !== null)) ? true : null), 3000);
+    await player.locator("#rvtt-e2e-late").evaluate((el) => (el as unknown as { remove(): void }).remove());
+    const id = randomUUID();
+    await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+    await waitFor("the roll on the player's side", () => playerSocket.state?.rolls[id]);
+    await player.waitForTimeout(800);
+    // Whatever the roll mounts beside the room while the alerts are over the screen, its foot card above all, takes no tap or focus.
+    const live = await player.evaluate(() => {
+      const w = globalThis as unknown as Dom;
+      const alertsBox = w.document.querySelector('[role="dialog"][aria-labelledby]');
+      return Array.from(w.document.querySelectorAll('[aria-label="The DM asks for a roll"]')).filter((el) => !el.closest("[inert]") && !(alertsBox?.contains(el) ?? false)).length;
+    });
+    await shots.take(player, "layout-follow-up-roll-card-inert-under-alerts");
+    // The alerts may give way to the roll's own card as it arrives: then nothing is over it, and nothing may stay inert.
+    if ((await alerts.count()) > 0) {
+      assert.equal(live, 0, "a roll card arrived live above the alerts over the screen");
+      await alerts.getByRole("button", { name: "Close", exact: true }).tap();
+      await alerts.waitFor({ state: "detached" });
+    }
+    assert.equal(await player.locator("[inert]").count(), 0, "nothing stays inert once the alerts are gone");
+    await ops.send({ t: "roll.close", rollIds: [id] });
+    await ops.send({ t: "actor.hp", target: { tokenId: run.thorn.id }, change: { kind: "heal", amount: 1 } });
+    await player.getByRole("dialog", { name: "The DM asks for a roll" }).waitFor({ state: "detached" });
+    // The check still waits: a fresh page starts the next step without it.
+    await reloadAt(player, 1.3);
+    await pickTool(player, "Select");
+  });
+
+  test("follow-up: at 480 x 320 at 130% with no fight, the Roll asked row stands clear of the Ruler's options, its hint included", async () => {
+    await view(player, playerCdp, { width: 480, height: 320 }, { side: 47, bottom: 21 });
+    await reloadAt(player, 1.3);
+    await endFight();
+    await pickTool(player, "Ruler");
+    const id = randomUUID();
+    await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+    const card = player.getByRole("dialog", { name: "The DM asks for a roll" });
+    const row = player.getByRole("button", { name: /^Roll asked/ });
+    await waitFor("the card or the row", async () => ((await card.isVisible()) || (await row.isVisible()) ? true : null));
+    if (await card.isVisible()) await card.getByRole("button", { name: "Later" }).tap();
+    await row.waitFor();
+    await player.waitForTimeout(300);
+    const ruler = options(player, "Ruler");
+    const hint = ruler.locator('[aria-live="polite"]').first();
+    const rowBox = await box(row);
+    for (const part of [hint, ruler.getByRole("button").first()]) assert.ok(!intersects(rowBox, await box(part)), `the row ${JSON.stringify(rowBox)} meets the Ruler's options ${JSON.stringify(await box(part))}`);
+    assert.equal(await reachable(row), true, "the row takes a tap");
+    await shots.take(player, "layout-follow-up-roll-asked-row-480x320-130");
+    await ops.send({ t: "roll.close", rollIds: [id] });
+    await pickTool(player, "Select");
+  });
+
   test("5. at a computer, Hide panels and Panels hide and show the side panel, and focus follows", async () => {
     const side = sidePanel(desk);
     const map = desk.locator(".konvajs-content").first();

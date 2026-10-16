@@ -1,5 +1,6 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { theme } from "../lib/theme.ts";
+import { Button } from "./Button.tsx";
 import { NOTICE_TONES, type NoticeTone } from "./tones.ts";
 
 export type { NoticeTone } from "./tones.ts";
@@ -19,6 +20,14 @@ export type { NoticeTone } from "./tones.ts";
  * stacks in the notice layer under the top bar, which the caller places.
  * An inline notice has no shadow. `role` is the caller's: "status" for
  * news, "alert" for what needs attention now.
+ *
+ * `compact` is a notice that lasts over the map on a short screen
+ * (docs/design-v1-layout-hierarchy.md, the bar dock review's follow-up):
+ * one line, its words cut short with an ellipsis, its actions in the same
+ * row, and More to read the rest. Taller, a Reconnecting or Starting view
+ * notice stood over the tool's buttons and the toolbar of a 480 x 320
+ * phone at 130%. The whole text stays in the page, so a screen reader
+ * hears all of it either way.
  */
 export function Notice(props: {
   tone?: NoticeTone;
@@ -26,10 +35,13 @@ export function Notice(props: {
   role?: "status" | "alert";
   leading?: ReactNode;
   action?: ReactNode;
+  compact?: boolean;
   children: ReactNode;
   style?: CSSProperties;
 }) {
   const tone = NOTICE_TONES[props.tone ?? "info"];
+  const [more, setMore] = useState(false);
+  const oneLine = props.compact === true && !more;
   return (
     <div
       role={props.role}
@@ -37,7 +49,7 @@ export function Notice(props: {
         display: "flex",
         alignItems: "center",
         gap: theme.space(2),
-        padding: `${theme.space(2)}px ${theme.space(3)}px`,
+        padding: props.compact ? `${theme.space(1)}px ${theme.space(2)}px` : `${theme.space(2)}px ${theme.space(3)}px`,
         borderRadius: theme.radius.md,
         border: `${theme.line.border}px solid ${tone.outline}`,
         background: tone.fill,
@@ -50,8 +62,13 @@ export function Notice(props: {
       }}
     >
       {props.leading}
-      <div style={{ flex: 1, minWidth: 0 }}>{props.children}</div>
-      {props.action ? <div style={{ flex: "none" }}>{props.action}</div> : null}
+      <div style={{ flex: 1, minWidth: 0, ...(oneLine ? { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } : null) }}>{props.children}</div>
+      {props.compact ? (
+        <Button size="sm" variant="quiet" expanded={more} onClick={() => setMore((m) => !m)} style={{ flex: "none", color: "inherit" }}>
+          {more ? "Less" : "More"}
+        </Button>
+      ) : null}
+      {props.action ? <div style={{ flex: "none", display: "flex", gap: theme.space(2) }}>{props.action}</div> : null}
     </div>
   );
 }

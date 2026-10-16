@@ -34,7 +34,7 @@ export function PanelBody(props: { id: string; shown: boolean; selectedTokenId: 
  * A load failure inside the room, where a reload must first wait for the
  * queued edits, and then opens the same panel or tool again.
  */
-export function RoomLoadNotice(props: FallbackProps & { subject: string; verb?: "open" | "load"; compact?: boolean; reopen: Reopen }) {
+export function RoomLoadNotice(props: FallbackProps & { subject: string; verb?: "open" | "load"; compact?: boolean; line?: boolean; reopen: Reopen }) {
   const { reopen, ...rest } = props;
   const roomId = useRoomView((s) => s.roomId);
   const pending = useRoomView((s) => s.pending.length);

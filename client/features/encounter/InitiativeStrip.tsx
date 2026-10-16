@@ -601,8 +601,16 @@ function FightAlerts() {
       gap: EDGE * zoom,
       minWidth: theme.touch * zoom,
     };
-    // Where no spot keeps above the tool's buttons, as with capped options scrolled at 130%, the row lets that rule go first and stands as high as the others allow, over as little of them as it can.
-    const place = raisedRow(rules) ?? raisedRow({ ...rules, floor: Infinity, highest: true });
+    /*
+     * Best above the whole of the tool's options, its hint included, where
+     * a spot is left there, such as over the room's name at 480 x 320 at
+     * 130%. Else above its buttons and readings, over the hint only. Where
+     * no spot keeps above the tool's buttons, as with capped options
+     * scrolled at 130%, the row lets that rule go too and stands as high
+     * as the others allow, over as little of them as it can.
+     */
+    const place =
+      raisedRow({ ...rules, floor: (height - chrome.bottom - theme.space(1)) * zoom }) ?? raisedRow(rules) ?? raisedRow({ ...rules, floor: Infinity, highest: true });
     const shift = place ? Math.max(0, Math.round((usual.left - place.left) / zoom)) : 0;
     const next = place
       ? {
@@ -682,11 +690,14 @@ function FightAlerts() {
   useLayoutEffect(() => {
     const cards = cardsRef.current;
     if (!cards || colTop === null) return;
+    // Where the summary row stands while it has risen over the bars, so a bar under it may take the room it left.
+    const row = summarized && rowPlace.lift > 0 ? colTop - rowPlace.lift : undefined;
     const measure = () => {
-      // The row standing in for a folded foot card, or for cards with no room, is the column's first card then, so the bar keeps below it.
+      // The row standing in for a folded foot card, or for cards with no room, is the column's first card then, so the bar keeps below it, wherever it stands.
       if ((forFootCard || forRoom) && dock.getState().bar?.lane !== "summary") {
+        const top = row ?? colTop;
         const prev = dock.getState().column;
-        if (prev?.top !== colTop || prev.first !== SUMMARY_ROW || prev.content !== SUMMARY_ROW) dock.setState({ column: { top: colTop, content: SUMMARY_ROW, first: SUMMARY_ROW } });
+        if (prev?.top !== top || prev.first !== SUMMARY_ROW || prev.content !== SUMMARY_ROW) dock.setState({ column: { top, content: SUMMARY_ROW, first: SUMMARY_ROW } });
         return;
       }
       // Over the screen the cards are as wide as it, so they say nothing of the column: its last measures stand.
@@ -694,14 +705,14 @@ function FightAlerts() {
       const measured = drawn(cards) ? { content: cards.getBoundingClientRect().height / zoom, first: firstCardHeight(cards) / zoom } : null;
       if (measured) setFirstHeight(measured.first);
       const prev = dock.getState().column;
-      const next = columnFacts(prev, { top: colTop, measured });
+      const next = columnFacts(prev, { top: colTop, measured, ...(row === undefined ? null : { row }) });
       if (next !== prev) dock.setState({ column: next });
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(cards);
     return () => observer.disconnect();
-  }, [dock, colTop, zoom, alerts, summarized, folded, forFootCard, forRoom, overlay]);
+  }, [dock, colTop, zoom, alerts, summarized, folded, forFootCard, forRoom, overlay, rowPlace.lift]);
   useLayoutEffect(() => () => dock.setState({ column: null }), [dock]);
 
   const clip = () => {

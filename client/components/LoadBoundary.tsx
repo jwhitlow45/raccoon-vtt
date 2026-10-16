@@ -144,6 +144,13 @@ export function LoadFailureNotice(
     pending?: number;
     connection?: ConnectionState;
     compact?: boolean;
+    /**
+     * One row that never wraps, for a notice that keeps to one line on a
+     * short screen (components/Notice.tsx `compact`): the words follow the
+     * line's own wrapping, cut short with an ellipsis until More opens them,
+     * and the button keeps its place at the row's end.
+     */
+    line?: boolean;
     beforeReload?(): void;
   },
 ) {
@@ -167,14 +174,21 @@ export function LoadFailureNotice(
       style={{
         display: "flex",
         flexDirection: props.compact ? "row" : "column",
-        flexWrap: "wrap",
+        flexWrap: props.line ? "nowrap" : "wrap",
         alignItems: props.compact ? "center" : "flex-start",
         gap: theme.space(props.compact ? 2 : 3),
         padding: props.compact ? 0 : `${theme.space(2)}px 0`,
         fontSize: theme.font.body14,
       }}
     >
-      <p style={{ margin: 0, color: failure === "checking" ? theme.color.textMuted : theme.color.text, flex: props.compact ? "1 1 180px" : undefined }}>
+      <p
+        style={{
+          margin: 0,
+          color: failure === "checking" ? theme.color.textMuted : theme.color.text,
+          flex: props.line ? "1 1 auto" : props.compact ? "1 1 180px" : undefined,
+          ...(props.line ? { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "inherit" } : null),
+        }}
+      >
         {text}
       </p>
       {failure === "updated" || failure === "failed" ? (

@@ -7,7 +7,8 @@ import { useUiScale } from "../device/settings.ts";
 import { theme } from "../../lib/theme.ts";
 import { Room } from "../../pages/Room.tsx";
 import { RoomProvider, useAssets, useRoomStore } from "../../state/view.ts";
-import { useTopBars } from "../encounter/band.ts";
+import { SHORT_LANDSCAPE_MAX, useTopBars } from "../encounter/band.ts";
+import { useLayoutSize } from "../device/layout.ts";
 import { createPreview, type Preview } from "./preview.ts";
 import { PreviewContext, type PreviewNotice } from "./previewContext.ts";
 
@@ -89,10 +90,13 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
   const dialog = useRef<HTMLDialogElement>(null);
   useModalDialog(dialog, { onClose: onExit, zoom: false });
   const zoom = useUiScale();
+  // One line on a short screen, as the room's own lasting notices (components/Notice.tsx).
+  const compact = useLayoutSize().height < SHORT_LANDSCAPE_MAX;
   const banner = (
     <Notice
       tone="highlight"
       float
+      compact={compact}
       role="status"
       action={
         <Button size="sm" onClick={onExit}>

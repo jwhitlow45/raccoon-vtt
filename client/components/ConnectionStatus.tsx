@@ -58,12 +58,12 @@ export function useReconnectDue(state: ConnectionState): boolean {
   return !connected && due;
 }
 
-/** The banner itself, for a state that is not `open`. */
-export function ReconnectNotice(props: { state: ConnectionState }) {
+/** The banner itself, for a state that is not `open`. `compact` is its one-line form on a short screen (Notice.tsx). */
+export function ReconnectNotice(props: { state: ConnectionState; compact?: boolean }) {
   const { state } = props;
   const offline = state === "offline";
   return (
-    <Notice role="status" tone={offline ? "danger" : "warning"} float leading={<ConnectionDot state={state} />}>
+    <Notice role="status" tone={offline ? "danger" : "warning"} float compact={props.compact} leading={<ConnectionDot state={state} />}>
       {offline
         ? "You are offline. Your changes are kept and will be sent when you reconnect."
         : state === "connecting"

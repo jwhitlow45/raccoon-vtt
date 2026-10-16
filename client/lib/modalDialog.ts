@@ -331,20 +331,34 @@ export function containTab(root: HTMLElement, e: KeyboardEvent): void {
  * Everything on the page but `root` made inert, as showModal() makes it
  * for a `<dialog>`: the siblings of `root` and of each of its ancestors up
  * to the body, so nothing behind takes focus, a tap or a screen reader's
- * attention. Returns the undo, which leaves alone what was inert already.
+ * attention. It keeps doing so until undone: something that arrives
+ * meanwhile beside one of them, such as a player's roll card portaled to
+ * the body above the fight's alerts opened over the screen, is made inert
+ * as it arrives, as the browser does for a modal dialog's top layer.
+ * Returns the undo, which leaves alone what was inert already.
  */
 export function inertOutside(root: HTMLElement): () => void {
   const made: Element[] = [];
+  const parents: HTMLElement[] = [];
+  const stillOut = (sibling: Element, node: Element) => {
+    if (sibling === node || sibling.contains(root) || sibling.hasAttribute("inert")) return;
+    sibling.setAttribute("inert", "");
+    made.push(sibling);
+  };
   for (let node: HTMLElement | null = root; node && node !== document.body; node = node.parentElement) {
     const parent: HTMLElement | null = node.parentElement;
     if (!parent) break;
-    for (const sibling of Array.from(parent.children)) {
-      if (sibling === node || sibling.hasAttribute("inert")) continue;
-      sibling.setAttribute("inert", "");
-      made.push(sibling);
-    }
+    parents.push(parent);
+    for (const sibling of Array.from(parent.children)) stillOut(sibling, node);
   }
+  const arrivals = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const added of record.addedNodes) if (added instanceof Element) stillOut(added, root);
+    }
+  });
+  for (const parent of parents) arrivals.observe(parent, { childList: true });
   return () => {
+    arrivals.disconnect();
     for (const el of made) el.removeAttribute("inert");
   };
 }

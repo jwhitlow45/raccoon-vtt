@@ -262,8 +262,13 @@ export function nextCorner(spot: Spot): { spot: Spot; status: string } {
 
 export type Lane = "none" | "stacked" | "beside" | "summary";
 
-/** The column's measures as it publishes them: its top, its content's height and its first card's. */
-export type ColumnFacts = { top: number; content: number; first: number };
+/**
+ * The column's measures as it publishes them: its top, its content's height
+ * and its first card's. `row` is where its summary row stands while it has
+ * risen from the column's top (InitiativeStrip.tsx FightAlerts), over the
+ * band or the top bar's row, so the bar under it may take the room it left.
+ */
+export type ColumnFacts = { top: number; content: number; first: number; row?: number };
 
 /** The left edge of the lane, the right 312 px of the free area. */
 export function laneLeft(free: Box): number {
@@ -333,10 +338,11 @@ export function laneChoice(input: { laneTop: number; laneHeight: number; column:
   const { laneTop, column } = input;
   const height = Math.max(0, input.laneHeight);
   if (!column || column.first <= 0) return { lane: "none", floor: laneTop };
-  const firstBottom = column.top + column.first + EDGE;
+  // Never above the lane: a column that has risen over the bars leaves the bar the lane's whole height, no more.
+  const firstBottom = Math.max(laneTop, column.top + column.first + EDGE);
   if (laneTop + height - firstBottom >= Math.min(BAR_FLOOR, height) && height > 0) return { lane: "stacked", floor: firstBottom };
   if (input.besideRoom >= BESIDE_MIN) return { lane: "beside", floor: laneTop };
-  return { lane: "summary", floor: column.top + SUMMARY_ROW + EDGE };
+  return { lane: "summary", floor: Math.max(laneTop, (column.row ?? column.top) + SUMMARY_ROW + EDGE) };
 }
 
 /**
@@ -527,12 +533,17 @@ export function noticeSpan(free: Box, rail: number): { left: number; width: numb
  * moves the summary row that shows, and the bar must follow it. The same
  * object back when nothing changed, so nothing renders for nothing.
  */
-export function columnFacts(prev: ColumnFacts | null, input: { top: number; measured: { content: number; first: number } | null }): ColumnFacts | null {
-  const { top, measured } = input;
-  if (!measured) return prev && prev.top !== top ? { ...prev, top } : prev;
+export function columnFacts(prev: ColumnFacts | null, input: { top: number; measured: { content: number; first: number } | null; row?: number }): ColumnFacts | null {
+  const { top, measured, row } = input;
+  if (!measured) return prev && (prev.top !== top || prev.row !== row) ? withRow({ ...prev, top }, row) : prev;
   if (measured.first <= 0) return null;
-  if (prev && prev.top === top && prev.content === measured.content && prev.first === measured.first) return prev;
-  return { top, content: measured.content, first: measured.first };
+  if (prev && prev.top === top && prev.content === measured.content && prev.first === measured.first && prev.row === row) return prev;
+  return withRow({ top, content: measured.content, first: measured.first }, row);
+}
+
+function withRow(facts: ColumnFacts, row: number | undefined): ColumnFacts {
+  const { row: _, ...rest } = facts;
+  return row === undefined ? rest : { ...rest, row };
 }
 
 /**

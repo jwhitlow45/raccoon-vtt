@@ -67,6 +67,8 @@ import { Badge, FindButton, FitButton, PauseScreen, Stacked, UndoButtons, useAcc
 import { DockHeaderActions, DockRow, FoldStatus, SAFE_PROBE_STYLE, useDockSummary, useLayoutHeight, useSafeAreas, type DockActions } from "./RoomDock.tsx";
 
 const { topBar: TOP_BAR, toolbar: TOOLBAR } = theme.layout;
+/** One row of a tool's options at the foot: a 44 px control and the bar's padding. */
+const OPTIONS_ROW = theme.touch + theme.space(2);
 /** "Viewing as Pat" at its widest, in window pixels (features/dm/PlayerPreview.tsx). */
 const PREVIEW_NOTICE_MAX = 520;
 /** Over the whole map, drawing nothing but its focus ring, inside the map's edge. */
@@ -125,7 +127,10 @@ function useWidth(scale: number): [(el: HTMLElement | null) => (() => void) | un
  * The active tool's options bar's height, as useHeight measures it, and how
  * far up from its foot its highest button or field reaches. A hint wraps
  * above the Ruler's buttons, and what the alerts column lays over the
- * bar's top may cover a hint but never a control (barDock.ts Chrome).
+ * bar's top may cover a hint but never a control (barDock.ts Chrome), nor
+ * a reading or a warning (measure/controls.tsx InfoLine), which count as
+ * controls here: the summary row stood over the Ruler's line at 480 x 320
+ * at 130%.
  */
 function useOptionsHeights(scale: number): [(el: HTMLElement | null) => (() => void) | undefined, number, number] {
   const [heights, setHeights] = useState({ height: 0, controls: 0 });
@@ -134,7 +139,7 @@ function useOptionsHeights(scale: number): [(el: HTMLElement | null) => (() => v
       if (!el) return undefined;
       const measure = () => {
         const box = el.getBoundingClientRect();
-        const tops = Array.from(el.querySelectorAll("button, input, select"), (c) => c.getBoundingClientRect().top);
+        const tops = Array.from(el.querySelectorAll("button, input, select, [data-options-reading]"), (c) => c.getBoundingClientRect().top);
         const height = barInset(box);
         // The bar scrolls once capped, so a control scrolled out above it reaches no higher than its top, and one below no lower than its foot.
         const controls = tops.length > 0 ? Math.round(Math.max(0, Math.min(box.height, box.bottom - Math.min(...tops)))) : 0;
@@ -1186,12 +1191,20 @@ function YouChip(props: { dm: boolean; dot: boolean }) {
   );
 }
 
-/** The connection banner. Inside a very short sheet while one shows, its 3 s count kept here (pages/modalSlot.tsx). */
+/** The connection banner, on one line on a short screen. Inside a very short sheet while one shows, its 3 s count kept here (pages/modalSlot.tsx). */
 function Banner() {
   const connection = useRoomView((s) => s.connection);
   const due = useReconnectDue(connection);
   const slot = useModalSlot("connection");
-  return inModal(<div style={{ pointerEvents: "auto", width: "100%", maxWidth: 520, minWidth: 0 }}>{due ? <ReconnectNotice state={connection} /> : null}</div>, slot);
+  const compact = useLayoutSize().height < SHORT_LANDSCAPE_MAX;
+  // Nothing at all while it is not due: an empty box would still take a gap in the stack, 8 px a short screen does not have.
+  if (!due) return null;
+  return inModal(
+    <div style={{ pointerEvents: "auto", width: "100%", maxWidth: 520, minWidth: 0 }}>
+      <ReconnectNotice state={connection} compact={compact} />
+    </div>,
+    slot,
+  );
 }
 
 /**
@@ -1424,7 +1437,7 @@ function OptionsBar(props: {
         top: "auto",
         bottom: `calc(${theme.safe.bottom} + ${TOOLBAR}px)`,
         width: "auto",
-        minHeight: theme.touch + theme.space(2),
+        minHeight: OPTIONS_ROW,
         maxWidth: props.wide ? 640 : "none",
         alignContent: "normal",
         padding: props.wide ? `${theme.space(1)}px ${theme.space(2)}px` : `${theme.space(1)}px calc(${theme.safe.right} + ${theme.space(2)}px) ${theme.space(1)}px calc(${theme.safe.left} + ${theme.space(2)}px)`,
@@ -1438,7 +1451,15 @@ function OptionsBar(props: {
         // half the screen it scrolls, so the map always keeps the other half,
         // and past the room under the top bars and any lasting notice too,
         // which would stand over its buttons, keeping one row at least.
-        maxHeight: props.room === null ? screenHeight(50) : `min(${screenHeight(50)}, ${Math.max(theme.touch + theme.space(2), props.room)}px)`,
+        maxHeight: props.room === null ? screenHeight(50) : `min(${screenHeight(50)}, ${Math.max(OPTIONS_ROW, props.room)}px)`,
+        /*
+         * Where even one row does not fit under a lasting notice, as at 480
+         * x 320 at 130% in a fight with Reconnecting up, the row stands over
+         * the notice, so the tool's buttons stay in reach. The notice keeps
+         * to one line there, and the connection dot or the tool's own
+         * change of mode still says what it said.
+         */
+        zIndex: props.room !== null && props.room < OPTIONS_ROW ? theme.z.notices + 1 : theme.z.options,
         overflowX: "auto",
         overflowY: "auto",
         overscrollBehavior: "auto",
