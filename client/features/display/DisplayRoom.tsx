@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useStore } from "zustand";
+import { handoutPages } from "#shared/handouts.ts";
 import type { Handout } from "#shared/model.ts";
 import { MapStage } from "../../canvas/Stage.tsx";
 import { SceneLoadingOverlay } from "../../canvas/SceneLoading.tsx";
@@ -23,10 +24,29 @@ import { createRoomStore, type RoomStore } from "../../state/store.ts";
 import type { Ended, RoomActions, You } from "../../state/types.ts";
 import { RoomProvider, useAssets, useRoomView, type AssetSource } from "../../state/view.ts";
 import { closedSlot, closedStorageKey, closeHandout, loadClosed } from "../handouts/closed.ts";
-import { nextPopup, showingKey } from "../handouts/handouts.ts";
+import { nextPopup, pageName, showingKey } from "../handouts/handouts.ts";
 import { useXCard, XCardHost } from "../xcard/XCardHost.tsx";
 import { UI_SCALES, uiScaleLabel, useUiScale } from "../device/settings.ts";
-import { displayPress, endedText, fitMapTarget, followCamera, MENU_MS, refitAt, turnText, type DisplayMode, type Overlay } from "./logic.ts";
+import {
+  BAR_BUTTONS,
+  barFirstFocus,
+  barFocusAfter,
+  barMove,
+  containRect,
+  displayPress,
+  endedText,
+  fitMapTarget,
+  followCamera,
+  MENU_MS,
+  pageLine,
+  refitAt,
+  stepPage,
+  turnText,
+  type BarButton,
+  type DisplayMode,
+  type DisplayPaging,
+  type Overlay,
+} from "./logic.ts";
 import { chooseDisplayUiScale, forgetDisplayRoom, readDisplayMode, readDisplayTurn, rememberedDisplayRoom, saveDisplayChoices, useDisplayTextSize } from "./remember.ts";
 import { TV_BUTTON_HEIGHT, TV_HANDOUT_SCRIM, TV_TEXT } from "./tvType.ts";
 
@@ -104,26 +124,64 @@ function DisplayTable(props: { roomId: string }) {
   useEffect(() => saveDisplayChoices({ mode, turn: showTurn }), [mode, showTurn]);
 
   const handout = useDisplayHandout(props.roomId, memberId);
+  const paging = useHandoutPaging(handout.current);
   // The X-card shows over a handout, so a tap closes the card first and the handout with the next.
   const xcard = useXCard();
   const overlay: Overlay = xcard.showing ? "xcard" : handout.current ? "handout" : null;
   const menu = useMenu();
   const cursorHidden = useIdleCursor();
 
+  // A handout takes every tap and key, and its bar takes the menu's place, so a menu open when one comes up goes.
+  const showing = handout.current ? showingKey(handout.current) : null;
+  useEffect(() => {
+    if (showing !== null) menu.hide();
+  }, [showing, menu]);
+
+  /** Acts on a tap (`key` null) or a key, and says whether the key may go on to do its own work: Enter or Space pressing the bar's button with focus. */
   const press = useCallback(
-    (key: boolean) => {
-      const what = displayPress({ overlay, menu: menu.open, key });
-      if (what === "closeOverlay") {
-        if (overlay === "xcard") xcard.dismiss();
-        else handout.close();
-      } else if (what === "openMenu") menu.show(key);
-      else if (what === "closeMenu") menu.hide();
-      else menu.touch();
+    (key: string | null): boolean => {
+      const what = displayPress({ overlay, menu: menu.open, key, paging: paging.state });
+      // Any key while the bar shows is a use of it, as in the menu.
+      if (key !== null && paging.state?.bar) paging.touch();
+      switch (what) {
+        case "closeOverlay":
+          if (overlay === "xcard") xcard.dismiss();
+          else handout.close();
+          return false;
+        case "openMenu":
+          menu.show(key !== null);
+          return false;
+        case "closeMenu":
+          menu.hide();
+          return false;
+        case "menuKey":
+          menu.touch();
+          return false;
+        case "nextPage":
+        case "previousPage":
+          paging.step(what === "nextPage" ? 1 : -1);
+          return false;
+        case "openBar":
+          paging.openBar(key !== null);
+          return false;
+        case "hideBar":
+          paging.hideBar();
+          return false;
+        case "barFocusNext":
+        case "barFocusPrevious":
+          paging.move(what === "barFocusNext" ? 1 : -1);
+          return false;
+        case "barKey":
+          return key !== null && paging.barKey(key);
+        case "none":
+          return false;
+      }
     },
-    [overlay, menu, handout, xcard],
+    [overlay, menu, handout, xcard, paging],
   );
 
   // Any key shows the menu, as a TV remote's OK button would. Inside the menu the keys move between its buttons.
+  // A handout of pages takes the keys for its pages and its bar instead (displayPress).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -140,13 +198,15 @@ function DisplayTable(props: { roomId: string }) {
         menu.touch();
         return;
       }
-      if (e.key === "Tab") return;
-      e.preventDefault();
-      press(true);
+      if (e.key === "Tab") {
+        if (paging.state?.bar) paging.touch();
+        return;
+      }
+      if (!press(e.key)) e.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [menu, overlay, press]);
+  }, [menu, overlay, press, paging]);
 
   const camera = useDisplayCamera(gate, mode);
   const turn = useRoomView((s) => (showTurn && s.view ? turnText({ encounter: s.view.encounter, tokens: s.view.tokens, characters: s.view.characters }) : null));
@@ -183,13 +243,19 @@ function DisplayTable(props: { roomId: string }) {
       <div
         aria-hidden
         onPointerUp={(e) => {
-          if (e.button === 0) press(false);
+          if (e.button === 0) press(null);
         }}
         style={{ position: "absolute", inset: 0, zIndex: 10, touchAction: "none", cursor: cursorHidden ? "none" : "default" }}
       />
       {turn && gate.kind === "ready" ? <TurnPill text={turn} /> : null}
       <DisplayBanner state={connection} />
-      {handout.current ? <HandoutView handout={handout.current} onClose={handout.close} /> : null}
+      {handout.current ? (
+        paging.state ? (
+          <HandoutPagesView key={showing} handout={handout.current} paging={paging} onTap={() => press(null)} onClose={handout.close} />
+        ) : (
+          <HandoutView handout={handout.current} onClose={handout.close} />
+        )
+      ) : null}
       <XCardHost tapCloses card={xcard} />
       {menu.open ? (
         <DisplayMenu
@@ -418,6 +484,265 @@ function HandoutView(props: { handout: Handout; onClose(): void }) {
   );
 }
 
+type Paging = ReturnType<typeof useHandoutPaging>;
+
+/**
+ * The page a handout of two or more pages shows on this display, and its
+ * bar (docs/design-v1-pdf-handouts.md 7). The page is kept per showing for
+ * as long as the display shows the room, and never stored: a resync of the
+ * same showing keeps it, a blackout lifting finds it again, a new showing
+ * starts at page 1, and a reload starts again. The DM's device never moves
+ * it. `state` is null for one page, which keeps the one-image rules.
+ */
+function useHandoutPaging(handout: Handout | null) {
+  const key = handout ? showingKey(handout) : null;
+  const pages = handout ? handoutPages(handout).length : 0;
+  const [kept, setKept] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const [barFor, setBarFor] = useState<string | null>(null);
+  const [stamp, setStamp] = useState(0);
+  // A new object each time, so asking for the same button twice still moves focus there.
+  const [focusTo, setFocusTo] = useState<{ button: BarButton } | null>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+
+  const page = key === null ? 0 : Math.min(kept.get(key) ?? 0, Math.max(0, pages - 1));
+  const bar = key !== null && barFor === key;
+  const state = useMemo<DisplayPaging | null>(() => (key !== null && pages > 1 ? { pages, page, bar } : null), [key, pages, page, bar]);
+
+  useEffect(() => {
+    if (!bar) return;
+    const timer = setTimeout(() => setBarFor(null), MENU_MS);
+    return () => clearTimeout(timer);
+  }, [bar, stamp]);
+  // After the render that shows the bar or changes the page, so the button is there and enabled.
+  useEffect(() => {
+    if (focusTo) barButtons(barRef.current)[BAR_BUTTONS.indexOf(focusTo.button)]?.focus();
+  }, [focusTo]);
+
+  return useMemo(() => {
+    const focused = (): BarButton | null => BAR_BUTTONS[barButtons(barRef.current).indexOf(document.activeElement as HTMLButtonElement)] ?? null;
+    const touch = () => setStamp((n) => n + 1);
+    return {
+      state,
+      barRef,
+      touch,
+      step(by: 1 | -1) {
+        if (key === null || !state) return;
+        const next = stepPage(state.page, state.pages, by);
+        if (next === state.page) return;
+        const handOn = state.bar ? barFocusAfter(focused(), next, state.pages) : null;
+        setKept((m) => new Map(m).set(key, next));
+        if (handOn) setFocusTo({ button: handOn });
+        if (state.bar) touch();
+      },
+      /** Shows the bar, with focus on its first button when a key opened it. */
+      openBar(withKeys: boolean) {
+        if (key === null || !state) return;
+        setBarFor(key);
+        touch();
+        if (withKeys) setFocusTo({ button: barFirstFocus(state.page, state.pages) });
+      },
+      hideBar() {
+        setBarFor(null);
+      },
+      /** A remote's arrows: focus to the bar's next or previous button. */
+      move(by: 1 | -1) {
+        if (!state) return;
+        setFocusTo({ button: barMove(state.page, state.pages, focused(), by) });
+        touch();
+      },
+      /**
+       * Any other key while the bar shows. Enter or Space presses the button
+       * with focus, so it goes on. With focus outside the bar, as after a tap
+       * opened it, the key puts focus where opening it by a key would have.
+       */
+      barKey(name: string): boolean {
+        if (!state) return false;
+        if (focused() === null) {
+          setFocusTo({ button: barFirstFocus(state.page, state.pages) });
+          return false;
+        }
+        return name === "Enter" || name === " ";
+      },
+    };
+  }, [key, state]);
+}
+
+function barButtons(bar: HTMLElement | null): HTMLButtonElement[] {
+  return [...(bar?.querySelectorAll("button") ?? [])];
+}
+
+/** An element's box, kept current as the window resizes or a phone turns. */
+function useBoxSize(ref: RefObject<HTMLElement | null>): Size | null {
+  const [size, setSize] = useState<Size | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const read = () => setSize((s) => (s && s.width === el.clientWidth && s.height === el.clientHeight ? s : { width: el.clientWidth, height: el.clientHeight }));
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(read);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+  return size;
+}
+
+/**
+ * A handout of two or more pages on the TV (docs/design-v1-pdf-handouts.md
+ * 7): one page at a time, fitted whole as one image is, with "Page 2 of 5"
+ * under the title. The page showing and the next one load, so Next page is
+ * usually instant. A tap shows the bar, and a tap beside it hides it.
+ */
+function HandoutPagesView(props: { handout: Handout; paging: Paging; onTap(): void; onClose(): void }) {
+  const assets = useAssets();
+  const pages = handoutPages(props.handout);
+  const { page, bar } = props.paging.state ?? { page: 0, bar: false };
+  const title = props.handout.title;
+  const areaRef = useRef<HTMLDivElement>(null);
+  const area = useBoxSize(areaRef);
+  const shown = pages[page];
+  const drawn = area && shown?.width && shown.height ? containRect(area, { width: shown.width, height: shown.height }) : null;
+  return (
+    <div
+      role="dialog"
+      aria-label={title}
+      onPointerUp={props.onTap}
+      style={{
+        position: "absolute",
+        inset: 0,
+        zIndex: 20,
+        display: "grid",
+        gridTemplateRows: "auto minmax(0, 1fr)",
+        gap: theme.space(3),
+        padding: `calc(${theme.safe.top} + ${theme.space(4)}px) ${theme.space(4)}px calc(${theme.safe.bottom} + ${theme.space(4)}px)`,
+        background: TV_HANDOUT_SCRIM,
+        cursor: "pointer",
+      }}
+    >
+      <div style={{ display: "grid", gap: theme.space(1), textAlign: "center" }}>
+        <h2 style={{ margin: 0, fontSize: TV_TEXT.title, fontWeight: theme.weight.bold, overflowWrap: "anywhere" }}>{title}</h2>
+        <p style={{ margin: 0, color: theme.color.textMuted, fontSize: TV_TEXT.body }}>{pageLine(page, pages.length)}</p>
+      </div>
+      <div ref={areaRef} style={{ position: "relative", minHeight: 0, display: "grid", placeItems: "center" }}>
+        {[page, page + 1].flatMap((i) => {
+          const p = pages[i];
+          return p ? [<DisplayPage key={i} src={assets.url(p.assetId, "full")} alt={pageName(title, i, pages.length)} current={i === page} />] : [];
+        })}
+        {bar ? (
+          <HandoutBar
+            barRef={props.paging.barRef}
+            page={page}
+            pages={pages.length}
+            below={area && drawn ? Math.max(0, area.height - drawn.y - drawn.height) : 0}
+            onStep={props.paging.step}
+            onTouch={props.paging.touch}
+            onClose={props.onClose}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One page in its place, as one image shows: "Loading the handout…" until
+ * it loads, and the one image's failure line in its place if it fails. The
+ * next page loads here too, unseen and hidden from screen readers.
+ */
+function DisplayPage(props: { src: string; alt: string; current: boolean }) {
+  const [state, setState] = useState<"loading" | "loaded" | "failed">("loading");
+  if (state === "failed") {
+    return props.current ? <p style={{ margin: 0, color: theme.color.textMuted, fontSize: TV_TEXT.message }}>The picture could not be loaded.</p> : null;
+  }
+  return (
+    <>
+      {props.current && state === "loading" ? <Loading text="Loading the handout…" style={{ position: "absolute", fontSize: TV_TEXT.body }} /> : null}
+      <img
+        src={props.src}
+        alt={props.alt}
+        aria-hidden={props.current ? undefined : true}
+        onLoad={() => setState("loaded")}
+        onError={() => setState("failed")}
+        // Placed over the area as one image is (HandoutView), so the bar over it never changes its size.
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", opacity: props.current && state === "loaded" ? 1 : 0 }}
+      />
+    </>
+  );
+}
+
+/**
+ * The handout's bar: Previous page, Next page and Close in the menu's
+ * TV-sized buttons, over the page's bottom edge. It lies over the page and
+ * takes no room from it, and its buttons wrap onto a second row on a screen
+ * too narrow for one, such as a phone used as a display. A press on it
+ * keeps it up, and a tap beside it falls through to the handout, which
+ * hides it.
+ *
+ * It sits in a box from the area's top down to the page's bottom edge, as
+ * far below as the page's shape leaves of the area. Its auto top margin
+ * puts it at that box's foot, and in a box too short for it, gives way so
+ * that it hangs from the area's top rather than rising over the title.
+ */
+function HandoutBar(props: {
+  barRef: RefObject<HTMLDivElement | null>;
+  page: number;
+  pages: number;
+  below: number;
+  onStep(by: 1 | -1): void;
+  onTouch(): void;
+  onClose(): void;
+}) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: props.below,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        padding: theme.space(3),
+        pointerEvents: "none",
+      }}
+    >
+      <div
+        ref={props.barRef}
+        role="toolbar"
+        aria-label="Handout pages"
+        onPointerDown={props.onTouch}
+        onPointerUp={(e) => e.stopPropagation()}
+        style={{
+          marginTop: "auto",
+          maxWidth: "100%",
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "center",
+          gap: theme.space(2),
+          padding: theme.space(3),
+          borderRadius: theme.radius.lg,
+          background: theme.color.surface,
+          border: `${theme.line.border}px solid ${theme.color.border}`,
+          boxShadow: theme.shadow.dialog,
+          pointerEvents: "auto",
+          cursor: "default",
+        }}
+      >
+        <MenuButton grow disabled={props.page <= 0} onClick={() => props.onStep(-1)}>
+          Previous page
+        </MenuButton>
+        <MenuButton grow disabled={props.page >= props.pages - 1} onClick={() => props.onStep(1)}>
+          Next page
+        </MenuButton>
+        <MenuButton grow onClick={props.onClose}>
+          Close
+        </MenuButton>
+      </div>
+    </div>
+  );
+}
+
 function TurnPill(props: { text: string }) {
   return (
     <div
@@ -625,13 +950,16 @@ function TextSize(props: { onTouch(): void }) {
 }
 
 function MenuButton(props: {
-  role: "menuitem" | "menuitemradio" | "menuitemcheckbox";
+  /** None for a plain button, as on a handout's bar. */
+  role?: "menuitem" | "menuitemradio" | "menuitemcheckbox";
   checked?: boolean;
   danger?: boolean;
   armed?: boolean;
   disabled?: boolean;
   /** Less room each side, for a row of several. */
   compact?: boolean;
+  /** Grows to fill its row in a wrapping bar. */
+  grow?: boolean;
   onClick(): void;
   children: ReactNode;
 }) {
@@ -640,10 +968,11 @@ function MenuButton(props: {
     <button
       type="button"
       role={props.role}
-      aria-checked={props.role === "menuitem" ? undefined : on}
+      aria-checked={props.role === undefined || props.role === "menuitem" ? undefined : on}
       disabled={props.disabled}
       onClick={props.onClick}
       style={{
+        flex: props.grow ? "1 1 auto" : undefined,
         minHeight: TV_BUTTON_HEIGHT,
         minWidth: 0,
         padding: `0 ${theme.space(props.compact ? 1 : 4)}px`,

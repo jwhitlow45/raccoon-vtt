@@ -7,8 +7,9 @@ import type { Ended } from "../../state/types.ts";
 
 /**
  * A table display's rules (docs/design-v1-dm-tools.md 3.1), as pure
- * functions: the pairing code as people type it, the two camera modes, and
- * what a tap does. The display's pages draw from these.
+ * functions: the pairing code as people type it, the two camera modes, what
+ * a tap does, and how a handout's pages step. The display's pages draw from
+ * these.
  */
 
 // ---------------------------------------------------------------- codes
@@ -108,18 +109,138 @@ export function refitAt(input: { target: Rect; applied: Rect | null; appliedAt: 
 export type Overlay = "handout" | "xcard" | null;
 
 /**
- * What a tap, a click or a key does on the display. A handout or the X-card
- * closes and nothing else happens, so the next tap opens the menu. Without
- * them a tap shows the menu, or hides it when it shows. A key while the
- * menu shows belongs to the menu (a remote's arrows and OK).
+ * A handout of two or more pages on the display (docs/design-v1-pdf-handouts.md
+ * 7): how many pages it has, the one showing, counted from 0, and whether its
+ * bar of Previous page, Next page and Close shows.
  */
-export function displayPress(input: { overlay: Overlay; menu: boolean; key: boolean }): "closeOverlay" | "openMenu" | "closeMenu" | "menuKey" {
+export type DisplayPaging = { pages: number; page: number; bar: boolean };
+
+export type DisplayAction =
+  | "closeOverlay"
+  | "openMenu"
+  | "closeMenu"
+  | "menuKey"
+  | "nextPage"
+  | "previousPage"
+  | "openBar"
+  | "hideBar"
+  /** An arrow while the bar shows: focus moves to the bar's next or previous button. */
+  | "barFocusNext"
+  | "barFocusPrevious"
+  /** Any other key while the bar shows. It keeps the bar up, and Enter or Space presses the button with focus. */
+  | "barKey"
+  /** A page key at the end it steps toward. */
+  | "none";
+
+/**
+ * What a tap, a click or a key does on the display. `key` is the key's name,
+ * or null for a tap or a click. A handout or the X-card closes and nothing
+ * else happens, so the next tap opens the menu. Without them a tap shows
+ * the menu, or hides it when it shows. A key while the menu shows belongs
+ * to the menu (a remote's arrows and OK).
+ *
+ * A handout of pages answers for itself (`paging`): the page keys step,
+ * Escape closes it, and any other key, a tap or a click shows its bar.
+ * While the bar shows, a tap hides it, the arrows move between its
+ * buttons, PageUp and PageDown still step, and Escape hides the bar before
+ * a second one closes the handout. The X-card over it still closes first.
+ */
+export function displayPress(input: { overlay: Overlay; menu: boolean; key: string | null; paging?: DisplayPaging | null }): DisplayAction {
+  if (input.overlay === "handout" && input.paging && input.paging.pages > 1) return pagingPress(input.paging, input.key);
   if (input.overlay) return "closeOverlay";
-  if (input.menu) return input.key ? "menuKey" : "closeMenu";
+  if (input.menu) return input.key !== null ? "menuKey" : "closeMenu";
   return "openMenu";
 }
 
-/** The menu hides this long after its last use. */
+function pagingPress(paging: DisplayPaging, key: string | null): DisplayAction {
+  if (key === null) return paging.bar ? "hideBar" : "openBar";
+  if (key === "Escape") return paging.bar ? "hideBar" : "closeOverlay";
+  const by = pageKey(key);
+  if (by === 0) return paging.bar ? "barKey" : "openBar";
+  // While the bar shows, the arrows are its own, as a remote's arrows are the menu's.
+  if (paging.bar && key.startsWith("Arrow")) return by > 0 ? "barFocusNext" : "barFocusPrevious";
+  if (stepPage(paging.page, paging.pages, by) === paging.page) return "none";
+  return by > 0 ? "nextPage" : "previousPage";
+}
+
+/** Which way a key steps a handout's pages: 1 to the next, -1 to the one before, 0 for any other key. */
+function pageKey(key: string): 1 | -1 | 0 {
+  switch (key) {
+    case "ArrowRight":
+    case "ArrowDown":
+    case "PageDown":
+      return 1;
+    case "ArrowLeft":
+    case "ArrowUp":
+    case "PageUp":
+      return -1;
+    default:
+      return 0;
+  }
+}
+
+/** The page `by` steps to from `page`, stopping at the first and the last. */
+export function stepPage(page: number, pages: number, by: number): number {
+  return Math.max(0, Math.min(pages - 1, page + by));
+}
+
+/** "Page 2 of 5", the line under a handout's title. */
+export function pageLine(page: number, pages: number): string {
+  return `Page ${page + 1} of ${pages}`;
+}
+
+/** The bar's buttons, in their order on screen. */
+export const BAR_BUTTONS = ["previous", "next", "close"] as const;
+export type BarButton = (typeof BAR_BUTTONS)[number];
+
+/** The buttons that work on this page: Previous page is disabled on the first, and Next page on the last. */
+export function barEnabled(page: number, pages: number): BarButton[] {
+  return BAR_BUTTONS.filter((b) => (b === "previous" ? page > 0 : b === "next" ? page < pages - 1 : true));
+}
+
+/**
+ * Where focus goes when a key opens the bar: Next page, or Close on the
+ * last page. The menu's rule, its first button, would land on Previous
+ * page, which is disabled on page 1.
+ */
+export function barFirstFocus(page: number, pages: number): BarButton {
+  return page < pages - 1 ? "next" : "close";
+}
+
+/**
+ * Where an arrow moves focus among the bar's enabled buttons, around the
+ * ends as in the menu. With focus outside the bar, as after a tap opened
+ * it, the first arrow goes where a key opening the bar would have put it.
+ */
+export function barMove(page: number, pages: number, focused: BarButton | null, by: 1 | -1): BarButton {
+  const enabled = barEnabled(page, pages);
+  const at = focused === null ? -1 : enabled.indexOf(focused);
+  if (at < 0) return barFirstFocus(page, pages);
+  return enabled[(at + by + enabled.length) % enabled.length] ?? barFirstFocus(page, pages);
+}
+
+/**
+ * Where focus goes after the page changes, when the page button holding it
+ * is now disabled: to the other page button, as the handout viewer hands it
+ * on. Never to Close, or OK pressed again and again to page through would
+ * close the handout at the end. Null when focus can stay.
+ */
+export function barFocusAfter(focused: BarButton | null, page: number, pages: number): BarButton | null {
+  if (focused === "next" && page >= pages - 1) return page > 0 ? "previous" : "close";
+  if (focused === "previous" && page <= 0) return pages > 1 ? "next" : "close";
+  return null;
+}
+
+/** Where a picture of `size` draws in `box` when fitted whole and centered, as `object-fit: contain` draws it. */
+export function containRect(box: Size, size: Size): Rect {
+  if (box.width <= 0 || box.height <= 0 || size.width <= 0 || size.height <= 0) return { x: 0, y: 0, width: box.width, height: box.height };
+  const scale = Math.min(box.width / size.width, box.height / size.height);
+  const width = size.width * scale;
+  const height = size.height * scale;
+  return { x: (box.width - width) / 2, y: (box.height - height) / 2, width, height };
+}
+
+/** The menu, and a handout's bar, hide this long after their last use. */
 export const MENU_MS = 5_000;
 
 /** "Turn: Thorn": whose turn, when the room is in a fight and the display may see who acts. */

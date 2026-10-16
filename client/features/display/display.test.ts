@@ -3,8 +3,27 @@ import { describe, test } from "node:test";
 import { entry, reveal, room, scene, token } from "#shared/testutil.ts";
 import { projectState } from "#shared/project.ts";
 import { screenToWorld } from "../../lib/camera.ts";
+import { pageName } from "../handouts/handouts.ts";
 import { revealedMask } from "../../lib/fogTiles.ts";
-import { codeFromHash, displayPress, endedText, fitMapTarget, followCamera, formatDisplayCode, normalizeDisplayCode, refitAt, REFIT_MS, turnText } from "./logic.ts";
+import {
+  barEnabled,
+  barFirstFocus,
+  barFocusAfter,
+  barMove,
+  codeFromHash,
+  containRect,
+  displayPress,
+  endedText,
+  fitMapTarget,
+  followCamera,
+  formatDisplayCode,
+  normalizeDisplayCode,
+  pageLine,
+  refitAt,
+  REFIT_MS,
+  stepPage,
+  turnText,
+} from "./logic.ts";
 
 describe("display codes", () => {
   test("typed loosely, read as the server reads them", () => {
@@ -90,12 +109,12 @@ describe("the display's camera", () => {
 
 describe("a tap on the display", () => {
   test("a tap on an open handout or X-card closes it and nothing else, and the next opens the menu", () => {
-    assert.equal(displayPress({ overlay: "handout", menu: false, key: false }), "closeOverlay");
-    assert.equal(displayPress({ overlay: "xcard", menu: false, key: true }), "closeOverlay");
-    assert.equal(displayPress({ overlay: null, menu: false, key: false }), "openMenu");
-    assert.equal(displayPress({ overlay: null, menu: false, key: true }), "openMenu", "any key shows the menu");
-    assert.equal(displayPress({ overlay: null, menu: true, key: false }), "closeMenu");
-    assert.equal(displayPress({ overlay: null, menu: true, key: true }), "menuKey", "a remote's keys work the menu");
+    assert.equal(displayPress({ overlay: "handout", menu: false, key: null }), "closeOverlay");
+    assert.equal(displayPress({ overlay: "xcard", menu: false, key: "Enter" }), "closeOverlay");
+    assert.equal(displayPress({ overlay: null, menu: false, key: null }), "openMenu");
+    assert.equal(displayPress({ overlay: null, menu: false, key: "Enter" }), "openMenu", "any key shows the menu");
+    assert.equal(displayPress({ overlay: null, menu: true, key: null }), "closeMenu");
+    assert.equal(displayPress({ overlay: null, menu: true, key: "Enter" }), "menuKey", "a remote's keys work the menu");
   });
 
   test("whose turn it is, when the display may see the creature that acts", () => {
@@ -105,6 +124,107 @@ describe("a tap on the display", () => {
     assert.equal(turnText({ encounter: { ...encounter, activeEntryId: null }, tokens: state.tokens, characters: {} }), null);
     assert.equal(turnText({ encounter: { ...encounter, activeEntryId: "hidden" }, tokens: state.tokens, characters: {} }), null, "a row the display does not hold names no one");
     assert.equal(turnText({ encounter: null, tokens: {}, characters: {} }), null);
+  });
+});
+
+describe("a handout of pages on the display", () => {
+  const press = (key: string | null, paging: { page: number; bar: boolean; pages?: number }) =>
+    displayPress({ overlay: "handout", menu: false, key, paging: { pages: 3, ...paging } });
+
+  test("a tap on a document opens the bar, and a tap beside the open bar hides it", () => {
+    assert.equal(press(null, { page: 0, bar: false }), "openBar");
+    assert.equal(press(null, { page: 2, bar: true }), "hideBar");
+  });
+
+  test("the page keys step and stop at the ends", () => {
+    for (const key of ["ArrowRight", "ArrowDown", "PageDown"]) {
+      assert.equal(press(key, { page: 0, bar: false }), "nextPage", key);
+      assert.equal(press(key, { page: 1, bar: false }), "nextPage", key);
+      assert.equal(press(key, { page: 2, bar: false }), "none", `${key} on the last page`);
+    }
+    for (const key of ["ArrowLeft", "ArrowUp", "PageUp"]) {
+      assert.equal(press(key, { page: 2, bar: false }), "previousPage", key);
+      assert.equal(press(key, { page: 0, bar: false }), "none", `${key} on page 1`);
+    }
+    assert.equal(stepPage(0, 3, 1), 1);
+    assert.equal(stepPage(2, 3, 1), 2, "no page after the last");
+    assert.equal(stepPage(0, 3, -1), 0, "no page before the first");
+  });
+
+  test("PageUp and PageDown still step with the bar open, and stop at the ends", () => {
+    assert.equal(press("PageDown", { page: 0, bar: true }), "nextPage");
+    assert.equal(press("PageUp", { page: 1, bar: true }), "previousPage");
+    assert.equal(press("PageDown", { page: 2, bar: true }), "none");
+    assert.equal(press("PageUp", { page: 0, bar: true }), "none");
+  });
+
+  test("with the bar open the arrows move between its buttons, and Enter is left to press one", () => {
+    assert.equal(press("ArrowRight", { page: 1, bar: true }), "barFocusNext");
+    assert.equal(press("ArrowDown", { page: 1, bar: true }), "barFocusNext");
+    assert.equal(press("ArrowLeft", { page: 1, bar: true }), "barFocusPrevious");
+    assert.equal(press("ArrowUp", { page: 1, bar: true }), "barFocusPrevious");
+    assert.equal(press("Enter", { page: 1, bar: true }), "barKey");
+    assert.equal(press(" ", { page: 1, bar: true }), "barKey");
+
+    // Around the enabled buttons, as in the menu, skipping a disabled page button.
+    assert.equal(barMove(1, 3, "previous", 1), "next");
+    assert.equal(barMove(1, 3, "next", 1), "close");
+    assert.equal(barMove(1, 3, "close", 1), "previous");
+    assert.equal(barMove(1, 3, "previous", -1), "close");
+    assert.equal(barMove(0, 3, "next", -1), "close", "Previous page is disabled on page 1");
+    assert.equal(barMove(0, 3, "close", 1), "next");
+    assert.equal(barMove(2, 3, "close", 1), "previous", "Next page is disabled on the last");
+    assert.deepEqual(barEnabled(0, 3), ["next", "close"]);
+    assert.deepEqual(barEnabled(1, 3), ["previous", "next", "close"]);
+    assert.deepEqual(barEnabled(2, 3), ["previous", "close"]);
+    // A tap opened the bar, so focus is outside it: the first arrow lands where a key opening it would.
+    assert.equal(barMove(0, 3, null, -1), "next");
+    assert.equal(barMove(2, 3, null, 1), "close");
+  });
+
+  test("any other key opens the bar, with focus on Next page, or on Close on the last page", () => {
+    assert.equal(press("Enter", { page: 0, bar: false }), "openBar");
+    assert.equal(press("a", { page: 2, bar: false }), "openBar");
+    assert.equal(barFirstFocus(0, 3), "next", "never the disabled Previous page");
+    assert.equal(barFirstFocus(1, 3), "next");
+    assert.equal(barFirstFocus(2, 3), "close");
+  });
+
+  test("a page button the new page disables hands focus to the other, never to Close", () => {
+    assert.equal(barFocusAfter("next", 2, 3), "previous");
+    assert.equal(barFocusAfter("previous", 0, 3), "next");
+    assert.equal(barFocusAfter("next", 1, 3), null, "still enabled");
+    assert.equal(barFocusAfter("close", 2, 3), null);
+    assert.equal(barFocusAfter(null, 2, 3), null, "focus was not on the bar");
+  });
+
+  test("Escape hides the bar, and a second Escape closes the handout", () => {
+    assert.equal(press("Escape", { page: 1, bar: true }), "hideBar");
+    assert.equal(press("Escape", { page: 1, bar: false }), "closeOverlay");
+  });
+
+  test("one page is unchanged: a tap or any key closes it", () => {
+    for (const key of [null, "Enter", "ArrowRight", "PageDown", "Escape"]) {
+      assert.equal(press(key, { page: 0, bar: false, pages: 1 }), "closeOverlay", String(key));
+      assert.equal(displayPress({ overlay: "handout", menu: false, key }), "closeOverlay", String(key));
+    }
+  });
+
+  test("the X-card over a document closes first, whatever the bar", () => {
+    for (const key of [null, "Enter", "ArrowRight", "Escape"]) {
+      assert.equal(displayPress({ overlay: "xcard", menu: false, key, paging: { pages: 3, page: 1, bar: true } }), "closeOverlay", String(key));
+    }
+  });
+
+  test("the page line, each page's name, and where a page draws fitted whole", () => {
+    assert.equal(pageLine(1, 5), "Page 2 of 5");
+    assert.equal(pageName("Strange letter", 1, 5), "Strange letter, page 2 of 5");
+    // A Letter page on a wide TV area fills its height, centered across. A landscape page on a phone fills its width, centered down.
+    assert.deepEqual(containRect({ width: 1888, height: 900 }, { width: 1584, height: 2048 }), { x: (1888 - (1584 * 900) / 2048) / 2, y: 0, width: (1584 * 900) / 2048, height: 900 });
+    const phone = containRect({ width: 358, height: 700 }, { width: 2048, height: 1584 });
+    assert.equal(phone.width, 358);
+    assert.ok(Math.abs(phone.y - (700 - phone.height) / 2) < 1e-9 && phone.height < 300);
+    assert.deepEqual(containRect({ width: 0, height: 0 }, { width: 10, height: 10 }), { x: 0, y: 0, width: 0, height: 0 }, "an area not yet laid out");
   });
 });
 
