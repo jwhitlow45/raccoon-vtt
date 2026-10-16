@@ -47,10 +47,58 @@ export type DialogProps = {
   dismissOnBackdrop?: boolean;
   /** For the scrolling body, such as a smaller font or no padding. */
   bodyStyle?: CSSProperties;
+  /**
+   * The phone's whole-screen card at any width, for the handout viewer: a
+   * short layout, where a card would leave a sliver of dim room around it,
+   * and its states that fill the window (features/handouts/HandoutViewer.tsx).
+   */
+  full?: boolean;
 };
 
 function widthPx(width: DialogWidth): number {
   return typeof width === "number" ? width : theme.layout.dialog[width];
+}
+
+/** The card's shape at a layout width: a sheet from the bottom, the whole screen, or a card in the middle. */
+export function dialogCard(layoutPx: number, props: Pick<DialogProps, "phone" | "width" | "full">): { card: CSSProperties; bottom: boolean } {
+  const phone = layoutPx < DIALOG_PHONE_MAX;
+  const sheet = props.phone === "sheet";
+  if (props.full || (phone && !sheet)) {
+    return {
+      card: {
+        width: "100%",
+        height: "100%",
+        borderRadius: 0,
+        paddingTop: theme.safe.top,
+        paddingBottom: theme.safe.bottom,
+        paddingLeft: theme.safe.left,
+        paddingRight: theme.safe.right,
+      },
+      bottom: false,
+    };
+  }
+  if (phone) {
+    return {
+      card: {
+        width: "100%",
+        maxHeight: "92%",
+        borderRadius: `${theme.radius.lg}px ${theme.radius.lg}px 0 0`,
+        paddingBottom: theme.safe.bottom,
+        paddingLeft: theme.safe.left,
+        paddingRight: theme.safe.right,
+      },
+      bottom: true,
+    };
+  }
+  return {
+    card: {
+      width: `min(${widthPx(props.width ?? "md")}px, calc(100% - ${theme.space(8)}px))`,
+      // An editor keeps one height while its tabs and sections change. A picker fits what it shows.
+      ...(sheet ? { maxHeight: `min(88%, 760px)` } : { height: `min(calc(100% - ${theme.space(8)}px), 760px)` }),
+      borderRadius: theme.radius.lg,
+    },
+    bottom: false,
+  };
 }
 
 /**
@@ -73,39 +121,13 @@ function widthPx(width: DialogWidth): number {
  * (features/device/layout.ts).
  */
 export function Dialog(props: DialogProps) {
-  const { onClose, phone: phoneMode = "fill", header = true } = props;
-  const phone = typeof window !== "undefined" && layoutWidth() < DIALOG_PHONE_MAX;
-  const sheet = phoneMode === "sheet";
+  const { onClose, header = true } = props;
+  // On the server's render, with no window, the computer's card.
+  const { card, bottom } = dialogCard(typeof window === "undefined" ? DIALOG_PHONE_MAX : layoutWidth(), props);
   const dialog = useRef<HTMLDialogElement>(null);
   useBackClose(props.backClose === true, onClose);
   useModalDialog(dialog, { onClose, ...(props.opener ? { returnFocus: props.opener } : null), ...(props.zoom === false ? { zoom: false } : null) });
   useStepFocus(dialog, props.title);
-
-  const card: CSSProperties = phone
-    ? sheet
-      ? {
-          width: "100%",
-          maxHeight: "92%",
-          borderRadius: `${theme.radius.lg}px ${theme.radius.lg}px 0 0`,
-          paddingBottom: theme.safe.bottom,
-          paddingLeft: theme.safe.left,
-          paddingRight: theme.safe.right,
-        }
-      : {
-          width: "100%",
-          height: "100%",
-          borderRadius: 0,
-          paddingTop: theme.safe.top,
-          paddingBottom: theme.safe.bottom,
-          paddingLeft: theme.safe.left,
-          paddingRight: theme.safe.right,
-        }
-    : {
-        width: `min(${widthPx(props.width ?? "md")}px, calc(100% - ${theme.space(8)}px))`,
-        // An editor keeps one height while its tabs and sections change. A picker fits what it shows.
-        ...(sheet ? { maxHeight: `min(88%, 760px)` } : { height: `min(calc(100% - ${theme.space(8)}px), 760px)` }),
-        borderRadius: theme.radius.lg,
-      };
 
   // The dialog element is the dimmed layer over the whole screen, so a tap on it outside the card closes the card.
   return createPortal(
@@ -128,7 +150,7 @@ export function Dialog(props: DialogProps) {
         padding: 0,
         border: "none",
         display: "flex",
-        alignItems: phone && sheet ? "flex-end" : "center",
+        alignItems: bottom ? "flex-end" : "center",
         justifyContent: "center",
         background: props.scrim ?? theme.color.scrim,
         fontFamily: theme.font.body,

@@ -12,7 +12,7 @@ import { theme } from "../lib/theme.ts";
  * readers.
  */
 
-export type IconName = "close" | "back" | "more" | "chevronRight" | "chevronDown" | "plus" | "minus" | "check" | "copy" | "filter";
+export type IconName = "close" | "back" | "more" | "chevronRight" | "chevronDown" | "plus" | "minus" | "check" | "copy" | "filter" | "expand";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -39,6 +39,7 @@ const SHAPES: Record<IconName, ReactNode> = {
     </g>
   ),
   filter: <path {...STROKE} d="M4 5h16l-6 7.5V19l-4 2v-8.5z" />,
+  expand: <path {...STROKE} d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" />,
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];
