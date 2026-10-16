@@ -10,6 +10,7 @@ import {
   companionInput,
   companionSpot,
   draftError,
+  draftWith,
   linkPatch,
   makeCompanionPatch,
   playerPlacement,
@@ -62,6 +63,19 @@ describe("the companion form (docs/design-v1-combat-flow.md 3.6.3)", () => {
   test("the turn's choices name the character, and an effect is offered only Bree's turns", () => {
     assert.deepEqual(turnChoices("Bree", "creature").map((c) => c.label), ["On Bree's turn, listed under Bree", "On Bree's turn, not listed", "Its own turn"]);
     assert.deepEqual(turnChoices("Bree", "effect").map((c) => c.value), ["shared", "none"]);
+  });
+
+  test("the turn follows what it is until the user picks one: a creature listed under Bree, an effect not listed (SOL-04)", () => {
+    const effect = draftWith(NEW_COMPANION, { what: "effect" });
+    assert.equal(effect.turn, "none", "Spiritual Weapon made without touching Turn stays out of the order");
+    assert.equal(companionInput({ ...effect, name: "Spiritual Weapon" }, at, bree().characters.bree!).companion?.turn, "none");
+    assert.equal(draftWith(effect, { what: "creature" }).turn, "shared", "back to a creature, still unpicked");
+    assert.equal(draftWith(effect, { name: "Spiritual Weapon", size: "medium" }).turn, "none", "other fields leave the turn");
+    const picked = draftWith(draftWith(NEW_COMPANION, { turn: "shared" }), { what: "effect" });
+    assert.equal(picked.turn, "shared", "a turn the user picked stays");
+    assert.equal(draftWith(picked, { what: "creature" }).turn, "shared");
+    assert.equal(draftWith(draftWith(NEW_COMPANION, { turn: "own" }), { what: "effect" }).turn, "none", "an effect takes no turn of its own");
+    assert.equal(draftWith(draftWith(NEW_COMPANION, { what: "effect" }), { turn: "own" }).turn, "none");
   });
 });
 

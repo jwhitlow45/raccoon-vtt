@@ -24,9 +24,30 @@ export type CompanionDraft = {
   /** A creature's AC, empty stored as 0. An effect has none. */
   ac: number | null;
   image: ImageRef | null;
+  /** The user chose a turn, which a change of what it is then keeps where it can. */
+  turnPicked: boolean;
 };
 
-export const NEW_COMPANION: CompanionDraft = { name: "", what: "creature", turn: "shared", size: "small", hp: null, ac: null, image: null };
+export const NEW_COMPANION: CompanionDraft = { name: "", what: "creature", turn: "shared", size: "small", hp: null, ac: null, image: null, turnPicked: false };
+
+/** The turn a companion starts at until the user picks one (3.6.2): a creature listed under its character, an effect not listed. */
+export function defaultTurn(what: CompanionWhat): CompanionTurn {
+  return what === "effect" ? "none" : "shared";
+}
+
+/**
+ * The draft after a change in the form. Until the user picks a turn, it
+ * follows what the companion is, so a Spiritual Weapon made without
+ * touching Turn stays out of the order. A picked turn is kept, except that
+ * an effect takes no turn of its own, which then goes to the effect's
+ * default.
+ */
+export function draftWith(draft: CompanionDraft, patch: Partial<Omit<CompanionDraft, "turnPicked">>): CompanionDraft {
+  const next: CompanionDraft = { ...draft, ...patch, turnPicked: draft.turnPicked || patch.turn !== undefined };
+  if (patch.what !== undefined && patch.turn === undefined && !next.turnPicked) next.turn = defaultTurn(next.what);
+  if (next.what === "effect" && next.turn === "own") next.turn = defaultTurn("effect");
+  return next;
+}
 
 export type TurnChoice = { value: CompanionTurn; label: string; help: string };
 

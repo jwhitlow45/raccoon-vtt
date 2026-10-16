@@ -527,11 +527,12 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
   test("9. Ana adds Spiritual Weapon and Wildfire Spirit beside Bree without Players can create their own characters, and the DM's log names each", async () => {
     await setUp(ana, await anaContext.newCDPSession(ana), { ...DESK, scale: 1 });
     await ana.getByRole("tab", { name: "Characters" }).click();
-    const add = async (name: string, what: "A creature" | "An effect", turn: string, hp?: string) => {
+    // A turn of null leaves Turn untouched, so the form's own start for what it is gets sent.
+    const add = async (name: string, what: "A creature" | "An effect", turn: string | null, hp?: string) => {
       await ana.getByRole("button", { name: "Add a companion" }).click();
       await ana.getByRole("textbox", { name: "Name" }).fill(name);
       await ana.getByRole("radio", { name: what }).check();
-      await ana.getByRole("combobox", { name: "Turn" }).selectOption({ label: turn });
+      if (turn) await ana.getByRole("combobox", { name: "Turn" }).selectOption({ label: turn });
       if (hp) {
         await ana.getByRole("textbox", { name: "HP" }).fill(hp);
         await ana.getByRole("textbox", { name: "AC" }).fill("13");
@@ -550,7 +551,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await ana.getByRole("button", { name: "Cancel" }).first().click();
     await ops.send({ t: "token.update", tokenId: run.bree.id, patch: { sceneId: run.sceneId, x: 5, y: 5 } });
     await waitFor("Bree back on the players' scene", () => (anaSocket.state?.tokens[run.bree.id] ? true : null));
-    const weapon = await add("Spiritual Weapon", "An effect", "On Bree's turn, not listed");
+    const weapon = await add("Spiritual Weapon", "An effect", null);
+    assert.deepEqual(weapon.companion, { of: run.bree.characterId, turn: "none" }, "an effect made without touching Turn is not listed (SOL-04)");
     await bar(ana, "Spiritual Weapon").waitFor();
     await ana.getByRole("tab", { name: "Characters" }).click();
     const spirit = await add("Wildfire Spirit", "A creature", "On Bree's turn, listed under Bree", "15");

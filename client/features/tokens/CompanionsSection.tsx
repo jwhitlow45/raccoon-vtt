@@ -31,6 +31,7 @@ import {
   companionsOf,
   dmPlacement,
   draftError,
+  draftWith,
   linkPatch,
   makeCompanionPatch,
   playerPlacement,
@@ -143,12 +144,8 @@ export function CompanionForm(props: { character: Character; close(): void; onDo
   const [draft, setDraft] = useState<CompanionDraft>(NEW_COMPANION);
   const [error, setError] = useState<string | null>(null);
   const [waiting, setWaiting] = useState(false);
-  const set = (patch: Partial<CompanionDraft>) => {
-    setDraft((d) => {
-      const next = { ...d, ...patch };
-      // An effect takes no turn of its own, so choosing one moves an own turn to Bree's.
-      return next.what === "effect" && next.turn === "own" ? { ...next, turn: "shared" } : next;
-    });
+  const set = (patch: Partial<Omit<CompanionDraft, "turnPicked">>) => {
+    setDraft((d) => draftWith(d, patch));
     setError(null);
   };
   const name = character.name;

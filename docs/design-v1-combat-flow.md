@@ -197,7 +197,7 @@ Tables run familiars both ways, as the project owner notes, so the turn is chose
 | `none` | On Bree's turn, not listed | It acts on Bree's turn and stays out of the initiative order, like Spiritual Weapon. | Spiritual Weapon, a spell's moving effect |
 | `own` | Its own turn | It rolls its own initiative and joins the fight as a row of its own. | A familiar or sidekick with its own turn |
 
-The labels name the character. They are a Select with the chosen one's help under it, the pattern of the auto initiative modes (`AutoInitiative.tsx:62-64`). A creature starts at `shared`, the project owner's Wildfire Spirit, and an effect at `none`.
+The labels name the character. They are a Select with the chosen one's help under it, the pattern of the auto initiative modes (`AutoInitiative.tsx:62-64`). A creature starts at `shared`, the project owner's Wildfire Spirit, and an effect at `none`. The start follows what it is until the user picks a turn. A picked turn stays when what it is changes, except that an effect never takes its own turn, which goes to `none`.
 
 **One eligibility rule**, the same for creation, turn changes and kind changes, enforced by the reducer for everyone: **an effect takes no turn of its own.** So `turn: "own"` needs a creature kind, and a companion with its own turn cannot become an effect. HP edits do not enter into it: a creature keeps its kind whatever its HP, so an own-turn companion is always a creature, and the tracker's creature filters (`logic.ts:438`) always let it join. The way to give an effect a turn of its own is to make it a creature first (3.6.9), which also brings back its HP fields.
 
