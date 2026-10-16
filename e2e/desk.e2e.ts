@@ -341,7 +341,7 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
 
     // On the players' scene the map image's picker comes after a warning, which it names as its description.
     await dm.getByRole("tab", { name: "Scenes", exact: true }).click();
-    await section("Map image").getByRole("button", { name: "Add a map image" }).click();
+    await section("This scene").getByRole("button", { name: "Add a map image" }).click();
     await waitFor("the image picker focused", async () => {
       const f = await focused(dm);
       return f.tag === "input" && f.name === "Choose the image";

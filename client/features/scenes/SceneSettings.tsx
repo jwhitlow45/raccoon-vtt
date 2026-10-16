@@ -26,11 +26,13 @@ import { uploadErrorText, uploadMap } from "./upload.ts";
 import { layoutWidth } from "../device/layout.ts";
 
 /**
- * Settings of the scene the DM is looking at: name, fog, starting view,
- * size, background, grid style, the map image and its grid, the build, and
- * deleting it. Every change is one op, so it shows at once and undo covers
- * it, and a setting that is on or off is a Switch row named by the setting
- * (docs/design-v1-visual.md 3.7), never a button named by its state.
+ * Settings of the scene the DM is looking at: name, map image, fog,
+ * starting view, size and background, then map phases and vision, used in
+ * play, above the grid, set up once (docs/design-v1-layout-hierarchy.md
+ * M5), then movement, the build, export and deleting it. Every change is
+ * one op, so it shows at once and undo covers it, and a setting that is on
+ * or off is a Switch row named by the setting (docs/design-v1-visual.md
+ * 3.7), never a button named by its state.
  */
 export function SceneSettings(props: { scene: Scene; others: Scene[]; close(): void }) {
   const { scene, others } = props;
@@ -55,6 +57,7 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close(): v
     <>
       <Section label="This scene">
         <NameField key={scene.id} name={scene.name} onSave={(name) => update({ name })} />
+        <MapImageRow scene={scene} close={props.close} />
         <Switch
           label="Fog"
           help={scene.fogEnabled ? "Players see only what you reveal. Use the fog tool to reveal." : "Players see the whole scene."}
@@ -85,13 +88,11 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close(): v
         </SettingRow>
       </Section>
 
-      <GridStyle scene={scene} onChange={(grid) => update({ grid })} close={props.close} />
-
-      <MapSection scene={scene} close={props.close} />
-
       <PhasesSection scene={scene} />
 
       <VisionSettings scene={scene} />
+
+      <GridStyle scene={scene} onChange={(grid) => update({ grid })} close={props.close} />
 
       <BlockMovementSetting scene={scene} />
 
@@ -304,15 +305,16 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close():
 }
 
 /**
- * The map image: adding one to a scene without, replacing it, or removing
- * it.
+ * The map image's row in "This scene": adding one to a scene without,
+ * replacing it, or removing it. It follows the scene's name, since the
+ * image decides what the scene is.
  *
  * On the scene the players are on, a new image shows on their screens the
  * moment it uploads, so the picker asks first (features 3: the DM prepares
  * privately). A scene's first image also brings the fog a map scene starts
  * with (create.ts `fogsWithFirstMap`), which the DM can decline there.
  */
-function MapSection(props: { scene: Scene; close(): void }) {
+function MapImageRow(props: { scene: Scene; close(): void }) {
   const { scene } = props;
   const map = scene.map;
   const actions = useRoomActions();
@@ -419,7 +421,7 @@ function MapSection(props: { scene: Scene; close(): void }) {
   /* Removing the image removes every map phase with it (docs/design-v1-maps-vision.md section 3.4), so the second tap says so. */
   const removeButton = (
     <ConfirmButton
-      label="Remove image"
+      label="Remove map image"
       confirm={phaseCount > 1 ? `Tap again to remove all ${phaseCount} phases` : "Tap again to remove"}
       title={phaseCount > 1 ? "Removes the map image and every map phase of this scene" : undefined}
       onConfirm={() => actions.dispatch({ t: "scene.setMap", sceneId: scene.id, map: null })}
@@ -452,11 +454,14 @@ function MapSection(props: { scene: Scene; close(): void }) {
       </>
     );
 
+  // Its buttons, the warning, the fog choice and the status stack under the name, as the section they came from did.
   return (
-    <Section label="Map image">
-      {picker(map ? "Replace image" : "Add a map image")}
-      {status}
-    </Section>
+    <SettingRow name="Map image" help={map ? `A ${map.widthPx} × ${map.heightPx} px image.` : "No map image yet."} wide>
+      <div style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(2) }}>
+        {picker(map ? "Replace map image" : "Add a map image")}
+        {status}
+      </div>
+    </SettingRow>
   );
 }
 
