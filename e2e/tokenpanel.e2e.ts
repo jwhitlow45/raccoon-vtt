@@ -252,19 +252,33 @@ async function ringsCompact(panel: Locator, where: string): Promise<void> {
   assert.equal(await panel.getByText("Another distance", { exact: true }).count(), 0, `${where}: no label or help under the rings`);
 }
 
-/** Max HP and Temp HP side by side at every width (docs/design-v1-token-panel.md 3.7): the fields share a line, and both labels stand beside or above alike. */
-async function hpPairSideBySide(panel: Locator, where: string): Promise<void> {
+/**
+ * Max HP and Temp HP side by side at every width (docs/design-v1-token-panel.md 3.7): the fields share a line, and both
+ * labels stand beside or above alike, the way the doc's size table says for this width.
+ */
+async function hpPairSideBySide(panel: Locator, where: string, labels: "beside" | "above"): Promise<void> {
   const maxHp = await rectOf(panel.getByRole("textbox", { name: "Max HP", exact: true }));
   const tempHp = await rectOf(panel.getByRole("textbox", { name: "Temporary HP", exact: true }));
   assert.ok(Math.abs(maxHp.top - tempHp.top) <= 2, `${where}: Max HP and Temp HP share a line`);
   assert.ok(tempHp.left >= maxHp.right, `${where}: Temp HP stands right of Max HP`);
-  const labels = await panel
+  const shown = await panel
     .locator("[data-rvtt-hp-pair] > [data-rvtt-labeled] > span:first-child")
     .evaluateAll((els) => els.map((el) => (el as unknown as El).getBoundingClientRect()));
-  assert.equal(labels.length, 2, `${where}: two labels`);
-  assert.ok(Math.abs(labels[0]!.top - labels[1]!.top) <= 2, `${where}: the labels stand alike`);
-  // Above its field, a label starts where the field starts, as labels do down the rest of the panel.
-  if (labels[0]!.bottom <= maxHp.top + 1) assert.ok(Math.abs(labels[0]!.left - maxHp.left) <= 1 && Math.abs(labels[1]!.left - tempHp.left) <= 1, `${where}: a label above its field starts with it`);
+  assert.equal(shown.length, 2, `${where}: two labels`);
+  assert.ok(Math.abs(shown[0]!.top - shown[1]!.top) <= 2, `${where}: the labels stand alike`);
+  const width = (await rectOf(panel.locator("[data-rvtt-hp-pair]"))).width;
+  for (const [label, field] of [
+    [shown[0]!, maxHp],
+    [shown[1]!, tempHp],
+  ] as const) {
+    if (labels === "above") {
+      // Above its field, a label starts where the field starts, as labels do down the rest of the panel.
+      assert.ok(label.bottom <= field.top + 1 && Math.abs(label.left - field.left) <= 1, `${where}: a label above its field at a ${width} px pair`);
+    } else {
+      const middle = label.top + label.height / 2;
+      assert.ok(label.right <= field.left + 1 && middle > field.top && middle < field.bottom, `${where}: a label beside its field at a ${width} px pair`);
+    }
+  }
 }
 
 /**
@@ -602,7 +616,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.ok(Math.abs(change.top - anotherBox.top) <= 2, "Change image and Add another image share a line");
     const panelLeft = (await rectOf(panel)).left;
     assert.ok(change.left - panelLeft >= 48 + 16, "the pair sits beside the preview");
-    await hpPairSideBySide(panel, "the side panel");
+    await hpPairSideBySide(panel, "the side panel", "beside");
     await ringsCompact(panel, "the side panel");
     await ringsFull(panel, "the side panel");
     await panel.getByRole("group", { name: "Maximum and temporary HP", exact: true }).scrollIntoViewIfNeeded();
@@ -884,7 +898,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     const change = await rectOf(panel.getByRole("button", { name: "Change image", exact: true }));
     const another = await rectOf(panel.getByRole("button", { name: "Add another image", exact: true }));
     assert.ok(Math.abs(change.top - another.top) <= 2 && change.left - (await rectOf(panel)).left >= 48, "the image row takes one line on a phone held upright");
-    await hpPairSideBySide(panel, "356 px");
+    await hpPairSideBySide(panel, "356 px", "beside");
     await ringsCompact(panel, "356 px");
     await panel.getByRole("group", { name: "Range rings in feet", exact: true }).scrollIntoViewIfNeeded();
     await shots.take(dm, "tokenpanel-390-range-rings");
@@ -989,7 +1003,8 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       assert.ok(change.top >= preview.bottom - 1, `${size.label}: the buttons sit beside the preview`);
       const holds = column >= change.width + another.width + 4 - 0.5;
       assert.equal(Math.abs(change.top - another.top) <= 2, holds, `${size.label}: the pair's lines with a ${column} px column`);
-      await hpPairSideBySide(panel, size.label);
+      // Each of these panels is under 320 px wide: 259, 259 and 268 (docs/design-v1-token-panel.md, the size table).
+      await hpPairSideBySide(panel, size.label, "above");
       await noSideScroll(panel, `${size.label}, the panel`);
       const pageWide = await dm.evaluate(() => (globalThis as unknown as { document: { documentElement: El } }).document.documentElement.scrollWidth > (globalThis as unknown as { innerWidth: number }).innerWidth);
       assert.equal(pageWide, false, `${size.label}: the page scrolls sideways`);
@@ -998,9 +1013,9 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
   });
 
   test("7b. a phone upright at 130%, short with Apply in view wherever its token stands, and an upright tablet, full: Stat block hiding the bar for the sheet at the block, and the image and HP rows", async () => {
-    const sizes: (View & { label: string })[] = [
-      { width: 390, height: 844, scale: 1.3, label: "390 x 844 at 130%" },
-      { width: 820, height: 1180, scale: 1, label: "820 x 1180" },
+    const sizes: (View & { label: string; hpLabels: "beside" | "above" })[] = [
+      { width: 390, height: 844, scale: 1.3, label: "390 x 844 at 130%", hpLabels: "above" },
+      { width: 820, height: 1180, scale: 1, label: "820 x 1180", hpLabels: "beside" },
     ];
     for (const size of sizes) {
       await setUp(dm, dmCdp, size, null);
@@ -1048,7 +1063,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       const gap = await pair.evaluate((el) => Number.parseFloat((el as unknown as { ownerDocument: { defaultView: { getComputedStyle(e: unknown): { columnGap: string } } } }).ownerDocument.defaultView.getComputedStyle(el).columnGap));
       const zoom = size.scale;
       assert.equal(Math.abs(change.top - another.top) <= 2, column >= change.width + another.width + gap * zoom - 0.5, `${size.label}: the pair's lines with a ${column} px column for ${change.width} + ${another.width} + ${gap * zoom}`);
-      await hpPairSideBySide(panel, size.label);
+      await hpPairSideBySide(panel, size.label, size.hpLabels);
       await noSideScroll(panel, `${size.label}, the panel`);
       await shots.take(dm, `tokenpanel-${size.label.replace(/ /g, "")}-stat-block-sheet`);
     }
@@ -1079,7 +1094,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     const another = await rectOf(panel.getByRole("button", { name: "Add another image", exact: true }));
     const gap = await pair.evaluate((el) => Number.parseFloat((el as unknown as { ownerDocument: { defaultView: { getComputedStyle(e: unknown): { columnGap: string } } } }).ownerDocument.defaultView.getComputedStyle(el).columnGap));
     assert.equal(Math.abs(change.top - another.top) <= 2, column >= change.width + another.width + gap * 1.3 - 0.5, `the pair's lines with a ${column} px column`);
-    await hpPairSideBySide(panel, "241 px");
+    await hpPairSideBySide(panel, "241 px", "above");
     await panel.getByRole("group", { name: "Maximum and temporary HP", exact: true }).scrollIntoViewIfNeeded();
     await shots.take(dm, "tokenpanel-480x320at130-hp-pair");
     await noSideScroll(panel, "480 x 320 at 130%, the very short panel");
