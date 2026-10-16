@@ -32,6 +32,9 @@ import { scopeSlot, useScoped } from "../state/scope.ts";
 export type ModalSlotName = "preview" | "connection" | "frame" | "quiet" | "turn" | "toasts" | "status";
 
 const SHOWN: readonly ModalSlotName[] = ["preview", "connection", "frame", "quiet", "turn", "toasts"];
+
+/** The places of notices that go by themselves within seconds. */
+const PASSING: readonly ModalSlotName[] = ["turn", "toasts"];
 const NAMES: readonly ModalSlotName[] = [...SHOWN, "status"];
 
 type Slots = Readonly<Partial<Record<ModalSlotName, HTMLElement>>>;
@@ -42,6 +45,27 @@ export const modalSlotsSlot = scopeSlot(() => createStore<{ slots: Slots }>(() =
 /** This notice's place inside the modal sheet while it shows, else null: render in place. */
 export function useModalSlot(name: ModalSlotName): HTMLElement | null {
   return useStore(useScoped(modalSlotsSlot), (s) => s.slots[name] ?? null);
+}
+
+/**
+ * The room the passing notices ("Your turn" and the toasts) take from the
+ * very short sheet's body while they show: each one's height and the gap
+ * it brings, the column's gap or the places' foot padding, which
+ * globals.css keeps the same. A part that sizes itself from the body, such
+ * as the round header (panels/TrackerPanel.tsx), adds it back, so a notice
+ * of a few seconds never changes it. A notice that lasts keeps its room
+ * taken. 0 outside the very short sheet.
+ */
+export function passingNoticesPx(inside: Element): number {
+  const notices = inside.closest("dialog")?.querySelector("[data-rvtt-modal-notices]");
+  if (!notices) return 0;
+  const gap = parseFloat(getComputedStyle(notices).rowGap) || 0;
+  let px = 0;
+  for (const name of PASSING) {
+    const place = notices.querySelector<HTMLElement>(`[data-rvtt-modal-slot="${name}"]`);
+    if (place && place.offsetHeight > 0) px += place.offsetHeight + gap;
+  }
+  return px;
 }
 
 /** Renders `node` in its place in the modal sheet while one shows, else where it stands. */

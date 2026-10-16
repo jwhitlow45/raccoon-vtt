@@ -39,6 +39,7 @@ import { GroupHpEntry } from "../features/tokens/GroupHpEntry.tsx";
 import type { PanelProps } from "../features/panels.ts";
 import { displayName, footprint } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
+import { passingNoticesPx } from "../pages/modalSlot.tsx";
 import { useRoomScope } from "../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { layoutSize } from "../features/device/layout.ts";
@@ -124,7 +125,11 @@ const STANDARD_ROW_GUESS = 56 + 2 * theme.line.border;
  * order's standard rows (`data-standard-row`), and picks the header's form
  * by the rule in roundHeaderForm, so a whole standard row always shows
  * under a stuck header. The full header's height is kept from when it last
- * showed full, since the compact one cannot measure it.
+ * showed full, since the compact one cannot measure it. In the very short
+ * sheet, "Your turn" and a toast push the body down for a few seconds,
+ * which is when End turn or Next is wanted, so the room they take counts
+ * as the body's (pages/modalSlot.tsx passingNoticesPx) and the header
+ * keeps its form while they show.
  */
 function RoundSection(props: { children: ReactNode }) {
   const sectionRef = useRef<HTMLElement>(null);
@@ -147,7 +152,7 @@ function RoundSection(props: { children: ReactNode }) {
     const measure = () => {
       if (formRef.current !== "compact" && header.offsetHeight > 0) fullPx.current = header.offsetHeight;
       const next = roundHeaderForm({
-        scroller: scroller.clientHeight,
+        scroller: scroller.clientHeight + passingNoticesPx(scroller),
         fullHeader: fullPx.current || FULL_HEADER_GUESS,
         // The compact form's bottom padding is 0, so its height follows from the pane's top padding it takes back.
         compactHeader: (parseFloat(getComputedStyle(header).paddingTop) || 0) + COMPACT_HEADER_PX + theme.line.border,

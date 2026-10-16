@@ -510,6 +510,50 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     for (const r of await rowsOf()) assert.equal(r.slot, true, `${r.name} lost the slot in the side panel`);
   });
 
+  test("2d. at 480 x 320 at 130% a notice that comes and goes keeps the round header stuck: Ana's End turn stays in reach as Your turn arrives, and the DM's Next as a toast does (SFB-P-15)", async () => {
+    const view = { width: 480, height: 320, scale: 1.3, side: 47, bottom: 21 };
+    const modal = (page: Page) => page.locator('dialog[data-rvtt-sheet][aria-modal="true"]');
+    const stuck = async (page: Page, button: string, label: string) => {
+      assert.notEqual((await headerRoom(page)).form, "static", `${label}: the round header stopped sticking`);
+      assert.ok(await wholeInReach(page.locator("[data-round-header]").getByRole("button", { name: button })), `${label}: ${button} is out of reach`);
+    };
+    // Cyra's turn, with Ana's order scrolled, then Bree's again: "Your turn" takes its place over the body for a few seconds.
+    await ops.send({ t: "encounter.next" });
+    await waitFor("Cyra's turn", () => (dmSocket.state?.encounter?.activeEntryId === "e-cy" ? true : null));
+    const anaCdp = await anaContext.newCDPSession(ana);
+    await setUp(ana, anaCdp, view);
+    await openTracker(ana);
+    await modal(ana).waitFor();
+    await scrollPane(ana, 220);
+    await ops.send({ t: "encounter.prev" });
+    await modal(ana).locator('[data-rvtt-modal-slot="turn"] [role="status"]', { hasText: "Your turn" }).waitFor();
+    await stuck(ana, "End turn", "Ana, as Your turn shows");
+    await shots.take(ana, "combat-header-480-130-your-turn-scrolled");
+    await ana.keyboard.press("Escape");
+    await modal(ana).waitFor({ state: "detached" });
+    await setUp(ana, anaCdp, { ...DESK, scale: 1 });
+    await anaCdp.detach();
+
+    // The DM's order scrolled, and a whisper from Ana comes as a toast.
+    await setUp(dm, dmCdp, view);
+    await openTracker(dm);
+    await modal(dm).waitFor();
+    await scrollPane(dm, 220);
+    const anaCookie = (await anaContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+    const anaOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie: anaCookie });
+    try {
+      const dmId = Object.values(dmSocket.state!.members).find((m) => m?.kind === "dm")!.id;
+      await anaOps.send({ t: "log.whisper", to: [dmId], text: "Behind you!" });
+    } finally {
+      anaOps.close();
+    }
+    await modal(dm).locator('[data-rvtt-modal-slot="toasts"] [role="status"]').first().waitFor();
+    await stuck(dm, "Next", "the DM, as a toast shows");
+    await shots.take(dm, "combat-header-480-130-toast-scrolled");
+    await dm.keyboard.press("Escape");
+    await modal(dm).waitFor({ state: "detached" });
+  });
+
   test("3. a sheet just tall enough for the compact header and two rows sticks it as one 44 px row, a whole row showing at every offset, and 2 px less scrolls it with the order", async () => {
     /*
      * The same phone held sideways, resized with the sheet open until its
