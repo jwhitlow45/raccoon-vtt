@@ -241,6 +241,8 @@ type StageCamera = { x: number; y: number; scale: number };
  * can still take a tap at its middle.
  */
 export async function wholeInReach(target: Locator): Promise<boolean> {
+  // Something hidden is not in reach, and a locator that matches nothing would wait for it.
+  if ((await target.count()) === 0) return false;
   const b = await target.boundingBox();
   if (!b) return false;
   const x = b.x + b.width / 2;
