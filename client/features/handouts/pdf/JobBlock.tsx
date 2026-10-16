@@ -21,6 +21,7 @@ import {
   recoveredWords,
   recoveryWords,
   savedWords,
+  savingWords,
   stopWords,
   uploadLabel,
   type PdfJob,
@@ -284,7 +285,7 @@ function Body(props: {
       return (
         <>
           <Loading
-            text={phase.k === "checking" ? "Checking whether the handout saved…" : props.connection === "open" ? "Saving the handout…" : "Waiting for the connection to save."}
+            text={savingWords(phase.k, props.connection === "open")}
             delay={0}
           />
           {keepOpen}

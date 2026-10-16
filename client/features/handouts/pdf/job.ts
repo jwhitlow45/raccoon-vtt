@@ -334,6 +334,16 @@ export function stopToast(job: PdfJob, page: number, stop: Stop): string {
   return `The PDF upload paused at page ${n(page)}. Open Handouts in the DM panel to go on.`;
 }
 
+/**
+ * The line while the save is sent or checked (4.1.5). A check waits for the
+ * connection's next snapshot, so while there is no connection it says that,
+ * rather than seeming to check forever.
+ */
+export function savingWords(phase: "saving" | "checking", connected: boolean): string {
+  if (phase === "checking") return connected ? "Checking whether the handout saved…" : "Waiting for the connection to check whether the handout saved.";
+  return connected ? "Saving the handout…" : "Waiting for the connection to save.";
+}
+
 export function savedWords(job: PdfJob): string[] {
   const out = [`Saved as ${job.title.trim()}, ${pagesWord(job.pages.length)}.`];
   const left = job.leftOut.filter((p) => job.range && p >= job.range.from && p <= job.range.to);

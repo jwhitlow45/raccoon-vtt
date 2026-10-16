@@ -17,6 +17,7 @@ import {
   pagesToDo,
   pdfPickRefusal,
   progressWords,
+  savingWords,
   stopFor,
   uploadLabel,
   waitsOnDm,
@@ -401,6 +402,13 @@ describe("drawing and uploading (docs/design-v1-pdf-handouts.md 4.1.4)", () => {
     await settle();
     assert.deepEqual(w.phase(), { k: "cancelled", removed: 0, failed: false, stillSaved: false });
     assert.equal(w.job().announce, "Nothing needed removing.");
+  });
+
+  test("saving and checking say when they wait for the connection", () => {
+    assert.equal(savingWords("saving", true), "Saving the handout…");
+    assert.equal(savingWords("saving", false), "Waiting for the connection to save.");
+    assert.equal(savingWords("checking", true), "Checking whether the handout saved…");
+    assert.equal(savingWords("checking", false), "Waiting for the connection to check whether the handout saved.");
   });
 
   test("the range's button keeps to its count, and says Upload pages while the range breaks a rule", () => {
