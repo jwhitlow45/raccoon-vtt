@@ -1,7 +1,25 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
+  allPagesShown,
   canPan,
+  currentPage,
+  END_PX,
+  flingIsFast,
+  flingStep,
+  FLING_STOP,
+  focusHandOff,
+  isTap,
+  KEEP_AHEAD,
+  MOUNT_AHEAD,
+  mountedPages,
+  pageRects,
+  pageStep,
+  releaseVelocity,
+  viewerFrame,
+  visiblePages,
+  wheelScroll,
+  WHEEL_LINE_PX,
   clampView,
   contentBox,
   FIT,
@@ -10,9 +28,10 @@ import {
   isDoubleTap,
   layoutPages,
   MAX_ZOOM,
-  PAGE_GAP,
+  PAGE_GAP_SHARE,
   panView,
   pinchView,
+  resetShown,
   STEP_ZOOM,
   TAP_ZOOM,
   viewerKey,
@@ -31,13 +50,13 @@ import {
 const close = (a: number, b: number, what: string, within = 1e-6) => assert.ok(Math.abs(a - b) <= within, `${what}: ${a} is not ${b}`);
 
 /** A stage 300 x 400 holding a picture fitted to 300 x 200: narrower down than the stage, so centered there. */
-const frame: Frame = { stage: { width: 300, height: 400 }, fitted: { width: 300, height: 200 } };
+const frame: Frame = { stage: { width: 300, height: 400 }, fitted: { width: 300, height: 200 }, min: 1, pad: 0 };
 
 describe("zooming inside the stage", () => {
   test("at the fit the picture is centered where it is smaller than the stage", () => {
     assert.deepEqual(clampView(FIT, frame), { scale: 1, x: 0, y: 100 });
     // Narrower across as well: centered both ways.
-    assert.deepEqual(clampView({ scale: 1, x: 40, y: -40 }, { stage: { width: 500, height: 400 }, fitted: { width: 300, height: 200 } }), { scale: 1, x: 100, y: 100 });
+    assert.deepEqual(clampView({ scale: 1, x: 40, y: -40 }, { stage: { width: 500, height: 400 }, fitted: { width: 300, height: 200 }, min: 1, pad: 0 }), { scale: 1, x: 100, y: 100 });
   });
 
   test("never under the fit nor past the largest zoom", () => {
@@ -95,12 +114,15 @@ describe("the pages", () => {
       { width: 800, height: 1000 },
       { width: 1000, height: 600 },
     ]);
+    // The gap is 2% of the widest page, 20 page pixels here.
+    const gap = 1000 * PAGE_GAP_SHARE;
+    assert.equal(gap, 20);
     assert.deepEqual(two, {
       width: 1000,
-      height: 1000 + PAGE_GAP + 600,
+      height: 1000 + gap + 600,
       pages: [
         { left: 100, top: 0, width: 800, height: 1000 },
-        { left: 0, top: 1000 + PAGE_GAP, width: 1000, height: 600 },
+        { left: 0, top: 1000 + gap, width: 1000, height: 600 },
       ],
     });
     const stage = { width: 500, height: 400 };
@@ -108,7 +130,7 @@ describe("the pages", () => {
     // Taller than the stage at the fit, so it starts at the top and scrolls down.
     const f = frameOf(stage, two);
     assert.deepEqual(clampView(FIT, f), { scale: 1, x: 0, y: 0 });
-    assert.deepEqual(panView(FIT, 0, -10_000, f), { scale: 1, x: 0, y: 400 - (1600 + PAGE_GAP) * 0.5 });
+    assert.deepEqual(panView(FIT, 0, -10_000, f), { scale: 1, x: 0, y: 400 - (1600 + gap) * 0.5 });
   });
 
   test("no pages have no size", () => {
@@ -151,7 +173,7 @@ function pinched(s: ViewerState, factor: number, mid = { x: 360, y: 300 }, windo
 
 /** What the screen shows of a state: its phase, the dialog's size, and the buttons' availability. */
 function shows(s: ViewerState) {
-  return { phase: viewerPhase(s), grown: s.grown, zoomOut: !zoomOutDisabled(s), reset: !zoomOutDisabled(s), zoomIn: !zoomInDisabled(s) };
+  return { phase: viewerPhase(s), grown: s.grown, zoomOut: !zoomOutDisabled(s), reset: resetShown(s), zoomIn: !zoomInDisabled(s) };
 }
 
 describe("the viewer's states on a card layout", () => {
@@ -393,5 +415,468 @@ describe("keys", () => {
     close(down.view.y, magnified.view.y - windowStage.height / 10, "down");
     const left = step(right, viewerKey("ArrowLeft", right)!);
     close(left.view.x, magnified.view.x, "back left");
+  });
+});
+
+/*
+ * Several pages (docs/design-v1-pdf-handouts.md section 5): a phone's
+ * whole-screen stage of 390 x 700, and round 2's mixed heights, pages
+ * about 390, 301, 390 and 390 px tall at the width fit.
+ */
+const phone: Rect = { left: 0, top: 100, width: 390, height: 700 };
+const mixed = layoutPages([
+  { width: 390, height: 390 },
+  { width: 390, height: 301 },
+  { width: 390, height: 390 },
+  { width: 390, height: 390 },
+]);
+/** A Letter page as a PDF page draws, 1584 x 2048, `n` times. */
+const letters = (n: number) => layoutPages(Array.from({ length: n }, () => ({ width: 1584, height: 2048 })));
+
+/** A viewer opened on these pages and measured, on a phone unless a card stage is given. */
+function opened(layout: typeof mixed, stage: Rect = phone, opts: { card?: boolean; start?: number; pad?: number } = {}): ViewerState {
+  return viewerStep(viewerStart(opts.card ?? false, opts.start ?? 0), { t: "layout", stage, layout, pad: opts.pad ?? 0 });
+}
+
+/** Steps, each followed by a measure of the stage where the dialog now is, as the component does. */
+function walk(s: ViewerState, actions: ViewerAction[], stages: { card: Rect; window: Rect }): ViewerState {
+  return actions.reduce((st, a) => {
+    const next = viewerStep(st, a);
+    return viewerStep(next, { t: "layout", stage: next.grown ? stages.window : stages.card });
+  }, s);
+}
+
+/** The page, and the point on it in its own pixels, at the stage's center. */
+function atCenter(s: ViewerState): { page: number; x: number; y: number } {
+  const rects = pageRects(s)!;
+  const cx = s.stage!.width / 2;
+  const cy = s.stage!.height / 2;
+  const page = rects.findIndex((r) => cy >= r.top && cy <= r.top + r.height + 1e-6);
+  const r = rects[page]!;
+  const box = s.layout!.pages[page]!;
+  return { page, x: ((cx - r.left) / r.width) * box.width, y: ((cy - r.top) / r.height) * box.height };
+}
+
+describe("several pages: the column and its fits", () => {
+  test("one column fitted to the width, with the end padded by the controls row", () => {
+    const s = opened(letters(3), phone, { pad: 60 });
+    const frame = viewerFrame(s)!;
+    close(frame.fitted.width, 390, "the width fit");
+    assert.equal(frame.pad, 60);
+    const end = viewerStep(s, { t: "end" });
+    const last = pageRects(end)!.at(-1)!;
+    close(last.top + last.height, 700 - 60, "the last page's bottom clears the controls row");
+  });
+
+  test("the page fit shows the tallest page whole, and is the floor where it is below the width fit", () => {
+    // A 320 x 480 phone, whose stage under the header is about 380 tall: a Letter page at the width fit is a little taller.
+    const small: Rect = { left: 0, top: 100, width: 320, height: 380 };
+    const s = opened(letters(2), small);
+    const frame = viewerFrame(s)!;
+    close(frame.min, 380 / 2048 / (320 / 1584), "the page fit, as a share of the width fit");
+    let out = s;
+    for (let i = 0; i < 5; i++) out = viewerStep(out, { t: "out" });
+    close(out.view.scale, frame.min, "Zoom out stops at the page fit");
+    assert.equal(zoomOutDisabled(out), true);
+    const page = pageRects(out)![0]!;
+    assert.ok(page.height <= 380 + 1e-6, "a whole page shows");
+    // Where every page already shows whole at the width fit, the width fit is the floor.
+    const short = opened(mixed);
+    assert.equal(viewerFrame(short)!.min, 1);
+    assert.equal(zoomOutDisabled(short), true);
+  });
+
+  test("the steps out of magnified on a card: the window's width fit, the card's width fit, then down to the card's page fit", () => {
+    const cardAt: Rect = { left: 280, top: 120, width: 720, height: 600 };
+    const windowAt: Rect = { left: 0, top: 60, width: 1280, height: 740 };
+    const stages = { card: cardAt, window: windowAt };
+    const start = opened(letters(3), cardAt, { card: true });
+    const magnified = walk(start, [{ t: "in" }, { t: "in" }, { t: "in" }], stages);
+    assert.equal(viewerPhase(magnified), "magnified");
+    const states = [magnified];
+    let s = magnified;
+    while (!zoomOutDisabled(s)) {
+      s = walk(s, [{ t: "out" }], stages);
+      states.push(s);
+      assert.ok(states.length < 20);
+    }
+    const phases = states.map((st) => `${viewerPhase(st)}@${st.view.scale.toFixed(3)}`);
+    assert.equal(phases[phases.indexOf("window@1.000") + 1], "card@1.000", `the step after the window's width fit is the card's width fit: ${phases.join(" ")}`);
+    close(s.view.scale, viewerFrame(s)!.min, "the floor is the card's page fit");
+    assert.equal(s.grown, false);
+    // Reset zoom from below the card's width fit goes back to it.
+    const reset = walk(s, [{ t: "reset" }], stages);
+    assert.equal(reset.view.scale, 1);
+    assert.equal(reset.grown, false);
+  });
+
+  test("with Expand pressed, the window's page fit is the floor", () => {
+    const cardAt: Rect = { left: 280, top: 120, width: 720, height: 600 };
+    const windowAt: Rect = { left: 0, top: 60, width: 1280, height: 740 };
+    const stages = { card: cardAt, window: windowAt };
+    let s = walk(opened(letters(3), cardAt, { card: true }), [{ t: "expand" }, { t: "in" }], stages);
+    for (let i = 0; !zoomOutDisabled(s); i++) {
+      assert.ok(i < 20, "Zoom out never reached the floor");
+      s = walk(s, [{ t: "out" }], stages);
+    }
+    assert.equal(s.grown, true, "never back to the card while Expand is pressed");
+    close(s.view.scale, viewerFrame(s)!.min, "the window's page fit");
+    assert.ok(viewerFrame(s)!.min < 1);
+  });
+
+  test("Reset zoom is hidden at the width fit, and shown above and below it", () => {
+    const small: Rect = { left: 0, top: 100, width: 320, height: 380 };
+    const s = opened(letters(2), small);
+    assert.equal(resetShown(s), false);
+    assert.equal(zoomOutDisabled(s), false, "Zoom out still goes to the page fit");
+    assert.equal(resetShown(viewerStep(s, { t: "in" })), true);
+    assert.equal(resetShown(viewerStep(s, { t: "out" })), true);
+    assert.equal(viewerStep(viewerStep(s, { t: "out" }), { t: "reset" }).view.scale, 1);
+  });
+
+  test("a double tap below the width fit goes to the width fit about the tap", () => {
+    const small: Rect = { left: 0, top: 100, width: 320, height: 380 };
+    const below = viewerStep(opened(letters(3), small), { t: "out" });
+    assert.ok(below.view.scale < 1);
+    const tap = { x: 160, y: 200 };
+    const before = pageRects(below)![0]!;
+    const after = viewerStep(below, { t: "double", at: tap });
+    assert.equal(after.view.scale, 1);
+    const page = pageRects(after)![0]!;
+    // The point of the page under the tap stays under it, as far as clamping lets it.
+    close((tap.y - page.top) / page.height, (tap.y - before.top) / before.height, "down the page", 1e-3);
+  });
+
+  test("a column that fits whole: every page shows, and the page keys and buttons do nothing", () => {
+    const two = layoutPages([
+      { width: 390, height: 200 },
+      { width: 390, height: 200 },
+    ]);
+    const s = opened(two);
+    assert.equal(allPagesShown(s), true);
+    assert.equal(pageStep(s, 1), null);
+    assert.equal(pageStep(s, -1), null);
+    for (const key of ["PageDown", "PageUp", "Home", "End", " "]) assert.equal(viewerKey(key, s, { onDialog: true }), null, key);
+  });
+});
+
+describe("several pages: where the reader is", () => {
+  test("the current page: page 1 at the top, the most height showing mid-way, the earlier on a tie, the last at the end however short", () => {
+    const withShortLast = layoutPages([
+      { width: 390, height: 390 },
+      { width: 390, height: 390 },
+      { width: 390, height: 390 },
+      { width: 390, height: 40 },
+    ]);
+    const s = opened(withShortLast);
+    assert.equal(currentPage(s), 0);
+    const gap = 390 * PAGE_GAP_SHARE;
+    // Page 2's top 100 px below the stage's top: page 1 shows 100 - gap px, page 2 all 390, page 3 the rest.
+    const mid = viewerStep(s, { t: "scroll", dx: 0, dy: 390 + gap - 100 });
+    assert.equal(currentPage(mid), 1);
+    // A tie between two pages each showing 350 px goes to the earlier.
+    const tieStage: Rect = { left: 0, top: 0, width: 390, height: 700 + gap };
+    const tie = viewerStep(opened(withShortLast, tieStage), { t: "scroll", dx: 0, dy: 40 });
+    const shown = pageRects(tie)!.map((r) => Math.min(r.top + r.height, tieStage.height) - Math.max(r.top, 0));
+    close(shown[0]!, shown[1]!, "a tie");
+    assert.equal(currentPage(tie), 0);
+    const end = viewerStep(s, { t: "end" });
+    assert.equal(currentPage(end), 3, "the short last page at the very end");
+  });
+
+  test("Next page and Previous page across mixed heights move the view with every press and reach both ends", () => {
+    let s = opened(mixed);
+    const seen: number[] = [];
+    for (let i = 0; pageStep(s, 1) !== null; i++) {
+      assert.ok(i < 10, "Next page never reached the end");
+      const before = s.view.y;
+      const step = pageStep(s, 1)!;
+      s = viewerStep(s, { t: "step", dir: 1 });
+      assert.ok(s.view.y < before - 1, "a press that did not move the view");
+      assert.equal(currentPage(s), step.page, "the indicator shows the page the press brought");
+      seen.push(step.page);
+    }
+    assert.equal(currentPage(s), 3);
+    assert.equal(seen.at(-1), 3, "Next page clamped at the end shows the last page");
+    for (let i = 0; pageStep(s, -1) !== null; i++) {
+      assert.ok(i < 10, "Previous page never reached the start");
+      const before = s.view.y;
+      s = viewerStep(s, { t: "step", dir: -1 });
+      assert.ok(s.view.y > before + 1, "a press that did not move the view");
+    }
+    assert.equal(currentPage(s), 0);
+    assert.equal(s.view.y, 0);
+  });
+
+  test("the same, zoomed out below the width fit and zoomed in, keeping the zoom and the place across", () => {
+    const short: Rect = { left: 0, top: 0, width: 390, height: 300 };
+    for (const zoom of [{ t: "out" }, { t: "in" }] as const) {
+      let s = viewerStep(opened(mixed, short), zoom);
+      const scale = s.view.scale;
+      assert.notEqual(scale, 1, zoom.t);
+      if (zoom.t === "in") s = viewerStep(s, { t: "arrow", dx: 1, dy: 0 });
+      const x = s.view.x;
+      let presses = 0;
+      while (pageStep(s, 1) !== null) {
+        const before = s.view.y;
+        s = viewerStep(s, { t: "step", dir: 1 });
+        assert.ok(s.view.y < before - 1, `${zoom.t}: a press that did not move the view`);
+        assert.equal(s.view.scale, scale, `${zoom.t}: the zoom changed`);
+        assert.equal(s.view.x, x, `${zoom.t}: the place across changed`);
+        assert.ok(++presses < 20);
+      }
+      assert.equal(currentPage(s), 3, zoom.t);
+      while (pageStep(s, -1) !== null) {
+        const before = s.view.y;
+        s = viewerStep(s, { t: "step", dir: -1 });
+        assert.ok(s.view.y > before + 1, `${zoom.t}: a press that did not move the view`);
+        assert.ok(++presses < 40);
+      }
+      assert.equal(currentPage(s), 0, zoom.t);
+    }
+  });
+
+  test("the indicator holds the page a button brought until the view moves another way", () => {
+    // A short stage, so after Next page the next page shows more of itself than the one at the top.
+    const short: Rect = { left: 0, top: 0, width: 390, height: 300 };
+    const s = viewerStep(viewerStep(opened(mixed, short), { t: "scroll", dx: 0, dy: 300 }), { t: "step", dir: 1 });
+    assert.equal(s.aligned, 1);
+    assert.equal(currentPage(s), 1);
+    const moved = viewerStep(s, { t: "scroll", dx: 0, dy: 1 });
+    assert.equal(moved.aligned, null);
+    // A layout that moves nothing keeps it.
+    assert.equal(viewerStep(s, { t: "layout", stage: short }).aligned, 1);
+  });
+
+  test("with no page top past the edge, Next page goes to the end and Previous page to the start (SOL-11)", () => {
+    // A last page taller than the stage.
+    const tall = layoutPages([
+      { width: 390, height: 390 },
+      { width: 390, height: 1000 },
+    ]);
+    let s = viewerStep(opened(tall), { t: "step", dir: 1 });
+    close(pageRects(s)![1]!.top, 0, "page 2 at the top");
+    const next = pageStep(s, 1);
+    assert.ok(next, "Next page is enabled while the tall last page goes on below");
+    s = next.state;
+    assert.equal(next.page, 1);
+    assert.equal(pageStep(s, 1), null, "at the end");
+    // The top of a magnified last page, taller than the stage at this zoom.
+    let m = viewerStep(viewerStep(opened(mixed), { t: "in" }), { t: "in" });
+    assert.ok(pageRects(m)![3]!.height > 700);
+    for (let i = 0; pageRects(m)![3]!.top > 1; i++) {
+      assert.ok(i < 20, "Next page never brought the last page up");
+      m = viewerStep(m, { t: "step", dir: 1 });
+    }
+    const last = pageStep(m, 1);
+    assert.ok(last, "Next page is enabled at the top of a magnified last page");
+    assert.equal(last.page, 3);
+    assert.equal(pageStep(last.state, 1), null);
+    // Half a pixel from the start.
+    const nudged = viewerStep(opened(mixed), { t: "scroll", dx: 0, dy: 0.5 });
+    const back = pageStep(nudged, -1);
+    assert.ok(back, "Previous page is enabled half a pixel from the start");
+    assert.equal(back.state.view.y, 0);
+    assert.equal(back.page, 0);
+    // Within the end tolerance there is nothing to move.
+    assert.equal(pageStep(viewerStep(opened(mixed), { t: "scroll", dx: 0, dy: END_PX / 2 }), -1), null);
+  });
+
+  test("pages load near the screen: within one stage height, kept until three away, on tall and on wide pages", () => {
+    const tall = opened(letters(30));
+    // A Letter page is about 504 px tall on this phone, so the pages in view and within one stage below are 1 to 3.
+    assert.deepEqual(visiblePages(tall, 0), [0, 1]);
+    assert.deepEqual(visiblePages(tall, MOUNT_AHEAD), [0, 1, 2]);
+    assert.deepEqual(visiblePages(tall, KEEP_AHEAD), [0, 1, 2, 3, 4, 5]);
+    const wide = opened(layoutPages(Array.from({ length: 30 }, () => ({ width: 2048, height: 1584 }))));
+    // Wide pages are about 300 px tall, so more of them lie within the same distance.
+    assert.deepEqual(visiblePages(wide, MOUNT_AHEAD), [0, 1, 2, 3, 4]);
+    // Mounted ones stay until three stages away, and a fast fling mounts none.
+    const mounted = mountedPages(new Set(), tall, false);
+    assert.deepEqual([...mounted], [0, 1, 2]);
+    const further = viewerStep(tall, { t: "scroll", dx: 0, dy: 1400 });
+    const slow = mountedPages(mounted, further, false);
+    assert.ok(slow.has(0), "page 1 unmounted too soon");
+    assert.ok(slow.has(5), "the pages now near the screen did not mount");
+    const fast = mountedPages(mounted, further, true);
+    assert.deepEqual([...fast], [0, 1, 2], "a fast fling mounted a page, or dropped one still near");
+    const far = viewerStep(tall, { t: "end" });
+    assert.equal(mountedPages(slow, far, false).has(0), false, "page 1 stayed mounted at the end");
+    // Nearest first, so the pages in view load before the ones beyond.
+    assert.equal(visiblePages(viewerStep(tall, { t: "scroll", dx: 0, dy: 5000 }), MOUNT_AHEAD)[0], 9);
+  });
+});
+
+describe("several pages: keys, wheel and fling", () => {
+  test("PageDown and PageUp move a stage height less a tenth, Space only from the dialog, Home and End to the ends", () => {
+    const s = opened(letters(5));
+    const down = viewerStep(s, viewerKey("PageDown", s)!);
+    close(down.view.y, -700 * 0.9, "PageDown");
+    close(viewerStep(down, viewerKey("PageUp", down)!).view.y, 0, "PageUp");
+    assert.deepEqual(viewerKey(" ", s, { onDialog: true }), { t: "screen", dir: 1 });
+    assert.deepEqual(viewerKey(" ", s, { onDialog: true, shift: true }), { t: "screen", dir: -1 });
+    assert.equal(viewerKey(" ", s, { onDialog: false }), null, "Space on a button presses the button");
+    const end = viewerStep(s, viewerKey("End", s)!);
+    assert.equal(currentPage(end), 4);
+    assert.equal(pageStep(end, 1), null);
+    const home = viewerStep(end, viewerKey("Home", end)!);
+    assert.equal(home.view.y, 0);
+    assert.equal(currentPage(home), 0);
+    // One page keeps today's keys.
+    const one = measured(viewerStart(true));
+    for (const key of ["PageDown", "PageUp", "Home", "End", " "]) assert.equal(viewerKey(key, one, { onDialog: true }), null, key);
+  });
+
+  test("the wheel scrolls by pixels, lines and pages, and across with Shift or once zoomed wider than the stage", () => {
+    const stage = { width: 390, height: 700 };
+    assert.deepEqual(wheelScroll({ deltaX: 0, deltaY: 120, deltaMode: 0, shiftKey: false }, stage), { dx: 0, dy: 120 });
+    assert.deepEqual(wheelScroll({ deltaX: 0, deltaY: 3, deltaMode: 1, shiftKey: false }, stage), { dx: 0, dy: 3 * WHEEL_LINE_PX });
+    assert.deepEqual(wheelScroll({ deltaX: 0, deltaY: 1, deltaMode: 2, shiftKey: false }, stage), { dx: 0, dy: 700 });
+    assert.deepEqual(wheelScroll({ deltaX: 0, deltaY: 100, deltaMode: 0, shiftKey: true }, stage), { dx: 100, dy: 0 });
+    assert.deepEqual(wheelScroll({ deltaX: 30, deltaY: 0, deltaMode: 0, shiftKey: false }, stage), { dx: 30, dy: 0 });
+    // A line-mode notch scrolls at least 100 px.
+    const s = opened(letters(3));
+    assert.ok(-viewerStep(s, { t: "scroll", ...wheelScroll({ deltaX: 0, deltaY: 3, deltaMode: 1, shiftKey: false }, stage) }).view.y >= 100);
+    // Across only once zoomed wider than the stage.
+    assert.equal(viewerStep(s, { t: "scroll", dx: 50, dy: 0 }).view.x, s.view.x);
+    const zoomed = viewerStep(s, { t: "in" });
+    assert.ok(viewerStep(zoomed, { t: "scroll", dx: 50, dy: 0 }).view.x < zoomed.view.x);
+  });
+
+  test("a fling travels as far in the same time at 60 and at 120 frames a second, and ends under a small speed", () => {
+    const run = (fps: number) => {
+      let v = { x: 0, y: -3 };
+      let travelled = 0;
+      for (let frame = 0; frame < fps; frame++) {
+        const step = flingStep(v, 1000 / fps);
+        travelled += step.dy;
+        v = step.velocity;
+      }
+      return travelled;
+    };
+    close(run(60), run(120), "distance", 1e-6);
+    assert.ok(run(60) < -500, "a quick flick goes a good way");
+    assert.equal(flingStep({ x: 0, y: FLING_STOP * 1.01 }, 16).done, true);
+    assert.equal(flingStep({ x: 0, y: 2 }, 16).done, false);
+  });
+
+  test("a fling stops at the document's end", () => {
+    let s = opened(letters(3));
+    let v = { x: 0, y: -50 };
+    let frames = 0;
+    for (;;) {
+      const step = flingStep(v, 16);
+      v = step.velocity;
+      const before = s.view;
+      s = viewerStep(s, { t: "pan", base: s.view, dx: step.dx, dy: step.dy });
+      frames++;
+      if (step.done || (s.view.x === before.x && s.view.y === before.y)) break;
+      assert.ok(frames < 1000);
+    }
+    assert.equal(pageStep(s, 1), null, "at the end");
+    assert.ok(frames < 60, "the fling ran on past the end");
+  });
+
+  test("the finger's speed over its last moves, and none once it rested", () => {
+    const moves = [
+      { at: 0, p: { x: 0, y: 0 } },
+      { at: 950, p: { x: 0, y: -10 } },
+      { at: 1000, p: { x: 0, y: -60 } },
+    ];
+    assert.deepEqual(releaseVelocity(moves, 1000), { x: 0, y: -1 });
+    assert.deepEqual(releaseVelocity(moves, 1300), { x: 0, y: 0 });
+    assert.equal(flingIsFast({ x: 0, y: 3 }, { width: 390, height: 700 }), true);
+    assert.equal(flingIsFast({ x: 0, y: 1 }, { width: 390, height: 700 }), false);
+  });
+
+  test("a touch during a fling only stops it, and is no tap", () => {
+    assert.equal(isTap({ moved: false, lifted: true, stoppedFling: true }), false);
+    assert.equal(isTap({ moved: false, lifted: true, stoppedFling: false }), true);
+    assert.equal(isTap({ moved: true, lifted: true, stoppedFling: false }), false);
+    assert.equal(isTap({ moved: false, lifted: false, stoppedFling: false }), false);
+  });
+});
+
+describe("several pages: the place is kept", () => {
+  const cardAt: Rect = { left: 280, top: 120, width: 720, height: 600 };
+  const windowAt: Rect = { left: 0, top: 60, width: 1280, height: 740 };
+  const stages = { card: cardAt, window: windowAt };
+
+  test("the card growing and shrinking, Expand, Zoom out to a fit and Reset zoom keep the page at the stage's center", () => {
+    const s = opened(letters(30), cardAt, { card: true, start: 13 });
+    const before = atCenter(s);
+    assert.equal(before.page, 13);
+    for (const actions of [[{ t: "in" }], [{ t: "expand" }], [{ t: "in" }, { t: "out" }], [{ t: "in" }, { t: "in" }, { t: "reset" }], [{ t: "in" }, { t: "in" }, { t: "out" }, { t: "out" }]] as ViewerAction[][]) {
+      const after = atCenter(walk(s, actions, stages));
+      assert.equal(after.page, 13, actions.map((a) => a.t).join(", "));
+      close(after.y, before.y, `${actions.map((a) => a.t).join(", ")}: down the page`, 1);
+    }
+    // Pressed and released, Expand comes back to the same place.
+    assert.equal(atCenter(walk(s, [{ t: "expand" }, { t: "expand" }], stages)).page, 13);
+    // A double tap back to the width fit keeps it too.
+    const tapped = walk(s, [{ t: "in" }, { t: "double", at: { x: 640, y: 370 } }, { t: "double", at: { x: 100, y: 100 } }], stages);
+    assert.equal(atCenter(tapped).page, 13);
+  });
+
+  test("a phone turned from 390 x 844 to 844 x 390 on page 14 keeps page 14 at the stage's center", () => {
+    const portrait: Rect = { left: 0, top: 100, width: 390, height: 744 };
+    const landscape: Rect = { left: 0, top: 60, width: 844, height: 330 };
+    const s = opened(letters(30), portrait, { start: 13 });
+    assert.equal(atCenter(s).page, 13);
+    const turned = viewerStep(s, { t: "layout", stage: landscape });
+    assert.equal(atCenter(turned).page, 13);
+    assert.equal(turned.view.scale, 1, "still at the width fit");
+    assert.equal(atCenter(viewerStep(turned, { t: "layout", stage: portrait })).page, 13);
+  });
+
+  test("a page a page button brought to the top stays there, with the indicator on it, as the phone turns", () => {
+    const portrait: Rect = { left: 0, top: 100, width: 390, height: 744 };
+    const landscape: Rect = { left: 0, top: 60, width: 844, height: 330 };
+    // Short pages: with page 2 at the top, the stage's center lies on page 3.
+    const s = viewerStep(opened(mixed, portrait), { t: "step", dir: 1 });
+    assert.equal(currentPage(s), 1);
+    assert.equal(atCenter(s).page, 2);
+    const turned = viewerStep(s, { t: "layout", stage: landscape });
+    assert.equal(currentPage(turned), 1);
+    close(pageRects(turned)![1]!.top, 0, "page 2's top");
+    // The view moving any other way lets the indicator go.
+    assert.equal(viewerStep(turned, { t: "scroll", dx: 0, dy: 5 }).aligned, null);
+  });
+
+  test("a start at a remembered page puts its top at the stage's top", () => {
+    const s = opened(letters(30), phone, { start: 5 });
+    close(pageRects(s)![5]!.top, 0, "page 6's top");
+    assert.equal(currentPage(s), 5);
+    assert.equal(s.start, null);
+    // Another showing starts at its own page once laid out again.
+    const next = viewerStep(viewerStep(s, { t: "pages", start: 2 }), { t: "layout", layout: letters(30) });
+    close(pageRects(next)![2]!.top, 0, "page 3's top");
+    const fresh = viewerStep(viewerStep(s, { t: "pages" }), { t: "layout", layout: letters(30) });
+    assert.equal(fresh.view.y, 0);
+    // A remembered last page that cannot reach the top still reads as the page the reader was on.
+    const short = opened(mixed, phone, { start: 2 });
+    assert.equal(currentPage(short), 2);
+    assert.equal(pageStep(short, 1) !== null, true, "Next page still goes to the end");
+  });
+});
+
+describe("focus when a control leaves under a step (PDF-P-34)", () => {
+  test("Reset zoom pressed from magnified hands focus to Zoom out, which still goes to the page fit", () => {
+    const cardAt: Rect = { left: 280, top: 120, width: 720, height: 600 };
+    const windowAt: Rect = { left: 0, top: 60, width: 1280, height: 740 };
+    const magnified = walk(opened(letters(3), cardAt, { card: true }), [{ t: "in" }, { t: "in" }], { card: cardAt, window: windowAt });
+    const reset = walk(magnified, [{ t: "reset" }], { card: cardAt, window: windowAt });
+    assert.equal(resetShown(reset), false);
+    assert.equal(focusHandOff("reset", reset), "out");
+    // One page has nowhere lower to go, so Zoom in takes it.
+    assert.equal(focusHandOff("reset", measured(viewerStart(true))), "in");
+  });
+
+  test("a page button at an end hands focus to the other, and Zoom out at the floor to Zoom in", () => {
+    const end = viewerStep(opened(mixed), { t: "end" });
+    assert.equal(focusHandOff("next", end), "prev");
+    assert.equal(focusHandOff("prev", end), null, "Previous page stays enabled");
+    assert.equal(focusHandOff("prev", opened(mixed)), "next");
+    assert.equal(focusHandOff("out", opened(mixed)), "in");
   });
 });

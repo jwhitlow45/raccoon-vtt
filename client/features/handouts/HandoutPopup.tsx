@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
+import { handoutPages } from "#shared/handouts.ts";
 import { Button } from "../../components/Button.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { useBackClose } from "../../lib/backClose.ts";
@@ -10,7 +11,7 @@ import { closedSlot, closedStorageKey, closeHandout, loadClosed } from "./closed
 import { useXCard } from "../xcard/XCardHost.tsx";
 import { prefersShare, shareFile } from "../mapexport/save.ts";
 import { downloadAction, fetchHandoutImage, handoutFile, saveBegin, saveForget, saveSettled, saveThroughLink, type SaveOutcome, type SaveStates } from "./download.ts";
-import { nextPopup, popupShows, showingKey } from "./handouts.ts";
+import { nextPopup, pageName, popupShows, showingKey } from "./handouts.ts";
 import { HandoutViewer } from "./HandoutViewer.tsx";
 
 /**
@@ -141,11 +142,20 @@ export function HandoutPopup() {
   useBackClose(key, close);
 
   if (!handout || !key || !url) return null;
+  // Every page with its size, so the viewer lays the whole handout out before any page loads (docs/design-v1-pdf-handouts.md 5.9).
+  const refs = handoutPages(handout);
+  const pages = refs.map((p, i) => ({
+    src: assets.url(p.assetId, "full"),
+    thumb: assets.url(p.assetId, "thumb"),
+    alt: pageName(handout.title, i, refs.length),
+    ...(p.width !== undefined && p.height !== undefined ? { width: p.width, height: p.height } : null),
+  }));
   return (
     <HandoutViewer
       title={handout.title}
       onClose={close}
-      pages={[{ src: url, alt: handout.title }]}
+      pages={pages}
+      showing={key}
       headerActions={
         // A busy button says so in its own words at once, and takes no second tap (components/Loading.tsx).
         <Button size="sm" busy={busy} onClick={() => void download()}>

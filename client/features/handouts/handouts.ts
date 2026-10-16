@@ -1,4 +1,4 @@
-import type { Handout, Member } from "#shared/model.ts";
+import type { Handout, HandoutPage, Member } from "#shared/model.ts";
 import { MAX_NAME, type ClientOp } from "#shared/protocol.ts";
 
 /**
@@ -78,7 +78,8 @@ export function audienceText(to: Handout["to"], members: Record<string, Member |
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-export type ShowInput = { id: string; assetId: string; title: string; audience: "all" | string[] };
+/** One image by its id, as every handout from before PDFs, or a document's pages in order (docs/design-v1-pdf-handouts.md 8.2). */
+export type ShowInput = { id: string; title: string; audience: "all" | string[] } & ({ assetId: string } | { pages: readonly HandoutPage[] });
 
 /** The op that shows a handout, or why it cannot be sent yet. */
 export function showHandoutOp(input: ShowInput): { ok: true; op: Extract<ClientOp, { t: "handout.show" }> } | { ok: false; error: string } {
@@ -87,7 +88,23 @@ export function showHandoutOp(input: ShowInput): { ok: true; op: Extract<ClientO
   if (title.length > MAX_NAME) return { ok: false, error: `At most ${MAX_NAME} characters.` };
   if (input.audience !== "all" && input.audience.length === 0) return { ok: false, error: "Pick at least one player, or everyone." };
   const to = input.audience === "all" ? "all" : [...new Set(input.audience)];
-  return { ok: true, op: { t: "handout.show", handout: { id: input.id, assetId: input.assetId, title, to } } };
+  // A copy of the document's pages, so the showing never changes with the document (section 3.2).
+  const shown = "pages" in input ? { pages: input.pages.map((p) => ({ assetId: p.assetId, width: p.width, height: p.height })) } : { assetId: input.assetId };
+  return { ok: true, op: { t: "handout.show", handout: { id: input.id, ...shown, title, to } } };
+}
+
+/**
+ * A page's one name, wherever it is read: its image's `alt`, or its
+ * placeholder's label before it loads, "Strange letter, page 2 of 5"
+ * (docs/design-v1-pdf-handouts.md 5.7). One image is named by the title alone.
+ */
+export function pageName(title: string, index: number, count: number): string {
+  return count > 1 ? `${title}, page ${index + 1} of ${count}` : title;
+}
+
+/** "12 pages", for a handout's or a document's row. */
+export function pageCountText(count: number): string {
+  return count === 1 ? "1 page" : `${count} pages`;
 }
 
 /** A starting title from an uploaded file's name: "old-map_v2.jpg" becomes "old map v2". */

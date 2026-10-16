@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Handout, Member } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
-import { audienceText, decodeDismissed, encodeDismissed, keepShowing, nextPopup, popupShows, showHandoutOp, showingKey, titleFromFileName } from "./handouts.ts";
+import { audienceText, decodeDismissed, encodeDismissed, keepShowing, nextPopup, pageCountText, pageName, popupShows, showHandoutOp, showingKey, titleFromFileName } from "./handouts.ts";
 
 const handout = (id: string, shownAt: string, to: Handout["to"] = "all"): Handout => ({ id, rev: 0, assetId: "a", title: id, to, shownAt });
 
@@ -73,6 +73,19 @@ describe("showing a handout", () => {
     assert.ok(some.ok && some.op.handout.to !== "all" && some.op.handout.to.length === 2);
   });
 
+  test("shows a document's pages in order, as a copy, with a new handout id (docs/design-v1-pdf-handouts.md 8.2)", () => {
+    const pages = [
+      { assetId: "p1", width: 1584, height: 2048 },
+      { assetId: "p2", width: 2048, height: 1584 },
+      { assetId: "p1", width: 1584, height: 2048 },
+    ];
+    const shown = showHandoutOp({ id: "h3", pages, title: "Strange letter", audience: "all" });
+    assert.ok(shown.ok);
+    assert.deepEqual(shown.op, { t: "handout.show", handout: { id: "h3", pages, title: "Strange letter", to: "all" } });
+    assert.notEqual(shown.ok && "pages" in shown.op.handout ? shown.op.handout.pages : null, pages, "the document's own list went into the op");
+    assert.ok(clientOpSchema.safeParse(shown.op).success);
+  });
+
   test("needs a title and at least one recipient", () => {
     assert.equal(showHandoutOp({ id: "h", assetId: "a", title: " ", audience: "all" }).ok, false);
     assert.equal(showHandoutOp({ id: "h", assetId: "a", title: "x", audience: [] }).ok, false);
@@ -89,5 +102,14 @@ describe("showing a handout", () => {
   test("a title from a file name", () => {
     assert.equal(titleFromFileName("old-map_v2.jpg"), "old map v2");
     assert.equal(titleFromFileName("Letter.PNG"), "Letter");
+  });
+});
+
+describe("a handout's pages", () => {
+  test("each page has one name, with its number and the count, and one image is named by its title alone", () => {
+    assert.equal(pageName("Strange letter", 1, 5), "Strange letter, page 2 of 5");
+    assert.equal(pageName("Strange letter", 0, 1), "Strange letter");
+    assert.equal(pageCountText(12), "12 pages");
+    assert.equal(pageCountText(1), "1 page");
   });
 });

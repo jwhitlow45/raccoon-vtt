@@ -288,7 +288,7 @@ function Detail(props: { id: string; row: AssetRow | undefined; actions: ReactNo
       </div>
       {viewing ? (
         // No Download: the popup's stays the players' way to save a handout, and the DM holds the images already.
-        <HandoutViewer title={title} onClose={() => setViewing(false)} pages={[{ src: assets.url(props.id, viewVariant(row)), alt: title }]} backClose opener={viewRef} />
+        <HandoutViewer title={title} onClose={() => setViewing(false)} pages={[{ src: assets.url(props.id, viewVariant(row)), alt: title }]} showing={`image:${props.id}`} backClose opener={viewRef} />
       ) : null}
     </div>
   );

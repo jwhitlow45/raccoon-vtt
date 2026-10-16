@@ -19,7 +19,7 @@ import { honorsImageOrientation } from "../images/orientation.ts";
 import { checkImageFile, prepareImageUpload } from "../images/upload.ts";
 import { EMPTY_DRAFT, handoutDraftSlot, showDocOp, type HandoutDraft } from "./draft.ts";
 import { HANDOUT_MAX_BYTES, HANDOUT_MAX_SIDE } from "./downscale.ts";
-import { audienceText, showHandoutOp, titleFromFileName } from "./handouts.ts";
+import { audienceText, showHandoutOp, showingKey, titleFromFileName } from "./handouts.ts";
 import { HandoutViewer, type ViewerPage } from "./HandoutViewer.tsx";
 import { JobBlock } from "./pdf/JobBlock.tsx";
 import { isPdfFile, jobPageIds, pdfPickRefusal } from "./pdf/job.ts";
@@ -33,8 +33,8 @@ const pagesTag = (count: number) => (count === 1 ? "1 page" : `${count} pages`);
 
 type PageRef = { assetId: string; width?: number; height?: number };
 
-/** What the viewer shows: a title and its pages. */
-type Viewing = { title: string; pages: ViewerPage[] };
+/** What the viewer shows: a title, its pages, and the showing it is (a handout's own key, or `doc:<id>`). */
+type Viewing = { title: string; pages: ViewerPage[]; showing: string };
 
 /** Every page of a handout or a document, for the viewer, each named "Strange letter, page 2 of 5" and laid out at its size. */
 function viewerPages(title: string, pages: readonly PageRef[], url: (id: string) => string): ViewerPage[] {
@@ -67,9 +67,9 @@ export function HandoutsSection() {
     [handouts],
   );
   const full = useCallback((id: string) => assets.url(id, "full"), [assets]);
-  const view = (title: string, pages: readonly PageRef[], opener: HTMLElement | null) => {
+  const view = (title: string, pages: readonly PageRef[], opener: HTMLElement | null, showing: string) => {
     viewOpener.current = opener;
-    setViewing({ title, pages: viewerPages(title, pages, full) });
+    setViewing({ title, pages: viewerPages(title, pages, full), showing });
   };
   // Where focus goes when the upload's block leaves: the form when it is open, else Show a handout (4.1.7).
   const afterBlock = useCallback(() => {
@@ -94,7 +94,7 @@ export function HandoutsSection() {
         onShow={showSaved}
         onView={(docId, opener) => {
           const doc = docs?.[docId];
-          if (doc) view(doc.title, doc.pages, opener);
+          if (doc) view(doc.title, doc.pages, opener, `doc:${doc.id}`);
         }}
       />
       {showing.length === 0 ? <Help>No handout is showing.</Help> : <Help>Showing now. Players can close their own copy.</Help>}
@@ -110,7 +110,7 @@ export function HandoutsSection() {
                   <button
                     type="button"
                     aria-label={`View ${h.title}`}
-                    onClick={(e) => view(h.title, pages, e.currentTarget)}
+                    onClick={(e) => view(h.title, pages, e.currentTarget, showingKey(h))}
                     style={{ display: "block", padding: 0, border: "none", background: "transparent", cursor: "pointer", borderRadius: theme.radius.sm }}
                   >
                     <img
@@ -135,7 +135,7 @@ export function HandoutsSection() {
         </RowList>
       ) : null}
       <ShowHandout members={members ?? {}} docs={docs ?? {}} opener={showButton} formRef={formRef} onView={view} />
-      {viewing ? <HandoutViewer title={viewing.title} pages={viewing.pages} onClose={() => setViewing(null)} backClose opener={viewOpener} /> : null}
+      {viewing ? <HandoutViewer title={viewing.title} pages={viewing.pages} showing={viewing.showing} onClose={() => setViewing(null)} backClose opener={viewOpener} /> : null}
     </Section>
   );
 }
@@ -145,7 +145,7 @@ function ShowHandout(props: {
   docs: Record<string, HandoutDoc | undefined>;
   opener: RefObject<HTMLButtonElement | null>;
   formRef: RefObject<HTMLDivElement | null>;
-  onView(title: string, pages: readonly PageRef[], opener: HTMLElement | null): void;
+  onView(title: string, pages: readonly PageRef[], opener: HTMLElement | null, showing: string): void;
 }) {
   const roomId = useRoomView((s) => s.roomId);
   const actions = useRoomActions();
@@ -279,7 +279,7 @@ function ShowHandout(props: {
             {pick.kind === "doc" && picked ? (
               <>
                 <span style={{ fontSize: theme.font.body14 }}>{pagesTag(picked.pages.length)}</span>
-                <Button size="sm" onClick={(e) => props.onView(picked.title, picked.pages, e.currentTarget)}>
+                <Button size="sm" onClick={(e) => props.onView(picked.title, picked.pages, e.currentTarget, `doc:${picked.id}`)}>
                   View
                 </Button>
               </>
