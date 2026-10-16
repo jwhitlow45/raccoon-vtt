@@ -2,6 +2,7 @@ import { useId, type CSSProperties, type ReactNode } from "react";
 import { accessibleName } from "../lib/a11y.ts";
 import { theme } from "../lib/theme.ts";
 import { choiceLook } from "./looks.ts";
+import { useMeasuring } from "./measuring.ts";
 
 export type SegmentedOption<T extends string | number> = {
   value: T;
@@ -59,6 +60,8 @@ export function Segmented<T extends string | number>(props: {
   style?: CSSProperties;
 }) {
   const name = useId();
+  // A measuring copy draws the options alone: a radio there would join this group's name and uncheck the real choice.
+  const measuring = useMeasuring();
   const group = (
     <div
       role="radiogroup"
@@ -94,16 +97,18 @@ export function Segmented<T extends string | number>(props: {
               ...(chosen && !disabled ? o.chosenStyle : undefined),
             }}
           >
-            <input
-              type="radio"
-              name={name}
-              value={String(o.value)}
-              checked={chosen}
-              disabled={disabled}
-              aria-label={accessibleName(o.label, o.title)}
-              onChange={() => props.onChange(o.value)}
-              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", margin: 0, opacity: 0, cursor: "inherit" }}
-            />
+            {measuring ? null : (
+              <input
+                type="radio"
+                name={name}
+                value={String(o.value)}
+                checked={chosen}
+                disabled={disabled}
+                aria-label={accessibleName(o.label, o.title)}
+                onChange={() => props.onChange(o.value)}
+                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", margin: 0, opacity: 0, cursor: "inherit" }}
+              />
+            )}
             {o.label}
           </label>
         );

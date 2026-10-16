@@ -184,6 +184,12 @@ export const theme = {
      * gap from its anchor, its margin inside its bound, and the size of a tile in a menu of tiles.
      */
     popover: { gap: 6, margin: 8, tile: 60 },
+    /**
+     * A tool's options in one row (docs/design-v1-tool-options.md 4.2, 6 and 8): the stacked row's height (44 px
+     * controls, 4 px padding above and below and a 1 px top edge), the line's gap above the row, the least width of a
+     * flexible field and of flexible text, and a color chip's disk.
+     */
+    options: { row: 53, lineGap: 6, field: 96, text: 48, disk: 24 },
   },
   /**
    * The notch, the rounded corners and the home bar. index.html sets

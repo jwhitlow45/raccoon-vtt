@@ -1,6 +1,7 @@
 import { useId, type CSSProperties } from "react";
 import { contrast } from "../lib/accent.ts";
 import { MEMBER_COLOR_NAMES, theme } from "../lib/theme.ts";
+import { useMeasuring } from "./measuring.ts";
 
 export type SwatchOption = {
   color: string;
@@ -45,6 +46,8 @@ export function Swatches(props: {
   style?: CSSProperties;
 }) {
   const name = useId();
+  // A measuring copy draws the disks alone, as Segmented's does.
+  const measuring = useMeasuring();
   const value = props.value?.toLowerCase() ?? null;
   const disabled = props.disabled === true;
   return (
@@ -73,16 +76,18 @@ export function Swatches(props: {
               cursor: disabled ? "default" : "pointer",
             }}
           >
-            <input
-              type="radio"
-              name={name}
-              value={option.color}
-              checked={chosen}
-              disabled={disabled}
-              aria-label={option.name ?? memberColorName(option.color) ?? option.color}
-              onChange={() => props.onChange(option.color)}
-              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", margin: 0, opacity: 0, cursor: "inherit" }}
-            />
+            {measuring ? null : (
+              <input
+                type="radio"
+                name={name}
+                value={option.color}
+                checked={chosen}
+                disabled={disabled}
+                aria-label={option.name ?? memberColorName(option.color) ?? option.color}
+                onChange={() => props.onChange(option.color)}
+                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", margin: 0, opacity: 0, cursor: "inherit" }}
+              />
+            )}
             {/* Drawn after the radio, so it paints on top: it lets every pointer through, so a tap or a click on the disk reaches the radio itself. */}
             <span
               aria-hidden
