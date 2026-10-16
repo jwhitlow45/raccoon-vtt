@@ -136,8 +136,9 @@ export function Sheet(props: {
             boxShadow: theme.shadow.sheet,
           }
         : {
-            // Modal, in the browser's top layer: the whole screen, its content inside the safe areas on all four sides.
+            // Modal, in the browser's top layer: the whole screen, its content inside the safe areas on all four sides. No border: at the screen's edges it frames nothing, and the body is short enough here to want its 2 px.
             position: "fixed",
+            border: "none",
             inset: 0,
             width: "100%",
             height: "100%",

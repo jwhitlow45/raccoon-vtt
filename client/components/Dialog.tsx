@@ -68,6 +68,8 @@ export function dialogCard(layoutPx: number, props: Pick<DialogProps, "phone" | 
       card: {
         width: "100%",
         height: "100%",
+        // At the screen's edges a border frames nothing, and takes 2 px from a short screen.
+        border: "none",
         borderRadius: 0,
         paddingTop: theme.safe.top,
         paddingBottom: theme.safe.bottom,

@@ -30,6 +30,7 @@ describe("the shape of a dialog's card", () => {
   const screen = {
     width: "100%",
     height: "100%",
+    border: "none",
     borderRadius: 0,
     paddingTop: theme.safe.top,
     paddingBottom: theme.safe.bottom,

@@ -64,9 +64,9 @@ describe("a sideways sheet's header", () => {
     assert.equal(headerStacks({ width: inside(sideSheetWidth(480), 0, 47), buttons: 3, actions: false }), false);
   });
 
-  test("the very short mode at 480 x 320 at 130% has 273 px, where five buttons stack and three do not", () => {
-    const width = Math.round(inside(480 / 1.3, 47, 47));
-    assert.equal(width, 273);
+  test("the very short mode at 480 x 320 at 130% has 275 px, with no borders, where five buttons stack and three do not", () => {
+    const width = Math.round(480 / 1.3 - 47 - 47);
+    assert.equal(width, 275);
     assert.equal(headerStacks({ width, buttons: 3, actions: false }), false);
     assert.equal(headerStacks({ width, buttons: 5, actions: true }), true, "Back, Hide, Close and the dock's two buttons");
     assert.equal(headerStacks({ width, buttons: 4, actions: true }), false, "one dock button still fits");

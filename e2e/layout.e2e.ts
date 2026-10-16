@@ -837,6 +837,14 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     assert.equal(await phone.getByRole("dialog", { name: "Initiative" }).count(), 1, "a dialog named by its panel");
     const whole = await rect(dialog);
     assert.deepEqual([Math.round(whole.x), Math.round(whole.y), Math.round(whole.width), Math.round(whole.height)], [0, 0, 480, 320], "over the whole screen");
+    // No border, which at the screen's edges would frame nothing and took 2 px from a body this short (4.2: 169 px, the header's one row).
+    const borders = await dialog.evaluate((el) => {
+      const style = (globalThis as unknown as { getComputedStyle(el: unknown): Record<string, string> }).getComputedStyle(el);
+      return [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth];
+    });
+    assert.deepEqual(borders, ["0px", "0px", "0px", "0px"], "the very short sheet draws no border");
+    const bodyPx = (await rect(dialog.locator("[data-pane-body]"))).height / 1.3;
+    assert.ok(bodyPx >= 169 - 0.5, `the body is ${bodyPx} px`);
     // Above the bars: what lies at the toolbar's middle and the top bar's is the sheet.
     const atBars = await phone.evaluate(() => {
       const w = globalThis as unknown as Dom;

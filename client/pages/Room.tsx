@@ -445,7 +445,8 @@ function RoomPage() {
   const sideHeader = headerStacks({ width: sideWidth - safe.right - 2 * theme.line.border, buttons: mounted ? 3 : 1, actions: false }) ? SHEET_HEADER_STACKED : SHEET_HEADER;
   const sheetModeNow: SheetMode = !landscape ? "bottom" : sheetMode({ height, safeTop: safe.top, safeBottom: safe.bottom, topBars: topInset, header: sideHeader });
   const full = sheetModeNow === "full" && sheetOpen;
-  const headerWidth = (sheetModeNow === "side" ? sideWidth - safe.right : width - safe.left - safe.right) - 2 * theme.line.border;
+  // Less a 1 px border on each side, which the very short mode does not draw (Sheet.tsx).
+  const headerWidth = (sheetModeNow === "side" ? sideWidth - safe.right : width - safe.left - safe.right) - (sheetModeNow === "full" ? 0 : 2 * theme.line.border);
   const fullMode = sheetModeNow === "full";
   useLayoutEffect(() => {
     const now = dockStore.getState();
