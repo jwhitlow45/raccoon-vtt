@@ -399,14 +399,15 @@ The Token sheet on a phone held upright (356 inside), the block folded at first:
 +--------------------------------------+
 ```
 
-The Token sheet on a phone held sideways (340 px wide, 306 inside, 259 with 47 px insets). The preview and both first buttons need about 317 px, so the buttons move under the preview, where "Change image" and "Add another image" still share a line (3.6):
+The Token sheet on a phone held sideways (340 px wide, 306 inside, 259 with 47 px insets). The preview and both first buttons need about 320 px, so the buttons move under the preview. The pair needs about 264 px, so at 259 "Add another image" takes the next line (3.6):
 
 ```
 +--------------------------------+
 | Goblin 4                       |
 | Small (5 ft)                   |
 | (img)                          |
-| [Change image] [Add another image]
+| [Change image]                 |
+| [Add another image]            |
 | [Crop] [Remove]                |
 |--------------------------------|
 | > STAT BLOCK                   |
@@ -433,9 +434,10 @@ A player's own character, at the side panel: name, image row, then row 3b, "(16)
 
 When the pair wraps, by plain flex wrapping and no fixed breakpoint:
 
-- The preview and the column share a line wherever the panel holds the preview (48), the gap (12) and the pair on one line, about 317 px at 14 px text. The column's basis is the pair's width. That is the side panel without a right inset (327 inside), a phone held upright (356) and every tablet.
-- Otherwise the column moves under the preview at the panel's full width, and the pair shares a line wherever that width holds it, about 257 px: a phone's sideways sheet (306, and 259 with 47 px insets), the side panel of a large phone held sideways (268 with its 59 px inset) and a phone held upright at 130% (266).
-- Under 257 the pair takes two lines, as in the very short mode at 480 x 320 at 130% (241 inside). Where a line is narrower than one button, its label wraps inside the button, which grows taller and stays 44 px or more.
+- The pair's two buttons keep 8 px sides instead of 12, and the preview's gap is 8 px, so the pair is about 264 px at 14 px text (114 and 146, and a 4 px gap, as measured).
+- The preview and the column share a line wherever the panel holds the preview (48), the gap (8) and the pair on one line, about 320 px. The column's basis is the pair's width. That is the side panel without a right inset (327 inside), a phone held upright (356) and every tablet.
+- Otherwise the column moves under the preview at the panel's full width, and the pair shares a line wherever that width holds it, 264 px: a phone's sideways sheet without insets (306), the side panel of a large phone held sideways (268 with its 59 px inset) and a phone held upright at 130% (266).
+- Under 264 the pair takes two lines, as in a phone's sideways sheet with 47 px insets (259) and the very short mode at 480 x 320 at 130% (242 inside). Where a line is narrower than one button, its label wraps inside the button, which grows taller and stays 44 px or more.
 
 The Openverse credit stays under the row (`ImageField.tsx:86`). Someone who may not change the image sees the preview alone. Nothing comes between the image row and the stat block.
 
@@ -455,7 +457,7 @@ The section keeps its parts and order: the large number row with the life tag, t
 Max HP [ 100000 ]   Temp HP [ 100000 ]
 ```
 
-Two labeled number fields at today's 88 px (`NUMBER_FIELD_WIDTH`, `components/Field.tsx:28`), which shows all six digits of `MAX_HP_AMOUNT` (100000), in a group named "Maximum and temporary HP". Their visible labels are "Max HP" and "Temp HP" and their accessible names stay "Max HP" and "Temporary HP", so the existing names hold. Each label stays with its field as one unit, about 144 and 152 px, and the units wrap between them. The row needs about 312 px: one line in the side panel without a right inset (327), on a phone held upright (356) and on every tablet. It takes two lines on a phone's sideways sheet (306, or 259 with insets), in the side panel of a large phone held sideways (268) and on a phone at 130% (266). It takes two lines in the very short mode at 480 x 320 at 130% (241) too. Inside 152 px a unit's label sits above its field. Death saves (while dying), the stable note and the life buttons stay where they are, since death and revive belong to design-v1-combat-flow.md (3.10). While `hpLess` holds (3.2), the section follows the combat doc's HP-less state (its 3.6.6): no 0/0, no Bloodied and no HP entry. The Characters panel's card uses the same section and gets the same row.
+Two labeled number fields at today's 88 px (`NUMBER_FIELD_WIDTH`, `components/Field.tsx:28`), which shows all six digits of `MAX_HP_AMOUNT` (100000), in a group named "Maximum and temporary HP". Their visible labels are "Max HP" and "Temp HP" and their accessible names stay "Max HP" and "Temporary HP", so the existing names hold. Each label stays with its field as one unit, about 144 and 152 px, and the units wrap between them. The row needs about 312 px: one line in the side panel without a right inset (327), on a phone held upright (356) and on every tablet. It takes two lines on a phone's sideways sheet (306, or 259 with insets), in the side panel of a large phone held sideways (268) and on a phone at 130% (266). It takes two lines in the very short mode at 480 x 320 at 130% (242) too. Inside 152 px a unit's label sits above its field. Death saves (while dying), the stable note and the life buttons stay where they are, since death and revive belong to design-v1-combat-flow.md (3.10). While `hpLess` holds (3.2), the section follows the combat doc's HP-less state (its 3.6.6): no 0/0, no Bloodied and no HP entry. The Characters panel's card uses the same section and gets the same row.
 
 ### 3.8 The rest of the panel
 
@@ -546,10 +548,10 @@ What content gets inside each box, after borders, safe-area padding and body pad
 | Side panel on a large phone held sideways in the wide layout, 932 x 430, with a 59 px right inset | 268 |
 | Bottom sheet, phone held upright at 390, 1 px borders, 16 px padding | 356. At 130% (300 wide): 266. Upright tablet at 820: 786 |
 | Right sheet, phone held sideways, 340 wide | 306. With a 47 px right inset, as an 844 x 390 phone has at any interface size: 259 |
-| The very short mode (docs/design-v1-layout-hierarchy.md 4.2, `sheetMode` "full"): the whole screen less the side safe areas, 1 px borders and 16 px padding | 241 at 480 x 320 at 130%, always. 521 at 649 x 300 with the turn band |
+| The very short mode (docs/design-v1-layout-hierarchy.md 4.2, `sheetMode` "full"): the whole screen less the side safe areas, 1 px borders and 16 px padding | 242 at 480 x 320 at 130%, always, as measured. 521 at 649 x 300 with the turn band |
 | Docked bar, 304 wide, 1 px borders, 12 px side padding | 278 |
 | Spanning bar, phone held upright at 390 | 348. At 130%: 258 |
-| Compact bar at 480 x 320 at 130%, 259 wide | 233 |
+| Compact bar at 480 x 320 at 130%, 259 wide | 234, as measured |
 
 ## 4. Data model and protocol
 
@@ -589,15 +591,15 @@ None. AC, speeds, Passive Perception, `srdId` and `monsterId` are already on the
 | Size | Bar | Panel | Image row | Max and Temp HP | Stat block default, and Stat block's action | Map badge |
 | --- | --- | --- | --- | --- | --- | --- |
 | Phone upright, 390 x 844 | Spans (348 inside), full layout: vitals and saves each one line. | Bottom sheet, 356 inside. | Preview and both first buttons on one line. | One row. | Folded. The action hides the bar (it folds under the sheet) and opens the sheet at the block. | Medium creatures at the pin zoom and closer. |
-| Phone sideways, 844 x 390 with 47 px side and 21 px bottom insets | Docks at 304 (278 inside), at most 241 drawable, so short: AC and HP on one line, field and Apply next, "More stats". | Right sheet, 259 inside (306 without insets). | Buttons under the preview, the pair on one line where 259 holds it, else two lines. | Two lines. | Folded. Keeps the bar beside the right sheet (441 px of free width). | As above. |
+| Phone sideways, 844 x 390 with 47 px side and 21 px bottom insets | Docks at 304 (278 inside), at most 241 drawable, so short: AC and HP on one line, field and Apply next, "More stats". | Right sheet, 259 inside (306 without insets). | Buttons under the preview, the pair on two lines (it needs 264). | Two lines. | Folded. Keeps the bar beside the right sheet (441 px of free width). | As above. |
 | Tablet upright, 820 x 1180 | Docks at 304, full layout. | Bottom sheet, 786 inside. | One line. | One row. | Folded. Hides the bar (it folds under the sheet), opens the sheet. | As above. |
 | Tablet sideways, 1180 x 820 | Docks at 304 left of the side panel, full layout. | Side panel, 327 inside. | One line. | One row. | Open. Keeps the bar, opens the Token tab. | As above. |
 | Desktop, 1280 x 800 | Docks at 304, full layout. | Side panel. | One line. | One row. | Open. Keeps the bar. | As above. |
 | Large phone sideways in the wide layout, 932 x 430 with 59 px side and 21 px bottom insets | Docks with at most 281 drawable (430 less 52, 60, 21 and 16), so short. | Side panel, 268 inside, its body about 250 tall. | Buttons under the preview, the pair on one line. | Two lines. | Folded (under 600 tall). Keeps the bar. | As above. |
 | Phone upright at 130% (300 x 649) | Spans, 258 inside, full layout: vitals two lines, saves two. Compact only on a shorter phone (320 x 480, bar-dock 1.4), where it is short and the overlay scrolls. | Sheet, 266 inside. | Buttons under the preview, the pair on one line. | Two lines. | Folded. Hides the bar. | Badge 24 px tall, so tokens of 48 px and up. |
-| Phone sideways at 130% with 47 px insets (649 x 300), no turn band | Docks at 151 tall, short: Apply ends 134 px down, in view. | Right sheet, 259 inside, body 111. | Buttons under the preview, the pair on one line where 259 holds it, else two lines. | Two lines. | Folded. Keeps the bar beside the sheet (246 px of free width, over 230). | As above. |
+| Phone sideways at 130% with 47 px insets (649 x 300), no turn band | Docks at 151 tall, short: Apply ends 134 px down, in view. | Right sheet, 259 inside, body 111. | Buttons under the preview, the pair on two lines (it needs 264). | Two lines. | Folded. Keeps the bar beside the sheet (246 px of free width, over 230). | As above. |
 | The same with the turn band in a band | Compact (163 tall), short, scrolls as a whole, and folds while the panel shows. | The very short mode: the whole screen, 521 inside, body 223. | Preview and pair on one line. | One row. | Folded. Hides the bar: the very short mode folds it. | As above. |
-| Small phone sideways at 130% with 47 px insets (480 x 320, 369 x 246) | Compact overlay, 259 wide (233 inside), over the toolbar (bar-dock 1.4), short. Every line wraps, the whole overlay scrolls, and "Stat block" scrolls into view and takes a tap. | Always the very short mode: the whole screen, 241 inside, body 169 (147 while the header holds the dock's buttons). | Buttons under the preview, the pair on two lines. | Two lines. | Folded. Hides the bar: the very short mode folds it. | As above. |
+| Small phone sideways at 130% with 47 px insets (480 x 320, 369 x 246) | Compact overlay, 259 wide (234 inside), over the toolbar (bar-dock 1.4), short. Every line wraps, the whole overlay scrolls, and "Stat block" scrolls into view and takes a tap. | Always the very short mode: the whole screen, 242 inside, body 168 as measured with the bar put away and with its Show in the header. In a fight with the alerts summary in the header too, its five buttons still keep to one row, and the body is 146. | Buttons under the preview, the pair on two lines. | Two lines. | Folded. Hides the bar: the very short mode folds it. | As above. |
 | Desktop at 130% (985 x 615) | Docks at 304, full layout. | Side panel, 327 inside. | One line. | One row. | Open (615 tall). Keeps the bar. | As above. |
 
 **Other cases.**
