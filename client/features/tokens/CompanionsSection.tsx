@@ -225,14 +225,14 @@ export function CompanionForm(props: {
         </Button>
       </div>
       <FieldRow label="Name">
-        <Input aria-label="Name" value={draft.name} maxLength={80} placeholder="Wildfire Spirit" error={error !== null && !draft.name.trim()} onChange={(e) => set({ name: e.target.value })} style={{ flex: 1 }} />
+        <Input aria-label="Name" value={draft.name} maxLength={80} error={error !== null && !draft.name.trim()} onChange={(e) => set({ name: e.target.value })} style={{ flex: 1 }} />
       </FieldRow>
       <FieldRow label="It is">
         <Segmented<CompanionWhat> label="What it is" value={draft.what} options={WHAT_OPTIONS} onChange={(what) => set({ what })} />
       </FieldRow>
-      <FieldRow label="Turn">
+      <TurnField>
         <Select<CompanionTurn> label="Turn" value={chosen.value} options={choices} onChange={(turn) => set({ turn })} />
-      </FieldRow>
+      </TurnField>
       <Help>{chosen.help}</Help>
       <FieldRow label="Size">
         <Select<CreatureSize> label="Size" value={draft.size} options={SIZE_OPTIONS.filter((o) => o.value !== "custom")} onChange={(size) => set({ size })} />
@@ -240,10 +240,10 @@ export function CompanionForm(props: {
       {draft.what === "creature" ? (
         <>
           <FieldRow label="HP">
-            <NumberField label="HP" value={draft.hp ?? undefined} min={1} max={100_000} nullable placeholder="15" onCommit={(hp) => set({ hp })} />
+            <NumberField label="HP" value={draft.hp ?? undefined} min={1} max={100_000} nullable onCommit={(hp) => set({ hp })} />
           </FieldRow>
-          <FieldRow label="AC">
-            <NumberField label="AC" value={draft.ac ?? undefined} min={0} max={100} nullable placeholder="13" onCommit={(ac) => set({ ac })} />
+          <FieldRow label="AC" hint="Optional">
+            <NumberField label="AC" value={draft.ac ?? undefined} min={0} max={100} nullable onCommit={(ac) => set({ ac })} />
           </FieldRow>
         </>
       ) : null}
@@ -257,16 +257,25 @@ export function CompanionForm(props: {
         initials={initials(draft.name || "?")}
       />
       <ErrorText>{error}</ErrorText>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-        <Button variant="primary" size="sm" style={{ flex: 1 }} busy={waiting} disabled={!placement?.ok} aria-describedby="companion-where" onClick={add}>
-          {waiting ? "Adding…" : "Add and place"}
-        </Button>
-        <Button size="sm" style={{ flex: 1 }} onClick={props.onDone}>
-          Cancel
-        </Button>
-      </div>
+      <Button variant="primary" size="sm" block busy={waiting} disabled={!placement?.ok} aria-describedby="companion-where" onClick={add}>
+        {waiting ? "Adding…" : "Add and place"}
+      </Button>
       {where ? <Help id="companion-where">{where}</Help> : null}
     </div>
+  );
+}
+
+/**
+ * The Turn field, its Select under its label at the pane's full width: its
+ * choices name the character twice ("On Bree's turn, listed under Bree"),
+ * which beside the label would cut off on a phone.
+ */
+function TurnField(props: { children: ReactNode }) {
+  return (
+    <label style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1), fontSize: theme.font.body14, color: theme.color.text }}>
+      Turn
+      {props.children}
+    </label>
   );
 }
 
@@ -333,9 +342,9 @@ export function CompanionSection(props: {
         />
       </FieldRow>
       {companion.turn === "own" ? <Help>Choose one of {name}'s turns first.</Help> : null}
-      <FieldRow label="Turn">
+      <TurnField>
         <Select<CompanionTurn> label="Turn" value={chosen.value} disabled={relink.waiting} options={choices} onChange={(turn) => send(linkPatch(companion, { turn }))} />
-      </FieldRow>
+      </TurnField>
       <Help>{chosen.help}</Help>
       {relink.waiting || kind.waiting ? (
         <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1), color: theme.color.textMuted, fontSize: theme.font.small }}>
@@ -405,9 +414,9 @@ export function MakeCompanion(props: { token: Token }) {
           onChange={setOf}
         />
       </FieldRow>
-      <FieldRow label="Turn">
+      <TurnField>
         <Select<CompanionTurn> label="Turn" value={chosen.value} options={choices} onChange={setTurn} />
-      </FieldRow>
+      </TurnField>
       <Help>{chosen.help}</Help>
       <div style={{ display: "flex", gap: theme.space(2) }}>
         <Button

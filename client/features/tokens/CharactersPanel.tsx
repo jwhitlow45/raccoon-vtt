@@ -360,7 +360,7 @@ function NewCharacter(props: { onDone(id: string | null): void; close(): void; o
       </div>
       <ImageField value={image ?? undefined} onChange={setImage} shape="circle" aspect={1} canEdit ring={theme.color.ally} />
       <FieldRow label="Name">
-        <Input aria-label="Name" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} placeholder="Thorn" error={error !== null} style={{ flex: 1 }} />
+        <Input aria-label="Name" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} error={error !== null} style={{ flex: 1 }} />
       </FieldRow>
       <FieldRow label="Size">
         <Select aria-label="Size" value={size} onChange={(e) => setSize(e.target.value as CreatureSize)} style={{ flex: 1, maxWidth: "100%" }}>

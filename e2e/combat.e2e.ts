@@ -198,6 +198,40 @@ async function fitsSideways(inner: Locator, label: string): Promise<void> {
   assert.deepEqual(wide, [], `${label}: content runs out of the pane sideways`);
 }
 
+/**
+ * The width a Select needs to show each of its choices whole, measured in
+ * its own font with its padding, borders and Chrome's arrow of about
+ * 20 px, and the width it has.
+ */
+function selectRoom(select: Locator): Promise<{ needs: { text: string; need: number }[]; has: number }> {
+  return select.evaluate((el) => {
+    type Styles = { font: string; paddingLeft: string; paddingRight: string; borderLeftWidth: string; borderRightWidth: string };
+    type Probe = { style: Record<string, string>; textContent: string | null; getBoundingClientRect(): Rect; remove(): void };
+    type Doc = { createElement(t: string): Probe; body: { append(n: Probe): void }; defaultView: { getComputedStyle(e: unknown): Styles } };
+    const sel = el as unknown as { options: ArrayLike<{ text: string }>; getBoundingClientRect(): Rect; ownerDocument: Doc };
+    const doc = sel.ownerDocument;
+    const style = doc.defaultView.getComputedStyle(sel);
+    const edges = [style.paddingLeft, style.paddingRight, style.borderLeftWidth, style.borderRightWidth].reduce((sum, v) => sum + parseFloat(v), 0);
+    const needs = Array.from(sel.options, ({ text }) => {
+      const probe = doc.createElement("span");
+      Object.assign(probe.style, { font: style.font, whiteSpace: "pre", position: "absolute", visibility: "hidden" });
+      probe.textContent = text;
+      doc.body.append(probe);
+      const width = probe.getBoundingClientRect().width;
+      probe.remove();
+      return { text, need: width + edges + 20 };
+    });
+    return { needs, has: sel.getBoundingClientRect().width };
+  });
+}
+
+/** Fails on a Turn Select that would cut off one of its choices, chosen or not. */
+async function turnShowsWhole(select: Locator, label: string): Promise<void> {
+  const room = await selectRoom(select);
+  assert.ok(room.needs.length >= 2, `${label}: the Select has ${room.needs.length} choices`);
+  for (const { text, need } of room.needs) assert.ok(need <= room.has + 0.5, `${label}: "${text}" needs ${Math.round(need)} px and has ${Math.round(room.has)}`);
+}
+
 /** Opens a panel: its side panel tab from 900 layout px up, else from the toolbar's list of panels. */
 async function openPanelOn(page: Page, title: string): Promise<void> {
   const tab = page.getByRole("tab", { name: title });
@@ -977,6 +1011,39 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       await dm.getByRole("button", { name: "Cancel", exact: true }).click();
     }
     assert.equal(dmSocket.state!.tokens[run.goblins[4]!]!.companion, undefined, "nothing was sent");
+  });
+
+  test("13f. on a 390 px phone the companion forms start empty with no example values, have one Cancel, and show every turn choice whole (SFB-P-11)", async () => {
+    const phone = { width: 390, height: 844, scale: 1, bottom: 34 };
+    await setUp(ana, await anaContext.newCDPSession(ana), phone);
+    await openPanelOn(ana, "Characters");
+    await ana.getByRole("button", { name: "Add a companion" }).click();
+    const form = ana.locator('dialog[data-rvtt-sheet][aria-label="Characters"]');
+    for (const name of ["Name", "HP", "AC"]) {
+      assert.equal(await form.getByRole("textbox", { name, exact: true }).getAttribute("placeholder"), null, `${name} shows an example that reads as its value`);
+    }
+    assert.equal(await form.getByRole("button", { name: "Cancel" }).count(), 1, "the form has one Cancel");
+    await turnShowsWhole(form.getByRole("combobox", { name: "Turn" }), "Add a companion at 390");
+    await shots.take(ana, "combat-companion-form-390");
+    await form.getByRole("button", { name: "Cancel" }).click();
+    // The DM's Make a companion, and the Companion section of the spirit's panel.
+    await setUp(dm, dmCdp, phone);
+    await openTracker(dm);
+    await (await rowButton(dm, goblinName(4))).click();
+    await bar(dm, goblinName(4)).getByRole("button", { name: "Details", exact: true }).click();
+    const panel = dm.locator('dialog[data-rvtt-sheet][aria-label="Token"]');
+    await openFold(panel, "Token settings");
+    await panel.getByRole("button", { name: "Make a companion", exact: true }).click();
+    await panel.getByRole("combobox", { name: "Belongs to", exact: true }).selectOption({ label: "Bree" });
+    await turnShowsWhole(panel.getByRole("combobox", { name: "Turn", exact: true }), "Make a companion at 390");
+    await panel.getByRole("button", { name: "Cancel", exact: true }).click();
+    await dm.keyboard.press("Escape");
+    await openTracker(dm);
+    await dm.getByRole("button", { name: /^Wildfire Spirit, acts on Bree's turn/ }).click();
+    await bar(dm, "Wildfire Spirit").getByRole("button", { name: "Details", exact: true }).click();
+    await openFold(panel, "Companion");
+    await turnShowsWhole(panel.getByRole("combobox", { name: "Turn", exact: true }), "the spirit's Companion section at 390");
+    await dm.keyboard.press("Escape");
   });
 
   test("14. no page logged an error", () => {
