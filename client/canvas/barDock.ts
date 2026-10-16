@@ -63,8 +63,6 @@ export const SUMMARY_ROW = 44;
 export const SNAP_PX = 24;
 /** The least room left of the lane for the notices to center there instead of spanning. */
 export const NOTICES_BESIDE_MIN = 320;
-/** Below this room inside its padding, the Multi-select bar shows the short hint, so it stays one row. */
-export const LONG_HINT_MIN = 600;
 
 export type Box = { left: number; top: number; width: number; height: number };
 export type Sides = { top: number; right: number; bottom: number; left: number };
@@ -78,27 +76,25 @@ export type BarMode = "span" | "dock" | "compact";
 export type Chrome = {
   /** The top bar with the turn band and the top safe area. */
   top: number;
-  /** The toolbar, the active tool's options and the bottom safe area. */
+  /**
+   * The toolbar with the bottom safe area, the tool's options row while it
+   * stands at the foot, and its line's reserve: everything that stands over
+   * the map's foot (docs/design-v1-tool-options.md 10.2).
+   */
   bottom: number;
-  /** As `bottom`, but only up to the highest button or field in the tool's options, so a hint wrapped above them is left out. */
+  /** As `bottom`, but only up to the row's highest control, or the line's top where it holds a reading, a warning or a status: a hint may be covered. */
   controls: number;
   /** The toolbar alone, with the bottom safe area. */
   toolbar: number;
   safe: Sides;
   /** A phone's sheet docked on the right in landscape, or 0. It covers the right safe area. */
   sheet: number;
-  /**
-   * The tool's options in a rail on the left of the map, as drawn with the
-   * left safe area it holds, or 0 (docs/design-v1-layout-hierarchy.md 3.5).
-   * It covers the left safe area, as a sheet covers the right.
-   */
-  rail: number;
 };
 
 export const NO_SIDES: Sides = { top: 0, right: 0, bottom: 0, left: 0 };
 
 /** Until Room has measured: a 52 px top bar and a 60 px toolbar, no safe areas. */
-export const DEFAULT_CHROME: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NO_SIDES, sheet: 0, rail: 0 };
+export const DEFAULT_CHROME: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NO_SIDES, sheet: 0 };
 
 /**
  * The bars a token bar keeps clear of: the measured chrome, with its top
@@ -113,14 +109,14 @@ export function barChrome(state: { chrome: Chrome | null; lasting: number | null
 
 /**
  * The part of the map a docked bar lives in: the map less the bars over
- * it, the side safe areas, a landscape sheet and the tool's rail, with an
- * 8 px margin all round. Its height may come out at 0 or less on a short
+ * it, the side safe areas and a landscape sheet, with an 8 px margin all
+ * round. Its height may come out at 0 or less on a short
  * screen. `foot` is a roll card standing on a narrow screen's toolbar and
  * the active tool's options (features/rolls/PlayerRolls.tsx), which the
  * bar keeps above.
  */
 export function freeArea(viewport: Size, chrome: Chrome, foot = 0): Box {
-  const left = (chrome.rail > 0 ? chrome.rail : chrome.safe.left) + EDGE;
+  const left = chrome.safe.left + EDGE;
   const right = viewport.width - (chrome.sheet > 0 ? chrome.sheet : chrome.safe.right) - EDGE;
   const top = chrome.top + EDGE;
   const bottom = viewport.height - chrome.bottom - Math.max(0, foot) - EDGE;
@@ -843,17 +839,6 @@ export function noticePlace(free: Box): { left: number; width: number } | null {
 }
 
 /**
- * Where a notice stack that does not fit beside the lane spans: across the
- * free area while the tool's options stand in a rail (`rail` is its drawn
- * width, or 0), so an offline banner never covers the tool's controls
- * (docs/design-v1-layout-hierarchy.md 3.6), and across the whole map
- * otherwise, as before (null).
- */
-export function noticeSpan(free: Box, rail: number): { left: number; width: number } | null {
-  return rail > 0 ? { left: free.left, width: free.width } : null;
-}
-
-/**
  * What the column publishes after it measures itself: its cards' heights
  * while they are drawn, none when it has no card, and while they are
  * hidden (folded under a sheet or summarized beside the bar) the last
@@ -968,38 +953,20 @@ export const CARD_MAX = 300;
  * The alerts column's card width and the shadow room at its left
  * (docs/design-v1-layout-hierarchy.md 3.5), in the column's own pixels.
  * The column hangs from the top bar and sizes its cards from the map's
- * width, so the rail, a sheet and the safe areas each take their share:
- * the rail in place of the left safe area, and a sheet in place of the
- * right one. The shadow room never reaches over the rail.
+ * width, so a sheet and the safe areas each take their share: a sheet in
+ * place of the right safe area.
  * features/encounter/InitiativeStrip.tsx writes the same rule as CSS,
  * where the map's width is the column's 100%.
  */
-export function columnCards(input: { mapWidth: number; sheet: number; rail: number; safe: Pick<Sides, "left" | "right"> }): { card: number; shadowLeft: number } {
+export function columnCards(input: { mapWidth: number; sheet: number; safe: Pick<Sides, "left" | "right"> }): { card: number; shadowLeft: number } {
   const rightPad = EDGE + (input.sheet > 0 ? 0 : input.safe.right);
-  const card = Math.min(CARD_MAX, input.mapWidth - input.sheet - 2 * EDGE - (input.rail > 0 ? input.rail : input.safe.left) - (input.sheet > 0 ? 0 : input.safe.right));
-  return { card, shadowLeft: Math.min(SHADOW_ROOM, input.mapWidth - input.rail - card - rightPad) };
+  const card = Math.min(CARD_MAX, input.mapWidth - input.sheet - 2 * EDGE - input.safe.left - (input.sheet > 0 ? 0 : input.safe.right));
+  return { card, shadowLeft: Math.min(SHADOW_ROOM, input.mapWidth - card - rightPad) };
 }
 
 /** The column's top: the lane's, or 8 px under the last lasting notice when the notices span over it. Toasts never move it. */
 export function columnTop(laneTop: number, lastingBottom: number | null): number {
   return lastingBottom === null ? laneTop : Math.max(laneTop, lastingBottom + EDGE);
-}
-
-// ------------------------------------------------------------ the Multi-select hint
-
-/**
- * The room the Multi-select bar's row has inside its padding, which
- * picks its hint (design section 3). From 900 px up the bar sizes to its
- * content, so the room comes from the map's width, never from the bar's
- * own drawn width, which would lock in whichever hint showed first. On a
- * phone it spans, and its own inner width is the room.
- */
-export function hintRoom(input: { wide: boolean; mapWidth: number; padding: number; inner: number }): number {
-  return input.wide ? Math.min(640, input.mapWidth - 2 * EDGE) - input.padding : input.inner;
-}
-
-export function shortHint(room: number): boolean {
-  return room < LONG_HINT_MIN;
 }
 
 // ------------------------------------------------------------ the Room's slot

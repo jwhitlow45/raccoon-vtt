@@ -694,6 +694,8 @@ function OptionsLine(props: { line: StripLine | null; tool: string; frame: Optio
     border: `${theme.line.border}px solid ${theme.color.border}`,
     fontSize: tone === "reading" && !pill ? theme.font.body14 : theme.font.small,
     lineHeight: theme.leading.body,
+    // A hint's 13 px stands as tall as a reading's 14 px. The line's height is the map's reserve (pages/Room.tsx useOptionsBox), so a hint turning into a reading as a drag starts would otherwise refit the map under the pointer.
+    minHeight: theme.font.body14 * theme.leading.body + 2 * theme.space(1.5) + 2 * theme.line.border,
     color: pill ? theme.color.text : LINE_COLORS[tone],
     pointerEvents: "auto",
     ...(floating ? { position: "absolute", left: floating.left, bottom: `calc(100% + ${theme.layout.options.lineGap}px)` } : null),

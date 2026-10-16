@@ -1151,12 +1151,12 @@ function bandStyle(at: Corner, part: "width" | "height"): CSSProperties {
  * anything is hidden below. It has no height of its own, so it never adds
  * to what scrolls, and screen readers skip it: they reach every control by
  * moving through them. The alerts column shows it too while a docked bar
- * cuts it short (features/encounter/InitiativeStrip.tsx), and the tool's
- * rail (pages/Room.tsx). `fill` is what its fade ends in, the color of the
- * box it covers: `surface` by default, the bars' `overlay` in the rail.
- * As wide as its box, so in a row that wraps it takes a line of its own.
+ * cuts it short (features/encounter/InitiativeStrip.tsx), and a popover
+ * (components/Popover.tsx). Its fade ends in `surface`, the color of the
+ * boxes it covers. As wide as its box, so in a row that wraps it takes a
+ * line of its own.
  */
-export function ScrollForMore(props: { fill?: string }) {
+export function ScrollForMore() {
   return (
     <div aria-hidden style={{ position: "sticky", bottom: 0, width: "100%", height: 0, pointerEvents: "none" }}>
       <div
@@ -1166,7 +1166,7 @@ export function ScrollForMore(props: { fill?: string }) {
           right: 0,
           bottom: 0,
           padding: `${theme.space(6)}px ${theme.space(3)}px ${theme.space(2)}px`,
-          background: `linear-gradient(transparent, ${props.fill ?? theme.color.surface} 60%)`,
+          background: `linear-gradient(transparent, ${theme.color.surface} 60%)`,
           color: theme.color.textMuted,
           fontSize: theme.font.small,
           textAlign: "center",

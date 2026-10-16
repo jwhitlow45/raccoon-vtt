@@ -423,6 +423,7 @@ export type BehaviorDevice = "keys" | "mouse" | "android";
 
 /** The surfaces whose own keys get a section of the sheet, in the sheet's order. */
 export const SURFACES = [
+  "Tool options",
   "Side panel tabs",
   "Handout viewer",
   "Token window",
@@ -459,16 +460,16 @@ const DM = ["dm"] as const;
 
 /** Every row beside the keys, in the order the sheet lists them. */
 export const BEHAVIORS: readonly Behavior[] = [
-  // The whole room: lib/escape.ts, pages/RoomChrome.tsx useEscape, state/selection.ts dismissal and barDismiss.
+  // The whole room: components/Popover.tsx, which takes the key first, then lib/escape.ts, pages/RoomChrome.tsx useEscape, state/selection.ts dismissal and barDismiss.
   {
     id: "escape",
     input: "Escape",
-    does: "Close a sheet, else the token's action bar, else let go of the selection and end Multi-select. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done",
+    does: "Close an open pop-up first, then a sheet, else the token's action bar, else let go of the selection and end Multi-select. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done. A field outside the pop-up keeps its Escape",
     roles: EVERYONE,
     device: "keys",
   },
   // lib/backClose.ts. Only Android has the button.
-  { id: "back", input: "Back button", does: "Close what opened last, such as a sheet, a dialog, a handout or the action bar", roles: EVERYONE, device: "android" },
+  { id: "back", input: "Back button", does: "Close what opened last, such as a pop-up, a sheet, a dialog, a handout or the action bar", roles: EVERYONE, device: "android" },
 
   // The map with a key or another button: canvas/Stage.tsx, canvas/TokenNode.tsx, state/selection.ts addsToSelection.
   {
@@ -516,6 +517,26 @@ export const BEHAVIORS: readonly Behavior[] = [
     roles: EVERYONE,
     when: "in the handout viewer",
     device: "mouse",
+  },
+
+  // A tool's options row and its pop-ups: components/Popover.tsx, features/measure/controls.tsx ValueChip and PickCloses.
+  {
+    id: "optionsOpenKey",
+    input: "Enter, Space",
+    does: "Open its pop-up with the keyboard in it",
+    roles: EVERYONE,
+    when: "on a button that shows a value, or on More options",
+    device: "keys",
+    surface: "Tool options",
+  },
+  {
+    id: "optionsChoiceKeys",
+    input: "Arrow keys",
+    does: "Change the choice and keep the pop-up open. Enter or Space picks it and closes the pop-up",
+    roles: EVERYONE,
+    when: "in a pop-up's choice",
+    device: "keys",
+    surface: "Tool options",
   },
 
   // The side panel's tabs and More's list: pages/SideTabs.tsx, pages/tabFit.ts, components/Menu.tsx and menuKeys.ts, components/Popover.tsx, lib/a11y.ts tabKeyIndex.
@@ -640,6 +661,7 @@ export const KEYS_INTRO = "On any device with a keyboard. They do nothing while 
 
 /** A line under a surface's heading, where its rows do not say where it is. */
 const SURFACE_INTRO: Partial<Record<Surface, string>> = {
+  "Tool options": "A tool's options row, its More options and the pop-ups its buttons open.",
   "Side panel tabs":
     "On a screen 900 px or wider, with a tab or More's list focused. There, and on a focused choice or slider, the arrow and Page keys never move a token, and in the list a letter goes to a panel instead of running a shortcut.",
   "Handout viewer": "A handout the DM shows, or a picture or a PDF opened from the Library.",

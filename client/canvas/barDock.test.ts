@@ -11,7 +11,6 @@ import {
   DEFAULT_CHROME,
   EDGE,
   LANE_WIDTH,
-  noticeSpan,
   clampBox,
   clearAnchor,
   columnFacts,
@@ -41,7 +40,6 @@ import {
   type ResizePart,
   freeArea,
   hangBox,
-  hintRoom,
   isDefaultSpot,
   laneLeft,
   arrowStep,
@@ -61,7 +59,6 @@ import {
   releaseSpot,
   restingBar,
   shareLane,
-  shortHint,
   SPOT_KEY,
   spotHang,
   spotText,
@@ -72,21 +69,25 @@ import {
 } from "./barDock.ts";
 
 const NONE = { top: 0, right: 0, bottom: 0, left: 0 };
-/** Multi-select's bar: one 52 px row (docs/design-v1-bar-dock.md section 3). */
-const OPTIONS = 52;
+/** Multi-select's row standing on the toolbar: 44 px controls, 4 px padding and a 1 px top edge (docs/design-v1-tool-options.md 4.2). */
+const OPTIONS = 53;
 
-/** A phone's chrome at full size: the top bar, an optional turn band, the toolbar, Multi-select's bar and the safe areas. */
-function phone(input: { band: boolean; options: boolean; safe: { top: number; side: number; bottom: number }; rail?: boolean }): Chrome {
+/**
+ * A phone's chrome at full size: the top bar, an optional turn band, the
+ * toolbar, Multi-select's row and the safe areas. The row stacks on the
+ * toolbar (`true`), or stands in the toolbar's own row on a short
+ * sideways screen ("merged"), where it takes no height.
+ */
+function phone(input: { band: boolean; options: boolean | "merged"; safe: { top: number; side: number; bottom: number } }): Chrome {
   const toolbar = 60 + input.safe.bottom;
+  const row = input.options === true ? OPTIONS : 0;
   return {
     top: 52 + input.safe.top + (input.band ? 48 : 0),
-    bottom: toolbar + (input.options ? OPTIONS : 0),
-    controls: toolbar + (input.options ? OPTIONS : 0),
+    bottom: toolbar + row,
+    controls: toolbar + row,
     toolbar,
     safe: { top: input.safe.top, right: input.safe.side, bottom: input.safe.bottom, left: input.safe.side },
     sheet: 0,
-    // The rail holds the left safe area (docs/design-v1-layout-hierarchy.md 3.2).
-    rail: input.rail ? 248 + input.safe.side : 0,
   };
 }
 
@@ -120,21 +121,29 @@ describe("span, dock or compact", () => {
 
 describe("the free area", () => {
   test("is the map less the bars, the safe areas and an 8 px margin", () => {
-    const free = freeArea({ width: 920, height: 800 }, { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0, rail: 0 });
+    const free = freeArea({ width: 920, height: 800 }, { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0 });
     assert.deepEqual(free, { left: 8, top: 60, width: 904, height: 672 });
   });
 
-  test("the turn band, the options bar and the safe areas each take their share", () => {
+  test("the turn band, the options row and the safe areas each take their share", () => {
     const plain = freeArea({ width: 649, height: 300 }, phone({ band: false, options: false, safe: { top: 0, side: 47, bottom: 21 } }));
     assert.deepEqual(plain, { left: 55, top: 60, width: 539, height: 151 });
     const busy = freeArea({ width: 649, height: 300 }, phone({ band: true, options: true, safe: { top: 0, side: 47, bottom: 21 } }));
-    assert.deepEqual(busy, { left: 55, top: 108, width: 539, height: 51 });
+    assert.deepEqual(busy, { left: 55, top: 108, width: 539, height: 50 });
+    const merged = freeArea({ width: 649, height: 300 }, phone({ band: false, options: "merged", safe: { top: 0, side: 47, bottom: 21 } }));
+    assert.deepEqual(merged, plain, "a row in the toolbar's own row takes no height");
+  });
+
+  test("the right safe area is off while the side panel shows, so the free area reaches 8 px from the map's edge", () => {
+    const shown = { ...phone({ band: false, options: false, safe: { top: 0, side: 59, bottom: 21 } }), safe: { top: 0, right: 0, bottom: 21, left: 59 } };
+    const free = freeArea({ width: 932 - 360, height: 430 }, shown);
+    assert.equal(free.left + free.width, 572 - EDGE);
   });
 
   test("a roll card standing on a narrow screen's toolbar and options bar takes the bottom above them", () => {
-    const chrome: Chrome = { top: 52, bottom: 60 + 52, controls: 60 + 52, toolbar: 60, safe: NONE, sheet: 0, rail: 0 };
+    const chrome: Chrome = { top: 52, bottom: 60 + 53, controls: 60 + 53, toolbar: 60, safe: NONE, sheet: 0 };
     const viewport = { width: 390, height: 844 };
-    assert.equal(freeArea(viewport, chrome, 250).height, 844 - 112 - 250 - 8 - 60);
+    assert.equal(freeArea(viewport, chrome, 250).height, 844 - 113 - 250 - 8 - 60);
     assert.equal(freeArea(viewport, chrome, 30).height, freeArea(viewport, chrome).height - 30);
     assert.equal(barMode(viewport, freeArea({ width: 390, height: 400 }, chrome, 250).height), "compact", "a card that leaves too little opens the bar compact");
   });
@@ -168,22 +177,20 @@ describe("compact", () => {
   test("480 x 320 at 130%, 47 px at the sides and 21 at the bottom", () => {
     const viewport = { width: 369, height: 246 };
     const safe = { top: 0, side: 47, bottom: 21 };
-    assert.equal(freeArea(viewport, phone({ band: false, options: true, safe })).height, 45);
-    assert.equal(freeArea(viewport, phone({ band: true, options: true, safe })).height, -3);
+    assert.equal(freeArea(viewport, phone({ band: false, options: true, safe })).height, 44);
+    assert.equal(freeArea(viewport, phone({ band: true, options: true, safe })).height, -4);
     assert.deepEqual(summary(phone({ band: false, options: true, safe }), viewport), { overlay: 157, lane: "summary", bar: 105, width: 259 });
     assert.deepEqual(summary(phone({ band: true, options: true, safe }), viewport), { overlay: 109, lane: "summary", bar: 57, width: 259 });
   });
 
-  test("844 x 390 at 130%, the same insets", () => {
+  test("844 x 390 at 130%, the same insets: Multi-select's row stands in the toolbar's own row, so the bar docks", () => {
     const viewport = { width: 649, height: 300 };
     const safe = { top: 0, side: 47, bottom: 21 };
-    assert.equal(freeArea(viewport, phone({ band: false, options: true, safe })).height, 99);
-    assert.deepEqual(summary(phone({ band: false, options: true, safe }), viewport), { overlay: 151, lane: "summary", bar: 99, width: 304 });
-    assert.deepEqual(summary(phone({ band: true, options: true, safe }), viewport), { overlay: 163, lane: "summary", bar: 111, width: 304 });
-    // Without Multi-select the bar docks, and an alert's summary row leaves it the header and a row.
-    const chrome = phone({ band: false, options: false, safe });
-    const free = freeArea(viewport, chrome);
+    const free = freeArea(viewport, phone({ band: false, options: "merged", safe }));
+    assert.equal(free.height, 151);
     assert.equal(barMode(viewport, free.height), "dock");
+    assert.deepEqual(summary(phone({ band: true, options: "merged", safe }), viewport), { overlay: 163, lane: "summary", bar: 111, width: 304 });
+    // Docked, an alert's summary row leaves it the header and a row.
     const docked = shareLane({
       hang: spotHang(DEFAULT_SPOT, free, { width: 304, height: 400 }),
       laneTop: free.top,
@@ -200,9 +207,9 @@ describe("compact", () => {
   test("320 x 480 at 130%, upright, 44 px at the top and 34 at the bottom", () => {
     const viewport = { width: 246, height: 369 };
     const safe = { top: 44, side: 0, bottom: 34 };
-    assert.equal(freeArea(viewport, phone({ band: true, options: true, safe })).height, 63);
+    assert.equal(freeArea(viewport, phone({ band: true, options: true, safe })).height, 62);
     assert.deepEqual(summary(phone({ band: true, options: true, safe }), viewport), { overlay: 175, lane: "summary", bar: 123, width: 230 });
-    assert.equal(freeArea(viewport, phone({ band: false, options: true, safe })).height, 111);
+    assert.equal(freeArea(viewport, phone({ band: false, options: true, safe })).height, 110);
     assert.deepEqual(summary(phone({ band: false, options: true, safe }), viewport), { overlay: 163, lane: "summary", bar: 111, width: 230 });
     assert.equal(compactHang(viewport, viewport, phone({ band: false, options: true, safe })).coversToolbar, false);
   });
@@ -590,7 +597,7 @@ describe("the right lane", () => {
 
   test("an upright span keeps below the column's first card and never covers its token, above it or below it", () => {
     // The DM at 390 x 844 with one 122 px check: the bar may reach up to 190, and the token sits low on the screen.
-    const chrome: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0, rail: 0 };
+    const chrome: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0 };
     const phoneView = { width: 390, height: 844 };
     const column = { top: 60, content: 122, first: 122 };
     for (const y of [300, 440, 480, 520, 560, 700]) {
@@ -722,7 +729,7 @@ describe("fit and find keep clear of the bar", () => {
   });
 
   test("a bar about to open rests at its spot with the height it last had, and a spanning one has no place yet", () => {
-    const chrome: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0, rail: 0 };
+    const chrome: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0 };
     const rest = restingBar({ layout: { width: 1280, height: 800 }, viewport, chrome, spot: DEFAULT_SPOT, height: 250, column: null });
     assert.deepEqual(rest, { box: { left: 920 - 8 - 304, top: 800 - 60 - 8 - 250, width: 304, height: 250 }, laneLeft: lane, freeRight: 912 });
     assert.equal(restingBar({ layout: { width: 390, height: 844 }, viewport: { width: 390, height: 844 }, chrome, spot: DEFAULT_SPOT, height: 250, column: null }), null);
@@ -730,7 +737,7 @@ describe("fit and find keep clear of the bar", () => {
 
   test("a bar about to open shares the lane with the column as the drawn bar will, so a pan never lands a token under it", () => {
     // 1180 x 390: an 820 px map, and a 150 px first card leaves the bar too little under it, so it moves beside the lane.
-    const chrome: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0, rail: 0 };
+    const chrome: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0 };
     const map = { width: 820, height: 390 };
     const column = { top: 60, content: 150, first: 150 };
     const input = { layout: { width: 1180, height: 390 }, viewport: map, chrome, spot: DEFAULT_SPOT, height: 300, foot: 0, column };
@@ -793,95 +800,20 @@ describe("the alerts column's summary row on a short screen", () => {
   });
 });
 
-describe("with the tool's options in a rail (docs/design-v1-layout-hierarchy.md 3.5)", () => {
-  const SAFE = { top: 0, side: 47, bottom: 21 };
-  const NO_SAFE = { top: 0, side: 0, bottom: 0 };
-
-  test("the free area starts right of the rail, which holds the left safe area, and the lane stays at the right", () => {
-    const free = freeArea({ width: 844, height: 390 }, phone({ band: false, options: false, safe: SAFE, rail: true }));
-    assert.equal(free.left, 295 + EDGE);
-    assert.equal(free.width, 486);
-    assert.equal(laneLeft(free) + LANE_WIDTH, 844 - 47 - EDGE);
+describe("the alerts column's cards", () => {
+  test("take the map less the safe areas and a sheet, up to 300 px, with room for their shadow", () => {
+    assert.deepEqual(columnCards({ mapWidth: 844, sheet: 0, safe: { left: 47, right: 47 } }), { card: 300, shadowLeft: 20 });
+    assert.deepEqual(columnCards({ mapWidth: 369, sheet: 0, safe: { left: 47, right: 47 } }), { card: 259, shadowLeft: 20 });
+    assert.deepEqual(columnCards({ mapWidth: 649, sheet: 340, safe: { left: 47, right: 47 } }), { card: 246, shadowLeft: 20 });
   });
 
-  test("with a rail and a sheet, the rail takes the left and the sheet the right", () => {
-    const free = freeArea({ width: 649, height: 300 }, { ...phone({ band: false, options: false, safe: SAFE, rail: true }), sheet: 340 });
-    assert.equal(free.left, 295 + EDGE);
-    assert.equal(free.left + free.width, 649 - 340 - EDGE);
-  });
-
-  test("the right safe area is off while the side panel shows, so the free area reaches 8 px from the map's edge", () => {
-    const shown = { ...phone({ band: false, options: false, safe: { top: 0, side: 59, bottom: 21 } }), safe: { top: 0, right: 0, bottom: 21, left: 59 } };
-    const free = freeArea({ width: 932 - 360, height: 430 }, shown);
-    assert.equal(free.left + free.width, 572 - EDGE);
-  });
-
-  test("844 x 390 at 130%: 291 x 150 docks, and with the turn band 291 x 102 is compact over the toolbar", () => {
-    const layout = { width: 649, height: 300 };
-    const free = freeArea(layout, phone({ band: false, options: false, safe: SAFE, rail: true }));
-    assert.deepEqual([Math.round(free.width), Math.round(free.height)], [291, 151]);
-    assert.equal(barMode(layout, free.height), "dock");
-    const chrome = phone({ band: true, options: false, safe: SAFE, rail: true });
-    const banded = freeArea(layout, chrome);
-    assert.deepEqual([Math.round(banded.width), Math.round(banded.height)], [291, 103]);
-    assert.equal(barMode(layout, banded.height), "compact");
-    const hang = compactHang(layout, layout, chrome);
-    assert.equal(hang.coversToolbar, true);
-    assert.equal(hang.left + hang.width, free.left + free.width, "the overlay takes the free area's right, never the rail");
-    assert.ok(hang.left >= free.left);
-  });
-
-  test("844 x 390 at 130%: under 230 px beside the lane, so an alert's column shares it as the summary row", () => {
-    const free = freeArea({ width: 649, height: 300 }, phone({ band: false, options: false, safe: SAFE, rail: true }));
-    const placed = placeBar({
-      layout: { width: 649, height: 300 },
-      viewport: { width: 649, height: 300 },
-      chrome: phone({ band: false, options: false, safe: SAFE, rail: true }),
-      foot: 0,
-      anchor: null,
-      spot: DEFAULT_SPOT,
-      height: 200,
-      column: { top: free.top, content: 90, first: 90 },
-    });
-    assert.equal(placed?.mode, "dock");
-    assert.equal(placed?.lane, "summary");
-  });
-
-  test("667 x 375 at 130%: 249 px across, docked, and compact with the band", () => {
-    const layout = { width: 513, height: 288 };
-    const free = freeArea(layout, phone({ band: false, options: false, safe: NO_SAFE, rail: true }));
-    assert.equal(free.left, 248 + EDGE);
-    assert.equal(Math.round(free.width), 249);
-    assert.equal(barMode(layout, free.height), "dock");
-    assert.equal(barMode(layout, freeArea(layout, phone({ band: true, options: false, safe: NO_SAFE, rail: true })).height), "compact");
-  });
-
-  test("the column's cards stop at the rail: 249 and 291 px at 130%, 232 at the worst case, 300 with no rail", () => {
-    assert.deepEqual(columnCards({ mapWidth: 513, sheet: 0, rail: 248, safe: { left: 0, right: 0 } }), { card: 249, shadowLeft: 8 });
-    assert.deepEqual(columnCards({ mapWidth: 649, sheet: 0, rail: 295, safe: { left: 47, right: 47 } }), { card: 291, shadowLeft: 8 });
-    // A rail and its inset taking exactly half the map, and an equal inset at the right.
-    assert.equal(columnCards({ mapWidth: 590, sheet: 0, rail: 295, safe: { left: 47, right: 47 } }).card, 232);
-    assert.deepEqual(columnCards({ mapWidth: 844, sheet: 0, rail: 0, safe: { left: 47, right: 47 } }), { card: 300, shadowLeft: 20 });
-    for (const c of [columnCards({ mapWidth: 513, sheet: 0, rail: 248, safe: { left: 0, right: 0 } }), columnCards({ mapWidth: 649, sheet: 0, rail: 295, safe: { left: 47, right: 47 } })]) {
-      assert.ok(c.shadowLeft >= 0, "the shadow's room never reaches over the rail");
-    }
-  });
-
-  test("a spanning notice starts right of the rail, and centers beside the lane where 320 px are left there", () => {
-    const narrow = freeArea({ width: 844, height: 390 }, phone({ band: false, options: false, safe: SAFE, rail: true }));
+  test("spanning notices center beside the lane where 320 px are left there, else span the map", () => {
+    const narrow = freeArea({ width: 649, height: 300 }, phone({ band: false, options: "merged", safe: { top: 0, side: 47, bottom: 21 } }));
     assert.equal(noticePlace(narrow), null);
-    assert.deepEqual(noticeSpan(narrow, 295), { left: narrow.left, width: narrow.width });
-    assert.equal(noticeSpan(narrow, 0), null, "with no rail it spans the whole map as before");
-    const wide = freeArea({ width: 1032, height: 480 }, { ...DEFAULT_CHROME, rail: 248 });
+    const sideways = freeArea({ width: 844, height: 390 }, phone({ band: false, options: "merged", safe: { top: 0, side: 47, bottom: 21 } }));
+    assert.deepEqual(noticePlace(sideways), { left: 55, width: 422 }, "with no rail, 844 x 390 leaves 422 px beside the lane");
+    const wide = freeArea({ width: 1032, height: 480 }, DEFAULT_CHROME);
     assert.deepEqual(noticePlace(wide), { left: wide.left, width: wide.width - LANE_WIDTH });
-  });
-
-  test("a stored bottom-left spot sits right of the rail, and back at the screen's corner when the rail goes", () => {
-    const size = { width: BAR_WIDTH, height: 150 };
-    const withRail = freeArea({ width: 844, height: 390 }, phone({ band: false, options: false, safe: SAFE, rail: true }));
-    assert.equal(spotHang({ corner: "bl", x: 0, y: 0 }, withRail, size).left, 295 + EDGE);
-    const without = freeArea({ width: 844, height: 390 }, phone({ band: false, options: false, safe: SAFE }));
-    assert.equal(spotHang({ corner: "bl", x: 0, y: 0 }, without, size).left, 47 + EDGE);
   });
 });
 
@@ -901,20 +833,5 @@ describe("a summary row risen over the bars (follow-up to docs/design-v1-bar-doc
     assert.equal(raised.row, 8);
     assert.equal(columnFacts(raised, { top: 122, measured: null, row: 8 }), raised);
     assert.equal(columnFacts(raised, { top: 122, measured: null })!.row, undefined, "back at its place");
-  });
-});
-
-describe("the Multi-select hint", () => {
-  test("from 900 px up the room comes from the map's width, whichever hint shows", () => {
-    // 1280 x 800: the map is 920 wide, and the bar's padding and edges take 18.
-    assert.equal(hintRoom({ wide: true, mapWidth: 920, padding: 18, inner: 120 }), 622);
-    assert.equal(shortHint(hintRoom({ wide: true, mapWidth: 920, padding: 18, inner: 120 })), false);
-    assert.equal(hintRoom({ wide: true, mapWidth: 920, padding: 18, inner: 900 }), 622, "the bar's own width never decides");
-    assert.equal(shortHint(hintRoom({ wide: true, mapWidth: 540, padding: 18, inner: 900 })), true);
-  });
-
-  test("on a phone the bar's own inner width is the room", () => {
-    assert.equal(shortHint(hintRoom({ wide: false, mapWidth: 649, padding: 110, inner: 539 })), true);
-    assert.equal(shortHint(hintRoom({ wide: false, mapWidth: 820, padding: 18, inner: 802 })), false);
   });
 });

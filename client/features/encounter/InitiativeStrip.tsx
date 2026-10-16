@@ -592,8 +592,8 @@ function FightAlerts() {
       .map((b) => b.getBoundingClientRect());
     const rules = {
       row: usual,
-      // Its shadow keeps inside the window, and off the tool's rail.
-      minLeft: ((chrome.rail > 0 ? chrome.rail : chrome.safe.left) + SHADOW_ROOM) * zoom,
+      // Its shadow keeps inside the window.
+      minLeft: (chrome.safe.left + SHADOW_ROOM) * zoom,
       ceiling: header.firstElementChild?.getBoundingClientRect().top ?? 0,
       floor: (height - chrome.controls - theme.space(1)) * zoom,
       taken: lasting === null ? [] : [{ top: chrome.top * zoom, bottom: (lasting + theme.space(1)) * zoom }],
@@ -794,11 +794,10 @@ function FightAlerts() {
    */
   // The right safe area as the map sees it: none beside the side panel (theme.safe.mapRight).
   const rightPad = sheetWidth > 0 ? `${EDGE}px` : `calc(${theme.safe.mapRight} + ${EDGE}px)`;
-  // The tool's rail takes the left in place of the left safe area, so a card never reaches over the tool's options (barDock.ts columnCards, the same rule in numbers).
-  const rail = chrome?.rail ?? 0;
-  const cardWidth = `min(${CARD_MAX}px, calc(100% - ${sheetWidth + 2 * EDGE}px - ${rail > 0 ? `${rail}px` : theme.safe.left} - ${sheetWidth > 0 ? "0px" : theme.safe.mapRight}))`;
-  // The shadow's room at the left, but never past the window's left edge on a phone the cards span, nor over the rail.
-  const leftPad = `min(${SHADOW_ROOM}px, calc(100% - ${rail}px - ${cardWidth} - ${rightPad}))`;
+  // The safe areas and a sheet take their share of the width (barDock.ts columnCards, the same rule in numbers).
+  const cardWidth = `min(${CARD_MAX}px, calc(100% - ${sheetWidth + 2 * EDGE}px - ${theme.safe.left} - ${sheetWidth > 0 ? "0px" : theme.safe.mapRight}))`;
+  // The shadow's room at the left, but never past the window's left edge on a phone the cards span.
+  const leftPad = `min(${SHADOW_ROOM}px, calc(100% - ${cardWidth} - ${rightPad}))`;
   return (
     <div
       ref={columnRef}

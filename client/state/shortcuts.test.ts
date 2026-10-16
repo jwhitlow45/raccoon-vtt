@@ -429,6 +429,13 @@ describe("the sheet's rows beside the keys", () => {
     assert.deepEqual(inputs("dm", DESKTOP, "Side panel tabs"), inputs("player", DESKTOP, "Side panel tabs"));
   });
 
+  test("a tool's options keep their keys in their own section, on every device", () => {
+    for (const role of ROLES) {
+      for (const device of [DESKTOP, IPHONE, ANDROID]) assert.deepEqual(inputs(role, device, "Tool options"), ["Enter, Space", "Arrow keys"], `${role} ${JSON.stringify(device)}`);
+    }
+    assert.ok(section("player", IPHONE, "Tool options")?.intro?.startsWith("A tool's options row"));
+  });
+
   test("each role sees its own rows", () => {
     assert.deepEqual(inputs("dm", IPHONE, "Initiative"), ["Enter", "Escape", "Enter"]);
     assert.deepEqual(inputs("player", IPHONE, "Initiative"), ["Enter", "Escape"], "only the DM types several values");

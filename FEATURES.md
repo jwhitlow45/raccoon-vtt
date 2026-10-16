@@ -48,12 +48,12 @@ This page lists what RaccoonVTT does today, grouped by area. "The DM" means anyo
 - The action bar opens with a summary: AC, HP, speed and passive Perception for a creature whose stats you have, then the HP entry, then for the DM a monster's or NPC's six saving throws and its resistances, immunities and vulnerabilities from its stat block. On a phone held sideways, a window made shorter than 300 px, or a screen too short for the whole bar, such as a phone held upright at a larger interface size, the bar keeps AC, HP and the HP entry at the top, and "More stats" holds the rest. A phone held upright keeps one layout whichever token you tap, with Apply in view. "Stat block" opens the whole block in the token's panel, with the action bar still open beside it on a wide screen or a phone on its side, except where the panel fills a very short screen. A player's own character offers "Open the sheet". "Details" sits beside them.
 - The action bar's buttons come in rows. Undo move, Doesn't count and the door lead on a line of their own when they apply. Then come Conditions, Hidden and Multi-select, always together on one line, then Request a roll and Light. The last row holds Locked, Duplicate and Delete for the DM, or Dismiss for a companion's player.
 - A tap on empty map closes the action bar. Panning, pinching and holding a finger down to ping leave it open.
-- The fight's alerts and a docked action bar share the right of the map without covering each other. Where there is no room for both, the alerts show as one row naming the most pressing one, and its tap hides the bar and shows them. Where the tool's options leave the alerts too little room for one whole card, as on a short phone with the Ruler, the same row stands for them, clear of the tool's buttons and of End turn. Its tap opens a roll waiting for your answer, or shows the alerts over the tool's options until you tap elsewhere, and opens the alerts over the screen where the column has no room, until you tap Close, press Escape or go Back. The action bar and the tool's options keep clear of notices that last, such as Reconnecting or the Starting view bar, and the options scroll past that room.
+- The fight's alerts and a docked action bar share the right of the map without covering each other. Where there is no room for both, the alerts show as one row naming the most pressing one, and its tap hides the bar and shows them. Where the tool's options leave the alerts too little room for one whole card, as on a small phone with the Ruler, the same row stands for them, clear of the tool's buttons and of End turn. Its tap opens a roll waiting for your answer, or shows the alerts over the tool's options until you tap elsewhere, and opens the alerts over the screen where the column has no room, until you tap Close, press Escape or go Back. The action bar keeps clear of notices that last, such as Reconnecting or the Starting view bar.
 - On a phone held upright, an open sheet folds the token's action bar and the fight's alerts into one row on the sheet's top edge: a button with the token's name, its Close, and one button that names the most pressing alert and how many more wait. The token's name closes the sheet and brings the bar back as it was, a half-typed HP entry included. The alert button closes the sheet and shows the alerts, or opens a roll waiting for your answer. Where the screen is too short for that row, its buttons sit in the sheet's header.
 - The fit button in the top bar ("Fit the map to the screen") brings the map back into view. A pinch anywhere but the map never zooms the page.
 - Android's Back button and the Escape key close an open sheet, handout or action bar before they leave the room. While the token's panel shows that token, they and the bar's Close put the bar away and keep the token in the panel. With the bar away, Escape lets go of the token.
 - On a phone, panels open as sheets from the bottom, and the toolbar names each tool under its icon, as it does on any touch screen. On a screen 900 px or wider, panels are tabs in a side panel, in one row: the most used first, as many as fit, then More, which lists the rest. A panel opened from More shows its name on More, and the tabs never move. A long name there may end in "…", and the panel then shows its full name at its top. A count on a panel inside More shows on More too. Hide panels at the end of the tabs, or the S key, hides the side panel, and Panels in the toolbar brings it back. This device remembers the choice. A short screen, such as a large phone held sideways, starts with it hidden. The toolbar scrolls sideways when its tools do not fit, and with a mouse the wheel scrolls it. On a phone held sideways, Hide in a panel's header tucks the panel away with its place kept, and Panels brings it back. Where the screen is too short for a panel beside the map, it opens over the whole screen, with the token's actions and the fight's alerts as buttons in its header, and the room's notices, "Your turn" and messages between the header and the panel.
-- On a short screen held sideways, such as a phone, a tool whose options take more than one row opens them in a column on the left of the map that scrolls, so the map keeps its height. Multi-select, Ping, Pin and Add token keep their one-row bar at the bottom, unless the screen is too narrow for it to stay one row.
+- A tool's options take one row. On a phone it sits above the toolbar. On a computer it floats above the toolbar. What does not fit the row waits behind ⋯ (More options), and a wider screen shows more of it. Choices with many values, such as the drawing tool, a color or an area's shape, show their value on a button that opens a small pop-up above the row, and the map stays live under it: two fingers still pan and zoom, and a tap on the map closes it without drawing or pinging. The tool's hint or reading floats above the row on one line, and a tap shows all of it when it is cut. Buttons that show a value, such as an area's shape, add their icon where the row has room.
 - Panels are listed with the ones used in play first, in an order that never changes with use. A DM's phone list and the side panel's More group them under In play and Prepare.
 - A page inside a panel, such as a journal page, a monster's stat block, an area's damage page, the encounter editor or a Menu page like Members, puts its own name at the top, with a back button that says where it goes, such as "Back to Journal".
 - Add to Home Screen installs it as a full-screen app on an iPhone. The screen stays awake during a session.
@@ -89,7 +89,7 @@ The Builder tool is the DM's. Its modes:
 - While Heights and stairs is open, each raised or lowered area shows its height in a pill, such as "↑10 ft". The pills grow and shrink with the map like token names. They draw under token names, condition chips, elevation badges and HP bars, and keep off them. A pill with no free spot at the current zoom shows again once zooming in gives it room.
 - **Label**: type, then tap the map. Tap a label, here or with the Select tool, to change its text and size or delete it, or drag it to move it.
 - **Lights**: a tap places a light (Candle, Torch, Lamp, Hooded Lantern, Light or Daylight), up to 100 a scene. Tap one to change its reach, turn it on or off, choose whether walls cast shadows from it, or delete it. Drag one to move it. Players see only the light it gives, never the light itself.
-- **Stamp** places pictures: 46 shipped top-down stamps (trees, stones, foliage, village pieces, furniture and rocks) or any token image in the room's library. A stamp moves by dragging, turns and resizes by its handles, takes one of 8 tints, flips, comes to the front, duplicates, hides from players, or is deleted.
+- **Stamp** places pictures: 46 shipped top-down stamps (trees, stones, foliage, village pieces, furniture and rocks) or any token image in the room's library. A stamp moves by dragging, turns and resizes by its handles, takes one of 8 tints, flips, comes to the front, duplicates, hides from players, or is deleted. Its tint, flip, front, duplicate, DM only, delete and Done sit in the builder's row, or behind ⋯ where the row has no room, on every screen.
 - The builder's bar has Undo and Redo buttons, the same undo as everywhere else. "Clear the build" in the scene's settings removes all of the build.
 
 ## Tokens
@@ -384,7 +384,7 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | / | Search the scene in the outliner | DM |
 | S | Hide or show the side panel, on a screen 900 px or wider | everyone |
 | ? | Show the shortcuts | everyone |
-| Escape | Close a sheet, else the token's action bar, else let go of the selection and end Multi-select. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done | everyone |
+| Escape | Close an open pop-up first, then a sheet, else the token's action bar, else let go of the selection and end Multi-select. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done. A field outside the pop-up keeps its Escape | everyone |
 
 ### Mouse with keys
 
@@ -402,7 +402,16 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 
 | Button | Does | Who |
 | --- | --- | --- |
-| Back button | Close what opened last, such as a sheet, a dialog, a handout or the action bar | everyone |
+| Back button | Close what opened last, such as a pop-up, a sheet, a dialog, a handout or the action bar | everyone |
+
+### Tool options
+
+A tool's options row, its More options and the pop-ups its buttons open.
+
+| Key | Does | Who |
+| --- | --- | --- |
+| Enter, Space | Open its pop-up with the keyboard in it | everyone, on a button that shows a value, or on More options |
+| Arrow keys | Change the choice and keep the pop-up open. Enter or Space picks it and closes the pop-up | everyone, in a pop-up's choice |
 
 ### Side panel tabs
 

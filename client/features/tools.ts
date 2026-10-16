@@ -112,20 +112,16 @@ export type ToolDef = {
   /** Runs when another tool takes over, or the scene changes. End any preview the tool sent here. */
   deactivate?(ctx: ToolContext): void;
   /**
-   * The tool's options (color, shape, size), as HTML. It docks above the
-   * toolbar on phones and floats above it on wide screens. It renders inside
-   * RoomProvider, so it may use the room hooks.
+   * The tool's options (color, shape, size), as one row of slots on the
+   * options strip (features/measure/controls.tsx OptionsStrip), which Room
+   * stands on a phone's toolbar, floats above a computer's, or puts in the
+   * toolbar's own row on a short sideways screen
+   * (docs/design-v1-tool-options.md 4). It renders inside RoomProvider, so
+   * it may use the room hooks.
    */
   Options?: ComponentType<{ role: "dm" | "player" }>;
   /** Whether the options show right now. Left out, they show whenever the tool is active. */
   optionsShown?(state: RoomView): boolean;
-  /**
-   * "foot" for options that are one row that never changes with use: they
-   * stay in the bar at the foot on a short screen held sideways, where it
-   * costs less map than the rail, unless their row wraps there
-   * (pages/optionsPlace.ts). Left out, the options take the rail there.
-   */
-  optionsAt?: "foot";
   /** A CSS cursor for the canvas while the tool is active. */
   cursor?: string;
   /**
@@ -150,7 +146,6 @@ export const selectTool: ToolDef = {
   order: TOOL_ORDER.select,
   Options: SelectOptions,
   optionsShown: (s) => s.local.multi,
-  optionsAt: "foot",
 };
 
 /** Every tool, one per line. */

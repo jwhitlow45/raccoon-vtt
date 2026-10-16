@@ -79,7 +79,7 @@ describe("the bar's rows", () => {
 /** A phone's chrome at full size, without Multi-select's bar: the top bar, the toolbar and the safe areas. */
 function chrome(input: { side: number; bottom: number; sheet?: number }): Chrome {
   const toolbar = 60 + input.bottom;
-  return { top: 52, bottom: toolbar, controls: toolbar, toolbar, safe: { top: 0, right: input.side, bottom: input.bottom, left: input.side }, sheet: input.sheet ?? 0, rail: 0 };
+  return { top: 52, bottom: toolbar, controls: toolbar, toolbar, safe: { top: 0, right: input.side, bottom: input.bottom, left: input.side }, sheet: input.sheet ?? 0 };
 }
 
 const desk = (height: number, column: BarRoom["column"] = null): BarRoom => ({

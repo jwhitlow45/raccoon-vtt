@@ -42,7 +42,7 @@ describe("openStatBlock", () => {
     const at = (width: number, height: number, safeLeft = 0) => {
       const scope = new RoomScope();
       const dock = scope.get(barDockSlot);
-      dock.setState({ chrome: { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: { top: 0, right: safeLeft, bottom: 0, left: safeLeft }, sheet: 0, rail: 0 } });
+      dock.setState({ chrome: { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: { top: 0, right: safeLeft, bottom: 0, left: safeLeft }, sheet: 0 } });
       const { calls, ui } = recorder();
       openStatBlock(scope, ui, "g1", { width, height });
       return calls.includes("showActions false");
@@ -58,7 +58,7 @@ describe("openStatBlock", () => {
   test("hides the bar where Room says a sheet would open over the whole screen, and only there", () => {
     const at = (sheetFullMode: boolean) => {
       const scope = new RoomScope();
-      scope.get(barDockSlot).setState({ chrome: { top: 100, bottom: 81, controls: 81, toolbar: 81, safe: { top: 0, right: 47, bottom: 21, left: 47 }, sheet: 0, rail: 0 } });
+      scope.get(barDockSlot).setState({ chrome: { top: 100, bottom: 81, controls: 81, toolbar: 81, safe: { top: 0, right: 47, bottom: 21, left: 47 }, sheet: 0 } });
       scope.get(dockSlot).setState({ sheetFullMode });
       const { calls, ui } = recorder();
       openStatBlock(scope, ui, "g1", { width: 649, height: 300 });

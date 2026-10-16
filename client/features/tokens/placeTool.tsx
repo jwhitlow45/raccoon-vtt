@@ -67,7 +67,6 @@ export const placeTool: ToolDef = {
     resetPending(ctx.scope);
   },
   Options: PlaceOptions,
-  optionsAt: "foot",
 };
 
 const KIND_OPTIONS: { value: TokenKind; label: string }[] = [
