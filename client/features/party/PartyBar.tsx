@@ -1,7 +1,9 @@
 import { useMemo, useState, type CSSProperties } from "react";
+import { AcBadge } from "../../components/AcBadge.tsx";
 import { Button } from "../../components/Button.tsx";
 import { Empty } from "../../components/Empty.tsx";
 import { Icon } from "../../components/Icon.tsx";
+import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { footprint } from "../../lib/scene.ts";
 import { effectChip } from "../../lib/tokenView.ts";
@@ -48,7 +50,7 @@ function storeFolded(folded: boolean): void {
 /**
  * The party bar (docs/design-v1-dm-tools.md 3.4): each party member's
  * portrait, name, HP with temporary HP and a thin bar by its label, AC on a
- * shield, Passive Perception on an eye, up to three condition chips, and
+ * shield, Passive Perception as "PP 13", up to three condition chips, and
  * Dying, Stable or Dead in place of the bar. A tap frames the character's
  * token on the scene in view and opens its action bar. "Ask the party"
  * opens Request a roll for the same party.
@@ -197,8 +199,14 @@ function Entry(props: { entry: PartyEntry; onFrame(): void }) {
           </span>
         )}
         <span style={{ display: "flex", alignItems: "center", gap: theme.space(2), fontSize: theme.font.small, color: theme.color.textMuted }}>
-          <Stat icon={SHIELD} label="AC" value={entry.ac} />
-          <Stat icon={EYE} label="Passive Perception" value={entry.passivePerception} />
+          {/* Both say what they are on screen, not in a tooltip a touch screen never shows (docs/design-v1-layout-hierarchy.md M9). */}
+          <AcBadge ac={entry.ac} size="sm" />
+          <span style={{ position: "relative", whiteSpace: "nowrap" }}>
+            <span aria-hidden>
+              PP <span style={{ color: theme.color.text, fontVariantNumeric: "tabular-nums" }}>{entry.passivePerception}</span>
+            </span>
+            <span style={VISUALLY_HIDDEN}>Passive Perception {entry.passivePerception}</span>
+          </span>
           <span style={{ flex: 1 }} />
           {entry.chips.map((effect) => {
             const chip = effectChip(effect);
@@ -230,20 +238,6 @@ function Entry(props: { entry: PartyEntry; onFrame(): void }) {
         {!here ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>Not on this scene</span> : null}
       </span>
     </button>
-  );
-}
-
-const SHIELD = "M12 2 4 5v6c0 5.2 3.4 9.8 8 11 4.6-1.2 8-5.8 8-11V5z";
-const EYE = "M12 5C6.6 5 2.7 9.2 1.5 12c1.2 2.8 5.1 7 10.5 7s9.3-4.2 10.5-7C21.3 9.2 17.4 5 12 5zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z";
-
-function Stat(props: { icon: string; label: string; value: number }) {
-  return (
-    <span title={props.label} style={{ display: "inline-flex", alignItems: "center", gap: theme.space(0.75), color: theme.color.text }}>
-      <svg aria-hidden width={14} height={14} viewBox="0 0 24 24" style={{ fill: theme.color.textMuted }}>
-        <path d={props.icon} />
-      </svg>
-      {props.value}
-    </span>
   );
 }
 
