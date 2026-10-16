@@ -160,14 +160,13 @@ export function Entry(props: { entry: PartyEntry; onFrame(): void }) {
   const life = lifeWord(entry.life);
   const color = LABEL_COLOR[entry.label];
   const here = entry.tokenId !== null;
-  // A corpse's AC answers nothing, so its shield hides as it does on the token and in the tracker, and comes back with Revive (docs/design-v1-token-panel.md 3.9).
-  const ac = entry.life === "dead" ? null : entry.ac;
+  const ac = entry.shield;
   return (
     <button
       type="button"
       onClick={props.onFrame}
       disabled={!here}
-      aria-label={`${entry.character.name}: HP ${hpLine(entry.hp)}${life ? `, ${life}` : ""}${ac !== null && ac > 0 ? `, AC ${ac}` : ""}, Passive Perception ${entry.passivePerception}${here ? ". Show it on the map" : ", not on this scene"}`}
+      aria-label={`${entry.character.name}: HP ${hpLine(entry.hp)}${life ? `, ${life}` : ""}${ac !== null ? `, AC ${ac}` : ""}, Passive Perception ${entry.passivePerception}${here ? ". Show it on the map" : ", not on this scene"}`}
       style={{
         display: "flex",
         alignItems: "center",

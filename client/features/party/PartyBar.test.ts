@@ -40,9 +40,9 @@ describe("the folded party bar", () => {
 });
 
 describe("a party member's row", () => {
-  const rowOf = (life: "alive" | "dead") => {
+  const rowOf = (life: "alive" | "dead", max = 24) => {
     const state = room({
-      characters: { ayla: character("ayla", { name: "Ayla", ownerIds: ["p1"], actor: actor({ ac: 15, passivePerception: 13, life, hp: { cur: life === "dead" ? 0 : 18, max: 24, temp: 0 } }) }) },
+      characters: { ayla: character("ayla", { name: "Ayla", ownerIds: ["p1"], actor: actor({ ac: 15, passivePerception: 13, life, hp: { cur: life === "dead" || max === 0 ? 0 : 18, max, temp: 0 } }) }) },
       tokens: { a1: token("a1", { kind: "pc", sceneId: "s1", actor: { ref: "ayla" } }) },
     });
     const [entry] = partyEntries(state, "s1");
@@ -62,6 +62,13 @@ describe("a party member's row", () => {
 
   test("hides a dead member's AC, as the token and the tracker do", () => {
     const markup = rowOf("dead");
+    assert.doesNotMatch(markup, /Armor Class/);
+    assert.doesNotMatch(markup, /AC 15/);
+  });
+
+  test("hides the AC of a member with no HP to show, who is drawn alive whatever life it stores, as the token and the tracker do (SOL-07)", () => {
+    const markup = rowOf("dead", 0);
+    assert.doesNotMatch(markup, /Dead/, "drawn alive");
     assert.doesNotMatch(markup, /Armor Class/);
     assert.doesNotMatch(markup, /AC 15/);
   });

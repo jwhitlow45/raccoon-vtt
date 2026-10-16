@@ -55,6 +55,20 @@ describe("the party bar", () => {
     assert.equal(lifeWord(ayla.life), null);
   });
 
+  test("an entry's shield shows its AC, and none for the dead, for a character with no HP to show or for an AC of 0", () => {
+    const state = setup();
+    const shield = (over: Parameters<typeof actor>[0]) => {
+      state.characters.ayla = { ...state.characters.ayla!, actor: actor({ ac: 16, hp: { cur: 18, max: 24, temp: 0 }, ...over }) };
+      return partyEntries(state, "s1").find((e) => e.character.id === "ayla")!.shield;
+    };
+    assert.equal(shield({}), 16);
+    assert.equal(shield({ life: "dead", hp: { cur: 0, max: 24, temp: 0 } }), null, "dead");
+    // Drawn alive (shownLife), yet with no HP to show it has no AC to answer either.
+    assert.equal(shield({ life: "dead", hp: { cur: 0, max: 0, temp: 0 } }), null, "max HP 0, stored dead");
+    assert.equal(shield({ hp: { cur: 0, max: 0, temp: 0 } }), null, "max HP 0, alive");
+    assert.equal(shield({ ac: 0 }), null, "AC 0");
+  });
+
   test("a tap frames the token on the scene in view, and one with no token there has none to frame", () => {
     const state = setup();
     const onS1 = partyEntries(state, "s1");

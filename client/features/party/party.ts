@@ -1,5 +1,5 @@
 import type { Character, Effect, LifeState, RoomState } from "#shared/model.ts";
-import { shownLife } from "#shared/rules/hp.ts";
+import { hpLess, shownLife } from "#shared/rules/hp.ts";
 import { hpLabel, type HpLabel } from "../../lib/tokenView.ts";
 import { characterToken, partyCharacters } from "../rolls/logic.ts";
 
@@ -22,6 +22,12 @@ export type PartyEntry = {
   /** Current over maximum, 0 to 1, for the thin bar. */
   fraction: number;
   ac: number;
+  /**
+   * The AC its shield shows, or null: none for the dead, whose AC answers
+   * nothing, or for a character with no HP to show (hpLess), as on its
+   * token and in the tracker (docs/design-v1-token-panel.md 3.9).
+   */
+  shield: number | null;
   passivePerception: number;
   chips: Effect[];
   /** Effects past the chips, shown as "+N". */
@@ -41,6 +47,7 @@ export function partyEntries(view: Pick<RoomState, "members" | "characters" | "t
       life: shownLife(actor) ?? "alive",
       fraction: actor.hp.max > 0 ? Math.max(0, Math.min(1, actor.hp.cur / actor.hp.max)) : 0,
       ac: actor.ac,
+      shield: actor.life === "dead" || hpLess(actor) || !(actor.ac > 0) ? null : actor.ac,
       passivePerception: actor.passivePerception,
       chips: actor.effects.slice(0, PARTY_CHIPS),
       more: Math.max(0, actor.effects.length - PARTY_CHIPS),
