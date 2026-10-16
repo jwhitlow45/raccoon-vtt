@@ -1327,6 +1327,10 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     const view = viewer(dm, "Strange letter");
     await view.waitFor();
     await view.getByText(/^3 pages, .+\. Showing now\. Close it in the DM panel to delete it\.$/).waitFor();
+    // The details describe the viewer, so a screen reader hears them as it opens.
+    const described = await view.getAttribute("aria-describedby");
+    assert.ok(described, "the viewer has no description");
+    assert.match((await dm.locator(`[id="${described}"]`).textContent()) ?? "", /^3 pages, .+ Showing now\./);
     assert.equal(await view.getByRole("button", { name: /^Delete/ }).count(), 0, "Delete while it shows");
     await indicatorIs(view, "1 of 3", "the Library's View");
     await shots.take(dm, "pdf-library-document-view");

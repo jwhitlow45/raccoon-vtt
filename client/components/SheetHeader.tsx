@@ -90,6 +90,8 @@ export function SheetHeader(props: {
    * (docs/design-v1-pdf-handouts.md 8.4). In line with the title's text.
    */
   detail?: ReactNode;
+  /** The detail lines' id, for a dialog that names them as its description. */
+  detailId?: string;
 }) {
   const { back, level = 2 } = props;
   const Heading = level === 2 ? "h2" : "h3";
@@ -148,7 +150,9 @@ export function SheetHeader(props: {
     return (
       <header style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, borderBottom: divider }}>
         <div style={rowStyle}>{row}</div>
-        <div style={{ minWidth: 0, padding: `0 ${padding + theme.space(2)}px ${theme.space(2)}px`, marginTop: -theme.space(2) }}>{props.detail}</div>
+        <div id={props.detailId} style={{ minWidth: 0, padding: `0 ${padding + theme.space(2)}px ${theme.space(2)}px`, marginTop: -theme.space(2) }}>
+          {props.detail}
+        </div>
       </header>
     );
   }

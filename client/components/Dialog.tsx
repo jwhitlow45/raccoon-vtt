@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { useId, useLayoutEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { layoutWidth } from "../features/device/layout.ts";
 import { useBackClose } from "../lib/backClose.ts";
@@ -37,7 +37,7 @@ export type DialogProps = {
   back?: HeaderBack | null;
   /** Between the title and the close button. */
   headerActions?: ReactNode;
-  /** Lines under the title inside the header, such as the handout viewer's details (SheetHeader `detail`). */
+  /** Lines under the title inside the header, such as the handout viewer's details (SheetHeader `detail`). They describe the dialog, so a screen reader hears them as it opens. */
   headerDetail?: ReactNode;
   /** Where focus returns on close, when not to whatever had it as the dialog opened. */
   opener?: RefObject<HTMLElement | null>;
@@ -129,6 +129,7 @@ export function Dialog(props: DialogProps) {
   // On the server's render, with no window, the computer's card.
   const { card, bottom } = dialogCard(typeof window === "undefined" ? DIALOG_PHONE_MAX : layoutWidth(), props);
   const dialog = useRef<HTMLDialogElement>(null);
+  const detailId = useId();
   useBackClose(props.backClose === true, onClose);
   useModalDialog(dialog, { onClose, ...(props.opener ? { returnFocus: props.opener } : null), ...(props.zoom === false ? { zoom: false } : null) });
   useStepFocus(dialog, props.title);
@@ -139,6 +140,7 @@ export function Dialog(props: DialogProps) {
       ref={dialog}
       aria-modal="true"
       aria-label={props.title}
+      aria-describedby={header && props.headerDetail ? detailId : undefined}
       tabIndex={-1}
       onClick={(e) => {
         if (props.dismissOnBackdrop !== false && e.target === e.currentTarget) onClose();
@@ -174,7 +176,7 @@ export function Dialog(props: DialogProps) {
           ...card,
         }}
       >
-        {header ? <SheetHeader title={props.title} back={props.back} actions={props.headerActions} detail={props.headerDetail} onClose={onClose} divider /> : null}
+        {header ? <SheetHeader title={props.title} back={props.back} actions={props.headerActions} detail={props.headerDetail} detailId={detailId} onClose={onClose} divider /> : null}
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", padding: theme.space(4), ...props.bodyStyle }}>{props.children}</div>
         {props.footer || props.status ? (
           <footer
