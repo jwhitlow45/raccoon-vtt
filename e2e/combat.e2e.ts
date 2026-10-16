@@ -1046,6 +1046,97 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await dm.keyboard.press("Escape");
   });
 
+  test("13g. by keyboard, focus moves on when a control takes itself away: the companion forms, New character, and Revive in the bar, a row, a sub-row and the panel (SFB-P-3)", async () => {
+    const focused = (page: Page) =>
+      page.evaluate(() => {
+        const a = (globalThis as unknown as { document: { activeElement: { tagName: string; hasAttribute(n: string): boolean; getAttribute(n: string): string | null; textContent: string | null } | null } }).document.activeElement;
+        if (!a) return "none";
+        return `${a.tagName.toLowerCase()} ${a.hasAttribute("data-hp-vitals") ? "HP line" : (a.getAttribute("aria-label") ?? (a.textContent ?? "").trim())}`;
+      });
+    const press = async (page: Page, control: Locator) => {
+      await control.focus();
+      await page.keyboard.press("Enter");
+    };
+    const lands = async (page: Page, where: RegExp, label: string) => {
+      try {
+        await waitFor(label, async () => where.test(await focused(page)), 3_000);
+      } catch {
+        assert.fail(`${label}: focus is on "${await focused(page)}", not ${where}`);
+      }
+    };
+
+    // Ana's Add a companion: into the form's heading, and back to the opener on Cancel.
+    await setUp(ana, await anaContext.newCDPSession(ana), { ...DESK, scale: 1 });
+    await ana.getByRole("tab", { name: "Characters" }).click();
+    await press(ana, ana.getByRole("button", { name: "Add a companion" }));
+    await lands(ana, /^h3 Add a companion for Bree/, "Add a companion opened");
+    await press(ana, ana.getByRole("button", { name: "Cancel" }));
+    await lands(ana, /^button Add a companion$/, "Add a companion cancelled");
+
+    // The DM's New character, the same way.
+    await setUp(dm, dmCdp, { ...DESK, scale: 1 });
+    await dm.getByRole("tab", { name: "Characters" }).click();
+    await press(dm, dm.getByRole("button", { name: "New character" }));
+    await lands(dm, /^h3 New character/, "New character opened");
+    await press(dm, dm.getByRole("button", { name: "Cancel" }));
+    await lands(dm, /^button New character$/, "New character cancelled");
+
+    // Make a companion on the chest: the first field, the opener again on Cancel, and done its section's label.
+    await dm.getByRole("tab", { name: "Outliner" }).click();
+    await dm.getByRole("tabpanel", { name: "Outliner" }).getByRole("button", { name: /^Chest/ }).click();
+    await bar(dm, "Chest").getByRole("button", { name: "Details" }).click();
+    const panel = dm.getByRole("tabpanel", { name: "Token" });
+    await panel.getByRole("heading", { name: "Chest" }).waitFor();
+    await openFold(panel, "Token settings");
+    await press(dm, panel.getByRole("button", { name: "Make a companion", exact: true }));
+    await lands(dm, /^select Belongs to/, "Make a companion opened");
+    await press(dm, panel.getByRole("button", { name: "Cancel", exact: true }));
+    await lands(dm, /^button Make a companion$/, "Make a companion cancelled");
+    await press(dm, panel.getByRole("button", { name: "Make a companion", exact: true }));
+    await panel.getByRole("combobox", { name: "Belongs to", exact: true }).selectOption({ label: "Bree" });
+    await press(dm, panel.getByRole("button", { name: "Make a companion", exact: true }));
+    await waitFor("the chest a companion", () => dmSocket.state?.tokens[run.chest]?.companion);
+    await lands(dm, /^button Token settings/, "Make a companion done");
+    await ops.send({ t: "token.update", tokenId: run.chest, patch: { companion: null } });
+
+    // Revive in the bar: to its frame, where Ctrl+Z still reaches the room's undo.
+    const goblin = goblinName(10);
+    const dead = () => ops.send({ t: "actor.life", target: { tokenId: run.goblins[10]! }, life: "dead" });
+    await dead();
+    await openTracker(dm);
+    await (await rowButton(dm, goblin)).click();
+    const b = bar(dm, goblin);
+    await press(dm, b.getByRole("button", { name: "Revive" }));
+    await lands(dm, new RegExp(`^div ${goblin} actions`), "Revive in the bar");
+    await waitFor("the goblin alive", () => (goblinState(10)?.life === "alive" ? true : null));
+    await dm.keyboard.press("Control+z");
+    await waitFor("Ctrl+Z took the Revive back", () => (goblinState(10)?.life === "dead" ? true : null));
+    // Revive in the row's options: to the row's button, the options still open.
+    await openTracker(dm);
+    await press(dm, dm.getByRole("button", { name: `${goblin} options` }));
+    await press(dm, dm.locator("[data-round-section]").getByRole("button", { name: "Revive" }));
+    await lands(dm, new RegExp(`^button ${goblin}[.,]`), "Revive in the row's options");
+    await dm.getByRole("button", { name: `${goblin} options` }).click();
+    // Revive in the panel's life controls: to its HP line, and Mark dead the same.
+    await dead();
+    await (await rowButton(dm, goblin)).click();
+    await b.getByRole("button", { name: "Details" }).click();
+    await panel.getByRole("heading", { name: goblin }).waitFor();
+    await press(dm, panel.getByRole("button", { name: "Revive" }));
+    await lands(dm, /^div HP line$/, "Revive in the panel");
+    await press(dm, panel.getByRole("button", { name: "Mark dead" }));
+    await lands(dm, /^div HP line$/, "Mark dead in the panel");
+    await ops.send({ t: "actor.life", target: { tokenId: run.goblins[10]! }, life: "alive" });
+
+    // Revive in a listed companion's options: to its sub-row's button.
+    const spirit = Object.values(dmSocket.state!.tokens).find((t) => t.name === "Wildfire Spirit")!;
+    await ops.send({ t: "actor.life", target: { tokenId: spirit.id }, life: "dead" });
+    await openTracker(dm);
+    await press(dm, dm.getByRole("button", { name: "Wildfire Spirit options" }));
+    await press(dm, dm.locator("[data-round-section]").getByRole("button", { name: "Revive" }));
+    await lands(dm, /^button Wildfire Spirit, acts on Bree's turn/, "Revive in the sub-row's options");
+  });
+
   test("14. no page logged an error", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(anaConsole.errors, [], "Ana's page logged errors");

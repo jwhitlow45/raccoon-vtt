@@ -17,6 +17,7 @@ import { ImageField } from "../images/ImageField.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
 import { displayName, footprint } from "../../lib/scene.ts";
+import { handFocusOn } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
 import { initials } from "../../lib/tokenView.ts";
 import { useRoomScope } from "../../state/scope.ts";
@@ -115,7 +116,7 @@ export function CharacterCompanions(props: { character: Character; canAdd: boole
       ) : null}
       {props.canAdd ? (
         <div style={{ display: "flex" }}>
-          <Button size="sm" onClick={props.onAdd}>
+          <Button size="sm" onClick={props.onAdd} data-opener={`companion:${props.character.id}`}>
             Add a companion
           </Button>
         </div>
@@ -151,6 +152,9 @@ export function CompanionForm(props: {
   const [draft, setDraft] = useState<CompanionDraft>(NEW_COMPANION);
   const [error, setError] = useState<string | null>(null);
   const [waiting, setWaiting] = useState(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  // The opener went with the panel the form replaced, so focus starts at the form's heading.
+  useEffect(() => heading.current?.focus(), []);
   /*
    * An answer moves the screen only while this form is still open and in
    * sight. After Cancel, or with another panel opened since, a late one may
@@ -219,7 +223,9 @@ export function CompanionForm(props: {
     // One column no wider than the pane, so a long turn label shortens its Select rather than widening the form.
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-        <h3 style={{ margin: 0, flex: 1, fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>Add a companion for {name}</h3>
+        <h3 ref={heading} tabIndex={-1} style={{ margin: 0, flex: 1, fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>
+          Add a companion for {name}
+        </h3>
         <Button size="sm" onClick={props.onDone}>
           Cancel
         </Button>
@@ -384,28 +390,54 @@ export function MakeCompanion(props: { token: Token }) {
   const [of, setOf] = useState<string>(NO_CHARACTER);
   const [turn, setTurn] = useState<CompanionTurn>("shared");
   const make = useSend();
+  /*
+   * The opener and the form take each other's place, so focus moves with
+   * them: into the form's first field on opening, back to the opener on
+   * Cancel. Done, the token is a companion and all of this goes, so focus
+   * moves to its section's label.
+   */
+  const opener = useRef<HTMLButtonElement>(null);
+  const form = useRef<HTMLDivElement>(null);
+  const focusOpener = useRef(false);
+  useEffect(() => {
+    if (open) (form.current?.querySelector<HTMLElement>("select") ?? form.current)?.focus();
+    else if (focusOpener.current) opener.current?.focus();
+    focusOpener.current = false;
+  }, [open]);
   // A companion has stats of its own, so a token that reads a character's cannot be one.
   if (token.kind === "pc" || token.companion || "ref" in token.actor) return null;
   if (!open) {
     return (
       <div style={{ display: "flex" }}>
-        <Button size="sm" onClick={() => setOpen(true)}>
+        <Button ref={opener} size="sm" onClick={() => setOpen(true)}>
           Make a companion
         </Button>
       </div>
     );
   }
-  if (list.length === 0) return <Help>A companion belongs to a character. Make a character first.</Help>;
+  if (list.length === 0) {
+    return (
+      <div ref={form} tabIndex={-1}>
+        <Help>A companion belongs to a character. Make a character first.</Help>
+      </div>
+    );
+  }
   const character = list.find((c) => c.id === of);
   const choices = turnChoices(character?.name ?? "its character", companionWhat(token.kind));
   const chosen = choices.find((c) => c.value === turn) ?? choices[0]!;
   const cancel = () => {
+    focusOpener.current = true;
     setOpen(false);
     setOf(NO_CHARACTER);
     setTurn("shared");
   };
+  const confirm = () => {
+    if (!character) return;
+    make.send({ t: "token.update", tokenId: token.id, patch: makeCompanionPatch(token, character.id, chosen.value) });
+    handFocusOn(form.current?.closest("section"), ["h3 button"]);
+  };
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
+    <div ref={form} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
       <FieldRow label="Belongs to">
         <Select<string>
           label="Belongs to"
@@ -424,7 +456,7 @@ export function MakeCompanion(props: { token: Token }) {
           variant="primary"
           busy={make.waiting}
           disabled={!character}
-          onClick={() => character && make.send({ t: "token.update", tokenId: token.id, patch: makeCompanionPatch(token, character.id, chosen.value) })}
+          onClick={confirm}
         >
           Make a companion
         </Button>

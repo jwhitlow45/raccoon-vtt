@@ -82,6 +82,13 @@ const NO_CHARACTERS = {};
 type Drawer = "conditions" | null;
 
 /**
+ * Where focus goes once Revive leaves the bar: its frame, which announces
+ * the bar, as the dock's Show does. The HP field would take Ctrl+Z from the
+ * room's undo, which takes the Revive back, and open a phone's keyboard.
+ */
+const REVIVE_FOCUS_IN_BAR = { scope: '[role="dialog"]', to: [":scope"] } as const;
+
+/**
  * The bar that opens under a tapped token (design section 14.3), in the
  * order docs/design-v1-token-panel.md 3.3 ranks by use: the header, the
  * stat summary's vitals (AC, HP, speed, Passive Perception), the HP entry
@@ -292,7 +299,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
         actions={badge ? <span style={{ flex: "none", color: theme.color.accentSoft, fontWeight: theme.weight.bold }}>{badge} ft</span> : null}
         onClose={props.onClose}
       />
-      <VitalsLine items={short ? split.line : items} afterTag={revive ? <ReviveButton target={target} describedBy={deadLineId} /> : undefined} />
+      <VitalsLine items={short ? split.line : items} afterTag={revive ? <ReviveButton target={target} describedBy={deadLineId} focusTo={REVIVE_FOCUS_IN_BAR} /> : undefined} />
       {deadLine ? (
         <div id={deadLineId} style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>
           {deadLine}

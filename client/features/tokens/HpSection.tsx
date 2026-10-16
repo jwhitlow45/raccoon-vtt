@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { healRevivesDead } from "#shared/migrate.ts";
 import type { Actor, HpVisibility, LifeState, TokenKind } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
@@ -7,6 +7,7 @@ import { Checkbox } from "../../components/Checkbox.tsx";
 import { fieldStyle } from "../../components/Field.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { Tag } from "../../components/Tag.tsx";
+import { handFocusOn } from "../../lib/handFocus.ts";
 import { hpDisplay, hpLabel, hpText, type HpView } from "../../lib/tokenView.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
@@ -204,7 +205,8 @@ export function HpSection(props: {
   return (
     <Section title="Hit points">
       {access.full && hp ? (
-        <div style={{ display: "flex", alignItems: "baseline", gap: theme.space(2), flexWrap: "wrap" }}>
+        // Focusable from script alone: where focus goes once a life button takes itself away (LifeControls).
+        <div data-hp-vitals="" tabIndex={-1} style={{ display: "flex", alignItems: "baseline", gap: theme.space(2), flexWrap: "wrap" }}>
           <span style={{ fontSize: theme.font.display, fontWeight: theme.weight.bold }}>{hp.cur}</span>
           <span style={{ color: theme.color.textMuted }}>/ {hp.max}</span>
           {hp.temp > 0 ? <span style={{ color: theme.color.ally, fontWeight: theme.weight.strong }}>+{hp.temp} temp</span> : null}
@@ -338,15 +340,26 @@ export function DeathSaves(props: { saves: { ok: number; fail: number }; canEdit
   );
 }
 
-/** The DM's direct life changes. Reviving at 0 HP gives 1 HP, so nobody stands alive at 0. */
+/**
+ * The DM's direct life changes. Reviving at 0 HP gives 1 HP, so nobody
+ * stands alive at 0. Each button goes with the state it changes, so focus
+ * moves to the section's HP line, which reads the new state. Not the HP
+ * field, where Ctrl+Z would not reach the room's undo, and not the button
+ * that comes in its place, where a second Enter would undo the change.
+ */
 function LifeControls(props: { life: LifeState; onLife(life: LifeState): void }) {
   const { life } = props;
+  const root = useRef<HTMLDivElement>(null);
+  const press = (next: LifeState) => {
+    props.onLife(next);
+    handFocusOn(root.current?.closest("section") ?? root.current?.parentElement, ["[data-hp-vitals]"]);
+  };
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
-      {life !== "alive" ? <SmallButton onClick={() => props.onLife("alive")}>Revive</SmallButton> : null}
-      {life === "dying" ? <SmallButton onClick={() => props.onLife("stable")}>Stabilize</SmallButton> : null}
+    <div ref={root} data-life-controls="" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
+      {life !== "alive" ? <SmallButton onClick={() => press("alive")}>Revive</SmallButton> : null}
+      {life === "dying" ? <SmallButton onClick={() => press("stable")}>Stabilize</SmallButton> : null}
       {life !== "dead" ? (
-        <SmallButton tone="danger" onClick={() => props.onLife("dead")}>
+        <SmallButton tone="danger" onClick={() => press("dead")}>
           Mark dead
         </SmallButton>
       ) : null}

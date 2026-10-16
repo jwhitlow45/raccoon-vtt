@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Character, CreatureSize, Member, RoomState } from "#shared/model.ts";
 import type { TokenInput } from "#shared/protocol.ts";
 import type { PanelProps } from "../panels.ts";
@@ -56,9 +56,34 @@ export default function CharactersPanel(props: PanelProps) {
 
   const own = !dm && view && you ? newCharacterState(view, you.memberId) : null;
 
+  /*
+   * A form opened from the list takes the panel's place, and its opener
+   * goes with the list. Closed, the form hands focus back to the opener
+   * once the list is drawn again, while the panel is in sight.
+   */
+  const root = useRef<HTMLDivElement>(null);
+  const returnTo = useRef<string | null>(null);
+  useEffect(() => {
+    const opener = returnTo.current;
+    if (opener === null || !root.current) return;
+    returnTo.current = null;
+    if (props.shown) root.current.querySelector<HTMLElement>(opener)?.focus();
+  });
+
   const companionOf = addingFor !== null ? characters?.[addingFor] : undefined;
   if (companionOf) {
-    return <CompanionForm character={companionOf} shown={props.shown} close={props.close} onDone={() => setAddingFor(null)} />;
+    const opener = `[data-opener="companion:${companionOf.id}"]`;
+    return (
+      <CompanionForm
+        character={companionOf}
+        shown={props.shown}
+        close={props.close}
+        onDone={() => {
+          returnTo.current = opener;
+          setAddingFor(null);
+        }}
+      />
+    );
   }
 
   if (creating) {
@@ -67,6 +92,7 @@ export default function CharactersPanel(props: PanelProps) {
         close={props.close}
         {...(!dm && you ? { owner: you.memberId } : {})}
         onDone={(id) => {
+          returnTo.current = '[data-opener="new-character"]';
           setCreating(false);
           if (id) setOpenId(id);
         }}
@@ -75,9 +101,9 @@ export default function CharactersPanel(props: PanelProps) {
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14 }}>
+    <div ref={root} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14 }}>
       {dm || own?.allowed ? (
-        <Button variant="primary" size="sm" block onClick={() => setCreating(true)}>
+        <Button variant="primary" size="sm" block onClick={() => setCreating(true)} data-opener="new-character">
           New character
         </Button>
       ) : null}
@@ -305,6 +331,9 @@ function NewCharacter(props: { onDone(id: string | null): void; close(): void; o
   const view = useRoomView((s) => s.view);
   const members = useRoomView((s) => s.view?.members);
   const players = Object.values(members ?? {}).filter((m): m is Member => !!m && m.kind === "player");
+  const heading = useRef<HTMLHeadingElement>(null);
+  // The opener went with the list the form replaced, so focus starts at the form's heading.
+  useEffect(() => heading.current?.focus(), []);
   const [name, setName] = useState("");
   const [owners, setOwners] = useState<string[]>(props.owner ? [props.owner] : []);
   const [size, setSize] = useState<CreatureSize>("medium");
@@ -353,7 +382,9 @@ function NewCharacter(props: { onDone(id: string | null): void; close(): void; o
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-        <h3 style={{ margin: 0, flex: 1, fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>New character</h3>
+        <h3 ref={heading} tabIndex={-1} style={{ margin: 0, flex: 1, fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>
+          New character
+        </h3>
         <Button size="sm" onClick={() => props.onDone(null)}>
           Cancel
         </Button>

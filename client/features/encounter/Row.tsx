@@ -117,11 +117,18 @@ export function EntryRow(props: {
 
   return (
     // A standard row, with no companions and its options closed, is what the round header leaves room for (3.1).
-    <li ref={props.rowRef} style={rowStyle} aria-current={active ? "step" : undefined} data-standard-row={companions.length === 0 && !props.expanded ? "" : undefined}>
+    <li
+      ref={props.rowRef}
+      style={rowStyle}
+      aria-current={active ? "step" : undefined}
+      data-entry-row=""
+      data-standard-row={companions.length === 0 && !props.expanded ? "" : undefined}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), minHeight: 56 }}>
         {dm ? <DragHandle drag={drag} name={name} /> : null}
         <button
           type="button"
+          data-row-button=""
           onClick={props.onShow}
           aria-label={`${name}${active ? ", acting now" : ""}. ${props.picking ? "Pick for the shared HP entry" : "Show it on the map with its actions"}`}
           aria-describedby={lineId}
@@ -240,6 +247,11 @@ export function EntryRow(props: {
   );
 }
 
+/** Where focus goes once Revive leaves a row's options: the row's own button, the options staying open under it. */
+const REVIVE_FOCUS_IN_ROW = { scope: "[data-entry-row]", to: ["[data-row-button]"] } as const;
+/** The same for a listed companion's options, to its sub-row's button. */
+const REVIVE_FOCUS_IN_SUB_ROW = { scope: "[data-companion-row]", to: ["[data-row-button]"] } as const;
+
 const NO_COMPANIONS: Token[] = [];
 const NO_HP: HpView = { kind: "none" };
 
@@ -270,10 +282,11 @@ function CompanionRow(props: { token: Token; characterName: string; entryId: str
   const owner = ownsToken({ characters: characters ?? {} }, memberId, token);
   const spent = token.companion?.reactionUsed === true;
   return (
-    <li style={{ listStyle: "none" }}>
+    <li style={{ listStyle: "none" }} data-companion-row="">
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), minHeight: theme.touch, paddingLeft: theme.touch }}>
         <button
           type="button"
+          data-row-button=""
           onClick={props.onShow}
           aria-label={`${name}, acts on ${props.characterName}'s turn. Show it on the map with its actions.`}
           aria-describedby={lineId}
@@ -359,7 +372,7 @@ function CompanionMenu(props: { token: Token; entryId: string; dm: boolean; read
     <div style={{ padding: `0 ${theme.space(2)}px ${theme.space(3)}px ${theme.touch * 2}px`, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
       {dm && props.dead && offersRevive("dead", token.kind) ? (
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2) }}>
-          <ReviveButton target={target} describedBy={reviveNoteId} />
+          <ReviveButton target={target} describedBy={reviveNoteId} focusTo={REVIVE_FOCUS_IN_SUB_ROW} />
           <span id={reviveNoteId} style={{ flex: 1, minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>
             {REVIVE_NOTE}
           </span>
@@ -575,7 +588,7 @@ function RowMenu(props: {
     <div style={{ padding: `0 ${theme.space(2)}px ${theme.space(3)}px ${dm ? theme.touch + theme.space(1) : theme.space(2)}px`, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
       {dm && props.revive && props.target ? (
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2) }}>
-          <ReviveButton target={props.target} describedBy={reviveNoteId} />
+          <ReviveButton target={props.target} describedBy={reviveNoteId} focusTo={REVIVE_FOCUS_IN_ROW} />
           <span id={reviveNoteId} style={{ flex: 1, minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>
             {REVIVE_NOTE}
           </span>
