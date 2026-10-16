@@ -590,8 +590,24 @@ describe("pausing and stopping (docs/design-v1-pdf-handouts.md 4.1.6)", () => {
       await settle();
       w.uploads[0]!.reject(new ApiError(0, "x", "network", null));
       await settle();
-      assert.deepEqual(w.toasts, shown ? [] : ["The PDF upload paused at page 1. Open Handouts in the DM panel to go on."]);
+      assert.deepEqual(w.toasts, shown ? [] : ["The PDF is open. Open Handouts in the DM panel to choose its pages.", "The PDF upload paused at page 1. Open Handouts in the DM panel to go on."]);
     }
+  });
+
+  test("a PDF refused or opened while the block is out of sight is toasted and badged, as a pause is", async () => {
+    const refused = world({ openFails: new ReaderRefusal("password", "x") });
+    refused.store.setState({ blockShown: false });
+    await refused.open();
+    assert.deepEqual(refused.toasts, ["The PDF could not be opened. Open Handouts in the DM panel."]);
+    assert.ok(waitsOnDm(refused.job()), "a refusal badges the DM panel");
+    const opened = world({ pages: 2 });
+    opened.store.setState({ blockShown: false });
+    await opened.open();
+    assert.deepEqual(opened.toasts, ["The PDF is open. Open Handouts in the DM panel to choose its pages."]);
+    assert.ok(waitsOnDm(opened.job()), "a PDF waiting for its range badges it");
+    const seen = world({ pages: 2 });
+    await seen.open();
+    assert.deepEqual(seen.toasts, [], "in sight, no toast");
   });
 });
 

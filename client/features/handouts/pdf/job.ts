@@ -207,10 +207,14 @@ export function isPdfFile(file: { type: string; name: string }): boolean {
   return (file.type === "" || file.type === "application/octet-stream") && /\.pdf$/i.test(file.name);
 }
 
-/** The job waits on the DM: what badges the DM panel and toasts while the block is out of sight (4.1.1). */
+/**
+ * The job waits on the DM: what badges the DM panel and toasts while the
+ * block is out of sight (4.1.1). A refusal and a PDF opened to its range
+ * wait too, since a DM may close the panel while the reader loads.
+ */
 export function waitsOnDm(job: PdfJob | null): boolean {
   const k = job?.phase.k;
-  return k === "paused" || k === "titleInvalid" || k === "saveFailed" || k === "empty" || k === "recovery";
+  return k === "paused" || k === "titleInvalid" || k === "saveFailed" || k === "empty" || k === "recovery" || k === "refused" || k === "range";
 }
 
 /**

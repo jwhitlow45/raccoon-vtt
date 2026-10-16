@@ -202,7 +202,7 @@ export class JobRunner implements JobControl {
       if (run !== this.#run || this.#disposed) return;
       const kind = err instanceof ReaderRefusal ? err.kind : "reader";
       this.#set({ phase: { k: "refused", kind } });
-      this.#say(REFUSALS[kind]);
+      this.#say(REFUSALS[kind], "The PDF could not be opened. Open Handouts in the DM panel.");
       return;
     }
     // Cancelled or gone while it opened.
@@ -210,7 +210,8 @@ export class JobRunner implements JobControl {
     this.#doc = doc;
     const range = defaultRange(this.#doc.numPages);
     this.#set({ numPages: this.#doc.numPages, title: pdfTitle(this.#doc.title, fileName), ...range, phase: { k: "range" } });
-    this.#say(openedWords(this.#job).join(" "));
+    // A DM who closed the panel while the reader loaded learns the PDF waits for its pages to be chosen.
+    this.#say(openedWords(this.#job).join(" "), "The PDF is open. Open Handouts in the DM panel to choose its pages.");
   }
 
   /** A ledger this device found from an upload that did not finish (4.1.2). */
