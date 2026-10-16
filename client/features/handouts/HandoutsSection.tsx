@@ -20,7 +20,7 @@ import { docShowing } from "../images/library.ts";
 import { checkImageFile, prepareImageUpload } from "../images/upload.ts";
 import { EMPTY_DRAFT, handoutDraftSlot, type HandoutDraft } from "./draft.ts";
 import { HANDOUT_MAX_BYTES, HANDOUT_MAX_SIDE } from "./downscale.ts";
-import { audienceText, pageCountText, pageName, showHandoutOp, showingKey, titleFromFileName } from "./handouts.ts";
+import { audienceText, pageCountText, pageName, showHandoutOp, showingKey, TITLE_FIELD_MAX, titleFromFileName } from "./handouts.ts";
 import { HandoutViewer, type ViewerPage } from "./HandoutViewer.tsx";
 import { JobBlock } from "./pdf/JobBlock.tsx";
 import { isPdfFile, jobPageIds, pdfPickRefusal } from "./pdf/job.ts";
@@ -359,7 +359,7 @@ function ShowHandout(props: {
         )}
         {status ? <Loading text={status} delay={0} /> : null}
       </div>
-      <Field label="Title" value={title} maxLength={80} onChange={(e) => set({ title: e.target.value })} placeholder="The old map" />
+      <Field label="Title" value={title} maxLength={TITLE_FIELD_MAX} onChange={(e) => set({ title: e.target.value })} placeholder="The old map" />
       <RadioGroup<"all" | "some">
         legend="Show to"
         value={audience}

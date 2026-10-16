@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Handout, Member } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
-import { audienceText, decodeDismissed, encodeDismissed, keepShowing, nextPopup, pageCountText, pageName, popupShows, showHandoutOp, showingKey, titleFromFileName } from "./handouts.ts";
+import { audienceText, decodeDismissed, encodeDismissed, keepShowing, nextPopup, pageCountText, pageName, popupShows, showHandoutOp, showingKey, TITLE_FIELD_MAX, titleFromFileName, titleProblem } from "./handouts.ts";
 
 const handout = (id: string, shownAt: string, to: Handout["to"] = "all"): Handout => ({ id, rev: 0, assetId: "a", title: id, to, shownAt });
 
@@ -89,6 +89,18 @@ describe("showing a handout", () => {
   test("needs a title and at least one recipient", () => {
     assert.equal(showHandoutOp({ id: "h", assetId: "a", title: " ", audience: "all" }).ok, false);
     assert.equal(showHandoutOp({ id: "h", assetId: "a", title: "x", audience: [] }).ok, false);
+  });
+
+  test("a title counts code points, as the protocol does: a saved document of 41 dragons shows under its own title, and 81 code points do not", () => {
+    const pages = [{ assetId: "p1", width: 1583, height: 2048 }];
+    const dragons = "\u{1F409}".repeat(41);
+    assert.equal(titleProblem(dragons), null, "the upload saves it");
+    const shown = showHandoutOp({ id: "h", pages, title: dragons, audience: "all" });
+    assert.ok(shown.ok, "Show it takes it");
+    assert.ok(shown.ok && clientOpSchema.safeParse(shown.op).success, "and so does the server");
+    assert.ok(dragons.length <= TITLE_FIELD_MAX, "the form's field holds it");
+    const long = showHandoutOp({ id: "h", pages, title: "\u{1F409}".repeat(81), audience: "all" });
+    assert.deepEqual(long, { ok: false, error: "A title is at most 80 characters." });
   });
 
   test("names the audience", () => {

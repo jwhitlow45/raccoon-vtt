@@ -26,6 +26,7 @@ import {
   type PdfJob,
 } from "./job.ts";
 import { usePdfJob } from "./live.ts";
+import { TITLE_FIELD_MAX } from "../handouts.ts";
 import { titleProblem } from "./title.ts";
 
 /**
@@ -170,7 +171,7 @@ function Body(props: {
     <Field
       label="Title"
       value={job.title}
-      maxLength={160}
+      maxLength={TITLE_FIELD_MAX}
       error={titleProblem(job.title)}
       onChange={(e) => runner?.setTitle(e.target.value)}
     />

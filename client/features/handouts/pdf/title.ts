@@ -1,4 +1,4 @@
-import { MAX_NAME, textSchemas } from "#shared/protocol.ts";
+import { MAX_NAME } from "#shared/protocol.ts";
 import { titleFromFileName } from "../handouts.ts";
 
 /**
@@ -54,11 +54,5 @@ export function pdfTitle(found: { xmp: string | null; info: string | null }, fil
   return cleanTitle(titleFromFileName(fileName)) || "Handout";
 }
 
-/** Why a typed title cannot be saved yet, in words for beside the field, or null when it can. */
-export function titleProblem(title: string): string | null {
-  if (title.trim() === "") return "Give the handout a title.";
-  const parsed = textSchemas.name.safeParse(title.trim());
-  if (parsed.success) return null;
-  if (parsed.error.issues.some((issue) => issue.code === "too_big")) return `A title is at most ${MAX_NAME} characters.`;
-  return "A title cannot hold line breaks, control or text direction characters.";
-}
+/** A typed title's check is every handout title's (handouts.ts). */
+export { titleProblem } from "../handouts.ts";

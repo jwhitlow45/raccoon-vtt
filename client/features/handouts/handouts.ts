@@ -1,5 +1,5 @@
 import type { Handout, HandoutPage, Member } from "#shared/model.ts";
-import { MAX_NAME, type ClientOp } from "#shared/protocol.ts";
+import { MAX_NAME, textSchemas, type ClientOp } from "#shared/protocol.ts";
 
 /**
  * Handouts (features section 16): the DM shows an image to everyone or to
@@ -81,11 +81,32 @@ export function audienceText(to: Handout["to"], members: Record<string, Member |
 /** One image by its id, as every handout from before PDFs, or a document's pages in order (docs/design-v1-pdf-handouts.md 8.2). */
 export type ShowInput = { id: string; title: string; audience: "all" | string[] } & ({ assetId: string } | { pages: readonly HandoutPage[] });
 
+/**
+ * Why a handout's title cannot be used yet, in words for beside its field,
+ * or null when it can. The protocol's own `name` rule decides, so a title
+ * counts code points as the server does: 80 dragons pass wherever a title
+ * is typed, saved or shown (docs/design-v1-pdf-handouts.md 3.3).
+ */
+export function titleProblem(title: string): string | null {
+  if (title.trim() === "") return "Give the handout a title.";
+  const parsed = textSchemas.name.safeParse(title.trim());
+  if (parsed.success) return null;
+  if (parsed.error.issues.some((issue) => issue.code === "too_big")) return `A title is at most ${MAX_NAME} characters.`;
+  return "A title cannot hold line breaks, control or text direction characters.";
+}
+
+/**
+ * The longest a title field takes as typed: twice MAX_NAME in UTF-16 units,
+ * room for MAX_NAME characters outside the basic plane. The protocol's rule
+ * above is what decides.
+ */
+export const TITLE_FIELD_MAX = 2 * MAX_NAME;
+
 /** The op that shows a handout, or why it cannot be sent yet. */
 export function showHandoutOp(input: ShowInput): { ok: true; op: Extract<ClientOp, { t: "handout.show" }> } | { ok: false; error: string } {
   const title = input.title.trim();
-  if (title === "") return { ok: false, error: "Give the handout a title." };
-  if (title.length > MAX_NAME) return { ok: false, error: `At most ${MAX_NAME} characters.` };
+  const problem = titleProblem(title);
+  if (problem) return { ok: false, error: problem };
   if (input.audience !== "all" && input.audience.length === 0) return { ok: false, error: "Pick at least one player, or everyone." };
   const to = input.audience === "all" ? "all" : [...new Set(input.audience)];
   // A copy of the document's pages, so the showing never changes with the document (section 3.2).
