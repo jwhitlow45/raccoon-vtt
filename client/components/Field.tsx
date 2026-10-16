@@ -72,7 +72,8 @@ export function Field(
   const id = useId();
   const hintId = `${id}-hint`;
   return (
-    <div style={{ display: "grid", gap: theme.space(1) }}>
+    // The column may be narrower than the input's own width (about 20 characters), so a field in a narrow pane shrinks rather than running past its edge.
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
       <label htmlFor={id} style={{ fontSize: theme.font.body14, fontWeight: theme.weight.strong }}>
         {label}
       </label>
