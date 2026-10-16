@@ -22,7 +22,7 @@ import { ConsoleWatch, dragWorld, OpSocket, pagePoint, Shots, sleep, SocketWatch
  * Every dialog is the one shell of docs/design-v1-visual.md 2.3, and the
  * run checks its structure in each (checkShell): the request a roll and
  * image dialogs, the editors, the scene sheet, the monster filters, the
- * stamp picker and stamp sheet, the keyboard shortcuts, a player's handout
+ * stamp picker and stamp sheet, the shortcut sheet, a player's handout
  * and the X-card, whose card has no title row. Every button and tab in
  * each is at least a 44 px target in the dialog's own pixels.
  *
@@ -471,10 +471,10 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await closeDialog(more);
         await page.keyboard.press("Escape");
 
-        // The keyboard shortcuts, from the ? key.
+        // The shortcut sheet, from the ? key.
         await page.keyboard.press("?");
-        const keys = page.getByRole("dialog", { name: "Keyboard shortcuts" });
-        await checkDialog(keys, `${label}, Keyboard shortcuts`, null);
+        const keys = page.getByRole("dialog", { name: "Shortcuts" });
+        await checkDialog(keys, `${label}, Shortcuts`, null);
         await shoot("shortcuts");
         await closeDialog(keys);
 

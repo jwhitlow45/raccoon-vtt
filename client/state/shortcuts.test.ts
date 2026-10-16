@@ -1,8 +1,29 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import type { ClientOp } from "#shared/protocol.ts";
 import { RoomScope } from "./scope.ts";
-import { deletedText, isTextField, shortcutFor, shortcutSheetSlot, shortcutsFor, sidePanelKeysSlot, stageKeysSlot, undoShortcut, ZOOM_STEP, type KeyPress, type ShortcutEnv } from "./shortcuts.ts";
+import {
+  BEHAVIORS,
+  behaviorEntries,
+  deletedText,
+  isTextField,
+  sheetSections,
+  SHORTCUTS,
+  shortcutFor,
+  shortcutSheetSlot,
+  shortcutsFor,
+  sidePanelKeysSlot,
+  stageKeysSlot,
+  SURFACES,
+  undoShortcut,
+  whoText,
+  ZOOM_STEP,
+  type BehaviorEntry,
+  type KeyPress,
+  type PointerKinds,
+  type ShortcutEnv,
+} from "./shortcuts.ts";
 import type { RoomUi } from "./store.ts";
 import type { RoomActions, RoomView } from "./types.ts";
 
@@ -261,3 +282,176 @@ describe("the shortcut table", () => {
     assert.ok(dm.includes("S"));
   });
 });
+
+describe("the sheet's mouse, touch and surface rows", () => {
+  const DESKTOP: PointerKinds = { fine: true, coarse: false };
+  const PHONE: PointerKinds = { fine: false, coarse: true };
+  const TOUCH_LAPTOP: PointerKinds = { fine: true, coarse: true };
+  const ROLES = ["dm", "player"] as const;
+
+  const titles = (role: "dm" | "player", kinds: PointerKinds) => sheetSections(role, kinds).map((s) => s.title);
+  const section = (role: "dm" | "player", kinds: PointerKinds, title: string) => sheetSections(role, kinds).find((s) => s.title === title);
+  const inputs = (role: "dm" | "player", kinds: PointerKinds, title: string) => section(role, kinds, title)?.rows.map((r) => r.input) ?? [];
+
+  test("every behavior has a role, a device, words for what you do and what it does, and a known surface", () => {
+    const ids = new Set(SHORTCUTS.map((s) => s.id));
+    for (const b of BEHAVIORS) {
+      assert.ok(b.roles.length > 0 && b.roles.every((r) => r === "dm" || r === "player"), `${b.id} has a role`);
+      assert.equal(new Set(b.roles).size, b.roles.length, `${b.id} names each role once`);
+      assert.ok(["mouse", "touch", "both", "keys"].includes(b.device), `${b.id} has a device`);
+      assert.ok(b.input.trim() && b.does.trim(), `${b.id} has words`);
+      assert.ok(b.touchInput === undefined || b.device === "both", `${b.id}: only a behavior on both devices has touch words of its own`);
+      assert.ok(b.surface === undefined || (SURFACES as readonly string[]).includes(b.surface), `${b.id} names a known surface`);
+      assert.ok(b.when === undefined || /^[a-z]/.test(b.when), `${b.id}: a condition starts in lowercase, as it follows the role`);
+      assert.ok(!ids.has(b.id), `${b.id} is used once across both tables`);
+      ids.add(b.id);
+    }
+  });
+
+  test("its words keep the house style: no em dash, no semicolon, no full stop at the end", () => {
+    for (const b of BEHAVIORS) {
+      for (const text of [b.input, b.touchInput ?? "", b.does, b.when ?? ""]) {
+        assert.ok(!/[\u2014;]/.test(text), `${b.id}: ${text}`);
+        assert.ok(!text.endsWith("."), `${b.id}: ${text}`);
+      }
+    }
+  });
+
+  test("a desktop shows Keys and Mouse, a phone Keys and Touch, and a laptop with a touch screen both", () => {
+    for (const role of ROLES) {
+      assert.deepEqual(titles(role, DESKTOP).slice(0, 2), ["Keys", "Mouse"], role);
+      assert.ok(!titles(role, DESKTOP).includes("Touch"), role);
+      assert.deepEqual(titles(role, PHONE).slice(0, 2), ["Keys", "Touch"], role);
+      assert.ok(!titles(role, PHONE).includes("Mouse"), role);
+      assert.deepEqual(titles(role, TOUCH_LAPTOP).slice(0, 3), ["Keys", "Mouse", "Touch"], role);
+    }
+    assert.ok(inputs("dm", DESKTOP, "Mouse").includes("Shift or Ctrl+click a token (Cmd on a Mac)"));
+    assert.ok(inputs("dm", DESKTOP, "Mouse").includes("Click a token"));
+    assert.ok(!inputs("dm", DESKTOP, "Mouse").includes("Tap a token"), "a mouse clicks");
+    assert.ok(inputs("player", PHONE, "Touch").includes("Tap a token"));
+    assert.ok(inputs("player", PHONE, "Touch").includes("Pinch"));
+    assert.ok(!inputs("player", PHONE, "Touch").includes("Click a token"), "a finger taps");
+  });
+
+  test("the sections come in order, Keys, Mouse, Touch, then each surface, and an empty one is left out", () => {
+    const order = ["Keys", "Mouse", "Touch", ...SURFACES];
+    for (const role of ROLES) {
+      for (const kinds of [DESKTOP, PHONE, TOUCH_LAPTOP]) {
+        const got = titles(role, kinds);
+        assert.deepEqual(got, [...got].sort((a, b) => order.indexOf(a) - order.indexOf(b)), `${role} ${JSON.stringify(kinds)}`);
+        for (const s of sheetSections(role, kinds)) assert.ok(s.rows.length > 0, s.title);
+      }
+    }
+    assert.ok(titles("dm", DESKTOP).includes("Label, pin and light panes"));
+    assert.ok(!titles("player", DESKTOP).includes("Label, pin and light panes"), "the panes are the DM's");
+    assert.ok(!titles("player", PHONE).includes("Toolbar"), "the toolbar's one row is the wheel's");
+  });
+
+  test("Keys holds the key table and then Escape, written as keys", () => {
+    const keys = section("player", PHONE, "Keys")!;
+    assert.deepEqual(
+      keys.rows.map((r) => r.id),
+      [...shortcutsFor("player").map((s) => s.id), "escape"],
+    );
+    assert.ok(keys.rows.every((r) => r.keys));
+    assert.ok(keys.intro?.startsWith("On any device with a keyboard."));
+  });
+
+  test("each role sees its own rows", () => {
+    const dm = inputs("dm", DESKTOP, "Mouse");
+    const player = inputs("player", DESKTOP, "Mouse");
+    for (const input of ["Click a map label", "Drag a corner of the box", "Drag a selected stamp's handle", "Click a builder room"]) {
+      assert.ok(dm.includes(input), input);
+      assert.ok(!player.includes(input), input);
+    }
+    for (const input of ["Double-click the map", "Drag a token", "Space+drag", "Right-click a token"]) assert.ok(player.includes(input), input);
+    assert.deepEqual(inputs("dm", PHONE, "Initiative"), ["Drag a row's grip", "Enter", "Escape", "Enter"]);
+    assert.deepEqual(inputs("player", PHONE, "Initiative"), ["Enter", "Escape"], "only the DM reorders ties");
+    const look = section("player", PHONE, "Touch")!.rows.find((r) => r.when === "with the Ping tool and Look here on");
+    assert.equal(look, undefined, "Look here is the DM's");
+  });
+
+  test("a surface shows its keys everywhere and its gestures on the devices that make them", () => {
+    assert.deepEqual(inputs("player", DESKTOP, "Handout viewer"), ["+, -", "0", "Arrow keys", "Wheel", "Double-click", "Drag"]);
+    assert.deepEqual(inputs("player", PHONE, "Handout viewer"), ["+, -", "0", "Arrow keys", "Pinch", "Double tap", "Drag"]);
+    assert.deepEqual(inputs("player", TOUCH_LAPTOP, "Handout viewer"), ["+, -", "0", "Arrow keys", "Wheel", "Pinch", "Double-click", "Double tap", "Drag"]);
+    assert.deepEqual(inputs("player", PHONE, "Side panel tabs"), ["Left, Right", "Home, End"]);
+  });
+
+  test("no section lists the same thing twice", () => {
+    for (const role of ROLES) {
+      for (const s of sheetSections(role, TOUCH_LAPTOP)) {
+        const ids = s.rows.map((r) => r.id);
+        assert.equal(new Set(ids).size, ids.length, `${role} ${s.title} ids`);
+        const rows = s.rows.map((r) => `${r.input} | ${r.when ?? ""}`);
+        assert.equal(new Set(rows).size, rows.length, `${role} ${s.title}: ${rows.join(", ")}`);
+      }
+    }
+  });
+
+  test("a behavior on both devices with touch words of its own is the mouse's words and the touch screen's", () => {
+    const tap = BEHAVIORS.find((b) => b.id === "rulerKeep")!;
+    assert.deepEqual(
+      behaviorEntries(tap).map((e) => [e.id, e.device, e.input]),
+      [
+        ["rulerKeep:mouse", "mouse", "Double-click the map"],
+        ["rulerKeep:touch", "touch", "Double tap the map"],
+      ],
+    );
+    const drag = BEHAVIORS.find((b) => b.id === "pan")!;
+    assert.deepEqual(behaviorEntries(drag).map((e) => e.device), ["both"]);
+  });
+
+  test("FEATURES.md's Shortcuts tables match the registries word for word", () => {
+    const tables = shortcutTables(readFileSync(new URL("../../FEATURES.md", import.meta.url), "utf8"));
+    const entries = BEHAVIORS.flatMap(behaviorEntries);
+    const row = (e: BehaviorEntry) => [e.input, e.does, whoText(e)];
+    const room = entries.filter((e) => e.surface === undefined);
+
+    // The keys table words its rows as it always has, so every key in it is the registry's, and every registry key is in it.
+    const split = (keys: string) => keys.split(", ");
+    const tableKeys = (tables.get("Keys") ?? []).flatMap((r) => split(r[0] ?? ""));
+    const registryKeys = [...SHORTCUTS.map((s) => s.keys), ...room.filter((e) => e.device === "keys").map((e) => e.input)].flatMap(split);
+    assert.deepEqual([...tableKeys].sort(), [...registryKeys].sort(), "the Keys table");
+    const escape = (tables.get("Keys") ?? []).find((r) => r[0] === "Escape");
+    assert.deepEqual(escape, row(room.find((e) => e.id === "escape")!));
+
+    assert.deepEqual(tables.get("Mouse"), room.filter((e) => e.device === "mouse" || e.device === "both").map(row), "the Mouse table");
+    assert.deepEqual(tables.get("Touch"), room.filter((e) => e.device === "touch" || e.device === "both").map(row), "the Touch table");
+    for (const surface of SURFACES) {
+      assert.deepEqual(tables.get(surface), entries.filter((e) => e.surface === surface).map(row), `the ${surface} table`);
+    }
+    assert.deepEqual([...tables.keys()], ["Keys", "Mouse", "Touch", ...SURFACES], "one table under each heading, in the sheet's order");
+  });
+});
+
+/** The rows of each table under FEATURES.md's Shortcuts, by the heading above it, as cells. */
+function shortcutTables(markdown: string): Map<string, string[][]> {
+  const start = markdown.indexOf("\n## Shortcuts\n");
+  assert.ok(start >= 0, "FEATURES.md has a Shortcuts section");
+  const rest = markdown.slice(start + 1);
+  const next = rest.indexOf("\n## ", 1);
+  const lines = (next === -1 ? rest : rest.slice(0, next)).split("\n");
+  const tables = new Map<string, string[][]>();
+  let heading: string | null = null;
+  let header = false;
+  for (const line of lines) {
+    if (line.startsWith("### ")) {
+      heading = line.slice(4).trim();
+      header = true;
+      continue;
+    }
+    if (!heading || !line.startsWith("|")) continue;
+    const cells = line.slice(1, -1).split("|").map((c) => c.trim());
+    if (header) {
+      // The table's heading row, then the line under it, where its rows start.
+      if (cells[0] === "---") {
+        header = false;
+        tables.set(heading, []);
+      }
+      continue;
+    }
+    tables.get(heading)?.push(cells);
+  }
+  return tables;
+}

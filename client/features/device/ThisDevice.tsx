@@ -57,10 +57,10 @@ export default function ThisDevice() {
           onChange={setSoundEnabled}
         />
       </Section>
-      <Section label="Keyboard shortcuts">
-        <Help>With a keyboard, letters pick tools, arrow keys move the selected tokens, and N moves the turn on.</Help>
+      <Section label="Shortcuts">
+        <Help>With a keyboard, letters pick tools, arrow keys move the selected tokens, and N moves the turn on. The list also says what a click, a drag or a pinch does.</Help>
         <Button size="sm" onClick={() => setShortcutSheet(scope, true)} style={{ justifySelf: "start" }}>
-          Show the keyboard shortcuts
+          Show the shortcuts
         </Button>
       </Section>
     </div>

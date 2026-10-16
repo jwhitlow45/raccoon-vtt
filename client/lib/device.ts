@@ -59,6 +59,12 @@ export function isAppleDevice(): boolean {
   return typeof navigator !== "undefined" && appleKeys({ platform: navigator.platform, userAgent: navigator.userAgent });
 }
 
+/** Which kinds of pointer this device has: a mouse or trackpad (`fine`), a touch screen (`coarse`), or both. */
+export function pointerKinds(): { fine: boolean; coarse: boolean } {
+  if (typeof matchMedia !== "function") return { fine: true, coarse: false };
+  return { fine: matchMedia("(any-pointer: fine)").matches, coarse: matchMedia("(any-pointer: coarse)").matches };
+}
+
 const NAME_KEY = "rvtt.name";
 
 /** The last display name used on this device, as a convenience for the next form. */

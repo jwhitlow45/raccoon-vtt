@@ -74,7 +74,7 @@ export default function MenuPanel(props: PanelProps) {
       </div>
       <MenuItem title="Members" detail={role === "dm" ? "Who is here, kicking, the player password and DM devices." : "Who is here and who is online."} page="members" onClick={() => setPage("members")} />
       {role === "dm" ? <MenuItem title="Room settings" detail="Movement, HP, combat, distance and backups." page="settings" onClick={() => setPage("settings")} /> : null}
-      <MenuItem title="This device" detail="Interface size, low power, map detail, sounds and keyboard shortcuts." page="device" onClick={() => setPage("device")} />
+      <MenuItem title="This device" detail="Interface size, low power, map detail, sounds and shortcuts." page="device" onClick={() => setPage("device")} />
       <MenuItem title="About" detail="Credits, licenses and the SRD notice." page="about" onClick={() => setPage("about")} />
       <MenuItem
         title="Leave room"
