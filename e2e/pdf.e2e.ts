@@ -443,6 +443,9 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await shots.take(dm, "pdf-upload-preparing");
     second.release();
     await shown(block, "Saved as Strange letter, 3 pages.").waitFor({ timeout: 60_000 });
+    // The form was open with nothing picked, so the saved document is picked at once (4.1.5).
+    await handoutForm().getByRole("button", { name: "View", exact: true }).waitFor();
+    assert.equal(await handoutForm().getByLabel("Title").inputValue(), "Strange letter");
     await shots.take(dm, "pdf-upload-saved");
     dm.off("request", onRequest);
     await dm.unroute(chunk);
@@ -676,6 +679,8 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     const form = handoutForm();
     await form.getByRole("button", { name: "From the library" }).click();
     await form.getByRole("button", { name: "Use Long book, 3 pages" }).click();
+    // A title the form already holds stays, so this one is typed.
+    await form.getByLabel("Title").fill("Long book");
     await form.getByRole("button", { name: "Show", exact: true }).click();
     const showing = dm.getByRole("list", { name: "Handouts showing" }).getByRole("listitem").filter({ hasText: "Long book" });
     await showing.waitFor();
@@ -696,6 +701,13 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
       "the form's image did not go before the job's next page",
     );
     const scrap = (await sent[from + 2]!.answer)!.id;
+    // A picked image has View, as a picked document has (the project owner, 2026-10-16).
+    await form.getByRole("button", { name: "View", exact: true }).click();
+    const scrapView = viewer(dm, "Map scrap");
+    await scrapView.waitFor();
+    await scrapView.getByText("300 × 200 px.").waitFor();
+    await scrapView.getByRole("button", { name: "Close Map scrap" }).click();
+    await scrapView.waitFor({ state: "detached" });
     await form.getByRole("button", { name: "Cancel", exact: true }).click();
 
     // Page 4's upload fails while the block is out of sight: a toast, and the DM panel's badge.
@@ -721,7 +733,18 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await dmTab().click();
     await shown(block, "The upload stopped at page 4 of 30. Check your connection.").waitFor();
     await shots.take(dm, "pdf-job-paused");
-    const thirty = await finishUpload(block, "Try again", "Thirty", 30);
+    await block.getByRole("button", { name: "Try again", exact: true }).click();
+    await shown(block, "Saved as Thirty, 30 pages.").waitFor({ timeout: 90_000 });
+    // Show it puts the document in the form in place of the image picked there, and keeps the title there (the project owner, 2026-10-16).
+    await block.getByRole("button", { name: "Show it" }).click();
+    await handoutForm().getByText("30 pages", { exact: true }).waitFor();
+    assert.equal(await handoutForm().getByLabel("Title").inputValue(), "Map scrap");
+    await shots.take(dm, "pdf-job-show-it");
+    const thirty = { pages: Object.values(dmSocket.state?.handoutDocs ?? {}).find((d) => d?.title === "Thirty")!.pages };
+    await handoutForm().getByRole("button", { name: "Change" }).click();
+    await handoutForm().getByRole("button", { name: "Cancel", exact: true }).click();
+    await block.getByRole("button", { name: "Done" }).click();
+    await block.waitFor({ state: "detached" });
     consoles.dm.allow = [];
     await dm.unroute(HANDOUT_PUT);
     assert.equal(thirty.pages.length, 30);
@@ -1364,4 +1387,29 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await tokenView.getByRole("button", { name: /^Close/ }).tap();
   });
 
+  test("15. a player's thumbnail under Handouts from the DM opens the handout in the viewer at the popup's own showing, and the DM closing it closes the viewer (the project owner, 2026-10-16)", async () => {
+    const doc = await documentOf("Last letter", [await paper(1584, 2048, 1), await paper(1584, 2048, 2), await paper(1584, 2048, 3)]);
+    const id = await show(doc, [run.patId]);
+    const popup = viewer(desk, "Last letter");
+    await popup.waitFor();
+    await popup.getByRole("button", { name: "Next page" }).click();
+    await indicatorIs(popup, "2 of 3", "Next page in the popup");
+    await popup.getByRole("button", { name: /^Close/ }).click();
+    await popup.waitFor({ state: "detached" });
+    await desk.getByRole("tab", { name: /^Library/ }).click();
+    const thumb = desk.getByRole("list").getByRole("button", { name: "View Last letter" });
+    await thumb.click();
+    const view = viewer(desk, "Last letter");
+    await view.waitFor();
+    await indicatorIs(view, "2 of 3", "the showing's own page, as the popup left it");
+    await shots.take(desk, "pdf-player-thumbnail-view");
+    await view.getByRole("button", { name: /^Close/ }).click();
+    await view.waitFor({ state: "detached" });
+    assert.equal(await thumb.evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement), true, "focus back on the thumbnail");
+    // The DM closes it while the player looks: the viewer closes with it.
+    await thumb.click();
+    await view.waitFor();
+    await ops.send({ t: "handout.close", handoutId: id });
+    await view.waitFor({ state: "detached" });
+  });
 });

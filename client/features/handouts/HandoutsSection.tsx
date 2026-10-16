@@ -36,7 +36,7 @@ const THUMB_PX = 44;
  * the item goes, as the Library's does (docs/design-v1-pdf-handouts.md 5.9
  * and 8.4).
  */
-type Viewing = { kind: "handout"; id: string } | { kind: "doc"; id: string };
+type Viewing = { kind: "handout"; id: string } | { kind: "doc"; id: string } | { kind: "image"; asset: AssetRow; title: string };
 
 /** What the viewer draws for the item: its title, its pages, the showing it is (the players' key, or `doc:<id>`), and its details. */
 type Viewed = { title: string; pages: ViewerPage[]; showing: string; details: string };
@@ -92,8 +92,18 @@ export function HandoutsSection() {
         details: `${pageCountText(viewedDoc.pages.length)}.${shown ? " Showing now." : ""}`,
       };
     }
+    // A loose image picked in the form, under the Library's key for it.
+    if (viewing?.kind === "image") {
+      const { asset, title } = viewing;
+      return {
+        title,
+        pages: viewerPagesOf(title, [{ assetId: asset.id, width: asset.width, height: asset.height }], url),
+        showing: `image:${asset.id}`,
+        details: `${asset.width} × ${asset.height} px.`,
+      };
+    }
     return null;
-  }, [viewedHandout, viewedDoc, handouts, members, assets]);
+  }, [viewing, viewedHandout, viewedDoc, handouts, members, assets]);
   // Closed or deleted elsewhere while open: the viewer closes, and focus goes back to its opener if that is still there, else on in the section.
   useEffect(() => {
     if (!viewing || viewed) return;
@@ -116,13 +126,11 @@ export function HandoutsSection() {
     if (form) form.querySelector<HTMLElement>("button, input")?.focus();
     else showButton.current?.focus();
   }, []);
-  // Show it: the saved document picked in the form, or listed first in From the library while another pick holds it (4.1.5).
+  // Show it: the saved document picked in the form, opening it, in place of any other pick, and keeping a title the DM typed (4.1.5, the project owner, 2026-10-16).
   const showSaved = useCallback(
     (docId: string) => {
       const now = draft.getState();
-      const title = now.title.trim() || docs?.[docId]?.title || "";
-      if (!now.open) draft.setState({ ...now, open: true, pick: { kind: "doc", docId }, title });
-      else if (!now.pick) draft.setState({ ...now, pick: { kind: "doc", docId }, title });
+      draft.setState({ ...now, open: true, pick: { kind: "doc", docId }, title: now.title.trim() ? now.title : (docs?.[docId]?.title ?? "") });
     },
     [draft, docs],
   );
@@ -170,7 +178,14 @@ export function HandoutsSection() {
           })}
         </RowList>
       ) : null}
-      <ShowHandout members={members ?? {}} docs={docs ?? {}} opener={showButton} formRef={formRef} onViewDoc={viewDoc} />
+      <ShowHandout
+        members={members ?? {}}
+        docs={docs ?? {}}
+        opener={showButton}
+        formRef={formRef}
+        onViewDoc={viewDoc}
+        onViewImage={(asset, title, opener) => view({ kind: "image", asset, title }, opener)}
+      />
       {viewed ? (
         <HandoutViewer
           title={viewed.title}
@@ -192,6 +207,8 @@ function ShowHandout(props: {
   opener: RefObject<HTMLButtonElement | null>;
   formRef: RefObject<HTMLDivElement | null>;
   onViewDoc(docId: string, opener: HTMLElement | null): void;
+  /** View on a picked image: it opens as the Library opens it. */
+  onViewImage(asset: AssetRow, title: string, opener: HTMLElement | null): void;
 }) {
   const roomId = useRoomView((s) => s.roomId);
   const actions = useRoomActions();
@@ -204,6 +221,17 @@ function ShowHandout(props: {
   const [library, setLibrary] = useState<AssetRow[] | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A PDF saved while the form is open with nothing picked is picked at once, its title too unless one was typed (4.1.5).
+  const savedDocId = pdf.job?.phase.k === "saved" ? pdf.job.docId : null;
+  const savedDocHere = savedDocId !== null && props.docs[savedDocId] !== undefined;
+  const autoPicked = useRef<string | null>(null);
+  useEffect(() => {
+    if (!savedDocId || !savedDocHere || autoPicked.current === savedDocId) return;
+    autoPicked.current = savedDocId;
+    const now = draftStore.getState();
+    if (!now.open || now.pick) return;
+    draftStore.setState({ ...now, pick: { kind: "doc", docId: savedDocId }, title: now.title.trim() ? now.title : (props.docs[savedDocId]?.title ?? "") });
+  }, [savedDocId, savedDocHere, draftStore, props.docs]);
   // The form opens at its first field, and Show or Cancel gives focus back to the button that opened it.
   const { opener, formRef: form } = props;
   useExpansionFocus(open, { inside: form, opener });
@@ -330,6 +358,12 @@ function ShowHandout(props: {
                   View
                 </Button>
               </>
+            ) : null}
+            {pick.kind === "image" ? (
+              // A picked image opens too, as a picked document does (the project owner, 2026-10-16).
+              <Button size="sm" onClick={(e) => props.onViewImage(pick.asset, title.trim() || "Handout", e.currentTarget)}>
+                View
+              </Button>
             ) : null}
             <Button size="sm" onClick={() => set({ pick: null })}>
               Change
