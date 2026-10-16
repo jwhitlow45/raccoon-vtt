@@ -31,7 +31,7 @@ import {
   type Phase,
   type Stop,
 } from "./job.ts";
-import { clearLedger, ledgerKey, writeLedger, type Ledger, type LedgerStorage, type UncertainPage } from "./ledger.ts";
+import { clearLedger, ledgerKey, readLedger, recoveryOf, writeLedger, type Ledger, type LedgerStorage, type UncertainPage } from "./ledger.ts";
 import { DrawCancelled, ReaderRefusal, type PdfDocument } from "./reader.ts";
 import { pdfTitle, titleProblem } from "./title.ts";
 
@@ -161,8 +161,21 @@ export class JobRunner implements JobControl {
 
   // Starting.
 
-  /** Opens a picked PDF: the reader loads, the file opens, and the range and title wait for the DM. */
+  /**
+   * Opens a picked PDF: the reader loads, the file opens, and the range and
+   * title wait for the DM. A ledger an earlier upload left, because its
+   * cleanup failed, comes first: its recovery shows instead, and holds the
+   * one upload until the DM removes or keeps its pages (4.1.2). The ledger
+   * holds one upload's pages, and the next upload's first page would
+   * overwrite it, so this is the one way none of them is ever forgotten.
+   * It decides before anything is awaited, so the caller reads the job at
+   * once to learn which.
+   */
   async start(file: Blob, fileName: string): Promise<void> {
+    const left = readLedger(this.#deps.storage, this.#ledgerKey);
+    const found = recoveryOf(left, this.#deps.room().savedDocs ?? undefined);
+    if (found === "saved") clearLedger(this.#deps.storage, this.#ledgerKey);
+    if (found === "offer" && left) return this.recover(left);
     this.#file = file;
     this.#store.setState({
       job: {

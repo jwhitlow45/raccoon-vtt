@@ -245,7 +245,8 @@ function ShowHandout(props: {
     if (!isPdfFile(file)) return void uploadImage(file);
     const refused = pdfPickRefusal(file, pdf.job);
     if (refused) return setError(refused);
-    pdf.start(file);
+    const held = pdf.start(file);
+    if (held) setError(held);
   };
 
   const show = () => {

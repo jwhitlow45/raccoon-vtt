@@ -6,7 +6,7 @@ import type { RoomActions, RoomUi, RoomViewStore } from "../../../state/view.ts"
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { deleteImages, rememberAsset, uploadingSlot } from "../../images/library.ts";
 import { canvasSource, encodeWithin, pageThumb } from "./encode.ts";
-import { jobActive, jobPageIds, pdfJobSlot, waitsOnDm } from "./job.ts";
+import { jobActive, jobPageIds, onePdfAtATime, pdfJobSlot, waitsOnDm } from "./job.ts";
 import { clearLedger, ledgerKey, localLedgerStorage, readLedger, recoveryOf } from "./ledger.ts";
 import { JobRunner, roomReadOf, type JobDeps } from "./run.ts";
 
@@ -84,8 +84,13 @@ export function usePdfJob() {
     store: slot.store,
     /** The runner of the job showing, if any. */
     current: () => (slot.runner instanceof JobRunner ? slot.runner : null),
-    start(file: File) {
-      void runner()?.start(file, file.name);
+    /** Starts a PDF, or, when an earlier upload's pages wait to be removed or kept, shows that recovery and says why instead. */
+    start(file: File): string | null {
+      const next = runner();
+      if (!next) return null;
+      void next.start(file, file.name);
+      const job = slot.store.getState().job;
+      return job?.phase.k === "recovery" ? onePdfAtATime(job) : null;
     },
   };
 }

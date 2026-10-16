@@ -924,6 +924,40 @@ describe("the ledger and its recovery (docs/design-v1-pdf-handouts.md 4.1.2)", (
     }
   });
 
+  test("pages whose cleanup failed are never overwritten: the next PDF brings their recovery back first, after a failed Cancel and after a failed Remove them", async () => {
+    const offline = async () => ({ deleted: 0, inUse: false, error: new ApiError(0, "x", "network", null) });
+    // A Cancel whose delete failed, then Done.
+    const w = world({ pages: 1 });
+    await w.throughUpload();
+    w.deps.deleteImages = offline;
+    answer(w.sent[0]!, "refused", refusal("quota", "x"));
+    await settle();
+    await w.runner.cancel();
+    await w.runner.end();
+    assert.deepEqual(w.ledger()?.ids, ["img-1"]);
+    await w.runner.start(new Blob(["%PDF-"]), "Second.pdf");
+    assert.equal(w.phase().k, "recovery", "the earlier pages first");
+    assert.equal(w.job().fileName, "Strange letter");
+    assert.equal(w.opened.length, 1, "the second PDF is not opened");
+    assert.deepEqual(w.ledger()?.ids, ["img-1"], "kept whole");
+
+    // Remove them fails too, then Done: the next PDF still meets them.
+    await w.runner.removeRecovered();
+    assert.deepEqual(w.phase(), { k: "recovered", removed: 0, failed: true });
+    await w.runner.end();
+    await w.runner.start(new Blob(["%PDF-"]), "Third.pdf");
+    assert.equal(w.phase().k, "recovery");
+    assert.deepEqual(w.ledger()?.ids, ["img-1"]);
+
+    // Once removed, the next PDF opens.
+    w.deps.deleteImages = async (ids) => ({ deleted: ids.length, inUse: false, error: null });
+    await w.runner.removeRecovered();
+    await w.runner.end();
+    await w.runner.start(new Blob(["%PDF-"]), "Fourth.pdf");
+    assert.equal(w.phase().k, "range");
+    assert.equal(w.ledger(), null);
+  });
+
   test("a storage that refuses writes costs only the recovery", async () => {
     const w = world({ pages: 1 });
     w.storage.setItem = () => {
