@@ -11,7 +11,7 @@ import { handFocusOn } from "../../lib/handFocus.ts";
 import { hpDisplay, hpLabel, hpText, type HpView } from "../../lib/tokenView.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
-import { deadLines, sendHpEntry, type EntryOperation, type HpTarget } from "./groupHp.ts";
+import { deadLines, entryOperation, entryRefusal, sendHpEntry, type HpTarget } from "./groupHp.ts";
 import { hpDraftKey, useKeepHpDraft, useKeptHpDraft, type HpPlace } from "./hpDraft.ts";
 import { HP_MODES, MAX_HP_AMOUNT, modeAfterApply, parseHpInput, type HpMode } from "./hpInput.ts";
 import { FieldRow, Note, NumberField, Section, SmallButton } from "./ui.tsx";
@@ -66,11 +66,12 @@ export function HpEntry(props: {
   const atZero = props.targets.some((t) => t.atZero);
   const showCrit = atZero && (preview?.ok ? preview.change.kind === "damage" : mode === "damage");
   const reach = props.targets.filter((t) => t.access !== "none").length;
-  // What will be sent decides the lines on the dead: the typed text once it parses, the chosen mode before.
+  // Typed math such as =12 may ask for what this viewer cannot send, which shows at once in the summary's place.
+  const refusal = preview?.ok ? entryRefusal(props.access, preview.change, props.targets.length) : null;
+  // What will be sent decides the lines on the dead: the typed text once it parses and may go, the chosen mode otherwise.
   const revives = useRoomView((s) => healRevivesDead(s.view?.meta.settings ?? {}));
   const dm = useRoomView((s) => s.you?.role === "dm");
-  const operation: EntryOperation = preview?.ok ? { kind: preview.change.kind, ...(preview.change.kind === "set" && preview.change.cur !== undefined ? { cur: preview.change.cur } : {}) } : { kind: mode };
-  const lines = deadLines(props.targets, operation, { revives, dm });
+  const lines = deadLines(props.targets, entryOperation(props.access, mode, preview), { revives, dm });
 
   const apply = () => {
     const parsed = parseHpInput(text, mode);
@@ -78,8 +79,9 @@ export function HpEntry(props: {
       setError(parsed.error);
       return;
     }
-    if (props.access === "relative" && parsed.change.kind !== "damage" && parsed.change.kind !== "heal") {
-      setError("You can only deal damage to or heal this creature.");
+    const refused = entryRefusal(props.access, parsed.change, props.targets.length);
+    if (refused) {
+      setError(refused);
       return;
     }
     sendHpEntry(actions, props.targets, parsed.change, crit && showCrit);
@@ -123,7 +125,7 @@ export function HpEntry(props: {
           }}
           style={{ ...fieldStyle(), flex: 1, width: 0 }}
         />
-        <SmallButton type="submit" tone="primary" disabled={!text.trim()}>
+        <SmallButton type="submit" tone="primary" disabled={!text.trim() || refusal !== null}>
           Apply
         </SmallButton>
       </div>
@@ -131,7 +133,11 @@ export function HpEntry(props: {
       {showCrit ? (
         <Checkbox checked={crit} onChange={setCrit} label="Critical hit (two failed death saves)" />
       ) : null}
-      {error ? <Note tone="error">{error}</Note> : preview?.ok ? <Note>{reach > 1 ? `${preview.summary}, to each of ${reach}` : preview.summary}</Note> : null}
+      {error || refusal ? (
+        <Note tone="error">{error ?? refusal}</Note>
+      ) : preview?.ok ? (
+        <Note>{reach > 1 ? `${preview.summary}, to each of ${reach}` : preview.summary}</Note>
+      ) : null}
       {lines.map((line) => (
         <Note key={line}>{line}</Note>
       ))}

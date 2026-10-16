@@ -674,6 +674,28 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await ops.send({ t: "actor.life", target: { tokenId: run.goblins[11]! }, life: "alive" });
   });
 
+  test("8b. Ana, who may only deal damage and heal, sees =12 on a dead goblin refused at once, with no promise to bring it back, and +5 counted as the heal it is (SFB-P-10)", async () => {
+    await ops.send({ t: "room.update", settings: { playersApplyDamage: true } });
+    await ops.send({ t: "actor.life", target: { tokenId: run.goblins[11]! }, life: "dead" });
+    await setUp(ana, await anaContext.newCDPSession(ana), { ...DESK, scale: 1 });
+    await openTracker(ana);
+    await (await rowButton(ana, "Goblin 12")).click();
+    const b = bar(ana, "Goblin 12");
+    const field = b.getByRole("textbox", { name: "HP change" });
+    await field.fill("=12");
+    await b.getByText("You can only deal damage to or heal this creature.").waitFor();
+    assert.equal(await b.getByText("Set HP to 12").count(), 0, "the summary promises a set");
+    assert.equal(await b.getByText("Brings back 1 dead creature.").count(), 0, "a line promises what a set would do");
+    assert.ok(await b.getByRole("button", { name: "Apply" }).isDisabled(), "Apply waits for something Ana may send");
+    await shots.take(ana, "combat-relative-set-refused");
+    await field.fill("+5");
+    await b.getByText("Brings back 1 dead creature.").waitFor();
+    assert.equal(await b.getByText("You can only deal damage to or heal this creature.").count(), 0);
+    await field.fill("");
+    await ops.send({ t: "room.update", settings: { playersApplyDamage: false } });
+    await ops.send({ t: "actor.life", target: { tokenId: run.goblins[11]! }, life: "alive" });
+  });
+
   test("9. Ana adds Spiritual Weapon and Wildfire Spirit beside Bree without Players can create their own characters, and the DM's log names each", async () => {
     await setUp(ana, await anaContext.newCDPSession(ana), { ...DESK, scale: 1 });
     await ana.getByRole("tab", { name: "Characters" }).click();

@@ -4,7 +4,7 @@ import { clientOpSchema } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor, DM, room, token } from "#shared/testutil.ts";
 import type { ClientOp } from "#shared/protocol.ts";
-import { deadHealLine, deadLines, groupAccess, hpOps, hpTargets, sendHpEntry, type EntryOperation, type HpTarget } from "./groupHp.ts";
+import { deadHealLine, deadLines, entryOperation, entryRefusal, groupAccess, hpOps, hpTargets, sendHpEntry, type EntryOperation, type HpTarget } from "./groupHp.ts";
 import { parseHpInput, type HpMode } from "./hpInput.ts";
 
 const target = (id: string, over: Partial<HpTarget> = {}): HpTarget => ({
@@ -94,12 +94,8 @@ describe("the HP entry's lines on the dead (docs/design-v1-combat-flow.md 3.5)",
   const thorn = target("thorn", { name: "Thorn", dead: true });
   const on = { revives: true, dm: true };
   const off = { revives: false, dm: true };
-  /** The operation an entry sends: the typed text once it parses, the chosen mode before, as HpEntry asks. */
-  const op = (text: string, mode: HpMode): EntryOperation => {
-    const parsed = text.trim() ? parseHpInput(text, mode) : null;
-    if (!parsed?.ok) return { kind: mode };
-    return { kind: parsed.change.kind, ...(parsed.change.kind === "set" && parsed.change.cur !== undefined ? { cur: parsed.change.cur } : {}) };
-  };
+  /** The operation a DM's entry sends: the typed text once it parses, the chosen mode before, as HpEntry asks. */
+  const op = (text: string, mode: HpMode, access: "all" | "relative" = "all"): EntryOperation => entryOperation(access, mode, text.trim() ? parseHpInput(text, mode) : null);
 
   test("a target's dead flag and maximum come from the viewer's copy", () => {
     const state = room({
@@ -152,6 +148,27 @@ describe("the HP entry's lines on the dead (docs/design-v1-combat-flow.md 3.5)",
     assert.deepEqual(deadLines([target("x", { dead: true, access: "none" }), target("a")], op("5", "heal"), on), []);
     const twice = [target("pc1", { holder: "character:c", dead: true }), target("pc2", { holder: "character:c", dead: true })];
     assert.deepEqual(deadLines(twice, op("5", "heal"), on), ["Brings back 1 dead creature."]);
+  });
+
+  test("a player who may only deal damage and heal: a typed set or temporary HP is refused before Apply, and its lines follow the mode (SFB-P-10)", () => {
+    const set = parseHpInput("=12", "damage");
+    assert.ok(set.ok);
+    assert.equal(entryRefusal("relative", set.change, 1), "You can only deal damage to or heal this creature.");
+    assert.equal(entryRefusal("relative", set.change, 3), "You can only deal damage to or heal these creatures.");
+    const temp = parseHpInput("t5", "heal");
+    assert.ok(temp.ok);
+    assert.notEqual(entryRefusal("relative", temp.change, 1), null);
+    for (const text of ["7", "+5", "-3"]) {
+      const parsed = parseHpInput(text, "damage");
+      assert.ok(parsed.ok);
+      assert.equal(entryRefusal("relative", parsed.change, 1), null, `${text} may go`);
+    }
+    assert.equal(entryRefusal("all", set.change, 1), null, "the DM sets HP");
+    // =12 under Damage promises nothing to the dead, and under Heal says what the heal it will send does.
+    assert.deepEqual(deadLines([thorn], op("=12", "damage", "relative"), on), []);
+    assert.deepEqual(deadLines([thorn], op("=12", "heal", "relative"), on), ["Brings back 1 dead creature."]);
+    assert.deepEqual(deadLines([thorn], op("=12", "damage", "relative"), off), [], "no line about a set it cannot send");
+    assert.deepEqual(deadLines([thorn], op("=12", "damage"), on), ["Brings back 1 dead creature."], "the DM's set does");
   });
 
   test("a dead creature's bar tells a player who may heal it what healing will do", () => {

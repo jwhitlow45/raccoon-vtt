@@ -4,7 +4,7 @@ import { displayName } from "../../lib/scene.ts";
 import { dispatchGesture } from "../../state/actions.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { tokenAccess, type Role } from "./access.ts";
-import { withCrit } from "./hpInput.ts";
+import { withCrit, type HpMode, type HpParse } from "./hpInput.ts";
 
 /**
  * One HP entry for several creatures (features section 10: "one entry can
@@ -97,6 +97,27 @@ export function sendHpEntry(actions: Pick<RoomActions, "dispatch" | "newId">, ta
 
 /** What an entry will send, as its lines judge it: a heal, damage, a set (with the current HP it names, once typed) or temporary HP. */
 export type EntryOperation = { kind: HpChange["kind"]; cur?: number };
+
+/**
+ * Why an entry under `relative` access (players who may only deal damage
+ * and heal) cannot send what was typed, such as `=12` or `t5`, shown as
+ * soon as it parses rather than after Apply. Null when it may go.
+ */
+export function entryRefusal(access: "all" | "relative", change: Pick<HpChange, "kind">, count: number): string | null {
+  if (access === "all" || change.kind === "damage" || change.kind === "heal") return null;
+  return count > 1 ? "You can only deal damage to or heal these creatures." : "You can only deal damage to or heal this creature.";
+}
+
+/**
+ * The operation an entry's lines judge: the typed change once it parses
+ * and the viewer may send it, else the chosen mode, so a refused `=12`
+ * never promises to bring back the dead.
+ */
+export function entryOperation(access: "all" | "relative", mode: HpMode, preview: HpParse | null): EntryOperation {
+  if (!preview?.ok || entryRefusal(access, preview.change, 1) !== null) return { kind: mode };
+  const { change } = preview;
+  return { kind: change.kind, ...(change.kind === "set" && change.cur !== undefined ? { cur: change.cur } : {}) };
+}
 
 /**
  * The lines an HP entry adds about the dead among its targets
