@@ -95,7 +95,7 @@ describe("find my token", () => {
     const bars = { top: 52, right: 0, bottom: 60, left: 0 };
     const target = findRect({ x: 30, y: 6, size: "medium" });
     // The bar in the lane covers the right 312 px and the 8 px margin past the bars (canvas/barDock.ts barCover).
-    const cover = largerEach(NO_INSETS, pastBars(barCover(viewport, bars, { box: { left: 608, top: 300, width: 304, height: 432 }, laneLeft: 600 }), bars));
+    const cover = largerEach(NO_INSETS, pastBars(barCover(viewport, bars, { box: { left: 608, top: 300, width: 304, height: 432 }, laneLeft: 600, freeRight: 912 }), bars));
     const cam = findCamera(viewport, target, bars, cover);
     assert.equal(cam.scale, fitRect(viewport, target, 24, bars).scale);
     const x = 30.5 * cam.scale + cam.x;

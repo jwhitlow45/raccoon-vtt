@@ -280,20 +280,20 @@ export function MapStage(props: {
     const z = uiScale();
     const layout = layoutSize(window, z);
     if (!shows) return NO_INSETS;
-    const resting = () => restingBar({ layout, viewport: sizeInZoomed(viewport, z), chrome: barChrome(dock), spot: dock.spot, height: dock.lastHeight, foot: dock.foot, column: dock.column });
+    const resting = () => restingBar({ layout, viewport: sizeInZoomed(viewport, z), chrome: barChrome(dock), spot: dock.spot, height: dock.lastHeight, foot: dock.foot, column: dock.column, width: dock.defaultWidth });
     const bar =
       source === "fresh"
         ? resting()
         : dock.bar
           ? dock.bar.mode === "span"
             ? null
-            : { box: dock.bar.box, laneLeft: dock.bar.laneLeft }
+            : { box: dock.bar.box, laneLeft: dock.bar.laneLeft, freeRight: dock.bar.freeRight }
           : source === "opening"
             ? resting()
             : null;
     if (!bar) return NO_INSETS;
     const box = { left: bar.box.left * z, top: bar.box.top * z, width: bar.box.width * z, height: bar.box.height * z };
-    return barCover(viewport, insetsRef.current, { box, laneLeft: bar.laneLeft * z });
+    return barCover(viewport, insetsRef.current, { box, laneLeft: bar.laneLeft * z, freeRight: bar.freeRight * z });
   };
 
   /*

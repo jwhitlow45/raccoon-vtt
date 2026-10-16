@@ -3,6 +3,7 @@ import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, noticePlace, noticeSpan, type Chrome } from "../canvas/barDock.ts";
+import { BarWidthProbe } from "../canvas/BarWidthProbe.tsx";
 import { ScrollForMore } from "../canvas/TokenActionBar.tsx";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
 import { MapStage } from "../canvas/Stage.tsx";
@@ -669,6 +670,7 @@ function RoomPage() {
       }}
     >
       <div ref={safe.probe} aria-hidden style={SAFE_PROBE_STYLE} />
+      <BarWidthProbe zoom={zoom} />
       {/* The map's chrome pads for the right safe area only where the map reaches that edge: not beside the side panel, which holds it (theme.safe.mapRight). */}
       <div style={{ position: "relative", flex: 1, minWidth: 0, ["--rvtt-map-safe-right" as string]: sideShown ? "0px" : theme.safe.right }}>
         <MapArea gate={gate} role={role} actionBar={actionBar} insets={insets} onSelect={select} onOpenDetails={openDetails} tokenPanelShown={tokenPanelShown} onHideBar={hideBar} />

@@ -79,6 +79,9 @@ import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/v
 
 const NO_CHARACTERS = {};
 
+/** A row of the bar's buttons, wrapping. An empty one takes no room (globals.css). */
+const BUTTON_ROW = { display: "flex", flexWrap: "wrap", gap: theme.space(1) } as const;
+
 type Drawer = "conditions" | null;
 
 /**
@@ -95,8 +98,9 @@ const REVIVE_FOCUS_IN_BAR = { scope: '[role="dialog"]', to: [":scope"] } as cons
  * right after them, death saves, the effects, a linked block's saves and
  * defenses, then "Stat block", the sheet link and Details beside the
  * summary they expand, elevation, other images, the Conditions drawer,
- * and the buttons in two rows: what play needs, then setup and Delete
- * apart from it. On a short bar (barButtons.ts barShort) the vitals keep
+ * and the buttons in rows (barButtons.ts): the answers to the move just
+ * made while they show, what play needs, then setup and Delete apart from
+ * it. On a short bar (barButtons.ts barShort) the vitals keep
  * to AC and HP, the HP entry puts its field and Apply first, and "More
  * stats" holds the rest, so Apply shows without a scroll on a phone held
  * sideways.
@@ -379,11 +383,16 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
 
       {drawer === "conditions" ? <QuickConditions lit={(key) => (effects.some((e) => e.key === key) ? "all" : "none")} onToggle={toggleEffect} /> : null}
 
-      <div data-bar-row="play" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
+      {rows.passing.length > 0 ? (
+        <div data-bar-row="passing" style={BUTTON_ROW}>
+          {rows.passing.map(button)}
+        </div>
+      ) : null}
+      <div data-bar-row="play" style={BUTTON_ROW}>
         {rows.play.map(button)}
       </div>
       {rows.less.length > 0 ? (
-        <div data-bar-row="less" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
+        <div data-bar-row="less" style={BUTTON_ROW}>
           {rows.less.map(button)}
         </div>
       ) : null}
@@ -465,19 +474,25 @@ export function GroupActionBar(props: {
       {drawer === "conditions" && offers.conditions ? (
         <QuickConditions lit={(key) => conditionLit(creatures, key)} onToggle={(key) => send(conditionOps(creatures, key, actions.newId))} />
       ) : null}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
+      {/* Undo move on a line of its own while it shows, so the steady line below never moves (docs/design-v1-token-window.md 3.2). */}
+      <div data-bar-row="passing" style={BUTTON_ROW}>
         <UndoMoveButton tokenIds={ids} />
+      </div>
+      <div data-bar-row="play" style={BUTTON_ROW}>
         {offers.conditions ? (
           <BarButton pressed={drawer === "conditions"} onClick={() => setDrawer((d) => (d === "conditions" ? null : "conditions"))}>
             Conditions
           </BarButton>
         ) : null}
-        {offers.dm && anyPlayed ? <BarButton onClick={() => openAsk(scope, { kind: "selection", tokenIds: ids })}>Request a roll</BarButton> : null}
         {offers.dm ? (
           <BarButton pressed={hidden === "all"} half={hidden === "some"} onClick={() => send(updateManyOps(ids, flagPatch(tokens, "hidden")))}>
             Hidden
           </BarButton>
         ) : null}
+        <BarButton pressed={multi} onClick={() => ui.setMultiSelect(!multi)}>
+          Multi-select
+        </BarButton>
+        {offers.dm && anyPlayed ? <BarButton onClick={() => openAsk(scope, { kind: "selection", tokenIds: ids })}>Request a roll</BarButton> : null}
         {offers.dm ? (
           <BarButton pressed={locked === "all"} half={locked === "some"} onClick={() => send(updateManyOps(ids, flagPatch(tokens, "locked")))}>
             Locked
@@ -500,9 +515,6 @@ export function GroupActionBar(props: {
             }}
           />
         ) : null}
-        <BarButton pressed={multi} onClick={() => ui.setMultiSelect(!multi)}>
-          Multi-select
-        </BarButton>
         <BarButton onClick={props.onClose}>Clear</BarButton>
         <PlaceButtons />
       </div>
@@ -663,6 +675,7 @@ function BarFrame(props: {
   const lasting = useStore(dockStore, (s) => s.lasting);
   const chrome = useMemo(() => barChrome({ chrome: measured, lasting }), [measured, lasting]);
   const spot = useStore(dockStore, (s) => s.spot);
+  const width = useStore(dockStore, (s) => s.defaultWidth);
   const column = useStore(dockStore, (s) => s.column);
   const foot = useStore(dockStore, (s) => s.foot);
   const barRef = useRef<HTMLDivElement>(null);
@@ -712,7 +725,7 @@ function BarFrame(props: {
   }, []);
 
   // The anchor is always given here, so a placement always comes back.
-  const placed = placeBar({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, height: barHeight, column })!;
+  const placed = placeBar({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, height: barHeight, column, width })!;
   const { free, mode } = placed;
 
   // Actions in the Multi-select bar shows the bar and focuses its frame, once it is drawn.
@@ -730,7 +743,7 @@ function BarFrame(props: {
    * dropped, put back by Escape or cancelled, publishes the latest, alerts
    * that arrived meanwhile included.
    */
-  const facts: BarFacts | null = folded ? null : { box: hangBox(placed.hang, barHeight), mode, lane: placed.lane, laneLeft: laneLeft(free) };
+  const facts: BarFacts | null = folded ? null : { box: hangBox(placed.hang, barHeight), mode, lane: placed.lane, laneLeft: laneLeft(free), freeRight: free.left + free.width };
   const factsKey = facts ? JSON.stringify(facts) : "";
   const dragging = dragBox !== null;
   useLayoutEffect(() => {
@@ -829,7 +842,7 @@ function BarFrame(props: {
         }
       : null;
   // Read from where the bar stands, never from its content, so the short layout and an opened "More stats" never flip it.
-  const short = barShort({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, column });
+  const short = barShort({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, column, width });
   const controls: FrameControls = { handle, sticky: mode !== "compact", place, short };
 
   const { hang } = placed;

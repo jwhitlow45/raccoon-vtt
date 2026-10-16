@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragCells, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * The docked token action bar (docs/design-v1-bar-dock.md section 7) on the
@@ -260,6 +260,30 @@ async function damageGoblins(): Promise<void> {
 
 function selectOptions(page: Page): Locator {
   return page.getByRole("toolbar", { name: "Select options" });
+}
+
+/**
+ * The default width this page draws the window at, in layout px, worked
+ * out from the hidden buttons Room measures (client/canvas/BarWidthProbe.tsx)
+ * by the design's rule (docs/design-v1-token-window.md 3.3).
+ */
+async function probeWidth(page: Page, scale: number): Promise<number> {
+  const widths = await page.evaluate(() =>
+    Array.from((globalThis as unknown as { document: Doc }).document.querySelectorAll("[data-bar-width-probe] > button")).map((b) => b.getBoundingClientRect().width),
+  );
+  assert.equal(widths.length, 3, "the page draws no hidden buttons to measure");
+  return Math.max(304, Math.ceil(26 + widths.reduce((sum, w) => sum + w / scale, 0) + 2 * 4) + 1);
+}
+
+/** The tops of a window's buttons, by their words, so a test can tell which share a line. */
+async function buttonTops(bar: Locator, names: readonly (string | RegExp)[]): Promise<number[]> {
+  const tops: number[] = [];
+  for (const name of names) tops.push((await rectOf(bar.getByRole("button", typeof name === "string" ? { name, exact: true } : { name }))).top);
+  return tops;
+}
+
+function oneTop(tops: readonly number[]): boolean {
+  return tops.every((t) => Math.abs(t - tops[0]!) < 1);
 }
 
 describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () => {
@@ -882,7 +906,105 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await dmCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
   });
 
-  test("15. nothing went wrong in the browsers", () => {
+  test("15. the rows: the window is the measured default width, Conditions, Hidden and Multi-select share one line, the passing line leads above it, and Request a roll and Light follow", async () => {
+    const STEADY = ["Conditions", "Hidden", "Multi-select"];
+    for (const view of [
+      { ...DESK, scale: 1 },
+      { ...DESK, scale: 1.3 },
+      { width: 1024, height: 768, scale: 1 },
+      { width: 1024, height: 768, scale: 1.3 },
+    ]) {
+      const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+      await setUp(dm, view);
+      await clickCell(dm, run.goblins[1]!);
+      const goblin = dm.getByRole("dialog", { name: "Goblin 2 actions" });
+      await goblin.waitFor();
+      const r = await barRect(dm);
+      const expected = await probeWidth(dm, view.scale);
+      assert.ok(expected >= 304, `${label}: ${expected}`);
+      assert.ok(Math.abs((r.right - r.left) / view.scale - expected) <= 1, `${label}: the window is ${(r.right - r.left) / view.scale} wide, not the measured ${expected}`);
+      assert.ok(oneTop(await buttonTops(goblin, STEADY)), `${label}: Conditions, Hidden and Multi-select wrap`);
+      if (view.width === DESK.width && view.scale === 1) await shots.take(dm, "token-window-rows-goblin-1280");
+      await clickCell(dm, EMPTY);
+      await barFrame(dm).waitFor({ state: "detached" });
+    }
+
+    // On a creature a player plays, Request a roll starts the next line, after Multi-select.
+    await setUp(dm, { ...DESK, scale: 1 });
+    await selectThorn();
+    const thornForDm = dm.getByRole("dialog", { name: "Thorn actions" });
+    assert.ok(oneTop(await buttonTops(thornForDm, STEADY)), "Thorn's steady line wraps for the DM");
+    const multi = await rectOf(thornForDm.getByRole("button", { name: "Multi-select", exact: true }));
+    const request = await rectOf(thornForDm.getByRole("button", { name: "Request a roll", exact: true }));
+    assert.ok(request.top >= multi.bottom - 0.5, `Request a roll shares the steady line: ${JSON.stringify({ multi, request })}`);
+    await clickCell(dm, EMPTY);
+    await barFrame(dm).waitFor({ state: "detached" });
+
+    // Pat's Thorn, lit: Conditions, Multi-select and Light on one line. In a fight on his turn, a move puts Undo move and Doesn't count on a line above them.
+    await ops.send({ t: "token.update", tokenId: run.thorn.id, patch: { light: { bright: 20, dim: 20 } } });
+    await waitFor("Thorn's light for Pat", () => (playerSocket.state?.tokens[run.thorn.id]?.light?.bright === 20 ? true : null));
+    await setUp(player, { width: 900, height: 800, scale: 1 });
+    await selectThorn(player);
+    const patThorn = player.getByRole("dialog", { name: "Thorn actions" });
+    // Lit, Light is named by its light ("Light: 20 ft bright, 20 ft dim").
+    const patLine = ["Conditions", "Multi-select", /^Light/];
+    assert.ok(oneTop(await buttonTops(patThorn, patLine)), "Pat's Conditions, Multi-select and Light wrap");
+    const before = (await buttonTops(patThorn, patLine))[0]! - (await barRect(player)).top;
+    await clickCell(player, EMPTY);
+    await barFrame(player).waitFor({ state: "detached" });
+    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.thorn.id, value: 20 }, ...run.goblins.map((g, i) => ({ id: randomUUID(), tokenId: g.id, value: 15 - i }))] });
+    await ops.send({ t: "encounter.next" });
+    await waitFor("Thorn's turn for Pat", () => (playerSocket.state?.encounter?.activeEntryId ? true : null));
+    const to = { x: run.thorn.x + 1, y: run.thorn.y };
+    await dragCells(player, run.bounds, run.thorn, to);
+    await waitFor("Thorn moved", () => (playerSocket.state?.tokens[run.thorn.id]?.x === to.x ? true : null));
+    await clickCell(player, to);
+    await patThorn.waitFor();
+    await patThorn.getByRole("button", { name: "Undo move", exact: true }).waitFor();
+    // Doesn't count is named by what it does.
+    const countsNot = /^The last move doesn't count/;
+    const passing = await buttonTops(patThorn, ["Undo move", countsNot]);
+    assert.ok(oneTop(passing), "Undo move and Doesn't count are not on one line");
+    const steady = await buttonTops(patThorn, patLine);
+    assert.ok(oneTop(steady), "the passing line moved Conditions, Multi-select or Light off their line");
+    const doesntCount = await rectOf(patThorn.getByRole("button", { name: countsNot }));
+    assert.ok(steady[0]! >= doesntCount.bottom - 0.5, "the passing line is not above the steady line");
+    assert.ok(steady[0]! - (await barRect(player)).top > before, "the steady line did not move down a line under the passing line");
+    await shots.take(player, "token-window-rows-passing-line");
+    await clickCell(player, EMPTY);
+    await barFrame(player).waitFor({ state: "detached" });
+    await ops.send({ t: "encounter.end" });
+    await ops.send({ t: "token.update", tokenId: run.thorn.id, patch: { x: run.thorn.x, y: run.thorn.y, light: { bright: 0, dim: 0 } } });
+    await waitFor("Thorn back", () => (dmSocket.state?.tokens[run.thorn.id]?.x === run.thorn.x ? true : null));
+
+    // A browser minimum font size of 16 px makes the buttons wider: the window takes the wider default, and the three still share one line.
+    const profile = path.join(work, "min-font");
+    mkdirSync(path.join(profile, "Default"), { recursive: true });
+    writeFileSync(path.join(profile, "Default", "Preferences"), JSON.stringify({ webkit: { webprefs: { minimum_font_size: 16 } } }));
+    const big = await chromium.launchPersistentContext(profile, { channel: "chrome", headless: process.env.E2E_HEADED !== "1", viewport: DESK });
+    try {
+      await big.addCookies(await dmContext.cookies(server.origin));
+      const page = big.pages()[0] ?? (await big.newPage());
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      await page.locator(".konvajs-content").first().waitFor();
+      await clickCell(page, run.goblins[1]!);
+      const bigGoblin = page.getByRole("dialog", { name: "Goblin 2 actions" });
+      await bigGoblin.waitFor();
+      const wide = await barRect(page);
+      const measured = await probeWidth(page, 1);
+      await setUp(dm, { ...DESK, scale: 1 });
+      const normal = await probeWidth(dm, 1);
+      assert.ok(measured > normal, `a 16 px minimum font size measures ${measured}, not wider than ${normal}`);
+      assert.ok(Math.abs(wide.right - wide.left - measured) <= 1, `the window is ${wide.right - wide.left} wide, not the measured ${measured}`);
+      assert.ok(oneTop(await buttonTops(bigGoblin, STEADY)), "with a 16 px minimum font size, Conditions, Hidden and Multi-select wrap");
+      await shots.take(page, "token-window-rows-min-font-16");
+    } finally {
+      await big.close();
+    }
+  });
+
+  test("16. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });

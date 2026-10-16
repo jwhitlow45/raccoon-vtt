@@ -19,6 +19,7 @@ import {
   columnTop,
   compactHang,
   DEFAULT_SPOT,
+  defaultBarWidth,
   freeArea,
   hangBox,
   hintRoom,
@@ -180,6 +181,46 @@ describe("compact", () => {
     assert.equal(freeArea(viewport, phone({ band: false, options: true, safe })).height, 111);
     assert.deepEqual(summary(phone({ band: false, options: true, safe }), viewport), { overlay: 163, lane: "summary", bar: 111, width: 230 });
     assert.equal(compactHang(viewport, viewport, phone({ band: false, options: true, safe })).coversToolbar, false);
+  });
+});
+
+describe("the default width (docs/design-v1-token-window.md 3.3)", () => {
+  test("the narrowest that holds the three buttons on one line, rounded up plus a pixel, never under 304", () => {
+    // Narrow buttons, as a small font draws them.
+    assert.equal(defaultBarWidth([80, 60, 90]), BAR_WIDTH);
+    // The system font on macOS: 26 + 99.1 + 74.1 + 107.4 + 8 = 314.6, up to 315, plus one.
+    assert.equal(defaultBarWidth([99.1, 74.1, 107.4]), 316);
+    assert.equal(defaultBarWidth([99.4, 74.3, 107.6]), 317);
+    // Tahoma: 294 for the three and their gaps.
+    assert.equal(defaultBarWidth([102, 77, 107]), 321);
+    // A whole sum still gains its pixel, so sub-pixel rounding never wraps the row.
+    assert.equal(defaultBarWidth([100, 75, 108]), 318);
+  });
+
+  test("every bar that does not span takes it: docked, compact and beside the lane", () => {
+    const desk = { width: 1280, height: 800 };
+    const chrome: Chrome = { ...DEFAULT_CHROME, top: 52, bottom: 60 };
+    const docked = placeBar({ layout: desk, viewport: { width: 920, height: 800 }, chrome, foot: 0, anchor: null, spot: DEFAULT_SPOT, height: 300, column: null, width: 316 });
+    assert.equal(docked?.mode, "dock");
+    assert.equal(docked?.hang.width, 316);
+    assert.equal(docked!.hang.left + 316, freeArea({ width: 920, height: 800 }, chrome).left + freeArea({ width: 920, height: 800 }, chrome).width);
+    const short = { width: 844, height: 200 };
+    const compact = placeBar({ layout: short, viewport: short, chrome, foot: 0, anchor: null, spot: DEFAULT_SPOT, height: 300, column: null, width: 316 });
+    assert.equal(compact?.mode, "compact");
+    assert.equal(compact?.hang.width, 316);
+    assert.equal(compactHang(short, short, chrome, 316).width, 316);
+    // Beside the lane, at most the room left of it.
+    const column = { top: 60, content: 700, first: 700 };
+    const beside = placeBar({ layout: desk, viewport: { width: 920, height: 800 }, chrome, foot: 0, anchor: null, spot: DEFAULT_SPOT, height: 300, column, width: 316 });
+    assert.equal(beside?.lane, "beside");
+    assert.equal(beside?.hang.width, 316);
+    const narrow = { width: 600, height: 800 };
+    const squeezed = placeBar({ layout: desk, viewport: narrow, chrome, foot: 0, anchor: null, spot: DEFAULT_SPOT, height: 300, column, width: 316 });
+    assert.equal(squeezed?.lane, "beside");
+    assert.equal(squeezed?.hang.width, freeArea(narrow, chrome).width - LANE_WIDTH);
+    // Without a measure yet, 304.
+    assert.equal(placeBar({ layout: desk, viewport: { width: 920, height: 800 }, chrome, foot: 0, anchor: null, spot: DEFAULT_SPOT, height: 300, column: null })?.hang.width, BAR_WIDTH);
+    assert.equal(restingBar({ layout: desk, viewport: { width: 920, height: 800 }, chrome, spot: DEFAULT_SPOT, height: 300, column: null, width: 316 })?.box.width, 316);
   });
 });
 
@@ -424,17 +465,28 @@ describe("fit and find keep clear of the bar", () => {
 
   test("a bar in the lane covers the lane's side, whatever its height", () => {
     for (const height of [120, 300, 600]) {
-      const cover = barCover(viewport, bars, { box: { left: lane + 8, top: 732 - height, width: 304, height }, laneLeft: lane });
+      const cover = barCover(viewport, bars, { box: { left: lane + 8, top: 732 - height, width: 304, height }, laneLeft: lane, freeRight: 912 });
       assert.deepEqual(cover, { top: 0, right: 320, bottom: 0, left: 0 });
     }
   });
 
   test("a bar elsewhere covers the side that leaves the largest clear rectangle", () => {
-    const at = (left: number, top: number, width = 304, height = 200) => barCover(viewport, bars, { box: { left, top, width, height }, laneLeft: lane });
+    const at = (left: number, top: number, width = 304, height = 200) => barCover(viewport, bars, { box: { left, top, width, height }, laneLeft: lane, freeRight: 912 });
     assert.deepEqual(at(8, 300), { top: 0, right: 0, bottom: 0, left: 312 });
     assert.deepEqual(at(400, 300, 304, 200).right, 520);
     assert.deepEqual(at(8, 60, 900, 150), { top: 210, right: 0, bottom: 0, left: 0 });
     assert.deepEqual(at(8, 580, 900, 150), { top: 0, right: 0, bottom: 220, left: 0 });
+  });
+
+  test("a window against the free area's right edge covers the right side from its own left edge when wider than the lane, and the lane when narrower, whatever its height (docs/design-v1-token-window.md 9.1)", () => {
+    const right = (width: number, top: number, height: number) => barCover(viewport, bars, { box: { left: 912 - width, top, width, height }, laneLeft: lane, freeRight: 912 });
+    for (const [top, height] of [[60, 120], [400, 332], [60, 672]] as const) {
+      assert.deepEqual(right(316, top, height), { top: 0, right: 920 - (912 - 316), bottom: 0, left: 0 });
+      assert.deepEqual(right(600, top, height), { top: 0, right: 920 - (912 - 600), bottom: 0, left: 0 });
+      assert.deepEqual(right(300, top, height), { top: 0, right: 320, bottom: 0, left: 0 });
+    }
+    // Off the right edge and out of the lane, as before: the largest clear rectangle.
+    assert.deepEqual(barCover(viewport, bars, { box: { left: 400, top: 300, width: 316, height: 200 }, laneLeft: lane, freeRight: 912 }).right, 520);
   });
 
   test("no box covers nothing", () => {
@@ -451,7 +503,7 @@ describe("fit and find keep clear of the bar", () => {
   test("a bar about to open rests at its spot with the height it last had, and a spanning one has no place yet", () => {
     const chrome: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0, rail: 0 };
     const rest = restingBar({ layout: { width: 1280, height: 800 }, viewport, chrome, spot: DEFAULT_SPOT, height: 250, column: null });
-    assert.deepEqual(rest, { box: { left: 920 - 8 - 304, top: 800 - 60 - 8 - 250, width: 304, height: 250 }, laneLeft: lane });
+    assert.deepEqual(rest, { box: { left: 920 - 8 - 304, top: 800 - 60 - 8 - 250, width: 304, height: 250 }, laneLeft: lane, freeRight: 912 });
     assert.equal(restingBar({ layout: { width: 390, height: 844 }, viewport: { width: 390, height: 844 }, chrome, spot: DEFAULT_SPOT, height: 250, column: null }), null);
   });
 

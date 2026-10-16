@@ -44,24 +44,31 @@ export type BarButtonInput = {
 };
 
 /**
- * The bar's two wrapping rows, ranked by use (3.1). The play row holds
- * what play needs, the transient answers to the move just made first. The
- * less-often row keeps the destructive and setup buttons apart from them,
- * so a quick tap meant for Conditions or Hidden never lands on Delete.
- * Each button shows only where it always has. Details is in neither: it
- * sits in the read-more row with the summary it expands.
+ * The bar's wrapping rows, ranked by use (3.1), each its own row in the
+ * bar. The passing line holds the answers to the move just made or a door
+ * just reached, which come and go with it, so it leads only while one of
+ * them shows. The steady line starts with Conditions, Hidden and
+ * Multi-select, which the default width keeps on one line
+ * (docs/design-v1-token-window.md 3.2), so nothing that comes and goes
+ * moves them: Request a roll and Light follow, on the same line where room
+ * is left. The less-often row keeps the destructive and setup buttons
+ * apart, so a quick tap meant for Conditions or Hidden never lands on
+ * Delete. Each button shows only where it always has. Details is in none:
+ * it sits in the read-more row with the summary it expands.
  */
-export function barButtons(input: BarButtonInput): { play: BarButtonId[]; less: BarButtonId[] } {
+export function barButtons(input: BarButtonInput): { passing: BarButtonId[]; play: BarButtonId[]; less: BarButtonId[] } {
   const { dm, owner } = input;
+  const passing: BarButtonId[] = [];
+  if (input.undoMove) passing.push("undoMove");
+  if ((dm || owner) && input.movedThisTurn) passing.push("countLeg");
+  if (!dm && owner && input.door) passing.push("door");
   const play: BarButtonId[] = [];
-  if (input.undoMove) play.push("undoMove");
-  if ((dm || owner) && input.movedThisTurn) play.push("countLeg");
-  if (!dm && owner && input.door) play.push("door");
   if (dm || owner) play.push("conditions");
-  if (dm && input.played) play.push("requestRoll");
   if (dm) play.push("hidden");
-  if ((dm || owner) && input.light) play.push("light");
   play.push("multiSelect");
+  // After Multi-select: between Conditions and Hidden it would push the two to the next line on every creature a player plays.
+  if (dm && input.played) play.push("requestRoll");
+  if ((dm || owner) && input.light) play.push("light");
   const less: BarButtonId[] = [];
   if (dm) less.push("locked", "duplicate", "delete");
   // The DM keeps Delete and gets no second button.
@@ -70,7 +77,7 @@ export function barButtons(input: BarButtonInput): { play: BarButtonId[]; less: 
     less.push("moveBar");
     if (input.moved) less.push("resetBar");
   }
-  return { play, less };
+  return { passing, play, less };
 }
 
 /** A token that belongs to a character as its companion (docs/design-v1-combat-flow.md 3.6), whose owners who are not the DM dismiss it. */
@@ -112,7 +119,7 @@ export function barCapacity(room: BarRoom): number | null {
   if (barMode(room.layout, free.height) === "span") return spanRoomAtWorst(free);
   const placed = placeBar({ ...room, height: Number.POSITIVE_INFINITY });
   if (!placed) return null;
-  if (placed.mode === "compact") return compactHang(room.layout, room.viewport, room.chrome).room;
+  if (placed.mode === "compact") return compactHang(room.layout, room.viewport, room.chrome, room.width).room;
   return placed.hang.room;
 }
 

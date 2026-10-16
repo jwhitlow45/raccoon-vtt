@@ -211,3 +211,11 @@ summary::-webkit-details-marker {
 [data-round-section] :is(a[href], button, input, select, textarea, [tabindex]):not([data-round-header] *) {
   scroll-margin-top: calc(var(--round-header-h, 0px) + 8px);
 }
+
+/* A row of the token window's buttons whose buttons all draw nothing, such
+   as the passing line on a player's token with no door in reach, takes no
+   room and no gap (canvas/TokenActionBar.tsx). Its inline flex display
+   would otherwise win over this rule. */
+[data-bar-row]:empty {
+  display: none !important;
+}

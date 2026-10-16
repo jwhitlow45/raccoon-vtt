@@ -16,8 +16,29 @@ import { scopeSlot } from "../state/scope.ts";
  * with the bar, and `shareLane` and `noticePlace` settle who gives way.
  */
 
-/** The bar's width wherever it does not span. */
+/**
+ * The narrowest default width of a bar that does not span, and its width
+ * until Room has measured the default (defaultBarWidth).
+ */
 export const BAR_WIDTH = 304;
+/** The frame's 12 px side padding and 1 px borders, each side. */
+const FRAME_SIDES = 26;
+/** The gap between buttons in a row. */
+const ROW_GAP = 4;
+
+/**
+ * The default width of a window that does not span
+ * (docs/design-v1-token-window.md 3.3): the narrowest that holds
+ * Conditions, Hidden and Multi-select on one line as this page draws them,
+ * and never under 304. `buttons` are the widths of three hidden small
+ * buttons with those labels, in layout px, so the device's font and the
+ * browser's minimum font size count. The last pixel keeps sub-pixel
+ * rounding from wrapping the row.
+ */
+export function defaultBarWidth(buttons: readonly number[]): number {
+  const row = buttons.reduce((sum, w) => sum + w, 0) + ROW_GAP * Math.max(0, buttons.length - 1);
+  return Math.max(BAR_WIDTH, Math.ceil(FRAME_SIDES + row) + 1);
+}
 /** The right of the free area that the column and a docked bar share: the bar and an 8 px gap before the map. */
 export const LANE_WIDTH = 312;
 /** The margin the free area keeps from every edge, and the gap between the column and the bar. */
@@ -134,10 +155,10 @@ export function hangBox(hang: Hang, height: number): Box {
  * 8 px above the bottom safe area, over the toolbar too. It hangs by its
  * bottom, so a short bar sits where a docked one would.
  */
-export function compactHang(layout: Size, viewport: Size, chrome: Chrome): Hang & { coversToolbar: boolean } {
+export function compactHang(layout: Size, viewport: Size, chrome: Chrome, barWidth = BAR_WIDTH): Hang & { coversToolbar: boolean } {
   const free = freeArea(viewport, chrome);
   const upright = layout.width <= layout.height;
-  const width = Math.max(0, upright ? free.width : Math.min(BAR_WIDTH, free.width));
+  const width = Math.max(0, upright ? free.width : Math.min(barWidth, free.width));
   const left = upright ? free.left : free.left + free.width - width;
   const aboveToolbar = viewport.height - chrome.toolbar - EDGE;
   const coversToolbar = aboveToolbar - free.top < MIN_BAR_HEIGHT;
@@ -294,7 +315,7 @@ export function overlapsLane(hang: Pick<Hang, "left" | "width">, free: Box): boo
  *    An upright span takes the first card's bottom as its top limit
  *    instead and stays off its token (placeBar).
  * 2. Beside: with 230 px or more left of the lane, the bar moves there,
- *    up to 304 px wide, with the lane's whole height, and the column keeps
+ *    up to its own width, with the lane's whole height, and the column keeps
  *    the lane whole.
  * 3. Summary: the column shows a 44 px summary row in place of its cards,
  *    and the bar takes the rest of the lane, 8 px below it.
@@ -318,7 +339,7 @@ export function shareLane(input: {
   const { lane, floor } = laneChoice(input);
   if (lane === "none") return { lane, hang };
   if (lane === "beside") {
-    const width = Math.min(BAR_WIDTH, input.besideRoom);
+    const width = Math.min(hang.width, input.besideRoom);
     const room = Math.max(0, hang.anchor === "top" ? laneBottom - hang.at : hang.at - laneTop);
     return { lane, hang: { ...hang, left: input.laneLeft - width, width, room } };
   }
@@ -361,16 +382,21 @@ export function columnRoom(input: { lane: Lane; columnTop: number; bar: Box }): 
 /**
  * The bar's box as one inset over the map, for Fit the map, Find my token
  * and the pans that bring a token into view (design section 4). A bar in
- * the lane covers the lane's side, whatever its height, so a token never
- * lands under a bar that later grows. A bar elsewhere covers the side
+ * the lane, or against the free area's right edge (`freeRight`), covers
+ * the right side from its own left edge or the lane's, whichever is
+ * further left, whatever its height, so a token never lands under a bar
+ * that later grows, nor under a window wider than the lane
+ * (docs/design-v1-token-window.md 9.1). A bar elsewhere covers the side
  * that leaves the largest clear rectangle. Measured from the viewport's
  * edges, like `bars`, in the same pixels as everything passed in.
  */
-export function barCover(viewport: Size, bars: Sides, bar: { box: Box; laneLeft: number } | null): Sides {
+export function barCover(viewport: Size, bars: Sides, bar: { box: Box; laneLeft: number; freeRight: number } | null): Sides {
   if (!bar) return NO_SIDES;
   const { box } = bar;
+  const inLane = box.left >= bar.laneLeft - 0.5;
+  const againstRight = box.left + box.width >= bar.freeRight - 0.5;
   // A lane that does not fit the free area (a narrow phone) leaves the bar to cover a side like any other.
-  if (bar.laneLeft > 0 && box.left >= bar.laneLeft - 0.5) return { ...NO_SIDES, right: Math.max(0, viewport.width - bar.laneLeft) };
+  if (bar.laneLeft > 0 && (inLane || againstRight)) return { ...NO_SIDES, right: Math.max(0, viewport.width - Math.min(box.left, bar.laneLeft)) };
   const sides: Sides[] = [
     { ...NO_SIDES, right: viewport.width - box.left },
     { ...NO_SIDES, bottom: viewport.height - box.top },
@@ -474,7 +500,10 @@ export function placeBar(input: {
   /** The bar's content height. */
   height: number;
   column: ColumnFacts | null;
+  /** The default width (defaultBarWidth), which every bar that does not span takes. */
+  width?: number;
 }): { mode: BarMode; free: Box; hang: Hang; lane: Lane } | null {
+  const barWidth = input.width ?? BAR_WIDTH;
   const free = freeArea(input.viewport, input.chrome, input.foot);
   const mode = barMode(input.layout, free.height);
   if (mode === "span") {
@@ -483,10 +512,10 @@ export function placeBar(input: {
     const { lane, floor } = laneChoice({ laneTop: free.top, laneHeight: free.height, column: input.column, besideRoom: free.width - LANE_WIDTH });
     const hang = spanHang(input.anchor, free, input.height, floor);
     if (lane !== "beside") return { mode, free, hang, lane };
-    const width = Math.min(BAR_WIDTH, free.width - LANE_WIDTH);
+    const width = Math.min(barWidth, free.width - LANE_WIDTH);
     return { mode, free, hang: { ...hang, left: laneLeft(free) - width, width }, lane };
   }
-  const hang = mode === "compact" ? compactHang(input.layout, input.viewport, input.chrome) : spotHang(input.spot, free, { width: BAR_WIDTH, height: input.height });
+  const hang = mode === "compact" ? compactHang(input.layout, input.viewport, input.chrome, barWidth) : spotHang(input.spot, free, { width: barWidth, height: input.height });
   if (!input.column || !overlapsLane(hang, free)) return { mode, free, hang, lane: "none" };
   const shared = shareLane({
     hang,
@@ -506,10 +535,10 @@ export function placeBar(input: {
  * as the drawn bar will be (placeBar). Null where the bar spans, since a
  * spanning bar is placed by its token.
  */
-export function restingBar(input: { layout: Size; viewport: Size; chrome: Chrome; spot: Spot; height: number; foot?: number; column: ColumnFacts | null }): { box: Box; laneLeft: number } | null {
+export function restingBar(input: { layout: Size; viewport: Size; chrome: Chrome; spot: Spot; height: number; foot?: number; column: ColumnFacts | null; width?: number }): { box: Box; laneLeft: number; freeRight: number } | null {
   const placed = placeBar({ ...input, foot: input.foot ?? 0, anchor: null });
   if (!placed || placed.mode === "span") return null;
-  return { box: hangBox(placed.hang, input.height), laneLeft: laneLeft(placed.free) };
+  return { box: hangBox(placed.hang, input.height), laneLeft: laneLeft(placed.free), freeRight: placed.free.left + placed.free.width };
 }
 
 // ------------------------------------------------------------ notices
@@ -687,8 +716,8 @@ export function shortHint(room: number): boolean {
 
 // ------------------------------------------------------------ the Room's slot
 
-/** The bar as it shows, for the column, the notices and the camera. */
-export type BarFacts = { box: Box; mode: BarMode; lane: Lane; laneLeft: number };
+/** The bar as it shows, for the column, the notices and the camera. `freeRight` is the free area's right edge (barCover). */
+export type BarFacts = { box: Box; mode: BarMode; lane: Lane; laneLeft: number; freeRight: number };
 
 type BarDockState = {
   /** Room's chrome, measured. Null until it is. */
@@ -705,6 +734,8 @@ type BarDockState = {
   columnRollAsked: boolean;
   /** This Room's spot. A "view as a player" preview reads the device's and keeps its own changes to itself. */
   spot: Spot;
+  /** The default width this page measured (defaultBarWidth). */
+  defaultWidth: number;
   /** The content height the bar last had, for where it will rest before it opens. */
   lastHeight: number;
   /** Set by Actions: the next bar to show takes focus on its frame. */
@@ -726,7 +757,7 @@ type BarDockState = {
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
-  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false })),
+  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false })),
 );
 
 function clamp(n: number, lo: number, hi: number): number {
