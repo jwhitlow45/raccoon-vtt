@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, dragCells, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragCells, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The docked token action bar (docs/design-v1-bar-dock.md section 7) on the
@@ -104,7 +104,20 @@ async function setUp(page: Page, view: { width: number; height: number; scale: n
     },
     [view.scale, [SPOT_KEY, SIZE_KEY], [spot, size]] as const,
   );
-  await page.reload();
+  /*
+   * A fresh load of the room's address rather than a reload, and one more
+   * try if it meets a navigation the page started itself: a page left with
+   * the window open steps off the window's Back entry (lib/backClose.ts).
+   */
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      break;
+    } catch (err) {
+      if (attempt >= 3) throw err;
+      await page.waitForTimeout(300);
+    }
+  }
   await page.getByRole("status", { name: "Connected" }).first().waitFor();
   await page.locator(".konvajs-content").first().waitFor();
 }
@@ -1381,7 +1394,148 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await setUp(dm, { ...DESK, scale: 1 });
   });
 
-  test("19. nothing went wrong in the browsers", () => {
+  test("19. the computer's reach sweep: every size and interface size, the side panel shown and hidden, no stored size, the smallest and the largest, the DM and Pat, out of a fight and with checks and a roll card, and a sheet on the right where there is one", async () => {
+    const SWEEP = [
+      { width: 1280, height: 800 },
+      { width: 1920, height: 1080 },
+      { width: 1024, height: 768 },
+      { width: 900, height: 600 },
+    ];
+    const STORED = [null, '{"w":1,"h":1}', '{"w":4096,"h":4096}'] as const;
+    const misses: string[] = [];
+    /** Steps where the bars and the alerts leave the token no map to be tapped on, which a viewer could not do either. */
+    const skipped: string[] = [];
+    let steps = 0;
+    const reach = async (page: Page, label: string, what: string, target: Locator) => {
+      if ((await target.count()) === 0) {
+        misses.push(`${label}: no ${what}`);
+        return;
+      }
+      if (!(await wholeInReach(target))) misses.push(`${label}: ${what} is cut off or takes no tap`);
+    };
+    /** Each control of the open window, whole and on top, the window in its room, nothing sideways, and Apply in view in the smallest. */
+    const sweepWindow = async (page: Page, name: string, label: string, smallest: boolean, resizable: boolean, sheetLeft?: number) => {
+      const frame = page.getByRole("dialog", { name: `${name} actions` });
+      if ((await frame.getAttribute("data-bar-mode")) !== "dock") return;
+      steps += 1;
+      const r = await barRect(page);
+      const c = await chrome(page);
+      // A hidden side panel stays in the page with no box.
+      const right = sheetLeft ?? (c.panel !== null && c.panel > 0 ? c.panel : c.width);
+      if (r.left < -0.5 || r.top < c.top - 0.5 || r.bottom > c.toolbar + 0.5 || r.right > right + 0.5) misses.push(`${label}: the window leaves its room: ${JSON.stringify({ r, c })}`);
+      await reach(page, label, "Move window", frame.getByRole("button", { name: "Move window", exact: true }));
+      await reach(page, label, "Close", frame.getByRole("button", { name: "Close", exact: true }));
+      const reset = frame.getByRole("button", { name: "Reset window position and size", exact: true });
+      if ((await reset.count()) > 0) await reach(page, label, "Reset", reset);
+      if (resizable) await reach(page, label, "Resize window", frame.getByRole("button", { name: "Resize window", exact: true }));
+      const scroller = frame.locator("[data-bar-scroll]");
+      if (smallest && resizable) {
+        const view = await rectOf(scroller);
+        const top = await scroller.evaluate((el) => (el as unknown as { scrollTop: number }).scrollTop);
+        const field = await rectOf(frame.getByRole("textbox", { name: "HP change" }));
+        const apply = await rectOf(frame.getByRole("button", { name: "Apply", exact: true }));
+        if (top !== 0 || field.top < view.top - 0.5 || apply.bottom > view.bottom + 0.5) misses.push(`${label}: the smallest window has the HP field or Apply out of view`);
+      }
+      for (const button of ["One size smaller", "One size larger"]) {
+        const b = frame.getByRole("group", { name: "Size", exact: true }).getByRole("button", { name: button });
+        if ((await b.count()) === 0) continue;
+        if (await b.isDisabled()) continue;
+        await b.evaluate((el) => (el as unknown as { scrollIntoView(o: object): void }).scrollIntoView({ block: "nearest" }));
+        await page.waitForTimeout(80);
+        await reach(page, label, button, b);
+      }
+      if (await scroller.evaluate((el) => (el as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth > (el as unknown as { clientWidth: number }).clientWidth + 1)) {
+        misses.push(`${label}: the window scrolls sideways`);
+      }
+    };
+    /** Opens a token's window from a fitted map, or says why it cannot. */
+    const open = async (page: Page, cell: { x: number; y: number }, name: string, label: string): Promise<boolean> => {
+      const close = page.locator('[role="dialog"][data-bar-mode]').getByRole("button", { name: "Close", exact: true }).first();
+      if ((await close.count()) > 0 && (await close.isVisible())) await close.click();
+      const fit = page.getByRole("button", { name: "Fit the map to the screen" });
+      if ((await fit.count()) > 0 && (await wholeInReach(fit))) await fit.click();
+      await page.waitForTimeout(250);
+      const p = await pagePoint(page, run.bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+      const tag = await page.evaluate(([x, y]) => (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): { tagName: string } | null } }).document.elementFromPoint(x, y)?.tagName ?? null, [p.x, p.y] as const);
+      if (tag !== "CANVAS") {
+        skipped.push(`${label}: ${name} is under ${tag}`);
+        return false;
+      }
+      await page.mouse.click(p.x, p.y);
+      await page.getByRole("dialog", { name: `${name} actions` }).waitFor({ timeout: 5000 }).catch(() => undefined);
+      return (await page.getByRole("dialog", { name: `${name} actions` }).count()) > 0;
+    };
+    const sidePanelShown = async (page: Page) => {
+      const aside = page.locator("aside").first();
+      return (await aside.count()) > 0 && ((await aside.boundingBox())?.width ?? 0) > 0;
+    };
+
+    for (const fight of ["none", "checks"] as const) {
+      if (fight === "checks") {
+        await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: randomUUID(), tokenId: g.id, value: 15 - i })) });
+        for (const g of run.goblins) await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } }).catch(() => undefined);
+        await ops.send({ t: "roll.ask", request: { id: randomUUID(), test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+      }
+      for (const scale of [1, 1.3]) {
+        for (const stored of STORED) {
+          await setUp(dm, { ...DESK, scale }, null, stored);
+          await setUp(player, { ...DESK, scale }, null, stored);
+          // Checks come up as damage arrives, so a page loaded again has none until the goblins take more.
+          if (fight === "checks") {
+            await damageGoblins();
+            await dm.locator('[data-alert="concentration"]').nth(2).waitFor().catch(() => undefined);
+          }
+          for (const size of SWEEP) {
+            await dm.setViewportSize(size);
+            await player.setViewportSize(size);
+            await dm.waitForTimeout(250);
+            const wide = size.width / scale >= 900;
+            for (const room of wide ? (["shown", "hidden"] as const) : (["alone", "sheet"] as const)) {
+              if (wide && (await sidePanelShown(dm)) !== (room === "shown")) {
+                await dm.keyboard.press("s");
+                await dm.waitForTimeout(250);
+              }
+              if (wide && (await sidePanelShown(dm)) !== (room === "shown")) misses.push(`${size.width} x ${size.height} at ${Math.round(scale * 100)}%: S did not make the side panel ${room}`);
+              const label = `${size.width} x ${size.height} at ${Math.round(scale * 100)}%, ${room}, stored ${stored ?? "none"}, ${fight}`;
+              const smallest = stored === '{"w":1,"h":1}';
+              for (const [cell, name] of [
+                [run.goblins[1]!, "Goblin 2"],
+                [run.thorn, "Thorn"],
+              ] as const) {
+                if (!(await open(dm, cell, name, `DM on ${name}, ${label}`))) continue;
+                // The window open first, then a panel's sheet on the right beside it, as a DM on a small screen would.
+                if (room === "sheet") {
+                  await dm.locator('nav[aria-label="Tools"] button[title="Panels"]').click();
+                  await dm.getByRole("region", { name: "Panels" }).getByRole("button", { name: "Outliner", exact: true }).click();
+                  await dm.locator('section[aria-label="Outliner"]').waitFor();
+                  await dm.waitForTimeout(250);
+                }
+                // Beside the sheet, its room ends at the sheet's edge.
+                const sheet = room === "sheet" ? await dm.locator('section[aria-label="Outliner"]').boundingBox() : null;
+                await sweepWindow(dm, name, `DM on ${name}, ${label}`, smallest, true, sheet ? sheet.x - 2 : undefined);
+                if (room === "sheet") {
+                  const closeSheet = dm.getByRole("button", { name: /^Close Outliner/ }).first();
+                  if (await closeSheet.isVisible()) await closeSheet.click();
+                }
+              }
+            }
+            // Pat on a touch tablet: the window keeps its default size, and no handle.
+            if (await open(player, run.thorn, "Thorn", `Pat on Thorn, ${size.width} x ${size.height} at ${Math.round(scale * 100)}%, ${fight}`)) {
+              await sweepWindow(player, "Thorn", `Pat on Thorn, ${size.width} x ${size.height} at ${Math.round(scale * 100)}%, stored ${stored ?? "none"}, ${fight}`, false, false);
+            }
+          }
+          if (scale === 1.3 && stored === '{"w":4096,"h":4096}' && fight === "checks") await shots.take(dm, "token-window-sweep-largest-in-a-fight-130");
+        }
+      }
+      if (fight === "checks") await ops.send({ t: "encounter.end" });
+    }
+    await setUp(dm, { ...DESK, scale: 1 });
+    await sidePanelChoice(dm, null);
+    console.error(`the computer's sweep: ${steps} windows, ${misses.length} misses, ${skipped.length} skipped${skipped.length ? `:\n${skipped.join("\n")}` : ""}`);
+    assert.deepEqual(misses, []);
+  });
+
+  test("20. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });
