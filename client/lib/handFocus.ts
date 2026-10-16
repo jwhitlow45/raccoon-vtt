@@ -10,7 +10,9 @@
  * when the server answers, so the hand-off waits for it, a frame at a time,
  * up to `HAND_OFF_WAIT_MS`. It moves nothing when the control stays (a
  * refusal kept it), when it never had focus (a tap on a phone), or when
- * focus went somewhere else meanwhile.
+ * focus went somewhere else meanwhile. A caller that knows when the
+ * control may have gone, such as when the op behind the press settles,
+ * takes the same step itself with `handFocusNow`, with no limit.
  */
 
 /** How long a hand-off waits for the pressed control to go: a slow server's answer. */
@@ -29,25 +31,43 @@ const browser = (): HandOffEnv => ({
 
 export function handFocusOn(scope: El | null | undefined, to: readonly string[], env: HandOffEnv = browser()): void {
   const { doc } = env;
-  const pressed = doc.activeElement;
-  // Nothing had focus to lose.
-  if (!scope || pressed === null || pressed === doc.body) return;
+  const pressed = pressedControl(doc);
+  if (!scope || pressed === null) return;
   const until = env.now() + HAND_OFF_WAIT_MS;
   const step = () => {
-    if (!scope.isConnected) return;
     if (pressed.isConnected) {
-      if (doc.activeElement === pressed && env.now() < until) env.schedule(step);
+      if (scope.isConnected && doc.activeElement === pressed && env.now() < until) env.schedule(step);
       return;
     }
-    const active = doc.activeElement;
-    if (active !== null && active !== doc.body) return;
-    for (const selector of to) {
-      const el = selector === ":scope" ? scope : scope.querySelector(selector);
-      if (el) {
-        el.focus();
-        return;
-      }
-    }
+    handFocusNow(scope, pressed, to, doc);
   };
   env.schedule(step);
+}
+
+/** What has focus as a control is pressed, or null when nothing does and so nothing can be lost. */
+export function pressedControl(doc: Doc = document as unknown as Doc): Doc["activeElement"] {
+  const active = doc.activeElement;
+  return active === null || active === doc.body ? null : active;
+}
+
+/**
+ * The hand-off's one step, for a caller that knows when the control may
+ * have gone, such as when the op behind the press settles, rather than
+ * watching a frame at a time up to a limit: an offline op may wait far
+ * longer. Once `pressed` is gone and focus fell to the page, focus moves
+ * to the first of `to` found in `scope`, which it returns. Anything else
+ * moves nothing and returns null.
+ */
+export function handFocusNow(scope: El | null | undefined, pressed: { isConnected: boolean } | null, to: readonly string[], doc: Doc = document as unknown as Doc): Focusable | null {
+  if (!scope?.isConnected || pressed === null || pressed.isConnected) return null;
+  const active = doc.activeElement;
+  if (active !== null && active !== doc.body) return null;
+  for (const selector of to) {
+    const el = selector === ":scope" ? scope : scope.querySelector(selector);
+    if (el) {
+      el.focus();
+      return el;
+    }
+  }
+  return null;
 }

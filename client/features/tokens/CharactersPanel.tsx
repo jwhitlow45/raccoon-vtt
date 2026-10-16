@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import type { Character, CreatureSize, Member, RoomState } from "#shared/model.ts";
 import { playsAlone } from "#shared/permissions.ts";
 import type { TokenInput } from "#shared/protocol.ts";
@@ -10,20 +10,20 @@ import { ErrorText, FieldRow, Input, Select } from "../../components/Field.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { Help, Note, Section } from "../../components/Panel.tsx";
 import { Row, RowList } from "../../components/Row.tsx";
-import { handFocusOn } from "../../lib/handFocus.ts";
+import { handFocusNow, pressedControl } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
 import { hpDisplay, hpText, initials } from "../../lib/tokenView.ts";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
 import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import { dispatchGesture } from "../../state/actions.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
-import { useSend } from "../encounter/hooks.ts";
+import { useAnyPending } from "../encounter/hooks.ts";
 import { ImageField, type ImageRef } from "../images/ImageField.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import { placeOnGround } from "../movement/ground.ts";
 import { ownsCharacter } from "./access.ts";
 import { CharacterCard, SIZE_OPTIONS } from "./CharacterCard.tsx";
-import { deleteWarning } from "./characterDelete.ts";
+import { deleteWarning, sharedNote } from "./characterDelete.ts";
 import { CharacterCompanions, CompanionForm } from "./CompanionsSection.tsx";
 import { EffectIcon } from "./EffectIcon.tsx";
 import { newCharacter } from "./factory.ts";
@@ -75,18 +75,7 @@ export default function CharactersPanel(props: PanelProps) {
     if (props.shown) root.current.querySelector<HTMLElement>(opener)?.focus();
   });
 
-  /*
-   * A deleted character's card goes with its row, Delete and all, so focus
-   * moves on to the next of the list once it is gone: the next character,
-   * else the one before, else New character, else the empty list's line.
-   * Delete waits for the server, so the hand-off waits too, and a refusal
-   * that keeps the card moves nothing (lib/handFocus.ts).
-   */
-  const handOff = (id: string) => {
-    const at = mine.findIndex((c) => c.id === id);
-    const neighbors = [...mine.slice(at + 1), ...mine.slice(0, Math.max(at, 0)).reverse()];
-    handFocusOn(root.current, [...neighbors.map((c) => `[data-opener="character:${c.id}"]`), '[data-opener="new-character"]', "[data-characters-empty]"]);
-  };
+  const remove = useDeleteHandOff(root, mine);
 
   const companionOf = addingFor !== null ? characters?.[addingFor] : undefined;
   if (companionOf) {
@@ -134,7 +123,7 @@ export default function CharactersPanel(props: PanelProps) {
               ? "The party's characters go here. Make one with New character, and pick who plays it."
               : own?.allowed
                 ? "Make your character, or wait for the DM to give you one."
-                : "The DM has not given you a character yet."}
+                : "Ask the DM for a character."}
           </Empty>
         </div>
       ) : null}
@@ -146,7 +135,7 @@ export default function CharactersPanel(props: PanelProps) {
           onToggle={() => setOpenId(open === c.id ? null : c.id)}
           close={props.close}
           onAddCompanion={() => setAddingFor(c.id)}
-          onDelete={() => handOff(c.id)}
+          onDelete={() => remove(c.id)}
         />
       ))}
       {/* A long rest comes once a day and the list is read every time, so the rest waits below it (docs/design-v1-layout-hierarchy.md M8). */}
@@ -162,6 +151,71 @@ export default function CharactersPanel(props: PanelProps) {
       ) : null}
     </div>
   );
+}
+
+/** A delete under way, for the focus hand-off once it settles (useDeleteHandOff). */
+type Leaving = {
+  /** The character's own row, where focus goes back when the delete is refused. */
+  own: string;
+  /** What had focus at the press, or null when nothing did and so nothing can be lost. */
+  pressed: ReturnType<typeof pressedControl>;
+  /** Where focus may go, the first found: the character's row, its neighbors, New character, the empty list's line. */
+  to: string[];
+  settled: boolean;
+  /** Where the hand-off put focus, once it has. */
+  movedTo: unknown;
+};
+
+/**
+ * Sends a character's delete and moves focus on once its card, Delete and
+ * all, goes with it: to the next character, else the one before, else New
+ * character, else the empty list's line. A refusal that takes the card's
+ * Delete away (the DM shared the character meanwhile) leaves the row, and
+ * focus goes to it.
+ *
+ * The hand-off follows the op, not a clock: it looks again each time the
+ * list is drawn, and once more when the op settles, however long an
+ * offline delete waits. A delete this device predicts removes the row at
+ * once, and a refusal brings it back, so focus the hand-off put on a
+ * neighbor returns to the row then. It moves focus only when it fell to
+ * the page, never from where the person put it meanwhile
+ * (lib/handFocus.ts handFocusNow).
+ */
+function useDeleteHandOff(root: RefObject<HTMLDivElement | null>, mine: readonly Character[]): (characterId: string) => number | null {
+  const actions = useRoomActions();
+  const leaving = useRef<Leaving | null>(null);
+  const [, settled] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    const l = leaving.current;
+    const scope = root.current;
+    if (!l || !scope) return;
+    if (l.movedTo === null) l.movedTo = handFocusNow(scope, l.pressed, l.to);
+    else if (l.settled && scope.ownerDocument.activeElement === l.movedTo) scope.querySelector<HTMLElement>(l.own)?.focus();
+    if (l.settled) leaving.current = null;
+  });
+  return (characterId) => {
+    const at = mine.findIndex((c) => c.id === characterId);
+    const neighbors = [...mine.slice(at + 1), ...mine.slice(0, Math.max(at, 0)).reverse()];
+    const own = `[data-opener="character:${characterId}"]`;
+    const l: Leaving = {
+      own,
+      pressed: pressedControl(),
+      to: [own, ...neighbors.map((c) => `[data-opener="character:${c.id}"]`), '[data-opener="new-character"]', "[data-characters-empty]"],
+      settled: false,
+      movedTo: null,
+    };
+    const n = actions.dispatch(
+      { t: "character.delete", characterId },
+      {
+        onAnswer: () => {
+          l.settled = true;
+          settled();
+        },
+      },
+    );
+    if (n !== null) leaving.current = l;
+    return n;
+  };
 }
 
 /**
@@ -223,7 +277,7 @@ export function Portrait(props: { character: Pick<Character, "name" | "defaultIm
   return <ImagePreview image={character.defaultImage} shape="circle" aspect={1} width={size} ring={theme.color.ally} initials={initials(character.name)} />;
 }
 
-function CharacterRow(props: { character: Character; open: boolean; onToggle(): void; close(): void; onAddCompanion(): void; onDelete(): void }) {
+function CharacterRow(props: { character: Character; open: boolean; onToggle(): void; close(): void; onAddCompanion(): void; onDelete(): number | null }) {
   const { character } = props;
   const members = useRoomView((s) => s.view?.members);
   const role = useRoomView((s) => s.you?.role);
@@ -265,7 +319,13 @@ function CharacterRow(props: { character: Character; open: boolean; onToggle(): 
           {/* Before the card: in play a player opens their card for companions more often than to edit stats (docs/design-v1-combat-flow.md 3.7.5). */}
           <CharacterCompanions character={character} canAdd onAdd={props.onAddCompanion} close={props.close} />
           <CharacterCard character={character} />
-          {role === "dm" || (memberId !== undefined && playsAlone(memberId, character)) ? <RemoveCharacter character={character} dm={role === "dm"} onDelete={props.onDelete} /> : null}
+          {role === "dm" || (memberId !== undefined && playsAlone(memberId, character)) ? (
+            <RemoveCharacter character={character} dm={role === "dm"} onDelete={props.onDelete} />
+          ) : memberId !== undefined && members ? (
+            <Section label="Remove">
+              <Help>{sharedNote(memberId, character, members)}</Help>
+            </Section>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -274,33 +334,37 @@ function CharacterRow(props: { character: Character; open: boolean; onToggle(): 
 
 /**
  * Delete at the foot of a character's card: the DM's for every character,
- * and a player's for one they play alone. The delete waits for the server,
- * since only it holds every token of the character on every scene, so the
- * button is busy until the answer, and a refusal is the store's toast. A
- * player's delete is on no undo stack (shared/permissions.ts playsAlone),
- * so their card says first what goes with it and that it cannot be undone.
+ * and a player's for one they play alone. The line above it says what goes
+ * with it, and is the button's description in both of its states. The
+ * delete waits for the server, since only it holds every token of the
+ * character on every scene, so the button is busy until the answer, and a
+ * refusal is the store's toast. A player's delete is on no undo stack
+ * (shared/permissions.ts playsAlone), so their line says it cannot be
+ * undone, in the warning tone.
  */
-function RemoveCharacter(props: { character: Character; dm: boolean; onDelete(): void }) {
+function RemoveCharacter(props: { character: Character; dm: boolean; onDelete(): number | null }) {
   const { character } = props;
   const tokens = useRoomView((s) => s.view?.tokens);
   const encounter = useRoomView((s) => s.view?.encounter ?? null);
-  const remove = useSend();
+  const [sent, setSent] = useState<number | null>(null);
+  const waiting = useAnyPending(sent === null ? [] : [sent]);
+  const id = useId();
+  const warning = deleteWarning({ tokens: tokens ?? {}, encounter }, character, props.dm);
+  // A long name breaks anywhere, as the button's label does.
+  const wraps = { overflowWrap: "anywhere" } as const;
   return (
     <Section label="Remove">
       {props.dm ? (
-        <Help>Deleting the character also removes every token of it, on every scene.</Help>
+        <Help id={id} style={wraps}>
+          {warning}
+        </Help>
       ) : (
-        <Note>{deleteWarning({ tokens: tokens ?? {}, encounter }, character)}</Note>
+        <Note id={id} style={wraps}>
+          {warning}
+        </Note>
       )}
-      <ConfirmButton
-        confirm="Tap again to delete"
-        busy={remove.waiting}
-        onConfirm={() => {
-          remove.send({ t: "character.delete", characterId: character.id });
-          props.onDelete();
-        }}
-      >
-        {remove.waiting ? "Deleting…" : `Delete ${character.name}`}
+      <ConfirmButton confirm="Tap again to delete" busy={waiting} describedBy={id} wrap onConfirm={() => setSent(props.onDelete())}>
+        {waiting ? "Deleting…" : `Delete ${character.name}`}
       </ConfirmButton>
     </Section>
   );

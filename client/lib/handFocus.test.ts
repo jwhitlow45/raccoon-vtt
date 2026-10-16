@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { HAND_OFF_WAIT_MS, handFocusOn } from "./handFocus.ts";
+import { HAND_OFF_WAIT_MS, handFocusNow, handFocusOn, pressedControl } from "./handFocus.ts";
 
 /**
  * A page of named elements, one of them focused, where removing the
@@ -93,5 +93,43 @@ describe("focus hand-off from a control a press takes away (SFB-P-3)", () => {
     p.remove("revive");
     p.frame();
     assert.equal(p.active(), "body");
+  });
+});
+
+describe("the hand-off's one step, for a caller that knows when the op behind the press settled", () => {
+  test("an offline delete answered long after the frame-by-frame wait still hands focus on", () => {
+    const p = page(["delete", "next"], "delete");
+    const pressed = pressedControl(p.doc);
+    assert.equal(handFocusNow(p.scope, pressed, ["own", "next"], p.doc), null, "nothing yet: the control is still there");
+    p.frame(HAND_OFF_WAIT_MS * 6);
+    p.remove("delete");
+    assert.ok(handFocusNow(p.scope, pressed, ["own", "next"], p.doc));
+    assert.equal(p.active(), "next");
+  });
+
+  test("a refusal that takes the control away but leaves its row hands focus to the row, the first target", () => {
+    const p = page(["delete", "own", "next"], "delete");
+    const pressed = pressedControl(p.doc);
+    p.remove("delete");
+    handFocusNow(p.scope, pressed, ["own", "next"], p.doc);
+    assert.equal(p.active(), "own");
+  });
+
+  test("nothing moves while the control stays, when it never had focus, or when focus went elsewhere", () => {
+    const kept = page(["delete", "next"], "delete");
+    assert.equal(handFocusNow(kept.scope, pressedControl(kept.doc), ["next"], kept.doc), null);
+    assert.equal(kept.active(), "delete");
+    const tapped = page(["delete", "next"], "none");
+    const none = pressedControl(tapped.doc);
+    assert.equal(none, null, "a tap that gave it no focus has nothing to lose");
+    tapped.remove("delete");
+    assert.equal(handFocusNow(tapped.scope, none, ["next"], tapped.doc), null);
+    assert.equal(tapped.active(), "body");
+    const moved = page(["delete", "next", "other"], "delete");
+    const pressed = pressedControl(moved.doc);
+    moved.doc.activeElement = { isConnected: true, name: "other" };
+    moved.remove("delete");
+    assert.equal(handFocusNow(moved.scope, pressed, ["next"], moved.doc), null);
+    assert.equal(moved.active(), "other");
   });
 });

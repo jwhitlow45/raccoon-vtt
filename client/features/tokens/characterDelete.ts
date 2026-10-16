@@ -1,14 +1,18 @@
-import type { Character, RoomState } from "#shared/model.ts";
+import type { Character, Member, RoomState } from "#shared/model.ts";
 
 /**
- * What a player reads before deleting a character they play alone
- * (shared/permissions.ts playsAlone). The delete takes every token and
- * companion of the character on every scene and its rows in the fight,
- * as the DM's does. Only what this player's own view holds is counted.
- * Tokens on other scenes and rows the DM hid get general words, so the
- * sentence never tells them something their view does not.
+ * What the Remove section of a character's card says before Delete. The
+ * delete takes every token and companion of the character on every scene
+ * and its rows in the fight. Only what this viewer's own view holds is
+ * counted. The rest, such as tokens on other scenes and rows the DM hid,
+ * is named in general words every time, since a view cannot tell whether
+ * there is any. So the sentence names every kind of thing that goes, and
+ * never tells a player something their view does not. A player's delete
+ * cannot be undone, which their sentence says. The DM's can, for a
+ * character with few enough tokens (server/rooms/undo.ts), so the DM's
+ * does not.
  */
-export function deleteWarning(view: Pick<RoomState, "tokens" | "encounter">, character: Pick<Character, "id" | "name">): string {
+export function deleteWarning(view: Pick<RoomState, "tokens" | "encounter">, character: Pick<Character, "id" | "name">, undoable: boolean): string {
   const tokenIds = new Set<string>();
   let tokens = 0;
   let companions = 0;
@@ -28,8 +32,22 @@ export function deleteWarning(view: Pick<RoomState, "tokens" | "encounter">, cha
     parts.push(parts.length === 0 ? (companions === 1 ? "its companion" : `its ${count}`) : count);
   }
   if (fighting) parts.push("its place in the fight");
-  const what = parts.length === 0 ? "every token of it on any map" : `${listed(parts)}, and any token of it on another map`;
-  return `Deleting ${character.name} also removes ${what}. This cannot be undone.`;
+  const what =
+    parts.length === 0 ? "every token, companion and place in the fight it has, on every map" : `${listed(parts)}, and any other token, companion or place in the fight it has`;
+  return `Deleting ${character.name} also removes ${what}.${undoable ? "" : " This cannot be undone."}`;
+}
+
+/**
+ * Why a player's card for a character they share has no Delete: only one
+ * they play alone is theirs to delete (shared/permissions.ts playsAlone).
+ * It names the other players as the roster names them, and says "someone
+ * else" when an owner is no longer on the roster.
+ */
+export function sharedNote(memberId: string, character: Pick<Character, "name" | "ownerIds">, members: Readonly<Record<string, Pick<Member, "name"> | undefined>>): string {
+  const others = character.ownerIds.filter((id) => id !== memberId).map((id) => members[id]?.name?.trim() ?? "");
+  if (others.length === 0 || others.some((name) => name === "")) return `Someone else plays ${character.name} too, so only the DM can delete it.`;
+  if (others.length === 1) return `You and ${others[0]} both play ${character.name}, so only the DM can delete it.`;
+  return `You, ${listed(others)} all play ${character.name}, so only the DM can delete it.`;
 }
 
 /** "a", "a and b", "a, b and c". */

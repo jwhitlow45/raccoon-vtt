@@ -319,8 +319,15 @@ export function Stepper(props: {
   );
 }
 
-/** A button that asks once more before it acts, for deletes. `busy` is a delete that waits for the server, which ignores further taps. */
-export function ConfirmButton(props: { onConfirm(): void; children: ReactNode; confirm: string; label?: string; grow?: boolean; busy?: boolean }) {
+/**
+ * A button that asks once more before it acts, for deletes. `busy` is a
+ * delete that waits for the server, which ignores further taps.
+ * `describedBy` names what the delete takes with it, in both states, so a
+ * screen reader hears it with "Tap again to delete" too. `wrap` lets a
+ * long label, such as a character's name, wrap inside the button and
+ * break inside a long word, where a line is narrower than it.
+ */
+export function ConfirmButton(props: { onConfirm(): void; children: ReactNode; confirm: string; label?: string; grow?: boolean; busy?: boolean; describedBy?: string; wrap?: boolean }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
@@ -335,6 +342,7 @@ export function ConfirmButton(props: { onConfirm(): void; children: ReactNode; c
       armed={armed}
       busy={props.busy}
       aria-label={label}
+      aria-describedby={props.describedBy}
       title={label}
       onClick={() => {
         if (armed) {
@@ -342,7 +350,10 @@ export function ConfirmButton(props: { onConfirm(): void; children: ReactNode; c
           props.onConfirm();
         } else setArmed(true);
       }}
-      style={{ flex: props.grow ? 1 : "none", whiteSpace: "nowrap" }}
+      style={{
+        flex: props.grow ? 1 : "none",
+        ...(props.wrap ? { minWidth: 0, maxWidth: "100%", whiteSpace: "normal", overflowWrap: "anywhere", textAlign: "center" } : { whiteSpace: "nowrap" }),
+      }}
     >
       {armed ? props.confirm : props.children}
     </Button>
