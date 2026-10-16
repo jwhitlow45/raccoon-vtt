@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, noticePlace, type Chrome } from "../canvas/barDock.ts";
+import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, noticePlace, noticeSpan, type Chrome } from "../canvas/barDock.ts";
+import { ScrollForMore } from "../canvas/TokenActionBar.tsx";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
 import { MapStage } from "../canvas/Stage.tsx";
 import { Button } from "../components/Button.tsx";
@@ -59,6 +60,7 @@ import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, focusAlert, foldsUnderShe
 import { mapFocusSlot } from "./mapFocus.ts";
 import { firstSidePanel, readSidePanel, writeSidePanel } from "./sidePanel.ts";
 import { inModal, ModalSlots, useModalSlot } from "./modalSlot.tsx";
+import { optionsPlace, railAllowed, RAIL_WIDTH, wrapRecord, wrapsLines } from "./optionsPlace.ts";
 import { Badge, FindButton, FitButton, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle } from "./RoomChrome.tsx";
 import { DockHeaderActions, DockRow, FoldStatus, SAFE_PROBE_STYLE, useDockSummary, useLayoutHeight, useSafeAreas, type DockActions } from "./RoomDock.tsx";
 
@@ -94,6 +96,27 @@ function useHeight(scale: number): [(el: HTMLElement | null) => (() => void) | u
     [scale],
   );
   return [ref, height];
+}
+
+/** An element's width as drawn, kept up to date, as useHeight keeps a height: the tool's rail reports its own, which Fit and the bar dock keep clear of. */
+function useWidth(scale: number): [(el: HTMLElement | null) => (() => void) | undefined, number] {
+  const [width, setWidth] = useState(0);
+  const ref = useCallback(
+    (el: HTMLElement | null) => {
+      if (!el) return undefined;
+      const measure = () => setWidth(Math.round(el.getBoundingClientRect().width));
+      const observer = new ResizeObserver(measure);
+      observer.observe(el, { box: "border-box" });
+      measure();
+      return () => {
+        observer.disconnect();
+        setWidth(0);
+      };
+    },
+    // The scale is read through the element's rectangle, but a change must measure again.
+    [scale],
+  );
+  return [ref, width];
 }
 
 /**
@@ -210,9 +233,10 @@ function RoomPage() {
   const [topBarRef, topBarHeight] = useHeight(zoom);
   const [toolbarRef, toolbarHeight] = useHeight(zoom);
   const [optionsRef, optionsHeight, optionsControls] = useOptionsHeights(zoom);
+  const [railRef, railWidth] = useWidth(zoom);
   const insets = useMemo<Insets>(
-    () => ({ top: topBarHeight, right: 0, bottom: toolbarHeight + optionsHeight, left: 0 }),
-    [topBarHeight, toolbarHeight, optionsHeight],
+    () => ({ top: topBarHeight, right: 0, bottom: toolbarHeight + optionsHeight, left: railWidth }),
+    [topBarHeight, toolbarHeight, optionsHeight, railWidth],
   );
   const role = useRoomView((s) => s.you?.role ?? "player");
   usePreloadAndReopen(role);
@@ -419,6 +443,25 @@ function RoomPage() {
     if (dockStore.getState().sheetFull !== full) dockStore.setState({ sheetFull: full });
   }, [dockStore, full]);
   useLayoutEffect(() => () => dockStore.setState({ sheetFull: false }), [dockStore]);
+  /*
+   * The tool's options in a rail on the left of the map, on a short screen
+   * held sideways (docs/design-v1-layout-hierarchy.md 3, pages/optionsPlace.ts).
+   * A one-row tool's foot bar records the width where its row wrapped, and
+   * from then on uses the rail at that width or narrower: the record comes
+   * from a layout effect, so the bar is never painted at the foot first.
+   */
+  const mapWidth = sideShown ? width - theme.layout.sidePanelWidth : width;
+  const [wrappedAt, setWrappedAt] = useState<Readonly<Record<string, number>>>({});
+  const optionsDrawn = tool.Options !== undefined && optionsShown && !sheet && !pickerOpen;
+  const optionsAt = optionsPlace({ allowed: railAllowed({ width, height, mapWidth, safeLeft: safe.left }), toolId: tool.id, optionsAt: tool.optionsAt, footWidth: mapWidth, wrappedAt: wrappedAt[tool.id] ?? null });
+  const recordWrap = useCallback(
+    (toolId: string, footWidth: number) =>
+      setWrappedAt((prev) => {
+        const next = wrapRecord(prev[toolId] ?? null, footWidth);
+        return prev[toolId] === next ? prev : { ...prev, [toolId]: next };
+      }),
+    [],
+  );
   const folded = foldsUnderSheet({ width, height, sheetOpen, full });
   const docked = folded && (hasBar || summary !== null);
   // Over the whole screen there is no edge to dock on, so the dock's buttons join the header, as where the dock has no room.
@@ -472,9 +515,10 @@ function RoomPage() {
             // Beside the side panel the map never touches the right edge, so its free area keeps no right inset.
             safe: { top: safe.top, right: sideShown ? 0 : safe.right, bottom: safe.bottom, left: safe.left },
             sheet: sheetRight,
+            rail: railWidth / zoom,
           }
         : null,
-    [topBarHeight, toolbarHeight, optionsHeight, optionsControls, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight, sideShown],
+    [topBarHeight, toolbarHeight, optionsHeight, optionsControls, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight, sideShown, railWidth],
   );
   useLayoutEffect(() => {
     barDock.setState({ chrome });
@@ -492,24 +536,27 @@ function RoomPage() {
    * its Exit: the preview tells this page how tall it is, and this page
    * says where it goes. Spanning, this page's own notices start below it.
    */
-  const mapWidth = sideShown ? width - theme.layout.sidePanelWidth : width;
   const free = freeArea({ width: mapWidth, height }, chrome ?? DEFAULT_CHROME);
   const beside = chrome ? noticePlace(free) : null;
   const besideLane = beside !== null;
+  // With a rail the notices that span keep to the free area, right of it (barDock.ts noticeSpan).
+  const span = chrome && !beside ? noticeSpan(free, chrome.rail) : null;
+  const noticeBox = beside ?? span;
   const previewNotice = previewing?.notice ?? null;
   const previewPush = !beside && previewNotice ? previewNotice.height / zoom + EDGE : 0;
   const reportsPreview = previewNotice !== null && !ended && gate.kind !== "blackout";
   useLayoutEffect(() => {
     if (!previewNotice || !reportsPreview) return;
-    if (beside) {
-      const room = beside.width * zoom;
+    // Beside the lane, or spanning the free area right of a rail, so "Viewing as Pat" never covers the tool's options.
+    if (noticeBox) {
+      const room = noticeBox.width * zoom;
       const noticeWidth = Math.min(PREVIEW_NOTICE_MAX, room);
-      previewNotice.place({ left: beside.left * zoom + (room - noticeWidth) / 2, width: noticeWidth });
+      previewNotice.place({ left: noticeBox.left * zoom + (room - noticeWidth) / 2, width: noticeWidth });
     } else {
       previewNotice.place(null);
     }
     return () => previewNotice.place(null);
-  }, [previewNotice, reportsPreview, beside?.left, beside?.width, zoom]);
+  }, [previewNotice, reportsPreview, noticeBox?.left, noticeBox?.width, zoom]);
   // While a sheet shows over the whole screen, "Viewing as Pat" renders first inside it, above its content (pages/modalSlot.tsx).
   const previewSlot = useModalSlot("preview");
   useLayoutEffect(() => {
@@ -626,7 +673,7 @@ function RoomPage() {
           style={{
             position: "absolute",
             top: `calc(${theme.safe.top} + ${topInset + EDGE + previewPush}px)`,
-            ...(beside ? { left: beside.left, width: beside.width, padding: 0 } : { left: 0, right: 0, padding: `0 ${theme.space(3)}px` }),
+            ...(noticeBox ? { left: noticeBox.left, width: noticeBox.width, padding: 0 } : { left: 0, right: 0, padding: `0 ${theme.space(3)}px` }),
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
@@ -703,7 +750,19 @@ function RoomPage() {
         ) : null}
         {/* After the sheet, so a test's or a screen reader's first "Close" in the page is still the sheet's (docs/design-v1-visual.md 5.4). */}
         {docked && !dockInHeader ? <DockRow zoom={zoom} sheetHeight={sheetHeight} summary={summary} actions={dockActions} showRef={showRef} summaryRef={summaryRef} /> : null}
-        {tool.Options && optionsShown && !sheet && !pickerOpen ? <OptionsBar ref={optionsRef} tool={tool} role={role} wide={wide} zoom={zoom} room={optionsRoom} /> : null}
+        {/* One element at the foot or in the rail, so a rotation never remounts the tool's options. */}
+        {optionsDrawn ? (
+          <OptionsBar
+            ref={optionsAt === "rail" ? railRef : optionsRef}
+            railTop={optionsAt === "rail" ? topInset : null}
+            tool={tool}
+            role={role}
+            wide={wide}
+            zoom={zoom}
+            room={optionsRoom}
+            onWrap={optionsAt === "foot" && tool.optionsAt === "foot" && tool.id !== "select" ? () => recordWrap(tool.id, mapWidth) : undefined}
+          />
+        ) : null}
         <Toolbar
           ref={toolbarRef}
           zoom={zoom}
@@ -1230,8 +1289,29 @@ function ToolIcon(props: { tool: ToolDef }) {
  * The active tool's options, docked above the toolbar on phones and floating
  * above it on wide screens. They wrap onto more rows rather than scroll, so
  * no option hides past the edge of a phone.
+ *
+ * On a short screen held sideways (`railTop`, the top bars' height under
+ * which it starts), they stand in a rail on the left of the map instead,
+ * from under the top bars down to the toolbar, 248 px and the left safe
+ * area wide, scrolling up and down, never sideways, with "Scroll for more"
+ * while they run past its foot (docs/design-v1-layout-hierarchy.md 3.2).
+ * The map keeps its whole height. Its place in the page's order stays just
+ * before the toolbar, so Tab reaches it where it did.
+ *
+ * `onWrap` is a one-row tool's at the foot: told, in a layout effect and so
+ * before paint, when its controls stand on more than one line, so Room can
+ * move them to the rail in the same frame (pages/optionsPlace.ts).
  */
-function OptionsBar(props: { ref?: Ref<HTMLDivElement>; tool: ToolDef; role: "dm" | "player"; wide: boolean; zoom: number; room: number | null }) {
+function OptionsBar(props: {
+  ref?: Ref<HTMLDivElement>;
+  railTop: number | null;
+  tool: ToolDef;
+  role: "dm" | "player";
+  wide: boolean;
+  zoom: number;
+  room: number | null;
+  onWrap?(): void;
+}) {
   const Options = props.tool.Options;
   const own = useRef<HTMLDivElement | null>(null);
   const { ref: outer } = props;
@@ -1244,10 +1324,11 @@ function OptionsBar(props: { ref?: Ref<HTMLDivElement>; tool: ToolDef; role: "dm
     },
     [outer],
   );
-  // Capped, the bar shows its buttons rather than the hint above them, which scrolls back into view: the Ruler's Keep and Clear stay in reach on a short screen.
+  const rail = props.railTop !== null;
+  // Capped, the bar shows its buttons rather than the hint above them, which scrolls back into view: the Ruler's Keep and Clear stay in reach on a short screen. The rail is tall, and starts at its hint.
   useLayoutEffect(() => {
     const el = own.current;
-    if (!el) return;
+    if (!el || rail) return;
     const reveal = () => {
       const first = el.querySelector<HTMLElement>("button, input, select");
       if (!first || el.scrollHeight <= el.clientHeight + 1) return;
@@ -1259,30 +1340,78 @@ function OptionsBar(props: { ref?: Ref<HTMLDivElement>; tool: ToolDef; role: "dm
     observer.observe(el);
     for (const row of el.children) observer.observe(row);
     return () => observer.disconnect();
-  }, [props.tool.id]);
+  }, [props.tool.id, rail]);
+  // A one-row tool whose row wraps at the foot: read in a layout effect, and in its observers' callbacks with a synchronous render, so it never paints a frame there.
+  const latestWrap = useRef(props.onWrap);
+  latestWrap.current = props.onWrap;
+  const watchWrap = props.onWrap !== undefined;
+  useLayoutEffect(() => {
+    const el = own.current;
+    if (!el || !watchWrap) return;
+    const wrapped = () => wrapsLines(Array.from(el.querySelectorAll("button, input, select"), (c) => c.getBoundingClientRect()).filter((r) => r.height > 0));
+    if (wrapped()) {
+      latestWrap.current?.();
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      if (wrapped()) flushSync(() => latestWrap.current?.());
+    });
+    observer.observe(el);
+    for (const row of el.children) observer.observe(row);
+    return () => observer.disconnect();
+  }, [watchWrap, props.tool.id]);
+  // "Scroll for more" while the rail's content runs past its foot.
+  const [clipped, setClipped] = useState(false);
+  useLayoutEffect(() => {
+    const el = own.current;
+    if (!el || !rail) {
+      setClipped(false);
+      return;
+    }
+    const clip = () => setClipped(el.scrollHeight - el.clientHeight - el.scrollTop > 4);
+    clip();
+    const observer = new ResizeObserver(clip);
+    observer.observe(el);
+    for (const row of el.children) observer.observe(row);
+    el.addEventListener("scroll", clip, { passive: true });
+    return () => {
+      observer.disconnect();
+      el.removeEventListener("scroll", clip);
+    };
+  }, [rail, props.tool.id]);
   if (!Options) return null;
-  return (
-    <div
-      ref={ref}
-      role="toolbar"
-      aria-label={`${props.tool.label} options`}
-      {...smallUi(props.zoom)}
-      style={{
-        ...chromeZoom(props.zoom),
-        position: "absolute",
+  const place: CSSProperties = rail
+    ? {
+        left: 0,
+        right: "auto",
+        top: `calc(${theme.safe.top} + ${props.railTop}px)`,
+        bottom: `calc(${theme.safe.bottom} + ${TOOLBAR}px)`,
+        width: `calc(${RAIL_WIDTH}px + ${theme.safe.left})`,
+        maxWidth: "none",
+        minHeight: 0,
+        maxHeight: "none",
+        alignContent: "flex-start",
+        padding: `${theme.space(1)}px ${theme.space(2)}px ${theme.space(1)}px calc(${theme.safe.left} + ${theme.space(2)}px)`,
+        borderTop: "none",
+        borderRight: `${theme.line.border}px solid ${theme.color.border}`,
+        borderBottom: "none",
+        borderLeft: "none",
+        borderRadius: 0,
+        overflowX: "hidden",
+        overflowY: "auto",
+        overscrollBehavior: "contain",
+      }
+    : {
         // From 900 px up the bar floats clear of every side, 8 px right of the left safe area, so its content pads 8 px with no safe area.
         left: props.wide ? `calc(${theme.safe.left} + ${theme.space(2)}px)` : 0,
-        right: props.wide ? undefined : 0,
+        right: props.wide ? "auto" : 0,
+        top: "auto",
         bottom: `calc(${theme.safe.bottom} + ${TOOLBAR}px)`,
-        zIndex: theme.z.options,
-        display: "flex",
-        flexWrap: "wrap",
-        alignItems: "center",
-        gap: theme.space(2),
+        width: "auto",
         minHeight: theme.touch + theme.space(2),
-        maxWidth: props.wide ? 640 : undefined,
+        maxWidth: props.wide ? 640 : "none",
+        alignContent: "normal",
         padding: props.wide ? `${theme.space(1)}px ${theme.space(2)}px` : `${theme.space(1)}px calc(${theme.safe.right} + ${theme.space(2)}px) ${theme.space(1)}px calc(${theme.safe.left} + ${theme.space(2)}px)`,
-        background: theme.color.overlay,
         // Longhands only: React warns when a rerender changes a shorthand mixed with its longhands, as crossing the wide breakpoint did.
         borderTop: `${theme.line.border}px solid ${theme.color.border}`,
         borderRight: props.wide ? `${theme.line.border}px solid ${theme.color.border}` : "none",
@@ -1296,11 +1425,31 @@ function OptionsBar(props: { ref?: Ref<HTMLDivElement>; tool: ToolDef; role: "dm
         maxHeight: props.room === null ? screenHeight(50) : `min(${screenHeight(50)}, ${Math.max(theme.touch + theme.space(2), props.room)}px)`,
         overflowX: "auto",
         overflowY: "auto",
+        overscrollBehavior: "auto",
+      };
+  return (
+    <div
+      ref={ref}
+      role="toolbar"
+      aria-label={`${props.tool.label} options`}
+      data-rvtt-options={rail ? "rail" : "foot"}
+      {...smallUi(props.zoom)}
+      style={{
+        ...chromeZoom(props.zoom),
+        position: "absolute",
+        zIndex: theme.z.options,
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: theme.space(2),
+        background: theme.color.overlay,
+        ...place,
       }}
     >
       <LoadBoundary key={props.tool.id} fallback={(f) => <RoomLoadNotice {...f} subject="These options" verb="load" compact reopen={{ tool: props.tool.id }} />}>
         <Options role={props.role} />
       </LoadBoundary>
+      {clipped ? <ScrollForMore fill={theme.color.overlay} /> : null}
     </div>
   );
 }

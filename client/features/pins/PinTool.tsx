@@ -177,4 +177,5 @@ export const pinTool: ToolDef = {
     slot.store.setState({ drag: null, placing: null, paneId: null });
   },
   Options: PinOptions,
+  optionsAt: "foot",
 };

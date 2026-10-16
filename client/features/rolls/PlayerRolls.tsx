@@ -509,7 +509,8 @@ function RollCard(props: {
       style={{
         ...chromeZoom(zoom),
         position: "fixed",
-        left: 0,
+        // Right of the tool's rail on a short screen held sideways, so it never covers the tool's options (docs/design-v1-layout-hierarchy.md 3.6).
+        left: chrome?.rail ?? 0,
         right: 0,
         bottom: chrome ? (props.stand === "options" ? chrome.bottom : chrome.toolbar) : `calc(${theme.safe.bottom} + ${theme.layout.toolbar}px)`,
         zIndex: theme.z.overBars,

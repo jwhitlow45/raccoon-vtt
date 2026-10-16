@@ -101,4 +101,5 @@ export const pingTool: ToolDef = {
     onCancel(ctx);
   },
   Options: PingOptions,
+  optionsAt: "foot",
 };

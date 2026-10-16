@@ -41,7 +41,7 @@ describe("openStatBlock", () => {
     const at = (width: number, height: number, safeLeft = 0) => {
       const scope = new RoomScope();
       const dock = scope.get(barDockSlot);
-      dock.setState({ chrome: { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: { top: 0, right: safeLeft, bottom: 0, left: safeLeft }, sheet: 0 } });
+      dock.setState({ chrome: { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: { top: 0, right: safeLeft, bottom: 0, left: safeLeft }, sheet: 0, rail: 0 } });
       const { calls, ui } = recorder();
       openStatBlock(scope, ui, "g1", { width, height });
       return calls.includes("showActions false");

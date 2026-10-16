@@ -118,6 +118,13 @@ export type ToolDef = {
   Options?: ComponentType<{ role: "dm" | "player" }>;
   /** Whether the options show right now. Left out, they show whenever the tool is active. */
   optionsShown?(state: RoomView): boolean;
+  /**
+   * "foot" for options that are one row that never changes with use: they
+   * stay in the bar at the foot on a short screen held sideways, where it
+   * costs less map than the rail, unless their row wraps there
+   * (pages/optionsPlace.ts). Left out, the options take the rail there.
+   */
+  optionsAt?: "foot";
   /** A CSS cursor for the canvas while the tool is active. */
   cursor?: string;
   /**
@@ -142,6 +149,7 @@ export const selectTool: ToolDef = {
   order: 0,
   Options: SelectOptions,
   optionsShown: (s) => s.local.multi,
+  optionsAt: "foot",
 };
 
 /** Every tool, one per line. */
