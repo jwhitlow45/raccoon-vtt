@@ -446,6 +446,17 @@ function spanHang(anchor: Point, free: Box, height: number, top: number): Hang {
 }
 
 /**
+ * The least room a spanning bar gets on this screen, whichever token is
+ * tapped: a token where the room below it and above it are equal, a little
+ * under the free area's middle since a bar above its token also clears the
+ * token itself. Each side there is about half the free area. Anywhere else
+ * one side is larger, and the bar takes that one.
+ */
+export function spanRoomAtWorst(free: Box): number {
+  return spanHang({ x: free.left + free.width / 2, y: free.top + (free.height + FLIP_CLEARANCE) / 2 }, free, Number.POSITIVE_INFINITY, free.top).room;
+}
+
+/**
  * Where the bar hangs, before a drag: by its token when it spans, at its
  * spot when it docks, and the overlay's place when compact, then shared
  * with the column when they meet across. The one rule for the bar drawn

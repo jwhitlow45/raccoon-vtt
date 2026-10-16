@@ -1,4 +1,4 @@
-import { barMode, compactHang, freeArea, placeBar } from "./barDock.ts";
+import { barMode, compactHang, freeArea, placeBar, spanRoomAtWorst } from "./barDock.ts";
 
 /*
  * The single-token bar's buttons and its short layout
@@ -81,6 +81,15 @@ export function isCompanion(token: object): boolean {
 /** Below this capacity a bar is short (3.3). */
 export const SHORT_BAR_PX = 300;
 
+/**
+ * Below this capacity a spanning bar is short: the room its full layout
+ * takes to show Apply with no scroll. That is the frame's 61 px above its
+ * content, the vitals on two lines as a narrow phone wraps them (21 px
+ * each, 4 apart) with the 8 px gap after them, and the HP entry's mode row
+ * and field row, 44 px each and 4 apart: 207 px, rounded up.
+ */
+export const SPAN_SHORT_BAR_PX = 210;
+
 /** What decides where a bar hangs: placeBar's input without the bar's own content. */
 export type BarRoom = Omit<Parameters<typeof placeBar>[0], "height">;
 
@@ -94,12 +103,13 @@ export type BarRoom = Omit<Parameters<typeof placeBar>[0], "height">;
  *
  * A bar that spans an upright phone hangs above or below its token, so its
  * room changes with where the tapped token stands. Its capacity is the
- * free area's height instead, the screen's alone, so a phone keeps one
- * layout and Apply one place whichever token is tapped.
+ * least room any token's bar gets on that screen instead (barDock.ts
+ * spanRoomAtWorst), the screen's alone, so a phone keeps one layout, and
+ * Apply one place in view, whichever token is tapped.
  */
 export function barCapacity(room: BarRoom): number | null {
   const free = freeArea(room.viewport, room.chrome, room.foot);
-  if (barMode(room.layout, free.height) === "span") return free.height;
+  if (barMode(room.layout, free.height) === "span") return spanRoomAtWorst(free);
   const placed = placeBar({ ...room, height: Number.POSITIVE_INFINITY });
   if (!placed) return null;
   if (placed.mode === "compact") return compactHang(room.layout, room.viewport, room.chrome).room;
@@ -110,10 +120,13 @@ export function barCapacity(room: BarRoom): number | null {
  * A short bar (3.3): a phone held sideways at any interface size, a large
  * phone held sideways in the wide layout, every screen too short to dock or
  * span, a docked bar under tall alert cards while they stand there, and a
- * spanning bar only where the phone's whole free area is under 300 px. It keeps
- * AC, HP and the HP entry at the top, and "More stats" holds the rest.
+ * spanning bar wherever a token in the middle of the screen would leave
+ * its full layout's Apply out of view, as on an upright phone at 130%. It
+ * keeps AC, HP and the HP entry at the top, and "More stats" holds the rest.
  */
 export function barShort(room: BarRoom): boolean {
   const capacity = barCapacity(room);
-  return capacity !== null && capacity < SHORT_BAR_PX;
+  if (capacity === null) return false;
+  const spans = barMode(room.layout, freeArea(room.viewport, room.chrome, room.foot).height) === "span";
+  return capacity < (spans ? SPAN_SHORT_BAR_PX : SHORT_BAR_PX);
 }

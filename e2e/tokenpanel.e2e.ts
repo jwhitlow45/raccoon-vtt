@@ -202,6 +202,14 @@ function tokenPanel(page: Page): Locator {
   return page.getByRole("tabpanel", { name: "Token" }).or(page.getByRole("region", { name: "Token" }));
 }
 
+/** Apply shows whole inside the bar's box with the bar at its top, so an HP change needs no scroll. */
+async function applyInView(b: Locator, label: string): Promise<void> {
+  assert.equal(await b.evaluate((el) => (el as unknown as El).scrollTop), 0, `${label}: the bar opened scrolled`);
+  const frame = await rectOf(b);
+  const apply = await rectOf(b.getByRole("button", { name: "Apply", exact: true }));
+  assert.ok(apply.top >= frame.top && apply.bottom <= frame.bottom + 1, `${label}: Apply is out of the bar's view: ${JSON.stringify({ apply, frame })}`);
+}
+
 async function rectOf(locator: Locator): Promise<Rect> {
   const b = await locator.boundingBox();
   assert.ok(b, "nothing on screen to measure");
@@ -754,6 +762,8 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.ok(vitals.height < 30, `the vitals take more than one line spanning: ${vitals.height} px`);
     const saves = await rectOf(goblin.locator("[data-saves]"));
     assert.ok(saves.height < 30, `the saves take more than one line spanning: ${saves.height} px`);
+    // At 100% the full layout's Apply shows wherever the bar hangs (barButtons.ts SPAN_SHORT_BAR_PX).
+    await applyInView(goblin, "390 x 844, Goblin 4 mid-screen");
     // A token at the scene's foot gets the same layout: the field under the mode buttons, no More stats.
     for (const [t, name] of [
       [run.herald, run.herald.name],
@@ -765,6 +775,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       const other = bar(dm, name);
       await other.waitFor();
       assert.equal(await other.getByRole("button", { name: "More stats", exact: true }).count(), 0, `${name}: the layout changed with the token's place`);
+      await applyInView(other, `390 x 844, ${name}`);
       const modes = await rectOf(other.getByRole("radiogroup", { name: "What the number does" }));
       assert.ok(modes.bottom <= (await rectOf(other.getByRole("textbox", { name: "HP change" }))).top + 1, `${name}: the mode buttons moved under the field`);
     }
@@ -892,7 +903,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     }
   });
 
-  test("7b. a phone upright at 130% and an upright tablet: the full layout, Stat block hiding the bar for the sheet at the block, and the image and HP rows", async () => {
+  test("7b. a phone upright at 130%, short with Apply in view wherever its token stands, and an upright tablet, full: Stat block hiding the bar for the sheet at the block, and the image and HP rows", async () => {
     const sizes: (View & { label: string; hpRow: boolean })[] = [
       { width: 390, height: 844, scale: 1.3, label: "390 x 844 at 130%", hpRow: false },
       { width: 820, height: 1180, scale: 1, label: "820 x 1180", hpRow: true },
@@ -902,8 +913,32 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await tapToken(dm, run.goblin.at);
       const goblin = bar(dm, "Goblin 4");
       await goblin.getByRole("img", { name: "Armor Class 15" }).waitFor();
-      // A spanning bar's layout is the screen's, wherever the token stands (barButtons.ts barCapacity), so the goblin mid-screen gets the full layout too.
-      assert.equal(await goblin.getByRole("button", { name: "More stats", exact: true }).count(), 0, `${size.label}: a short bar`);
+      /*
+       * A spanning bar's layout is the screen's, wherever the token stands,
+       * from the least room any token leaves it (barButtons.ts barCapacity).
+       * An upright phone at 130% leaves its full layout's Apply out of view
+       * there, so its bar is short for every token, with Apply in view. The
+       * tablet docks, full.
+       */
+      const short = size.width < 600;
+      assert.equal(await goblin.getByRole("button", { name: "More stats", exact: true }).count(), short ? 1 : 0, `${size.label}: the bar is ${short ? "full" : "short"}`);
+      if (short) {
+        await applyInView(goblin, `${size.label}, Goblin 4 mid-screen`);
+        for (const [t, name] of [
+          [run.thorn, "Thorn"],
+          [run.herald, run.herald.name],
+        ] as const) {
+          await dm.keyboard.press("Escape");
+          await tapToken(dm, t.at);
+          const other = bar(dm, name);
+          await other.waitFor();
+          assert.equal(await other.getByRole("button", { name: "More stats", exact: true }).count(), 1, `${size.label}, ${name}: the layout changed with the token's place`);
+          await applyInView(other, `${size.label}, ${name}`);
+        }
+        await dm.keyboard.press("Escape");
+        await tapToken(dm, run.goblin.at);
+        await goblin.getByRole("button", { name: "More stats", exact: true }).click();
+      }
       await goblin.locator("[data-saves]").waitFor();
       await noSideScroll(goblin, `${size.label}, the bar`);
       await goblin.getByRole("button", { name: "Stat block", exact: true }).click();
