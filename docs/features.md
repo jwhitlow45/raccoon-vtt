@@ -560,6 +560,8 @@ Not built, except auto initiative for the DM's monsters (section 10). Players ro
   - It lives in the room and its backups. Only the DM sets it, and players see it only on tokens they can see.
 - A link from a token to its owner's D&D Beyond sheet.
 - A room setting, off by default: players can create their own characters (owned by themselves only, at most 3 each, with a portrait they uploaded) and place their tokens on the players' scene. The DM can still edit, take over or delete them.
+  - Who may delete a character (the project owner, 2026-10-16): the DM, any character, and a player, one that player plays alone, whoever made it and whatever the setting says. The room does not record who made a character, so playing it alone is the rule. A character shared with another player stays the DM's to delete.
+  - A player's delete takes what the DM's takes: every token of the character on every scene, its companions and its rows in the fight. It cannot be undone, since a player's undo holds only their drawings and moves, so the card says first what goes, counting only the tokens and rows that player can see and naming the rest in general words ("any token of it on another map"), and Delete asks for a second tap.
 - Short and long rest buttons, which restore HP, reset uses and remove one Exhaustion level, as SRD 5.2.1 describes each rest.
   - Either rest needs at least 1 HP.
   - A short rest takes the HP the player's Hit Point Dice rolled. The app rolls no dice and keeps no count of them.
