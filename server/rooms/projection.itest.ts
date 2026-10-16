@@ -368,6 +368,11 @@ describe("projection over the socket", () => {
     assert.deepEqual(tokenIn(seen.changes, pc.id), { key: `token:${pc.id}`, deleted: true });
     const encounter = seen.changes.find((c) => c.key === "encounter") as { value: { entries: unknown[] } } | undefined;
     assert.deepEqual(encounter?.value.entries, [], "its row left the fight");
+    // The DM's log says who deleted it and what went, and no player's does.
+    const lineOf = (changes: Change[]) => changes.find((c) => c.key.startsWith("log:") && "value" in c && (c.value as { data?: { type?: string } }).data?.type === "characterDeleted");
+    const logged = lineOf(seen.changes) as { value: { data: unknown } } | undefined;
+    assert.deepEqual(logged?.value.data, { type: "characterDeleted", characterId: solo, memberId: playerMemberId, name: "Bree", tokens: 1, companions: 0, rows: 1 });
+    assert.equal(lineOf(deleted.changes), undefined, "the player's own ev carries no line");
 
     // The undo takes back the drawing, never the delete.
     const undone = await player.apply({ t: "undo" });

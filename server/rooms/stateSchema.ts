@@ -41,6 +41,8 @@ const rev = z.number().int().min(0);
 const coord = z.number().min(-1_000).max(1_000);
 const iso = z.string().max(40);
 const memberIds = z.array(id).max(MAX_OWNERS);
+/** What a log line counts, such as the tokens a deleted character took with it. */
+const count = z.number().int().min(0).max(1_000_000);
 /** An upload or, from wave 5, a shipped icon (docs/design-v1-dm-tools.md 3.12). */
 const imageRef = dmToolSchemas.imageRef;
 const sizeSchema = z.enum(["tiny", "small", "medium", "large", "huge", "gargantuan", "custom"]);
@@ -493,6 +495,7 @@ const logEvent = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("member"), memberId: id, action: z.enum(["join", "kick", "dm", "undm", "remove"]) }),
   z.strictObject({ type: z.literal("teleport"), tokenId: id, past: z.enum(["wall", "ledge"]) }),
   z.strictObject({ type: z.literal("companion"), tokenId: id, characterId: id, memberId: id, name }),
+  z.strictObject({ type: z.literal("characterDeleted"), characterId: id, memberId: id, name, tokens: count, companions: count, rows: count }),
   z.strictObject({
     type: z.literal("roll"),
     test: dmToolSchemas.rollTest,

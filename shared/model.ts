@@ -1353,6 +1353,14 @@ export type LogEvent =
    */
   | { type: "companion"; tokenId: TokenId; characterId: CharacterId; memberId: MemberId; name: string }
   /**
+   * A player deleted a character they play alone (features section 15).
+   * DM only, as the companion line is: the DM cannot undo it, so the line
+   * says what went. `name` is the character's name then, and the counts are
+   * what the delete removed, on every scene: its tokens, its companions and
+   * its rows in the fight.
+   */
+  | { type: "characterDeleted"; characterId: CharacterId; memberId: MemberId; name: string; tokens: number; companions: number; rows: number }
+  /**
    * An answer to a roll request, or a DM's mark of one (wave 5,
    * docs/design-v1-dm-tools.md 3.3), as the target stood after it. It
    * carries the test and the request's two switches, so the line keeps its

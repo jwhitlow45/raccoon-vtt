@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { describeEvent } from "../logText.ts";
+import { projectState } from "../project.ts";
 import type { Effect, RoomState, Token, Viewer } from "../model.ts";
 import { canApply } from "../permissions.ts";
 import { opSchema, type Op, type TokenInput } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
-import { DM, P1, P2, actor, apply, character, effect, entry, env, refused, room, token } from "../testutil.ts";
+import { DM, P1, P2, actor, apply, character, comparable, effect, entry, env, refused, room, token } from "../testutil.ts";
 import { normalizeCompanionState } from "./companions.ts";
 
 /**
@@ -179,14 +180,38 @@ describe("a companion's turn and its rows", () => {
     };
     const op: Op = { t: "character.delete", characterId: "bree" };
     assert.ok(canApply(op, P1, start(), { canUseAsset: () => false }).ok);
-    const byAna = run(start(), op, P1, 2).state;
+    const ana = run(start(), op, P1, 2);
+    const byAna = ana.state;
     const byDm = run(start(), op, DM, 2).state;
-    assert.deepEqual(byAna, byDm);
+    assert.deepEqual(comparable(byAna), comparable(byDm), "the same state, but for the DM's line");
     assert.equal(byAna.characters.bree, undefined);
     assert.deepEqual(Object.keys(byAna.tokens), ["gob"]);
     assert.deepEqual(rows(byAna), ["e-gob"]);
     assert.equal(byAna.encounter!.activeEntryId, "e-gob", "the turn passes on, as when the DM deletes it");
     assert.ok(byAna.encounterHistory.every((step) => !step.encounter.entries.some((e) => e.id === "e-ws")));
+    // What went, on every scene and hidden ones included, in a line for the DM: the DM cannot undo it.
+    const line = ana.log.find((e) => e.data?.type === "characterDeleted");
+    assert.deepEqual(line?.data, { type: "characterDeleted", characterId: "bree", memberId: "p1", name: "Bree", tokens: 3, companions: 1, rows: 3 });
+  });
+
+  test("a player's delete writes a line only the DM's log carries, and the DM's own delete writes none", () => {
+    const state = withSpirit();
+    state.members.p1 = { ...state.members.p1!, name: "Pat" };
+    state.tokens.away = token("away", { kind: "pc", name: "Bree", actor: { ref: "bree" }, sceneId: "s2", x: 3, y: 3 });
+    state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("e-bree", { tokenId: "bt", value: 20 })] };
+    const op: Op = { t: "character.delete", characterId: "bree" };
+    const byPat = run(state, op, P1, 2);
+    const data = byPat.log.find((e) => e.data?.type === "characterDeleted")?.data;
+    assert.ok(data?.type === "characterDeleted");
+    const names = { members: byPat.state.members, tokens: byPat.state.tokens, characters: byPat.state.characters, handouts: {}, encounter: null };
+    assert.equal(describeEvent(data, names), "Pat deleted Bree, with 2 tokens, 1 companion and its place in the fight.");
+    assert.equal(describeEvent({ ...data, tokens: 0, companions: 0, rows: 0 }, names), "Pat deleted Bree.");
+    assert.equal(describeEvent({ ...data, tokens: 1, companions: 2, rows: 2 }, names), "Pat deleted Bree, with 1 token, 2 companions and its 2 places in the fight.");
+    const has = (viewer: Viewer) => projectState(byPat.state, viewer, { sceneId: "s1" }).log.some((e) => e.data?.type === "characterDeleted");
+    assert.equal(has(DM), true, "the DM reads it");
+    assert.equal(has(P1), false, "not the player who deleted it");
+    assert.equal(has(P2), false, "nor any other player");
+    assert.equal(run(state, op, DM, 2).log.some((e) => e.data?.type === "characterDeleted"), false, "the DM's own delete writes none");
   });
 
   test("a readied effect saved by Next and counting the companion's row comes back counting Bree's row after a turn change, and paused on the companion after Dismiss", () => {

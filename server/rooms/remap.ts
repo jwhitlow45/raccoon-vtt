@@ -429,6 +429,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
         return { ...data, tokenId: tokens.of(data.tokenId) };
       case "companion":
         return { ...data, tokenId: tokens.of(data.tokenId), characterId: characters.of(data.characterId), memberId: members.of(data.memberId) };
+      case "characterDeleted":
+        return { ...data, characterId: characters.of(data.characterId), memberId: members.of(data.memberId) };
       case "roll": {
         const next = { ...data };
         if (data.tokenId !== undefined) next.tokenId = tokens.of(data.tokenId);

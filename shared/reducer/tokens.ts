@@ -419,13 +419,24 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
 /** Removes a character with every token that points at it, so no token is left with a dangling actor, and its companions. */
 export function characterDelete(tx: Tx, op: OpOf<"character.delete">): void {
   const character = tx.character(op.characterId);
+  const rowsBefore = tx.state.encounter?.entries.length ?? 0;
+  let tokens = 0;
+  let companions = 0;
   for (const token of sortedById(Object.values(tx.state.tokens))) {
-    const its = ("ref" in token.actor && token.actor.ref === character.id) || token.companion?.of === character.id;
-    if (its) deleteToken(tx, token.id);
+    const companion = token.companion?.of === character.id;
+    if (!companion && !("ref" in token.actor && token.actor.ref === character.id)) continue;
+    deleteToken(tx, token.id);
+    if (companion) companions++;
+    else tokens++;
   }
   const entryIds = tx.state.encounter?.entries.filter((e) => e.characterId === character.id).map((e) => e.id) ?? [];
   if (entryIds.length > 0) removeEntries(tx, entryIds);
   tx.remove(keys.character(character.id));
+  // The DM learns that a player deleted one, and what went with it, in a line only the DM's log carries: the DM cannot undo it.
+  if (tx.actor.role !== "dm") {
+    const rows = rowsBefore - (tx.state.encounter?.entries.length ?? 0);
+    tx.addEvent({ type: "characterDeleted", characterId: character.id, memberId: tx.actor.memberId, name: character.name, tokens, companions, rows });
+  }
 }
 
 /** An area is drawn on its own scene, so the token it follows must stand there too. */

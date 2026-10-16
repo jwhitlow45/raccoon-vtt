@@ -1249,6 +1249,9 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
     case "companion":
       // The DM's note that a player added a companion (docs/design-v1-combat-flow.md 3.6.3). No player gets it.
       return null;
+    case "characterDeleted":
+      // The DM's note that a player deleted a character, with counts that name what no player may see. No player gets it.
+      return null;
     case "roll": {
       // As the request itself (projectRollCtx): its creature's players now, under the same two switches.
       if (ctx.paused || !ownsRollCreature(ctx, data)) return null;

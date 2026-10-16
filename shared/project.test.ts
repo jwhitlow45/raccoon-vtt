@@ -192,6 +192,7 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
   for (const [key, tile] of Object.entries(p.fogTiles)) assert.equal(decodeTile(tile.bits)?.join(), decodeTile(fog[key]!.bits)?.join(), `${label}: fog tile ${key} is not the layers merged`);
   for (const e of p.log) assert.notEqual(e.data?.type, "teleport", `${label}: a teleport line leaked`);
   for (const e of p.log) assert.notEqual(e.data?.type, "companion", `${label}: a companion line leaked`);
+  for (const e of p.log) assert.notEqual(e.data?.type, "characterDeleted", `${label}: a deleted character's line leaked`);
   const vision = sceneId !== null && state.scenes[sceneId]!.vision?.on === true;
   for (const key of Object.keys(p.sight)) assert.ok(vision && key.startsWith(`${sceneId}:`), `${label}: sight tile ${key} leaked`);
   for (const [id, pt] of Object.entries(p.tokens)) {

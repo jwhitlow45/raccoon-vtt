@@ -421,6 +421,19 @@ describe("companions in an import (docs/design-v1-combat-flow.md 4.7)", () => {
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
   });
 
+  test("the DM's line for a character a player deleted keeps its name and counts, and its member follows", () => {
+    let n = 0;
+    const state = party();
+    state.log.push({ id: "5:0", at: AT, kind: "event", data: { type: "characterDeleted", characterId: "wren", memberId: "p1", name: "Wren", tokens: 2, companions: 1, rows: 1 } });
+    const out = remapState(state, { assets: new Map(), newId: () => `n${n++}` });
+    const bree = Object.values(out.characters).find((c) => c.name === "Bree")!;
+    const line = out.log.find((e) => e.data?.type === "characterDeleted")!.data!;
+    // The character is gone, so its id has nothing to follow and stays, as other lines' ids of things gone do.
+    assert.deepEqual(line, { type: "characterDeleted", characterId: "wren", memberId: bree.ownerIds[0], name: "Wren", tokens: 2, companions: 1, rows: 1 });
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+
   test("the rules run over the import: the shared spirit's rows leave the fight and its history, saved effects rebound, and saved Reactions are filtered and mapped", () => {
     let n = 0;
     const out = remapState(party(), { assets: new Map(), newId: () => `n${n++}` });

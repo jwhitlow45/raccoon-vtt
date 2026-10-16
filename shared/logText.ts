@@ -258,7 +258,21 @@ function eventText(data: LogEvent, names: LogNames): string {
       const character = names.characters[data.characterId]?.name ?? "their character";
       return `${memberName(names, data.memberId)} added ${data.name} beside ${character}.`;
     }
+    case "characterDeleted":
+      // Only the DM's log holds it. The character is gone, so the line keeps its name.
+      return `${memberName(names, data.memberId)} deleted ${data.name}${deletedWith(data)}.`;
   }
+}
+
+/** ", with 2 tokens, 1 companion and its place in the fight", or nothing when the character had none of them. */
+function deletedWith(data: { tokens: number; companions: number; rows: number }): string {
+  const parts: string[] = [];
+  if (data.tokens > 0) parts.push(data.tokens === 1 ? "1 token" : `${data.tokens} tokens`);
+  if (data.companions > 0) parts.push(data.companions === 1 ? "1 companion" : `${data.companions} companions`);
+  if (data.rows > 0) parts.push(data.rows === 1 ? "its place in the fight" : `its ${data.rows} places in the fight`);
+  if (parts.length === 0) return "";
+  const list = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)!}`;
+  return `, with ${list}`;
 }
 
 /** Members the viewer may whisper to, as the composer's choices. */

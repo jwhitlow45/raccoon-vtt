@@ -36,6 +36,19 @@ describe("roomStateSchema", () => {
     assert.ok(parseRoomState(older).ok, "a backup from before the setting");
   });
 
+  test("the DM's line for a character a player deleted parses, with whole counts of zero and up", () => {
+    const state = room();
+    const line = { type: "characterDeleted", characterId: "bree", memberId: "p1", name: "Bree", tokens: 2, companions: 0, rows: 1 };
+    state.log = [{ id: "1:0", at: "x", kind: "event", data: line as never }];
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    for (const bad of [{ tokens: -1 }, { rows: 1.5 }, { companions: undefined }, { extra: true }]) {
+      const broken = JSON.parse(JSON.stringify(state));
+      broken.log[0].data = { ...line, ...bad };
+      assert.equal(parseRoomState(broken).ok, false, JSON.stringify(bad));
+    }
+  });
+
   test("a room where a member was removed parses, so its backup can be imported", () => {
     const fresh = createInitialState({ roomName: "R", dm: { id: "m1", rev: 1, name: "DM", color: "#f38400", kind: "dm", createdAt: new Date().toISOString() } });
     const removed = { ...fresh, log: [{ id: "1:0", at: new Date().toISOString(), kind: "event", data: { type: "member", memberId: "m2", action: "remove" } }] };
