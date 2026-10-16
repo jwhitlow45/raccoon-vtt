@@ -274,7 +274,8 @@ function TokenBody(props: {
   const square = token.kind === "object";
   const drawn = imageFace(token.image, image !== null, glyph) !== "initials";
   const crop = useMemo(() => (image ? cropSourceRect(image, upload?.crop, w / h) : undefined), [image, upload?.crop, w, h]);
-  const life = actor?.life;
+  // No HP rule kills an object, so the map draws no dead or dying mark on one, an effect companion included (docs/design-v1-combat-flow.md 3.6.6).
+  const life = token.kind === "object" ? undefined : actor?.life;
   const ring = RING[token.disposition] ?? theme.color.neutral;
   const ringPx = boardSizes(scale).ringPx;
   return (

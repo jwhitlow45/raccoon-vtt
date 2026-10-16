@@ -10,6 +10,7 @@ import { PaneHeader, type PaneHandle } from "../components/SheetHeader.tsx";
 import { useLayoutSize } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
+import { useSend } from "../features/encounter/hooks.ts";
 import { tokenAccess } from "../features/tokens/access.ts";
 import { AltImagesRow } from "../features/tokens/AltImages.tsx";
 import { DoorButton } from "../features/doors/DoorButton.tsx";
@@ -263,9 +264,9 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
             }}
           />
         );
-      // A companion's Dismiss for its owners who are not the DM is docs/design-v1-combat-flow.md 3.6.9's, and stands here when that lands.
+      // A companion's owners who are not the DM dismiss it in Delete's place (docs/design-v1-combat-flow.md 3.6.9).
       case "dismiss":
-        return null;
+        return <DismissButton key={id} tokenId={token.id} name={displayName(token)} />;
       case "moveBar":
         return <MoveBarButton key={id} />;
       case "resetBar":
@@ -957,6 +958,43 @@ function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Ef
       {group("Conditions", CONDITION_KEYS)}
       {group("Other statuses", STATUS_KEYS)}
     </div>
+  );
+}
+
+/**
+ * Dismiss, for a companion's owners who are not the DM, in Delete's place
+ * (docs/design-v1-combat-flow.md 3.6.9): armed as Delete is, and busy until
+ * the server answers, since it can take a row out of the fight and pass a
+ * turn on. The token, and with it this bar, goes when it does.
+ */
+function DismissButton(props: { tokenId: string; name: string }) {
+  const [armed, setArmed] = useState(false);
+  const { send, waiting } = useSend();
+  useEffect(() => {
+    if (!armed) return;
+    const timer = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(timer);
+  }, [armed]);
+  const text = armed ? `Dismiss ${props.name}?` : "Dismiss";
+  return (
+    <Button
+      size="sm"
+      variant="danger"
+      armed={armed}
+      busy={waiting}
+      aria-label={text}
+      onClick={() => {
+        if (!armed) {
+          setArmed(true);
+          return;
+        }
+        setArmed(false);
+        send({ t: "token.delete", tokenId: props.tokenId });
+      }}
+      style={{ flex: "none" }}
+    >
+      {text}
+    </Button>
   );
 }
 

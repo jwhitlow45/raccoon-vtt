@@ -120,10 +120,17 @@ export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): voi
         />
       </Section>
       <Section title="Owners">
-        <Note>Owners can move a token and edit what their role allows. Each keeps its other owners.</Note>
-        {roster.map((m) => (
-          <TriToggle key={m.id} lit={ownersLit(tokens, m.id)} label={<MemberLabel member={m} />} onChange={(on) => send(ownerOps(tokens, m.id, on))} />
-        ))}
+        {tokens.some((t) => t.companion) ? (
+          // The server refuses owners over a companion, whose owners are its character's (docs/design-v1-combat-flow.md 3.6.4).
+          <Note>A companion is played by whoever plays its character. Leave the companions out of the selection to set owners.</Note>
+        ) : (
+          <>
+            <Note>Owners can move a token and edit what their role allows. Each keeps its other owners.</Note>
+            {roster.map((m) => (
+              <TriToggle key={m.id} lit={ownersLit(tokens, m.id)} label={<MemberLabel member={m} />} onChange={(on) => send(ownerOps(tokens, m.id, on))} />
+            ))}
+          </>
+        )}
       </Section>
     </SheetDialog>
   );

@@ -16,7 +16,7 @@ const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
-const { HpEntry, oneTarget } = await import("./HpSection.tsx");
+const { HpEntry, HpSection, oneTarget } = await import("./HpSection.tsx");
 
 function render(access: "all" | "relative", vitals = { name: "Thorn", dead: false, max: 20 as number | undefined }, settings: { healRevives?: boolean } = {}, role: "dm" | "player" = "dm"): string {
   const target = oneTarget({ tokenId: "t1" }, access, false, vitals);
@@ -82,3 +82,33 @@ describe("the HP entry's lines on the dead (docs/design-v1-combat-flow.md 3.5)",
     assert.doesNotMatch(render("all", { name: "Thorn", dead: false, max: 20 }, { healRevives: false }), /dead/);
   });
 });
+
+describe("the Hit points section of a creature with no HP to show (docs/design-v1-combat-flow.md 3.6.6)", () => {
+  const section = (actor: object, token: { kind: "object" | "npc" | "monster"; companion?: unknown }, life = true) => {
+    const store = createStore(() => ({ view: { meta: { settings: {} } }, you: { role: "dm" } }));
+    const el = createElement(HpSection, { actor: actor as never, hpVisibility: "exact", target: { tokenId: "t1" }, access: { full: true, hp: "all", deathSaves: true, life }, name: "Thorn", token });
+    return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: el }) }));
+  };
+  const hp = (cur: number, max: number) => ({ hp: { cur, max, temp: 0 }, life: "dead", deathSaves: { ok: 0, fail: 2 }, effects: [] });
+
+  test("an effect companion shows one line and nothing else, whatever HP it stores", () => {
+    const markup = section(hp(0, 15), { kind: "object", companion: { of: "c1", turn: "none" } });
+    assert.match(markup, /No HP: it is an effect\./);
+    assert.doesNotMatch(markup, /HP change|Max HP|Revive|Dead|Death saves/);
+  });
+
+  test("a token at max HP 0 shows No HP yet with the Max HP field that gives it HP", () => {
+    const markup = section(hp(0, 0), { kind: "npc" });
+    assert.match(markup, /No HP yet\./);
+    assert.match(markup, /aria-label="Max HP"/);
+    assert.doesNotMatch(markup, /HP change|Temporary HP|Revive/);
+  });
+
+  test("an ordinary object keeps its HP and has no life buttons", () => {
+    const markup = section({ ...hp(0, 10), life: "dead" }, { kind: "object" });
+    assert.match(markup, /aria-label="HP change"/);
+    assert.doesNotMatch(markup, />Revive</);
+    assert.match(section({ ...hp(0, 10), life: "dead" }, { kind: "monster" }), />Revive</, "a creature's panel keeps it");
+  });
+});
+

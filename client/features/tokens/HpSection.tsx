@@ -1,6 +1,7 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { healRevivesDead } from "#shared/migrate.ts";
-import type { Actor, HpVisibility, LifeState } from "#shared/model.ts";
+import type { Actor, HpVisibility, LifeState, TokenKind } from "#shared/model.ts";
+import { hpLess } from "#shared/rules/hp.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { fieldStyle } from "../../components/Field.tsx";
@@ -12,7 +13,7 @@ import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { deadLines, sendHpEntry, type EntryOperation, type HpTarget } from "./groupHp.ts";
 import { hpDraftKey, useKeepHpDraft, useKeptHpDraft, type HpPlace } from "./hpDraft.ts";
 import { HP_MODES, MAX_HP_AMOUNT, modeAfterApply, parseHpInput, type HpMode } from "./hpInput.ts";
-import { Note, NumberField, Section, SmallButton } from "./ui.tsx";
+import { FieldRow, Note, NumberField, Section, SmallButton } from "./ui.tsx";
 
 /**
  * HP, temporary HP, death saves and life state (design section 9.6). Every
@@ -169,6 +170,8 @@ export function HpSection(props: {
   access: { full: boolean; hp: HpAccessLevel; deathSaves: boolean; life: boolean };
   /** The creature's name, for the entry's lines on the dead. */
   name?: string;
+  /** The token, when there is one: an effect companion and every object have no life controls (docs/design-v1-combat-flow.md 3.6.6). */
+  token?: { kind: TokenKind; companion?: unknown };
 }) {
   const { actor, access, target } = props;
   const actions = useRoomActions();
@@ -176,6 +179,27 @@ export function HpSection(props: {
   const hp = actor?.hp;
   const life = actor?.life ?? "alive";
   const atZero = !!hp && hp.cur === 0 && (life === "dying" || life === "stable");
+
+  // No HP to show (hpLess): one line, and for a maximum of 0 the field that gives it HP, and nothing else.
+  if (hpLess(actor, props.token)) {
+    const effect = props.token?.companion !== undefined && props.token.kind === "object";
+    return (
+      <Section title="Hit points">
+        <Note>{effect ? "No HP: it is an effect." : "No HP yet."}</Note>
+        {!effect && access.hp === "all" ? (
+          <FieldRow label="Max HP">
+            <NumberField
+              label="Max HP"
+              value={0}
+              min={0}
+              max={MAX_HP_AMOUNT}
+              onCommit={(n) => n !== null && actions.dispatch({ t: "actor.hp", target, change: { kind: "set", max: n } })}
+            />
+          </FieldRow>
+        ) : null}
+      </Section>
+    );
+  }
 
   return (
     <Section title="Hit points">
@@ -227,7 +251,8 @@ export function HpSection(props: {
       ) : null}
       {life === "stable" ? <Note>Stable: unconscious, but no more death saves.</Note> : null}
 
-      {access.life ? <LifeControls life={life} onLife={(next) => actions.dispatch({ t: "actor.life", target, life: next })} /> : null}
+      {/* No HP rule kills an object, so its life controls would only ever mark one dead by hand (3.6.6). */}
+      {access.life && props.token?.kind !== "object" ? <LifeControls life={life} onLife={(next) => actions.dispatch({ t: "actor.life", target, life: next })} /> : null}
     </Section>
   );
 }

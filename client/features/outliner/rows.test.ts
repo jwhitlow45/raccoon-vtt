@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { BuildChunk, Drawing, Light, Pin, Stamp } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import { reveal, room, scene, template, token } from "#shared/testutil.ts";
+import { character, reveal, room, scene, template, token } from "#shared/testutil.ts";
 import { filterRows, frameRect, listItems, outlineRows, ROW_PX, windowRange, type OutlineRow } from "./rows.ts";
 
 const stamp = (id: string, o: Partial<Stamp> = {}): Stamp => ({ id, rev: 0, sceneId: "s1", art: { key: "chest" }, x: 20, y: 20, w: 1, h: 1, rotation: 0, z: 0, visibility: "all", ...o });
@@ -88,6 +88,20 @@ describe("the scene outliner's rows", () => {
       [...new Set(rows.map((x) => x.group))],
       ["tokens", "map", "areas", "drawings", "doors"],
     );
+  });
+
+  test("a companion reads whose it is, away from its character when none of its tokens stands here, and searching companion finds it (docs/design-v1-combat-flow.md 3.6.10)", () => {
+    const state = room({ characters: { bree: character("bree", { name: "Bree" }) } });
+    state.tokens.bt = token("bt", { kind: "pc", actor: { ref: "bree" }, sceneId: "s1" });
+    state.tokens.ws = token("ws", { kind: "npc", name: "Wildfire Spirit", sceneId: "s1", ownerIds: ["p1"], companion: { of: "bree", turn: "shared" } });
+    state.tokens.left = token("left", { kind: "npc", name: "Owl", sceneId: "s2", ownerIds: ["p1"], companion: { of: "bree", turn: "own" } });
+    const here = byKey(outlineRows(state, "s1")).get("token:ws")!;
+    assert.equal(here.detail, "Companion of Bree");
+    assert.equal(here.mark, null);
+    const away = byKey(outlineRows(state, "s2")).get("token:left")!;
+    assert.equal(away.detail, "Companion of Bree");
+    assert.equal(away.mark, "Away from Bree");
+    assert.deepEqual(filterRows(outlineRows(state, "s1"), "companion", null).map((r) => r.id), ["ws"]);
   });
 
   test("a mark agrees with what a player is sent, token by token", () => {

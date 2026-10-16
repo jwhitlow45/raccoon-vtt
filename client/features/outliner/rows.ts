@@ -106,6 +106,20 @@ const SHAPE_WORD: Record<AreaTemplate["shape"], string> = {
 
 const STAMP_NAMES = new Map(STAMP_ART.map((s) => [s.key, s.name]));
 
+/**
+ * A companion's detail and mark (docs/design-v1-combat-flow.md 3.6.10):
+ * whose it is, in place of its kind word, so searching "companion" lists
+ * them all, and "Away from Bree" when no token of its character stands on
+ * the scene, as when the party moved on and left it behind.
+ */
+function companionOf(view: RoomState, t: Token, sceneId: string): { detail: string; away: string | null } | null {
+  if (!t.companion) return null;
+  const characterId = t.companion.of;
+  const name = view.characters[characterId]?.name ?? "a character";
+  const here = Object.values(view.tokens).some((o) => o?.sceneId === sceneId && "ref" in o.actor && o.actor.ref === characterId);
+  return { detail: `Companion of ${name}`, away: here ? null : `Away from ${name}` };
+}
+
 /** Every row for the scene, in group order, each group sorted by name. */
 export function outlineRows(view: RoomState, sceneId: string): OutlineRow[] {
   const scene = view.scenes[sceneId];
@@ -127,7 +141,16 @@ export function outlineRows(view: RoomState, sceneId: string): OutlineRow[] {
   for (const t of Object.values(view.tokens)) {
     if (!t || t.sceneId !== sceneId) continue;
     const fp = footprint(t);
-    add({ group: "tokens", kind: "token", id: t.id, name: displayName(t), detail: KIND_WORD[t.kind] ?? "", mark: tokenMark(t), rect: rectOf(t.x, t.y, t.x + fp.w, t.y + fp.h) });
+    const companion = companionOf(view, t, sceneId);
+    add({
+      group: "tokens",
+      kind: "token",
+      id: t.id,
+      name: displayName(t),
+      detail: companion?.detail ?? KIND_WORD[t.kind] ?? "",
+      mark: companion?.away ?? tokenMark(t),
+      rect: rectOf(t.x, t.y, t.x + fp.w, t.y + fp.h),
+    });
   }
 
   for (const s of Object.values(view.stamps ?? {})) {

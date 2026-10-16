@@ -189,6 +189,9 @@ export function duplicateToken(source: Token, input: { id: string; at: Point; ch
   if (source.notes !== undefined) copy.notes = source.notes;
   if (source.altImages) copy.altImages = source.altImages.map(copyImage);
   if (source.rangeRings) copy.rangeRings = [...source.rangeRings];
+  // Built field by field: a spent Reaction is the source's own, and the strict schema takes no stored field
+  // (docs/design-v1-combat-flow.md 4.2). The reducer gives the copy its character's owners and no number.
+  if (source.companion) copy.companion = { of: source.companion.of, turn: source.companion.turn };
   return copy;
 }
 
@@ -245,6 +248,23 @@ export function spreadPositions(input: {
   bounds: Bounds;
   occupied: Placed[];
 }): Point[] {
+  const out = freeSpots(input);
+  const start = clampCorner(cornerFor(input.center, input.footprint), input.footprint, input.bounds);
+  while (out.length < input.count) out.push(start);
+  return out;
+}
+
+/**
+ * The nearest free spot around a point that `accept` also takes, or null
+ * when none does: a companion's place beside its character
+ * (docs/design-v1-combat-flow.md 3.6.3), which must not stack anywhere.
+ */
+export function firstFreeSpot(input: { center: Point; footprint: Footprint; bounds: Bounds; occupied: Placed[]; accept(p: Point): boolean }): Point | null {
+  return freeSpots({ ...input, count: 1 })[0] ?? null;
+}
+
+/** Up to `count` free spots, ring by ring from the tapped point, each one `accept` takes. */
+function freeSpots(input: { center: Point; footprint: Footprint; count: number; bounds: Bounds; occupied: Placed[]; accept?(p: Point): boolean }): Point[] {
   const { footprint: fp, bounds } = input;
   const step = Math.max(snapStep(fp), Math.max(fp.w, fp.h) >= 1 ? 1 : 0.5);
   const start = clampCorner(cornerFor(input.center, fp), fp, bounds);
@@ -257,11 +277,11 @@ export function spreadPositions(input: {
       if (out.length >= input.count) break;
       const box = { x: p.x, y: p.y, w: fp.w, h: fp.h };
       if (!inside(box, bounds) || taken.some((t) => overlaps(t, box))) continue;
+      if (input.accept && !input.accept(p)) continue;
       taken.push(box);
       out.push(p);
     }
   }
-  while (out.length < input.count) out.push(start);
   return out;
 }
 

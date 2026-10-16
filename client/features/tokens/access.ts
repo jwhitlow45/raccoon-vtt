@@ -16,6 +16,12 @@ import type { ActorPatch, TokenPatch } from "#shared/protocol.ts";
 /** Token fields an owner may patch. `name` and `publicName` only on a PC. */
 export const OWNER_TOKEN_FIELDS: ReadonlySet<keyof TokenPatch> = new Set(["image", "altImages", "rotation", "elevation", "name", "publicName", "notes", "rangeRings", "light"]);
 const OWNER_PC_ONLY_FIELDS: ReadonlySet<keyof TokenPatch> = new Set(["name", "publicName"]);
+/**
+ * What a companion's owners may patch beyond those (docs/design-v1-combat-flow.md
+ * 3.6.4): its name, what it is, its turn and its Reaction. Its stats go
+ * through `actor`, limited by OWNER_ACTOR_FIELDS, on the token itself.
+ */
+const COMPANION_OWNER_FIELDS: ReadonlySet<keyof TokenPatch> = new Set(["name", "actor", "kind", "companion", "companionReaction"]);
 
 /** Actor fields an owner may patch, and only through `character.update`: an inline actor is the DM's. */
 export const OWNER_ACTOR_FIELDS: ReadonlySet<keyof ActorPatch> = new Set([
@@ -69,19 +75,25 @@ export type TokenAccess = {
   effects: boolean;
   deathSaves: boolean;
   life: boolean;
+  /** The DM or an owner of a companion: changes what it is and its turn (docs/design-v1-combat-flow.md 3.6.9). */
+  companion: boolean;
+  /** A companion's owner who is not the DM: Dismiss in Delete's place. */
+  dismiss: boolean;
 };
 
 export function tokenAccess(input: {
   role: Role;
   memberId: MemberId | null | undefined;
   view: (View & { meta?: { settings?: { playersApplyDamage?: boolean } } }) | null | undefined;
-  token: Pick<Token, "ownerIds" | "actor" | "kind">;
+  token: Pick<Token, "ownerIds" | "actor" | "kind"> & { companion?: Token["companion"] };
 }): TokenAccess {
   const { role, memberId, view, token } = input;
   const dm = role === "dm";
   const owner = !dm && ownsToken(view, memberId, token);
   const full = dm || owner;
   const actorVia = "ref" in token.actor ? "character" : "token";
+  // A companion is to its player what their character is (docs/design-v1-combat-flow.md 3.6.4).
+  const companionOwner = owner && token.companion !== undefined;
   return {
     dm,
     owner,
@@ -89,17 +101,20 @@ export function tokenAccess(input: {
     actorVia,
     canEditToken(field) {
       if (dm) return true;
+      if (companionOwner && COMPANION_OWNER_FIELDS.has(field)) return true;
       if (!owner || !OWNER_TOKEN_FIELDS.has(field)) return false;
       return !OWNER_PC_ONLY_FIELDS.has(field) || token.kind === "pc";
     },
     canEditActor(field) {
       if (dm) return true;
-      return owner && actorVia === "character" && OWNER_ACTOR_FIELDS.has(field);
+      return owner && (actorVia === "character" || companionOwner) && OWNER_ACTOR_FIELDS.has(field);
     },
     hp: full ? "all" : view?.meta?.settings?.playersApplyDamage ? "relative" : "none",
     effects: full,
     deathSaves: full,
     life: dm,
+    companion: token.companion !== undefined && full,
+    dismiss: companionOwner,
   };
 }
 

@@ -20,6 +20,7 @@ import { ImagePreview } from "../images/IconDisk.tsx";
 import { placeOnGround } from "../movement/ground.ts";
 import { ownsCharacter } from "./access.ts";
 import { CharacterCard, SIZE_OPTIONS } from "./CharacterCard.tsx";
+import { CharacterCompanions, CompanionForm } from "./CompanionsSection.tsx";
 import { EffectIcon } from "./EffectIcon.tsx";
 import { newCharacter } from "./factory.ts";
 import { PLACE_TOOL_ID, setPending } from "./placement.ts";
@@ -41,6 +42,8 @@ export default function CharactersPanel(props: PanelProps) {
   /** Undefined until the first tap: a player with one character sees that card open. */
   const [openId, setOpenId] = useState<string | null | undefined>(undefined);
   const [creating, setCreating] = useState(false);
+  /** The character whose "Add a companion" form shows in the panel's place. */
+  const [addingFor, setAddingFor] = useState<string | null>(null);
   const dm = you?.role === "dm";
 
   const list = useMemo(
@@ -52,6 +55,11 @@ export default function CharactersPanel(props: PanelProps) {
   const open = openId === undefined ? (!dm && mine.length === 1 ? (mine[0]?.id ?? null) : null) : openId;
 
   const own = !dm && view && you ? newCharacterState(view, you.memberId) : null;
+
+  const companionOf = addingFor !== null ? characters?.[addingFor] : undefined;
+  if (companionOf) {
+    return <CompanionForm character={companionOf} close={props.close} onDone={() => setAddingFor(null)} />;
+  }
 
   if (creating) {
     return (
@@ -85,7 +93,14 @@ export default function CharactersPanel(props: PanelProps) {
         </Empty>
       ) : null}
       {mine.map((c) => (
-        <CharacterRow key={c.id} character={c} open={open === c.id} onToggle={() => setOpenId(open === c.id ? null : c.id)} close={props.close} />
+        <CharacterRow
+          key={c.id}
+          character={c}
+          open={open === c.id}
+          onToggle={() => setOpenId(open === c.id ? null : c.id)}
+          close={props.close}
+          onAddCompanion={() => setAddingFor(c.id)}
+        />
       ))}
       {others.length > 0 ? (
         <Section label="The party">
@@ -159,7 +174,7 @@ export function Portrait(props: { character: Pick<Character, "name" | "defaultIm
   return <ImagePreview image={character.defaultImage} shape="circle" aspect={1} width={size} ring={theme.color.ally} initials={initials(character.name)} />;
 }
 
-function CharacterRow(props: { character: Character; open: boolean; onToggle(): void; close(): void }) {
+function CharacterRow(props: { character: Character; open: boolean; onToggle(): void; close(): void; onAddCompanion(): void }) {
   const { character } = props;
   const members = useRoomView((s) => s.view?.members);
   const role = useRoomView((s) => s.you?.role);
@@ -197,6 +212,8 @@ function CharacterRow(props: { character: Character; open: boolean; onToggle(): 
           ) : (
             <PlaceMine character={character} close={props.close} />
           )}
+          {/* Before the card: in play a player opens their card for companions more often than to edit stats (docs/design-v1-combat-flow.md 3.7.5). */}
+          <CharacterCompanions character={character} canAdd onAdd={props.onAddCompanion} close={props.close} />
           <CharacterCard character={character} />
           {role === "dm" ? (
             <Section label="Remove">

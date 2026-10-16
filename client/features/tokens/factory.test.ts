@@ -229,6 +229,18 @@ describe("other token sources", () => {
     assert.deepEqual(duplicateToken(pc, { id: "pc2", at: { x: 0, y: 0 }, chunks: {} }).actor, { ref: "hero" });
   });
 
+  test("a companion's duplicate takes its link alone, its Reaction unspent and no number, and the reducer gives it the character's owners (docs/design-v1-combat-flow.md 4.3)", () => {
+    const state = room({ characters: { hero: character("hero", { ownerIds: ["p1"] }) } });
+    state.tokens.ws = token("ws", { kind: "npc", name: "Wildfire Spirit", ownerIds: ["p1"], companion: { of: "hero", turn: "shared", reactionUsed: true } });
+    const copy = duplicateToken(state.tokens.ws, { id: "ws2", at: { x: 4, y: 3 }, chunks: {} });
+    assert.deepEqual(copy.companion, { of: "hero", turn: "shared" });
+    assert.ok(clientOpSchema.safeParse({ t: "token.create", token: copy }).success, "the strict schema takes it");
+    const made = apply(state, { t: "token.create", token: copy }, DM).tokens.ws2!;
+    assert.deepEqual(made.companion, { of: "hero", turn: "shared" });
+    assert.deepEqual(made.ownerIds, ["p1"]);
+    assert.equal(made.number, undefined);
+  });
+
   test("a duplicate lands where it goes as its original would if dropped there", () => {
     // A 10 ft platform over (4, 3) and (5, 3), the floor around it at 0.
     const { buildChunks: chunks } = apply(room(), { t: "build.height", sceneId: "s1", cells: ["4,3", "5,3"], height: 10 });

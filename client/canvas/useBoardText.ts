@@ -1,5 +1,6 @@
 import { useMemo, useRef } from "react";
 import type { Actor, Character } from "#shared/model.ts";
+import { hpLess } from "#shared/rules/hp.ts";
 import { boardSizes } from "../lib/boardScale.ts";
 import { focusLines, linesSize, placeLabels, showsNumberBadge, type Box, type LabelInput, type LabelLine, type LabelStyle, type Obstacle, type Side } from "../lib/boardText.ts";
 import { footprint, type ViewToken } from "../lib/scene.ts";
@@ -101,8 +102,10 @@ export function useBoardText(input: {
       obstacles.push({ box, owner: t.id, kind: "body" });
       const actor: Partial<Actor> | undefined = "inline" in t.actor ? t.actor.inline : characters?.[t.actor.ref]?.actor;
       const fullAccess = role === "dm" || ownsToken(t);
-      const hp = hpDisplay({ actor, hpVisibility: t.hpVisibility, fullAccess });
-      const state = healthState({ actor, hpVisibility: t.hpVisibility, fullAccess });
+      // A creature with no HP to show, such as an effect companion, gets no HP bar, label or Bloodied notch (docs/design-v1-combat-flow.md 3.6.6).
+      const less = hpLess(actor, t);
+      const hp: HpDisplay = less ? { kind: "none" } : hpDisplay({ actor, hpVisibility: t.hpVisibility, fullAccess });
+      const state = less ? null : healthState({ actor, hpVisibility: t.hpVisibility, fullAccess });
       const big = widthPx >= DECOR_MIN_PX;
       const marks = big
         ? tokenMarks({

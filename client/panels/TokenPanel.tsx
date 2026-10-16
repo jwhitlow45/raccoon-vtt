@@ -16,10 +16,11 @@ import { statBlockShown } from "../features/monsters/statBlockLink.ts";
 import { GroundNotice } from "../features/movement/GroundNotice.tsx";
 import { tokenAccess, type TokenAccess } from "../features/tokens/access.ts";
 import { useAltImages } from "../features/tokens/AltImages.tsx";
+import { CompanionOwners, CompanionSection, MakeCompanion, followsPartyHp } from "../features/tokens/CompanionsSection.tsx";
 import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
 import { HpSection } from "../features/tokens/HpSection.tsx";
 import { usePanelFolds, type FoldKey } from "../features/tokens/panelFolds.ts";
-import { panelSections, type PanelSectionId } from "../features/tokens/panelOrder.ts";
+import { offersMakeCompanion, panelSections, type PanelSectionId } from "../features/tokens/panelOrder.ts";
 import { RestSection } from "../features/tokens/RestSection.tsx";
 import { StatBlockSection } from "../features/tokens/StatBlockSection.tsx";
 import { CardNotesField, SheetUrlField, StatsFields } from "../features/tokens/StatsSection.tsx";
@@ -142,7 +143,7 @@ function TokenDetails(props: PanelProps) {
       case "summary":
         return <PanelSection key={id}>{summary}</PanelSection>;
       case "hp":
-        return <HpSection key={id} actor={actor} hpVisibility={token.hpVisibility} target={{ tokenId: token.id }} access={access} name={name} />;
+        return <HpSection key={id} actor={actor} hpVisibility={token.hpVisibility} target={{ tokenId: token.id }} access={access} name={name} token={token} />;
       case "conditions":
         return <EffectsSection key={id} effects={actor?.effects ?? []} target={{ tokenId: token.id }} self={{ tokenId: token.id }} selfLabel={name} canEdit={access.effects} />;
       case "position":
@@ -178,13 +179,12 @@ function TokenDetails(props: PanelProps) {
       case "settings":
         return (
           <Section key={id} title="Token settings" fold={fold("settings")}>
-            {access.dm ? <DmSettings token={token} feetPerCell={feetPerCell} update={update} /> : <OwnerNames token={token} update={update} />}
-            {/* "Make a companion" (offersMakeCompanion) and its form are docs/design-v1-combat-flow.md 3.6.9's, and stand here at the end of the DM's settings. */}
+            {access.dm ? <DmSettings token={token} feetPerCell={feetPerCell} update={update} /> : <OwnerNames token={token} access={access} update={update} />}
           </Section>
         );
-      // The Companion section is docs/design-v1-combat-flow.md 3.6.9's, and folds through this panel's folds under the key "companion".
+      // docs/design-v1-combat-flow.md 3.6.9's section, folded through this panel's folds with its character beside its label.
       case "companion":
-        return null;
+        return <CompanionSection key={id} token={token} access={access} fold={(summary) => fold("companion", summary)} />;
       case "owners":
         return <Owners key={id} token={token} update={update} fold={fold} />;
       case "remove":
@@ -273,17 +273,19 @@ function PositionSection(props: { token: Token; access: TokenAccess; update(patc
   );
 }
 
-/** An owner's Name and "Name others see", for a token they may rename, a PC's. */
-function OwnerNames(props: { token: Token; update(patch: TokenPatch): void }) {
+/** An owner's Name and, on a PC, "Name others see", for a token they may rename: a PC's or a companion's (docs/design-v1-combat-flow.md 3.6.4). */
+function OwnerNames(props: { token: Token; access: TokenAccess; update(patch: TokenPatch): void }) {
   const { token, update } = props;
   return (
     <>
       <FieldRow label="Name">
         <TextField label="Name" value={token.name} maxLength={80} onCommit={(v) => v.trim() && update({ name: v.trim() })} />
       </FieldRow>
-      <FieldRow label="Name others see" hint="Used when the DM hides the name">
-        <TextField label="Name others see" value={token.publicName ?? ""} maxLength={80} onCommit={(v) => update({ publicName: v.trim() || null })} />
-      </FieldRow>
+      {props.access.canEditToken("publicName") ? (
+        <FieldRow label="Name others see" hint="Used when the DM hides the name">
+          <TextField label="Name others see" value={token.publicName ?? ""} maxLength={80} onCommit={(v) => update({ publicName: v.trim() || null })} />
+        </FieldRow>
+      ) : null}
     </>
   );
 }
@@ -293,6 +295,8 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
   const { token, update } = props;
   const fp = footprint(token);
   const autoHeight = Math.max(fp.w, fp.h) * props.feetPerCell;
+  // A creature companion a player plays is the party's, so its HP follows the party's setting (docs/design-v1-combat-flow.md 3.6.5).
+  const followsParty = useRoomView((s) => followsPartyHp(s.view, token));
   return (
     <>
       <FieldRow label="Name">
@@ -352,7 +356,11 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
         />
       </FieldRow>
       <FieldRow label="Players see HP as">
-        <Select<HpVisibility> label="Players see HP as" value={token.hpVisibility} options={HP_VISIBILITY_OPTIONS} onChange={(hpVisibility) => update({ hpVisibility })} />
+        {followsParty ? (
+          <span style={{ flex: 1, color: theme.color.textMuted }}>Follows Players see the party's HP</span>
+        ) : (
+          <Select<HpVisibility> label="Players see HP as" value={token.hpVisibility} options={HP_VISIBILITY_OPTIONS} onChange={(hpVisibility) => update({ hpVisibility })} />
+        )}
       </FieldRow>
       <Switch
         checked={token.visibility === "dm"}
@@ -370,6 +378,7 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
       <FieldRow label="Height" hint={`Feet. Empty uses the size: ${autoHeight} ft.`}>
         <NumberField label="Height" value={token.height} min={0} max={10_000} nullable placeholder={`${autoHeight}`} onCommit={(height) => update({ height })} />
       </FieldRow>
+      {offersMakeCompanion({ dm: true, kind: token.kind, companion: isCompanion(token) }) ? <MakeCompanion token={token} /> : null}
     </>
   );
 }
@@ -402,6 +411,14 @@ function Owners(props: { token: Token; update(patch: TokenPatch): void; fold(key
   const summary = (
     <span style={{ flex: "0 1 auto", minWidth: 0, color: theme.color.textMuted, fontSize: theme.font.small, overflowWrap: "anywhere" }}>{names.length > 0 ? names.join(", ") : "None"}</span>
   );
+  if (token.companion) {
+    // A companion's owners are its character's, kept in step by the server (docs/design-v1-combat-flow.md 3.6.4).
+    return (
+      <Section title="Owners" fold={props.fold("owners", summary)}>
+        <CompanionOwners token={token} />
+      </Section>
+    );
+  }
   return (
     <Section title="Owners" fold={props.fold("owners", summary)}>
       <Note>Owners can move it and edit what their role allows.</Note>

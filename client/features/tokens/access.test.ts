@@ -15,6 +15,8 @@ function fixture(): RoomState {
   state.tokens.pc = token("pc", { kind: "pc", name: "Hero", actor: { ref: "hero" }, ownerIds: [] });
   state.tokens.familiar = token("familiar", { kind: "npc", name: "Owl", ownerIds: ["p1"] });
   state.tokens.goblin = token("goblin");
+  // Hero's companion, played by whoever plays Hero (docs/design-v1-combat-flow.md 3.6.4).
+  state.tokens.spirit = token("spirit", { kind: "npc", name: "Wildfire Spirit", ownerIds: ["p1"], companion: { of: "hero", turn: "shared" } });
   return state;
 }
 
@@ -92,7 +94,7 @@ describe("ownership", () => {
 });
 
 describe("token access mirrors the server's permissions", () => {
-  for (const tokenId of ["pc", "familiar", "goblin"]) {
+  for (const tokenId of ["pc", "familiar", "goblin", "spirit"]) {
     test(`token.update fields on ${tokenId}`, () => {
       const state = fixture();
       for (const viewer of [DM, P1, P2]) {
@@ -107,10 +109,21 @@ describe("token access mirrors the server's permissions", () => {
     });
   }
 
-  test("actor fields go through the character for a PC, and owners never patch an inline actor", () => {
+  test("a companion's owner dismisses it, and the DM deletes instead", () => {
     const state = fixture();
     for (const viewer of [DM, P1, P2]) {
-      for (const tokenId of ["pc", "familiar", "goblin"]) {
+      const access = tokenAccess({ role: viewer.role, memberId: viewer.memberId, view: state, token: state.tokens.spirit! });
+      const allowed = canApply({ t: "token.delete", tokenId: "spirit" }, viewer, state, deps).ok;
+      assert.equal(access.dismiss || access.dm, allowed, viewer.memberId);
+      assert.equal(access.companion, viewer.memberId !== "p2", `${viewer.memberId} changes what it is`);
+    }
+    assert.equal(tokenAccess({ role: "player", memberId: "p1", view: state, token: state.tokens.familiar! }).dismiss, false, "an owned token that is no companion");
+  });
+
+  test("actor fields go through the character for a PC, and owners never patch an inline actor but a companion's", () => {
+    const state = fixture();
+    for (const viewer of [DM, P1, P2]) {
+      for (const tokenId of ["pc", "familiar", "goblin", "spirit"]) {
         const t = state.tokens[tokenId]!;
         const access = tokenAccess({ role: viewer.role, memberId: viewer.memberId, view: state, token: t });
         for (const field of Object.keys(ACTOR_SAMPLES) as (keyof ActorPatch)[]) {
