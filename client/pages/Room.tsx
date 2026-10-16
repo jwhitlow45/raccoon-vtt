@@ -12,6 +12,7 @@ import { ConnectionDot, ReconnectNotice, useReconnectDue } from "../components/C
 import { Card, Page } from "../components/Field.tsx";
 import { LoadBoundary } from "../components/LoadBoundary.tsx";
 import { PRESSED } from "../components/looks.ts";
+import { SectionLabel } from "../components/Panel.tsx";
 import { Row } from "../components/Row.tsx";
 import { returnFocusAfterSheet, sheetFocusSlot, useAlertsSummaryEntry, useDockSummaryButton } from "../components/sheetFocus.ts";
 import { SheetHeader } from "../components/SheetHeader.tsx";
@@ -23,7 +24,7 @@ import { Sheet, paneBodyPadding, type SheetMode } from "../components/Sheet.tsx"
 import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, sheetMode, sideSheetWidth } from "../components/sheetCap.ts";
 import { SHORT_LANDSCAPE_MAX, useRecordOverflow, useTopBars, useTurnPlacement, type TurnPlacement } from "../features/encounter/band.ts";
 import { FightWatch, InitiativeStrip, useYourTurnNotice } from "../features/encounter/InitiativeStrip.tsx";
-import { panelById, panelsFor, subpageBack, useSubpageFocus, type PanelDef, type PanelHeader } from "../features/panels.ts";
+import { panelById, panelsFor, subpageBack, useSubpageFocus, type PanelDef, type PanelGroup, type PanelHeader } from "../features/panels.ts";
 import { PartyDock } from "../features/party/PartyDock.tsx";
 import type { OpenSheet } from "../features/find/findToken.ts";
 import { HandoutPopup } from "../features/handouts/HandoutPopup.tsx";
@@ -742,6 +743,7 @@ function RoomPage() {
               panels={panels}
               current={tabId}
               badges={badges}
+              grouped={role === "dm"}
               onPick={(id) => {
                 focusNext.current = { kind: "panel" };
                 ui.openPanel(id);
@@ -1545,11 +1547,19 @@ function panelTile(panelId: string): string {
   return `panel-${panelId}`;
 }
 
+/** The labels of a DM's list of panels on a phone (docs/design-v1-layout-hierarchy.md M3). Menu follows a plain divider. */
+const GROUP_LABELS: Partial<Record<PanelGroup, string>> = { play: "In play", prepare: "Prepare" };
+
 /**
  * Every panel the role has, as large buttons, for the phone's Panels sheet:
  * card rows (components/Row.tsx), the open panel in the pressed look.
+ * `grouped` labels a DM's groups, "In play" and "Prepare", with Menu after
+ * a plain divider, so a DM finds a panel for preparing without reading the
+ * ones for play. The labels are items that span the grid, so it stays one
+ * list named "Panels" and its tiles keep their names.
  */
-function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Record<string, number>; onPick(id: string): void }) {
+function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Record<string, number>; grouped: boolean; onPick(id: string): void }) {
+  const opens = (p: PanelDef, i: number) => props.grouped && props.panels[i - 1]?.group !== p.group;
   return (
     <ul
       aria-label="Panels"
@@ -1562,11 +1572,22 @@ function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Recor
         gap: theme.space(2),
       }}
     >
-      {props.panels.map((p) => {
+      {props.panels.map((p, i) => {
         const current = p.id === props.current;
         const count = props.badges[p.id] ?? 0;
+        const label = GROUP_LABELS[p.group];
         return (
-          <li key={p.id}>
+          <Fragment key={p.id}>
+            {opens(p, i) ? (
+              label ? (
+                <li style={{ gridColumn: "1 / -1", paddingTop: i === 0 ? 0 : theme.space(2) }}>
+                  <SectionLabel>{label}</SectionLabel>
+                </li>
+              ) : (
+                <li aria-hidden style={{ gridColumn: "1 / -1", height: theme.line.border, margin: `${theme.space(1)}px 0`, background: theme.color.border }} />
+              )
+            ) : null}
+          <li>
             <Row
               opener={panelTile(p.id)}
               title={p.title}
@@ -1576,6 +1597,7 @@ function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Recor
               style={{ minHeight: 52, ...(current ? { color: theme.color.accent } : null) }}
             />
           </li>
+          </Fragment>
         );
       })}
     </ul>
@@ -1693,8 +1715,10 @@ function SidePanel(props: {
     props.onTab(next.id);
     document.getElementById(tabId(next.id))?.focus();
   };
-  const tabs = props.tabs.map((t) => {
+  const tabs = props.tabs.map((t, i) => {
     const chosen = props.tab === t.id;
+    // An 8 px gap before each group's first tab, where the row's own gap is 2 (docs/design-v1-layout-hierarchy.md M3).
+    const opensGroup = i > 0 && props.tabs[i - 1]?.group !== t.group;
     return (
       <button
         key={t.id}
@@ -1711,6 +1735,7 @@ function SidePanel(props: {
           flex: "none",
           minHeight: theme.touch,
           minWidth: theme.touch,
+          marginLeft: opensGroup ? theme.space(2) - theme.space(0.5) : 0,
           padding: `0 ${theme.space(2)}px`,
           borderRadius: theme.radius.md,
           ...(chosen ? PRESSED : TAB_REST),
