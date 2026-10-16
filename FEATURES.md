@@ -98,6 +98,7 @@ The Builder tool is the DM's. Its modes:
 - What players see of a monster's HP, set per token: nothing, a label (Healthy, Bloodied, Dying, Dead), a bar, or the exact number.
 - A colored ring shows ally, neutral or hostile.
 - Copies of a monster are numbered (Goblin 1, Goblin 2). A token without a picture shows its initials, G1, G2 or "AR" for Ash Rider, the same on the board, in the tracker and in the Characters and Monsters panels.
+- Each creature shows its AC on a small shield in the bottom left corner of its token. The DM sees every creature's, a player sees the AC of the creatures whose stats they have: their own character and creatures they own. A dead creature's shield hides, and on a token too small for it the action bar still says its AC.
 - Names, condition chips and badges draw above every token and the fog. They scale with the map and make way when crowded.
 - Hidden tokens are translucent to the DM and never reach players. A locked token shows a padlock and cannot be dragged.
 - A token sits on the creatures layer or the objects layer, under creatures.

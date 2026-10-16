@@ -40,6 +40,21 @@ export function hpLabel(actor: Pick<Actor, "hp" | "life">): HpLabel {
   return "Healthy";
 }
 
+/**
+ * Whether a token, or a character card with no token, has no HP to show
+ * (docs/design-v1-combat-flow.md 3.6.6): a companion that is an effect, or
+ * any token with max HP 0, such as Spiritual Weapon. It takes the resolved
+ * actor (a token's own, or its character's) and the token where there is
+ * one, and decides only from what the caller holds. HP this viewer may not
+ * see never counts as 0, so a creature whose numbers the projection held
+ * back is not HP-less. An ordinary object keeps HP of its own, such as a
+ * door the DM tracks, so being an object alone does not make it HP-less.
+ */
+export function hpLess(actor: { hp?: Pick<Actor["hp"], "max"> } | undefined, token?: { kind: TokenKind; companion?: unknown }): boolean {
+  if (token?.companion !== undefined && token.kind === "object") return true;
+  return actor?.hp !== undefined && actor.hp.max === 0;
+}
+
 export function isBloodied(actor: Pick<Actor, "hp">): boolean {
   return actor.hp.cur <= Math.floor(actor.hp.max / 2);
 }

@@ -460,8 +460,10 @@ export function MapStage(props: {
     () => Object.values(allMapLabels).flatMap((l) => (l && l.sceneId === scene.id ? [labelBox(l, measureMapLabel)] : [])),
     [allMapLabels, scene.id, zoom],
   );
-  const boardText = useBoardText({ tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, mapLabels });
   const movesAny = useCallback((t: ViewToken) => movesOthers(t, settings, youId), [settings, youId]);
+  // The lock shows where it is the only thing in the way of a drag.
+  const lockShown = useCallback((t: ViewToken) => t.locked && (role === "dm" || ownsToken(t) || movesAny(t)), [role, ownsToken, movesAny]);
+  const boardText = useBoardText({ tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, mapLabels, lockShown });
   const canDrag = useCallback(
     (t: ViewToken) => canDragToken({ token: t, role, memberId: youId, characters, settings }),
     [role, youId, characters, settings],
@@ -471,9 +473,6 @@ export function MapStage(props: {
     (t: ViewToken) => refusedDragText({ name: displayName(t), role, owns: ownsToken(t), locked: t.locked, moveAny: movesAny(t) }),
     [role, ownsToken, movesAny],
   );
-  // The lock shows where it is the only thing in the way of a drag.
-  const lockShown = (t: ViewToken) => t.locked && (role === "dm" || ownsToken(t) || movesAny(t));
-
   // The pointer handlers and the drag callbacks outlive renders, so they read these.
   const tokensByIdRef = useRef(tokensById);
   tokensByIdRef.current = tokensById;

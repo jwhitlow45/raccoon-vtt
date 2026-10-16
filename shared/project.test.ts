@@ -1528,3 +1528,62 @@ describe("wave 3 projection", () => {
     assert.equal(projectEntity(keys.light("l1"), state, P1, { sceneId: "s1" }), null);
   });
 });
+
+/*
+ * What the stat summary and the AC shield may show rests on these
+ * (docs/design-v1-token-panel.md 3.2 and 3.9): they read only the viewer's
+ * copy, so a number the projection holds back can never reach a screen.
+ */
+describe("the stats a player's copy holds, for the stat summary and the AC shield", () => {
+  const inlineOf = (t: { actor: unknown } | undefined) => (t?.actor as { inline?: ProjectedActor } | undefined)?.inline;
+
+  test("a monster the player does not own reaches them without its AC, speeds, Passive Perception or stat block links", () => {
+    const state = room();
+    state.tokens.g = token("g", { actor: { inline: actor({ ac: 15, srdId: "goblin-warrior", passivePerception: 9 }) } });
+    state.tokens.m = token("m", { actor: { inline: actor({ ac: 13, monsterId: "mon1" }) } });
+    for (const viewer of [P1, DISPLAY]) {
+      const p = projectState(state, viewer, { sceneId: "s1" });
+      for (const id of ["g", "m"]) {
+        const a = inlineOf(p.tokens[id]) as Record<string, unknown> | undefined;
+        assert.ok(a, `${viewer.memberId} sees ${id}`);
+        for (const key of ["ac", "speeds", "passivePerception", "srdId", "monsterId"]) assert.equal(key in a, false, `${viewer.memberId}'s ${id} has no ${key}`);
+      }
+    }
+  });
+
+  test("an owner's copy of an SRD-linked token with its own actor has its AC and SRD id, never a room monster's id", () => {
+    const state = room();
+    state.tokens.w = token("w", { kind: "npc", ownerIds: ["p1"], actor: { inline: actor({ ac: 13, srdId: "brown-bear", speeds: { walk: 40, climb: 30 }, passivePerception: 13 }) } });
+    state.tokens.r = token("r", { kind: "npc", ownerIds: ["p1"], actor: { inline: actor({ ac: 12, monsterId: "mon1" }) } });
+    const p = projectState(state, P1, { sceneId: "s1" });
+    const w = inlineOf(p.tokens.w)!;
+    assert.equal(w.ac, 13);
+    assert.equal(w.srdId, "brown-bear");
+    assert.deepEqual(w.speeds, { walk: 40, climb: 30 });
+    assert.equal(w.passivePerception, 13);
+    assert.equal("monsterId" in w, false);
+    const r = inlineOf(p.tokens.r)!;
+    assert.equal(r.ac, 12);
+    assert.equal("monsterId" in r, false, "owners never get monsterId");
+  });
+
+  test("a character's token owned without its character carries only the reference, and the character comes without its AC", () => {
+    const state = room();
+    state.characters.c2 = character("c2", { ownerIds: ["p2"], actor: actor({ ac: 17, passivePerception: 15 }) });
+    state.tokens.t2 = token("t2", { kind: "pc", ownerIds: ["p1"], actor: { ref: "c2" } });
+    const p = projectState(state, P1, { sceneId: "s1" });
+    assert.deepEqual(p.tokens.t2?.actor, { ref: "c2" });
+    const c = p.characters.c2?.actor as Record<string, unknown> | undefined;
+    assert.ok(c, "the character reaches them as any other player's");
+    for (const key of ["ac", "speeds", "passivePerception", "srdId", "sheetUrl"]) assert.equal(key in c, false, `no ${key}`);
+    assert.equal((projectState(state, P2, { sceneId: "s1" }).characters.c2?.actor as Partial<RoomState["characters"][string]["actor"]>).ac, 17, "its own player holds it");
+  });
+
+  test("a hidden token reaches its owners and no other player", () => {
+    const state = room();
+    state.tokens.h = token("h", { kind: "npc", visibility: "dm", ownerIds: ["p1"], actor: { inline: actor({ ac: 14 }) } });
+    assert.equal(inlineOf(projectState(state, P1, { sceneId: "s1" }).tokens.h)?.ac, 14);
+    assert.equal(projectState(state, P2, { sceneId: "s1" }).tokens.h, undefined);
+    assert.equal(projectState(state, DISPLAY, { sceneId: "s1" }).tokens.h, undefined);
+  });
+});

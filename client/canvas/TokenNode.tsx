@@ -12,7 +12,8 @@ import { useAssets, useRoomView } from "../state/view.ts";
 import { useChipIcon } from "./chipIcons.ts";
 import { PLATE_STROKE, plateRect } from "./textBoxes.ts";
 import { TokenShadow } from "./TokenShadow.tsx";
-import type { Notch, TokenMarks } from "./tokenMarks.ts";
+import { numberBadgeWidth, type Notch, type TokenMarks } from "./tokenMarks.ts";
+import { SHIELD_PATH } from "../components/acBadge.ts";
 import type { PlacedLines, TokenText } from "./useBoardText.ts";
 import { useTokenImage } from "./useImage.ts";
 import { isAssetImage } from "#shared/imageRef.ts";
@@ -141,7 +142,8 @@ function DecorParts(props: DecorProps & {
       {marks && text.marks ? <TopDecor effects={props.effects} marks={text.marks} /> : null}
       {marks && text.notch ? <BloodiedNotch notch={text.notch} /> : null}
       {marks && text.numberBadge && token.number !== undefined ? <NumberBadge widthPx={text.widthPx} heightPx={text.heightPx} number={token.number} px={sizes.numberPx} /> : null}
-      {marks && text.marks && props.lockMark && token.locked ? <LockMark heightPx={text.heightPx} sizePx={sizes.chipPx} /> : null}
+      {marks && text.marks?.lock && props.lockMark && token.locked ? <LockMark place={text.marks.lock} /> : null}
+      {marks && text.marks?.ac ? <AcMark ac={text.marks.ac} /> : null}
       {marks && text.marks?.bar && text.hp.kind === "bar" ? <HpBar box={text.marks.bar} fraction={text.hp.fraction} /> : null}
       {label && text.label && !text.plate ? <Lines block={text.label} /> : null}
       {plate && text.plate ? <Lines block={text.plate} plate /> : null}
@@ -149,14 +151,50 @@ function DecorParts(props: DecorProps & {
   );
 }
 
-/** A padlock in the token's bottom left corner, so a locked token says why a drag does nothing. */
-function LockMark(props: { heightPx: number; sizePx: number }) {
-  const k = props.sizePx / 18;
+/** A padlock at the bottom left, in its corner or above the AC shield (tokenMarks.ts), so a locked token says why a drag does nothing. Named for the e2e. */
+function LockMark(props: { place: { x: number; y: number; size: number } }) {
+  const { x, y, size } = props.place;
+  const k = size / 18;
   return (
-    <Group x={9 * k} y={props.heightPx - 9 * k} scaleX={k} scaleY={k}>
+    <Group name="lock-mark" x={x + 9 * k} y={y + 9 * k} scaleX={k} scaleY={k}>
       <Rect x={-9} y={-9} width={18} height={18} cornerRadius={9} fill={theme.color.surfaceRaised} stroke={theme.color.accentSoft} strokeWidth={1} />
       <Arc x={0} y={-1} innerRadius={2} outerRadius={3.6} angle={180} rotation={180} fill={theme.color.accentSoft} />
       <Rect x={-4.5} y={-1} width={9} height={6.5} cornerRadius={1.5} fill={theme.color.accentSoft} />
+    </Group>
+  );
+}
+
+let shieldPath: Path2D | null = null;
+
+/**
+ * The creature's AC on the party bar's shield (docs/design-v1-token-panel.md
+ * 3.9), in the token's bottom left corner as the number badge sits in the
+ * bottom right, filled and outlined as that badge is. Named for the e2e.
+ */
+function AcMark(props: { ac: NonNullable<TokenMarks["ac"]> }) {
+  const { ac } = props;
+  const sx = ac.width / 24;
+  const sy = ac.height / 24;
+  return (
+    <Group name="ac-badge" x={ac.x} y={ac.y}>
+      {/* A plain Shape over the outline's Path2D, as IconGlyph draws, so the board needs no Konva Path and its SVG parser (konvaSetup.ts). */}
+      <Shape
+        width={ac.width}
+        height={ac.height}
+        sceneFunc={(ctx) => {
+          shieldPath ??= new Path2D(SHIELD_PATH);
+          ctx.save();
+          ctx.scale(sx, sy);
+          ctx.setAttr("fillStyle", theme.color.surfaceRaised);
+          ctx.fill(shieldPath);
+          ctx.setAttr("strokeStyle", theme.color.text);
+          ctx.setAttr("lineWidth", 2 / (sx + sy));
+          ctx.stroke(shieldPath);
+          ctx.restore();
+        }}
+      />
+      {/* In the top 85%, where the shield is widest, so the number never reaches its point. */}
+      <Text text={ac.text} width={ac.width} height={ac.height * 0.85} align="center" verticalAlign="middle" fontSize={ac.textPx} fontStyle="700" fill={theme.color.text} />
     </Group>
   );
 }
@@ -176,7 +214,7 @@ function BloodiedNotch(props: { notch: Notch }) {
 function NumberBadge(props: { widthPx: number; heightPx: number; number: number; px: number }) {
   const text = String(props.number);
   const d = Math.ceil(props.px + 6);
-  const width = Math.max(d, Math.ceil(text.length * props.px * 0.62 + 8));
+  const width = numberBadgeWidth(props.number, props.px);
   const x = props.widthPx - width;
   const y = props.heightPx - d;
   return (

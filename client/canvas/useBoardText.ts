@@ -7,7 +7,7 @@ import { DECOR_MIN_PX, healthState, hpDisplay, type HpDisplay } from "../lib/tok
 import { pillPlace } from "../features/measure/Pill.tsx";
 import type { PillSpec } from "./boardView.ts";
 import { measureLabel } from "./measureText.ts";
-import { bloodiedNotch, tokenMarks, type Notch, type TokenMarks } from "./tokenMarks.ts";
+import { bloodiedNotch, numberBadgeWidth, shieldAc, tokenMarks, type Notch, type TokenMarks } from "./tokenMarks.ts";
 
 /** A block of label lines, placed in screen pixels from the token's top-left corner. */
 export type PlacedLines = { lines: LabelLine[]; x: number; y: number; width: number; height: number };
@@ -75,10 +75,12 @@ export function useBoardText(input: {
   pills: readonly PillSpec[];
   /** The DM's labels on the map as this viewer has them, in cells. */
   mapLabels: readonly Box[];
+  /** Whether a token's padlock shows (Stage.tsx), which shares the bottom left corner with the AC shield. */
+  lockShown: (t: ViewToken) => boolean;
 }): Map<string, TokenText> {
   // The last layout's sides, read and written inside the layout on purpose: they steer the next one, never trigger one.
   const previous = useRef<Map<string, Side>>(new Map());
-  const { tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, mapLabels } = input;
+  const { tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, mapLabels, lockShown } = input;
   const layout = useMemo(() => {
     const sizes = boardSizes(scale);
     const out = new Map<string, TokenText>();
@@ -103,7 +105,19 @@ export function useBoardText(input: {
       const state = healthState({ actor, hpVisibility: t.hpVisibility, fullAccess });
       const big = widthPx >= DECOR_MIN_PX;
       const marks = big
-        ? tokenMarks({ widthPx, heightPx, effects: actor?.effects ?? [], elevation: t.elevation, hasBar: hp.kind === "bar", cellPx: scale, sizes, measure: measureLabel })
+        ? tokenMarks({
+            widthPx,
+            heightPx,
+            effects: actor?.effects ?? [],
+            elevation: t.elevation,
+            hasBar: hp.kind === "bar",
+            cellPx: scale,
+            sizes,
+            measure: measureLabel,
+            ac: shieldAc(t, actor),
+            lock: lockShown(t),
+            numberReserve: t.image && t.number !== undefined ? numberBadgeWidth(t.number, sizes.numberPx) : 0,
+          })
         : null;
       for (const m of marks?.boxes ?? []) obstacles.push({ box: { x0: m.x0 + ox, y0: m.y0 + oy, x1: m.x1 + ox, y1: m.y1 + oy }, owner: t.id, kind: "mark" });
       const own = t.kind === "pc" || ownsToken(t);
@@ -144,7 +158,7 @@ export function useBoardText(input: {
     for (const [id, m] of meta) if (!placed.has(id)) out.get(id)!.numberBadge = showsNumberBadge(m, undefined);
     previous.current = sides;
     return { out, meta, sizes };
-  }, [tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels]);
+  }, [tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown]);
 
   return useMemo(() => {
     if (plateIds.size === 0) return layout.out;
