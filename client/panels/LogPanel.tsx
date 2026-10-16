@@ -212,7 +212,8 @@ function EntryRow(props: { entry: LogEntry; names: LogNames; me: string; canUndo
     if (!entry.data) return null;
     return (
       <li style={{ display: "flex", alignItems: "center", gap: theme.space(2), color: theme.color.textMuted, fontSize: theme.font.small, lineHeight: theme.leading.body }}>
-        <span style={{ flex: 1 }}>{describeEvent(entry.data, names)}</span>
+        {/* A name with no break in it, such as an 80-letter one, wraps anywhere rather than run past a narrow panel, as a chat line does. */}
+        <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{describeEvent(entry.data, names)}</span>
         {/* The DM takes an HP change back from the log (features section 10). */}
         {props.canUndo ? <TakeBack logId={entry.id} /> : null}
         <time dateTime={entry.at} style={{ flex: "none" }}>

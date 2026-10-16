@@ -827,6 +827,45 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     }
   }
 
+  test("7. 480 x 320 at 130%: a Log line about a creature with an unbroken 80-letter name wraps inside the very short sheet's 241 px", async () => {
+    await view(phone, phoneCdp, { width: 480, height: 320 }, { side: 47, bottom: 21 });
+    await reloadAt(phone, 1.3);
+    await startFight();
+    const id = randomUUID();
+    const name = "Q".repeat(80);
+    await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name, x: 20, y: 2, disposition: "hostile", actor: { inline: actor(9) } } });
+    await ops.send({ t: "actor.hp", target: { tokenId: id }, change: { kind: "damage", amount: 1 } });
+    try {
+      await openPanel(phone, "Log");
+      const dialog = modal(phone);
+      await dialog.waitFor();
+      const line = dialog.locator("li", { hasText: `${name} takes 1 damage` });
+      await line.waitFor();
+      const fit = await line.evaluate((el) => {
+        type El = { scrollWidth: number; clientWidth: number; getBoundingClientRect(): { left: number; right: number; width: number }; closest(s: string): El; querySelector(s: string): El };
+        const li = el as unknown as El;
+        const body = li.closest("[data-pane-body]");
+        const text = li.querySelector("span");
+        return {
+          inner: body.clientWidth,
+          lineOverflows: li.scrollWidth > li.clientWidth + 0.5,
+          textOverflows: text.scrollWidth > text.clientWidth + 0.5,
+          bodyScrolls: body.scrollWidth > body.clientWidth + 0.5,
+          inside: li.getBoundingClientRect().right <= body.getBoundingClientRect().right + 0.5,
+        };
+      });
+      // The body's own width inside its padding: the very short sheet's 241 px (docs/design-v1-layout-hierarchy.md 4.2) and the padding's 32.
+      assert.ok(Math.abs(fit.inner - 32 - 241) <= 3, `the body is ${fit.inner - 32} px inside its padding`);
+      assert.deepEqual({ lineOverflows: fit.lineOverflows, textOverflows: fit.textOverflows, bodyScrolls: fit.bodyScrolls, inside: fit.inside }, { lineOverflows: false, textOverflows: false, bodyScrolls: false, inside: true });
+      await shots.take(phone, "layout-very-short-480x320-130-log-long-name");
+    } finally {
+      const close = modal(phone).getByRole("button", { name: "Close Log" });
+      if (await close.isVisible()) await close.click();
+      await ops.send({ t: "token.delete", tokenId: id });
+      await endFight();
+    }
+  });
+
   test("7. 480 x 320 at 130%: Initiative opens modal over the whole screen, its header and body in reach, Tab kept inside", async () => {
     await view(phone, phoneCdp, { width: 480, height: 320 }, { side: 47, bottom: 21 });
     await reloadAt(phone, 1.3);
