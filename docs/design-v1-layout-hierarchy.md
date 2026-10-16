@@ -590,7 +590,7 @@ Unit tests, `node:test`:
 
 e2e, one file after another as docs/design-v1-visual.md 5.3 says:
 
-- New `e2e/layout.e2e.ts`, on E2E_PORT plus 8, run after the other files like them:
+- New `e2e/layout.e2e.ts`, on E2E_PORT plus 11 (plus 8 is the bar dock's `reach.e2e.ts`), run after the other files like them:
   1. 844 x 390 at 100% and 130% with 47, 47 and 21 px insets, and 667 x 375 at 100% and 130%, for the DM and a player: each multi-row tool puts its options in the rail, a `role="toolbar"` named "<tool> options" whose box lies left of the map's middle, starts under the top bars, ends at the toolbar's top, and never scrolls sideways (`scrollWidth <= clientWidth`). Every control in it scrolls into view and takes a tap. Select several, Ping and Add token keep their one-row bar at the foot, every control at one top. Pin is at the foot at 100% and in the rail at 130%. At 844 x 390 at 130% with no record stored, Pin is picked for the first time while a `requestAnimationFrame` loop in the page logs where its options toolbar stands in every frame: no frame shows it at the foot. The map's height between the bars equals the measured one in section 2.1 without the options.
   2. 480 x 320 at 100% and 130%, 390 x 844 and 1280 x 800: the options stay at the foot.
   3. With a rail tool and a fight with concentration prompts and a roll waiting, at 844 x 390 and 667 x 375 at 130%: the column's cards, its summary row and the rail never intersect, with the token bar closed, with it open, with the column summarized, and with it opened from its summary row. Every card's buttons take a tap at their centers. A spanning notice starts right of the rail. In a DM's "view as a player" at 667 x 375 at 130% with a rail tool, "Viewing as Pat" never intersects the rail. A player at 667 x 375 at 130% sees the roll card right of the rail.
@@ -641,7 +641,7 @@ Four parts, each its own commits, in this order: part 2 reads the side panel's s
   - `client/features/party/PartyBar.tsx`: this design's M9 and the short-screen fold default. docs/design-v1-token-panel.md moves the shield path into `AcBadge.tsx`, which M9 then uses.
   - `client/features/tokens/CharactersPanel.tsx`: this design's M8 moves Long rest. docs/design-v1-combat-flow.md adds companions to the character card.
   - `client/pages/Room.tsx` and `client/components/Sheet.tsx`: docs/design-v1-combat-flow.md publishes the scrolling bodies' padding as CSS variables (its build step 3). This design adds Hide, the hidden state, the stacked header and the side panel's changes.
-- Ports: `e2e/layout.e2e.ts` runs on E2E_PORT plus 8. The combat flow and token panel builds take plus 9 and plus 10 for their own e2e files, so the three never share a port.
+- Ports: `e2e/layout.e2e.ts` runs on E2E_PORT plus 11, since `e2e/reach.e2e.ts` took plus 8. The combat flow and token panel builds take plus 9 and plus 10 for their own e2e files, so the three never share a port.
 
 ## 12. Decided
 

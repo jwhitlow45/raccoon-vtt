@@ -407,6 +407,8 @@ Each row says what changes. "Before" and "After" name the look, and the files ar
 
 ### 3.2 Room chrome
 
+The side panel that hides from 900 px up, a phone's sideways sheet that hides, and the very short sheet over the whole screen are docs/design-v1-layout-hierarchy.md section 4.
+
 | Screen | Before | After | Files |
 |---|---|---|---|
 | Top bar (d-dm-room-empty, p-player-room-empty) | The DM badge is an accent-outlined "DM". The player chip has a dot and a border in the member color. Different heights and weights. | One chip shape for both: a pill 28 px tall at 13 px weight 700, a dot in the member color and a 1 px outline in the accent. The DM's says "DM", the player's their name. The connection dot uses `shadow.rim`. | pages/Room.tsx (PlayerChip), pages/RoomChrome.tsx (Badge) |
@@ -475,6 +477,8 @@ Two findings from the post-wave-5 review. The project owner confirmed their reco
 **The DM's open requests on a phone** (`015-dm-phone-room-open-requests.png` in the same folder). Every open request stacks as a folded card of about 62 px (`DmDesk.tsx:55-80`), and six cover most of the map's top half. Recommendation: the player's rule and look, through the same `chipStack`. On a phone the newest two cards show, then one "Rolls d/a" button with `aria-expanded` that shows the rest and folds them again, the same disclosure and wording as the player's. "Close all answered" stays first. While a sheet is open in portrait, the whole stack folds into the dock's alerts summary (3.2.1).
 
 ### 3.4 Map tools
+
+On a short screen held sideways the options of a tool that runs past one row stand in a rail on the left of the map instead of the bar at the foot: docs/design-v1-layout-hierarchy.md section 3.
 
 | Tool | Before | After | Files |
 |---|---|---|---|

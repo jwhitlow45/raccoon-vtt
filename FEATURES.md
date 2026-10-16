@@ -23,7 +23,7 @@ This page lists what RaccoonVTT does today, grouped by area. "The DM" means anyo
 - The player link carries the password, so opening it skips typing it. The DM can copy or share the link, or show its QR code for phones at the table, at any time from the DM panel or Members. "Copy player link" is in the Menu too. "Show password", beside the link, is there for anyone who would rather type it.
 - A device stays signed in. Coming back never asks for the password again.
 - Home lists the rooms this device has been in, and as whom. "Leave room" in the Menu goes back there.
-- The DM can kick a player, change the player password and delete the room. A new password signs every player out and stops old player links.
+- The DM can kick a player, change the player password and delete the room. A new password signs every player out and stops old player links. On Members, Manage on a member's row holds Kick and Remove.
 - Creating rooms is limited: a few per address a day, 20 a day across the site, and a storage limit per room. The server owner can turn on a free, usually invisible human check (Cloudflare Turnstile) on the create form.
 - Wrong passwords meet growing delays. Guessing cannot lock a room's players out. After many wrong passwords in an hour, joining that room with the password needs the human check, if the server owner turned it on.
 
@@ -51,7 +51,9 @@ This page lists what RaccoonVTT does today, grouped by area. "The DM" means anyo
 - On a phone held upright, an open sheet folds the token's action bar and the fight's alerts into one row on the sheet's top edge: a button with the token's name, its Close, and one button that names the most pressing alert and how many more wait. The token's name closes the sheet and brings the bar back as it was, a half-typed HP entry included. The alert button closes the sheet and shows the alerts, or opens a roll waiting for your answer. Where the screen is too short for that row, its buttons sit in the sheet's header.
 - The fit button in the top bar ("Fit the map to the screen") brings the map back into view. A pinch anywhere but the map never zooms the page.
 - Android's Back button and the Escape key close an open sheet, handout or action bar before they leave the room. While the token's panel shows that token, they and the bar's Close put the bar away and keep the token in the panel. With the bar away, Escape lets go of the token.
-- On a phone, panels open as sheets from the bottom, and the toolbar names each tool under its icon. On a screen 900 px or wider, panels are tabs in a side panel.
+- On a phone, panels open as sheets from the bottom, and the toolbar names each tool under its icon, as it does on any touch screen. On a screen 900 px or wider, panels are tabs in a side panel. Hide panels at the end of its tabs, or the S key, hides it, and Panels in the toolbar brings it back. This device remembers the choice. A short screen, such as a large phone held sideways, starts with it hidden, and shows its tabs in one row that scrolls. On a phone held sideways, Hide in a panel's header tucks the panel away with its place kept, and Panels brings it back. Where the screen is too short for a panel beside the map, it opens over the whole screen, with the token's actions and the fight's alerts as buttons in its header.
+- On a short screen held sideways, such as a phone, a tool whose options take more than one row opens them in a column on the left of the map that scrolls, so the map keeps its height. Select several, Ping, Pin and Add token keep their one-row bar at the bottom, unless the screen is too narrow for it to stay one row.
+- Panels are listed with the ones used in play first. A DM's phone list groups them under In play and Prepare.
 - A page inside a panel, such as a journal page, a monster's stat block, an area's damage page, the encounter editor or a Menu page like Members, puts its own name at the top, with a back button that says where it goes, such as "Back to Journal".
 - Add to Home Screen installs it as a full-screen app on an iPhone. The screen stays awake during a session.
 - Phones load a smaller copy of each map, and the map redraws only when something changes.
@@ -63,7 +65,7 @@ All of this is the DM's.
 
 - A room holds many scenes. The DM moves the players to a scene, and can prepare another one privately while the players stay where they are. The Scenes panel marks the players' scene "Players here".
 - A new scene is a Battle mat (a blank grid with a background color), a Map image, or a Builder scene. "From a Universal VTT file" brings in a whole map (below). Cancel folds the new scene form away, and during an upload it stops the upload and keeps the form.
-- The server resizes and re-encodes uploaded maps and makes a smaller copy for phones. Changing the map image of the scene the players are on asks first, since they see it at once.
+- The server resizes and re-encodes uploaded maps and makes a smaller copy for phones. A scene's map image is added, replaced or removed in its This scene section. Changing the map image of the scene the players are on asks first, since they see it at once.
 - "Line up the grid" fits the grid to a map that has one drawn on it: drag a box over 3 by 3 squares and fine-tune it by its corners, or type how many squares the image has across and down. Snapping, rulers and areas then match the drawn squares. A new map scene shows the app's own grid lines over the art, and "Grid lines" in the Grid tool or the Scenes panel turns them off for art that has its own.
 - Grid lines take a color, opacity and line width, or hide. A scene's size in squares and its background color can change.
 - Each scene can have a starting view ("Save current view").
@@ -128,7 +130,8 @@ The Builder tool is the DM's. Its modes:
 - **Search the web**: type "goblin archer" and tap a result. It searches Google Images, with safe search on, while the server has a Google search key and searches left this month. Otherwise it searches Openverse's openly licensed images, and "Search Openverse instead" asks Openverse on purpose. An Openverse image keeps its credit (title, author, license and what was changed), shown in the library and the token panel.
 - Crop to a circle with zoom and pan. The ring takes the disposition color.
 - The server checks, resizes and re-encodes every image and strips its metadata.
-- The room's library keeps every image for reuse. The DM's library marks images nothing uses as "Not in use" and deletes them one at a time or all at once ("Delete N not in use"), on a second tap. An image in use cannot be deleted. Undo cannot bring back a token or anything else whose image was deleted since.
+- The room's library keeps every image for reuse. The DM's library marks images nothing uses as "Not in use" and deletes them one at a time or all at once ("Delete N not in use", under Clean up at the foot), on a second tap. An image in use cannot be deleted. Undo cannot bring back a token or anything else whose image was deleted since.
+- View in an image's details opens it large in the same viewer, so the DM can look at any handout, map or token image, and a player at any token image they can see. The DM's library lists handouts first.
 - A monster's default image: set it once, and every token of that monster placed afterwards starts with it. "Apply to N tokens on this scene" puts it on the ones already there.
 - Every piece of art that ships with the app is openly licensed and credited on the About page. None of it is AI generated.
 
@@ -281,9 +284,10 @@ The DM asks players for a saving throw or an ability check, and each player type
 - "View as a player" shows exactly what a chosen player sees.
 - "Follow me" makes players' maps follow the DM's as they pan and zoom. "Bring everyone here" moves them once. A ping with "Look here" on moves every player's view to that spot.
 - "Black out players' screens" for a break or a reveal. Players see only a black screen that says "The DM has paused the game." Meanwhile their devices receive nothing from the game but the X-card. When the game resumes, each player's selected token, its action bar and any HP typed into it and not applied come back as they were.
-- Undo and Redo for the DM's changes, each saying what it took back. On a phone or a tablet they sit in the top bar.
+- Undo and Redo for the DM's changes, each saying what it took back. They sit in the top bar.
+- The DM panel leads with Handouts, then Players' screens (Follow me, Bring everyone here and Black out), then Check their view (View as a player and Party sight), then the player link and the table display.
 - **Outliner**: a panel listing everything on the scene in view, in groups that fold: Creatures and objects, Map (stamps, labels, pins and lights), Areas, Drawings, and Doors. Each row says what players get, such as Hidden, Under fog, Out of the party's sight, DM only, or a secret door hidden or found. The search filters as you type. A tap shows the item on the map and selects it.
-- **Party bar**: each player character's portrait, HP with temporary HP and a bar, AC, passive Perception, and up to three conditions, or Dying, Stable or Dead. On a wide screen it sits above the side panel and folds to one line. On a phone it is the Party panel. A tap jumps to that character's token and opens its action bar.
+- **Party bar**: each player character's portrait, HP with temporary HP and a bar, AC on the same shield as the tokens', passive Perception as "PP 13", and up to three conditions, or Dying, Stable or Dead. On a wide screen it sits above the side panel and folds to one line. On a phone it is the Party panel. A tap jumps to that character's token and opens its action bar.
 
 ## Journal and map pins
 
@@ -302,7 +306,7 @@ The DM asks players for a saving throw or an ability check, and each player type
 - Whisper to the DM or to one player. Only the sender and the recipients see a whisper.
 - While the Log is closed, its button counts new messages, and a whisper to you shows a short notice.
 - **Export** in the Log saves it as a Markdown file, one evening or all of it. A gap of more than 4 hours starts a new evening. Everyone can export, and the file holds only what that person's Log shows. On an iPhone it saves through the share sheet. Listing the evenings and each export count toward 10 an hour per person.
-- **Handouts** (DM panel): show an image to everyone or to chosen players as a popup. Players can zoom in, and anyone shown a handout can download it with the popup's Download button, saved under the handout's title. On a phone that can share files, Download opens the share sheet instead, to save the image to Photos or Files or send it on. A closed handout stays closed after a reload and opens again from the Library.
+- **Handouts** (DM panel): show an image to everyone or to chosen players as a popup. Players can zoom in with a pinch, a double tap, the wheel, the zoom buttons or the + and − keys. Zooming uses the whole popup. On a tablet or a computer the popup starts as a card, and zooming in opens it to the whole window, at once with a button, a key or the wheel, or when a pinch ends. A small pinch then settles with the whole picture fitted to the window. Zoom out or Reset zoom brings the card back, and Expand opens it to the window without zooming. On a phone it fills the screen from the start. Anyone shown a handout can download it with the popup's Download button, saved under the handout's title. On a phone that can share files, Download opens the share sheet instead, to save the image to Photos or Files or send it on. A closed handout stays closed after a reload and opens again from the Library.
 
 ## Drawing, pings and the laser
 
@@ -368,6 +372,7 @@ On any device with a keyboard. They do nothing while you type in a field or a wi
 | +, - | Zoom in, zoom out | everyone |
 | 0 | Fit the map | everyone |
 | / | Search the scene in the outliner | DM |
+| S | Hide or show the side panel, on a screen 900 px or wider | everyone |
 | ? | Show the shortcuts | everyone |
 
 With a mouse, the wheel zooms, and a drag with the right or middle button, or with Space held, moves the map. Escape closes a sheet or the token's action bar. While you drag the action bar, Escape puts it back.
