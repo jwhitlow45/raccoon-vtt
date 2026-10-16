@@ -5,13 +5,14 @@ import type { RoomState } from "../model.ts";
 import { hash128, stableStringify } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
-import { DM, P1 } from "../testutil.ts";
+import { DM, P1, actor, character, env, room, token } from "../testutil.ts";
+import type { Env } from "./tx.ts";
 
 /**
- * Ops stored before op version 6 replay with the rule they were applied
- * under (shared/migrate.ts, step 5 to 6): a size change on the acting
- * creature's turn was a move, so a token update with a size and a place
- * recorded a counted stop, and one with a size alone recorded nothing.
+ * Ops stored before op version 6 replay with the rules they were applied
+ * under (shared/migrate.ts, step 5 to 6). The first: a size change on the
+ * acting creature's turn was a move, so a token update with a size and a
+ * place recorded a counted stop, and one with a size alone recorded nothing.
  * Replay hands the reducer the stored version, so a version 5 op makes the
  * very state it made then, and a later stored restore's guard still
  * matches.
@@ -73,5 +74,48 @@ describe("version 5 size and place updates on the acting creature", () => {
     assert.equal(replay(5).refusals.at(-1), null);
     const today = replay(6);
     assert.notEqual(today.refusals.at(-1), null, "today's ops made another path, so the stored guard refuses");
+  });
+});
+
+/** The second rule: a patch that set `srdId` alone kept an actor's `monsterId`, and ops stored at version 5 still do. */
+const at = (seq: number, opVersion?: number): Env => ({ ...env(seq), ...(opVersion === undefined ? {} : { opVersion }) });
+
+describe("version 5 ops on an actor's stat block links (docs/design-v1-companion-stat-blocks.md 3.2, rule 1)", () => {
+  /** A companion the DM linked to a room monster through "Make a companion". */
+  function moonHound(): RoomState {
+    return room({
+      characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }) },
+      tokens: { mh: token("mh", { kind: "monster", companion: { of: "bree", turn: "shared" }, ownerIds: ["p1"], actor: { inline: actor({ monsterId: "m1" }) } }) },
+    });
+  }
+  const srdAlone: Op = { t: "token.update", tokenId: "mh", patch: { actor: { srdId: "wolf" } } };
+
+  function links(opVersion?: number): [string | undefined, string | undefined] {
+    const r = applyOp(moonHound(), srdAlone, DM, at(2, opVersion));
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    const a = r.state.tokens.mh!.actor;
+    assert.ok("inline" in a);
+    return [a.inline.srdId, a.inline.monsterId];
+  }
+
+  test("a patch naming srdId alone replays at version 5 keeping the room monster, as it applied then", () => {
+    assert.deepEqual(links(5), ["wolf", "m1"]);
+    assert.deepEqual(links(4), ["wolf", "m1"]);
+  });
+
+  test("the same op stored at version 6, and the same live op, clear it", () => {
+    assert.deepEqual(links(6), ["wolf", undefined]);
+    assert.deepEqual(links(), ["wolf", undefined]);
+  });
+
+  test("a version 5 patch setting two links sets both, as it did, and a version 6 one is refused", () => {
+    const both: Op = { t: "token.update", tokenId: "mh", patch: { actor: { srdId: "wolf", monsterId: "m2" } } };
+    const old = applyOp(moonHound(), both, DM, at(2, 5));
+    assert.ok(old.ok);
+    const a = old.state.tokens.mh!.actor;
+    assert.ok("inline" in a);
+    assert.deepEqual([a.inline.srdId, a.inline.monsterId], ["wolf", "m2"]);
+    const now = applyOp(moonHound(), both, DM, at(2, 6));
+    assert.equal(now.ok, false);
   });
 });

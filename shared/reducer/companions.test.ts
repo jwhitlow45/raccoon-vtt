@@ -6,8 +6,8 @@ import type { Effect, RoomState, Token, Viewer } from "../model.ts";
 import { canApply } from "../permissions.ts";
 import { opSchema, type Op, type TokenInput } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
-import { DM, P1, P2, actor, apply, character, comparable, effect, entry, env, refused, room, token } from "../testutil.ts";
-import { normalizeCompanionState } from "./companions.ts";
+import { DM, P1, P2, actor, apply, character, companionBlock, comparable, effect, entry, env, refused, room, token } from "../testutil.ts";
+import { BLOCK_OF_ITS_CHARACTER, ONE_LINK, normalizeCompanionState } from "./companions.ts";
 
 /**
  * Companions (docs/design-v1-combat-flow.md 3.6): a token that belongs to a
@@ -439,5 +439,118 @@ describe("permissions read the same rules (P2 as a stranger)", () => {
   test("another player cannot mark Bree's spirit's Reaction", () => {
     const state = withSpirit("shared");
     assert.equal(canApply({ t: "token.update", tokenId: "ws", patch: { companionReaction: true } }, P2, state, { canUseAsset: () => true }).ok, false);
+  });
+});
+
+describe("a companion's stat block link (docs/design-v1-companion-stat-blocks.md 3.2)", () => {
+  /** Bree's spirit, with a block Bree keeps, one Cy keeps, and Cy herself. */
+  function linked(over: Partial<Token> = {}): RoomState {
+    const state = withSpirit("shared", over);
+    state.characters.cy = character("cy", { name: "Cy", ownerIds: ["p2"] });
+    state.companionBlocks.moth = companionBlock("moth", "bree");
+    state.companionBlocks.wolf = companionBlock("wolf", "cy", { name: "Wolf" });
+    return state;
+  }
+  const inlineOf = (state: RoomState, id = "ws") => {
+    const a = state.tokens[id]!.actor;
+    assert.ok("inline" in a);
+    return a.inline;
+  };
+  const link = (patch: Record<string, string | null>): Op => ({ t: "token.update", tokenId: "ws", patch: { actor: patch } });
+
+  test("setting any one link clears the other two, so one patch swaps a block", () => {
+    const withMonster = linked({ actor: { inline: actor({ monsterId: "m1" }) } });
+    const srd = run(withMonster, link({ srdId: "owl" })).state;
+    assert.deepEqual([inlineOf(srd).srdId, inlineOf(srd).monsterId, inlineOf(srd).blockId], ["owl", undefined, undefined]);
+    const block = run(srd, link({ blockId: "moth" })).state;
+    assert.deepEqual([inlineOf(block).srdId, inlineOf(block).monsterId, inlineOf(block).blockId], [undefined, undefined, "moth"]);
+    const monster = run(block, link({ monsterId: "m2" })).state;
+    assert.deepEqual([inlineOf(monster).srdId, inlineOf(monster).monsterId, inlineOf(monster).blockId], [undefined, "m2", undefined]);
+    // Null detaches the one it names and touches nothing else.
+    const detached = run(block, link({ blockId: null })).state;
+    assert.deepEqual([inlineOf(detached).srdId, inlineOf(detached).blockId], [undefined, undefined]);
+    // A patch that sets two is refused.
+    assert.deepEqual(refused(linked(), link({ srdId: "owl", blockId: "moth" })), { ok: false, code: "invalid", message: ONE_LINK });
+  });
+
+  test("a block must be its own character's and on a companion's actor, and one that is not here is gone", () => {
+    assert.deepEqual(refused(linked(), link({ blockId: "wolf" })), { ok: false, code: "invalid", message: BLOCK_OF_ITS_CHARACTER });
+    assert.equal(refused(linked(), link({ blockId: "nothing" })).code, "gone");
+    // On a token that is not a companion.
+    const state = linked();
+    assert.deepEqual(refused(state, { t: "token.update", tokenId: "gob", patch: { actor: { blockId: "moth" } } }), { ok: false, code: "invalid", message: BLOCK_OF_ITS_CHARACTER });
+    // On a character, by its own update and through its token's patch.
+    assert.deepEqual(refused(state, { t: "character.update", characterId: "bree", patch: { actor: { blockId: "moth" } } }), { ok: false, code: "invalid", message: BLOCK_OF_ITS_CHARACTER });
+    assert.deepEqual(refused(state, { t: "token.update", tokenId: "bt", patch: { actor: { blockId: "moth" } } }), { ok: false, code: "invalid", message: BLOCK_OF_ITS_CHARACTER });
+    const { rev: _rev, ...cy } = character("cy2", { actor: actor({ blockId: "moth" }) });
+    assert.deepEqual(refused(state, { t: "character.create", character: cy }), { ok: false, code: "invalid", message: BLOCK_OF_ITS_CHARACTER });
+  });
+
+  test("a new companion may hold its character's block, alone, and a new token that is not a companion never", () => {
+    const state = linked();
+    delete state.tokens.ws;
+    const made = run(state, create({ actor: { inline: actor({ hp: { cur: 9, max: 9, temp: 0 }, blockId: "moth" }) } })).state;
+    assert.equal(inlineOf(made).blockId, "moth");
+    assert.deepEqual(refused(state, create({ actor: { inline: actor({ blockId: "moth", srdId: "owl" }) } })), { ok: false, code: "invalid", message: ONE_LINK });
+    assert.deepEqual(refused(state, create({ actor: { inline: actor({ blockId: "wolf" }) } })), { ok: false, code: "invalid", message: BLOCK_OF_ITS_CHARACTER });
+    assert.equal(refused(state, create({ actor: { inline: actor({ blockId: "nothing" }) } })).code, "gone");
+    const plain = { ...spiritInput({ id: "plain", actor: { inline: actor({ blockId: "moth" }) } }) };
+    delete plain.companion;
+    assert.deepEqual(refused(state, { t: "token.create", token: plain }), { ok: false, code: "invalid", message: BLOCK_OF_ITS_CHARACTER });
+  });
+
+  test("given to another character or no longer a companion, it lets its block go and keeps an SRD link, in the same op", () => {
+    const state = linked({ actor: { inline: actor({ blockId: "moth" }) } });
+    const given = run(state, { t: "token.update", tokenId: "ws", patch: { companion: { of: "cy", turn: "shared" } } }).state;
+    assert.equal(inlineOf(given).blockId, undefined);
+    const freed = run(state, { t: "token.update", tokenId: "ws", patch: { companion: null } }).state;
+    assert.equal(inlineOf(freed).blockId, undefined);
+    const withSrd = linked({ actor: { inline: actor({ srdId: "owl" }) } });
+    assert.equal(inlineOf(run(withSrd, { t: "token.update", tokenId: "ws", patch: { companion: { of: "cy", turn: "shared" } } }).state).srdId, "owl");
+    // A change of turn alone keeps it.
+    assert.equal(inlineOf(run(state, { t: "token.update", tokenId: "ws", patch: { companion: { of: "bree", turn: "none" } } }).state).blockId, "moth");
+    // One patch may give it to Cy and link Cy's block, checked as the op leaves it.
+    const both = run(state, { t: "token.update", tokenId: "ws", patch: { companion: { of: "cy", turn: "shared" }, actor: { blockId: "wolf" } } }).state;
+    assert.equal(inlineOf(both).blockId, "wolf");
+    assert.deepEqual(refused(state, { t: "token.update", tokenId: "ws", patch: { companion: { of: "cy", turn: "shared" }, actor: { blockId: "moth" } } }), { ok: false, code: "invalid", message: BLOCK_OF_ITS_CHARACTER });
+  });
+
+  test("made an effect and a creature again, it keeps its link, and deleting the block leaves the link", () => {
+    const state = linked({ actor: { inline: actor({ blockId: "moth" }) } });
+    const effect = run(state, { t: "token.update", tokenId: "ws", patch: { kind: "object", companion: { of: "bree", turn: "shared" } } }).state;
+    assert.equal(inlineOf(effect).blockId, "moth");
+    const creature = run(effect, { t: "token.update", tokenId: "ws", patch: { kind: "npc" } }).state;
+    assert.equal(inlineOf(creature).blockId, "moth");
+    const deleted = run(creature, { t: "companionBlock.delete", blockId: "moth" });
+    assert.equal(inlineOf(deleted.state).blockId, "moth");
+    assert.ok(!deleted.touched.includes("token:ws"));
+    // An edit that does not name the link leaves a deleted block's link as it is.
+    assert.equal(inlineOf(run(deleted.state, { t: "token.update", tokenId: "ws", patch: { name: "Moth" } }).state).blockId, "moth");
+  });
+
+  test("a stored attach patch, the SRD block with the room monster cleared, replays to the same actor at any version", () => {
+    const state = linked({ actor: { inline: actor({ monsterId: "m1" }) } });
+    const op = link({ srdId: "owl", monsterId: null });
+    for (const opVersion of [undefined, 4, 5, 6]) {
+      const r = applyOp(state, op, DM, { ...env(1), ...(opVersion === undefined ? {} : { opVersion }) });
+      assert.ok(r.ok);
+      assert.deepEqual([inlineOf(r.state).srdId, inlineOf(r.state).monsterId], ["owl", undefined], `version ${opVersion}`);
+    }
+  });
+
+  test("an imported room keeps blockId alone where an actor holds more, and drops one off a companion or of another character", () => {
+    const state = linked({ actor: { inline: actor({ blockId: "moth", srdId: "owl", monsterId: "m1" }) } });
+    state.tokens.cyws = token("cyws", { kind: "npc", companion: { of: "cy", turn: "shared" }, actor: { inline: actor({ blockId: "moth" }) } });
+    state.tokens.gob!.actor = { inline: actor({ blockId: "moth", srdId: "goblin-warrior" }) };
+    state.tokens.gone = token("gone", { kind: "npc", companion: { of: "bree", turn: "shared" }, actor: { inline: actor({ blockId: "deleted" }) } });
+    state.tokens.orphan = token("orphan", { kind: "npc", companion: { of: "nobody", turn: "shared" }, actor: { inline: actor({ blockId: "moth" }) } });
+    state.characters.bree = { ...state.characters.bree!, actor: actor({ blockId: "moth" }) };
+    const out = normalizeCompanionState(state);
+    assert.deepEqual([inlineOf(out).blockId, inlineOf(out).srdId, inlineOf(out).monsterId], ["moth", undefined, undefined]);
+    assert.equal(inlineOf(out, "cyws").blockId, undefined, "another character's block");
+    assert.deepEqual([inlineOf(out, "gob").blockId, inlineOf(out, "gob").srdId], [undefined, "goblin-warrior"], "not a companion");
+    assert.equal(inlineOf(out, "gone").blockId, "deleted", "a link to a block the file does not hold reads as deleted");
+    assert.equal(inlineOf(out, "orphan").blockId, undefined, "a companion whose character is missing becomes a plain token");
+    assert.equal(out.characters.bree!.actor.blockId, undefined);
   });
 });

@@ -242,6 +242,7 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
         assert.equal("hpBar" in a, access === "bar", `${label}: hp bar of ${id}`);
         assert.equal("hpLabel" in a, access === "label", `${label}: hp label of ${id}`);
         assert.ok(!("ac" in a) && !("notes" in a), `${label}: stats of ${id} leaked`);
+        assert.ok(!("blockId" in a) && !("srdId" in a), `${label}: the stat block link of ${id} leaked`);
         if ("inline" in t.actor) assertTriggersKept(t.actor.inline.effects, a.effects, playersAmong(state, t.ownerIds), `${label}: token ${id}`);
       }
     }
@@ -1836,6 +1837,22 @@ describe("companion stat blocks (docs/design-v1-companion-stat-blocks.md 4.2)", 
     const state = apply(bree(), { t: "character.update", characterId: "bree", patch: { ownerIds: ["p2"] } });
     assert.deepEqual(Object.keys(projectState(state, P2, ON_S1).companionBlocks).sort(), ["moth", "wolf"]);
     assert.deepEqual(projectState(state, P1, ON_S1).companionBlocks, {});
+  });
+
+  test("a companion's link reaches its owners and the DM, and never another player or a display, even while the companion is the party's", () => {
+    const state = bree();
+    state.tokens.moth = token("moth", { kind: "npc", companion: { of: "bree", turn: "shared" }, ownerIds: ["p1", "p3"], actor: { inline: actor({ blockId: "moth", monsterId: "m1" }) } });
+    const actorOf = (viewer: Viewer) => {
+      const a = projectState(state, viewer, ON_S1).tokens.moth?.actor;
+      assert.ok(a && "inline" in a, viewer.memberId);
+      return a.inline;
+    };
+    assert.equal(actorOf(DM).blockId, "moth");
+    for (const viewer of [P1, P3]) {
+      assert.equal(actorOf(viewer).blockId, "moth", viewer.memberId);
+      assert.equal("monsterId" in actorOf(viewer), false, `${viewer.memberId}: a room monster's link stays the DM's`);
+    }
+    for (const viewer of [P2, DISPLAY]) assert.equal("blockId" in actorOf(viewer), false, viewer.memberId);
   });
 
   test("behind a blackout a player keeps their characters' blocks, as they keep their characters", () => {

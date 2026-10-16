@@ -1,5 +1,5 @@
 import { keys } from "../keys.ts";
-import { healRevivesDead, resizeStop } from "../migrate.ts";
+import { healRevivesDead, oneLinkPerActor, resizeStop } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import { MAX_RULER_STOPS, type ActorPatch, type OpOf, type TokenPatch } from "../protocol.ts";
@@ -7,7 +7,20 @@ import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
 import { footprintSize } from "../rules/footprint.ts";
 import { oneSize, pathThisTurn, sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
 import { deleteCharacterBlocks } from "./companionBlocks.ts";
-import { COMPANION_OWNERS, NO_NUMBER, NOT_SHARED, actsOnCharacterTurn, checkCompanion, dropRows, syncOwners } from "./companions.ts";
+import {
+  BLOCK_LINKS,
+  BLOCK_OF_ITS_CHARACTER,
+  COMPANION_OWNERS,
+  NO_NUMBER,
+  NOT_SHARED,
+  ONE_LINK,
+  actsOnCharacterTurn,
+  checkBlockLink,
+  checkCompanion,
+  dropRows,
+  linksSet,
+  syncOwners,
+} from "./companions.ts";
 import { removeEntries } from "./encounter.ts";
 import { gone, invalid, type Env, type ResolvedActor, type Tx } from "./tx.ts";
 
@@ -50,6 +63,8 @@ export function tokenCreate(tx: Tx, op: OpOf<"token.create">): void {
   if (tx.state.tokens[input.id]) throw invalid("token already exists");
   tx.scene(input.sceneId);
   if ("ref" in input.actor) tx.character(input.actor.ref);
+  // An actor links one stat block, and one of its character's only on a companion (docs/design-v1-companion-stat-blocks.md 3.2).
+  if ("inline" in input.actor && input.actor.inline.blockId !== undefined && linksSet(input.actor.inline) > 1) throw invalid(ONE_LINK);
   const defaults = tokenDefaults(input.kind);
   const token: Token = {
     id: input.id,
@@ -91,11 +106,13 @@ export function tokenCreate(tx: Tx, op: OpOf<"token.create">): void {
     token.companion = { of: input.companion.of, turn: input.companion.turn };
     token.ownerIds = [...character.ownerIds];
     checkCompanion(tx, token);
+    checkBlockLink(tx, token);
     tx.write(keys.token(token.id), token);
     // The DM learns that a player brought one, in a line only the DM's log carries.
     if (tx.actor.role !== "dm") tx.addEvent({ type: "companion", tokenId: token.id, characterId: character.id, memberId: tx.actor.memberId, name: token.name });
     return;
   }
+  checkBlockLink(tx, token);
   const number = input.number ?? autoNumber(tx, token);
   if (number !== undefined) token.number = number;
   tx.write(keys.token(token.id), token);
@@ -105,8 +122,19 @@ function sameMembers(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((id) => b.includes(id));
 }
 
-/** Applies the shared actor patch. HP edits go through the rules so life states follow. */
+/**
+ * Applies the shared actor patch. HP edits go through the rules so life
+ * states follow. A patch that sets one stat block link clears the other two
+ * (docs/design-v1-companion-stat-blocks.md 3.2, rule 1), so a player can
+ * replace a link they cannot see, such as the DM's `monsterId`. Ops stored
+ * before op version 6 kept the others (`oneLinkPerActor`). A character's
+ * actor never holds a companion's block, whichever op writes it.
+ */
 export function applyActorPatch(tx: Tx, resolved: ResolvedActor, patch: ActorPatch): { actor: Actor; events: ActorEvent[] } {
+  const oneLink = oneLinkPerActor(tx.env.opVersion);
+  const linking = linksSet(patch);
+  if (oneLink && linking > 1) throw invalid(ONE_LINK);
+  if (resolved.holder === "character" && patch.blockId !== undefined && patch.blockId !== null) throw invalid(BLOCK_OF_ITS_CHARACTER);
   let actor: Actor = { ...resolved.actor };
   const events: ActorEvent[] = [];
   if (patch.hp) {
@@ -128,6 +156,10 @@ export function applyActorPatch(tx: Tx, resolved: ResolvedActor, patch: ActorPat
   setOrDelete(actor, "xp", patch.xp);
   setOrDelete(actor, "srdId", patch.srdId);
   setOrDelete(actor, "monsterId", patch.monsterId);
+  setOrDelete(actor, "blockId", patch.blockId);
+  if (oneLink && linking === 1) {
+    for (const field of BLOCK_LINKS) if (patch[field] === undefined || patch[field] === null) delete actor[field];
+  }
   setOrDelete(actor, "sheetUrl", patch.sheetUrl);
   setOrDelete(actor, "legendary", patch.legendary);
   return { actor, events };
@@ -197,6 +229,8 @@ export function tokenUpdate(tx: Tx, op: OpOf<"token.update">): void {
     const r = applyActorPatch(tx, resolved, p.actor);
     tx.putActor(resolved, r.actor);
     tx.addActorEvents(resolved, r.events);
+    // Checked against the companion as the op leaves it, so one patch may give it to another character and that one's block.
+    if (p.actor.blockId !== undefined && p.actor.blockId !== null) checkBlockLink(tx, tx.token(token.id));
   }
 }
 
@@ -215,6 +249,12 @@ function updateCompanion(tx: Tx, token: Token, next: Token, p: TokenPatch): void
     const keep = token.companion?.turn === "shared" && token.companion.reactionUsed === true && p.companion.turn === "shared";
     next.companion = { of: p.companion.of, turn: p.companion.turn, ...(keep ? { reactionUsed: true as const } : {}) };
     delete next.number;
+  }
+  // A companion block is its character's, so a companion given to another character, or no longer one, lets it go
+  // (docs/design-v1-companion-stat-blocks.md 3.2, rule 3). An SRD link holds nothing of the character's and stays.
+  if (next.companion?.of !== token.companion?.of && "inline" in next.actor && next.actor.inline.blockId !== undefined) {
+    const { blockId: _theirs, ...actor } = next.actor.inline;
+    next.actor = { inline: actor };
   }
   if (p.companionReaction !== undefined) {
     if (next.companion?.turn !== "shared") throw invalid(NOT_SHARED);
@@ -403,6 +443,7 @@ export function tokenCountLeg(tx: Tx, op: OpOf<"token.countLeg">): void {
 export function characterCreate(tx: Tx, op: OpOf<"character.create">): void {
   const input = op.character;
   if (tx.state.characters[input.id]) throw invalid("character already exists");
+  if (input.actor.blockId !== undefined) throw invalid(BLOCK_OF_ITS_CHARACTER);
   const character: Character = {
     id: input.id,
     rev: 0,

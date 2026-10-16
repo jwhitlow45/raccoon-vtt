@@ -35,6 +35,13 @@ export const OWNER_ACTOR_FIELDS: ReadonlySet<keyof ActorPatch> = new Set([
   "sheetUrl",
 ]);
 
+/**
+ * The stat block links a companion's owners set beside those
+ * (docs/design-v1-companion-stat-blocks.md 4.1): an SRD block or one of the
+ * character's own, never a room monster.
+ */
+const COMPANION_OWNER_ACTOR_FIELDS: ReadonlySet<keyof ActorPatch> = new Set([...OWNER_ACTOR_FIELDS, "srdId", "blockId"]);
+
 /** Character fields an owner may patch. `actor` is limited further by OWNER_ACTOR_FIELDS. */
 export const OWNER_CHARACTER_FIELDS: ReadonlySet<string> = new Set(["name", "defaultImage", "actor", "level"]);
 
@@ -120,7 +127,8 @@ export function tokenAccess(input: {
     },
     canEditActor(field) {
       if (dm) return true;
-      return owner && (actorVia === "character" || companionOwner) && OWNER_ACTOR_FIELDS.has(field);
+      if (companionOwner) return COMPANION_OWNER_ACTOR_FIELDS.has(field);
+      return owner && actorVia === "character" && OWNER_ACTOR_FIELDS.has(field);
     },
     hp: full ? "all" : view?.meta?.settings?.playersApplyDamage ? "relative" : "none",
     effects: full,

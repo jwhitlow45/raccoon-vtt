@@ -4,7 +4,7 @@ import { canApply } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
 import type { ActorPatch, TokenPatch } from "#shared/protocol.ts";
 import type { RoomState } from "#shared/model.ts";
-import { DM, P1, P2, character, room, token } from "#shared/testutil.ts";
+import { DM, P1, P2, character, companionBlock, room, token } from "#shared/testutil.ts";
 import { characterAccess, ownsToken, tokenAccess } from "./access.ts";
 import { resizePatch } from "./resize.ts";
 
@@ -18,6 +18,8 @@ function fixture(): RoomState {
   state.tokens.goblin = token("goblin");
   // Hero's companion, played by whoever plays Hero (docs/design-v1-combat-flow.md 3.6.4).
   state.tokens.spirit = token("spirit", { kind: "npc", name: "Wildfire Spirit", ownerIds: ["p1"], companion: { of: "hero", turn: "shared" } });
+  // A stat block Hero keeps, which Hero's player may link to the spirit (docs/design-v1-companion-stat-blocks.md 4.1).
+  state.companionBlocks.b1 = companionBlock("b1", "hero");
   return state;
 }
 
@@ -68,6 +70,7 @@ const ACTOR_SAMPLES: { [K in keyof ActorPatch]-?: ActorPatch[K] } = {
   xp: 200,
   srdId: "goblin-warrior",
   monsterId: "m1",
+  blockId: "b1",
   sheetUrl: "https://example.com/sheet",
   legendary: { actionsMax: 3, actionsUsed: 0, resistMax: 0, resistUsed: 0 },
   notes: "note",

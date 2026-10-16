@@ -725,6 +725,14 @@ export type Actor = {
    * which keep `srdId`, and in rooms from before it.
    */
   monsterId?: MonsterId;
+  /**
+   * One of its character's companion stat blocks, on a companion's own
+   * actor only (docs/design-v1-companion-stat-blocks.md 3.2). An actor
+   * links at most one block: `srdId`, `monsterId` or this. Its owners
+   * receive it, other players never. A link to a block deleted since reads
+   * as deleted until someone attaches another or detaches.
+   */
+  blockId?: CompanionBlockId;
   /** https only, at most 500 characters. */
   sheetUrl?: string;
   effects: Effect[];

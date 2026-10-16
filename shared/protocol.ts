@@ -213,6 +213,8 @@ const actorSchema = z.strictObject({
   srdId: line(80).optional(),
   /** The room monster a token was placed from (wave 5). DM only, which permissions hold to. */
   monsterId: id.optional(),
+  /** One of its character's companion stat blocks, on a companion only (docs/design-v1-companion-stat-blocks.md 3.2). */
+  blockId: id.optional(),
   sheetUrl: sheetUrl.optional(),
   effects: z.array(effectStored).max(MAX_EFFECTS),
   deathSaves: z.strictObject({ ok: z.number().int().min(0).max(3), fail: z.number().int().min(0).max(3) }),
@@ -236,6 +238,12 @@ const actorPatch = z.strictObject({
   srdId: line(80).nullable().optional(),
   /** Attaches a room monster's stat block, or null detaches it (wave 5, section 3.6). Not an owner field. */
   monsterId: id.nullable().optional(),
+  /**
+   * Attaches one of its character's companion stat blocks, or null detaches
+   * it (docs/design-v1-companion-stat-blocks.md 3.2). Setting any of the
+   * three links to a value clears the other two.
+   */
+  blockId: id.nullable().optional(),
   sheetUrl: sheetUrl.nullable().optional(),
   legendary: legendary.nullable().optional(),
   notes: notes.optional(),

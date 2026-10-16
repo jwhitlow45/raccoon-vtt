@@ -629,6 +629,17 @@ function addCompanionBlocks(state: RoomState): void {
     state.companionBlocks.cb1 = companionBlock("cb1", first, { name: "Owl", size: "tiny", type: "Beast", fromSrd: "owl" });
   }
   if (second !== undefined) state.companionBlocks.cb2 = companionBlock("cb2", second, { name: "Wolf", size: "medium", type: "Beast" });
+  // Companions in turn link one of their character's blocks, an SRD block, a block deleted since, or none.
+  const companions = Object.values(state.tokens)
+    .filter((t) => t.companion !== undefined && "inline" in t.actor)
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+  companions.forEach((t, i) => {
+    const actor = (t.actor as { inline: Actor }).inline;
+    const own = Object.keys(state.companionBlocks).find((id) => state.companionBlocks[id]!.characterId === t.companion!.of);
+    if (i % 4 === 0 && own !== undefined) actor.blockId = own;
+    else if (i % 4 === 1) actor.srdId = "owl";
+    else if (i % 4 === 2) actor.blockId = "cb-deleted";
+  });
 }
 
 /**
@@ -1447,7 +1458,7 @@ function companionOp(r: () => number, state: RoomState, who: Viewer, helpers: { 
   const companions = Object.values(state.tokens).filter((t) => t.companion !== undefined);
   const anyCompanion = () => (companions.length > 0 && chance(r, 0.8) ? pick(r, companions).id : helpers.anyToken());
   const link = () => ({ of: helpers.anyCharacter(), turn: pick(r, ["own", "shared", "none"] as const) });
-  switch (int(r, 0, 7)) {
+  switch (int(r, 0, 8)) {
     case 0: {
       const of = helpers.anyCharacter();
       const beside = Object.values(state.tokens).find((t) => "ref" in t.actor && t.actor.ref === of);
@@ -1481,6 +1492,17 @@ function companionOp(r: () => number, state: RoomState, who: Viewer, helpers: { 
       return { t: "character.update", characterId: helpers.anyCharacter(), patch: { ownerIds: pick(r, [[], ["p1"], ["p2"], ["p1", "p2"]]) } };
     case 7:
       return companionBlockOp(r, state, helpers);
+    case 8: {
+      // A link set, changed or cleared: one of its character's blocks, maybe another's, an SRD block, or none.
+      const blocks = Object.keys(state.companionBlocks);
+      const actorPatch = pick(r, [
+        { blockId: blocks.length > 0 ? pick(r, blocks) : "missing-block" },
+        { srdId: "wolf" },
+        { blockId: null },
+        { srdId: null, blockId: null },
+      ]);
+      return { t: "token.update", tokenId: anyCompanion(), patch: { actor: actorPatch } };
+    }
     default:
       // Next clears the Reactions of the landing row's companions, and a player's End Turn too.
       return who.role === "dm" ? { t: "encounter.next" } : { t: "encounter.next", from: { entry: state.encounter?.activeEntryId ?? null, round: state.encounter?.round ?? 1 } };

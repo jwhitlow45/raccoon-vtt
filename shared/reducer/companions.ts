@@ -3,7 +3,7 @@ import type { Actor, Effect, Encounter, EncounterSnapshot, InitEntry, RoomState,
 import { pausedAnchorForEntry } from "../rules/durations.ts";
 import { renumber, rowCharacter, sortEntries } from "../rules/initiative.ts";
 import { bindDurations, removeEntries } from "./encounter.ts";
-import { invalid, type Tx } from "./tx.ts";
+import { gone, invalid, type Tx } from "./tx.ts";
 
 /**
  * The companion rules (docs/design-v1-combat-flow.md 3.6) the token,
@@ -20,6 +20,11 @@ export const NO_OWN_TURN = "an effect takes no turn of its own";
 export const NOT_SHARED = "it does not act on its character's turn";
 export const ON_ITS_TURN = "it acts on its character's turn";
 export const ON_ITS_TURN_NOW = "a companion in it now acts on its character's turn";
+export const BLOCK_OF_ITS_CHARACTER = "a stat block belongs to its character's companions";
+export const ONE_LINK = "an actor links one stat block";
+
+/** An actor's stat block links, of which it holds at most one (docs/design-v1-companion-stat-blocks.md 3.2, rule 1). */
+export const BLOCK_LINKS = ["srdId", "monsterId", "blockId"] as const;
 
 /** Whether the token is a companion that acts on its character's turn, listed under it or not, and so has no row. */
 export function actsOnCharacterTurn(token: Pick<Token, "companion"> | undefined): boolean {
@@ -44,6 +49,28 @@ export function checkCompanion(tx: Tx, token: Token): void {
   if (!("inline" in token.actor) || token.kind === "pc") throw invalid("a companion has stats of its own and is never a player character");
   if (companion.turn === "own" && token.kind === "object") throw invalid(NO_OWN_TURN);
   if (token.number !== undefined) throw invalid(NO_NUMBER);
+}
+
+/**
+ * A companion stat block a token's actor is given, checked against the
+ * token as the op leaves it (docs/design-v1-companion-stat-blocks.md 3.2,
+ * rule 2): only a companion's own actor holds one, and it names a block of
+ * the character the companion belongs to. Called only where an op sets the
+ * link, so a link to a block deleted since stays (rule 4).
+ */
+export function checkBlockLink(tx: Tx, token: Token): void {
+  if (!("inline" in token.actor)) return;
+  const blockId = token.actor.inline.blockId;
+  if (blockId === undefined) return;
+  if (!token.companion) throw invalid(BLOCK_OF_ITS_CHARACTER);
+  const block = tx.state.companionBlocks[blockId];
+  if (!block) throw gone("stat block");
+  if (block.characterId !== token.companion.of) throw invalid(BLOCK_OF_ITS_CHARACTER);
+}
+
+/** How many stat blocks an actor or a patch links to a value. */
+export function linksSet(actor: Partial<Record<(typeof BLOCK_LINKS)[number], string | null>>): number {
+  return BLOCK_LINKS.filter((field) => actor[field] !== undefined && actor[field] !== null).length;
 }
 
 function sameList(a: readonly string[], b: readonly string[]): boolean {
@@ -179,10 +206,17 @@ export function rowsForSharedCompanions(state: Pick<RoomState, "tokens">, encoun
  * `shared` one keeps a spent Reaction. Rows of companions that act on
  * their character's turn leave the encounter and its history, with every
  * duration that counted them rebound as dropRows rebinds it.
+ *
+ * Stat block links come within rules 1 to 3 of
+ * docs/design-v1-companion-stat-blocks.md 3.2: an actor holding `blockId`
+ * with another link keeps `blockId` alone, and a `blockId` on an actor
+ * that is not a companion's, or naming a block of another character, goes.
+ * A link to a block the file does not hold stays, as a deleted block's does.
  */
 export function normalizeCompanionState(state: RoomState): RoomState {
   const tokens: Record<string, Token> = {};
-  for (const [id, token] of Object.entries(state.tokens)) {
+  for (const [id, raw] of Object.entries(state.tokens)) {
+    const token = withLinkRules(state, raw);
     const companion = token.companion;
     if (!companion) {
       tokens[id] = token;
@@ -191,7 +225,7 @@ export function normalizeCompanionState(state: RoomState): RoomState {
     const character = state.characters[companion.of];
     if (!character || !("inline" in token.actor) || token.kind === "pc") {
       const { companion: _gone, ...plain } = token;
-      tokens[id] = plain;
+      tokens[id] = withLinkRules(state, plain);
       continue;
     }
     const turn = companion.turn === "own" && token.kind === "object" ? "shared" : companion.turn;
@@ -202,12 +236,31 @@ export function normalizeCompanionState(state: RoomState): RoomState {
       companion: { of: companion.of, turn, ...(turn === "shared" && companion.reactionUsed ? { reactionUsed: true as const } : {}) },
     };
   }
-  let out: RoomState = { ...state, tokens };
+  const characters: Record<string, RoomState["characters"][string]> = {};
+  for (const [id, character] of Object.entries(state.characters)) {
+    if (character.actor.blockId === undefined) characters[id] = character;
+    else {
+      const { blockId: _gone, ...actor } = character.actor;
+      characters[id] = { ...character, actor };
+    }
+  }
+  let out: RoomState = { ...state, tokens, characters };
   for (const token of byId(Object.values(tokens))) {
     if (!actsOnCharacterTurn(token)) continue;
     out = withoutCompanionRows(out, token);
   }
   return out;
+}
+
+/** A token's stat block links within rules 1 to 3, pure: `blockId` alone where it holds more, and none where it may hold none. */
+function withLinkRules(state: RoomState, token: Token): Token {
+  if (!("inline" in token.actor) || token.actor.inline.blockId === undefined) return token;
+  const { srdId: _srd, monsterId: _monster, ...one } = token.actor.inline;
+  const block = state.companionBlocks[one.blockId!];
+  const belongs = token.companion !== undefined && (block === undefined || block.characterId === token.companion.of);
+  if (belongs) return linksSet(token.actor.inline) > 1 ? { ...token, actor: { inline: one } } : token;
+  const { blockId: _gone, ...unlinked } = token.actor.inline;
+  return { ...token, actor: { inline: unlinked } };
 }
 
 /** One companion's rows out of a state's encounter and history, pure, as dropRows takes them with `rebind`. */

@@ -283,8 +283,9 @@ describe("idle unload, snapshots and recovery", () => {
     const { rev: _rev, ...block } = companionBlock(uuidv7(), characterId, { name: "Moth Spirit" });
     back.n = 1;
     assert.equal((await back.apply({ t: "companionBlock.create", block })).rejects, undefined);
-    const op = await t.pool.query<{ op: { t: string } }>("select op from room_ops where room_id = $1 order by seq desc limit 1", [roomId]);
+    const op = await t.pool.query<{ op: { t: string }; op_version: number }>("select op, op_version from room_ops where room_id = $1 order by seq desc limit 1", [roomId]);
     assert.equal(op.rows[0]?.op.t, "companionBlock.create");
+    assert.equal(op.rows[0]?.op_version, 6, "stored at op version 6, from which an actor links one stat block");
     // A crash: the block comes back by replaying its op over the version 9 snapshot.
     await t.manager.unload(roomId, 1011, false);
     await back.waitClosed();

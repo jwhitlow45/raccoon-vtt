@@ -104,7 +104,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   pages.assign(Object.keys(state.journal));
   scenes.assign(Object.keys(state.scenes));
   characters.assign(Object.keys(state.characters));
-  // A companion block goes with its character, so one whose character did not come through is dropped.
+  // Before the actors, which name a companion's block (Actor.blockId). A block goes with its character, so one whose
+  // character did not come through is dropped.
   blocks.assign(Object.values(state.companionBlocks).filter((b) => characters.has(b.characterId)).map((b) => b.id));
   // A token whose character is gone would be a dangling actor, which only a live room may hold.
   const liveTokens = Object.values(state.tokens).filter((t) => scenes.has(t.sceneId) && ("inline" in t.actor || characters.has(t.actor.ref)));
@@ -150,12 +151,17 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       "entryId" in a ? { entryId: entries.of(a.entryId) } : "tokenId" in a ? { tokenId: tokens.of(a.tokenId) } : { characterId: characters.of(a.characterId) };
     return { ...e, duration: { ...e.duration, anchor } };
   };
-  // A link to a room monster follows its new id, and one to a monster that did not come through is dropped (wave 5).
-  const actor = <A extends { effects: Effect[]; monsterId?: string }>(a: A): A => {
+  // A link to a room monster follows its new id, and one to a monster that did not come through is dropped (wave 5). So does
+  // a link to a companion block (docs/design-v1-companion-stat-blocks.md 3.6).
+  const actor = <A extends { effects: Effect[]; monsterId?: string; blockId?: string }>(a: A): A => {
     const next: A = { ...a, effects: a.effects.map(effect) };
     if (a.monsterId !== undefined) {
       if (monsters.has(a.monsterId)) next.monsterId = monsters.of(a.monsterId);
       else delete next.monsterId;
+    }
+    if (a.blockId !== undefined) {
+      if (blocks.has(a.blockId)) next.blockId = blocks.of(a.blockId);
+      else delete next.blockId;
     }
     return next;
   };

@@ -481,6 +481,13 @@ describe("roomStateSchema, pdf handouts (docs/design-v1-pdf-handouts.md 3.3)", (
     assert.equal(withBlock({ name: "" }), false);
     assert.equal(withBlock({ ac: 101 }), false);
     assert.equal(withBlock({ owner: "p1" }), false);
+    // A companion's link, as a token.update stores it.
+    state = apply(state, { t: "token.create", token: { id: "moth", sceneId: "s1", kind: "npc", name: "Moth", size: "small", x: 1, y: 1, actor: { inline: actor() }, companion: { of: "c1", turn: "shared" } } }, DM, 3);
+    state = apply(state, { t: "token.update", tokenId: "moth", patch: { actor: { blockId: "b1" } } }, DM, 4);
+    const withLink = parseRoomState(JSON.parse(JSON.stringify(state)));
+    assert.ok(withLink.ok, withLink.ok ? "" : withLink.message);
+    const linkedActor = withLink.ok ? withLink.state.tokens.moth!.actor : null;
+    assert.ok(linkedActor && "inline" in linkedActor && linkedActor.inline.blockId === "b1");
     const { companionBlocks: _blocks, ...v9 } = room();
     assert.equal(parseRoomState(JSON.parse(JSON.stringify(v9))).ok, false, "the schema itself is strict");
     const migrated = parseRoomState(migrateSnapshot(JSON.parse(JSON.stringify(v9)), 9));

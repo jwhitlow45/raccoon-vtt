@@ -8,6 +8,7 @@ import {
   migrateOp,
   migrateSnapshot,
   opMigrations,
+  oneLinkPerActor,
   resizeStop,
   reviveToOne,
   runMigrations,
@@ -391,6 +392,7 @@ describe("migrations", () => {
 
 describe("op version 5: healing the dead and Revive (docs/design-v1-combat-flow.md 4.7)", () => {
   test("the step from 4 returns every op unchanged", () => {
+    assert.ok(OP_VERSION >= 5);
     const ops: unknown[] = [
       { t: "actor.hp", target: { tokenId: "g1" }, change: { kind: "heal", amount: 5 } },
       { t: "actor.life", target: { tokenId: "g1" }, life: "alive" },
@@ -436,5 +438,31 @@ describe("op version 6: a resize is not movement (docs/design-v1-token-window.md
     assert.equal(resizeStop(1), false);
     assert.equal(resizeStop(6), true);
     assert.equal(resizeStop(undefined), true);
+  });
+});
+
+describe("op version 6: an actor links one stat block (docs/design-v1-companion-stat-blocks.md 3.2 and 3.6)", () => {
+  test("the step from 5 returns every op unchanged", () => {
+    assert.equal(OP_VERSION, 6);
+    const ops: unknown[] = [
+      { t: "token.update", tokenId: "g1", patch: { actor: { srdId: "owl" } } },
+      { t: "token.update", tokenId: "g1", patch: { actor: { srdId: "owl", monsterId: null } } },
+      { t: "token.update", tokenId: "g1", patch: { size: "large", x: 3, y: 4 } },
+      { t: "sys.restore", entries: [{ key: "token:g1", value: null, expectHash: "abc" }], from: "undo", deps: true },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 5, 6, opMigrations), op);
+    // Every older version reaches it.
+    assert.deepEqual(migrateOp({ t: "log.chat", text: "hi" }, 4), { t: "log.chat", text: "hi" });
+  });
+
+  test("oneLinkPerActor is false at version 5 and before, and true at 6 and for a live op", () => {
+    assert.equal(oneLinkPerActor(5), false);
+    assert.equal(oneLinkPerActor(1), false);
+    assert.equal(oneLinkPerActor(6), true);
+    assert.equal(oneLinkPerActor(undefined), true);
+  });
+
+  test("a version 6 op never migrates down to 5", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 6, 5, opMigrations), /down/);
   });
 });

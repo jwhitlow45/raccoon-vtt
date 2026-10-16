@@ -1034,6 +1034,21 @@ function ownsBlock(c: Check, blockId: string): boolean {
 
 /** What an owner may change on a companion beyond any token's owner fields (docs/design-v1-combat-flow.md 3.6.4). */
 const COMPANION_OWNER_FIELDS = new Set(["name", "actor", "kind", "companion", "companionReaction"]);
+/**
+ * The stat block links a companion's owners set beside the stats an owner
+ * edits (docs/design-v1-companion-stat-blocks.md 4.1): an SRD block, or one
+ * of the character's own. A room monster's link stays the DM's.
+ */
+const COMPANION_OWNER_ACTOR_FIELDS = new Set([...OWNER_ACTOR_FIELDS, "srdId", "blockId"]);
+
+/**
+ * A `blockId` a player names must be a block of a character they own, else
+ * `gone`, before the reducer's own rules run, so no answer tells them that
+ * a block outside their view exists (docs/design-v1-companion-stat-blocks.md 4.1).
+ */
+function blockLinkVisible(c: Check, blockId: string | null | undefined): boolean {
+  return blockId === undefined || blockId === null || ownsBlock(c, blockId);
+}
 
 /**
  * An owner's edit of a companion: to its player, a companion is what their
@@ -1052,8 +1067,9 @@ function companionUpdateCheck(c: Check, token: Token, link: NonNullable<Token["c
     if (!OWNER_TOKEN_FIELDS.has(field) && !COMPANION_OWNER_FIELDS.has(field)) return refuse("forbidden", `owners cannot change ${field}`);
   }
   for (const field of Object.keys(patch.actor ?? {})) {
-    if (!OWNER_ACTOR_FIELDS.has(field)) return refuse("forbidden", `owners cannot change ${field}`);
+    if (!COMPANION_OWNER_ACTOR_FIELDS.has(field)) return refuse("forbidden", `owners cannot change ${field}`);
   }
+  if (!blockLinkVisible(c, patch.actor?.blockId)) return GONE;
   if (patch.kind !== undefined && patch.kind !== "npc" && patch.kind !== "object") return refuse("forbidden", "a companion is a creature or an effect");
   if (patch.companion !== undefined && patch.companion?.of !== link.of) return refuse("forbidden", "only the DM changes whose companion it is");
   return tokenImagesUsable(c, patch) ? OK : GONE;
@@ -1176,6 +1192,11 @@ function companionCheck(c: Check, input: TokenInput, link: NonNullable<TokenInpu
     a.legendary === undefined &&
     a.monsterId === undefined;
   if (!bare) return refuse("forbidden", "a new companion starts unhurt, with no conditions or DM notes");
+  // Only what its player could change afterwards (docs/design-v1-companion-stat-blocks.md 4.1): a link, never the DM's fields.
+  if (a.initScore !== undefined || a.creatureType !== undefined || a.cr !== undefined || a.xp !== undefined) {
+    return refuse("forbidden", "a new companion leaves its initiative score, creature type, CR and XP to the DM");
+  }
+  if (!blockLinkVisible(c, a.blockId)) return GONE;
   if (input.ownerIds !== undefined && !sameMembers(input.ownerIds, character.ownerIds)) return refuse("forbidden", "a companion is played by whoever plays its character");
   if (!tokenImagesUsable(c, input)) return GONE;
   const here = Object.values(c.state.tokens).filter((t) => t.sceneId === input.sceneId && t.companion?.of === character.id).length;

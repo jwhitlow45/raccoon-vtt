@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { RoomState, Viewer } from "../model.ts";
 import type { Op, RestoreEntry } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
-import { actor, chance, env, int, member, pick, rng, room } from "../testutil.ts";
+import { actor, chance, character, companionBlock, env, int, member, pick, rng, room, token } from "../testutil.ts";
 import { DEPENDED_ON, PARENT_GONE } from "./misc.ts";
 
 const A: Viewer = { memberId: "dmA", role: "dm" };
@@ -432,5 +432,58 @@ describe("companions under undo (docs/design-v1-combat-flow.md 3.6.4 and 3.6.8)"
     const back = undo(gone.state, deleted.inverse, 6);
     assert.ok(!back.ok);
     assert.equal(back.message, PARENT_GONE);
+  });
+});
+
+describe("undoing companion stat blocks (docs/design-v1-companion-stat-blocks.md 3.3)", () => {
+  function bree(): RoomState {
+    const state = twoDms();
+    state.characters.bree = character("bree", { name: "Bree", ownerIds: ["p1"] });
+    state.tokens.moth = token("moth", { kind: "npc", companion: { of: "bree", turn: "shared" }, ownerIds: ["p1"], actor: { inline: actor({ blockId: "b1" }) } });
+    state.companionBlocks.b1 = companionBlock("b1", "bree");
+    return state;
+  }
+  const blockOf = (state: RoomState) => {
+    const a = state.tokens.moth?.actor;
+    return a && "inline" in a ? state.companionBlocks[a.inline.blockId ?? ""] : undefined;
+  };
+
+  test("undoing a block's delete brings it back, and the companion's link reads it again", () => {
+    const deleted = run(bree(), { t: "companionBlock.delete", blockId: "b1" }, A, 1);
+    assert.equal(blockOf(deleted.state), undefined);
+    const r = undo(deleted.state, deleted.inverse, 2);
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    assert.equal(blockOf(r.state)?.name, "Moth Spirit");
+  });
+
+  test("an undo that would remove a character a block still names is refused as depended on", () => {
+    const state = twoDms();
+    const { rev: _rev, ...c } = character("bree", { name: "Bree" });
+    const made = run(state, { t: "character.create", character: c }, A, 1);
+    const { rev: _r, ...block } = companionBlock("b1", "bree");
+    const saved = run(made.state, { t: "companionBlock.create", block }, B, 2);
+    const r = undo(saved.state, made.inverse, 3);
+    assert.ok(!r.ok);
+    assert.equal(r.message, DEPENDED_ON);
+  });
+
+  test("an undo that puts back a block whose character was deleted since is refused as its parent gone", () => {
+    const deleted = run(bree(), { t: "companionBlock.delete", blockId: "b1" }, A, 1);
+    const characterGone = run(deleted.state, { t: "character.delete", characterId: "bree" }, B, 2);
+    const r = undo(characterGone.state, deleted.inverse, 3);
+    assert.ok(!r.ok);
+    assert.equal(r.message, PARENT_GONE);
+  });
+
+  test("undoing a character's delete brings back its blocks and its companions together", () => {
+    const state = bree();
+    state.companionBlocks.b2 = companionBlock("b2", "bree", { name: "Owl" });
+    const deleted = run(state, { t: "character.delete", characterId: "bree" }, A, 1);
+    assert.deepEqual(deleted.state.companionBlocks, {});
+    assert.equal(deleted.state.tokens.moth, undefined);
+    const r = undo(deleted.state, deleted.inverse, 2);
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    assert.deepEqual(Object.keys(r.state.companionBlocks).sort(), ["b1", "b2"]);
+    assert.equal(blockOf(r.state)?.id, "b1");
   });
 });

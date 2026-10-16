@@ -445,6 +445,35 @@ describe("companions in an import (docs/design-v1-combat-flow.md 4.7)", () => {
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
   });
 
+  test("a companion's block link follows its block's new id, goes with a block that did not come through, and comes within the link rules (docs/design-v1-companion-stat-blocks.md 3.6)", () => {
+    const state = party();
+    state.characters.cy = character("cy", { name: "Cy" });
+    state.companionBlocks.moth = companionBlock("moth", "bree");
+    state.companionBlocks.wolf = companionBlock("wolf", "cy", { name: "Wolf" });
+    const rename = (id: string, name: string, inline: Parameters<typeof actor>[0]) => {
+      state.tokens[id] = { ...state.tokens[id]!, name, actor: { inline: actor(inline) } };
+    };
+    rename("ws", "Both links", { blockId: "moth", srdId: "owl" });
+    rename("own", "Cy's block", { blockId: "wolf" });
+    rename("gob", "Not a companion", { blockId: "moth" });
+    state.tokens.lost = token("lost", { kind: "npc", name: "Deleted block", ownerIds: ["p1"], companion: { of: "bree", turn: "none" }, actor: { inline: actor({ blockId: "deleted-before-the-backup" }) } });
+    let n = 0;
+    const out = remapState(state, { assets: new Map(), newId: () => `n${n++}` });
+    const bree = Object.values(out.characters).find((c) => c.name === "Bree")!;
+    const moth = Object.values(out.companionBlocks).find((b) => b.characterId === bree.id)!;
+    const inlineOf = (name: string) => {
+      const t = Object.values(out.tokens).find((x) => x.name === name)!;
+      assert.ok("inline" in t.actor, name);
+      return t.actor.inline;
+    };
+    assert.deepEqual([inlineOf("Both links").blockId, inlineOf("Both links").srdId], [moth.id, undefined], "blockId alone, under its new id");
+    assert.equal(inlineOf("Cy's block").blockId, undefined, "a block of another character");
+    assert.equal(inlineOf("Not a companion").blockId, undefined, "not a companion");
+    assert.equal(inlineOf("Deleted block").blockId, undefined, "a block the file does not hold");
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+
   test("the DM's line for a character a player deleted keeps its name and counts, and its member follows", () => {
     let n = 0;
     const state = party();

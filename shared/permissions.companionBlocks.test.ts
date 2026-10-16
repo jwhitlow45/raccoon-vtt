@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState } from "./model.ts";
 import { canApply, type PermissionDeps } from "./permissions.ts";
-import type { CompanionBlockInput, Op } from "./protocol.ts";
-import { DM, P1, P2, character, companionBlock, imageRef, room } from "./testutil.ts";
+import type { ActorPatch, CompanionBlockInput, Op, TokenInput } from "./protocol.ts";
+import { DM, P1, P2, actor, character, companionBlock, imageRef, room, token } from "./testutil.ts";
 
 /**
  * The permissions of companion stat blocks
@@ -84,5 +84,89 @@ describe("a character's companion stat blocks", () => {
     const noRoom: PermissionDeps = { canUseAsset: () => false };
     const d = canApply(create(input("new", "cy", { defaultImage: imageRef("elsewhere") })), DM, state, noRoom);
     assert.deepEqual(d, { ok: false, code: "gone", message: "that is not here" });
+  });
+});
+
+describe("a companion's stat block link", () => {
+  /** Bree (p1 and p2 together) with her token and her spirit, Cy (p2) with a block of her own, and a token of Bree's p3 owns but not Bree. */
+  function linked(): RoomState {
+    const state = setup();
+    state.members.p3 = { ...state.members.p2!, id: "p3", name: "p3" };
+    state.tokens.bt = token("bt", { kind: "pc", name: "Bree", actor: { ref: "bree" }, x: 5, y: 5 });
+    state.tokens.ws = token("ws", { kind: "npc", name: "Spirit", x: 6, y: 5, ownerIds: ["p1", "p2"], companion: { of: "bree", turn: "shared" }, actor: { inline: actor() } });
+    state.tokens.extra = token("extra", { kind: "pc", actor: { ref: "bree" }, ownerIds: ["p3"], x: 1, y: 1 });
+    return state;
+  }
+  const link = (actorPatch: ActorPatch): Op => ({ t: "token.update", tokenId: "ws", patch: { actor: actorPatch } });
+  const spirit = (inline: Partial<ReturnType<typeof actor>> = {}): Op => {
+    const input: TokenInput = {
+      id: "new",
+      sceneId: "s1",
+      kind: "npc",
+      name: "Owl",
+      size: "tiny",
+      x: 4,
+      y: 5,
+      layer: "token",
+      actor: { inline: actor({ hp: { cur: 1, max: 1, temp: 0 }, dmNotes: "", ...inline }) },
+      companion: { of: "bree", turn: "shared" },
+    };
+    return { t: "token.create", token: input };
+  };
+
+  test("its owners link an SRD block or one of the character's, change it and detach it", () => {
+    const state = linked();
+    for (const patch of [{ srdId: "owl" }, { blockId: "moth" }, { blockId: null }, { srdId: null }, { blockId: "moth", ac: 12, speeds: { walk: 5, fly: 60 } }] as ActorPatch[]) {
+      assert.equal(decide(link(patch), P1, state), "ok", JSON.stringify(patch));
+    }
+  });
+
+  test("they may not set the DM's fields: a room monster, legendary uses, the initiative score, type, CR, XP or the DM's notes", () => {
+    const state = linked();
+    for (const [field, value] of [
+      ["monsterId", "m1"],
+      ["legendary", { actionsMax: 3, actionsUsed: 0, resistMax: 0, resistUsed: 0 }],
+      ["initScore", 12],
+      ["creatureType", "Beast"],
+      ["cr", "1"],
+      ["xp", 25],
+      ["dmNotes", "secret"],
+    ] as const) {
+      assert.equal(decide(link({ [field]: value } as ActorPatch), P1, state), `forbidden: owners cannot change ${field}`);
+    }
+  });
+
+  test("a block of another character answers as one that is not there, on an update and on a new companion", () => {
+    const state = linked();
+    assert.equal(decide(link({ blockId: "wolf" }), P1, state), "gone: that is not here");
+    assert.equal(decide(link({ blockId: "nothing" }), P1, state), "gone: that is not here");
+    assert.equal(decide(spirit({ blockId: "wolf" }), P1, state), "gone: that is not here");
+    assert.equal(decide(spirit({ blockId: "nothing" }), P1, state), "gone: that is not here");
+    // Cy's player owns Cy, so the reducer's own rule answers them instead (another character's block).
+    assert.equal(decide(link({ blockId: "wolf" }), P2, state), "ok");
+  });
+
+  test("a new companion may carry a link, and never the DM's fields", () => {
+    const state = linked();
+    assert.equal(decide(spirit({ srdId: "owl" }), P1, state), "ok");
+    assert.equal(decide(spirit({ blockId: "moth" }), P1, state), "ok");
+    for (const field of [{ initScore: 12 }, { creatureType: "Beast" }, { cr: "0" }, { xp: 10 }]) {
+      assert.match(decide(spirit(field), P1, state), /^forbidden: a new companion leaves/, JSON.stringify(field));
+    }
+    assert.match(decide(spirit({ monsterId: "m1" }), P1, state), /^forbidden: a new companion starts/);
+  });
+
+  test("a player who owns a token of the character but not the character may not link its companion's block", () => {
+    const state = linked();
+    const p3 = { memberId: "p3", role: "player" as const };
+    assert.equal(decide(link({ blockId: "moth" }), p3, state), "forbidden: that is not yours");
+    assert.equal(decide(link({ srdId: "owl" }), p3, state), "forbidden: that is not yours");
+  });
+
+  test("the DM may set every link and field", () => {
+    const state = linked();
+    for (const patch of [{ monsterId: "m1" }, { blockId: "wolf" }, { srdId: "owl", initScore: 12, creatureType: "Beast", cr: "1", xp: 25 }] as ActorPatch[]) {
+      assert.equal(decide(link(patch), DM, state), "ok", JSON.stringify(patch));
+    }
   });
 });

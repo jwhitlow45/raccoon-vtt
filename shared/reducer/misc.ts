@@ -1,5 +1,5 @@
 import { keys, parseKey, revOf, type EntityKey, type ParsedKey } from "../keys.ts";
-import type { AreaTemplate, Encounter, Handout, HandoutDoc, Pin, Scene, Token } from "../model.ts";
+import type { AreaTemplate, CompanionBlock, Encounter, Handout, HandoutDoc, Pin, Scene, Token } from "../model.ts";
 import type { OpOf, RestoreEntry } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
 import { ON_ITS_TURN_NOW, actsOnCharacterTurn, rowsForSharedCompanions, syncOwners } from "./companions.ts";
@@ -225,10 +225,12 @@ function checkReferences(tx: Tx, entries: RestoreEntry[], before: Map<EntityKey,
   const pages = new Set(removed.flatMap((p) => (p.kind === "journal" ? [p.id] : [])));
   if (pages.size > 0 && Object.values(s.pins).some((pin) => pin.pageId !== undefined && pages.has(pin.pageId))) throw invalid(DEPENDED_ON);
   if (characters.size > 0) {
-    // A companion uses its character as a character token does (docs/design-v1-combat-flow.md 3.6.4).
+    // A companion uses its character as a character token does (docs/design-v1-combat-flow.md 3.6.4), and so does a stat
+    // block the character keeps (docs/design-v1-companion-stat-blocks.md 3.3).
     const tokenUses = Object.values(s.tokens).some((t) => ("ref" in t.actor && characters.has(t.actor.ref)) || (t.companion !== undefined && characters.has(t.companion.of)));
     const entryUses = s.encounter?.entries.some((e) => e.characterId !== undefined && characters.has(e.characterId)) ?? false;
-    if (tokenUses || entryUses) throw invalid(DEPENDED_ON);
+    const blockUses = Object.values(s.companionBlocks).some((b) => characters.has(b.characterId));
+    if (tokenUses || entryUses || blockUses) throw invalid(DEPENDED_ON);
   }
   if (tokens.size > 0) {
     const named = (id: string | undefined) => id !== undefined && tokens.has(id);
@@ -240,8 +242,8 @@ function checkReferences(tx: Tx, entries: RestoreEntry[], before: Map<EntityKey,
 
 /**
  * The entity keys of the scenes, characters, tokens and journal pages an
- * entity refers to. The scans in checkReferences look for the same
- * references, so the two change together.
+ * entity refers to, a companion block's character among them. The scans in
+ * checkReferences look for the same references, so the two change together.
  */
 function referencesOf(parsed: ParsedKey, value: unknown): EntityKey[] {
   if (value === null || typeof value !== "object") return [];
@@ -256,6 +258,11 @@ function referencesOf(parsed: ParsedKey, value: unknown): EntityKey[] {
   if (parsed.kind === "pin") {
     const { pageId } = value as Partial<Pin>;
     if (pageId !== undefined) refs.push(keys.journal(pageId));
+  }
+  // A token's `blockId` is no reference: a link to a deleted block stays, and reads as deleted (section 3.2, rule 4).
+  if (parsed.kind === "companionBlock") {
+    const { characterId } = value as Partial<CompanionBlock>;
+    if (characterId !== undefined) refs.push(keys.character(characterId));
   }
   if (parsed.kind === "template") {
     const { attachedTo, casterId } = value as Partial<AreaTemplate>;

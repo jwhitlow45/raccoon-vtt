@@ -225,20 +225,30 @@ export const opMigrations: MigrationStep[] = [
     apply: (op) => op,
   },
   {
-    // v5 ops ran while a size change on the acting creature's turn was a
-    // move: a token update with a size and a place recorded a counted stop
-    // on its path, and one with a size alone recorded nothing. From v6 a
-    // resize is not movement: the old size goes on every earlier stop
-    // (PathStop.footprint) and the resize appends an uncounted stop
-    // (docs/design-v1-token-window.md 8.7). The shape of every op is
-    // unchanged, so as in step 4 to 5, replay hands the reducer the stored
-    // version (`resizeStop`), and a v5 op makes the state it made then.
+    // v5 ops ran under two rules that version 6 changes, at one boundary.
     //
-    // Deploy: nothing to run. Rollback: an older build refuses to migrate a
-    // version 6 op down (runMigrations), and its state schema refuses a
-    // path stop holding `footprint`, so a room that stored either loads only
-    // on this build or later. Rolling back past it needs the backup taken
-    // before the update.
+    // A size change on the acting creature's turn was a move: a token
+    // update with a size and a place recorded a counted stop on its path,
+    // and one with a size alone recorded nothing. From v6 a resize is not
+    // movement: the old size goes on every earlier stop (PathStop.footprint)
+    // and the resize appends an uncounted stop
+    // (docs/design-v1-token-window.md 8.7).
+    //
+    // A patch that set an actor's `srdId` alone kept a `monsterId` it held.
+    // From v6 an actor links one stat block, and setting any of `srdId`,
+    // `monsterId` and `blockId` clears the other two
+    // (docs/design-v1-companion-stat-blocks.md 3.2, rule 1).
+    //
+    // The shape of every op is unchanged, so as in step 4 to 5, replay hands
+    // the reducer the stored version (`resizeStop`, `oneLinkPerActor`), and
+    // a v5 op makes the state it made then.
+    //
+    // Deploy: nothing to run. The first op after it is stored at version 6.
+    // Rollback: an older build refuses to migrate a version 6 op down
+    // (runMigrations), and a version 10 snapshot too, and its state schema
+    // refuses a path stop holding `footprint`, so a room that stored any of
+    // them loads only on this build or later. Rolling back past it needs
+    // the backup taken before the update.
     from: 5,
     to: 6,
     apply: (op) => op,
@@ -280,6 +290,16 @@ export function reviveToOne(opVersion: number | undefined): boolean {
  * move's counted stop (step 5 to 6). Ops stored before version 6 did not.
  */
 export function resizeStop(opVersion: number | undefined): boolean {
+  return opVersion === undefined || opVersion >= 6;
+}
+
+/**
+ * Whether a patch that sets one of an actor's stat block links clears the
+ * other two (docs/design-v1-companion-stat-blocks.md 3.2, rule 1). Ops
+ * stored before version 6 kept the others (step 5 to 6 above). Live ops
+ * carry no stored version and take today's rule.
+ */
+export function oneLinkPerActor(opVersion: number | undefined): boolean {
   return opVersion === undefined || opVersion >= 6;
 }
 

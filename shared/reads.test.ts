@@ -47,6 +47,26 @@ describe("reads", () => {
     for (const op of [edit, remove]) assert.ok(!satisfies(reads(op, state), other.projected, P2, other.opts), op.t);
   });
 
+  test("attaching, changing and detaching a companion's block is predicted by its owners and the DM, and a change of character stays never", () => {
+    const state = setup();
+    state.companionBlocks.b1 = companionBlock("b1", "c1");
+    state.tokens.moth = token("moth", { kind: "npc", x: 2, y: 3, companion: { of: "c1", turn: "shared" }, ownerIds: ["p1"], actor: { inline: actor() } });
+    const attach = { t: "token.update" as const, tokenId: "moth", patch: { actor: { blockId: "b1", ac: 12 } } };
+    const r = reads(attach, state);
+    assert.ok("keys" in r);
+    assert.deepEqual(r.complete, []);
+    assert.deepEqual(r.keys.at(-1), { key: "companionBlock:b1", fields: ["characterId"] });
+    const detach = { t: "token.update" as const, tokenId: "moth", patch: { actor: { blockId: null } } };
+    for (const [viewer, sceneId] of [[DM, "s1"], [P1, "s1"]] as const) {
+      const v = view(state, viewer, sceneId);
+      for (const op of [attach, detach]) assert.ok(satisfies(reads(op, state), v.projected, viewer, v.opts), `${op.patch.actor.blockId} by ${viewer.memberId}`);
+    }
+    // A block the device does not hold is not predicted.
+    const other = { ...attach, patch: { actor: { blockId: "unseen" } } };
+    assert.ok(!satisfies(reads(other, state), view(state, P1).projected, P1, { sceneId: "s1" }));
+    assert.ok("never" in reads({ t: "token.update", tokenId: "moth", patch: { companion: { of: "c1", turn: "none" }, actor: { blockId: "b1" } } }, state));
+  });
+
   test("a DM on any scene replays custom monster edits, a player never holds one to replay", () => {
     const state = setup();
     state.monsters.m1 = customMonster("m1");

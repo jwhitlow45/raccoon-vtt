@@ -95,6 +95,8 @@ export function reads(op: Op, state: RoomState): Reads {
       const r: Read[] = [{ key: keys.token(op.tokenId), ...(op.patch.companionReaction !== undefined ? { fields: ["companion"] } : {}) }];
       if (op.patch.sceneId !== undefined) r.push({ key: keys.scene(op.patch.sceneId) });
       if (op.patch.actor) r.push(holderRead(state, { tokenId: op.tokenId }, op.patch.actor.hp ? ["hp", "life"] : ["life"]));
+      // A companion's block link reads the block's character, which the DM's and the owners' views hold (docs/design-v1-companion-stat-blocks.md 4.4).
+      if (op.patch.actor?.blockId) r.push({ key: keys.companionBlock(op.patch.actor.blockId), fields: ["characterId"] });
       return of(r);
     }
     // A companion's deletion rewrites the fight's history (docs/design-v1-combat-flow.md 3.6.8).
