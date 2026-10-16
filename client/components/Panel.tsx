@@ -139,7 +139,11 @@ function FoldLabel(props: { id: string; label: ReactNode; tone?: "danger"; fold:
           ref={fold.foldRef}
           type="button"
           aria-expanded={fold.open}
-          onClick={fold.onToggle}
+          onClick={(e) => {
+            // Focus first, so a field being typed in blurs and commits before the fold unmounts it, even when the press moved no focus (an assistive technology's click, or Safari, whose buttons take no focus on a click).
+            e.currentTarget.focus();
+            fold.onToggle();
+          }}
           style={{
             flex: 1,
             display: "flex",

@@ -95,7 +95,11 @@ export function Row(props: {
       aria-current={props.chosen ? true : undefined}
       aria-expanded={props.expanded}
       disabled={props.disabled}
-      onClick={props.onClick}
+      onClick={(e) => {
+        // A disclosure takes focus before it folds, so a field being typed in under it blurs and commits first, and focus stays on the row.
+        if (props.expanded !== undefined) e.currentTarget.focus();
+        props.onClick?.();
+      }}
       style={{ ...style, cursor: props.disabled ? "default" : "pointer" }}
     >
       {body}

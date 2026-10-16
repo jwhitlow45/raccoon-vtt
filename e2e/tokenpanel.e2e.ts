@@ -530,7 +530,16 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await bar(dm, "Goblin 4").getByRole("button", { name: "Details", exact: true }).click();
     await tokenPanel(dm).getByRole("heading", { name: "Goblin 4" }).waitFor();
     assert.equal(await tokenPanel(dm).getByRole("button", { name: "Token settings", exact: true }).getAttribute("aria-expanded"), "true");
-    await tokenPanel(dm).getByRole("button", { name: "Token settings", exact: true }).click();
+
+    // A fold activated while a changed field still holds focus, as an assistive technology's click is, with no press to move focus first: the field's draft is kept, and focus lands on the disclosure.
+    const settings = tokenPanel(dm).getByRole("button", { name: "Token settings", exact: true });
+    const height = tokenPanel(dm).getByRole("textbox", { name: "Height", exact: true });
+    await height.click();
+    await height.fill("25");
+    await settings.dispatchEvent("click");
+    await height.waitFor({ state: "detached" });
+    await waitFor("the height typed before the fold", () => dmSocket.state?.tokens[run.goblin.id]?.height === 25);
+    assert.deepEqual(await focused(dm).then((f) => [f.name, f.expanded]), ["Token settings", "false"]);
     assert.equal(JSON.parse((await storedFolds(dm)) ?? "{}").settings, false);
 
     // A character: no stat block, the summary line alone under the image, with the sheet link.
@@ -571,6 +580,23 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await panel.getByRole("button", { name: "Token settings", exact: true }).click();
     await dm.keyboard.press("Escape");
     await dm.keyboard.press("Escape");
+  });
+
+  test("3c. a character's card folded while a changed field holds focus keeps what was typed", async () => {
+    await dm.getByRole("tab", { name: "Characters" }).click();
+    const list = dm.getByRole("tabpanel", { name: "Characters" });
+    const card = list.getByRole("button", { name: /^Thorn/ }).and(list.locator("[aria-expanded]"));
+    await card.click();
+    const level = list.getByRole("textbox", { name: "Character level", exact: true });
+    await level.click();
+    await level.fill("5");
+    await card.dispatchEvent("click");
+    await level.waitFor({ state: "detached" });
+    await waitFor("the level typed before the card folded", () => dmSocket.state?.characters[run.thorn.characterId]?.level === 5);
+    assert.equal(await card.getAttribute("aria-expanded"), "false");
+    const after = await focused(dm);
+    assert.ok(after.expanded === "false" && after.name.includes("Thorn"), `focus stays on the card's row, not ${JSON.stringify(after)}`);
+    await dm.getByRole("tab", { name: "Initiative" }).click();
   });
 
   test("4. a long Immunities line clamps in the bar and shows whole in the block; an unlinked NPC offers Attach; the lock stands above the shield; AC 9 and 100 fit their shields", async () => {
@@ -733,6 +759,8 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       [run.herald, run.herald.name],
       [run.thorn, "Thorn"],
     ] as const) {
+      // A spanning bar covers the map under it: put it away before the next tap.
+      await dm.keyboard.press("Escape");
       await tapToken(dm, t.at);
       const other = bar(dm, name);
       await other.waitFor();
@@ -740,6 +768,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       const modes = await rectOf(other.getByRole("radiogroup", { name: "What the number does" }));
       assert.ok(modes.bottom <= (await rectOf(other.getByRole("textbox", { name: "HP change" }))).top + 1, `${name}: the mode buttons moved under the field`);
     }
+    await dm.keyboard.press("Escape");
     await tapToken(dm, run.goblin.at);
     await goblin.waitFor();
     await goblin.getByRole("button", { name: "Details", exact: true }).click();

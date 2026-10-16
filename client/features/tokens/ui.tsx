@@ -46,17 +46,30 @@ type DraftFocus = {
   discard(input: HTMLElement): void;
 };
 
-/** A draft that follows the outside value whenever the field is not being edited. */
-function useDraft<T>(value: T): [T, (v: T) => void, DraftFocus] {
+/**
+ * A draft that follows the outside value whenever the field is not being
+ * edited. `leave` is the field's commit, which it sets on every render: a
+ * field taken away while it is still being edited, by a fold, a card that
+ * closes or a panel that remounts, commits what was typed then, since no
+ * blur comes from an element that is gone.
+ */
+function useDraft<T>(value: T): [T, (v: T) => void, DraftFocus, { current: () => void }] {
   const [draft, setDraft] = useState(value);
   const editing = useRef(false);
   // blur() runs the blur handler at once, from the render that still holds
   // the edited draft, before the reset below can render. So Escape leaves
   // this mark for that handler instead of relying on the reset.
   const discarding = useRef(false);
+  const leave = useRef<() => void>(() => {});
   useEffect(() => {
     if (!editing.current) setDraft(value);
   }, [value]);
+  useEffect(
+    () => () => {
+      if (editing.current && !discarding.current) leave.current();
+    },
+    [],
+  );
   return [
     draft,
     setDraft,
@@ -77,6 +90,7 @@ function useDraft<T>(value: T): [T, (v: T) => void, DraftFocus] {
         input.blur();
       },
     },
+    leave,
   ];
 }
 
@@ -93,10 +107,11 @@ export function TextField(props: {
   disabled?: boolean;
   style?: CSSProperties;
 }) {
-  const [draft, setDraft, focus] = useDraft(props.value);
+  const [draft, setDraft, focus, leave] = useDraft(props.value);
   const commit = () => {
     if (draft !== props.value) props.onCommit(draft);
   };
+  leave.current = commit;
   const common = {
     id: props.id,
     "aria-label": props.label,
@@ -159,7 +174,7 @@ export function NumberField(props: NumberFieldProps) {
 /** The number field itself. A Stepper centers its value between the buttons that change it. */
 function DraftNumber(props: NumberFieldProps & { align: "right" | "center" }) {
   const text = props.value === undefined ? "" : String(props.value);
-  const [draft, setDraft, focus] = useDraft(text);
+  const [draft, setDraft, focus, leave] = useDraft(text);
   const commit = () => {
     const trimmed = draft.trim().replace(/[\u2212\u2013]/g, "-");
     if (trimmed === "") {
@@ -176,6 +191,7 @@ function DraftNumber(props: NumberFieldProps & { align: "right" | "center" }) {
     setDraft(String(clamped));
     if (clamped !== props.value) props.onCommit(clamped);
   };
+  leave.current = commit;
   return (
     <input
       id={props.id}
