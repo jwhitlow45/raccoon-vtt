@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
 import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
@@ -95,8 +95,8 @@ async function waitForTvOn(view: () => View | null, what: string): Promise<void>
 }
 
 /** A picture in one color, wider than tall as most handouts are. */
-function picture(width: number, height: number): Promise<Buffer> {
-  return sharp({ create: { width, height, channels: 3, background: { r: 60, g: 60, b: 200 } } }).png().toBuffer();
+function picture(width: number, height: number, background = { r: 60, g: 60, b: 200 }): Promise<Buffer> {
+  return sharp({ create: { width, height, channels: 3, background } }).png().toBuffer();
 }
 
 /** What the page's share sheet does, stubbed: missing ("none"), sharing, or closed by the player ("cancel"). */
@@ -424,7 +424,211 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     dmConsole.expectSocketFailures = false;
   });
 
-  test("7. changing the player password warns that it signs the display out, and does", async () => {
+  test("7. a handout of pages steps a page at a time on the TV, its bar over the page (docs/design-v1-pdf-handouts.md 7)", async () => {
+    // The last test stopped the server, which closed the op socket with it.
+    const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+    ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
+
+    // Three pages in three colors, so each is its own image, uploaded as a PDF's pages are.
+    const pages: { assetId: string; width: number; height: number }[] = [];
+    for (const color of [{ r: 200, g: 40, b: 40 }, { r: 40, g: 160, b: 60 }, { r: 40, g: 60, b: 200 }]) {
+      const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=handout`, {
+        headers: { Origin: server.origin, "content-type": "image/png" },
+        data: await picture(600, 800, color),
+      });
+      assert.ok(res.ok(), `uploading a page answered ${res.status()}`);
+      const answer = (await res.json()) as { id: string; width: number; height: number };
+      pages.push({ assetId: answer.id, width: answer.width, height: answer.height });
+    }
+    const handoutId = randomUUID();
+    await ops.send({ t: "handout.show", handout: { id: handoutId, pages, title: "Ship's log", to: "all" } });
+
+    const dialog = tv.getByRole("dialog", { name: "Ship's log" });
+    const bar = dialog.getByRole("toolbar", { name: "Handout pages" });
+    const button = (name: string) => bar.getByRole("button", { name, exact: true });
+    const focused = () => tv.evaluate(() => (globalThis as unknown as { document: { activeElement: { textContent: string | null } | null } }).document.activeElement?.textContent ?? null);
+    const loaded = (img: Locator) =>
+      img.evaluate((el) => {
+        const picture = el as unknown as { complete: boolean; naturalWidth: number };
+        return picture.complete && picture.naturalWidth > 0;
+      });
+    /** Waits for page `n` to show: its line under the title, and its own image, named for its place, loaded and in sight. */
+    const showsPage = async (n: number): Promise<Locator> => {
+      await dialog.getByText(`Page ${n} of 3`, { exact: true }).waitFor();
+      const img = dialog.getByRole("img", { name: `Ship's log, page ${n} of 3`, exact: true });
+      await waitFor(`page ${n} on the TV`, () =>
+        img.evaluate((el) => {
+          const picture = el as unknown as { complete: boolean; naturalWidth: number };
+          const style = (globalThis as unknown as { getComputedStyle(el: unknown): { opacity: string } }).getComputedStyle(el);
+          return picture.complete && picture.naturalWidth > 0 && style.opacity === "1";
+        }),
+      );
+      const src = (await img.getAttribute("src")) ?? "";
+      assert.ok(src.includes(pages[n - 1]!.assetId), `page ${n} shows another page's image: ${src}`);
+      assert.ok(src.includes("/display/assets/"), `the display reads a page outside its own route: ${src}`);
+      return img;
+    };
+    /** Where page `n` is drawn: whole inside its box, so its box fitted to the page's shape. */
+    const drawnPage = async (img: Locator, n: number) => {
+      const box = await img.boundingBox();
+      assert.ok(box, `page ${n} has no box`);
+      const { width, height } = pages[n - 1]!;
+      const scale = Math.min(box.width / width, box.height / height);
+      return { x: box.x + (box.width - width * scale) / 2, y: box.y + (box.height - height * scale) / 2, width: width * scale, height: height * scale };
+    };
+    /** The bar lies over the page's foot, centered on it, below the page line and on the screen. A page narrower than the bar has it overhang both sides. */
+    const assertBarOverPage = async (img: Locator, n: number, screen: { width: number; height: number }) => {
+      const page = await drawnPage(img, n);
+      const box = await bar.boundingBox();
+      const line = await dialog.getByText(`Page ${n} of 3`, { exact: true }).boundingBox();
+      assert.ok(box && line);
+      const where = `bar ${JSON.stringify(box)}, page ${JSON.stringify(page)}`;
+      assert.ok(box.y >= page.y - 1 && box.y + box.height <= page.y + page.height + 1, `the bar is not over the page: ${where}`);
+      assert.ok(page.y + page.height - (box.y + box.height) < 40, `the bar is not at the page's foot: ${where}`);
+      assert.ok(Math.abs(box.x + box.width / 2 - (page.x + page.width / 2)) <= 2, `the bar is not centered on the page: ${where}`);
+      if (box.width <= page.width) assert.ok(box.x >= page.x - 1 && box.x + box.width <= page.x + page.width + 1, `the bar runs off the page: ${where}`);
+      assert.ok(box.x >= 0 && box.x + box.width <= screen.width, `the bar runs off the screen: ${where}`);
+      assert.ok(box.y >= line.y + line.height, `the bar covers the page line: ${where}, line ${JSON.stringify(line)}`);
+    };
+
+    await showsPage(1);
+    assert.equal(await dialog.getByRole("img").count(), 1, "screen readers find only the page showing");
+    // The next page loads unseen, so Next page is usually instant.
+    await waitFor("page 2 loaded ahead", () => loaded(dialog.locator(`img[aria-hidden="true"][src*="${pages[1]!.assetId}"]`)));
+    await shots.take(tv, "display-pages-first");
+
+    // A tap shows the bar, a tap beside it hides it, and it hides by itself 5 s after its last use.
+    await tv.mouse.click(TV.width / 2, TV.height / 3);
+    await bar.waitFor();
+    await tv.mouse.click(TV.width / 2, TV.height / 3);
+    await bar.waitFor({ state: "detached" });
+    await tv.mouse.click(TV.width / 2, TV.height / 3);
+    await bar.waitFor();
+    await bar.waitFor({ state: "detached", timeout: 8_000 });
+    assert.equal(await dialog.count(), 1, "a tap or the bar's timer closed the handout");
+
+    await tv.keyboard.press("ArrowRight");
+    const second = await showsPage(2);
+    await shots.take(tv, "display-pages-second");
+
+    // The X-card shows over the handout, and a page key closes the card first, leaving the page as it was.
+    const sent = await playerContext.request.post(`${server.origin}/api/rooms/${run.roomId}/xcard`, { headers: { Origin: server.origin } });
+    assert.equal(sent.status(), 204);
+    const card = tv.getByRole("dialog", { name: "X-card" });
+    await card.waitFor();
+    await shots.take(tv, "display-pages-xcard");
+    await tv.keyboard.press("ArrowRight");
+    await card.waitFor({ state: "detached" });
+    await showsPage(2);
+    assert.equal(await bar.count(), 0, "the key that closed the X-card showed the bar");
+    await dm.getByRole("dialog", { name: "X-card" }).getByRole("button", { name: "Dismiss" }).click();
+
+    // Any other key shows the bar, with focus on Next page, over the page and without resizing it.
+    const before = await second.boundingBox();
+    await tv.keyboard.press("Enter");
+    await bar.waitFor();
+    await waitFor("focus on Next page", async () => (await focused()) === "Next page");
+    assert.deepEqual(await second.boundingBox(), before, "the bar resized the page");
+    await assertBarOverPage(second, 2, TV);
+    await shots.take(tv, "display-pages-bar");
+
+    // A remote's arrows move between the bar's buttons, and OK presses the one with focus.
+    await tv.keyboard.press("ArrowRight");
+    await waitFor("focus on Close", async () => (await focused()) === "Close");
+    await tv.keyboard.press("ArrowLeft");
+    await waitFor("focus back on Next page", async () => (await focused()) === "Next page");
+    await tv.keyboard.press("Enter");
+    await showsPage(3);
+    assert.equal(await button("Next page").isDisabled(), true, "Next page works on the last page");
+    assert.equal(await button("Previous page").isDisabled(), false);
+    // Next page disabled under focus hands it to Previous page, never to Close, which OK pressed again would take.
+    await waitFor("focus handed to Previous page", async () => (await focused()) === "Previous page");
+    await shots.take(tv, "display-pages-last");
+
+    // PageUp still steps with the bar open, and the bar stays.
+    await tv.keyboard.press("PageUp");
+    await showsPage(2);
+    assert.equal(await bar.count(), 1, "PageUp hid the bar");
+    await button("Next page").click();
+    await showsPage(3);
+    await tv.keyboard.press("Escape");
+    await bar.waitFor({ state: "detached" });
+
+    // A phone used as a display wraps the bar onto two rows over the page. Turned sideways, and on a TV at
+    // 130% as Chrome lays a 1920 x 1080 screen out at that zoom, it keeps one row. Nothing overlaps.
+    try {
+      for (const [size, rows] of [
+        [{ width: 390, height: 844 }, 2],
+        [{ width: 844, height: 390 }, 1],
+        [{ width: 1477, height: 831 }, 1],
+      ] as const) {
+        await tv.setViewportSize(size);
+        await tv.keyboard.press("Enter");
+        await bar.waitFor();
+        await waitFor("focus on Close on the last page", async () => (await focused()) === "Close");
+        const tops = new Set<number>();
+        for (const name of ["Previous page", "Next page", "Close"]) {
+          const b = await button(name).boundingBox();
+          assert.ok(b && b.x >= 0 && b.x + b.width <= size.width && b.height >= 56, `${name} at ${size.width} px: ${JSON.stringify(b)}`);
+          tops.add(Math.round(b.y));
+        }
+        assert.equal(tops.size, rows, `the bar's buttons are on ${tops.size} rows at ${size.width} px`);
+        await assertBarOverPage(await showsPage(3), 3, size);
+        await shots.take(tv, `display-pages-bar-${size.width}`);
+        // Escape hides the bar first.
+        await tv.keyboard.press("Escape");
+        await bar.waitFor({ state: "detached" });
+      }
+    } finally {
+      await tv.setViewportSize(TV);
+    }
+
+    // The page keys stop at the last page.
+    await tv.keyboard.press("ArrowRight");
+    await tv.waitForTimeout(300);
+    await showsPage(3);
+    assert.equal(await bar.count(), 0, "a page key at the end showed the bar");
+
+    // A pause takes the handout away, and lifting it brings the same showing back at its page. Shown anew, it starts at page 1.
+    await ops.send({ t: "view.blackout", blackout: true });
+    await dialog.waitFor({ state: "detached" });
+    await ops.send({ t: "view.blackout", blackout: false });
+    await showsPage(3);
+    await ops.send({ t: "handout.show", handout: { id: handoutId, pages, title: "Ship's log", to: "all" } });
+    await showsPage(1);
+    // Escape with the bar hidden closes the handout.
+    await tv.keyboard.press("Escape");
+    await dialog.waitFor({ state: "detached" });
+    await ops.send({ t: "handout.close", handoutId });
+
+    // A page that fails to load says so in its place, as one image does. Routing turns the cache off, so it is asked for again.
+    const broken = `**/display/assets/${pages[2]!.assetId}/full`;
+    await tv.route(broken, (route) => route.abort("connectionrefused"));
+    tvConsole.allow = [/ERR_CONNECTION_REFUSED/];
+    const tornId = randomUUID();
+    await ops.send({ t: "handout.show", handout: { id: tornId, pages: [pages[0], pages[2]], title: "Torn map", to: "all" } });
+    const torn = tv.getByRole("dialog", { name: "Torn map" });
+    await torn.getByText("Page 1 of 2", { exact: true }).waitFor();
+    await tv.keyboard.press("PageDown");
+    await torn.getByText("Page 2 of 2", { exact: true }).waitFor();
+    await torn.getByText("The picture could not be loaded.").waitFor();
+    await shots.take(tv, "display-pages-failed");
+    await tv.unroute(broken);
+    tvConsole.allow = [];
+    await tv.keyboard.press("Escape");
+    await torn.waitFor({ state: "detached" });
+    await ops.send({ t: "handout.close", handoutId: tornId });
+
+    // One page is as it was: the last test's letter, still showing under these, has no page line and closes on a tap.
+    const letter = tv.getByRole("dialog", { name: "Old letter" });
+    await letter.waitFor();
+    assert.equal(await letter.getByText(/^Page \d+ of/).count(), 0, "one page has a page line");
+    await shots.take(tv, "display-pages-one-page");
+    await tv.mouse.click(TV.width / 2, TV.height / 2);
+    await letter.waitFor({ state: "detached" });
+  });
+
+  test("8. changing the player password warns that it signs the display out, and does", async () => {
     await dm.getByRole("tab", { name: "Menu", exact: true }).click();
     await dm.getByRole("button", { name: /^Members/ }).click();
     await dm.getByText(/signs every player and table display out/).waitFor();
@@ -436,7 +640,7 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     await dm.getByRole("status").filter({ hasText: "No table display is connected." }).waitFor();
   });
 
-  test("8. a display paired with another room from another tab says it moved, and Home keeps the new room", async () => {
+  test("9. a display paired with another room from another tab says it moved, and Home keeps the new room", async () => {
     const mint = async (roomId: string) => {
       const res = await dmContext.request.post(`${server.origin}/api/rooms/${roomId}/display/code`, { headers: { Origin: server.origin } });
       assert.equal(res.status(), 201, await res.text());

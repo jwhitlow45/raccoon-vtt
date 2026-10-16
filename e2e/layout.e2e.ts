@@ -25,7 +25,7 @@ import { ConsoleWatch, OpSocket, pagePoint, readCamera, Shots, SocketWatch, star
  * 7. A phone's sideways sheet hides and comes back with its state, and on
  *    a screen too short for it, it opens modal over the whole screen with
  *    the room's notices inside it.
- * 8. The handout viewer and the Library's View.
+ * 8. The handout viewer and the Library's tiles, which open it.
  * 9. The hierarchy moves.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus eleven: plus eight is the
@@ -1517,8 +1517,8 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
    * by the wheel, a button or a key, and Zoom out or Reset zoom takes it back.
    * Expand grows it without a zoom. A sideways phone shows it whole-screen
    * from the start. On a touch tablet a pinch keeps the card's size until the
-   * fingers lift. The Library's View opens any image it lists in the same
-   * viewer.
+   * fingers lift. A tap on any image the Library lists opens it in the same
+   * viewer, its details in the header (docs/design-v1-pdf-handouts.md 8.4).
    */
 
   let dmContext: BrowserContext;
@@ -1952,7 +1952,7 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
       await shot(phone, "phone-390x844-zoomed");
     });
 
-    test("8. the DM's Library: handouts first, clean-up at the foot, and View on every image", async () => {
+    test("8. the DM's Library: handouts first, clean-up at the foot, and every tile opening the viewer", async () => {
       run.tokenImage = await upload(dmContext, "token", await square([200, 160, 60]));
       await dm.getByRole("tab", { name: "Library", exact: true }).click();
       const handouts = dm.getByRole("tabpanel", { name: "Library" }).getByRole("list", { name: "Handouts in this room" });
@@ -1972,17 +1972,17 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
       );
       await shot(dm, "library-dm-order");
 
-      // A handout's View, first in the detail's row, opens the viewer under the title of the handout showing it.
-      await handouts.getByRole("button", { name: "Handout", exact: true }).click();
-      // Each section keeps its own detail card open, and the DM panel's "View as a player" has a View of its own.
+      // A tap on a handout's tile opens the viewer at once, under the title of the handout showing it (docs/design-v1-pdf-handouts.md 8.4).
       const library = dm.getByRole("tabpanel", { name: "Library" });
-      const section = (list: string) => library.locator("section").filter({ has: dm.getByRole("list", { name: list }) });
-      const view = section("Handouts in this room").getByRole("button", { name: "View", exact: true });
-      await shot(dm, "library-dm-handout-detail");
-      await view.click();
+      const tile = handouts.getByRole("button", { name: "Handout", exact: true });
+      await shot(dm, "library-dm-handout-tile");
+      await tile.click();
       const viewer = dm.getByRole("dialog", { name: run.handoutTitle });
       await loaded(viewer, run.handoutTitle);
       assert.equal(await viewer.getByRole("button", { name: "Download" }).count(), 0, "Download in the Library's viewer");
+      // Its details sit in the header, and an image in use has no Delete.
+      await viewer.getByText(/^2000 × 1000 px, .+\. In use\.$/).waitFor();
+      assert.equal(await viewer.getByRole("button", { name: /^Delete/ }).count(), 0, "Delete on an image in use");
       await viewer.getByRole("button", { name: "Expand", exact: true }).waitFor();
       assertFitted(await cardIs(viewer, "card", "the Library viewer as a card"), "the Library viewer's fit");
       await expandLeavesWithFocus(dm, viewer, { width: 1280, height: 800 });
@@ -1991,18 +1991,11 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
       await shot(dm, "library-dm-handout-window");
       await viewer.getByRole("button", { name: `Close ${run.handoutTitle}` }).click();
       await viewer.waitFor({ state: "detached" });
-      assert.equal(await focusedName(dm), "View", "focus back on View");
+      assert.equal(await focusedName(dm), "Handout", "focus back on the tile");
+      // No card under the grid.
+      assert.equal(await library.getByRole("button", { name: "View", exact: true }).count(), 0, "a View card under the grid");
 
-      // The thumbnail is a pointer shortcut to the same viewer, hidden from screen readers and no Tab stop.
-      const thumb = library.locator('button[aria-hidden="true"][tabindex="-1"]').filter({ has: dm.locator("img") });
-      assert.equal(await thumb.count(), 1);
-      await thumb.click();
-      await loaded(viewer, run.handoutTitle);
-      await viewer.getByRole("button", { name: `Close ${run.handoutTitle}` }).click();
-      await viewer.waitFor({ state: "detached" });
-      assert.equal(await focusedName(dm), "View", "focus on View after the thumbnail's viewer");
-
-      // A map's View is titled "Map". While its image is on the way, the viewer says so.
+      // A map's viewer is titled "Map". While its image is on the way, the viewer says so.
       let release = () => {};
       const held = new Promise<void>((resolve) => (release = resolve));
       const image = `**/api/assets/${run.mapImage}/full`;
@@ -2011,7 +2004,6 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
         await route.continue();
       });
       await library.getByRole("list", { name: "Maps in this room" }).getByRole("button", { name: /^Map/ }).click();
-      await section("Maps in this room").getByRole("button", { name: "View", exact: true }).click();
       const map = dm.getByRole("dialog", { name: "Map", exact: true });
       await map.getByRole("status").filter({ hasText: "Loading the image…" }).waitFor();
       assert.equal(await map.getByRole("button", { name: "Zoom in", exact: true }).count(), 0, "zoom buttons before the image arrived");
@@ -2032,7 +2024,6 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
       await popup(desk).waitFor({ state: "detached" });
       await desk.getByRole("tab", { name: "Library", exact: true }).click();
       await desk.getByRole("list", { name: "Token images in this room" }).getByRole("button", { name: /^Token image/ }).first().click();
-      await desk.getByRole("button", { name: "View", exact: true }).click();
       const viewer = desk.getByRole("dialog", { name: "Token image" });
       await loaded(viewer, "Token image");
       assert.equal(await viewer.getByRole("button", { name: "Download" }).count(), 0);

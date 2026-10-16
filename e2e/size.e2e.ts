@@ -23,8 +23,9 @@ import { ConsoleWatch, dragWorld, OpSocket, pagePoint, Shots, sleep, SocketWatch
  * run checks its structure in each (checkShell): the request a roll and
  * image dialogs, the editors, the scene sheet, the monster filters, the
  * stamp picker and stamp sheet, the shortcut sheet, a player's handout
- * and the X-card, whose card has no title row. Every button and tab in
- * each is at least a 44 px target in the dialog's own pixels.
+ * of one image and of three pages, and the X-card, whose card has no title
+ * row. Every button and tab in each is at least a 44 px target in the
+ * dialog's own pixels.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus five. The
  * other environment variables are the smoke run's (smoke.e2e.ts).
@@ -67,6 +68,7 @@ const run = {
   /** A stamp's cell, clear of the tokens, so a tap there selects the stamp. */
   stamp: { id: randomUUID(), x: 0, y: 0 },
   handoutImage: "",
+  handoutPages: [] as { assetId: string; width: number; height: number }[],
   uvttFile: path.join(work, "Small_hall.dd2vtt"),
   /** When the X-card was last tapped. Taps within 10 s of a card merge into it (server/http/xcard.ts). */
   xcardAt: 0,
@@ -332,6 +334,14 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
     const handout = await context.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=handout`, { headers: { Origin: server.origin, "content-type": "image/png" }, data: letter });
     assert.ok(handout.ok(), `uploading a handout answered ${handout.status()}`);
     run.handoutImage = ((await handout.json()) as { id: string }).id;
+    // A handout of three pages, as a PDF's pages are stored (docs/design-v1-pdf-handouts.md 11.3).
+    for (const [i, [width, height]] of ([[1584, 2048], [2048, 1584], [1448, 2048]] as const).entries()) {
+      const pageImage = await sharp({ create: { width, height, channels: 3, background: { r: 240, g: 236 - i * 20, b: 220 } } }).png().toBuffer();
+      const res = await context.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=handout`, { headers: { Origin: server.origin, "content-type": "image/png" }, data: pageImage });
+      assert.ok(res.ok(), `uploading a handout page answered ${res.status()}`);
+      const row = (await res.json()) as { id: string; width: number; height: number };
+      run.handoutPages.push({ assetId: row.id, width: row.width, height: row.height });
+    }
 
     const cookie = (await context.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
@@ -516,6 +526,23 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await letter.getByRole("button", { name: `Close ${title}` }).click();
         await letter.waitFor({ state: "detached" });
         await ops.send({ t: "handout.close", handoutId });
+
+        // A handout of three pages: its page row and zoom buttons inside the card and apart.
+        const pagesId = randomUUID();
+        const pagesTitle = `Three pages, ${label}`;
+        await ops.send({ t: "handout.show", handout: { id: pagesId, pages: run.handoutPages, title: pagesTitle, to: "all" } });
+        const pages = player.getByRole("dialog", { name: pagesTitle });
+        await pages.getByRole("button", { name: "Next page" }).waitFor();
+        await checkDialog(pages, `${label}, a handout of three pages`, null);
+        const row = await pages.getByRole("button", { name: "Previous page" }).locator("..").boundingBox();
+        const zoom = await pages.getByRole("button", { name: "Zoom in" }).locator("..").boundingBox();
+        assertInside(row, `${label}, a handout of three pages: the page row`, player);
+        assertInside(zoom, `${label}, a handout of three pages: the zoom buttons`, player);
+        assert.ok(row && zoom && (row.x + row.width <= zoom.x || row.y + row.height <= zoom.y), `${label}: the page row meets the zoom buttons`);
+        if (scale === 1.3) await shots.take(player, `size-${size.name}-130-handout-pages`);
+        await pages.getByRole("button", { name: `Close ${pagesTitle}` }).click();
+        await pages.waitFor({ state: "detached" });
+        await ops.send({ t: "handout.close", handoutId: pagesId });
 
         // The X-card, which Pat taps and every device shows: the one dialog with no title row.
         const merging = run.xcardAt + 11_000 - Date.now();
