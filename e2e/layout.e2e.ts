@@ -1636,6 +1636,28 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
     });
   }
 
+  /**
+   * Focus on Expand, then a window too short for a card, which takes Expand
+   * away: focus goes to Zoom in, inside the viewer, where + still zooms. The
+   * window then goes back to `size` and the viewer to its rest.
+   */
+  async function expandLeavesWithFocus(page: Page, dialog: Locator, size: { width: number; height: number }): Promise<void> {
+    const expand = dialog.getByRole("button", { name: "Expand", exact: true });
+    await expand.focus();
+    await page.setViewportSize({ width: size.width, height: 460 });
+    await expand.waitFor({ state: "detached" });
+    assert.equal(await focusedName(page), "Zoom in", "focus after Expand left with it");
+    const before = (await parts(dialog)).img.width;
+    await page.keyboard.press("+");
+    await waitFor("+ zooms with focus where Expand handed it", async () => (await parts(dialog)).img.width > before * 1.2);
+    await page.keyboard.press("0");
+    await page.setViewportSize(size);
+    await expand.waitFor();
+    const reset = dialog.getByRole("button", { name: "Reset zoom" });
+    if ((await reset.count()) > 0) await reset.click();
+    await cardIs(dialog, "card", "the card again in a tall window");
+  }
+
   /** Tab, up to a bound, until the named button has focus. */
   async function tabTo(page: Page, name: string): Promise<void> {
     for (let i = 0; i < 12; i++) {
@@ -1842,6 +1864,12 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
       await cardIs(dialog, "card", "Expand again back to the card");
     });
 
+    test("4. a window too short for a card takes Expand away, and focus on it goes to Zoom in, where the keys still reach the popup", async () => {
+      const dialog = popup(desk);
+      await cardIs(dialog, "card", "the popup as a card");
+      await expandLeavesWithFocus(desk, dialog, { width: 1280, height: 800 });
+    });
+
     test("5. a sideways phone shows the popup whole-screen from the start, with no Expand, and Zoom in magnifies", async () => {
       const dialog = popup(phone);
       const start = await cardIs(dialog, "window", "the whole screen from the start");
@@ -1943,6 +1971,7 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
       assert.equal(await viewer.getByRole("button", { name: "Download" }).count(), 0, "Download in the Library's viewer");
       await viewer.getByRole("button", { name: "Expand", exact: true }).waitFor();
       assertFitted(await cardIs(viewer, "card", "the Library viewer as a card"), "the Library viewer's fit");
+      await expandLeavesWithFocus(dm, viewer, { width: 1280, height: 800 });
       await viewer.getByRole("button", { name: "Zoom in", exact: true }).click();
       await cardIs(viewer, "window", "the Library viewer at the window");
       await shot(dm, "library-dm-handout-window");
@@ -1996,6 +2025,38 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
       await shot(desk, "library-player-token");
       await desk.keyboard.press("Escape");
       await viewer.waitFor({ state: "detached" });
+    });
+
+    test("9. focus on Zoom in, as the DM shows the next handout and its image loads, goes to Close, not the page", async () => {
+      const pat = Object.values(dmSocket.state!.members).find((m) => m.name === "Pat")!.id;
+      // Each its own color, so neither is an image the room already holds.
+      const tinted = (rgb: [number, number, number]) => sharp({ create: { width: 2000, height: 1000, channels: 3, background: { r: rgb[0], g: rgb[1], b: rgb[2] } } }).png().toBuffer();
+      const [first, second] = [await upload(dmContext, "handout", await tinted([150, 60, 60])), await upload(dmContext, "handout", await tinted([60, 150, 60]))];
+      await ops.send({ t: "handout.show", handout: { id: randomUUID(), assetId: first, title: "The first page", to: [pat] } });
+      const firstPopup = desk.getByRole("dialog", { name: "The first page" });
+      await loaded(firstPopup, "The first page");
+      await firstPopup.getByRole("button", { name: "Zoom in", exact: true }).focus();
+      let release = () => {};
+      const held = new Promise<void>((resolve) => (release = resolve));
+      const image = `**/api/assets/${second}/full`;
+      await desk.route(image, async (route) => {
+        await held;
+        await route.continue();
+      });
+      await ops.send({ t: "handout.show", handout: { id: randomUUID(), assetId: second, title: "The second page", to: [pat] } });
+      const secondPopup = desk.getByRole("dialog", { name: "The second page" });
+      await secondPopup.getByRole("status").filter({ hasText: "Loading the image…" }).waitFor();
+      assert.equal(await secondPopup.getByRole("button", { name: "Zoom in", exact: true }).count(), 0, "the zoom buttons wait for the image");
+      assert.equal(await focusedName(desk), "Close The second page", "focus after the zoom buttons left");
+      release();
+      await loaded(secondPopup, "The second page");
+      await desk.unroute(image);
+      for (const title of ["The second page", "The first page"]) {
+        const open = desk.getByRole("dialog", { name: title });
+        if ((await open.count()) === 0) continue;
+        await open.getByRole("button", { name: `Close ${title}` }).click();
+        await open.waitFor({ state: "detached" });
+      }
     });
 
     test("10. no page logged an error", () => {

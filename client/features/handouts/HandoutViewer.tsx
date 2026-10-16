@@ -104,6 +104,32 @@ export function HandoutViewer(props: {
     setState(next);
   }, []);
 
+  /*
+   * A part of the viewer that leaves while the viewer stays: Expand when
+   * the window gets too small for a card, the zoom buttons while another
+   * image loads. With focus inside, focus goes to a zoom button that stays,
+   * else the viewer's Close, as `act` hands it on, or it would fall to the
+   * page under the modal dialog and the keys would stop reaching the
+   * viewer. React lets go of a removed element's ref before it takes the
+   * element off the page, while focus is still inside. Closing the viewer
+   * removes them too, and then where focus goes is the dialog's to decide.
+   */
+  const mounted = useRef(true);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const handsOnFocus = useCallback((el: HTMLElement | null) => {
+    if (!el) return;
+    return () => {
+      if (!mounted.current || !el.contains(document.activeElement)) return;
+      const zoom = [zoomInRef.current, zoomOutRef.current].find((b) => b !== null && b.isConnected && !b.disabled && !el.contains(b));
+      (zoom ?? el.closest("dialog")?.querySelector<HTMLButtonElement>('button[aria-label^="Close"]'))?.focus({ preventScroll: true });
+    };
+  }, []);
+
   // The pages' sizes, for the pages now shown. Until every one has its size, the stage says it is loading.
   const srcKey = props.pages.map((p) => p.src).join("\n");
   const [sizes, setSizes] = useState<{ key: string; got: (PageSize | undefined)[] }>({ key: srcKey, got: [] });
@@ -249,7 +275,7 @@ export function HandoutViewer(props: {
   const outOff = zoomOutDisabled(state);
   const inOff = zoomInDisabled(state);
   const shown = frame !== null && !failed;
-  const expand = card ? <IconButton icon="expand" label="Expand" pressed={state.pinned} onClick={() => act({ t: "expand" })} /> : null;
+  const expand = card ? <IconButton ref={handsOnFocus} icon="expand" label="Expand" pressed={state.pinned} onClick={() => act({ t: "expand" })} /> : null;
 
   return (
     <Dialog
@@ -345,6 +371,7 @@ export function HandoutViewer(props: {
         {shown ? (
           // The buttons take their own taps: the stage would capture the pointer, and the click would never reach them.
           <div
+            ref={handsOnFocus}
             onPointerDown={(e) => e.stopPropagation()}
             style={{ position: "absolute", right: theme.space(2), bottom: theme.space(2), display: "flex", alignItems: "center", gap: theme.space(2) }}
           >
