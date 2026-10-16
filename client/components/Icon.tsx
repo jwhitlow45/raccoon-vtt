@@ -12,7 +12,7 @@ import { theme } from "../lib/theme.ts";
  * readers.
  */
 
-export type IconName = "close" | "back" | "more" | "chevronRight" | "chevronDown" | "plus" | "minus" | "check" | "copy" | "filter" | "expand";
+export type IconName = "close" | "back" | "more" | "chevronRight" | "chevronDown" | "plus" | "minus" | "check" | "copy" | "filter" | "expand" | "collapsePanel";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -40,6 +40,13 @@ const SHAPES: Record<IconName, ReactNode> = {
   ),
   filter: <path {...STROKE} d="M4 5h16l-6 7.5V19l-4 2v-8.5z" />,
   expand: <path {...STROKE} d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" />,
+  // A framed panel with its right edge and an arrow toward it, for Hide: a bare chevron read as a scrolling row's arrow, or as forward beside Back.
+  collapsePanel: (
+    <g {...STROKE}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M15 4v16M8 9l3 3-3 3" />
+    </g>
+  ),
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];

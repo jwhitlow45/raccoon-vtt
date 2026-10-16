@@ -1,4 +1,4 @@
-import type { PointerEvent as ReactPointerEvent, ReactNode, Ref } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, Ref } from "react";
 import { theme } from "../lib/theme.ts";
 import { Icon } from "./Icon.tsx";
 import { IconButton } from "./IconButton.tsx";
@@ -15,6 +15,11 @@ import { dangerLook } from "./looks.ts";
  * what a screen reader hears is what the tap will confirm.
  */
 export type HeaderBack = { label: string; onBack(): void; armed?: string | null };
+
+/** Hide, for the side panel and a sideways sheet alike (docs/design-v1-layout-hierarchy.md 4.1, 4.2): one icon wherever a panel goes away and stays mounted. */
+export function HideButton(props: { label: string; onClick(): void; style?: CSSProperties }) {
+  return <IconButton icon="collapsePanel" label={props.label} onClick={props.onClick} style={props.style} />;
+}
 
 const TITLE_STYLE = {
   flex: 1,
@@ -89,7 +94,7 @@ export function SheetHeader(props: {
   const trailing = (
     <>
       {actions}
-      {props.onHide ? <IconButton icon="chevronRight" label={props.hideLabel ?? "Hide"} onClick={props.onHide} style={asking && !props.stacked ? { marginLeft: "auto" } : undefined} /> : null}
+      {props.onHide ? <HideButton label={props.hideLabel ?? "Hide"} onClick={props.onHide} style={asking && !props.stacked ? { marginLeft: "auto" } : undefined} /> : null}
       {props.onClose ? <IconButton ref={props.closeRef} icon="close" label={closeLabel} onClick={props.onClose} style={asking && !props.onHide && !props.stacked ? { marginLeft: "auto" } : undefined} /> : null}
     </>
   );

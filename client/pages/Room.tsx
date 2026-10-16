@@ -7,7 +7,6 @@ import { ScrollForMore } from "../canvas/TokenActionBar.tsx";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
 import { MapStage } from "../canvas/Stage.tsx";
 import { Button } from "../components/Button.tsx";
-import { IconButton } from "../components/IconButton.tsx";
 import { ConnectionDot, ReconnectNotice, useReconnectDue } from "../components/ConnectionStatus.tsx";
 import { Card, Page } from "../components/Field.tsx";
 import { LoadBoundary } from "../components/LoadBoundary.tsx";
@@ -15,7 +14,7 @@ import { PRESSED } from "../components/looks.ts";
 import { SectionLabel } from "../components/Panel.tsx";
 import { Row } from "../components/Row.tsx";
 import { returnFocusAfterSheet, sheetFocusSlot, useAlertsSummaryEntry, useDockSummaryButton } from "../components/sheetFocus.ts";
-import { SheetHeader } from "../components/SheetHeader.tsx";
+import { HideButton, SheetHeader } from "../components/SheetHeader.tsx";
 import { NOTICE_TONES } from "../components/tones.ts";
 import { QuietLoadNotice } from "./QuietLoadNotice.tsx";
 import { Loading } from "../components/Loading.tsx";
@@ -1822,9 +1821,9 @@ function SidePanel(props: {
             {tabs}
           </div>
         )}
-        {/* A rule sets it apart from a scrolling row's own chevron, which looks the same and only scrolls. */}
+        {/* A rule sets it apart from the scrolling row it ends, whose own chevron only scrolls. */}
         <div style={{ flex: "none", display: "flex", paddingLeft: props.short ? theme.space(1) : 0, borderLeft: props.short ? `${theme.line.border}px solid ${theme.color.border}` : "none" }}>
-          <IconButton icon="chevronRight" label="Hide panels" onClick={props.onHide} />
+          <HideButton label="Hide panels" onClick={props.onHide} />
         </div>
       </div>
       {props.subpage ? (

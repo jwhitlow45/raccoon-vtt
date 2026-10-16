@@ -1432,6 +1432,15 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
       return { scrolls: e.scrollWidth > e.clientWidth, rows: new Set(tabs.map(Math.round)).size };
     });
     assert.deepEqual(row, { scrolls: true, rows: 1 });
+    // Hide panels draws its own icon, unlike the scrolling row's chevron a few pixels away.
+    const icons = await tablist.evaluate((el) => {
+      const e = el as unknown as DomEl & { parentElement: DomEl };
+      const hide = (globalThis as unknown as Dom).document.querySelector('button[aria-label="Hide panels"] svg') as unknown as { innerHTML: string } | null;
+      const chevrons = Array.from(e.parentElement.querySelectorAll('button[aria-hidden="true"] svg'), (svg) => (svg as unknown as { innerHTML: string }).innerHTML);
+      return { hide: hide?.innerHTML ?? "", chevrons };
+    });
+    assert.ok(icons.hide !== "" && icons.chevrons.length > 0, `no icons to compare: ${JSON.stringify(icons)}`);
+    assert.ok(!icons.chevrons.includes(icons.hide), "Hide panels looks like the tab row's scroll chevron");
     const listBox = await box(tablist);
     const chosen = phone.getByRole("tab", { selected: true });
     const chosenBox = await box(chosen);
