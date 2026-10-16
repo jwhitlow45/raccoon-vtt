@@ -825,7 +825,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
         await b.getByRole("button", { name: "Details", exact: true }).click();
         const panel = tokenPanel(dm);
         await panel.getByRole("heading", { name, exact: true }).first().waitFor();
-        // At 480 x 320 at 130% the panel takes the very short mode, over the whole screen with 241 px inside (docs/design-v1-layout-hierarchy.md 4.2).
+        // At 480 x 320 at 130% the panel takes the very short mode, over the whole screen with 243 px inside (docs/design-v1-layout-hierarchy.md 4.2).
         if (size.width === 480) assert.equal(await dm.locator('dialog[data-rvtt-sheet][aria-modal="true"]').count(), 1, `${size.label}: the panel opens over the whole screen`);
         await noSideScroll(panel, `${size.label}, ${name}'s panel`);
         await speedUnitsWhole(panel, `${size.label}, ${name}'s panel`);
@@ -1069,7 +1069,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     }
   });
 
-  test("7c. the very short mode at 480 x 320 at 130%: Stat block opens the whole-screen sheet at the block with focus on its disclosure, the bar put away, and the image row wrapping at 241 px with Max and Temp HP side by side", async () => {
+  test("7c. the very short mode at 480 x 320 at 130%: Stat block opens the whole-screen sheet at the block with focus on its disclosure, the bar put away, and the image row wrapping at 243 px with Max and Temp HP side by side", async () => {
     await setUp(dm, dmCdp, { width: 480, height: 320, scale: 1.3, insets: { side: 47, bottom: 21 } }, null);
     await tapToken(dm, run.goblin.at);
     const goblin = bar(dm, "Goblin 4");
@@ -1094,7 +1094,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     const another = await rectOf(panel.getByRole("button", { name: "Add another image", exact: true }));
     const gap = await pair.evaluate((el) => Number.parseFloat((el as unknown as { ownerDocument: { defaultView: { getComputedStyle(e: unknown): { columnGap: string } } } }).ownerDocument.defaultView.getComputedStyle(el).columnGap));
     assert.equal(Math.abs(change.top - another.top) <= 2, column >= change.width + another.width + gap * 1.3 - 0.5, `the pair's lines with a ${column} px column`);
-    await hpPairSideBySide(panel, "241 px", "above");
+    await hpPairSideBySide(panel, "243 px", "above");
     await panel.getByRole("group", { name: "Maximum and temporary HP", exact: true }).scrollIntoViewIfNeeded();
     await shots.take(dm, "tokenpanel-480x320at130-hp-pair");
     await noSideScroll(panel, "480 x 320 at 130%, the very short panel");

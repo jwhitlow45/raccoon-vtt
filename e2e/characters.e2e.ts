@@ -23,7 +23,7 @@ import { ConsoleWatch, OpSocket, Shots, sleep, SocketWatch, startServer, tapCell
  * character meanwhile, keeps focus on its row. Focus Pat moved elsewhere
  * stays there. The DM's own delete is busy and then moves focus on too.
  * 80-character names, spaced and unbroken, fit the card at 327, 356 and
- * 241 px.
+ * 243 px.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twelve, one file after
  * another. The other environment variables are the smoke run's
@@ -341,16 +341,16 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     assert.equal(patSocket.everSaw(run.breeOnTheRoad), false, "the token on the road never reached Pat");
   });
 
-  test("3. 80-character names, spaced and unbroken, keep Delete and its line inside the card at 356 and 241 px", async () => {
+  test("3. 80-character names, spaced and unbroken, keep Delete and its line inside the card at 356 and 243 px", async () => {
     let sheet = await openCharacters(pat);
     await longNameFits(pat, sheet, run.spaced, SPACED, "356 px spaced");
     await longNameFits(pat, sheet, run.unbroken, UNBROKEN, "356 px unbroken");
     await sharedNoteFits(pat, sheet, "356 px");
     await setUp(pat, patCdp, VERY_SHORT);
     sheet = await openCharacters(pat);
-    await longNameFits(pat, sheet, run.spaced, SPACED, "241 px spaced");
-    await longNameFits(pat, sheet, run.unbroken, UNBROKEN, "241 px unbroken");
-    await sharedNoteFits(pat, sheet, "241 px");
+    await longNameFits(pat, sheet, run.spaced, SPACED, "243 px spaced");
+    await longNameFits(pat, sheet, run.unbroken, UNBROKEN, "243 px unbroken");
+    await sharedNoteFits(pat, sheet, "243 px");
     await setUp(pat, patCdp, PHONE);
   });
 

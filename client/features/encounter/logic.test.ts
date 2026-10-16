@@ -530,8 +530,8 @@ describe("a hidden creature revealed on its turn", () => {
 
 describe("the drag handle's slot (SFB-P-13)", () => {
   test("a tied row keeps it for its handle, an untied row only in an order 320 px wide or more, and an unmeasured order keeps it", () => {
-    assert.equal(keepsDragSlot(241, true), true);
-    assert.equal(keepsDragSlot(241, false), false);
+    assert.equal(keepsDragSlot(243, true), true);
+    assert.equal(keepsDragSlot(243, false), false);
     assert.equal(keepsDragSlot(319, false), false);
     assert.equal(keepsDragSlot(320, false), true);
     assert.equal(keepsDragSlot(0, false), true);

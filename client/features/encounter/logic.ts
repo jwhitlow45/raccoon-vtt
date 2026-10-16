@@ -351,7 +351,7 @@ export function roundHeaderForm(room: RoundHeaderRoom): RoundHeaderForm {
   return "static";
 }
 
-/** An order narrower than this, such as the very short sheet's 241 px, has no room to spare beside a row's name. */
+/** An order narrower than this, such as the very short sheet's 243 px, has no room to spare beside a row's name. */
 export const NARROW_ORDER_PX = 320;
 
 /**
