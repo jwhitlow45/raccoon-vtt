@@ -111,13 +111,19 @@ export function LibraryGrid(props: {
   );
 }
 
+/** Handouts first: the DM comes to the Library for one a few times a session, and for the rest rarely (docs/design-v1-layout-hierarchy.md M6). */
 const SECTIONS: { kind: AssetKind; heading: string }[] = [
-  { kind: "token", heading: "Token images" },
-  { kind: "map", heading: "Maps" },
   { kind: "handout", heading: "Handouts" },
+  { kind: "map", heading: "Maps" },
+  { kind: "token", heading: "Token images" },
 ];
 
-/** The DM's library: every image by kind, those nothing uses marked, and the means to delete them. */
+/**
+ * The DM's library: every image by kind, those nothing uses marked, and
+ * the means to delete them. The bulk delete sits at the foot under "Clean
+ * up", with what a delete did, out of the way of the images the DM came
+ * for. A rare action that cannot be undone led the panel before.
+ */
 function ManagedLibrary(props: { roomId: string; rows: readonly AssetRow[]; empty: string; hint?: string }) {
   const unused = notInUse(props.rows);
   const [busy, setBusy] = useState(false);
@@ -138,19 +144,6 @@ function ManagedLibrary(props: { roomId: string; rows: readonly AssetRow[]; empt
   const bytes = totalBytes(unused);
   return (
     <div style={{ display: "grid", gap: theme.space(4) }}>
-      {unused.length > 0 ? (
-        <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>
-          <TwoTapDelete busy={busy} onConfirm={() => void remove(unused.map((r) => r.id))} confirm={unused.length === 1 ? "Delete it?" : `Delete all ${unused.length}?`}>
-            {`Delete ${unused.length} not in use${bytes !== null ? ` (${formatBytes(bytes)})` : ""}`}
-          </TwoTapDelete>
-          <Help>No token, scene, stamp or handout uses these. A deleted image is gone for good, from undo too.</Help>
-        </div>
-      ) : null}
-      {note ? (
-        <p role={note.error ? "alert" : "status"} style={{ margin: 0, fontSize: theme.font.body14, color: note.error ? theme.color.dangerText : theme.color.textMuted }}>
-          {note.text}
-        </p>
-      ) : null}
       {SECTIONS.map((section) => {
         const rows = props.rows.filter((r) => r.kind === section.kind);
         if (rows.length === 0) return null;
@@ -172,6 +165,24 @@ function ManagedLibrary(props: { roomId: string; rows: readonly AssetRow[]; empt
         );
       })}
       {props.rows.every((r) => r.kind === "thumb") ? <Empty>{props.empty}</Empty> : props.hint ? <Help>{props.hint}</Help> : null}
+      {unused.length > 0 || note ? (
+        <section style={{ display: "grid", gap: theme.space(2) }}>
+          <SectionLabel>Clean up</SectionLabel>
+          {unused.length > 0 ? (
+            <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>
+              <TwoTapDelete busy={busy} onConfirm={() => void remove(unused.map((r) => r.id))} confirm={unused.length === 1 ? "Delete it?" : `Delete all ${unused.length}?`}>
+                {`Delete ${unused.length} not in use${bytes !== null ? ` (${formatBytes(bytes)})` : ""}`}
+              </TwoTapDelete>
+              <Help>No token, scene, stamp or handout uses these. A deleted image is gone for good, from undo too.</Help>
+            </div>
+          ) : null}
+          {note ? (
+            <p role={note.error ? "alert" : "status"} style={{ margin: 0, fontSize: theme.font.body14, color: note.error ? theme.color.dangerText : theme.color.textMuted }}>
+              {note.text}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
     </div>
   );
 }
