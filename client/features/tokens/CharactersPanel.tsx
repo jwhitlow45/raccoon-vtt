@@ -82,7 +82,6 @@ export default function CharactersPanel(props: PanelProps) {
         </Button>
       ) : null}
       {own && !own.allowed && own.reason === "full" ? <Help>You have as many characters as a player can make. Ask the DM for another.</Help> : null}
-      {dm && list.length > 0 ? <PartyLongRest characters={list} /> : null}
       {mine.length === 0 ? (
         <Empty>
           {dm
@@ -102,6 +101,8 @@ export default function CharactersPanel(props: PanelProps) {
           onAddCompanion={() => setAddingFor(c.id)}
         />
       ))}
+      {/* A long rest comes once a day and the list is read every time, so the rest waits below it (docs/design-v1-layout-hierarchy.md M8). */}
+      {dm && list.length > 0 ? <PartyLongRest characters={list} /> : null}
       {others.length > 0 ? (
         <Section label="The party">
           <RowList>
