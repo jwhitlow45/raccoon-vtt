@@ -1,4 +1,4 @@
-import { SIZE_CELLS, type Actor, type BuildChunk, type Character, type CreatureSize, type ImageRef, type Token, type TokenKind } from "#shared/model.ts";
+import { SIZE_CELLS, type Actor, type BuildChunk, type Character, type CompanionBlock, type CreatureSize, type ImageRef, type Token, type TokenKind } from "#shared/model.ts";
 import type { CharacterInput, TokenInput } from "#shared/protocol.ts";
 import { monsterActor, type StatBlockMonster } from "#shared/srd/monsters.ts";
 import { footprint } from "../../lib/scene.ts";
@@ -160,7 +160,10 @@ export function newCharacter(input: {
  * at its height or the ground there, whichever is higher, and a burrower's
  * keeps its depth.
  */
-export function duplicateToken(source: Token, input: { id: string; at: Point; chunks: Readonly<Record<string, BuildChunk>> }): TokenInput {
+export function duplicateToken(
+  source: Token,
+  input: { id: string; at: Point; chunks: Readonly<Record<string, BuildChunk>>; blocks?: Readonly<Record<string, CompanionBlock | undefined>> },
+): TokenInput {
   const copy: TokenInput = {
     id: input.id,
     sceneId: source.sceneId,
@@ -179,7 +182,7 @@ export function duplicateToken(source: Token, input: { id: string; at: Point; ch
     layer: source.layer,
     ownerIds: [...(source.ownerIds ?? [])],
     hpVisibility: source.hpVisibility ?? "label",
-    actor: "ref" in source.actor ? { ref: source.actor.ref } : { inline: freshActor(source.actor.inline) },
+    actor: "ref" in source.actor ? { ref: source.actor.ref } : { inline: freshActor(source.actor.inline, input.blocks) },
   };
   if (source.publicName !== undefined) copy.publicName = source.publicName;
   if (source.image) copy.image = copyImage(source.image);
@@ -195,7 +198,7 @@ export function duplicateToken(source: Token, input: { id: string; at: Point; ch
   return copy;
 }
 
-function freshActor(actor: Actor): Actor {
+function freshActor(actor: Actor, blocks: Readonly<Record<string, CompanionBlock | undefined>> | undefined): Actor {
   const next: Actor = {
     ...actor,
     hp: { cur: actor.hp.max, max: actor.hp.max, temp: 0 },
@@ -205,6 +208,9 @@ function freshActor(actor: Actor): Actor {
     deathSaves: { ok: 0, fail: 0 },
   };
   if (actor.legendary) next.legendary = { ...actor.legendary, actionsUsed: 0, resistUsed: 0 };
+  // A new link must name a block that is there (docs/design-v1-companion-stat-blocks.md 3.2), so a copy of a companion
+  // whose block was deleted starts with none rather than being refused.
+  if (next.blockId !== undefined && blocks !== undefined && blocks[next.blockId] === undefined) delete next.blockId;
   return next;
 }
 

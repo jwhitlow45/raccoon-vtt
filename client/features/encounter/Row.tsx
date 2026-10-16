@@ -14,6 +14,7 @@ import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { REVIVE_NOTE, ReviveButton, offersRevive } from "../tokens/Revive.tsx";
 import { ownsToken } from "../tokens/access.ts";
+import { opensStatBlock, statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
 import { displayName } from "../../lib/scene.ts";
 import { openStatBlock } from "../tokens/statBlockOpen.ts";
 import { RowRollTools } from "./AutoInitiative.tsx";
@@ -103,6 +104,8 @@ export function EntryRow(props: {
   // An HP-less creature is never drawn dead, whatever it stores (docs/design-v1-combat-flow.md 3.6.6).
   const life = shownLife(actor, token);
   const dead = life === "dead";
+  // A companion's players open its block from its row where its bar would (docs/design-v1-companion-stat-blocks.md 6.7).
+  const playerBlock = useCompanionBlockOpens(!dm && mine ? token : undefined);
   const drag = props.drag;
   const slotted = handleSlot(dm, drag);
 
@@ -235,7 +238,7 @@ export function EntryRow(props: {
           target={rowTarget({ tokens: token ? { [token.id]: token } : {}, characters: character ? { [character.id]: character } : {} }, entry)}
           readied={readied}
           playerOwned={playerOwned}
-          statBlockTokenId={token && (token.kind === "monster" || token.kind === "npc") ? token.id : null}
+          statBlockTokenId={token && (dm ? token.kind === "monster" || token.kind === "npc" : playerBlock) ? token.id : null}
           revive={offersRevive(life, token?.kind)}
         />
       ) : null}
@@ -252,6 +255,19 @@ export function EntryRow(props: {
 }
 
 /** Where focus goes once Revive leaves a row's options: the row's own button, the options staying open under it. */
+/**
+ * Whether a companion's player has a block to open from its rows: its bar's
+ * rule (TokenActionBar.tsx), a creature companion with a block they read.
+ * Undefined, for the DM or a token that is not the viewer's, it is false.
+ */
+function useCompanionBlockOpens(token: Token | undefined): boolean {
+  const monsters = useRoomView((s) => s.view?.monsters);
+  const blocks = useRoomView((s) => s.view?.companionBlocks);
+  if (!token?.companion || !("inline" in token.actor)) return false;
+  const actor = token.actor.inline;
+  return opensStatBlock(statBlockShown({ dm: false, owner: true, kind: token.kind, actor, companion: true }), tokenStatBlock(actor, monsters, blocks));
+}
+
 const REVIVE_FOCUS_IN_ROW = { scope: "[data-entry-row]", to: ["[data-row-button]"] } as const;
 /** The same for a listed companion's options, to its sub-row's button. */
 const REVIVE_FOCUS_IN_SUB_ROW = { scope: "[data-companion-row]", to: ["[data-row-button]"] } as const;
@@ -265,8 +281,8 @@ const NO_HP: HpView = { kind: "none" };
  * AC, HP, conditions and its own Reaction and Ready, struck through when
  * dead. A tap does what a row tap does. It has no value box and no drag
  * handle, since it takes its character's place in the order. For the DM
- * and its owners, a ⋯ opens its Reaction, Ready, and for the DM its stat
- * block and Revive.
+ * and its owners, a ⋯ opens its Reaction, Ready, its stat block, and for
+ * the DM Revive.
  */
 function CompanionRow(props: { token: Token; characterName: string; entryId: string; role: "dm" | "player"; onShow(): void }) {
   const { token, role } = props;
@@ -285,6 +301,7 @@ function CompanionRow(props: { token: Token; characterName: string; entryId: str
   const dead = shownLife(actor, token) === "dead";
   const owner = ownsToken({ characters: characters ?? {} }, memberId, token);
   const spent = token.companion?.reactionUsed === true;
+  const playerBlock = useCompanionBlockOpens(!dm && owner ? token : undefined);
   return (
     <li style={{ listStyle: "none" }} data-companion-row="">
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), minHeight: theme.touch, paddingLeft: theme.touch }}>
@@ -358,14 +375,27 @@ function CompanionRow(props: { token: Token; characterName: string; entryId: str
         )}
       </div>
       {open && (dm || owner) ? (
-        <CompanionMenu token={token} entryId={props.entryId} dm={dm} readied={readied} playerOwned={playerOwned} spent={spent} dead={dead} />
+        <CompanionMenu
+          token={token}
+          entryId={props.entryId}
+          dm={dm}
+          readied={readied}
+          playerOwned={playerOwned}
+          spent={spent}
+          dead={dead}
+          statBlock={dm ? token.kind === "monster" || token.kind === "npc" : playerBlock}
+        />
       ) : null}
     </li>
   );
 }
 
-/** A listed companion's options: its own Reaction, its Ready on its character's turn, and for the DM its stat block and Revive. */
-function CompanionMenu(props: { token: Token; entryId: string; dm: boolean; readied: Effect | undefined; playerOwned: boolean; spent: boolean; dead: boolean }) {
+/**
+ * A listed companion's options: its own Reaction, its Ready on its
+ * character's turn, its stat block, for the DM as on any monster or NPC
+ * and for its players while it has one, and for the DM Revive.
+ */
+function CompanionMenu(props: { token: Token; entryId: string; dm: boolean; readied: Effect | undefined; playerOwned: boolean; spent: boolean; dead: boolean; statBlock: boolean }) {
   const { token, dm } = props;
   const actions = useRoomActions();
   const ui = useRoomUi();
@@ -390,7 +420,7 @@ function CompanionMenu(props: { token: Token; entryId: string; dm: boolean; read
         onChange={(on) => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { companionReaction: on } })}
       />
       <ReadyControls answer={{ kind: "companion", tokenId: token.id, entryId: props.entryId }} target={target} readied={props.readied} dm={dm} playerOwned={props.playerOwned} />
-      {dm && (token.kind === "monster" || token.kind === "npc") ? (
+      {props.statBlock ? (
         <div style={{ display: "flex" }}>
           <Button size="sm" onClick={() => openStatBlock(scope, ui, token.id)}>
             Stat block
@@ -571,7 +601,11 @@ function RowMenu(props: {
   target: ActorTarget | null;
   readied: Effect | undefined;
   playerOwned: boolean;
-  /** A monster's or NPC's token, whose full stat block the DM can open from the row (docs/design-v1-dm-tools.md 3.6). */
+  /**
+   * A token whose full stat block the row opens: a monster's or NPC's for
+   * the DM (docs/design-v1-dm-tools.md 3.6), and a companion's with a block
+   * for its players (docs/design-v1-companion-stat-blocks.md 6.7).
+   */
   statBlockTokenId: string | null;
   /** The row's creature is dead: the DM's Revive comes first, for a row whose token has no bar in this view (docs/design-v1-combat-flow.md 3.5). */
   revive: boolean;
@@ -681,6 +715,13 @@ function RowMenu(props: {
             onChange={(reactionUsed) => reaction.send({ t: "encounter.update", entryId: entry.id, patch: { reactionUsed } })}
           />
           {props.target ? <ReadyControls answer={rowAnswer(entry)} target={props.target} readied={props.readied} dm={false} playerOwned={props.playerOwned} /> : null}
+          {props.statBlockTokenId !== null ? (
+            <div style={{ display: "flex" }}>
+              <Button size="sm" onClick={() => openStatBlock(scope, ui, props.statBlockTokenId!)}>
+                Stat block
+              </Button>
+            </div>
+          ) : null}
         </>
       )}
       <div style={{ display: "flex", justifyContent: "flex-end" }}>

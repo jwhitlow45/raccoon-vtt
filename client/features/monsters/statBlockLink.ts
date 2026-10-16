@@ -67,6 +67,14 @@ export function statBlockShown(input: { dm: boolean; owner: boolean; kind: Token
   return input.owner && input.actor?.srdId !== undefined;
 }
 
+/**
+ * Whether "Stat block" in the bar or a tracker row has a block to open for
+ * this viewer: one they read, linked and still there.
+ */
+export function opensStatBlock(shown: boolean, link: TokenStatBlock): boolean {
+  return shown && (link.kind === "room" || link.kind === "srd" || link.kind === "block");
+}
+
 export type BlockLink = { monsterId: MonsterId } | { srdId: string } | { blockId: CompanionBlockId };
 
 /**

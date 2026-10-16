@@ -24,7 +24,7 @@ function sectionsFor(state: ReturnType<typeof room>, viewer: typeof DM, tokenId:
     owner: access.owner,
     kind: t.kind,
     companion,
-    statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: t.kind, actor: a }),
+    statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: t.kind, actor: a, companion }),
     summary: vitals({ actor: a, token: t, fullAccess: access.full, place: "panel" }).length > 0,
     actor: a !== undefined,
     ownerRenames: !access.dm && access.canEditToken("name"),
@@ -100,6 +100,15 @@ describe("the token panel's order", () => {
     const state = room();
     state.tokens.g = token("g", { actor: { inline: actor({ srdId: "goblin-warrior" }) } });
     assert.deepEqual(sectionsFor(state, P1, "g"), ["name", "image", ...PLAY, "sight"]);
+  });
+
+  test("a creature companion's player gets its stat block row with no link, for Attach, and an effect's gets none (docs/design-v1-companion-stat-blocks.md 6.5)", () => {
+    const state = room({ characters: { bree: character("bree", { ownerIds: ["p1"] }) } });
+    state.tokens.owl = token("owl", { kind: "npc", ownerIds: ["p1"], companion: { of: "bree", turn: "shared" }, actor: { inline: actor() } });
+    state.tokens.blade = token("blade", { kind: "object", ownerIds: ["p1"], companion: { of: "bree", turn: "none" }, actor: { inline: actor({ hp: { cur: 0, max: 0, temp: 0 }, ac: 0, srdId: "owl" }) } });
+    assert.deepEqual(sectionsFor(state, P1, "owl", true).slice(0, 3), ["name", "image", "statBlock"]);
+    assert.equal(sectionsFor(state, P1, "blade", true).includes("statBlock"), false);
+    assert.equal(sectionsFor(state, DM, "blade", true).includes("statBlock"), false);
   });
 
   test("Companion shows only on a companion", () => {

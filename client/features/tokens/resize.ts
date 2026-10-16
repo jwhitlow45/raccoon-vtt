@@ -1,4 +1,4 @@
-import type { Actor, Character, CreatureSize, CustomMonster, RoomState, Token } from "#shared/model.ts";
+import type { Actor, Character, CompanionBlock, CreatureSize, CustomMonster, RoomState, Token } from "#shared/model.ts";
 import type { TokenPatch } from "#shared/protocol.ts";
 import { resizeSpot, sizeChange, SIX_SIZES, type NextSize } from "#shared/rules/resize.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
@@ -47,16 +47,19 @@ export function stepSize(size: CreatureSize, by: 1 | -1): Exclude<CreatureSize, 
 
 /**
  * The creature's own size where this viewer's copy knows it (8.8): a PC's
- * character's size, a linked room monster's block, both sizes of a
+ * character's size, a linked room monster's block or a companion's own
+ * stat block (docs/design-v1-companion-stat-blocks.md 3.2), both sizes of a
  * "Medium or Small" block, or an SRD monster's block once the SRD has
  * loaded (`srd`, null until then). Null where none is known: an unlinked
- * NPC, a monster without a block, an object.
+ * NPC, a monster without a block, a companion whose block was deleted, an
+ * object.
  */
 export function baseSize(input: {
   token: Pick<Token, "actor" | "kind">;
-  actor: Pick<Actor, "srdId" | "monsterId"> | undefined;
+  actor: Pick<Actor, "srdId" | "monsterId" | "blockId"> | undefined;
   characters: Readonly<Record<string, Pick<Character, "size"> | undefined>> | undefined;
   monsters: Readonly<Record<string, Pick<CustomMonster, "size" | "sizeAlt"> | undefined>> | undefined;
+  blocks?: Readonly<Record<string, Pick<CompanionBlock, "size" | "sizeAlt"> | undefined>> | undefined;
   srd: readonly Pick<SrdMonster, "srdId" | "size">[] | null;
 }): Exclude<CreatureSize, "custom">[] | null {
   const { token } = input;
@@ -65,8 +68,9 @@ export function baseSize(input: {
     const size = input.characters?.[token.actor.ref]?.size;
     return size && size !== "custom" ? [size] : null;
   }
-  const link = tokenStatBlock(input.actor, input.monsters as Readonly<Record<string, CustomMonster | undefined>> | undefined);
+  const link = tokenStatBlock(input.actor, input.monsters as Readonly<Record<string, CustomMonster | undefined>> | undefined, input.blocks as Readonly<Record<string, CompanionBlock | undefined>> | undefined);
   if (link.kind === "room") return [link.monster.size, ...(link.monster.sizeAlt !== undefined ? [link.monster.sizeAlt] : [])];
+  if (link.kind === "block") return [link.block.size, ...(link.block.sizeAlt !== undefined ? [link.block.sizeAlt] : [])];
   if (link.kind === "srd") {
     const block = input.srd?.find((m) => m.srdId === link.srdId);
     return block ? [block.size] : null;

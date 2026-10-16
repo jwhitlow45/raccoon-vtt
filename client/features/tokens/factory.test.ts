@@ -5,7 +5,7 @@ import type { Token } from "#shared/model.ts";
 import { clientOpSchema, MAX_LEGENDARY_USES, MAX_NAME, monsterInputSchema } from "#shared/protocol.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { monsterView } from "#shared/statBlock.ts";
-import { DM, actor, apply, blockOf, character, customMonster, room, token } from "#shared/testutil.ts";
+import { DM, actor, apply, blockOf, character, companionBlock, customMonster, room, token } from "#shared/testutil.ts";
 import {
   blankToken,
   characterToken,
@@ -239,6 +239,19 @@ describe("other token sources", () => {
     assert.deepEqual(made.companion, { of: "hero", turn: "shared" });
     assert.deepEqual(made.ownerIds, ["p1"]);
     assert.equal(made.number, undefined);
+  });
+
+  test("a companion's duplicate keeps its block link, and drops one to a block deleted since, which a new link may not name (docs/design-v1-companion-stat-blocks.md 3.2)", () => {
+    const state = room({ characters: { hero: character("hero", { ownerIds: ["p1"] }) } });
+    state.companionBlocks.moth = companionBlock("moth", "hero");
+    const linked = (blockId: string) => token("ws", { kind: "npc", ownerIds: ["p1"], companion: { of: "hero", turn: "shared" }, actor: { inline: actor({ blockId }) } });
+    const kept = duplicateToken(linked("moth"), { id: "ws2", at: { x: 4, y: 3 }, chunks: {}, blocks: state.companionBlocks });
+    assert.equal("inline" in kept.actor && kept.actor.inline.blockId, "moth");
+    const made = apply({ ...state, tokens: { ws: linked("moth") } }, { t: "token.create", token: kept }, DM).tokens.ws2!;
+    assert.equal("inline" in made.actor && made.actor.inline.blockId, "moth");
+    const dropped = duplicateToken(linked("gone"), { id: "ws3", at: { x: 4, y: 3 }, chunks: {}, blocks: state.companionBlocks });
+    assert.equal("inline" in dropped.actor && "blockId" in dropped.actor.inline, false);
+    apply({ ...state, tokens: { ws: linked("gone") } }, { t: "token.create", token: dropped }, DM);
   });
 
   test("a duplicate lands where it goes as its original would if dropped there", () => {

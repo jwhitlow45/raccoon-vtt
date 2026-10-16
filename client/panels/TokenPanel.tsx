@@ -127,7 +127,7 @@ function TokenDetails(props: PanelProps) {
     owner: access.owner,
     kind: token.kind,
     companion,
-    statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor }),
+    statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion }),
     summary: summary !== null,
     actor: actor !== undefined,
     ownerRenames: !access.dm && access.canEditToken("name"),
@@ -393,7 +393,9 @@ function SizeField(props: { token: Token; actor: Partial<Actor>; access: TokenAc
   const [refused, setRefused] = useState<string | null>(null);
   const characters = useRoomView((s) => s.view?.characters);
   const monsters = useRoomView((s) => s.view?.monsters);
-  const srd = useSrdList(props.actor.srdId !== undefined && props.actor.monsterId === undefined);
+  const blocks = useRoomView((s) => s.view?.companionBlocks);
+  // A companion's stored block or a room monster's comes first, so the SRD loads only when it is the link (statBlockLink.ts tokenStatBlock).
+  const srd = useSrdList(props.actor.srdId !== undefined && props.actor.monsterId === undefined && props.actor.blockId === undefined);
   // A refusal belongs to the size it was about: a new size, or a new token, clears it.
   useEffect(() => setRefused(null), [token.id, token.size, token.w, token.h]);
   const fp = footprint(token);
@@ -406,7 +408,7 @@ function SizeField(props: { token: Token; actor: Partial<Actor>; access: TokenAc
       </FieldRow>
     );
   }
-  const base = backTo(token.size, baseSize({ token, actor: props.actor, characters, monsters, srd: srd.list }));
+  const base = backTo(token.size, baseSize({ token, actor: props.actor, characters, monsters, blocks, srd: srd.list }));
   const options = access.dm ? SIZE_OPTIONS : SIZE_OPTIONS.filter((o) => o.value !== "custom");
   return (
     <>

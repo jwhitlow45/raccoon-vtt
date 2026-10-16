@@ -111,6 +111,14 @@ describe("the creature's own size, and the steps", () => {
     assert.equal(baseSize({ token: { kind: "object", actor: { inline: {} as never } }, actor: { monsterId: "m1" }, ...view, srd: null }), null, "an object");
   });
 
+  test("a companion's own stat block gives its base, and one deleted since gives none (docs/design-v1-companion-stat-blocks.md 3.2)", () => {
+    const blocks = { b1: { size: "tiny" as const }, b2: { size: "medium" as const, sizeAlt: "small" as const } };
+    assert.deepEqual(baseSize({ token: npc, actor: { blockId: "b1" }, ...view, blocks, srd: null }), ["tiny"]);
+    assert.deepEqual(baseSize({ token: npc, actor: { blockId: "b2" }, ...view, blocks, srd: null }), ["medium", "small"]);
+    assert.equal(baseSize({ token: npc, actor: { blockId: "gone" }, ...view, blocks, srd: null }), null);
+    assert.equal(backTo("large", baseSize({ token: npc, actor: { blockId: "b1" }, ...view, blocks, srd: null })), "tiny", "an owl grown Large goes back to Tiny");
+  });
+
   test("Back to names the base's first size, only where the token is neither", () => {
     assert.equal(backTo("large", ["medium"]), "medium");
     assert.equal(backTo("small", ["medium", "small"]), null);

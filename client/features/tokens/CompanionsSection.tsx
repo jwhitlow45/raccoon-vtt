@@ -306,6 +306,8 @@ export function CompanionSection(props: {
   const { token, access } = props;
   const companion = token.companion;
   const characters = useRoomView((s) => s.view?.characters);
+  const blockId = "inline" in token.actor ? token.actor.inline.blockId : undefined;
+  const stored = useRoomView((s) => (blockId !== undefined ? s.view?.companionBlocks[blockId] !== undefined : false));
   const relink = useSend();
   const kind = useSend();
   const detach = useSend();
@@ -321,18 +323,23 @@ export function CompanionSection(props: {
     .sort((a, b) => a.name.localeCompare(b.name));
   // Folded, the section names its character beside its label, as Owners names its players.
   const summary = <span style={{ flex: "0 1 auto", minWidth: 0, color: theme.color.textMuted, fontSize: theme.font.small, overflowWrap: "anywhere" }}>{name}</span>;
+  // A stored block is its character's, so giving the companion away or letting it go leaves the block behind (docs/design-v1-companion-stat-blocks.md 5.5).
+  const staysLine = stored ? <Help style={{ overflowWrap: "anywhere" }}>{`Its stat block is ${name}’s and stays with ${name}.`}</Help> : null;
   return (
     <Section title="Companion" fold={props.fold?.(summary)}>
       {access.dm ? (
-        <FieldRow label="Belongs to">
-          <Select<string>
-            label="Belongs to"
-            value={companion.of}
-            disabled={relink.waiting}
-            options={list.map((c) => ({ value: c.id, label: c.name }))}
-            onChange={(of) => send(linkPatch(companion, { of }))}
-          />
-        </FieldRow>
+        <>
+          <FieldRow label="Belongs to">
+            <Select<string>
+              label="Belongs to"
+              value={companion.of}
+              disabled={relink.waiting}
+              options={list.map((c) => ({ value: c.id, label: c.name }))}
+              onChange={(of) => send(linkPatch(companion, { of }))}
+            />
+          </FieldRow>
+          {staysLine}
+        </>
       ) : (
         <Help>
           Belongs to {name}. Whoever plays {name} controls it.
@@ -358,10 +365,11 @@ export function CompanionSection(props: {
         </span>
       ) : null}
       {access.dm ? (
-        <div style={{ display: "flex" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
           <Button size="sm" busy={detach.waiting} onClick={() => detach.send({ t: "token.update", tokenId: token.id, patch: { companion: null } })}>
             Stop being a companion
           </Button>
+          {staysLine}
         </div>
       ) : null}
     </Section>

@@ -26,7 +26,7 @@ import { duplicateToken, occupiedBoxes, spreadPositions } from "../features/toke
 import { DefenseLines, MoreStats, SavesLine, SheetAnchor, useLinkedBlock, VitalsLine } from "../features/tokens/StatSummary.tsx";
 import { openStatBlock } from "../features/tokens/statBlockOpen.ts";
 import { shortSplit, validSheetUrl, vitals } from "../features/tokens/statSummary.ts";
-import { statBlockShown, tokenStatBlock } from "../features/monsters/statBlockLink.ts";
+import { opensStatBlock, statBlockShown, tokenStatBlock } from "../features/monsters/statBlockLink.ts";
 import { visionOn } from "../features/vision/sightMode.ts";
 import {
   conditionLit,
@@ -169,6 +169,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const multi = useRoomView((s) => s.local.multi);
   const encounter = useRoomView((s) => s.view?.encounter);
   const monsters = useRoomView((s) => s.view?.monsters);
+  const blocks = useRoomView((s) => s.view?.companionBlocks);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const scope = useRoomScope();
   // Only a creature a player plays, askable where it stands, offers a roll request (docs/design-v1-dm-tools.md 3.3, rolls/logic.ts askTarget).
@@ -196,8 +197,8 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const items = vitals({ actor, token, fullAccess: props.fullAccess || access.full, place: "bar" });
   const split = shortSplit(items);
   const block = useLinkedBlock(token, actor, access);
-  const link = tokenStatBlock(actor, monsters);
-  const statBlock = statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor }) && (link.kind === "room" || link.kind === "srd");
+  // A creature companion's players read its block here too, as the DM does a monster's (docs/design-v1-companion-stat-blocks.md 6.6).
+  const statBlock = opensStatBlock(statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion: token.companion !== undefined }), tokenStatBlock(actor, monsters, blocks));
   const sheetUrl = actor?.sheetUrl ? validSheetUrl(actor.sheetUrl) : null;
   // A dead creature's bar offers the DM Revive after the Dead tag, and tells a player who may heal it what healing will do (docs/design-v1-combat-flow.md 3.5).
   // An HP-less token shows no life tag, so it has neither (docs/design-v1-token-panel.md 3.2).
@@ -220,7 +221,8 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
     const [at] = spreadPositions({ center: { x: token.x + fp.w / 2, y: token.y + fp.h / 2 }, footprint: fp, count: 1, bounds: scene.bounds, occupied });
     const id = actions.newId();
     const chunks = store.getState().view?.buildChunks ?? {};
-    if (actions.dispatch({ t: "token.create", token: duplicateToken(token, { id, at: at ?? { x: token.x + fp.w, y: token.y }, chunks }) }) !== null) {
+    const copy = duplicateToken(token, { id, at: at ?? { x: token.x + fp.w, y: token.y }, chunks, blocks: blocks ?? {} });
+    if (actions.dispatch({ t: "token.create", token: copy }) !== null) {
       ui.select(id);
     }
   };

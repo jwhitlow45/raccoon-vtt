@@ -49,14 +49,16 @@ export function useSrdList(active: boolean): { list: readonly SrdMonster[] | nul
 
 /**
  * The block behind a token's link, where this viewer reads it
- * (statBlockLink.ts statBlockShown): none, loading, failed, or ready. The
- * vitals never wait for it.
+ * (statBlockLink.ts statBlockShown): none, loading, failed, or ready. A
+ * companion's stored block reads at once from the view, so only an SRD
+ * block loads the chunk. The vitals never wait for it.
  */
-export function useLinkedBlock(token: Pick<Token, "kind">, actor: Partial<Actor> | undefined, access: Pick<TokenAccess, "dm" | "owner">): LinkedBlock {
+export function useLinkedBlock(token: Pick<Token, "kind" | "companion">, actor: Partial<Actor> | undefined, access: Pick<TokenAccess, "dm" | "owner">): LinkedBlock {
   const monsters = useRoomView((s) => s.view?.monsters);
-  const shown = statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor });
-  const srd = useSrdList(shown && tokenStatBlock(actor, monsters).kind === "srd");
-  const block = shown ? linkedBlockState(actor, monsters, srd) : ({ kind: "none" } as const);
+  const blocks = useRoomView((s) => s.view?.companionBlocks);
+  const shown = statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion: token.companion !== undefined });
+  const srd = useSrdList(shown && tokenStatBlock(actor, monsters, blocks).kind === "srd");
+  const block = shown ? linkedBlockState(actor, monsters, srd, blocks) : ({ kind: "none" } as const);
   return block;
 }
 
