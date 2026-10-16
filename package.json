@@ -61,6 +61,7 @@
     "@types/yauzl": "3.4.0",
     "@types/yazl": "3.3.1",
     "@vitejs/plugin-react": "6.1.2",
+    "pdfjs-dist": "6.3.289",
     "playwright-core": "1.63.0",
     "three": "0.160.0",
     "typescript": "7.0.2",
