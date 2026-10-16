@@ -37,6 +37,7 @@ import {
   type Rect,
   type Size,
 } from "../lib/camera.ts";
+import { isAppleDevice } from "../lib/device.ts";
 import { fitTarget } from "../lib/fitTarget.ts";
 import { revealedMask } from "../lib/fogTiles.ts";
 import { CameraGesture, distance, LongPress, TAP_SLOP_PX } from "../lib/gestures.ts";
@@ -53,7 +54,7 @@ import { stageMountKey, uiScale, useLowPower, useMapVariant, useUiScale } from "
 import { mapFocusSlot, spaceMovesMap } from "../pages/mapFocus.ts";
 import { localDragSlot } from "../state/localDrags.ts";
 import { useRoomScope } from "../state/scope.ts";
-import { barDismiss } from "../state/selection.ts";
+import { addsToSelection, barDismiss } from "../state/selection.ts";
 import { stageKeysSlot } from "../state/shortcuts.ts";
 import { sheetOpen as sheetIsOpen } from "../state/types.ts";
 import { dockSlot, foldsUnderSheet } from "../pages/fold.ts";
@@ -76,6 +77,7 @@ const SETTLE_MS = 1_000;
 const EMPTY_TILES: RoomState["fogTiles"] = {};
 const EMPTY_MAP_LABELS: RoomState["labels"] = {};
 const NOT_CARRIED: ReadonlySet<string> = new Set();
+const APPLE = isAppleDevice();
 const BOARD_LAYERS = layersOf("board");
 const OVERLAY_LAYERS = layersOf("overlay");
 const UNDER_DECOR_LAYERS = layersOf("underDecor");
@@ -557,11 +559,11 @@ export function MapStage(props: {
   } | null>(null);
   /**
    * A box being dragged over the map to select the tokens under it, in
-   * screen pixels. With Select several on and no Shift, a box that never
-   * moves past the tap slop is a tap off instead (docs/design-v1-bar-dock.md
-   * section 3).
+   * screen pixels. With Select several on and no key that adds (`add`), a
+   * box that never moves past the tap slop is a tap off instead
+   * (docs/design-v1-bar-dock.md section 3).
    */
-  const boxRef = useRef<{ pointerId: number; start: Point; shift: boolean; moved: boolean } | null>(null);
+  const boxRef = useRef<{ pointerId: number; start: Point; add: boolean; moved: boolean } | null>(null);
   const boxElRef = useRef<HTMLDivElement>(null);
   /** Set when a gesture became multi-touch, so lifting fingers off a token does not select it. */
   const suppressSelectRef = useRef(false);
@@ -743,11 +745,12 @@ export function MapStage(props: {
       const handlers = toolRef.current.pointer;
       const tokenId = tokenAt(p);
       if (gesture.pointers.size === 0) suppressSelectRef.current = false;
-      // While selecting several, or with Shift on a desktop, a drag on empty
-      // map draws a box that selects the tokens under it. Two fingers still
-      // move the map.
-      const boxing =
-        !handlers && tokenId === null && gesture.pointers.size === 0 && (multiRef.current || (e.pointerType === "mouse" && e.shiftKey));
+      // While selecting several, or on a desktop with a key that adds a
+      // clicked token (Shift, or Ctrl or Cmd: state/selection.ts
+      // addsToSelection), a drag on empty map draws a box that adds the
+      // tokens under it. Two fingers still move the map.
+      const add = addsToSelection(e, APPLE);
+      const boxing = !handlers && tokenId === null && gesture.pointers.size === 0 && (multiRef.current || (e.pointerType === "mouse" && add));
       // A tool with handlers owns the one-finger gesture wherever it lands, so it never pans.
       const mode = gesture.down(e.pointerId, p, c, !handlers && tokenId === null && !boxing);
       refusedPressRef.current = null;
@@ -766,7 +769,7 @@ export function MapStage(props: {
         return;
       }
       if (boxing) {
-        boxRef.current = { pointerId: e.pointerId, start: p, shift: e.shiftKey, moved: false };
+        boxRef.current = { pointerId: e.pointerId, start: p, add, moved: false };
       } else if (handlers) {
         toolPointerRef.current = e.pointerId;
         handlers.down?.(toolPointer(e, p, c, tokenId), toolContextRef.current);
@@ -847,7 +850,7 @@ export function MapStage(props: {
         if (lifted && (box.moved || distance(box.start, p) > TAP_SLOP_PX)) {
           const picked = tokensInBox(tokensByIdRef.current.values(), screenToWorld(c, box.start), screenToWorld(c, p));
           if (picked.length > 0) uiRef.current.selectMany(picked.map((t) => t.id));
-        } else if (lifted && !held && !box.shift) {
+        } else if (lifted && !held && !box.add) {
           // Select several's tap off hides the group's bar and keeps the group (state/selection.ts tapToken), and opens nothing, as before.
           onSelectRef.current(null);
           putAway(toolContextRef.current, screenToWorld(c, p));

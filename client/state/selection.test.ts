@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { addToSelection, barDismiss, dismissal, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
+import { appleKeys } from "../lib/device.ts";
+import { addsToSelection, addToSelection, barDismiss, dismissal, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
 import { INITIAL_LOCAL } from "./types.ts";
 
 describe("taps, the selection and the action bar", () => {
@@ -123,5 +124,33 @@ describe("taps, the selection and the action bar", () => {
     assert.equal(local.selectedId, "b");
     assert.equal(keepSelected(local, () => true), local);
     assert.equal(selectToken(local, null).selectedIds.length, 0);
+  });
+});
+
+describe("the keys that add to a selection", () => {
+  const keys = (held: { shift?: boolean; ctrl?: boolean; cmd?: boolean } = {}) => ({ shiftKey: held.shift === true, ctrlKey: held.ctrl === true, metaKey: held.cmd === true });
+
+  test("Shift adds everywhere, and Ctrl adds on Windows and Linux", () => {
+    for (const apple of [false, true]) assert.equal(addsToSelection(keys({ shift: true }), apple), true);
+    assert.equal(addsToSelection(keys({ ctrl: true }), false), true);
+    assert.equal(addsToSelection(keys(), false), false);
+    assert.equal(addsToSelection(keys(), true), false);
+  });
+
+  test("on a Mac, Ctrl with a click is a right click, so Cmd adds instead", () => {
+    assert.equal(addsToSelection(keys({ ctrl: true }), true), false);
+    assert.equal(addsToSelection(keys({ cmd: true }), true), true);
+    assert.equal(addsToSelection(keys({ cmd: true, shift: true }), true), true, "Cmd+Shift, as a Mac user may hold for a box");
+    assert.equal(addsToSelection(keys({ cmd: true }), false), true, "Cmd still adds wherever a Meta key reaches the page");
+  });
+
+  test("a Mac, an iPad and an iPhone count as Apple, and Windows, Linux and Android do not", () => {
+    const mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+    assert.equal(appleKeys({ platform: "MacIntel", userAgent: mac }), true);
+    assert.equal(appleKeys({ platform: "iPhone", userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)" }), true);
+    assert.equal(appleKeys({ platform: "", userAgent: "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X)" }), true);
+    assert.equal(appleKeys({ platform: "Win32", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }), false);
+    assert.equal(appleKeys({ platform: "Linux x86_64", userAgent: "Mozilla/5.0 (X11; Linux x86_64)" }), false);
+    assert.equal(appleKeys({ platform: "Linux armv81", userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8)" }), false);
   });
 });

@@ -4,11 +4,13 @@ import { Arc, Circle, Ellipse, Group, Image as KImage, Line, Rect, Shape, Text }
 import type { Actor, Effect } from "#shared/model.ts";
 import { shownLife } from "#shared/rules/hp.ts";
 import { boardSizes } from "../lib/boardScale.ts";
+import { isAppleDevice } from "../lib/device.ts";
 import { lineHeight, type LabelLine } from "../lib/boardText.ts";
 import { displayName, footprint, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { cropSourceRect, DECOR_MIN_PX, effectChip, effectCount, initials, type Chip } from "../lib/tokenView.ts";
 import { useAccent } from "../state/accent.ts";
+import { addsToSelection } from "../state/selection.ts";
 import { useAssets, useRoomView } from "../state/view.ts";
 import { useChipIcon } from "./chipIcons.ts";
 import { PLATE_STROKE, plateRect } from "./textBoxes.ts";
@@ -24,7 +26,7 @@ import { glyphColor, glyphSide, iconPath2D, imageFace, useIconGlyph } from "../f
 export type TokenInteraction = {
   /** The mouse over a token, or off it (null): a desktop shows that token's whole label. */
   hover(tokenId: string | null): void;
-  /** `add` is Shift or Cmd held: add the token to the selection or take it out. */
+  /** `add` is Shift or Ctrl held (Cmd on a Mac, state/selection.ts addsToSelection): add the token to the selection or take it out. */
   select(tokenId: string, add: boolean): void;
   menu(tokenId: string): void;
   dragStart(node: Konva.Node, token: ViewToken): void;
@@ -33,6 +35,8 @@ export type TokenInteraction = {
 };
 
 export const TokenInteractionContext = createContext<TokenInteraction | null>(null);
+
+const APPLE = isAppleDevice();
 
 const RING: Record<ViewToken["disposition"], string> = {
   ally: theme.color.ally,
@@ -80,7 +84,7 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
       y={token.y}
       draggable={draggable}
       opacity={token.visibility === "dm" ? 0.5 : 1}
-      onPointerClick={(e) => interaction?.select(token.id, e.evt.shiftKey || e.evt.metaKey)}
+      onPointerClick={(e) => interaction?.select(token.id, addsToSelection(e.evt, APPLE))}
       onMouseEnter={() => interaction?.hover(token.id)}
       onMouseLeave={() => interaction?.hover(null)}
       onContextMenu={(e) => {

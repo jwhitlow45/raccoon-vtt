@@ -11,8 +11,8 @@ import type { LocalUi } from "./types.ts";
  * hover, so "Select several" is a mode: while it is on, a tap adds a token
  * or takes it out again, and a tap on empty map hides the group's bar and
  * keeps the group, so the tokens under the bar can be tapped
- * (docs/design-v1-bar-dock.md section 3). On a desktop, Shift or Cmd with a
- * click does the same without the mode.
+ * (docs/design-v1-bar-dock.md section 3). On a desktop, Shift or Ctrl (Cmd
+ * on a Mac) with a click does the same without the mode (addsToSelection).
  * `selectedId` is always the last token of `selectedIds`: the one the
  * single-token views (its panel, the area tool's caster) show.
  */
@@ -20,8 +20,8 @@ import type { LocalUi } from "./types.ts";
 /**
  * A tap on a token, on the map or on its initiative row ("tapping a row
  * opens the same menu as tapping the token", features section 10): select
- * it and open its action bar. `add` (Shift on a desktop, or the "Select
- * several" mode) adds it to the selection or takes it out. A token added
+ * it and open its action bar. `add` (Shift or Ctrl on a desktop, or the
+ * "Select several" mode) adds it to the selection or takes it out. A token added
  * shows the bar, and one taken out leaves a hidden bar hidden, so tapping
  * tokens out of a group never covers the next one. Taking out the last
  * lets go. Null is a tap on empty map, which lets go, except while
@@ -33,6 +33,18 @@ export function tapToken(local: LocalUi, tokenId: string | null, add = false): L
   const leaving = local.selectedIds.includes(tokenId);
   const ids = leaving ? local.selectedIds.filter((id) => id !== tokenId) : [...local.selectedIds, tokenId];
   return withIds(local, ids, ids.length > 0 && (leaving ? local.actionBar : true));
+}
+
+/**
+ * Whether a click on a token, or a mouse drag on empty map, with these
+ * keys held adds to the selection: Shift, or Ctrl as on Windows and Linux.
+ * On a Mac, an iPad or an iPhone (`apple`) Ctrl with a click is a right
+ * click, which selects that token alone, and a click that then also added
+ * would take it straight back out, so Cmd adds there instead. Cmd counts
+ * everywhere, as it did before Ctrl did.
+ */
+export function addsToSelection(keys: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }, apple: boolean): boolean {
+  return keys.shiftKey || keys.metaKey || (!apple && keys.ctrlKey);
 }
 
 /** Selects one token without opening or closing its action bar, as placing or duplicating one does. Null lets go. */
