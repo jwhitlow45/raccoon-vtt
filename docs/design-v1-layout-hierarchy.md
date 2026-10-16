@@ -382,9 +382,9 @@ One component, `HandoutViewer` (`features/handouts/HandoutViewer.tsx`), replaces
 - It loads the `full` variant when the row lists it, else the largest one listed (`AssetRow.variants`, `lib/api.ts:39`). The server serves an image only to a member who may see it (design 11.2), so a player sees nothing new.
 - A player's "Handouts from the DM" and its Open stay as they are (`LibraryPanel.tsx:37-79`), opening the popup, which now holds the viewer.
 
-### 5.4 Later: a document of pages
+### 5.4 A document of pages
 
-A PDF-like viewer is queued, not part of this wave: one scrolling document of pages with zoom. The viewer is built for it now. It takes `pages: { src, alt, width, height }[]` and lays them in one column with a 16 px gap. One page fits whole. Several fit the widest page's width, the wheel then scrolls (and with Ctrl, like a pinch, zooms), and the stage, the three states, Expand, the buttons and the keys work as above. The states and their steps are one pure function in `zoom.ts` (`viewerStep(state, action)`), so the later viewer reuses them too. This wave passes one page. The layout function's tests cover two pages, so the later viewer reuses it unchanged.
+Built later, in docs/design-v1-pdf-handouts.md: a PDF uploads as one handout of pages, and this viewer shows them as one scrolling document, with a page row, the page keys, zoom out to a whole page and the page each showing was left on (its section 5). What this wave left ready for it follows. A PDF-like viewer was queued, not part of this wave: one scrolling document of pages with zoom. The viewer was built for it then. It takes `pages: { src, alt, width, height }[]` and lays them in one column with a 16 px gap. One page fits whole. Several fit the widest page's width, the wheel then scrolls (and with Ctrl, like a pinch, zooms), and the stage, the three states, Expand, the buttons and the keys work as above. The states and their steps are one pure function in `zoom.ts` (`viewerStep(state, action)`), so the later viewer reuses them too. This wave passes one page. The layout function's tests cover two pages, so the later viewer reuses it unchanged.
 
 ### 5.5 Mockups
 
