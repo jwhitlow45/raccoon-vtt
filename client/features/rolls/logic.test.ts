@@ -34,6 +34,7 @@ import {
   keepFocusFor,
   lookAtRequests,
   newestFirst,
+  askTarget,
   offersRequest,
   parseTotal,
   partyCharacters,
@@ -191,6 +192,15 @@ describe("who a request asks", () => {
     assert.equal(offered("b1"), true, "a party character is asked as itself, wherever its token stands");
     assert.equal(offered("npcDm", "goblin"), false, "no player plays either");
     assert.equal(offered("goblin", "cap"), true, "one askable creature in a group is enough");
+  });
+
+  test("an object a player plays, such as a Spiritual Weapon, is no creature to ask, alone or in a group", () => {
+    const state = setup();
+    state.tokens.weapon = token("weapon", { kind: "object", name: "Spiritual Weapon", sceneId: "s1", ownerIds: ["p1"], actor: { inline: actor({ hp: { cur: 0, max: 0, temp: 0 }, ac: 0 }) } });
+    assert.equal(askTarget(state, state.tokens.weapon!), null);
+    assert.equal(offersRequest(state, [state.tokens.weapon!]), false, "the single bar");
+    assert.equal(offersRequest(state, [state.tokens.weapon!, state.tokens.goblin!]), false, "the group bar, with nothing else to ask");
+    assert.equal(offersRequest(state, [state.tokens.weapon!, state.tokens.b1!]), true, "a party character beside it still is");
   });
 });
 

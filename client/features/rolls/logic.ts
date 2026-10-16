@@ -108,14 +108,17 @@ export function defaultTargets(view: View, from: AskFrom, viewing?: string | nul
 }
 
 /**
- * How a selected token is asked, or null when no player plays it. A party
- * character is asked as itself. A token a player owns that points at a
- * character no player owns, such as the DM's NPC lent to a player, is asked
- * by its token, as a familiar is, since `roll.ask` refuses that character.
- * A token target off the players' scene is listed but cannot be asked.
+ * How a selected token is asked, or null when no player plays it or it is
+ * no creature. A party character is asked as itself. A token a player owns
+ * that points at a character no player owns, such as the DM's NPC lent to a
+ * player, is asked by its token, as a familiar is, since `roll.ask` refuses
+ * that character. A token target off the players' scene is listed but
+ * cannot be asked. An object, such as a Spiritual Weapon its cleric moves,
+ * rolls nothing of its own (docs/design-v1-token-panel.md 3.3), so neither
+ * bar offers "Request a roll" for it and the sheet does not list it.
  */
 export function askTarget(view: Pick<RoomState, "members" | "characters" | "meta">, token: Token): TargetOption | null {
-  if (!playersToken(view, token)) return null;
+  if (token.kind === "object" || !playersToken(view, token)) return null;
   const character = "ref" in token.actor ? view.characters[token.actor.ref] : undefined;
   if (character && anyPlayer(view, character.ownerIds)) return { key: `c:${character.id}`, ref: { characterId: character.id }, name: character.name, ticked: true };
   if (token.sceneId === view.meta.playerSceneId) return { key: `t:${token.id}`, ref: { tokenId: token.id }, name: displayName(token), ticked: true };
