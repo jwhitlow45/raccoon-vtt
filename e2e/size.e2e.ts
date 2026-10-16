@@ -7,6 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
 import { ConsoleWatch, dragWorld, OpSocket, pagePoint, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { A5, LETTER, LETTER_WIDE, pdfOf } from "./pdfFixture.ts";
 
 /**
  * Every dialog stays on the screen at the larger interface sizes
@@ -558,6 +559,50 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
       });
     }
   }
+
+  test("2b. the DM panel's PDF upload block at 246 px wide: nothing past its edge, and 44 px targets", async () => {
+    // A phone at 320 x 480 with the interface at 130% leaves the DM panel's Handouts section 246 px of its own (docs/design-v1-pdf-handouts.md 11.3).
+    await page.setViewportSize({ width: 320, height: 480 });
+    await page.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+    // The sweep before may end anywhere, Home included, so the room is opened by its address.
+    await page.goto(`${server.origin}/r/${run.roomId}`);
+    await page.getByRole("status", { name: "Connected" }).first().waitFor();
+    await openPanel("DM", true);
+    const open = page.getByRole("button", { name: "Show a handout" });
+    const form = page.getByRole("group", { name: "Show a handout" });
+    await open.or(form).first().waitFor();
+    if (await open.isVisible()) await open.click();
+    await form.getByLabel("Upload a file").setInputFiles({ name: "A long letter from the harbor master.pdf", mimeType: "application/pdf", buffer: pdfOf([LETTER, LETTER_WIDE, A5], "A long letter from the harbor master") });
+    const block = page.getByRole("group", { name: "PDF upload, A long letter from the harbor master.pdf" });
+    await block.getByRole("button", { name: "Upload 3 pages", exact: true }).waitFor();
+    // An empty From page field brings up the range's words too, the longest the block shows at the range.
+    await block.getByLabel("From page").fill("");
+    await block.getByRole("alert").waitFor();
+    const width = await block.evaluate((el) => (el as unknown as { getBoundingClientRect(): { width: number }; currentCSSZoom?: number }).getBoundingClientRect().width / ((el as unknown as { currentCSSZoom?: number }).currentCSSZoom ?? 1));
+    assert.ok(width <= 247, `the block is ${width.toFixed(1)} px wide, not the 246 px it was measured at`);
+    const past = await block.evaluate((el) => {
+      type Box = { right: number };
+      type El = { getBoundingClientRect(): Box; querySelectorAll(s: string): ArrayLike<El>; scrollWidth: number; clientWidth: number; tagName: string; textContent: string | null; parentElement: El | null };
+      const styleOf = (globalThis as unknown as { getComputedStyle(el: unknown): { overflowX: string } }).getComputedStyle;
+      const root = el as unknown as El;
+      const edge = root.getBoundingClientRect().right;
+      // Text inside a box that clips it, such as the hidden status line, shows only as far as that box.
+      const clipped = (child: El) => {
+        for (let up = child.parentElement; up && up !== root; up = up.parentElement) if (styleOf(up).overflowX !== "visible") return true;
+        return false;
+      };
+      const out = Array.from(root.querySelectorAll("*"))
+        .filter((child) => child.getBoundingClientRect().right > edge + 0.5 && !clipped(child))
+        .map((child) => `${child.tagName} "${(child.textContent ?? "").slice(0, 30)}"`);
+      return root.scrollWidth > root.clientWidth + 1 ? [...out, `the block scrolls sideways: ${root.scrollWidth} in ${root.clientWidth}`] : out;
+    });
+    assert.deepEqual(past, [], "parts of the block run past its edge");
+    await checkTargets(block, "the PDF upload block at 246 px");
+    await shots.take(page, "size-phone-130-pdf-block");
+    // Nothing uploaded yet, so Cancel ends the job at once.
+    await block.getByRole("button", { name: "Cancel upload" }).click();
+    await block.waitFor({ state: "detached" });
+  });
 
   test("3. no page errors along the way", () => {
     assert.deepEqual(consoleWatch.errors.filter((e) => e.startsWith("uncaught")), []);

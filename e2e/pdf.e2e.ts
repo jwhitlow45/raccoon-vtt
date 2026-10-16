@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type Request, type Route } from "playwright-core";
 import sharp from "sharp";
 import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { A5, BANDS, LETTER, LETTER_WIDE, bandProblem, fontBoxDistance, pdfOf, shapeProblem, type PdfPage } from "./pdfFixture.ts";
 
 /**
  * PDF handouts end to end (docs/design-v1-pdf-handouts.md 11.3): a handout
@@ -14,12 +15,15 @@ import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, waitFor, type 
  * the wheel and a fling, loaded near the screen, remembered per showing,
  * downloaded as a PDF, and kept in the DM's Library as one item.
  *
- * The upload's steps come first in the full run. This part starts from a
- * handout of pages made through the ops (`documentOf`): its pages are
- * ordinary handout images, each white paper with a band of its own color in
- * its top-left corner, as the PDF fixture draws them. A run whose upload
- * steps saved a document sets `run.letter` before step 7, and every step
- * from there reads it.
+ * Steps 1 to 6 upload PDFs as a DM does, with Upload a file in Show a
+ * handout: small vector PDFs from pdfFixture.ts, and the files in
+ * e2e/fixtures/ for a password, the scanners' codecs and an embedded font.
+ * Each stored page is read back from the server and checked by its pixels.
+ * Step 1's document, "Strange letter", is the one the later steps read
+ * through `run.letter`. Their other handouts are made through the ops
+ * (`documentOf`): ordinary handout images, each white paper with a band of
+ * its own color in its top-left corner, as a PDF's page draws it, so the
+ * same checks hold. A run from step 7 alone makes the letter that way too.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus twelve. The
  * other environment variables are the smoke run's (smoke.e2e.ts).
@@ -75,16 +79,21 @@ const run = {
   showingId: "",
   mixed: null as Doc | null,
   thirty: null as Doc | null,
+  /** The PDF step 11 downloaded, uploaded again in 11b. */
+  downloaded: null as Buffer | null,
 };
 
-/** Each page's band, in order, so a page out of place or blank is seen. */
-const BANDS: [number, number, number][] = [
-  [200, 40, 40],
-  [40, 160, 60],
-  [40, 70, 200],
-  [200, 150, 30],
-  [140, 50, 170],
-];
+/** A handout upload's request: the PDF job's pages and the form's images go there. */
+const HANDOUT_PUT = /\/api\/rooms\/[^/]+\/assets\?kind=handout$/;
+
+type Answer = { id: string; width: number; height: number; created?: boolean };
+
+/**
+ * Every handout upload the DM's page sent, in the order sent, with its type
+ * and its answer: null for one that failed, and never settling for one the
+ * test's route holds.
+ */
+const sent: { type: string; answer: Promise<Answer | null> }[] = [];
 
 /** A page as a PDF page draws it: white paper with a band of its own color in its top-left corner and "Page N" printed. */
 async function paper(width: number, height: number, n: number): Promise<Buffer> {
@@ -123,6 +132,123 @@ async function show(doc: Doc, to: "all" | string[] = "all"): Promise<string> {
   const id = randomUUID();
   await ops.send({ t: "handout.show", handout: { id, pages: doc.pages, title: doc.title, to } });
   return id;
+}
+
+type FilePick = { name: string; mimeType: string; buffer: Buffer };
+
+function pdfFile(name: string, buffer: Buffer): FilePick {
+  return { name, mimeType: "application/pdf", buffer };
+}
+
+function fixturePath(name: string): URL {
+  return new URL(`./fixtures/${name}`, import.meta.url);
+}
+
+function fixture(name: string): FilePick {
+  return pdfFile(name, readFileSync(fixturePath(name)));
+}
+
+/** A run of pages of one size, so each PDF's pages are its own bytes and none is taken for another PDF's page. */
+function pagesOf(count: number, size: PdfPage): PdfPage[] {
+  return Array.from({ length: count }, () => size);
+}
+
+/** The DM panel's tab. Its name gains "1 upload waiting" while a PDF upload waits on the DM. */
+function dmTab(): Locator {
+  return dm.getByRole("tab", { name: /^DM( |$)/ });
+}
+
+function handoutForm(): Locator {
+  return dm.getByRole("group", { name: "Show a handout" });
+}
+
+/** Opens Show a handout in the DM panel, ready for Upload a file, letting go of an image the form holds. */
+async function openForm(): Promise<void> {
+  await dmTab().click();
+  const open = dm.getByRole("button", { name: "Show a handout" });
+  // The panel draws a moment after its tab is pressed: the button when the form is closed, else the form.
+  await open.or(handoutForm()).first().waitFor();
+  if (await open.isVisible()) await open.click();
+  const change = handoutForm().getByRole("button", { name: "Change" });
+  if (await change.isVisible()) await change.click();
+}
+
+/** Picks a file with Show a handout's Upload a file. */
+async function pickFile(file: FilePick): Promise<void> {
+  await openForm();
+  await handoutForm().getByLabel("Upload a file").setInputFiles(file);
+}
+
+/** The upload's block in the DM panel, a group named by its file. */
+function jobBlock(fileName: string): Locator {
+  return dm.getByRole("group", { name: `PDF upload, ${fileName}` });
+}
+
+/**
+ * Words the block shows. Its spoken status line, hidden and first in the
+ * block, repeats the start, each stop and the end, so the shown line is the
+ * last match.
+ */
+function shown(block: Locator, text: string | RegExp): Locator {
+  return block.getByText(text, { exact: typeof text === "string" }).last();
+}
+
+/** Presses the block's Upload, waits for its saved line, presses Done, and gives the new document from the DM's state. */
+async function finishUpload(block: Locator, press: string, title: string, count: number): Promise<Doc> {
+  const before = new Set(Object.keys(dmSocket.state?.handoutDocs ?? {}));
+  await block.getByRole("button", { name: press, exact: true }).click();
+  await shown(block, `Saved as ${title}, ${count === 1 ? "1 page" : `${count} pages`}.`).waitFor({ timeout: 90_000 });
+  const doc = await waitFor("the new document in the DM's state", () => Object.values(dmSocket.state?.handoutDocs ?? {}).find((d) => d !== undefined && !before.has(d.id)));
+  await block.getByRole("button", { name: "Done" }).click();
+  await block.waitFor({ state: "detached" });
+  return { id: doc.id, title: doc.title, pages: doc.pages.map((p) => ({ assetId: p.assetId, width: p.width, height: p.height })) };
+}
+
+/** A page's `full` image as the server stored it. */
+async function stored(assetId: string): Promise<Buffer> {
+  const res = await dmContext.request.get(`${server.origin}/api/assets/${assetId}/full`);
+  assert.ok(res.ok(), `reading ${assetId} answered ${res.status()}`);
+  return res.body();
+}
+
+async function assertBand(page: Page_, n: number, what: string): Promise<void> {
+  const problem = await bandProblem(await stored(page.assetId), n);
+  assert.equal(problem, null, `${what}: ${problem}`);
+}
+
+/** The ids in the room's library, as the DM lists them. */
+async function libraryIds(): Promise<Set<string>> {
+  const res = await dmContext.request.get(`${server.origin}/api/rooms/${run.roomId}/assets`);
+  assert.ok(res.ok(), `listing the library answered ${res.status()}`);
+  return new Set(((await res.json()) as { assets: { id: string }[] }).assets.map((a) => a.id));
+}
+
+/**
+ * Deletes handout images the upload steps leave loose, so the Library's
+ * steps find only the images they made themselves.
+ */
+async function deleteImages(ids: readonly string[]): Promise<void> {
+  const res = await dmContext.request.post(`${server.origin}/api/rooms/${run.roomId}/assets/delete`, { headers: { Origin: server.origin, "content-type": "application/json" }, data: { ids } });
+  assert.ok(res.ok(), `deleting ${ids.join(", ")} answered ${res.status()}`);
+}
+
+/** Waits until the page has asked for nothing for `ms`. */
+async function quiet(page: Page, ms: number): Promise<void> {
+  let last = Date.now();
+  const onRequest = () => (last = Date.now());
+  page.on("request", onRequest);
+  try {
+    await waitFor(`${ms} ms with no request`, () => Date.now() - last >= ms);
+  } finally {
+    page.off("request", onRequest);
+  }
+}
+
+/** A promise and the call that settles it, to hold a request until the test lets it go. */
+function gate(): { held: Promise<void>; release(): void } {
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  return { held, release };
 }
 
 async function join(context: BrowserContext, name: string, color: string): Promise<string> {
@@ -200,7 +326,7 @@ function intersects(a: Box, b: Box): boolean {
   return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
-describe("raccoon-vtt pdf handouts run", { timeout: 420_000 }, () => {
+describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
@@ -212,6 +338,20 @@ describe("raccoon-vtt pdf handouts run", { timeout: 420_000 }, () => {
     deskContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: true });
     desk = await deskContext.newPage();
     consoles.dm.attach(dm);
+    // A policy violation fires on the document. The upload's step 1 reads the list.
+    await dmContext.addInitScript(() => {
+      const w = globalThis as unknown as { rvttCsp: string[]; document: { addEventListener(type: string, listener: (e: { violatedDirective: string; blockedURI: string }) => void): void } };
+      w.rvttCsp = [];
+      w.document.addEventListener("securitypolicyviolation", (e) => w.rvttCsp.push(`${e.violatedDirective} ${e.blockedURI}`));
+    });
+    dm.on("request", (req) => {
+      if (req.method() !== "PUT" || !HANDOUT_PUT.test(req.url())) return;
+      const answer = req.response().then(
+        async (res) => (res?.ok() ? ((await res.json()) as Answer) : null),
+        () => null,
+      );
+      sent.push({ type: req.headers()["content-type"] ?? "", answer });
+    });
     consoles.phone.attach(phone);
     consoles.desk.attach(desk);
     await dmSocket.attach(dmContext, dm);
@@ -260,6 +400,369 @@ describe("raccoon-vtt pdf handouts run", { timeout: 420_000 }, () => {
     await desk.goto(`${server.origin}/r/${run.roomId}`);
     await waitFor("Pip's snapshot", () => phoneSocket.state);
     await waitFor("Pat's snapshot", () => deskSocket.state);
+  });
+
+  test("1. Upload: the DM's three-page PDF becomes one document, every request to the app's own origin, each stored page's band in place", async () => {
+    const name = "Strange letter.pdf";
+    const file = pdfFile(name, pdfOf([LETTER, LETTER_WIDE, A5], "Strange letter"));
+    // pdf.js loads only when a PDF is picked. Held a moment, its loading line can be read.
+    const reader = gate();
+    const chunk = /\/assets\/pdfjs-[\w-]+\.js$/;
+    await dm.route(chunk, async (route) => {
+      await reader.held;
+      await route.continue();
+    });
+    // Page 2's upload is held, so the progress line can be read while it waits.
+    const second = gate();
+    let puts = 0;
+    await dm.route(HANDOUT_PUT, async (route) => {
+      if (route.request().method() === "PUT" && ++puts === 2) await second.held;
+      await route.continue();
+    });
+    const requests: { method: string; url: string }[] = [];
+    const onRequest = (req: Request) => requests.push({ method: req.method(), url: req.url() });
+    // The room's code for its other panels loads in the background once the DM panel opens. The upload starts after it, so every request from then on is the upload's.
+    await openForm();
+    await quiet(dm, 1_000);
+    // As the app loads, zod tries eval once to see whether it may compile its parsers, and the policy's refusal fires the event. That is the app's, so the count starts with the upload.
+    await dm.evaluate(() => void ((globalThis as unknown as { rvttCsp: string[] }).rvttCsp.length = 0));
+    dm.on("request", onRequest);
+    const from = sent.length;
+    await handoutForm().getByLabel("Upload a file").setInputFiles(file);
+    const block = jobBlock(name);
+    await shown(block, "Loading the PDF reader…").waitFor();
+    await shots.take(dm, "pdf-upload-loading");
+    reader.release();
+    await block.getByRole("heading", { name: "Strange letter.pdf, 3 pages." }).waitFor();
+    assert.equal(await block.getByLabel("From page").inputValue(), "1");
+    assert.equal(await block.getByLabel("To page").inputValue(), "3");
+    assert.equal(await block.getByLabel("Title").inputValue(), "Strange letter", "the title from the PDF's Info");
+    await shots.take(dm, "pdf-upload-range");
+    await block.getByRole("button", { name: "Upload 3 pages", exact: true }).click();
+    await shown(block, "Preparing page 2 of 3…").waitFor();
+    await shots.take(dm, "pdf-upload-preparing");
+    second.release();
+    await shown(block, "Saved as Strange letter, 3 pages.").waitFor({ timeout: 60_000 });
+    await shots.take(dm, "pdf-upload-saved");
+    dm.off("request", onRequest);
+    await dm.unroute(chunk);
+    await dm.unroute(HANDOUT_PUT);
+
+    // Every request went to the app: the reader's chunk, the job's worker and pdf.js's own code in it, the two decoders, and the pages.
+    const saved = Object.values(dmSocket.state?.handoutDocs ?? {}).find((d) => d?.title === "Strange letter");
+    const allowed = [
+      // Once saved, the open form lists the new document by its first page's thumb.
+      new RegExp(`^GET /api/assets/${saved?.pages[0]?.assetId}/thumb$`),
+      /^GET \/assets\/pdfjs-[\w-]+\.js$/,
+      /^GET \/assets\/(pdf\.)?worker-[\w-]+\.js$/,
+      /^GET \/pdfjs\/6\.3\.289\/(jbig2|openjpeg)_nowasm_fallback\.js$/,
+      /^PUT \/api\/rooms\/\w+\/assets\?kind=handout$/,
+    ];
+    const strays = requests.filter((r) => !r.url.startsWith(`${server.origin}/`) || !allowed.some((a) => a.test(`${r.method} ${r.url.slice(server.origin.length)}`)));
+    assert.deepEqual(strays, [], "a request during the upload that is none of the reader's, the decoders' or the pages'");
+    for (const name of ["jbig2_nowasm_fallback.js", "openjpeg_nowasm_fallback.js"]) assert.ok(requests.some((r) => r.url.endsWith(`/pdfjs/6.3.289/${name}`)), `${name} was never loaded`);
+    const violations = await dm.evaluate(() => (globalThis as unknown as { rvttCsp: string[] }).rvttCsp);
+    assert.deepEqual(violations, [], "a content security policy violation");
+
+    // One document, its pages the sizes the uploads answered, each with its band upright and in order.
+    const answers = await Promise.all(sent.slice(from).map((s) => s.answer));
+    assert.equal(answers.length, 3);
+    const docs = Object.values(dmSocket.state?.handoutDocs ?? {}).filter((d) => d !== undefined);
+    assert.equal(docs.length, 1, "the state's documents");
+    const doc = docs[0]!;
+    assert.equal(doc.title, "Strange letter");
+    assert.deepEqual(
+      doc.pages.map((p) => [p.assetId, p.width, p.height]),
+      answers.map((a) => [a!.id, a!.width, a!.height]),
+      "the document's pages are not the uploads' answers",
+    );
+    for (const [i, [w, h]] of [[LETTER.width, LETTER.height], [LETTER_WIDE.width, LETTER_WIDE.height], [A5.width, A5.height]].entries()) {
+      const p = doc.pages[i]!;
+      assert.equal(Math.max(p.width, p.height), 2048, `page ${i + 1}'s long side`);
+      assert.ok(Math.abs(p.width / p.height - w! / h!) < 0.01, `page ${i + 1} is ${p.width} x ${p.height}, not the shape of ${w} x ${h} pt`);
+      await assertBand(p, i + 1, `Strange letter page ${i + 1}`);
+    }
+    run.letter = { id: doc.id, title: doc.title, pages: doc.pages.map((p) => ({ assetId: p.assetId, width: p.width, height: p.height })) };
+    await block.getByRole("button", { name: "Done" }).click();
+    await block.waitFor({ state: "detached" });
+  });
+
+  test("2. the range: a 140-page PDF starts at pages 1 to 100 with its sentence, and pages 87 to 89 upload as three pages", async () => {
+    const name = "Long book.pdf";
+    await pickFile(pdfFile(name, pdfOf(pagesOf(140, { width: 400, height: 600 }), "Long book")));
+    const block = jobBlock(name);
+    await shown(block, "This PDF has 140 pages. A handout holds up to 100, so choose which.").waitFor();
+    assert.equal(await block.getByLabel("From page").inputValue(), "1");
+    assert.equal(await block.getByLabel("To page").inputValue(), "100");
+    await block.getByRole("button", { name: "Upload 100 pages", exact: true }).waitFor();
+    await shots.take(dm, "pdf-upload-long-range");
+    await block.getByLabel("From page").fill("87");
+    await block.getByLabel("To page").fill("89");
+    const doc = await finishUpload(block, "Upload 3 pages", "Long book", 3);
+    for (const [i, p] of doc.pages.entries()) await assertBand(p, 87 + i, `Long book page ${87 + i}`);
+  });
+
+  test("3. refusals: a password, bytes that are no PDF, a blocked reader and a blocked decoder, none uploading a thing", async () => {
+    const from = sent.length;
+    const refusedAs = async (fileName: string, words: string, shot: string) => {
+      const block = jobBlock(fileName);
+      await shown(block, words).waitFor({ timeout: 30_000 });
+      await shots.take(dm, shot);
+      await block.getByRole("button", { name: "Dismiss" }).click();
+      await block.waitFor({ state: "detached" });
+    };
+    await pickFile(fixture("password.pdf"));
+    await refusedAs("password.pdf", "This PDF has a password. Save a copy without one, then upload that.", "pdf-refused-password");
+    await pickFile(pdfFile("Notes.pdf", randomBytes(4096)));
+    await refusedAs("Notes.pdf", "This PDF could not be read. It may be damaged.", "pdf-refused-invalid");
+
+    // The job's worker blocked: the reader's refusal, and no PDF parsed on the page's own thread instead.
+    const readerWords = "The PDF reader could not start here. Check your connection, then try again. If it keeps failing, update the browser or use a computer.";
+    const letter = pdfFile("Strange letter.pdf", pdfOf([LETTER, LETTER_WIDE, A5], "Strange letter"));
+    const workerScript = /\/assets\/worker-[\w-]+\.js$/;
+    const asked: string[] = [];
+    const onRequest = (req: Request) => asked.push(req.url());
+    dm.on("request", onRequest);
+    consoles.dm.allow = [/Failed to load resource: net::ERR_BLOCKED_BY_CLIENT/, /ERR_BLOCKED_BY_CLIENT/];
+    await dm.route(workerScript, (route) => route.abort("blockedbyclient"));
+    await pickFile(letter);
+    await refusedAs("Strange letter.pdf", readerWords, "pdf-refused-reader");
+    await dm.unroute(workerScript);
+    assert.ok(asked.some((u) => workerScript.test(u)), "the job's worker was never asked for");
+    assert.deepEqual(asked.filter((u) => /\/pdf\.worker-/.test(u)), [], "pdf.js's worker code loaded on the page's thread");
+    assert.equal(await dm.evaluate(() => "pdfjsWorker" in globalThis), false, "pdf.js set up its fallback worker on the page's thread");
+
+    // A decoder blocked: the job stops when the file opens, not partway.
+    const decoder = /\/pdfjs\/6\.3\.289\/openjpeg_nowasm_fallback\.js$/;
+    asked.length = 0;
+    await dm.route(decoder, (route) => route.abort("blockedbyclient"));
+    await pickFile(letter);
+    await refusedAs("Strange letter.pdf", readerWords, "pdf-refused-decoder");
+    await dm.unroute(decoder);
+    assert.ok(asked.some((u) => decoder.test(u)), "the decoder was never asked for");
+    dm.off("request", onRequest);
+    consoles.dm.allow = [];
+    assert.equal(sent.length, from, "a refused PDF uploaded a page");
+  });
+
+  test("4. decoders and fonts: JBIG2, CCITT and JPEG 2000 pages store their black shape in place, and an embedded font draws as its reference", async () => {
+    for (const name of ["jbig2.pdf", "ccitt.pdf", "jpx.pdf"]) {
+      await pickFile(fixture(name));
+      const doc = await finishUpload(jobBlock(name), "Upload 1 page", name.replace(/\.pdf$/, ""), 1);
+      const problem = await shapeProblem(await stored(doc.pages[0]!.assetId));
+      assert.equal(problem, null, `${name}: ${problem}`);
+    }
+    await pickFile(fixture("embedded-font.pdf"));
+    const doc = await finishUpload(jobBlock("embedded-font.pdf"), "Upload 1 page", "Embedded font", 1);
+    const distance = await fontBoxDistance(await stored(doc.pages[0]!.assetId), readFileSync(fixturePath("embedded-font.png")));
+    if (process.env.E2E_DEBUG === "1") console.error(`the embedded font's text box is ${distance.toFixed(1)} gray levels from its reference`);
+    assert.ok(distance < 12, `the embedded font's text box is ${distance.toFixed(1)} gray levels from its reference`);
+  });
+
+  test("5. ownership and Cancel: a page the library holds is reused and kept, Cancel removes only the job's own pages, and a page that never answers is named after the grace", async () => {
+    const name = "Field notes.pdf";
+    const file = pdfFile(name, pdfOf(pagesOf(6, { width: 500, height: 650 }), "Field notes"));
+    // Page 2 alone, saved and then its document deleted: a loose handout image the DM kept.
+    await pickFile(file);
+    let block = jobBlock(name);
+    await block.getByLabel("From page").fill("2");
+    await block.getByLabel("To page").fill("2");
+    const single = await finishUpload(block, "Upload 1 page", "Field notes", 1);
+    await ops.send({ t: "handoutDoc.delete", docId: single.id });
+    const kept = single.pages[0]!.assetId;
+
+    // Every page, with page 4's upload held until Cancel is pressed after page 3.
+    const fourth = gate();
+    let puts = 0;
+    let heldFourth = false;
+    await dm.route(HANDOUT_PUT, async (route) => {
+      if (route.request().method() === "PUT" && ++puts === 4) {
+        heldFourth = true;
+        await fourth.held;
+      }
+      await route.continue();
+    });
+    let from = sent.length;
+    await pickFile(file);
+    block = jobBlock(name);
+    await block.getByRole("button", { name: "Upload 6 pages", exact: true }).click();
+    await waitFor("page 4's upload", () => heldFourth);
+    const answers = await Promise.all(sent.slice(from, from + 3).map((s) => s.answer));
+    assert.deepEqual(
+      answers.map((a) => a?.created),
+      [true, false, true],
+      "page 2's bytes were already in the library, so its upload made nothing",
+    );
+    assert.equal(answers[1]!.id, kept, "page 2 is not the kept image");
+    await block.getByRole("button", { name: "Cancel upload" }).click();
+    await block.getByRole("button", { name: "Cancelling…" }).waitFor();
+    fourth.release();
+    await shown(block, "Removed 3 pages.").waitFor({ timeout: 20_000 });
+    await shots.take(dm, "pdf-cancelled");
+    const own = [answers[0]!.id, answers[2]!.id, (await sent[from + 3]!.answer)!.id];
+    const listed = await libraryIds();
+    assert.ok(listed.has(kept), "Cancel removed the kept image");
+    for (const id of own) assert.ok(!listed.has(id), `the job's own page ${id} is still in the library`);
+    await block.getByRole("button", { name: "Done" }).click();
+    await dm.unroute(HANDOUT_PUT);
+
+    // Again, with page 4's upload never answered: Cancel waits out its grace, then names page 4.
+    let hung: Route | null = null;
+    puts = 0;
+    await dm.route(HANDOUT_PUT, async (route) => {
+      if (route.request().method() === "PUT" && ++puts === 4) {
+        hung = route;
+        return;
+      }
+      await route.continue();
+    });
+    from = sent.length;
+    await pickFile(file);
+    block = jobBlock(name);
+    await block.getByRole("button", { name: "Upload 6 pages", exact: true }).click();
+    await waitFor("page 4's upload", () => hung);
+    consoles.dm.allow = [/net::ERR_/];
+    const pressed = Date.now();
+    await block.getByRole("button", { name: "Cancel upload" }).click();
+    await shown(block, /^Page 4 was uploading and may remain in the library as a loose handout image, \d+ x \d+ px\.$/).waitFor({ timeout: 30_000 });
+    const took = Date.now() - pressed;
+    assert.ok(took >= 9_000 && took < 15_000, `Cancel ended ${took} ms after it was pressed, not about its 10 s grace`);
+    await shown(block, "Removed 2 pages.").waitFor();
+    await shots.take(dm, "pdf-cancelled-uncertain");
+    await block.getByRole("button", { name: "Done" }).click();
+    await block.waitFor({ state: "detached" });
+    await (hung as Route | null)?.abort().catch(() => {});
+    await dm.unroute(HANDOUT_PUT);
+    consoles.dm.allow = [];
+    assert.ok((await libraryIds()).has(kept), "the kept image after the second Cancel");
+    await deleteImages([kept]);
+  });
+
+  test("6. the job outside the form: the DM panel closed and opened, Show still working, an image sent first, a failed upload's pause, the Panels count, and a reload's recovery", async () => {
+    const name = "Thirty.pdf";
+    const file = pdfFile(name, pdfOf(pagesOf(30, { width: 600, height: 800 }), "Thirty"));
+    // Page 2's upload is held while the DM works elsewhere, and page 4's fails once the block is out of sight.
+    const second = gate();
+    const fourth = gate();
+    let pages = 0;
+    let atFourth = false;
+    await dm.route(HANDOUT_PUT, async (route) => {
+      const req = route.request();
+      if (req.method() !== "PUT" || (req.headers()["content-type"] ?? "").startsWith("image/png")) return route.continue();
+      const n = ++pages;
+      if (n === 2) await second.held;
+      if (n === 4) {
+        atFourth = true;
+        await fourth.held;
+        return route.abort("internetdisconnected");
+      }
+      await route.continue();
+    });
+    const from = sent.length;
+    await pickFile(file);
+    const block = jobBlock(name);
+    await block.getByRole("button", { name: "Upload 30 pages", exact: true }).click();
+    await shown(block, "Preparing page 2 of 30…").waitFor();
+
+    // The DM panel closed and opened again: the job went on meanwhile, and its block shows the same progress.
+    await dm.getByRole("tab", { name: "Library", exact: true }).click();
+    await block.waitFor({ state: "hidden" });
+    await dmTab().click();
+    await shown(block, "Preparing page 2 of 30…").waitFor();
+    assert.equal(await block.getByRole("progressbar", { name: "Pages uploaded" }).getAttribute("aria-valuenow"), "1");
+    await shots.take(dm, "pdf-job-panel-reopened");
+
+    // From the library and Show still show another handout: step 2's document.
+    const form = handoutForm();
+    await form.getByRole("button", { name: "From the library" }).click();
+    await form.getByRole("button", { name: "Use Long book, 3 pages" }).click();
+    await form.getByRole("button", { name: "Show", exact: true }).click();
+    const showing = dm.getByRole("list", { name: "Handouts showing" }).getByRole("listitem").filter({ hasText: "Long book" });
+    await showing.waitFor();
+    await shots.take(dm, "pdf-job-beside-a-showing");
+    await showing.getByRole("button", { name: "Close", exact: true }).click();
+    await showing.waitFor({ state: "detached" });
+
+    // An image uploaded in the form meanwhile goes before the job's next page.
+    await dm.getByRole("button", { name: "Show a handout" }).click();
+    await form.getByLabel("Upload a file").setInputFiles({ name: "Map scrap.png", mimeType: "image/png", buffer: await paper(300, 200, 5) });
+    await form.getByText(/^(Uploading…|Waiting for the server…)$/).waitFor();
+    second.release();
+    await form.getByRole("button", { name: "Change" }).waitFor();
+    await waitFor("page 3's upload", () => sent.length - from >= 4);
+    assert.deepEqual(
+      sent.slice(from, from + 4).map((s) => (s.type.startsWith("image/png") ? "image" : "page")),
+      ["page", "page", "image", "page"],
+      "the form's image did not go before the job's next page",
+    );
+    const scrap = (await sent[from + 2]!.answer)!.id;
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
+
+    // Page 4's upload fails while the block is out of sight: a toast, and the DM panel's badge.
+    await waitFor("page 4's upload", () => atFourth);
+    await dm.getByRole("tab", { name: "Library", exact: true }).click();
+    await block.waitFor({ state: "hidden" });
+    // The block's sight is read by an observer, which reports on the next frame.
+    await dm.waitForTimeout(300);
+    consoles.dm.allow = [/net::ERR_INTERNET_DISCONNECTED/];
+    fourth.release();
+    await dm.getByText("The PDF upload paused at page 4. Open Handouts in the DM panel to go on.").waitFor();
+    await waitFor("the DM panel's badge", async () => /1 upload waiting/.test((await dmTab().textContent()) ?? ""));
+    await shots.take(dm, "pdf-job-paused-toast");
+
+    // On a phone's width the Panels button counts the waiting upload.
+    await dm.setViewportSize({ width: 390, height: 844 });
+    const panels = dm.locator('nav[aria-label="Tools"] button[title="Panels"]');
+    await waitFor("the Panels button's count", async () => ((await panels.textContent()) ?? "").includes("1 upload waiting"));
+    await shots.take(dm, "pdf-job-panels-count");
+    await dm.setViewportSize({ width: 1280, height: 800 });
+
+    // Try again finishes all 30, in order.
+    await dmTab().click();
+    await shown(block, "The upload stopped at page 4 of 30. Check your connection.").waitFor();
+    await shots.take(dm, "pdf-job-paused");
+    const thirty = await finishUpload(block, "Try again", "Thirty", 30);
+    consoles.dm.allow = [];
+    await dm.unroute(HANDOUT_PUT);
+    assert.equal(thirty.pages.length, 30);
+    for (const [i, p] of thirty.pages.entries()) await assertBand(p, i + 1, `Thirty page ${i + 1}`);
+
+    // A reload mid-upload: the recovery line, and Remove them deletes exactly the ledger's pages.
+    const torn = "Torn map.pdf";
+    let hung: Route | null = null;
+    let puts = 0;
+    await dm.route(HANDOUT_PUT, async (route) => {
+      if (route.request().method() === "PUT" && ++puts === 4) {
+        hung = route;
+        return;
+      }
+      await route.continue();
+    });
+    await pickFile(pdfFile(torn, pdfOf(pagesOf(6, { width: 520, height: 520 }), "Torn map")));
+    await jobBlock(torn).getByRole("button", { name: "Upload 6 pages", exact: true }).click();
+    await waitFor("page 4's upload", () => hung);
+    const key = `rvtt.pdfUpload.${run.roomId}.${dmSocket.you!.memberId}`;
+    const ledger = JSON.parse((await dm.evaluate((k) => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem(k), key)) ?? "null") as { ids: string[] } | null;
+    assert.equal(ledger?.ids.length, 3, "the ledger's pages before the reload");
+    const before = await libraryIds();
+    dm.once("dialog", (d) => void d.accept());
+    consoles.dm.allow = [/net::ERR_/];
+    await dm.reload();
+    await (hung as Route | null)?.abort().catch(() => {});
+    await dm.unroute(HANDOUT_PUT);
+    await dmTab().click();
+    const recovery = jobBlock("Torn map");
+    await shown(recovery, "A PDF upload did not finish: Torn map, 3 pages are in the library.").waitFor({ timeout: 30_000 });
+    await shots.take(dm, "pdf-recovery");
+    await recovery.getByRole("button", { name: "Remove them" }).click();
+    await shown(recovery, "Removed 3 pages.").waitFor();
+    const after = await libraryIds();
+    assert.deepEqual([...before].filter((id) => !after.has(id)).sort(), [...ledger!.ids].sort(), "Remove them deleted other than the ledger's pages");
+    assert.equal(await dm.evaluate((k) => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem(k), key), null, "the ledger after Remove them");
+    await recovery.getByRole("button", { name: "Done" }).click();
+    await recovery.waitFor({ state: "detached" });
+    consoles.dm.allow = [];
+    await deleteImages([scrap]);
   });
 
   test("7. Pip's popup: the page row, a page laid out before it loads with its thumb first, Next page, a fling, the page names, 320 px, and a page that fails", async () => {
@@ -360,6 +863,41 @@ describe("raccoon-vtt pdf handouts run", { timeout: 420_000 }, () => {
     await indicatorIs(popup, "2 of 3", "the phone turned back");
   });
 
+  test("7d. the DM's Showing now: the thumbnail opens the viewer at the players' showing with its details, focus comes back to it, and the document's View has a key of its own (8.4)", async () => {
+    await dmTab().click();
+    const thumb = dm.getByRole("list", { name: "Handouts showing" }).getByRole("button", { name: "View Strange letter" });
+    await thumb.click();
+    const view = viewer(dm, "Strange letter");
+    await view.waitFor();
+    await view.getByText("To Everyone, 3 pages. Showing now.").waitFor();
+    await indicatorIs(view, "1 of 3", "the DM's view of the showing");
+    await view.getByRole("button", { name: "Next page" }).click();
+    await indicatorIs(view, "2 of 3", "Next page in the DM's view");
+    await shots.take(dm, "pdf-dm-showing-view");
+    await view.getByRole("button", { name: "Close Strange letter" }).click();
+    await view.waitFor({ state: "detached" });
+    assert.equal(await thumb.evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement), true, "focus did not come back to the thumbnail");
+    // The same showing opens where the DM left it, as the players' popup does.
+    await thumb.click();
+    await indicatorIs(view, "2 of 3", "the same showing again");
+    await view.getByRole("button", { name: "Close Strange letter" }).click();
+    await view.waitFor({ state: "detached" });
+
+    // The document picked in the form opens under its own key, at page 1, with its page count and that it shows.
+    await openForm();
+    await handoutForm().getByRole("button", { name: "Use Strange letter, 3 pages" }).click();
+    const open = handoutForm().getByRole("button", { name: "View", exact: true });
+    await open.click();
+    await view.waitFor();
+    await view.getByText("3 pages. Showing now.").waitFor();
+    await indicatorIs(view, "1 of 3", "the document's own View");
+    await view.getByRole("button", { name: "Close Strange letter" }).click();
+    await view.waitFor({ state: "detached" });
+    assert.equal(await open.evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement), true, "focus did not come back to View");
+    await handoutForm().getByRole("button", { name: "Change" }).click();
+    await handoutForm().getByRole("button", { name: "Cancel", exact: true }).click();
+  });
+
   test("8. Pat at a computer: the page keys and their words, the page buttons across mixed heights, zoom out to a whole page, and a line-mode wheel", async () => {
     run.mixed = await documentOf("Mixed pages", [await paper(1000, 1000, 1), await paper(1000, 772, 2), await paper(1000, 1000, 3), await paper(1000, 1000, 4)]);
     await show(run.mixed, [run.patId]);
@@ -418,13 +956,20 @@ describe("raccoon-vtt pdf handouts run", { timeout: 420_000 }, () => {
     await indicatorIs(popup, "1 of 4", "Reset zoom on the same page");
     assert.equal(await popup.getByRole("button", { name: "Reset zoom" }).count(), 0);
 
-    // A wheel that reports lines scrolls at a reading pace.
+    // A wheel that reports lines scrolls at a reading pace. The viewer claims it, so nothing under the dialog scrolls with it.
+    const wheel = (init: object) =>
+      stage(popup).evaluate((el, init) => {
+        const w = globalThis as unknown as { WheelEvent: new (t: string, i: object) => unknown };
+        // dispatchEvent answers false when a listener called preventDefault.
+        return !(el as unknown as Element_).dispatchEvent(new w.WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: 600, clientY: 400, ...init }));
+      }, init);
     const before = (await pageImage(popup, "Mixed pages", 1, 4).boundingBox())!;
-    await stage(popup).evaluate((el) => {
-      const w = globalThis as unknown as { WheelEvent: new (t: string, i: object) => unknown };
-      (el as unknown as Element_).dispatchEvent(new w.WheelEvent("wheel", { deltaY: 3, deltaMode: 1, bubbles: true, cancelable: true, clientX: 600, clientY: 400 }));
-    });
+    assert.equal(await wheel({ deltaY: 3, deltaMode: 1 }), true, "the viewer left a plain wheel to the browser");
     await waitFor("the wheel to scroll", async () => before.y - (await pageImage(popup, "Mixed pages", 1, 4).boundingBox())!.y >= 100);
+    // Ctrl with the wheel, as a trackpad's pinch sends it, zooms the picture and is claimed, so the browser does not zoom the page as well.
+    assert.equal(await wheel({ deltaY: -100, ctrlKey: true }), true, "the viewer left Ctrl with the wheel to the browser, which zooms the page");
+    await popup.getByRole("button", { name: "Reset zoom" }).waitFor();
+    await popup.getByRole("button", { name: "Reset zoom" }).click();
     await popup.getByRole("button", { name: /^Close/ }).click();
     await popup.waitFor({ state: "detached" });
 
@@ -539,6 +1084,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 420_000 }, () => {
     const [saved] = await Promise.all([desk.waitForEvent("download"), popup.getByRole("button", { name: "Download", exact: true }).click()]);
     assert.equal(saved.suggestedFilename(), "Strange letter.pdf");
     const bytes = readFileSync(await saved.path());
+    run.downloaded = bytes;
     assert.equal(bytes.subarray(0, 5).toString("latin1"), "%PDF-");
     const text = bytes.toString("latin1");
     assert.match(text, /\/Count 3 /);
@@ -623,6 +1169,23 @@ describe("raccoon-vtt pdf handouts run", { timeout: 420_000 }, () => {
     await download.tap();
     await popupPhone.getByRole("button", { name: "Share", exact: true }).waitFor({ timeout: 20_000 });
     await shots.take(phone, "pdf-phone-share");
+  });
+
+  test("11b. the download uploaded again: its pages come back in order, upright and in color", async () => {
+    const letter = run.letter!;
+    await pickFile(pdfFile("Strange letter.pdf", run.downloaded!));
+    const block = jobBlock("Strange letter.pdf");
+    await block.getByRole("button", { name: "Upload 3 pages", exact: true }).waitFor();
+    // A title of its own, so the Library's tiles for the letter stay one of a kind.
+    await block.getByLabel("Title").fill("Strange letter again");
+    const again = await finishUpload(block, "Upload 3 pages", "Strange letter again", 3);
+    for (const [i, p] of again.pages.entries()) {
+      const was = letter.pages[i]!;
+      assert.equal(p.width > p.height, was.width > was.height, `page ${i + 1} turned on its side`);
+      await assertBand(p, i + 1, `the downloaded letter's page ${i + 1}`);
+    }
+    await ops.send({ t: "handoutDoc.delete", docId: again.id });
+    await deleteImages(again.pages.map((p) => p.assetId));
   });
 
   test("12. the DM's Library: the document as one tile with its pages, its details in the viewer, no Delete while it shows, then Delete with its pages", async () => {
