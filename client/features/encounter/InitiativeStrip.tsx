@@ -7,6 +7,7 @@ import { ScrollForMore } from "../../canvas/TokenActionBar.tsx";
 import { useAlertsSummaryEntry } from "../../components/sheetFocus.ts";
 import { useBackClose } from "../../lib/backClose.ts";
 import { containTab, inertOutside } from "../../lib/modalDialog.ts";
+import { focusMap, mapFocusSlot } from "../../pages/mapFocus.ts";
 import { theme } from "../../lib/theme.ts";
 import { screenHeight, useLayoutSize } from "../device/layout.ts";
 import { effectChip } from "../../lib/tokenView.ts";
@@ -507,8 +508,13 @@ function FightAlerts() {
   useLayoutEffect(() => () => dock.setState({ columnCramped: false }), [dock]);
   // What waits changed: the cards are measured again, which a hidden card cannot be. Asked for, they stay shown while anything waits, since opening a roll's card changes the summary's words too.
   const waits = roomSummary?.name ?? null;
+  // The last alert answered over the screen takes the alerts and the row with it: focus goes to the map, never to the page (pages/mapFocus.ts).
+  const focusMapNext = useRef(false);
   useLayoutEffect(() => {
-    if (waits === null) setAsked(null);
+    if (waits === null) {
+      if (asked !== null && asked !== "column") focusMapNext.current = true;
+      setAsked(null);
+    }
     setFirstHeight(0);
   }, [waits]);
   const overlay = asked !== null && asked !== "column" && !folded;
@@ -620,7 +626,15 @@ function FightAlerts() {
     return () => document.removeEventListener("keydown", onKey, true);
   }, [overlay, closeOverlay]);
   // Measured again once closed, the cards stand in the column for a moment before the row returns, so focus waits for it.
+  const mapFocus = useScoped(mapFocusSlot);
   useLayoutEffect(() => {
+    if (focusMapNext.current && !overlay) {
+      focusMapNext.current = false;
+      focusRow.current = false;
+      const active = document.activeElement;
+      if (active === null || active === document.body || !active.isConnected) focusMap(mapFocus);
+      return;
+    }
     if (!focusRow.current || !rowRef.current) return;
     focusRow.current = false;
     rowRef.current.focus({ preventScroll: true });

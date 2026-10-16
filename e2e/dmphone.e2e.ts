@@ -590,6 +590,12 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await alerts.getByRole("button", { name: "Close", exact: true }).tap();
     await alerts.waitFor({ state: "detached" });
     await waitFor(`focus back on the row, ${label}`, async () => ((await focused(dm)).name.startsWith("Concentration check") ? true : null));
+    // The last check answered over the screen takes the alerts and the row with it: focus goes to the map, not to the page.
+    await row.tap();
+    await alerts.waitFor();
+    await alerts.locator('[data-alert="concentration"]').first().getByRole("button", { name: "Passed", exact: true }).tap();
+    await alerts.waitFor({ state: "detached" });
+    await waitFor(`focus on the map once nothing waits, ${label}`, async () => ((await focused(dm)).name === "Map" ? true : null));
     await framing.getByRole("button", { name: "Cancel" }).tap();
   });
 
