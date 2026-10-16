@@ -341,6 +341,7 @@ describe("the sheet's rows beside the keys", () => {
       "Drag with the right or middle button",
       "Space+drag",
       "Ctrl+wheel, or a pinch on a trackpad",
+      "Ctrl+wheel, or a pinch on a trackpad",
     ]);
     assert.deepEqual(inputs("player", ANDROID, "Android"), ["Back button"]);
   });
@@ -367,7 +368,7 @@ describe("the sheet's rows beside the keys", () => {
     assert.ok(keys.rows.every((r) => r.keys));
     assert.ok(keys.intro?.startsWith("On any device with a keyboard."));
     for (const device of [DESKTOP, IPHONE, ANDROID]) {
-      assert.deepEqual(inputs("player", device, "Handout viewer"), ["+, -", "0", "Arrow keys"]);
+      assert.deepEqual(inputs("player", device, "Handout viewer"), ["+, -", "0", "Arrow keys", "Page Down, Page Up", "Space, Shift+Space", "Home, End"]);
       assert.deepEqual(inputs("player", device, "Side panel tabs"), ["Left, Right", "Home, End"]);
     }
     assert.ok(section("dm", DESKTOP, MOUSE_SECTION)!.rows.every((r) => !r.keys), "a mouse row is a phrase, not a key");

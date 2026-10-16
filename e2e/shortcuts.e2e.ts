@@ -136,6 +136,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
       "Drag with the right or middle button",
       "Space+drag",
       "Ctrl+wheel, or a pinch on a trackpad",
+      "Ctrl+wheel, or a pinch on a trackpad",
     ]);
     assert.deepEqual(await inputs(sheet, "Initiative"), ["Enter", "Escape", "Enter"], "the DM types several values");
     await shots.take(dm, "shortcuts-dm-computer");
@@ -162,7 +163,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     for (const k of ["T", "H", "/"]) assert.ok(!keys.includes(k), `the DM's ${k} is not a player's`);
     assert.deepEqual(await inputs(sheet, "Android"), ["Back button"]);
     assert.deepEqual(await inputs(sheet, "Initiative"), ["Enter", "Escape"], "only the DM types several values");
-    assert.deepEqual(await inputs(sheet, "Handout viewer"), ["+, -", "0", "Arrow keys"]);
+    assert.deepEqual(await inputs(sheet, "Handout viewer"), ["+, -", "0", "Arrow keys", "Page Down, Page Up", "Space, Shift+Space", "Home, End"]);
     await shots.take(player, "shortcuts-player-android");
     await sheet.getByRole("heading", { name: "Android", exact: true }).scrollIntoViewIfNeeded();
     await shots.take(player, "shortcuts-player-android-back");

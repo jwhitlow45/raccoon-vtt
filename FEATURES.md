@@ -395,6 +395,7 @@ On any device with a keyboard. They do nothing while you type in a field or a wi
 | Drag with the right or middle button | Move the map | everyone, with any tool |
 | Space+drag | Move the map | everyone, with any tool, while nothing has focus or the map does |
 | Ctrl+wheel, or a pinch on a trackpad | Zoom in or out at the pointer, faster than the wheel alone | everyone, with any tool |
+| Ctrl+wheel, or a pinch on a trackpad | Zoom the picture or the pages in or out at the pointer, down to a whole page | everyone, in the handout viewer |
 
 ### Android
 
@@ -413,13 +414,16 @@ On a screen 900 px or wider, with a tab focused. There, and on a focused choice 
 
 ### Handout viewer
 
-A handout the DM shows, or a picture opened from the Library.
+A handout the DM shows, or a picture or a PDF opened from the Library.
 
 | Key | Does | Who |
 | --- | --- | --- |
 | +, - | Zoom in, zoom out | everyone |
 | 0 | Reset the zoom | everyone |
-| Arrow keys | Move the zoomed picture | everyone, while it is larger than the viewer |
+| Arrow keys | Move the zoomed picture, or a handout's pages | everyone, while it is larger than the viewer |
+| Page Down, Page Up | Scroll down or up about a screen | everyone, on a handout of pages taller than the viewer |
+| Space, Shift+Space | Scroll down or up about a screen, as Page Down and Page Up do | everyone, on a handout of pages taller than the viewer, with focus on the viewer rather than a button |
+| Home, End | Go to the top of the first page or the end of the last | everyone, on a handout of pages taller than the viewer |
 
 ### Token action bar
 

@@ -507,6 +507,15 @@ export const BEHAVIORS: readonly Behavior[] = [
     when: "with any tool",
     device: "mouse",
   },
+  // features/handouts/HandoutViewer.tsx's own wheel listener, which also keeps the browser from zooming the page. A surface lists only keys, so this row is the room's.
+  {
+    id: "viewerCtrlWheel",
+    input: "Ctrl+wheel, or a pinch on a trackpad",
+    does: "Zoom the picture or the pages in or out at the pointer, down to a whole page",
+    roles: EVERYONE,
+    when: "in the handout viewer",
+    device: "mouse",
+  },
 
   // The side panel's tabs: pages/Room.tsx, lib/a11y.ts tabKeyIndex.
   { id: "tabsSide", input: "Left, Right", does: "Switch to the tab beside it, wrapping around at the ends", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
@@ -518,9 +527,36 @@ export const BEHAVIORS: readonly Behavior[] = [
   {
     id: "viewerArrows",
     input: "Arrow keys",
-    does: "Move the zoomed picture",
+    does: "Move the zoomed picture, or a handout's pages",
     roles: EVERYONE,
     when: "while it is larger than the viewer",
+    device: "keys",
+    surface: "Handout viewer",
+  },
+  {
+    id: "viewerScreen",
+    input: "Page Down, Page Up",
+    does: "Scroll down or up about a screen",
+    roles: EVERYONE,
+    when: "on a handout of pages taller than the viewer",
+    device: "keys",
+    surface: "Handout viewer",
+  },
+  {
+    id: "viewerSpace",
+    input: "Space, Shift+Space",
+    does: "Scroll down or up about a screen, as Page Down and Page Up do",
+    roles: EVERYONE,
+    when: "on a handout of pages taller than the viewer, with focus on the viewer rather than a button",
+    device: "keys",
+    surface: "Handout viewer",
+  },
+  {
+    id: "viewerEnds",
+    input: "Home, End",
+    does: "Go to the top of the first page or the end of the last",
+    roles: EVERYONE,
+    when: "on a handout of pages taller than the viewer",
     device: "keys",
     surface: "Handout viewer",
   },
@@ -582,7 +618,7 @@ export const KEYS_INTRO = "On any device with a keyboard. They do nothing while 
 /** A line under a surface's heading, where its rows do not say where it is. */
 const SURFACE_INTRO: Partial<Record<Surface, string>> = {
   "Side panel tabs": "On a screen 900 px or wider, with a tab focused. There, and on a focused choice or slider, the arrow and Page keys never move a token.",
-  "Handout viewer": "A handout the DM shows, or a picture opened from the Library.",
+  "Handout viewer": "A handout the DM shows, or a picture or a PDF opened from the Library.",
 };
 
 function sheetRow(b: Behavior): SheetRow {
