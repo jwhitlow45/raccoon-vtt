@@ -663,7 +663,7 @@ function RoomPage() {
           ref={topBarRef}
           zoom={zoom}
           canFit={gate.kind === "ready"}
-          undo={role === "dm" && (!wide || touchFirst)}
+          undo={role === "dm"}
           compact={!wide}
           placement={placement}
           // In the bar a player's chip shows only its dot, so the strip has room: from 900 px up below 1,100 px as before, and on a phone while the strip is there.
@@ -949,22 +949,27 @@ function MapArea(props: {
 
 /**
  * The top bar: the room name beside the DM's or the player's chip, a DM's
- * Undo and Redo on a touch screen, Find my token and Fit map. The
- * initiative strip sits in its row or in a band of its own under it
- * (`placement`, features/encounter/band.ts). `compact` keeps only the
- * tight gaps, the name's way of giving way first, and the phase menu's
- * absence, which a phone's bar has no room for.
+ * Undo and Redo, Find my token and Fit map. The initiative strip sits in
+ * its row or in a band of its own under it (`placement`,
+ * features/encounter/band.ts). `compact` keeps only the tight gaps, the
+ * name's way of giving way first, and the phase menu's absence, which a
+ * phone's bar has no room for.
  *
  * A phone's bar checks whether its row overflows (scrollWidth past
  * clientWidth). Where the bar holds the strip, it records it, so the strip
  * goes back to the band until the layout is wider than that. Where the row
  * still overflows without the strip, the DM's chip keeps only its dot, as
  * a player's does, again until the layout is wider: on a 320 px phone at
- * 130% the whole chip pushed Fit off the screen. The row's own box keeps
- * its size when its content grows, so the check runs when the row's size
- * changes (the window), when the strip's size changes (whose turn, "Your
- * turn" and End turn, the timer), and when the bar's other content changes
- * (the room name, the blackout pill).
+ * 130% the whole chip pushed Fit off the screen. A DM's row from 900 px up
+ * checks too, since Undo and Redo sit in it on every layout
+ * (docs/design-v1-layout-hierarchy.md M2): there the strip stays, the chip
+ * gives way to its dot first, then the Phase menu leaves the bar, each
+ * until the layout is wider, and a scene's "Show a phase" chips still
+ * switch phases. The row's own box keeps its size when its content grows,
+ * so the check runs when the row's size changes (the window), when the
+ * strip's size changes (whose turn, "Your turn" and End turn, the timer),
+ * and when the bar's other content changes (the room name, the blackout
+ * pill, the scene's phases).
  */
 function TopBar(props: {
   ref?: Ref<HTMLElement>;
@@ -991,30 +996,37 @@ function TopBar(props: {
   const { width } = useLayoutSize();
   // The layout width at which the DM's whole chip last overflowed the row: up to it, the chip is its dot.
   const [dmDotUpTo, setDmDotUpTo] = useState(0);
-  const dmDot = props.compact && role === "dm" && width <= dmDotUpTo;
-  // From 900 px up the strip sits in the bar whatever it holds, so only a phone's bar measures.
+  const dmDot = role === "dm" && width <= dmDotUpTo;
+  // From 900 px up, the width at which the row still overflowed with the chip's dot: up to it, the Phase menu leaves the bar.
+  const [phaseOffUpTo, setPhaseOffUpTo] = useState(0);
+  const phaseMenu = !props.compact && width > phaseOffUpTo;
+  const phases = useRoomView((s) => (s.sceneId ? (s.view?.scenes[s.sceneId]?.phases?.length ?? 0) : 0));
+  // From 900 px up the strip sits in the bar whatever it holds, so only a phone's bar records it.
   const measured = props.placement === "bar" && props.compact;
+  // A phone's row, and a DM's row from 900 px up, which holds Undo, Redo and the Phase menu.
+  const checks = props.compact || role === "dm";
   const check = useCallback(() => {
     const row = rowRef.current;
-    if (!props.compact || !row) return;
+    if (!checks || !row) return;
     // The last button tucks into the bar's padding by a negative margin (RoomChrome.tsx FitButton), which is room the row has, not overflow.
     const last = row.lastElementChild;
     const tuck = last ? Math.max(0, -parseFloat(getComputedStyle(last).marginRight) || 0) : 0;
     const overflow = row.scrollWidth - row.clientWidth - tuck;
     if (overflow <= 0) return;
-    // The strip leaves first. Once it is in the band, this runs again with the row it left.
+    // The strip leaves first. Once it is in the band, this runs again with the row it left. Then the chip's name, then the Phase menu.
     if (measured) recordOverflow(layoutWidth(), overflow);
     else if (role === "dm" && !dmDot) setDmDotUpTo(layoutWidth());
-  }, [props.compact, measured, recordOverflow, role, dmDot]);
+    else if (phaseMenu) setPhaseOffUpTo(layoutWidth());
+  }, [checks, measured, recordOverflow, role, dmDot, phaseMenu]);
   useLayoutEffect(() => {
     const row = rowRef.current;
-    if (!props.compact || !row) return;
+    if (!checks || !row) return;
     const observer = new ResizeObserver(check);
     observer.observe(row);
     if (strip) observer.observe(strip);
     return () => observer.disconnect();
-  }, [props.compact, strip, check]);
-  useLayoutEffect(check, [check, name, blackout, role, activeEntryId, round, notice]);
+  }, [checks, strip, check]);
+  useLayoutEffect(check, [check, name, blackout, role, activeEntryId, round, notice, phases]);
   return (
     <header
       ref={props.ref}
@@ -1070,7 +1082,7 @@ function TopBar(props: {
         ) : null}
         <div style={{ flex: 1 }} />
         {props.undo ? <UndoButtons /> : null}
-        {props.compact ? null : <PhaseMenu />}
+        {phaseMenu ? <PhaseMenu /> : null}
         {props.placement === "bar" ? <InitiativeStrip placement="bar" notice={notice} stripRef={setStrip} /> : null}
         {props.canFit && role === "player" ? <FindButton openSheet={props.openSheet} /> : null}
         {props.canFit ? <FitButton /> : null}

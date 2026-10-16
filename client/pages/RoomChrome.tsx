@@ -211,11 +211,12 @@ export function PauseScreen() {
 }
 
 /**
- * The DM's Undo and Redo, one tap away on a phone or a tablet, where the
- * only other ones sat at the bottom of the DM panel. They undo this
- * member's own changes (design 7.7), and the server answers an empty stack
- * with a notice, so both stay enabled: knowing the depth here would need a
- * new field on the socket for each member.
+ * The DM's Undo and Redo, one click or tap away in the top bar on every
+ * layout (docs/design-v1-layout-hierarchy.md M2): Undo is used every
+ * scene, and a DM with a mouse had only the DM panel's copy or Ctrl+Z.
+ * They undo this member's own changes (design 7.7), and the server
+ * answers an empty stack with a notice, so both stay enabled: knowing the
+ * depth here would need a new field on the socket for each member.
  */
 export function UndoButtons() {
   const actions = useRoomActions();

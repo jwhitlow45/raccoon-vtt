@@ -16,7 +16,8 @@ import { PartySightToggle } from "../vision/PartySightToggle.tsx";
  * The DM's view tools (features section 13), in two groups by what they do
  * (docs/design-v1-layout-hierarchy.md M4). "Players' screens" acts on the
  * table: follow me, bring everyone here, black out. "Check their view"
- * only looks: view as a player and party sight. Undo and redo follow.
+ * only looks: view as a player and party sight. Undo and Redo sit in the
+ * top bar on every layout (M2), so the panel has no copy of its own.
  */
 export function ViewControls() {
   const actions = useRoomActions();
@@ -73,17 +74,6 @@ export function ViewControls() {
       <Section label="Check their view">
         <ViewAsPlayer members={members} onPlayerScene={onPlayerScene} playerSceneId={playerSceneId} />
         <PartySightToggle />
-      </Section>
-      <Section label="Undo">
-        <Help>Undo or redo your own last changes, one at a time.</Help>
-        <div style={{ display: "flex", gap: theme.space(2) }}>
-          <Button size="sm" onClick={() => actions.undo()}>
-            Undo
-          </Button>
-          <Button size="sm" onClick={() => actions.redo()}>
-            Redo
-          </Button>
-        </div>
       </Section>
     </>
   );
