@@ -238,6 +238,7 @@ describe("the shortcut table", () => {
       inside("slider"),
       inside("tablist"),
       inside("listbox"),
+      inside("menu"),
     ];
     for (const target of targets) {
       for (const key of ["ArrowRight", "ArrowDown", "PageUp", "PageDown"]) assert.equal(run(e, press({ key, code: key, target })), null, `${key} on ${JSON.stringify(target)}`);
@@ -245,6 +246,17 @@ describe("the shortcut table", () => {
     assert.deepEqual(moves, [], "no token moved");
     assert.equal(run(e, press({ key: "v", code: "KeyV", target: targets[0] })), "tool:select", "letters still pick tools from a radio");
     assert.equal(run(e, press({ key: "ArrowRight", code: "ArrowRight", target: { tagName: "BUTTON", closest: () => null } })), "nudge", "a plain button leaves the arrows to the map");
+  });
+
+  test("a letter a menu used for typeahead picks no tool, and S leaves the side panel alone", () => {
+    const { env: e, scope } = env({ selected: ["t1"] });
+    let toggled = 0;
+    scope.get(sidePanelKeysSlot).toggle = () => void toggled++;
+    const item = { tagName: "DIV", closest: (selector: string) => (selector.includes('[role="menu"]') ? {} : null) };
+    assert.equal(run(e, press({ key: "r", code: "KeyR", target: item, defaultPrevented: true })), null, "R is typeahead there");
+    assert.equal(run(e, press({ key: "s", code: "KeyS", target: item, defaultPrevented: true })), null, "S is typeahead there");
+    assert.equal(toggled, 0);
+    assert.equal(run(e, press({ key: "r", code: "KeyR", target: item })), "tool:ruler", "a letter the menu left alone still picks its tool");
   });
 
   test("N is Next for the DM and End turn for a player only on their own turn", () => {

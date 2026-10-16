@@ -23,20 +23,7 @@ import { Icon } from "./Icon.tsx";
 export function SectionLabel(props: { children: ReactNode; id?: string; tone?: "danger"; action?: ReactNode; level?: 2 | 3 | 4 }) {
   const Heading = props.level === 2 ? "h2" : props.level === 4 ? "h4" : "h3";
   const label = (
-    <Heading
-      id={props.id}
-      style={{
-        flex: 1,
-        minWidth: 0,
-        margin: 0,
-        fontSize: theme.font.small,
-        fontWeight: theme.weight.bold,
-        letterSpacing: theme.caps,
-        textTransform: "uppercase",
-        lineHeight: theme.leading.tight,
-        color: props.tone === "danger" ? theme.color.dangerText : theme.color.textMuted,
-      }}
-    >
+    <Heading id={props.id} style={{ flex: 1, minWidth: 0, margin: 0, ...sectionLabelLook(props.tone) }}>
       {props.children}
     </Heading>
   );
@@ -48,6 +35,23 @@ export function SectionLabel(props: { children: ReactNode; id?: string; tone?: "
       {props.action}
     </div>
   );
+}
+
+/**
+ * A section label's look without its heading element, for a label that
+ * must not be a heading: a popover's title and a menu's group labels
+ * (components/Popover.tsx, components/Menu.tsx), where a heading would
+ * break the menu's roles.
+ */
+export function sectionLabelLook(tone?: "danger"): CSSProperties {
+  return {
+    fontSize: theme.font.small,
+    fontWeight: theme.weight.bold,
+    letterSpacing: theme.caps,
+    textTransform: "uppercase",
+    lineHeight: theme.leading.tight,
+    color: tone === "danger" ? theme.color.dangerText : theme.color.textMuted,
+  };
 }
 
 /**

@@ -63,18 +63,19 @@ export function isTextField(target: unknown): boolean {
   return !NOT_TYPED.has(typeof el.type === "string" ? el.type.toLowerCase() : "text");
 }
 
-/** The groups whose arrow and Page keys move their own choice, value or tab. */
-const NAVIGATES = '[role="radiogroup"], [role="slider"], [role="tablist"], [role="listbox"]';
+/** The groups whose arrow and Page keys move their own choice, value, tab or item. */
+const NAVIGATES = '[role="radiogroup"], [role="slider"], [role="tablist"], [role="listbox"], [role="menu"]';
 
 /**
  * Whether focus is on a control that answers the arrow and Page keys
  * itself: a native radio (Segmented, Swatches, design 2.3), a range
- * slider, or anything inside a radio group, slider, tab list or list box.
- * There the keys choose, so the map's shortcuts on the same keys stand
+ * slider, or anything inside a radio group, slider, tab list, list box or
+ * menu. There the keys choose, so the map's shortcuts on the same keys stand
  * aside: with a token selected, ArrowRight on the HP modes moved the token
  * and left the mode as it was. A tab list says the arrows switch its
  * tabs, so a screen reader user pressing one there must never move a
- * token every player sees.
+ * token every player sees. A menu (components/Menu.tsx) leaves Left and
+ * Right alone in a list, and those must not move a token either.
  */
 export function ownsNavigationKeys(target: unknown): boolean {
   if (!target || typeof target !== "object") return false;

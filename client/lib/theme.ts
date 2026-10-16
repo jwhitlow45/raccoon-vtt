@@ -148,6 +148,11 @@ export const theme = {
     /** The token action bar on a screen too short to dock it (docs/design-v1-bar-dock.md 1.4): over the toolbar and the options it covers, under the notices. */
     barOverlay: 16,
     notices: 20,
+    /**
+     * An open popover or menu and the element that holds it (docs/design-v1-tool-options.md 7.6): over
+     * notices and toasts, under the fight's alerts opened over the screen, a player's roll card and dialogs.
+     */
+    popover: 21,
     /** The top bar while it holds the fight's alerts opened over the screen: over the notices, which would hide the alerts' buttons. */
     alertsOverlay: 22,
     overBars: 25,
@@ -174,6 +179,11 @@ export const theme = {
     toolbar: 60,
     /** Dialog widths on a computer. A phone shows a dialog full screen or as a bottom sheet. */
     dialog: { sm: 440, md: 560, lg: 720 },
+    /**
+     * The shared popover base (components/Popover.tsx, docs/design-v1-tool-options.md 7.1 and 7.2): its
+     * gap from its anchor, its margin inside its bound, and the size of a tile in a menu of tiles.
+     */
+    popover: { gap: 6, margin: 8, tile: 60 },
   },
   /**
    * The notch, the rounded corners and the home bar. index.html sets
