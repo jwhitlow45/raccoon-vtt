@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
@@ -34,6 +34,7 @@ import { FrameViewBar } from "../features/scenes/FrameView.tsx";
 import { barInset, chromeZoom, layoutWidth, screenHeight, smallUi, useLayoutSize } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { activeTool, toolsFor, type ToolDef } from "../features/tools.ts";
+import { setupDivider } from "../features/toolbarOrder.ts";
 import { useDropHpDraftsOnSelect } from "../features/tokens/hpDraft.ts";
 import { useClearStatBlockOnSelect } from "../features/tokens/statBlockOpen.ts";
 import { tabKeyIndex, VISUALLY_HIDDEN } from "../lib/a11y.ts";
@@ -1474,6 +1475,7 @@ function Toolbar(props: {
   onShowSide(): void;
 }) {
   const { wide, tools } = props;
+  const divider = setupDivider(tools);
   const hiddenId = useId();
   const panelsIcon = (
     <svg aria-hidden viewBox="0 0 24 24" width={22} height={22} style={{ display: "block" }}>
@@ -1502,10 +1504,14 @@ function Toolbar(props: {
       }}
     >
       <ScrollStrip active={props.tool} style={{ flex: "1 1 auto", height: "100%" }}>
-        {tools.map((t) => (
-          <ToolButton key={t.id} label={t.label} active={props.tool === t.id} onClick={() => props.onTool(t.id)} floating={wide} iconOnly>
-            {wide ? <ToolIcon tool={t} /> : <Stacked icon={<ToolIcon tool={t} />} text={t.shortLabel ?? t.label} />}
-          </ToolButton>
+        {tools.map((t, i) => (
+          <Fragment key={t.id}>
+            {/* The play tools, then the setup tools past a divider (docs/design-v1-layout-hierarchy.md M1): a line in a phone's strip, a 12 px gap between the floating buttons. */}
+            {i === divider ? <span aria-hidden data-rvtt-divider="" style={wide ? { flex: "none", width: theme.space(1) } : { flex: "none", width: theme.line.border, height: 32, background: theme.color.border }} /> : null}
+            <ToolButton label={t.label} active={props.tool === t.id} onClick={() => props.onTool(t.id)} floating={wide} iconOnly>
+              {wide ? <ToolIcon tool={t} /> : <Stacked icon={<ToolIcon tool={t} />} text={t.shortLabel ?? t.label} />}
+            </ToolButton>
+          </Fragment>
         ))}
       </ScrollStrip>
       {wide ? (

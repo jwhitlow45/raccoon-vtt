@@ -31,6 +31,7 @@ import { builderSlot, resetGesture } from "./store.ts";
 import { withStampMode } from "./stamps/pointer.ts";
 import { withHeightMode } from "./heights/pointer.ts";
 import { withLightMode } from "../lights/pointer.ts";
+import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /** Brush strokes send what they painted this often (design 12): a few ops a second, never one per cell. */
 export const PAINT_FLUSH_MS = 150;
@@ -175,7 +176,7 @@ export const builderTool: ToolDef = {
   shortLabel: "Builder",
   icon: { path: "M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm12 0h2v4h4v2h-4v4h-2v-4h-4v-2h4z" },
   roles: ["dm"],
-  order: 80,
+  order: TOOL_ORDER.build,
   cursor: "crosshair",
   activate(ctx) {
     resetGesture(ctx.scope.get(builderSlot).store);

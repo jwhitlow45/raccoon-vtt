@@ -14,6 +14,7 @@ import { fogTool } from "./fog/tool.tsx";
 import { gridTool } from "./grid/tool.tsx";
 import { placeTool } from "./tokens/placeTool.tsx";
 import { SelectOptions } from "./select/SelectOptions.tsx";
+import { TOOL_ORDER } from "./toolbarOrder.ts";
 
 /**
  * The toolbar's tools (design sections 14.2 to 14.4).
@@ -146,7 +147,7 @@ export const selectTool: ToolDef = {
   label: "Select",
   icon: { path: "M5 2.5v17.2l4.6-4.4 3 6.9 3.1-1.3-3-6.8h6.3z" },
   roles: ["dm", "player"],
-  order: 0,
+  order: TOOL_ORDER.select,
   Options: SelectOptions,
   optionsShown: (s) => s.local.multi,
   optionsAt: "foot",

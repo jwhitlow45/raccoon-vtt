@@ -6,6 +6,7 @@ import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import { InfoLine, OptButton, OptionsColumn, OptionsRow } from "../measure/controls.tsx";
 import { setSoundEnabled, usePingSound } from "./feedback.ts";
 import { lookHereEvent } from "./lookHere.ts";
+import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /**
  * Pings, the laser pointer and the DM's "look here" (features section 12,
@@ -94,7 +95,7 @@ export const pingTool: ToolDef = {
   label: "Ping",
   icon: { path: "M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 4.2a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6z" },
   roles: ["dm", "player"],
-  order: 50,
+  order: TOOL_ORDER.ping,
   cursor: "pointer",
   pointer: { down: onDown, move: onMove, up: onUp, cancel: onCancel },
   deactivate(ctx) {

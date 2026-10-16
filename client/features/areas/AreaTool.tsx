@@ -41,6 +41,7 @@ import {
   updateTemplate,
   type AreaEnv,
 } from "./store.ts";
+import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /**
  * The area of effect tool (design section 9.3, features section 9).
@@ -302,7 +303,7 @@ export const areaTool: ToolDef = {
   label: "Area",
   icon: { path: "M3 21 19.9 14.8A18 18 0 0 0 9.2 4.1z" },
   roles: ["dm", "player"],
-  order: 30,
+  order: TOOL_ORDER.area,
   cursor: "crosshair",
   pointer: { down: onDown, move: onMove, up: onUp, cancel: onCancel },
   activate(ctx) {

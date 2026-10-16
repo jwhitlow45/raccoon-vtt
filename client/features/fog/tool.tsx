@@ -9,6 +9,7 @@ import { retryableLazy } from "../../lib/retryableLazy.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import { fogOps, polyShape, rectShape, roomShapes, snapPoint, strokeShapes, type Point } from "./shapes.ts";
 import { fogSlot, resetFogGesture } from "./store.ts";
+import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /** A tap this close to the first corner closes a polygon: half a 44 px target. */
 const CLOSE_PX = 22;
@@ -89,7 +90,7 @@ export const fogTool: ToolDef = {
   label: "Fog",
   icon: { path: "M6.5 18A4.5 4.5 0 0 1 6 9.03 6 6 0 0 1 17.6 8.5 4.75 4.75 0 0 1 17.25 18zM3 21h18v-1.5H3z" },
   roles: ["dm"],
-  order: 70,
+  order: TOOL_ORDER.fog,
   cursor: "crosshair",
   activate(ctx) {
     resetFogGesture(ctx.scope.get(fogSlot).store);

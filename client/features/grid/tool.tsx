@@ -7,6 +7,7 @@ import { currentStageCamera } from "../scenes/stageCamera.ts";
 import type { ToolContext, ToolDef } from "../tools.ts";
 import { boxAtCell, boxCorner, boxFromDrag, canonicalToWorld, resizeBox, worldToCanonical, type CalBox, type Corner } from "./calibrate.ts";
 import { gridSlot, HANDLE_HIT_PX } from "./store.ts";
+import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /** A drag shorter than this, in screen pixels, is a tap. */
 const TAP_PX = 8;
@@ -63,7 +64,7 @@ export const gridTool: ToolDef = {
   shortLabel: "Grid",
   icon: { path: "M3 3h18v18H3zm2 2v4h4V5zm6 0v4h4V5zm6 0v4h2V5zM5 11v4h4v-4zm6 0v4h4v-4zm6 0v4h2v-4zM5 17v2h4v-2zm6 0v2h4v-2zm6 0v2h2v-2z" },
   roles: ["dm"],
-  order: 90,
+  order: TOOL_ORDER.grid,
   cursor: "crosshair",
   activate(ctx) {
     ctx.scope.get(gridSlot).setState({ box: centeredBox(ctx), drag: null });

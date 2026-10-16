@@ -14,6 +14,7 @@ import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import { InfoLine, OptButton, OptInput, OptionsColumn, OptionsRow, OptSelect } from "../measure/controls.tsx";
 import { DRAWING_TURNED_OFF, drawAccess, type DrawAccess } from "./gate.ts";
 import { eraseTarget, estimateEm, fillable, fillFor, simplifyStroke } from "./geometry.ts";
+import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /**
  * The drawing tool (features section 12, design 6 and 7.7): freehand, line,
@@ -443,7 +444,7 @@ export const drawTool: ToolDef = {
   label: "Draw",
   icon: { path: "M4 20l1.2-4.6L16.6 4l3.4 3.4L8.6 18.8zM17.8 2.8l1.4-1.4 3.4 3.4-1.4 1.4z" },
   roles: ["dm", "player"],
-  order: 40,
+  order: TOOL_ORDER.draw,
   cursor: "crosshair",
   pointer: {
     down: onDown,

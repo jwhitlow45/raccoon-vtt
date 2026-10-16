@@ -12,6 +12,7 @@ import type { Point } from "./factory.ts";
 import { pendingTokens } from "./placeInputs.ts";
 import { PLACE_TOOL_ID, describePending, placementSlot, resetPending, setPending, type Pending } from "./placement.ts";
 import { Select } from "./ui.tsx";
+import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /** A tap moves less than this on screen. More is a slip of the finger, and places nothing. */
 const TAP_SLOP_PX = 10;
@@ -48,8 +49,7 @@ export const placeTool: ToolDef = {
   shortLabel: "Add",
   icon: { path: "M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7z" },
   roles: ["dm"],
-  // Right after select: the DM adds tokens all session long.
-  order: 10,
+  order: TOOL_ORDER[PLACE_TOOL_ID],
   cursor: "copy",
   pointer: {
     down(p: ToolPointer, ctx: ToolContext) {

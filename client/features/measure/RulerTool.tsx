@@ -24,6 +24,7 @@ import {
   type RulerState,
   type RulerToken,
 } from "./ruler.ts";
+import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /**
  * The ruler (design sections 7.6 and 9.2, features section 4): drag to
@@ -235,7 +236,7 @@ export const rulerTool: ToolDef = {
   label: "Ruler",
   icon: { path: "M2 11h20v2H2zM2 7h2v10H2zm18 0h2v10h-2zM7 9h1.6v3H7zm4.2 0h1.6v3h-1.6zm4.2 0H17v3h-1.6z" },
   roles: ["dm", "player"],
-  order: 20,
+  order: TOOL_ORDER.ruler,
   cursor: "crosshair",
   pointer: { down: onDown, move: onMove, up: onUp, cancel: onCancel },
   activate(ctx) {

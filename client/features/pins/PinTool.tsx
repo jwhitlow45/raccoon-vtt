@@ -10,6 +10,7 @@ import { InfoLine, OptButton, OptionsColumn, OptionsRow } from "../measure/contr
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import { pinAt, pinToolTap } from "./rules.ts";
 import { pinSlot } from "./store.ts";
+import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /**
  * The Pin tool (docs/design-v1-dm-tools.md 3.8), the DM's: a tap places a
@@ -158,8 +159,7 @@ export const pinTool: ToolDef = {
   label: "Pin",
   icon: { path: "M6 2h12v2l-2 1v6l3 3v2h-6v6l-1 1-1-1v-6H5v-2l3-3V5L6 4z" },
   roles: ["dm"],
-  // Between Ping and Fog.
-  order: 60,
+  order: TOOL_ORDER.pin,
   cursor: "crosshair",
   pointer: {
     down: onDown,
