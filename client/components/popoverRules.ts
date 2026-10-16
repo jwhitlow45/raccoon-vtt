@@ -1,3 +1,4 @@
+import { mousePans } from "../lib/gestures.ts";
 import { scopeSlot } from "../state/scope.ts";
 
 /**
@@ -203,6 +204,8 @@ export class PopoverRoom {
   /** The last pointer of a suppressed press lifted, and its event is still being dispatched to the map. */
   #ending = false;
   #detach: (() => void) | null = null;
+  /** The map's own rule for a press that pans it, with its Space (canvas/Stage.tsx sets it while it is drawn). */
+  mapPans: ((e: { pointerType: string; button: number }) => boolean) | null = null;
 
   readonly subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener);
@@ -226,6 +229,11 @@ export class PopoverRoom {
     if (this.#open?.key !== key) return;
     this.#open = null;
     this.#notify();
+  }
+
+  /** Whether a press pans the map whatever the tool, as the map decides. With no map, a mouse press with the middle or right button. */
+  pans(e: { pointerType: string; button: number }): boolean {
+    return this.mapPans ? this.mapPans(e) : mousePans(e, false);
   }
 
   /** Runs one pointer event through the map press rule. The caller closes the popover as the step says. */

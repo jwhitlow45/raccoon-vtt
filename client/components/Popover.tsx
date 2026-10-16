@@ -451,40 +451,25 @@ function OpenPopover(props: PopoverProps) {
  */
 function attachRoom(room: PopoverRoom): void {
   if (room.attached()) return;
-  let space = false;
   const down = (e: PointerEvent) => {
     const entry = room.current();
     const where: PressWhere = entry ? entry.where(e.target) : isMapTarget(e.target) ? "map" : "elsewhere";
-    const step = room.press({ type: "down", pointerId: e.pointerId, where, open: entry !== null, pan: e.pointerType === "mouse" && (e.button !== 0 || space) });
+    const step = room.press({ type: "down", pointerId: e.pointerId, where, open: entry !== null, pan: room.pans(e) });
     if (step.close === "now") entry?.close("press");
   };
   const end = (e: PointerEvent) => {
     const step = room.press({ type: e.type === "pointerup" ? "up" : "cancel", pointerId: e.pointerId });
     if (step.close === "end") room.current()?.close("map");
-    // The map's handlers for this last event run after this listener and still read the press as suppressed.
+    // The map's handlers for this last event run after this listener and still read the press as suppressed. The map settles it as its last pointer lifts (canvas/Stage.tsx), and this covers a press whose map went away meanwhile.
     if (step.state === null && step.suppress) setTimeout(() => room.settle(), 0);
-  };
-  const spaceKey = (held: boolean) => (e: KeyboardEvent) => {
-    if (e.code === "Space") space = held;
-  };
-  const spaceDown = spaceKey(true);
-  const spaceUp = spaceKey(false);
-  const blur = () => {
-    space = false;
   };
   window.addEventListener("pointerdown", down, true);
   window.addEventListener("pointerup", end, true);
   window.addEventListener("pointercancel", end, true);
-  window.addEventListener("keydown", spaceDown, true);
-  window.addEventListener("keyup", spaceUp, true);
-  window.addEventListener("blur", blur);
   room.attach(() => {
     window.removeEventListener("pointerdown", down, true);
     window.removeEventListener("pointerup", end, true);
     window.removeEventListener("pointercancel", end, true);
-    window.removeEventListener("keydown", spaceDown, true);
-    window.removeEventListener("keyup", spaceUp, true);
-    window.removeEventListener("blur", blur);
   });
 }
 

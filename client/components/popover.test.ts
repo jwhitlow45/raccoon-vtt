@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { mousePans } from "../lib/gestures.ts";
 import { RoomScope } from "../state/scope.ts";
 import { chromeRect, needsPlace, popoverPlace, type PlaceInput, type Rect } from "./popoverPlace.ts";
 import {
@@ -325,6 +326,18 @@ describe("a press while a popover is open", () => {
     assert.equal(room.suppressesTool(), false);
     room.press(down(2, { open: false }));
     assert.equal(room.suppressesTool(), false, "the next press with nothing open is the tool's");
+  });
+
+  test("whether a press pans the map is the map's to say, with its own Space, and with no map a middle or right press pans", () => {
+    const room = new RoomScope().get(popoverSlot);
+    const mouse = (button: number) => ({ pointerType: "mouse", button });
+    assert.deepEqual([room.pans(mouse(0)), room.pans(mouse(1)), room.pans(mouse(2)), room.pans({ pointerType: "touch", button: 0 })], [false, true, true, false]);
+    let space = true;
+    room.mapPans = (e) => mousePans(e, space);
+    assert.equal(room.pans(mouse(0)), true, "the left button with Space held, as canvas/Stage.tsx judges it");
+    space = false;
+    assert.equal(room.pans(mouse(0)), false, "Space let go, or held while a control has focus");
+    assert.equal(mousePans({ pointerType: "pen", button: 0 }, true), false, "only a mouse pans by button");
   });
 
   test("a press on the map is one inside Konva's element, and a pane over the map is not", () => {

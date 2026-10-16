@@ -10,6 +10,17 @@ import { MIN_SCALE, panBy, pinchCamera, type Camera, type Point } from "./camera
 export const TAP_SLOP_PX = 8;
 export const LONG_PRESS_MS = 500;
 
+/**
+ * Whether a mouse press moves the map whatever the tool: the middle or
+ * right button, or the left with Space held. Every tool but Select puts
+ * the left button to its own use, so without this a desktop could only
+ * zoom. The map (canvas/Stage.tsx) decides Space, and an open popover
+ * (components/popoverRules.ts) asks it, since such a press never closes one.
+ */
+export function mousePans(e: { pointerType: string; button: number }, spaceHeld: boolean): boolean {
+  return e.pointerType === "mouse" && (e.button === 1 || e.button === 2 || (e.button === 0 && spaceHeld));
+}
+
 export function distance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }

@@ -1,6 +1,7 @@
 import type Konva from "konva";
 import { memo, useEffect, useRef, useState, type RefObject } from "react";
 import { Circle, Group } from "react-konva";
+import { popoverSlot } from "../../components/popoverRules.ts";
 import { boardSizes } from "../../lib/boardScale.ts";
 import { useLowPower } from "../device/settings.ts";
 import { LONG_PRESS_MS, TAP_SLOP_PX } from "../../lib/gestures.ts";
@@ -51,10 +52,15 @@ export const PingLayer = memo(function PingLayer(props: LayerProps) {
   const now = useFrameClock(pings.length > 0 && !still);
 
   useFeedback(pings, focus?.id ?? null);
-  useHoldToPing(groupRef, tool === "select", (x, y, pointerId) => {
-    actions.sendEph({ k: "ping", x, y });
-    reportHoldPing(scope, pointerId);
-  });
+  useHoldToPing(
+    groupRef,
+    tool === "select",
+    (x, y, pointerId) => {
+      actions.sendEph({ k: "ping", x, y });
+      reportHoldPing(scope, pointerId);
+    },
+    () => scope.get(popoverSlot).suppressesTool(),
+  );
 
   return (
     <Group ref={groupRef} listening={false}>
@@ -133,11 +139,14 @@ function useFeedback(pings: readonly Ping[], focusId: number | null): void {
   }, []);
 }
 
-function useHoldToPing(ref: RefObject<Konva.Group | null>, enabled: boolean, ping: (x: number, y: number, pointerId: number) => void): void {
+/** `closing` says a press is one that closes a popover or a menu (components/popoverRules.ts), which never pings. */
+function useHoldToPing(ref: RefObject<Konva.Group | null>, enabled: boolean, ping: (x: number, y: number, pointerId: number) => void, closing: () => boolean): void {
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
   const pingRef = useRef(ping);
   pingRef.current = ping;
+  const closingRef = useRef(closing);
+  closingRef.current = closing;
   useEffect(() => {
     const stage = ref.current?.getStage();
     if (!stage) return;
@@ -157,7 +166,7 @@ function useHoldToPing(ref: RefObject<Konva.Group | null>, enabled: boolean, pin
     const down = (e: PointerEvent) => {
       pointers.add(e.pointerId);
       clear();
-      if (!enabledRef.current || pointers.size !== 1 || (e.pointerType === "mouse" && e.button !== 0)) return;
+      if (!enabledRef.current || pointers.size !== 1 || (e.pointerType === "mouse" && e.button !== 0) || closingRef.current()) return;
       const p = local(e);
       if (stage.getIntersection(p)?.findAncestor(".token", true)) return;
       start = p;

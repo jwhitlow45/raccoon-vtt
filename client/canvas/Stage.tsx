@@ -1,4 +1,5 @@
 import { applyPixelRatio } from "./konvaSetup.ts";
+import { popoverSlot } from "../components/popoverRules.ts";
 import type Konva from "konva";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Layer, Stage } from "react-konva";
@@ -40,7 +41,7 @@ import {
 import { isAppleDevice } from "../lib/device.ts";
 import { fitTarget } from "../lib/fitTarget.ts";
 import { revealedMask } from "../lib/fogTiles.ts";
-import { CameraGesture, distance, LongPress, TAP_SLOP_PX } from "../lib/gestures.ts";
+import { CameraGesture, distance, LongPress, mousePans, TAP_SLOP_PX } from "../lib/gestures.ts";
 import { groupFollowers, tokensInBox } from "../lib/group.ts";
 import { displayName, drawsAboveFog, footprint, snapPosition, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
@@ -159,6 +160,7 @@ export function MapStage(props: {
   const ui = useRoomUi();
   const store = useRoomStore();
   const scope = useRoomScope();
+  const popovers = scope.get(popoverSlot);
   const youId = useRoomView((s) => s.you?.memberId ?? null);
   const allTokens = useRoomView((s) => s.view?.tokens ?? EMPTY_TOKENS);
   const characters = useRoomView((s) => s.view?.characters);
@@ -731,8 +733,22 @@ export function MapStage(props: {
       toolRef.current.pointer?.cancel?.(toolContextRef.current);
     };
 
+    /*
+     * A press on the map while a popover or menu is open does nothing but
+     * close it (docs/design-v1-tool-options.md 7.1 and 7.4): from its first
+     * event to its last finger's lift, the tool does nothing with it, no
+     * stroke, ping, ruler point, fog edit, area, selection, one-finger pan
+     * or hold to ping. The room's popover rule follows the press
+     * (components/popoverRules.ts) and closes the popover as it ends as
+     * one pointer. A second finger still pinches or pans the map, which
+     * leaves the popover open. A press that pans the map whatever the tool
+     * is the map's to judge, with its own Space rule, and never closes one.
+     */
+    const pans = (e: { pointerType: string; button: number }) => mousePans(e, spaceRef.current);
+    popovers.mapPans = pans;
+
     const onDown = (e: PointerEvent) => {
-      const mousePan = e.pointerType === "mouse" && (e.button === 1 || e.button === 2 || (e.button === 0 && spaceRef.current));
+      const mousePan = pans(e);
       if (e.pointerType === "mouse" && e.button !== 0 && !mousePan) return;
       const c = currentCam();
       if (!c) return;
@@ -742,6 +758,19 @@ export function MapStage(props: {
         if (gesture.pointers.size > 0) return;
         mousePanRef.current = { pointerId: e.pointerId, start: p, moved: false };
         gesture.down(e.pointerId, p, c, true);
+        return;
+      }
+      if (popovers.suppressesTool()) {
+        // Followed for a pinch, never for a one-finger pan, and no token is selected on its lift.
+        suppressSelectRef.current = true;
+        refusedPressRef.current = null;
+        const mode = gesture.down(e.pointerId, p, c, false);
+        if (mode === "pinch" || mode === "ignored") {
+          longPress.cancel();
+          stopTokenDrag();
+          cancelToolGesture();
+          endBox();
+        }
         return;
       }
       const handlers = toolRef.current.pointer;
@@ -824,6 +853,14 @@ export function MapStage(props: {
     };
     const onUp = (e: PointerEvent) => {
       if (!gesture.pointers.has(e.pointerId)) return;
+      if (popovers.suppressesTool() && mousePanRef.current?.pointerId !== e.pointerId) {
+        const c = currentCam();
+        if (c) gesture.up(e.pointerId, c);
+        else gesture.pointers.delete(e.pointerId);
+        // Its last finger lifted, and the popover's own listeners have heard it: the next press is the tool's again.
+        if (gesture.pointers.size === 0) popovers.settle();
+        return;
+      }
       longPress.cancel();
       if (refusedPressRef.current?.pointerId === e.pointerId) refusedPressRef.current = null;
       const c = currentCam();
@@ -888,10 +925,11 @@ export function MapStage(props: {
       el.removeEventListener("contextmenu", onContextMenu);
       el.removeEventListener("mousedown", onMouseDown);
       longPress.cancel();
+      if (popovers.mapPans === pans) popovers.mapPans = null;
     };
     // The listeners read the camera and the tool through refs, so they
     // attach once, when the stage first exists, and again to a remounted one.
-  }, [hasStage, stageKey, scheduleCam, stopTokenDrag]);
+  }, [hasStage, stageKey, scheduleCam, stopTokenDrag, popovers]);
 
   // Safari's own pinch-zoom of the page would fight the canvas pinch. The
   // Room page prevents it for the whole room (Room.tsx useNoPageZoom).
@@ -951,8 +989,8 @@ export function MapStage(props: {
           return n ? [{ token: t, node: n }] : [];
         });
         dragRef.current = { node, tokenId: token.id, cancelled: false, followers };
-        // Space and the left button drag the map, not the token under it.
-        if (gestureRef.current.pointers.size >= 2 || mousePanRef.current) {
+        // Space and the left button drag the map, not the token under it. A press that closes a popover moves nothing.
+        if (gestureRef.current.pointers.size >= 2 || mousePanRef.current || popovers.suppressesTool()) {
           stopTokenDrag();
           return;
         }
@@ -1034,7 +1072,7 @@ export function MapStage(props: {
         clearSpots();
       },
     }),
-    [actions, stopTokenDrag, setSpot, clearSpots],
+    [actions, stopTokenDrag, setSpot, clearSpots, popovers],
   );
 
   const memberMap = members ?? {};

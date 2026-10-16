@@ -3,6 +3,7 @@ import { memo, useEffect, useMemo, useRef, type RefObject } from "react";
 import { Circle, Group, Line, Rect } from "react-konva";
 import { useStore } from "zustand";
 import type { JournalPage, Pin } from "#shared/model.ts";
+import { popoverSlot } from "../../components/popoverRules.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useIsDisplay, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
@@ -115,6 +116,8 @@ function useTapPin(ref: RefObject<Konva.Group | null>, enabled: boolean, sceneId
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
     const onDown = (e: PointerEvent) => {
+      // A press that closes a popover or a menu (components/popoverRules.ts) opens no pin, nor does any finger that joins it.
+      if (scope.get(popoverSlot).suppressesTool()) return;
       if (down.size === 0) several = false;
       down.set(e.pointerId, local(e));
       held.delete(e.pointerId);
