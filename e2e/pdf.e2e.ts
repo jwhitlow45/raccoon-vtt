@@ -1152,6 +1152,21 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     // Page 1 keeps its name on its placeholder.
     assert.equal(await popup.getByRole("img", { name: "Thirty pages, page 1 of 30", exact: true }).count(), 1);
     desk.off("request", onRequest);
+
+    // On page 14, another handout of other pages and sizes comes and goes: the first comes back at page 14, never at a page the other's layout worked out (PDF-BUILD-ASTRA-06).
+    await desk.keyboard.press("Home");
+    await indicatorIs(popup, "1 of 30", "Home before paging to 14");
+    for (let i = 0; i < 13; i++) await popup.getByRole("button", { name: "Next page" }).click();
+    await indicatorIs(popup, "14 of 30", "Next page to page 14");
+    const other = await documentOf("Short notes", [await paper(1000, 300, 3), await paper(1000, 300, 4)]);
+    const otherId = await show(other, [run.patId]);
+    const notes = viewer(desk, "Short notes");
+    await notes.waitFor();
+    await indicatorIs(notes, "All 2 pages", "the other handout");
+    await notes.getByRole("button", { name: /^Close/ }).click();
+    await popup.waitFor();
+    await indicatorIs(popup, "14 of 30", "the first handout again");
+    await ops.send({ t: "handout.close", handoutId: otherId });
     await popup.getByRole("button", { name: /^Close/ }).click();
     await popup.waitFor({ state: "detached" });
   });

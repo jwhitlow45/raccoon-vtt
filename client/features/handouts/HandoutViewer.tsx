@@ -139,6 +139,9 @@ export function HandoutViewer(props: {
   const latest = useRef<ViewerState>(state);
   // The showing the state belongs to, set before the step that starts it, so the page memory never files one showing's page under another's key.
   const shownKey = useRef(props.showing);
+  // The showing the props name now, which shownKey takes on once the new showing starts.
+  const wanted = useRef(props.showing);
+  wanted.current = props.showing;
   const stageRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
   const zoomOutRef = useRef<HTMLButtonElement>(null);
@@ -178,7 +181,8 @@ export function HandoutViewer(props: {
       if (pages < 2 || !viewerFrame(next)) return;
       const page = currentPage(next);
       const was = viewerFrame(before) ? currentPage(before) : null;
-      if (page !== was) rememberPage(memory, shownKey.current, page);
+      // Only once the showing on screen is the one the props name: between the two, a page belongs to neither.
+      if (page !== was && shownKey.current === wanted.current) rememberPage(memory, shownKey.current, page);
       if (announcesPage(a) && page !== was) say(`Page ${page + 1} of ${pages}`);
     },
     [lostFocus, memory, say],
@@ -269,6 +273,32 @@ export function HandoutViewer(props: {
   // One page keeps today's message over the whole stage. Several fail each in its own box (5.4, 5.8).
   const first = props.pages[0];
   const failedWhole = count === 1 && first !== undefined && loads.get(first.src) === "failed";
+
+  // ---------------------------------------------------------------- another showing (5.1)
+
+  /*
+   * A new showing resets the viewer's identity before anything of the new
+   * pages is laid out or measured: this effect is declared ahead of the
+   * layout and measuring effects, so it runs first in the same commit, and
+   * a page worked out from the new pages is never filed under the old
+   * showing's key (PDF-BUILD-ASTRA-06).
+   */
+  const mountedRef = useRef<ReadonlySet<number>>(new Set());
+  useLayoutEffect(() => {
+    if (shownKey.current === props.showing) return;
+    shownKey.current = props.showing;
+    // A new showing drops any gesture and fling, and starts at rest on its remembered page.
+    stopFling();
+    pointers.current.clear();
+    gesture.current = null;
+    lastTap.current = null;
+    mountedRef.current = new Set();
+    act({ t: "pages", start: rememberedPage(memory, props.showing) });
+    // The same pages shown anew keep their layout's identity, so its own effect would not lay them out again.
+    act({ t: "layout", layout: pagesLayout });
+    // Only the key starts a showing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.showing]);
 
   // ---------------------------------------------------------------- measuring
 
@@ -467,25 +497,6 @@ export function HandoutViewer(props: {
     stopFling();
     act(a);
   };
-
-  // ---------------------------------------------------------------- another showing (5.1)
-
-  const mountedRef = useRef<ReadonlySet<number>>(new Set());
-  useLayoutEffect(() => {
-    if (shownKey.current === props.showing) return;
-    shownKey.current = props.showing;
-    // A new showing drops any gesture and fling, and starts at rest on its remembered page.
-    stopFling();
-    pointers.current.clear();
-    gesture.current = null;
-    lastTap.current = null;
-    mountedRef.current = new Set();
-    act({ t: "pages", start: rememberedPage(memory, props.showing) });
-    // The same pages shown anew keep their layout's identity, so its own effect would not lay them out again.
-    act({ t: "layout", layout: pagesLayout });
-    // Only the key starts a showing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.showing]);
 
   // ---------------------------------------------------------------- drawing
 
