@@ -1,6 +1,7 @@
 import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { createStore } from "zustand/vanilla";
 import { theme } from "../../lib/theme.ts";
 
 /*
@@ -17,12 +18,13 @@ const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 const { HpEntry, oneTarget } = await import("./HpSection.tsx");
 
-function render(access: "all" | "relative"): string {
-  const target = oneTarget({ tokenId: "t1" }, access, false);
-  // HpEntry reads the room's actions only when a change is applied, and the store only as it unmounts. The page's scope holds what a blackout keeps (hpDraft.ts).
+function render(access: "all" | "relative", vitals = { name: "Thorn", dead: false, max: 20 as number | undefined }, settings: { healRevives?: boolean } = {}, role: "dm" | "player" = "dm"): string {
+  const target = oneTarget({ tokenId: "t1" }, access, false, vitals);
+  // HpEntry reads the room's actions only when a change is applied. The store gives the room's healing setting and the role, for the lines on the dead. The page's scope holds what a blackout keeps (hpDraft.ts).
+  const store = createStore(() => ({ view: { meta: { settings } }, you: { role } }));
   const entry = createElement(HpEntry, { targets: [target], access, place: "bar" });
   return renderToStaticMarkup(
-    createElement(RoomProvider, { store: {} as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: entry }) }),
+    createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: entry }) }),
   );
 }
 
@@ -65,5 +67,18 @@ describe("the HP entry's modes are native radios", () => {
 
   test("a player who may only damage or heal sees those two", () => {
     assert.deepEqual(names(render("relative")), ["Damage", "Heal"]);
+  });
+});
+
+describe("the HP entry's lines on the dead (docs/design-v1-combat-flow.md 3.5)", () => {
+  const dead = { name: "Thorn", dead: true, max: 20 };
+  test("with healing off, Heal chosen before anything is typed says healing does nothing, and the DM is told to Revive first", () => {
+    // The entry opens on Damage, which adds no line. The lines follow the mode only until the text parses.
+    assert.doesNotMatch(render("all", dead, { healRevives: false }), /Healing does nothing/);
+    assert.doesNotMatch(render("all", dead, {}), /Brings back/, "damage counts no revival");
+  });
+
+  test("a living target gets no line", () => {
+    assert.doesNotMatch(render("all", { name: "Thorn", dead: false, max: 20 }, { healRevives: false }), /dead/);
   });
 });

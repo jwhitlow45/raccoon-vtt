@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type Ref } from "react";
+import { useId, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type Ref } from "react";
 import type { Effect, InitEntry } from "#shared/model.ts";
 import { playerPlays } from "#shared/project.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
@@ -9,6 +9,7 @@ import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { REVIVE_NOTE, ReviveButton, offersRevive } from "../tokens/Revive.tsx";
 import { openStatBlock } from "../tokens/statBlockOpen.ts";
 import { RowRollTools } from "./AutoInitiative.tsx";
 import { useSend } from "./hooks.ts";
@@ -191,6 +192,7 @@ export function EntryRow(props: {
           readied={readied}
           playerOwned={playerOwned}
           statBlockTokenId={token && (token.kind === "monster" || token.kind === "npc") ? token.id : null}
+          revive={offersRevive(actor?.life, token?.kind)}
         />
       ) : null}
     </li>
@@ -358,8 +360,11 @@ function RowMenu(props: {
   playerOwned: boolean;
   /** A monster's or NPC's token, whose full stat block the DM can open from the row (docs/design-v1-dm-tools.md 3.6). */
   statBlockTokenId: string | null;
+  /** The row's creature is dead: the DM's Revive comes first, for a row whose token has no bar in this view (docs/design-v1-combat-flow.md 3.5). */
+  revive: boolean;
 }) {
   const { entry, role, drag } = props;
+  const reviveNoteId = useId();
   const actions = useRoomActions();
   const ui = useRoomUi();
   const scope = useRoomScope();
@@ -378,6 +383,14 @@ function RowMenu(props: {
 
   return (
     <div style={{ padding: `0 ${theme.space(2)}px ${theme.space(3)}px ${dm ? theme.touch + theme.space(1) : theme.space(2)}px`, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
+      {dm && props.revive && props.target ? (
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2) }}>
+          <ReviveButton target={props.target} describedBy={reviveNoteId} />
+          <span id={reviveNoteId} style={{ flex: 1, minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>
+            {REVIVE_NOTE}
+          </span>
+        </div>
+      ) : null}
       {dm ? (
         <>
           <Switch label="Hidden from players" help="Players do not see this row" checked={entry.hidden} onChange={(hidden) => update({ hidden })} />

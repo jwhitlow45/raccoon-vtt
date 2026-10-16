@@ -1,4 +1,5 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
+import { healRevivesDead } from "#shared/migrate.ts";
 import type { Actor, HpVisibility, LifeState } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -7,8 +8,8 @@ import { Segmented } from "../../components/Segmented.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { hpDisplay, hpLabel, hpText, type HpView } from "../../lib/tokenView.ts";
 import { theme } from "../../lib/theme.ts";
-import { useRoomActions } from "../../state/view.ts";
-import { sendHpEntry, type HpTarget } from "./groupHp.ts";
+import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { deadLines, sendHpEntry, type EntryOperation, type HpTarget } from "./groupHp.ts";
 import { hpDraftKey, useKeepHpDraft, useKeptHpDraft, type HpPlace } from "./hpDraft.ts";
 import { HP_MODES, MAX_HP_AMOUNT, modeAfterApply, parseHpInput, type HpMode } from "./hpInput.ts";
 import { Note, NumberField, Section, SmallButton } from "./ui.tsx";
@@ -23,9 +24,9 @@ type HpActor = HpView & Partial<Pick<Actor, "deathSaves">>;
 
 export type HpAccessLevel = "all" | "relative" | "none";
 
-/** The HP entry's target for a single creature. */
-export function oneTarget(target: ActorTarget, access: HpAccessLevel, atZero: boolean): HpTarget {
-  return { holder: "tokenId" in target ? `token:${target.tokenId}` : `character:${target.characterId}`, target, name: "", access, atZero };
+/** The HP entry's target for a single creature: its name, life and maximum feed the entry's lines on the dead (groupHp.ts deadLines). */
+export function oneTarget(target: ActorTarget, access: HpAccessLevel, atZero: boolean, vitals: Pick<HpTarget, "name" | "dead" | "max">): HpTarget {
+  return { holder: "tokenId" in target ? `token:${target.tokenId}` : `character:${target.characterId}`, target, access, atZero, ...vitals };
 }
 
 /**
@@ -63,6 +64,11 @@ export function HpEntry(props: {
   const atZero = props.targets.some((t) => t.atZero);
   const showCrit = atZero && (preview?.ok ? preview.change.kind === "damage" : mode === "damage");
   const reach = props.targets.filter((t) => t.access !== "none").length;
+  // What will be sent decides the lines on the dead: the typed text once it parses, the chosen mode before.
+  const revives = useRoomView((s) => healRevivesDead(s.view?.meta.settings ?? {}));
+  const dm = useRoomView((s) => s.you?.role === "dm");
+  const operation: EntryOperation = preview?.ok ? { kind: preview.change.kind, ...(preview.change.kind === "set" && preview.change.cur !== undefined ? { cur: preview.change.cur } : {}) } : { kind: mode };
+  const lines = deadLines(props.targets, operation, { revives, dm });
 
   const apply = () => {
     const parsed = parseHpInput(text, mode);
@@ -124,6 +130,9 @@ export function HpEntry(props: {
         <Checkbox checked={crit} onChange={setCrit} label="Critical hit (two failed death saves)" />
       ) : null}
       {error ? <Note tone="error">{error}</Note> : preview?.ok ? <Note>{reach > 1 ? `${preview.summary}, to each of ${reach}` : preview.summary}</Note> : null}
+      {lines.map((line) => (
+        <Note key={line}>{line}</Note>
+      ))}
     </form>
   );
 }
@@ -158,6 +167,8 @@ export function HpSection(props: {
   hpVisibility: HpVisibility | undefined;
   target: ActorTarget;
   access: { full: boolean; hp: HpAccessLevel; deathSaves: boolean; life: boolean };
+  /** The creature's name, for the entry's lines on the dead. */
+  name?: string;
 }) {
   const { actor, access, target } = props;
   const actions = useRoomActions();
@@ -183,7 +194,9 @@ export function HpSection(props: {
         </div>
       )}
 
-      {access.hp !== "none" ? <HpEntry targets={[oneTarget(target, access.hp, atZero)]} access={access.hp} place="panel" /> : null}
+      {access.hp !== "none" ? (
+        <HpEntry targets={[oneTarget(target, access.hp, atZero, { name: props.name ?? "it", dead: life === "dead", max: hp?.max })]} access={access.hp} place="panel" />
+      ) : null}
 
       {access.hp === "all" && hp ? (
         // One row where it fits (docs/design-v1-token-panel.md 3.7): each label stays with its field, and the two wrap between them.

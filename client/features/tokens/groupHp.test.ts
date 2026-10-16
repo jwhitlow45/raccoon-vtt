@@ -4,7 +4,8 @@ import { clientOpSchema } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor, DM, room, token } from "#shared/testutil.ts";
 import type { ClientOp } from "#shared/protocol.ts";
-import { groupAccess, hpOps, hpTargets, sendHpEntry, type HpTarget } from "./groupHp.ts";
+import { deadHealLine, deadLines, groupAccess, hpOps, hpTargets, sendHpEntry, type EntryOperation, type HpTarget } from "./groupHp.ts";
+import { parseHpInput, type HpMode } from "./hpInput.ts";
 
 const target = (id: string, over: Partial<HpTarget> = {}): HpTarget => ({
   holder: `token:${id}`,
@@ -12,6 +13,8 @@ const target = (id: string, over: Partial<HpTarget> = {}): HpTarget => ({
   name: id,
   access: "all",
   atZero: false,
+  dead: false,
+  max: 20,
   ...over,
 });
 
@@ -84,5 +87,75 @@ describe("one HP entry for several creatures", () => {
     sendHpEntry(actions, [target("a")], { kind: "heal", amount: 2 }, false);
     assert.equal(sent.length, 1);
     assert.equal(sent[0]!.group, undefined);
+  });
+});
+
+describe("the HP entry's lines on the dead (docs/design-v1-combat-flow.md 3.5)", () => {
+  const thorn = target("thorn", { name: "Thorn", dead: true });
+  const on = { revives: true, dm: true };
+  const off = { revives: false, dm: true };
+  /** The operation an entry sends: the typed text once it parses, the chosen mode before, as HpEntry asks. */
+  const op = (text: string, mode: HpMode): EntryOperation => {
+    const parsed = text.trim() ? parseHpInput(text, mode) : null;
+    if (!parsed?.ok) return { kind: mode };
+    return { kind: parsed.change.kind, ...(parsed.change.kind === "set" && parsed.change.cur !== undefined ? { cur: parsed.change.cur } : {}) };
+  };
+
+  test("a target's dead flag and maximum come from the viewer's copy", () => {
+    const state = room({
+      tokens: {
+        dead: token("dead", { actor: { inline: actor({ hp: { cur: 0, max: 7, temp: 0 }, life: "dead" }) } }),
+        up: token("up"),
+      },
+    });
+    const [dead, up] = hpTargets([state.tokens.dead!, state.tokens.up!], { role: "dm", memberId: DM.memberId, characters: {}, playersApplyDamage: false });
+    assert.deepEqual([dead!.dead, dead!.max, up!.dead], [true, 7, false]);
+    const label = { ...state.tokens.dead!, actor: { inline: { life: "dead" as const, effects: [], hpLabel: "Dead" as const } } };
+    assert.equal(hpTargets([label as never], { role: "player", memberId: "p1", characters: {}, playersApplyDamage: true })[0]!.max, undefined, "no HP in the viewer's copy, no maximum");
+  });
+
+  test("with healing on, a heal counts the dead it brings back, and so does a set of a current HP above 0", () => {
+    assert.deepEqual(deadLines([thorn], op("5", "heal"), on), ["Brings back 1 dead creature."]);
+    assert.deepEqual(deadLines([thorn, target("b", { dead: true }), target("c")], op("5", "heal"), on), ["Brings back 2 dead creatures."]);
+    assert.deepEqual(deadLines([thorn], op("=4", "damage"), on), ["Brings back 1 dead creature."]);
+    assert.deepEqual(deadLines([thorn], op("=0", "damage"), on), [], "a set of 0 brings nobody back");
+    assert.deepEqual(deadLines([thorn], op("", "set"), on), [], "a set says nothing until its HP is typed");
+  });
+
+  test("the lines follow what will be sent: +5 under Damage is a heal, -7 under Heal is damage, and the mode decides only before anything parses", () => {
+    assert.deepEqual(deadLines([thorn], op("+5", "damage"), on), ["Brings back 1 dead creature."]);
+    assert.deepEqual(deadLines([thorn], op("-7", "heal"), on), []);
+    assert.deepEqual(deadLines([thorn], op("-7", "heal"), off), [], "damage adds no line with the setting off either");
+    assert.deepEqual(deadLines([thorn], op("", "heal"), on), ["Brings back 1 dead creature."]);
+    assert.deepEqual(deadLines([thorn], op("", "damage"), on), []);
+    assert.deepEqual(deadLines([thorn], op("t5", "heal"), off), [], "temporary HP adds no line");
+  });
+
+  test("the count leaves out a maximum of 0 and counts an unknown maximum", () => {
+    assert.deepEqual(deadLines([target("z", { dead: true, max: 0 })], op("5", "heal"), on), []);
+    assert.deepEqual(deadLines([target("u", { dead: true, max: undefined })], op("5", "heal"), on), ["Brings back 1 dead creature."]);
+    assert.deepEqual(deadLines([target("z", { dead: true, max: 0 }), target("u", { dead: true, max: undefined })], op("=3", "set"), on), ["Brings back 1 dead creature."]);
+  });
+
+  test("with healing off, a heal and a set say the dead stay dead, for one target and a group, and only the DM is told to Revive first", () => {
+    assert.deepEqual(deadLines([thorn], op("5", "heal"), off), ["Healing does nothing while Thorn is dead. Revive Thorn first."]);
+    assert.deepEqual(deadLines([thorn], op("5", "heal"), { revives: false, dm: false }), ["Healing does nothing while Thorn is dead."]);
+    assert.deepEqual(deadLines([thorn, target("b", { dead: true }), target("c")], op("5", "heal"), off), ["Healing does nothing to the 2 dead among them."]);
+    assert.deepEqual(deadLines([thorn], op("=9", "damage"), off), ["Thorn stays dead at the new HP. Only Revive brings Thorn back."]);
+    assert.deepEqual(deadLines([thorn], op("", "set"), off), ["Thorn stays dead at the new HP. Only Revive brings Thorn back."]);
+    assert.deepEqual(deadLines([thorn, target("b", { dead: true })], op("=9", "set"), off), ["The 2 dead among them stay dead at the new HP. Only Revive brings them back."]);
+    assert.deepEqual(deadLines([thorn], op("7", "damage"), off), []);
+  });
+
+  test("no line without a dead target, and creatures the viewer cannot reach or that share a character count once", () => {
+    assert.deepEqual(deadLines([target("a"), target("b")], op("5", "heal"), off), []);
+    assert.deepEqual(deadLines([target("x", { dead: true, access: "none" }), target("a")], op("5", "heal"), on), []);
+    const twice = [target("pc1", { holder: "character:c", dead: true }), target("pc2", { holder: "character:c", dead: true })];
+    assert.deepEqual(deadLines(twice, op("5", "heal"), on), ["Brings back 1 dead creature."]);
+  });
+
+  test("a dead creature's bar tells a player who may heal it what healing will do", () => {
+    assert.equal(deadHealLine("Bree", true), "Healing brings Bree back.");
+    assert.equal(deadHealLine("Bree", false), "Healing does nothing while Bree is dead. Only the DM's Revive brings Bree back.");
   });
 });

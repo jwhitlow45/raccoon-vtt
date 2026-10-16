@@ -142,7 +142,7 @@ function TokenDetails(props: PanelProps) {
       case "summary":
         return <PanelSection key={id}>{summary}</PanelSection>;
       case "hp":
-        return <HpSection key={id} actor={actor} hpVisibility={token.hpVisibility} target={{ tokenId: token.id }} access={access} />;
+        return <HpSection key={id} actor={actor} hpVisibility={token.hpVisibility} target={{ tokenId: token.id }} access={access} name={name} />;
       case "conditions":
         return <EffectsSection key={id} effects={actor?.effects ?? []} target={{ tokenId: token.id }} self={{ tokenId: token.id }} selfLabel={name} canEdit={access.effects} />;
       case "position":

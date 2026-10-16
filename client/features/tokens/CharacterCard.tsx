@@ -98,6 +98,7 @@ export function CharacterCard(props: { character: Character }) {
         hpVisibility={undefined}
         target={{ characterId: character.id }}
         access={{ full: access.full, hp: access.full ? "all" : "none", deathSaves: access.full, life: access.dm }}
+        name={character.name}
       />
       <EffectsSection
         effects={character.actor.effects ?? []}

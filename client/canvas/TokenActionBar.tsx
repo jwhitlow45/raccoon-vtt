@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject } from "react";
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { useStore } from "zustand";
+import { healRevivesDead } from "#shared/migrate.ts";
 import { CONDITION_KEYS, STATUS_KEYS, type Actor, type Effect } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import type { ClientOp } from "#shared/protocol.ts";
@@ -39,10 +40,12 @@ import {
   updateManyOps,
   type Lit,
 } from "../features/tokens/groupEdit.ts";
+import { deadHealLine } from "../features/tokens/groupHp.ts";
 import { GroupHpEntry } from "../features/tokens/GroupHpEntry.tsx";
 import { GroupMoreSheet } from "../features/tokens/GroupMoreSheet.tsx";
 import { DeathSaves, HpEntry, oneTarget } from "../features/tokens/HpSection.tsx";
 import { pathNow } from "../features/measure/movement.ts";
+import { REVIVE_NOTE, ReviveButton, offersRevive } from "../features/tokens/Revive.tsx";
 import { lastMoveSlot, offered, offersMarkUndo, offersUndo, undoOf } from "../features/tokens/undoMove.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import type { Point, Size } from "../lib/camera.ts";
@@ -159,6 +162,13 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const link = tokenStatBlock(actor, monsters);
   const statBlock = statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor }) && (link.kind === "room" || link.kind === "srd");
   const sheetUrl = actor?.sheetUrl ? validSheetUrl(actor.sheetUrl) : null;
+  // A dead creature's bar offers the DM Revive after the Dead tag, and tells a player who may heal it what healing will do (docs/design-v1-combat-flow.md 3.5).
+  // An HP-less token shows no life tag, so it has neither (docs/design-v1-token-panel.md 3.2).
+  const noHp = hpLess(actor, token);
+  const revives = useRoomView((s) => healRevivesDead(s.view?.meta.settings ?? {}));
+  const deadLineId = useId();
+  const revive = access.life && !noHp && offersRevive(life, token.kind);
+  const deadLine = revive ? REVIVE_NOTE : life === "dead" && !noHp && !access.dm && access.hp !== "none" ? deadHealLine(displayName(token), revives) : null;
 
   const toggleEffect = (key: Effect["key"]) => {
     const existing = effects.find((e) => e.key === key);
@@ -280,9 +290,21 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
         actions={badge ? <span style={{ flex: "none", color: theme.color.accentSoft, fontWeight: theme.weight.bold }}>{badge} ft</span> : null}
         onClose={props.onClose}
       />
-      <VitalsLine items={short ? split.line : items} />
+      <VitalsLine items={short ? split.line : items} afterTag={revive ? <ReviveButton target={target} describedBy={deadLineId} /> : undefined} />
+      {deadLine ? (
+        <div id={deadLineId} style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>
+          {deadLine}
+        </div>
+      ) : null}
 
-      {access.hp !== "none" && !hpLess(actor, token) ? <HpEntry targets={[oneTarget(target, access.hp, atZero)]} access={access.hp} place="bar" fieldFirst={short} /> : null}
+      {access.hp !== "none" && !noHp ? (
+        <HpEntry
+          targets={[oneTarget(target, access.hp, atZero, { name: displayName(token), dead: life === "dead", max: actor?.hp?.max })]}
+          access={access.hp}
+          place="bar"
+          fieldFirst={short}
+        />
+      ) : null}
 
       {life === "dying" && access.deathSaves && actor?.deathSaves ? (
         <DeathSaves
