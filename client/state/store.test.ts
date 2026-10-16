@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Viewer } from "#shared/model.ts";
-import { checkLimits, LIMITS } from "#shared/limits.ts";
+import { BLOCK_SAVES_TOO_FAST, checkLimits, LIMITS } from "#shared/limits.ts";
 import { projectState } from "#shared/project.ts";
 import type { ClientOp, ServerMessage } from "#shared/protocol.ts";
-import { actor, character, DM, entry, P1, P2, room, token } from "#shared/testutil.ts";
+import { actor, character, companionBlock, DM, entry, P1, P2, room, token } from "#shared/testutil.ts";
 import { LocalServer } from "../dev/localServer.ts";
 import { turnOp } from "../features/encounter/logic.ts";
 import { DRAG_END_HOLD_MS, PREVIEW_IDLE_MS } from "./ephemeral.ts";
@@ -310,6 +310,71 @@ describe("which companion ops are optimistic (docs/design-v1-combat-flow.md 4.6)
     s.deliver();
     assert.equal(s.state().pending.length, 0);
     assert.equal(s.state().view?.tokens.ws?.companion?.reactionUsed, undefined);
+  });
+});
+
+describe("which companion stat block ops are optimistic (docs/design-v1-companion-stat-blocks.md 4.4)", () => {
+  /** Bree (Ana, p1) with her token and her owl Hoot on the players' scene, and one block she keeps. */
+  const bree = () => {
+    const state = room({ characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }) } });
+    state.tokens.bt = token("bt", { kind: "pc", actor: { ref: "bree" }, x: 2, y: 2 });
+    state.tokens.hoot = token("hoot", { kind: "npc", name: "Hoot", x: 3, y: 2, ownerIds: ["p1"], companion: { of: "bree", turn: "shared" }, actor: { inline: actor({ dmNotes: "" }) } });
+    state.companionBlocks.moth = companionBlock("moth", "bree");
+    return state;
+  };
+  const newBlock = (id: string): ClientOp => {
+    const { rev: _rev, ...block } = companionBlock(id, "bree", { name: "Owl" });
+    return { t: "companionBlock.create", block };
+  };
+
+  test("a player's block create, edit and delete, and an attach with its numbers, show at once and land", () => {
+    const s = setup(bree(), P1);
+    s.connect();
+    s.room.dispatch(newBlock("owl"));
+    assert.equal(s.state().view?.companionBlocks.owl?.name, "Owl", "predicted");
+    s.room.dispatch({ t: "companionBlock.update", blockId: "moth", patch: { ac: 15 } });
+    assert.equal(s.state().view?.companionBlocks.moth?.ac, 15);
+    s.room.dispatch({ t: "token.update", tokenId: "hoot", patch: { actor: { blockId: "owl", ac: 11, hp: { max: 1, cur: 1 } } } });
+    const hoot = s.state().view?.tokens.hoot?.actor;
+    assert.ok(hoot && "inline" in hoot && hoot.inline.blockId === "owl" && hoot.inline.ac === 11, "the attach is predicted");
+    s.room.dispatch({ t: "companionBlock.delete", blockId: "moth" });
+    assert.equal(s.state().view?.companionBlocks.moth, undefined);
+    s.deliver();
+    assert.equal(s.state().pending.length, 0);
+    assert.equal(s.state().view?.companionBlocks.owl?.rev, 0, "the server's copy, rev 0 as a player's projection holds it");
+    assert.equal(s.state().view?.companionBlocks.moth, undefined);
+  });
+
+  test("a new companion that carries a block waits for the server, as every companion create does", () => {
+    const s = setup(bree(), P1);
+    s.connect();
+    s.room.dispatch({
+      t: "token.create",
+      token: { id: "owl", sceneId: "s1", kind: "npc", name: "Owl", size: "tiny", x: 1, y: 2, layer: "token", actor: { inline: actor({ hp: { cur: 1, max: 1, temp: 0 }, dmNotes: "", blockId: "moth" }) }, companion: { of: "bree", turn: "shared" } },
+    });
+    assert.equal(s.state().view?.tokens.owl, undefined, "not predicted");
+    s.deliver();
+    const owl = s.state().view?.tokens.owl?.actor;
+    assert.ok(owl && "inline" in owl && owl.inline.blockId === "moth");
+  });
+
+  test("a save refused past the saves budget rolls back its prediction, and the moves queued after it are sent and taken in order", () => {
+    const s = setup(bree(), P1);
+    s.connect();
+    const answers: OpAnswer[] = [];
+    s.room.dispatch(newBlock("late"), { onAnswer: (a) => answers.push(a), quiet: true });
+    s.room.dispatch(move("hoot", 4, 2));
+    s.room.dispatch(move("hoot", 5, 2));
+    assert.ok(s.state().view?.companionBlocks.late);
+    assert.deepEqual(s.outbox.takeOps(), [1, 2, 3], "nothing waits behind the save");
+    // The server refuses the save and takes the moves after it, in one batch, as the room actor answers a save past the budget.
+    s.room.applyEv({ t: "ev", seq: 1, changes: [], acks: [2, 3], rejects: [{ n: 1, code: "quota", message: BLOCK_SAVES_TOO_FAST }] });
+    assert.equal(s.state().view?.companionBlocks.late, undefined, "rolled back");
+    assert.deepEqual(answers, ["refused"]);
+    assert.deepEqual(s.state().toasts, [], "the editor that sent it says why");
+    assert.equal(s.state().pending.length, 0);
+    s.room.dispatch(move("hoot", 6, 2));
+    assert.deepEqual(s.outbox.takeOps(), [4], "the device goes on sending at once");
   });
 });
 

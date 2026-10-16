@@ -5,7 +5,7 @@ import { projectState } from "#shared/project.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { loadMonsters } from "#shared/srd/monsters.ts";
 import { statBlockOf } from "#shared/statBlock.ts";
-import { P1, actor, character, customMonster, room, token } from "#shared/testutil.ts";
+import { P1, actor, character, companionBlock, customMonster, room, token } from "#shared/testutil.ts";
 import { defenseLines, hpUnits, linkedBlockState, moreStatsShown, saveUnits, shortSplit, speedUnits, unitText, validSheetUrl, vitals, type VitalItem, type VitalUnit } from "./statSummary.ts";
 
 /*
@@ -202,6 +202,17 @@ describe("saves and defenses", () => {
 describe("the linked block's state", () => {
   const monsters = { m1: customMonster("m1") };
   const loaded = async () => ({ list: await loadMonsters(), failed: false });
+
+  test("a companion's stored block reads at once, with no chunk, and a deleted one as none (docs/design-v1-companion-stat-blocks.md 6.6)", () => {
+    const blocks = { b1: companionBlock("b1", "bree", { resistances: "Cold" }) };
+    const state = linkedBlockState({ blockId: "b1" }, monsters, { list: null, failed: false }, blocks);
+    assert.equal(state.kind, "ready");
+    assert.ok(state.kind === "ready" && !("characterId" in state.block) && !("id" in state.block));
+    assert.deepEqual(state.kind === "ready" ? defenseLines(state.block) : [], [{ label: "Resistances", text: "Cold" }]);
+    const again = linkedBlockState({ blockId: "b1" }, monsters, { list: null, failed: false }, blocks);
+    assert.ok(again.kind === "ready" && state.kind === "ready" && again.block === state.block, "the same block for the same version, so a bar drawn again keeps it");
+    assert.deepEqual(linkedBlockState({ blockId: "gone" }, monsters, { list: null, failed: false }, blocks), { kind: "none" });
+  });
 
   test("none, a room monster at once, and a deleted one as none", () => {
     assert.deepEqual(linkedBlockState({}, monsters, { list: null, failed: false }), { kind: "none" });

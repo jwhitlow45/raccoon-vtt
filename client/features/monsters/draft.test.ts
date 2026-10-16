@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { monsterInputSchema } from "#shared/protocol.ts";
 import { emptyStatBlock, statBlockOf } from "#shared/statBlock.ts";
-import { blockOf, customMonster, imageRef } from "#shared/testutil.ts";
-import { issueText, monsterPatch, tidy, viewOf, withCr, withImage, withScore } from "./draft.ts";
+import { BLOCK_SAVES_TOO_FAST, BLOCKS_ROOM_TOO_FULL, LIMITS } from "#shared/limits.ts";
+import { blockOf, companionBlock, customMonster, imageRef } from "#shared/testutil.ts";
+import { blockSaveOutcome, issueText, lateBlockSaveText, monsterPatch, tidy, viewOf, withCr, withImage, withScore } from "./draft.ts";
 
 describe("the editor's draft", () => {
   test("tidy trims, drops blank lines and empty entries, and keeps an ASCII minus in the hit dice", () => {
@@ -93,3 +94,42 @@ describe("the editor's draft", () => {
     assert.equal(viewOf(m).srdId, undefined);
   });
 });
+
+describe("a companion block's save (docs/design-v1-companion-stat-blocks.md 6.2)", () => {
+  test("an edit is diffed against the block as the editor opened it, so another's change to another line is kept", () => {
+    const opened = companionBlock("b1", "bree", { name: "Moth Spirit", ac: 12 });
+    // A co-owner renamed it meanwhile. This draft changed the AC alone.
+    const live = { ...opened, name: "Moth Spirit, Bree's version" };
+    const draft = { ...statBlockOf(customMonster("x")), ...blockOf(customMonster("b1")), ...stripped(opened), ac: 14 };
+    assert.deepEqual(monsterPatch(stripped(opened), draft), { ac: 14 });
+    // Diffed against the live block, the old name would go back as a change.
+    assert.deepEqual(monsterPatch(stripped(live), draft), { name: "Moth Spirit", ac: 14 });
+  });
+
+  test("taken closes, and a refusal keeps the draft with the server's words, a guard's in the blocks' own", () => {
+    assert.deepEqual(blockSaveOutcome("taken", undefined, "Bree"), { kind: "saved" });
+    assert.deepEqual(blockSaveOutcome("refused", { message: BLOCKS_ROOM_TOO_FULL }, "Bree"), { kind: "problem", text: BLOCKS_ROOM_TOO_FULL });
+    assert.deepEqual(blockSaveOutcome("refused", { message: "Bree can keep at most 100 stat blocks. Delete one first." }, "Bree"), {
+      kind: "problem",
+      text: "Bree can keep at most 100 stat blocks. Delete one first.",
+    });
+    assert.deepEqual(blockSaveOutcome("refused", { message: "that is not here" }, "Bree"), { kind: "problem", text: "That is not here." });
+    assert.deepEqual(blockSaveOutcome("unknown", undefined, "Bree"), { kind: "problem", text: "The connection dropped before the server answered. Check Bree’s stat blocks before saving again." });
+  });
+
+  test("past the saves budget the draft stays and Save waits out one refill before it is offered again", () => {
+    assert.deepEqual(blockSaveOutcome("refused", { message: BLOCK_SAVES_TOO_FAST }, "Bree"), { kind: "problem", text: BLOCK_SAVES_TOO_FAST, retryInMs: LIMITS.companionBlockWriteRefillMs });
+  });
+
+  test("an answer after Cancel adds the block and says nothing, and a refusal or a lost answer is a toast", () => {
+    assert.equal(lateBlockSaveText("Owl", "Bree", "taken"), null);
+    assert.equal(lateBlockSaveText("Owl", "Bree", "refused", { message: "Bree can keep at most 100 stat blocks. Delete one first." }), "Owl was not saved. Bree can keep at most 100 stat blocks. Delete one first.");
+    assert.equal(lateBlockSaveText("Owl", "Bree", "unknown"), "The connection dropped before the server answered, so Owl may not have been saved. Check Bree’s stat blocks.");
+  });
+});
+
+/** A stored block as the editor's draft holds it, without the fields the entity carries. */
+function stripped(block: ReturnType<typeof companionBlock>) {
+  const { id: _id, rev: _rev, characterId: _c, fromSrd: _f, ...lines } = block;
+  return lines;
+}

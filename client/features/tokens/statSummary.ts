@@ -1,4 +1,4 @@
-import type { Actor, CustomMonster, HpVisibility, LifeState, StatBlock, TokenKind } from "#shared/model.ts";
+import type { Actor, CompanionBlock, CustomMonster, HpVisibility, LifeState, StatBlock, TokenKind } from "#shared/model.ts";
 import { ABILITY_KEYS } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
@@ -190,19 +190,34 @@ function srdBlock(monster: SrdMonster): StatBlock | null {
   return block;
 }
 
+/** A companion's stored block without its entity fields, once per version, so a bar that draws it again gets the same object. */
+const storedBlocks = new WeakMap<CompanionBlock, StatBlock>();
+
+function storedBlock(stored: CompanionBlock): StatBlock {
+  let block = storedBlocks.get(stored);
+  if (!block) {
+    const { id: _id, rev: _rev, characterId: _of, fromSrd: _from, ...lines } = stored;
+    block = lines;
+    storedBlocks.set(stored, block);
+  }
+  return block;
+}
+
 /**
  * The block behind a token's link (statBlockLink.ts tokenStatBlock): a
- * room monster's at once, from state only the DM holds, an SRD monster's
- * once its chunk has loaded. A link to a deleted room monster, an SRD id
- * the chunk lacks and a block that does not read all count as none.
+ * room monster's or a companion's stored block at once, from the view, an
+ * SRD monster's once its chunk has loaded. A link to a deleted block, an
+ * SRD id the chunk lacks and a block that does not read all count as none.
  */
 export function linkedBlockState(
-  link: Pick<Actor, "srdId" | "monsterId"> | undefined,
+  link: Pick<Actor, "srdId" | "monsterId" | "blockId"> | undefined,
   monsters: Readonly<Record<string, CustomMonster | undefined>> | undefined,
   srd: { list: readonly SrdMonster[] | null; failed: boolean },
+  blocks?: Readonly<Record<string, CompanionBlock | undefined>>,
 ): LinkedBlock {
-  const target = tokenStatBlock(link, monsters);
+  const target = tokenStatBlock(link, monsters, blocks);
   if (target.kind === "room") return { kind: "ready", block: statBlockOf(target.monster) };
+  if (target.kind === "block") return { kind: "ready", block: storedBlock(target.block) };
   if (target.kind !== "srd") return { kind: "none" };
   if (srd.list === null) return srd.failed ? { kind: "failed" } : { kind: "loading" };
   const monster = srd.list.find((m) => m.srdId === target.srdId);

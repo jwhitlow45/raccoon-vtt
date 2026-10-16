@@ -1,8 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { ABILITY_KEYS, CR_VALUES, type Actor, type CustomMonster, type MonsterSize, type StatBlock, type StatBlockEntry } from "#shared/model.ts";
+import { ABILITY_KEYS, CR_VALUES, type Actor, type Character, type CompanionBlock, type CustomMonster, type MonsterSize, type StatBlock, type StatBlockEntry } from "#shared/model.ts";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { stableStringify } from "#shared/project.ts";
-import { MAX_LEGENDARY_USES, MAX_NAME, monsterInputSchema } from "#shared/protocol.ts";
+import { companionBlockInputSchema, MAX_LEGENDARY_USES, MAX_NAME, monsterInputSchema, type ClientOp } from "#shared/protocol.ts";
 import { tokenUses } from "#shared/srd/monsters.ts";
 import {
   ABILITY_NAMES,
@@ -24,8 +24,10 @@ import { Markdown } from "../../components/Markdown.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { Help, SectionLabel } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
-import { useRoomActions } from "../../state/view.ts";
-import { issueText, monsterPatch, tidy, withCr, withImage, withScore } from "./draft.ts";
+import type { OpAnswer, OpRefusal } from "../../state/types.ts";
+import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { ownsCharacter } from "../tokens/access.ts";
+import { blockSaveOutcome, issueText, lateBlockSaveText, monsterPatch, tidy, withCr, withImage, withScore } from "./draft.ts";
 import { MonsterImageField } from "./MonsterImage.tsx";
 import { parseStatBlockText } from "./parse.ts";
 
@@ -36,7 +38,16 @@ import { parseStatBlockText } from "./parse.ts";
  *
  * The whole block is one draft in this dialog and one op on Save, so an
  * edit is one undo step and one change for any other DM's device. A new
- * monster is a `monster.create`. An edit sends only the lines it changed.
+ * monster is a `monster.create`. An edit sends only the lines it changed,
+ * diffed against the block as the editor opened it, so a line someone
+ * else changed meanwhile is kept unless this draft changed it too.
+ *
+ * With `block` it edits a character's stat block for its companions
+ * (docs/design-v1-companion-stat-blocks.md 6.2) for the DM or the
+ * character's players, and its Save waits for the server's answer, so a
+ * refusal (a cap, the saves budget, a full room) shows here with the draft
+ * intact. A block or character that leaves this device's view meanwhile
+ * keeps the draft for copying and can no longer be saved.
  */
 
 const SIZE_OPTIONS = (Object.keys(SIZE_WORDS) as MonsterSize[]).map((value) => ({ value, label: SIZE_WORDS[value] }));
@@ -53,26 +64,61 @@ export function MonsterEditor(props: {
   /** The monster being edited, or null for a new one. */
   monster: CustomMonster | null;
   initial: StatBlock;
+  /** A character's companion stat block instead of a room monster: the one being edited, or null for a new one, and the SRD monster a copy came from. */
+  block?: { character: Pick<Character, "id" | "name">; existing: CompanionBlock | null; fromSrd?: string };
   /** Opens with the paste box ready, for "Paste a stat block". */
   paste?: boolean;
   onClose(): void;
   onSaved(id: string): void;
 }) {
   const actions = useRoomActions();
+  const ui = useRoomUi();
+  // What an edit is diffed against: the block as it was when the editor opened, whatever arrives meanwhile.
+  const [base] = useState<StatBlock | null>(() => props.block?.existing ?? props.monster);
+  const target = props.block;
   const [draft, setDraft] = useState<StatBlock>(props.initial);
   const [pasteOpen, setPasteOpen] = useState(props.paste ?? false);
   const [pasted, setPasted] = useState("");
   const [readBack, setReadBack] = useState<string[] | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
+  // The server's refusal of a block's save, which the problem list heads as not saved rather than as fields to fix.
+  const [refused, setRefused] = useState(false);
   const [preview, setPreview] = useState(false);
   const [leaving, setLeaving] = useState(false);
   // While the image picker or crop dialog is open over this one, Escape is theirs to close.
   const [imageOpen, setImageOpen] = useState(false);
   const problems = useRef<HTMLDivElement>(null);
+  const [saving, setSaving] = useState(false);
+  // Past the saves budget, Save stays off until this moment (docs/design-v1-companion-stat-blocks.md 3.5).
+  const [retryAt, setRetryAt] = useState<number | null>(null);
+  // A new block's id, chosen once, so a save sent again after a lost answer finds the first one rather than making two.
+  const [newBlockId] = useState(() => actions.newId());
+  const blockId = target?.existing?.id ?? newBlockId;
+  const held = useRoomView((s) => (target ? s.view?.companionBlocks?.[blockId] : undefined));
+  const keeper = useRoomView((s) => (target ? s.view?.characters?.[target.character.id] : undefined));
+  const you = useRoomView((s) => s.you);
+  const gone = target !== undefined && !saving && (target.existing ? held === undefined : keeper === undefined || (you?.role !== "dm" && !ownsCharacter(you?.memberId, keeper)));
+  /*
+   * An answer that comes after Cancel may only say what became of the save:
+   * the editor that would have shown it is gone.
+   */
+  const open = useRef(true);
+  useEffect(() => {
+    open.current = true;
+    return () => {
+      open.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (retryAt === null) return;
+    const timer = setTimeout(() => setRetryAt(null), Math.max(0, retryAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [retryAt]);
 
   const tidied = useMemo(() => tidy(draft), [draft]);
   const dirty = pasted.trim() !== "" || stableStringify(tidied) !== stableStringify(tidy(props.initial));
   const bytes = serializedBytes(tidied);
+  const byteLimit = target ? LIMITS.companionBlockBytes : LIMITS.monsterBytes;
   const set = (patch: Partial<StatBlock>) => setDraft((d) => ({ ...d, ...patch }));
 
   // After the render that shows them: scrolling first would let the browser keep the fields in place and push the list out of sight.
@@ -94,6 +140,10 @@ export function MonsterEditor(props: {
   };
 
   const save = () => {
+    if (target) {
+      saveBlock(target);
+      return;
+    }
     const id = props.monster?.id ?? actions.newId();
     const checked = monsterInputSchema.safeParse({ id, ...tidied });
     if (!checked.success) {
@@ -101,14 +151,61 @@ export function MonsterEditor(props: {
       setPreview(false);
       return;
     }
-    if (props.monster) {
-      const patch = monsterPatch(props.monster, tidied);
+    if (props.monster && base) {
+      const patch = monsterPatch(base, tidied);
       if (Object.keys(patch).length > 0 && actions.dispatch({ t: "monster.update", monsterId: id, patch }) === null) return;
     } else if (actions.dispatch({ t: "monster.create", monster: checked.data }) === null) return;
     props.onSaved(id);
   };
 
-  const title = props.monster ? `Edit ${props.monster.name}` : "New monster";
+  /** A companion block's save, which waits for the server: a refusal keeps the draft here, where its player can act on it. */
+  const saveBlock = (block: NonNullable<typeof target>) => {
+    if (saving || gone || retryAt !== null) return;
+    // A create whose answer was lost and that went through after all is in the view now: it is saved.
+    if (!block.existing && held !== undefined) {
+      props.onSaved(blockId);
+      return;
+    }
+    const checked = companionBlockInputSchema.safeParse({ id: blockId, characterId: block.character.id, ...(block.fromSrd ? { fromSrd: block.fromSrd } : {}), ...tidied });
+    if (!checked.success) {
+      setRefused(false);
+      setErrors(issueText(checked.error.issues));
+      setPreview(false);
+      return;
+    }
+    let op: ClientOp;
+    if (block.existing && base) {
+      const patch = monsterPatch(base, tidied);
+      if (Object.keys(patch).length === 0) {
+        props.onSaved(blockId);
+        return;
+      }
+      op = { t: "companionBlock.update", blockId, patch };
+    } else op = { t: "companionBlock.create", block: checked.data };
+    const name = tidied.name;
+    const onAnswer = (answer: OpAnswer, refusal?: OpRefusal) => {
+      if (!open.current) {
+        const text = lateBlockSaveText(name, block.character.name, answer, refusal);
+        if (text) ui.notify(text, "error");
+        return;
+      }
+      setSaving(false);
+      const outcome = blockSaveOutcome(answer, refusal, block.character.name);
+      if (outcome.kind === "saved") {
+        props.onSaved(blockId);
+        return;
+      }
+      setErrors([outcome.text]);
+      setRefused(true);
+      if (outcome.retryInMs !== undefined) setRetryAt(Date.now() + outcome.retryInMs);
+    };
+    setErrors([]);
+    setRefused(false);
+    // In "view as a player" nothing is sent: the preview says so, and the draft stays.
+    if (actions.dispatch(op, { onAnswer, quiet: true }) !== null) setSaving(true);
+  };
+
+  const title = target ? (target.existing ? `Edit ${target.existing.name}` : `New stat block for ${target.character.name}`) : props.monster ? `Edit ${props.monster.name}` : "New monster";
   const footer = leaving ? (
     <>
       <Button onClick={() => setLeaving(false)}>Keep editing</Button>
@@ -123,8 +220,8 @@ export function MonsterEditor(props: {
       </Button>
       <span style={{ flex: 1 }} />
       <Button onClick={close}>Cancel</Button>
-      <Button variant="primary" onClick={save}>
-        Save
+      <Button variant="primary" busy={saving} disabled={gone || retryAt !== null} onClick={save}>
+        {saving ? "Saving…" : "Save"}
       </Button>
     </>
   );
@@ -134,15 +231,20 @@ export function MonsterEditor(props: {
       title={title}
       onClose={imageOpen ? () => {} : close}
       footer={footer}
-      status={leaving ? <DiscardQuestion /> : null}
+      status={leaving ? <DiscardQuestion /> : retryAt !== null ? "You can save again in a few seconds." : null}
       phone="fill"
       width="lg"
     >
       <div style={{ display: "grid", gap: theme.space(4), fontSize: theme.font.body14 }}>
+        {gone ? (
+          <Notice tone="warning" role="alert">
+            This stat block was deleted or is no longer yours, so it cannot be saved.
+          </Notice>
+        ) : null}
         {errors.length > 0 ? (
           <div ref={problems}>
             <Notice tone="danger" role="alert">
-              <strong>Fix these first:</strong>
+              <strong>{refused ? "Not saved:" : "Fix these first:"}</strong>
               {errors.map((e) => (
                 <p key={e} style={{ margin: `${theme.space(1)}px 0 0` }}>
                   {e}
@@ -151,9 +253,9 @@ export function MonsterEditor(props: {
             </Notice>
           </div>
         ) : null}
-        {bytes > LIMITS.monsterBytes * 0.75 ? (
-          <Notice tone={bytes > LIMITS.monsterBytes ? "danger" : "warning"}>
-            {`This stat block is ${(bytes / 1024).toFixed(1)} KiB of the ${LIMITS.monsterBytes / 1024} KiB a monster may hold.`}
+        {bytes > byteLimit * 0.75 ? (
+          <Notice tone={bytes > byteLimit ? "danger" : "warning"}>
+            {`This stat block is ${(bytes / 1024).toFixed(1)} KiB of the ${byteLimit / 1024} KiB ${target ? "a stat block" : "a monster"} may hold.`}
           </Notice>
         ) : null}
         {preview ? (
@@ -167,18 +269,29 @@ export function MonsterEditor(props: {
               onText={setPasted}
               onRead={read}
               readBack={readBack}
-              replacing={props.monster !== null}
+              replacing={(target ? target.existing : props.monster) !== null}
               focus={props.paste ?? false}
             />
-            <Group title="Token image">
+            <Group title={target ? "Picture" : "Token image"}>
               <MonsterImageField value={draft.defaultImage} onChange={(image) => setDraft((d) => withImage(d, image))} name={draft.name} onOpen={setImageOpen} />
-              <Help>Every token placed from this monster starts with this image. After you save, its page offers to put it on its tokens already on this scene.</Help>
+              <Help>
+                {target
+                  ? "Each companion added from this stat block starts with this picture."
+                  : "Every token placed from this monster starts with this image. After you save, its page offers to put it on its tokens already on this scene."}
+              </Help>
             </Group>
             <Basics draft={draft} set={set} />
             <Abilities draft={draft} setDraft={setDraft} />
             <Details draft={draft} set={set} setDraft={setDraft} />
             {SECTIONS.map(({ key, title: heading }) => (
-              <Entries key={key} section={key} title={heading} entries={draft[key]} onChange={(list) => set({ [key]: list })} hint={<SectionHint section={key} draft={tidied} />} />
+              <Entries
+                key={key}
+                section={key}
+                title={heading}
+                entries={draft[key]}
+                onChange={(list) => set({ [key]: list })}
+                hint={<SectionHint section={key} draft={tidied} companion={target !== undefined} />}
+              />
             ))}
           </>
         )}
@@ -463,8 +576,13 @@ function cutNote(text: string): string | undefined {
   return text.length > MAX_NAME ? `Tokens show the first ${MAX_NAME} characters. The stat block keeps all of it.` : undefined;
 }
 
-/** What tokens take from this section's entries, so the DM sees the names that set them were typed right. */
-function SectionHint(props: { section: SectionKey; draft: StatBlock }) {
+/**
+ * What tokens take from this section's entries, so the DM sees the names
+ * that set them were typed right. A companion's block promises no
+ * legendary uses, since attaching never sets them.
+ */
+function SectionHint(props: { section: SectionKey; draft: StatBlock; companion: boolean }) {
+  if (props.companion && (props.section === "traits" || props.section === "legendaryActions")) return null;
   const uses = legendaryUses(props.draft);
   const lair = (u: { uses: number; usesInLair?: number }) =>
     u.usesInLair !== undefined ? `${tokenUses(u.uses)} (${tokenUses(u.usesInLair)} in lair)` : String(tokenUses(u.uses));

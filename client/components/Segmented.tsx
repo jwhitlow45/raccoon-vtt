@@ -57,6 +57,8 @@ export function Segmented<T extends string | number>(props: {
    * and under 210 px, too narrow even so, they go two by two.
    */
   even?: boolean;
+  /** Labels wrap inside their option, for a choice that names something of any length, such as a creature. */
+  wrap?: boolean;
   style?: CSSProperties;
 }) {
   const name = useId();
@@ -91,7 +93,7 @@ export function Segmented<T extends string | number>(props: {
               borderRadius: theme.radius.md,
               fontSize: theme.font.body14,
               fontWeight: theme.weight.strong,
-              whiteSpace: "nowrap",
+              ...(props.wrap ? { maxWidth: "100%", whiteSpace: "normal", overflowWrap: "anywhere", textAlign: "center", paddingTop: theme.space(1), paddingBottom: theme.space(1) } : { whiteSpace: "nowrap" }),
               cursor: disabled ? "default" : "pointer",
               ...choiceLook(chosen, disabled),
               ...(chosen && !disabled ? o.chosenStyle : undefined),

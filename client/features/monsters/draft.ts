@@ -1,5 +1,7 @@
-import type { CustomMonster, ImageRef, StatBlock, StatBlockEntry, AbilityKey } from "#shared/model.ts";
+import type { ImageRef, StatBlock, StatBlockEntry, AbilityKey } from "#shared/model.ts";
+import { BLOCK_SAVES_TOO_FAST, LIMITS } from "#shared/limits.ts";
 import type { MonsterPatch } from "#shared/protocol.ts";
+import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { stableStringify } from "#shared/project.ts";
 import { abilityMod, monsterView, SECTIONS, XP_BY_CR } from "#shared/statBlock.ts";
 import type { StatBlockMonster } from "#shared/srd/monsters.ts";
@@ -44,11 +46,14 @@ export function tidy(block: StatBlock): StatBlock {
 }
 
 /**
- * The lines an edit changed, for `monster.update`. Two DMs editing different
- * lines of one monster both keep their work, and an edit that changed
+ * The lines an edit changed, for `monster.update` or `companionBlock.update`.
+ * `before` is the block as the editor opened it, never as it is now: a line
+ * another DM or a co-owner changed meanwhile is then kept unless this draft
+ * changed the same line, where the later save wins
+ * (docs/design-v1-companion-stat-blocks.md 6.2). An edit that changed
  * nothing sends nothing.
  */
-export function monsterPatch(before: CustomMonster, after: StatBlock): MonsterPatch {
+export function monsterPatch(before: StatBlock, after: StatBlock): MonsterPatch {
   const patch: Record<string, unknown> = {};
   for (const key of Object.keys(after) as (keyof StatBlock)[]) {
     if (stableStringify(after[key]) !== stableStringify(before[key])) patch[key] = after[key];
@@ -140,14 +145,52 @@ export function issueText(issues: readonly Issue[]): string[] {
   return out;
 }
 
-const views = new WeakMap<CustomMonster, StatBlockMonster>();
+const views = new WeakMap<StatBlock, StatBlockMonster>();
 
-/** A room monster in the SRD shape, worked out once per version: entities are replaced, never changed, so the object is the key. */
-export function viewOf(m: CustomMonster): StatBlockMonster {
+/**
+ * A room monster or a companion's stat block in the SRD shape, worked out
+ * once per version: entities are replaced, never changed, so the object is
+ * the key.
+ */
+export function viewOf(m: StatBlock): StatBlockMonster {
   let view = views.get(m);
   if (!view) {
     view = monsterView(m);
     views.set(m, view);
   }
   return view;
+}
+
+/** What a companion block's answered save comes to while its editor is open (docs/design-v1-companion-stat-blocks.md 6.2). */
+export type BlockSaveOutcome =
+  | { kind: "saved" }
+  /** The draft stays, with the problem above the fields. `retryInMs` keeps Save off that long, past the saves budget. */
+  | { kind: "problem"; text: string; retryInMs?: number };
+
+/**
+ * A save's answer, for the editor that sent it: closes on `taken`, and
+ * otherwise keeps the draft with the server's words, which for a guard's
+ * refusal are already the blocks' own (server/rooms/actor.ts). Past the
+ * player's save budget, Save waits out one refill before it is offered again.
+ */
+export function blockSaveOutcome(answer: OpAnswer, refusal: Pick<OpRefusal, "message"> | undefined, characterName: string): BlockSaveOutcome {
+  if (answer === "taken") return { kind: "saved" };
+  if (answer === "unknown") return { kind: "problem", text: `The connection dropped before the server answered. Check ${characterName}’s stat blocks before saving again.` };
+  const message = refusal?.message.trim() ?? "";
+  if (message === BLOCK_SAVES_TOO_FAST) return { kind: "problem", text: message, retryInMs: LIMITS.companionBlockWriteRefillMs };
+  return { kind: "problem", text: message ? sentence(message) : "The server refused it." };
+}
+
+/** The toast for a save answered after its editor closed: nothing once saved, since the block shows in the list. */
+export function lateBlockSaveText(name: string, characterName: string, answer: OpAnswer, refusal?: Pick<OpRefusal, "message">): string | null {
+  if (answer === "taken") return null;
+  if (answer === "unknown") return `The connection dropped before the server answered, so ${name} may not have been saved. Check ${characterName}’s stat blocks.`;
+  const why = refusal?.message.trim().replace(/\.$/, "");
+  return why ? `${name} was not saved. ${why[0]!.toUpperCase()}${why.slice(1)}.` : `${name} was not saved.`;
+}
+
+/** A refusal's words as a sentence of the editor's problem list. */
+function sentence(text: string): string {
+  const capital = `${text[0]!.toUpperCase()}${text.slice(1)}`;
+  return /[.!?]$/.test(capital) ? capital : `${capital}.`;
 }
