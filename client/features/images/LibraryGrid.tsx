@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref, type RefObject } from "react";
 import { useStore } from "zustand";
 import { handoutPages } from "#shared/handouts.ts";
 import { imageAssetId } from "#shared/imageRef.ts";
@@ -175,6 +175,8 @@ function ManagedLibrary(props: { roomId: string; library: LibraryState; unlisted
   const unused = rows ? notInUse(rows, held) : [];
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
+  // The last images going take Clean up's button with them, and focus goes to its section, which then says what the delete did.
+  const cleanFocus = useHandsFocusTo<HTMLElement>();
 
   const remove = async (ids: string[]) => {
     setBusy(true);
@@ -273,12 +275,17 @@ function ManagedLibrary(props: { roomId: string; library: LibraryState; unlisted
       after={
         <>
           {empty ? <Empty>{rows ? props.empty : props.unlistedEmpty}</Empty> : props.hint && (rows || props.unlisted.length > 0) ? <Help>{props.hint}</Help> : null}
-          {unused.length > 0 || note ? (
-            <section style={{ display: "grid", gap: theme.space(2) }}>
+          {unused.length > 0 || note || busy ? (
+            <section ref={cleanFocus.target} tabIndex={-1} style={{ display: "grid", gap: theme.space(2), outline: "none" }}>
               <SectionLabel>Clean up</SectionLabel>
               {unused.length > 0 ? (
                 <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>
-                  <TwoTapDelete busy={busy} onConfirm={() => void remove(unused.map((r) => r.id))} confirm={unused.length === 1 ? "Delete it?" : `Delete all ${unused.length}?`}>
+                  <TwoTapDelete
+                    buttonRef={cleanFocus.leaving}
+                    busy={busy}
+                    onConfirm={() => void remove(unused.map((r) => r.id))}
+                    confirm={unused.length === 1 ? "Delete it?" : `Delete all ${unused.length}?`}
+                  >
                     {`Delete ${unused.length} not in use${bytes !== null ? ` (${formatBytes(bytes)})` : ""}`}
                   </TwoTapDelete>
                   <Help>No token, scene, stamp or handout uses these. A deleted image is gone for good, from undo too.</Help>
@@ -586,16 +593,44 @@ export function viewTitle(id: string, row: AssetRow | undefined, handouts: reado
 
 function DeleteNote(props: { flow: DocDelete; onRetry(): void }) {
   const note = docDeleteNote(props.flow);
+  const focus = useHandsFocusTo<HTMLDivElement>();
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+    <div ref={focus.target} tabIndex={-1} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), outline: "none" }}>
       <NoteLine error={note.error}>{note.text}</NoteLine>
       {note.retry ? (
-        <Button size="sm" onClick={props.onRetry}>
+        <Button ref={focus.leaving} size="sm" onClick={props.onRetry}>
           Try again
         </Button>
       ) : null}
     </div>
   );
+}
+
+/**
+ * A button that leaves as it is pressed, its work done (a delete's Try
+ * again, Clean up's last delete), hands focus to `target`, which takes it
+ * from script only. Otherwise focus would fall to the page, and a keyboard
+ * or screen reader user would have to find the Library again. `leaving` is
+ * the button's ref. Where focus goes is chosen once the step is drawn.
+ */
+function useHandsFocusTo<T extends HTMLElement>(): { target: RefObject<T | null>; leaving(el: HTMLElement | null): (() => void) | undefined } {
+  const target = useRef<T>(null);
+  const lost = useRef(false);
+  useLayoutEffect(() => {
+    if (!lost.current) return;
+    lost.current = false;
+    const active = document.activeElement;
+    // Something else took focus meanwhile, which it keeps.
+    if (active !== null && active !== document.body) return;
+    target.current?.focus({ preventScroll: true });
+  });
+  const leaving = useCallback((el: HTMLElement | null) => {
+    if (!el) return;
+    return () => {
+      if (el.contains(document.activeElement)) lost.current = true;
+    };
+  }, []);
+  return { target, leaving };
 }
 
 function NoteLine(props: { error?: boolean; children: ReactNode }) {
@@ -632,7 +667,7 @@ function Thumb(props: { id: string }) {
 }
 
 /** Red text at rest, armed with the red outline for 4 s after the first tap, busy while the delete runs. */
-function TwoTapDelete(props: { busy: boolean; confirm: string; onConfirm(): void; children: ReactNode }) {
+function TwoTapDelete(props: { busy: boolean; confirm: string; onConfirm(): void; children: ReactNode; buttonRef?: Ref<HTMLButtonElement> }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
@@ -641,6 +676,7 @@ function TwoTapDelete(props: { busy: boolean; confirm: string; onConfirm(): void
   }, [armed]);
   return (
     <Button
+      ref={props.buttonRef}
       size="sm"
       variant="danger"
       armed={armed && !props.busy}

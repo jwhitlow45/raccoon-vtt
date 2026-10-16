@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { handoutPages } from "#shared/handouts.ts";
 import { Button } from "../../components/Button.tsx";
@@ -217,10 +217,31 @@ export function HandoutPopup() {
     }
   };
 
+  /*
+   * The lead line's Cancel and Try again leave once pressed. Focus goes to
+   * Download, or it would fall out of the dialog, whose listener the page
+   * keys reach the viewer through (PB-P-8). Placed once the line has gone.
+   */
+  const downloadRef = useRef<HTMLButtonElement>(null);
+  const toDownload = useRef(false);
+  useLayoutEffect(() => {
+    if (!toDownload.current) return;
+    toDownload.current = false;
+    downloadRef.current?.focus({ preventScroll: true });
+  });
+  const cancelPdf = () => {
+    toDownload.current = true;
+    pdfStep({ t: "cancel" });
+  };
+
   const several = pageCount > 1;
   const pdfBusy = pdfMine?.t === "building";
   const failure = several ? (pdfMine?.t === "failed" ? pdfMine.why : null) : mine?.state === "failed" ? (mine.why ?? "fetch") : null;
   const press = () => void (several ? downloadPdf() : download());
+  const retry = () => {
+    toDownload.current = true;
+    press();
+  };
   const label = several ? (pdfBusy ? "Preparing…" : pdfMine?.t === "ready" ? "Share" : "Download") : busy ? "Downloading…" : mine?.state === "share" ? "Share" : "Download";
 
   // Android's Back closes the handout before it leaves the room, one Back for each handout shown in turn.
@@ -243,7 +264,7 @@ export function HandoutPopup() {
       showing={key}
       headerActions={
         // A busy button says so in its own words at once, and takes no second tap (components/Loading.tsx).
-        <Button size="sm" busy={several ? pdfBusy : busy} onClick={press}>
+        <Button ref={downloadRef} size="sm" busy={several ? pdfBusy : busy} onClick={press}>
           {label}
         </Button>
       }
@@ -256,7 +277,7 @@ export function HandoutPopup() {
               <span style={{ flex: "1 1 200px" }}>
                 {pdfProgressText(pdfMine)}
               </span>
-              <Button size="sm" onClick={() => pdfStep({ t: "cancel" })}>
+              <Button size="sm" onClick={cancelPdf}>
                 Cancel
               </Button>
             </div>
@@ -264,7 +285,7 @@ export function HandoutPopup() {
           {failure ? (
             <div role="alert" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), fontSize: theme.font.body14, color: theme.color.dangerText }}>
               <span style={{ flex: "1 1 200px" }}>{failure === "share" ? "The handout could not be shared." : "The handout could not be downloaded. Check your connection."}</span>
-              <Button size="sm" onClick={press}>
+              <Button size="sm" onClick={retry}>
                 Try again
               </Button>
             </div>

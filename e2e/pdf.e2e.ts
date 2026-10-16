@@ -1215,6 +1215,11 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     const [again] = await Promise.all([desk.waitForEvent("download"), popup.getByRole("button", { name: "Try again" }).click()]);
     assert.equal(again.suggestedFilename(), "Strange letter.pdf");
     await popup.getByRole("alert").waitFor({ state: "detached" });
+    // Try again left with focus on it: focus is on Download, so the page keys still reach the viewer (PB-P-8).
+    await waitFor("focus on Download after Try again", async () => (await focusedName(desk)) === "Download");
+    await desk.keyboard.press("End");
+    await indicatorIs(popup, "3 of 3", "End after Try again");
+    await desk.keyboard.press("Home");
 
     // On a phone that shares files: Cancel stops a build, and closing the popup mid-build leaves no Share.
     const popupPhone = viewer(phone, "Strange letter");
@@ -1241,6 +1246,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await shots.take(phone, "pdf-phone-preparing");
     await popupPhone.getByRole("button", { name: "Cancel", exact: true }).tap();
     await download.waitFor();
+    await waitFor("focus on Download after Cancel", async () => (await focusedName(phone)) === "Download");
     assert.equal(await popupPhone.getByText(/^Preparing the PDF/).count(), 0, "the progress after Cancel");
     release();
     await phone.unroute(second);
@@ -1334,10 +1340,22 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await closed.click();
     await view.waitFor();
     const remove = view.getByRole("button", { name: "Delete", exact: true });
+    // Its images' delete fails first, offline: the note keeps them with Try again, which hands focus to the note as it leaves.
+    const deleteRoute = `**/api/rooms/${run.roomId}/assets/delete`;
+    await dm.route(deleteRoute, (route) => route.abort("internetdisconnected"));
+    consoles.dm.allow = [/Failed to load resource: net::ERR_INTERNET_DISCONNECTED/];
     await remove.click();
     await view.getByRole("button", { name: "Delete all 3 pages?" }).click();
     await view.waitFor({ state: "detached" });
+    const retryDelete = library.getByRole("button", { name: "Try again" });
+    await retryDelete.waitFor();
+    await dm.unroute(deleteRoute);
+    consoles.dm.allow = [];
+    await retryDelete.click();
     await library.getByText("Deleted Strange letter and its 3 pages.").waitFor();
+    await waitFor("focus on the delete's note", () =>
+      dm.evaluate(() => ((globalThis as unknown as { document: { activeElement: { textContent: string | null } | null } }).document.activeElement?.textContent ?? "").includes("Deleted Strange letter")),
+    );
     await closed.waitFor({ state: "detached" });
     const listed = (await (await dmContext.request.get(`${server.origin}/api/rooms/${run.roomId}/assets`)).json()) as { assets: { id: string }[] };
     for (const page of letter.pages) assert.ok(!listed.assets.some((a) => a.id === page.assetId), `page ${page.assetId} is still in the library`);
@@ -1425,6 +1443,17 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     assert.equal(await tokenView.getByText(/In use|Not in use/).count(), 0, "a status for a player");
     await shots.take(phone, "pdf-library-player-token");
     await tokenView.getByRole("button", { name: /^Close/ }).tap();
+
+    // Clean up's last delete takes its button away: focus goes to its section, which says what was deleted.
+    const cleanUp = library.getByRole("button", { name: /^Delete \d+ not in use/ });
+    await cleanUp.waitFor();
+    await cleanUp.click();
+    await library.getByRole("button", { name: /^Delete (it|all \d+)\?$/ }).click();
+    await library.getByText(/^Deleted \d+ images?\.$/).waitFor();
+    assert.equal(await cleanUp.count(), 0, "images left not in use");
+    await waitFor("focus on the Clean up section", () =>
+      dm.evaluate(() => ((globalThis as unknown as { document: { activeElement: { tagName: string; textContent: string | null } | null } }).document.activeElement?.tagName ?? "") === "SECTION"),
+    );
   });
 
   test("15. a player's thumbnail under Handouts from the DM opens the handout in the viewer at the popup's own showing, and the DM closing it closes the viewer (the project owner, 2026-10-16)", async () => {
