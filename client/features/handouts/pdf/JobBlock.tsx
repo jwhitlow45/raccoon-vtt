@@ -209,13 +209,20 @@ function Body(props: {
           <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
             <div style={{ flex: "1 1 120px", minWidth: 0 }}>
               {/* A small intrinsic width, so the two fields share a 246 px block side by side or stack, never past its edge. */}
-              <Field label="From page" inputMode="numeric" size={4} maxLength={6} value={job.from} onChange={(e) => runner?.setRange(e.target.value, job.to)} />
+              <Field
+                label="From page"
+                inputMode="numeric"
+                size={4}
+                maxLength={6}
+                value={job.from}
+                error={check.ok ? null : check.from}
+                onChange={(e) => runner?.setRange(e.target.value, job.to)}
+              />
             </div>
             <div style={{ flex: "1 1 120px", minWidth: 0 }}>
-              <Field label="To page" inputMode="numeric" size={4} maxLength={6} value={job.to} onChange={(e) => runner?.setRange(job.from, e.target.value)} />
+              <Field label="To page" inputMode="numeric" size={4} maxLength={6} value={job.to} error={check.ok ? null : check.to} onChange={(e) => runner?.setRange(job.from, e.target.value)} />
             </div>
           </div>
-          {check.ok ? null : <ErrorText>{check.problems.join(" ")}</ErrorText>}
           {title}
           <Buttons>
             <Button variant="primary" size="sm" disabled={!check.ok} onClick={leaving(() => runner?.upload())}>

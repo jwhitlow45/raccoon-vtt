@@ -314,14 +314,17 @@ describe("opening a PDF (docs/design-v1-pdf-handouts.md 4.1.3)", () => {
   test("the range's rules, each said in words, and the room's page limit", () => {
     assert.deepEqual(checkRange("1", "12", 12, 0), { ok: true, from: 1, to: 12, count: 12 });
     assert.deepEqual(checkRange("87", "89", 140, 0), { ok: true, from: 87, to: 89, count: 3 });
+    // Each field's words, From page's then To page's.
     const problems = (from: string, to: string, pages = 12, room = 0) => {
       const r = checkRange(from, to, pages, room);
-      return r.ok ? [] : r.problems;
+      return r.ok ? [] : [r.from, r.to].filter((p) => p !== null);
     };
     assert.deepEqual(problems("", "x"), ["From page takes a whole number.", "To page takes a whole number."]);
     assert.deepEqual(problems("1.5", "3"), ["From page takes a whole number."]);
     assert.deepEqual(problems("0", "13"), ["From page is at least 1.", "To page is at most 12."]);
     assert.deepEqual(problems("5", "4"), ["From page comes before To page."]);
+    assert.deepEqual(checkRange("5", "4", 12, 0), { ok: false, from: null, to: "From page comes before To page." }, "a rule of the whole range is said on To page");
+    assert.deepEqual(checkRange("1.5", "3", 12, 0), { ok: false, from: "From page takes a whole number.", to: null });
     assert.deepEqual(problems("1", "101", 140), ["A handout holds up to 100 pages. Choose at most 100."]);
     assert.deepEqual(problems("1", "60", 140, 1_950), ["The room holds 1,950 of its 2,000 handout pages. Choose at most 50, or delete a document."]);
     assert.deepEqual(problems("1", "1", 1, 2_000), ["The room holds 2,000 of its 2,000 handout pages. Delete a document or close a handout first."]);

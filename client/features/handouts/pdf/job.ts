@@ -145,28 +145,31 @@ export function pagePosition(job: Pick<PdfJob, "range" | "leftOut">, page: numbe
 const n = (value: number) => value.toLocaleString("en-US");
 const pagesWord = pageCountText;
 
-/** The fields' rules (4.1.3), each broken one said beside them. */
-export type RangeCheck = { ok: true; from: number; to: number; count: number } | { ok: false; problems: string[] };
+/**
+ * The fields' rules (4.1.3). A broken rule is said on the field that
+ * breaks it, which marks that field invalid and points it at the words: a
+ * rule of the range as a whole (its order, its size, the room's pages) on
+ * To page, the end that sets the count.
+ */
+export type RangeCheck = { ok: true; from: number; to: number; count: number } | { ok: false; from: string | null; to: string | null };
 
 export function checkRange(fromText: string, toText: string, numPages: number, roomPages: number): RangeCheck {
-  const problems: string[] = [];
   const whole = (text: string) => (/^\d{1,6}$/.test(text.trim()) ? Number(text.trim()) : null);
   const from = whole(fromText);
   const to = whole(toText);
-  if (from === null) problems.push("From page takes a whole number.");
-  else if (from < 1) problems.push("From page is at least 1.");
-  else if (from > numPages) problems.push(`From page is at most ${n(numPages)}.`);
-  if (to === null) problems.push("To page takes a whole number.");
-  else if (to < 1) problems.push("To page is at least 1.");
-  else if (to > numPages) problems.push(`To page is at most ${n(numPages)}.`);
-  if (problems.length > 0 || from === null || to === null) return { ok: false, problems };
-  if (from > to) return { ok: false, problems: ["From page comes before To page."] };
+  const fieldProblem = (name: string, value: number | null) =>
+    value === null ? `${name} takes a whole number.` : value < 1 ? `${name} is at least 1.` : value > numPages ? `${name} is at most ${n(numPages)}.` : null;
+  const fromProblem = fieldProblem("From page", from);
+  const toProblem = fieldProblem("To page", to);
+  if (fromProblem || toProblem || from === null || to === null) return { ok: false, from: fromProblem, to: toProblem };
+  const range = (words: string): RangeCheck => ({ ok: false, from: null, to: words });
+  if (from > to) return range("From page comes before To page.");
   const count = to - from + 1;
-  if (count > LIMITS.handoutPages) return { ok: false, problems: [`A handout holds up to ${LIMITS.handoutPages} pages. Choose at most ${LIMITS.handoutPages}.`] };
+  if (count > LIMITS.handoutPages) return range(`A handout holds up to ${LIMITS.handoutPages} pages. Choose at most ${LIMITS.handoutPages}.`);
   const room = LIMITS.handoutPagesPerRoom - roomPages;
   if (count > room) {
     const held = `The room holds ${n(roomPages)} of its ${n(LIMITS.handoutPagesPerRoom)} handout pages.`;
-    return { ok: false, problems: [room > 0 ? `${held} Choose at most ${n(room)}, or delete a document.` : `${held} Delete a document or close a handout first.`] };
+    return range(room > 0 ? `${held} Choose at most ${n(room)}, or delete a document.` : `${held} Delete a document or close a handout first.`);
   }
   return { ok: true, from, to, count };
 }
