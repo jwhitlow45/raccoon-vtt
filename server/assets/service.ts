@@ -6,7 +6,7 @@ import type { Config } from "../config.ts";
 import { createEgress, type Egress } from "./egress.ts";
 import { AssetError } from "./errors.ts";
 import { KINDS, PIPELINE, cellPxHint, type AssetKind, type UploadResult } from "./kinds.ts";
-import { WindowLimiter } from "./limits.ts";
+import { WindowLimiter, hourlyChecks } from "./limits.ts";
 import { ProcessingQueue, configureSharp, processImage, removeFiles, sniffImage } from "./process.ts";
 import { RoomQuota, assertFreeDisk, roomStoredBytes, type Reservation } from "./quota.ts";
 import { OpenverseSearch, openverseHttp, type OpenverseHttp } from "./openverse.ts";
@@ -53,18 +53,6 @@ export type AssetServiceOptions = {
 };
 
 export const MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024;
-
-const HOURLY = { session: 30, ip: 60, room: 120 } as const;
-
-/**
- * Scene thumbnails have a budget of their own. A DM device draws and
- * uploads one by itself each time the DM leaves a scene it changed
- * (docs/design-v1-maps-vision.md 3.3), so a long prep session makes many,
- * and spending the 30 uploads above on them refused the DM's own maps. A
- * thumbnail is DM only and at most 512 KiB, and every one still counts
- * against the room's storage quota, so a generous hourly count is enough.
- */
-const THUMB_HOURLY = { session: 240, room: 240 } as const;
 
 export class AssetService {
   readonly pool: pg.Pool;
@@ -149,25 +137,9 @@ export class AssetService {
     return assertFreeDisk(this.assetDir, this.minFreeBytes);
   }
 
-  /**
-   * Uploads and URL imports share one hourly budget (design section 10.3):
-   * 30 per session, 60 per IP, 120 per room. Per IP and per room are there
-   * because anyone with the password can mint new sessions. A thumbnail
-   * upload counts only against the thumbnails' own budget, per session and
-   * per room: only a DM may upload one, and a DM session needs the DM link.
-   */
+  /** The hourly budgets an upload spends (limits.ts hourlyChecks). */
   hourlyChecks(sessionId: string, ip: string, roomId: string, kind?: AssetKind): Array<{ key: string; limit: number }> {
-    if (kind === "thumb") {
-      return [
-        { key: `thumb:s:${sessionId}`, limit: THUMB_HOURLY.session },
-        { key: `thumb:r:${roomId}`, limit: THUMB_HOURLY.room },
-      ];
-    }
-    return [
-      { key: `s:${sessionId}`, limit: HOURLY.session },
-      { key: `ip:${ip}`, limit: HOURLY.ip },
-      { key: `r:${roomId}`, limit: HOURLY.room },
-    ];
+    return hourlyChecks(sessionId, ip, roomId, kind);
   }
 
   assertHourly(checks: Array<{ key: string; limit: number }>): void {
@@ -192,7 +164,12 @@ export class AssetService {
    *
    * The same bytes as the same kind in the same room reuse the row: the
    * uploader is added to it, and the answer is built exactly as for a fresh
-   * upload, so it shows neither who uploaded first nor when.
+   * upload, so it shows neither who uploaded first nor when. A handout's
+   * answer alone says `created`, whether this request made the row, so a
+   * PDF upload deletes only the pages it made (docs/design-v1-pdf-handouts.md
+   * 3.9). Only a DM uploads one, and a DM's library lists every handout
+   * image already, so it tells the DM nothing new. Every other kind keeps
+   * the answer that never shows a reuse (design 11.1).
    */
   async ingest(input: {
     roomId: string;
@@ -210,7 +187,7 @@ export class AssetService {
     if (existing) {
       await addUploaders(this.pool, existing.id, input.uploaderIds);
       if (input.credit) await addCredit(this.pool, existing.id, input.credit);
-      return withHint(toView(existing), input.nameHint);
+      return withCreated(withHint(toView(existing), input.nameHint), false);
     }
 
     await sniffImage(input.tempPath);
@@ -220,7 +197,7 @@ export class AssetService {
     });
     try {
       const total = variants.reduce((sum, v) => sum + v.bytes, 0);
-      const view = await input.reservation.commit(total, () =>
+      const placed = await input.reservation.commit(total, () =>
         placeAndInsert(
           this.pool,
           this.assetDir,
@@ -228,13 +205,18 @@ export class AssetService {
           PIPELINE,
         ),
       );
-      return withHint(view, input.nameHint);
+      return withCreated(withHint(placed.view, input.nameHint), placed.created);
     } finally {
       // Placed variants were renamed away, so this only removes leftovers
       // (a refused commit, or copies dropped because the file existed).
       await removeFiles(variants.map((v) => v.path));
     }
   }
+}
+
+/** `created` on a handout's answer only (AssetService.ingest). */
+function withCreated(result: UploadResult, created: boolean): UploadResult {
+  return result.kind === "handout" ? { ...result, created } : result;
 }
 
 function withHint(view: ReturnType<typeof toView>, nameHint: string | undefined): UploadResult {

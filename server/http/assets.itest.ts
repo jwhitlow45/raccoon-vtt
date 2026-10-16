@@ -243,7 +243,7 @@ describe("intake slots", () => {
   test("thumbnails have their own hourly budget, so a burst of them leaves the map budget untouched", async () => {
     const roomId = await room();
     const dm = auth.allow(roomId, "dm");
-    // More thumbnails than the 30 uploads a session gets for maps, tokens and handouts.
+    // More thumbnails than the 30 uploads a session gets for maps and tokens.
     for (let i = 0; i < 31; i++) {
       const thumb = await solid(160, 90 + i, "#3a6").png().toBuffer();
       const res = await upload(app, roomId, dm, "thumb", thumb);
@@ -263,6 +263,58 @@ describe("intake slots", () => {
     assert.ok(Number(thumb.headers["retry-after"]) > 0);
     const map = await upload(app, roomId, dm, "map", otherPng);
     assert.equal(map.statusCode, 200, map.body);
+  });
+
+  test("handouts have their own hourly budget per session and per room, so a PDF's pages leave maps and tokens alone (docs/design-v1-pdf-handouts.md 3.7)", async () => {
+    const roomId = await room();
+    const dm = auth.allow(roomId, "dm");
+    // The shared budget spent: a map is refused, and a handout still goes up.
+    const shared = app.assets.hourlyChecks(dm.sessionId, "x", roomId).slice(0, 1);
+    for (let i = 0; i < 30; i++) app.assets.hourly.record(shared);
+    assert.equal((await upload(app, roomId, dm, "map", otherPng)).statusCode, 429);
+    const page = await upload(app, roomId, dm, "handout", await solid(120, 160, "#6a3").png().toBuffer());
+    assert.equal(page.statusCode, 200, page.body);
+    // The handout budget spent: a handout is refused, a map still goes up.
+    const other = auth.allow(roomId, "dm");
+    const own = app.assets.hourlyChecks(other.sessionId, "x", roomId, "handout");
+    assert.deepEqual(own.map((c) => c.limit), [250, 250]);
+    for (let i = 0; i < 250; i++) app.assets.hourly.record(own.slice(0, 1));
+    const refused = await upload(app, roomId, other, "handout", await solid(120, 161, "#6a3").png().toBuffer());
+    assert.equal(refused.statusCode, 429);
+    assert.ok(Number(refused.headers["retry-after"]) > 0);
+    assert.equal((await upload(app, roomId, other, "map", await solid(300, 301, "#33a").png().toBuffer())).statusCode, 200);
+    // Per room too: a fresh session in a room whose handout budget is spent is refused.
+    const busy = await room();
+    for (let i = 0; i < 250; i++) app.assets.hourly.record(app.assets.hourlyChecks("anyone", "x", busy, "handout").slice(1));
+    assert.equal((await upload(app, busy, auth.allow(busy, "dm"), "handout", otherPng)).statusCode, 429);
+  });
+
+  test("a handout upload says whether it made the image, true for new bytes and false for bytes the room has, and a token's answer never says (docs/design-v1-pdf-handouts.md 3.9)", async () => {
+    const roomId = await room();
+    const dm = auth.allow(roomId, "dm");
+    // Bytes no other test uploads, so no other room's row or file is shared with these.
+    const bytes = await solid(237, 119, "#4b7").png().toBuffer();
+    const first = await upload(app, roomId, dm, "handout", bytes);
+    assert.equal(first.statusCode, 200, first.body);
+    assert.deepEqual(Object.keys(first.json()).sort(), ["created", "height", "id", "kind", "variants", "width"]);
+    assert.equal(first.json().created, true);
+    const again = await upload(app, roomId, auth.allow(roomId, "dm"), "handout", bytes);
+    assert.equal(again.statusCode, 200, again.body);
+    assert.equal(again.json().created, false);
+    assert.equal(again.json().id, first.json().id);
+    // The same bytes as a token are a row of their own, whose answer has no `created` either time.
+    for (let i = 0; i < 2; i++) {
+      const token = await upload(app, roomId, auth.allow(roomId, "player"), "token", bytes);
+      assert.equal(token.statusCode, 200, token.body);
+      assert.equal("created" in token.json(), false);
+    }
+    // Two identical uploads at once: exactly one made the row.
+    const fresh = await solid(238, 119, "#4b8").png().toBuffer();
+    const [a, b] = await Promise.all([upload(app, roomId, dm, "handout", fresh), upload(app, roomId, auth.allow(roomId, "dm"), "handout", fresh)]);
+    assert.equal(a.statusCode, 200, a.body);
+    assert.equal(b.statusCode, 200, b.body);
+    assert.equal(a.json().id, b.json().id);
+    assert.deepEqual([a.json().created, b.json().created].sort(), [false, true]);
   });
 
   test("the hourly upload budget per session answers 429", async () => {

@@ -45,6 +45,8 @@ export type AssetRow = {
   inUse?: boolean;
   /** The bytes the image's files take, when the server says. */
   bytes?: number;
+  /** A handout upload's answer only: whether this upload made the image, rather than reusing one the room had (docs/design-v1-pdf-handouts.md 3.9). */
+  created?: boolean;
 };
 /** The server's own shape, which sends the original's size only when the search service gave it. */
 export type { SearchResult, SearchSource };

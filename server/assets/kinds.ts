@@ -111,7 +111,12 @@ export type AssetView = {
   bytes?: number;
 };
 
-export type UploadResult = AssetView & { cellPx?: number };
+/**
+ * `created`, on a handout's answer only: whether this upload made the row,
+ * rather than reusing the room's row of the same bytes
+ * (docs/design-v1-pdf-handouts.md 3.9).
+ */
+export type UploadResult = AssetView & { cellPx?: number; created?: boolean };
 
 /**
  * Owlbear's trick: a map file named like `crypt_30x20.jpg` is 30 cells wide

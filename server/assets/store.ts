@@ -213,9 +213,10 @@ export type NewAsset = {
  * same kind) is kept and the new copy dropped, so a URL that was served once
  * never changes bytes. If an identical upload to the same room won the race
  * to write the row, that row is returned and this uploader is added to it,
- * exactly as if the reuse had been found up front.
+ * exactly as if the reuse had been found up front. `created` says which:
+ * whether this call wrote the row.
  */
-export async function placeAndInsert(pool: pg.Pool, assetDir: string, asset: NewAsset, pipeline: number): Promise<AssetView> {
+export async function placeAndInsert(pool: pg.Pool, assetDir: string, asset: NewAsset, pipeline: number): Promise<{ view: AssetView; created: boolean }> {
   const key: FileKey = { sha256: asset.sha256, kind: asset.kind, pipeline };
   return fileLocks.run(lockKey(key), async () => {
     let inserted: { view: AssetView; lostRace: boolean };
@@ -230,7 +231,7 @@ export async function placeAndInsert(pool: pg.Pool, assetDir: string, asset: New
     // The row that won may come from an older pipeline, in which case the
     // files just placed belong to nobody.
     if (inserted.lostRace) await deleteIfUnreferenced(pool, assetDir, key);
-    return inserted.view;
+    return { view: inserted.view, created: !inserted.lostRace };
   });
 }
 

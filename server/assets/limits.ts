@@ -1,7 +1,9 @@
+import type { AssetKind } from "./kinds.ts";
+
 /**
  * Sliding-window counters for the hourly upload and import limits (design
  * section 10.3): 30 per session, 60 per IP and 120 per room, and for scene
- * thumbnails a budget of their own (service.ts).
+ * thumbnails and handouts budgets of their own (hourlyChecks below).
  *
  * These live in memory rather than in rate_events. A restart forgets them,
  * which costs nothing here: the window is one hour, a deploy is rare, and
@@ -66,4 +68,54 @@ export class WindowLimiter {
       if (this.#live(key, now).length === 0) this.#events.delete(key);
     }
   }
+}
+
+const HOURLY = { session: 30, ip: 60, room: 120 } as const;
+
+/**
+ * Scene thumbnails have a budget of their own. A DM device draws and
+ * uploads one by itself each time the DM leaves a scene it changed
+ * (docs/design-v1-maps-vision.md 3.3), so a long prep session makes many,
+ * and spending the 30 uploads above on them refused the DM's own maps. A
+ * thumbnail is DM only and at most 512 KiB, and every one still counts
+ * against the room's storage quota, so a generous hourly count is enough.
+ */
+const THUMB_HOURLY = { session: 240, room: 240 } as const;
+
+/**
+ * So do handouts, each page of a PDF being one upload
+ * (docs/design-v1-pdf-handouts.md 3.7): on the shared budget a 30-page PDF
+ * spent the DM's whole hour and refused the next map. Two documents at the
+ * page cap fit in an hour. A handout is DM only, and every page still
+ * counts against the room's storage quota.
+ */
+export const HANDOUT_HOURLY = { session: 250, room: 250 } as const;
+
+/**
+ * The hourly budgets an upload of `kind` spends, by key. Uploads and URL
+ * imports share one (design section 10.3): 30 per session, 60 per IP, 120
+ * per room. Per IP and per room are there because anyone with the password
+ * can mint new sessions. A thumbnail or a handout spends only its own, per
+ * session and per room: only a DM may upload one, and a DM session needs
+ * the DM link. A URL import passes no kind, so it always spends the shared
+ * budget and the larger ones never pay for outbound fetches.
+ */
+export function hourlyChecks(sessionId: string, ip: string, roomId: string, kind?: AssetKind): Array<{ key: string; limit: number }> {
+  if (kind === "thumb") {
+    return [
+      { key: `thumb:s:${sessionId}`, limit: THUMB_HOURLY.session },
+      { key: `thumb:r:${roomId}`, limit: THUMB_HOURLY.room },
+    ];
+  }
+  if (kind === "handout") {
+    return [
+      { key: `handout:s:${sessionId}`, limit: HANDOUT_HOURLY.session },
+      { key: `handout:r:${roomId}`, limit: HANDOUT_HOURLY.room },
+    ];
+  }
+  return [
+    { key: `s:${sessionId}`, limit: HOURLY.session },
+    { key: `ip:${ip}`, limit: HOURLY.ip },
+    { key: `r:${roomId}`, limit: HOURLY.room },
+  ];
 }
