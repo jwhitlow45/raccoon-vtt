@@ -75,10 +75,10 @@ export function ShortcutList(props: { role: "dm" | "player" }) {
 
 /**
  * Keys in their keycaps, one per key or chord, and a trailing note such as
- * "(Cmd+V on a Mac)" as muted text under them. A keycap never breaks, so
- * the row wraps between keycaps and in the note instead: one keycap holding
- * "Page Up, Page Down" or a long note would push the sheet past a narrow
- * phone at a large interface size.
+ * "(Cmd+V on a Mac)" as muted text under them. A keycap breaks only past
+ * the length KBD allows, so the row wraps between keycaps and in the note
+ * instead: one keycap holding "Page Up, Page Down" or a long note would
+ * push the sheet past a narrow phone at a large interface size.
  */
 function KeyInput(props: { text: string }) {
   const note = /^(.+?) (\(.+\))$/.exec(props.text);
@@ -118,8 +118,18 @@ const INPUT_CELL: CSSProperties = {
   fontWeight: theme.weight.strong,
 };
 
+/**
+ * A keycap keeps a key or chord on one line, and one with words after it,
+ * such as "Shift+Tab in the list", wraps inside it past 14 characters. On
+ * one line it ran the sheet past a 320 px phone at 130%. The keycap is as
+ * wide as its text up to that, so the table never squeezes a shorter one
+ * onto two lines. The width counts the padding and border, as every box does.
+ */
 const KBD: CSSProperties = {
-  whiteSpace: "nowrap",
+  display: "inline-block",
+  width: "max-content",
+  maxWidth: `calc(14ch + ${2 * (theme.space(1.5) + theme.line.border)}px)`,
+  whiteSpace: "normal",
   fontFamily: theme.font.mono,
   fontSize: theme.font.small,
   padding: `${theme.space(0.5)}px ${theme.space(1.5)}px`,

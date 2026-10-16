@@ -518,9 +518,29 @@ export const BEHAVIORS: readonly Behavior[] = [
     device: "mouse",
   },
 
-  // The side panel's tabs: pages/Room.tsx, lib/a11y.ts tabKeyIndex.
-  { id: "tabsSide", input: "Left, Right", does: "Switch to the tab beside it, wrapping around at the ends", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
-  { id: "tabsEnds", input: "Home, End", does: "Switch to the first or the last tab", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
+  // The side panel's tabs and More's list: pages/SideTabs.tsx, pages/tabFit.ts, components/Menu.tsx and menuKeys.ts, components/Popover.tsx, lib/a11y.ts tabKeyIndex.
+  {
+    id: "tabsSide",
+    input: "Left, Right",
+    does: "Switch to the tab beside it, wrapping around at the ends. On More, stop there and open nothing",
+    roles: EVERYONE,
+    device: "keys",
+    surface: "Side panel tabs",
+  },
+  { id: "tabsEnds", input: "Home, End", does: "Switch to the first tab, or go to More, the last", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
+  { id: "tabsMoreKeys", input: "Enter, Space, Down, Up on More", does: "Open the list, at the open panel or the first, or with Up the last", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
+  { id: "tabsListMove", input: "Up, Down, Home, End in the list", does: "Move through it, wrapping around at the ends", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
+  { id: "tabsListType", input: "Letters in the list", does: "Go to the next panel whose name starts with them", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
+  { id: "tabsListPick", input: "Enter, Space in the list", does: "Open the panel and close the list. More then shows its name", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
+  {
+    id: "tabsListLeave",
+    input: "Tab, Shift+Tab in the list",
+    does: "Close it. Tab goes on to the next control, Shift+Tab back to More",
+    roles: EVERYONE,
+    device: "keys",
+    surface: "Side panel tabs",
+  },
+  { id: "tabsListEscape", input: "Escape in the list", does: "Close it, back to More", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
 
   // The handout viewer: features/handouts/HandoutViewer.tsx, zoom.ts viewerKey.
   { id: "viewerZoom", input: "+, -", does: "Zoom in, zoom out", roles: EVERYONE, device: "keys", surface: "Handout viewer" },
@@ -620,7 +640,8 @@ export const KEYS_INTRO = "On any device with a keyboard. They do nothing while 
 
 /** A line under a surface's heading, where its rows do not say where it is. */
 const SURFACE_INTRO: Partial<Record<Surface, string>> = {
-  "Side panel tabs": "On a screen 900 px or wider, with a tab focused. There, and on a focused choice or slider, the arrow and Page keys never move a token.",
+  "Side panel tabs":
+    "On a screen 900 px or wider, with a tab or More's list focused. There, and on a focused choice or slider, the arrow and Page keys never move a token, and in the list a letter goes to a panel instead of running a shortcut.",
   "Handout viewer": "A handout the DM shows, or a picture or a PDF opened from the Library.",
   "Token window": "Where the action bar opens as a window: on a screen 600 px or wider, or a phone on its side. With its grip or corner handle focused, the arrow keys move or resize it and never move a token.",
 };

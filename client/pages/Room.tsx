@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref, type RefObject } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
@@ -11,11 +11,10 @@ import { Button } from "../components/Button.tsx";
 import { ConnectionDot, ReconnectNotice, useReconnectDue } from "../components/ConnectionStatus.tsx";
 import { Card, Page } from "../components/Field.tsx";
 import { LoadBoundary } from "../components/LoadBoundary.tsx";
-import { PRESSED } from "../components/looks.ts";
 import { SectionLabel } from "../components/Panel.tsx";
 import { Row } from "../components/Row.tsx";
 import { returnFocusAfterSheet, sheetFocusSlot, useAlertsSummaryEntry, useDockSummaryButton } from "../components/sheetFocus.ts";
-import { HideButton, SheetHeader } from "../components/SheetHeader.tsx";
+import { SheetHeader } from "../components/SheetHeader.tsx";
 import { NOTICE_TONES } from "../components/tones.ts";
 import { QuietLoadNotice } from "./QuietLoadNotice.tsx";
 import { Loading } from "../components/Loading.tsx";
@@ -39,7 +38,7 @@ import { activeTool, toolsFor, type ToolDef } from "../features/tools.ts";
 import { setupDivider } from "../features/toolbarOrder.ts";
 import { useDropHpDraftsOnSelect } from "../features/tokens/hpDraft.ts";
 import { useClearStatBlockOnSelect } from "../features/tokens/statBlockOpen.ts";
-import { tabKeyIndex, VISUALLY_HIDDEN } from "../lib/a11y.ts";
+import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { useBackClose } from "../lib/backClose.ts";
 import { useWakeLock } from "../lib/wakeLock.ts";
 import type { Insets } from "../lib/camera.ts";
@@ -62,6 +61,7 @@ import { endedText } from "./endedText.ts";
 import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, focusAlert, foldsUnderSheet, useSideSheetRoom, type AlertsSummary } from "./fold.ts";
 import { mapFocusSlot } from "./mapFocus.ts";
 import { firstSidePanel, readSidePanel, writeSidePanel } from "./sidePanel.ts";
+import { SideTabs } from "./SideTabs.tsx";
 import { inModal, ModalSlots, useModalSlot } from "./modalSlot.tsx";
 import { optionsPlace, railAllowed, RAIL_WIDTH, wrapRecord, wrapsLines } from "./optionsPlace.ts";
 import { Badge, FindButton, FitButton, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle } from "./RoomChrome.tsx";
@@ -207,8 +207,9 @@ function useOptionsHeights(scale: number): [(el: HTMLElement | null) => (() => v
  *   all of them as large buttons. Panel names are long words, so a row of
  *   them could show three at most, and a list shows every one at once. An
  *   open panel's sheet has a back button to that list.
- * From 900 px up the tools fit, and the side panel's tabs wrap onto a
- * second row instead of scrolling, so a mouse reaches all of them.
+ * From 900 px up the tools fit, and the side panel's tabs stand in one
+ * row, the most used first and the rest behind More, whose menu lists
+ * them (pages/SideTabs.tsx).
  *
  * Room makes the page's scope (state/scope.ts) and RoomPage draws inside
  * it, so the page's own hooks read the same per-page state as everything
@@ -636,14 +637,17 @@ function RoomPage() {
    */
   const sheetTitleRef = useRef<HTMLHeadingElement>(null);
   const sideTabRef = useRef<HTMLButtonElement>(null);
-  useLayoutEffect(() => {
+  const placeFocus = () => {
     const ask = focusNext.current;
     if (!ask) return;
+    // The side panel draws no tabs until it has fitted them to its row (pages/SideTabs.tsx), at most one commit later and before paint, and then asks again (onTabsDrawn).
+    if (ask.kind === "panel" && wide && sideShown && !sideTabRef.current) return;
     focusNext.current = null;
     if (ask.kind === "panel") (wide ? sideTabRef.current : sheetTitleRef.current)?.focus({ preventScroll: true });
     else if (ask.kind === "panels") panelsRef.current?.focus({ preventScroll: true });
     else sheetRef.current?.querySelector<HTMLElement>(`[data-opener="${panelTile(ask.panelId)}"]`)?.focus();
-  });
+  };
+  useLayoutEffect(placeFocus);
 
   if (ended) return <EndedScreen ended={ended} roomId={roomId} role={role} />;
   // A blackout is for a break or a reveal (features section 13), so players
@@ -813,10 +817,12 @@ function RoomPage() {
           tab={tabId}
           badges={badges}
           badgeLabels={badgeLabels}
+          grouped={role === "dm"}
           onTab={(id) => ui.openPanel(id)}
           onHide={hideSidePanel}
           subpage={subpage}
           tabRef={sideTabRef}
+          onTabsDrawn={placeFocus}
         >
           {tabId ? <PanelBody id={tabId} shown={sideShown} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={setSubpage} /> : null}
         </SidePanel>
@@ -1704,22 +1710,20 @@ function ToolButton(props: {
   );
 }
 
-/** A side panel tab: the chosen one in the pressed look, as every other chosen option (docs/design-v1-visual.md 3.2). */
-const TAB_REST: CSSProperties = { background: "transparent", border: `${theme.line.border}px solid transparent`, color: theme.color.textMuted };
-
 /**
  * The side panel from 900 px up: the party bar, the tabs, and the open
  * panel. While the panel shows a subpage (features/panels.ts
  * usePanelHeader), a header above it names the subpage with "Back to" its
  * panel, and focus follows it in and out (useSubpageFocus). With no
- * subpage there is no header, since the chosen tab already names the panel.
+ * subpage there is no header, since the chosen tab already names the
+ * panel, unless More cuts its name (pages/SideTabs.tsx).
  *
  * "Hide panels" at the end of the tab row hides it (`hidden`), its content
  * kept mounted, so a half-typed message, an open journal page and each
- * panel's scroll survive (docs/design-v1-layout-hierarchy.md 4.1). On a
- * short layout the tabs are one row that scrolls sideways, in place of
- * rows that wrap, so the open panel keeps a body to show: at 932 x 430 a
- * DM's wrapped tabs left it 45 px.
+ * panel's scroll survive (docs/design-v1-layout-hierarchy.md 4.1). The
+ * tabs stand in one row at every height, the rest behind More
+ * (docs/design-v1-panel-tabs.md), so the open panel keeps a body to show:
+ * at 932 x 430 a DM's wrapped tabs left it 45 px.
  */
 function SidePanel(props: {
   ref?: Ref<HTMLElement>;
@@ -1733,14 +1737,18 @@ function SidePanel(props: {
   badges: Record<string, number>;
   /** What a tab's count says to a screen reader where it is not "N unread". */
   badgeLabels: Record<string, string>;
+  grouped: boolean;
   onTab(id: string): void;
   subpage: PanelHeader | null;
   /**
    * The chosen tab, which takes focus from script when Details opens the
    * token's panel: "Token, tab, selected". The tab panel itself takes no
    * focus, so a click on its blank space leaves Space free to pan the map.
+   * More, while the open panel is in it.
    */
   tabRef: RefObject<HTMLButtonElement | null>;
+  /** The tabs have just been drawn for a new fit, in a commit of the side panel's own. */
+  onTabsDrawn(): void;
   children: ReactNode;
 }) {
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -1752,58 +1760,6 @@ function SidePanel(props: {
   const ids = useId();
   const tabId = (id: string) => `${ids}-tab-${id}`;
   const panelId = `${ids}-panel`;
-  /*
-   * The ARIA tab pattern, which role="tab" promises a screen reader: the
-   * row is one Tab stop, the chosen tab (roving tabindex), and Left, Right,
-   * Home and End move along it and choose. The map's arrow shortcuts stand
-   * aside on a tab list (state/shortcuts.ts ownsNavigationKeys).
-   */
-  const stop = props.tabs.some((t) => t.id === props.tab) ? props.tab : props.tabs[0]?.id;
-  const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-    const at = props.tabs.findIndex((t) => tabId(t.id) === (e.target as HTMLElement).id);
-    const index = at === -1 ? null : tabKeyIndex(e.key, at, props.tabs.length);
-    const next = index === null ? undefined : props.tabs[index];
-    if (!next) return;
-    e.preventDefault();
-    props.onTab(next.id);
-    document.getElementById(tabId(next.id))?.focus();
-  };
-  const tabs = props.tabs.map((t, i) => {
-    const chosen = props.tab === t.id;
-    // An 8 px gap before each group's first tab, where the row's own gap is 2 (docs/design-v1-layout-hierarchy.md M3).
-    const opensGroup = i > 0 && props.tabs[i - 1]?.group !== t.group;
-    return (
-      <button
-        key={t.id}
-        ref={chosen ? chosenTabRef : undefined}
-        id={tabId(t.id)}
-        type="button"
-        role="tab"
-        aria-selected={chosen}
-        aria-controls={chosen ? panelId : undefined}
-        tabIndex={t.id === stop ? 0 : -1}
-        data-active={chosen}
-        onClick={() => props.onTab(t.id)}
-        style={{
-          flex: "none",
-          minHeight: theme.touch,
-          minWidth: theme.touch,
-          marginLeft: opensGroup ? theme.space(2) - theme.space(0.5) : 0,
-          padding: `0 ${theme.space(2)}px`,
-          borderRadius: theme.radius.md,
-          ...(chosen ? PRESSED : TAB_REST),
-          fontFamily: theme.font.body,
-          fontSize: theme.font.body14,
-          fontWeight: theme.weight.strong,
-          cursor: "pointer",
-        }}
-      >
-        {t.title}
-        <Badge count={props.badges[t.id] ?? 0} label={props.badgeLabels[t.id]} />
-      </button>
-    );
-  });
   return (
     <aside
       ref={props.ref}
@@ -1824,22 +1780,22 @@ function SidePanel(props: {
       }}
     >
       <PartyDock short={props.short} />
-      {/* The tab list, then Hide panels outside it, level with the first row of tabs. */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: theme.space(1), padding: theme.space(2), borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>
-        {props.short ? (
-          <ScrollStrip role="tablist" aria-label="Panels" active={props.tab} onKeyDown={onTabKey} style={{ flex: "1 1 auto" }}>
-            {tabs}
-          </ScrollStrip>
-        ) : (
-          <div role="tablist" aria-label="Panels" onKeyDown={onTabKey} style={{ flex: "1 1 auto", minWidth: 0, display: "flex", flexWrap: "wrap", gap: theme.space(0.5) }}>
-            {tabs}
-          </div>
-        )}
-        {/* A rule sets it apart from the scrolling row it ends, whose own chevron only scrolls. */}
-        <div style={{ flex: "none", display: "flex", paddingLeft: props.short ? theme.space(1) : 0, borderLeft: props.short ? `${theme.line.border}px solid ${theme.color.border}` : "none" }}>
-          <HideButton label="Hide panels" onClick={props.onHide} />
-        </div>
-      </div>
+      <SideTabs
+        hidden={props.hidden}
+        zoom={props.zoom}
+        tabs={props.tabs}
+        tab={props.tab}
+        badges={props.badges}
+        badgeLabels={props.badgeLabels}
+        grouped={props.grouped}
+        onTab={props.onTab}
+        onHide={props.onHide}
+        subpage={props.subpage !== null}
+        tabRef={chosenTabRef}
+        onTabsDrawn={props.onTabsDrawn}
+        tabId={tabId}
+        panelId={panelId}
+      />
       {props.subpage ? (
         <div style={{ flex: "none", borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>
           <SheetHeader title={props.subpage.title} back={subpageBack(props.subpage)} titleRef={titleRef} />

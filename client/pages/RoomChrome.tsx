@@ -345,7 +345,17 @@ export function Stacked(props: { icon: ReactNode; text: string }) {
  * A count is a status, so it never wears the accent: text-colored with
  * dark digits, the same for every member (docs/design-v1-visual.md 2.2).
  */
-export function Badge(props: { count: number; corner?: boolean; label?: string }) {
+export function Badge(props: {
+  count: number;
+  corner?: boolean;
+  label?: string;
+  /**
+   * False leaves out its hidden "N unread", for a button whose name may
+   * be another panel's title while its count covers several panels: the
+   * side panel's More says its count in its description instead.
+   */
+  spoken?: boolean;
+}) {
   const text = badgeText(props.count);
   if (!text) return null;
   return (
@@ -368,7 +378,7 @@ export function Badge(props: { count: number; corner?: boolean; label?: string }
       }}
     >
       <span aria-hidden>{text}</span>
-      <span style={VISUALLY_HIDDEN}>{props.label || `${props.count} unread`}</span>
+      {props.spoken === false ? null : <span style={VISUALLY_HIDDEN}>{props.label || `${props.count} unread`}</span>}
     </span>
   );
 }

@@ -379,9 +379,10 @@ export function useSubpageFocus(
      * A tab chosen by click or arrow key changes the page too, to a panel
      * that may show a subpage. The tab pattern keeps focus on the tab, and
      * moved to the subpage's title, the next arrow left the tab list and
-     * moved the selected token.
+     * moved the selected token. The side panel's More menu is part of the
+     * tabs: a panel picked there keeps focus for More (pages/SideTabs.tsx).
      */
-    if (active instanceof Element && active.closest('[role="tablist"]')) return;
+    if (active instanceof Element && active.closest('[role="tablist"], [data-tabs-menu]')) return;
     target?.focus({ preventScroll: true });
     /*
      * The row Back found can lie outside the view the offset put back: a

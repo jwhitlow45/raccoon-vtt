@@ -52,9 +52,9 @@ This page lists what RaccoonVTT does today, grouped by area. "The DM" means anyo
 - On a phone held upright, an open sheet folds the token's action bar and the fight's alerts into one row on the sheet's top edge: a button with the token's name, its Close, and one button that names the most pressing alert and how many more wait. The token's name closes the sheet and brings the bar back as it was, a half-typed HP entry included. The alert button closes the sheet and shows the alerts, or opens a roll waiting for your answer. Where the screen is too short for that row, its buttons sit in the sheet's header.
 - The fit button in the top bar ("Fit the map to the screen") brings the map back into view. A pinch anywhere but the map never zooms the page.
 - Android's Back button and the Escape key close an open sheet, handout or action bar before they leave the room. While the token's panel shows that token, they and the bar's Close put the bar away and keep the token in the panel. With the bar away, Escape lets go of the token.
-- On a phone, panels open as sheets from the bottom, and the toolbar names each tool under its icon, as it does on any touch screen. On a screen 900 px or wider, panels are tabs in a side panel. Hide panels at the end of its tabs, or the S key, hides it, and Panels in the toolbar brings it back. This device remembers the choice. A short screen, such as a large phone held sideways, starts with it hidden, and shows its tabs in one row that scrolls. The toolbar scrolls sideways the same way when its tools do not fit, and with a mouse the wheel scrolls either row. On a phone held sideways, Hide in a panel's header tucks the panel away with its place kept, and Panels brings it back. Where the screen is too short for a panel beside the map, it opens over the whole screen, with the token's actions and the fight's alerts as buttons in its header, and the room's notices, "Your turn" and messages between the header and the panel.
+- On a phone, panels open as sheets from the bottom, and the toolbar names each tool under its icon, as it does on any touch screen. On a screen 900 px or wider, panels are tabs in a side panel, in one row: the most used first, as many as fit, then More, which lists the rest. A panel opened from More shows its name on More, and the tabs never move. A long name there may end in "…", and the panel then shows its full name at its top. A count on a panel inside More shows on More too. Hide panels at the end of the tabs, or the S key, hides the side panel, and Panels in the toolbar brings it back. This device remembers the choice. A short screen, such as a large phone held sideways, starts with it hidden. The toolbar scrolls sideways when its tools do not fit, and with a mouse the wheel scrolls it. On a phone held sideways, Hide in a panel's header tucks the panel away with its place kept, and Panels brings it back. Where the screen is too short for a panel beside the map, it opens over the whole screen, with the token's actions and the fight's alerts as buttons in its header, and the room's notices, "Your turn" and messages between the header and the panel.
 - On a short screen held sideways, such as a phone, a tool whose options take more than one row opens them in a column on the left of the map that scrolls, so the map keeps its height. Multi-select, Ping, Pin and Add token keep their one-row bar at the bottom, unless the screen is too narrow for it to stay one row.
-- Panels are listed with the ones used in play first. A DM's phone list groups them under In play and Prepare.
+- Panels are listed with the ones used in play first, in an order that never changes with use. A DM's phone list and the side panel's More group them under In play and Prepare.
 - A page inside a panel, such as a journal page, a monster's stat block, an area's damage page, the encounter editor or a Menu page like Members, puts its own name at the top, with a back button that says where it goes, such as "Back to Journal".
 - Add to Home Screen installs it as a full-screen app on an iPhone. The screen stays awake during a session.
 - Phones load a smaller copy of each map, and the map redraws only when something changes.
@@ -406,12 +406,18 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 
 ### Side panel tabs
 
-On a screen 900 px or wider, with a tab focused. There, and on a focused choice or slider, the arrow and Page keys never move a token.
+On a screen 900 px or wider, with a tab or More's list focused. There, and on a focused choice or slider, the arrow and Page keys never move a token, and in the list a letter goes to a panel instead of running a shortcut.
 
 | Key | Does | Who |
 | --- | --- | --- |
-| Left, Right | Switch to the tab beside it, wrapping around at the ends | everyone |
-| Home, End | Switch to the first or the last tab | everyone |
+| Left, Right | Switch to the tab beside it, wrapping around at the ends. On More, stop there and open nothing | everyone |
+| Home, End | Switch to the first tab, or go to More, the last | everyone |
+| Enter, Space, Down, Up on More | Open the list, at the open panel or the first, or with Up the last | everyone |
+| Up, Down, Home, End in the list | Move through it, wrapping around at the ends | everyone |
+| Letters in the list | Go to the next panel whose name starts with them | everyone |
+| Enter, Space in the list | Open the panel and close the list. More then shows its name | everyone |
+| Tab, Shift+Tab in the list | Close it. Tab goes on to the next control, Shift+Tab back to More | everyone |
+| Escape in the list | Close it, back to More | everyone |
 
 ### Handout viewer
 

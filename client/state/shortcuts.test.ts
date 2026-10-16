@@ -384,7 +384,16 @@ describe("the sheet's rows beside the keys", () => {
     assert.ok(keys.intro?.startsWith("On any device with a keyboard."));
     for (const device of [DESKTOP, IPHONE, ANDROID]) {
       assert.deepEqual(inputs("player", device, "Handout viewer"), ["+, -", "0", "Arrow keys", "Page Down, Page Up", "Space, Shift+Space", "Home, End"]);
-      assert.deepEqual(inputs("player", device, "Side panel tabs"), ["Left, Right", "Home, End"]);
+      assert.deepEqual(inputs("player", device, "Side panel tabs"), [
+        "Left, Right",
+        "Home, End",
+        "Enter, Space, Down, Up on More",
+        "Up, Down, Home, End in the list",
+        "Letters in the list",
+        "Enter, Space in the list",
+        "Tab, Shift+Tab in the list",
+        "Escape in the list",
+      ]);
     }
     assert.ok(section("dm", DESKTOP, MOUSE_SECTION)!.rows.every((r) => !r.keys), "a mouse row is a phrase, not a key");
   });
@@ -407,6 +416,17 @@ describe("the sheet's rows beside the keys", () => {
     assert.match(BEHAVIORS.find((b) => b.id === "selectAdd")!.does, /as Multi-select does$/);
     assert.match(BEHAVIORS.find((b) => b.id === "escape")!.does, /end Multi-select/);
     assert.equal(BEHAVIORS.find((b) => b.id === "selectMenu")!.when, "with Multi-select off");
+  });
+
+  test("the side panel's tabs and More's list are keys only, the same for the DM and players (docs/design-v1-panel-tabs.md 5.4)", () => {
+    const rows = BEHAVIORS.filter((b) => b.surface === "Side panel tabs");
+    assert.deepEqual(
+      rows.map((b) => b.id),
+      ["tabsSide", "tabsEnds", "tabsMoreKeys", "tabsListMove", "tabsListType", "tabsListPick", "tabsListLeave", "tabsListEscape"],
+    );
+    assert.ok(rows.every((b) => b.device === "keys" && b.roles.includes("dm") && b.roles.includes("player")));
+    assert.ok(!BEHAVIORS.some((b) => b.id === "tabsWheel"), "the row no longer scrolls");
+    assert.deepEqual(inputs("dm", DESKTOP, "Side panel tabs"), inputs("player", DESKTOP, "Side panel tabs"));
   });
 
   test("each role sees its own rows", () => {
