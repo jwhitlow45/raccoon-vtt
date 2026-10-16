@@ -3,7 +3,7 @@ import { createStore } from "zustand/vanilla";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
-import { InfoLine, OptButton, OptionsColumn, OptionsRow } from "../measure/controls.tsx";
+import { OptButton, OptionsStrip } from "../measure/controls.tsx";
 import { setSoundEnabled, usePingSound } from "./feedback.ts";
 import { lookHereEvent } from "./lookHere.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
@@ -61,32 +61,37 @@ function onCancel(ctx: ToolContext): void {
   if (g?.laser) ctx.actions.sendEph({ k: "laser", x: g.last.x, y: g.last.y, on: false });
 }
 
+/** The ping tool's options (docs/design-v1-tool-options.md 9.5): Look here for the DM, and Ping sound. */
 function PingOptions(props: { role: "dm" | "player" }) {
   const pingStore = useScoped(pingSlot).store;
   const lookHere = useStore(pingStore, (s) => s.lookHere);
   const sound = usePingSound();
   return (
-    <OptionsColumn>
-      <InfoLine tone="muted">
-        Tap to ping. Drag to point with the laser.
-        {props.role === "dm" && lookHere ? " Your taps also move every player's view." : ""}
-      </InfoLine>
-      <OptionsRow label="Ping">
-        {props.role === "dm" ? (
-          <OptButton pressed={lookHere} label="Taps move every player's view to the spot" onClick={() => pingStore.setState({ lookHere: !lookHere })}>
-            Look here
-          </OptButton>
-        ) : null}
-        {/* The same setting, and the same fixed name, as This device's "Ping sound" (docs/design-v1-visual.md 3.7). */}
-        <OptButton
-          pressed={sound}
-          label="Play a sound for pings on this device"
-          onClick={() => setSoundEnabled(!sound)}
-        >
-          Ping sound
-        </OptButton>
-      </OptionsRow>
-    </OptionsColumn>
+    <OptionsStrip
+      tool="Ping"
+      line={{ tone: "hint", content: `Tap to ping. Drag to point with the laser.${props.role === "dm" && lookHere ? " Your taps also move every player's view." : ""}` }}
+      slots={[
+        props.role === "dm" && {
+          id: "lookHere",
+          priority: 1,
+          control: (
+            <OptButton pressed={lookHere} label="Taps move every player's view to the spot" onClick={() => pingStore.setState({ lookHere: !lookHere })}>
+              Look here
+            </OptButton>
+          ),
+        },
+        {
+          id: "sound",
+          priority: 1,
+          control: (
+            // The same setting, and the same fixed name, as This device's "Ping sound" (docs/design-v1-visual.md 3.7).
+            <OptButton pressed={sound} label="Play a sound for pings on this device" onClick={() => setSoundEnabled(!sound)}>
+              Ping sound
+            </OptButton>
+          ),
+        },
+      ]}
+    />
   );
 }
 
