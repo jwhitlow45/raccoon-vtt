@@ -55,7 +55,9 @@ export function SelectOptions() {
 
   const sides = safe ? safe.left + safe.right : 0;
   // Before a phone's row is measured its room reads as 0, so the first frame shows the short hint and never wraps.
-  const short = shortHint(hintRoom({ wide, mapWidth: width - theme.layout.sidePanelWidth, padding: WIDE_BAR_PADDING + sides, inner }));
+  // The side panel takes its width only while it shows (docs/design-v1-layout-hierarchy.md 4.1).
+  const sidePanelHidden = useRoomView((s) => s.local.sidePanelHidden);
+  const short = shortHint(hintRoom({ wide, mapWidth: width - (sidePanelHidden ? 0 : theme.layout.sidePanelWidth), padding: WIDE_BAR_PADDING + sides, inner }));
   return (
     <div ref={rowRef} style={{ display: "flex", alignItems: "center", gap: theme.space(2), width: "100%", minWidth: 0 }}>
       <span style={{ flex: 1, minWidth: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.textMuted }}>

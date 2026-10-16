@@ -19,7 +19,7 @@ import { SCENE_LOAD_IDLE, sceneLoadFailureText, stepSceneLoad, type SceneLoad, t
 import { shareRecord, shareState } from "./share.ts";
 import { backoffDelay, realClock, Timer, type Clock } from "./timing.ts";
 import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
-import { EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, type Ended, type LocalUi, type OpAnswer, type OpRefusal, type PendingOp, type RoomView, type Toast, type You } from "./types.ts";
+import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetHidden, withSidePanelHidden, type Ended, type LocalUi, type OpAnswer, type OpRefusal, type PendingOp, type RoomView, type Toast, type You } from "./types.ts";
 
 export type { PendingOp } from "./types.ts";
 
@@ -102,6 +102,12 @@ export type RoomUi = {
   showPanelList(open: boolean): void;
   /** Closes whatever sheet stands over a phone's map, a panel or the list of panels, in one change. */
   closeSheets(): void;
+  /** Hides a phone's open panel with its state kept, or shows it again (state/types.ts withSheetHidden). */
+  hideSheet(hidden: boolean): void;
+  /** Hides or shows the side panel from 900 px up. Storing the choice is the page's (pages/sidePanel.ts). */
+  hideSidePanel(hidden: boolean): void;
+  /** The layout crossed 900 px, wider or narrower (state/types.ts crossWide). */
+  crossWide(wide: boolean): void;
   /**
    * A short note from this page rather than the server, for this device
    * only: why a drag did nothing, or a whisper that arrived while the Log
@@ -434,20 +440,25 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       setLocal(showActions(get().local, open));
     },
     openPanel(id) {
-      const local = get().local;
-      if (local.panel !== id || local.tab !== id || local.panelList) store.setState({ local: { ...local, panel: id, tab: id, panelList: false } });
+      setLocal(withPanel(get().local, id));
     },
     showPanelList(open) {
-      const local = get().local;
-      if (local.panelList !== open) store.setState({ local: { ...local, panelList: open } });
+      setLocal(withPanelList(get().local, open));
     },
     closePanel() {
-      const local = get().local;
-      if (local.panel !== null) store.setState({ local: { ...local, panel: null } });
+      setLocal(withoutPanel(get().local));
     },
     closeSheets() {
-      const local = get().local;
-      if (local.panel !== null || local.panelList) store.setState({ local: { ...local, panel: null, panelList: false } });
+      setLocal(withoutSheets(get().local));
+    },
+    hideSheet(hidden) {
+      setLocal(withSheetHidden(get().local, hidden));
+    },
+    hideSidePanel(hidden) {
+      setLocal(withSidePanelHidden(get().local, hidden));
+    },
+    crossWide(wide) {
+      setLocal(crossWide(get().local, wide));
     },
     notify(text, tone = "info") {
       pushToast(text, tone);

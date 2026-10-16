@@ -42,6 +42,12 @@ export type PanelProps = {
   selectedTokenId: string | null;
   /** Closes the panel's sheet on phones. On wide screens the side panel stays. */
   close(): void;
+  /**
+   * Whether the panel is on screen. A hidden sheet or side panel keeps its
+   * panel mounted (docs/design-v1-layout-hierarchy.md 4.2), so whatever
+   * marks content read asks this first.
+   */
+  shown: boolean;
 };
 
 export type PanelDef = {

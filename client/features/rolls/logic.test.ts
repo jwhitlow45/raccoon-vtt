@@ -314,7 +314,7 @@ describe("the DM's cards on a phone", () => {
     assert.equal(desk(844, 390, true).folded, false, "in landscape the column steps left of the docked sheet");
     assert.equal(desk(1280, 800, true).folded, false, "the side panel covers nothing");
     // The phone's list of panels is a sheet too (state/types.ts sheetOpen), and the DM's desk reads that signal.
-    const covered = (local: { panel: string | null; panelList: boolean }) => desk(390, 844, sheetOpen(local)).folded;
+    const covered = (local: { panel: string | null; panelList: boolean }) => desk(390, 844, sheetOpen({ ...local, sheetHidden: false })).folded;
     assert.equal(covered({ panel: null, panelList: true }), true, "the list of panels folds the stack");
     assert.equal(covered({ panel: "log", panelList: false }), true);
     assert.equal(covered({ panel: null, panelList: false }), false);

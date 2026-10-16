@@ -5,7 +5,7 @@ import { projectState } from "#shared/project.ts";
 import { shareState } from "../../state/share.ts";
 import type { RoomUi } from "../../state/store.ts";
 import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "../../state/selection.ts";
-import { EMPTY_EPHEMERAL, INITIAL_LOCAL, type RoomActions, type RoomView } from "../../state/types.ts";
+import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetHidden, withSidePanelHidden, type RoomActions, type RoomView } from "../../state/types.ts";
 
 /**
  * "View as a player" (features section 13): the DM sees exactly what one
@@ -99,10 +99,13 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
     setMultiSelect: (on) => store.setState({ local: setMultiSelect(store.getState().local, on) }),
     doneSelecting: () => store.setState({ local: doneSelecting(store.getState().local) }),
     showActions: (open) => store.setState({ local: showActions(store.getState().local, open) }),
-    openPanel: (id) => setLocal({ panel: id, tab: id, panelList: false }),
-    closePanel: () => setLocal({ panel: null }),
-    showPanelList: (open) => setLocal({ panelList: open }),
-    closeSheets: () => setLocal({ panel: null, panelList: false }),
+    openPanel: (id) => store.setState({ local: withPanel(store.getState().local, id) }),
+    closePanel: () => store.setState({ local: withoutPanel(store.getState().local) }),
+    showPanelList: (open) => store.setState({ local: withPanelList(store.getState().local, open) }),
+    closeSheets: () => store.setState({ local: withoutSheets(store.getState().local) }),
+    hideSheet: (hidden) => store.setState({ local: withSheetHidden(store.getState().local, hidden) }),
+    hideSidePanel: (hidden) => store.setState({ local: withSidePanelHidden(store.getState().local, hidden) }),
+    crossWide: (wide) => store.setState({ local: crossWide(store.getState().local, wide) }),
     notify: (text, tone = "info") => {
       const toasts = store.getState().toasts;
       if (!toasts.some((t) => t.text === text)) store.setState({ toasts: [...toasts, { id: ++toastSeq, text, tone }].slice(-3) });

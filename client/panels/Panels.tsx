@@ -15,7 +15,7 @@ import { useRoomView } from "../state/view.ts";
  * Members inside Menu, so the sheet or side panel around it can title its
  * header with it and put "Back to Menu" there.
  */
-export function PanelBody(props: { id: string; selectedTokenId: string | null; close(): void; onHeader?(header: PanelHeader | null): void }) {
+export function PanelBody(props: { id: string; shown: boolean; selectedTokenId: string | null; close(): void; onHeader?(header: PanelHeader | null): void }) {
   const def = panelById(props.id);
   if (!def) return null;
   const Component = def.Component;
@@ -23,7 +23,7 @@ export function PanelBody(props: { id: string; selectedTokenId: string | null; c
     // Keyed by panel, so a panel that failed does not keep its notice when another one opens.
     <LoadBoundary key={props.id} fallback={(f) => <RoomLoadNotice {...f} subject="This panel" reopen={{ panel: props.id }} />}>
       <Suspense fallback={<Loading text="Loading…" />}>
-        <Component selectedTokenId={props.selectedTokenId} close={props.close} />
+        <Component selectedTokenId={props.selectedTokenId} close={props.close} shown={props.shown} />
       </Suspense>
     </LoadBoundary>
   );

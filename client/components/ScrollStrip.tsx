@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type WheelEvent } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type WheelEvent } from "react";
 import { theme } from "../lib/theme.ts";
 import { Icon } from "./Icon.tsx";
 
@@ -23,6 +23,8 @@ export function ScrollStrip(props: {
   active?: string;
   role?: string;
   "aria-label"?: string;
+  /** On the row itself, for a role whose keys move along it, such as a tab list's arrows. */
+  onKeyDown?(e: KeyboardEvent<HTMLDivElement>): void;
   style?: CSSProperties;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -77,6 +79,7 @@ export function ScrollStrip(props: {
         ref={ref}
         role={props.role}
         aria-label={props["aria-label"]}
+        onKeyDown={props.onKeyDown}
         onScroll={measure}
         onWheel={onWheel}
         style={{

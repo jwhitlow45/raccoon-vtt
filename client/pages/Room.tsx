@@ -5,6 +5,7 @@ import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, noticePlace, type Chrome }
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
 import { MapStage } from "../canvas/Stage.tsx";
 import { Button } from "../components/Button.tsx";
+import { IconButton } from "../components/IconButton.tsx";
 import { ConnectionDot, ReconnectBanner } from "../components/ConnectionStatus.tsx";
 import { Card, Page } from "../components/Field.tsx";
 import { LoadBoundary } from "../components/LoadBoundary.tsx";
@@ -17,7 +18,7 @@ import { QuietLoadNotice } from "./QuietLoadNotice.tsx";
 import { Loading } from "../components/Loading.tsx";
 import { ScrollStrip } from "../components/ScrollStrip.tsx";
 import { Sheet, paneBodyPadding } from "../components/Sheet.tsx";
-import { useRecordOverflow, useTopBars, useTurnPlacement, type TurnPlacement } from "../features/encounter/band.ts";
+import { SHORT_LANDSCAPE_MAX, useRecordOverflow, useTopBars, useTurnPlacement, type TurnPlacement } from "../features/encounter/band.ts";
 import { FightWatch, InitiativeStrip, useYourTurnNotice } from "../features/encounter/InitiativeStrip.tsx";
 import { panelById, panelsFor, subpageBack, useSubpageFocus, type PanelDef, type PanelHeader } from "../features/panels.ts";
 import { PartyDock } from "../features/party/PartyDock.tsx";
@@ -43,7 +44,7 @@ import { theme } from "../lib/theme.ts";
 import { PanelBody, RoomLoadNotice } from "../panels/Panels.tsx";
 import { RoomScope, RoomScopeProvider, useRoomScope, useScoped } from "../state/scope.ts";
 import { TOAST_MS } from "../state/store.ts";
-import { useShortcuts } from "../state/shortcuts.ts";
+import { sidePanelKeysSlot, useShortcuts } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
 import type { Ended } from "../state/types.ts";
@@ -53,6 +54,7 @@ import { DmLinkEntry } from "./DmLinkEntry.tsx";
 import { endedText } from "./endedText.ts";
 import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, focusAlert, foldsUnderSheet, type AlertsSummary } from "./fold.ts";
 import { mapFocusSlot } from "./mapFocus.ts";
+import { firstSidePanel, readSidePanel, writeSidePanel } from "./sidePanel.ts";
 import { Badge, FindButton, FitButton, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle } from "./RoomChrome.tsx";
 import { DockHeaderActions, DockRow, FoldStatus, SAFE_PROBE_STYLE, useDockSummary, useLayoutHeight, useSafeAreas, type DockActions } from "./RoomDock.tsx";
 
@@ -213,7 +215,7 @@ function RoomPage() {
   const ended = useRoomView((s) => s.ended);
   const roomId = useRoomView((s) => s.roomId);
   const gate = useRoomView(useShallow((s) => sceneGate({ view: s.view, sceneId: s.sceneId, role })));
-  const { selectedId, panel, tab, tool: toolId, actionBar } = useRoomView(useShallow((s) => s.local));
+  const { selectedId, panel, tab, tool: toolId, actionBar, sidePanelHidden } = useRoomView(useShallow((s) => s.local));
   const select = useCallback((id: string | null, add?: boolean) => ui.tap(id, add), [ui]);
 
   // A change of scene lets go of the selection, and a blackout does not (lib/scene.ts selectionScene).
@@ -236,7 +238,7 @@ function RoomPage() {
    * panel's tab panel), or a tile in the list of panels. See the effect
    * after useDockFocus below.
    */
-  const focusNext = useRef<{ kind: "panel" } | { kind: "tile"; panelId: string } | null>(null);
+  const focusNext = useRef<{ kind: "panel" } | { kind: "tile"; panelId: string } | { kind: "panels" } | null>(null);
 
   // The action bar steps aside once the token's panel is open, and focus, which went with the bar's Details, goes to the panel.
   const openDetails = useCallback(
@@ -260,11 +262,68 @@ function RoomPage() {
   const previewing = usePreview();
   const preview = previewing !== null;
   useShortcuts({ role, tools, scope, preview });
+
+  /*
+   * The side panel from 900 px up, which can be hidden
+   * (docs/design-v1-layout-hierarchy.md 4.1). Its first state on this page
+   * is worked out once, the first time the layout is wide, from this
+   * device's choice or the short screen's default (pages/sidePanel.ts), in
+   * a layout effect so a panel that starts hidden never paints a frame.
+   */
+  const sideShown = wide && !sidePanelHidden;
+  const sideFirst = useRef<boolean | null>(null);
+  useLayoutEffect(() => {
+    if (sideFirst.current !== null || !wide) return;
+    const first = firstSidePanel(null, { wide, height, stored: readSidePanel() });
+    sideFirst.current = first;
+    if (first !== null) ui.hideSidePanel(first);
+  }, [wide, height, ui]);
+  // Crossing 900 px, a phone's hidden sheet and the side panel hand over to each other (state/types.ts crossWide).
+  const wasWide = useRef(wide);
+  useLayoutEffect(() => {
+    if (wasWide.current === wide) return;
+    wasWide.current = wide;
+    ui.crossWide(wide);
+  }, [wide, ui]);
+  const panelsRef = useRef<HTMLButtonElement>(null);
+  const sidePanelRef = useRef<HTMLElement>(null);
+  const sidePanelId = useId();
+  const setSidePanel = useCallback(
+    (hidden: boolean) => {
+      ui.hideSidePanel(hidden);
+      writeSidePanel(hidden ? "hidden" : "shown", { preview });
+    },
+    [ui, preview],
+  );
+  // Each button goes as it acts, so focus moves to the one that takes its place: Hide panels to Panels, Panels to the chosen tab.
+  const hideSidePanel = () => {
+    focusNext.current = { kind: "panels" };
+    setSidePanel(true);
+  };
+  const showSidePanel = () => {
+    focusNext.current = { kind: "panel" };
+    setSidePanel(false);
+  };
+  // S (state/shortcuts.ts) moves focus only where its element disappears: from inside the side panel to Panels, and from Panels to the chosen tab.
+  const sidePanelKeys = scope.get(sidePanelKeysSlot);
+  useEffect(() => {
+    if (!wide) return;
+    sidePanelKeys.toggle = () => {
+      const hidden = store.getState().local.sidePanelHidden;
+      const active = document.activeElement;
+      if (!hidden && active && sidePanelRef.current?.contains(active)) focusNext.current = { kind: "panels" };
+      else if (hidden && active && active === panelsRef.current) focusNext.current = { kind: "panel" };
+      setSidePanel(!hidden);
+    };
+    return () => {
+      sidePanelKeys.toggle = null;
+    };
+  }, [wide, sidePanelKeys, store, setSidePanel]);
   const optionsShown = useRoomView((s) => (tool.optionsShown ? tool.optionsShown(s) : true));
   const sheet = !wide && panel ? panels.find((p) => p.id === panel) : undefined;
   const tabId = panelById(tab) && panels.some((p) => p.id === tab) ? tab : (panels[0]?.id ?? "");
   // New chat and whispers mark the Log's button while it is not on screen.
-  const unread = useLogUnread(wide ? tabId === "log" : sheet?.id === "log");
+  const unread = useLogUnread(wide ? sideShown && tabId === "log" : sheet?.id === "log");
   const journalUnread = useJournalUnread();
   const badges: Record<string, number> = { log: unread, journal: journalUnread };
   // The phone sheet that lists every panel, in the room's local state (state/types.ts sheetOpen), so
@@ -292,7 +351,7 @@ function RoomPage() {
    * does both everywhere. Neither ends the mode while the token's panel
    * shows the selection (state/selection.ts dismissal).
    */
-  const tokenPanelShown = wide ? tabId === "token" : sheet?.id === "token";
+  const tokenPanelShown = wide ? sideShown && tabId === "token" : sheet?.id === "token";
   const away = useRoomView((s) => dismissal(s.local, tokenPanelShown));
   /*
    * While the token's panel shows the token, the bar's Close, Escape and
@@ -404,7 +463,7 @@ function RoomPage() {
    * its Exit: the preview tells this page how tall it is, and this page
    * says where it goes. Spanning, this page's own notices start below it.
    */
-  const mapWidth = wide ? width - theme.layout.sidePanelWidth : width;
+  const mapWidth = sideShown ? width - theme.layout.sidePanelWidth : width;
   const free = freeArea({ width: mapWidth, height }, chrome ?? DEFAULT_CHROME);
   const beside = chrome ? noticePlace(free) : null;
   const besideLane = beside !== null;
@@ -479,6 +538,7 @@ function RoomPage() {
     if (!ask) return;
     focusNext.current = null;
     if (ask.kind === "panel") (wide ? sideTabRef.current : sheetTitleRef.current)?.focus({ preventScroll: true });
+    else if (ask.kind === "panels") panelsRef.current?.focus({ preventScroll: true });
     else sheetRef.current?.querySelector<HTMLElement>(`[data-opener="${panelTile(ask.panelId)}"]`)?.focus();
   });
 
@@ -564,7 +624,7 @@ function RoomPage() {
             closeRef={closeRef}
             titleRef={sheetTitleRef}
           >
-            <PanelBody id={sheet.id} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={setSubpage} />
+            <PanelBody id={sheet.id} shown selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={setSubpage} />
           </Sheet>
         ) : null}
         {pickerOpen ? (
@@ -603,11 +663,28 @@ function RoomPage() {
           panelsOpen={sheet !== undefined || pickerOpen}
           onPanels={togglePanels}
           unread={unread + journalUnread}
+          panelsRef={panelsRef}
+          sideHidden={wide && sidePanelHidden}
+          sidePanelId={sidePanelId}
+          onShowSide={showSidePanel}
         />
       </div>
       {wide ? (
-        <SidePanel zoom={zoom} tabs={panels} tab={tabId} badges={badges} onTab={(id) => ui.openPanel(id)} subpage={subpage} tabRef={sideTabRef}>
-          {tabId ? <PanelBody id={tabId} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={setSubpage} /> : null}
+        <SidePanel
+          ref={sidePanelRef}
+          id={sidePanelId}
+          hidden={!sideShown}
+          short={height < SHORT_LANDSCAPE_MAX}
+          zoom={zoom}
+          tabs={panels}
+          tab={tabId}
+          badges={badges}
+          onTab={(id) => ui.openPanel(id)}
+          onHide={hideSidePanel}
+          subpage={subpage}
+          tabRef={sideTabRef}
+        >
+          {tabId ? <PanelBody id={tabId} shown={sideShown} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={setSubpage} /> : null}
         </SidePanel>
       ) : null}
       <FoldStatus folded={folded || columnSummary} />
@@ -1154,8 +1231,18 @@ function Toolbar(props: {
   onPanels(): void;
   /** Unread messages in the Log and unread journal pages, which sit behind the Panels button on phones. */
   unread: number;
+  panelsRef: Ref<HTMLButtonElement>;
+  /** The side panel is hidden from 900 px up: Panels shows at the toolbar's right end, which brings it back (docs/design-v1-layout-hierarchy.md 4.1). */
+  sideHidden: boolean;
+  sidePanelId: string;
+  onShowSide(): void;
 }) {
   const { wide, tools } = props;
+  const panelsIcon = (
+    <svg aria-hidden viewBox="0 0 24 24" width={22} height={22} style={{ display: "block" }}>
+      <path d="M4 5h16v2H4zm0 6h16v2H4zm0 6h16v2H4z" fill="currentColor" />
+    </svg>
+  );
   return (
     <nav
       ref={props.ref}
@@ -1184,17 +1271,19 @@ function Toolbar(props: {
           </ToolButton>
         ))}
       </ScrollStrip>
-      {wide ? null : (
+      {wide ? (
+        props.sideHidden ? (
+          <div style={{ flex: "none", display: "flex", alignItems: "center", height: "100%" }}>
+            <ToolButton ref={props.panelsRef} label="Panels" active={false} expanded={false} controls={props.sidePanelId} onClick={props.onShowSide} floating iconOnly>
+              {panelsIcon}
+              <Badge count={props.unread} corner />
+            </ToolButton>
+          </div>
+        ) : null
+      ) : (
         <div style={{ flex: "none", display: "flex", alignItems: "center", height: "100%", paddingLeft: theme.space(1), borderLeft: `${theme.line.border}px solid ${theme.color.border}` }}>
-          <ToolButton label="Panels" active={props.panelsOpen} onClick={props.onPanels}>
-            <Stacked
-              icon={
-                <svg aria-hidden viewBox="0 0 24 24" width={22} height={22} style={{ display: "block" }}>
-                  <path d="M4 5h16v2H4zm0 6h16v2H4zm0 6h16v2H4z" fill="currentColor" />
-                </svg>
-              }
-              text="Panels"
-            />
+          <ToolButton ref={props.panelsRef} label="Panels" active={props.panelsOpen} onClick={props.onPanels}>
+            <Stacked icon={panelsIcon} text="Panels" />
             <Badge count={props.unread} corner />
           </ToolButton>
         </div>
@@ -1245,12 +1334,28 @@ function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Recor
   );
 }
 
-function ToolButton(props: { label: string; active: boolean; onClick(): void; floating?: boolean; iconOnly?: boolean; children: ReactNode }) {
+function ToolButton(props: {
+  ref?: Ref<HTMLButtonElement>;
+  label: string;
+  active: boolean;
+  onClick(): void;
+  floating?: boolean;
+  iconOnly?: boolean;
+  /** A button that shows or hides something it names (`controls`), which says so in place of a pressed state. */
+  expanded?: boolean;
+  controls?: string;
+  describedBy?: string;
+  children: ReactNode;
+}) {
   return (
     <button
+      ref={props.ref}
       type="button"
       data-active={props.active}
-      aria-pressed={props.active}
+      aria-pressed={props.expanded === undefined ? props.active : undefined}
+      aria-expanded={props.expanded}
+      aria-controls={props.controls}
+      aria-describedby={props.describedBy}
       aria-label={props.iconOnly ? props.label : undefined}
       title={props.label}
       onClick={props.onClick}
@@ -1286,8 +1391,20 @@ const TAB_REST: CSSProperties = { background: "transparent", border: `${theme.li
  * usePanelHeader), a header above it names the subpage with "Back to" its
  * panel, and focus follows it in and out (useSubpageFocus). With no
  * subpage there is no header, since the chosen tab already names the panel.
+ *
+ * "Hide panels" at the end of the tab row hides it (`hidden`), its content
+ * kept mounted, so a half-typed message, an open journal page and each
+ * panel's scroll survive (docs/design-v1-layout-hierarchy.md 4.1). On a
+ * short layout the tabs are one row that scrolls sideways, in place of
+ * rows that wrap, so the open panel keeps a body to show: at 932 x 430 a
+ * DM's wrapped tabs left it 45 px.
  */
 function SidePanel(props: {
+  ref?: Ref<HTMLElement>;
+  id: string;
+  hidden: boolean;
+  short: boolean;
+  onHide(): void;
   zoom: number;
   tabs: PanelDef[];
   tab: string;
@@ -1328,8 +1445,43 @@ function SidePanel(props: {
     props.onTab(next.id);
     document.getElementById(tabId(next.id))?.focus();
   };
+  const tabs = props.tabs.map((t) => {
+    const chosen = props.tab === t.id;
+    return (
+      <button
+        key={t.id}
+        ref={chosen ? chosenTabRef : undefined}
+        id={tabId(t.id)}
+        type="button"
+        role="tab"
+        aria-selected={chosen}
+        aria-controls={chosen ? panelId : undefined}
+        tabIndex={t.id === stop ? 0 : -1}
+        data-active={chosen}
+        onClick={() => props.onTab(t.id)}
+        style={{
+          flex: "none",
+          minHeight: theme.touch,
+          minWidth: theme.touch,
+          padding: `0 ${theme.space(2)}px`,
+          borderRadius: theme.radius.md,
+          ...(chosen ? PRESSED : TAB_REST),
+          fontFamily: theme.font.body,
+          fontSize: theme.font.body14,
+          fontWeight: theme.weight.strong,
+          cursor: "pointer",
+        }}
+      >
+        {t.title}
+        <Badge count={props.badges[t.id] ?? 0} />
+      </button>
+    );
+  });
   return (
     <aside
+      ref={props.ref}
+      id={props.id}
+      hidden={props.hidden}
       {...smallUi(props.zoom)}
       style={{
         ...chromeZoom(props.zoom),
@@ -1344,44 +1496,22 @@ function SidePanel(props: {
         paddingBottom: theme.safe.bottom,
       }}
     >
-      <PartyDock />
-      <div
-        role="tablist"
-        aria-label="Panels"
-        onKeyDown={onTabKey}
-        style={{ display: "flex", flexWrap: "wrap", gap: theme.space(0.5), padding: theme.space(2), borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}
-      >
-        {props.tabs.map((t) => {
-          const chosen = props.tab === t.id;
-          return (
-            <button
-              key={t.id}
-              ref={chosen ? chosenTabRef : undefined}
-              id={tabId(t.id)}
-              type="button"
-              role="tab"
-              aria-selected={chosen}
-              aria-controls={chosen ? panelId : undefined}
-              tabIndex={t.id === stop ? 0 : -1}
-              onClick={() => props.onTab(t.id)}
-              style={{
-                flex: "none",
-                minHeight: theme.touch,
-                minWidth: theme.touch,
-                padding: `0 ${theme.space(2)}px`,
-                borderRadius: theme.radius.md,
-                ...(chosen ? PRESSED : TAB_REST),
-                fontFamily: theme.font.body,
-                fontSize: theme.font.body14,
-                fontWeight: theme.weight.strong,
-                cursor: "pointer",
-              }}
-            >
-              {t.title}
-              <Badge count={props.badges[t.id] ?? 0} />
-            </button>
-          );
-        })}
+      <PartyDock short={props.short} />
+      {/* The tab list, then Hide panels outside it, level with the first row of tabs. */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: theme.space(1), padding: theme.space(2), borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>
+        {props.short ? (
+          <ScrollStrip role="tablist" aria-label="Panels" active={props.tab} onKeyDown={onTabKey} style={{ flex: "1 1 auto" }}>
+            {tabs}
+          </ScrollStrip>
+        ) : (
+          <div role="tablist" aria-label="Panels" onKeyDown={onTabKey} style={{ flex: "1 1 auto", minWidth: 0, display: "flex", flexWrap: "wrap", gap: theme.space(0.5) }}>
+            {tabs}
+          </div>
+        )}
+        {/* A rule sets it apart from a scrolling row's own chevron, which looks the same and only scrolls. */}
+        <div style={{ flex: "none", display: "flex", paddingLeft: props.short ? theme.space(1) : 0, borderLeft: props.short ? `${theme.line.border}px solid ${theme.color.border}` : "none" }}>
+          <IconButton icon="chevronRight" label="Hide panels" onClick={props.onHide} />
+        </div>
       </div>
       {props.subpage ? (
         <div style={{ flex: "none", borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>

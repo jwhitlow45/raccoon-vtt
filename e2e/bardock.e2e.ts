@@ -105,6 +105,18 @@ async function setUp(page: Page, view: { width: number; height: number; scale: n
   await page.locator(".konvajs-content").first().waitFor();
 }
 
+/** Stores this device's side panel choice (client/pages/sidePanel.ts), or clears it with null, for the next reload. */
+async function sidePanelChoice(page: Page, choice: "shown" | "hidden" | null): Promise<void> {
+  await page.evaluate(
+    (value) => {
+      const g = globalThis as unknown as { localStorage: { setItem(k: string, v: string): void; removeItem(k: string): void } };
+      if (value === null) g.localStorage.removeItem("rvtt.sidePanel");
+      else g.localStorage.setItem("rvtt.sidePanel", value);
+    },
+    choice,
+  );
+}
+
 /** The token bar's frame, whichever token or group it is for. */
 function barFrame(page: Page): Locator {
   return page.locator('[role="dialog"][data-bar-mode]');
@@ -743,6 +755,8 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     // A roll card at the column's head, taller than the room the bar would keep under it.
     const ask = randomUUID();
     await ops.send({ t: "roll.ask", request: { id: ask, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+    // A layout this short starts with the side panel hidden (docs/design-v1-layout-hierarchy.md 4.1), and this case keeps it shown beside the alerts.
+    await sidePanelChoice(dm, "shown");
     await setUp(dm, { width: 1180, height: 390, scale: 1 });
     await dm.locator('[data-alert="rolls"] > *').first().waitFor();
     await dm.getByRole("tab", { name: "Outliner" }).click();
@@ -758,6 +772,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await barFrame(dm).getByRole("button", { name: "Close", exact: true }).click();
     await dm.getByRole("tab", { name: "Initiative" }).click();
     await ops.send({ t: "roll.close", rollIds: [ask] });
+    await sidePanelChoice(dm, null);
   });
 
   test("12. after Fit, turning the screen fits the map again against where the bar ends up, the turn band moving included (BD-ASTRA-03, BD-ASTRA-07)", async () => {

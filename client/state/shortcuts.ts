@@ -141,6 +141,13 @@ export const stageKeysSlot = scopeSlot(() => ({
   zoom: null as ((factor: number) => void) | null,
 }));
 
+/**
+ * The side panel's S (docs/design-v1-layout-hierarchy.md 4.1): the Room
+ * page sets `toggle` while its layout is 900 px or wider, where there is a
+ * side panel, and clears it below, so S does nothing on a phone.
+ */
+export const sidePanelKeysSlot = scopeSlot(() => ({ toggle: null as (() => void) | null }));
+
 /** The outliner's search takes focus when it next shows, after `/` (features/outliner). */
 export const outlinerSearchSlot = scopeSlot(() => ({ focusNext: false, listeners: new Set<() => void>() }));
 
@@ -367,6 +374,15 @@ export const SHORTCUTS: readonly Shortcut[] = [
       env.ui.openPanel("outliner");
       for (const listener of search.listeners) listener();
     },
+  },
+  {
+    id: "sidePanel",
+    keys: "S",
+    does: "Hide or show the side panel",
+    roles: ["dm", "player"],
+    match: letter("s"),
+    when: (env) => env.scope.get(sidePanelKeysSlot).toggle !== null,
+    run: (env) => env.scope.get(sidePanelKeysSlot).toggle?.(),
   },
   {
     id: "sheet",

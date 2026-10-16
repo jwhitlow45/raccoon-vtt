@@ -10,7 +10,7 @@ import { turnOp } from "../features/encounter/logic.ts";
 import { DRAG_END_HOLD_MS, PREVIEW_IDLE_MS } from "./ephemeral.ts";
 import { createRoomStore, MAX_OP_AGE_MS, OP_ANSWER_MS, refusalText, type RoomStore } from "./store.ts";
 import { FakeClock, FakeOutbox } from "./testing.ts";
-import { sheetOpen, type OpAnswer, type OpRefusal } from "./types.ts";
+import { INITIAL_LOCAL, panelView, sheetOpen, type LocalUi, type OpAnswer, type OpRefusal } from "./types.ts";
 
 type Snapshot = Extract<ServerMessage, { t: "snapshot" }>;
 type Ev = Extract<ServerMessage, { t: "ev" }>;
@@ -688,6 +688,96 @@ describe("phone sheets", () => {
     const before = t.state();
     t.room.ui.closeSheets();
     assert.equal(t.state(), before, "nothing open: no change, no render");
+  });
+});
+
+describe("hidden sheets and side panel", () => {
+  test("a hidden sheet keeps its panel and covers nothing, and opening a panel shows it again", () => {
+    const t = setup(room());
+    t.room.ui.openPanel("log");
+    t.room.ui.hideSheet(true);
+    assert.deepEqual([t.state().local.panel, t.state().local.sheetHidden], ["log", true]);
+    assert.equal(sheetOpen(t.state().local), false, "what floats over the map comes back");
+    t.room.ui.hideSheet(false);
+    assert.equal(sheetOpen(t.state().local), true);
+    t.room.ui.hideSheet(true);
+    t.room.ui.openPanel("journal");
+    assert.deepEqual([t.state().local.panel, t.state().local.sheetHidden], ["journal", false]);
+  });
+
+  test("with no panel open there is nothing to hide", () => {
+    const t = setup(room());
+    const before = t.state();
+    t.room.ui.hideSheet(true);
+    assert.equal(t.state(), before);
+  });
+
+  test("opening a panel clears both hidden states", () => {
+    const t = setup(room());
+    t.room.ui.hideSidePanel(true);
+    t.room.ui.openPanel("log");
+    t.room.ui.hideSheet(true);
+    t.room.ui.openPanel("token");
+    assert.deepEqual([t.state().local.sidePanelHidden, t.state().local.sheetHidden, t.state().local.tab], [false, false, "token"]);
+  });
+
+  test("closing clears the hidden sheet, and the list drops a hidden panel", () => {
+    const t = setup(room());
+    t.room.ui.openPanel("log");
+    t.room.ui.hideSheet(true);
+    t.room.ui.closeSheets();
+    assert.deepEqual([t.state().local.panel, t.state().local.sheetHidden], [null, false]);
+    t.room.ui.openPanel("log");
+    t.room.ui.hideSheet(true);
+    t.room.ui.closePanel();
+    assert.deepEqual([t.state().local.panel, t.state().local.sheetHidden], [null, false]);
+    t.room.ui.openPanel("log");
+    t.room.ui.hideSheet(true);
+    t.room.ui.showPanelList(true);
+    assert.deepEqual([t.state().local.panel, t.state().local.sheetHidden, t.state().local.panelList], [null, false, true], "the list takes the hidden panel's place");
+  });
+
+  test("closing the list leaves a hidden panel hidden", () => {
+    const t = setup(room());
+    t.room.ui.openPanel("log");
+    t.room.ui.hideSheet(true);
+    t.room.ui.showPanelList(false);
+    assert.deepEqual([t.state().local.panel, t.state().local.sheetHidden], ["log", true]);
+  });
+
+  test("what the panels show, in each state", () => {
+    const local = (patch: Partial<LocalUi>): LocalUi => ({ ...INITIAL_LOCAL, ...patch });
+    assert.deepEqual(panelView(local({}), false), { panel: null, shown: false, list: false, tokenShown: false }, "no panel");
+    assert.deepEqual(panelView(local({ panel: "token", tab: "token" }), false), { panel: "token", shown: true, list: false, tokenShown: true }, "a shown sheet");
+    assert.deepEqual(panelView(local({ panel: "token", tab: "token", sheetHidden: true }), false), { panel: "token", shown: false, list: false, tokenShown: false }, "a hidden sheet");
+    assert.deepEqual(panelView(local({ panelList: true }), false), { panel: null, shown: false, list: true, tokenShown: false }, "the list");
+    assert.deepEqual(panelView(local({ tab: "token" }), true), { panel: "token", shown: true, list: false, tokenShown: true }, "wide, the side panel shown");
+    assert.deepEqual(panelView(local({ tab: "token", sidePanelHidden: true }), true), { panel: "token", shown: false, list: false, tokenShown: false }, "wide, the side panel hidden");
+    assert.deepEqual(panelView(local({ tab: "log" }), true), { panel: "log", shown: true, list: false, tokenShown: false }, "wide, another tab");
+  });
+
+  test("crossing 900 px with a hidden sheet: wide clears it, and back it stays shown", () => {
+    const t = setup(room());
+    t.room.ui.openPanel("log");
+    t.room.ui.hideSheet(true);
+    t.room.ui.crossWide(true);
+    assert.deepEqual([t.state().local.sheetHidden, t.state().local.tab], [false, "log"], "the side panel shows that panel's tab");
+    t.room.ui.crossWide(false);
+    assert.deepEqual([t.state().local.panel, t.state().local.sheetHidden], ["log", false], "the side panel showed it, so the sheet shows");
+  });
+
+  test("crossing below 900 px with a hidden side panel opens its tab as a hidden sheet", () => {
+    const t = setup(room());
+    t.room.ui.openPanel("log");
+    t.room.ui.hideSidePanel(true);
+    t.room.ui.crossWide(false);
+    assert.deepEqual([t.state().local.panel, t.state().local.sheetHidden], ["log", true], "a panel the viewer hid never pops up");
+    assert.equal(sheetOpen(t.state().local), false);
+    t.room.ui.crossWide(true);
+    assert.deepEqual([t.state().local.sheetHidden, t.state().local.sidePanelHidden], [false, true], "wide again, the side panel keeps its own state");
+    const before = t.state();
+    t.room.ui.crossWide(true);
+    assert.equal(t.state(), before, "no change, no render");
   });
 });
 

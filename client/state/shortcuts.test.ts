@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { ClientOp } from "#shared/protocol.ts";
 import { RoomScope } from "./scope.ts";
-import { deletedText, isTextField, shortcutFor, shortcutSheetSlot, shortcutsFor, stageKeysSlot, undoShortcut, ZOOM_STEP, type KeyPress, type ShortcutEnv } from "./shortcuts.ts";
+import { deletedText, isTextField, shortcutFor, shortcutSheetSlot, shortcutsFor, sidePanelKeysSlot, stageKeysSlot, undoShortcut, ZOOM_STEP, type KeyPress, type ShortcutEnv } from "./shortcuts.ts";
 import type { RoomUi } from "./store.ts";
 import type { RoomActions, RoomView } from "./types.ts";
 
@@ -234,11 +234,30 @@ describe("the shortcut table", () => {
     assert.deepEqual(mine.calls.ops[0]?.op, { t: "encounter.next", from: { entry: "e1", round: 1 } });
   });
 
+  test("S hides or shows the side panel from 900 px up, for the DM and players, by its key or its place", () => {
+    for (const role of ["dm", "player"] as const) {
+      const { env: e, scope } = env({ role });
+      let toggled = 0;
+      assert.equal(run(e, press({ key: "s", code: "KeyS" })), null, "below 900 px Room sets no toggle: there is no side panel");
+      scope.get(sidePanelKeysSlot).toggle = () => void toggled++;
+      assert.equal(run(e, press({ key: "s", code: "KeyS" })), "sidePanel");
+      assert.equal(run(e, press({ key: "S", code: "KeyS", shiftKey: true })), "sidePanel");
+      // Russian: the S key types ы.
+      assert.equal(run(e, press({ key: "ы", code: "KeyS" })), "sidePanel");
+      assert.equal(toggled, 3);
+      assert.equal(run(e, press({ key: "s", code: "KeyS", target: { tagName: "INPUT", type: "text" } })), null, "typing in a field");
+      assert.equal(run(e, press({ key: "s", code: "KeyS" }), { dialogOpen: true, preview: false }), null, "under a dialog");
+      assert.equal(run(e, press({ key: "s", code: "KeyS" }), { dialogOpen: false, preview: true }), null, "in a preview");
+      assert.equal(toggled, 3);
+    }
+  });
+
   test("the sheet lists each role's keys from the table itself", () => {
     const dm = shortcutsFor("dm").map((s) => s.keys);
     const player = shortcutsFor("player").map((s) => s.keys);
     for (const k of ["V", "T", "M", "F", "B", "G", "H", "L", "Delete, Backspace", "/", "?", "Ctrl+Z"]) assert.ok(dm.includes(k), k);
     for (const k of ["T", "F", "H", "L", "/"]) assert.ok(!player.includes(k), k);
-    for (const k of ["V", "D", "Arrow keys", "N", "+", "?"]) assert.ok(player.includes(k), k);
+    for (const k of ["V", "D", "Arrow keys", "N", "+", "?", "S"]) assert.ok(player.includes(k), k);
+    assert.ok(dm.includes("S"));
   });
 });

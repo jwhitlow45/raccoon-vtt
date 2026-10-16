@@ -142,6 +142,18 @@ export type LocalUi = {
   panelList: boolean;
   /** The side panel's tab from 900 px up. */
   tab: string;
+  /**
+   * The side panel is hidden, from 900 px up (docs/design-v1-layout-hierarchy.md
+   * 4.1). Its first value on a page comes from this device's choice or the
+   * short screen's default (pages/sidePanel.ts).
+   */
+  sidePanelHidden: boolean;
+  /**
+   * A phone's open panel is hidden by Hide in its sheet's header (4.2): the
+   * panel stays mounted with its state and scroll, and Panels shows it again.
+   * Only for this page, never stored.
+   */
+  sheetHidden: boolean;
 };
 
 export const DEFAULT_TOOL = "select";
@@ -155,15 +167,91 @@ export const INITIAL_LOCAL: LocalUi = Object.freeze({
   panel: null,
   panelList: false,
   tab: "tracker",
+  sidePanelHidden: false,
+  sheetHidden: false,
 });
 
 /**
  * Whether a sheet covers the bottom of a phone's map: a panel, or the list
  * of panels. What floats over the map, such as the fight's alert cards,
- * steps aside or folds for either.
+ * steps aside or folds for either. A hidden sheet covers nothing.
  */
-export function sheetOpen(local: Pick<LocalUi, "panel" | "panelList">): boolean {
-  return local.panel !== null || local.panelList;
+export function sheetOpen(local: Pick<LocalUi, "panel" | "panelList" | "sheetHidden">): boolean {
+  return (local.panel !== null && !local.sheetHidden) || local.panelList;
+}
+
+/**
+ * What the panels show (docs/design-v1-layout-hierarchy.md 4.2): the panel
+ * that is mounted, in a phone's sheet or as the side panel's tab, whether it
+ * is on screen, whether a phone's list of panels shows, and whether the
+ * Token panel is the one on screen. A hidden sheet or side panel keeps its
+ * panel mounted, so every reader asks this rather than `local.panel`.
+ */
+export type PanelView = { panel: string | null; shown: boolean; list: boolean; tokenShown: boolean };
+
+export function panelView(local: Pick<LocalUi, "panel" | "panelList" | "tab" | "sidePanelHidden" | "sheetHidden">, wide: boolean): PanelView {
+  if (wide) {
+    const shown = !local.sidePanelHidden;
+    return { panel: local.tab, shown, list: false, tokenShown: shown && local.tab === "token" };
+  }
+  const shown = local.panel !== null && !local.sheetHidden;
+  return { panel: local.panel, shown, list: local.panelList && !shown, tokenShown: shown && local.panel === "token" };
+}
+
+/*
+ * The panels' changes of state, shared by the room's store and a "view as a
+ * player" preview (features/dm/preview.ts), so the two follow one rule. Each
+ * hands back the same object when nothing changes, so nothing renders.
+ */
+
+/** Opens a panel, as a sheet or as the side panel's tab. A hidden side panel or sheet never swallows a request to see a panel. */
+export function withPanel(local: LocalUi, id: string): LocalUi {
+  if (local.panel === id && local.tab === id && !local.panelList && !local.sidePanelHidden && !local.sheetHidden) return local;
+  return { ...local, panel: id, tab: id, panelList: false, sidePanelHidden: false, sheetHidden: false };
+}
+
+/**
+ * Opens or closes a phone's list of panels. Opening it drops a hidden
+ * panel, as opening another panel would. Closing it leaves a hidden panel
+ * hidden, which would otherwise pop up.
+ */
+export function withPanelList(local: LocalUi, open: boolean): LocalUi {
+  if (open && local.sheetHidden) return { ...local, panel: null, panelList: true, sheetHidden: false };
+  return local.panelList === open ? local : { ...local, panelList: open };
+}
+
+/** Closes the open panel for good. */
+export function withoutPanel(local: LocalUi): LocalUi {
+  if (local.panel === null && !local.sheetHidden) return local;
+  return { ...local, panel: null, sheetHidden: false };
+}
+
+/** Closes whatever sheet stands over a phone's map, hidden or not. */
+export function withoutSheets(local: LocalUi): LocalUi {
+  if (local.panel === null && !local.panelList && !local.sheetHidden) return local;
+  return { ...local, panel: null, panelList: false, sheetHidden: false };
+}
+
+/** Hides a phone's open panel, or shows it again. With no panel open there is nothing to hide. */
+export function withSheetHidden(local: LocalUi, hidden: boolean): LocalUi {
+  const next = hidden && local.panel !== null;
+  return local.sheetHidden === next ? local : { ...local, sheetHidden: next };
+}
+
+export function withSidePanelHidden(local: LocalUi, hidden: boolean): LocalUi {
+  return local.sidePanelHidden === hidden ? local : { ...local, sidePanelHidden: hidden };
+}
+
+/**
+ * The layout crossed 900 px. A phone's hidden sheet means nothing beside a
+ * side panel, which shows that panel's tab, shown or hidden by its own
+ * state. Back below 900 px the side panel's tab opens as a sheet, as
+ * `panel` holds it, hidden when the side panel was, so a panel the viewer
+ * hid never pops up on a rotation.
+ */
+export function crossWide(local: LocalUi, wide: boolean): LocalUi {
+  if (wide) return local.sheetHidden ? { ...local, sheetHidden: false } : local;
+  return local.sidePanelHidden && local.panel !== null && !local.sheetHidden ? { ...local, sheetHidden: true } : local;
 }
 
 /**

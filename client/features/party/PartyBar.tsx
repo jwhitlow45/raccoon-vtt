@@ -23,11 +23,17 @@ const LABEL_COLOR: Record<PartyEntry["label"], string> = {
 
 const FOLD_KEY = "rvtt.partyFolded";
 
-function readFolded(): boolean {
+/**
+ * The fold this device stored. With none, a short layout's side panel
+ * starts folded (docs/design-v1-layout-hierarchy.md 4.1), where the whole
+ * bar left the open panel almost no body.
+ */
+function readFolded(short: boolean): boolean {
   try {
-    return localStorage.getItem(FOLD_KEY) === "1";
+    const stored = localStorage.getItem(FOLD_KEY);
+    return stored === null ? short : stored === "1";
   } catch {
-    return false;
+    return short;
   }
 }
 
@@ -51,14 +57,14 @@ function storeFolded(folded: boolean): void {
  * it folds to one line of names and HP. On a phone it is the Party panel,
  * and `onLeave` closes that sheet before the map moves.
  */
-export function PartyBar(props: { dock?: boolean; onLeave?(): void }) {
+export function PartyBar(props: { dock?: boolean; short?: boolean; onLeave?(): void }) {
   const ui = useRoomUi();
   const scope = useRoomScope();
   const members = useRoomView((s) => s.view?.members);
   const characters = useRoomView((s) => s.view?.characters);
   const tokens = useRoomView((s) => s.view?.tokens);
   const sceneId = useRoomView((s) => s.sceneId);
-  const [folded, setFolded] = useState(() => (props.dock ? readFolded() : false));
+  const [folded, setFolded] = useState(() => (props.dock ? readFolded(props.short ?? false) : false));
   const entries = useMemo(
     () => (members && characters && tokens ? partyEntries({ members, characters, tokens }, sceneId) : []),
     [members, characters, tokens, sceneId],

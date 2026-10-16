@@ -71,7 +71,7 @@ export default function JournalPanel(props: PanelProps) {
   if (page) {
     return (
       <>
-        <PageView page={page} dm={dm} onBack={back} onEdit={() => setEditing({ page })} close={props.close} />
+        <PageView page={page} dm={dm} shown={props.shown} onBack={back} onEdit={() => setEditing({ page })} close={props.close} />
         {editor}
       </>
     );
@@ -189,7 +189,7 @@ export function PageRow(props: { id: string; title: string; detail: string | nul
   );
 }
 
-function PageView(props: { page: JournalPage; dm: boolean; onBack(): void; onEdit(): void; close(): void }) {
+function PageView(props: { page: JournalPage; dm: boolean; shown: boolean; onBack(): void; onEdit(): void; close(): void }) {
   const { page, dm } = props;
   const actions = useRoomActions();
   const members = useRoomView((s) => s.view?.members ?? EMPTY_MEMBERS);
@@ -198,10 +198,10 @@ function PageView(props: { page: JournalPage; dm: boolean; onBack(): void; onEdi
   const scope = useRoomScope();
   const sceneShown = useRoomView((s) => s.sceneId !== null);
 
-  // A page on screen is read, and stays read as it changes under the reader's eyes.
+  // A page on screen is read, and stays read as it changes under the reader's eyes. A hidden sheet or side panel keeps it mounted, and what changed meanwhile counts as unread until it shows again.
   useEffect(() => {
-    markRead(page);
-  }, [page]);
+    if (props.shown) markRead(page);
+  }, [page, props.shown]);
 
   const reveal = (block: JournalBlock, revealed: boolean) => actions.dispatch({ t: "journal.reveal", pageId: page.id, blockId: block.id, revealed });
   const remove = () => {
