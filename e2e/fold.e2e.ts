@@ -787,9 +787,10 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     const bar = barFrame(dm);
     await bar.waitFor();
     assert.equal(await bar.getAttribute("data-bar-mode"), "dock", "the tablet's bar does not dock");
-    // Moved off its default spot, so Show's return to it means something.
-    await bar.getByRole("button", { name: "Move bar", exact: true }).click();
-    const spot = '{"corner":"bl","x":0,"y":0}';
+    // Moved off its default spot by the grip's keys, so Show's return to it means something.
+    await bar.getByRole("button", { name: "Move window", exact: true }).focus();
+    await dm.keyboard.press("Shift+ArrowUp");
+    const spot = '{"corner":"br","x":0,"y":64}';
     const docked = await bar.boundingBox();
     assert.ok(docked, "the bar has no box");
     await panelsButton(dm).click();
@@ -802,7 +803,7 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     assert.equal((await focused(dm)).name, "Thorn actions");
     assert.equal(await dm.evaluate(() => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem("rvtt.tokenBarSpot")), spot, "the stored spot changed");
     await shots.take(dm, "fold-tablet-docked-back");
-    await bar.getByRole("button", { name: "Reset bar position", exact: true }).click();
+    await bar.getByRole("button", { name: "Reset window position and size", exact: true }).click();
     await dm.keyboard.press("Escape");
   });
 

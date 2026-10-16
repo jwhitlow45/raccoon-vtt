@@ -3,49 +3,49 @@ import { describe, test } from "node:test";
 import { barButtons, barCapacity, barShort, isCompanion, SPAN_SHORT_BAR_PX, type BarButtonInput, type BarRoom } from "./barButtons.ts";
 import { DEFAULT_SPOT, placeBar, type Chrome } from "./barDock.ts";
 
-const NOTHING: BarButtonInput = { dm: false, owner: false, undoMove: false, movedThisTurn: false, door: false, light: false, played: false, companion: false, docked: true, moved: false };
+const NOTHING: BarButtonInput = { dm: false, owner: false, undoMove: false, movedThisTurn: false, door: false, light: false, played: false, companion: false };
 const DM: BarButtonInput = { ...NOTHING, dm: true };
 const OWNER: BarButtonInput = { ...NOTHING, owner: true };
 
 describe("the bar's rows", () => {
-  test("the DM on a monster, alive or dead, docked: the steady line, then the setup and destructive row", () => {
+  test("the DM on a monster, alive or dead: the steady line, then the setup and destructive row, with no Move bar or Reset bar position", () => {
     assert.deepEqual(barButtons(DM), {
       passing: [],
       play: ["conditions", "hidden", "multiSelect"],
-      less: ["locked", "duplicate", "delete", "moveBar"],
+      less: ["locked", "duplicate", "delete"],
     });
-    assert.deepEqual(barButtons({ ...DM, undoMove: true, movedThisTurn: true, light: true, moved: true }), {
+    assert.deepEqual(barButtons({ ...DM, undoMove: true, movedThisTurn: true, light: true }), {
       passing: ["undoMove", "countLeg"],
       play: ["conditions", "hidden", "multiSelect", "light"],
-      less: ["locked", "duplicate", "delete", "moveBar", "resetBar"],
+      less: ["locked", "duplicate", "delete"],
     });
   });
 
   test("the DM on a creature a player plays, such as a companion: Request a roll after Multi-select, and Delete, never Dismiss", () => {
     const rows = barButtons({ ...DM, played: true, companion: true, light: true });
     assert.deepEqual(rows.play, ["conditions", "hidden", "multiSelect", "requestRoll", "light"]);
-    assert.deepEqual(rows.less, ["locked", "duplicate", "delete", "moveBar"]);
+    assert.deepEqual(rows.less, ["locked", "duplicate", "delete"]);
   });
 
-  test("a player on their own character: Undo move, Doesn't count and the door on the passing line, then Conditions, Multi-select and Light, then Move bar", () => {
-    assert.deepEqual(barButtons(OWNER), { passing: [], play: ["conditions", "multiSelect"], less: ["moveBar"] });
-    assert.deepEqual(barButtons({ ...OWNER, undoMove: true, movedThisTurn: true, door: true, light: true, moved: true }), {
+  test("a player on their own character: Undo move, Doesn't count and the door on the passing line, then Conditions, Multi-select and Light, and no less-often row", () => {
+    assert.deepEqual(barButtons(OWNER), { passing: [], play: ["conditions", "multiSelect"], less: [] });
+    assert.deepEqual(barButtons({ ...OWNER, undoMove: true, movedThisTurn: true, door: true, light: true }), {
       passing: ["undoMove", "countLeg", "door"],
       play: ["conditions", "multiSelect", "light"],
-      less: ["moveBar", "resetBar"],
+      less: [],
     });
   });
 
   test("a player on their companion: Dismiss in Delete's place", () => {
-    assert.deepEqual(barButtons({ ...OWNER, companion: true }).less, ["dismiss", "moveBar"]);
+    assert.deepEqual(barButtons({ ...OWNER, companion: true }).less, ["dismiss"]);
   });
 
-  test("a player on another's creature: Undo move when they could move it, Multi-select, Move bar", () => {
-    assert.deepEqual(barButtons(NOTHING), { passing: [], play: ["multiSelect"], less: ["moveBar"] });
+  test("a player on another's creature: Undo move when they could move it, and Multi-select", () => {
+    assert.deepEqual(barButtons(NOTHING), { passing: [], play: ["multiSelect"], less: [] });
     assert.deepEqual(barButtons({ ...NOTHING, undoMove: true, movedThisTurn: true, door: true, light: true, played: true, companion: true }), {
       passing: ["undoMove"],
       play: ["multiSelect"],
-      less: ["moveBar"],
+      less: [],
     });
   });
 
@@ -59,11 +59,6 @@ describe("the bar's rows", () => {
         assert.equal(rows.play.some((id) => passingIds.includes(id)), false);
       }
     }
-  });
-
-  test("spanning, no Move bar or Reset", () => {
-    assert.deepEqual(barButtons({ ...DM, docked: false, moved: true }).less, ["locked", "duplicate", "delete"]);
-    assert.deepEqual(barButtons({ ...OWNER, docked: false }).less, []);
   });
 
   test("a door is offered only on a player's own token, and Details is in neither row", () => {

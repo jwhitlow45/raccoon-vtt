@@ -259,24 +259,70 @@ export function clampBox(box: Box, free: Box): Box {
  * spot again. There is no grid.
  */
 export function releaseSpot(box: Box, free: Box): Spot {
+  return cornerSpot(box, free, SNAP_PX);
+}
+
+/**
+ * The spot a step of the grip's arrow keys stores (docs/design-v1-token-window.md
+ * 4.3): the nearest corner as a drop picks it, with no snapping, since a
+ * 24 px snap would never let an 8 px step leave an edge.
+ */
+export function keySpot(box: Box, free: Box): Spot {
+  return cornerSpot(box, free, 0);
+}
+
+function cornerSpot(box: Box, free: Box, snap: number): Spot {
   const right = box.left + box.width / 2 > free.left + free.width / 2;
   const bottom = box.top + box.height / 2 > free.top + free.height / 2;
   const x = right ? free.left + free.width - (box.left + box.width) : box.left - free.left;
   const y = bottom ? free.top + free.height - (box.top + box.height) : box.top - free.top;
-  const gap = (n: number) => (n <= SNAP_PX ? 0 : clamp(Math.round(n), 0, SPOT_MAX));
+  const gap = (n: number) => (n <= snap ? 0 : clamp(Math.round(n), 0, SPOT_MAX));
   return { corner: `${bottom ? "b" : "t"}${right ? "r" : "l"}`, x: gap(x), y: gap(y) };
 }
 
-const CORNER_WORDS: Record<Corner, string> = { br: "Bar at bottom right", bl: "Bar at bottom left", tl: "Bar at top left", tr: "Bar at top right" };
+/** An arrow key's step for the grip and the handle: 8 px, the free area's margin, or 64 with Shift. Null for any other key. */
+export function arrowStep(key: string, shift: boolean): { dx: number; dy: number } | null {
+  const step = shift ? 64 : EDGE;
+  if (key === "ArrowLeft") return { dx: -step, dy: 0 };
+  if (key === "ArrowRight") return { dx: step, dy: 0 };
+  if (key === "ArrowUp") return { dx: 0, dy: -step };
+  if (key === "ArrowDown") return { dx: 0, dy: step };
+  return null;
+}
 
 /**
- * Move bar's press (design section 2): the next corner of the free area,
- * clockwise from the bottom right, flush with it, and what the bar's
- * status says.
+ * What the window's status says of where it stands, read from its stored
+ * spot (docs/design-v1-token-window.md 4.3): its corner when flush with
+ * both edges, the edge and the gap along it when flush with one, and both
+ * gaps otherwise.
  */
-export function nextCorner(spot: Spot): { spot: Spot; status: string } {
-  const next = CORNERS[(CORNERS.indexOf(spot.corner) + 1) % CORNERS.length] ?? "br";
-  return { spot: next === "br" ? DEFAULT_SPOT : { corner: next, x: 0, y: 0 }, status: CORNER_WORDS[next] };
+export function spotWords(spot: Spot): string {
+  const v = spot.corner[0] === "t" ? "top" : "bottom";
+  const h = spot.corner[1] === "l" ? "left" : "right";
+  if (spot.x === 0 && spot.y === 0) return `Window at ${v} ${h}`;
+  if (spot.y === 0) return `Window at the ${v} edge, ${spot.x} px from the ${h}`;
+  if (spot.x === 0) return `Window at the ${h} edge, ${spot.y} px from the ${v}`;
+  return `Window ${spot.x} px from the ${h} and ${spot.y} px from the ${v}`;
+}
+
+/** What the status says once Reset brings the window home. */
+export const RESET_WORDS = "Window back at bottom right";
+
+/*
+ * A docked window narrower than the default width happens only beside a
+ * phone's open sideways sheet, and its header follows the width it gets
+ * (docs/design-v1-token-window.md 7.1). Each band counts Reset and an
+ * elevation badge whether they show or not, so pressing nothing and moving
+ * the window never changes the band.
+ */
+/** One row: the grip, the name's 40 px floor, a badge up to "↑120 ft" (about 51 px), Reset and Close, four 4 px gaps and the frame's 26 px. */
+export const HEADER_ROW_MIN = 44 + 40 + 51 + 44 + 44 + 4 * 4 + 26;
+/** Stacked: the grip, Reset and Close at 44 px, two gaps and the frame's 26 px. Narrower, the window folds into the sheet's header. */
+export const WINDOW_FOLD_BELOW = 3 * 44 + 2 * 4 + 26;
+
+export function headerBand(width: number): "row" | "stacked" | "fold" {
+  if (width >= HEADER_ROW_MIN) return "row";
+  return width >= WINDOW_FOLD_BELOW ? "stacked" : "fold";
 }
 
 // ------------------------------------------------------------ the right lane

@@ -25,7 +25,12 @@ import {
   hintRoom,
   isDefaultSpot,
   laneLeft,
-  nextCorner,
+  arrowStep,
+  headerBand,
+  HEADER_ROW_MIN,
+  keySpot,
+  spotWords,
+  WINDOW_FOLD_BELOW,
   noticePlace,
   overlapsLane,
   parseSpot,
@@ -299,19 +304,42 @@ describe("the stored spot", () => {
     assert.deepEqual(clampBox(bar(5000, 5000), free), bar(908 - 304, 660 - 200));
   });
 
-  test("Move bar goes clockwise from the bottom right, flush with each corner, and says where", () => {
-    let spot = DEFAULT_SPOT;
-    const said: string[] = [];
-    for (let i = 0; i < 4; i++) {
-      const next = nextCorner(spot);
-      said.push(next.status);
-      spot = next.spot;
-      assert.equal(spot.x, 0);
-      assert.equal(spot.y, 0);
-    }
-    assert.deepEqual(said, ["Bar at bottom left", "Bar at top left", "Bar at top right", "Bar at bottom right"]);
-    assert.ok(isDefaultSpot(spot), "the fourth press is the default spot, stored as no key");
-    assert.equal(nextCorner({ corner: "tl", x: 120, y: 40 }).spot.corner, "tr");
+  test("a step of the grip's keys stores the nearest corner's spot, unsnapped, and clamped into the free area", () => {
+    // The default spot's box, then three steps left: 24 px from the right, still the bottom right corner.
+    const home = bar(908 - 304, 660 - 200);
+    assert.deepEqual(keySpot(home, free), DEFAULT_SPOT);
+    assert.deepEqual(keySpot({ ...home, left: home.left - 24 }, free), { corner: "br", x: 24, y: 0 });
+    // An 8 px step off an edge stays off it: no 24 px snap.
+    assert.deepEqual(keySpot({ ...home, top: home.top - 8 }, free), { corner: "br", x: 0, y: 8 });
+    // Past the middle, the nearest corner changes, keeping the box where it is.
+    assert.deepEqual(keySpot(bar(8 + 40, 60 + 30), free), { corner: "tl", x: 40, y: 30 });
+    // A held key ends at the edge, never past it.
+    assert.deepEqual(keySpot(clampBox({ ...home, left: home.left + 64 }, free), free), DEFAULT_SPOT);
+    assert.deepEqual(arrowStep("ArrowLeft", false), { dx: -8, dy: 0 });
+    assert.deepEqual(arrowStep("ArrowUp", true), { dx: 0, dy: -64 });
+    assert.deepEqual(arrowStep("ArrowDown", false), { dx: 0, dy: 8 });
+    assert.deepEqual(arrowStep("ArrowRight", true), { dx: 64, dy: 0 });
+    assert.equal(arrowStep("Enter", false), null);
+    // A drop still snaps within 24 px.
+    assert.deepEqual(releaseSpot({ ...home, left: home.left - 24 }, free), DEFAULT_SPOT);
+  });
+
+  test("the status names a corner, an edge and the gap along it, or both gaps", () => {
+    assert.equal(spotWords(DEFAULT_SPOT), "Window at bottom right");
+    assert.equal(spotWords({ corner: "tl", x: 0, y: 0 }), "Window at top left");
+    assert.equal(spotWords({ corner: "br", x: 24, y: 0 }), "Window at the bottom edge, 24 px from the right");
+    assert.equal(spotWords({ corner: "tl", x: 0, y: 40 }), "Window at the left edge, 40 px from the top");
+    assert.equal(spotWords({ corner: "br", x: 120, y: 40 }), "Window 120 px from the right and 40 px from the bottom");
+  });
+
+  test("a narrow window's header: one row from 265 px, stacked from 166, folded below, counting Reset and a badge whether they show or not", () => {
+    assert.equal(HEADER_ROW_MIN, 265);
+    assert.equal(WINDOW_FOLD_BELOW, 166);
+    assert.equal(headerBand(316), "row");
+    assert.equal(headerBand(265), "row");
+    assert.equal(headerBand(264), "stacked");
+    assert.equal(headerBand(166), "stacked");
+    assert.equal(headerBand(165), "fold");
   });
 });
 

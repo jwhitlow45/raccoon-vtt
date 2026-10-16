@@ -20,7 +20,11 @@ import { OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInR
  * - End turn when it shows;
  * - the tool's buttons (the Ruler's, scrolled to the foot of its capped
  *   list of kept rulers, or Multi-select's Actions and Done);
- * - the token bar's Close when the bar shows.
+ * - the token bar's Close when the bar shows, and Move window beside it
+ *   wherever the bar docks as the token window;
+ * - beside a phone's sideways sheet, the token window's header at each
+ *   width it narrows to, or its Show in the sheet's header where it folds
+ *   (docs/design-v1-token-window.md 7.1).
  *
  * One page per side, resized and changed between steps rather than set up
  * again, so the whole matrix runs in minutes. Every miss is collected, so
@@ -244,6 +248,7 @@ async function expectBarClose(page: Page, label: string): Promise<void> {
   const frame = barFrame(page);
   if ((await frame.count()) === 0 || !(await frame.isVisible())) return;
   await expectReach(label, "the bar's Close", frame.getByRole("button", { name: "Close", exact: true }).first());
+  if ((await frame.getAttribute("data-bar-mode")) === "dock") await expectReach(label, "the window's Move window", frame.getByRole("button", { name: "Move window", exact: true }));
 }
 
 /**
@@ -576,7 +581,78 @@ describe("raccoon-vtt short-screen reach", { timeout: 1_800_000 }, () => {
     });
   }
 
-  test("4. nothing is out of reach", () => {
+  // The DM beside a sideways sheet: the token window narrows with the room the sheet leaves, and folds into the sheet's header where that is too little.
+  test("4. beside a sideways sheet, the token window moved off its spot with an elevation badge: one row, stacked, or folded into the sheet's header", { skip: ONLY === "player" }, async () => {
+    shotPage = dm;
+    await ops.send({ t: "token.update", tokenId: run.goblin.id, patch: { elevation: 10 } });
+    await setFight("none");
+    const cases = [
+      { size: { width: 667, height: 375, insets: {} }, scale: 1, band: "row" },
+      { size: { width: 844, height: 390, insets: { side: 47, bottom: 21 } }, scale: 1.3, band: "stacked" },
+      { size: { width: 667, height: 375, insets: {} }, scale: 1.3, band: "stacked" },
+      { size: { width: 480, height: 320, insets: { side: 47, bottom: 21 } }, scale: 1, band: "fold" },
+    ] as const;
+    for (const c of cases) {
+      const label = `DM beside a sheet, ${sizeLabel(c.size, c.scale)}`;
+      await view(dm, dmCdp, c.size);
+      // Moved 16 px up from its default, so Reset shows.
+      await dm.evaluate(() => localStorage.setItem("rvtt.tokenBarSpot", '{"corner":"br","x":0,"y":16}'));
+      await reloadAt(dm, c.scale);
+      const fit = dm.getByRole("button", { name: "Fit the map to the screen" });
+      if (await wholeInReach(fit)) await fit.tap();
+      await dm.waitForTimeout(300);
+      const p = await pagePoint(dm, dmSocket.state!.scenes[run.sceneId]!.bounds, { x: 12.5, y: 9.5 });
+      if (!(await canvasAt(dm, p))) {
+        await miss(`${label}: the goblin is out of reach to select`);
+        continue;
+      }
+      await dm.touchscreen.tap(p.x, p.y);
+      const frame = dm.getByRole("dialog", { name: "Goblin 1 actions" });
+      await frame.waitFor();
+      await dm.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
+      await dm.getByRole("region", { name: "Panels" }).getByRole("button", { name: "Outliner", exact: true }).tap();
+      await dm.locator('section[aria-label="Outliner"]').waitFor();
+      await dm.waitForTimeout(400);
+      if (c.band === "fold") {
+        if (await frame.isVisible()) await miss(`${label}: the window does not fold beside the sheet`);
+        const show = dm.getByRole("button", { name: "Show Goblin 1 actions", exact: true });
+        await expectReach(label, "Show Goblin 1 actions in the sheet's header", show);
+        await shots.take(dm, "reach-token-window-folded-beside-sheet-480x320");
+        if (await wholeInReach(show)) {
+          await show.tap();
+          await frame.waitFor({ state: "visible", timeout: 3000 }).catch(() => undefined);
+          if (!(await frame.isVisible())) await miss(`${label}: Show did not bring the window back`);
+          const focused = await dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { getAttribute(n: string): string | null } | null } }).document.activeElement?.getAttribute("aria-label") ?? null);
+          if (focused !== "Goblin 1 actions") await miss(`${label}: Show left focus on ${focused}, not the window's frame`);
+        }
+      } else {
+        if (!(await frame.isVisible())) {
+          await miss(`${label}: the window folded beside the sheet`);
+          continue;
+        }
+        await expectReach(label, "Move window", frame.getByRole("button", { name: "Move window", exact: true }));
+        await expectReach(label, "Reset", frame.getByRole("button", { name: "Reset window position and size", exact: true }));
+        await expectReach(label, "Close", frame.getByRole("button", { name: "Close", exact: true }));
+        const wide = await frame.evaluate((el) => (el as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth > (el as unknown as { clientWidth: number }).clientWidth + 1);
+        if (wide) await miss(`${label}: the window scrolls sideways`);
+        const grip = await frame.getByRole("button", { name: "Move window", exact: true }).boundingBox();
+        const name = await frame.locator("strong").first().boundingBox();
+        if (grip && name) {
+          const stacked = name.y >= grip.y + grip.height - 1;
+          if (stacked !== (c.band === "stacked")) await miss(`${label}: the header is ${stacked ? "stacked" : "one row"}, not ${c.band === "stacked" ? "stacked" : "one row"}`);
+        }
+        await shots.take(dm, `reach-token-window-beside-sheet-${c.size.width}x${c.size.height}-${Math.round(c.scale * 100)}`);
+      }
+      const closeSheet = dm.getByRole("button", { name: /^Close Outliner/ }).first();
+      if (await closeSheet.isVisible()) await closeSheet.tap();
+      const closeWindow = frame.getByRole("button", { name: "Close", exact: true });
+      if (await closeWindow.isVisible()) await closeWindow.tap();
+    }
+    await dm.evaluate(() => localStorage.removeItem("rvtt.tokenBarSpot"));
+    await ops.send({ t: "token.update", tokenId: run.goblin.id, patch: { elevation: 0 } });
+  });
+
+  test("5. nothing is out of reach", () => {
     if (skipped.length > 0) console.error(`skipped ${skipped.length} steps with no map left to select on:\n${skipped.join("\n")}`);
     assert.deepEqual(misses, []);
   });

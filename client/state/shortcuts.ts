@@ -424,7 +424,7 @@ export type BehaviorDevice = "keys" | "mouse" | "android";
 export const SURFACES = [
   "Side panel tabs",
   "Handout viewer",
-  "Token action bar",
+  "Token window",
   "Initiative",
   "Token and character fields",
   "Label, pin and light panes",
@@ -462,7 +462,7 @@ export const BEHAVIORS: readonly Behavior[] = [
   {
     id: "escape",
     input: "Escape",
-    does: "Close a sheet, else the token's action bar, else let go of the selection and end Multi-select. While the token's panel shows the selection, the bar closes and keeps it, and a group stays until Done",
+    does: "Close a sheet, else the token's action bar, else let go of the selection and end Multi-select. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done",
     roles: EVERYONE,
     device: "keys",
   },
@@ -561,8 +561,9 @@ export const BEHAVIORS: readonly Behavior[] = [
     surface: "Handout viewer",
   },
 
-  // The token action bar: canvas/TokenActionBar.tsx.
-  { id: "barEscape", input: "Escape", does: "Put it back where it was", roles: EVERYONE, when: "while you drag its header", device: "keys", surface: "Token action bar" },
+  // The token window, the action bar where it docks: canvas/TokenActionBar.tsx BarFrame.
+  { id: "barEscape", input: "Escape", does: "Put it back where it was", roles: EVERYONE, when: "while you drag its header", device: "keys", surface: "Token window" },
+  { id: "windowMoveKeys", input: "Arrow keys", does: "Move it 8 px, or 64 px with Shift", roles: EVERYONE, when: "with its grip focused", device: "keys", surface: "Token window" },
 
   // The initiative tracker: features/encounter/Row.tsx, ValueEntry.tsx.
   { id: "initEnter", input: "Enter", does: "Save the initiative you typed", roles: EVERYONE, when: "in a row's initiative box", device: "keys", surface: "Initiative" },
@@ -613,12 +614,13 @@ export type SheetDevice = { mouse: boolean; android: boolean };
 export const MOUSE_SECTION = "Mouse with keys";
 
 /** The sheet's Keys intro, which FEATURES.md repeats. */
-export const KEYS_INTRO = "On any device with a keyboard. They do nothing while you type in a field or a window is open. On a Mac, Cmd works where Ctrl is written.";
+export const KEYS_INTRO = "On any device with a keyboard. They do nothing while you type in a field or a dialog is open. On a Mac, Cmd works where Ctrl is written.";
 
 /** A line under a surface's heading, where its rows do not say where it is. */
 const SURFACE_INTRO: Partial<Record<Surface, string>> = {
   "Side panel tabs": "On a screen 900 px or wider, with a tab focused. There, and on a focused choice or slider, the arrow and Page keys never move a token.",
   "Handout viewer": "A handout the DM shows, or a picture or a PDF opened from the Library.",
+  "Token window": "Where the action bar opens as a window: on a screen 600 px or wider, or a phone on its side. With its grip focused, the arrow keys move it and never move a token.",
 };
 
 function sheetRow(b: Behavior): SheetRow {

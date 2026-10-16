@@ -59,7 +59,7 @@ import { barDismiss, dismissal } from "../state/selection.ts";
 import { useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
 import { endedText } from "./endedText.ts";
-import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, focusAlert, foldsUnderSheet, type AlertsSummary } from "./fold.ts";
+import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, focusAlert, foldsUnderSheet, useSideSheetRoom, type AlertsSummary } from "./fold.ts";
 import { mapFocusSlot } from "./mapFocus.ts";
 import { firstSidePanel, readSidePanel, writeSidePanel } from "./sidePanel.ts";
 import { inModal, ModalSlots, useModalSlot } from "./modalSlot.tsx";
@@ -481,10 +481,11 @@ function RoomPage() {
       }),
     [],
   );
-  const folded = foldsUnderSheet({ width, height, sheetOpen, full });
+  const sideRoom = useSideSheetRoom();
+  const folded = foldsUnderSheet({ width, height, sheetOpen, full, sideRoom });
   const docked = folded && (hasBar || summary !== null);
-  // Over the whole screen there is no edge to dock on, so the dock's buttons join the header, as where the dock has no room.
-  const dockInHeader = docked && (full || !dockFits({ height, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR }));
+  // Over the whole screen there is no edge to dock on, nor beside a sideways sheet that leaves a window too little room, so the dock's buttons join the header, as where the dock has no room.
+  const dockInHeader = docked && (full || landscape || !dockFits({ height, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR }));
   const sheetHeight = useLayoutHeight(sheetEl, zoom);
   const backRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);

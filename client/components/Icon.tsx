@@ -12,7 +12,7 @@ import { theme } from "../lib/theme.ts";
  * readers.
  */
 
-export type IconName = "close" | "back" | "more" | "chevronRight" | "chevronDown" | "plus" | "minus" | "check" | "copy" | "filter" | "expand" | "collapsePanel" | "resetZoom";
+export type IconName = "close" | "back" | "more" | "chevronRight" | "chevronDown" | "plus" | "minus" | "check" | "copy" | "filter" | "expand" | "collapsePanel" | "resetZoom" | "grip" | "windowHome";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -52,6 +52,22 @@ const SHAPES: Record<IconName, ReactNode> = {
     <g {...STROKE}>
       <path d="M5 12a7 7 0 1 0 2.05-4.95M7 3v4h4" />
       <circle cx="12" cy="12" r="1" fill="currentColor" />
+    </g>
+  ),
+  // Six dots, the usual sign that a control moves what it heads (the token window's Move window).
+  grip: (
+    <g fill="currentColor">
+      {[6, 12, 18].flatMap((y) => [9, 15].map((x) => <circle key={`${x}:${y}`} cx={x} cy={y} r="1.75" />))}
+    </g>
+  ),
+  // A frame with its bottom right corner filled and an arrow toward it, for the token window's Reset: back to its place, never Undo's curved arrow.
+  windowHome: (
+    <g>
+      <g {...STROKE}>
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <path d="M7 8l5 5M12 9v4H8" />
+      </g>
+      <rect x="14" y="13" width="5" height="5" rx="1" fill="currentColor" />
     </g>
   ),
 };

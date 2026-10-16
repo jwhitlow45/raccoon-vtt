@@ -52,19 +52,21 @@ export function Segmented<T extends string | number>(props: {
    * Options split the row's width equally and stay on one line, for a short
    * choice in a narrow place such as the token action bar. `grow` lets each
    * option keep its own width and wrap, which there would break the row
-   * into uneven pieces. The side padding shrinks so four labels still fit.
+   * into uneven pieces. The side padding shrinks so four labels still fit,
+   * and under 210 px, too narrow even so, they go two by two.
    */
   even?: boolean;
   style?: CSSProperties;
 }) {
   const name = useId();
-  return (
+  const group = (
     <div
       role="radiogroup"
       aria-label={props.labelledBy ? undefined : props.label}
       aria-labelledby={props.labelledBy}
       aria-disabled={props.disabled ? true : undefined}
-      style={{ display: "flex", flexWrap: props.even ? "nowrap" : "wrap", gap: theme.space(1), minWidth: 0, ...props.style }}
+      className={props.even ? "rvtt-even-choices" : undefined}
+      style={{ display: "flex", flexWrap: props.even ? "nowrap" : "wrap", gap: theme.space(1), minWidth: 0, ...(props.even ? null : props.style) }}
     >
       {props.options.map((o) => {
         const chosen = o.value === props.value;
@@ -108,4 +110,6 @@ export function Segmented<T extends string | number>(props: {
       })}
     </div>
   );
+  // Even options measure the room they share, so where four cannot fit side by side they go two by two (globals.css).
+  return props.even ? <div style={{ containerType: "inline-size", minWidth: 0, ...props.style }}>{group}</div> : group;
 }

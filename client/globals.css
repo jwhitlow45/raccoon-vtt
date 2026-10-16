@@ -219,3 +219,16 @@ summary::-webkit-details-marker {
 [data-bar-row]:empty {
   display: none !important;
 }
+
+/* Options that share a row evenly (components/Segmented.tsx `even`), such
+   as the HP entry's four modes, go two by two where the row is too narrow
+   for four labels side by side, as in a token window beside a phone's
+   sideways sheet, so none runs out of its row. */
+@container (width < 210px) {
+  .rvtt-even-choices {
+    flex-wrap: wrap !important;
+  }
+  .rvtt-even-choices > .rvtt-choice {
+    flex: 1 1 calc(50% - 4px) !important;
+  }
+}

@@ -1,4 +1,5 @@
-import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, Ref } from "react";
+import { useId, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
+import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { theme } from "../lib/theme.ts";
 import { Icon } from "./Icon.tsx";
 import { IconButton } from "./IconButton.tsx";
@@ -208,8 +209,11 @@ function BackButton(props: { back: HeaderBack; ref?: Ref<HTMLButtonElement> }) {
 
 /**
  * What makes a pane's header a handle to move the pane by (the docked
- * token action bar, canvas/TokenActionBar.tsx): the pointer handlers on
- * its row, and whether a drag is under way, for the cursor.
+ * token window, canvas/TokenActionBar.tsx): the pointer handlers on its
+ * row, whether a drag is under way, for the cursor, and the grip at its
+ * start, a button named by `grip.label` that takes the same drag and,
+ * while it has focus, the arrow keys (`grip.onKeyDown`). A tap on the grip
+ * does nothing. `grip.description` names its keys for a screen reader.
  */
 export type PaneHandle = {
   dragging: boolean;
@@ -217,7 +221,11 @@ export type PaneHandle = {
   onPointerMove(e: ReactPointerEvent<HTMLDivElement>): void;
   onPointerUp(e: ReactPointerEvent<HTMLDivElement>): void;
   onPointerCancel(e: ReactPointerEvent<HTMLDivElement>): void;
+  grip: { label: string; description: string; ref?: Ref<HTMLButtonElement>; onKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>): void };
 };
+
+/** Marks the grip, so the header's handle takes a press on it while it skips the header's other buttons. */
+export const GRIP_ATTR = "data-pane-grip";
 
 /**
  * The header of a pane over the map (docs/design-v1-visual.md 2.3): the
@@ -227,13 +235,17 @@ export type PaneHandle = {
  * corner. The close is named "Close" unless the pane says more ("Close
  * without saving").
  *
- * The token action bar asks for three more (docs/design-v1-bar-dock.md):
- * `handle` makes the row the pane's handle, with a grip at its start and
- * no scrolling or zooming under a finger on it. `sticky` keeps the row at
- * the top of the pane's scrolling frame on an opaque fill that reaches
- * across the frame's 12 px side padding, so the handle and the close never
- * scroll away. `lines` lets the title wrap to that many lines before it
- * is cut short.
+ * The token window asks for more (docs/design-v1-bar-dock.md,
+ * docs/design-v1-token-window.md 4): `handle` makes the row the pane's
+ * handle, with its grip button at the start and no scrolling or zooming
+ * under a finger on it. `sticky` keeps the row at the top of the pane's
+ * scrolling frame on an opaque fill that reaches across the frame's 12 px
+ * side padding, so the handle and the close never scroll away. `lines`
+ * lets the title wrap to that many lines before it is cut short.
+ * `beforeClose` sits left of the close, after the actions, as the
+ * window's Reset does. `stacked` puts the grip, `beforeClose` and the
+ * close on a first row and the title with its actions on a second, for a
+ * window too narrow for one row (7.1).
  */
 export function PaneHeader(props: {
   title: ReactNode;
@@ -243,11 +255,46 @@ export function PaneHeader(props: {
   closeRef?: Ref<HTMLButtonElement>;
   /** Between the title and the close button. */
   actions?: ReactNode;
+  beforeClose?: ReactNode;
   handle?: PaneHandle;
   sticky?: boolean;
   lines?: number;
+  stacked?: boolean;
 }) {
   const { handle, sticky, lines } = props;
+  const descriptionId = useId();
+  const grip = handle ? (
+    <>
+      <IconButton
+        ref={handle.grip.ref}
+        icon="grip"
+        label={handle.grip.label}
+        aria-describedby={descriptionId}
+        {...{ [GRIP_ATTR]: "" }}
+        onKeyDown={handle.grip.onKeyDown}
+        style={{ cursor: handle.dragging ? "grabbing" : "grab", touchAction: "none" }}
+      />
+      <span id={descriptionId} style={VISUALLY_HIDDEN}>
+        {handle.grip.description}
+      </span>
+    </>
+  ) : null;
+  const title = (
+    <strong
+      id={props.titleId}
+      style={{
+        ...TITLE_STYLE,
+        fontSize: theme.font.input,
+        fontWeight: theme.weight.bold,
+        lineHeight: theme.leading.tight,
+        ...(lines ? { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", whiteSpace: "normal", overflowWrap: "anywhere" } : null),
+      }}
+    >
+      {props.title}
+    </strong>
+  );
+  const close = props.onClose ? <IconButton ref={props.closeRef} icon="close" label={props.closeLabel ?? "Close"} onClick={props.onClose} /> : null;
+  const row = { display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0 } as const;
   return (
     <div
       onPointerDown={handle?.onPointerDown}
@@ -255,11 +302,7 @@ export function PaneHeader(props: {
       onPointerUp={handle?.onPointerUp}
       onPointerCancel={handle?.onPointerCancel}
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: theme.space(1),
-        minWidth: 0,
-        minHeight: 48,
+        ...(props.stacked ? { display: "flex", flexDirection: "column", minWidth: 0 } : { ...row, minHeight: 48 }),
         ...(handle ? { touchAction: "none", cursor: handle.dragging ? "grabbing" : "grab" } : null),
         ...(sticky
           ? {
@@ -274,30 +317,28 @@ export function PaneHeader(props: {
           : null),
       }}
     >
-      {handle ? <Grip /> : null}
-      <strong
-        id={props.titleId}
-        style={{
-          ...TITLE_STYLE,
-          fontSize: theme.font.input,
-          fontWeight: theme.weight.bold,
-          lineHeight: theme.leading.tight,
-          ...(lines ? { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", whiteSpace: "normal", overflowWrap: "anywhere" } : null),
-        }}
-      >
-        {props.title}
-      </strong>
-      {props.actions}
-      {props.onClose ? <IconButton ref={props.closeRef} icon="close" label={props.closeLabel ?? "Close"} onClick={props.onClose} /> : null}
+      {props.stacked ? (
+        <>
+          <div style={{ ...row, minHeight: 48 }}>
+            {grip}
+            <span style={{ flex: 1 }} />
+            {props.beforeClose}
+            {close}
+          </div>
+          <div style={{ ...row, minHeight: theme.touch }}>
+            {title}
+            {props.actions}
+          </div>
+        </>
+      ) : (
+        <>
+          {grip}
+          {title}
+          {props.actions}
+          {props.beforeClose}
+          {close}
+        </>
+      )}
     </div>
-  );
-}
-
-/** Six dots, the usual sign that a row moves what it heads. Decoration only: the pane's name and its Move bar button say the rest. */
-function Grip() {
-  return (
-    <svg aria-hidden viewBox="0 0 12 20" width={12} height={20} style={{ flex: "none", display: "block", color: theme.color.textMuted }}>
-      {[4, 10, 16].flatMap((y) => [3, 9].map((x) => <circle key={`${x}:${y}`} cx={x} cy={y} r={1.6} fill="currentColor" />))}
-    </svg>
   );
 }

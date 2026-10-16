@@ -221,6 +221,9 @@ describe("the shortcut table", () => {
     assert.deepEqual(moves, [[0, -1], [1, 0], [0, 1], [-1, 0]]);
     assert.equal(run(env().env, press({ key: "ArrowUp", code: "ArrowUp" })), null, "nothing selected");
     assert.equal(run(e, press({ key: "ArrowUp", code: "ArrowUp", repeat: true })), null, "a held arrow moves once");
+    // The token window's grip and handle take their arrows and prevent the default (docs/design-v1-token-window.md 4.3).
+    assert.equal(run(e, press({ key: "ArrowLeft", code: "ArrowLeft", defaultPrevented: true, target: { tagName: "BUTTON" } })), null, "a key the window took moves no token");
+    assert.equal(moves.length, 4);
   });
 
   test("a focused choice group or slider keeps the arrow and Page keys, and the selection stays put", () => {
@@ -374,6 +377,26 @@ describe("the sheet's rows beside the keys", () => {
     assert.ok(section("dm", DESKTOP, MOUSE_SECTION)!.rows.every((r) => !r.keys), "a mouse row is a phrase, not a key");
   });
 
+  test("the token window's section holds its keys, and the dialogs' section its own (docs/design-v1-token-window.md 11)", () => {
+    assert.ok(SURFACES.includes("Token window"));
+    assert.ok(!(SURFACES as readonly string[]).includes("Token action bar"), "the sheet never says window for two things");
+    for (const role of ROLES) {
+      const tokenWindow = section(role, IPHONE, "Token window")!;
+      assert.deepEqual(tokenWindow.rows.map((r) => r.id).slice(0, 2), ["barEscape", "windowMoveKeys"]);
+      assert.ok(tokenWindow.intro?.includes("never move a token"));
+      assert.deepEqual(inputs(role, IPHONE, "Dialogs"), ["Escape", "Tab, Shift+Tab"]);
+    }
+    const keys = section("player", IPHONE, "Keys")!;
+    assert.match(keys.intro ?? "", /a dialog is open/);
+  });
+
+  test("every row that names the mode says Multi-select", () => {
+    for (const b of BEHAVIORS) assert.doesNotMatch(`${b.does} ${b.when ?? ""}`, /select several/i, b.id);
+    assert.match(BEHAVIORS.find((b) => b.id === "selectAdd")!.does, /as Multi-select does$/);
+    assert.match(BEHAVIORS.find((b) => b.id === "escape")!.does, /end Multi-select/);
+    assert.equal(BEHAVIORS.find((b) => b.id === "selectMenu")!.when, "with Multi-select off");
+  });
+
   test("each role sees its own rows", () => {
     assert.deepEqual(inputs("dm", IPHONE, "Initiative"), ["Enter", "Escape", "Enter"]);
     assert.deepEqual(inputs("player", IPHONE, "Initiative"), ["Enter", "Escape"], "only the DM types several values");
@@ -412,7 +435,28 @@ describe("the sheet's rows beside the keys", () => {
     }
     assert.deepEqual([...tables.keys()], ["Keys", MOUSE_SECTION, "Android", ...SURFACES], "one table under each heading, in the sheet's order");
   });
+
+  test("FEATURES.md repeats the sheet's intros word for word", () => {
+    const intros = shortcutIntros(readFileSync(new URL("../../FEATURES.md", import.meta.url), "utf8"));
+    for (const role of ROLES) {
+      for (const s of sheetSections(role, { mouse: true, android: true })) assert.equal(intros.get(s.title) ?? null, s.intro ?? null, `${s.title}'s intro`);
+    }
+  });
 });
+
+/** The paragraph between each heading under FEATURES.md's Shortcuts and its table, where it has one. */
+function shortcutIntros(markdown: string): Map<string, string> {
+  const start = markdown.indexOf("\n## Shortcuts\n");
+  const rest = markdown.slice(start + 1);
+  const next = rest.indexOf("\n## ", 1);
+  const intros = new Map<string, string>();
+  for (const part of (next === -1 ? rest : rest.slice(0, next)).split("\n### ").slice(1)) {
+    const [heading = "", ...lines] = part.split("\n");
+    const text = lines.filter((l) => l.trim() !== "" && !l.startsWith("|"));
+    if (text.length > 0) intros.set(heading.trim(), text.join(" ").trim());
+  }
+  return intros;
+}
 
 /** The rows of each table under FEATURES.md's Shortcuts, by the heading above it, as cells. */
 function shortcutTables(markdown: string): Map<string, string[][]> {

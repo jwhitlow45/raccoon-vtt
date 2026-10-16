@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject } from "react";
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { useStore } from "zustand";
 import { healRevivesDead } from "#shared/migrate.ts";
 import { CONDITION_KEYS, STATUS_KEYS, type Actor, type Effect } from "#shared/model.ts";
@@ -6,7 +6,8 @@ import { hpLess, shownLife } from "#shared/rules/hp.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
 import { RETURN_RANK, useSheetReturnFocus } from "../components/sheetFocus.ts";
-import { PaneHeader, type PaneHandle } from "../components/SheetHeader.tsx";
+import { IconButton } from "../components/IconButton.tsx";
+import { GRIP_ATTR, PaneHeader, type PaneHandle } from "../components/SheetHeader.tsx";
 import { useLayoutSize } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
@@ -54,21 +55,25 @@ import { TAP_SLOP_PX } from "../lib/gestures.ts";
 import { displayName, footprint, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { effectChip, elevationBadge } from "../lib/tokenView.ts";
-import { dockSlot, foldsUnderSheet, usePublishBar } from "../pages/fold.ts";
+import { dockSlot, foldsUnderSheet, sideSheetRoom, usePublishBar } from "../pages/fold.ts";
 import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope, useScoped } from "../state/scope.ts";
 import { sheetOpen } from "../state/types.ts";
 import {
+  arrowStep,
   barDockSlot,
   clampBox,
   barChrome,
   DEFAULT_SPOT,
   hangBox,
+  headerBand,
   isDefaultSpot,
+  keySpot,
   laneLeft,
-  nextCorner,
   placeBar,
   releaseSpot,
+  RESET_WORDS,
+  spotWords,
   writeSpot,
   type BarFacts,
   type Box,
@@ -212,8 +217,6 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
     light: (scene !== undefined && visionOn(scene)) || (token.light !== undefined && (token.light.bright > 0 || token.light.dim > 0)),
     played,
     companion: isCompanion(token),
-    docked: frame.place !== null,
-    moved: frame.place?.moved ?? false,
   });
   const button = (id: BarButtonId): ReactNode => {
     switch (id) {
@@ -279,10 +282,6 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
       // A companion's owners who are not the DM dismiss it in Delete's place (docs/design-v1-combat-flow.md 3.6.9).
       case "dismiss":
         return <DismissButton key={id} tokenId={token.id} name={displayName(token)} />;
-      case "moveBar":
-        return <MoveBarButton key={id} />;
-      case "resetBar":
-        return <ResetBarButton key={id} />;
     }
   };
 
@@ -359,8 +358,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
       </div>
 
       {access.canEditToken("elevation") ? (
-        <div style={{ display: "flex", alignItems: "center", gap: theme.space(1) }}>
-          <span style={{ flex: 1, color: theme.color.textMuted }}>Elevation</span>
+        <StepperRow label="Elevation">
           <BarButton label="Down 5 feet" onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { elevation: (token.elevation ?? 0) - 5 } })}>
             −5
           </BarButton>
@@ -368,7 +366,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
           <BarButton label="Up 5 feet" onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { elevation: (token.elevation ?? 0) + 5 } })}>
             +5
           </BarButton>
-        </div>
+        </StepperRow>
       ) : null}
 
       <GroundNotice token={token} />
@@ -460,8 +458,7 @@ export function GroupActionBar(props: {
         </div>
       ) : null}
       {offers.elevation ? (
-        <div style={{ display: "flex", alignItems: "center", gap: theme.space(1) }}>
-          <span style={{ flex: 1, color: theme.color.textMuted }}>Elevation</span>
+        <StepperRow label="Elevation">
           <BarButton label="All down 5 feet" onClick={() => send(elevationOps(tokens, -5))}>
             −5
           </BarButton>
@@ -469,7 +466,7 @@ export function GroupActionBar(props: {
           <BarButton label="All up 5 feet" onClick={() => send(elevationOps(tokens, 5))}>
             +5
           </BarButton>
-        </div>
+        </StepperRow>
       ) : null}
       {drawer === "conditions" && offers.conditions ? (
         <QuickConditions lit={(key) => conditionLit(creatures, key)} onToggle={(key) => send(conditionOps(creatures, key, actions.newId))} />
@@ -516,7 +513,6 @@ export function GroupActionBar(props: {
           />
         ) : null}
         <BarButton onClick={props.onClose}>Clear</BarButton>
-        <PlaceButtons />
       </div>
       {more ? <GroupMoreSheet tokens={tokens} opener={moreButton} onClose={() => setMore(false)} /> : null}
     </BarFrame>
@@ -573,66 +569,66 @@ function CountLegButton(props: { token: ViewToken }) {
 }
 
 /**
- * What a bar's frame hands its header and its button row: the header's
- * handle and stickiness, and Move bar with Reset bar position while it
- * docks (docs/design-v1-bar-dock.md section 2).
+ * What a bar's frame hands its header and its rows: the header's handle,
+ * with its grip, and stickiness, Reset while the window docks away from
+ * its default (docs/design-v1-token-window.md 4.4), the header's band
+ * (7.1), and whether the bar is short.
  */
 type FrameControls = {
   handle: PaneHandle | null;
   sticky: boolean;
-  place: { moveRef: RefObject<HTMLButtonElement | null>; moved: boolean; move(): void; reset(): void } | null;
+  place: { moved: boolean; reset(): void; closeRef: RefObject<HTMLButtonElement | null>; onResetFocus(focused: boolean): void } | null;
+  /** A window narrower than one header row stacks its header (barDock.ts headerBand). */
+  stacked: boolean;
   /** The bar has under 300 px where it stands (barButtons.ts barShort), whatever its content. */
   short: boolean;
 };
 
-const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, short: false });
+const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, stacked: false, short: false });
 
-/** The bar's header: its name on at most two lines, the grip and handle while it docks, sticky while it docks or spans. */
-function BarHeader(props: { title: string; actions?: ReactNode; onClose(): void; closeLabel?: string }) {
-  const frame = useContext(FrameContext);
-  return <PaneHeader title={props.title} actions={props.actions} onClose={props.onClose} closeLabel={props.closeLabel} handle={frame.handle ?? undefined} sticky={frame.sticky} lines={2} />;
-}
+/** Reset's name and tooltip, on every device. */
+const RESET_LABEL = "Reset window position and size";
 
 /**
- * Move bar, the single-pointer and keyboard way to move a docked bar
- * (WCAG 2.2 SC 2.5.7), and Reset bar position while it is away from its
- * default spot. Each is named by its words.
+ * The bar's header: the grip while it docks, its name on at most two
+ * lines, the elevation badge, Reset while the window is away from its
+ * default, and Close. Sticky while it docks or spans.
  */
-function PlaceButtons() {
-  const { place } = useContext(FrameContext);
-  if (!place) return null;
+function BarHeader(props: { title: string; actions?: ReactNode; onClose(): void; closeLabel?: string }) {
+  const frame = useContext(FrameContext);
+  const { place } = frame;
+  const reset = place?.moved ? (
+    <IconButton icon="windowHome" label={RESET_LABEL} onClick={place.reset} onFocus={() => place.onResetFocus(true)} onBlur={() => place.onResetFocus(false)} />
+  ) : null;
   return (
-    <>
-      <MoveBarButton />
-      {place.moved ? <ResetBarButton /> : null}
-    </>
+    <PaneHeader
+      title={props.title}
+      actions={props.actions}
+      beforeClose={reset}
+      onClose={props.onClose}
+      closeLabel={props.closeLabel}
+      closeRef={place?.closeRef}
+      handle={frame.handle ?? undefined}
+      sticky={frame.sticky}
+      stacked={frame.stacked}
+      lines={2}
+    />
   );
 }
 
-function MoveBarButton() {
-  const { place } = useContext(FrameContext);
-  if (!place) return null;
-  return (
-    <BarButton ref={place.moveRef} onClick={place.move}>
-      Move bar
-    </BarButton>
-  );
-}
-
-function ResetBarButton() {
-  const { place } = useContext(FrameContext);
-  if (!place?.moved) return null;
-  return <BarButton onClick={place.reset}>Reset bar position</BarButton>;
-}
+/** How long the window's keys rest before its status speaks. */
+const KEYS_REST_MS = 500;
 
 /** A drag of the bar by its header, in progress: the pointer, where it went down, and the box the bar had then and has now. */
 type Drag = { pointerId: number; el: HTMLElement; x: number; y: number; start: Box; box: Box | null };
 
 /**
  * Where a bar sits (docs/design-v1-bar-dock.md). From 600 layout px up, and
- * on a phone on its side, it docks in the map's free area, at the bottom
- * right unless the viewer moved it there by its header or with Move bar,
- * and this device remembers the spot (`rvtt.tokenBarSpot`, barDock.ts). A
+ * on a phone on its side, it docks in the map's free area as the token
+ * window, at the bottom right unless the viewer moved it there by its
+ * header, its grip or the grip's arrow keys, and this device remembers
+ * the spot (`rvtt.tokenBarSpot`, barDock.ts). Reset in its header brings
+ * it home (docs/design-v1-token-window.md 4). A
  * phone held upright spans the screen under or over its token, as before.
  * A screen too short for either opens it compact: a taller overlay over
  * the Multi-select bar, and over the toolbar when even that is short,
@@ -667,29 +663,30 @@ function BarFrame(props: {
   const zoom = useUiScale();
   const anySheet = useRoomView((s) => sheetOpen(s.local));
   const full = useStore(useScoped(dockSlot), (s) => s.sheetFull);
-  const folded = foldsUnderSheet({ ...layout, sheetOpen: anySheet, full });
   // "View as a player" reads this device's spot and keeps its own moves to itself, since nothing done there is saved.
   const preview = usePreview() !== null;
   const dockStore = useScoped(barDockSlot);
   const measured = useStore(dockStore, (s) => s.chrome);
   const lasting = useStore(dockStore, (s) => s.lasting);
   const chrome = useMemo(() => barChrome({ chrome: measured, lasting }), [measured, lasting]);
+  // Beside a sideways sheet that leaves it too little room for its header, the window folds into the sheet's header (docs/design-v1-token-window.md 7.1).
+  const folded = foldsUnderSheet({ ...layout, sheetOpen: anySheet, full, sideRoom: sideSheetRoom(props.viewport, chrome) });
   const spot = useStore(dockStore, (s) => s.spot);
   const width = useStore(dockStore, (s) => s.defaultWidth);
   const column = useStore(dockStore, (s) => s.column);
   const foot = useStore(dockStore, (s) => s.foot);
   const barRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const moveRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const [barHeight, setBarHeight] = useState(() => dockStore.getState().lastHeight);
   const [clipped, setClipped] = useState(false);
   const [status, setStatus] = useState("");
   const statusSeq = useRef(0);
   /*
-   * What Move bar's status says. It is cleared, then set on the next frame,
-   * so the same words twice are spoken again rather than heard as no
-   * change. A drop or Reset clears it, so it never names a corner the bar
-   * has left.
+   * What the window's status says after its keys or Reset. It is cleared,
+   * then set on the next frame, so the same words twice are spoken again
+   * rather than heard as no change. A drop clears it, so it never names a
+   * place the window has left.
    */
   const say = (text: string) => {
     const id = ++statusSeq.current;
@@ -699,6 +696,21 @@ function BarFrame(props: {
       if (statusSeq.current === id) setStatus(text);
     });
   };
+  // Spoken once the keys rest, so a held key is heard once, from where they left the window.
+  const restTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sayAtRest = (words: () => string) => {
+    if (restTimer.current !== null) clearTimeout(restTimer.current);
+    restTimer.current = setTimeout(() => {
+      restTimer.current = null;
+      say(words());
+    }, KEYS_REST_MS);
+  };
+  useEffect(
+    () => () => {
+      if (restTimer.current !== null) clearTimeout(restTimer.current);
+    },
+    [],
+  );
   const [dragBox, setDragBox] = useState<Box | null>(null);
   const dragRef = useRef<Drag | null>(null);
   useSheetReturnFocus(barRef, RETURN_RANK.tokenBar);
@@ -791,7 +803,8 @@ function BarFrame(props: {
           dragging: dragBox !== null,
           onPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
             if (e.button !== 0 || dragRef.current) return;
-            if (e.target instanceof Element && e.target.closest("button, a, input, select, textarea")) return;
+            // The grip is a button that takes the drag too. The header's other buttons keep their presses.
+            if (e.target instanceof Element && e.target.closest("button, a, input, select, textarea") && !e.target.closest(`[${GRIP_ATTR}]`)) return;
             const frame = barRef.current;
             const start = frame ? layerBox(frame) : null;
             if (!start) return;
@@ -821,29 +834,65 @@ function BarFrame(props: {
           onPointerCancel(e: ReactPointerEvent<HTMLDivElement>) {
             if (dragRef.current?.pointerId === e.pointerId) endDrag.current();
           },
+          grip: {
+            label: "Move window",
+            description: "Drag to move the window. With this focused, the arrow keys move it, and Shift moves it faster. Reset, beside Close, puts it back.",
+            onKeyDown: moveByKeys,
+          },
         }
       : null;
+  /*
+   * The grip's arrow keys (docs/design-v1-token-window.md 4.3): each step
+   * starts from the box as drawn, so a step the lane took back starts from
+   * where the lane put the window, is clamped into the free area, and is
+   * stored at once as the nearest corner's spot, unsnapped. The handled
+   * key's default is prevented, so the room's shortcuts pass over it and no
+   * selected token moves. Escape is left to close the bar.
+   */
+  function moveByKeys(e: ReactKeyboardEvent<HTMLButtonElement>) {
+    const step = arrowStep(e.key, e.shiftKey);
+    if (!step || e.altKey || e.ctrlKey || e.metaKey) return;
+    e.preventDefault();
+    const frame = barRef.current;
+    const box = frame ? layerBox(frame) : null;
+    if (!box) return;
+    setSpot(keySpot(clampBox({ ...box, left: box.left + step.dx, top: box.top + step.dy }, free), free));
+    sayAtRest(() => spotWords(dockStore.getState().spot));
+  }
+  const moved = !isDefaultSpot(spot);
+  /*
+   * Reset leaves with the press that brings the window home, or with a drag
+   * back to its default. Whatever takes it away while it has focus, focus
+   * goes to Close rather than to the page (4.4).
+   */
+  const resetFocused = useRef(false);
+  useLayoutEffect(() => {
+    if (moved || !resetFocused.current) return;
+    resetFocused.current = false;
+    const active = document.activeElement;
+    if (active === null || active === document.body) closeRef.current?.focus();
+  }, [moved]);
   const place: FrameControls["place"] =
     mode === "dock"
       ? {
-          moveRef,
-          moved: !isDefaultSpot(spot),
-          move: () => {
-            const next = nextCorner(spot);
-            setSpot(next.spot);
-            say(next.status);
+          moved,
+          closeRef,
+          onResetFocus: (focused) => {
+            resetFocused.current = focused;
           },
           reset: () => {
-            // Reset goes away with the press, so focus moves to Move bar first.
-            moveRef.current?.focus();
+            // Reset goes away with the press, so focus moves to Close first.
+            resetFocused.current = false;
+            closeRef.current?.focus();
             setSpot(DEFAULT_SPOT);
-            say("");
+            say(RESET_WORDS);
           },
         }
       : null;
   // Read from where the bar stands, never from its content, so the short layout and an opened "More stats" never flip it.
   const short = barShort({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, column, width });
-  const controls: FrameControls = { handle, sticky: mode !== "compact", place, short };
+  const stacked = mode === "dock" && headerBand(placed.hang.width) !== "row";
+  const controls: FrameControls = { handle, sticky: mode !== "compact", place, stacked, short };
 
   const { hang } = placed;
   const where = dragBox
@@ -1043,6 +1092,22 @@ function DeleteButton(props: { onDelete(): void; armedText?: string }) {
     >
       {words.text}
     </BarButton>
+  );
+}
+
+/**
+ * A label and its stepper, such as Elevation's −5 and +5, on one line, or
+ * the stepper under the label, right-aligned, where the window is too
+ * narrow for both, as beside a phone's sideways sheet or on the narrowest
+ * phone's spanning bar (docs/design-v1-token-window.md 8.9). One rule keeps
+ * every stepper row inside the window at any width and font.
+ */
+function StepperRow(props: { label: string; children: ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
+      <span style={{ flex: "1 1 auto", color: theme.color.textMuted }}>{props.label}</span>
+      <div style={{ flex: "none", marginLeft: "auto", display: "flex", alignItems: "center", gap: theme.space(1) }}>{props.children}</div>
+    </div>
   );
 }
 

@@ -1,8 +1,10 @@
 import { useCallback, useLayoutEffect, useRef, type RefObject } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
+import { barDockSlot, freeArea, WINDOW_FOLD_BELOW, type Chrome } from "../canvas/barDock.ts";
 import { sheetRoom, SHEET_MIN_HEIGHT, type SheetSpace } from "../components/sheetCap.ts";
 import { useLayoutSize } from "../features/device/layout.ts";
+import type { Size } from "../lib/camera.ts";
 import { revealAndFocus } from "../lib/reveal.ts";
 import { theme } from "../lib/theme.ts";
 import { scopeSlot, useScoped } from "../state/scope.ts";
@@ -28,10 +30,31 @@ import { useRoomView } from "../state/view.ts";
  * panels open. In landscape the sheet docks on the right and leaves the
  * map beside it, so nothing folds there, unless the screen is so short
  * that the sheet opens over all of it (`full`, the very short mode of
- * docs/design-v1-layout-hierarchy.md 4.2), as the upright sheet folds.
+ * docs/design-v1-layout-hierarchy.md 4.2), as the upright sheet folds, or
+ * the room the sheet leaves beside it (`sideRoom`, sideSheetRoom) is too
+ * narrow for a docked window's stacked header, as on a phone 480 px wide
+ * (docs/design-v1-token-window.md 7.1).
  */
-export function foldsUnderSheet(input: { width: number; height: number; sheetOpen: boolean; full?: boolean }): boolean {
-  return input.sheetOpen && input.width < theme.layout.wideMinWidth && (input.width <= input.height || input.full === true);
+export function foldsUnderSheet(input: { width: number; height: number; sheetOpen: boolean; full?: boolean; sideRoom?: number }): boolean {
+  if (!input.sheetOpen) return false;
+  if (input.sideRoom !== undefined && input.sideRoom < WINDOW_FOLD_BELOW) return true;
+  return input.width < theme.layout.wideMinWidth && (input.width <= input.height || input.full === true);
+}
+
+/**
+ * The width a sideways sheet leaves the map's free area, where a docked
+ * window stands beside it, or undefined with no such sheet. Under 900 px
+ * there is no side panel, so the map is the layout's whole width.
+ */
+export function sideSheetRoom(layout: Size, chrome: Chrome | null): number | undefined {
+  return chrome && chrome.sheet > 0 ? freeArea(layout, chrome).width : undefined;
+}
+
+/** sideSheetRoom for this Room now, from the chrome Room measured. */
+export function useSideSheetRoom(): number | undefined {
+  const layout = useLayoutSize();
+  const chrome = useStore(useScoped(barDockSlot), (s) => s.chrome);
+  return sideSheetRoom(layout, chrome);
 }
 
 /** foldsUnderSheet for this Room now, in the chrome's own pixels (features/device/layout.ts). */
@@ -39,7 +62,8 @@ export function useUnderSheet(): boolean {
   const { width, height } = useLayoutSize();
   const open = useRoomView((s) => sheetOpen(s.local));
   const full = useStore(useScoped(dockSlot), (s) => s.sheetFull);
-  return foldsUnderSheet({ width, height, sheetOpen: open, full });
+  const sideRoom = useSideSheetRoom();
+  return foldsUnderSheet({ width, height, sheetOpen: open, full, sideRoom });
 }
 
 /** The dock's row height, and the gap kept above it under the top bars. */

@@ -17,9 +17,7 @@ export type BarButtonId =
   | "locked"
   | "duplicate"
   | "delete"
-  | "dismiss"
-  | "moveBar"
-  | "resetBar";
+  | "dismiss";
 
 /** Who the viewer is and what applies to this token now. */
 export type BarButtonInput = {
@@ -38,9 +36,6 @@ export type BarButtonInput = {
   played: boolean;
   /** The token is a companion (docs/design-v1-combat-flow.md 3.6), whose owners dismiss it. */
   companion: boolean;
-  /** The bar docks, so it may be moved, and the spot it sits at is not its default. */
-  docked: boolean;
-  moved: boolean;
 };
 
 /**
@@ -73,10 +68,6 @@ export function barButtons(input: BarButtonInput): { passing: BarButtonId[]; pla
   if (dm) less.push("locked", "duplicate", "delete");
   // The DM keeps Delete and gets no second button.
   else if (owner && input.companion) less.push("dismiss");
-  if (input.docked) {
-    less.push("moveBar");
-    if (input.moved) less.push("resetBar");
-  }
   return { passing, play, less };
 }
 

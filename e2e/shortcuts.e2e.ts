@@ -122,7 +122,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     const titles = await headings(sheet);
     assert.deepEqual(titles.slice(0, 2), ["Keys", "Mouse with keys"], titles.join(", "));
     assert.ok(!titles.includes("Android"), titles.join(", "));
-    for (const surface of ["Side panel tabs", "Handout viewer", "Token action bar", "Initiative", "Token and character fields", "Label, pin and light panes", "Dialogs", "Choose an image"]) {
+    for (const surface of ["Side panel tabs", "Handout viewer", "Token window", "Initiative", "Token and character fields", "Label, pin and light panes", "Dialogs", "Choose an image"]) {
       assert.ok(titles.includes(surface), `${surface} in ${titles.join(", ")}`);
     }
     assert.equal(await sheet.getByRole("region").count(), 0, "headings, not landmarks");

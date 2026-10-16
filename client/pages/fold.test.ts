@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { alertsSummary, dockFits, foldsUnderSheet, type ColumnAlert } from "./fold.ts";
+import { DEFAULT_CHROME } from "../canvas/barDock.ts";
+import { alertsSummary, dockFits, foldsUnderSheet, sideSheetRoom, type ColumnAlert } from "./fold.ts";
 
 describe("foldsUnderSheet", () => {
   test("a phone in portrait folds while a sheet is open", () => {
@@ -31,6 +32,22 @@ describe("foldsUnderSheet", () => {
   test("from 900 px wide there are no sheets to fold under", () => {
     assert.equal(foldsUnderSheet({ width: 1280, height: 800, sheetOpen: true }), false);
     assert.equal(foldsUnderSheet({ width: 900, height: 1200, sheetOpen: true }), false);
+  });
+
+  test("a docked window beside a sideways sheet folds under 166 px of room, and not at 166 (docs/design-v1-token-window.md 7.1)", () => {
+    assert.equal(foldsUnderSheet({ width: 480, height: 320, sheetOpen: true, sideRoom: 129 }), true);
+    assert.equal(foldsUnderSheet({ width: 480, height: 320, sheetOpen: true, sideRoom: 165 }), true);
+    assert.equal(foldsUnderSheet({ width: 480, height: 320, sheetOpen: true, sideRoom: 166 }), false);
+    assert.equal(foldsUnderSheet({ width: 844, height: 390, sheetOpen: true, sideRoom: 246 }), false);
+    assert.equal(foldsUnderSheet({ width: 480, height: 320, sheetOpen: false, sideRoom: 129 }), false, "a closed sheet folds nothing");
+  });
+
+  test("the room a sideways sheet leaves: the free area's width beside it, none without one", () => {
+    // 480 x 320 with 47 px insets: the sheet takes its 60%, 288 px, and covers the right inset.
+    const chrome = { ...DEFAULT_CHROME, safe: { top: 0, right: 47, bottom: 21, left: 47 }, sheet: 288 };
+    assert.equal(sideSheetRoom({ width: 480, height: 320 }, chrome), 480 - 288 - 47 - 16);
+    assert.equal(sideSheetRoom({ width: 480, height: 320 }, { ...chrome, sheet: 0 }), undefined);
+    assert.equal(sideSheetRoom({ width: 480, height: 320 }, null), undefined);
   });
 });
 

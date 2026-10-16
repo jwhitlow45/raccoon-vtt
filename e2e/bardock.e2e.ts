@@ -10,7 +10,7 @@ import { ConsoleWatch, dragCells, OpSocket, pagePoint, Shots, SocketWatch, start
 /**
  * The docked token action bar (docs/design-v1-bar-dock.md section 7) on the
  * real server serving the production build: where it docks at computer and
- * tablet sizes, moving it by its header and with Move bar, what this device
+ * tablet sizes, moving it by its header, its grip and the grip's keys, what this device
  * remembers, Fit, Find and the outliner keeping tokens out from under it,
  * the right lane it shares with the fight alerts column, taps off the bar
  * with and without Multi-select, and "Viewing as Pat" beside the column.
@@ -415,6 +415,27 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     const still = await barRect(dm);
     assert.ok(Math.abs(still.left - start.left) < 0.5 && Math.abs(still.top - start.top) < 0.5, "a tap on the header moved the bar");
     assert.equal(await storedSpot(dm), null, "a tap on the header stored a spot");
+    // Nor does a press on the grip, Move window, that moves under 8 px: a tap on it does nothing.
+    const grip = await rectOf(barFrame(dm).getByRole("button", { name: "Move window", exact: true }));
+    await dm.mouse.move(grip.left + 22, grip.top + 22);
+    await dm.mouse.down();
+    await dm.mouse.move(grip.left + 27, grip.top + 24, { steps: 2 });
+    await dm.mouse.up();
+    const pressed = await barRect(dm);
+    assert.ok(Math.abs(pressed.left - start.left) < 0.5 && Math.abs(pressed.top - start.top) < 0.5, "a short press on the grip moved the window");
+    assert.equal(await storedSpot(dm), null, "a short press on the grip stored a spot");
+    assert.ok(await dm.getByRole("dialog", { name: "Thorn actions" }).isVisible(), "a press on the grip closed the window");
+    // A drag that starts on the grip moves the window, as one on the header does.
+    await dm.mouse.move(grip.left + 22, grip.top + 22);
+    await dm.mouse.down();
+    await dm.mouse.move(grip.left + 34, grip.top + 26, { steps: 2 });
+    await dm.mouse.move(grip.left - 300, grip.top - 200, { steps: 10 });
+    await dm.mouse.up();
+    const byGrip = await barRect(dm);
+    assert.ok(byGrip.left < start.left - 200 && byGrip.top < start.top - 100, `a drag by the grip did not move the window: ${JSON.stringify({ start, byGrip })}`);
+    assert.match((await storedSpot(dm)) ?? "", /^\{"corner":"[tb][lr]","x":\d+,"y":\d+\}$/);
+    await dragHeader(dm, { x: 2000, y: 2000 });
+    assert.equal(await storedSpot(dm), null, "a drop near the bottom right is the default spot");
 
     await dragHeader(dm, { x: 300, y: 300 });
     const moved = await barRect(dm);
@@ -457,37 +478,101 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await shots.take(dm, "bardock-dropped-on-column");
     await dm.getByRole("button", { name: "Passed" }).first().click();
     await prompt.waitFor({ state: "detached" });
-    await dm.getByRole("button", { name: "Reset bar position", exact: true }).click();
+    await dm.getByRole("button", { name: "Reset window position and size", exact: true }).click();
   });
 
-  test("4. this device remembers the spot through a reload, a resize and a new interface size, Move bar goes round the corners, Reset brings the bar home, and Escape puts a dragged bar back", async () => {
+  test("4. the grip's arrow keys move the window and no token, the status says where once the keys rest, Reset in the header brings it home with focus on Close, this device remembers the spot through a reload, a resize and a new interface size, and Escape puts a dragged bar back", async () => {
     await setUp(dm, { ...DESK, scale: 1 });
     await selectThorn();
     const home = await barRect(dm);
-    assert.equal(await dm.getByRole("button", { name: "Reset bar position" }).count(), 0, "Reset bar position shows at the default spot");
-    const move = dm.getByRole("button", { name: "Move bar", exact: true });
-    assert.equal((await move.textContent())?.trim(), "Move bar", "Move bar is not named by its text");
+    const frame = barFrame(dm);
+    const resetButton = frame.getByRole("button", { name: "Reset window position and size", exact: true });
+    assert.equal(await resetButton.count(), 0, "Reset shows at the default spot");
 
-    const said: string[] = [];
-    const stored: (string | null)[] = [];
-    const places: Rect[] = [];
-    for (let i = 0; i < 4; i++) {
-      await move.click();
-      places.push(await barRect(dm));
-      stored.push(await storedSpot(dm));
-      said.push((await barFrame(dm).getByRole("status").textContent())?.trim() ?? "");
-      assert.equal(await focusedName(dm), "Move bar", "focus left Move bar");
-    }
-    assert.deepEqual(said, ["Bar at bottom left", "Bar at top left", "Bar at top right", "Bar at bottom right"]);
-    assert.deepEqual(stored, ['{"corner":"bl","x":0,"y":0}', '{"corner":"tl","x":0,"y":0}', '{"corner":"tr","x":0,"y":0}', null]);
+    // From the frame, Tab reaches Move window first.
+    await frame.focus();
+    await dm.keyboard.press("Tab");
+    assert.equal(await focusedName(dm), "Move window");
+    const grip = frame.getByRole("button", { name: "Move window", exact: true });
+    assert.equal(await grip.getAttribute("title"), "Move window");
+    const described = await grip.getAttribute("aria-describedby");
+    assert.ok(described, "the grip names no description of its keys");
+    assert.match((await dm.locator(`[id="${described}"]`).textContent()) ?? "", /^Drag to move the window\. With this focused, the arrow keys move it/);
+
+    // What the status says, each time it says something.
+    await dm.evaluate(() => {
+      type Node = { textContent: string | null };
+      const g = globalThis as unknown as { document: { querySelector(s: string): Node | null }; MutationObserver: new (cb: () => void) => { observe(n: Node, o: object): void }; said: string[] };
+      const status = g.document.querySelector('[role="dialog"][data-bar-mode] [role="status"]')!;
+      g.said = [];
+      new g.MutationObserver(() => {
+        const text = status.textContent?.trim() ?? "";
+        if (text) g.said.push(text);
+      }).observe(status, { childList: true, characterData: true, subtree: true });
+    });
+    const said = () => dm.evaluate(() => (globalThis as unknown as { said: string[] }).said.splice(0));
+    const thornAt = () => ({ x: dmSocket.state?.tokens[run.thorn.id]?.x, y: dmSocket.state?.tokens[run.thorn.id]?.y });
+    const thornBefore = thornAt();
+
+    // Three steps left: 24 px, stored as a gap from the bottom right, and said once the keys rest.
+    for (let i = 0; i < 3; i++) await dm.keyboard.press("ArrowLeft");
+    await dm.waitForTimeout(900);
+    const left = await barRect(dm);
+    assert.ok(Math.abs(home.left - left.left - 24) < 1 && Math.abs(home.top - left.top) < 1, `three steps left: ${JSON.stringify({ home, left })}`);
+    assert.equal(await storedSpot(dm), '{"corner":"br","x":24,"y":0}');
+    assert.deepEqual(await said(), ["Window at the bottom edge, 24 px from the right"]);
+    assert.deepEqual(thornAt(), thornBefore, "the arrow keys moved the selected token");
+    assert.equal(await focusedName(dm), "Move window", "the keys took focus off the grip");
+
+    // Shift and ArrowUp: 64 px.
+    await dm.keyboard.press("Shift+ArrowUp");
+    const up = await barRect(dm);
+    assert.ok(Math.abs(left.top - up.top - 64) < 1, `Shift+ArrowUp: ${JSON.stringify({ left, up })}`);
+    assert.equal(await storedSpot(dm), '{"corner":"br","x":24,"y":64}');
+
+    // Reset is left of Close on one top, named by its tooltip.
+    await resetButton.waitFor();
+    const resetBox = await rectOf(resetButton);
+    const closeBox = await rectOf(frame.getByRole("button", { name: "Close", exact: true }));
+    assert.ok(resetBox.right <= closeBox.left + 0.5 && Math.abs(resetBox.top - closeBox.top) < 1, `Reset is not left of Close: ${JSON.stringify({ resetBox, closeBox })}`);
+    assert.equal(await resetButton.getAttribute("title"), "Reset window position and size");
+
+    // A held key moves the window to its room's edge and no further.
+    await grip.focus();
+    for (let i = 0; i < 100; i++) await dm.keyboard.down("ArrowLeft");
+    await dm.keyboard.up("ArrowLeft");
+    const edge = await barRect(dm);
     const c = await chrome(dm);
-    assert.ok(places[0]!.left <= 8.5 && places[1]!.top <= c.top + 8.5 && places[2]!.right >= (c.panel ?? c.width) - 8.5, `the corners: ${JSON.stringify(places)}`);
-    assert.ok(Math.abs(places[3]!.right - home.right) < 1 && Math.abs(places[3]!.bottom - home.bottom) < 1, "the fourth press is not the default spot");
+    assert.ok(Math.abs(edge.left - 8) < 1, `a held key did not stop at the free area's left edge: ${JSON.stringify(edge)}`);
+    await dm.keyboard.press("ArrowLeft");
+    assert.ok(Math.abs((await barRect(dm)).left - edge.left) < 0.5, "a step past the edge moved the window");
+    assert.match((await storedSpot(dm)) ?? "", /^\{"corner":"bl","x":0,"y":64\}$/);
+    assert.ok(edge.bottom <= c.toolbar, "the window left the free area");
+    await dm.waitForTimeout(900);
+    assert.deepEqual(await said(), ["Window at the left edge, 64 px from the bottom"], "a held key was heard more than once");
+    assert.deepEqual(thornAt(), thornBefore, "the held key moved the selected token");
+
+    // Enter and Space on the grip change nothing.
+    const stored = await storedSpot(dm);
+    await dm.keyboard.press("Enter");
+    await dm.keyboard.press("Space");
+    const after = await barRect(dm);
+    assert.ok(Math.abs(after.left - edge.left) < 0.5 && Math.abs(after.top - edge.top) < 0.5, "Enter or Space moved the window");
+    assert.equal(await storedSpot(dm), stored);
+    assert.ok(await frame.isVisible(), "Enter or Space closed the window");
+
+    // Reset removes the key, brings the window home, focuses Close and says so.
+    await resetButton.click();
+    await resetButton.waitFor({ state: "detached" });
+    assert.equal(await storedSpot(dm), null);
+    assert.equal(await focusedName(dm), "Close");
+    const back = await barRect(dm);
+    assert.ok(Math.abs(back.right - home.right) < 1 && Math.abs(back.bottom - home.bottom) < 1, "Reset did not bring the window home");
+    await dm.waitForTimeout(300);
+    assert.deepEqual(await said(), ["Window back at bottom right"]);
+    await shots.take(dm, "token-window-grip-keys-reset");
 
     // A reload keeps the spot, and a resize and a new interface size keep the bar in its corner.
-    await move.click();
-    await move.click();
-    assert.equal(await storedSpot(dm), '{"corner":"tl","x":0,"y":0}');
     for (const view of [
       { ...DESK, scale: 1 },
       { width: 1024, height: 768, scale: 1 },
@@ -502,22 +587,14 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     }
     await shots.take(dm, "bardock-top-left-1024-130");
 
-    // Reset puts the bar home, removes the key and leaves focus on Move bar.
-    await setUp(dm, { ...DESK, scale: 1 }, '{"corner":"tl","x":0,"y":0}');
+    await setUp(dm, { ...DESK, scale: 1 });
     await selectThorn();
-    const reset = dm.getByRole("button", { name: "Reset bar position", exact: true });
-    assert.equal((await reset.textContent())?.trim(), "Reset bar position");
-    await reset.click();
-    await reset.waitFor({ state: "detached" });
-    assert.equal(await storedSpot(dm), null);
-    assert.equal(await focusedName(dm), "Move bar");
-    const back = await barRect(dm);
-    assert.ok(Math.abs(back.right - home.right) < 1 && Math.abs(back.bottom - home.bottom) < 1, "Reset did not bring the bar home");
+    const atHome = await barRect(dm);
 
     // Escape during a drag puts the bar back where it was and keeps it open.
     await dragHeader(dm, { x: 300, y: 300 }, { escape: true });
-    const after = await barRect(dm);
-    assert.ok(Math.abs(after.left - back.left) < 1 && Math.abs(after.top - back.top) < 1, `Escape did not put the bar back: ${JSON.stringify({ back, after })}`);
+    const putBack = await barRect(dm);
+    assert.ok(Math.abs(putBack.left - atHome.left) < 1 && Math.abs(putBack.top - atHome.top) < 1, `Escape did not put the bar back: ${JSON.stringify({ atHome, putBack })}`);
     assert.ok(await dm.getByRole("dialog", { name: "Thorn actions" }).isVisible(), "Escape during a drag closed the bar");
     assert.equal(await storedSpot(dm), null, "a drag Escape put back stored a spot");
   });

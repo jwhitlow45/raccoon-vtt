@@ -44,9 +44,9 @@ This page lists what RaccoonVTT does today, grouped by area. "The DM" means anyo
 - On a short screen, a notice that lasts (Reconnecting, the Starting view bar, a part that did not load, "Viewing as") keeps to one line, its buttons in the same row and More to read the rest, so it never stands over the toolbar. Where even that leaves no room for a row of the tool's options, the options stand over it.
 - Other people's token drags move live, with their name over the token in their color.
 - One finger uses the current tool, and with the Select tool a drag on empty map moves the map. Two fingers pan and pinch-zoom. With a mouse, the wheel zooms at the pointer, as two fingers on a trackpad do, and pointing at a token shows its whole name. Nothing needs a long press.
-- Tapping a token opens its action bar. On a screen 600 px or wider, or a phone on its side, it sits at the bottom right of the map instead of under the token. Drag it by its header, or press "Move bar" to send it to the next corner. This device remembers the spot, and "Reset bar position" puts it back. "Fit the map" keeps the map out from under it. On a phone held upright it spans the screen under the token. On a screen too short for either, it opens taller, over the Multi-select bar and if need be the toolbar. Close it to reach the toolbar again.
+- Tapping a token opens its action bar. On a screen 600 px or wider, or a phone on its side, it opens as a window at the bottom right of the map instead of under the token. Drag it by its header, or by the grip at the header's start ("Move window"). With the grip focused, the arrow keys move it, and Shift moves it further. This device remembers the spot for every token's window, and the reset button left of Close ("Reset window position and size") puts it back. Beside a phone's sideways sheet it narrows, and where it would be too narrow it folds into the sheet's header. "Fit the map" keeps the map out from under it. On a phone held upright it spans the screen under the token. On a screen too short for either, it opens taller, over the Multi-select bar and if need be the toolbar. Close it to reach the toolbar again.
 - The action bar opens with a summary: AC, HP, speed and passive Perception for a creature whose stats you have, then the HP entry, then for the DM a monster's or NPC's six saving throws and its resistances, immunities and vulnerabilities from its stat block. On a phone held sideways, or a screen too short for the whole bar, such as a phone held upright at a larger interface size, the bar keeps AC, HP and the HP entry at the top, and "More stats" holds the rest. A phone held upright keeps one layout whichever token you tap, with Apply in view. "Stat block" opens the whole block in the token's panel, with the action bar still open beside it on a wide screen or a phone on its side, except where the panel fills a very short screen. A player's own character offers "Open the sheet". "Details" sits beside them.
-- The action bar's buttons come in rows. Undo move, Doesn't count and the door lead on a line of their own when they apply. Then come Conditions, Hidden and Multi-select, always together on one line, then Request a roll and Light. The last row holds Locked, Duplicate, Delete (or Dismiss for a companion's player) and Move bar.
+- The action bar's buttons come in rows. Undo move, Doesn't count and the door lead on a line of their own when they apply. Then come Conditions, Hidden and Multi-select, always together on one line, then Request a roll and Light. The last row holds Locked, Duplicate and Delete for the DM, or Dismiss for a companion's player.
 - A tap on empty map closes the action bar. Panning, pinching and holding a finger down to ping leave it open.
 - The fight's alerts and a docked action bar share the right of the map without covering each other. Where there is no room for both, the alerts show as one row naming the most pressing one, and its tap hides the bar and shows them. Where the tool's options leave the alerts too little room for one whole card, as on a short phone with the Ruler, the same row stands for them, clear of the tool's buttons and of End turn. Its tap opens a roll waiting for your answer, or shows the alerts over the tool's options until you tap elsewhere, and opens the alerts over the screen where the column has no room, until you tap Close, press Escape or go Back. The action bar and the tool's options keep clear of notices that last, such as Reconnecting or the Starting view bar, and the options scroll past that room.
 - On a phone held upright, an open sheet folds the token's action bar and the fight's alerts into one row on the sheet's top edge: a button with the token's name, its Close, and one button that names the most pressing alert and how many more wait. The token's name closes the sheet and brings the bar back as it was, a half-typed HP entry included. The alert button closes the sheet and shows the alerts, or opens a roll waiting for your answer. Where the screen is too short for that row, its buttons sit in the sheet's header.
@@ -364,7 +364,7 @@ Menu, This device holds settings kept on this device alone:
 
 ### Keys
 
-On any device with a keyboard. They do nothing while you type in a field or a window is open. On a Mac, Cmd works where Ctrl is written.
+On any device with a keyboard. They do nothing while you type in a field or a dialog is open. On a Mac, Cmd works where Ctrl is written.
 
 | Key | Does | Who |
 | --- | --- | --- |
@@ -383,7 +383,7 @@ On any device with a keyboard. They do nothing while you type in a field or a wi
 | / | Search the scene in the outliner | DM |
 | S | Hide or show the side panel, on a screen 900 px or wider | everyone |
 | ? | Show the shortcuts | everyone |
-| Escape | Close a sheet, else the token's action bar, else let go of the selection and end Multi-select. While the token's panel shows the selection, the bar closes and keeps it, and a group stays until Done | everyone |
+| Escape | Close a sheet, else the token's action bar, else let go of the selection and end Multi-select. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done | everyone |
 
 ### Mouse with keys
 
@@ -425,11 +425,14 @@ A handout the DM shows, or a picture or a PDF opened from the Library.
 | Space, Shift+Space | Scroll down or up about a screen, as Page Down and Page Up do | everyone, on a handout of pages taller than the viewer, with focus on the viewer rather than a button |
 | Home, End | Go to the top of the first page or the end of the last | everyone, on a handout of pages taller than the viewer |
 
-### Token action bar
+### Token window
+
+Where the action bar opens as a window: on a screen 600 px or wider, or a phone on its side. With its grip focused, the arrow keys move it and never move a token.
 
 | Key | Does | Who |
 | --- | --- | --- |
 | Escape | Put it back where it was | everyone, while you drag its header |
+| Arrow keys | Move it 8 px, or 64 px with Shift | everyone, with its grip focused |
 
 ### Initiative
 

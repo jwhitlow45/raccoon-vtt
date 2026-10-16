@@ -57,7 +57,7 @@ import { useRoomScope } from "../state/scope.ts";
 import { addsToSelection, barDismiss } from "../state/selection.ts";
 import { stageKeysSlot } from "../state/shortcuts.ts";
 import { sheetOpen as sheetIsOpen } from "../state/types.ts";
-import { dockSlot, foldsUnderSheet } from "../pages/fold.ts";
+import { dockSlot, foldsUnderSheet, sideSheetRoom } from "../pages/fold.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
 import { barChrome, barCover, barDockSlot, clearAnchor, largerEach, pastBars, restingBar } from "./barDock.ts";
@@ -272,7 +272,9 @@ export function MapStage(props: {
     // Whether the bar shows follows the room's state at once, ahead of the render that draws or removes it.
     const local = store.getState().local;
     const full = scope.get(dockSlot).getState().sheetFull;
-    return local.actionBar && local.selectedId !== null && !activeTool(local.tool, role).pointer && !foldsUnderSheet({ ...layoutSize(window, uiScale()), sheetOpen: sheetIsOpen(local), full });
+    const layout = layoutSize(window, uiScale());
+    const sideRoom = sideSheetRoom(layout, scope.get(barDockSlot).getState().chrome);
+    return local.actionBar && local.selectedId !== null && !activeTool(local.tool, role).pointer && !foldsUnderSheet({ ...layout, sheetOpen: sheetIsOpen(local), full, sideRoom });
   };
   const barCoverRef = useRef<(viewport: Size, source: "drawn" | "opening" | "fresh", shows?: boolean) => Insets>(() => NO_INSETS);
   barCoverRef.current = (viewport, source, shows = barShowsRef.current()) => {
