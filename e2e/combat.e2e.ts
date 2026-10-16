@@ -510,12 +510,38 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     for (const r of await rowsOf()) assert.equal(r.slot, true, `${r.name} lost the slot in the side panel`);
   });
 
-  test("2d. at 480 x 320 at 130% a notice that comes and goes keeps the round header stuck: Ana's End turn stays in reach as Your turn arrives, and the DM's Next as a toast does (SFB-P-15)", async () => {
+  test("2d. at 480 x 320 at 130% a notice that comes and goes keeps the round header stuck and in its form: Ana's End turn stays in reach as Your turn arrives, and the DM's Next as a toast does (SFB-P-15, SFB-P-18)", async () => {
     const view = { width: 480, height: 320, scale: 1.3, side: 47, bottom: 21 };
     const modal = (page: Page) => page.locator('dialog[data-rvtt-sheet][aria-modal="true"]');
+    /*
+     * The header's form and the body it is picked from: the scroller plus
+     * the room the passing notices take, counted as pages/modalSlot.tsx
+     * passingNoticesPx counts it. Counting a gap that is not drawn turned
+     * the compact header full for the seconds a notice showed.
+     */
+    const room = (page: Page) =>
+      page.evaluate(() => {
+        type El = { offsetHeight: number; clientHeight: number; dataset: Record<string, string | undefined>; closest(s: string): El | null; querySelector(s: string): El | null };
+        const g = globalThis as unknown as { document: { querySelector(s: string): El | null }; getComputedStyle(e: El): { rowGap: string } };
+        const header = g.document.querySelector("[data-round-header]")!;
+        const notices = header.closest("dialog")!.querySelector("[data-rvtt-modal-notices]")!;
+        const gap = parseFloat(g.getComputedStyle(notices).rowGap) || 0;
+        let passing = 0;
+        for (const name of ["turn", "toasts"]) {
+          const place = notices.querySelector(`[data-rvtt-modal-slot="${name}"]`);
+          if (place && place.offsetHeight > 0) passing += place.offsetHeight + gap;
+        }
+        return { form: header.dataset.form ?? "", body: header.closest("[data-pane-body]")!.clientHeight + passing };
+      });
     const stuck = async (page: Page, button: string, label: string) => {
-      assert.notEqual((await headerRoom(page)).form, "static", `${label}: the round header stopped sticking`);
+      const now = await room(page);
+      assert.notEqual(now.form, "static", `${label}: the round header stopped sticking`);
       assert.ok(await wholeInReach(page.locator("[data-round-header]").getByRole("button", { name: button })), `${label}: ${button} is out of reach`);
+      return now;
+    };
+    const keeps = (during: { form: string; body: number }, rest: { form: string; body: number }, label: string) => {
+      assert.equal(during.form, rest.form, `${label}: the round header changed form while the notice showed`);
+      assert.ok(Math.abs(during.body - rest.body) <= 1, `${label}: the notice took ${rest.body - during.body} px more than was counted`);
     };
     // Cyra's turn, with Ana's order scrolled, then Bree's again: "Your turn" takes its place over the body for a few seconds.
     await ops.send({ t: "encounter.next" });
@@ -527,8 +553,11 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await scrollPane(ana, 220);
     await ops.send({ t: "encounter.prev" });
     await modal(ana).locator('[data-rvtt-modal-slot="turn"] [role="status"]', { hasText: "Your turn" }).waitFor();
-    await stuck(ana, "End turn", "Ana, as Your turn shows");
+    const anaDuring = await stuck(ana, "End turn", "Ana, as Your turn shows");
     await shots.take(ana, "combat-header-480-130-your-turn-scrolled");
+    // Her turn brings End turn into the header, so its form is compared with the one it settles in once the notice goes.
+    await modal(ana).locator('[data-rvtt-modal-slot="turn"]:empty').waitFor({ state: "attached", timeout: 15_000 });
+    keeps(anaDuring, await room(ana), "Ana, as Your turn shows");
     await ana.keyboard.press("Escape");
     await modal(ana).waitFor({ state: "detached" });
     await setUp(ana, anaCdp, { ...DESK, scale: 1 });
@@ -539,6 +568,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await openTracker(dm);
     await modal(dm).waitFor();
     await scrollPane(dm, 220);
+    const dmRest = await room(dm);
     const anaCookie = (await anaContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     const anaOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie: anaCookie });
     try {
@@ -548,7 +578,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       anaOps.close();
     }
     await modal(dm).locator('[data-rvtt-modal-slot="toasts"] [role="status"]').first().waitFor();
-    await stuck(dm, "Next", "the DM, as a toast shows");
+    keeps(await stuck(dm, "Next", "the DM, as a toast shows"), dmRest, "the DM, as a toast shows");
     await shots.take(dm, "combat-header-480-130-toast-scrolled");
     await dm.keyboard.press("Escape");
     await modal(dm).waitFor({ state: "detached" });

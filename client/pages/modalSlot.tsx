@@ -98,7 +98,8 @@ export function ModalSlots() {
     refs.current[name] = el;
   };
   return (
-    <div data-rvtt-modal-notices="" style={{ ...COLUMN, flex: "none", padding: `0 ${theme.space(3)}px` }}>
+    // Only the sides inline: a padding shorthand here would beat globals.css's foot padding, which passingNoticesPx counts.
+    <div data-rvtt-modal-notices="" style={{ ...COLUMN, flex: "none", paddingInline: theme.space(3) }}>
       {SHOWN.map((name) => (
         <div key={name} ref={place(name)} data-rvtt-modal-slot={name} style={COLUMN} />
       ))}
