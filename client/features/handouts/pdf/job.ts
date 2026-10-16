@@ -50,6 +50,8 @@ export type Phase =
   | { k: "empty" }
   /** A ledger this device found from an upload that did not finish (4.1.2). */
   | { k: "recovery"; ledger: Ledger }
+  /** Remove them pressed: the recovery's pages being deleted. Nothing is uploading, so there is nothing to cancel. */
+  | { k: "removing" }
   | { k: "recovered"; removed: number | null; failed: boolean };
 
 export type PdfJob = {
@@ -266,7 +268,9 @@ export const REFUSALS: Record<RefusalKind, string> = {
 export const PDF_TOO_LARGE = "PDFs up to 100 MB can be used.";
 
 export function onePdfAtATime(job: PdfJob): string {
-  return job.phase.k === "recovery" ? `One PDF at a time. Remove or keep the pages of ${job.fileName} first.` : `One PDF at a time. Cancel ${job.fileName}, or wait for it.`;
+  if (job.phase.k === "recovery") return `One PDF at a time. Remove or keep the pages of ${job.fileName} first.`;
+  if (job.phase.k === "removing") return `One PDF at a time. Wait until the pages of ${job.fileName} are removed.`;
+  return `One PDF at a time. Cancel ${job.fileName}, or wait for it.`;
 }
 
 /** Why a picked PDF does not start a job, before a byte of it is read, or null when it does (4.1.1, 4.1.3). */

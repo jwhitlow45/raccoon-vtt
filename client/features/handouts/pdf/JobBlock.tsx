@@ -297,6 +297,8 @@ function Body(props: {
           </Buttons>
         </>
       );
+    case "removing":
+      return <Loading text="Removing the pages…" delay={0} />;
     case "cancelling":
       return (
         <>

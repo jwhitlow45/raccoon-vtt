@@ -932,8 +932,12 @@ describe("the ledger and its recovery (docs/design-v1-pdf-handouts.md 4.1.2)", (
       w.runner.recover(ledger);
       assert.equal(w.job().announce, "A PDF upload did not finish: Strange letter, 2 pages are in the library. Page 7 may also be there, a loose handout image of 1583 x 2048 px.");
       assert.ok(waitsOnDm(w.job()));
-      if (choice === "remove") await w.runner.removeRecovered();
-      else w.runner.keepRecovered();
+      if (choice === "remove") {
+        const removing = w.runner.removeRecovered();
+        assert.deepEqual(w.phase(), { k: "removing" }, "its own phase, with no upload to cancel");
+        assert.equal(jobActive(w.job()), true);
+        await removing;
+      } else w.runner.keepRecovered();
       assert.deepEqual(w.deleted, choice === "remove" ? [["a", "b"]] : []);
       assert.equal(w.ledger(), null);
       assert.equal(w.phase().k, "recovered");

@@ -624,7 +624,7 @@ export class JobRunner implements JobControl {
     const job = this.#store.getState().job;
     if (!job || this.#cancelling || this.#disposed) return;
     const from = job.phase.k;
-    if (from === "saved" || from === "cancelled" || from === "recovery" || from === "recovered") return;
+    if (from === "saved" || from === "cancelled" || from === "recovery" || from === "removing" || from === "recovered") return;
     // Nothing uploaded and nothing on its way: there is nothing to undo, so the job just ends.
     if ((from === "loading" || from === "range" || from === "refused" || from === "empty") && job.pages.length === 0 && !this.#inflight) return this.end();
     this.#cancelling = true;
@@ -720,7 +720,7 @@ export class JobRunner implements JobControl {
     const job = this.#job;
     if (job.phase.k !== "recovery") return;
     const { ledger } = job.phase;
-    this.#set({ phase: { k: "cancelling" } });
+    this.#set({ phase: { k: "removing" } });
     this.#say("Removing the pages…");
     const result = ledger.ids.length > 0 ? await this.#deps.deleteImages(ledger.ids) : { deleted: 0, inUse: false, error: null };
     const failed = result.error !== null && result.error !== undefined;
