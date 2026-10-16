@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import type { EphEvent } from "#shared/protocol.ts";
@@ -7,8 +8,8 @@ import { groundSource, seenGround } from "../builder/heights/ground.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
-import { InfoLine, OptButton, OptionsColumn, OptionsRow } from "./controls.tsx";
-import { KeptRulers } from "./KeptRulers.tsx";
+import { OptButton, OptionsStrip } from "./controls.tsx";
+import { KeptRulersChip, useKeptRulers } from "./KeptRulers.tsx";
 import {
   allStops,
   beginGesture,
@@ -174,60 +175,89 @@ function onCancel(ctx: ToolContext): void {
   else publish(ctx, null);
 }
 
+/**
+ * The Ruler's row (docs/design-v1-tool-options.md 9.2): Shared for the DM,
+ * Keep and Clear, and the kept rulers behind a chip. Its line is the hint,
+ * or the reading with the diagonal rule.
+ */
 function RulerOptions(props: { role: "dm" | "player" }) {
   const tool = useScoped(rulerSlot);
   const rulerStore = tool.store;
   const { ruler, share } = useStore(rulerStore);
   const tokens = useRoomView((s) => s.view?.tokens);
   const settings = useRoomView((s) => s.view?.meta.settings);
+  const kept = useKeptRulers(props.role);
   const stops = ruler ? allStops(ruler) : [];
-  let info = "Drag to measure. Tap to add a waypoint. Double-tap to keep a ruler on the map.";
+  let info: ReactNode = "Drag to measure. Tap to add a waypoint. Double-tap to keep a ruler on the map.";
   if (stops.length === 1) info = "Tap or drag to the next point.";
   if (stops.length > 1 && tokens && settings) {
     const { totalFt, legsFt } = measureStops(stops, tokens, settings);
-    info = legsFt.length > 1 ? `${formatFeet(totalFt)} (${legsFt.map(formatFeet).join(" + ")})` : formatFeet(totalFt);
+    info = (
+      <>
+        <strong>{formatFeet(totalFt)}</strong>
+        {legsFt.length > 1 ? ` (${legsFt.map(formatFeet).join(" + ")})` : null}
+      </>
+    );
   }
   return (
-    <OptionsColumn>
-      <InfoLine tone={stops.length > 1 ? undefined : "muted"}>
-        {info}
-        {settings ? <span style={{ color: theme.color.textMuted }}> · {diagonalLabel(settings.diagonal)}</span> : null}
-      </InfoLine>
-      <OptionsRow label="Ruler">
-        {props.role === "dm" ? (
-          // A fixed name that says what pressed means (docs/design-v1-visual.md 3.7).
-          <OptButton
-            pressed={share}
-            label="Players see this ruler"
-            onClick={() => {
-              const ctx = tool.activeCtx;
-              const next = !share;
-              const { ruler: current, sent } = rulerStore.getState();
-              if (!next && current && sent && ctx) {
-                // Take it off everyone else's map, then keep showing it here.
-                ctx.actions.sendEph({ k: "rulerEnd", id: current.id });
-                rulerStore.setState({ sent: false });
-              }
-              rulerStore.setState({ share: next });
-              if (ctx && current) publish(ctx, current);
-            }}
-          >
-            Shared
-          </OptButton>
-        ) : null}
-        <OptButton
-          disabled={!ruler || ruler.stops.length < 2}
-          label="Keep this ruler on the map"
-          onClick={() => tool.activeCtx && keep(tool.activeCtx, rulerStore.getState().ruler)}
-        >
-          Keep
-        </OptButton>
-        <OptButton tone="danger" disabled={!ruler} onClick={() => tool.activeCtx && publish(tool.activeCtx, null)}>
-          Clear
-        </OptButton>
-      </OptionsRow>
-      <KeptRulers role={props.role} />
-    </OptionsColumn>
+    <OptionsStrip
+      tool="Ruler"
+      line={{
+        tone: stops.length > 1 ? "reading" : "hint",
+        content: (
+          <>
+            {info}
+            {settings ? <span style={{ color: theme.color.textMuted }}> · {diagonalLabel(settings.diagonal)}</span> : null}
+          </>
+        ),
+      }}
+      slots={[
+        props.role === "dm" && {
+          id: "shared",
+          priority: 1,
+          control: (
+            // A fixed name that says what pressed means (docs/design-v1-visual.md 3.7).
+            <OptButton
+              pressed={share}
+              label="Players see this ruler"
+              onClick={() => {
+                const ctx = tool.activeCtx;
+                const next = !share;
+                const { ruler: current, sent } = rulerStore.getState();
+                if (!next && current && sent && ctx) {
+                  // Take it off everyone else's map, then keep showing it here.
+                  ctx.actions.sendEph({ k: "rulerEnd", id: current.id });
+                  rulerStore.setState({ sent: false });
+                }
+                rulerStore.setState({ share: next });
+                if (ctx && current) publish(ctx, current);
+              }}
+            >
+              Shared
+            </OptButton>
+          ),
+        },
+        {
+          id: "keep",
+          priority: 2,
+          control: (
+            <OptButton disabled={!ruler || ruler.stops.length < 2} label="Keep this ruler on the map" onClick={() => tool.activeCtx && keep(tool.activeCtx, rulerStore.getState().ruler)}>
+              Keep
+            </OptButton>
+          ),
+        },
+        {
+          id: "clear",
+          priority: 2,
+          control: (
+            <OptButton tone="danger" disabled={!ruler} onClick={() => tool.activeCtx && publish(tool.activeCtx, null)}>
+              Clear
+            </OptButton>
+          ),
+        },
+        kept.length > 0 && { id: "kept", priority: 3, compact: true, control: <KeptRulersChip kept={kept} /> },
+      ]}
+    />
   );
 }
 

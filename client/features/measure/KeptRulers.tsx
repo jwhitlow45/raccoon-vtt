@@ -2,8 +2,9 @@ import { useMemo } from "react";
 import { Icon } from "../../components/Icon.tsx";
 import type { Drawing, RoomState } from "#shared/model.ts";
 import { dispatchGesture } from "../../state/actions.ts";
+import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
-import { OptButton, OptionsRow } from "./controls.tsx";
+import { OptButton, ValueChip } from "./controls.tsx";
 import { formatFeet, keptStops, measureStops } from "./ruler.ts";
 
 /**
@@ -12,48 +13,70 @@ import { formatFeet, keptStops, measureStops } from "./ruler.ts";
  * removes one, and Remove all takes them in one undo step. They are listed
  * here rather than picked on the map, where a tap with the ruler tool
  * already starts a ruler or adds a waypoint.
+ *
+ * They sit behind a chip in the Ruler's row, "Kept rulers (2)", whose
+ * setting popover holds one danger row per ruler (docs/design-v1-tool-options.md
+ * 9.2). The popover stays open as rulers go, and closes with its chip
+ * when none is left.
  */
 
 const EMPTY: RoomState["drawings"] = {};
 
-export function KeptRulers(props: { role: "dm" | "player" }) {
+export type KeptRuler = { id: string; text: string };
+
+/** The kept rulers on this scene this member may remove, oldest first, each described as its button says it. */
+export function useKeptRulers(role: "dm" | "player"): KeptRuler[] {
   const drawings = useRoomView((s) => s.view?.drawings ?? EMPTY);
   const sceneId = useRoomView((s) => s.sceneId);
   const youId = useRoomView((s) => s.you?.memberId ?? null);
   const members = useRoomView((s) => s.view?.members);
   const tokens = useRoomView((s) => s.view?.tokens);
   const settings = useRoomView((s) => s.view?.meta.settings);
-  const actions = useRoomActions();
-  const kept = useMemo(
-    () =>
-      Object.values(drawings)
-        .filter((d): d is Drawing => !!d && d.kind === "ruler" && d.sceneId === sceneId && (props.role === "dm" || d.ownerId === youId))
-        .sort((a, b) => (a.id < b.id ? -1 : 1)),
-    [drawings, sceneId, youId, props.role],
-  );
-  if (kept.length === 0 || !tokens || !settings) return null;
+  return useMemo(() => {
+    if (!tokens || !settings) return [];
+    const kept = Object.values(drawings)
+      .filter((d): d is Drawing => !!d && d.kind === "ruler" && d.sceneId === sceneId && (role === "dm" || d.ownerId === youId))
+      .sort((a, b) => (a.id < b.id ? -1 : 1));
+    const describe = (d: Drawing) => {
+      const total = formatFeet(measureStops(keptStops(d), tokens, settings).totalFt);
+      const owner = d.ownerId === youId ? null : (members?.[d.ownerId]?.name ?? "Someone");
+      return [owner, total, d.visibility === "dm" ? "only DMs see it" : null].filter(Boolean).join(" · ");
+    };
+    return kept.map((d) => ({ id: d.id, text: describe(d) }));
+  }, [drawings, sceneId, youId, members, tokens, settings, role]);
+}
 
-  const describe = (d: Drawing) => {
-    const total = formatFeet(measureStops(keptStops(d), tokens, settings).totalFt);
-    const owner = d.ownerId === youId ? null : (members?.[d.ownerId]?.name ?? "Someone");
-    return [owner, total, d.visibility === "dm" ? "only DMs see it" : null].filter(Boolean).join(" · ");
-  };
+/** "Kept rulers (2)", or "Kept (2)" where the row is short, with room for two digits so a count never moves its neighbors. */
+export function KeptRulersChip(props: { kept: readonly KeptRuler[] }) {
+  const actions = useRoomActions();
+  const { kept } = props;
+  const count = kept.length;
   return (
-    <OptionsRow label="Kept rulers">
-      {kept.map((d) => {
-        const text = describe(d);
-        return (
-          <OptButton key={d.id} tone="danger" label={`Remove the kept ruler: ${text}`} onClick={() => actions.dispatch({ t: "drawing.delete", drawingId: d.id })}>
-            {text}
+    <ValueChip
+      label="Kept rulers"
+      kind="setting"
+      plain
+      value="count"
+      options={[
+        { key: "count", words: `Kept rulers (${count})` },
+        { key: "widest", words: "Kept rulers (88)" },
+      ]}
+      short={`Kept (${count})`}
+      title={`Kept rulers (${count})`}
+    >
+      <div role="group" aria-label="Kept rulers" style={{ display: "grid", gap: theme.space(1) }}>
+        {kept.map((d) => (
+          <OptButton key={d.id} tone="danger" label={`Remove the kept ruler: ${d.text}`} onClick={() => actions.dispatch({ t: "drawing.delete", drawingId: d.id })}>
+            {d.text}
             <Icon name="close" size="sm" />
           </OptButton>
-        );
-      })}
-      {kept.length > 1 ? (
-        <OptButton tone="danger" onClick={() => dispatchGesture(actions, kept.map((d) => ({ t: "drawing.delete" as const, drawingId: d.id })))}>
-          Remove all
-        </OptButton>
-      ) : null}
-    </OptionsRow>
+        ))}
+        {count > 1 ? (
+          <OptButton tone="danger" onClick={() => dispatchGesture(actions, kept.map((d) => ({ t: "drawing.delete" as const, drawingId: d.id })))}>
+            Remove all
+          </OptButton>
+        ) : null}
+      </div>
+    </ValueChip>
   );
 }
