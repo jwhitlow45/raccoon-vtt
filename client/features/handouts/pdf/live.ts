@@ -4,9 +4,9 @@ import { api } from "../../../lib/api.ts";
 import { useRoomScope, useScoped } from "../../../state/scope.ts";
 import type { RoomActions, RoomUi, RoomViewStore } from "../../../state/view.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../../state/view.ts";
-import { deleteImages, rememberAsset } from "../../images/library.ts";
+import { deleteImages, rememberAsset, uploadingSlot } from "../../images/library.ts";
 import { canvasSource, encodeWithin, pageThumb } from "./encode.ts";
-import { jobActive, pdfJobSlot, waitsOnDm } from "./job.ts";
+import { jobActive, jobPageIds, pdfJobSlot, waitsOnDm } from "./job.ts";
 import { clearLedger, ledgerKey, localLedgerStorage, readLedger, recoveryOf } from "./ledger.ts";
 import { JobRunner, type JobDeps } from "./run.ts";
 
@@ -117,6 +117,18 @@ export function usePdfJobRoom(): void {
   const actions = useRoomActions();
   const ui = useRoomUi();
   const checked = useRef<string | null>(null);
+
+  // The Library's "Uploading" tags and Clean up's skip read the job's pages here (images/library.ts uploadingSlot), emptied when the job ends.
+  const uploading = scope.get(uploadingSlot);
+  useEffect(() => {
+    const mirror = (job: Parameters<typeof jobPageIds>[0]) => {
+      const ids = jobPageIds(job);
+      const now = uploading.getState().ids;
+      if (ids.size !== now.size || [...ids].some((id) => !now.has(id))) uploading.setState({ ids: new Set(ids) });
+    };
+    mirror(slot.store.getState().job);
+    return slot.store.subscribe((s) => mirror(s.job));
+  }, [slot, uploading]);
 
   useEffect(() => {
     if (!active) return;

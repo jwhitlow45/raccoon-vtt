@@ -1,6 +1,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { LIMITS } from "#shared/limits.ts";
 import { ApiError } from "../../../lib/api.ts";
+import { pageCountText } from "../handouts.ts";
 import { scopeSlot } from "../../../state/scope.ts";
 import type { Ledger, UncertainPage } from "./ledger.ts";
 import { PDF_MAX_BYTES } from "./options.ts";
@@ -140,7 +141,7 @@ export function pagePosition(job: Pick<PdfJob, "range" | "leftOut">, page: numbe
 }
 
 const n = (value: number) => value.toLocaleString("en-US");
-const pagesWord = (count: number) => (count === 1 ? "1 page" : `${n(count)} pages`);
+const pagesWord = pageCountText;
 
 /** The fields' rules (4.1.3), each broken one said beside them. */
 export type RangeCheck = { ok: true; from: number; to: number; count: number } | { ok: false; problems: string[] };

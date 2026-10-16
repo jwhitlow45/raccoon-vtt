@@ -16,10 +16,11 @@ import { useScoped } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomView } from "../../state/view.ts";
 import { FileButton, RadioGroup } from "../dm/controls.tsx";
 import { honorsImageOrientation } from "../images/orientation.ts";
+import { docShowing } from "../images/library.ts";
 import { checkImageFile, prepareImageUpload } from "../images/upload.ts";
-import { EMPTY_DRAFT, handoutDraftSlot, showDocOp, type HandoutDraft } from "./draft.ts";
+import { EMPTY_DRAFT, handoutDraftSlot, type HandoutDraft } from "./draft.ts";
 import { HANDOUT_MAX_BYTES, HANDOUT_MAX_SIDE } from "./downscale.ts";
-import { audienceText, showHandoutOp, showingKey, titleFromFileName } from "./handouts.ts";
+import { audienceText, pageCountText, pageName, showHandoutOp, showingKey, titleFromFileName } from "./handouts.ts";
 import { HandoutViewer, type ViewerPage } from "./HandoutViewer.tsx";
 import { JobBlock } from "./pdf/JobBlock.tsx";
 import { isPdfFile, jobPageIds, pdfPickRefusal } from "./pdf/job.ts";
@@ -28,19 +29,20 @@ import { usePdfJob } from "./pdf/live.ts";
 /** A handout's thumbnail in its row: a picture, so larger than a row's 32 px disk, still inside a 56 px two-line row. */
 const THUMB_PX = 44;
 
-/** "12 pages", for a handout or a document of more than one. */
-const pagesTag = (count: number) => (count === 1 ? "1 page" : `${count} pages`);
-
 type PageRef = { assetId: string; width?: number; height?: number };
 
-/** What the viewer shows: a title, its pages, and the showing it is (a handout's own key, or `doc:<id>`). */
-type Viewing = { title: string; pages: ViewerPage[]; showing: string };
+/**
+ * What the viewer shows: a title, its pages, the showing it is (a
+ * handout's own key, which the players' popup uses, or `doc:<id>`), and the
+ * lines under its title (docs/design-v1-pdf-handouts.md 8.4).
+ */
+type Viewing = { title: string; pages: ViewerPage[]; showing: string; details: string };
 
 /** Every page of a handout or a document, for the viewer, each named "Strange letter, page 2 of 5" and laid out at its size. */
 function viewerPages(title: string, pages: readonly PageRef[], url: (id: string) => string): ViewerPage[] {
   return pages.map((p, i) => ({
     src: url(p.assetId),
-    alt: pages.length > 1 ? `${title}, page ${i + 1} of ${pages.length}` : title,
+    alt: pageName(title, i, pages.length),
     ...(p.width !== undefined && p.height !== undefined ? { width: p.width, height: p.height } : {}),
   }));
 }
@@ -67,9 +69,16 @@ export function HandoutsSection() {
     [handouts],
   );
   const full = useCallback((id: string) => assets.url(id, "full"), [assets]);
-  const view = (title: string, pages: readonly PageRef[], opener: HTMLElement | null, showing: string) => {
+  const view = (title: string, pages: readonly PageRef[], opener: HTMLElement | null, showing: string, details: string) => {
     viewOpener.current = opener;
-    setViewing({ title, pages: viewerPages(title, pages, full), showing });
+    setViewing({ title, pages: viewerPages(title, pages, full), showing, details });
+  };
+  /** A document's View: every page, under the Library's key for it, with its page count and whether it shows. */
+  const viewDoc = (docId: string, opener: HTMLElement | null) => {
+    const doc = docs?.[docId];
+    if (!doc) return;
+    const shown = docShowing(doc, Object.values(handouts ?? {}));
+    view(doc.title, doc.pages, opener, `doc:${doc.id}`, `${pageCountText(doc.pages.length)}.${shown ? " Showing now." : ""}`);
   };
   // Where focus goes when the upload's block leaves: the form when it is open, else Show a handout (4.1.7).
   const afterBlock = useCallback(() => {
@@ -92,10 +101,7 @@ export function HandoutsSection() {
       <JobBlock
         onLeave={afterBlock}
         onShow={showSaved}
-        onView={(docId, opener) => {
-          const doc = docs?.[docId];
-          if (doc) view(doc.title, doc.pages, opener, `doc:${doc.id}`);
-        }}
+        onView={viewDoc}
       />
       {showing.length === 0 ? <Help>No handout is showing.</Help> : <Help>Showing now. Players can close their own copy.</Help>}
       {showing.length > 0 ? (
@@ -110,7 +116,7 @@ export function HandoutsSection() {
                   <button
                     type="button"
                     aria-label={`View ${h.title}`}
-                    onClick={(e) => view(h.title, pages, e.currentTarget, showingKey(h))}
+                    onClick={(e) => view(h.title, pages, e.currentTarget, showingKey(h), `To ${audienceText(h.to, members ?? {})}${pages.length > 1 ? `, ${pageCountText(pages.length)}` : ""}. Showing now.`)}
                     style={{ display: "block", padding: 0, border: "none", background: "transparent", cursor: "pointer", borderRadius: theme.radius.sm }}
                   >
                     <img
@@ -123,7 +129,7 @@ export function HandoutsSection() {
                   </button>
                 }
                 title={h.title}
-                detail={`To ${audienceText(h.to, members ?? {})}${pages.length > 1 ? `, ${pagesTag(pages.length)}` : ""}`}
+                detail={`To ${audienceText(h.to, members ?? {})}${pages.length > 1 ? `, ${pageCountText(pages.length)}` : ""}`}
                 trailing={
                   <Button variant="danger" size="sm" onClick={() => actions.dispatch({ t: "handout.close", handoutId: h.id })}>
                     Close
@@ -134,8 +140,18 @@ export function HandoutsSection() {
           })}
         </RowList>
       ) : null}
-      <ShowHandout members={members ?? {}} docs={docs ?? {}} opener={showButton} formRef={formRef} onView={view} />
-      {viewing ? <HandoutViewer title={viewing.title} pages={viewing.pages} showing={viewing.showing} onClose={() => setViewing(null)} backClose opener={viewOpener} /> : null}
+      <ShowHandout members={members ?? {}} docs={docs ?? {}} opener={showButton} formRef={formRef} onViewDoc={viewDoc} />
+      {viewing ? (
+        <HandoutViewer
+          title={viewing.title}
+          pages={viewing.pages}
+          showing={viewing.showing}
+          details={<span>{viewing.details}</span>}
+          onClose={() => setViewing(null)}
+          backClose
+          opener={viewOpener}
+        />
+      ) : null}
     </Section>
   );
 }
@@ -145,7 +161,7 @@ function ShowHandout(props: {
   docs: Record<string, HandoutDoc | undefined>;
   opener: RefObject<HTMLButtonElement | null>;
   formRef: RefObject<HTMLDivElement | null>;
-  onView(title: string, pages: readonly PageRef[], opener: HTMLElement | null, showing: string): void;
+  onViewDoc(docId: string, opener: HTMLElement | null): void;
 }) {
   const roomId = useRoomView((s) => s.roomId);
   const actions = useRoomActions();
@@ -237,7 +253,7 @@ function ShowHandout(props: {
     const result =
       pick?.kind === "doc"
         ? picked
-          ? showDocOp(input, picked)
+          ? showHandoutOp({ ...input, pages: picked.pages })
           : ({ ok: false, error: "That handout was deleted." } as const)
         : pick?.kind === "image"
           ? showHandoutOp({ ...input, assetId: pick.asset.id })
@@ -278,8 +294,8 @@ function ShowHandout(props: {
             />
             {pick.kind === "doc" && picked ? (
               <>
-                <span style={{ fontSize: theme.font.body14 }}>{pagesTag(picked.pages.length)}</span>
-                <Button size="sm" onClick={(e) => props.onView(picked.title, picked.pages, e.currentTarget, `doc:${picked.id}`)}>
+                <span style={{ fontSize: theme.font.body14 }}>{pageCountText(picked.pages.length)}</span>
+                <Button size="sm" onClick={(e) => props.onViewDoc(picked.id, e.currentTarget)}>
                   View
                 </Button>
               </>
@@ -305,7 +321,7 @@ function ShowHandout(props: {
                     <button
                       key={d.id}
                       type="button"
-                      aria-label={`Use ${d.title}, ${pagesTag(d.pages.length)}`}
+                      aria-label={`Use ${d.title}, ${pageCountText(d.pages.length)}`}
                       onClick={() => set({ pick: { kind: "doc", docId: d.id }, title: title.trim() ? title : d.title })}
                       style={{
                         position: "relative",
@@ -320,7 +336,7 @@ function ShowHandout(props: {
                     >
                       <img src={assets.url(d.pages[0]?.assetId ?? "", "thumb")} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: theme.radius.sm }} />
                       <span aria-hidden style={{ position: "absolute", left: theme.space(1), bottom: theme.space(1), display: "flex", pointerEvents: "none" }}>
-                        <Tag dense>{pagesTag(d.pages.length)}</Tag>
+                        <Tag dense>{pageCountText(d.pages.length)}</Tag>
                       </span>
                     </button>
                   ))}
