@@ -286,8 +286,9 @@ export function openedWords(job: Pick<PdfJob, "fileName" | "numPages">): string[
   return out;
 }
 
-export function uploadLabel(count: number): string {
-  return `Upload ${pagesWord(count)}`;
+/** The range's button: its count of pages, or "Upload pages" while the range breaks a rule and has none. */
+export function uploadLabel(count: number | null): string {
+  return count === null ? "Upload pages" : `Upload ${pagesWord(count)}`;
 }
 
 /** "Preparing page 3 of 12…", 3 being the first page not yet uploaded, counted within the upload. */
@@ -298,13 +299,15 @@ export function progressWords(job: PdfJob): string {
   return `Preparing page ${n(at)} of ${n(total)}…`;
 }
 
-/** What a pause or stop says. Pages are named by their number in the PDF, so the DM can find them there. */
+/**
+ * What a pause or stop says. Pages are named by their number in the PDF,
+ * so the DM can find them there, in the block and in the toast alike.
+ */
 export function stopWords(job: PdfJob, page: number, stop: Stop): string {
   const total = rangeTotal(job);
-  const at = pagePosition(job, page);
   switch (stop.k) {
     case "offline":
-      return `The upload stopped at page ${n(at)} of ${n(total)}. Check your connection.`;
+      return `The upload stopped at page ${n(page)}. Check your connection.`;
     case "busy":
       return "The server is busy.";
     case "rateLimited":
@@ -325,7 +328,7 @@ export function stopWords(job: PdfJob, page: number, stop: Stop): string {
 /** What the toast says for a pause or stop, which also tells the DM where to go on. */
 export function stopToast(job: PdfJob, page: number, stop: Stop): string {
   if (stop.k === "notDm") return "The PDF upload stopped: you are no longer a DM here.";
-  return `The PDF upload paused at page ${n(pagePosition(job, page))}. Open Handouts in the DM panel to go on.`;
+  return `The PDF upload paused at page ${n(page)}. Open Handouts in the DM panel to go on.`;
 }
 
 export function savedWords(job: PdfJob): string[] {
@@ -336,18 +339,19 @@ export function savedWords(job: PdfJob): string[] {
   return out;
 }
 
-/** "Page 7 was uploading and may remain in the library as a loose handout image, 1584 x 2048 px." */
+/** "Page 7 was uploading and may remain in the library as a loose handout image, 1583 × 2048 px." */
 export function uncertainWords(u: UncertainPage, recovery = false): string {
   return recovery
-    ? `Page ${n(u.page)} may also be there, a loose handout image of ${u.width} x ${u.height} px.`
-    : `Page ${n(u.page)} was uploading and may remain in the library as a loose handout image, ${u.width} x ${u.height} px.`;
+    ? `Page ${n(u.page)} may also be there, a loose handout image of ${u.width} × ${u.height} px.`
+    : `Page ${n(u.page)} was uploading and may remain in the library as a loose handout image, ${u.width} × ${u.height} px.`;
 }
 
 export function cancelledWords(job: PdfJob, phase: Extract<Phase, { k: "cancelled" }>): string[] {
   const out: string[] = [];
   if (phase.stillSaved) out.push(`${job.title.trim()} was saved and could not be deleted. Delete it in the Library.`);
   else if (phase.failed) out.push("The pages could not be removed. Check your connection. This device offers to remove them next time.");
-  else out.push(phase.removed === 0 ? "Nothing was left in the library." : `Removed ${pagesWord(phase.removed)}.`);
+  // Reused images stay in the library, so a Cancel with none of its own to remove says that, not that nothing is left.
+  else out.push(phase.removed === 0 ? "Nothing needed removing." : `Removed ${pagesWord(phase.removed)}.`);
   if (job.uncertain) out.push(uncertainWords(job.uncertain));
   return out;
 }
@@ -361,7 +365,7 @@ export function recoveryWords(ledger: Ledger): string[] {
 export function recoveredWords(phase: Extract<Phase, { k: "recovered" }>): string {
   if (phase.failed) return "The pages could not be removed. Check your connection, then try again next time.";
   if (phase.removed === null) return "The pages stay in the library as loose images.";
-  return phase.removed === 0 ? "Nothing was left to remove." : `Removed ${pagesWord(phase.removed)}.`;
+  return phase.removed === 0 ? "Nothing needed removing." : `Removed ${pagesWord(phase.removed)}.`;
 }
 
 export function savedToast(job: PdfJob): string {

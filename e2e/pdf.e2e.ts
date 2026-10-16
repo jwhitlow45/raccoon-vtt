@@ -629,7 +629,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     consoles.dm.allow = [/net::ERR_/];
     const pressed = Date.now();
     await block.getByRole("button", { name: "Cancel upload" }).click();
-    await shown(block, /^Page 4 was uploading and may remain in the library as a loose handout image, \d+ x \d+ px\.$/).waitFor({ timeout: 30_000 });
+    await shown(block, /^Page 4 was uploading and may remain in the library as a loose handout image, \d+ × \d+ px\.$/).waitFor({ timeout: 30_000 });
     const took = Date.now() - pressed;
     assert.ok(took >= 9_000 && took < 15_000, `Cancel ended ${took} ms after it was pressed, not about its 10 s grace`);
     await shown(block, "Removed 2 pages.").waitFor();
@@ -733,7 +733,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
 
     // Try again finishes all 30, in order.
     await dmTab().click();
-    await shown(block, "The upload stopped at page 4 of 30. Check your connection.").waitFor();
+    await shown(block, "The upload stopped at page 4. Check your connection.").waitFor();
     await shots.take(dm, "pdf-job-paused");
     await block.getByRole("button", { name: "Try again", exact: true }).click();
     await shown(block, "Saved as Thirty, 30 pages.").waitFor({ timeout: 90_000 });

@@ -219,7 +219,7 @@ function Body(props: {
           {title}
           <Buttons>
             <Button variant="primary" size="sm" disabled={!check.ok} onClick={leaving(() => runner?.upload())}>
-              {uploadLabel(check.ok ? check.count : 0)}
+              {uploadLabel(check.ok ? check.count : null)}
             </Button>
             {cancel()}
           </Buttons>

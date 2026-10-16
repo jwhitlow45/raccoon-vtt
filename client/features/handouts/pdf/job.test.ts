@@ -18,6 +18,7 @@ import {
   pdfPickRefusal,
   progressWords,
   stopFor,
+  uploadLabel,
   waitsOnDm,
   type JobSlotState,
   type PdfJob,
@@ -370,6 +371,41 @@ describe("drawing and uploading (docs/design-v1-pdf-handouts.md 4.1.4)", () => {
     assert.deepEqual(w.uploads.map((u) => u.page), [87, 88, 89]);
   });
 
+  test("a stop names the page by its number in the PDF, in the block and in the toast alike", async () => {
+    const w = world({ pages: 140, autoUpload: false });
+    w.store.setState({ blockShown: false });
+    await w.open();
+    w.runner.setRange("87", "89");
+    w.runner.upload();
+    await settle();
+    w.uploads[0]!.resolve({});
+    await settle();
+    w.uploads[1]!.reject(new ApiError(0, "x", "network", null));
+    await settle();
+    assert.equal(w.job().announce, "The upload stopped at page 88. Check your connection.");
+    assert.equal(w.toasts.at(-1), "The PDF upload paused at page 88. Open Handouts in the DM panel to go on.");
+  });
+
+  test("a Cancel whose pages were all reused from the library says nothing needed removing", async () => {
+    const w = world({ pages: 1, autoUpload: false });
+    await w.open();
+    w.runner.upload();
+    await settle();
+    w.uploads[0]!.resolve({ created: false });
+    await settle();
+    void w.runner.cancel();
+    answer(w.sent[0]!, "refused", refusal("quota", "x"));
+    await settle();
+    assert.deepEqual(w.phase(), { k: "cancelled", removed: 0, failed: false, stillSaved: false });
+    assert.equal(w.job().announce, "Nothing needed removing.");
+  });
+
+  test("the range's button keeps to its count, and says Upload pages while the range breaks a rule", () => {
+    assert.equal(uploadLabel(3), "Upload 3 pages");
+    assert.equal(uploadLabel(1), "Upload 1 page");
+    assert.equal(uploadLabel(null), "Upload pages");
+  });
+
   test("page n + 1 draws while page n uploads, and no second upload starts before the first is recorded", async () => {
     const w = world({ pages: 3, autoUpload: false });
     await w.open();
@@ -441,7 +477,7 @@ describe("drawing and uploading (docs/design-v1-pdf-handouts.md 4.1.4)", () => {
 describe("pausing and stopping (docs/design-v1-pdf-handouts.md 4.1.6)", () => {
   test("each upload failure pauses or stops in its own words, and Try again goes on from that page", async () => {
     const cases: [unknown, string][] = [
-      [new ApiError(0, "x", "network", null), "The upload stopped at page 2 of 3. Check your connection."],
+      [new ApiError(0, "x", "network", null), "The upload stopped at page 2. Check your connection."],
       [new ApiError(503, "x", "busy", 2000), "The server is busy."],
       [new ApiError(429, "x", "rate_limited", 12 * 60_000), "Too many uploads this hour. Try again in 12 minutes."],
       [new ApiError(413, "x", "quota_exceeded", null), "The room's storage is full, after 1 of 3 pages. Free space in the Library, then try again."],
@@ -778,7 +814,7 @@ describe("Cancel upload (docs/design-v1-pdf-handouts.md 4.1.6)", () => {
     assert.equal(w.uploads[1]!.settled, true, "aborted");
     assert.deepEqual(w.job().uncertain, { page: 2, width: 1583, height: 2048, thumb: "data:image/jpeg;base64,page2" });
     assert.deepEqual(w.deleted, [["img-1"]]);
-    assert.equal(w.job().announce, "Removed 1 page. Page 2 was uploading and may remain in the library as a loose handout image, 1583 x 2048 px.");
+    assert.equal(w.job().announce, "Removed 1 page. Page 2 was uploading and may remain in the library as a loose handout image, 1583 × 2048 px.");
     assert.deepEqual(w.ledger(), { docId: "doc-1", title: "Strange letter", ids: [], uncertain: w.job().uncertain });
     await w.runner.end();
     assert.equal(w.ledger(), null, "Done: the DM has read it");
@@ -930,7 +966,7 @@ describe("the ledger and its recovery (docs/design-v1-pdf-handouts.md 4.1.2)", (
       const w = world();
       writeLedger(w.storage, ledgerKey(ROOM, ME), ledger);
       w.runner.recover(ledger);
-      assert.equal(w.job().announce, "A PDF upload did not finish: Strange letter, 2 pages are in the library. Page 7 may also be there, a loose handout image of 1583 x 2048 px.");
+      assert.equal(w.job().announce, "A PDF upload did not finish: Strange letter, 2 pages are in the library. Page 7 may also be there, a loose handout image of 1583 × 2048 px.");
       assert.ok(waitsOnDm(w.job()));
       if (choice === "remove") {
         const removing = w.runner.removeRecovered();
