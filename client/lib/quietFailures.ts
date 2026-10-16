@@ -7,8 +7,8 @@ import type { LoadFailure } from "./chunkLoad.ts";
  * room opens. A part that failed draws nothing where it stands, since a notice
  * on the map's canvas would cover the map, so it reports here instead, and
  * the room shows one notice for all of them (pages/QuietLoadNotice.tsx)
- * with the same Retry and the same reload, which waits for queued edits,
- * as a panel that did not load.
+ * with the same reload, which waits for queued edits, as a panel that did
+ * not load. Retry is only for a part that threw while rendering.
  */
 
 /** As components/LoadBoundary.tsx's Failure: `checking` while the page asks why, `error` for a part that threw. */
@@ -39,8 +39,9 @@ const ORDER: readonly QuietFailure[] = ["updated", "failed", "offline", "error"]
 
 /**
  * The notice for the parts that failed, or null when none did or the page
- * is still asking why (`checking`, a moment). Retry tries every failed part
- * again. One part is named by its subject, several together.
+ * is still asking why (`checking`, a moment). Retry renders every failed
+ * part again, which helps only a part that threw while rendering. One part
+ * is named by its subject, several together.
  */
 export function quietNotice(parts: Readonly<Record<string, QuietPart>>): { subject: string; failure: QuietFailure; retry(): void } | null {
   const failed = Object.values(parts).filter((p) => p.failure !== "checking");

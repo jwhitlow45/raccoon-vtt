@@ -7,8 +7,8 @@ export type SrdList = {
   list: readonly SrdMonster[] | null;
   /** The list by SRD id, null until it arrives. */
   byId: ReadonlyMap<string, SrdMonster> | null;
+  /** The load did not work. Only a reload can try again (features/monsters/SrdLoadFailed.tsx). */
   failed: boolean;
-  retry(): void;
 };
 
 /**
@@ -20,10 +20,8 @@ export type SrdList = {
 export function useSrdMonsters(): SrdList {
   const [list, setList] = useState<readonly SrdMonster[] | null>(null);
   const [failed, setFailed] = useState(false);
-  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let live = true;
-    setFailed(false);
     loadMonsters().then(
       (monsters) => live && setList(monsters),
       () => live && setFailed(true),
@@ -31,7 +29,7 @@ export function useSrdMonsters(): SrdList {
     return () => {
       live = false;
     };
-  }, [attempt]);
+  }, []);
   const byId = useMemo(() => (list ? srdIndex(list) : null), [list]);
-  return { list, byId, failed, retry: () => setAttempt((a) => a + 1) };
+  return { list, byId, failed };
 }

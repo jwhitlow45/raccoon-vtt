@@ -58,7 +58,7 @@ This page lists what RaccoonVTT does today, grouped by area. "The DM" means anyo
 - A page inside a panel, such as a journal page, a monster's stat block, an area's damage page, the encounter editor or a Menu page like Members, puts its own name at the top, with a back button that says where it goes, such as "Back to Journal".
 - Add to Home Screen installs it as a full-screen app on an iPhone. The screen stays awake during a session.
 - Phones load a smaller copy of each map, and the map redraws only when something changes.
-- A panel that cannot load, offline or after the site was updated, says so inside itself, and the rest of the room keeps running.
+- A panel that cannot load, offline or after the site was updated, says so inside itself, and the rest of the room keeps running. Its Reload waits until your changes are saved and the connection is back, and opens the panel again. The SRD monster list and stat blocks offer the same Reload when they did not load.
 
 ## Scenes and maps
 

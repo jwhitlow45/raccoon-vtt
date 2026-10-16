@@ -903,7 +903,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
   });
 
   test("7. 480 x 320 at 130%: a map layer that did not load, the connection banner and a toast show inside the sheet", async () => {
-    // The height marks' code fails before it loads: its notice is a quiet one with Retry.
+    // The height marks' code fails before it loads: its notice is a quiet one with the reload.
     consoles.phone.allow = [/HeightLayer/, /dynamically imported module/, /ERR_INTERNET_DISCONNECTED|ERR_FAILED|net::/, /WebSocket connection/];
     await phone.route("**/assets/HeightLayer-*.js", (route) => route.abort("internetdisconnected"));
     // The room's socket through a route, so the test can drop it: the browser's offline switch alone leaves an open socket open.
@@ -924,7 +924,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await dialog.waitFor();
     const quiet = dialog.getByText("The height marks can't load while offline.");
     await quiet.waitFor();
-    assert.equal(await reachable(dialog.locator('[data-rvtt-modal-slot="quiet"]').getByRole("button", { name: "Retry" })), true, "its Retry takes a tap inside the sheet");
+    assert.equal(await reachable(dialog.locator('[data-rvtt-modal-slot="quiet"]').getByRole("button", { name: "Reload" })), true, "its Reload takes a tap inside the sheet");
     await shots.take(phone, "layout-very-short-quiet-notice-in-sheet");
     await phone.unroute("**/assets/HeightLayer-*.js");
 

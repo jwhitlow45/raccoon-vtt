@@ -17,6 +17,7 @@ import { usePreview } from "../dm/previewContext.ts";
 import { statBlockOpen, statBlockOpenedSlot, usePanelFolds } from "./panelFolds.ts";
 import { statBlockRequest } from "./statBlockOpen.ts";
 import { Note, Section, SmallButton } from "./ui.tsx";
+import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 
 type Editing = { kind: "edit" } | { kind: "copy" } | null;
 
@@ -153,16 +154,9 @@ export function StatBlockSection(props: {
 
 /** An SRD monster's block. The SRD chunk loads only here, once the section is open on this device. */
 function SrdBlock(props: { srdId: string; dm: boolean; detach: ReactNode; onCopy(): void }) {
-  const { monsters, failed, retry } = useSrdMonsters();
+  const { monsters, failed } = useSrdMonsters();
   const monster = monsters?.find((m) => m.srdId === props.srdId);
-  if (failed) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-        <Note tone="error">The stat block did not load.</Note>
-        <SmallButton onClick={retry}>Try again</SmallButton>
-      </div>
-    );
-  }
+  if (failed) return <SrdLoadFailed what="The stat block" inline />;
   if (!monsters) return <Loading text="Loading the stat block…" />;
   return (
     <>

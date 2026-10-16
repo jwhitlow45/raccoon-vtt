@@ -1,9 +1,7 @@
 import { useDeferredValue, useMemo, useState } from "react";
-import { Button } from "../../components/Button.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
-import { Notice } from "../../components/Notice.tsx";
 import { Help, SectionLabel } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -12,6 +10,7 @@ import { viewOf } from "./draft.ts";
 import { MonsterList, type Listed } from "./MonsterList.tsx";
 import { SrdCredit, useSrdMonsters } from "./StatBlockView.tsx";
 import { nameSuggestions, type Suggestion } from "./statBlockLink.ts";
+import { SrdLoadFailed } from "./SrdLoadFailed.tsx";
 
 const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
 
@@ -22,7 +21,7 @@ const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompar
  * token's name suggested first. A tap attaches and closes.
  */
 export function MonsterPicker(props: { name: string; onPick(link: Suggestion["link"]): void; onClose(): void }) {
-  const { monsters, failed, retry } = useSrdMonsters();
+  const { monsters, failed } = useSrdMonsters();
   const roomMonsters = useRoomView((s) => s.view?.monsters);
   const [query, setQuery] = useState("");
   const deferred = useDeferredValue(query);
@@ -72,17 +71,7 @@ export function MonsterPicker(props: { name: string; onPick(link: Suggestion["li
         ) : null}
         <ListLabel>{monsters ? (srdResults.length === srd.length ? `SRD 5.2.1 (${srd.length})` : `SRD 5.2.1 (${srdResults.length} of ${srd.length})`) : "SRD 5.2.1"}</ListLabel>
         {failed ? (
-          <Notice
-            tone="danger"
-            role="alert"
-            action={
-              <Button size="sm" onClick={retry}>
-                Try again
-              </Button>
-            }
-          >
-            The monster list did not load.
-          </Notice>
+          <SrdLoadFailed what="The monster list" />
         ) : null}
         {!monsters && !failed ? <Loading text="Loading the monsters…" /> : null}
         <MonsterList items={srdResults} onPick={pick} />

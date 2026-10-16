@@ -27,17 +27,15 @@ export function SrdCredit() {
 
 /**
  * The SRD's 330 stat blocks, loaded on first use in their own chunk
- * (shared/srd/monsters.ts): null until they arrive, and `failed` with a
- * `retry` when the load did not work, so a caller can say so and offer
- * another try instead of looking stuck.
+ * (shared/srd/monsters.ts): null until they arrive, and `failed` when the
+ * load did not work, so a caller can say so and offer the reload
+ * (SrdLoadFailed.tsx) instead of looking stuck.
  */
-export function useSrdMonsters(): { monsters: readonly SrdMonster[] | null; failed: boolean; retry(): void } {
+export function useSrdMonsters(): { monsters: readonly SrdMonster[] | null; failed: boolean } {
   const [monsters, setMonsters] = useState<readonly SrdMonster[] | null>(null);
   const [failed, setFailed] = useState(false);
-  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let live = true;
-    setFailed(false);
     loadMonsters().then(
       (list) => live && setMonsters(list),
       () => live && setFailed(true),
@@ -45,6 +43,6 @@ export function useSrdMonsters(): { monsters: readonly SrdMonster[] | null; fail
     return () => {
       live = false;
     };
-  }, [attempt]);
-  return { monsters, failed, retry: () => setAttempt((a) => a + 1) };
+  }, []);
+  return { monsters, failed };
 }

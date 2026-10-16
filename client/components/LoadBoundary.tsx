@@ -86,16 +86,8 @@ function subscribeOnline(onChange: () => void): () => void {
 
 /** The browser's online flag, for a notice outside a room, which has no connection state of its own. */
 function useBrowserConnection(): ConnectionState {
-  return useSyncExternalStore(subscribeOnline, () => (navigator.onLine === false ? "offline" : "open"));
-}
-
-/** Tries again by itself when the browser says the network is back. */
-function useRetryWhenOnline(failure: Failure, retry: () => void): void {
-  useEffect(() => {
-    if (failure !== "offline") return;
-    window.addEventListener("online", retry);
-    return () => window.removeEventListener("online", retry);
-  }, [failure, retry]);
+  // Rendered outside a browser (a test's static markup), the page counts as online.
+  return useSyncExternalStore(subscribeOnline, () => (navigator.onLine === false ? "offline" : "open"), () => "open");
 }
 
 /**
@@ -104,8 +96,13 @@ function useRetryWhenOnline(failure: Failure, retry: () => void): void {
  * reloadGate), then reloads. Outside a room there is no queue or room
  * connection, and the browser's online flag stands in for the connection.
  * `beforeReload` notes what to open again on the other side.
+ *
+ * It is the one answer to code that did not load, here and wherever the
+ * SRD's monsters did not load (features/monsters/SrdLoadFailed.tsx):
+ * Chrome keeps a module that failed for the life of the page and never
+ * fetches it again, so a Retry that imports it again cannot work there.
  */
-function ReloadButton(props: { pending: number; connection: ConnectionState; beforeReload?(): void }) {
+export function ReloadButton(props: { pending: number; connection: ConnectionState; beforeReload?(): void }) {
   const [asked, setAsked] = useState(false);
   const gate = reloadGate(props);
   const reload = () => {
@@ -132,10 +129,12 @@ function ReloadButton(props: { pending: number; connection: ConnectionState; bef
  * The notice a failed part shows in its place. `subject` names it in the
  * sentence: "This panel", "These options", "The room".
  *
- * Offline it offers Retry, and retries by itself when the network comes
- * back. Chrome remembers a module that failed to load for the life of the
- * page and never fetches it again, so when a retry fails online the answer
- * is a reload, which waits for the queued edits like the update's does.
+ * Code that did not load, offline, after an update or for any other
+ * reason, is answered by the reload, which waits for the connection and
+ * the queued edits first. Chrome remembers a module that failed to load
+ * for the life of the page and never fetches it again, so a Retry could
+ * not work there. A part that threw while rendering is no load, and Retry
+ * renders it afresh.
  */
 export function LoadFailureNotice(
   props: FallbackProps & {
@@ -155,14 +154,13 @@ export function LoadFailureNotice(
   },
 ) {
   const { failure, retry, subject } = props;
-  useRetryWhenOnline(failure, retry);
   const browserConnection = useBrowserConnection();
   const verb = props.verb ?? "open";
   const text =
     failure === "checking"
       ? "Loading…"
       : failure === "offline"
-        ? `${subject} can't ${verb} while offline.`
+        ? `${subject} can't ${verb} while offline. Reload once you're back online.`
         : failure === "updated"
           ? "RaccoonVTT was updated. Reload to continue."
           : failure === "failed"
@@ -191,9 +189,9 @@ export function LoadFailureNotice(
       >
         {text}
       </p>
-      {failure === "updated" || failure === "failed" ? (
+      {failure === "updated" || failure === "failed" || failure === "offline" ? (
         <ReloadButton pending={props.pending ?? 0} connection={props.connection ?? browserConnection} beforeReload={props.beforeReload} />
-      ) : failure !== "checking" ? (
+      ) : failure === "error" ? (
         <Button onClick={retry}>Retry</Button>
       ) : null}
     </div>

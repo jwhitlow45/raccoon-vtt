@@ -11,8 +11,8 @@ import { inModal, useModalSlot } from "./modalSlot.tsx";
  * The one notice for the map's quiet layers whose code did not load
  * (lib/quietLazy.tsx), over the map beside the toasts, since those layers
  * draw nothing where they failed. It offers what a panel that did not load
- * offers: Retry, or a reload that waits for queued edits first. It goes
- * once every failed part loads.
+ * offers: the reload, which waits for queued edits first. It goes once
+ * every failed part loads.
  */
 export function QuietLoadNotice() {
   const parts = useStore(quietFailures, (s) => s.parts);

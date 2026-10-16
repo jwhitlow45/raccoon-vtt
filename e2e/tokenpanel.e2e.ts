@@ -978,14 +978,21 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     const goblinState = playerSocket.state!.tokens[run.goblin.id]!;
     assert.equal("ac" in ((goblinState.actor as { inline: Record<string, unknown> }).inline ?? {}), false, "the goblin's AC reached Pat");
 
-    // A failed load says so and offers another try. Chrome keeps a failed module for the page, so the run reloads before the next load.
+    // A failed load says so and offers the reload, the one try that can work: Chrome keeps a failed module for the life of the page.
     await player.route(/\/assets\/monsters-[^/]*\.js$/, (route) => route.abort());
     await setUp(player, playerCdp, DESK, null);
     await tapToken(player, run.bear.at);
-    await bar(player, "Brown Bear").getByText("Saves did not load.").waitFor();
-    await bar(player, "Brown Bear").getByRole("button", { name: "Try again", exact: true }).waitFor();
+    await bar(player, "Brown Bear").getByText("Saves did not load. Reload to try again.").waitFor();
+    assert.equal(await bar(player, "Brown Bear").getByRole("button", { name: "Try again" }).count(), 0, "a retry that cannot work");
     await shots.take(player, "tokenpanel-pat-bear-saves-failed");
     await player.unroute(/\/assets\/monsters-[^/]*\.js$/);
+    const reloaded = player.waitForEvent("load");
+    await bar(player, "Brown Bear").getByRole("button", { name: "Reload", exact: true }).click();
+    await reloaded;
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+    await player.locator(".konvajs-content").first().waitFor();
+    await tapToken(player, run.bear.at);
+    await bar(player, "Brown Bear").locator("[data-saves]").waitFor();
 
     // The SRD chunk waits 600 ms, so Loading saves shows.
     await player.route(/\/assets\/monsters-[^/]*\.js$/, async (route) => {
@@ -1039,6 +1046,29 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await tokenPanel(player).getByText("Stat blocks from the System Reference Document 5.2.1").waitFor();
     await shots.take(player, "tokenpanel-pat-bear-stat-block");
     await player.unroute(/\/assets\/monsters-[^/]*\.js$/);
+  });
+
+  test("8c. the DM's SRD lists and blocks that did not load offer the reload, which brings them", async () => {
+    await dm.route(/\/assets\/monsters-[^/]*\.js$/, (route) => route.abort());
+    dmConsole.allow = [/monsters-/, /dynamically imported module/, /ERR_FAILED|net::/];
+    await setUp(dm, dmCdp, DESK, null);
+    await dm.getByRole("tab", { name: "Monsters" }).click();
+    const monsters = dm.getByRole("tabpanel", { name: "Monsters" });
+    await monsters.getByText("The monster list did not load. Reload to try again.").waitFor();
+    assert.equal(await monsters.getByRole("button", { name: "Try again" }).count(), 0);
+    await tapToken(dm, run.goblin.at);
+    await bar(dm, "Goblin 4").getByRole("button", { name: "Stat block", exact: true }).click();
+    const block = tokenPanel(dm).locator("[data-stat-block]");
+    await block.getByText("The stat block did not load. Reload to try again.").waitFor();
+    await shots.take(dm, "tokenpanel-dm-srd-failed");
+    await dm.unroute(/\/assets\/monsters-[^/]*\.js$/);
+    const reloaded = dm.waitForEvent("load");
+    await block.getByRole("button", { name: "Reload", exact: true }).click();
+    await reloaded;
+    dmConsole.allow = [];
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    await dm.getByRole("tab", { name: "Monsters" }).click();
+    await dm.getByRole("tabpanel", { name: "Monsters" }).getByText("SRD 5.2.1 (330)", { exact: true }).waitFor();
   });
 
   test("8b. viewing as Pat: Stat block opens the preview's own panel at the SRD block, and nothing there writes the folds", async () => {

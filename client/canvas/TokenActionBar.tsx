@@ -167,7 +167,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const short = frame.short;
   const items = vitals({ actor, token, fullAccess: props.fullAccess || access.full, place: "bar" });
   const split = shortSplit(items);
-  const { block, retry } = useLinkedBlock(token, actor, access);
+  const block = useLinkedBlock(token, actor, access);
   const link = tokenStatBlock(actor, monsters);
   const statBlock = statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor }) && (link.kind === "room" || link.kind === "srd");
   const sheetUrl = actor?.sheetUrl ? validSheetUrl(actor.sheetUrl) : null;
@@ -283,10 +283,10 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   };
 
   const savesAndDefenses = short ? (
-    <MoreStats more={split.more} block={block} retry={retry} />
+    <MoreStats more={split.more} block={block} />
   ) : (
     <>
-      <SavesLine block={block} retry={retry} />
+      <SavesLine block={block} />
       <DefenseLines block={block} clamp />
     </>
   );

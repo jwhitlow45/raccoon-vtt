@@ -8,7 +8,6 @@ import { Checkbox } from "../../components/Checkbox.tsx";
 import { Empty } from "../../components/Empty.tsx";
 import { FieldRow, Input } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
-import { Notice } from "../../components/Notice.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
@@ -25,6 +24,7 @@ import { MonsterFilterBar } from "./MonsterFilters.tsx";
 import { monsterMatcher } from "./monsterSearch.ts";
 import { PLACE_TOOL_ID, setPending } from "./placement.ts";
 import { ConfirmButton, NumberField, Stepper } from "./ui.tsx";
+import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 
 /**
  * The DM's monster browser (features section 15): the room's own monsters,
@@ -41,7 +41,7 @@ type Editing = { monster: CustomMonster | null; initial: StatBlock; paste: boole
 const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
 
 export default function MonstersPanel(props: PanelProps) {
-  const { monsters, failed, retry } = useSrdMonsters();
+  const { monsters, failed } = useSrdMonsters();
   const [query, setQuery] = useState("");
   const deferred = useDeferredValue(query);
   const { filters, setFilters } = useMonsterFilters();
@@ -128,17 +128,7 @@ export default function MonstersPanel(props: PanelProps) {
       </Section>
       <Section label={monsters ? (srdResults.length === srd.length ? `SRD 5.2.1 (${srd.length})` : `SRD 5.2.1 (${srdResults.length} of ${srd.length})`) : "SRD 5.2.1"}>
         {failed ? (
-          <Notice
-            tone="danger"
-            role="alert"
-            action={
-              <Button size="sm" onClick={retry}>
-                Try again
-              </Button>
-            }
-          >
-            The monster list did not load.
-          </Notice>
+          <SrdLoadFailed what="The monster list" reopen={{ panel: "monsters" }} />
         ) : null}
         {!monsters && !failed ? <Loading text="Loading the monsters…" /> : null}
         <MonsterList items={srdResults} onPick={setChosen} subpages />

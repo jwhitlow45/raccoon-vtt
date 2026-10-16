@@ -11,7 +11,7 @@ import { useRoomView } from "../../state/view.ts";
 import { statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
 import type { TokenAccess } from "./access.ts";
 import { defenseLines, linkedBlockState, moreStatsShown, saveUnits, type LinkedBlock, type VitalItem, type VitalUnit } from "./statSummary.ts";
-import { Note, SmallButton } from "./ui.tsx";
+import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 
 /*
  * The stat summary (docs/design-v1-token-panel.md 3.2): the vitals line,
@@ -24,15 +24,13 @@ import { Note, SmallButton } from "./ui.tsx";
 // The SRD chunk, once any summary has loaded it this page, so a later bar shows its saves without a wait.
 let srdLoaded: readonly SrdMonster[] | null = null;
 
-/** The SRD's blocks while `active`: loaded on first need, kept for the page, with a retry after a failure. */
-function useSrdList(active: boolean): { list: readonly SrdMonster[] | null; failed: boolean; retry(): void } {
+/** The SRD's blocks while `active`: loaded on first need and kept for the page. A failure stays until a reload (monsters/SrdLoadFailed.tsx). */
+function useSrdList(active: boolean): { list: readonly SrdMonster[] | null; failed: boolean } {
   const [list, setList] = useState(srdLoaded);
   const [failed, setFailed] = useState(false);
-  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!active || list) return;
     let live = true;
-    setFailed(false);
     loadMonsters().then(
       (loaded) => {
         srdLoaded = loaded;
@@ -45,21 +43,21 @@ function useSrdList(active: boolean): { list: readonly SrdMonster[] | null; fail
     return () => {
       live = false;
     };
-  }, [active, list, attempt]);
-  return { list, failed, retry: () => setAttempt((a) => a + 1) };
+  }, [active, list]);
+  return { list, failed };
 }
 
 /**
  * The block behind a token's link, where this viewer reads it
- * (statBlockLink.ts statBlockShown): none, loading, failed with a retry,
- * or ready. The vitals never wait for it.
+ * (statBlockLink.ts statBlockShown): none, loading, failed, or ready. The
+ * vitals never wait for it.
  */
-export function useLinkedBlock(token: Pick<Token, "kind">, actor: Partial<Actor> | undefined, access: Pick<TokenAccess, "dm" | "owner">): { block: LinkedBlock; retry(): void } {
+export function useLinkedBlock(token: Pick<Token, "kind">, actor: Partial<Actor> | undefined, access: Pick<TokenAccess, "dm" | "owner">): LinkedBlock {
   const monsters = useRoomView((s) => s.view?.monsters);
   const shown = statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor });
   const srd = useSrdList(shown && tokenStatBlock(actor, monsters).kind === "srd");
   const block = shown ? linkedBlockState(actor, monsters, srd) : ({ kind: "none" } as const);
-  return { block, retry: srd.retry };
+  return block;
 }
 
 /** "Open the sheet ↗": the owner's D&D Beyond sheet in a new tab, with no referrer and no opener. 44 px tall. */
@@ -144,9 +142,9 @@ export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: Reac
 /**
  * The six saves, "Saves" then "Str +5" and the rest, each a unit that
  * never breaks. While the SRD chunk loads the line keeps its place and,
- * after the usual 200 ms, says so, and a failed load offers another try.
+ * after the usual 200 ms, says so, and a failed load offers the reload.
  */
-export function SavesLine(props: { block: LinkedBlock; retry(): void }) {
+export function SavesLine(props: { block: LinkedBlock }) {
   const { block } = props;
   if (block.kind === "none") return null;
   if (block.kind === "loading") {
@@ -157,12 +155,7 @@ export function SavesLine(props: { block: LinkedBlock; retry(): void }) {
     );
   }
   if (block.kind === "failed") {
-    return (
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
-        <Note tone="error">Saves did not load.</Note>
-        <SmallButton onClick={props.retry}>Try again</SmallButton>
-      </div>
-    );
+    return <SrdLoadFailed what="Saves" inline />;
   }
   return (
     <div data-saves="" style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", rowGap: theme.space(1), columnGap: theme.space(1.5), fontSize: theme.font.body14 }}>
@@ -216,7 +209,7 @@ export function DefenseLines(props: { block: LinkedBlock; clamp?: boolean }) {
  * bar opens and not remembered. Its name says more than saves because it
  * holds the speed too. Nothing when it would hold nothing.
  */
-export function MoreStats(props: { more: readonly VitalItem[]; block: LinkedBlock; retry(): void }) {
+export function MoreStats(props: { more: readonly VitalItem[]; block: LinkedBlock }) {
   const [open, setOpen] = useState(false);
   if (!moreStatsShown(props.more, props.block)) return null;
   return (
@@ -228,7 +221,7 @@ export function MoreStats(props: { more: readonly VitalItem[]; block: LinkedBloc
       {open ? (
         <>
           <VitalsLine items={props.more} />
-          <SavesLine block={props.block} retry={props.retry} />
+          <SavesLine block={props.block} />
           <DefenseLines block={props.block} clamp />
         </>
       ) : null}

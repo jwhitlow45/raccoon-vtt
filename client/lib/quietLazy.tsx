@@ -14,10 +14,10 @@ import { retryableLazy, roleMayLoad, type Role } from "./retryableLazy.ts";
  * A load that fails draws nothing on the canvas either, since a notice
  * there would cover the map. It reports to the room's one notice for these
  * parts instead (lib/quietFailures.ts, pages/QuietLoadNotice.tsx), named by
- * `subject`, with the Retry and the reload that waits for queued edits a
- * panel has, a redeploy's chunk told from a dropped request by the
- * boundary's own check. It also tries again when the browser comes back
- * online.
+ * `subject`, with the reload that waits for queued edits a panel has, a
+ * redeploy's chunk told from a dropped request by the boundary's own check.
+ * It never imports the code again by itself: Chrome keeps a module that
+ * failed for the life of the page, so only the reload can bring it.
  *
  * A viewer whose role is not in `roles` (the `role` its props carry, as a
  * map layer's do) gets nothing at all: the part is not mounted, so its code
@@ -51,9 +51,5 @@ function Report(props: FallbackProps & { subject: string }) {
     reportQuietFailure(id, { subject, failure, retry });
     return () => reportQuietFailure(id, null);
   }, [id, subject, failure, retry]);
-  useEffect(() => {
-    window.addEventListener("online", retry);
-    return () => window.removeEventListener("online", retry);
-  }, [retry]);
   return null;
 }

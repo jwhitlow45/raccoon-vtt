@@ -52,6 +52,7 @@ import {
   type MonsterRef,
 } from "./draft.ts";
 import { useSrdMonsters, type SrdList } from "./useSrd.ts";
+import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 
 /**
  * The DM's encounter builder (features section 10, v1): fights built ahead
@@ -97,17 +98,7 @@ function useDefaultParty(): ReturnType<typeof partyFromCharacters> {
 function SrdStatus(props: { srd: SrdList }) {
   if (props.srd.failed) {
     return (
-      <Notice
-        tone="danger"
-        role="alert"
-        action={
-          <Button size="sm" onClick={props.srd.retry}>
-            Try again
-          </Button>
-        }
-      >
-        The SRD monster list did not load.
-      </Notice>
+      <SrdLoadFailed what="The SRD monster list" reopen={{ panel: "encounters" }} />
     );
   }
   return props.srd.list ? null : <Loading text="Loading the monsters…" />;
