@@ -170,6 +170,34 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await sheet.waitFor({ state: "detached" });
   });
 
+  test("3b. on a 320 px phone at 130%, the sheet scrolls only down: a key's note wraps under its keycap", async () => {
+    await player.setViewportSize({ width: 320, height: 568 });
+    await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+    await player.reload();
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+    await player.locator('button[title="Panels"]').click();
+    await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
+    await player.getByRole("button", { name: /^This device/ }).click();
+    await player.getByRole("button", { name: "Show the shortcuts" }).click();
+    const sheet = player.getByRole("dialog", { name: "Shortcuts" });
+    await sheet.waitFor();
+    const paste = sheet.getByRole("heading", { name: "Choose an image", exact: true });
+    await paste.scrollIntoViewIfNeeded();
+    const wide = await sheet.evaluate((root) => {
+      type El = { scrollWidth: number; clientWidth: number; tagName: string; textContent: string | null };
+      const all = [root as unknown as El, ...(Array.from((root as unknown as { querySelectorAll(s: string): ArrayLike<unknown> }).querySelectorAll("*")) as El[])];
+      return all.filter((el) => el.clientWidth > 1 && el.scrollWidth > el.clientWidth + 1).map((el) => `${el.tagName} ${(el.textContent ?? "").slice(0, 30)}: ${el.scrollWidth} > ${el.clientWidth}`);
+    });
+    assert.deepEqual(wide, [], "content wider than its box at 320 px and 130%");
+    await shots.take(player, "shortcuts-player-320-130-paste");
+    await player.keyboard.press("Escape");
+    await sheet.waitFor({ state: "detached" });
+    await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await player.setViewportSize({ width: 390, height: 844 });
+    await player.reload();
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+  });
+
   test("4. neither page logged an error", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's console");
     assert.deepEqual(playerConsole.errors, [], "the player's console");

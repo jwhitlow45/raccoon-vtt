@@ -323,7 +323,8 @@ function CharacterRow(props: { character: Character; open: boolean; onToggle(): 
             <RemoveCharacter character={character} dm={role === "dm"} onDelete={props.onDelete} />
           ) : memberId !== undefined && members ? (
             <Section label="Remove">
-              <Help>{sharedNote(memberId, character, members)}</Help>
+              {/* The name may be one unbroken word as long as the protocol allows, so it breaks anywhere, as the delete line does. */}
+              <Help style={{ overflowWrap: "anywhere" }}>{sharedNote(memberId, character, members)}</Help>
             </Section>
           ) : null}
         </div>
@@ -390,7 +391,7 @@ function PlaceMine(props: { character: Character; close(): void }) {
   const scope = useRoomScope();
   const scene = view?.meta.playerSceneId ? view.scenes[view.meta.playerSceneId] : undefined;
   if (!view || !you || !scene || view.meta.settings.playersCreateCharacters !== true) return null;
-  if (onScene(view, character.id, scene.id)) return <Help style={{ paddingBottom: theme.space(2) }}>{character.name} is on the map.</Help>;
+  if (onScene(view, character.id, scene.id)) return <Help style={{ paddingBottom: theme.space(2), overflowWrap: "anywhere" }}>{character.name} is on the map.</Help>;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), paddingBottom: theme.space(2) }}>
       <Button

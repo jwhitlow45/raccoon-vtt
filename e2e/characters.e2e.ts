@@ -56,6 +56,8 @@ const patConsole = new ConsoleWatch("pat");
 /** Two names at the 80-character limit: one with spaces to wrap at, and one word with none. */
 const SPACED = "Sir Aldric Brightwater of the Northern Marches, Warden of the Old Oak and Stones";
 const UNBROKEN = "Brightwaterhollow".repeat(5).slice(0, 80);
+/** A shared character with an unbroken 80-character name: its card explains why it has no Delete. */
+const SHARED_LONG = "Stonemarrowdeep".repeat(6).slice(0, 80);
 
 const run = {
   roomId: "",
@@ -76,6 +78,7 @@ const run = {
   zed: randomUUID(),
   spaced: randomUUID(),
   unbroken: randomUUID(),
+  sharedLong: randomUUID(),
   goblin: randomUUID(),
 };
 
@@ -160,6 +163,19 @@ async function boxOf(target: Locator): Promise<Box> {
   const b = await target.boundingBox();
   assert.ok(b, "not on the page");
   return { left: b.x, right: b.x + b.width, top: b.y, bottom: b.y + b.height, width: b.width, height: b.height };
+}
+
+/** A shared character's card at this width: the note saying why there is no Delete stays inside the panel, its long name broken. */
+async function sharedNoteFits(page: Page, panel: Locator, where: string): Promise<void> {
+  await openCard(panel, run.sharedLong);
+  const note = panel.getByText(`You and Quin both play ${SHARED_LONG}`);
+  await note.scrollIntoViewIfNeeded();
+  const frame = await boxOf(panel);
+  const b = await boxOf(note);
+  assert.ok(b.left >= frame.left - 0.5 && b.right <= frame.right + 0.5, `${where}: the shared note runs out of the ${Math.round(frame.width)} px panel (${Math.round(b.left)} to ${Math.round(b.right)})`);
+  const spills = await note.evaluate((el) => (el as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth > (el as unknown as { clientWidth: number }).clientWidth + 1);
+  assert.equal(spills, false, `${where}: the shared note's text spills out of its box`);
+  await shots.take(page, `characters-shared-long-name-${where.replace(/[^a-z0-9]+/gi, "-")}`);
 }
 
 /** A long name's card in a panel this wide: Delete and its line inside the panel, nothing scrolling sideways, the name whole. */
@@ -275,6 +291,7 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     await character(run.zed, "Zed", [run.patId]);
     await character(run.spaced, SPACED, [run.patId]);
     await character(run.unbroken, UNBROKEN, [run.patId]);
+    await character(run.sharedLong, SHARED_LONG, [run.patId, run.quinId]);
     const token = (id: string, extra: Record<string, unknown>) => ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", ...extra } });
     await token(run.breeToken, { kind: "pc", name: "Bree", x: 5, y: 5, disposition: "ally", actor: { ref: run.bree } });
     await token(run.breeOnTheRoad, { kind: "pc", name: "Bree", sceneId: run.roadId, x: 4, y: 4, disposition: "ally", actor: { ref: run.bree } });
@@ -328,10 +345,12 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     let sheet = await openCharacters(pat);
     await longNameFits(pat, sheet, run.spaced, SPACED, "356 px spaced");
     await longNameFits(pat, sheet, run.unbroken, UNBROKEN, "356 px unbroken");
+    await sharedNoteFits(pat, sheet, "356 px");
     await setUp(pat, patCdp, VERY_SHORT);
     sheet = await openCharacters(pat);
     await longNameFits(pat, sheet, run.spaced, SPACED, "241 px spaced");
     await longNameFits(pat, sheet, run.unbroken, UNBROKEN, "241 px unbroken");
+    await sharedNoteFits(pat, sheet, "241 px");
     await setUp(pat, patCdp, PHONE);
   });
 

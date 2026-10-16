@@ -57,7 +57,7 @@ export function ShortcutList(props: { role: "dm" | "player" }) {
               {section.rows.map((row) => (
                 <tr key={row.id} style={{ borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
                   <th scope="row" style={row.keys ? KEY_CELL : INPUT_CELL}>
-                    {row.keys ? <kbd style={KBD}>{row.input}</kbd> : row.input}
+                    {row.keys ? <KeyInput text={row.input} /> : row.input}
                   </th>
                   <td style={{ padding: `${theme.space(2)}px 0`, color: theme.color.text, verticalAlign: "top" }}>
                     {row.does}
@@ -73,6 +73,34 @@ export function ShortcutList(props: { role: "dm" | "player" }) {
   );
 }
 
+/**
+ * Keys in their keycaps, one per key or chord, and a trailing note such as
+ * "(Cmd+V on a Mac)" as muted text under them. A keycap never breaks, so
+ * the row wraps between keycaps and in the note instead: one keycap holding
+ * "Page Up, Page Down" or a long note would push the sheet past a narrow
+ * phone at a large interface size.
+ */
+function KeyInput(props: { text: string }) {
+  const note = /^(.+?) (\(.+\))$/.exec(props.text);
+  const keys = (note?.[1] ?? props.text).split(", ");
+  return (
+    <>
+      {keys.map((key, i) => (
+        <span key={i}>
+          {i > 0 ? ", " : null}
+          <kbd style={KBD}>{key}</kbd>
+        </span>
+      ))}
+      {note ? (
+        <>
+          {" "}
+          <span style={KEY_NOTE}>{note[2]}</span>
+        </>
+      ) : null}
+    </>
+  );
+}
+
 function capitalized(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
@@ -80,19 +108,18 @@ function capitalized(text: string): string {
 const KEY_CELL: CSSProperties = {
   padding: `${theme.space(2)}px ${theme.space(3)}px ${theme.space(2)}px 0`,
   textAlign: "left",
-  whiteSpace: "nowrap",
   verticalAlign: "top",
 };
 
 /** What you do with the mouse is a phrase, which wraps in a column of about half the card. */
 const INPUT_CELL: CSSProperties = {
   ...KEY_CELL,
-  whiteSpace: "normal",
   width: "45%",
   fontWeight: theme.weight.strong,
 };
 
 const KBD: CSSProperties = {
+  whiteSpace: "nowrap",
   fontFamily: theme.font.mono,
   fontSize: theme.font.small,
   padding: `${theme.space(0.5)}px ${theme.space(1.5)}px`,
@@ -100,6 +127,8 @@ const KBD: CSSProperties = {
   border: `${theme.line.border}px solid ${theme.color.border}`,
   background: theme.color.surfaceRaised,
 };
+
+const KEY_NOTE: CSSProperties = { display: "block", whiteSpace: "normal", color: theme.color.textMuted, fontSize: theme.font.small, fontWeight: theme.weight.regular, marginTop: theme.space(1) };
 
 /** The condition beyond the role, under what the row does: "With the Select tool". */
 const WHEN: CSSProperties = { display: "block", color: theme.color.textMuted, fontSize: theme.font.small };
