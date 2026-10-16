@@ -231,13 +231,19 @@ export type PopoverProps = {
   bound: Rect | (() => Rect);
   /** A taller rectangle it may grow into where the bound leaves less than `minHeight`. */
   rise?: Rect | (() => Rect) | null;
-  gap?: number;
+  /**
+   * From its anchor's edge, or worked out from the anchor's rectangle where
+   * the popover opens from a line other than that edge: a tool popover
+   * stands 6 px above its options row or the toolbar, whatever the chip's
+   * place inside them (docs/design-v1-tool-options.md 7.3).
+   */
+  gap?: number | ((anchor: Rect) => number);
   margin?: number;
   /** Below this the popover rises into `rise`: a tool popover's title and one 44 px row. */
   minHeight?: number;
-  /** Drawn in the section label's look, and a dialog's name. */
+  /** Drawn in the section label's look, and a dialog's name unless `label` gives another. */
   title?: string;
-  /** A dialog's name where it draws no title. */
+  /** A dialog's name where it draws no title, or where its name says more than its title: ⋯'s "More" is "More Area options". */
   label?: string;
   children: ReactNode;
 };
@@ -283,6 +289,7 @@ function OpenPopover(props: PopoverProps) {
       }
       const scale = uiScale();
       const next: PlaceFrame = { anchor: chromeRect(a, scale), bound: resolve(p.bound), rise: p.rise ? resolve(p.rise) : null };
+      const gap = typeof p.gap === "function" ? p.gap(next.anchor) : (p.gap ?? theme.layout.popover.gap);
       if (!force && !needsPlace(frame.current, next)) return;
       frame.current = next;
       const margin = p.margin ?? theme.layout.popover.margin;
@@ -294,7 +301,7 @@ function OpenPopover(props: PopoverProps) {
       const at = popoverPlace({
         ...next,
         side: p.side,
-        gap: p.gap ?? theme.layout.popover.gap,
+        gap,
         margin,
         minHeight: p.minHeight ?? 0,
         content: { width: natural.width / scale, height: natural.height / scale },
@@ -407,8 +414,8 @@ function OpenPopover(props: PopoverProps) {
         ref={handle.box}
         id={dialog ? handle.contentId : undefined}
         role={dialog ? "dialog" : undefined}
-        aria-labelledby={dialog && props.title ? titleId : undefined}
-        aria-label={dialog && !props.title ? props.label : undefined}
+        aria-labelledby={dialog && props.title && !props.label ? titleId : undefined}
+        aria-label={dialog ? props.label : undefined}
         // A press on a part that is no control focuses the box, so it never reads as focus leaving.
         tabIndex={-1}
         onKeyDown={onKeyDown}
