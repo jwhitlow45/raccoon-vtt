@@ -1,15 +1,30 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import type { AreaShape, AreaTemplate, AreaTrigger } from "#shared/model.ts";
 import { AREA_MAX_FT, AREA_MIN_FT, canPitch, emanationFootprint, MAX_PITCH, pitchOf, type AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { boxDistanceFt, pointCellBox, tokenCellBox } from "#shared/rules/distance.ts";
 import { displayName } from "../../lib/scene.ts";
-import { Icon } from "../../components/Icon.tsx";
-import { Segmented } from "../../components/Segmented.tsx";
-import { Swatches } from "../../components/Swatches.tsx";
+import { Icon, type IconName } from "../../components/Icon.tsx";
+import { Popover, usePopover } from "../../components/Popover.tsx";
 import { MEMBER_COLORS, theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
-import { InfoLine, OptButton, OptInput, OptionsColumn, OptionsRow, OptSelect, Stepper, StepValue } from "../measure/controls.tsx";
+import {
+  ChoiceTiles,
+  OptButton,
+  OptInput,
+  OptionsStrip,
+  OptSegmented,
+  OptSwatches,
+  PickCloses,
+  Stepper,
+  useOpenInSlot,
+  usePopoverFrame,
+  useSlotPlace,
+  ValueChip,
+  type Slot,
+  type StripLine,
+} from "../measure/controls.tsx";
+import { POPOVER_MIN } from "../../pages/optionsLayout.ts";
 import { caughtTokens, contextFrom, inAreaEntries, inAreaText } from "./coverage.ts";
 import { areaTitle, shapeName, SHAPES } from "./labels.ts";
 import {
@@ -47,9 +62,13 @@ import {
 import { useLiveTokens } from "./useLiveTokens.ts";
 
 /**
- * The area tool's options bar: what the area catches, then the controls.
- * The first line is the "In area" list (features section 9), names as this
- * viewer sees them with allies marked, recomputed as tokens move.
+ * The area tool's options (docs/design-v1-tool-options.md 9.3): its line
+ * is the hint, or what the area catches, the "In area" list (features
+ * section 9), names as this viewer sees them with allies marked,
+ * recomputed as tokens move. Its row holds the shape, Place, Cancel and
+ * the rest by priority, and its less used settings are always in ⋯ under
+ * "More area options". The spell search and Size wait in the shape
+ * chip's popover when the row has no room for them.
  */
 
 const SNAPS: readonly { value: SnapMode; label: string }[] = [
@@ -57,6 +76,19 @@ const SNAPS: readonly { value: SnapMode; label: string }[] = [
   { value: "45", label: "45°" },
   { value: "free", label: "Free" },
 ];
+
+const SHAPE_GLYPHS: Record<AreaShape, IconName> = {
+  cone: "areaCone",
+  sphere: "areaSphere",
+  cylinder: "areaCylinder",
+  cube: "areaCube",
+  line: "areaLine",
+  emanation: "areaEmanation",
+};
+
+const SIZES = { words: (ft: number) => `${ft.toLocaleString("en-US")} ft`, all: [`${AREA_MIN_FT} ft`, `${AREA_MAX_FT.toLocaleString("en-US")} ft`] } as const;
+
+const MORE = "More area options";
 
 export function AreaOptions(props: { role: "dm" | "player" }) {
   const area = useAreaScope();
@@ -74,6 +106,7 @@ export function AreaOptions(props: { role: "dm" | "player" }) {
   return <IdleOptions env={env} st={st} />;
 }
 
+/** What the area catches, as the line's reading: its title in bold, then the "In area" list and what follows it. */
 function InArea(props: { env: AreaEnv; t: AreaTemplateInput; moving: boolean; title: string; extra?: ReactNode }) {
   const { env, t } = props;
   // Tokens other members are dragging count where they would drop.
@@ -82,29 +115,81 @@ function InArea(props: { env: AreaEnv; t: AreaTemplateInput; moving: boolean; ti
   const ids = caughtTokens(t, ctx, env.scene.id);
   const entries = inAreaEntries(ids, live.tokens, env.view.characters);
   return (
-    <InfoLine>
+    <>
       <strong>{props.title}</strong>
       <span style={{ color: theme.color.textMuted }}> · In area{entries.length ? ` (${entries.length})` : ""}: </span>
       {inAreaText(entries)}
       {props.extra}
-    </InfoLine>
+    </>
   );
 }
 
-function SpellSearch(props: { env: AreaEnv; st: AreaToolState; base: () => AreaDraft }) {
-  const { st } = props;
-  return (
+function inAreaLine(props: Parameters<typeof InArea>[0]): StripLine {
+  return { tone: "reading", content: <InArea {...props} /> };
+}
+
+/**
+ * The spell search. In the row it is a flexible field whose matches show
+ * in a "Spells" popover anchored to it while it has focus and text. In
+ * the shape chip's popover, or in ⋯, they show under it. Enter applies
+ * the first match.
+ */
+function SpellField(props: { env: AreaEnv; st: AreaToolState; base: () => AreaDraft }) {
+  const { env, st } = props;
+  const place = useSlotPlace();
+  const inRow = place?.at === "row";
+  const results = usePopover({ kind: "dialog" });
+  const [focused, setFocused] = useState(false);
+  const typed = st.query.trim() !== "";
+  const { show, close, open } = results;
+  useOpenInSlot(open);
+  useEffect(() => {
+    if (inRow && focused && typed && !open) show({ by: "pointer", from: "first" });
+    else if (!typed && open) close("state");
+  }, [inRow, focused, typed, open, show, close]);
+  const apply = (name: string) => {
+    applySpell(env, props.base(), name);
+    close("pick");
+  };
+  const field = (
     <OptInput
+      ref={inRow ? results.anchorProps.ref : undefined}
       label="Spell"
       placeholder="Spell, e.g. fireball"
       value={st.query}
       width={170}
-      onChange={(query) => props.env.area.store.setState({ query })}
+      onChange={(query) => env.area.store.setState({ query })}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
       onEnter={() => {
         const first = searchAreaSpells(st.query, 1)[0];
-        if (first) applySpell(props.env, props.base(), first.name);
+        if (first) apply(first.name);
       }}
+      popup={inRow ? { expanded: open, controls: results.anchorProps["aria-controls"] } : undefined}
     />
+  );
+  if (!inRow) {
+    return (
+      <div style={{ display: "grid", gap: theme.space(1) }}>
+        {field}
+        {typed ? <SpellResults query={st.query} onPick={apply} /> : null}
+      </div>
+    );
+  }
+  return (
+    <>
+      {field}
+      <SpellsPopover handle={results} query={st.query} onPick={apply} />
+    </>
+  );
+}
+
+function SpellsPopover(props: { handle: ReturnType<typeof usePopover>; query: string; onPick(name: string): void }) {
+  const frame = usePopoverFrame();
+  return (
+    <Popover handle={props.handle} side="above" bound={frame.bound} rise={frame.rise} gap={frame.gap} minHeight={POPOVER_MIN} title="Spells">
+      <SpellResults query={props.query} onPick={props.onPick} />
+    </Popover>
   );
 }
 
@@ -116,14 +201,13 @@ function applySpell(env: AreaEnv, base: AreaDraft, name: string): void {
   env.area.store.setState({ query: "" });
 }
 
-function SearchResults(props: { env: AreaEnv; st: AreaToolState; base: () => AreaDraft }) {
-  const results = searchAreaSpells(props.st.query, 8);
-  if (!props.st.query.trim()) return null;
+function SpellResults(props: { query: string; onPick(name: string): void }) {
+  const results = searchAreaSpells(props.query, 8);
   return (
-    <OptionsRow label="Spells">
+    <div role="group" aria-label="Spells" style={{ display: "grid", gap: theme.space(1) }}>
       {results.length === 0 ? <span style={{ color: theme.color.textMuted, fontSize: theme.font.body14 }}>No area spell by that name.</span> : null}
       {results.map((s) => (
-        <OptButton key={s.srdId} onClick={() => applySpell(props.env, props.base(), s.name)}>
+        <OptButton key={s.srdId} onClick={() => props.onPick(s.name)}>
           {s.name}
           <span style={{ fontWeight: theme.weight.regular, color: theme.color.textMuted }}>
             {" "}
@@ -131,12 +215,29 @@ function SearchResults(props: { env: AreaEnv; st: AreaToolState; base: () => Are
           </span>
         </OptButton>
       ))}
-    </OptionsRow>
+    </div>
   );
 }
 
-function ShapePicker(props: { value: AreaShape; onChange(shape: AreaShape): void }) {
-  return <OptSelect<AreaShape> label="Shape" value={props.value} options={SHAPES} onChange={props.onChange} />;
+/**
+ * The shape chip, "Shape: Sphere", with the shapes as tiles. Its glyph
+ * shows where the row has room, and alone where it has little. While the
+ * size waits in its popover, it reads "Sphere 20 ft" where the row holds it.
+ */
+function ShapeChip(props: { value: AreaShape; size?: number; onChange(shape: AreaShape): void }) {
+  return (
+    <ValueChip
+      label="Shape"
+      kind="choice"
+      value={props.value}
+      options={SHAPES.map((s) => ({ key: s.value, words: s.label, glyph: <Icon name={SHAPE_GLYPHS[s.value]} /> }))}
+      hosted={props.size !== undefined ? { words: SIZES.words(props.size), all: SIZES.all } : undefined}
+    >
+      <PickCloses>
+        <ChoiceTiles<AreaShape> label="Shape" value={props.value} options={SHAPES.map((s) => ({ value: s.value, label: s.label, glyph: <Icon name={SHAPE_GLYPHS[s.value]} /> }))} onChange={props.onChange} />
+      </PickCloses>
+    </ValueChip>
+  );
 }
 
 /** Degrees per tap when aiming a cone or line up or down. */
@@ -148,17 +249,20 @@ const AIM_STEP = 5;
  * reads as a typo on a phone.
  */
 function AimControl(props: { pitch: number; onChange(pitch: number): void }) {
-  const { pitch } = props;
-  const set = (p: number) => props.onChange(clampPitch(p));
   return (
-    <div role="group" aria-label="Aim up or down" style={{ display: "flex", flex: "none", alignItems: "center", gap: theme.space(1) }}>
-      <OptButton icon="chevronDown" label="Aim lower" disabled={pitch <= -MAX_PITCH} onClick={() => set(pitch - AIM_STEP)} />
-      <StepValue minWidth={84}>{aimText(pitch)}</StepValue>
-      <OptButton label="Aim higher" disabled={pitch >= MAX_PITCH} onClick={() => set(pitch + AIM_STEP)}>
-        {/* The icon set has one chevron for up and down, turned here. */}
-        <Icon name="chevronDown" size="sm" style={{ transform: "rotate(180deg)" }} />
-      </OptButton>
-    </div>
+    <Stepper
+      label="Aim up or down"
+      value={props.pitch}
+      step={AIM_STEP}
+      min={-MAX_PITCH}
+      max={MAX_PITCH}
+      format={aimText}
+      less="Aim lower"
+      more="Aim higher"
+      icons={["chevronDown", "chevronUp"]}
+      valueWidth={84}
+      onChange={(pitch) => props.onChange(clampPitch(pitch))}
+    />
   );
 }
 
@@ -170,43 +274,62 @@ const TRIGGER_BUTTONS: Record<AreaTrigger, { label: string; hint: string }> = {
 
 /**
  * When the log reminds the table that the area hits a creature again
- * (features section 9). A spell preset sets them where the spell says so,
- * Spirit Guardians on entering and at the end of a turn, and once a turn
- * where the spell says "only once per turn". Once a turn means nothing
- * without a trigger, so it shows only with one.
+ * (features section 9), under "Reminders" in ⋯. A spell preset sets them
+ * where the spell says so, Spirit Guardians on entering and at the end of
+ * a turn, and once a turn where the spell says "only once per turn". Once
+ * a turn means nothing without a trigger, so it shows only with one.
  */
-function TriggerToggles(props: {
+function triggerSlots(props: {
   value: readonly AreaTrigger[] | undefined;
   once: boolean;
   onChange(next: AreaTrigger[]): void;
   onOnce(next: boolean): void;
-}) {
+}): Slot[] {
   const on = normalizeTriggers(props.value);
-  return (
-    <div role="group" aria-label="Reminders" style={{ display: "flex", flex: "none", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
-      <span style={{ paddingRight: theme.space(1), fontSize: theme.font.body14, color: theme.color.textMuted }}>Remind:</span>
-      {AREA_TRIGGERS.map((t) => (
-        <OptButton
-          key={t}
-          pressed={on.includes(t)}
-          label={TRIGGER_BUTTONS[t].hint}
-          onClick={() => props.onChange(on.includes(t) ? on.filter((x) => x !== t) : normalizeTriggers([...on, t]))}
-        >
-          {TRIGGER_BUTTONS[t].label}
-        </OptButton>
-      ))}
-      {on.length > 0 ? (
-        <OptButton pressed={props.once} label="Remind about a creature once a turn, whichever comes first" onClick={() => props.onOnce(!props.once)}>
-          Once a turn
-        </OptButton>
-      ) : null}
-    </div>
-  );
+  const group = MORE;
+  const sub = "Reminders";
+  return [
+    ...AREA_TRIGGERS.map(
+      (t): Slot => ({
+        id: `remind-${t}`,
+        priority: 9,
+        always: true,
+        group,
+        sub,
+        control: (
+          <OptButton pressed={on.includes(t)} label={TRIGGER_BUTTONS[t].hint} onClick={() => props.onChange(on.includes(t) ? on.filter((x) => x !== t) : normalizeTriggers([...on, t]))}>
+            {TRIGGER_BUTTONS[t].label}
+          </OptButton>
+        ),
+      }),
+    ),
+    ...(on.length > 0
+      ? [
+          {
+            id: "remind-once",
+            priority: 9,
+            always: true,
+            group,
+            sub,
+            control: (
+              <OptButton pressed={props.once} label="Remind about a creature once a turn, whichever comes first" onClick={() => props.onOnce(!props.once)}>
+                Once a turn
+              </OptButton>
+            ),
+          },
+        ]
+      : []),
+  ];
 }
 
 /** ", aimed 30° up" after an area's name, or nothing when it is level. */
 function aimSuffix(pitch: number): string {
   return pitch === 0 ? "" : `, aimed ${aimText(pitch)}`;
+}
+
+/** A slot always in ⋯ under "More area options". */
+function more(id: string, control: ReactNode): Slot {
+  return { id, priority: 9, always: true, group: MORE, control };
 }
 
 function IdleOptions(props: { env: AreaEnv; st: AreaToolState }) {
@@ -215,27 +338,29 @@ function IdleOptions(props: { env: AreaEnv; st: AreaToolState }) {
   const caster = env.area.defaultCaster;
   const casterToken = caster ? env.view.tokens[caster] : undefined;
   return (
-    <OptionsColumn>
-      <InfoLine tone="muted">
-        {casterToken ? `Casting from ${displayName(casterToken)}. ` : ""}Tap a token to cast from it, or tap the map. Tap an area on the map to pick it.
-      </InfoLine>
-      <OptionsRow label="New area">
-        {casterToken ? (
-          <OptButton
-            onClick={() => {
-              env.area.defaultCaster = null;
-              // The caster lives outside the store, so this only asks the bar to draw again.
-              env.area.store.setState({});
-            }}
-          >
-            Not from {displayName(casterToken)}
-          </OptButton>
-        ) : null}
-        <ShapePicker value={st.shape} onChange={(shape) => env.area.store.setState({ shape })} />
-        <SpellSearch env={env} st={st} base={base} />
-      </OptionsRow>
-      <SearchResults env={env} st={st} base={base} />
-    </OptionsColumn>
+    <OptionsStrip
+      tool="Area"
+      line={{ tone: "hint", content: `${casterToken ? `Casting from ${displayName(casterToken)}. ` : ""}Tap a token to cast from it, or tap the map. Tap an area on the map to pick it.` }}
+      slots={[
+        casterToken && {
+          id: "notFrom",
+          priority: 2,
+          control: (
+            <OptButton
+              onClick={() => {
+                env.area.defaultCaster = null;
+                // The caster lives outside the store, so this only asks the bar to draw again.
+                env.area.store.setState({});
+              }}
+            >
+              Not from {displayName(casterToken)}
+            </OptButton>
+          ),
+        },
+        { id: "shape", priority: 1, compact: true, glyph: true, control: <ShapeChip value={st.shape} onChange={(shape) => env.area.store.setState({ shape })} /> },
+        { id: "spell", priority: 3, flex: theme.layout.options.field, home: "shape", control: <SpellField env={env} st={st} base={base} /> },
+      ]}
+    />
   );
 }
 
@@ -261,55 +386,77 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
   }
   const note = d.note ? <span style={{ color: theme.color.textMuted }}> · {d.note}</span> : null;
   const title = (d.spell ?? `${d.size} ft ${shapeName(d.shape).toLowerCase()}`) + (canPitch(d.shape) ? aimSuffix(clampPitch(d.pitch)) : "");
+  const line: StripLine = t
+    ? inAreaLine({ env, t, moving: st.moving, title, extra: <>{range}{note}</> })
+    : {
+        tone: "hint",
+        content: (
+          <>
+            {st.pickCaster ? "Tap the caster." : `${caster ? `Cast by ${displayName(caster)}. ` : ""}${placementHint(d)}`}
+            {note}
+          </>
+        ),
+      };
 
   return (
-    <OptionsColumn>
-      {t ? (
-        <InArea env={env} t={t} moving={st.moving} title={title} extra={<>{range}{note}</>} />
-      ) : (
-        <InfoLine tone="muted">
-          {st.pickCaster ? "Tap the caster." : `${caster ? `Cast by ${displayName(caster)}. ` : ""}${placementHint(d)}`}
-          {note}
-        </InfoLine>
-      )}
-      <OptionsRow label="Area">
-        <ShapePicker value={d.shape} onChange={(shape) => setDraft(env, withShape(d, shape))} />
-        <Stepper label="Size" unit="ft" value={d.size} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(size) => set({ size })} />
-        <OptButton tone="primary" disabled={!t} onClick={() => placeDraft(env)}>
-          Place
-        </OptButton>
-        {/* A fixed name that says what pressed means (docs/design-v1-visual.md 3.7). */}
-        <OptButton pressed={st.shared} disabled={!t} label="Everyone sees this preview" onClick={() => setShared(env, !st.shared)}>
-          Shared
-        </OptButton>
-        <OptButton onClick={() => cancelDraft(env)}>Cancel</OptButton>
-        <OptButton pressed={st.more} onClick={() => env.area.store.setState({ more: !st.more })}>
-          More
-        </OptButton>
-        <SpellSearch env={env} st={st} base={() => d} />
-      </OptionsRow>
-      <SearchResults env={env} st={st} base={() => d} />
-      {st.more && !st.query.trim() ? (
-        <OptionsRow label="More area options">
-          <Segmented label="Rotation snap" value={st.snap} options={SNAPS} onChange={(snap) => env.area.store.setState({ snap })} />
-          {canPitch(d.shape) ? <AimControl pitch={clampPitch(d.pitch)} onChange={(pitch) => set({ pitch })} /> : null}
-          {d.shape === "line" ? <Stepper label="Width" unit="ft" value={d.width} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(width) => set({ width })} /> : null}
-          {d.shape === "cylinder" ? (
-            <>
-              <Stepper label="Height" unit="ft" value={d.height} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(height) => set({ height })} />
-              <Segmented
-                label="Point on"
-                value={d.anchor}
-                options={[
-                  { value: "bottom", label: "Bottom" },
-                  { value: "top", label: "Top" },
-                ]}
-                onChange={(anchor) => set({ anchor })}
-              />
-            </>
-          ) : null}
-          {d.shape === "cube" && d.fromId ? (
-            <Segmented
+    <OptionsStrip
+      tool="Area"
+      line={line}
+      task
+      slots={[
+        { id: "shape", priority: 1, compact: true, glyph: true, hosts: "size", control: <ShapeChip value={d.shape} size={d.size} onChange={(shape) => setDraft(env, withShape(d, shape))} /> },
+        { id: "size", priority: 3, home: "shape", control: <Stepper label="Size" unit="ft" value={d.size} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(size) => set({ size })} /> },
+        {
+          id: "place",
+          priority: 1,
+          control: (
+            <OptButton tone="primary" disabled={!t} ends onClick={() => placeDraft(env)}>
+              Place
+            </OptButton>
+          ),
+        },
+        {
+          id: "shared",
+          priority: 4,
+          control: (
+            // A fixed name that says what pressed means (docs/design-v1-visual.md 3.7).
+            <OptButton pressed={st.shared} disabled={!t} label="Everyone sees this preview" onClick={() => setShared(env, !st.shared)}>
+              Shared
+            </OptButton>
+          ),
+        },
+        {
+          id: "cancel",
+          priority: 2,
+          control: (
+            <OptButton ends onClick={() => cancelDraft(env)}>
+              Cancel
+            </OptButton>
+          ),
+        },
+        { id: "spell", priority: 5, flex: theme.layout.options.field, home: "shape", control: <SpellField env={env} st={st} base={() => d} /> },
+        more("snap", <OptSegmented label="Rotation snap" value={st.snap} options={SNAPS} onChange={(snap) => env.area.store.setState({ snap })} />),
+        canPitch(d.shape) && more("aim", <AimControl pitch={clampPitch(d.pitch)} onChange={(pitch) => set({ pitch })} />),
+        d.shape === "line" && more("width", <Stepper label="Width" unit="ft" value={d.width} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(width) => set({ width })} />),
+        d.shape === "cylinder" && more("height", <Stepper label="Height" unit="ft" value={d.height} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(height) => set({ height })} />),
+        d.shape === "cylinder" &&
+          more(
+            "pointOn",
+            <OptSegmented
+              label="Point on"
+              value={d.anchor}
+              options={[
+                { value: "bottom", label: "Bottom" },
+                { value: "top", label: "Top" },
+              ]}
+              onChange={(anchor) => set({ anchor })}
+            />,
+          ),
+        d.shape === "cube" &&
+          d.fromId &&
+          more(
+            "cubeReaches",
+            <OptSegmented
               label="Cube reaches"
               value={d.faceU > 0 ? "left" : d.faceU < 0 ? "right" : "center"}
               options={[
@@ -318,39 +465,50 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
                 { value: "right", label: "Right" },
               ]}
               onChange={(v) => set({ faceU: v === "left" ? 0.5 : v === "right" ? -0.5 : 0 })}
-            />
-          ) : null}
-          {d.point && !d.fromId ? (
-            <Stepper label="Elevation" unit="ft" value={d.point.z} step={5} min={-1000} max={1000} onChange={(z) => set({ point: { ...d.point!, z } })} />
-          ) : null}
-          {d.shape !== "sphere" && d.shape !== "cylinder" ? (
+            />,
+          ),
+        d.point && !d.fromId && more("elevation", <Stepper label="Elevation" unit="ft" value={d.point.z} step={5} min={-1000} max={1000} onChange={(z) => set({ point: { ...d.point!, z } })} />),
+        d.shape !== "sphere" &&
+          d.shape !== "cylinder" &&
+          more(
+            "includes",
             <OptButton pressed={d.includeOrigin} onClick={() => set({ includeOrigin: !d.includeOrigin })}>
               {d.targetsOther ? `Includes ${d.targetName ?? "target"}` : "Includes caster"}
-            </OptButton>
-          ) : null}
-          {d.shape === "emanation" && d.fromId && !d.targetsOther ? (
+            </OptButton>,
+          ),
+        d.shape === "emanation" &&
+          d.fromId &&
+          !d.targetsOther &&
+          more(
+            "attached",
             <OptButton pressed={d.attached} onClick={() => set({ attached: !d.attached })}>
               Moves with token
-            </OptButton>
-          ) : null}
+            </OptButton>,
+          ),
+        more(
+          "caster",
           <OptButton pressed={st.pickCaster} onClick={() => env.area.store.setState({ pickCaster: !st.pickCaster })}>
             {caster ? `Caster: ${displayName(caster)}` : "Set caster"}
-          </OptButton>
-          {caster ? (
+          </OptButton>,
+        ),
+        caster &&
+          more(
+            "noCaster",
             <OptButton label="Clear the caster" onClick={() => set({ casterId: undefined, fromId: d.targetsOther ? d.fromId : undefined, point: d.point ?? (t ? freePointOf(t, fpc) : null) })}>
               No caster
-            </OptButton>
-          ) : null}
-          <TriggerToggles value={d.triggers} once={d.oncePerTurn} onChange={(triggers) => set({ triggers })} onOnce={(oncePerTurn) => set({ oncePerTurn })} />
-          <Swatches label="Color" value={d.color} options={MEMBER_COLORS} onChange={(color) => set({ color })} />
-          {env.role === "dm" ? (
+            </OptButton>,
+          ),
+        ...triggerSlots({ value: d.triggers, once: d.oncePerTurn, onChange: (triggers) => set({ triggers }), onOnce: (oncePerTurn) => set({ oncePerTurn }) }),
+        more("color", <OptSwatches label="Color" value={d.color} options={MEMBER_COLORS} onChange={(color) => set({ color })} />),
+        env.role === "dm" &&
+          more(
+            "dmOnly",
             <OptButton pressed={d.visibility === "dm"} onClick={() => set({ visibility: d.visibility === "dm" ? "all" : "dm" })}>
               DM only
-            </OptButton>
-          ) : null}
-        </OptionsRow>
-      ) : null}
-    </OptionsColumn>
+            </OptButton>,
+          ),
+      ]}
+    />
   );
 }
 
@@ -368,46 +526,76 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
   };
   const by = caster ? <span style={{ color: theme.color.textMuted }}> · cast by {displayName(caster)}</span> : null;
   return (
-    <OptionsColumn>
-      <InArea env={env} t={t} moving={st.moving} title={areaTitle(t) + aimSuffix(pitchOf(t))} extra={by} />
-      <OptionsRow label="Placed area">
-        {editable ? (
-          <>
-            <Stepper label="Size" unit="ft" value={t.size} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(size) => update({ size })} />
-            {env.role === "dm" ? (
+    <OptionsStrip
+      tool="Area"
+      line={inAreaLine({ env, t, moving: st.moving, title: areaTitle(t) + aimSuffix(pitchOf(t)), extra: by })}
+      slots={[
+        editable && { id: "size", priority: 3, control: <Stepper label="Size" unit="ft" value={t.size} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(size) => update({ size })} /> },
+        editable &&
+          env.role === "dm" && {
+            id: "hidden",
+            priority: 4,
+            control: (
               // A fixed name that says what pressed means (docs/design-v1-visual.md 3.7).
               <OptButton pressed={t.visibility === "dm"} label="Hide it from players" onClick={() => update({ visibility: t.visibility === "dm" ? "all" : "dm" })}>
                 Hidden
               </OptButton>
-            ) : null}
-          </>
-        ) : null}
-        {env.role === "dm" ? <OptButton onClick={() => openDamage(env.area, ui, template.id)}>Damage</OptButton> : null}
-        <OptButton onClick={copy}>Copy</OptButton>
-        {editable ? (
-          <OptButton tone="danger" onClick={() => deleteTemplate(env, template.id)}>
-            Delete
-          </OptButton>
-        ) : null}
-        <OptButton onClick={() => select(env.area, null)}>Done</OptButton>
-        {editable ? (
-          <OptButton pressed={st.more} onClick={() => env.area.store.setState({ more: !st.more })}>
-            More
-          </OptButton>
-        ) : null}
-      </OptionsRow>
-      {editable && st.more ? (
-        <OptionsRow label="More area options">
-          <Segmented label="Rotation snap" value={st.snap} options={SNAPS} onChange={(snap) => env.area.store.setState({ snap })} />
-          {canPitch(t.shape) ? <AimControl pitch={pitchOf(t)} onChange={(pitch) => update({ pitch: pitch === 0 ? null : pitch })} /> : null}
-          {t.shape === "line" ? <Stepper label="Width" unit="ft" value={t.width ?? 5} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(width) => update({ width })} /> : null}
-          {t.shape === "cylinder" ? <Stepper label="Height" unit="ft" value={t.height ?? 40} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(height) => update({ height })} /> : null}
-          {t.shape !== "sphere" && t.shape !== "cylinder" ? (
+            ),
+          },
+        env.role === "dm" && {
+          id: "damage",
+          priority: 3,
+          control: (
+            <OptButton ends onClick={() => openDamage(env.area, ui, template.id)}>
+              Damage
+            </OptButton>
+          ),
+        },
+        {
+          id: "copy",
+          priority: 2,
+          control: (
+            <OptButton ends onClick={copy}>
+              Copy
+            </OptButton>
+          ),
+        },
+        editable && {
+          id: "delete",
+          priority: 3,
+          control: (
+            <OptButton tone="danger" ends onClick={() => deleteTemplate(env, template.id)}>
+              Delete
+            </OptButton>
+          ),
+        },
+        {
+          id: "done",
+          priority: 1,
+          control: (
+            <OptButton ends onClick={() => select(env.area, null)}>
+              Done
+            </OptButton>
+          ),
+        },
+        editable && more("snap", <OptSegmented label="Rotation snap" value={st.snap} options={SNAPS} onChange={(snap) => env.area.store.setState({ snap })} />),
+        editable && canPitch(t.shape) && more("aim", <AimControl pitch={pitchOf(t)} onChange={(pitch) => update({ pitch: pitch === 0 ? null : pitch })} />),
+        editable && t.shape === "line" && more("width", <Stepper label="Width" unit="ft" value={t.width ?? 5} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(width) => update({ width })} />),
+        editable && t.shape === "cylinder" && more("height", <Stepper label="Height" unit="ft" value={t.height ?? 40} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(height) => update({ height })} />),
+        editable &&
+          t.shape !== "sphere" &&
+          t.shape !== "cylinder" &&
+          more(
+            "includes",
             <OptButton pressed={t.includeOrigin} onClick={() => update({ includeOrigin: !t.includeOrigin })}>
               Includes caster
-            </OptButton>
-          ) : null}
-          {t.shape === "emanation" && (t.attachedTo || caster) ? (
+            </OptButton>,
+          ),
+        editable &&
+          t.shape === "emanation" &&
+          (t.attachedTo || caster) &&
+          more(
+            "attached",
             <OptButton
               pressed={!!t.attachedTo}
               onClick={() => {
@@ -423,17 +611,18 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
               }}
             >
               Moves with token
-            </OptButton>
-          ) : null}
-          <TriggerToggles
-            value={t.triggers}
-            once={t.oncePerTurn === true}
-            onChange={(triggers) => update({ triggers: triggers.length > 0 ? triggers : null })}
-            onOnce={(once) => update({ oncePerTurn: once ? true : null })}
-          />
-          <Swatches label="Color" value={t.color} options={MEMBER_COLORS} onChange={(color) => update({ color })} />
-        </OptionsRow>
-      ) : null}
-    </OptionsColumn>
+            </OptButton>,
+          ),
+        ...(editable
+          ? triggerSlots({
+              value: t.triggers,
+              once: t.oncePerTurn === true,
+              onChange: (triggers) => update({ triggers: triggers.length > 0 ? triggers : null }),
+              onOnce: (once) => update({ oncePerTurn: once ? true : null }),
+            })
+          : []),
+        editable && more("color", <OptSwatches label="Color" value={t.color} options={MEMBER_COLORS} onChange={(color) => update({ color })} />),
+      ]}
+    />
   );
 }

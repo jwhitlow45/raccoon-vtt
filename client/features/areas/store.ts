@@ -31,7 +31,6 @@ export type AreaToolState = {
   /** The next tap on a token picks the caster. */
   pickCaster: boolean;
   query: string;
-  more: boolean;
   /**
    * The placed area whose damage the DM is entering in the Areas panel
    * (AreaDamage.tsx). It outlives the tool, since the panel opens with
@@ -60,7 +59,6 @@ export const areaSlot = scopeSlot<AreaScope>(
       shape: "cone",
       pickCaster: false,
       query: "",
-      more: false,
       damageId: null,
     })),
     defaultCaster: null,
@@ -208,7 +206,7 @@ export function resetAreaTool(a: AreaScope, actions: RoomActions | null): void {
   const { draft, shared } = a.store.getState();
   if (actions && draft && shared) actions.sendEph({ k: "aoeEnd", id: draft.id });
   markRested(a);
-  a.store.setState({ draft: null, shared: false, selectedId: null, live: null, pickCaster: false, query: "", more: false });
+  a.store.setState({ draft: null, shared: false, selectedId: null, live: null, pickCaster: false, query: "" });
 }
 
 /** The rules context for drawing or listing the area being worked on. */
