@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { SHEET_MIN_HEIGHT, sheetCap, sheetMaxHeight, sheetRoom } from "./sheetCap.ts";
+import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, SHEET_MIN_HEIGHT, sheetCap, sheetMaxHeight, sheetMode, sheetRoom, sideSheetWidth } from "./sheetCap.ts";
 
 /** A 390 x 844 phone at 100%: the 52 px top bar and the 60 px toolbar, no safe areas. */
 const PHONE = { height: 844, safeTop: 0, safeBottom: 0, insetTop: 52, insetBottom: 60 };
@@ -37,5 +37,71 @@ describe("the sheet's height cap", () => {
     assert.match(css, /^max\(120px, min\(calc\(60dvh \/ var\(--rvtt-ui, 1\)\), calc\(100% - env\(safe-area-inset-top, 0px\) - env\(safe-area-inset-bottom, 0px\) - 136px\)\)\)$/);
     assert.match(sheetMaxHeight({ top: 52, bottom: 60 }, 56), / - 168px\)\)\)$/);
     assert.match(sheetMaxHeight({ top: 52, bottom: 60 }, 8), / - 136px\)\)\)$/);
+  });
+});
+
+describe("a sideways sheet's header", () => {
+  /** The header's width: the sheet less the safe area it holds on each side and its two 1 px borders. */
+  const inside = (sheet: number, safeLeft: number, safeRight: number) => sheet - safeLeft - safeRight - 2;
+
+  test("Back, Hide and Close keep one row from 200 px of header, 192 with actions", () => {
+    assert.equal(headerStacks({ width: 200, buttons: 3, actions: false }), false);
+    assert.equal(headerStacks({ width: 199, buttons: 3, actions: false }), true);
+    assert.equal(headerStacks({ width: 192, buttons: 3, actions: true }), false);
+    assert.equal(headerStacks({ width: 191, buttons: 3, actions: true }), true);
+  });
+
+  test("every sideways sheet in the doc's sizes keeps one row", () => {
+    // 844 x 390 with 47 px insets, at 100% and 130%: the 340 px sheet holds the right inset.
+    assert.equal(inside(sideSheetWidth(844), 0, 47), 291);
+    assert.equal(headerStacks({ width: inside(sideSheetWidth(844), 0, 47), buttons: 3, actions: false }), false);
+    assert.equal(headerStacks({ width: inside(sideSheetWidth(649), 0, 47), buttons: 3, actions: false }), false);
+    // 667 x 375 at 130% (513 x 288): the 60% cap, 308 px.
+    assert.equal(Math.round(sideSheetWidth(513)), 308);
+    assert.equal(headerStacks({ width: inside(sideSheetWidth(513), 0, 0), buttons: 3, actions: false }), false);
+    // 480 x 320 at 100%: 288 px, 239 inside.
+    assert.equal(Math.round(inside(sideSheetWidth(480), 0, 47)), 239);
+    assert.equal(headerStacks({ width: inside(sideSheetWidth(480), 0, 47), buttons: 3, actions: false }), false);
+  });
+
+  test("the very short mode at 480 x 320 at 130% has 273 px, where five buttons stack and three do not", () => {
+    const width = Math.round(inside(480 / 1.3, 47, 47));
+    assert.equal(width, 273);
+    assert.equal(headerStacks({ width, buttons: 3, actions: false }), false);
+    assert.equal(headerStacks({ width, buttons: 5, actions: true }), true, "Back, Hide, Close and the dock's two buttons");
+    assert.equal(headerStacks({ width, buttons: 4, actions: true }), false, "one dock button still fits");
+  });
+});
+
+describe("a sideways sheet's mode", () => {
+  const mode = (height: number, topBars: number, safeBottom = 21, header = SHEET_HEADER) => sheetMode({ height, safeTop: 0, safeBottom, topBars, header });
+
+  test("the doc's sizes, band or not: the very short mode exactly where the body would be under 88 px", () => {
+    // 844 x 390: body 201, 153 with the band.
+    assert.equal(mode(390, 52), "side");
+    assert.equal(mode(390, 100), "side");
+    // 844 x 390 at 130% (300 tall): body 111, or 63 with the band.
+    assert.equal(mode(300, 52), "side");
+    assert.equal(mode(300, 100), "full");
+    // 667 x 375, no insets: 207 and 159. At 130% (288): 120, and 72 with the band.
+    assert.equal(mode(375, 52, 0), "side");
+    assert.equal(mode(375, 100, 0), "side");
+    assert.equal(mode(288, 52, 0), "side");
+    assert.equal(mode(288, 100, 0), "full");
+    // 932 x 430 at 130% (331): 142, and 94 with the band, still a sheet.
+    assert.equal(mode(331, 52), "side");
+    assert.equal(mode(331, 100), "side");
+    // 480 x 320: 131, and 83 with the band. At 130% (246), 57 with no band: always the very short mode.
+    assert.equal(mode(320, 52), "side");
+    assert.equal(mode(320, 100), "full");
+    assert.equal(mode(246, 52), "full");
+    assert.equal(mode(246, 100), "full");
+  });
+
+  test("88 px of body is enough, 87 is not, and a stacked header counts its 78 px", () => {
+    // 52 + 60 + 56 + 88 = 256.
+    assert.equal(mode(256, 52, 0), "side");
+    assert.equal(mode(255, 52, 0), "full");
+    assert.equal(mode(256, 52, 0, SHEET_HEADER_STACKED), "full");
   });
 });

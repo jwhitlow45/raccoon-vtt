@@ -17,6 +17,13 @@ describe("foldsUnderSheet", () => {
     assert.equal(foldsUnderSheet({ width: 667, height: 375, sheetOpen: true }), false);
   });
 
+  test("landscape folds too where the sheet opens over the whole screen, the very short mode", () => {
+    assert.equal(foldsUnderSheet({ width: 369, height: 246, sheetOpen: true, full: true }), true);
+    assert.equal(foldsUnderSheet({ width: 649, height: 300, sheetOpen: true, full: false }), false);
+    assert.equal(foldsUnderSheet({ width: 369, height: 246, sheetOpen: false, full: true }), false, "a hidden sheet folds nothing");
+    assert.equal(foldsUnderSheet({ width: 932, height: 430, sheetOpen: true, full: true }), false, "from 900 px there are no sheets");
+  });
+
   test("a square layout counts as portrait, as the roll desk's rule does", () => {
     assert.equal(foldsUnderSheet({ width: 600, height: 600, sheetOpen: true }), true);
   });

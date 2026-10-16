@@ -66,12 +66,64 @@ export function SheetHeader(props: {
   titleRef?: Ref<HTMLHeadingElement>;
   /** A line under the header, for a dialog whose body scrolls under it. */
   divider?: boolean;
+  /**
+   * Hide, for a sheet on the right of a phone held sideways
+   * (docs/design-v1-layout-hierarchy.md 4.2): between the actions and the
+   * close, named by the panel as the close is ("Hide Initiative").
+   */
+  onHide?(): void;
+  hideLabel?: string;
+  /**
+   * Two rows where one would not fit its buttons and a few letters of the
+   * title (sheetCap.ts headerStacks): Back at the left and the other
+   * buttons at the right, then the title alone on one line. 78 px in all.
+   */
+  stacked?: boolean;
 }) {
   const { back, level = 2 } = props;
   const Heading = level === 2 ? "h2" : "h3";
   const asking = !!back?.armed;
   const actions = asking ? null : props.actions;
   const closeLabel = props.closeLabel ?? (typeof props.title === "string" ? `Close ${props.title}` : "Close");
+  const backButton = back ? <BackButton back={back} ref={props.backRef} /> : null;
+  const trailing = (
+    <>
+      {actions}
+      {props.onHide ? <IconButton icon="chevronRight" label={props.hideLabel ?? "Hide"} onClick={props.onHide} style={asking && !props.stacked ? { marginLeft: "auto" } : undefined} /> : null}
+      {props.onClose ? <IconButton ref={props.closeRef} icon="close" label={closeLabel} onClick={props.onClose} style={asking && !props.onHide && !props.stacked ? { marginLeft: "auto" } : undefined} /> : null}
+    </>
+  );
+  const heading = (stacked: boolean) => (
+    <Heading
+      ref={props.titleRef}
+      id={props.titleId}
+      tabIndex={-1}
+      hidden={asking}
+      style={{
+        ...TITLE_STYLE,
+        paddingLeft: back && !stacked ? 0 : theme.space(2),
+        fontSize: theme.font.heading,
+        fontWeight: theme.weight.bold,
+        lineHeight: stacked ? `${STACKED_TITLE_LINE}px` : theme.leading.tight,
+      }}
+    >
+      {props.title}
+    </Heading>
+  );
+  const padding = theme.space(actions ? 1 : 2);
+  const divider = props.divider ? `${theme.line.border}px solid ${theme.color.border}` : undefined;
+  if (props.stacked) {
+    return (
+      <header style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, padding: `${STACKED_PAD}px ${padding}px`, borderBottom: divider }}>
+        <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0, height: theme.touch }}>
+          {backButton}
+          <span style={{ flex: 1 }} />
+          {trailing}
+        </div>
+        {heading(true)}
+      </header>
+    );
+  }
   return (
     <header
       style={{
@@ -82,25 +134,20 @@ export function SheetHeader(props: {
         // A row that never wraps would otherwise ask its parent for the title's whole width, before the title's ellipsis can act.
         minWidth: 0,
         minHeight: 56,
-        padding: `0 ${theme.space(actions ? 1 : 2)}px`,
-        borderBottom: props.divider ? `${theme.line.border}px solid ${theme.color.border}` : undefined,
+        padding: `0 ${padding}px`,
+        borderBottom: divider,
       }}
     >
-      {back ? <BackButton back={back} ref={props.backRef} /> : null}
-      <Heading
-        ref={props.titleRef}
-        id={props.titleId}
-        tabIndex={-1}
-        hidden={asking}
-        style={{ ...TITLE_STYLE, paddingLeft: back ? 0 : theme.space(2), fontSize: theme.font.heading, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}
-      >
-        {props.title}
-      </Heading>
-      {actions}
-      {props.onClose ? <IconButton ref={props.closeRef} icon="close" label={closeLabel} onClick={props.onClose} style={asking ? { marginLeft: "auto" } : undefined} /> : null}
+      {backButton}
+      {heading(false)}
+      {trailing}
     </header>
   );
 }
+
+/** The stacked header's padding above and below, and its title's line: 6 + 44 + 22 + 6 = 78 px (sheetCap.ts SHEET_HEADER_STACKED). */
+const STACKED_PAD = 6;
+const STACKED_TITLE_LINE = 22;
 
 /**
  * One `<button>` in both states, so arming it changes its content, name

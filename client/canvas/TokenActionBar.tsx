@@ -54,7 +54,7 @@ import { TAP_SLOP_PX } from "../lib/gestures.ts";
 import { displayName, footprint, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { effectChip, elevationBadge } from "../lib/tokenView.ts";
-import { foldsUnderSheet, usePublishBar } from "../pages/fold.ts";
+import { dockSlot, foldsUnderSheet, usePublishBar } from "../pages/fold.ts";
 import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope, useScoped } from "../state/scope.ts";
 import { sheetOpen } from "../state/types.ts";
@@ -646,7 +646,8 @@ function BarFrame(props: {
   const layout = useLayoutSize();
   const zoom = useUiScale();
   const anySheet = useRoomView((s) => sheetOpen(s.local));
-  const folded = foldsUnderSheet({ ...layout, sheetOpen: anySheet });
+  const full = useStore(useScoped(dockSlot), (s) => s.sheetFull);
+  const folded = foldsUnderSheet({ ...layout, sheetOpen: anySheet, full });
   // "View as a player" reads this device's spot and keeps its own moves to itself, since nothing done there is saved.
   const preview = usePreview() !== null;
   const dockStore = useScoped(barDockSlot);

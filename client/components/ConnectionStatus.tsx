@@ -37,7 +37,16 @@ export function ConnectionDot(props: { state: ConnectionState }) {
  * not from each change between the other states.
  */
 export function ReconnectBanner(props: { state: ConnectionState }) {
-  const { state } = props;
+  const due = useReconnectDue(props.state);
+  return due ? <ReconnectNotice state={props.state} /> : null;
+}
+
+/**
+ * Whether the banner is due: 3 s after leaving `open`, until it is back.
+ * Apart from the notice, so a room that moves the notice into a modal sheet
+ * keeps the count where it is (pages/modalSlot.tsx).
+ */
+export function useReconnectDue(state: ConnectionState): boolean {
   const connected = state === "open";
   const [due, setDue] = useState(false);
   useEffect(() => {
@@ -46,8 +55,12 @@ export function ReconnectBanner(props: { state: ConnectionState }) {
     const timer = setTimeout(() => setDue(true), BANNER_DELAY_MS);
     return () => clearTimeout(timer);
   }, [connected]);
+  return !connected && due;
+}
 
-  if (connected || !due) return null;
+/** The banner itself, for a state that is not `open`. */
+export function ReconnectNotice(props: { state: ConnectionState }) {
+  const { state } = props;
   const offline = state === "offline";
   return (
     <Notice role="status" tone={offline ? "danger" : "warning"} float leading={<ConnectionDot state={state} />}>

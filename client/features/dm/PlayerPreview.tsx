@@ -46,6 +46,7 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
   const noticeRef = useRef<HTMLDivElement>(null);
   const [noticeHeight, setNoticeHeight] = useState(0);
   const [placed, setPlaced] = useState<{ left: number; width: number } | null>(null);
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => {
     const el = noticeRef.current;
     if (!el) return;
@@ -59,6 +60,7 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
     () => ({
       height: noticeHeight,
       place: (box) => setPlaced((prev) => (prev === box || (prev && box && prev.left === box.left && prev.width === box.width) ? prev : box)),
+      slot: setSlot,
     }),
     [noticeHeight],
   );
@@ -87,6 +89,20 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
   const dialog = useRef<HTMLDialogElement>(null);
   useModalDialog(dialog, { onClose: onExit, zoom: false });
   const zoom = useUiScale();
+  const banner = (
+    <Notice
+      tone="highlight"
+      float
+      role="status"
+      action={
+        <Button size="sm" onClick={onExit}>
+          Exit
+        </Button>
+      }
+    >
+      <strong>Viewing as {name}.</strong> {flash ? <strong>Read-only: nothing you do here is saved.</strong> : "Nothing here is saved."}
+    </Notice>
+  );
 
   return createPortal(
     <dialog
@@ -129,19 +145,9 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
           fontFamily: theme.font.body,
         }}
       >
-        <Notice
-          tone="highlight"
-          float
-          role="status"
-          action={
-            <Button size="sm" onClick={onExit}>
-              Exit
-            </Button>
-          }
-        >
-          <strong>Viewing as {name}.</strong> {flash ? <strong>Read-only: nothing you do here is saved.</strong> : "Nothing here is saved."}
-        </Notice>
+        {slot ? null : banner}
       </div>
+      {slot ? createPortal(<div style={{ width: "100%", maxWidth: 520, pointerEvents: "auto", fontFamily: theme.font.body }}>{banner}</div>, slot) : null}
     </dialog>,
     document.body,
   );

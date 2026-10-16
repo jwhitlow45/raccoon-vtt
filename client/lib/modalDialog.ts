@@ -104,6 +104,214 @@ export function useModalDialog(
   }, [dialog, scale]);
 }
 
+/** How a sheet's `<dialog>` stands: closed (hidden, or not yet open), open beside the map with show(), or modal with showModal(). */
+export type SheetDialogState = "closed" | "shown" | "modal";
+export type SheetDialogStep = "close" | "show" | "showModal";
+
+/**
+ * What takes a sheet's `<dialog>` from how it stands to how its sheet asks
+ * (docs/design-v1-layout-hierarchy.md 4.2): show() or showModal() to open,
+ * close() to hide, and close() then the other open for a change of mode,
+ * since a dialog cannot change between modal and not while open.
+ */
+export function sheetDialogSteps(now: SheetDialogState, want: { shown: boolean; modal: boolean }): SheetDialogStep[] {
+  const next: SheetDialogState = !want.shown ? "closed" : want.modal ? "modal" : "shown";
+  if (next === now) return [];
+  if (next === "closed") return ["close"];
+  const open: SheetDialogStep = next === "modal" ? "showModal" : "show";
+  return now === "closed" ? [open] : ["close", open];
+}
+
+/**
+ * Where focus goes once a sheet's dialog has taken its steps. The browser
+ * runs its own focusing steps on show(), showModal() and close(), which no
+ * sheet asked for, so the hook puts focus where the sheet's rules say:
+ * - Opened, beside the map: back where it was, so a turn strip's tap that
+ *   opens Initiative leaves focus on the strip. A request Room makes after
+ *   (the sheet's title, for a panel picked from the list) still wins.
+ *   Opened modal: where the browser put it, inside, since outside is inert.
+ * - Switched between modes: the element inside the sheet that had it.
+ * - Closed with focus inside: on `hide`, the element that stands for the
+ *   sheet (Panels), else lost to the page, as when a sheet unmounted, for
+ *   Room's own decision after a sheet closes. Focus elsewhere stays there.
+ * Null leaves focus where the browser put it, and "page" blurs it.
+ */
+export function sheetFocusAfter(input: { steps: readonly SheetDialogStep[]; before: "inside" | "outside" | "page"; hiding: boolean }): "before" | "page" | "hide" | null {
+  const { steps, before } = input;
+  if (steps.length === 0) return null;
+  const last = steps[steps.length - 1];
+  if (last === "close") {
+    if (before === "outside") return "before";
+    return input.hiding ? "hide" : "page";
+  }
+  if (steps.length === 2) return before === "inside" ? "before" : last === "showModal" ? null : before === "outside" ? "before" : "page";
+  if (last === "showModal") return null;
+  return before === "page" ? "page" : "before";
+}
+
+/** The parts of a `<dialog>` a sheet's steps use, so they run in tests without a DOM. */
+export type DialogLike = {
+  open: boolean;
+  show(): void;
+  showModal(): void;
+  close(): void;
+  setAttribute(name: string, value: string): void;
+  removeAttribute(name: string): void;
+};
+
+/**
+ * Counts the closes the hook asked for. The browser fires `close` a task
+ * after close(), so each close event heard is the hook's own while any is
+ * owed, and otherwise the viewer's: a repeated Escape that closed the
+ * modal with no cancel event.
+ */
+export function closeLedger(): { mark(): void; heard(): "own" | "viewer" } {
+  let owed = 0;
+  return {
+    mark() {
+      owed++;
+    },
+    heard() {
+      if (owed === 0) return "viewer";
+      owed--;
+      return "own";
+    },
+  };
+}
+
+/**
+ * Takes the steps on the dialog. `aria-modal` is set only once showModal()
+ * has run and removed before every close(), so a closed or plain sheet is
+ * never taken for a modal by the room's readers of one.
+ */
+export function applySheetDialogSteps(el: DialogLike, steps: readonly SheetDialogStep[], ledger: { mark(): void }): void {
+  for (const step of steps) {
+    if (step === "close") {
+      el.removeAttribute("aria-modal");
+      if (!el.open) continue;
+      ledger.mark();
+      el.close();
+    } else if (step === "show") el.show();
+    else {
+      el.showModal();
+      el.setAttribute("aria-modal", "true");
+    }
+  }
+}
+
+/*
+ * How many sheets are taking their dialog steps right now. The steps move
+ * focus synchronously, the browser's focusing steps and then the hook's
+ * own placing, and neither is the viewer moving it.
+ */
+let stepping = 0;
+
+/** Whether a focus event comes from a sheet's dialog steps, for a reader that tracks where the viewer put focus (Room's dock). */
+export function sheetStepping(): boolean {
+  return stepping > 0;
+}
+
+/**
+ * A panel sheet as one `<dialog>` kept mounted from the moment its panel
+ * opens until it closes (docs/design-v1-layout-hierarchy.md 4.2), so no
+ * change of mode, no Hide and no rotation remounts the panel, and its
+ * draft, scroll and subpage stay. `shown` false closes it with its content
+ * kept. `modal` opens it with showModal() and `aria-modal="true"`, which
+ * the room's readers of an open modal see only while it shows, so after
+ * Hide the map's shortcuts and Escape work again at once.
+ *
+ * While modal it takes useModalDialog's Tab wrapping and its Escape, which
+ * asks `onCancel`. Chrome can close a modal dialog with no cancel event
+ * when Escape repeats with no tap between: a close this hook did not ask
+ * for is the viewer closing the sheet, so it drops the marker and calls
+ * `onCancel` too. `hideFocus` is where focus goes when the sheet hides
+ * with focus inside it, as Hide does. Unmounting closes the dialog first,
+ * so whatever decides focus after a sheet closes finds nothing inert.
+ */
+export function useSheetDialog(
+  dialog: RefObject<HTMLDialogElement | null>,
+  options: { shown: boolean; modal: boolean; onCancel(): void; hideFocus?: RefObject<HTMLElement | null> },
+): void {
+  const latest = useRef(options);
+  latest.current = options;
+  const [ledger] = useState(closeLedger);
+  const state = useRef<SheetDialogState>("closed");
+  /*
+   * What had focus inside the sheet when the effects were last cleaned up
+   * with the sheet still mounted. React's development StrictMode cleans up
+   * and runs a new component's effects again at once, which closes and
+   * opens the dialog: focus goes back to that element, never to where the
+   * browser's focusing steps put it.
+   */
+  const held = useRef<HTMLElement | null>(null);
+  const { shown, modal } = options;
+
+  useLayoutEffect(() => {
+    const el = dialog.current;
+    if (!el) return;
+    const steps = sheetDialogSteps(state.current, { shown, modal });
+    if (steps.length === 0) return;
+    const active = focusedElement();
+    const before = active === null || active === document.body ? "page" : el.contains(active) ? "inside" : "outside";
+    stepping++;
+    try {
+      applySheetDialogSteps(el, steps, ledger);
+      state.current = !shown ? "closed" : modal ? "modal" : "shown";
+      const keep = held.current;
+      held.current = null;
+      if (shown && keep?.isConnected && el.contains(keep)) {
+        keep.focus({ preventScroll: true });
+        return;
+      }
+      const focus = sheetFocusAfter({ steps, before, hiding: !shown });
+      if (focus === "before") {
+        if (active?.isConnected) active.focus({ preventScroll: true });
+        // What had it may be gone or hidden by this same render, such as a token bar folded under the sheet. Focus then goes to the page, as before sheets were dialogs, for the room to place.
+        if (focusedElement() !== active) focusedElement()?.blur();
+      } else if (focus === "hide") {
+        const target = latest.current.hideFocus?.current;
+        if (target?.isConnected) target.focus({ preventScroll: true });
+        else focusedElement()?.blur();
+      } else if (focus === "page") focusedElement()?.blur();
+    } finally {
+      stepping--;
+    }
+  }, [dialog, shown, modal, ledger]);
+
+  useLayoutEffect(() => {
+    const el = dialog.current;
+    if (!el) return;
+    const onCancel = (e: Event) => {
+      e.preventDefault();
+      latest.current.onCancel();
+    };
+    const onNativeClose = () => {
+      if (ledger.heard() === "own" || el.open) return;
+      state.current = "closed";
+      el.removeAttribute("aria-modal");
+      latest.current.onCancel();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (state.current === "modal") containTab(el, e);
+    };
+    el.addEventListener("cancel", onCancel);
+    el.addEventListener("close", onNativeClose);
+    el.addEventListener("keydown", onKey);
+    return () => {
+      el.removeEventListener("cancel", onCancel);
+      el.removeEventListener("close", onNativeClose);
+      el.removeEventListener("keydown", onKey);
+      // The sheet closes for good: closed before it leaves the page, and focus that was inside is lost to the page, as when a sheet unmounted, for Room to place.
+      const active = focusedElement();
+      const inside = active !== null && el.contains(active);
+      applySheetDialogSteps(el, ["close"], ledger);
+      state.current = "closed";
+      held.current = inside ? active : null;
+      if (inside) focusedElement()?.blur();
+    };
+  }, [dialog, ledger]);
+}
+
 /**
  * Keeps Tab and Shift+Tab inside `root`: from its last control to its
  * first, and back. useModalDialog's `<dialog>` does it, and so does a modal

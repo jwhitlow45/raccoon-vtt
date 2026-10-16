@@ -193,7 +193,8 @@ async function boxes(page: Page) {
     return {
       bars: box(bar),
       dock: box(document.querySelector("[data-rvtt-dock]")),
-      sheet: box(document.querySelector('section[aria-label="Panels"]')),
+      // The sheet's outer box, its border included: its region is a section inside the dialog.
+      sheet: box(document.querySelector('dialog[data-rvtt-sheet][aria-label="Panels"]')),
       toolbar: box(document.querySelector('nav[aria-label="Tools"]')),
     };
   });

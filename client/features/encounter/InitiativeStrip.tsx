@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
+import { createPortal } from "react-dom";
 import { useStore } from "zustand";
 import type { LogEntry } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
@@ -8,6 +9,7 @@ import { useAlertsSummaryEntry } from "../../components/sheetFocus.ts";
 import { useBackClose } from "../../lib/backClose.ts";
 import { containTab, inertOutside } from "../../lib/modalDialog.ts";
 import { focusMap, mapFocusSlot } from "../../pages/mapFocus.ts";
+import { useModalSlot } from "../../pages/modalSlot.tsx";
 import { theme } from "../../lib/theme.ts";
 import { screenHeight, useLayoutSize } from "../device/layout.ts";
 import { effectChip } from "../../lib/tokenView.ts";
@@ -112,6 +114,7 @@ export function useYourTurnNotice(): boolean {
  */
 function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement> }) {
   const you = useYou();
+  const turnSlot = useModalSlot("turn");
   const round = useRoomView((s) => s.view?.encounter?.round ?? null);
   const activeEntryId = useRoomView((s) => s.view?.encounter?.activeEntryId ?? null);
   const started = useRoomView((s) => (s.view?.encounter ? hasStarted(s.view.encounter) : false));
@@ -174,7 +177,7 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement> }) {
         >
           {name}
         </span>
-        {yours ? <YourTurn notice={props.notice} fontSize={theme.font.small} inline /> : null}
+        {yours ? <YourTurn notice={props.notice} fontSize={theme.font.small} inline slot={turnSlot} /> : null}
         {timer && current ? <TimerClock state={timer} /> : null}
         {next.map((entry) => (
           <Portrait key={entry.id} entry={entry} size={22} />
@@ -193,6 +196,7 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement> }) {
  */
 function Band(props: { notice: boolean }) {
   const you = useYou();
+  const turnSlot = useModalSlot("turn");
   const round = useRoomView((s) => s.view?.encounter?.round ?? null);
   const activeEntryId = useRoomView((s) => s.view?.encounter?.activeEntryId ?? null);
   const started = useRoomView((s) => (s.view?.encounter ? hasStarted(s.view.encounter) : false));
@@ -276,7 +280,7 @@ function Band(props: { notice: boolean }) {
         >
           {current ? name : line}
         </span>
-        {current && yours ? <YourTurn notice={props.notice} fontSize={theme.font.small} /> : null}
+        {current && yours ? <YourTurn notice={props.notice} fontSize={theme.font.small} slot={turnSlot} /> : null}
       </span>
       {timer && current ? <TimerClock state={timer} size={theme.font.body14} stack /> : null}
       {shownNext.length > 0 ? (
@@ -352,7 +356,7 @@ function TrackerTarget(props: { label: string; reach: number }) {
  */
 const PILL_PAD = 6;
 
-function YourTurn(props: { notice: boolean; fontSize: number; inline?: boolean }) {
+function YourTurn(props: { notice: boolean; fontSize: number; inline?: boolean; slot?: HTMLElement | null }) {
   const text: CSSProperties = {
     flex: "none",
     justifySelf: "start",
@@ -377,6 +381,31 @@ function YourTurn(props: { notice: boolean; fontSize: number; inline?: boolean }
     "--rvtt-notice-ink": theme.color.ink,
     "--rvtt-notice-settled": theme.color.accentSoft,
   } as CSSProperties;
+  /*
+   * A sheet in the very short mode is modal and leaves the strip out of
+   * reach, so while it shows the flare speaks and shows inside it, at the
+   * top of its body (pages/modalSlot.tsx), and the strip's pill under it
+   * only shows.
+   */
+  if (props.slot) {
+    return (
+      <>
+        <span aria-hidden className="rvtt-turn-notice" style={{ ...text, ...colors, padding: `0 ${PILL_PAD}px`, margin: props.inline ? 0 : `0 -${PILL_PAD}px`, borderRadius: theme.radius.pill, background: theme.color.accentSoft, color: theme.color.ink }}>
+          Your turn
+        </span>
+        {createPortal(
+          <span
+            role="status"
+            aria-live="assertive"
+            style={{ padding: `${theme.space(1)}px ${theme.space(3)}px`, borderRadius: theme.radius.pill, background: theme.color.accentSoft, color: theme.color.ink, fontSize: theme.font.body14, fontWeight: theme.weight.bold, boxShadow: theme.shadow.float }}
+          >
+            Your turn
+          </span>,
+          props.slot,
+        )}
+      </>
+    );
+  }
   return (
     <span
       role="status"

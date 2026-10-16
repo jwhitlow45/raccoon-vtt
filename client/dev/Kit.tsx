@@ -573,7 +573,7 @@ function Folding() {
     <Card title="Sheets and folding">
       <Switch label="Reserve room for the dock" help="Keeps 56 px above the sheet, as the dock does on a phone." checked={reserve} onChange={setReserve} />
       <div style={{ position: "relative", height: 420, overflow: "hidden", borderRadius: theme.radius.md, background: theme.color.fog, border: `${theme.line.border}px solid ${theme.color.border}` }}>
-        <Sheet title="Menu" placement="bottom" inset={{ top: 0, bottom: 0 }} reserveTop={reserve ? 56 : 0} subpage={header} onClose={() => {}}>
+        <Sheet title="Menu" mode="bottom" headerWidth={360} inset={{ top: 0, bottom: 0 }} reserveTop={reserve ? 56 : 0} subpage={header} onClose={() => {}}>
           <PanelHeaderHost onHeader={setHeader}>
             <KitMenu remote={remote} />
           </PanelHeaderHost>

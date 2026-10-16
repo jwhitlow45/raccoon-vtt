@@ -261,9 +261,10 @@ describe("raccoon-vtt shared components on the kit page", { timeout: 180_000 }, 
     const sheet = page.locator('section[aria-label="Menu"]');
     await sheet.getByRole("button", { name: "Room settings" }).click();
     await sheet.getByRole("heading", { name: "Room settings" }).waitFor();
-    // Its twelve settings are taller than the cap, so the sheet's height is the cap: the kit's box with no bars, less 24 px of map or the 56 px reserve.
-    const room = await sheet.evaluate((el) => (el as unknown as { parentElement: { clientHeight: number } }).parentElement.clientHeight);
-    const height = async () => Math.round((await sheet.boundingBox())!.height);
+    // Its twelve settings are taller than the cap, so the sheet's height is the cap: the kit's box with no bars, less 24 px of map or the 56 px reserve. The sheet is the dialog around its region, border and all.
+    const dialog = page.locator('dialog[data-rvtt-sheet][aria-label="Menu"]');
+    const room = await dialog.evaluate((el) => (el as unknown as { parentElement: { clientHeight: number } }).parentElement.clientHeight);
+    const height = async () => Math.round((await dialog.boundingBox())!.height);
     assert.equal(await height(), room - 24);
     await page.getByRole("switch", { name: "Reserve room for the dock" }).click();
     assert.equal(await height(), room - 56);

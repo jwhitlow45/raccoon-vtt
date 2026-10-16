@@ -1,10 +1,14 @@
-import { useRef, type CSSProperties, type ReactNode, type Ref, type RefObject } from "react";
+import { useCallback, useRef, type CSSProperties, type ReactNode, type Ref, type RefObject } from "react";
 import { chromeZoom, smallUi } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { subpageBack, useSubpageFocus, type PanelHeader } from "../features/panels.ts";
+import { useSheetDialog } from "../lib/modalDialog.ts";
 import { theme } from "../lib/theme.ts";
-import { sheetMaxHeight } from "./sheetCap.ts";
+import { headerStacks, sheetMaxHeight } from "./sheetCap.ts";
 import { SheetHeader, type HeaderBack } from "./SheetHeader.tsx";
+
+/** Where a sheet stands (docs/design-v1-layout-hierarchy.md 4.2): at a phone's foot, on the right of one held sideways, or over the whole screen where that is too short. */
+export type SheetMode = "bottom" | "side" | "full";
 
 /**
  * A panel over the map on phones (design section 14.4): a bottom sheet in
@@ -29,11 +33,23 @@ import { SheetHeader, type HeaderBack } from "./SheetHeader.tsx";
  * docks on its edge (docs/design-v1-visual.md 3.2.1), in place of the
  * usual 24 px gap, and the sheet never goes below 120 px (sheetCap.ts).
  * A sheet on the right runs the screen's height, so it has no reserve.
+ *
+ * The sheet is one `<dialog>` from the moment its panel opens until it
+ * closes (lib/modalDialog.ts useSheetDialog), whatever its mode, so a
+ * change of mode or Hide never remounts the panel. Its inner `<section>`
+ * keeps the panel's name and the region role every query and landmark
+ * finds a sheet by. On the right it gains Hide (`onHide`), which closes
+ * the dialog and keeps the panel, and where the screen is too short for
+ * a body of 88 px beside the map, the very short mode (`full`) opens it
+ * modal over the whole screen, inside the safe areas on every side, with
+ * the room's notices inside it, which the modal would otherwise leave out
+ * of reach: `lasting` between the header and the body, and `notices` laid
+ * over the top of the body (pages/modalSlot.tsx).
  */
 export function Sheet(props: {
   ref?: Ref<HTMLElement>;
   title: string;
-  placement: "bottom" | "right";
+  mode: SheetMode;
   inset: { top: number; bottom: number };
   onClose(): void;
   onBack?(): void;
@@ -42,78 +58,147 @@ export function Sheet(props: {
   reserveTop?: number;
   /** In the header, between the title and the close button, such as the dock's buttons when the dock has no room (3.2.1). */
   actions?: ReactNode;
+  /** How many buttons `actions` holds, for whether the header stacks. */
+  actionCount?: number;
   /** Focus moves to the back button, or the close button without one, once the token bar's Close leaves the sheet (3.2.1). */
   backRef?: Ref<HTMLButtonElement>;
   closeRef?: Ref<HTMLButtonElement>;
   /** The header's title, a heading that takes focus from script, for a room that moves focus into the sheet it just opened. */
   titleRef?: RefObject<HTMLHeadingElement | null>;
+  /** Hide, on the right or over the whole screen: the panel stays mounted and Panels shows it again. */
+  onHide?(): void;
+  /** False while hidden: the dialog closed, its content kept. */
+  shown?: boolean;
+  /** Where focus goes when the sheet hides with focus inside it: the toolbar's Panels. */
+  hideFocus?: RefObject<HTMLElement | null>;
+  /** The header's width in layout px, the sheet less its side padding and borders, which decides whether it stacks (sheetCap.ts headerStacks). */
+  headerWidth: number;
+  /** Under the header, above the body, in the very short mode. */
+  lasting?: ReactNode;
+  /** Laid over the top of the body in the very short mode. */
+  notices?: ReactNode;
   children: ReactNode;
 }) {
-  const { placement, inset, subpage } = props;
+  const { mode, inset, subpage } = props;
   const zoom = useUiScale();
   const ownTitleRef = useRef<HTMLHeadingElement>(null);
   const titleRef = props.titleRef ?? ownTitleRef;
   const bodyRef = useRef<HTMLDivElement>(null);
-  useSubpageFocus(subpage ?? null, { title: titleRef, body: bodyRef });
-  const bottom = placement === "bottom";
+  const sectionRef = useRef<HTMLElement>(null);
+  useSubpageFocus(subpage ?? null, { title: titleRef, body: bodyRef, root: sectionRef });
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const { ref: outer } = props;
+  const setDialog = useCallback(
+    (el: HTMLDialogElement | null) => {
+      dialogRef.current = el;
+      if (typeof outer === "function") return outer(el);
+      if (outer) outer.current = el;
+      return undefined;
+    },
+    [outer],
+  );
+  const onHide = mode === "bottom" ? undefined : props.onHide;
+  useSheetDialog(dialogRef, { shown: props.shown ?? true, modal: mode === "full", onCancel: props.onClose, hideFocus: props.hideFocus });
+  const back: HeaderBack | null = subpage ? subpageBack(subpage) : props.onBack ? { label: props.backLabel ?? "Back", onBack: props.onBack } : null;
+  const actionCount = props.actions ? (props.actionCount ?? 0) : 0;
+  const stacked = headerStacks({ width: props.headerWidth, buttons: (back ? 1 : 0) + (onHide ? 1 : 0) + 1 + actionCount, actions: actionCount > 0 });
   const insetTop = `calc(${theme.safe.top} + ${inset.top}px)`;
   const insetBottom = `calc(${theme.safe.bottom} + ${inset.bottom}px)`;
-  const back: HeaderBack | null = subpage ? subpageBack(subpage) : props.onBack ? { label: props.backLabel ?? "Back", onBack: props.onBack } : null;
+  const box: CSSProperties =
+    mode === "bottom"
+      ? {
+          position: "absolute",
+          top: "auto",
+          left: 0,
+          right: 0,
+          bottom: insetBottom,
+          width: "auto",
+          height: "auto",
+          maxWidth: "none",
+          maxHeight: sheetMaxHeight(inset, props.reserveTop),
+          borderRadius: `${theme.radius.lg}px ${theme.radius.lg}px 0 0`,
+          padding: `0 ${theme.safe.right} 0 ${theme.safe.left}`,
+          zIndex: theme.z.sheet,
+          boxShadow: theme.shadow.sheet,
+        }
+      : mode === "side"
+        ? {
+            position: "absolute",
+            top: insetTop,
+            bottom: insetBottom,
+            left: "auto",
+            right: 0,
+            width: theme.layout.landscapeSheetWidth,
+            height: "auto",
+            maxWidth: "60%",
+            maxHeight: "none",
+            borderRadius: `${theme.radius.lg}px 0 0 ${theme.radius.lg}px`,
+            padding: `0 ${theme.safe.right} 0 0`,
+            zIndex: theme.z.sheet,
+            boxShadow: theme.shadow.sheet,
+          }
+        : {
+            // Modal, in the browser's top layer: the whole screen, its content inside the safe areas on all four sides.
+            position: "fixed",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            maxWidth: "none",
+            maxHeight: "none",
+            borderRadius: 0,
+            padding: `${theme.safe.top} ${theme.safe.right} ${theme.safe.bottom} ${theme.safe.left}`,
+          };
   return (
-    <section
-      ref={props.ref}
+    <dialog
+      ref={setDialog}
       aria-label={props.title}
+      data-rvtt-sheet=""
       {...smallUi(zoom)}
       style={{
         ...chromeZoom(zoom),
-        position: "absolute",
-        zIndex: theme.z.sheet,
+        boxSizing: "border-box",
+        margin: 0,
+        // Open, it lays out as a column. Closed, globals.css hides it, since this inline display would beat the browser's own rule for a closed dialog.
         display: "flex",
         flexDirection: "column",
+        overflow: "hidden",
+        outline: "none",
         background: theme.color.surface,
+        color: theme.color.text,
         border: `${theme.line.border}px solid ${theme.color.border}`,
-        boxShadow: theme.shadow.sheet,
-        ...(bottom
-          ? {
-              left: 0,
-              right: 0,
-              bottom: insetBottom,
-              maxHeight: sheetMaxHeight(inset, props.reserveTop),
-              borderRadius: `${theme.radius.lg}px ${theme.radius.lg}px 0 0`,
-              paddingLeft: theme.safe.left,
-              paddingRight: theme.safe.right,
-            }
-          : {
-              top: insetTop,
-              bottom: insetBottom,
-              right: 0,
-              width: theme.layout.landscapeSheetWidth,
-              maxWidth: "60%",
-              borderRadius: `${theme.radius.lg}px 0 0 ${theme.radius.lg}px`,
-              paddingRight: theme.safe.right,
-            }),
+        ...box,
       }}
     >
-      <SheetHeader
-        title={subpage?.title ?? props.title}
-        back={back}
-        actions={props.actions}
-        onClose={props.onClose}
-        closeLabel={`Close ${props.title}`}
-        backRef={props.backRef}
-        closeRef={props.closeRef}
-        titleRef={titleRef}
-      />
-      {/* The 4 px on top hold the focus ring of a first full-width control (2 px out, 2 px wide), which the scrolling body would clip. */}
-      {/* data-pane-body and the padding variables let a sticky header inside meet the scroller's edges (docs/design-v1-combat-flow.md 3.1). */}
-      <div
-        ref={bodyRef}
-        data-pane-body=""
-        style={{ ...paneBodyPadding(theme.space(1), theme.space(4)), flex: 1, minHeight: 0, overflowY: "auto", padding: `${theme.space(1)}px ${theme.space(4)}px ${theme.space(4)}px`, overscrollBehavior: "contain" }}
-      >
-        {props.children}
-      </div>
-    </section>
+      <section ref={sectionRef} aria-label={props.title} style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        <SheetHeader
+          title={subpage?.title ?? props.title}
+          back={back}
+          actions={props.actions}
+          onClose={props.onClose}
+          closeLabel={`Close ${props.title}`}
+          onHide={onHide}
+          hideLabel={`Hide ${props.title}`}
+          stacked={stacked}
+          backRef={props.backRef}
+          closeRef={props.closeRef}
+          titleRef={titleRef}
+        />
+        {mode === "full" ? props.lasting : null}
+        {/* Every mode keeps this shape, so a change of mode never mounts the panel again. */}
+        <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+          {/* The 4 px on top hold the focus ring of a first full-width control (2 px out, 2 px wide), which the scrolling body would clip. */}
+          {/* data-pane-body and the padding variables let a sticky header inside meet the scroller's edges in every mode (docs/design-v1-combat-flow.md 3.1). */}
+          <div
+            ref={bodyRef}
+            data-pane-body=""
+            style={{ ...paneBodyPadding(theme.space(1), theme.space(4)), flex: 1, minHeight: 0, overflowY: "auto", padding: `${theme.space(1)}px ${theme.space(4)}px ${theme.space(4)}px`, overscrollBehavior: "contain" }}
+          >
+            {props.children}
+          </div>
+          {mode === "full" && props.notices ? <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 1, pointerEvents: "none" }}>{props.notices}</div> : null}
+        </div>
+      </section>
+    </dialog>
   );
 }
 

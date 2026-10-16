@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { openingFocus, stopIndex, tabStops, wrapFocusIndex } from "./modalDialog.ts";
+import { applySheetDialogSteps, closeLedger, openingFocus, sheetDialogSteps, sheetFocusAfter, stopIndex, tabStops, wrapFocusIndex, type DialogLike } from "./modalDialog.ts";
 
 describe("focus wrapping in a modal dialog", () => {
   test("Tab from the last control goes to the first", () => {
@@ -101,5 +101,108 @@ describe("focus as a modal dialog opens", () => {
   test("a field that left the dialog since is passed over, and the dialog takes focus", () => {
     const first = openingFocus(null, "stat block field", (el) => el === "stat block field", "Paste button");
     assert.deepEqual(openingFocus(first, "Paste button", inDialog, "Paste button"), { opener: "Paste button", first: null });
+  });
+});
+
+describe("a sheet's one dialog (useSheetDialog)", () => {
+  /** A dialog that records what was done to it, as the browser's would stand. */
+  function fakeDialog() {
+    const calls: string[] = [];
+    const attrs = new Map<string, string>();
+    const el: DialogLike & { calls: string[]; attrs: Map<string, string> } = {
+      open: false,
+      calls,
+      attrs,
+      show() {
+        calls.push("show");
+        el.open = true;
+      },
+      showModal() {
+        calls.push("showModal");
+        el.open = true;
+      },
+      close() {
+        calls.push("close");
+        el.open = false;
+      },
+      setAttribute: (name, value) => void attrs.set(name, value),
+      removeAttribute: (name) => void attrs.delete(name),
+    };
+    return el;
+  }
+
+  test("the steps from how it stands to how the sheet asks", () => {
+    assert.deepEqual(sheetDialogSteps("closed", { shown: true, modal: false }), ["show"]);
+    assert.deepEqual(sheetDialogSteps("closed", { shown: true, modal: true }), ["showModal"]);
+    assert.deepEqual(sheetDialogSteps("shown", { shown: false, modal: false }), ["close"]);
+    assert.deepEqual(sheetDialogSteps("modal", { shown: false, modal: true }), ["close"]);
+    assert.deepEqual(sheetDialogSteps("shown", { shown: true, modal: true }), ["close", "showModal"], "a change of mode closes first");
+    assert.deepEqual(sheetDialogSteps("modal", { shown: true, modal: false }), ["close", "show"]);
+    assert.deepEqual(sheetDialogSteps("closed", { shown: false, modal: true }), [], "hidden, a change of mode only changes how it will open");
+    assert.deepEqual(sheetDialogSteps("modal", { shown: true, modal: true }), []);
+  });
+
+  test("open as show(), and as showModal() with aria-modal", () => {
+    const plain = fakeDialog();
+    applySheetDialogSteps(plain, ["show"], closeLedger());
+    assert.deepEqual(plain.calls, ["show"]);
+    assert.equal(plain.attrs.has("aria-modal"), false);
+    const modal = fakeDialog();
+    applySheetDialogSteps(modal, ["showModal"], closeLedger());
+    assert.deepEqual(modal.calls, ["showModal"]);
+    assert.equal(modal.attrs.get("aria-modal"), "true");
+  });
+
+  test("close with aria-modal removed, and a switch of mode as close() then the other open", () => {
+    const el = fakeDialog();
+    const ledger = closeLedger();
+    applySheetDialogSteps(el, ["showModal"], ledger);
+    applySheetDialogSteps(el, ["close", "show"], ledger);
+    assert.deepEqual(el.calls, ["showModal", "close", "show"]);
+    assert.equal(el.attrs.has("aria-modal"), false, "a plain sheet is no modal");
+    applySheetDialogSteps(el, ["close", "showModal"], ledger);
+    assert.equal(el.attrs.get("aria-modal"), "true");
+    applySheetDialogSteps(el, ["close"], ledger);
+    assert.equal(el.open, false);
+    assert.equal(el.attrs.has("aria-modal"), false, "Hide drops the marker");
+  });
+
+  test("its own closes (Hide, a switch, Close) are heard as its own, and a close it did not ask for is the viewer's", () => {
+    const el = fakeDialog();
+    const ledger = closeLedger();
+    applySheetDialogSteps(el, ["showModal"], ledger);
+    applySheetDialogSteps(el, ["close", "show"], ledger);
+    applySheetDialogSteps(el, ["close"], ledger);
+    // Each close event arrives a task later.
+    assert.equal(ledger.heard(), "own");
+    assert.equal(ledger.heard(), "own");
+    assert.equal(ledger.heard(), "viewer", "Escape repeated with no tap between closed it: onCancel closes the panel");
+  });
+
+  test("a close step on a dialog already closed calls nothing and owes no event", () => {
+    const el = fakeDialog();
+    const ledger = closeLedger();
+    applySheetDialogSteps(el, ["close"], ledger);
+    assert.deepEqual(el.calls, []);
+    assert.equal(ledger.heard(), "viewer");
+  });
+
+  test("focus after show() returns to the element noted before, and a request made after it still wins", () => {
+    assert.equal(sheetFocusAfter({ steps: ["show"], before: "outside", hiding: false }), "before", "a turn strip's tap keeps focus on the strip");
+    assert.equal(sheetFocusAfter({ steps: ["show"], before: "page", hiding: false }), "page", "nothing had focus: the browser's pick is taken back");
+    assert.equal(sheetFocusAfter({ steps: ["showModal"], before: "outside", hiding: false }), null, "modal: focus stays inside where the browser put it");
+  });
+
+  test("a switch of mode keeps focus on its element inside the sheet", () => {
+    assert.equal(sheetFocusAfter({ steps: ["close", "showModal"], before: "inside", hiding: false }), "before");
+    assert.equal(sheetFocusAfter({ steps: ["close", "show"], before: "inside", hiding: false }), "before");
+    assert.equal(sheetFocusAfter({ steps: ["close", "showModal"], before: "outside", hiding: false }), null);
+  });
+
+  test("closing holds focus: Hide moves it to Panels, and focus elsewhere stays", () => {
+    assert.equal(sheetFocusAfter({ steps: ["close"], before: "inside", hiding: true }), "hide");
+    assert.equal(sheetFocusAfter({ steps: ["close"], before: "page", hiding: true }), "hide", "a tap that focused nothing, as in Safari");
+    assert.equal(sheetFocusAfter({ steps: ["close"], before: "outside", hiding: true }), "before");
+    assert.equal(sheetFocusAfter({ steps: [], before: "inside", hiding: false }), null);
   });
 });

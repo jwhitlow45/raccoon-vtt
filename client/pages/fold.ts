@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, type RefObject } from "react";
+import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { sheetRoom, SHEET_MIN_HEIGHT, type SheetSpace } from "../components/sheetCap.ts";
 import { useLayoutSize } from "../features/device/layout.ts";
@@ -25,17 +26,20 @@ import { useRoomView } from "../state/view.ts";
  * 900 layout px and no wider than tall, the roll desk's rule,
  * features/rolls/logic.ts deskLayout) with a panel sheet or the list of
  * panels open. In landscape the sheet docks on the right and leaves the
- * map beside it, so nothing folds there.
+ * map beside it, so nothing folds there, unless the screen is so short
+ * that the sheet opens over all of it (`full`, the very short mode of
+ * docs/design-v1-layout-hierarchy.md 4.2), as the upright sheet folds.
  */
-export function foldsUnderSheet(input: { width: number; height: number; sheetOpen: boolean }): boolean {
-  return input.sheetOpen && input.width < theme.layout.wideMinWidth && input.width <= input.height;
+export function foldsUnderSheet(input: { width: number; height: number; sheetOpen: boolean; full?: boolean }): boolean {
+  return input.sheetOpen && input.width < theme.layout.wideMinWidth && (input.width <= input.height || input.full === true);
 }
 
 /** foldsUnderSheet for this Room now, in the chrome's own pixels (features/device/layout.ts). */
 export function useUnderSheet(): boolean {
   const { width, height } = useLayoutSize();
   const open = useRoomView((s) => sheetOpen(s.local));
-  return foldsUnderSheet({ width, height, sheetOpen: open });
+  const full = useStore(useScoped(dockSlot), (s) => s.sheetFull);
+  return foldsUnderSheet({ width, height, sheetOpen: open, full });
 }
 
 /** The dock's row height, and the gap kept above it under the top bars. */
@@ -151,12 +155,14 @@ type DockState = {
   alerts: readonly ColumnAlert[];
   /** The fight alerts column, to find the alert a tap on the summary shows. */
   column: HTMLElement | null;
+  /** A sheet shows in the very short mode, over the whole screen (Room sets it): what floats over the map folds as under an upright sheet. */
+  sheetFull: boolean;
 };
 
 const NO_ALERTS: readonly ColumnAlert[] = [];
 
 /** Per Room page (state/scope.ts): "view as a player" draws a second room with a bar and a column of its own. */
-export const dockSlot = scopeSlot(() => createStore<DockState>(() => ({ bar: null, alerts: NO_ALERTS, column: null })));
+export const dockSlot = scopeSlot(() => createStore<DockState>(() => ({ bar: null, alerts: NO_ALERTS, column: null, sheetFull: false })));
 
 /**
  * Publishes the token bar for the dock while it is mounted, or nothing for

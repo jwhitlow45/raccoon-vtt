@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, noticePlace, type Chrome } from "../canvas/barDock.ts";
@@ -6,7 +7,7 @@ import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
 import { MapStage } from "../canvas/Stage.tsx";
 import { Button } from "../components/Button.tsx";
 import { IconButton } from "../components/IconButton.tsx";
-import { ConnectionDot, ReconnectBanner } from "../components/ConnectionStatus.tsx";
+import { ConnectionDot, ReconnectNotice, useReconnectDue } from "../components/ConnectionStatus.tsx";
 import { Card, Page } from "../components/Field.tsx";
 import { LoadBoundary } from "../components/LoadBoundary.tsx";
 import { PRESSED } from "../components/looks.ts";
@@ -17,7 +18,8 @@ import { NOTICE_TONES } from "../components/tones.ts";
 import { QuietLoadNotice } from "./QuietLoadNotice.tsx";
 import { Loading } from "../components/Loading.tsx";
 import { ScrollStrip } from "../components/ScrollStrip.tsx";
-import { Sheet, paneBodyPadding } from "../components/Sheet.tsx";
+import { Sheet, paneBodyPadding, type SheetMode } from "../components/Sheet.tsx";
+import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, sheetMode, sideSheetWidth } from "../components/sheetCap.ts";
 import { SHORT_LANDSCAPE_MAX, useRecordOverflow, useTopBars, useTurnPlacement, type TurnPlacement } from "../features/encounter/band.ts";
 import { FightWatch, InitiativeStrip, useYourTurnNotice } from "../features/encounter/InitiativeStrip.tsx";
 import { panelById, panelsFor, subpageBack, useSubpageFocus, type PanelDef, type PanelHeader } from "../features/panels.ts";
@@ -38,6 +40,7 @@ import { useBackClose } from "../lib/backClose.ts";
 import { useWakeLock } from "../lib/wakeLock.ts";
 import type { Insets } from "../lib/camera.ts";
 import { isCoarsePointer } from "../lib/device.ts";
+import { sheetStepping } from "../lib/modalDialog.ts";
 import { roomPath } from "../lib/roomId.ts";
 import { sceneGate, selectionScene } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
@@ -47,7 +50,7 @@ import { TOAST_MS } from "../state/store.ts";
 import { sidePanelKeysSlot, useShortcuts } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
-import type { Ended } from "../state/types.ts";
+import type { Ended, Toast } from "../state/types.ts";
 import { barDismiss, dismissal } from "../state/selection.ts";
 import { useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
@@ -55,6 +58,7 @@ import { endedText } from "./endedText.ts";
 import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, focusAlert, foldsUnderSheet, type AlertsSummary } from "./fold.ts";
 import { mapFocusSlot } from "./mapFocus.ts";
 import { firstSidePanel, readSidePanel, writeSidePanel } from "./sidePanel.ts";
+import { inModal, ModalSlots, useModalSlot } from "./modalSlot.tsx";
 import { Badge, FindButton, FitButton, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle } from "./RoomChrome.tsx";
 import { DockHeaderActions, DockRow, FoldStatus, SAFE_PROBE_STYLE, useDockSummary, useLayoutHeight, useSafeAreas, type DockActions } from "./RoomDock.tsx";
 
@@ -215,7 +219,7 @@ function RoomPage() {
   const ended = useRoomView((s) => s.ended);
   const roomId = useRoomView((s) => s.roomId);
   const gate = useRoomView(useShallow((s) => sceneGate({ view: s.view, sceneId: s.sceneId, role })));
-  const { selectedId, panel, tab, tool: toolId, actionBar, sidePanelHidden } = useRoomView(useShallow((s) => s.local));
+  const { selectedId, panel, tab, tool: toolId, actionBar, sidePanelHidden, sheetHidden } = useRoomView(useShallow((s) => s.local));
   const select = useCallback((id: string | null, add?: boolean) => ui.tap(id, add), [ui]);
 
   // A change of scene lets go of the selection, and a blackout does not (lib/scene.ts selectionScene).
@@ -320,7 +324,9 @@ function RoomPage() {
     };
   }, [wide, sidePanelKeys, store, setSidePanel]);
   const optionsShown = useRoomView((s) => (tool.optionsShown ? tool.optionsShown(s) : true));
-  const sheet = !wide && panel ? panels.find((p) => p.id === panel) : undefined;
+  // A phone's open panel stays mounted while its sheet is hidden (docs/design-v1-layout-hierarchy.md 4.2): `mounted` is drawn, and `sheet` is it only while it shows.
+  const mounted = !wide && panel ? panels.find((p) => p.id === panel) : undefined;
+  const sheet = mounted && !sheetHidden ? mounted : undefined;
   const tabId = panelById(tab) && panels.some((p) => p.id === tab) ? tab : (panels[0]?.id ?? "");
   // New chat and whispers mark the Log's button while it is not on screen.
   const unread = useLogUnread(wide ? sideShown && tabId === "log" : sheet?.id === "log");
@@ -336,8 +342,12 @@ function RoomPage() {
   }, [wide, picker, setPicker]);
   const pickerOpen = !wide && picker && !sheet;
   const closeSheets = useCallback(() => ui.closeSheets(), [ui]);
+  // A hidden sheet comes back in one tap, with focus on its title, in place of the list.
   const togglePanels = () => {
-    if (sheet || pickerOpen) closeSheets();
+    if (mounted && !sheet) {
+      focusNext.current = { kind: "panel" };
+      ui.hideSheet(false);
+    } else if (sheet || pickerOpen) closeSheets();
     else setPicker(true);
   };
   // Android's Back closes the sheet before it leaves the room (lib/backClose.ts).
@@ -380,10 +390,12 @@ function RoomPage() {
     sheetRef.current = el;
     setSheetEl(el);
   }, []);
+  // A hidden sheet's box measures nothing, so it counts as no sheet.
+  const sheetShown = sheet !== undefined || pickerOpen;
   const openSheet = useCallback((): OpenSheet | null => {
-    const rect = sheetRef.current?.getBoundingClientRect();
+    const rect = sheetShown ? sheetRef.current?.getBoundingClientRect() : undefined;
     return rect ? { placement: landscape ? "right" : "bottom", width: rect.width, height: rect.height } : null;
-  }, [landscape]);
+  }, [landscape, sheetShown]);
   // The subpage the open panel names (features/panels.ts usePanelHeader), for the sheet's or side panel's header.
   const [subpage, setSubpage] = useState<PanelHeader | null>(null);
 
@@ -391,10 +403,26 @@ function RoomPage() {
   const dockStore = scope.get(dockSlot);
   const hasBar = useStore(dockStore, (s) => s.bar !== null);
   const summary = useDockSummary();
-  const folded = foldsUnderSheet({ width, height, sheetOpen });
-  const docked = folded && (hasBar || summary !== null);
   const safe = useSafeAreas();
-  const dockInHeader = docked && !dockFits({ height, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR });
+  /*
+   * Where a sheet stands: at the foot of an upright phone, on the right of
+   * one held sideways, or, where that would leave its body under 88 px, in
+   * the very short mode over the whole screen (components/sheetCap.ts).
+   * Worked out from the layout, the safe areas and the bars, never measured.
+   */
+  const sideWidth = sideSheetWidth(width);
+  const sideHeader = headerStacks({ width: sideWidth - safe.right - 2 * theme.line.border, buttons: mounted ? 3 : 1, actions: false }) ? SHEET_HEADER_STACKED : SHEET_HEADER;
+  const sheetModeNow: SheetMode = !landscape ? "bottom" : sheetMode({ height, safeTop: safe.top, safeBottom: safe.bottom, topBars: topInset, header: sideHeader });
+  const full = sheetModeNow === "full" && sheetOpen;
+  const headerWidth = (sheetModeNow === "side" ? sideWidth - safe.right : width - safe.left - safe.right) - 2 * theme.line.border;
+  useLayoutEffect(() => {
+    if (dockStore.getState().sheetFull !== full) dockStore.setState({ sheetFull: full });
+  }, [dockStore, full]);
+  useLayoutEffect(() => () => dockStore.setState({ sheetFull: false }), [dockStore]);
+  const folded = foldsUnderSheet({ width, height, sheetOpen, full });
+  const docked = folded && (hasBar || summary !== null);
+  // Over the whole screen there is no edge to dock on, so the dock's buttons join the header, as where the dock has no room.
+  const dockInHeader = docked && (full || !dockFits({ height, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR }));
   const sheetHeight = useLayoutHeight(sheetEl, zoom);
   const backRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -431,7 +459,7 @@ function RoomPage() {
   // ------------------------------------------------ the docked token bar (canvas/barDock.ts)
   // The bars as drawn, in the chrome's own pixels, so the token bar keeps to the part of the map they leave free.
   const barDock = scope.get(barDockSlot);
-  const sheetRight = landscape && sheetOpen ? Math.min(theme.layout.landscapeSheetWidth, width * 0.6) : 0;
+  const sheetRight = landscape && sheetOpen && !full ? sideWidth : 0;
   // Until both bars have a height, the bar keeps its defaults rather than reaching under them.
   const chrome = useMemo<Chrome | null>(
     () =>
@@ -481,6 +509,13 @@ function RoomPage() {
     }
     return () => previewNotice.place(null);
   }, [previewNotice, reportsPreview, beside?.left, beside?.width, zoom]);
+  // While a sheet shows over the whole screen, "Viewing as Pat" renders first inside it, above its content (pages/modalSlot.tsx).
+  const previewSlot = useModalSlot("preview");
+  useLayoutEffect(() => {
+    if (!previewNotice) return;
+    previewNotice.slot(previewSlot);
+    return () => previewNotice.slot(null);
+  }, [previewNotice, previewSlot]);
   const lastingRef = useRef<HTMLDivElement>(null);
   const laneTop = free.top;
   const previewBottom = previewPush > 0 ? laneTop + previewPush - EDGE : null;
@@ -550,6 +585,9 @@ function RoomPage() {
 
   const reserveTop = docked && !dockInHeader ? DOCK_PX + DOCK_GAP : undefined;
   const headerActions = dockInHeader ? <DockHeaderActions summary={summary} actions={dockActions} showRef={showRef} summaryRef={summaryRef} /> : undefined;
+  const headerActionCount = dockInHeader ? (hasBar ? 1 : 0) + (summary ? 1 : 0) : 0;
+  const lasting = full ? <ModalSlots part="lasting" /> : undefined;
+  const notices = full ? <ModalSlots part="over" /> : undefined;
   return (
     <div
       style={{
@@ -604,38 +642,49 @@ function RoomPage() {
           </div>
           <Toasts />
         </div>
-        {sheet ? (
+        {mounted ? (
           <Sheet
             ref={sheetElRef}
-            title={sheet.title}
-            placement={landscape ? "right" : "bottom"}
+            title={mounted.title}
+            mode={sheetModeNow}
+            shown={sheet !== undefined}
             inset={{ top: topInset, bottom: TOOLBAR }}
             onClose={() => ui.closePanel()}
             onBack={() => {
-              focusNext.current = { kind: "tile", panelId: sheet.id };
+              focusNext.current = { kind: "tile", panelId: mounted.id };
               ui.closePanel();
               setPicker(true);
             }}
+            onHide={() => ui.hideSheet(true)}
+            hideFocus={panelsRef}
             backLabel="All panels"
             subpage={subpage}
             reserveTop={reserveTop}
             actions={headerActions}
+            actionCount={headerActionCount}
+            headerWidth={headerWidth}
+            lasting={lasting}
+            notices={notices}
             backRef={backRef}
             closeRef={closeRef}
             titleRef={sheetTitleRef}
           >
-            <PanelBody id={sheet.id} shown selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={setSubpage} />
+            <PanelBody id={mounted.id} shown={sheet !== undefined} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={setSubpage} />
           </Sheet>
         ) : null}
         {pickerOpen ? (
           <Sheet
             ref={sheetElRef}
             title="Panels"
-            placement={landscape ? "right" : "bottom"}
+            mode={sheetModeNow}
             inset={{ top: topInset, bottom: TOOLBAR }}
             onClose={() => setPicker(false)}
             reserveTop={reserveTop}
             actions={headerActions}
+            actionCount={headerActionCount}
+            headerWidth={headerWidth}
+            lasting={lasting}
+            notices={notices}
             backRef={backRef}
             closeRef={closeRef}
           >
@@ -661,6 +710,7 @@ function RoomPage() {
           tool={tool.id}
           onTool={(id) => ui.setTool(id)}
           panelsOpen={sheet !== undefined || pickerOpen}
+          hiddenSheet={mounted && !sheet ? mounted.title : null}
           onPanels={togglePanels}
           unread={unread + journalUnread}
           panelsRef={panelsRef}
@@ -723,12 +773,13 @@ function useDockFocus(input: {
   // What had focus last, kept past a fold that hid it: a browser may drop focus from a hidden element before this reads it.
   const lastFocus = useRef<Element | null>(null);
   useEffect(() => {
+    // A sheet's dialog opening moves focus for the browser's focusing steps, not the viewer's, so those moves never stand for where the viewer was.
     const onIn = (e: FocusEvent) => {
-      lastFocus.current = e.target instanceof Element ? e.target : null;
+      if (!sheetStepping()) lastFocus.current = e.target instanceof Element ? e.target : null;
     };
     // Focus that moved to the page because of a tap elsewhere, not because its element was folded away.
     const onOut = (e: FocusEvent) => {
-      if (e.relatedTarget === null && e.target instanceof Element && drawn(e.target)) lastFocus.current = null;
+      if (!sheetStepping() && e.relatedTarget === null && e.target instanceof Element && drawn(e.target)) lastFocus.current = null;
     };
     document.addEventListener("focusin", onIn);
     document.addEventListener("focusout", onOut);
@@ -1058,58 +1109,89 @@ function YouChip(props: { dm: boolean; dot: boolean }) {
   );
 }
 
+/** The connection banner. Inside a very short sheet while one shows, its 3 s count kept here (pages/modalSlot.tsx). */
 function Banner() {
   const connection = useRoomView((s) => s.connection);
-  return (
-    <div style={{ pointerEvents: "auto", width: "100%", maxWidth: 520, minWidth: 0 }}>
-      <ReconnectBanner state={connection} />
-    </div>
-  );
+  const due = useReconnectDue(connection);
+  const slot = useModalSlot("connection");
+  return inModal(<div style={{ pointerEvents: "auto", width: "100%", maxWidth: 520, minWidth: 0 }}>{due ? <ReconnectNotice state={connection} /> : null}</div>, slot);
 }
 
-/** Refusals and notices from the store (design 7.4), each gone after a few seconds or a tap, in the Notice look (components/Notice.tsx). */
+/**
+ * Refusals and notices from the store (design 7.4), each gone after a few
+ * seconds or a tap, in the Notice look (components/Notice.tsx).
+ *
+ * While a sheet shows in the very short mode, a new toast shows and is read
+ * out inside it, at the top of its body (pages/modalSlot.tsx), since the
+ * modal leaves the map's notices out of reach. Each toast stays where it
+ * first showed until it ends, so it is never moved and never announced
+ * again: one shown in the sheet goes with the sheet.
+ */
 function Toasts() {
   const toasts = useRoomView((s) => s.toasts);
   const ui = useRoomUi();
+  const slot = useModalSlot("toasts");
+  // Where each toast first showed, by id: over the map, or in the very short sheet. Set once, so a toast never moves.
+  const places = useRef(new Map<number, "map" | "sheet">());
+  for (const t of toasts) if (!places.current.has(t.id)) places.current.set(t.id, slot ? "sheet" : "map");
+  useEffect(() => {
+    for (const id of places.current.keys()) if (!toasts.some((t) => t.id === id)) places.current.delete(id);
+  }, [toasts]);
+  useEffect(() => {
+    if (slot) return;
+    for (const [id, place] of places.current) if (place === "sheet") ui.dismissToast(id);
+  }, [slot, ui]);
   useEffect(() => {
     if (toasts.length === 0) return;
     const timers = toasts.map((t) => setTimeout(() => ui.dismissToast(t.id), TOAST_MS));
     return () => timers.forEach(clearTimeout);
   }, [toasts, ui]);
   if (toasts.length === 0) return null;
+  const overMap = toasts.filter((t) => places.current.get(t.id) !== "sheet");
+  const inSheet = slot ? toasts.filter((t) => places.current.get(t.id) === "sheet") : [];
   return (
     <>
-      {toasts.map((t) => {
-        const tone = NOTICE_TONES[t.tone === "error" ? "danger" : "info"];
-        return (
-          <button
-            key={t.id}
-            type="button"
-            role="status"
-            onClick={() => ui.dismissToast(t.id)}
-            style={{
-              pointerEvents: "auto",
-              width: "100%",
-              maxWidth: 520,
-              minHeight: theme.touch,
-              padding: `${theme.space(2)}px ${theme.space(3)}px`,
-              borderRadius: theme.radius.md,
-              background: tone.fill,
-              border: `${theme.line.border}px solid ${tone.outline}`,
-              color: tone.text,
-              fontFamily: theme.font.body,
-              fontSize: theme.font.body14,
-              lineHeight: theme.leading.body,
-              textAlign: "left",
-              boxShadow: theme.shadow.float,
-              cursor: "pointer",
-            }}
-          >
-            {t.text}
-          </button>
-        );
-      })}
+      {overMap.map((t) => (
+        <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />
+      ))}
+      {slot && inSheet.length > 0
+        ? createPortal(
+            inSheet.map((t) => <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />),
+            slot,
+          )
+        : null}
     </>
+  );
+}
+
+function ToastNote(props: { toast: Toast; onDismiss(): void }) {
+  const t = props.toast;
+  const tone = NOTICE_TONES[t.tone === "error" ? "danger" : "info"];
+  return (
+    <button
+      type="button"
+      role="status"
+      onClick={props.onDismiss}
+      style={{
+        pointerEvents: "auto",
+        width: "100%",
+        maxWidth: 520,
+        minHeight: theme.touch,
+        padding: `${theme.space(2)}px ${theme.space(3)}px`,
+        borderRadius: theme.radius.md,
+        background: tone.fill,
+        border: `${theme.line.border}px solid ${tone.outline}`,
+        color: tone.text,
+        fontFamily: theme.font.body,
+        fontSize: theme.font.body14,
+        lineHeight: theme.leading.body,
+        textAlign: "left",
+        boxShadow: theme.shadow.float,
+        cursor: "pointer",
+      }}
+    >
+      {t.text}
+    </button>
   );
 }
 
@@ -1232,12 +1314,15 @@ function Toolbar(props: {
   /** Unread messages in the Log and unread journal pages, which sit behind the Panels button on phones. */
   unread: number;
   panelsRef: Ref<HTMLButtonElement>;
+  /** A phone's hidden sheet, which Panels shows again: its button says so. */
+  hiddenSheet: string | null;
   /** The side panel is hidden from 900 px up: Panels shows at the toolbar's right end, which brings it back (docs/design-v1-layout-hierarchy.md 4.1). */
   sideHidden: boolean;
   sidePanelId: string;
   onShowSide(): void;
 }) {
   const { wide, tools } = props;
+  const hiddenId = useId();
   const panelsIcon = (
     <svg aria-hidden viewBox="0 0 24 24" width={22} height={22} style={{ display: "block" }}>
       <path d="M4 5h16v2H4zm0 6h16v2H4zm0 6h16v2H4z" fill="currentColor" />
@@ -1282,10 +1367,15 @@ function Toolbar(props: {
         ) : null
       ) : (
         <div style={{ flex: "none", display: "flex", alignItems: "center", height: "100%", paddingLeft: theme.space(1), borderLeft: `${theme.line.border}px solid ${theme.color.border}` }}>
-          <ToolButton ref={props.panelsRef} label="Panels" active={props.panelsOpen} onClick={props.onPanels}>
+          <ToolButton ref={props.panelsRef} label="Panels" active={props.panelsOpen} onClick={props.onPanels} describedBy={props.hiddenSheet ? hiddenId : undefined}>
             <Stacked icon={panelsIcon} text="Panels" />
             <Badge count={props.unread} corner />
           </ToolButton>
+          {props.hiddenSheet ? (
+            <span id={hiddenId} hidden>
+              {`Shows ${props.hiddenSheet} again.`}
+            </span>
+          ) : null}
         </div>
       )}
     </nav>

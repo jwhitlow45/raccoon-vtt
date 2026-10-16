@@ -3,6 +3,7 @@ import { createStore } from "zustand/vanilla";
 import { Button } from "../../components/Button.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { theme } from "../../lib/theme.ts";
+import { inModal, useModalSlot } from "../../pages/modalSlot.tsx";
 import { scopeSlot, useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { viewFromCamera } from "./create.ts";
@@ -30,6 +31,8 @@ export function FrameViewBar() {
   const scope = useRoomScope();
   const actions = useRoomActions();
   const ui = useRoomUi();
+  // Inside a very short sheet while one shows, where the modal leaves the map's notices out of reach (pages/modalSlot.tsx).
+  const slot = useModalSlot("frame");
   // Switching scenes, or losing the DM role, ends it.
   if (!framing || framing !== sceneId) return null;
   const stop = () => store.setState({ sceneId: null });
@@ -41,7 +44,7 @@ export function FrameViewBar() {
     }
     stop();
   };
-  return (
+  return inModal(
     <div role="group" aria-label="Starting view" style={{ pointerEvents: "auto", width: "100%", maxWidth: 520 }}>
       <Notice float>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
@@ -54,6 +57,7 @@ export function FrameViewBar() {
           </Button>
         </div>
       </Notice>
-    </div>
+    </div>,
+    slot,
   );
 }

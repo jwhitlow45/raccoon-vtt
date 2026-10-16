@@ -53,3 +53,45 @@ export function sheetMaxHeight(inset: { top: number; bottom: number }, reserveTo
   const gap = Math.max(SHEET_TOP_GAP, reserveTop);
   return `max(${SHEET_MIN_HEIGHT}px, min(${screenHeight(SHEET_SCREEN_SHARE)}, calc(100% - ${theme.safe.top} - ${theme.safe.bottom} - ${inset.top + inset.bottom + gap}px)))`;
 }
+
+// ------------------------------------------------------------ sideways sheets (docs/design-v1-layout-hierarchy.md 4.2)
+
+/** A sheet header's one row, and the stacked header of a narrow sheet: 6 px, the 44 px row, a 22 px title line, 6 px. */
+export const SHEET_HEADER = 56;
+export const SHEET_HEADER_STACKED = 78;
+/** The least body a sheet keeps below its header: two 44 px rows, one whole control and room to see there is more. */
+export const SHEET_BODY_MIN = 88;
+/** A header's title never shrinks below a few letters and the ellipsis (SheetHeader.tsx). */
+const TITLE_MIN = 40;
+const HEADER_GAP = theme.space(1);
+
+/**
+ * Whether a sheet's header stacks: its buttons at 44 px each, a title of
+ * at least 40 px, a 4 px gap between each two and the header's side
+ * padding (8 px, or 4 px when it holds actions such as the dock's) do not
+ * fit in one row. Back, Hide and Close need 200 px, or 192 with actions.
+ * `width` is the header's: the sheet's width less its side padding (the
+ * safe areas it holds) and its 1 px borders, which Room knows from the
+ * layout, so the header never flickers between two shapes as it measures.
+ */
+export function headerStacks(input: { width: number; buttons: number; actions: boolean }): boolean {
+  const padding = input.actions ? theme.space(1) : theme.space(2);
+  return input.width < input.buttons * (theme.touch + HEADER_GAP) + TITLE_MIN + 2 * padding;
+}
+
+/** A sheet docked on the right of a phone held sideways: 340 px, or 60% of a narrower layout (Sheet.tsx). */
+export function sideSheetWidth(layoutWidth: number): number {
+  return Math.min(theme.layout.landscapeSheetWidth, layoutWidth * 0.6);
+}
+
+/**
+ * A sideways sheet runs from under the top bars (52 px, and 48 more while
+ * the turn strip is a band) to the toolbar (60 px), inside the safe areas.
+ * Where that leaves its body under 88 px below its header, it opens in the
+ * very short mode, "full": the whole screen, modal, over the bars. All of
+ * it comes from the layout, never from a measure.
+ */
+export function sheetMode(input: { height: number; safeTop: number; safeBottom: number; topBars: number; header: number }): "side" | "full" {
+  const body = input.height - input.safeTop - input.topBars - input.safeBottom - theme.layout.toolbar - input.header;
+  return body < SHEET_BODY_MIN ? "full" : "side";
+}

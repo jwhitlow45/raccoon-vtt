@@ -8,6 +8,7 @@ import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { theme } from "../lib/theme.ts";
 import { useScoped } from "../state/scope.ts";
 import { alertsSummary, DOCK_PX, dockSlot, type AlertsSummary } from "./fold.ts";
+import { inModal, useModalSlot } from "./modalSlot.tsx";
 
 /*
  * The dock on a phone's sheet (docs/design-v1-visual.md 3.2.1, pages/fold.ts):
@@ -242,6 +243,18 @@ export function FoldStatus(props: { folded: boolean }) {
   const alerts = useStore(useScoped(dockSlot), (s) => s.alerts);
   const rolls = useAlertsSummaryEntry();
   const [text, setText] = useState("");
+  /*
+   * Inside a very short sheet while one shows (pages/modalSlot.tsx), where
+   * the modal leaves the room's region out of reach. Its record of what it
+   * has said stays here, and its region starts empty in its new place, so
+   * it speaks only what arrives after the move.
+   */
+  const slot = useModalSlot("status");
+  const [speaksIn, setSpeaksIn] = useState(slot);
+  if (speaksIn !== slot) {
+    setSpeaksIn(slot);
+    setText("");
+  }
   const seen = useRef<Set<string> | null>(null);
   // When each alert first showed, and whether the alerts were folded last time: one that folds away as it arrives was never seen either.
   const arrived = useRef(new Map<string, number>());
@@ -268,10 +281,11 @@ export function FoldStatus(props: { folded: boolean }) {
     const fresh = items.filter((i) => !before.has(i.id) || (justFolded && now - (arrived.current.get(i.id) ?? 0) < FRESH_MS));
     if (fresh.length > 0) setText(fresh.map((i) => i.says).join(" "));
   }, [alerts, rollsKey, rollsSays, props.folded]);
-  return (
+  return inModal(
     <div role="status" data-rvtt-fold-status="" style={VISUALLY_HIDDEN}>
       {text}
-    </div>
+    </div>,
+    slot,
   );
 }
 
