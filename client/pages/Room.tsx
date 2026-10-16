@@ -781,6 +781,7 @@ function RoomPage() {
           sideHidden={wide && sidePanelHidden}
           sidePanelId={sidePanelId}
           onShowSide={showSidePanel}
+          named={!wide || touchFirst}
         />
       </div>
       {wide ? (
@@ -1475,6 +1476,13 @@ function Toolbar(props: {
   sideHidden: boolean;
   sidePanelId: string;
   onShowSide(): void;
+  /**
+   * Each tool's short name under its icon: on a phone, and on any touch
+   * screen from 900 px up (docs/design-v1-layout-hierarchy.md M10), which
+   * has no hover to show a tool's name. A mouse keeps the icons alone, named
+   * on hover and to screen readers.
+   */
+  named: boolean;
 }) {
   const { wide, tools } = props;
   const divider = setupDivider(tools);
@@ -1511,7 +1519,7 @@ function Toolbar(props: {
             {/* The play tools, then the setup tools past a divider (docs/design-v1-layout-hierarchy.md M1): a line in a phone's strip, a 12 px gap between the floating buttons. */}
             {i === divider ? <span aria-hidden data-rvtt-divider="" style={wide ? { flex: "none", width: theme.space(1) } : { flex: "none", width: theme.line.border, height: 32, background: theme.color.border }} /> : null}
             <ToolButton label={t.label} active={props.tool === t.id} onClick={() => props.onTool(t.id)} floating={wide} iconOnly>
-              {wide ? <ToolIcon tool={t} /> : <Stacked icon={<ToolIcon tool={t} />} text={t.shortLabel ?? t.label} />}
+              {props.named ? <Stacked icon={<ToolIcon tool={t} />} text={t.shortLabel ?? t.label} /> : <ToolIcon tool={t} />}
             </ToolButton>
           </Fragment>
         ))}
@@ -1520,7 +1528,7 @@ function Toolbar(props: {
         props.sideHidden ? (
           <div style={{ flex: "none", display: "flex", alignItems: "center", height: "100%" }}>
             <ToolButton ref={props.panelsRef} label="Panels" active={false} expanded={false} controls={props.sidePanelId} onClick={props.onShowSide} floating iconOnly>
-              {panelsIcon}
+              {props.named ? <Stacked icon={panelsIcon} text="Panels" /> : panelsIcon}
               <Badge count={props.unread} corner />
             </ToolButton>
           </div>
