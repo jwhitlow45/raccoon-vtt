@@ -15,6 +15,7 @@ import {
   type FogTile,
   type FreeWall,
   type Handout,
+  type HandoutDoc,
   type InitEntry,
   type JournalPage,
   type Label,
@@ -912,6 +913,11 @@ function projectSavedEncounterCtx(ctx: Ctx, encounter: SavedEncounter): SavedEnc
   return ctx.viewer.role === "dm" ? encounter : null;
 }
 
+/** A document in the DM's library reaches players only as a handout it is shown as (docs/design-v1-pdf-handouts.md 3.4). */
+function projectHandoutDocCtx(ctx: Ctx, doc: HandoutDoc): HandoutDoc | null {
+  return ctx.viewer.role === "dm" ? doc : null;
+}
+
 /** Whether a player may read a journal page: one shared with every player, or with them alone (docs/design-v1-dm-tools.md 3.7). */
 export function pageReadableBy(page: Pick<JournalPage, "access">, memberId: string): boolean {
   return page.access === "all" || (typeof page.access === "object" && page.access.member === memberId);
@@ -1350,6 +1356,8 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
       return value ? projectPinCtx(ctx, value as Pin) : null;
     case "roll":
       return value ? projectRollCtx(ctx, value as RollRequest) : null;
+    case "handoutDoc":
+      return value ? projectHandoutDocCtx(ctx, value as HandoutDoc) : null;
     case "log":
       return value ? projectLogEntryCtx(ctx, value as LogEntry) : null;
     case "encounter":
@@ -1398,6 +1406,7 @@ export function projectState(state: RoomState, viewer: Viewer, opts: ProjectOpts
     journal: projectMap(state.journal, (page) => projectJournalCtx(ctx, page)),
     pins: projectMap(state.pins, (pin) => projectPinCtx(ctx, pin)),
     rolls: projectMap(state.rolls, (request) => projectRollCtx(ctx, request)),
+    handoutDocs: projectMap(state.handoutDocs, (doc) => projectHandoutDocCtx(ctx, doc)),
     sight: sightTilesCtx(ctx),
   };
 }
@@ -1443,6 +1452,7 @@ export function allKeys(state: RoomState): EntityKey[] {
   for (const id of Object.keys(state.journal)) out.push(keys.journal(id));
   for (const id of Object.keys(state.pins)) out.push(keys.pin(id));
   for (const id of Object.keys(state.rolls)) out.push(keys.roll(id));
+  for (const id of Object.keys(state.handoutDocs)) out.push(keys.handoutDoc(id));
   for (const e of state.log) out.push(keys.log(e.id));
   return out;
 }
@@ -1669,6 +1679,8 @@ export function visibleAssetIds(state: RoomState, viewer: Viewer, opts: ProjectO
   for (const character of Object.values(projected.characters)) addImage(character.defaultImage);
   // Every page of each handout the viewer gets, and no page of one they do not (docs/design-v1-pdf-handouts.md 3.4).
   for (const handout of Object.values(projected.handouts)) for (const page of handoutPages(handout)) ids.add(page.assetId);
+  // Only a DM's projection holds documents. A document's pages reach a player only by being shown.
+  for (const doc of Object.values(projected.handoutDocs)) for (const page of doc.pages) ids.add(page.assetId);
   // A stamp's image while the stamp is in the projection, so a stamp withheld under fog keeps its picture back too.
   for (const stamp of Object.values(projected.stamps)) if ("assetId" in stamp.art) ids.add(stamp.art.assetId);
   // Only a DM's projection holds them. A player meets these images on tokens alone.

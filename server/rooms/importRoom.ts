@@ -47,12 +47,21 @@ import { parseRoomState } from "./stateSchema.ts";
  * join the room before it is whole. A failure in between deletes the row,
  * which cascades to the asset rows, and then the files nobody refers to.
  */
+/*
+ * An export writes every variant as an entry, two for each handout page, so
+ * the entry and manifest caps leave room for a room at its handout pages
+ * (docs/design-v1-pdf-handouts.md 3.6). What bounds an import is the body
+ * cap, the inflated total and reading one entry at a time: an entry costs a
+ * few hundred bytes in the entries map, so 10,000 cost a few MB.
+ */
 export const IMPORT_LIMITS = {
   bodyBytes: 95_000_000,
-  entries: 2_000,
+  entries: 10_000,
+  /** Assets the manifest may list. */
+  assets: 5_000,
   inflatedBytes: 1024 * 1024 * 1024,
   roomJsonBytes: 2 * LIMITS.stateBytes,
-  manifestBytes: 1024 * 1024,
+  manifestBytes: 2 * 1024 * 1024,
 } as const;
 
 export type ImportForm = {
@@ -86,7 +95,7 @@ const manifestSchema = z.object({
         credit: z.unknown().optional(),
       }),
     )
-    .max(IMPORT_LIMITS.entries),
+    .max(IMPORT_LIMITS.assets),
 });
 
 const roomJsonSchema = z.object({

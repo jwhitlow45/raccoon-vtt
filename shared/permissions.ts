@@ -261,6 +261,8 @@ function forDm(op: Op, c: Check): Decision {
     case "handout.show":
       // Every page a handout image of this room, so a map, a token image or another room's image among them is not here.
       return handoutPages(op.handout).every((page) => c.asset(page.assetId, "handout")) ? OK : GONE;
+    case "handoutDoc.create":
+      return op.doc.pages.every((page) => c.asset(page.assetId, "handout")) ? OK : GONE;
     case "journal.create":
       return pageReader(c, op.page.access);
     case "journal.update":
@@ -334,6 +336,8 @@ function forPlayer(op: Op, c: Check): Decision {
     case "encounter.prev":
     case "handout.show":
     case "handout.close":
+    case "handoutDoc.create":
+    case "handoutDoc.delete":
     case "sys.memberJoin":
     case "sys.memberSetKind":
     case "sys.memberRemove":

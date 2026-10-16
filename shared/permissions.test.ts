@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { MoveAnyToken } from "./model.ts";
 import { canApply, movesAnyToken, PLAYED_WITH_OTHERS, type AssetKind, type PermissionDeps } from "./permissions.ts";
-import type { Op } from "./protocol.ts";
+import type { Op, RestoreEntry } from "./protocol.ts";
 import { DM, P1, P2, actor, apply, blockOf, character, customMonster, drawing, entry, imageRef, reveal, room, template, token } from "./testutil.ts";
 
 const deps: PermissionDeps = { canUseAsset: (memberId, assetId) => assetId.startsWith(`${memberId}-`) || assetId === "shared" };
@@ -875,5 +875,34 @@ describe("pdf handouts (docs/design-v1-pdf-handouts.md 3.3)", () => {
     assert.equal(kindCode(show("tok", "h1")), "gone");
     assert.equal(kindCode(show("h1", "elsewhere")), "gone");
     assert.equal(kindCode(show("h1"), P1), "forbidden");
+  });
+
+  test("both document ops are the DM's, and a save checks every page as a show does", () => {
+    const create = (...ids: string[]): Op => ({ t: "handoutDoc.create", doc: { id: "d2", title: "Strange letter", pages: pages(...ids) } });
+    const remove: Op = { t: "handoutDoc.delete", docId: "d1" };
+    assert.equal(kindCode(create("h1", "h2", "h1")), "ok");
+    assert.equal(kindCode(create("h1", "map")), "gone");
+    assert.equal(kindCode(create("tok")), "gone");
+    assert.equal(kindCode(create("elsewhere", "h1")), "gone");
+    assert.equal(kindCode(remove), "ok");
+    for (const op of [create("h1"), remove]) {
+      assert.equal(kindCode(op, P1), "forbidden", op.t);
+      assert.equal(kindCode(op, P2), "forbidden", op.t);
+    }
+  });
+
+  test("an undo that puts a document back is refused once one of its pages is gone, and a show's as well", () => {
+    const state = setup();
+    const doc = { id: "d1", rev: 3, title: "Strange letter", pages: pages("h1", "deleted"), createdAt: "" };
+    // The restore's facts: the rows of this room still there.
+    const restoring: PermissionDeps = { ...byKind, restoredAssetUsable: (assetId, kind) => rows[assetId] === kind };
+    const back = (entries: RestoreEntry[]) => {
+      const d = canApply({ t: "sys.restore", entries, from: "undo", deps: true }, DM, state, restoring);
+      return d.ok ? "ok" : `${d.code}: ${d.message}`;
+    };
+    assert.equal(back([{ key: "handoutDoc:d1", value: doc, expectRev: null }]), "gone: its image was deleted since");
+    assert.equal(back([{ key: "handoutDoc:d1", value: { ...doc, pages: pages("h1", "h2") }, expectRev: null }]), "ok");
+    const handout = { id: "h9", rev: 1, assetId: "h1", pages: pages("h1", "deleted"), title: "Strange letter", to: "all", shownAt: "" };
+    assert.equal(back([{ key: "handout:h9", value: handout, expectRev: null }]), "gone: its image was deleted since");
   });
 });

@@ -50,7 +50,7 @@ import { journalCreate, journalDelete, journalReveal, journalUpdate } from "./re
 import { actorEffects, tokenDeleteMany, tokenUpdateMany } from "./reducer/many.ts";
 import { pinPut, pinRemove } from "./reducer/pins.ts";
 import { rollAnswer, rollAsk, rollClose, rollReopen } from "./reducer/rolls.ts";
-import { handoutClose, handoutShow, logChat, logWhisper, restore } from "./reducer/misc.ts";
+import { handoutClose, handoutDocCreate, handoutDocDelete, handoutShow, logChat, logWhisper, restore } from "./reducer/misc.ts";
 import { sceneSetPhase } from "./reducer/phases.ts";
 import { monsterCreate, monsterDelete, monsterSetSrdImage, monsterUpdate } from "./reducer/monsters.ts";
 import { savedEncounterCreate, savedEncounterDelete, savedEncounterUpdate } from "./reducer/savedEncounters.ts";
@@ -295,6 +295,10 @@ function dispatch(tx: Tx, op: Op): void {
       return handoutShow(tx, op);
     case "handout.close":
       return handoutClose(tx, op);
+    case "handoutDoc.create":
+      return handoutDocCreate(tx, op);
+    case "handoutDoc.delete":
+      return handoutDocDelete(tx, op);
     case "sys.memberJoin":
       return sysMemberJoin(tx, op);
     case "sys.memberSetKind":

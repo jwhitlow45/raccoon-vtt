@@ -190,6 +190,8 @@ const DELETIONS = new Set<Op["t"]>([
   "journal.delete",
   "pin.remove",
   "roll.close",
+  // A document's images are freed through the library's delete, which works at the quota too (docs/design-v1-pdf-handouts.md 3.3).
+  "handoutDoc.delete",
 ]);
 
 const NO_FACTS: Map<string, AssetFact> = new Map();
@@ -911,7 +913,8 @@ export class RoomActor {
     if (!result.ok) return result;
     const sceneIds = scenesOf(op, this.#staged.state, result.state);
     const before = this.#staged.state;
-    const limits: LimitCheck = sceneIds.length === 0 ? checkLimits(result.state) : checkLimits(result.state, sceneIds[0], before, viewer.role);
+    // `before` with no scene too, so a show past the room's handout pages says that showing counts them again.
+    const limits: LimitCheck = checkLimits(result.state, sceneIds[0] ?? null, before, viewer.role);
     if (!limits.ok) return limits;
     for (const sceneId of sceneIds.slice(1)) {
       const more = checkLimits(result.state, sceneId, before, viewer.role);
@@ -1460,6 +1463,7 @@ function sleep(ms: number): Promise<void> {
 function withAssetSizes(op: Op, facts: Map<string, AssetFact>): Op {
   // A handout's page sizes lay out the viewer before any image loads (docs/design-v1-pdf-handouts.md 3.1).
   if (op.t === "handout.show" && "pages" in op.handout) return { ...op, handout: { ...op.handout, pages: pagesWithSizes(op.handout.pages, facts) } };
+  if (op.t === "handoutDoc.create") return { ...op, doc: { ...op.doc, pages: pagesWithSizes(op.doc.pages, facts) } };
   // A phase's size decides its grid, so it comes from the asset row too (docs/design-v1-maps-vision.md 3.4).
   if (op.t === "scene.update" && op.patch.phases) {
     const phases = op.patch.phases.map((phase) => {

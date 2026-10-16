@@ -14,7 +14,8 @@ import { splitRefusal } from "#shared/rules/walls.ts";
 import type { FreeWall, RoomState } from "#shared/model.ts";
 import { apply, room, scene, token } from "#shared/testutil.ts";
 import { sightPieces, tooManySightPieces } from "#shared/visionLimits.ts";
-import { assertWithinLimits, entryToFile, InflatedCounter } from "./importRoom.ts";
+import { MANIFEST_VERSION, type ExportManifest, type ManifestAsset } from "./exportRoom.ts";
+import { assertWithinLimits, entryToFile, IMPORT_LIMITS, InflatedCounter } from "./importRoom.ts";
 import { SizeGuard } from "./sizeGuard.ts";
 
 async function zipWith(name: string, data: Buffer): Promise<{ zip: yauzl.ZipFile; entry: yauzl.Entry }> {
@@ -205,5 +206,27 @@ describe("wave 4 import limits (docs/design-v1-maps-vision.md 2.4)", () => {
     // Vision off there, nothing is reserved.
     tight.scenes.s1 = { ...tight.scenes.s1!, vision: { on: false, light: "dark" } };
     assert.doesNotThrow(() => assertWithinLimits(tight));
+  });
+});
+
+describe("pdf handout import caps (docs/design-v1-pdf-handouts.md 3.6)", () => {
+  test("a room at its handout pages comes back: two entries a page beside room.json and assets.json, and every page in the manifest", () => {
+    const pages = LIMITS.handoutPagesPerRoom;
+    assert.ok(IMPORT_LIMITS.entries >= 2 * pages + 2, `${IMPORT_LIMITS.entries} entries`);
+    assert.ok(IMPORT_LIMITS.assets >= pages, `${IMPORT_LIMITS.assets} assets`);
+    // As an export writes each row (exportRoom.ts roomManifest), with more uploaders than one DM's devices make.
+    const uuid = (i: number) => `0192f0aa-0000-7000-8000-${String(i).padStart(12, "0")}`;
+    const asset = (i: number): ManifestAsset => ({
+      id: uuid(i),
+      sha256: createHash("sha256").update(String(i)).digest("hex"),
+      kind: "handout",
+      width: 2048,
+      height: 2048,
+      variants: ["full", "thumb"],
+      uploaders: [uuid(900_000 + i), uuid(910_000 + i), uuid(920_000 + i)],
+    });
+    const manifest: ExportManifest = { formatVersion: MANIFEST_VERSION, assets: Array.from({ length: IMPORT_LIMITS.assets }, (_, i) => asset(i)) };
+    const bytes = Buffer.byteLength(JSON.stringify(manifest));
+    assert.ok(bytes <= IMPORT_LIMITS.manifestBytes, `a manifest of ${IMPORT_LIMITS.assets} handout pages is ${bytes} bytes`);
   });
 });

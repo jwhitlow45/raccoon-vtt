@@ -10,6 +10,7 @@ import {
   opMigrations,
   reviveToOne,
   runMigrations,
+  snapshotMigrations,
   type MigrationStep,
 } from "./migrate.ts";
 import type { Encounter, RoomState } from "./model.ts";
@@ -174,6 +175,23 @@ describe("migrations", () => {
     // Every older version reaches it.
     const { journal: _j, pins: _p, rolls: _r, exploredTiles: _e, stamps: _s, lights: _l, ...v5 } = room();
     assert.deepEqual(migrateSnapshot(v5, 5), room());
+  });
+
+  test("a room from before pdf handouts gets no documents, and nothing else about it changes (docs/design-v1-pdf-handouts.md 3.8)", () => {
+    const { handoutDocs: _docs, ...v8 } = room({ handouts: { h1: { id: "h1", rev: 0, assetId: "a", title: "Letter", to: "all", shownAt: "" } } });
+    const migrated = migrateSnapshot(v8, 8);
+    assert.deepEqual(migrated, { ...v8, handoutDocs: {} });
+    assert.equal(migrated.handouts, v8.handouts, "a stored handout reads as one image, as before");
+    const withOne = room({ handoutDocs: { d1: { id: "d1", rev: 0, title: "Strange letter", pages: [{ assetId: "a", width: 1, height: 1 }], createdAt: "" } } });
+    assert.equal(migrateSnapshot(withOne, 8), withOne);
+    // Every older version reaches it.
+    const { handoutDocs: _d, journal: _j, pins: _p, rolls: _r, ...v7 } = room();
+    assert.deepEqual(migrateSnapshot(v7, 7), room());
+  });
+
+  test("a version 9 snapshot never migrates down to 8, so going back to an older build is a restore (docs/design-v1-pdf-handouts.md 3.8)", () => {
+    assert.equal(SNAPSHOT_VERSION, 9);
+    assert.throws(() => runMigrations(room(), 9, 8, snapshotMigrations), /down/);
   });
 
   test("a room's stored undo from before wave 5 replays onto the migrated room, its guards matching as they did", () => {

@@ -15,7 +15,7 @@ describe("keys", () => {
     assert.deepEqual(parseKey(keys.encounter), { kind: "encounter" });
     assert.deepEqual(parseKey(keys.encounterHistory), { kind: "encounterHistory" });
     assert.deepEqual(parseKey(keys.meta), { kind: "meta" });
-    for (const kind of ["scene", "member", "character", "template", "drawing", "label", "handout", "journal", "pin", "roll"] as const) {
+    for (const kind of ["scene", "member", "character", "template", "drawing", "label", "handout", "journal", "pin", "roll", "handoutDoc"] as const) {
       assert.deepEqual(parseKey(keys[kind]("x")), { kind, id: "x" });
     }
   });
@@ -36,6 +36,18 @@ describe("keys", () => {
       assert.equal(readEntity(state, key), null);
       assert.equal(readEntity(writeEntity(next, key, null), key), null);
     }
+  });
+
+  test("documents of handout pages read and write by key (docs/design-v1-pdf-handouts.md 3.3)", () => {
+    const state = room();
+    const doc = { id: "d1", rev: 0, title: "Strange letter", pages: [{ assetId: "a", width: 1584, height: 2048 }], createdAt: "x" };
+    const key = keys.handoutDoc("d1");
+    assert.equal(key, "handoutDoc:d1");
+    assert.equal(collectionOf(key), "handoutDocs");
+    const next = writeEntity(state, key, doc);
+    assert.equal(readEntity(next, key), doc);
+    assert.equal(readEntity(state, key), null);
+    assert.equal(readEntity(writeEntity(next, key, null), key), null);
   });
 
   test("rejects malformed keys", () => {

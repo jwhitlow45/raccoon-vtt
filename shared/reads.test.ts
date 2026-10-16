@@ -57,6 +57,22 @@ describe("reads", () => {
     assert.ok(!satisfies(reads(edit, state), p.projected, P1, p.opts));
   });
 
+  test("a DM on any scene replays saving and deleting a document, which reads nothing and its own key, and a player never holds one (docs/design-v1-pdf-handouts.md 3.3)", () => {
+    const state = setup();
+    const pages = [{ assetId: "a", width: 1584, height: 2048 }];
+    state.handoutDocs.d1 = { id: "d1", rev: 0, title: "Strange letter", pages, createdAt: "" };
+    const create = { t: "handoutDoc.create" as const, doc: { id: "d2", title: "Strange letter", pages } };
+    const remove = { t: "handoutDoc.delete" as const, docId: "d1" };
+    assert.deepEqual(reads(create, state), { keys: [], complete: [] });
+    assert.deepEqual(reads(remove, state), { keys: [{ key: "handoutDoc:d1" }], complete: [] });
+    for (const sceneId of ["s1", "s2"]) {
+      const v = view(state, DM, sceneId);
+      for (const op of [create, remove]) assert.ok(satisfies(reads(op, state), v.projected, DM, v.opts), `${op.t} on ${sceneId}`);
+    }
+    const p = view(state, P1);
+    assert.ok(!satisfies(reads(remove, state), p.projected, P1, p.opts));
+  });
+
   test("a DM on any scene replays an SRD monster's image", () => {
     const state = setup();
     const set = { t: "monster.setSrdImage" as const, srdId: "goblin-warrior", image: { assetId: "a", crop: { cx: 0, cy: 0, zoom: 1 } } };

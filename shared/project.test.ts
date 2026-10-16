@@ -1755,4 +1755,22 @@ describe("pdf handouts (docs/design-v1-pdf-handouts.md 3.4)", () => {
     delete state.handouts.h1;
     for (const id of ["page1", "page2", "page3"]) assert.ok(!visibleAssetIds(state, P1, ON_S1).has(id), id);
   });
+
+  test("documents are the DM's alone: whole for the DM, none for a player or a display, and their pages reach a player only by being shown", () => {
+    const state = room();
+    state.handoutDocs.d1 = { id: "d1", rev: 0, title: "Strange letter", pages, createdAt: "" };
+    assert.deepEqual(projectState(state, DM, ON_S1).handoutDocs, state.handoutDocs);
+    assert.equal(projectEntity(keys.handoutDoc("d1"), state, DM, ON_S1), state.handoutDocs.d1);
+    for (const viewer of [P1, P2, DISPLAY]) {
+      assert.deepEqual(projectState(state, viewer, ON_S1).handoutDocs, {}, viewer.memberId);
+      assert.equal(projectEntity(keys.handoutDoc("d1"), state, viewer, ON_S1), null, viewer.memberId);
+      for (const id of ["page1", "page2", "page3"]) assert.ok(!visibleAssetIds(state, viewer, ON_S1).has(id), `${viewer.memberId}: ${id}`);
+    }
+    for (const id of ["page1", "page2", "page3"]) assert.ok(visibleAssetIds(state, DM, ON_S1).has(id), `DM: ${id}`);
+    assert.ok(allKeys(state).includes(keys.handoutDoc("d1")));
+    // Shown to one player as a handout, its pages reach that player and no one else.
+    state.handouts.h1 = { id: "h1", rev: 0, assetId: "page1", pages, title: "Strange letter", to: ["p1"], shownAt: "" };
+    assert.ok(visibleAssetIds(state, P1, ON_S1).has("page2"));
+    assert.ok(!visibleAssetIds(state, P2, ON_S1).has("page2"));
+  });
 });

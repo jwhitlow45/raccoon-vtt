@@ -213,6 +213,10 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `showing ${the("handout", op.handout.title)}`;
     case "handout.close":
       return `closing ${the("handout", before.handouts[op.handoutId]?.title)}`;
+    case "handoutDoc.create":
+      return `saving ${the("handout", op.doc.title)}`;
+    case "handoutDoc.delete":
+      return `deleting ${the("handout", before.handoutDocs[op.docId]?.title)}`;
     case "token.updateMany":
       return manyTokens("changing", op.tokenIds, token);
     case "token.deleteMany":

@@ -1,5 +1,5 @@
 import { keys, parseKey, revOf, type EntityKey, type ParsedKey } from "../keys.ts";
-import type { AreaTemplate, Encounter, Handout, Pin, Scene, Token } from "../model.ts";
+import type { AreaTemplate, Encounter, Handout, HandoutDoc, Pin, Scene, Token } from "../model.ts";
 import type { OpOf, RestoreEntry } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
 import { ON_ITS_TURN_NOW, actsOnCharacterTurn, rowsForSharedCompanions, syncOwners } from "./companions.ts";
@@ -43,6 +43,24 @@ export function handoutShow(tx: Tx, op: OpOf<"handout.show">): void {
 export function handoutClose(tx: Tx, op: OpOf<"handout.close">): void {
   if (!tx.state.handouts[op.handoutId]) throw gone("handout");
   tx.remove(keys.handout(op.handoutId));
+}
+
+/**
+ * Saves a PDF as a document of pages in the DM's library, under the id the
+ * upload chose before it began (docs/design-v1-pdf-handouts.md 3.3). An id in
+ * use is refused, so a create sent again after a lost answer never makes a
+ * second document. Documents log nothing, as saved encounters do.
+ */
+export function handoutDocCreate(tx: Tx, op: OpOf<"handoutDoc.create">): void {
+  if (tx.state.handoutDocs[op.doc.id]) throw invalid("that handout is already saved");
+  const doc: HandoutDoc = { id: op.doc.id, rev: 0, title: op.doc.title, pages: op.doc.pages, createdAt: tx.env.at };
+  tx.write(keys.handoutDoc(doc.id), doc);
+}
+
+/** Deletes a document. Its images stay until the DM's device deletes them through the library (section 3.5). */
+export function handoutDocDelete(tx: Tx, op: OpOf<"handoutDoc.delete">): void {
+  if (!tx.state.handoutDocs[op.docId]) throw gone("handout");
+  tx.remove(keys.handoutDoc(op.docId));
 }
 
 /**

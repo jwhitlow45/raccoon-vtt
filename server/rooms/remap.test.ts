@@ -484,4 +484,18 @@ describe("remapState, pdf handouts (docs/design-v1-pdf-handouts.md 3.6)", () => 
     assert.deepEqual(Object.values(out.handouts).map(({ id: _id, ...h }) => h), [{ rev: 0, assetId: "n9", title: "Letter", to: "all", shownAt: AT }]);
     assert.deepEqual(out.log, []);
   });
+
+  test("a document gets a new id and its pages follow in order, the rest dropped, and one left with no page is dropped", () => {
+    const state = room();
+    state.handoutDocs.d1 = { id: "d1", rev: 2, title: "Strange letter", pages: [page("p1"), page("p2"), page("p3"), page("p1")], createdAt: AT };
+    state.handoutDocs.d2 = { id: "d2", rev: 0, title: "Gone", pages: [page("p3")], createdAt: AT };
+    const out = remapState(state, { assets: kinds({ p1: ["n1", "handout"], p2: ["n2", "token"], p3: ["n3", "map"] }) });
+    const docs = Object.values(out.handoutDocs);
+    assert.equal(docs.length, 1);
+    assert.notEqual(docs[0]!.id, "d1");
+    assert.deepEqual(docs[0], { id: docs[0]!.id, rev: 2, title: "Strange letter", pages: [page("n1"), page("n1")], createdAt: AT });
+    assert.deepEqual(out.handoutDocs[docs[0]!.id], docs[0]);
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
 });

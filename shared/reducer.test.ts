@@ -23,6 +23,7 @@ import {
   deepClone,
   effect,
   env,
+  handoutPage,
   imageRef,
   refused,
   reveal,
@@ -45,6 +46,7 @@ function setup() {
   state.monsters.mon1 = customMonster("mon1", { sizeAlt: "medium", xpInLair: 700, defaultImage: imageRef("lurker") });
   state.srdImages.bandit = srdImage("bandit", "bandit-pic");
   state.savedEncounters.enc1 = { id: "enc1", rev: 0, name: "Ambush", monsters: [{ srdId: "goblin-warrior", count: 4 }, { monsterId: "mon1", count: 1 }], party: [{ count: 4, level: 3 }] };
+  state.handoutDocs.doc1 = { id: "doc1", rev: 0, title: "Strange letter", pages: [handoutPage("page1"), handoutPage("page2", 2048, 1584)], createdAt: AT };
   reveal(state, "s1", { x: 0, y: 0, w: 4, h: 4 });
   return state;
 }
@@ -147,6 +149,9 @@ describe("inverses", () => {
     { t: "savedEncounter.create", encounter: { id: "enc2", name: "Wolves", monsters: [{ srdId: "wolf", count: 3 }] } },
     { t: "savedEncounter.update", encounterId: "enc1", patch: { name: "Ambush at dusk", monsters: [{ srdId: "bandit", count: 2, inLair: true }], party: null } },
     { t: "savedEncounter.delete", encounterId: "enc1" },
+    { t: "handout.show", handout: { id: "h2", pages: [handoutPage("page1"), handoutPage("page2", 2048, 1584)], title: "Strange letter", to: "all" } },
+    { t: "handoutDoc.create", doc: { id: "doc2", title: "Strange letter", pages: [handoutPage("page3")] } },
+    { t: "handoutDoc.delete", docId: "doc1" },
   ];
 
   for (const op of ops) {
@@ -1420,6 +1425,22 @@ describe("log and handouts", () => {
     const again = apply(image, { t: "handout.show", handout: { id: "h1", pages: pages.slice(1), title: "Strange letter", to: ["p1"] } }, DM, 3);
     assert.equal(again.handouts.h1!.assetId, "p2");
     assert.deepEqual(again.handouts.h1!.pages, pages.slice(1));
+  });
+
+  test("a document is saved under its own id with the time of the save, never twice, logs nothing, and deleting one not there is gone (docs/design-v1-pdf-handouts.md 3.3)", () => {
+    const pages = [handoutPage("page3"), handoutPage("page3")];
+    const saved = applyOp(fresh(), { t: "handoutDoc.create", doc: { id: "doc2", title: "Map pack", pages } }, DM, env(4));
+    assert.ok(saved.ok);
+    assert.deepEqual(saved.state.handoutDocs.doc2, { id: "doc2", rev: 1, title: "Map pack", pages, createdAt: AT });
+    assert.deepEqual(saved.touched, ["handoutDoc:doc2"]);
+    assert.deepEqual(saved.log, []);
+    // A create sent again after a lost answer is refused, so it never makes a second document.
+    assert.equal(refused(saved.state, { t: "handoutDoc.create", doc: { id: "doc2", title: "Map pack", pages } }).code, "invalid");
+    const deleted = applyOp(saved.state, { t: "handoutDoc.delete", docId: "doc2" }, DM, env(5));
+    assert.ok(deleted.ok);
+    assert.equal(deleted.state.handoutDocs.doc2, undefined);
+    assert.deepEqual(deleted.log, []);
+    assert.equal(refused(deleted.state, { t: "handoutDoc.delete", docId: "doc2" }).code, "gone");
   });
 });
 

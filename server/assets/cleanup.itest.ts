@@ -341,6 +341,64 @@ describe("image cleanup", () => {
     assert.ok(await exists(filePath(inA, "token")), "room B still names the file");
   });
 
+  test("a document's pages are in use until it is deleted, and a page another document names stays in use (docs/design-v1-pdf-handouts.md 3.5)", async () => {
+    const { roomId, socket, dm } = await room();
+    const first = await upload(dm, roomId, "handout", randomColor());
+    const second = await upload(dm, roomId, "handout", randomColor());
+    const blank = await upload(dm, roomId, "handout", randomColor());
+    const page = (u: Uploaded) => ({ assetId: u.id, width: 1, height: 1 });
+    const letter = uuidv7();
+    for (const op of [
+      { t: "handoutDoc.create", doc: { id: letter, title: "Strange letter", pages: [page(first), page(blank), page(second)] } },
+      { t: "handoutDoc.create", doc: { id: uuidv7(), title: "Map pack", pages: [page(blank)] } },
+    ] as Op[]) {
+      assert.equal((await socket.apply(op)).rejects, undefined, op.t);
+    }
+    const inUse = async () => {
+      const assets = (await dm.get(`/api/rooms/${roomId}/assets`)).json<{ assets: Array<{ id: string; inUse?: boolean }> }>().assets;
+      return Object.fromEntries([first, second, blank].map((u) => [u.id, assets.find((a) => a.id === u.id)?.inUse]));
+    };
+    assert.deepEqual(await inUse(), { [first.id]: true, [second.id]: true, [blank.id]: true });
+    const url = `/api/rooms/${roomId}/assets/delete`;
+    const refused = await dm.post(url, { ids: [first.id] });
+    assert.equal(refused.statusCode, 409);
+    assert.deepEqual(refused.json(), { error: "asset_in_use", inUse: [first.id] });
+
+    assert.equal((await socket.apply({ t: "handoutDoc.delete", docId: letter })).rejects, undefined);
+    assert.deepEqual(await inUse(), { [first.id]: false, [second.id]: false, [blank.id]: true });
+    const shared = await dm.post(url, { ids: [first.id, second.id, blank.id] });
+    assert.equal(shared.statusCode, 409);
+    assert.deepEqual(shared.json(), { error: "asset_in_use", inUse: [blank.id] });
+    const deleted = await dm.post(url, { ids: [first.id, second.id] });
+    assert.equal(deleted.statusCode, 200, deleted.body);
+    assert.deepEqual(new Set(deleted.json<{ deleted: string[] }>().deleted), new Set([first.id, second.id]));
+    assert.ok(await rowExists(blank.id), "the other document's page stays");
+    // Its pages are gone, so undoing the delete is refused.
+    const undo = await socket.apply({ t: "undo" });
+    assert.equal(undo.rejects?.[0]?.code, "gone");
+    assert.match(undo.rejects?.[0]?.message ?? "", /its image was deleted since/);
+  });
+
+  test("a handout showing pages keeps every page in use until it closes, as when a show wins its race with a delete on another device (docs/design-v1-pdf-handouts.md 3.5)", async () => {
+    const { roomId, socket, dm } = await room();
+    const first = await upload(dm, roomId, "handout", randomColor());
+    const second = await upload(dm, roomId, "handout", randomColor());
+    const page = (u: Uploaded) => ({ assetId: u.id, width: 1, height: 1 });
+    const handoutId = uuidv7();
+    assert.equal((await socket.apply({ t: "handout.show", handout: { id: handoutId, pages: [page(second), page(first)], title: "Strange letter", to: "all" } })).rejects, undefined);
+    const url = `/api/rooms/${roomId}/assets/delete`;
+    const showing = await dm.post(url, { ids: [first.id, second.id] });
+    assert.equal(showing.statusCode, 409);
+    assert.deepEqual(new Set(showing.json<{ inUse: string[] }>().inUse), new Set([first.id, second.id]));
+    assert.equal((await socket.apply({ t: "handout.close", handoutId })).rejects, undefined);
+    const deleted = await dm.post(url, { ids: [first.id, second.id] });
+    assert.equal(deleted.statusCode, 200, deleted.body);
+    // Showing it again by undoing the close is refused: its pages are gone.
+    const undo = await socket.apply({ t: "undo" });
+    assert.equal(undo.rejects?.[0]?.code, "gone");
+    assert.match(undo.rejects?.[0]?.message ?? "", /its image was deleted since/);
+  });
+
   test("undoing the deletion of a token whose image was deleted since is refused", async () => {
     const { roomId, sceneId, socket, dm } = await room();
     const img = await upload(dm, roomId, "token", randomColor());
@@ -388,6 +446,37 @@ describe("the quota re-check after a deletion", () => {
     const res = await dm.post(`/api/rooms/${roomId}/assets/delete`, { ids: [big] });
     assert.equal(res.statusCode, 200, res.body);
     assert.equal(await readOnly(roomId), false);
+  });
+
+  test("a room at its quota deletes a document and then frees its pages through the library delete, but saves none (docs/design-v1-pdf-handouts.md 3.3)", async () => {
+    const { roomId, dm, socket, big } = await fill();
+    // fill() sets the flag at once, so it is lifted for a moment to save the document a room reaches its quota with.
+    await t.pool.query("update rooms set read_only = false where id = $1", [roomId]);
+    socket.close();
+    await socket.waitClosed();
+    await t.manager.unload(roomId);
+    const before = await t.connect(roomId, dm);
+    await before.snapshot("dm-before");
+    const docId = uuidv7();
+    assert.equal((await before.apply({ t: "handoutDoc.create", doc: { id: docId, title: "Strange letter", pages: [{ assetId: big, width: 1, height: 1 }] } })).rejects, undefined);
+    before.close();
+    await before.waitClosed();
+    await t.manager.unload(roomId);
+    await t.pool.query("update rooms set read_only = true where id = $1", [roomId]);
+
+    const full = await t.connect(roomId, dm);
+    await full.snapshot("dm-full");
+    assert.equal(t.manager.get(roomId)?.readOnly, true);
+    const saved = await full.apply({ t: "handoutDoc.create", doc: { id: uuidv7(), title: "Map pack", pages: [{ assetId: big, width: 1, height: 1 }] } });
+    assert.equal(saved.rejects?.[0]?.code, "quota");
+    assert.equal((await dm.post(`/api/rooms/${roomId}/assets/delete`, { ids: [big] })).statusCode, 409, "a document still names it");
+    assert.equal((await full.apply({ t: "handoutDoc.delete", docId })).rejects, undefined);
+    const res = await dm.post(`/api/rooms/${roomId}/assets/delete`, { ids: [big] });
+    assert.equal(res.statusCode, 200, res.body);
+    const actor = t.manager.get(roomId)!;
+    for (let i = 0; i < 100 && (actor.readOnly || (await readOnly(roomId))); i++) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(actor.readOnly, false);
+    full.close();
   });
 
   test("a loaded room does too, through its actor", async () => {

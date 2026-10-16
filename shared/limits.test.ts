@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { LIMITS, checkLimits, serializedBytes, utf8Bytes } from "./limits.ts";
+import { roomHandoutPages } from "./handouts.ts";
+import { HANDOUT_PAGES_FULL, LIMITS, SHOWING_COUNTS_AGAIN, checkLimits, serializedBytes, utf8Bytes } from "./limits.ts";
 import type { EdgeFeature, FreeWall } from "./model.ts";
 import { customMonster, drawing, room, srdImage, token } from "./testutil.ts";
 
@@ -74,6 +75,29 @@ describe("checkLimits", () => {
     state.savedEncounters.extra = { id: "extra", rev: 0, name: "One more", monsters: [] };
     const many = checkLimits(state);
     assert.ok(!many.ok && /100 saved encounters/.test(many.message));
+  });
+
+  test("handout pages: every page of every document and of every handout showing, one image as one page, a document shown counted again (docs/design-v1-pdf-handouts.md 3.7)", () => {
+    const pages = (n: number, prefix: string) => Array.from({ length: n }, (_, i) => ({ assetId: `${prefix}${i}`, width: 1584, height: 2048 }));
+    const state = room();
+    // 19 documents of 100 pages and one of 99: 1,999 pages.
+    for (let i = 0; i < 20; i++) state.handoutDocs[`d${i}`] = { id: `d${i}`, rev: 0, title: "Strange letter", pages: pages(i === 19 ? 99 : 100, `d${i}-`), createdAt: "" };
+    assert.equal(roomHandoutPages(state), 1_999);
+    // One image showing is one page: the room is at its 2,000.
+    state.handouts.h1 = { id: "h1", rev: 0, assetId: "img", title: "Letter", to: "all", shownAt: "" };
+    assert.equal(roomHandoutPages(state), LIMITS.handoutPagesPerRoom);
+    assert.deepEqual(checkLimits(state), { ok: true });
+    // A save past it says what frees some.
+    const saved = { ...state, handoutDocs: { ...state.handoutDocs, d20: { id: "d20", rev: 0, title: "One more", pages: pages(1, "x"), createdAt: "" } } };
+    assert.deepEqual(checkLimits(saved, null, state), { ok: false, code: "quota", message: HANDOUT_PAGES_FULL });
+    assert.equal(HANDOUT_PAGES_FULL, "the room holds at most 2,000 handout pages. Delete a document or close a handout, then try again");
+    // A show of a saved document counts its pages again, and says so.
+    const shown = { ...state, handouts: { ...state.handouts, h2: { id: "h2", rev: 0, assetId: "d0-0", pages: state.handoutDocs.d0!.pages, title: "Strange letter", to: "all" as const, shownAt: "" } } };
+    assert.equal(roomHandoutPages(shown), 2_100);
+    assert.deepEqual(checkLimits(shown, null, state), { ok: false, code: "quota", message: `${HANDOUT_PAGES_FULL}. ${SHOWING_COUNTS_AGAIN}` });
+    assert.equal(SHOWING_COUNTS_AGAIN, "Showing a document counts its pages again while it shows");
+    // Without the state before, as for an import, the words are the save's.
+    assert.deepEqual(checkLimits(shown), { ok: false, code: "quota", message: HANDOUT_PAGES_FULL });
   });
 
   test("pillars: a cap per scene, absolute without the state before, and with it only for an op that raises the count", () => {

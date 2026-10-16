@@ -538,4 +538,23 @@ describe("pdf handout ops (docs/design-v1-pdf-handouts.md 3.3)", () => {
     bad(clientOpSchema, show({ pages: [page("a")], title: "\u{1F409}".repeat(81) }));
     bad(clientOpSchema, show({ pages: [page("a")], title: "Letter\u202E" }));
   });
+
+  test("a document is saved with its id, a title and 1 to 100 pages, and deleted by its id", () => {
+    const create = (doc: Record<string, unknown>) => ({ t: "handoutDoc.create", doc: { id: "d1", title: "Strange letter", pages: [page("a")], ...doc } });
+    ok(clientOpSchema, create({}));
+    ok(clientOpSchema, create({ pages: pages(100) }));
+    bad(clientOpSchema, create({ pages: pages(101) }));
+    bad(clientOpSchema, create({ pages: [] }));
+    bad(clientOpSchema, create({ pages: [page("a", 0, 1)] }));
+    bad(clientOpSchema, create({ title: "" }));
+    bad(clientOpSchema, create({ title: "x".repeat(81) }));
+    bad(clientOpSchema, create({ title: "Line\u2028break" }));
+    // The reducer sets these.
+    bad(clientOpSchema, create({ createdAt: "2026-10-16T00:00:00.000Z" }));
+    bad(clientOpSchema, create({ rev: 0 }));
+    bad(clientOpSchema, create({ id: "x".repeat(65) }));
+    ok(clientOpSchema, { t: "handoutDoc.delete", docId: "d1" });
+    bad(clientOpSchema, { t: "handoutDoc.delete", docId: "" });
+    bad(clientOpSchema, { t: "handoutDoc.delete", docId: "d1", pages: [] });
+  });
 });

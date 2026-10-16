@@ -755,6 +755,8 @@ const handoutInput = z.union([
   z.strictObject({ id, assetId: id, title: name, to: handoutTo }),
   z.strictObject({ id, pages: handoutPages, title: name, to: handoutTo }),
 ]);
+/** A document as its create op carries it. The reducer sets `rev` and `createdAt`. */
+const handoutDocInput = z.strictObject({ id, title: name, pages: handoutPages });
 
 const hpChange = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("damage"), amount: z.number().int().min(0).max(100_000), crit: z.boolean().optional() }),
@@ -1093,6 +1095,13 @@ export const clientOps = [
   op("log.whisper", { to: z.array(id).min(1).max(MAX_OWNERS), text: longText.min(1) }),
   op("handout.show", { handout: handoutInput }),
   op("handout.close", { handoutId: id }),
+  /**
+   * A PDF kept in the DM's library as a document of pages, under the id its
+   * upload chose first, so a create sent twice cannot make two
+   * (docs/design-v1-pdf-handouts.md 3.3). Both ops are the DM's.
+   */
+  op("handoutDoc.create", { doc: handoutDocInput }),
+  op("handoutDoc.delete", { docId: id }),
   // Wave 5 (docs/design-v1-dm-tools.md).
   /** Several tokens changed alike in one step (section 3.5), whole or not at all. */
   op("token.updateMany", { tokenIds: manyTokenIds, patch: tokenGroupPatch }),
@@ -1256,6 +1265,7 @@ export type PinInput = z.infer<typeof pinInput>;
 export type RollRequestInput = z.infer<typeof rollRequestInput>;
 export type TokenGroupPatch = z.infer<typeof tokenGroupPatch>;
 export type HandoutInput = z.infer<typeof handoutInput>;
+export type HandoutDocInput = z.infer<typeof handoutDocInput>;
 
 export const actorTargetSchema = actorTarget;
 export const fogOpSchema = fogOp;
@@ -1317,6 +1327,8 @@ export const dmToolSchemas = {
 };
 /** A handout's pages and audience, so the stored-state schema checks imports by the same bounds (docs/design-v1-pdf-handouts.md 3.3). */
 export const handoutSchemas = { handoutPage, handoutPages, handoutTo };
+/** A document as its create op carries it, for the upload job to check its save before it sends it. */
+export const handoutDocInputSchema = handoutDocInput;
 
 // Ephemeral events (design 7.6). Never stored, forwarded per scene.
 

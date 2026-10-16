@@ -45,6 +45,16 @@ describe("undo step labels", () => {
     assert.equal(describeOp({ t: "savedEncounter.delete", encounterId: "gone" }, s), "deleting an encounter");
   });
 
+  test("a document of handout pages is saved and deleted by its title, and a show of one says showing (docs/design-v1-pdf-handouts.md 3.3)", () => {
+    const s = state();
+    const pages = [{ assetId: "a", width: 1584, height: 2048 }];
+    const saved = { ...s, handoutDocs: { d1: { id: "d1", rev: 0, title: "Strange letter", pages, createdAt: "" } } };
+    assert.equal(describeOp({ t: "handoutDoc.create", doc: { id: "d2", title: "Strange letter", pages } }, s), "saving the handout Strange letter");
+    assert.equal(describeOp({ t: "handoutDoc.delete", docId: "d1" }, saved), "deleting the handout Strange letter");
+    assert.equal(describeOp({ t: "handoutDoc.delete", docId: "gone" }, s), "deleting a handout");
+    assert.equal(describeOp({ t: "handout.show", handout: { id: "h1", pages, title: "Strange letter", to: "all" } }, s), "showing the handout Strange letter");
+  });
+
   test("cut long names, so the toast stays short", () => {
     const label = describeOp({ t: "token.move", tokenId: "long", x: 1, y: 1 }, state());
     assert.ok(label.length < 60, label);
@@ -56,7 +66,7 @@ describe("undo step labels", () => {
     for (const schema of clientOps) {
       const t = schema.shape.t.value;
       // The smallest op of each type the label can read: fields it does not use stay unset.
-      const label = describeOp({ t, sceneId: "s1", tokenId: "g2", target: { tokenId: "g2" }, moves: [], hits: [], patch: {}, change: { kind: "heal", amount: 1 }, effect: { key: "prone" }, token: { name: "x" }, scene: { name: "x" }, character: { name: "x" }, monster: { name: "x" }, encounter: { name: "x" }, srdId: "goblin-warrior", image: null, template: {}, drawing: {}, handout: { title: "x" }, label: null, door: { edge: "0,0,n" }, tokenIds: ["g2"], rollIds: ["r1"], page: { title: "x" }, pin: { id: "p1" }, request: { test: { kind: "save", choices: [{ ability: "dex" }] } } } as never, s);
+      const label = describeOp({ t, sceneId: "s1", tokenId: "g2", target: { tokenId: "g2" }, moves: [], hits: [], patch: {}, change: { kind: "heal", amount: 1 }, effect: { key: "prone" }, token: { name: "x" }, scene: { name: "x" }, character: { name: "x" }, monster: { name: "x" }, encounter: { name: "x" }, srdId: "goblin-warrior", image: null, template: {}, drawing: {}, handout: { title: "x" }, doc: { title: "x" }, label: null, door: { edge: "0,0,n" }, tokenIds: ["g2"], rollIds: ["r1"], page: { title: "x" }, pin: { id: "p1" }, request: { test: { kind: "save", choices: [{ ability: "dex" }] } } } as never, s);
       assert.ok(label.length > 0 && label.length <= 200, `${t}: ${label}`);
     }
   });

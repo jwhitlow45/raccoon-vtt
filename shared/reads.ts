@@ -232,6 +232,11 @@ export function reads(op: Op, state: RoomState): Reads {
       return of([]);
     case "handout.close":
       return of([{ key: keys.handout(op.handoutId) }]);
+    // A DM's view holds every document, as it holds every saved encounter.
+    case "handoutDoc.create":
+      return of([]);
+    case "handoutDoc.delete":
+      return of([{ key: keys.handoutDoc(op.docId) }]);
 
     // Wave 5 (docs/design-v1-dm-tools.md). A group edit reads only its tokens, so a DM's on tokens in view replays at
     // once, and a player's waits when any target is redacted (section 3.5).

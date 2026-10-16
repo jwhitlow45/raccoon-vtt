@@ -421,6 +421,9 @@ const handout = z.strictObject({
   shownAt: iso,
 });
 
+/** A document of handout pages, with its create op's bounds (docs/design-v1-pdf-handouts.md 3.2). The room's page count is `checkLimits`'s. */
+const handoutDoc = z.strictObject({ id, rev, title: name, pages: handoutSchemas.handoutPages, createdAt: iso });
+
 /** The create op's bounds. The byte limits for one monster and for all of them are `checkLimits`'s. */
 const monster = z.strictObject({ id, rev, ...statBlockFieldsForImport });
 
@@ -553,6 +556,8 @@ export const roomStateSchema = z.strictObject({
   journal: record(journalPage),
   pins: record(pin),
   rolls: record(rollRequest),
+  // PDF handouts. A backup from before them reaches this schema through the snapshot migration, which adds them empty.
+  handoutDocs: record(handoutDoc),
 });
 
 export function parseRoomState(value: unknown): { ok: true; state: RoomState } | { ok: false; message: string } {

@@ -241,6 +241,16 @@ describe("SizeGuard's room-level part (docs/design-v1-dm-tools.md 2.4)", () => {
     }
   });
 
+  test("documents of handout pages count, since they ride in every DM snapshot (docs/design-v1-pdf-handouts.md 3.4)", () => {
+    const pages = Array.from({ length: 100 }, (_, i) => ({ assetId: `0192f0aa-0000-7000-8000-${String(i).padStart(12, "0")}`, width: 1584, height: 2048 }));
+    const next = applied(twoScenes(), { t: "handoutDoc.create", doc: { id: "d1", title: "Strange letter", pages } }).state;
+    for (const sceneId of ["s1", "s2"]) {
+      const bytes = serializedBytes(projectState({ ...next, sight: {} } as unknown as RoomState, DM, { sceneId }));
+      assert.equal(new SizeGuard({ sceneLimit: bytes }).check(next, [sceneId], 0).ok, true, sceneId);
+      assert.equal(new SizeGuard({ sceneLimit: bytes - 1 }).check(next, [sceneId], 0).ok, false, sceneId);
+    }
+  });
+
   test("every whisper counts, so an op that fits the DM with fewer whispers but not the other is refused", () => {
     const state = room();
     state.members.dm2 = { ...state.members.dm1!, id: "dm2", name: "Second DM" };

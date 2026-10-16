@@ -42,6 +42,7 @@ export type ParsedKey =
   | { kind: "journal"; id: string }
   | { kind: "pin"; id: string }
   | { kind: "roll"; id: string }
+  | { kind: "handoutDoc"; id: string }
   | { kind: "log"; id: string }
   | { kind: "chunk"; sceneId: string; cx: number; cy: number }
   | { kind: "fog"; sceneId: string; tx: number; ty: number }
@@ -73,6 +74,8 @@ export const keys = {
   pin: (id: string): EntityKey => `pin:${id}`,
   /** An open roll request (RoomState.rolls, wave 5). */
   roll: (id: string): EntityKey => `roll:${id}`,
+  /** A document of handout pages in the DM's library (RoomState.handoutDocs). */
+  handoutDoc: (id: string): EntityKey => `handoutDoc:${id}`,
   log: (id: string): EntityKey => `log:${id}`,
   chunk: (sceneId: string, cx: number, cy: number): EntityKey => `chunk:${sceneId}:${cx},${cy}`,
   fog: (sceneId: string, tx: number, ty: number): EntityKey => `fog:${sceneId}:${tx},${ty}`,
@@ -169,6 +172,7 @@ export function parseKey(key: EntityKey): ParsedKey | null {
     case "journal":
     case "pin":
     case "roll":
+    case "handoutDoc":
     case "log":
       return { kind, id: rest };
     case "fogDraft":
@@ -228,6 +232,8 @@ export function collectionOf(key: EntityKey): keyof RoomState | null {
       return "pins";
     case "roll":
       return "rolls";
+    case "handoutDoc":
+      return "handoutDocs";
     case "chunk":
       return "buildChunks";
     case "fog":
@@ -283,6 +289,8 @@ export function readEntity(state: RoomState, key: EntityKey): unknown {
       return state.pins[parsed.id] ?? null;
     case "roll":
       return state.rolls[parsed.id] ?? null;
+    case "handoutDoc":
+      return state.handoutDocs[parsed.id] ?? null;
     case "log":
       return state.log.find((e) => e.id === parsed.id) ?? null;
     case "chunk":
@@ -361,6 +369,8 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
       return { ...state, pins: withEntry(state.pins, parsed.id, value as RoomState["pins"][string] | null) };
     case "roll":
       return { ...state, rolls: withEntry(state.rolls, parsed.id, value as RoomState["rolls"][string] | null) };
+    case "handoutDoc":
+      return { ...state, handoutDocs: withEntry(state.handoutDocs, parsed.id, value as RoomState["handoutDocs"][string] | null) };
     case "chunk":
       return {
         ...state,

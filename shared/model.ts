@@ -18,6 +18,7 @@ export type TemplateId = string;
 export type DrawingId = string;
 export type LabelId = string;
 export type HandoutId = string;
+export type HandoutDocId = string;
 export type AssetId = string;
 export type EntryId = string;
 export type EffectId = string;
@@ -99,6 +100,13 @@ export type RoomState = {
    * it, so every request here is open. Empty in rooms from before them.
    */
   rolls: Record<RollId, RollRequest>;
+  /**
+   * DM only. The PDFs the DM uploaded, each a document of handout pages kept
+   * in the library until the DM deletes it (docs/design-v1-pdf-handouts.md
+   * 3.2). Showing one copies its pages into a handout, so players never get
+   * a document. Empty in rooms from before them.
+   */
+  handoutDocs: Record<HandoutDocId, HandoutDoc>;
 };
 
 export type RoomMeta = {
@@ -1254,6 +1262,23 @@ export type Handout = {
   title: string;
   to: "all" | MemberId[];
   shownAt: string;
+};
+
+/**
+ * A PDF the DM uploaded, kept in the library until the DM deletes it
+ * (docs/design-v1-pdf-handouts.md 3.2). It is not a handout: a handout is a
+ * showing, and nothing links one back to the document it came from, so no
+ * id of this DM-only entity reaches players.
+ */
+export type HandoutDoc = {
+  id: HandoutDocId;
+  rev: number;
+  /** A name, as a handout's title is, from the PDF's own title or its file name. */
+  title: string;
+  /** Every page in order, at least one. */
+  pages: HandoutPage[];
+  /** When it was saved, for the library's order, newest first. */
+  createdAt: string;
 };
 
 /**

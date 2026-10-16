@@ -9,6 +9,7 @@ import type {
   Encounter,
   EncounterSnapshot,
   Handout,
+  HandoutDoc,
   HandoutPage,
   ImageRef,
   InitEntry,
@@ -115,7 +116,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   };
   labels.assign(Object.values(state.labels).filter((l) => scenes.has(l.sceneId)).map((l) => l.id));
   /*
-   * A handout's pages in order, each page that came through
+   * A handout's or a document's pages in order, each page that came through
    * as a handout image under its new id and the rest dropped
    * (docs/design-v1-pdf-handouts.md 3.6). One image is the list of its one page.
    */
@@ -188,6 +189,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     pins: {},
     // Open roll requests belong to a moment of play, and their targets' players have new member ids anyway (section 2.5).
     rolls: {},
+    handoutDocs: {},
   };
 
   const moveAny = state.meta.settings.playersMoveAny;
@@ -406,6 +408,13 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       }
     }
     out.pins[next.id] = next;
+  }
+  // A document gets a new id, as a handout does, and one left with no page is dropped (docs/design-v1-pdf-handouts.md 3.6).
+  for (const d of Object.values(state.handoutDocs)) {
+    const pages = handoutPagesOf(d.pages);
+    if (pages.length === 0) continue;
+    const next: HandoutDoc = { ...d, id: newId(), pages };
+    out.handoutDocs[next.id] = next;
   }
   // SRD monsters keep their ids. A room monster follows its new id, and one that is not in the backup was deleted before it.
   for (const e of Object.values(state.savedEncounters)) {

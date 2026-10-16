@@ -498,6 +498,65 @@ describe("room export and import", () => {
     assert.deepEqual(rows[0]!.state.savedEncounters, {});
   });
 
+  test("a document and a showing handout of pages come back with every page row, under new ids, in order and as handout images (docs/design-v1-pdf-handouts.md 3.6)", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Pdf handouts");
+    const dmSocket = await t.connect(roomId, dm);
+    await dmSocket.snapshot("dm");
+    const [a, b, c] = [await upload(dm, roomId, "handout", await solid(60, 80, "#a11").png().toBuffer()), await upload(dm, roomId, "handout", await solid(80, 60, "#1a1").png().toBuffer()), await upload(dm, roomId, "handout", await solid(50, 70, "#11a").png().toBuffer())];
+    const page = (u: { id: string; width: number; height: number }) => ({ assetId: u.id, width: u.width, height: u.height });
+    const docId = uuidv7();
+    const handoutId = uuidv7();
+    for (const op of [
+      { t: "handoutDoc.create", doc: { id: docId, title: "Strange letter", pages: [c, a, b, a].map(page) } },
+      { t: "handout.show", handout: { id: handoutId, pages: [a!, b!, c!].map(page), title: "Strange letter", to: "all" } },
+    ]) {
+      const ev = await dmSocket.apply(op);
+      assert.deepEqual(ev.rejects ?? [], [], op.t);
+    }
+    const res = await dm.get(`/api/rooms/${roomId}/export`);
+    assert.equal(res.statusCode, 200, res.body);
+    const importer = t.client();
+    const imported = await importZip(importer, res.rawPayload);
+    assert.equal(imported.statusCode, 201, imported.body);
+    const { roomId: copyId } = imported.json<{ roomId: string }>();
+    t.track(copyId);
+    // Each page's new row, found by its size, which differs for each: a new id, still a handout image.
+    const { rows } = await t.pool.query<{ id: string; kind: string; width: number; height: number }>("select id, kind, width, height from assets where room_id = $1", [copyId]);
+    assert.equal(rows.length, 3);
+    for (const row of rows) assert.equal(row.kind, "handout");
+    const moved = (u: { id: string; width: number; height: number }) => {
+      const row = rows.find((r) => r.width === u.width && r.height === u.height)!;
+      assert.notEqual(row.id, u.id);
+      return { assetId: row.id, width: row.width, height: row.height };
+    };
+    const copy = await t.connect(copyId, importer);
+    const state = (await copy.snapshot("i")).state as ProjectedState;
+    const [doc] = Object.values(state.handoutDocs);
+    assert.ok(doc && doc.id !== docId);
+    assert.equal(doc.title, "Strange letter");
+    assert.deepEqual(doc.pages, [c!, a!, b!, a!].map(moved));
+    const [shown] = Object.values(state.handouts);
+    assert.ok(shown && shown.id !== handoutId);
+    assert.deepEqual(shown.pages, [a!, b!, c!].map(moved));
+    assert.equal(shown.assetId, moved(a!).assetId);
+    for (const s of [dmSocket, copy]) s.close();
+  });
+
+  test("a backup from before pdf handouts imports with no documents", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Before pdf handouts");
+    const res = await dm.get(`/api/rooms/${roomId}/export`);
+    const room = JSON.parse((await unzip(res.rawPayload)).get("room.json")!.toString()) as RoomExport;
+    const { handoutDocs: _docs, ...v8 } = room.state;
+    const imported = await importZip(t.client(), await zipOf({ "room.json": JSON.stringify({ ...room, schemaVersion: 8, state: v8 }) }));
+    assert.equal(imported.statusCode, 201, imported.body);
+    const newId = imported.json<{ roomId: string }>().roomId;
+    t.track(newId);
+    const { rows } = await t.pool.query<{ state: RoomState }>("select state from room_snapshots where room_id = $1", [newId]);
+    assert.deepEqual(rows[0]!.state.handoutDocs, {});
+  });
+
   test("a saved encounter is the DM's alone, and a backup brings it back pointing at the room's monsters under their new ids", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom("Saved encounters");

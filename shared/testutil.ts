@@ -239,6 +239,7 @@ export function room(overrides: Partial<RoomState> = {}): RoomState {
     journal: {},
     pins: {},
     rolls: {},
+    handoutDocs: {},
     ...overrides,
   };
 }
@@ -515,6 +516,8 @@ export function randomState(r: () => number): RoomState {
     // The second is a handout of pages (docs/design-v1-pdf-handouts.md 3.1), with no draw of its own so the seeds keep what they hold.
     if (i === 1) state.handouts[id]!.pages = [handoutPage(`img-${id}`), handoutPage(`img-${id}-2`)];
   }
+  // A document in the DM's library, sharing a page with the second handout as a shown document would.
+  state.handoutDocs.d0 = { id: "d0", rev: 0, title: "Strange letter", pages: [handoutPage("img-h1"), handoutPage("img-h1-2"), handoutPage("img-d0-3")], createdAt: AT };
 
   for (let i = 0; i < int(r, 0, 3); i++) {
     const id = `m${i}`;
@@ -1203,8 +1206,14 @@ export function randomOp(r: () => number, state: RoomState, who: Viewer): Op {
         t: "handout.show",
         handout: { id: seqId, ...(n < 50 ? { assetId: "img-h" } : { pages: [handoutPage("img-h"), handoutPage("img-h-2")] }), title: "Letter", to: pick(r, ["all", ["p1"], ["p2"]]) },
       };
-    case 22:
-      return { t: "log.whisper", to: [pick(r, ["p1", "p2"])], text: "dm whisper" };
+    case 22: {
+      if (n < 50) return { t: "log.whisper", to: [pick(r, ["p1", "p2"])], text: "dm whisper" };
+      // A document saved or deleted in turn, with no draw of its own.
+      const docIds = Object.keys(state.handoutDocs);
+      return docIds[0] !== undefined && docIds.length % 2 === 1
+        ? { t: "handoutDoc.delete", docId: docIds[0] }
+        : { t: "handoutDoc.create", doc: { id: seqId, title: "Strange letter", pages: [handoutPage("img-h"), handoutPage("img-h-2")] } };
+    }
     case 23:
       return { t: "character.update", characterId: anyCharacter(), patch: { ownerIds: pick(r, [[], ["p1"], ["p2"]]) } };
     case 24: {

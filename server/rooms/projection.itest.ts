@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { randomBytes, randomUUID } from "node:crypto";
 import { after, before, describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
-import type { CustomMonster } from "#shared/model.ts";
+import type { CustomMonster, Handout, HandoutPage } from "#shared/model.ts";
 import { PLAYED_WITH_OTHERS } from "#shared/permissions.ts";
 import { blockOf, customMonster, drawing } from "#shared/testutil.ts";
 import type { ProjectedState, ProjectedToken } from "#shared/project.ts";
@@ -383,5 +384,47 @@ describe("projection over the socket", () => {
     assert.equal(nothing.rejects?.[0]?.code, "invalid");
     dm.close();
     player.close();
+  });
+
+  test("a show of 100 pages reaches the player it is shown to whole, every page with its row's size, in its event and in a reconnect's snapshot, and a document never does (docs/design-v1-pdf-handouts.md 3.4)", async () => {
+    const dmClient = t.client();
+    const { roomId } = await dmClient.createRoom("Handouts");
+    const playerClient = t.client();
+    const playerMemberId = await playerClient.join(roomId, "Pip");
+    const dm = await t.connect(roomId, dmClient);
+    const player = await t.connect(roomId, playerClient);
+    await dm.snapshot("dm1");
+    await player.snapshot("p1");
+    // Rows written directly, since no page's file is read here, each a size of its own.
+    const pages: HandoutPage[] = [];
+    for (let i = 0; i < 100; i++) {
+      const id = randomUUID();
+      await t.pool.query(
+        `insert into assets (id, room_id, sha256, kind, pipeline, width, height, bytes, variants)
+         values ($1, $2, $3, 'handout', 1, $4, 2048, 10, '{full,thumb}')`,
+        [id, roomId, randomBytes(32), 1000 + i],
+      );
+      pages.push({ assetId: id, width: 1000 + i, height: 2048 });
+    }
+    const docId = uuidv7();
+    // The client's sizes are wrong on purpose: the rows' win.
+    const sent = pages.map((p) => ({ ...p, width: 1, height: 1 }));
+    assert.equal((await dm.apply({ t: "handoutDoc.create", doc: { id: docId, title: "Player's guide", pages: sent } })).rejects, undefined);
+    assert.equal(await player.maybe("ev", (m) => m.changes.some((c) => c.key.startsWith("handoutDoc:")), 300), null);
+
+    const id = uuidv7();
+    const shown = await dm.apply({ t: "handout.show", handout: { id, pages: sent, title: "Player's guide", to: [playerMemberId] } });
+    assert.equal(shown.rejects, undefined);
+    const ev = await player.next("ev", (m) => m.changes.some((c) => c.key === `handout:${id}`));
+    const handout = (ev.changes.find((c) => c.key === `handout:${id}`) as { value: Handout }).value;
+    assert.equal(handout.assetId, pages[0]!.assetId);
+    assert.deepEqual(handout.pages, pages);
+
+    const again = await t.connect(roomId, playerClient);
+    const snap = (await again.snapshot("p1-again")).state as ProjectedState;
+    assert.deepEqual(snap.handouts[id]?.pages, pages);
+    assert.deepEqual(snap.handoutDocs, {});
+    assert.equal(JSON.stringify(snap).includes(docId), false);
+    for (const s of [dm, player, again]) s.close();
   });
 });

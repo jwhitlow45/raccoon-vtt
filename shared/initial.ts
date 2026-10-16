@@ -54,5 +54,6 @@ export function createInitialState(input: { roomName: string; dm: Member; now?: 
     journal: {},
     pins: {},
     rolls: {},
+    handoutDocs: {},
   };
 }

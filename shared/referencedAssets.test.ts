@@ -26,6 +26,7 @@ function everyReference(): RoomState {
   state.stamps.st2 = { id: "st2", rev: 0, sceneId: "s1", art: { key: "oak-tree" }, x: 1, y: 1, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" };
   state.handouts.h1 = { id: "h1", rev: 0, assetId: "handout", title: "Letter", to: "all", shownAt: "2026-10-14T00:00:00.000Z" };
   state.handouts.h2 = { id: "h2", rev: 0, assetId: "page1", pages: [page("page1"), page("page2"), page("page1")], title: "Strange letter", to: "all", shownAt: "2026-10-14T00:00:00.000Z" };
+  state.handoutDocs.d1 = { id: "d1", rev: 0, title: "Strange letter", pages: [page("docPage1"), page("docPage2")], createdAt: "2026-10-14T00:00:00.000Z" };
   return state;
 }
 
@@ -47,7 +48,7 @@ describe("referencedAssetIds (docs/design-v1-dm-tools.md 3.19)", () => {
     const found = referencedAssetIds(state);
     // A field added to the model that names an asset shows here first, and fails until the walk knows it.
     assert.deepEqual([...found].sort(), [...namedAssets(state)].sort());
-    assert.deepEqual([...found].sort(), ["altImage", "handout", "map", "monsterImage", "page1", "page2", "phase", "portrait", "srdImage", "stampImage", "thumb", "tokenImage"]);
+    assert.deepEqual([...found].sort(), ["altImage", "docPage1", "docPage2", "handout", "map", "monsterImage", "page1", "page2", "phase", "portrait", "srdImage", "stampImage", "thumb", "tokenImage"]);
   });
 
   test("a restore adds only references the entity does not hold now, and never a thumbnail", () => {
@@ -77,5 +78,16 @@ describe("referencedAssetIds (docs/design-v1-dm-tools.md 3.19)", () => {
       { assetId: "page1", kind: "handout" },
       { assetId: "page2", kind: "handout" },
     ]);
+  });
+
+  test("a document's every page is a handout image, and putting a deleted one back adds every page", () => {
+    const state = everyReference();
+    const doc = state.handoutDocs.d1!;
+    const deleted = { ...state, handoutDocs: {} };
+    assert.deepEqual(restoreAddedAssets([{ key: keys.handoutDoc("d1"), value: doc }], deleted), [
+      { assetId: "docPage1", kind: "handout" },
+      { assetId: "docPage2", kind: "handout" },
+    ]);
+    assert.deepEqual(restoreAddedAssets([{ key: keys.handoutDoc("d1"), value: doc }], state), []);
   });
 });

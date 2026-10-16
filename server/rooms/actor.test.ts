@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import { createInitialState } from "#shared/initial.ts";
 import { chunkKey } from "#shared/keys.ts";
-import { exploredReserve, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes, utf8Bytes } from "#shared/limits.ts";
+import { exploredReserve, HANDOUT_PAGES_FULL, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes, SHOWING_COUNTS_AGAIN, utf8Bytes } from "#shared/limits.ts";
 import { partySight, type VisionWorld } from "#shared/rules/vision.ts";
 import { sceneWalls, splitRefusal } from "#shared/rules/walls.ts";
 import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
@@ -418,6 +418,70 @@ describe("handout pages (docs/design-v1-pdf-handouts.md 3.1)", () => {
         assert.equal(ev.rejects?.[0]?.code, "gone");
       }
       assert.deepEqual(actor.committed.state.handouts, {});
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("a saved document takes each page's size from its row too", async () => {
+    const { dm, ids, db } = handoutRoom();
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const { conn, sent } = connect(actor, dm);
+      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await actor.op(conn, 1, { t: "handoutDoc.create", doc: { id: "d1", title: "Strange letter", pages: [page(ids.second, 3, 3), page(ids.first)] } });
+      const ev = await answerTo(sent, 1);
+      assert.ok(ev !== "stuck" && ev.rejects === undefined);
+      assert.deepEqual(actor.committed.state.handoutDocs.d1?.pages, [page(ids.second, 2048, 1448), page(ids.first, 1584, 2048)]);
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("a room at its storage quota deletes a document but saves none (docs/design-v1-pdf-handouts.md 3.3)", async () => {
+    const { dm, ids, db } = handoutRoom();
+    db.snapshot.state.handoutDocs.d1 = { id: "d1", rev: 0, title: "Strange letter", pages: [page(ids.first, 1584, 2048)], createdAt: new Date().toISOString() };
+    const actor = await RoomActor.load(deps(db, { readOnly: true }));
+    assert.ok(actor);
+    try {
+      const { conn, sent } = connect(actor, dm);
+      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await actor.op(conn, 1, { t: "handoutDoc.create", doc: { id: "d2", title: "Map pack", pages: [page(ids.second)] } });
+      const refused = await answerTo(sent, 1);
+      assert.ok(refused !== "stuck");
+      assert.equal(refused.rejects?.[0]?.code, "quota");
+      await actor.op(conn, 2, { t: "handoutDoc.delete", docId: "d1" });
+      const taken = await answerTo(sent, 2);
+      assert.ok(taken !== "stuck" && taken.rejects === undefined);
+      assert.deepEqual(actor.committed.state.handoutDocs, {});
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("a show past the room's handout pages says that showing counts a document's pages again, and a save past them says what frees some", async () => {
+    const { dm, ids, db } = handoutRoom();
+    const full = Array.from({ length: LIMITS.handoutPages }, () => page(ids.first, 1584, 2048));
+    for (let i = 0; i < LIMITS.handoutPagesPerRoom / LIMITS.handoutPages; i++) {
+      db.snapshot.state.handoutDocs[`d${i}`] = { id: `d${i}`, rev: 0, title: "Strange letter", pages: full, createdAt: new Date().toISOString() };
+    }
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const { conn, sent } = connect(actor, dm);
+      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await actor.op(conn, 1, { t: "handout.show", handout: { id: "h1", pages: [page(ids.second)], title: "Strange letter", to: "all" } });
+      const shown = await answerTo(sent, 1);
+      assert.ok(shown !== "stuck");
+      assert.deepEqual(shown.rejects, [{ n: 1, code: "quota", message: `${HANDOUT_PAGES_FULL}. ${SHOWING_COUNTS_AGAIN}` }]);
+      await actor.op(conn, 2, { t: "handoutDoc.create", doc: { id: "d99", title: "Map pack", pages: [page(ids.second)] } });
+      const saved = await answerTo(sent, 2);
+      assert.ok(saved !== "stuck");
+      assert.deepEqual(saved.rejects, [{ n: 2, code: "quota", message: HANDOUT_PAGES_FULL }]);
     } finally {
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });

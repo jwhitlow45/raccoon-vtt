@@ -651,4 +651,31 @@ describe("the display image route", () => {
     assert.equal((await player.get(`/api/rooms/${roomId}/display/assets/${map}/full`)).statusCode, 404);
     assert.equal((await dm.get(`/api/rooms/${roomId}/display/assets/${map}/full`)).statusCode, 404);
   });
+
+  test("reads every page of a handout of pages shown to everyone, and no page of one shown to chosen players or kept in a document (docs/design-v1-pdf-handouts.md 3.4)", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Pages");
+    const dmSocket = await t.connect(roomId, dm);
+    await dmSocket.snapshot("dm");
+    const player = t.client();
+    const playerId = await player.join(roomId, "Thorn");
+    const page = (assetId: string) => ({ assetId, width: 100, height: 100 });
+    const forAll = [await addAsset(roomId, "handout"), await addAsset(roomId, "handout"), await addAsset(roomId, "handout")];
+    const chosen = [await addAsset(roomId, "handout"), await addAsset(roomId, "handout")];
+    const kept = await addAsset(roomId, "handout");
+    const ok = (ev: { rejects?: unknown[] }) => assert.equal(ev.rejects, undefined, JSON.stringify(ev.rejects));
+    const allId = uuidv7();
+    ok(await dmSocket.apply({ t: "handout.show", handout: { id: allId, pages: forAll.map(page), title: "Strange letter", to: "all" } }));
+    ok(await dmSocket.apply({ t: "handout.show", handout: { id: uuidv7(), pages: chosen.map(page), title: "Map pack", to: [playerId] } }));
+    ok(await dmSocket.apply({ t: "handoutDoc.create", doc: { id: uuidv7(), title: "Kept", pages: [page(forAll[0]!), page(kept)] } }));
+
+    const tv = await pairDisplay(t, dm, roomId);
+    const read = (id: string, variant = "full") => tv.get(`/api/rooms/${roomId}/display/assets/${id}/${variant}`);
+    for (const id of forAll) for (const variant of ["full", "thumb"]) assert.equal((await read(id, variant)).statusCode, 200, `${id} ${variant}`);
+    for (const id of [...chosen, kept]) assert.equal((await read(id)).statusCode, 404, id);
+    // Closed, its pages answer 404 too, though a document still names one of them.
+    ok(await dmSocket.apply({ t: "handout.close", handoutId: allId }));
+    for (const id of forAll) assert.equal((await read(id)).statusCode, 404, `${id} after close`);
+    dmSocket.close();
+  });
 });

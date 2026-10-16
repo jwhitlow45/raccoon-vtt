@@ -10,7 +10,7 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 8;
+export const SNAPSHOT_VERSION = 9;
 export const OP_VERSION = 5;
 
 export type MigrationStep = {
@@ -78,6 +78,13 @@ export const snapshotMigrations: MigrationStep[] = [
       if (state === null || typeof state !== "object" || ("journal" in state && "pins" in state && "rolls" in state)) return state;
       return { journal: {}, pins: {}, rolls: {}, ...state };
     },
+  },
+  // v8 had no PDF handouts (docs/design-v1-pdf-handouts.md 3.8). Rooms and backups from before them start with no
+  // documents. A handout without `pages` is one image, so stored handouts and ops read as before.
+  {
+    from: 8,
+    to: 9,
+    apply: (state) => (state !== null && typeof state === "object" && !("handoutDocs" in state) ? { ...state, handoutDocs: {} } : state),
   },
 ];
 

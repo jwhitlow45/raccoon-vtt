@@ -424,4 +424,37 @@ describe("roomStateSchema, pdf handouts (docs/design-v1-pdf-handouts.md 3.3)", (
     assert.equal(withHandout({ pages: [{ ...page("a1"), height: 8193 }] }).ok, false);
     assert.equal(withHandout({ pages: [{ ...page("a1"), kind: "handout" }] }).ok, false);
   });
+
+  test("a document and a show of it parse as their ops stored them", () => {
+    let state = room();
+    const ops: Op[] = [
+      { t: "handoutDoc.create", doc: { id: "d1", title: "Strange letter", pages: [page("a1"), page("a2"), page("a1")] } },
+      { t: "handout.show", handout: { id: "h1", pages: [page("a1"), page("a2"), page("a1")], title: "Strange letter", to: ["p1"] } },
+    ];
+    ops.forEach((op, i) => {
+      state = apply(state, op, DM, i + 1);
+    });
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.deepEqual(parsed.ok && parsed.state, JSON.parse(JSON.stringify(state)));
+  });
+
+  test("a document keeps the create op's bounds, and a backup from before documents still imports, with none", () => {
+    const withDoc = (doc: Record<string, unknown>) => {
+      const state = JSON.parse(JSON.stringify(room()));
+      state.handoutDocs.d1 = { id: "d1", rev: 0, title: "Strange letter", pages: [page("a1")], createdAt: "2026-10-16T00:00:00.000Z", ...doc };
+      return parseRoomState(state).ok;
+    };
+    assert.equal(withDoc({}), true);
+    assert.equal(withDoc({ pages: Array.from({ length: 101 }, (_, i) => page(`a${i}`)) }), false);
+    assert.equal(withDoc({ pages: [] }), false);
+    assert.equal(withDoc({ title: "" }), false);
+    assert.equal(withDoc({ title: "two\nlines" }), false);
+    assert.equal(withDoc({ to: "all" }), false);
+    const { handoutDocs: _docs, ...v8 } = room();
+    assert.equal(parseRoomState(JSON.parse(JSON.stringify(v8))).ok, false, "the schema itself is strict");
+    const parsed = parseRoomState(migrateSnapshot(JSON.parse(JSON.stringify(v8)), 8));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.deepEqual(parsed.ok && parsed.state.handoutDocs, {});
+  });
 });

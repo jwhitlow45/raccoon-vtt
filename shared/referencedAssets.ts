@@ -9,7 +9,8 @@ import type { RestoreEntry } from "./protocol.ts";
  * 2.6 and 3.19), with the kind of asset that place takes: scene maps, map
  * phases and thumbnails, token images and other images, character
  * portraits, monsters' and SRD monsters' default images, stamps from the
- * library, and every page of a handout. Shipped icons name no row.
+ * library, and every page of a handout and of a document in the DM's
+ * library. Shipped icons name no row.
  *
  * Cleanup asks it which images a room still uses, and the permissions ask
  * it which images an undo would put back. Both must know every reference,
@@ -28,7 +29,7 @@ export function entityAssetRefs(key: EntityKey, value: unknown): AssetRef[] {
     const assetId = imageAssetId(ref);
     if (assetId !== undefined) out.push({ assetId, kind: "token" });
   };
-  // Every page of a handout, each image once (docs/design-v1-pdf-handouts.md 3.5).
+  // Every page of a handout or a document, each image once (docs/design-v1-pdf-handouts.md 3.5).
   const pages = (list: unknown, ...seen: unknown[]) => {
     if (!Array.isArray(list)) return;
     const named = new Set(seen);
@@ -70,6 +71,9 @@ export function entityAssetRefs(key: EntityKey, value: unknown): AssetRef[] {
       if (typeof v.assetId === "string") out.push({ assetId: v.assetId, kind: "handout" });
       pages(v.pages, v.assetId);
       break;
+    case "handoutDoc":
+      pages(v.pages);
+      break;
     default:
       break;
   }
@@ -85,6 +89,7 @@ const IMAGE_COLLECTIONS = [
   ["srdImages", "srdImage"],
   ["stamps", "stamp"],
   ["handouts", "handout"],
+  ["handoutDocs", "handoutDoc"],
 ] as const satisfies readonly (readonly [keyof RoomState, string])[];
 
 /** Every asset id the state names, whatever kind its place takes. A thumbnail of a scene counts as used while the scene names it. */

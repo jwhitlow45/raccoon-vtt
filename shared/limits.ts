@@ -1,3 +1,4 @@
+import { roomHandoutPages } from "./handouts.ts";
 import { CHUNK_CELLS, HEIGHTS_CHARS, type BuildChunk, type CustomMonster, type JournalPage, type RoomState, type Token } from "./model.ts";
 
 /**
@@ -37,6 +38,13 @@ export const LIMITS = {
    * of the socket's frame.
    */
   handoutPages: 100,
+  /**
+   * Handout pages in a room: every page of every document and of every
+   * handout showing, one image as one page, so a document shown counts its
+   * pages again while it shows (section 3.7). A page entry is about 90
+   * bytes in every DM snapshot.
+   */
+  handoutPagesPerRoom: 2_000,
   monstersPerRoom: 200,
   /**
    * One custom monster, serialized. The longest SRD 5.2.1 stat block is
@@ -302,6 +310,8 @@ export function checkLimits(state: RoomState, sceneId?: string | null, before?: 
   if (Object.keys(state.savedEncounters).length > LIMITS.savedEncountersPerRoom) return roomFull(`${n(LIMITS.savedEncountersPerRoom)} saved encounters`);
   const journal = checkJournal(state);
   if (!journal.ok) return journal;
+  const handoutPages = checkHandoutPages(state, before);
+  if (!handoutPages.ok) return handoutPages;
   if (Object.keys(state.rolls).length > LIMITS.openRollsPerRoom) return over(`at most ${n(LIMITS.openRollsPerRoom)} roll requests can be open at once. Close one first`);
   for (const scene of Object.values(state.scenes)) {
     if (scene.bounds.w > LIMITS.sceneCells || scene.bounds.h > LIMITS.sceneCells) {
@@ -331,6 +341,22 @@ export function checkLimits(state: RoomState, sceneId?: string | null, before?: 
   const draft = state.fogDrafts[sceneId];
   if (draft && draft.ops.length > LIMITS.fogDraftOpsPerScene) return sceneFull(`${n(LIMITS.fogDraftOpsPerScene)} fog changes in its draft`);
   return checkMapLimits(state, sceneId, before, by);
+}
+
+/** The refusal of a save past the room's handout pages, with what frees some (docs/design-v1-pdf-handouts.md 3.7). */
+export const HANDOUT_PAGES_FULL = `the room holds at most ${n(LIMITS.handoutPagesPerRoom)} handout pages. Delete a document or close a handout, then try again`;
+/** What a show adds, since showing a document is what passed the limit. */
+export const SHOWING_COUNTS_AGAIN = "Showing a document counts its pages again while it shows";
+
+/**
+ * The room's handout pages against its limit. A show that passes it says
+ * that showing counts the pages again: with `before`, an op that added to
+ * the handouts' pages is a show.
+ */
+function checkHandoutPages(state: RoomState, before?: RoomState): LimitCheck {
+  if (roomHandoutPages(state) <= LIMITS.handoutPagesPerRoom) return { ok: true };
+  const showing = (s: RoomState) => roomHandoutPages({ handouts: s.handouts, handoutDocs: {} });
+  return over(before && showing(state) > showing(before) ? `${HANDOUT_PAGES_FULL}. ${SHOWING_COUNTS_AGAIN}` : HANDOUT_PAGES_FULL);
 }
 
 /**

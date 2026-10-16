@@ -11,6 +11,8 @@ import { PIPELINE } from "../assets/kinds.ts";
 import { deleteUnreferencedFiles, roomFileKeys, variantPath } from "../assets/store.ts";
 import { FakeAuth, buildAssetApp, dropRooms, makeRoom, testConfig, testPool } from "../assets/testApp.ts";
 import { SVG, checkerboardPng, solid, tempDir } from "../assets/testImages.ts";
+import { startEngine, type Engine, type TestClient } from "../rooms/testing.ts";
+import { uuidv7 } from "#shared/ids.ts";
 
 let pool: pg.Pool;
 let dir: string;
@@ -575,5 +577,48 @@ describe("URL import", () => {
     } finally {
       await t.close();
     }
+  });
+});
+
+describe("who reads a handout's pages (docs/design-v1-pdf-handouts.md 3.4)", () => {
+  let t: Engine;
+  before(async () => {
+    t = await startEngine();
+  });
+  after(() => t.close());
+
+  test("a player shown a handout of pages reads every page, a player not shown it reads none, closing it takes them back, and a document's pages are never read", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Pages");
+    const socket = await t.connect(roomId, dm);
+    await socket.snapshot("dm");
+    const pip = t.client();
+    const pipId = await pip.join(roomId, "Pip");
+    const quin = t.client();
+    await quin.join(roomId, "Quin");
+    const up = async (color: string) => {
+      const res = await dm.request("PUT", `/api/rooms/${roomId}/assets?kind=handout`, undefined, { "content-type": "image/png" }, await solid(60, 80, color).png().toBuffer());
+      assert.equal(res.statusCode, 200, res.body);
+      return res.json<{ id: string; width: number; height: number }>();
+    };
+    const pages = [await up("#a11"), await up("#1a1"), await up("#11a")];
+    const kept = await up("#aa1");
+    const page = (a: { id: string; width: number; height: number }) => ({ assetId: a.id, width: a.width, height: a.height });
+    const ok = (ev: { rejects?: unknown[] }) => assert.equal(ev.rejects, undefined, JSON.stringify(ev.rejects));
+    ok(await socket.apply({ t: "handoutDoc.create", doc: { id: uuidv7(), title: "Strange letter", pages: [...pages, kept].map(page) } }));
+    const handoutId = uuidv7();
+    ok(await socket.apply({ t: "handout.show", handout: { id: handoutId, pages: pages.map(page), title: "Strange letter", to: [pipId] } }));
+
+    const read = (who: TestClient, id: string, variant = "full") => who.get(`/api/assets/${id}/${variant}`);
+    for (const p of pages) {
+      for (const variant of ["full", "thumb"]) {
+        assert.equal((await read(pip, p.id, variant)).statusCode, 200, `Pip, ${p.id} ${variant}`);
+        assert.equal((await read(quin, p.id, variant)).statusCode, 404, `Quin, ${p.id} ${variant}`);
+      }
+    }
+    assert.equal((await read(pip, kept.id)).statusCode, 404, "a page only a document holds");
+    ok(await socket.apply({ t: "handout.close", handoutId }));
+    for (const p of pages) assert.equal((await read(pip, p.id)).statusCode, 404, `Pip, ${p.id} after close`);
+    socket.close();
   });
 });
