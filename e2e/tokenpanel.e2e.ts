@@ -728,6 +728,20 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.ok(vitals.height < 30, `the vitals take more than one line spanning: ${vitals.height} px`);
     const saves = await rectOf(goblin.locator("[data-saves]"));
     assert.ok(saves.height < 30, `the saves take more than one line spanning: ${saves.height} px`);
+    // A token at the scene's foot gets the same layout: the field under the mode buttons, no More stats.
+    for (const [t, name] of [
+      [run.herald, run.herald.name],
+      [run.thorn, "Thorn"],
+    ] as const) {
+      await tapToken(dm, t.at);
+      const other = bar(dm, name);
+      await other.waitFor();
+      assert.equal(await other.getByRole("button", { name: "More stats", exact: true }).count(), 0, `${name}: the layout changed with the token's place`);
+      const modes = await rectOf(other.getByRole("radiogroup", { name: "What the number does" }));
+      assert.ok(modes.bottom <= (await rectOf(other.getByRole("textbox", { name: "HP change" }))).top + 1, `${name}: the mode buttons moved under the field`);
+    }
+    await tapToken(dm, run.goblin.at);
+    await goblin.waitFor();
     await goblin.getByRole("button", { name: "Details", exact: true }).click();
     const panel = tokenPanel(dm);
     const fold = panel.getByRole("button", { name: "Stat block", exact: true });
@@ -859,10 +873,8 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await tapToken(dm, run.goblin.at);
       const goblin = bar(dm, "Goblin 4");
       await goblin.getByRole("img", { name: "Armor Class 15" }).waitFor();
-      // A spanning bar is short where the side of its token it takes has under 300 px (barButtons.ts barShort), as at 130% with the goblin mid-screen.
-      const more = goblin.getByRole("button", { name: "More stats", exact: true });
-      if (size.width >= 600) assert.equal(await more.count(), 0, `${size.label}: a short bar`);
-      if ((await more.count()) > 0) await more.click();
+      // A spanning bar's layout is the screen's, wherever the token stands (barButtons.ts barCapacity), so the goblin mid-screen gets the full layout too.
+      assert.equal(await goblin.getByRole("button", { name: "More stats", exact: true }).count(), 0, `${size.label}: a short bar`);
       await goblin.locator("[data-saves]").waitFor();
       await noSideScroll(goblin, `${size.label}, the bar`);
       await goblin.getByRole("button", { name: "Stat block", exact: true }).click();

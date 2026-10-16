@@ -1,4 +1,4 @@
-import { compactHang, placeBar } from "./barDock.ts";
+import { barMode, compactHang, freeArea, placeBar } from "./barDock.ts";
 
 /*
  * The single-token bar's buttons and its short layout
@@ -91,8 +91,15 @@ export type BarRoom = Omit<Parameters<typeof placeBar>[0], "height">;
  * which shareLane uses to place a moved bar hung by its bottom, so opening
  * "More stats", or the short layout itself, never changes it. It counts
  * what the lane gives the bar, so tall alert cards over a docked bar count.
+ *
+ * A bar that spans an upright phone hangs above or below its token, so its
+ * room changes with where the tapped token stands. Its capacity is the
+ * free area's height instead, the screen's alone, so a phone keeps one
+ * layout and Apply one place whichever token is tapped.
  */
 export function barCapacity(room: BarRoom): number | null {
+  const free = freeArea(room.viewport, room.chrome, room.foot);
+  if (barMode(room.layout, free.height) === "span") return free.height;
   const placed = placeBar({ ...room, height: Number.POSITIVE_INFINITY });
   if (!placed) return null;
   if (placed.mode === "compact") return compactHang(room.layout, room.viewport, room.chrome).room;
@@ -101,8 +108,9 @@ export function barCapacity(room: BarRoom): number | null {
 
 /**
  * A short bar (3.3): a phone held sideways at any interface size, a large
- * phone held sideways in the wide layout, every screen too short to dock,
- * and a docked bar under tall alert cards while they stand there. It keeps
+ * phone held sideways in the wide layout, every screen too short to dock or
+ * span, a docked bar under tall alert cards while they stand there, and a
+ * spanning bar only where the phone's whole free area is under 300 px. It keeps
  * AC, HP and the HP entry at the top, and "More stats" holds the rest.
  */
 export function barShort(room: BarRoom): boolean {

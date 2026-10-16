@@ -115,6 +115,25 @@ describe("a short bar", () => {
     assert.equal(barShort(desk(800, null)), false);
   });
 
+  test("a spanning bar is short or not by the screen alone, wherever its token stands, so Apply keeps its place", () => {
+    // Phones held upright at 100% and 130%, with a notch and a home bar.
+    for (const [width, height] of [
+      [390, 844],
+      [300, 649],
+      [320, 548],
+    ] as const) {
+      const room = (y: number): BarRoom => ({ ...desk(height), layout: { width, height }, viewport: { width, height }, chrome: { ...chrome({ side: 0, bottom: 34 }), top: 52 + 47 }, anchor: { x: width / 2, y } });
+      const answers = new Set([120, height / 2, height - 140].map((y) => barShort(room(y))));
+      assert.equal(answers.size, 1, `${width} x ${height}: the token's place changed the layout`);
+      assert.equal(barShort(room(height / 2)), false, `${width} x ${height}: an upright phone that spans keeps the full layout`);
+      assert.equal(barShort({ ...room(height / 2), anchor: null }), false, "and needs no token to say so");
+    }
+    // A small phone at 130% whose whole free area is under 300 px spans and is short, wherever the token stands.
+    const small = (y: number): BarRoom => ({ ...desk(421), layout: { width: 246, height: 421 }, viewport: { width: 246, height: 421 }, chrome: { ...chrome({ side: 0, bottom: 34 }), top: 52 + 47 }, anchor: { x: 123, y } });
+    assert.equal(placeBar({ ...small(200), height: 100 })?.mode, "span");
+    assert.deepEqual([100, 210, 330].map((y) => barShort(small(y))), [true, true, true]);
+  });
+
   test("a moved bar hung by its bottom, under alerts, gives one answer whatever its content, so More stats never flips it", () => {
     const room: BarRoom = { ...desk(800, { top: 60, content: 640, first: 380 }), spot: { corner: "br", x: 40, y: 60 } };
     const small = { ...room, height: 220 };
