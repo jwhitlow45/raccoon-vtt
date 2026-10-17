@@ -1264,8 +1264,9 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
 
   test("6. tuck", async () => {
     await view(dm, dmCdp, SIZES[1]!);
-    // A DM with Map builder active picks its tile again: the options hide, the tool stays, and the tile shows them again.
+    // A DM with Map builder active picks its tile again: the options hide, the tool stays and still paints, and the tile shows them again.
     await selectTool(dm, "b");
+    await pick(dm, "Map builder", "Builder mode", "Brush");
     const setup = () => tools(dm).getByRole("button", { name: /^Setup tools/ });
     await setup().tap();
     await dm.getByRole("menuitemradio", { name: "Map builder" }).tap();
@@ -1273,6 +1274,11 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     assert.equal(await options(dm).getAttribute("data-rvtt-tucked"), "", "tucked");
     assert.match((await setup().getAttribute("aria-label")) ?? "", /Map builder/, "the tool stays");
     assert.ok(await setup().getAttribute("aria-describedby"), "Setup carries the tucked line");
+    const built = () => JSON.stringify(dmSocket.state?.buildChunks ?? {});
+    const unpainted = built();
+    await dragCellsTouch(dm, { x: 12, y: 8 }, { x: 14, y: 8 });
+    await waitFor("a stroke painted while tucked", () => (built() !== unpainted ? true : null));
+    assert.equal(await options(dm).getAttribute("data-rvtt-tucked"), "", "still tucked after painting");
     await setup().tap();
     await dm.getByRole("menuitemradio", { name: "Map builder" }).tap();
     assert.equal(await options(dm).getAttribute("data-rvtt-tucked"), null, "shown again");
@@ -1298,8 +1304,9 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await tools(dm).getByRole("button", { name: "Ruler" }).tap();
     assert.equal(await options(dm).getAttribute("data-rvtt-tucked"), null, "the Ruler's own button shows them again");
 
-    // A second tap on Draw tucks: still pressed, described, marked, and the map gains 53 px stacked.
+    // A second tap on Draw tucks: still pressed, described, marked, the map gains 53 px stacked, and the pen still draws.
     await key(dm, "d");
+    await pick(dm, "Draw", "Drawing tool", "Pen");
     const draw = tools(dm).getByRole("button", { name: "Draw" });
     const headerBottom = async () => (await dm.locator("header").boundingBox())!;
     const mapFoot = async () => (await options(dm).boundingBox())!.y;
@@ -1312,6 +1319,11 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     const footAfter = await mapFoot();
     assert.ok(Math.abs(footAfter - footBefore - 53) <= 2, `the map gains 53 px (${footAfter - footBefore})`);
     void headerBottom;
+    const drawings = () => Object.keys(dmSocket.state?.drawings ?? {}).length;
+    const drawn = drawings();
+    await dragCellsTouch(dm, { x: 18, y: 6 }, { x: 22, y: 8 });
+    await waitFor("a stroke drawn while tucked", () => (drawings() > drawn ? true : null));
+    assert.equal(await options(dm).getAttribute("data-rvtt-tucked"), "", "still tucked after drawing");
     // D brings them back, and picking Ruler shows the Ruler's options.
     await key(dm, "d");
     assert.equal(await options(dm).getAttribute("data-rvtt-tucked"), null);
