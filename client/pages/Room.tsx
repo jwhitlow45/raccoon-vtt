@@ -68,7 +68,7 @@ import { mapFocusSlot } from "./mapFocus.ts";
 import { firstSidePanel, readSidePanel, writeSidePanel } from "./sidePanel.ts";
 import { SideTabs } from "./SideTabs.tsx";
 import { SplitBar } from "./SplitBar.tsx";
-import { readSplit, roomForTwo, sameSplit, shareOf, splitPanes, swapFocus, writeSplit, type SplitEntry } from "./splitPanes.ts";
+import { readSplit, roomForTwo, sameSplit, ScrollKeep, shareOf, splitPanes, swapFocus, writeSplit, type SplitEntry } from "./splitPanes.ts";
 import { inModal, ModalSlots, useModalSlot } from "./modalSlot.tsx";
 import {
   FLOAT_MAX,
@@ -2263,20 +2263,22 @@ function SidePanel(props: {
    * A swap moves the panes and the bar with `insertBefore` (react-dom has
    * no `moveBefore` here), which drops every scroll offset in what moved
    * and, by the browser's focus fixup, the focus inside it (4.3). So the
-   * room keeps every offset as it happens, and focus is read as the swap
-   * is asked for: zustand calls a subscriber inside the state change,
-   * before React commits the move, whichever path asked.
+   * room keeps every offset as it happens, weakly, so no pane it no
+   * longer holds stays in memory (pages/splitPanes.ts ScrollKeep), and
+   * focus is read as the swap is asked for: zustand calls a subscriber
+   * inside the state change, before React commits the move, whichever
+   * path asked.
    */
-  const offsets = useRef(new Map<Element, { top: number; left: number }>());
+  const [offsets] = useState(() => new ScrollKeep());
   useEffect(() => {
     const el = roomRef.current;
     if (!el) return;
     const keep = (e: Event) => {
-      if (e.target instanceof Element) offsets.current.set(e.target, { top: e.target.scrollTop, left: e.target.scrollLeft });
+      if (e.target instanceof Element) offsets.record(e.target);
     };
     el.addEventListener("scroll", keep, true);
     return () => el.removeEventListener("scroll", keep, true);
-  }, []);
+  }, [offsets]);
   const swapAsked = useRef<{ before: Element | null } | null>(null);
   useEffect(
     () =>
@@ -2287,11 +2289,11 @@ function SidePanel(props: {
       }),
     [store],
   );
-  // The last element focused in the room, for a pane that hides after the browser already let its focus go.
-  const lastIn = useRef<Element | null>(null);
+  // The last element focused in the room, for a pane that hides after the browser already let its focus go. Held weakly, as the offsets are, since its pane may leave.
+  const lastIn = useRef<WeakRef<Element> | null>(null);
   useEffect(() => {
     const onIn = (e: FocusEvent) => {
-      lastIn.current = e.target instanceof Element && roomRef.current?.contains(e.target) ? e.target : null;
+      lastIn.current = e.target instanceof Element && roomRef.current?.contains(e.target) ? new WeakRef(e.target) : null;
     };
     document.addEventListener("focusin", onIn);
     return () => document.removeEventListener("focusin", onIn);
@@ -2317,14 +2319,7 @@ function SidePanel(props: {
     const ask = swapAsked.current;
     if (ask) {
       swapAsked.current = null;
-      for (const [el, at] of offsets.current) {
-        if (!el.isConnected || !roomEl.contains(el)) {
-          offsets.current.delete(el);
-          continue;
-        }
-        if (el.scrollTop !== at.top) el.scrollTop = at.top;
-        if (el.scrollLeft !== at.left) el.scrollLeft = at.left;
-      }
+      offsets.restore(roomEl.querySelectorAll("*"));
       const back = swapFocus(ask.before, document.activeElement, roomEl, document.body);
       if (back instanceof HTMLElement) {
         if (hiddenHere(back)) lost = true;
@@ -2334,7 +2329,7 @@ function SidePanel(props: {
     if (props.hidden) return;
     const active = document.activeElement;
     if (hiddenHere(active)) lost = true;
-    if (hadTwo && !two && (active === null || active === document.body) && hiddenHere(lastIn.current)) lost = true;
+    if (hadTwo && !two && (active === null || active === document.body) && hiddenHere(lastIn.current?.deref() ?? null)) lost = true;
     if (lost) tabRef.current?.focus({ preventScroll: true });
   });
 

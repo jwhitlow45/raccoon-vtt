@@ -11,6 +11,7 @@ import {
   readSplit,
   roomForTwo,
   sameSplit,
+  ScrollKeep,
   separatorValue,
   shareOf,
   SPLIT_KEY,
@@ -194,5 +195,39 @@ describe("what this device remembers", () => {
     assert.equal(sameSplit({ share: 3, pair: { top: "a", below: "b" } }, { share: 3, pair: { top: "a", below: "b" } }), true);
     assert.equal(sameSplit({ share: 3, pair: null }, { share: 3, pair: { top: "a", below: "b" } }), false);
     assert.equal(sameSplit({ share: 3, pair: null }, { share: 4, pair: null }), false);
+  });
+});
+
+describe("the room's scroll offsets", () => {
+  const scroller = (top = 0, left = 0) => ({ scrollTop: top, scrollLeft: left });
+
+  test("a swap puts back the offsets of the scrollers still in the room, and only those", () => {
+    const keep = new ScrollKeep();
+    const pane = scroller(120);
+    const table = scroller(0, 150);
+    keep.record(pane);
+    keep.record(table);
+    pane.scrollTop = 0;
+    table.scrollLeft = 0;
+    assert.equal(keep.restore([pane, table, scroller()]), 2);
+    assert.deepEqual([pane.scrollTop, table.scrollLeft], [120, 150]);
+  });
+
+  // W6B-ASTRA-04: tab changes without a swap replace panes, and the keep never lists or touches the ones that left.
+  test("repeated tab changes leave nothing to put back but the panes the room holds now", () => {
+    const keep = new ScrollKeep();
+    const gone: { scrollTop: number; scrollLeft: number }[] = [];
+    for (let i = 0; i < 50; i++) {
+      const pane = scroller(10 * i);
+      keep.record(pane);
+      gone.push(pane);
+    }
+    const now = scroller(42);
+    keep.record(now);
+    now.scrollTop = 0;
+    for (const pane of gone) pane.scrollTop = -1;
+    assert.equal(keep.restore([now]), 1, "only the pane in the room");
+    assert.equal(now.scrollTop, 42);
+    assert.ok(gone.every((pane) => pane.scrollTop === -1), "a pane that left is never written");
   });
 });

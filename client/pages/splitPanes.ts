@@ -118,6 +118,37 @@ export function swapFocus<T extends FocusNode>(before: T | null, now: FocusNode 
   return now === before ? null : before;
 }
 
+/** What a scroll offset is kept for: anything inside the room that scrolls. */
+export type Scroller = { scrollTop: number; scrollLeft: number };
+
+/**
+ * The room's scroll offsets as they happen, for a swap to put back (4.3).
+ * Keyed weakly, so a panel that leaves, as every tab change replaces one,
+ * takes its scrollers with it: the room never holds a removed pane's DOM.
+ * A swap puts back the offsets of the scrollers still in the room, found
+ * by walking it, since a weak map cannot be listed.
+ */
+export class ScrollKeep {
+  private readonly offsets = new WeakMap<Scroller, { top: number; left: number }>();
+
+  record(el: Scroller): void {
+    this.offsets.set(el, { top: el.scrollTop, left: el.scrollLeft });
+  }
+
+  /** Puts back each kept offset among `live`, the room's elements now. Returns how many it kept. */
+  restore(live: Iterable<Scroller>): number {
+    let kept = 0;
+    for (const el of live) {
+      const at = this.offsets.get(el);
+      if (!at) continue;
+      kept++;
+      if (el.scrollTop !== at.top) el.scrollTop = at.top;
+      if (el.scrollLeft !== at.left) el.scrollLeft = at.left;
+    }
+    return kept;
+  }
+}
+
 // ------------------------------------------------------------ what this device remembers
 
 export const SPLIT_KEY = "rvtt.sidePanelSplit";

@@ -398,6 +398,25 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
   test("2. the tabs pick the top panel, its bottom one's tab swaps, a swap keeps scroll and focus, and the row never moves", async () => {
     await oneOnly(dm);
 
+    // Tab changes without a swap, each panel scrolled, keep no panel that left in memory (W6B-ASTRA-04): the page's DOM nodes after a collection do not grow with them.
+    const nodes = async () => {
+      await dmCdp.send("HeapProfiler.collectGarbage");
+      return ((await dmCdp.send("Memory.getDOMCounters")) as { nodes: number }).nodes;
+    };
+    const cycle = async () => {
+      for (const title of ["Log", "Journal", "Library", "Initiative"]) {
+        await openSideTab(dm, title);
+        await js(dm, `document.querySelector("[role=tabpanel]").scrollTop = 80; return null;`);
+        await dm.waitForTimeout(60);
+      }
+    };
+    await cycle();
+    await cycle();
+    const settled = await nodes();
+    for (let i = 0; i < 6; i++) await cycle();
+    const grown = (await nodes()) - settled;
+    assert.ok(grown < 400, `24 more tab changes kept ${grown} DOM nodes`);
+
     const oneRow = await Promise.all([...(await tablist(dm).getByRole("tab").all()), hidePanels(dm)].map((t) => t.boundingBox()));
     await toggleSplit(dm);
     await tab(dm, "Log").click();
