@@ -216,7 +216,8 @@ function PageView(props: { page: JournalPage; dm: boolean; shown: boolean; onBac
 
   return (
     // The page's title is the sheet's or side panel's header, so the body opens with who reads it and its folder.
-    <article style={{ display: "grid", gap: theme.space(2) }}>
+    // One column that never grows past the panel, so a wide table scrolls in its own box (components/Markdown.tsx) rather than the whole page sideways.
+    <article style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
       {dm || page.folder !== undefined ? (
         <Help>{[dm ? accessText(page.access, members) : null, page.folder !== undefined ? `In ${page.folder}` : null].filter(Boolean).join(" · ")}</Help>
       ) : null}
