@@ -1607,6 +1607,8 @@ export function OptInput(props: {
   onBlur?(): void;
   /** Ties it to a popover it opens, such as the spell results. */
   popup?: { expanded: boolean; controls: string | undefined };
+  /** A press on the field or Down in it, which asks for its popover again after a dismissal. */
+  onReopen?(): void;
 }) {
   const place = useSlotPlace();
   const width = props.width ?? 180;
@@ -1629,7 +1631,9 @@ export function OptInput(props: {
       aria-controls={props.popup?.controls}
       onKeyDown={(e) => {
         if (e.key === "Enter") props.onEnter?.();
+        if (e.key === "ArrowDown") props.onReopen?.();
       }}
+      onPointerDown={props.onReopen}
       style={{ flex: "none", boxSizing: "border-box", width: inPopover(place) ? "100%" : place?.at === "row" && place.width !== undefined ? place.width : width }}
     />
   );

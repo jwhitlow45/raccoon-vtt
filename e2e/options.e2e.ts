@@ -1066,6 +1066,45 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await reloadAt(dm, 1);
   });
 
+  test("4b. dismissed spell results stay closed until the words change or the field is pressed", async () => {
+    await reloadAt(dm, 1);
+    await view(dm, dmCdp, SIZES[1]!);
+    await selectTool(dm, "a");
+    const field = options(dm).locator('[data-options-row] input[aria-label="Spell"]');
+    const results = dm.getByRole("dialog", { name: "Spells" });
+    const stayClosed = async (how: string) => {
+      await results.waitFor({ state: "detached" });
+      await dm.waitForTimeout(400);
+      assert.equal(await results.count(), 0, `${how}: the results opened again by themselves`);
+    };
+    await field.tap();
+    await field.fill("fire");
+    await results.waitFor();
+    // Escape in the field.
+    await dm.keyboard.press("Escape");
+    await stayClosed("Escape in the field");
+    assert.equal(await field.evaluate((e) => e === e.ownerDocument.activeElement), true, "the field keeps focus");
+    // New words ask for them again.
+    await dm.keyboard.type("b");
+    await results.waitFor();
+    // Escape from a result puts focus back on the field and leaves them closed.
+    await results.getByRole("button").first().focus();
+    await dm.keyboard.press("Escape");
+    await stayClosed("Escape from a result");
+    assert.equal(await field.evaluate((e) => e === e.ownerDocument.activeElement), true, "focus is back on the field");
+    // Down asks for them, and Back dismisses them too.
+    await dm.keyboard.press("ArrowDown");
+    await results.waitFor();
+    await dm.goBack();
+    await stayClosed("Back");
+    // A press on the field asks for them.
+    await field.tap();
+    await results.waitFor();
+    await field.fill("");
+    await results.waitFor({ state: "detached" });
+    await key(dm, "v");
+  });
+
   test("5. the toolbar: Setup, the pair and keys", async () => {
     await view(dm, dmCdp, SIZES[1]!);
     await key(dm, "v");
