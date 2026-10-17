@@ -19,10 +19,9 @@ import { useDicePanel, type PanelRoll } from "../useDicePanel.ts";
 import { useDiceView } from "../useDiceView.ts";
 import { useReceipt } from "../useReceipt.ts";
 import { useRollBlocked } from "../useRollOption.ts";
-import { pageTitle } from "./GroupSave.tsx";
+import { ReplaceConfirm } from "./ReplaceConfirm.tsx";
 import { useAutoInitiativeFor } from "../../encounter/AutoInitiative.tsx";
 import { useStartGroupSave, type StartInput } from "./start.ts";
-import { useGroupSave } from "./store.ts";
 import type { GroupTest } from "./rows.ts";
 
 /**
@@ -36,7 +35,6 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
   const view = useRoomView((s) => s.view);
   const panel = useDicePanel();
   const start = useStartGroupSave();
-  const open = useGroupSave((s) => s.page);
   const blocked = useRollBlocked();
   const [dc, setDc] = useState<number | null>(null);
   // Only a tap below sends the DC, so a sheet's swipe springs back once one is typed (docs/design-v1-sheet-swipe.md 4.6). The page it starts takes the DC with it.
@@ -63,19 +61,12 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
       <Note>{names.join(", ")}</Note>
       {blocked ? <Note tone="info">{blocked}</Note> : null}
       {pending ? (
-        <div role="alert" style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap", alignItems: "center" }}>
-          <span>{`Discard the ${open ? pageTitle(open) : "group save"}?`}</span>
-          <Button
-            variant="danger"
-            onClick={() => {
-              start(pending, { replace: true });
-              setPending(null);
-            }}
-          >
-            Discard
-          </Button>
-          <Button onClick={() => setPending(null)}>Keep it</Button>
-        </div>
+        <ReplaceConfirm
+          onDiscard={() => {
+            if (start(pending, { replace: true })) setPending(null);
+          }}
+          onKeep={() => setPending(null)}
+        />
       ) : null}
       <FieldRow label="DC">
         <NumberField label="DC for the group" value={dc ?? undefined} min={1} max={50} nullable placeholder="None" onCommit={setDc} width={88} />

@@ -117,7 +117,9 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
 /** Why Apply waits, in its words, or null when it may go (5.5). */
 export function applyWaits(page: Page, dice: DiceView, amounts: PartAmount[] | null): string | null {
   if (page.apply === "sending") return "Applying…";
-  if (page.rolls.some((r) => r.state === "sending") || page.dmRolls.some((r) => r.state === "sending")) return "Rolling…";
+  // A DM's tap whose row has its answer, the player's or its own landed meanwhile, holds nothing up.
+  const tapWaits = page.dmRolls.some((r) => r.state === "sending" && !page.states[r.holder]?.answer);
+  if (page.rolls.some((r) => r.state === "sending") || tapWaits) return "Rolling…";
   if (page.damage?.state === "sending") return "Rolling…";
   if (amounts === null) return "Type the damage, or roll it";
   if (page.outcome.saveEnds && page.outcome.conditions.length > 0 && saveEndsDc(page) === null) return "Give the save that ends it a DC";

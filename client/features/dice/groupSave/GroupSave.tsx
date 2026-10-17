@@ -4,7 +4,6 @@ import { formatFormula, parseFormula, type AdvantageSource } from "#shared/dice/
 import { uuidv7 } from "#shared/ids.ts";
 import { ABILITY_KEYS, CONDITION_KEYS, SKILL_KEYS, type AbilityKey, type ConditionKey, type Effect, type RoomState, type SkillKey } from "#shared/model.ts";
 import type { ActorTarget, OpOf } from "#shared/protocol.ts";
-import { ANSWERED_MEANWHILE } from "#shared/permissions.ts";
 import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { effectName } from "#shared/logText.ts";
@@ -21,7 +20,6 @@ import { EffectPicker } from "../../tokens/EffectsSection.tsx";
 import { SaveEndsFields, type SaveEndsForm } from "../../tokens/SaveEndsFields.tsx";
 import { FieldRow, Note, NumberField, Select, Stepper } from "../../tokens/ui.tsx";
 import { creatureRolls } from "../creature.ts";
-import { rollsOf } from "../logic.ts";
 import { creatureKey, readUsed, signedText, spendOnStart, withUsed, writeUsed } from "../options.ts";
 import { presetFor } from "../presets.ts";
 import { useRollSender } from "../send.ts";
@@ -34,10 +32,8 @@ import {
   apply,
   applyAgain,
   mayApplyAgain,
-  applySettled,
   askAnswered,
   damageSent,
-  damageSettled,
   discard,
   dmRoll,
   dmRollSettled,
@@ -46,16 +42,18 @@ import {
   results,
   roll,
   rollAgain,
-  rollSettled,
   rollWords,
   setDc,
+  settleTag,
   sourceIds,
   stateOf,
   syncRequests,
   typeTotal,
   readDraft,
+  waitingTags,
   writeDraft,
   type Command,
+  type Settled,
   type Page,
   type ServerRoll,
   type Step,
@@ -198,16 +196,14 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
           },
         });
       } else if (c.op.t === "roll.dice") {
+        // The DM's tap on an asked row is settled by its receipt, as the page's other rolls are, so a reload in between settles it too.
         const tag = c.op.tag;
-        actions.dispatch(c.op, {
-          quiet: true,
-          onAnswer: (answer, refusal) => {
-            if (answer === "refused") {
-              const says = refusal?.message === ANSWERED_MEANWHILE ? "Answered before your roll." : (refusal?.text ?? refusal?.message ?? "");
-              update(dmRollSettled(pageRef.current, tag, "refused", says));
-            } else update(dmRollSettled(pageRef.current, tag, answer === "taken" ? "committed" : "unknown"));
-          },
-        });
+        sender.receipts.sending(tag, 0);
+        const n = actions.dispatch(c.op, { quiet: true, onAnswer: (answer, refusal, cause) => sender.receipts.answer(tag, 0, answer, refusal, cause) });
+        if (n === null) {
+          sender.receipts.forget(tag, 0);
+          update(dmRollSettled(pageRef.current, tag, "refused", "Not sent."));
+        }
       } else actions.dispatch(c.op);
     }
   };
@@ -425,7 +421,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
 
   return (
     <div style={{ display: "grid", gap: theme.space(3) }}>
-      <Watchers page={page} update={update} key_={key} />
+      <Watchers page={page} settle={(tag, receipt) => update(settleTag(pageRef.current, tag, settledOf(receipt), key))} />
       {page.fill ? <Note tone="info">{page.fill.from}</Note> : null}
       {failed ? <SrdLoadFailed what="The stat blocks" inline /> : null}
       {offScene ? <Note tone="error">{`This group save is on ${sceneName}. Go back to it to apply.`}</Note> : null}
@@ -504,44 +500,25 @@ function AppliedToast(props: { page: Page; ui: ReturnType<typeof useRoomUi> }) {
   return null;
 }
 
-/** Each roll, request and the plan the page waits on, settled by its receipt as it lands (doc 1 1.2). */
-function Watchers(props: { page: Page; update(page: Page): void; key_: (t: { tokenId?: string; characterId?: string }) => string }) {
-  const { page } = props;
+/**
+ * One watcher for each tag the page waits on (doc 1 1.2), the plan's keyed
+ * by its state so Apply again watches afresh. Each settles the newest page
+ * when its receipt lands, never the page it was mounted with, so receipts
+ * landing together never undo each other.
+ */
+function Watchers(props: { page: Page; settle(tag: string, receipt: ReceiptState): void }) {
   return (
     <>
-      {page.rolls.filter((r) => r.state === "sending").map((r) => (
-        <ReceiptWatch key={r.tag} tag={r.tag} onSettled={(receipt) => props.update(rollSettled(page, r.tag, settledOf(receipt), props.key_))} />
+      {waitingTags(props.page).map((tag) => (
+        <ReceiptWatch key={tag === props.page.plan?.plan ? `plan:${tag}:${props.page.apply}` : tag} tag={tag} onSettled={(receipt) => props.settle(tag, receipt)} />
       ))}
-      {page.damage?.state === "sending" ? (
-        <ReceiptWatch
-          key={page.damage.tag}
-          tag={page.damage.tag}
-          onSettled={(receipt) => {
-            const s = settledOf(receipt);
-            props.update(damageSettled(page, page.damage!.tag, s.state === "committed" ? { state: "committed", amounts: damageAmounts(page, s.lines) } : s));
-          }}
-        />
-      ) : null}
-      {page.plan && (page.apply === "sending" || page.apply === "unknown") ? (
-        <ReceiptWatch key={`plan:${page.plan.plan}:${page.apply}`} tag={page.plan.plan} onSettled={(receipt) => props.update(applySettled(page, settledOf(receipt)))} />
-      ) : null}
     </>
   );
 }
 
-function damageAmounts(page: Page, lines: readonly import("#shared/model.ts").LogEntry[]): (number | undefined)[] {
-  const parsed = parseParts(page.outcome.damage, page.fill?.damageType);
-  if (!parsed.ok) return [];
-  const rolled = rollsOf(lines);
-  let i = 0;
-  return parsed.parts.map((p) => ("formula" in p ? rolled[i++]?.total : undefined));
-}
-
-type Settled = { state: "committed"; lines: readonly import("#shared/model.ts").LogEntry[]; refused?: string } | { state: "refused"; says: string } | { state: "unknown" };
-
 function settledOf(receipt: ReceiptState): Settled {
   if (receipt.state === "committed") return { state: "committed", lines: receipt.lines, ...(receipt.refused ? { refused: receipt.refused.text || receipt.refused.message } : {}) };
-  if (receipt.state === "refused") return { state: "refused", says: receipt.text || receipt.message };
+  if (receipt.state === "refused") return { state: "refused", says: receipt.text || receipt.message, message: receipt.message };
   return { state: "unknown" };
 }
 

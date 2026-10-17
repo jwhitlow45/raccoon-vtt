@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AreaTemplate } from "#shared/model.ts";
-import { Button } from "../../components/Button.tsx";
-import { theme } from "../../lib/theme.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
-import { pageTitle } from "../dice/groupSave/GroupSave.tsx";
+import { ReplaceConfirm } from "../dice/groupSave/ReplaceConfirm.tsx";
 import { areaFill } from "../dice/groupSave/fills.ts";
 import { useStartGroupSave, type StartInput } from "../dice/groupSave/start.ts";
-import { useGroupSave } from "../dice/groupSave/store.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { Note } from "../tokens/ui.tsx";
 import { areaTitle } from "./labels.ts";
@@ -21,7 +18,6 @@ import { areaTitle } from "./labels.ts";
 export function AreaSaveStart(props: { template: AreaTemplate; onDone(): void }) {
   const { template, onDone } = props;
   const start = useStartGroupSave();
-  const open = useGroupSave((s) => s.page);
   const creatures = useMemo<ActorTarget[]>(() => (template.casterId ? [{ tokenId: template.casterId }] : []), [template.casterId]);
   const { dice, loading } = useDiceView(creatures);
   const [pending, setPending] = useState<StartInput | null>(null);
@@ -40,20 +36,11 @@ export function AreaSaveStart(props: { template: AreaTemplate; onDone(): void })
   }, [input]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!pending) return <Note>Reading the area…</Note>;
   return (
-    <div role="alert" style={{ display: "grid", gap: theme.space(2) }}>
-      <span>{`Discard the ${open ? pageTitle(open) : "group save"}?`}</span>
-      <div style={{ display: "flex", gap: theme.space(2) }}>
-        <Button
-          variant="danger"
-          onClick={() => {
-            start(pending, { replace: true });
-            onDone();
-          }}
-        >
-          Discard
-        </Button>
-        <Button onClick={onDone}>Keep it</Button>
-      </div>
-    </div>
+    <ReplaceConfirm
+      onDiscard={() => {
+        if (start(pending, { replace: true })) onDone();
+      }}
+      onKeep={onDone}
+    />
   );
 }

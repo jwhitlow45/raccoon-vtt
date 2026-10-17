@@ -42,6 +42,7 @@ import { presetFor } from "./presets.ts";
 import { useDiceView } from "./useDiceView.ts";
 import { GroupOptions } from "./groupSave/GroupOptions.tsx";
 import { useStartGroupSave } from "./groupSave/start.ts";
+import { ReplaceConfirm } from "./groupSave/ReplaceConfirm.tsx";
 import { actionFill } from "./groupSave/fills.ts";
 import { useActOnce, useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "./useRollOption.ts";
 
@@ -612,28 +613,14 @@ function GroupSaveButton(props: { ctx: Ctx; named: NamedRoll }) {
   const filled = actionFill(ctx.dice, named, { key: ctx.key, ...(ctx.tokenId ? { tokenId: ctx.tokenId } : {}) })!;
   const source = { kind: "selection" as const, tokenIds: others, live: true as const, ...(ctx.tokenId ? { except: ctx.tokenId } : {}) };
   const input = { source, ...filled, panel: "dice" as const };
-  // A recharge action is spent once its group save starts, as its Damage tap is once its roll goes.
+  // A recharge action is spent once its group save starts, as its Damage tap is once its roll goes, and not when the DM keeps the open one instead.
   const go = (replace: boolean) => spendOnStart(() => start(input, { replace }), named.recharge !== undefined ? () => writeUsed(roomId, withUsed(readUsed(roomId), ctx.key, named.key, true)) : null);
   return (
     <div style={{ display: "grid", gap: theme.space(1) }}>
       <SmallButton disabled={ctx.blocked !== null} onClick={() => !go(false) && setPending(true)}>
         {`Group save, DC ${save.dc} ${ABILITY_SHORT[save.ability]}`}
       </SmallButton>
-      {pending ? (
-        <div role="alert" style={{ display: "flex", gap: theme.space(1), flexWrap: "wrap" }}>
-          <span>Discard the open group save?</span>
-          <SmallButton
-            tone="danger"
-            onClick={() => {
-              go(true);
-              setPending(false);
-            }}
-          >
-            Discard
-          </SmallButton>
-          <SmallButton onClick={() => setPending(false)}>Keep it</SmallButton>
-        </div>
-      ) : null}
+      {pending ? <ReplaceConfirm onDiscard={() => go(true) && setPending(false)} onKeep={() => setPending(false)} /> : null}
     </div>
   );
 }

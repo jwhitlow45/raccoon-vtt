@@ -4,10 +4,13 @@ import type { DiceRoll, LogEntry, RollRequest, RollTest } from "#shared/model.ts
 import type { ActorTarget, ClientOp, OpOf } from "#shared/protocol.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { dcOnLine } from "#shared/dice/secret.ts";
+import { ANSWERED_MEANWHILE } from "#shared/permissions.ts";
 import { askOp } from "../../rolls/logic.ts";
 import { MAX_OP_AGE_MS } from "../../../state/store.ts";
 import { asSave, cutLabel, testLabel, withExtra } from "../options.ts";
 import type { PanelRoll } from "../useDicePanel.ts";
+import { rollsOf } from "../logic.ts";
+import { parseParts } from "./outcome.ts";
 import { d20Of, rowResult, type GroupTest, type Mark, type RowBase, type RowState, type Way } from "./rows.ts";
 
 /**
@@ -234,7 +237,12 @@ export function askAnswered(page: Page, rollId: string, answer: { ok: true } | {
   return next;
 }
 
-/** The requests as the view holds them: each asked row copies its answer as it arrives, kept once its request is closed elsewhere. */
+/**
+ * The requests as the view holds them: each asked row copies its answer as
+ * it arrives, kept once its request is closed elsewhere. A target the
+ * request holds unanswered again, after Reopen, has no answer here either,
+ * so its row waits, and the DM's one tap on it may go again.
+ */
 export function syncRequests(page: Page, rolls: Readonly<Record<string, RollRequest | undefined>>, key: (t: { tokenId?: string; characterId?: string }) => string): Page {
   let next = page;
   for (const request of page.requests) {
@@ -251,7 +259,13 @@ export function syncRequests(page: Page, rolls: Readonly<Record<string, RollRequ
       const same = s.answer && JSON.stringify(s.answer) === JSON.stringify(target);
       if (!answered && !s.answer) continue;
       if (same && s.asked?.dc === dc) continue;
-      next = withState(next, holder, { ...(answered ? { answer: target } : {}), asked: { rollId: request.rollId, ...(dc !== undefined ? { dc } : {}) } });
+      const asked = { rollId: request.rollId, ...(dc !== undefined ? { dc } : {}) };
+      if (answered) {
+        next = withState(next, holder, { answer: target, asked });
+        continue;
+      }
+      const { answer: _old, ...rest } = s;
+      next = { ...next, states: { ...next.states, [holder]: { ...rest, asked } }, dmRolls: next.dmRolls.filter((d) => d.holder !== holder || d.state === "sending") };
     }
   }
   return next;
@@ -325,6 +339,45 @@ export function dmRoll(page: Page, holder: string, op: OpOf<"roll.dice">): Step 
 export function dmRollSettled(page: Page, tag: string, state: Settle, says?: string): Page {
   if (!page.dmRolls.some((r) => r.tag === tag && r.state === "sending")) return page;
   return { ...page, dmRolls: page.dmRolls.map((r) => (r.tag === tag ? { ...r, state, ...(says ? { says } : {}) } : r)) };
+}
+
+/** A receipt as the page reads it (doc 1 1.2): committed with its lines and any part refused, refused with its words, or unknown. */
+export type Settled = { state: "committed"; lines: readonly LogEntry[]; refused?: string } | { state: "refused"; says: string; message?: string } | { state: "unknown" };
+
+/** A damage line's amounts by part: each part with dice takes the next rolled total, a typed part none. */
+export function damageAmounts(page: Page, lines: readonly LogEntry[]): (number | undefined)[] {
+  const parsed = parseParts(page.outcome.damage, page.fill?.damageType);
+  if (!parsed.ok) return [];
+  const rolled = rollsOf(lines);
+  let i = 0;
+  return parsed.parts.map((p) => ("formula" in p ? rolled[i++]?.total : undefined));
+}
+
+/**
+ * Whatever the page sent under this tag, settled by its receipt: a server
+ * roll, the damage line, the DM's one tap on an asked row, or the plan. The
+ * page applies each to the newest page, so two receipts that land together
+ * both stay settled, and a reload settles what it sent before.
+ */
+export function settleTag(page: Page, tag: string, settled: Settled, key: (t: { tokenId?: string; characterId?: string }) => string): Page {
+  if (page.rolls.some((r) => r.tag === tag)) return rollSettled(page, tag, settled, key);
+  if (page.damage?.tag === tag) {
+    return damageSettled(page, tag, settled.state === "committed" ? { state: "committed", amounts: damageAmounts(page, settled.lines) } : settled.state === "refused" ? { state: "refused", says: settled.says } : { state: "unknown" });
+  }
+  if (page.dmRolls.some((r) => r.tag === tag)) {
+    const says = settled.state === "refused" ? (settled.message === ANSWERED_MEANWHILE ? "Answered before your roll." : settled.says) : undefined;
+    return dmRollSettled(page, tag, settled.state, says);
+  }
+  if (page.plan?.plan === tag) return applySettled(page, settled.state === "committed" ? { state: "committed" } : settled);
+  return page;
+}
+
+/** The tags the page waits on a receipt for: its rolls, its damage line, the DM's taps and the plan, as Watchers mounts one each. */
+export function waitingTags(page: Page): string[] {
+  const out = [...page.rolls.filter((r) => r.state === "sending").map((r) => r.tag), ...page.dmRolls.filter((r) => r.state === "sending").map((r) => r.tag)];
+  if (page.damage?.state === "sending") out.push(page.damage.tag);
+  if (page.plan && (page.apply === "sending" || page.apply === "unknown")) out.push(page.plan.plan);
+  return out;
 }
 
 export function mark(page: Page, holder: string, value: Mark | null): Page {
@@ -410,6 +463,19 @@ export function discard(page: Page): Command[] {
   const open = page.requests.filter((r) => r.state === "open" || r.state === "sending").map((r) => r.rollId);
   return open.length > 0 ? [{ kind: "op", op: { t: "roll.close", rollIds: open } }] : [];
 }
+
+/**
+ * A new group save in place of this one (5.1): the old one's requests close
+ * as Discard closes them, so no player is left asked and no open place is
+ * spent. A page Applying is never replaced, since its outcome may still land.
+ */
+export function replace(old: Page | null): { ok: true; send: Command[] } | { ok: false; error: string } {
+  if (!old) return { ok: true, send: [] };
+  if (old.phase === "applying") return { ok: false, error: APPLYING };
+  return { ok: true, send: discard(old) };
+}
+
+export const APPLYING = "The open group save is applying. Wait for it to finish.";
 
 /** Creatures the view no longer holds: after the roll their rows hold, and Apply leaves them out. */
 export function markGone(page: Page, present: (row: RowBase) => boolean): Page {

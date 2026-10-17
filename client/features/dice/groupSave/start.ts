@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { uuidv7 } from "#shared/ids.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
-import { useRoomUi, useRoomView } from "../../../state/view.ts";
+import { useRoomActions, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { askSwitches } from "../../rolls/logic.ts";
-import { newPage, type Fill, type OutcomeForm, type Page, type Source } from "./chain.ts";
+import { newPage, replace, type Fill, type OutcomeForm, type Page, type Source } from "./chain.ts";
 import type { GroupTest } from "./rows.ts";
 import { useGroupSaveStore } from "./store.ts";
 
@@ -27,16 +27,23 @@ export type StartInput = {
 /**
  * Starts a group save (5.1): one at a time in a browser tab, so a start
  * while one holds rolls returns false, and the caller asks "Discard the
- * Dexterity save for 6?" first, then starts again with `replace`.
+ * Dexterity save for 6?" first (ReplaceConfirm), then starts again with
+ * `replace`, which closes the old one's requests as its Discard would. A
+ * page Applying is never replaced: that start returns false too.
  */
 export function useStartGroupSave(): (input: StartInput, opts?: { replace?: boolean }) => boolean {
   const store = useGroupSaveStore();
   const roomId = useRoomView((s) => s.roomId);
   const sceneId = useRoomView((s) => s.sceneId);
   const ui = useRoomUi();
+  const actions = useRoomActions();
   return useMemo(
     () => (input: StartInput, opts: { replace?: boolean } = {}) => {
-      if (!opts.replace && holdsRolls(store.getState().page)) return false;
+      const old = store.getState().page;
+      if (!opts.replace && holdsRolls(old)) return false;
+      const out = replace(old);
+      if (!out.ok) return false;
+      for (const c of out.send) if (c.kind === "op") actions.dispatch(c.op);
       const page = newPage({
         id: uuidv7(),
         sceneId: sceneId ?? "",
@@ -55,6 +62,6 @@ export function useStartGroupSave(): (input: StartInput, opts?: { replace?: bool
       ui.openPanel(input.panel);
       return true;
     },
-    [store, roomId, sceneId, ui],
+    [store, roomId, sceneId, ui, actions],
   );
 }
