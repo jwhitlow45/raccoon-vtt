@@ -1470,7 +1470,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     );
   });
 
-  test("15. a player's thumbnail under Handouts from the DM opens the handout in the viewer at the popup's own showing, and the DM closing it closes the viewer (the project owner, 2026-10-16)", async () => {
+  test("15. a player's thumbnail under Handouts from the DM opens the handout's own popup, with Download, at the page it was left on, as Open does (the project owner, 2026-10-16)", async () => {
     const doc = await documentOf("Last letter", [await paper(1584, 2048, 1), await paper(1584, 2048, 2), await paper(1584, 2048, 3)]);
     const id = await show(doc, [run.patId]);
     const popup = viewer(desk, "Last letter");
@@ -1480,19 +1480,14 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await popup.getByRole("button", { name: /^Close/ }).click();
     await popup.waitFor({ state: "detached" });
     await desk.getByRole("tab", { name: /^Library/ }).click();
-    const thumb = desk.getByRole("list").getByRole("button", { name: "View Last letter" });
-    await thumb.click();
-    const view = viewer(desk, "Last letter");
-    await view.waitFor();
-    await indicatorIs(view, "2 of 3", "the showing's own page, as the popup left it");
-    await shots.take(desk, "pdf-player-thumbnail-view");
-    await view.getByRole("button", { name: /^Close/ }).click();
-    await view.waitFor({ state: "detached" });
-    assert.equal(await thumb.evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement), true, "focus back on the thumbnail");
-    // The DM closes it while the player looks: the viewer closes with it.
-    await thumb.click();
-    await view.waitFor();
+    await desk.getByRole("list").getByRole("button", { name: "View Last letter" }).click();
+    await popup.waitFor();
+    await indicatorIs(popup, "2 of 3", "the showing's own page, as the popup left it");
+    await popup.getByRole("button", { name: "Download", exact: true }).waitFor();
+    await popup.getByText("The DM shows you").waitFor();
+    await shots.take(desk, "pdf-player-thumbnail-popup");
+    // The DM closes it while the player looks: the popup closes with it.
     await ops.send({ t: "handout.close", handoutId: id });
-    await view.waitFor({ state: "detached" });
+    await popup.waitFor({ state: "detached" });
   });
 });
