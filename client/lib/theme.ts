@@ -187,9 +187,10 @@ export const theme = {
     /**
      * A tool's options in one row (docs/design-v1-tool-options.md 4.2, 6 and 8): the stacked row's height (44 px
      * controls, 4 px padding above and below and a 1 px top edge), the line's gap above the row, the least width of a
-     * flexible field and of flexible text, and a color chip's disk.
+     * flexible field and of flexible text, a color chip's disk, and the most a creature's name takes in a control
+     * before it ends in an ellipsis, about ten characters (docs/design-v1-area-from-character.md 3.2).
      */
-    options: { row: 53, lineGap: 6, field: 96, text: 48, disk: 24 },
+    options: { row: 53, lineGap: 6, field: 96, text: 48, disk: 24, name: 68 },
   },
   /**
    * The notch, the rounded corners and the home bar. index.html sets

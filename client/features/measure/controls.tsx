@@ -1065,12 +1065,14 @@ const TILE: CSSProperties = {
   cursor: "pointer",
 };
 
-export type RowOption<T extends string> = { value: T; label: string; title?: string; swatch?: string };
+/** `picture` stands before the words as a swatch does, and `detail` follows them in muted words ("Pip companion"). */
+export type RowOption<T extends string> = { value: T; label: string; title?: string; swatch?: string; picture?: ReactNode; detail?: string };
 
 /**
  * Rows (7.2): a choice as 44 px rows with a check mark on the chosen one,
- * for values with longer names (a blank token kind, an edge, a light).
- * Native radios, as ChoiceTiles. Wrap it in PickCloses.
+ * for values with longer names (a blank token kind, an edge, a light, a
+ * creature an area is cast from). Native radios, as ChoiceTiles. Wrap it
+ * in PickCloses.
  */
 export function ChoiceRows<T extends string>(props: { label: string; value: T; options: readonly RowOption<T>[]; onChange(value: NoInfer<T>): void }) {
   const name = useId();
@@ -1082,7 +1084,15 @@ export function ChoiceRows<T extends string>(props: { label: string; value: T; o
           <label key={o.value} className="rvtt-choice" title={o.title} style={{ ...CHOICE_ROW, ...buttonLook("quiet", { pressed: chosen }) }}>
             <input type="radio" name={name} value={o.value} checked={chosen} aria-label={accessibleName(o.label, o.title)} onChange={() => props.onChange(o.value)} style={RADIO_COVER} />
             {o.swatch !== undefined ? <ChipSwatch color={o.swatch} /> : null}
-            <span style={{ flex: 1 }}>{o.label}</span>
+            {o.picture !== undefined ? (
+              <span aria-hidden style={{ flex: "none", display: "grid", placeItems: "center" }}>
+                {o.picture}
+              </span>
+            ) : null}
+            <span style={{ flex: 1 }}>
+              {o.label}
+              {o.detail !== undefined ? <span style={{ fontWeight: theme.weight.regular, color: theme.color.textMuted }}> {o.detail}</span> : null}
+            </span>
             {chosen ? <Icon name="check" size="sm" /> : null}
           </label>
         );

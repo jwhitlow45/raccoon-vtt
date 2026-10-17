@@ -308,7 +308,7 @@ Tiers:
   - Aim by dragging, or with a rotation handle on touch.
   - Rotation snaps to 15° or 45°, or is free.
   - A tap on a token casts from it, even when it stands inside a placed area. A placed area is picked by tapping its open ground or from the Areas panel.
-  - A new area starts from the player's own selected creature, named in the options with a way to drop it, and never from an old selection. The DM taps the caster each time.
+  - A new area starts from the player's own selected creature, named in the options with a way to drop it, and never from an old selection. The DM taps the caster each time. Built in v1 wave 6: the area tool always shows a player's From control, on for their only character on the scene, a list with a companion or a second character, disabled with the reason when none is here, and kept for the page. While it is on, a tap on another creature aims at it.
   - A placed area's name keeps clear of tokens, their chips and their names: above the area, else below it, else slid along either edge, and when it has nowhere clear to go it shrinks to one cut line. On a player's screen it keeps off fully fogged ground too, where the fog would cut it off.
 - Live preview of who is hit:
   - Affected squares are shaded.

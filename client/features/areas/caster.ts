@@ -161,7 +161,8 @@ export function fromShows(input: { draft: AreaDraft | null; saved: string | null
  */
 export type FromControl =
   | { form: "none" }
-  | { form: "disabled"; words: string; characterId?: CharacterId }
+  /** `name` is their first character's, wherever it stands, or null for a player with none: "From you". */
+  | { form: "disabled"; name: string | null; characterId?: CharacterId }
   | { form: "toggle"; offer: AreaCreature; on: boolean }
   | { form: "chip"; offers: AreaCreature[]; on: string | null };
 
@@ -188,7 +189,7 @@ export function fromOffers(input: {
     const character = Object.values(view.characters)
       .filter((c): c is Character => c !== undefined && ownsCharacter(input.you.memberId, c))
       .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))[0];
-    return character ? { form: "disabled", words: `From ${character.name}`, characterId: character.id } : { form: "disabled", words: "From you" };
+    return character ? { form: "disabled", name: character.name, characterId: character.id } : { form: "disabled", name: null };
   }
   if (offers.length === 1) return { form: "toggle", offer: first, on: shown === first.tokenId };
   return { form: "chip", offers, on: offers.some((o) => o.tokenId === shown) ? shown : null };
@@ -291,27 +292,6 @@ export function tokenTap(d: Pick<AreaDraft, "shape" | "fromId" | "casterId" | "t
   if (d.fromId !== undefined) return tokenId === d.fromId ? "grab" : "aim";
   if (d.shape === "cube") return "center";
   return d.point ? "aim" : "cast";
-}
-
-/**
- * The caster a new area starts from when the tool opens: a player's own
- * selected creature, and nothing for the DM. A selection is whatever was
- * tapped last, often long ago and for something else, so the DM taps the
- * caster each time rather than casting a Fireball from a goblin picked for
- * its HP. A player's own creature is almost always the caster, and the
- * options bar names it with a way to drop it.
- */
-export function defaultCaster(input: {
-  selected: Token | undefined;
-  sceneId: string;
-  you: { memberId: string; role: "dm" | "player" };
-  characters: RoomState["characters"];
-}): string | null {
-  const { selected, you } = input;
-  if (you.role === "dm" || !selected || selected.sceneId !== input.sceneId) return null;
-  if ((selected.ownerIds ?? []).includes(you.memberId)) return selected.id;
-  const character = "ref" in selected.actor ? input.characters[selected.actor.ref] : undefined;
-  return (character?.ownerIds ?? []).includes(you.memberId) ? selected.id : null;
 }
 
 /**

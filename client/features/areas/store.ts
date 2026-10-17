@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { AreaShape, AreaTemplate, RoomState, Scene } from "#shared/model.ts";
@@ -6,6 +7,8 @@ import { PREVIEW_SAMPLES, SAMPLES } from "#shared/rules/aoe.ts";
 import { theme } from "../../lib/theme.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import type { RoomActions } from "../../state/types.ts";
+import { useRoomStore } from "../../state/view.ts";
+import { areaCreatures, choiceOf, draftCaster, savedChoice, seeSelection, type AreaCreature, type SavedChoice, type SelectionSeen } from "./caster.ts";
 import { areaContext } from "./coverage.ts";
 import { aoeFrame, draftTemplate, newDraft, templateInput, type AreaDraft, type DraftTemplate, type SnapMode } from "./placement.ts";
 
@@ -32,6 +35,12 @@ export type AreaToolState = {
   pickCaster: boolean;
   query: string;
   /**
+   * Who a player's next area starts from (docs/design-v1-area-from-character.md
+   * 3.3): kept for the page across areas, tools and scenes, until a reload.
+   * The DM has none.
+   */
+  saved: SavedChoice;
+  /**
    * The placed area whose damage the DM is entering in the Areas panel
    * (AreaDamage.tsx). It outlives the tool, since the panel opens with
    * any tool.
@@ -42,8 +51,10 @@ export type AreaToolState = {
 /** One Room page's area tool (client/state/scope.ts). */
 export type AreaScope = {
   store: StoreApi<AreaToolState>;
-  /** The token selected on the map when the tool opened: the caster a new draft assumes. */
-  defaultCaster: string | null;
+  /** The room's selection as last seen, and how often it has changed, whatever tool is active (useSelectionWatch). */
+  selection: SelectionSeen;
+  /** The selection's count when the saved choice last changed: a selection made after it is fresh (3.3 step 1). */
+  choiceAt: number;
   restTimer: ReturnType<typeof setTimeout> | null;
 };
 
@@ -59,9 +70,11 @@ export const areaSlot = scopeSlot<AreaScope>(
       shape: "cone",
       pickCaster: false,
       query: "",
+      saved: null,
       damageId: null,
     })),
-    defaultCaster: null,
+    selection: { ids: [], count: 0 },
+    choiceAt: 0,
     restTimer: null,
   }),
   (a) => {
@@ -125,14 +138,67 @@ export function currentTemplate(env: Pick<AreaEnv, "view">, draft: AreaDraft | n
 }
 
 /**
- * A new draft of the last shape used. The token selected on the map when the
- * tool opened is the caster, as the person most likely means it to be.
+ * A new draft of the last shape used, cast from `casterId`: a player's
+ * saved choice (resolvedChoice), or nothing for the DM.
  */
 export function startDraft(env: AreaEnv, casterId: string | null): AreaDraft {
   const d = newDraft(env.actions.newId(), env.area.store.getState().shape, memberColor(env));
   const caster = casterId ? env.view.tokens[casterId] : undefined;
-  if (caster && caster.sceneId === env.scene.id) d.casterId = caster.id;
+  if (caster && caster.sceneId === env.scene.id) {
+    d.casterId = caster.id;
+    d.lastCaster = caster.id;
+  }
   return d;
+}
+
+/** The viewer's own creatures on this scene, which the From control offers (3.1). None for the DM. */
+export function yourCreatures(env: Pick<AreaEnv, "view" | "scene" | "role" | "youId">): AreaCreature[] {
+  return areaCreatures({ view: env.view, sceneId: env.scene.id, you: { memberId: env.youId, role: env.role } });
+}
+
+/** Who a player's next area starts from now: the saved choice resolved against their creatures here (3.3 steps 2 and 3). */
+export function resolvedChoice(env: AreaEnv, creatures: readonly AreaCreature[] = yourCreatures(env)): string | null {
+  return savedChoice({ creatures, tokens: env.view.tokens, sceneId: env.scene.id, choice: env.area.store.getState().saved, selected: { id: null, fresh: false }, role: env.role }).casterId;
+}
+
+/** Sets a player's saved choice. A selection made before this no longer counts as fresh. */
+export function setChoice(env: Pick<AreaEnv, "area" | "role">, choice: SavedChoice): void {
+  if (env.role === "dm") return;
+  env.area.choiceAt = env.area.selection.count;
+  env.area.store.setState({ saved: choice });
+}
+
+/**
+ * Whether the area's caster is one of the viewer's creatures: then a tap
+ * on another creature aims rather than casts (3.5). Never for the DM.
+ */
+export function castsYours(env: AreaEnv, d: AreaDraft, creatures: readonly AreaCreature[] = yourCreatures(env)): boolean {
+  const caster = draftCaster(d);
+  return caster !== null && creatures.some((c) => c.tokenId === caster);
+}
+
+/** A tap or Set caster made `casterId` the area's caster: where it is one of the player's creatures, it is their choice too (3.3). */
+export function noteCaster(env: AreaEnv, casterId: string | null): void {
+  const creature = casterId === null ? undefined : yourCreatures(env).find((c) => c.tokenId === casterId);
+  if (creature) setChoice(env, choiceOf(creature));
+}
+
+/**
+ * Counts every change of the room's selection, whatever tool is active,
+ * so the area tool can tell a selection made since the choice changed
+ * from an old one (3.3 step 1). Mounted with the board, which is always
+ * drawn in a room.
+ */
+export function useSelectionWatch(): void {
+  const store = useRoomStore();
+  const area = useAreaScope();
+  useEffect(() => {
+    const see = () => {
+      area.selection = seeSelection(area.selection, store.getState().local.selectedIds);
+    };
+    see();
+    return store.subscribe(see);
+  }, [store, area]);
 }
 
 /** Replaces the draft and, while it is shared, sends its geometry. */

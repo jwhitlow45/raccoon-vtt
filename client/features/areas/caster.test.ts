@@ -6,7 +6,6 @@ import { actor, character, template, token } from "#shared/testutil.ts";
 import {
   areaCreatures,
   castFrom,
-  defaultCaster,
   draftCaster,
   fromOffers,
   fromShows,
@@ -23,23 +22,6 @@ import {
 } from "./caster.ts";
 import { draftFromTemplate, draftTemplate, newDraft, withShape, type AreaDraft } from "./placement.ts";
 import { presetDraft } from "./presets.ts";
-
-describe("the area tool's caster", () => {
-  const characters = { c1: character("c1", { ownerIds: ["p1"] }) };
-  const player = { memberId: "p1", role: "player" as const };
-
-  test("a player's own selected creature, directly or through its character", () => {
-    assert.equal(defaultCaster({ selected: token("t", { ownerIds: ["p1"] }), sceneId: "s1", you: player, characters }), "t");
-    assert.equal(defaultCaster({ selected: token("pc", { kind: "pc", actor: { ref: "c1" } }), sceneId: "s1", you: player, characters }), "pc");
-  });
-
-  test("never an old selection of someone else's token, one on another scene, or anything for the DM", () => {
-    assert.equal(defaultCaster({ selected: token("gob"), sceneId: "s1", you: player, characters }), null);
-    assert.equal(defaultCaster({ selected: token("t", { ownerIds: ["p1"], sceneId: "s2" }), sceneId: "s1", you: player, characters }), null);
-    assert.equal(defaultCaster({ selected: token("gob"), sceneId: "s1", you: { memberId: "dm1", role: "dm" }, characters }), null);
-    assert.equal(defaultCaster({ selected: undefined, sceneId: "s1", you: player, characters }), null);
-  });
-});
 
 describe("a tap with nothing in progress", () => {
   test("a token inside a placed area casts from the token", () => {
@@ -148,6 +130,12 @@ describe("the saved choice (3.3)", () => {
     assert.deepEqual(resolve(table(), "none", { id: "t", fresh: false }), { casterId: null, choice: "none" });
   });
 
+  test("a fresh selection of one of yours on another scene is not here, and the DM's selection never counts", () => {
+    const view = table({ away: token("away", { kind: "npc", name: "Ally", ownerIds: ["p1"], sceneId: "s2" }) });
+    assert.deepEqual(resolve(view, "none", { id: "away", fresh: true }), { casterId: null, choice: "none" });
+    assert.deepEqual(savedChoice({ creatures: mine(view), tokens: view.tokens, sceneId: "s1", choice: null, selected: { id: "t", fresh: true }, role: "dm" }).casterId, null);
+  });
+
   test("someone else's selection is ignored, as the DM's goblin", () => {
     assert.deepEqual(resolve(table(), "none", { id: "g1", fresh: true }), { casterId: null, choice: "none" });
     assert.deepEqual(resolve(table(), null, { id: "g1", fresh: true }).casterId, "t", "the default instead");
@@ -230,8 +218,18 @@ describe("the control's form (3.1, 3.2)", () => {
     const two = offers(table({ pip }), null, "t");
     assert.ok(two.form === "chip" && two.on === "t" && names(two.offers).join() === "Thorn,Pip");
     const away = { ...table(), tokens: { t: token("t", { kind: "pc", name: "Thorn", actor: { ref: "thorn" }, sceneId: "s2" }) } };
-    assert.deepEqual(offers(away, null), { form: "disabled", words: "From Ash", characterId: "ash" }, "the first character by name, wherever it is");
-    assert.deepEqual(offers({ characters: {}, tokens: {} }, null), { form: "disabled", words: "From you" });
+    assert.deepEqual(offers(away, null), { form: "disabled", name: "Ash", characterId: "ash" }, "the first character by name, wherever it is");
+    assert.deepEqual(offers({ characters: {}, tokens: {} }, null), { form: "disabled", name: null });
+  });
+
+  test("two characters: the chip reads No caster until one is picked. Pip alone, Thorn elsewhere: the toggle From Pip, on", () => {
+    const two = table({ a: token("a", { kind: "pc", name: "Ash", actor: { ref: "ash" } }) });
+    const saved = resolve(two, null).casterId;
+    const chip = offers(two, null, saved);
+    assert.ok(chip.form === "chip" && chip.on === null && names(chip.offers).join() === "Ash,Thorn");
+    const away = table({ pip: { ...pip }, t: token("t", { kind: "pc", name: "Thorn", actor: { ref: "thorn" }, sceneId: "s2" }) });
+    const toggle = offers(away, null, resolve(away, null).casterId);
+    assert.ok(toggle.form === "toggle" && toggle.on && toggle.offer.name === "Pip");
   });
 
   test("the area's caster joins when it is not yours, and stays after off", () => {

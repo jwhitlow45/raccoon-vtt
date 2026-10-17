@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import type { AreaShape, AreaTemplate, AreaTrigger } from "#shared/model.ts";
 import { AREA_MAX_FT, AREA_MIN_FT, canPitch, emanationFootprint, MAX_PITCH, pitchOf, type AreaTemplateInput } from "#shared/rules/aoe.ts";
@@ -26,14 +26,15 @@ import {
   type StripLine,
 } from "../measure/controls.tsx";
 import { POPOVER_MIN } from "../../pages/optionsLayout.ts";
+import { castFrom, choiceOf, draftCaster, fromOffers, withoutDeparted, type AreaCreature } from "./caster.ts";
 import { caughtTokens, contextFrom, inAreaEntries, inAreaText } from "./coverage.ts";
+import { FromControl, NO_CREATURE } from "./FromControl.tsx";
 import { areaTitle, shapeName, SHAPES } from "./labels.ts";
 import {
   aimText,
   AREA_TRIGGERS,
   clampPitch,
   draftFromTemplate,
-  freePointOf,
   liveOrigin,
   normalizeTriggers,
   usesFrom,
@@ -45,18 +46,22 @@ import { placementHint, presetDraft, searchAreaSpells } from "./presets.ts";
 import {
   canEdit,
   cancelDraft,
+  castsYours,
   currentTemplate,
   deleteTemplate,
   liveContext,
   openDamage,
   placeDraft,
+  resolvedChoice,
   samplesNow,
   select,
+  setChoice,
   setDraft,
   setShared,
   startDraft,
   updateTemplate,
   useAreaScope,
+  yourCreatures,
   type AreaEnv,
   type AreaToolState,
 } from "./store.ts";
@@ -66,10 +71,11 @@ import { useLiveTokens } from "./useLiveTokens.ts";
  * The area tool's options (docs/design-v1-tool-options.md 9.3): its line
  * is the hint, or what the area catches, the "In area" list (features
  * section 9), names as this viewer sees them with allies marked,
- * recomputed as tokens move. Its row holds the shape, Place, Cancel and
- * the rest by priority, and its less used settings are always in ⋯ under
- * "More area options". The spell search and Size wait in the shape
- * chip's popover when the row has no room for them.
+ * recomputed as tokens move. Its row holds who the area comes from (the
+ * From control, docs/design-v1-area-from-character.md), the shape, Place,
+ * Cancel and the rest by priority, and its less used settings are always
+ * in ⋯ under "More area options". The spell search and Size wait in the
+ * shape chip's popover when the row has no room for them.
  */
 
 const SNAPS: readonly { value: SnapMode; label: string }[] = [
@@ -211,11 +217,15 @@ function SpellsPopover(props: { handle: ReturnType<typeof usePopover>; query: st
   );
 }
 
+/**
+ * A spell picked while placing takes the area's caster, or none while From
+ * is off, and never falls back to the saved choice. While idle its draft is
+ * a new area, which starts from the saved choice (startDraft).
+ */
 function applySpell(env: AreaEnv, base: AreaDraft, name: string): void {
   const spell = searchAreaSpells(name, 1)[0];
   if (!spell) return;
-  const caster = base.casterId ?? (base.targetsOther ? undefined : base.fromId) ?? env.area.defaultCaster ?? undefined;
-  setDraft(env, presetDraft(spell, base, caster));
+  setDraft(env, presetDraft(spell, base, draftCaster(base) ?? undefined));
   env.area.store.setState({ query: "" });
 }
 
@@ -350,31 +360,40 @@ function more(id: string, control: ReactNode): Slot {
   return { id, priority: 9, always: true, group: MORE, control };
 }
 
+/** The idle line without a caster: today's taps. */
+const IDLE_HINT = "Tap a token to cast from it, or tap the map. Tap an area on the map to pick it.";
+
+/**
+ * The From control's choice: while idle the saved choice, and while placing
+ * the area's caster at once (3.4). Off and No caster, and a pick of one of
+ * the player's creatures, set the saved choice too. A pick of someone
+ * else's token, the area's own caster, does not.
+ */
+function pickFrom(env: AreaEnv, d: AreaDraft | null, offer: AreaCreature | null): void {
+  if (d) setDraft(env, castFrom(d, offer?.tokenId ?? null, env.view.tokens, env.view.meta.settings.feetPerCell));
+  if (offer === null) setChoice(env, "none");
+  else if (offer.yours) setChoice(env, choiceOf(offer));
+}
+
 function IdleOptions(props: { env: AreaEnv; st: AreaToolState }) {
   const { env, st } = props;
-  const base = () => startDraft(env, env.area.defaultCaster);
-  const caster = env.area.defaultCaster;
-  const casterToken = caster ? env.view.tokens[caster] : undefined;
+  const base = () => startDraft(env, resolvedChoice(env));
+  const creatures = yourCreatures(env);
+  const resolved = resolvedChoice(env, creatures);
+  const control = fromOffers({ creatures, draft: null, saved: resolved, view: env.view, sceneId: env.scene.id, you: { memberId: env.youId, role: env.role } });
+  const casting = resolved !== null ? creatures.find((c) => c.tokenId === resolved) : undefined;
+  const hint =
+    control.form === "disabled"
+      ? `${NO_CREATURE} ${IDLE_HINT}`
+      : casting
+        ? `Casting from ${casting.name}. Tap the map or a creature to aim or place it. Tap an area on the map to pick it.`
+        : IDLE_HINT;
   return (
     <OptionsStrip
       tool="Area"
-      line={{ tone: "hint", content: `${casterToken ? `Casting from ${displayName(casterToken)}. ` : ""}Tap a token to cast from it, or tap the map. Tap an area on the map to pick it.` }}
+      line={{ tone: "hint", content: hint }}
       slots={[
-        casterToken && {
-          id: "notFrom",
-          priority: 2,
-          control: (
-            <OptButton
-              onClick={() => {
-                env.area.defaultCaster = null;
-                // The caster lives outside the store, so this only asks the bar to draw again.
-                env.area.store.setState({});
-              }}
-            >
-              Not from {displayName(casterToken)}
-            </OptButton>
-          ),
-        },
+        control.form !== "none" && { id: "from", priority: 1, compact: true, control: <FromControl control={control} onPick={(offer) => pickFrom(env, null, offer)} /> },
         { id: "shape", priority: 1, compact: true, glyph: true, control: <ShapeChip value={st.shape} onChange={(shape) => env.area.store.setState({ shape })} /> },
         { id: "spell", priority: 3, flex: theme.layout.options.field, home: "shape", control: <SpellField env={env} st={st} base={base} /> },
       ]}
@@ -383,12 +402,19 @@ function IdleOptions(props: { env: AreaEnv; st: AreaToolState }) {
 }
 
 function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft }) {
-  const { env, st, draft: d } = props;
+  const { env, st } = props;
+  // A creature the draft names that left the scene or was deleted goes from it, and nothing stands in for it (3.3).
+  const d = withoutDeparted(props.draft, (id) => env.view.tokens[id]?.sceneId === env.scene.id);
+  useLayoutEffect(() => {
+    if (d !== props.draft) setDraft(env, d);
+  });
   const t = currentTemplate(env, d);
   const fpc = env.view.meta.settings.feetPerCell;
   const set = (patch: Partial<AreaDraft>) => setDraft(env, { ...d, ...patch });
-  const casterId = d.casterId ?? d.fromId;
+  const casterId = draftCaster(d);
   const caster = casterId ? env.view.tokens[casterId] : undefined;
+  const creatures = yourCreatures(env);
+  const control = fromOffers({ creatures, draft: d, saved: null, view: env.view, sceneId: env.scene.id, you: { memberId: env.youId, role: env.role } });
 
   let range: ReactNode = null;
   if (t && caster && !usesFrom(d.shape)) {
@@ -410,7 +436,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
         tone: "hint",
         content: (
           <>
-            {st.pickCaster ? "Tap the caster." : `${caster ? `Cast by ${displayName(caster)}. ` : ""}${placementHint(d)}`}
+            {st.pickCaster ? "Tap the caster." : `${caster ? `Cast by ${displayName(caster)}. ` : ""}${placementHint(d, castsYours(env, d, creatures))}`}
             {note}
           </>
         ),
@@ -422,6 +448,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
       line={line}
       task
       slots={[
+        control.form !== "none" && { id: "from", priority: 1, compact: true, control: <FromControl control={control} onPick={(offer) => pickFrom(env, d, offer)} /> },
         { id: "shape", priority: 1, compact: true, glyph: true, hosts: "size", control: <ShapeChip value={d.shape} size={d.size} onChange={(shape) => setDraft(env, withShape(d, shape))} /> },
         { id: "size", priority: 3, home: "shape", control: <Stepper label="Size" unit="ft" value={d.size} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(size) => set({ size })} /> },
         {
@@ -509,13 +536,6 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
             {caster ? `Caster: ${displayName(caster)}` : "Set caster"}
           </OptButton>,
         ),
-        caster &&
-          more(
-            "noCaster",
-            <OptButton label="Clear the caster" onClick={() => set({ casterId: undefined, fromId: d.targetsOther ? d.fromId : undefined, point: d.point ?? (t ? freePointOf(t, fpc) : null) })}>
-              No caster
-            </OptButton>,
-          ),
         ...triggerSlots({ value: d.triggers, once: d.oncePerTurn, onChange: (triggers) => set({ triggers }), onOnce: (oncePerTurn) => set({ oncePerTurn }) }),
         more("color", <OptSwatches label="Color" value={d.color} options={MEMBER_COLORS} onChange={(color) => set({ color })} />),
         env.role === "dm" &&

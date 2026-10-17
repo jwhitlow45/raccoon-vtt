@@ -6,7 +6,7 @@ import { scopeSlot, type RoomScope } from "../../state/scope.ts";
 import type { RoomActions } from "../../state/types.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import { AreaOptions } from "./AreaOptions.tsx";
-import { defaultCaster, idleTapPicks, pickedPress } from "./caster.ts";
+import { areaCreatures, castFrom, draftCaster, idleTapPicks, pickedPress, savedChoice, seeSelection, tappedToken, withoutDeparted } from "./caster.ts";
 import { areaContext } from "./coverage.ts";
 import {
   areaContains,
@@ -30,12 +30,16 @@ import {
 import {
   areaSlot,
   canEdit,
+  castsYours,
   GRAB_PX,
   HANDLE_GAP_PX,
   markMoving,
   markRested,
+  noteCaster,
   resetAreaTool,
+  resolvedChoice,
   select,
+  setChoice,
   setDraft,
   startDraft,
   updateTemplate,
@@ -48,11 +52,14 @@ import { TOOL_ORDER } from "../toolbarOrder.ts";
  *
  * With nothing in progress, a tap on a token casts the last shape used from
  * it, even inside a placed area (caster.ts), a tap on the map places it
- * there, and a tap on a placed area's open ground picks it for editing.
- * While a draft is out:
+ * there, and a tap on a placed area's open ground picks it for editing. A
+ * player's new area starts from their saved choice, the From control's
+ * (docs/design-v1-area-from-character.md). While a draft is out:
  *
  * - A token tapped becomes what a cone, line, cube or emanation starts from
  *   (for Ice Knife, its target). A sphere or cylinder goes on the token.
+ *   While the area is cast from one of the player's own creatures, a tap
+ *   on another creature aims the area at it instead (caster.ts tokenTap).
  * - A drag aims a cone, line or cube from its caster's center, snapped to
  *   15 or 45 degrees or free. With no caster, the first press sets the
  *   origin and the drag aims from it, and a later press near the origin
@@ -109,12 +116,6 @@ export function templateAt(env: AreaEnv, actx: AreaContext, p: { x: number; y: n
   return null;
 }
 
-/** A token tapped while a draft is out: what it starts from, or its target. */
-function fromToken(d: AreaDraft, tokenId: string): AreaDraft {
-  if (d.targetsOther) return { ...d, fromId: tokenId, point: null };
-  return { ...d, fromId: tokenId, casterId: tokenId, point: null };
-}
-
 function aimed(env: AreaEnv, d: AreaDraft, pivot: { x: number; y: number }, to: { x: number; y: number }): AreaDraft {
   const yaw = yawToward(pivot, to);
   return yaw === null ? d : { ...d, yaw: snapYaw(yaw, env.area.store.getState().snap) };
@@ -133,6 +134,12 @@ function onDown(p: ToolPointer, ctx: ToolContext): void {
   local.gesture = null;
   if (!env) return;
   const areaStore = env.area.store;
+  // A creature the draft names that left the scene or was deleted goes from it first (3.3), and nothing stands in for it.
+  const held = areaStore.getState().draft;
+  if (held) {
+    const live = withoutDeparted(held, (id) => sceneToken(env, id) !== undefined);
+    if (live !== held) setDraft(env, live);
+  }
   const st = areaStore.getState();
   const token = sceneToken(env, p.tokenId);
   const scale = ctx.camera().scale;
@@ -144,7 +151,11 @@ function onDown(p: ToolPointer, ctx: ToolContext): void {
 
   if (st.pickCaster) {
     areaStore.setState({ pickCaster: false });
-    if (token && st.draft) setDraft(env, usesFrom(st.draft.shape) && !st.draft.targetsOther ? fromToken(st.draft, token.id) : { ...st.draft, casterId: token.id });
+    if (token && st.draft) {
+      // As the From control turning on with this token: a cube placed at a point stays there.
+      setDraft(env, castFrom(st.draft, token.id, env.view.tokens, fpc));
+      noteCaster(env, token.id);
+    }
     return begin({ kind: "none" });
   }
 
@@ -185,36 +196,46 @@ function onDown(p: ToolPointer, ctx: ToolContext): void {
       select(env.area, null);
       return begin({ kind: "none" });
     }
-    d = startDraft(env, env.area.defaultCaster);
-    if (!token && d.casterId && usesFrom(d.shape)) d = { ...d, fromId: d.casterId };
+    d = startDraft(env, resolvedChoice(env));
+    if (d.casterId && usesFrom(d.shape)) d = { ...d, fromId: d.casterId };
   }
 
-  if (token && usesFrom(d.shape) && token.id !== d.fromId) {
-    const next = fromToken(d, token.id);
-    setDraft(env, next);
-    return begin(isDirectional(d.shape) ? { kind: "aim", pivot: centerOf(token) } : { kind: "none" });
+  if (token) {
+    const tapped = tappedToken({
+      draft: d,
+      token,
+      yours: castsYours(env, d),
+      tokens: env.view.tokens,
+      snap: st.snap,
+      chunks: env.view.buildChunks,
+      sceneId: env.scene.id,
+      feetPerCell: fpc,
+    });
+    setDraft(env, tapped.draft);
+    const caster = draftCaster(tapped.draft);
+    if (caster !== draftCaster(d)) noteCaster(env, caster);
+    return begin(tapped.gesture);
   }
 
   const from = d.fromId ? sceneToken(env, d.fromId) : undefined;
   switch (d.shape) {
     case "sphere":
     case "cylinder":
-      setDraft(env, { ...d, point: freePoint(env, d, p.world, token) });
+      setDraft(env, { ...d, point: freePoint(env, d, p.world, undefined) });
       return begin({ kind: "point" });
     case "emanation":
       if (from || d.targetsOther) {
         setDraft(env, d);
         return begin({ kind: "none" });
       }
-      setDraft(env, { ...d, point: freePoint(env, d, p.world, token) });
+      setDraft(env, { ...d, point: freePoint(env, d, p.world, undefined) });
       return begin({ kind: "point" });
     case "cone":
     case "line":
     case "cube": {
       if (from) {
         const pivot = centerOf(from);
-        // A press on the caster itself only grabs the aim: a point that close to the pivot has no real direction.
-        setDraft(env, token?.id === from.id ? d : aimed(env, d, pivot, p.world));
+        setDraft(env, aimed(env, d, pivot, p.world));
         return begin({ kind: "aim", pivot });
       }
       if (d.shape === "cube") {
@@ -310,8 +331,20 @@ export const areaTool: ToolDef = {
     const s = ctx.getState();
     const area = ctx.scope.get(areaSlot);
     const local = ctx.scope.get(gestureSlot);
-    const selected = s.local.selectedId ? s.view?.tokens[s.local.selectedId] : undefined;
-    area.defaultCaster = s.view && s.you ? defaultCaster({ selected, sceneId: ctx.scene.id, you: s.you, characters: s.view.characters }) : null;
+    if (s.view && s.you) {
+      // A player's creature selected since the choice last changed becomes the choice (3.3 step 1). An old selection never undoes it.
+      area.selection = seeSelection(area.selection, s.local.selectedIds);
+      const saved = area.store.getState().saved;
+      const next = savedChoice({
+        creatures: areaCreatures({ view: s.view, sceneId: ctx.scene.id, you: s.you }),
+        tokens: s.view.tokens,
+        sceneId: ctx.scene.id,
+        choice: saved,
+        selected: { id: s.local.selectedId, fresh: area.selection.count > area.choiceAt },
+        role: ctx.role,
+      }).choice;
+      if (next !== saved) setChoice({ area, role: ctx.role }, next);
+    }
     resetAreaTool(area, null);
     if (local.pendingPick) select(area, local.pendingPick);
     local.pendingPick = null;

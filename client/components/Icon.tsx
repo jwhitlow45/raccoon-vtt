@@ -48,7 +48,8 @@ export type IconName =
   | "areaLine"
   | "areaEmanation"
   | "fogBrush"
-  | "fogRoom";
+  | "fogRoom"
+  | "noCaster";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -161,6 +162,8 @@ const SHAPES: Record<IconName, ReactNode> = {
   ),
   fogBrush: <path {...STROKE} d="M4 16c2.5-5 4.5-6 6-3s3.5 2 5-1.5S19 8 20 9" />,
   fogRoom: <path {...STROKE} d="M4 4h16v16H4zM4 13h7M14 4v9h6" />,
+  // A plain circle crossed by a slash, where the area tool's From control names no creature: No caster, or "From you" (docs/design-v1-area-from-character.md 3.2).
+  noCaster: <path {...STROKE} d="M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16zM6.3 17.7L17.7 6.3" />,
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];

@@ -207,6 +207,7 @@ The Builder tool is the DM's. Its modes:
 
 - Shapes: sphere, cylinder, cone, cube, line and emanation.
 - Place an area freely, or cast it from a token: cones, lines and cubes start at the caster's edge, and emanations surround the caster. Aim by dragging or with a handle, in 15° or 45° steps or freely. Cones and lines can aim up or down.
+- A player's area tool always shows who the next area comes from, such as "From Thorn". It starts on when Thorn is your only character on the scene, and a tap turns it off or on. With a companion or a second character it lists them, and No caster. With none of your creatures on the scene it stays, greyed out, and says why. It stays as you left it until you reload, and selecting your creature before opening the tool still casts from it. While an area comes from your creature, a tap on another creature aims it there. Set caster in More options casts from someone else. The DM's areas start with no caster, and once one is cast from a token the same button drops or restores it.
 - Spell presets from SRD 5.2.1: search "fireball" and get a 20 ft sphere.
 - A private preview shades the squares and lists who is in it ("In area (3): Goblin 1, Goblin 2, Thorn (ally)") before you place it. The caster is left out unless you include it.
 - Auras stick to a token and move with it, such as Spirit Guardians or a Paladin's aura. The list of who is inside updates live.

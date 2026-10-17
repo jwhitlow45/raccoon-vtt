@@ -281,6 +281,154 @@ describe("the fit (6.3)", () => {
   });
 });
 
+/**
+ * Area's row with the From control (docs/design-v1-area-from-character.md
+ * 3.6 and Appendix A): each room's row from the widths the dev room's
+ * measuring layer gives at 1280 x 800, for a short name and one at the
+ * name cap, as the toggle and as the chip, and the disabled "From you".
+ * From, Shape and Place stand inline in every room.
+ */
+describe("Area with the From control (Appendix A)", () => {
+  const FROM = {
+    toggle: 104.2,
+    capped: 132.2,
+    chip: 118.2,
+    chipCapped: 146.2,
+    you: 88.7,
+  } as const;
+  type Form = keyof typeof FROM;
+  const shape = (hosts: boolean) => slot("shape", 1, 111.2, { compact: 60, glyph: 135.2, ...(hosts ? { hosts: { id: "size", words: 167, glyph: 191 } } : {}) });
+  const from = (form: Form) => slot("from", 1, FROM[form], { compact: theme.touch });
+  const placing = (form: Form) => [
+    from(form),
+    shape(true),
+    slot("size", 3, 152.4, { home: "shape" }),
+    slot("place", 1, 62.9),
+    slot("shared", 4, 74),
+    slot("cancel", 2, 72.3),
+    slot("spell", 5, 96, { home: "shape", max: 170 }),
+  ];
+  const idle = (form: Form) => [from(form), shape(false), slot("spell", 3, 96, { home: "shape", max: 170 })];
+  const rows = (state: "placing" | "idle", form: Form, bands: readonly (readonly [readonly number[], string])[]) => {
+    for (const [rooms, row] of bands) {
+      for (const room of rooms) {
+        const fit = fitRow({ room, slots: state === "placing" ? placing(form) : idle(form), alwaysMore: state === "placing", pins: [] });
+        assert.equal(ids(fit), row, `${state}, ${form}, ${room}`);
+        for (const id of ["from", "shape", ...(state === "placing" ? ["place"] : [])]) assert.ok(fit.row.some((p) => p.id === id), `${id} inline at ${room}`);
+      }
+    }
+  };
+
+  test("placing, the toggle with a short name: Cancel and Shared wait behind ⋯ where the row is tight", () => {
+    rows("placing", "toggle", [
+      [[230, 259, 275], "from:compact shape:compact place …"],
+      [[284, 301, 304], "from shape:compact place …"],
+      [[343, 356, 358], "from shape place …"],
+      [[366, 370, 374, 387], "from shape:glyph place …"],
+      [[422], "from shape place cancel …"],
+      [[455], "from shape:glyph place cancel …"],
+      [[538], "from shape:glyph place shared cancel …"],
+      [[591, 602, 615, 622], "from shape:glyph size place cancel …"],
+      [[715], "from shape:glyph size place shared cancel …"],
+      [[804, 960], "from shape:glyph size place shared cancel spell …"],
+    ]);
+  });
+
+  test("placing, a name at the cap, as the toggle and as the chip", () => {
+    rows("placing", "capped", [
+      [[230, 259, 275, 284], "from:compact shape:compact place …"],
+      [[301, 304], "from:compact shape:compact place cancel …"],
+      [[343, 356, 358], "from shape:compact place …"],
+      [[366, 370, 374], "from shape place …"],
+      [[387], "from shape:glyph place …"],
+      [[422], "from shape:hosts place …"],
+      [[455], "from shape place cancel …"],
+      [[538], "from shape place shared cancel …"],
+      [[591], "from shape:hosts place shared cancel …"],
+      [[602, 615], "from shape size place cancel …"],
+      [[622], "from shape:glyph size place cancel …"],
+      [[715], "from shape:glyph size place shared cancel …"],
+      [[804, 960], "from shape:glyph size place shared cancel spell …"],
+    ]);
+    rows("placing", "chipCapped", [
+      [[230, 259, 275, 284], "from:compact shape:compact place …"],
+      [[301, 304], "from:compact shape:compact place cancel …"],
+      [[343, 356, 358, 366, 370, 374], "from shape:compact place …"],
+      [[387], "from shape place …"],
+      [[422], "from shape:glyph place …"],
+      [[455], "from shape place cancel …"],
+      [[538], "from shape place shared cancel …"],
+      [[591, 602], "from shape:hosts place shared cancel …"],
+      [[615, 622], "from shape size place cancel …"],
+      [[715], "from shape:glyph size place shared cancel …"],
+      [[804], "from shape size place shared cancel spell …"],
+      [[960], "from shape:glyph size place shared cancel spell …"],
+    ]);
+  });
+
+  test("placing, the chip with a short name, and the disabled From you", () => {
+    rows("placing", "chip", [
+      [[230, 259, 275, 284], "from:compact shape:compact place …"],
+      [[301, 304, 343], "from shape:compact place …"],
+      [[356, 358, 366, 370], "from shape place …"],
+      [[374, 387], "from shape:glyph place …"],
+      [[422], "from shape:hosts place …"],
+      [[455], "from shape:glyph place cancel …"],
+      [[538], "from shape:glyph place shared cancel …"],
+      [[591, 602], "from shape size place cancel …"],
+      [[615, 622], "from shape:glyph size place cancel …"],
+      [[715], "from shape:glyph size place shared cancel …"],
+      [[804, 960], "from shape:glyph size place shared cancel spell …"],
+    ]);
+    rows("placing", "you", [
+      [[230, 259], "from:compact shape:compact place …"],
+      [[275, 284, 301, 304], "from shape:compact place …"],
+      [[343, 356, 358, 366, 370, 374], "from shape:glyph place …"],
+      [[387], "from shape:hosts place …"],
+      [[422], "from shape:glyph place cancel …"],
+      [[455], "from shape:hosts place cancel …"],
+      [[538], "from shape:hosts place shared cancel …"],
+      [[591, 602, 615, 622], "from shape:glyph size place cancel …"],
+      [[715], "from shape:glyph size place shared cancel …"],
+      [[804, 960], "from shape:glyph size place shared cancel spell …"],
+    ]);
+  });
+
+  test("idle, with no ⋯: the square, the shape and the spell field, which grows into what is left", () => {
+    const rest = [366, 370, 374, 387, 422, 455, 538, 591, 602, 615, 622, 715, 804, 960];
+    rows("idle", "toggle", [
+      [[230, 259], "from:compact shape:compact spell"],
+      [[275, 284, 301, 304], "from shape:compact spell"],
+      [[343], "from shape spell"],
+      [[356, 358, ...rest], "from shape:glyph spell"],
+    ]);
+    rows("idle", "capped", [
+      [[230, 259, 275, 284], "from:compact shape:compact spell"],
+      [[301, 304, 343], "from shape:compact spell"],
+      [[356, 358, 366, 370], "from shape spell"],
+      [[374, 387, 422, 455, 538, 591, 602, 615, 622, 715, 804, 960], "from shape:glyph spell"],
+    ]);
+    rows("idle", "chip", [
+      [[230, 259, 275], "from:compact shape:compact spell"],
+      [[284, 301, 304], "from shape:compact spell"],
+      [[343, 356], "from shape spell"],
+      [[358, ...rest], "from shape:glyph spell"],
+    ]);
+    rows("idle", "chipCapped", [
+      [[230, 259, 275, 284, 301, 304], "from:compact shape:compact spell"],
+      [[343, 356, 358], "from shape:compact spell"],
+      [[366, 370, 374], "from shape spell"],
+      [[387, 422, 455, 538, 591, 602, 615, 622, 715, 804, 960], "from shape:glyph spell"],
+    ]);
+  });
+
+  test("Area's priority-1 set with ⋯ stays under the floor, so From, Shape and Place are inline in the narrowest stacked room", () => {
+    const set = theme.touch + 60 + 62.9 + 2 * SLOT_GAP + MORE_ROOM;
+    assert.ok(set <= 230, `${set}`);
+    assert.ok(set < MERGE_MIN);
+  });
+});
+
 describe("what holds still (6.4)", () => {
   test("with ⋯ open, a slot that appears joins its home, one that goes leaves, and ⋯ stays", () => {
     const before = fitRow({ room: 260, slots: [slot("a", 1, 100), slot("b", 2, 100), slot("c", 3, 60)], alwaysMore: false, pins: [] });
