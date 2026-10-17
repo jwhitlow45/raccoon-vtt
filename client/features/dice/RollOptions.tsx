@@ -596,8 +596,10 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
 
 /**
  * A save action's "Group save, DC 21 Dex" (5.6): the group save's setup
- * filled from the action, on the selection less the acting creature. With
- * nobody else selected the page says to select the creatures it hits.
+ * filled from the action, its rows the selection less the acting creature
+ * as it changes until the roll (5.1). The button shows with one creature
+ * selected, so the page opens saying to select the creatures it hits, and
+ * the DM's next selection fills it.
  */
 function GroupSaveButton(props: { ctx: Ctx; named: NamedRoll }) {
   const { ctx, named } = props;
@@ -608,7 +610,8 @@ function GroupSaveButton(props: { ctx: Ctx; named: NamedRoll }) {
   const [pending, setPending] = useState(false);
   const others = selected.filter((id) => id !== ctx.tokenId);
   const filled = actionFill(ctx.dice, named, { key: ctx.key, ...(ctx.tokenId ? { tokenId: ctx.tokenId } : {}) })!;
-  const input = { source: { kind: "selection" as const, tokenIds: others }, ...filled, panel: "dice" as const };
+  const source = { kind: "selection" as const, tokenIds: others, live: true as const, ...(ctx.tokenId ? { except: ctx.tokenId } : {}) };
+  const input = { source, ...filled, panel: "dice" as const };
   // A recharge action is spent once its group save starts, as its Damage tap is once its roll goes.
   const go = (replace: boolean) => spendOnStart(() => start(input, { replace }), named.recharge !== undefined ? () => writeUsed(roomId, withUsed(readUsed(roomId), ctx.key, named.key, true)) : null);
   return (

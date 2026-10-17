@@ -62,6 +62,8 @@ const run = {
   bounds: { w: 30, h: 20 },
   bree: { characterId: randomUUID(), id: randomUUID(), x: 4, y: 3 },
   goblins: [6, 8, 10].map((x, i) => ({ id: randomUUID(), name: `Goblin ${i + 1}`, x, y: 3 })),
+  /** A red dragon wyrmling, whose Fire Breath is a save action with its own Group save. */
+  dragon: { id: randomUUID(), name: "Wyrmling", x: 13, y: 3 },
   /** The goblins' save line and the damage line, read once each lands. */
   saves: [] as DiceRoll[],
   fire: 0,
@@ -184,7 +186,8 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     const token = (id: string, extra: Record<string, unknown>) => ({ t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", ...extra } });
     await ops.send(token(run.bree.id, { kind: "pc", name: "Bree", x: run.bree.x, y: run.bree.y, disposition: "ally", actor: { ref: run.bree.characterId } }));
     for (const g of run.goblins) await ops.send(token(g.id, { kind: "monster", name: g.name, x: g.x, y: g.y, disposition: "hostile", actor: { inline: actor(HP, { srdId: "goblin-warrior" }) } }));
-    await waitFor("every token on the player's map", () => [run.bree, ...run.goblins].every((t) => playerSocket.state?.tokens[t.id]) || null);
+    await ops.send(token(run.dragon.id, { kind: "monster", name: run.dragon.name, x: run.dragon.x, y: run.dragon.y, disposition: "hostile", actor: { inline: actor(HP, { srdId: "red-dragon-wyrmling" }) } }));
+    await waitFor("every token on the player's map", () => [run.bree, ...run.goblins, run.dragon].every((t) => playerSocket.state?.tokens[t.id]) || null);
 
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
     await dm.reload();
@@ -335,7 +338,49 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await waitFor(`Bree back at ${HP}`, () => (breeHp() === HP ? true : null));
   });
 
-  test("6. nothing went wrong in the browsers", () => {
+  test("6. the wyrmling's Fire Breath Group save opens on no creature, and the goblins selected after it become its rows (W7B-P-1)", async () => {
+    // The applied page and the group of four from the steps before give way first.
+    if (await diceSheet(dm).isVisible()) await diceSheet(dm).getByRole("button", { name: "Close Dice" }).tap();
+    await dm.getByRole("button", { name: "Let go of all of them" }).first().tap();
+    await waitFor("the group let go", async () => ((await dm.getByRole("button", { name: "Let go of all of them" }).count()) === 0 ? true : null));
+    // Multi-select from step 3 ends, so a tap selects one token again.
+    const done = dm.getByRole("button", { name: "Done", exact: true });
+    if (await done.isVisible()) await done.tap();
+    await tapCell(dm, run.bounds, run.dragon);
+    const bar = dm.getByRole("dialog", { name: `${run.dragon.name} actions` });
+    await bar.waitFor();
+    await bar.getByRole("button", { name: "Roll", exact: true }).tap();
+    const sheet = diceSheet(dm);
+    await sheet.waitFor();
+    const groupSave = sheet.locator("[data-roll-options]").getByRole("button", { name: "Group save, DC 13 Dex" });
+    await groupSave.scrollIntoViewIfNeeded();
+    await groupSave.tap();
+    await sheet.getByText("Select the creatures it hits, or place an area from it.").waitFor();
+    await sheet.getByText("From Fire Breath: Dexterity save, DC 13", { exact: false }).waitFor();
+    await sheet.getByRole("button", { name: "Close Dice" }).tap();
+    await sheet.waitFor({ state: "hidden" });
+
+    // The goblins selected now are the page's rows: it follows the selection until the roll, and never holds the wyrmling.
+    const first = run.goblins[0]!;
+    await tapCell(dm, run.bounds, first);
+    const goblinBar = dm.getByRole("dialog", { name: `${first.name} actions` });
+    await goblinBar.waitFor();
+    await goblinBar.getByRole("button", { name: "Multi-select", exact: true }).tap();
+    for (const g of run.goblins.slice(1)) await tapCell(dm, run.bounds, g);
+    // The group's Roll opens the Dice panel's first page, where the open group save's row opens it again.
+    await dm.locator('[role="dialog"][data-bar-mode]').getByRole("button", { name: "Roll", exact: true }).tap();
+    await sheet.waitFor();
+    await sheet.getByText("Fire Breath's save: set up.").locator("xpath=..").getByRole("button", { name: "Open" }).tap();
+    const creatures = sheet.getByRole("group", { name: "Creatures" });
+    await creatures.getByText("3 creatures").waitFor();
+    for (const g of run.goblins) await creatures.getByText(g.name, { exact: true }).waitFor();
+    assert.equal(await creatures.getByText(run.dragon.name, { exact: true }).count(), 0, "the wyrmling is not its own target");
+    await shots.take(dm, "groupsave-fire-breath-rows-130");
+    await sheet.getByRole("button", { name: "Discard", exact: true }).tap();
+    await sheet.getByRole("button", { name: "Close Dice" }).tap();
+  });
+
+  test("8. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, []);
     assert.deepEqual(playerConsole.errors, []);
   });

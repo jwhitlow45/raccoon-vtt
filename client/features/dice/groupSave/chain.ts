@@ -21,7 +21,21 @@ import { d20Of, rowResult, type GroupTest, type Mark, type RowBase, type RowStat
 
 export type Phase = "setup" | "rolled" | "applying" | "applied";
 
-export type Source = { kind: "selection"; tokenIds: string[] } | { kind: "area"; templateId: string };
+/**
+ * Where a page's rows come from until the roll freezes them (5.1): the
+ * tokens a quick tap rolled, the room's selection as it changes (`live`,
+ * less the creature acting, `except`), or an area's caught creatures.
+ * `tokenIds` of a live source are the ones selected at the start, for a
+ * title read before the page shows.
+ */
+export type Source = { kind: "selection"; tokenIds: string[]; live?: true; except?: string } | { kind: "area"; templateId: string };
+
+/** The tokens a page in setup reads its rows from: the selection now for a live source, less the acting creature. */
+export function sourceIds(source: Source, selected: readonly string[], area?: (templateId: string) => string[]): string[] {
+  if (source.kind === "area") return area ? area(source.templateId) : [];
+  if (!source.live) return source.tokenIds;
+  return selected.filter((id) => id !== source.except);
+}
 
 export type Fill = {
   /** The spell's or action's name: "Fireball". Notes and labels name it. */

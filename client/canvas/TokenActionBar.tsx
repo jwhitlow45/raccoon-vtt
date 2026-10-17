@@ -14,6 +14,7 @@ import { GRIP_ATTR, PaneHeader, STICKY_HEADER_ATTR, type PaneHandle } from "../c
 import { useLayoutSize } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { useOptionStore } from "../features/dice/optionState.ts";
+import { useGroupSaveStore } from "../features/dice/groupSave/store.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { useSend } from "../features/encounter/hooks.ts";
 import { tokenAccess } from "../features/tokens/access.ts";
@@ -562,11 +563,18 @@ export function GroupActionBar(props: {
  * options already name its tokens. A player's earlier pick of another of
  * their creatures gives way, so the options are this token's.
  */
+/**
+ * A bar's Roll: the Dice panel's options for the token or group (4.1). A
+ * group save shown in the panel steps back to the first page, where its
+ * row still opens it, so the Roll never lands on another page.
+ */
 function useOpenRollOptions(): () => void {
   const ui = useRoomUi();
   const options = useOptionStore();
+  const groupSave = useGroupSaveStore();
   return () => {
     options.setState((s) => ({ focus: s.focus + 1, picked: null }));
+    if (groupSave.getState().shownIn === "dice") groupSave.setState({ shownIn: null });
     ui.openPanel("dice");
   };
 }

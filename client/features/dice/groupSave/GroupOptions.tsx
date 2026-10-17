@@ -93,7 +93,8 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
       </Section>
       <GroupInitiative tokenIds={props.tokenIds} blocked={blocked} />
       {dice ? <SharedAttacks tokenIds={props.tokenIds} blocked={blocked} /> : null}
-      <Button onClick={() => go({ source: { kind: "selection", tokenIds: [...props.tokenIds] }, test: { kind: "save", ability: "dex" }, dc, panel: "dice" })}>Set up a group save</Button>
+      {/* Its rows follow the selection until the roll (5.1), so a creature selected or dropped after it opens counts. A quick tap above rolls the creatures it was tapped on. */}
+      <Button onClick={() => go({ source: { kind: "selection", tokenIds: [...props.tokenIds], live: true }, test: { kind: "save", ability: "dex" }, dc, panel: "dice" })}>Set up a group save</Button>
     </section>
   );
 }

@@ -49,6 +49,7 @@ import {
   rollSettled,
   rollWords,
   setDc,
+  sourceIds,
   stateOf,
   syncRequests,
   typeTotal,
@@ -90,10 +91,10 @@ export function pageTitle(page: Pick<Page, "fill" | "test" | "rows" | "source">)
   return `${what} for ${n}`;
 }
 
-/** The tokens a page's rows come from while it is in setup: the selection it was started on. Step 7 adds an area's. */
+/** The tokens a page's rows come from while it is in setup (5.1): the selection as it is now for a live source, an area's caught creatures, or the tokens a quick tap rolled. */
 export function useSourceIds(page: Page, area?: (templateId: string) => string[]): string[] {
-  if (page.source.kind === "selection") return page.source.tokenIds;
-  return area ? area(page.source.templateId) : [];
+  const selected = useRoomView((s) => s.local.selectedIds);
+  return sourceIds(page.source, selected, area);
 }
 
 export function GroupSave(props: { parent: "Dice" | "Areas"; onBack(): void; areaIds?: (templateId: string) => string[] }) {
@@ -131,11 +132,11 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   // The draft follows the page (5.10), inside try and catch.
   useEffect(() => writeDraft(roomId, page), [roomId, page]);
 
-  const sourceIds = useSourceIds(page, props.areaIds);
-  const ids = page.phase === "setup" ? sourceIds : page.rows.map((r) => r.tokenId);
+  const fromSource = useSourceIds(page, props.areaIds);
+  const ids = page.phase === "setup" ? fromSource : page.rows.map((r) => r.tokenId);
   const creatures = useMemo<ActorTarget[]>(() => ids.map((tokenId) => ({ tokenId })), [ids.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
   const { dice, loading, failed } = useDiceView(creatures);
-  const live = dice && page.phase === "setup" ? groupRows(dice, sourceIds, page.test, page.spell) : page.rows;
+  const live = dice && page.phase === "setup" ? groupRows(dice, fromSource, page.test, page.spell) : page.rows;
   const rows = live;
   const tooMany = rows.length > 100;
   const shown: Page = page.phase === "setup" ? { ...page, rows } : page;
