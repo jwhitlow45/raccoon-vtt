@@ -838,7 +838,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const lines = dmSocket.state!.log.filter((e) => e.data?.type === "companion").map((e) => (e.data?.type === "companion" ? e.data.name : ""));
     assert.deepEqual(lines, ["Spiritual Weapon", "Wildfire Spirit"]);
     assert.equal(anaSocket.state!.log.some((e) => e.data?.type === "companion"), false, "the line is the DM's alone");
-    await dm.getByRole("tab", { name: "Log" }).click();
+    // The Dice tab took the Log's place in the row, so the Log may stand behind More (docs/design-v1-dice.md 8.1).
+    await openSideTab(dm, "Log");
     await dm.getByText("Ana added Wildfire Spirit beside Bree.").waitFor();
     await shots.take(dm, "combat-companion-log");
     // Neither is offered a row: not in Ana's Join the fight, nor in the DM's Everyone here.
