@@ -26,24 +26,26 @@ export const GRABBER_ATTR = "data-sheet-grabber";
  * X-card's body).
  *
  * It is decoration, laid over the room above the header's first line, so
- * it moves nothing there. A header with less room than GRABBER_ROOM above
- * its buttons grows its top padding by the difference. `from` is where the
- * surface's top edge lies below the pill's containing box, negative where
- * that box starts lower, in the surface's own padding. It takes no
- * pointer, so a touch on it lands on the header under it, and a tap
- * beside it still reaches Back or Close.
+ * it moves nothing there. Its containing box is the grab area, which
+ * starts at the surface's top edge, reaching over the surface's own top
+ * padding where it has one, so the pill is always on it and a touch there
+ * moves the surface as one on the header does. A header with less room
+ * than GRABBER_ROOM above its buttons grows its top padding by the
+ * difference. The X-card has no header, and its pill sits on the content
+ * that it swipes by. It takes no pointer, so a touch on it lands on what
+ * lies under it, and a tap beside it still reaches Back or Close.
  *
  * Forced colors drop its fill, so globals.css gives it a system color
  * there.
  */
-export function SheetGrabber(props: { from?: number }) {
+export function SheetGrabber() {
   return (
     <span
       aria-hidden
       {...{ [GRABBER_ATTR]: "" }}
       style={{
         position: "absolute",
-        top: (props.from ?? 0) + GRABBER.top,
+        top: GRABBER.top,
         left: "50%",
         width: GRABBER.width,
         height: GRABBER.height,

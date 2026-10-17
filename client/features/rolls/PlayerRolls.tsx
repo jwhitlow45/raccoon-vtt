@@ -412,9 +412,9 @@ function RollCard(props: {
     const measure = () => {
       // Folded, the card has no size: the last measures stand.
       if (card.offsetHeight === 0) return;
-      // Measured as a sticking header stands, its fill taking in the card's top padding and a little under it, so whether it sticks never changes the answer.
+      // Measured as a sticking header stands, its fill taking in the card's top padding, which every header at the foot reaches over, and a little under it, so whether it sticks never changes the answer.
       const lift = sticks ? 0 : theme.space(1);
-      const head = header.offsetHeight + (sticks ? 0 : theme.space(4) + lift);
+      const head = header.offsetHeight + lift;
       const edges = 2 * theme.line.border;
       const row = card.querySelector("form");
       if (!row) {
@@ -449,7 +449,8 @@ function RollCard(props: {
           display: "flex",
           alignItems: "flex-start",
           gap: theme.space(2),
-          ...(props.sheet ? { ...GRAB_STYLE, position: "relative" } : null),
+          // At the foot it reaches over the card's top padding, taken back from its margin, so the pill drawn there is on the grab area, stuck or not. Its content stays where it was.
+          ...(props.sheet ? { ...GRAB_STYLE, position: "relative", margin: `-${theme.space(4)}px 0 0`, padding: `${theme.space(4)}px 0 0` } : null),
           ...(sticks
             ? {
                 position: "sticky",
@@ -464,8 +465,8 @@ function RollCard(props: {
             : null),
         }}
       >
-        {/* In the card's 16 px top padding, which a sticking header takes into its own box: room enough for the pill with no growth. */}
-        {props.sheet ? <SheetGrabber from={sticks ? 0 : -theme.space(4)} /> : null}
+        {/* In the card's 16 px top padding, which the header takes into its own box: room enough for the pill with no growth. */}
+        {props.sheet ? <SheetGrabber /> : null}
         <div style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
           <div style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>{askLine(request)}</div>
           {dc ? <div style={{ fontSize: theme.font.body14, color: theme.color.textMuted }}>{dc}</div> : null}

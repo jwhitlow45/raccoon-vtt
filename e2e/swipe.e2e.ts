@@ -1432,6 +1432,43 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
         if (view.sheet) await checkFit(rollCard, view.scale, where);
         await shotsInBothSchemes(player, `grabber-roll-card-${view.width}x${view.height}-${view.scale * 100}`);
       }
+      /*
+       * Where the screen is too short even for the card's question and its
+       * answer row, the header stops sticking and the whole card scrolls.
+       * The header still reaches over the card's top padding, so the pill
+       * is on the grab area: with the total focused, where a drag on the
+       * content stays the browser's, a drag that starts right on the pill
+       * still puts the card off.
+       */
+      let unstuck = false;
+      for (const height of [260, 240, 220, 200]) {
+        await setUp(player, { width: 320, height, scale: 1.3 });
+        const rollCard = player.getByRole("dialog", { name: "The DM asks for a roll" });
+        const row = player.getByRole("button", { name: /^Roll asked/ }).first();
+        await waitFor("the card or the row that stands for it", async () => ((await rollCard.isVisible()) || (await row.isVisible()) ? true : null));
+        if (!(await rollCard.isVisible())) await row.tap();
+        await steadyRect(rollCard);
+        const position = await rollCard.locator("[data-sheet-grab]").evaluate((el) => (globalThis as unknown as Win).getComputedStyle(el as unknown as El).position);
+        if (position === "sticky") continue;
+        unstuck = true;
+        const where = `the roll card whose header does not stick, at 320 x ${height} at 130%`;
+        await rollCard
+          .getByRole("textbox")
+          .first()
+          .evaluate((el) => (el as unknown as { focus(o: { preventScroll: boolean }): void }).focus({ preventScroll: true }));
+        await rollCard.evaluate((el) => {
+          (el as unknown as El).scrollTop = 0;
+        });
+        await expectGrabbers(player, ["The DM asks for a roll"], where);
+        await checkFit(rollCard, 1.3, where);
+        await shots.take(player, `grabber-roll-card-unstuck-320x${height}-130`);
+        const pill = await middleOf(rollCard.locator("[data-sheet-grabber]"));
+        const card = await rectOf(rollCard);
+        await swipe(playerCdp, pill, 8 + Math.max(card.height / 4, 44 * 1.3) + 20, {}, player);
+        assert.equal(await settled(rollCard), "gone", `${where}: a drag from the pill with the total focused did not put the card off`);
+        break;
+      }
+      assert.ok(unstuck, "no screen size left the roll card's header unstuck");
     } finally {
       await ops.send({ t: "roll.close", rollIds: [request] });
     }
