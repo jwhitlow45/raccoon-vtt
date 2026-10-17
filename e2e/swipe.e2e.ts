@@ -1229,6 +1229,203 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await jitterTap(dmCdp, dm, await middleOf(close), []);
     assert.equal(await settled(sheet), "gone", "Close at rest did not close");
   });
+
+  test("14. a grabber tops every sheet that swipes, in its header's top space with nothing moved, and no surface that does not swipe", async () => {
+    const light = randomUUID();
+    await ops.send({ t: "build.lights", sceneId: run.sceneId, put: [{ id: light, x: 12.5, y: 6.5, bright: 5, dim: 5, on: true, walls: true, label: "Candle" }] });
+
+    // The panel sheet at each phone size: one pill, the header as wave 6 left it (56 px, its buttons 6 px down), and Close by a tap.
+    for (const view of [
+      { width: 375, height: 667, scale: 1 },
+      { width: 375, height: 667, scale: 1.3 },
+      { width: 320, height: 568, scale: 1.3 },
+      { width: 390, height: 844, scale: 1 },
+    ]) {
+      const where = `the Log at ${view.width} x ${view.height} at ${view.scale * 100}%`;
+      await setUp(dm, view);
+      const sheet = await openPanel(dm, "Log");
+      await steadyRect(sheet);
+      await expectGrabbers(dm, ["Log"], where);
+      const fit = await checkFit(sheet, view.scale, where);
+      assert.ok(Math.abs(fit.area.height - 56 * view.scale) < 0.6, `${where}: the header is ${fit.area.height} px tall`);
+      assert.ok(fit.close && Math.abs(fit.close.top - fit.area.top - 6 * view.scale) < 0.6, `${where}: Close moved: ${JSON.stringify(fit)}`);
+      await shotsInBothSchemes(dm, `grabber-log-${view.width}x${view.height}-${view.scale * 100}`);
+      await touchTap(dmCdp, dm, await middleOf(sheet.getByRole("button", { name: "Close Log" })));
+      assert.equal(await settled(sheet), "gone", `${where}: a tap on Close did not close the sheet`);
+    }
+
+    // The Panels list, and forced colors, where the pill keeps a system color of its own.
+    await setUp(dm, { width: 375, height: 667, scale: 1 });
+    await panelsButton(dm).click();
+    const list = sheetOf(dm, "Panels");
+    await steadyRect(list);
+    await expectGrabbers(dm, ["Panels"], "the Panels list");
+    await checkFit(list, 1, "the Panels list");
+    await dm.emulateMedia({ forcedColors: "active" });
+    try {
+      const fills = await list.evaluate((el) => {
+        const g = globalThis as unknown as Win;
+        const pill = (el as unknown as El).querySelector("[data-sheet-grabber]");
+        return { pill: pill ? g.getComputedStyle(pill).backgroundColor : "", sheet: g.getComputedStyle(el as unknown as El).backgroundColor };
+      });
+      assert.ok(fills.pill !== "" && fills.pill !== fills.sheet && !/^rgba\(.*, 0\)$|^transparent$/.test(fills.pill ?? ""), `under forced colors the pill is not seen: ${JSON.stringify(fills)}`);
+      await shots.take(dm, "grabber-panels-forced-colors");
+    } finally {
+      await dm.emulateMedia({ forcedColors: "none" });
+    }
+    await list.getByRole("button", { name: "Close Panels" }).click();
+
+    // Full screen, and in a fight with the dock riding the sheet and then in its header.
+    for (const view of [
+      { width: 375, height: 667, scale: 1 },
+      { width: 320, height: 568, scale: 1.3 },
+    ]) {
+      const where = `full screen at ${view.width} x ${view.height} at ${view.scale * 100}%`;
+      await setUp(dm, view);
+      const sheet = await openPanel(dm, "Log");
+      await fillScreen(sheet, view.scale, where);
+      await expectGrabbers(dm, ["Log"], where);
+      const fit = await checkFit(sheet, view.scale, where);
+      assert.ok(Math.abs(fit.area.height - 56 * view.scale) < 0.6, `${where}: the header is ${fit.area.height} px tall`);
+      await shotsInBothSchemes(dm, `grabber-full-${view.width}x${view.height}-${view.scale * 100}`);
+      await touchTap(dmCdp, dm, await middleOf(sheet.getByRole("button", { name: "Close Log" })));
+      assert.equal(await settled(sheet), "gone", `${where}: a tap on Close did not close the sheet`);
+    }
+    await ops.send({
+      t: "encounter.start",
+      entries: [
+        { id: run.entries.goblins[0], tokenId: run.goblins[0], value: 18 },
+        { id: run.entries.thorn, tokenId: run.thorn.id, value: 15 },
+      ],
+    });
+    try {
+      await setUp(dm, { width: 320, height: 568, scale: 1.3 });
+      await touchTap(dmCdp, dm, await cellPoint(dm, { x: 6, y: 3 }));
+      await dm.getByRole("dialog", { name: "Goblin 1 actions" }).waitFor();
+      const sheet = await openPanel(dm, "Log");
+      await steadyRect(sheet);
+      await expectGrabbers(dm, ["Log"], "a fight at 320 x 568 at 130%");
+      await checkFit(sheet, 1.3, "a fight at 320 x 568 at 130%");
+      await shots.take(dm, "grabber-fight-dock-320x568-130");
+      await fillScreen(sheet, 1.3, "a fight in full screen");
+      // The dock's chip joins the header, the one place an outlined button could stand under the pill.
+      await sheet.locator("header").getByRole("button", { name: /^Show Goblin 1 actions/ }).waitFor();
+      await expectGrabbers(dm, ["Log"], "a fight in full screen");
+      await checkFit(sheet, 1.3, "a fight in full screen");
+      await shots.take(dm, "grabber-fight-full-320x568-130");
+      await sheet.getByRole("button", { name: "Close Log" }).click();
+    } finally {
+      await ops.send({ t: "encounter.end" });
+    }
+
+    // Dialog sheets: the monster filters over the Monsters panel, each with its own pill, and the X-card, which has no header.
+    await setUp(dm, { width: 375, height: 667, scale: 1 });
+    const monsters = await openPanel(dm, "Monsters");
+    await steadyRect(monsters);
+    await monsters.getByRole("button", { name: "Filters" }).click();
+    const filters = dm.getByRole("dialog", { name: "Monster filters" }).locator("section").first();
+    await steadyRect(filters);
+    await expectGrabbers(dm, ["Monsters", "Monster filters"], "the monster filters");
+    await checkFit(filters, 1, "the monster filters");
+    await shots.take(dm, "grabber-dialog-filters-375x667-100");
+    await touchTap(dmCdp, dm, await middleOf(filters.getByRole("button", { name: /^Close/ })));
+    assert.equal(await settled(filters), "gone", "a tap on the filters' Close did not close them");
+    await monsters.getByRole("button", { name: "Close Monsters" }).click();
+    const sent = await playerContext.request.post(`${server.origin}/api/rooms/${run.roomId}/xcard`, { headers: { Origin: server.origin } });
+    assert.ok(sent.ok(), `the X-card answered ${sent.status()}`);
+    const xcard = dm.getByRole("dialog", { name: "X-card" }).locator("section").first();
+    await steadyRect(xcard);
+    await expectGrabbers(dm, ["X-card"], "the X-card");
+    await checkFit(xcard, 1, "the X-card");
+    await shots.take(dm, "grabber-xcard-375x667-100");
+    await xcard.getByRole("button", { name: "Dismiss" }).click();
+    const playerCard = player.getByRole("dialog", { name: "X-card" });
+    if (await playerCard.isVisible()) await playerCard.getByRole("button", { name: "Dismiss" }).click();
+
+    // From 600 px a dialog is a card in the middle, under a panel sheet that still swipes.
+    await setUp(dm, { width: 768, height: 1024, scale: 1 });
+    const tall = await openPanel(dm, "Monsters");
+    await steadyRect(tall);
+    await tall.getByRole("button", { name: "Filters" }).click();
+    const card = dm.getByRole("dialog", { name: "Monster filters" }).locator("section").first();
+    await steadyRect(card);
+    await expectGrabbers(dm, ["Monsters"], "a dialog's card at 768 x 1024");
+    await shots.take(dm, "grabber-dialog-card-768x1024-100");
+    await card.getByRole("button", { name: /^Close/ }).click();
+    await tall.getByRole("button", { name: "Close Monsters" }).click();
+
+    // The label, pin and light panes as sheets: the pane's header reaches over the frame's top padding to hold the pill, its buttons as before (1 px border, 4 px padding, 2 px over a 44 px button).
+    for (const scale of [1, 1.3]) {
+      await setUp(dm, { width: 375, height: 667, scale });
+      const label = await openLabel(0);
+      await checkPane(label, scale, `the label pane at ${scale * 100}%`, `grabber-label-375x667-${scale * 100}`);
+      await pickTool(dm, "Select");
+    }
+    await setUp(dm, { width: 375, height: 667, scale: 1 });
+    await pickTool(dm, "Pin");
+    const pinAt = await pagePoint(dm, run.bounds, { x: 10.5, y: 3.5 });
+    await touchTap(dmCdp, dm, { x: pinAt.x, y: pinAt.y - 14 });
+    await checkPane(dm.getByRole("dialog", { name: "Edit pin" }), 1, "the pin pane", "grabber-pin-375x667-100");
+    await pickTool(dm, "Map builder");
+    await pickOption(dm, "Map builder", "Builder mode", "Lights");
+    await touchTap(dmCdp, dm, await pagePoint(dm, run.bounds, { x: 12.5, y: 6.5 }));
+    await checkPane(dm.getByRole("dialog", { name: "Edit light" }), 1, "the light pane", "grabber-light-375x667-100");
+    await pickTool(dm, "Select");
+
+    // Beside the side panel the map is under 600 px, so the label pane is a sheet. On a wide map it is a card by its label.
+    for (const view of [
+      { width: 940, height: 800, scale: 1, sheet: true },
+      { width: 1280, height: 800, scale: 1, sheet: false },
+    ]) {
+      const where = `the label pane at ${view.width} x ${view.height}`;
+      await setUp(dm, view);
+      await dm.evaluate((shown) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.sidePanel", shown ? "shown" : "hidden"), view.sheet);
+      await setUp(dm, view);
+      const pane = await openLabel(0);
+      await steadyRect(pane);
+      await expectGrabbers(dm, view.sheet ? ["Edit label"] : [], where);
+      if (view.sheet) await checkFit(pane, 1, where);
+      await shots.take(dm, `grabber-label-${view.width}x${view.height}`);
+      await pane.getByRole("button", { name: "Close without saving" }).click();
+      await pickTool(dm, "Select");
+    }
+    await dm.evaluate(() => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem("rvtt.sidePanel"));
+
+    // Sideways and in the very short mode nothing swipes, so nothing shows a pill.
+    for (const view of [
+      { width: 844, height: 390, scale: 1 },
+      { width: 480, height: 320, scale: 1.3 },
+    ]) {
+      const where = `the Log at ${view.width} x ${view.height} at ${view.scale * 100}%`;
+      await setUp(dm, view);
+      const sheet = await openPanel(dm, "Log");
+      await steadyRect(sheet);
+      await expectGrabbers(dm, [], where);
+      await shotsInBothSchemes(dm, `grabber-log-${view.width}x${view.height}-${view.scale * 100}`);
+      await sheet.getByRole("button", { name: "Close Log" }).click();
+    }
+
+    // A player's roll card at a phone's foot has its pill. On a computer it is a card, with none.
+    const request = randomUUID();
+    await ops.send({ t: "roll.ask", request: { id: request, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+    try {
+      for (const view of [
+        { width: 375, height: 667, scale: 1, sheet: true },
+        { width: 375, height: 667, scale: 1.3, sheet: true },
+        { width: 1280, height: 800, scale: 1, sheet: false },
+      ]) {
+        const where = `the roll card at ${view.width} x ${view.height} at ${view.scale * 100}%`;
+        await setUp(player, view);
+        const rollCard = player.getByRole("dialog", { name: "The DM asks for a roll" });
+        await steadyRect(rollCard);
+        await expectGrabbers(player, view.sheet ? ["The DM asks for a roll"] : [], where);
+        if (view.sheet) await checkFit(rollCard, view.scale, where);
+        await shotsInBothSchemes(player, `grabber-roll-card-${view.width}x${view.height}-${view.scale * 100}`);
+      }
+    } finally {
+      await ops.send({ t: "roll.close", rollIds: [request] });
+    }
+  });
 });
 
 /** Opens the page called Notes that says `text`, of the two that share the title. */
@@ -1258,4 +1455,115 @@ async function openLabel(index: number): Promise<Locator> {
   const pane = dm.getByRole("dialog", { name: "Edit label" });
   await pane.waitFor();
   return pane;
+}
+
+/** Swipes the panel sheet up from its header until it fills the screen, as test 12 does. */
+async function fillScreen(sheet: Locator, scale: number, where: string): Promise<void> {
+  const normal = await steadyRect(sheet);
+  await swipe(dmCdp, await headerPoint(sheet), -(16 + Math.max(44 * scale, normal.top / 4) + 12));
+  await waitFor(`${where}: the sheet to fill the screen`, async () => (await sheet.getAttribute("aria-modal")) === "true" || null, 3_000);
+  assert.equal(await settled(sheet), "rest");
+}
+
+/**
+ * Every surface that can swipe now, which the swipe marks `data-sheet-swipes`
+ * while it is enabled, with the grabbers each shows, and the grabbers shown
+ * on no such surface. Read from the swipe's own mark, so a grabber drawn by
+ * a condition of its own would show here as a surface with none or a stray.
+ */
+async function expectGrabbers(page: Page, names: readonly string[], where: string): Promise<void> {
+  const audit = await page.evaluate(() => {
+    type Node = { getAttribute(n: string): string | null; getClientRects(): ArrayLike<unknown>; closest(s: string): Node | null; querySelectorAll(s: string): ArrayLike<Node> };
+    const doc = (globalThis as unknown as { document: { querySelectorAll(s: string): ArrayLike<Node> } }).document;
+    const shown = (el: Node) => el.getClientRects().length > 0;
+    return {
+      swiping: Array.from(doc.querySelectorAll("[data-sheet-swipes]"))
+        .filter(shown)
+        .map((s) => ({ name: s.closest("[aria-label]")?.getAttribute("aria-label") ?? "", grabbers: Array.from(s.querySelectorAll("[data-sheet-grabber]")).filter(shown).length })),
+      stray: Array.from(doc.querySelectorAll("[data-sheet-grabber]")).filter((g) => shown(g) && !g.closest("[data-sheet-swipes]")).length,
+    };
+  });
+  assert.deepEqual(audit.swiping.map((s) => s.name).sort(), [...names].sort(), `${where}: the surfaces that swipe`);
+  for (const s of audit.swiping) assert.equal(s.grabbers, 1, `${where}: ${s.name} shows ${s.grabbers} grabbers`);
+  assert.equal(audit.stray, 0, `${where}: a grabber shows on a surface that does not swipe`);
+}
+
+/**
+ * The pill against the grab area it sits in (the surface itself where it
+ * has none, as the X-card): its box, the top of the area's first line (its
+ * buttons, title and text), the area's parts with the pill and without it,
+ * and what a touch at the pill's middle lands on.
+ */
+async function grabberFit(surface: Locator): Promise<{ pill: Rect; area: Rect; surface: Rect; firstLine: number; close: Rect | null; same: boolean; hit: string }> {
+  return surface.evaluate((root) => {
+    type Node = El & { contains(n: Node | null): boolean; querySelectorAll(s: string): ArrayLike<Node> };
+    const doc = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): Node | null } }).document;
+    const el = root as unknown as Node;
+    const pill = el.querySelector("[data-sheet-grabber]") as Node | null;
+    if (!pill) throw new Error("the surface has no grabber");
+    const area = (pill.closest("[data-sheet-grab]") as Node | null) ?? el;
+    const box = (n: El): Rect => {
+      const r = n.getBoundingClientRect();
+      return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+    };
+    // The visually hidden Full screen button is 1 px square: no line of its own.
+    const parts = () => Array.from(area.querySelectorAll("button, h2, h3, strong, p, input")).map(box).filter((r) => r.width > 2 && r.height > 2);
+    const p = box(pill);
+    const at = doc.elementFromPoint((p.left + p.right) / 2, (p.top + p.bottom) / 2);
+    const before = JSON.stringify([box(area), ...parts()]);
+    pill.style.display = "none";
+    const after = JSON.stringify([box(area), ...parts()]);
+    pill.style.display = "";
+    const close = area.querySelector('button[aria-label^="Close"]');
+    return {
+      pill: p,
+      area: box(area),
+      surface: box(el),
+      firstLine: Math.min(...parts().map((r) => r.top)),
+      close: close ? box(close) : null,
+      same: before === after,
+      hit: at === pill ? "the pill" : at && area.contains(at) ? "area" : "elsewhere",
+    };
+  });
+}
+
+/** The pill is about 36 x 4 at the interface size, centered, inside its grab area above its first line, moves nothing, and lets a touch through to the header. */
+async function checkFit(surface: Locator, scale: number, where: string): Promise<Awaited<ReturnType<typeof grabberFit>>> {
+  const fit = await grabberFit(surface);
+  const say = `${where}: ${JSON.stringify(fit)}`;
+  assert.ok(Math.abs(fit.pill.width - 36 * scale) < 0.6 && Math.abs(fit.pill.height - 4 * scale) < 0.6, `the pill's size, ${say}`);
+  assert.ok(Math.abs((fit.pill.left + fit.pill.right) / 2 - (fit.surface.left + fit.surface.right) / 2) < 1, `the pill is off center, ${say}`);
+  assert.ok(fit.pill.top >= fit.area.top - 0.5 && fit.pill.top >= fit.surface.top, `the pill pokes out of its header, ${say}`);
+  assert.ok(fit.pill.bottom <= fit.firstLine + 0.5, `the pill reaches the header's buttons, title or text, ${say}`);
+  assert.ok(fit.same, `the pill moves the header's title or buttons, ${say}`);
+  assert.equal(fit.hit, "area", `a touch on the pill does not reach the header under it, ${say}`);
+  return fit;
+}
+
+/** A label, pin or light pane as a sheet: one pill, its close where it was before the pill (1 px border, 4 px padding, 2 px over a 44 px button), and closed by a tap on its close. */
+async function checkPane(pane: Locator, scale: number, where: string, shot: string): Promise<void> {
+  await steadyRect(pane);
+  await expectGrabbers(dm, [(await pane.getAttribute("aria-label")) ?? ""], where);
+  const fit = await checkFit(pane, scale, where);
+  assert.ok(fit.close && Math.abs(fit.close.top - fit.surface.top - 7 * scale) < 0.6, `${where}: its close moved: ${JSON.stringify(fit)}`);
+  await shots.take(dm, shot);
+  await touchTap(dmCdp, dm, await middleOf(pane.getByRole("button", { name: /^Close/ }).first()));
+  assert.equal(await settled(pane), "gone", `${where}: a tap on its close did not close it`);
+}
+
+/**
+ * A screenshot with the browser asking for a dark scheme and one asking
+ * for light. The app draws one dark theme (a light theme is a later item,
+ * docs/features.md), so the two match: the light one shows that a light
+ * preference changes nothing.
+ */
+async function shotsInBothSchemes(page: Page, name: string): Promise<void> {
+  try {
+    await page.emulateMedia({ colorScheme: "dark" });
+    await shots.take(page, name);
+    await page.emulateMedia({ colorScheme: "light" });
+    await shots.take(page, `${name}-light-scheme`);
+  } finally {
+    await page.emulateMedia({ colorScheme: null });
+  }
 }
