@@ -478,7 +478,7 @@ Two findings from the post-wave-5 review. The project owner confirmed their reco
 
 ### 3.4 Map tools
 
-On a short screen held sideways the options of a tool that runs past one row stand in a rail on the left of the map instead of the bar at the foot: docs/design-v1-layout-hierarchy.md section 3.
+A tool's options are one row, with what does not fit behind ⋯, and on a short screen held sideways they stand in the toolbar's own row: docs/design-v1-tool-options.md, which replaced the rail of docs/design-v1-layout-hierarchy.md section 3.
 
 | Tool | Before | After | Files |
 |---|---|---|---|

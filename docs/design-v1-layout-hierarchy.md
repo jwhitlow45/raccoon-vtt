@@ -75,6 +75,8 @@ So the DM has no way to see a handout larger than 96 px, and nobody can make the
 
 ## 3. Tool options in a rail on short sideways screens
 
+Replaced by docs/design-v1-tool-options.md, which puts every tool's options in one row: in the toolbar's own row on a short sideways screen, so the map keeps its whole height without a rail. This section stays as the record of what the rail did.
+
 ### 3.1 When
 
 `optionsPlace` in a new `client/pages/optionsPlace.ts` gives "rail" or "foot" for the active tool, in two steps.
@@ -565,7 +567,7 @@ Checked before commit, and again after the design review's round 1. Each state a
 In "Phones, tablets and connection":
 
 - "On a phone, panels open as sheets from the bottom, and the toolbar names each tool under its icon. On a screen 900 px or wider, panels are tabs in a side panel." becomes: "On a phone, panels open as sheets from the bottom, and the toolbar names each tool under its icon, as it does on any touch screen. On a screen 900 px or wider, panels are tabs in a side panel. Hide panels at the end of its tabs, or the S key, hides it, and Panels in the toolbar brings it back. This device remembers the choice. A short screen, such as a large phone held sideways, starts with it hidden, and shows its tabs in one row that scrolls. On a phone held sideways, Hide in a panel's header tucks the panel away with its place kept, and Panels brings it back. Where the screen is too short for a panel beside the map, it opens over the whole screen, with the token's actions and the fight's alerts as buttons in its header."
-- New, after it: "On a short screen held sideways, such as a phone, a tool whose options take more than one row opens them in a column on the left of the map that scrolls, so the map keeps its height. Select several, Ping, Pin and Add token keep their one-row bar at the bottom, unless the screen is too narrow for it to stay one row."
+- New, after it: "On a short screen held sideways, such as a phone, a tool whose options take more than one row opens them in a column on the left of the map that scrolls, so the map keeps its height. Select several, Ping, Pin and Add token keep their one-row bar at the bottom, unless the screen is too narrow for it to stay one row." docs/design-v1-tool-options.md section 16 has since replaced this line with the one-row options.
 - New, after that: "Panels are listed with the ones used in play first. A DM's phone list groups them under In play and Prepare."
 
 Elsewhere:
