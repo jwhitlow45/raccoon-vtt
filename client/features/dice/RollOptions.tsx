@@ -221,15 +221,20 @@ function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creature: Ac
           ) : null}
         </>
       ) : null}
-      {rolls.multiattack !== null || named.length > 0 ? (
-        <div role="group" aria-label="Actions" style={{ display: "grid", gap: theme.space(2) }}>
-          <GroupLabel>Actions</GroupLabel>
-          {rolls.multiattack !== null ? <Note>Multiattack. {rolls.multiattack}</Note> : null}
-          {named.map((r) => (
-            <NamedRow key={r.key} ctx={ctx} named={r} />
-          ))}
-        </div>
-      ) : null}
+      {ACTION_SECTIONS.map(([section, title]) => {
+        const these = named.filter((r) => r.section === section);
+        const multiattack = section === "actions" ? rolls.multiattack : null;
+        if (these.length === 0 && multiattack === null) return null;
+        return (
+          <div key={section} role="group" aria-label={title} style={{ display: "grid", gap: theme.space(2) }}>
+            <GroupLabel>{title}</GroupLabel>
+            {multiattack !== null ? <Note>Multiattack. {multiattack}</Note> : null}
+            {these.map((r) => (
+              <NamedRow key={r.key} ctx={ctx} named={r} />
+            ))}
+          </div>
+        );
+      })}
       {numbers?.spellAttack !== undefined || numbers?.spellDc !== undefined || spells.length > 0 ? (
         <div role="group" aria-label="Spells" style={{ display: "grid", gap: theme.space(2) }}>
           <GroupLabel>Spells</GroupLabel>
@@ -247,6 +252,19 @@ function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creature: Ac
     </section>
   );
 }
+
+/**
+ * A block's named rolls under the heading of the section they come from, so
+ * a dragon's legendary Fiery Rays never reads as an action of its own turn
+ * (W7B-P-14). Spells have their own group below.
+ */
+const ACTION_SECTIONS: readonly (readonly [Exclude<NamedRoll["section"], "spells">, string])[] = [
+  ["traits", "Traits"],
+  ["actions", "Actions"],
+  ["bonusActions", "Bonus actions"],
+  ["reactions", "Reactions"],
+  ["legendaryActions", "Legendary actions"],
+];
 
 function GroupLabel(props: { children: ReactNode }) {
   return <div style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>{props.children}</div>;
