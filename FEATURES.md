@@ -9,7 +9,7 @@ This page lists what RaccoonVTT does today, grouped by area. "The DM" means anyo
 ## Secrets stay secret
 
 - The DM sees everything. Hidden things show translucent or dimmed to the DM.
-- Players' devices never receive what players may not see: hidden tokens, monsters and map labels under the fog, hidden stamps, lights, DM notes, monster stats, the DM's fog edits before they are published, the map's other phases, scene folders and thumbnails, DM-only journal pages, secrets not yet revealed, and creatures out of the party's sight. So even a reload or the browser's developer tools cannot show them.
+- Players' devices never receive what players may not see: hidden tokens, monsters and map labels under the fog, hidden stamps, lights, DM notes, monster stats, other players' companion stat blocks, the DM's fog edits before they are published, the map's other phases, scene folders and thumbnails, DM-only journal pages, secrets not yet revealed, and creatures out of the party's sight. So even a reload or the browser's developer tools cannot show them.
 - The log never tells players what happened to a creature while they could not see it, even after it is revealed.
 - The map image itself reaches players whole, and each player's device draws the fog over it. A group has to trust its players with that.
 
@@ -249,6 +249,11 @@ The Builder tool is the DM's. Its modes:
 - A companion is a token that belongs to a character: a creature such as a familiar or a summoned spirit, or an effect with no HP such as Spiritual Weapon. Whoever plays the character controls it: moves it, changes its HP, conditions and stats, renames it and dismisses it.
 - Each companion takes its own turn with its own initiative, acts on its character's turn listed under it in the order, or acts on its character's turn and stays out of the order. Only a creature takes its own turn. A new creature starts listed under its character and a new effect out of the order, unless its maker picks another turn.
 - A player adds a companion from their character in the Characters panel. It goes right next to the character's token, up to 10 per character on a scene, and the DM's log says so. The DM can make any token a companion in its panel.
+- A creature companion can have a full stat block: an SRD 5.2.1 creature, such as an owl for Find Familiar or a wolf, text pasted from a book with "Paste a stat block", or one typed in the editor. Its players and the DM read it in its panel, and its action bar shows its saves, resistances and immunities. Other players see its token, name and HP as before.
+- A character keeps up to 100 stat blocks for its companions, so a familiar summoned again starts from the same block. Its players and the DM add, edit and delete them from the character's card. "Add a companion" can start from one, which fills in the form.
+- Attaching a block can set the companion's AC, max HP (the block's average, a typed number, or the maximum it has), speed, size, senses, passive Perception and initiative. An unhurt companion stays at full HP, and a hurt, dying or dead one stays so. Conditions, effects and temporary HP stay.
+- A block's size goes through the same resize as any token's: a companion its player grows near a wall grows into the space around it, still covering where it stood, and moves just enough to stand where a move could end, never across the wall, or keeps its size with "No room to grow here", while the block and its other numbers still apply. Ctrl+Z right after attaching takes back the size change alone, and the block and its numbers stay. Detach takes the block off.
+- A summon cast at a higher level takes its AC and HP as you type them when you add it.
 - A companion listed under its character keeps its own Reaction and Ready action in the order.
 - A companion's token panel says whose it is ("Companion of Bree"), as its own row in the order does.
 - Other players see a party member's companions, under the character in the order, with HP as "Players see the party's HP" allows. A creature companion lends the party its sight, an effect does not.
@@ -283,7 +288,7 @@ The DM asks players for a saving throw or an ability check, and each player type
 - Filters like D&D Beyond's: challenge rating, creature type, legendary, lair, size, condition and damage immunities, resistances, vulnerabilities, movement, senses and alignment. Or type it in the search: "cr 5", "cr 1-5", "cr 1/2-3", "cr 10-".
 - Custom monsters: the DM enters a full stat block from a book the group owns, or uses "Paste a stat block" to read pasted text into the editor. They stay in that room only.
 - Full stat blocks on tokens: a monster or NPC token's panel has its stat block right under its image for the DM, with abilities, saves, skills, senses, languages, CR, traits, actions, bonus actions, reactions and legendary actions, and folds. "Stat block" in the token's action bar or a tracker row's options opens it. Edit opens a room monster in the editor, and an SRD monster offers "Copy to this room's monsters and edit". "Attach a stat block" links a token that has none, and Detach unlinks it.
-- A player whose token is an SRD monster, such as a druid's Wild Shape, can read its SRD block. A room monster's block never reaches players.
+- A player whose token is an SRD monster, such as a druid's Wild Shape, can read its SRD block, and a companion's players read its block. A room monster's block never reaches players, a companion's included.
 
 ## DM tools
 

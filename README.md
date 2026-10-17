@@ -471,6 +471,20 @@ across the update, table displays included. Until it reloads, an old page
 shows only the first page of a handout of several pages, and an old DM page
 cannot upload a PDF.
 
+The update that adds companion stat blocks
+(docs/design-v1-companion-stat-blocks.md) saves rooms at snapshot version 10
+and stores changes at op version 6, which the builds before it cannot read:
+they answer "Something went wrong" for every room. Going back is the same
+restore: check out the commit you ran before (`git log` lists it), rebuild
+with `docker compose -f docker-compose.server.yml up -d --build`, then follow
+Restore under Backups with the backup taken just before the update. Every
+room loses what changed after that backup. Reload every page left open
+across the update, table displays included. Until it reloads, an old page
+fails on the first change to a companion's stat block it receives, and DM
+pages and the pages of that companion's players receive them. A DM's room
+snapshot can now be up to 6 MiB, 3 MiB more than before for the stat blocks,
+so a DM's page may take a few seconds longer to load a room that holds many.
+
 Compose rebuilds the image and replaces only the containers that changed. On
 the way down the app closes every WebSocket with code 1012, finishes each
 room's current write and saves a snapshot, so phones reconnect on their own
