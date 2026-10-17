@@ -27,7 +27,8 @@ const PAD_X = "var(--pane-pad-x, 0px)";
 /** The sticky line's height (Appendix C). */
 export const LAST_LINE_PX = 40;
 
-const QUICK_DICE = [4, 6, 8, 10, 12, 20, 100] as const;
+// The d20 leads, as the die rolled most: at 130% on a phone the strip scrolls after d10, and at 100% after d12.
+const QUICK_DICE = [20, 4, 6, 8, 10, 12, 100] as const;
 
 /**
  * The newest panel roll, from the first roll on: "Rolling..." while it

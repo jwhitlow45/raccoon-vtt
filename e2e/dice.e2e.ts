@@ -225,14 +225,14 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     assert.equal((third.rolls[0] as DiceRoll).faces.length, 1);
   });
 
-  test("6. at 375 x 667, at 100% and 130%, the sticky line, the field, Roll, the quick dice and the choices are in view", async () => {
+  test("6. at 375 x 667, at 100% and 130%, the sticky line, the field, Roll, the quick dice with the d20 first and the choices are in view", async () => {
     for (const scale of [1, 1.3]) {
       await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
       await player.goto(`${server.origin}/r/${run.roomId}`);
       await player.getByRole("status", { name: "Connected" }).first().waitFor();
       await openDicePhone(player);
       await rollWithEnter(player, playerSocket, "1d20+3");
-      for (const selector of ["[data-dice-last]", 'input[aria-label="Dice formula"]', 'button:has-text("Roll")', '[aria-label="Quick dice"]', '[role="group"][aria-label="For the next roll"]']) {
+      for (const selector of ["[data-dice-last]", 'input[aria-label="Dice formula"]', 'button:has-text("Roll")', '[aria-label="Quick dice"]', 'button[aria-label="Add a d20"]', '[role="group"][aria-label="For the next roll"]']) {
         assert.ok(await inView(player, selector), `${selector} in view at ${Math.round(scale * 100)}%`);
       }
       await shots.take(player, `dice-phone-${Math.round(scale * 100)}`);

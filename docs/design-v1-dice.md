@@ -494,12 +494,12 @@ Worked from the sheet's cap and the rows' sizes, not yet measured in a browser: 
 
 | Screen, size | Body (layout px) | Content width | Quick dice | Options in view at rest |
 | --- | --- | --- | --- | --- |
-| 375 x 667, 100% | 344 | 343 | one row, 332 | 164 px, their heading and two rows of buttons |
-| 375 x 667, 130% | 252 | 256 | scrolls sideways | 72 px, their heading and one row |
+| 375 x 667, 100% | 344 | 343 | d20 to d12, then d100 sideways | 164 px, their heading and two rows of buttons |
+| 375 x 667, 130% | 252 | 256 | d20 to d10, then sideways | 72 px, their heading and one row |
 | 390 x 844, 100% | 450 | 358 | one row | 270 px |
 | 390 x 844, 130% | 334 | 268 | scrolls sideways | 154 px |
 
-The chips row (Adv, Dis, Secret) is about 190 px, one row at every size here. Opened for a creature, the options move up under the sticky line, so all of the body below it, 208 px at 375 x 667 at 130%, shows them.
+The quick dice lead with the d20, the die rolled most, so it is in view at every size (build round 1 measured d20 and d100 behind the strip's scroll at 375 x 667 at 130%, in the old order). The chips row (Adv, Dis, Secret) is about 190 px, one row at every size here. Opened for a creature, the options move up under the sticky line, so all of the body below it, 208 px at 375 x 667 at 130%, shows them.
 
 ## Appendix D. Worked examples
 
