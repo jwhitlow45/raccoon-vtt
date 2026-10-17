@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, dragWorld, openSideTab, OpSocket, pagePoint, pickOption, pickTool, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragWorld, openSideTab, OpSocket, pagePoint, pickOption, pickTool, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { A5, LETTER, LETTER_WIDE, pdfOf } from "./pdfFixture.ts";
 
 /**
@@ -23,9 +23,10 @@ import { A5, LETTER, LETTER_WIDE, pdfOf } from "./pdfFixture.ts";
  * Every dialog is the one shell of docs/design-v1-visual.md 2.3, and the
  * run checks its structure in each (checkShell): the request a roll and
  * image dialogs, the editors, the scene sheet, the monster filters, the
- * stamp picker and stamp sheet, the shortcut sheet, a player's handout
- * of one image and of three pages, and the X-card, whose card has no title
- * row. Every button and tab in each is at least a 44 px target in the
+ * stamp picker and stamp sheet, the shortcut sheet, a companion's stat
+ * block picker and its numbers step, the editor for a character's stat
+ * block, a player's handout of one image and of three pages, and the
+ * X-card, whose card has no title row. Every button and tab in each is at least a 44 px target in the
  * dialog's own pixels.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus five. The
@@ -66,6 +67,8 @@ const run = {
   sceneName: "",
   goblin: { id: randomUUID(), x: 0, y: 0 },
   orc: { id: randomUUID(), x: 0, y: 0 },
+  /** Thorn's companion, whose panel offers the picker with its numbers step. */
+  pip: { id: randomUUID(), x: 0, y: 0 },
   /** A stamp's cell, clear of the tokens, so a tap there selects the stamp. */
   stamp: { id: randomUUID(), x: 0, y: 0 },
   handoutImage: "",
@@ -382,10 +385,12 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
     await ops.send(token(randomUUID(), { kind: "pc", name: "Thorn", x: cx - 1, y: cy - 3, disposition: "ally", actor: { ref: characterId } }));
     await ops.send(token(run.goblin.id, { kind: "monster", name: "Goblin", x: run.goblin.x, y: run.goblin.y, disposition: "hostile", actor: { inline: actor() } }));
     await ops.send(token(run.orc.id, { kind: "monster", name: "Orc", x: run.orc.x, y: run.orc.y, disposition: "hostile", actor: { inline: actor() } }));
+    run.pip = { ...run.pip, x: cx + 2, y: cy - 3 };
+    await ops.send(token(run.pip.id, { kind: "npc", name: "Pip", size: "small", x: run.pip.x, y: run.pip.y, disposition: "ally", companion: { of: characterId, turn: "shared" }, actor: { inline: actor() } }));
     run.stamp = { ...run.stamp, x: cx, y: cy + 3 };
     const stamp = { id: run.stamp.id, art: { key: "barrel" }, x: run.stamp.x + 0.5, y: run.stamp.y + 0.5, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" };
     await ops.send({ t: "build.stamps", sceneId: run.sceneId, put: [stamp] });
-    await waitFor("the monsters and the stamp in the DM's view", () => (socket.state?.tokens[run.goblin.id] && socket.state?.tokens[run.orc.id] && socket.state?.stamps[run.stamp.id]) || null);
+    await waitFor("the monsters, the companion and the stamp in the DM's view", () => (socket.state?.tokens[run.goblin.id] && socket.state?.tokens[run.orc.id] && socket.state?.tokens[run.pip.id] && socket.state?.stamps[run.stamp.id]) || null);
   });
 
   for (const size of SIZES.filter((s) => process.env.SIZE_ONLY === undefined || s.name === process.env.SIZE_ONLY)) {
@@ -495,6 +500,38 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         const attach = page.getByRole("dialog", { name: "Attach a stat block" });
         await checkDialog(attach, `${label}, Attach a stat block`, null);
         await closeDialog(attach);
+
+        // Modal: a companion's Attach a stat block, which offers Thorn's own blocks, through to its numbers step.
+        await closeSheet(phone);
+        await page.keyboard.press("Escape");
+        await clickToken(run.pip);
+        if (phone) await page.getByRole("button", { name: "Details" }).click();
+        else await page.getByRole("tab", { name: "Token" }).click();
+        await page.getByRole("button", { name: "Attach a stat block" }).click();
+        const lists = page.getByRole("dialog", { name: "Attach a stat block" });
+        await lists.getByRole("button", { name: "Paste a stat block" }).waitFor();
+        await checkDialog(lists, `${label}, a companion's Attach a stat block`, null);
+        await lists.getByRole("searchbox", { name: "Search monsters" }).fill("wolf");
+        await lists.getByRole("button", { name: /^Wolf\b/ }).first().click();
+        const numbers = page.getByRole("dialog", { name: "Attach Wolf" });
+        await checkDialog(numbers, `${label}, Attach Wolf`, { name: "Attach", in: "footer" });
+        await shoot("attach-numbers");
+        await closeDialog(numbers);
+
+        // Modal: the editor for a character's stat block, from Thorn's stat blocks page.
+        await closeSheet(phone);
+        await openPanel("Characters", phone);
+        const blocks = page.getByRole("button", { name: /^Stat blocks \(\d+\)$/ });
+        // A DM's list of characters starts folded. On a computer the party bar above it holds a Thorn too.
+        const characters = phone ? page : page.getByRole("tabpanel", { name: sideTabName("Characters") });
+        if (!(await blocks.first().isVisible())) await characters.getByRole("button", { name: /^Thorn/ }).first().click();
+        await blocks.first().click();
+        await page.getByRole("button", { name: "New stat block" }).click();
+        const blockEditor = page.getByRole("dialog", { name: "New stat block for Thorn" });
+        await checkDialog(blockEditor, `${label}, New stat block for Thorn`, { name: "Save", in: "footer" });
+        await shoot("companion-block-editor");
+        await closeDialog(blockEditor);
+        await page.getByRole("button", { name: "Done", exact: true }).click();
 
         // SheetDialog: More, for the goblin and the orc together, picked with a Shift box over both.
         await closeSheet(phone);
