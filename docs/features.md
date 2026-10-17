@@ -268,6 +268,8 @@ Tiers:
   - They count down with the initiative tracker.
   - Everyone is notified when one expires.
 - Concentration prompt when a concentrating creature takes damage. It shows the DC (the higher of 10 and half the damage, capped at 30), and the player reports pass or fail.
+  - Built in v1 wave 7 (docs/design-v1-roll-options.md 6): the prompt also rolls the save on the server, with the creature's conditions counted.
+- A condition that a save at the end of each of the creature's turns ends, such as Hold Person's Paralyzed (v1 wave 7, docs/design-v1-roll-options.md 6.1). Each turn end puts a reminder in the DM's fight alerts, which rolls the save or asks the creature's player. A pass ends the condition. Players see which save ends it, never its DC.
 - A condition can be hidden from players, the creature's owner included. The log keeps it hidden too.
   - Only the DM hides one or shows it again. The DM's chips and lists show it dimmed with a dashed edge, and the DM's log marks its lines.
   - To its owner a hidden condition is not there: removing or changing it is refused as if it were missing.
@@ -343,6 +345,7 @@ Tiers:
   - Objects the area catches (a door, a cart) are listed too, after the creatures, since a fireball can burn them, but they are skipped until the DM marks one. "All fail" and "All pass" mark only the creatures.
   - Only the DM applies it, so no player ever sees a list with a hidden creature in it. A caster's player proposing it for the DM to confirm is not built.
   - It goes through the usual HP rules, so temporary HP is spent first and concentration checks follow. One undo takes it all back.
+  - Since v1 wave 7 (docs/design-v1-roll-options.md 5) the area's button is "Save and damage" and opens the group save: the area's spell and caster fill the save, DC and damage, the monsters roll on the server, players' creatures are asked, damage rolls once and keeps its types, and resistances, immunities, Evasion, conditions on a fail and Legendary Resistance apply per creature in one step.
 - Reminders for areas that hit creatures as they enter or end a turn inside, for example "Goblin 2 ended its turn in Spirit Guardians".
   - Built in v1 wave 2. Each area has its own reminders: when a creature enters it, starts its turn in it, or ends its turn in it. They are in the area tool's More options.
   - A spell preset turns them on where SRD 5.2.1 says the spell hits again: Spirit Guardians, Moonbeam and Cloudkill on entering and at the end of a turn, Web on entering and at the start, Stinking Cloud at the start, and others.
@@ -370,6 +373,7 @@ Tiers:
     - Each roll is a d20 plus the creature's initiative modifier, with advantage or disadvantage from its reminder. By default it rolls only monsters still waiting for a value, and a switch re-rolls them all. A row's options can roll one monster on its own.
     - The DM sees each roll's dice until dismissing them. Players see each visible monster's total, as if the DM typed it, never the dice or modifiers, and never a hidden monster's row.
     - The DM's last choice is remembered for the room on that device.
+    - Since v1 wave 7 (docs/design-v1-roll-options.md 7) its dice roll on the server, secret to the DM, and show in the DM's Recent rolls. Only the draw moved: the modes, groups and card are as before.
   - Reminders show who rolls with advantage or disadvantage. In 2024, Invisible gives advantage, and being surprised or Incapacitated gives disadvantage.
 - Optional 2024 initiative score (10 + Dex modifier) for monsters, so no roll is needed.
 - Sorted high to low. Ties are fixed by dragging rows.
@@ -532,6 +536,7 @@ Built in v1 wave 7 (docs/design-v1-dice.md), at the project owner's request of 2
 - The newest roll stays at the top of the panel, and Recent rolls lists the log's rolls, newest first. Others' rolls come as toasts while the panel is closed, which This device can turn off.
 - The server also rolls a request's answer (`roll.dice`) with the creature's bonus or one the player types, keeps the dice on the answer, and makes a rolled answer final for its player. The request card's Roll button comes with docs/design-v1-roll-request.md.
 - Players can still type any total from real dice, as before.
+- Roll options and the group save (v1 wave 7, docs/design-v1-roll-options.md): a creature's saves, checks, skills, initiative, death saves, attacks and save actions from its stat block in the Dice panel, with its conditions' advantage, disadvantage or extra die, and for the DM one save, check, initiative or shared attack for several creatures, and the group save with one Apply and one undo.
 
 ## 15. Characters and monsters
 
