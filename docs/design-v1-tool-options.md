@@ -215,7 +215,7 @@ The row draws its inline slots in display order with 4 px between them, then ⋯
 - a press that began on the row is down: the refit waits for the press to end.
 - the ⋯ popover is open: no slot crosses between the row and ⋯. A slot that goes leaves from wherever it is. A slot that appears joins ⋯ at its place in the display order. ⋯ itself stays, even if nothing waits any more, until the popover closes. Then the row refits once.
 
-**Pins.** The fit never moves two slots out of the row: the one holding focus and the anchor of an open popover. They go inline first (step 2). Where the room cannot hold a pinned slot and ⋯ (a rotation to a much narrower room), the pin breaks: an open popover closes, and focus follows the next rule.
+**Pins.** The fit never moves two slots out of the row: the one holding focus and the anchor of an open popover. Only an inline control's focus pins its slot: focus inside a popover is the popover's, its anchor's own pin holds the chip while it is open, and once focus leaves for ⋯, a popover or anything outside the row, no slot is pinned for it. They go inline first (step 2). Where the room cannot hold a pinned slot and ⋯ (a rotation to a much narrower room), the pin breaks: an open popover closes, and focus follows the next rule.
 
 **Focus never falls to the page.** When the control holding focus leaves the row, whether into ⋯ or because its state ended (Fog's Discard, the builder's polygon Cancel, a stamp's Done), focus moves to the slot now in its place in display order, else the one before it, else ⋯, else the active tool's button. Controls that move focus on purpose keep doing so: Multi-select's Actions to the token bar, a chooser's picker returning to its chooser.
 

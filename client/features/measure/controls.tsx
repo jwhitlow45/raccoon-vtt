@@ -489,7 +489,11 @@ function useFocusKeeper(input: {
     if (!was || was.el.isConnected || !fit) return;
     held.current = null;
     const active = document.activeElement;
-    if (active && active !== document.body) return;
+    if (active && active !== document.body) {
+      // Focus went on by itself: the pin goes with it unless it went to another inline control, which pinned itself.
+      if (inlineSlotOf(input.row.current, active) === null) input.onFocused(null);
+      return;
+    }
     const inline = new Set(fit.row.map((p) => p.id));
     const at = was.order.indexOf(was.id);
     const after = was.order.slice(Math.max(0, at)).find((id) => inline.has(id) && order.includes(id));
@@ -497,16 +501,15 @@ function useFocusKeeper(input: {
     const pick = (id: string | undefined) => (id ? firstControl(input.row.current?.querySelector(`:scope > [data-rvtt-slot="${CSS.escape(id)}"]`) ?? null) : null);
     const target = pick(after) ?? pick(before) ?? (input.moreButton.current?.isConnected ? input.moreButton.current : null) ?? input.toolButton.current?.() ?? null;
     target?.focus({ preventScroll: true });
+    if (target === null || inlineSlotOf(input.row.current, target) === null) input.onFocused(null);
   });
   return {
     onFocus(e: { target: EventTarget }) {
       const el = e.target instanceof HTMLElement ? e.target : null;
-      // Only the row's own inline controls: focus in a popover is the popover's to keep (components/Popover.tsx inPopoverBox).
-      if (!el || inPopoverBox(el)) return;
-      const slot = el.closest<HTMLElement>("[data-rvtt-slot]");
-      if (!slot || slot.parentElement !== input.row.current) return;
-      held.current = { id: slot.dataset.rvttSlot ?? "", el, order };
-      input.onFocused(held.current.id);
+      const id = inlineSlotOf(input.row.current, el);
+      if (el === null || id === null) return;
+      held.current = { id, el, order };
+      input.onFocused(id);
     },
     onBlur(e: { target: EventTarget }) {
       const el = e.target;
@@ -514,10 +517,23 @@ function useFocusKeeper(input: {
       queueMicrotask(() => {
         if (held.current?.el !== el || !held.current.el.isConnected || document.activeElement === el) return;
         held.current = null;
-        if (!input.row.current?.contains(document.activeElement)) input.onFocused(null);
+        // Into the chip's own popover, to ⋯ or out of the row: no inline control holds focus, so nothing is pinned. An open popover's anchor keeps its own pin.
+        if (inlineSlotOf(input.row.current, document.activeElement) === null) input.onFocused(null);
       });
     },
   };
+}
+
+/**
+ * The slot whose inline control `el` is, in this strip's own row, or
+ * null. The pin follows only these (6.4): focus in a popover is the
+ * popover's to keep (components/Popover.tsx inPopoverBox), and ⋯ is no
+ * slot.
+ */
+function inlineSlotOf(row: HTMLElement | null, el: Element | null): string | null {
+  if (row === null || !(el instanceof HTMLElement) || inPopoverBox(el)) return null;
+  const slot = el.closest<HTMLElement>("[data-rvtt-slot]");
+  return slot !== null && slot.parentElement === row ? (slot.dataset.rvttSlot ?? null) : null;
 }
 
 function firstControl(root: Element | null): HTMLElement | null {

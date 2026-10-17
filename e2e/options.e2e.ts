@@ -1512,6 +1512,30 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await key(dm, "v");
   });
 
+  test("8c. focus that leaves a chip through its popover leaves no pin, so a narrower row fits as if it never held focus", async () => {
+    await reloadAt(dm, 1.3);
+    const inlineIds = () => options(dm).locator("[data-options-row] > [data-rvtt-slot]").evaluateAll((els) => els.map((e) => e.getAttribute("data-rvtt-slot")));
+    // The DM's Ruler at 320 x 568 at 130% (230 px) with no focus in the row: Shared and Keep inline, the rest behind ⋯.
+    await view(dm, dmCdp, SIZES[0]!);
+    await selectTool(dm, "r");
+    await dm.waitForTimeout(300);
+    const unpinned = await inlineIds();
+    // Wider, the kept rulers' chip stands inline: open it by key, then leave straight to a control outside the options.
+    await view(dm, dmCdp, DESK);
+    const chip = options(dm).getByRole("button", { name: /^Kept rulers/ });
+    await chip.focus();
+    await dm.keyboard.press("Enter");
+    const kept = dm.getByRole("dialog", { name: "Kept rulers" });
+    await kept.waitFor();
+    await dm.getByRole("button", { name: "Fit the map to the screen" }).focus();
+    await kept.waitFor({ state: "detached" });
+    await view(dm, dmCdp, SIZES[0]!);
+    await dm.waitForTimeout(300);
+    assert.deepEqual(await inlineIds(), unpinned, "the chip it left is not pinned, so nothing of higher priority waits for it");
+    await key(dm, "v");
+    await reloadAt(dm, 1);
+  });
+
   test("9. nothing went wrong in the browsers", () => {
     for (const c of consoles) assert.deepEqual(c.errors, [], `${c.label}: console errors`);
   });
