@@ -41,9 +41,9 @@ export type AreaToolState = {
    */
   saved: SavedChoice;
   /**
-   * The placed area whose damage the DM is entering in the Areas panel
-   * (AreaDamage.tsx). It outlives the tool, since the panel opens with
-   * any tool.
+   * The placed area whose save and damage the DM asked for, which the
+   * Areas panel starts as a group save (AreaSaveStart.tsx). It outlives the
+   * tool, since the panel opens with any tool.
    */
   damageId: string | null;
 };
@@ -262,7 +262,7 @@ export function deleteTemplate(env: AreaEnv, id: string): void {
 }
 
 /**
- * Opens the Areas panel on the damage form for a placed area (DM only).
+ * Opens the Areas panel on a placed area's group save (DM only, docs/design-v1-roll-options.md 5.6).
  * `from` is the panel the press was in, the Areas panel's own list, so
  * with two panels its page opens where the panel is (docs/design-v1-split-panel.md 5.1).
  */

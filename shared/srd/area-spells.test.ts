@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { parseFormula } from "../dice/formula.ts";
 import type { AreaShape } from "../model.ts";
+import { DAMAGE_TYPES } from "../rules/damage.ts";
 import { AREA_SPELLS, type AreaSpell } from "./area-spells.ts";
 
 const SHAPES: readonly AreaShape[] = ["sphere", "cylinder", "cone", "cube", "line", "emanation"];
@@ -120,5 +122,26 @@ describe("area spells", () => {
     for (const name of ["Wall of Fire", "Light", "Magic Missile", "Major Image", "Alarm"]) {
       assert.equal(AREA_SPELLS.find((s) => s.name === name), undefined, name);
     }
+  });
+
+  test("every preset's save and damage reads (docs/design-v1-roll-options.md 5.6): each part parses, with its type and its dice per slot", () => {
+    for (const s of AREA_SPELLS) {
+      for (const part of s.damage ?? []) {
+        assert.ok(parseFormula(part.formula).ok, `${s.name}: ${part.formula}`);
+        assert.ok((DAMAGE_TYPES as readonly string[]).includes(part.type), `${s.name}: ${part.type}`);
+        if (part.perSlot) assert.ok(parseFormula(part.perSlot).ok, `${s.name}: ${part.perSlot}`);
+      }
+      if (s.save) assert.ok(s.onPass === "half" || s.onPass === "none", s.name);
+      assert.ok(!(s.save && s.noSave), `${s.name}: a save and no save`);
+    }
+    assert.deepEqual(spell("Flame Strike").damage, [
+      { formula: "5d6", type: "fire", perSlot: "1d6" },
+      { formula: "5d6", type: "radiant", perSlot: "1d6" },
+    ]);
+    assert.deepEqual([spell("Fireball").save, spell("Fireball").onPass], ["dex", "half"]);
+    assert.equal(spell("Spike Growth").noSave, true, "everyone takes it");
+    assert.deepEqual(spell("Hypnotic Pattern").conditions, ["charmed", "incapacitated"]);
+    assert.equal(spell("Acid Splash").cantrip, true);
+    assert.deepEqual(spell("Sleep").lasts, { at: "end", of: "target" });
   });
 });

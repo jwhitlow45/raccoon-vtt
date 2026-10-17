@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import { CONDITION_KEYS, STATUS_KEYS, type AreaShape, type AreaTrigger, type ConditionKey, type StatusKey } from "../shared/model.ts";
+import { CONDITION_KEYS, STATUS_KEYS, type AbilityKey, type AreaShape, type AreaTrigger, type ConditionKey, type StatusKey } from "../shared/model.ts";
+import type { DamageType } from "../shared/rules/damage.ts";
 import type { AreaSpell } from "../shared/srd/area-spells.ts";
 import type { SrdMonster } from "../shared/srd/monsters.ts";
 import { srdRollsOf } from "../shared/srd/rolls.ts";
@@ -411,8 +412,51 @@ type AreaReview =
       target?: string;
       /** That target is not one of the creatures the spell hits, so the area leaves it out. */
       catchesTarget?: false;
+      /** What it does to the creatures it catches, for the group save (docs/design-v1-roll-options.md 5.6), each checked against the text (outcomeProblems). */
+      outcome?: AreaOutcome;
     }
   | { skip: string };
+
+type AreaOutcome = {
+  /** The save it forces, null for none: everyone takes it (Spike Growth). */
+  save: AbilityKey | null;
+  onPass?: "half";
+  damage?: { formula: string; type: DamageType; perSlot?: string }[];
+  /** A cantrip's dice grow at character levels 5, 11 and 17 ("Cantrip Upgrade"). */
+  cantrip?: true;
+  conditions?: ConditionKey[];
+  lasts?: { at: "start" | "end"; of: "target" | "self" };
+  saveEnds?: true;
+};
+
+const ABILITY_WORD: Record<AbilityKey, string> = { str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma" };
+
+/**
+ * What a spell's text must say for each part of its reviewed outcome, so a
+ * hand-read save, damage or condition cannot drift from the spell: its
+ * save's ability, "half as much damage" for half, each damage's dice and
+ * type, each slot's added dice, each condition by name, "Cantrip Upgrade",
+ * the turn its condition lasts until, and a save at the end of each turn.
+ */
+function outcomeProblems(name: string, flat: string, o: AreaOutcome): string[] {
+  const out: string[] = [];
+  const says = (re: RegExp, what: string) => {
+    if (!re.test(flat)) out.push(`${name}: review says ${what}, but its text does not`);
+  };
+  if (o.save) says(new RegExp(`${ABILITY_WORD[o.save]} saving throw`, "i"), `a ${o.save} save`);
+  if (o.onPass === "half") says(/half (as much|the initial) damage/i, "half on a pass");
+  // Only the reviewed damage counts: Earthquake halves a collapse's damage, which is not its save's.
+  else if (o.save && o.damage && /half (as much|the initial) damage/i.test(flat)) out.push(`${name}: its text halves the damage on a pass, but the review does not`);
+  for (const part of o.damage ?? []) {
+    says(new RegExp(`\\b${part.formula} ${part.type} damage`, "i"), `${part.formula} ${part.type}`);
+    if (part.perSlot) says(new RegExp(`increases? by ${part.perSlot} for each spell slot level above`, "i"), `${part.perSlot} more per slot`);
+  }
+  for (const key of o.conditions ?? []) says(new RegExp(`\\b${key}\\b[^.]*\\bconditions?\\b|\\bconditions?\\b[^.]*\\b${key}\\b|the ${key} condition`, "i"), `the ${key} condition`);
+  if (o.cantrip) says(/Cantrip Upgrade/, "a cantrip upgrade");
+  if (o.lasts) says(new RegExp(`until the ${o.lasts.at} of ${o.lasts.of === "self" ? "your" : "its"} next turn`, "i"), `until the ${o.lasts.at} of ${o.lasts.of === "self" ? "your" : "its"} next turn`);
+  if (o.saveEnds) says(/at the end of each of its turns/i, "a save at the end of each of its turns");
+  return out;
+}
 
 /**
  * What a spell's text must say for each trigger its review lists, so a
@@ -440,26 +484,39 @@ const ONCE_PER_TURN_TEXT = /\bonly once per turn\b/;
  * the distance of an emanation.
  */
 const AREA_REVIEW: Record<string, AreaReview> = {
-  "Acid Splash": { shape: "sphere", size: 5 },
+  "Acid Splash": { shape: "sphere", size: 5, outcome: { save: "dex", damage: [{ formula: "1d6", type: "acid" }], cantrip: true } },
   Alarm: { skip: "the largest area it can ward" },
   "Antilife Shell": { shape: "emanation", size: 10, attached: true },
   "Antimagic Field": { shape: "emanation", size: 10, attached: true },
   "Aura of Life": { shape: "emanation", size: 30, attached: true },
-  "Black Tentacles": { shape: "cube", size: 20, manual: true, note: "A 20-foot square on the ground.", triggers: ["enter", "turnEnd"] },
-  "Burning Hands": { shape: "cone", size: 15 },
+  "Black Tentacles": {
+    shape: "cube",
+    size: 20,
+    manual: true,
+    note: "A 20-foot square on the ground.",
+    triggers: ["enter", "turnEnd"],
+    outcome: { save: "str", damage: [{ formula: "3d6", type: "bludgeoning" }], conditions: ["restrained"] },
+  },
+  "Burning Hands": { shape: "cone", size: 15, outcome: { save: "dex", onPass: "half", damage: [{ formula: "3d6", type: "fire", perSlot: "1d6" }] } },
   "Call Lightning": {
     shape: "sphere",
     size: 5,
     manual: true,
     note: "Each bolt hits creatures within 5 feet of a point under the storm cloud, a 60-foot-radius Cylinder 10 feet tall.",
+    outcome: { save: "dex", onPass: "half", damage: [{ formula: "3d10", type: "lightning", perSlot: "1d10" }] },
   },
-  "Calm Emotions": { shape: "sphere", size: 20 },
-  "Circle of Death": { shape: "sphere", size: 60 },
-  Cloudkill: { shape: "sphere", size: 20, triggers: ["enter", "turnEnd"] },
-  "Color Spray": { shape: "cone", size: 15 },
+  "Calm Emotions": { shape: "sphere", size: 20, outcome: { save: "cha" } },
+  "Circle of Death": { shape: "sphere", size: 60, outcome: { save: "con", onPass: "half", damage: [{ formula: "8d8", type: "necrotic", perSlot: "2d8" }] } },
+  Cloudkill: {
+    shape: "sphere",
+    size: 20,
+    triggers: ["enter", "turnEnd"],
+    outcome: { save: "con", onPass: "half", damage: [{ formula: "5d8", type: "poison", perSlot: "1d8" }] },
+  },
+  "Color Spray": { shape: "cone", size: 15, outcome: { save: "con", conditions: ["blinded"], lasts: { at: "end", of: "self" } } },
   "Commune with Nature": { skip: "knowledge of the surroundings" },
-  "Cone of Cold": { shape: "cone", size: 60 },
-  Confusion: { shape: "sphere", size: 10 },
+  "Cone of Cold": { shape: "cone", size: 60, outcome: { save: "con", onPass: "half", damage: [{ formula: "8d8", type: "cold", perSlot: "1d8" }] } },
+  Confusion: { shape: "sphere", size: 10, outcome: { save: "wis" } },
   "Conjure Animals": {
     shape: "emanation",
     size: 10,
@@ -468,10 +525,23 @@ const AREA_REVIEW: Record<string, AreaReview> = {
     triggers: ["enter", "turnEnd"],
     target: "pack",
     catchesTarget: false,
+    outcome: { save: "dex", damage: [{ formula: "3d10", type: "slashing", perSlot: "1d10" }] },
   },
-  "Conjure Celestial": { shape: "cylinder", size: 10, height: 40, triggers: ["enter", "turnEnd"] },
+  "Conjure Celestial": {
+    shape: "cylinder",
+    size: 10,
+    height: 40,
+    triggers: ["enter", "turnEnd"],
+    outcome: { save: "dex", onPass: "half", damage: [{ formula: "6d12", type: "radiant", perSlot: "1d12" }] },
+  },
   "Conjure Minor Elementals": { shape: "emanation", size: 15, attached: true },
-  "Conjure Woodland Beings": { shape: "emanation", size: 10, attached: true, triggers: ["enter", "turnEnd"] },
+  "Conjure Woodland Beings": {
+    shape: "emanation",
+    size: 10,
+    attached: true,
+    triggers: ["enter", "turnEnd"],
+    outcome: { save: "wis", onPass: "half", damage: [{ formula: "5d8", type: "force", perSlot: "1d8" }] },
+  },
   "Continual Flame": { skip: "a light radius" },
   "Control Water": { skip: "an area the caster chooses, up to a 100-foot Cube" },
   "Create or Destroy Water": { shape: "cube", size: 30, note: "When the water falls as rain or the spell destroys fog." },
@@ -479,9 +549,9 @@ const AREA_REVIEW: Record<string, AreaReview> = {
   "Dancing Lights": { skip: "a light radius" },
   Darkness: { shape: "sphere", size: 15, note: "Or a 15-foot Emanation from an object." },
   Daylight: { shape: "sphere", size: 60, note: "Or a 60-foot Emanation from an object." },
-  "Delayed Blast Fireball": { shape: "sphere", size: 20 },
+  "Delayed Blast Fireball": { shape: "sphere", size: 20, outcome: { save: "dex", onPass: "half" } },
   Disintegrate: { skip: "the part of a Huge object it destroys" },
-  "Dragon’s Breath": { shape: "cone", size: 15, note: "Exhaled by the creature you touch." },
+  "Dragon’s Breath": { shape: "cone", size: 15, note: "Exhaled by the creature you touch.", outcome: { save: "dex", onPass: "half" } },
   Druidcraft: { skip: "the largest sensory effect it can create" },
   Earthquake: {
     shape: "cylinder",
@@ -489,82 +559,151 @@ const AREA_REVIEW: Record<string, AreaReview> = {
     height: 5,
     manual: true,
     note: "A 100-foot-radius circle on the ground. It affects creatures on the ground.",
+    outcome: { save: "dex", conditions: ["prone"] },
   },
   Elementalism: { skip: "harmless effects in a 5-foot Cube" },
-  Entangle: { shape: "cube", size: 20, manual: true, note: "A 20-foot square on the ground." },
+  Entangle: { shape: "cube", size: 20, manual: true, note: "A 20-foot square on the ground.", outcome: { save: "str", conditions: ["restrained"] } },
   Fabricate: { skip: "the largest object it can make" },
-  "Faerie Fire": { shape: "cube", size: 20 },
-  Fear: { shape: "cone", size: 30 },
-  Fireball: { shape: "sphere", size: 20 },
+  "Faerie Fire": { shape: "cube", size: 20, outcome: { save: "dex" } },
+  Fear: { shape: "cone", size: 30, outcome: { save: "wis", conditions: ["frightened"] } },
+  Fireball: { shape: "sphere", size: 20, outcome: { save: "dex", onPass: "half", damage: [{ formula: "8d6", type: "fire", perSlot: "1d6" }] } },
   "Fire Shield": { skip: "a light radius" },
-  "Fire Storm": { shape: "cube", size: 10, note: "Up to ten 10-foot Cubes, each touching another." },
+  "Fire Storm": {
+    shape: "cube",
+    size: 10,
+    note: "Up to ten 10-foot Cubes, each touching another.",
+    outcome: { save: "dex", onPass: "half", damage: [{ formula: "7d10", type: "fire" }] },
+  },
   "Flame Blade": { skip: "a light radius" },
-  "Flame Strike": { shape: "cylinder", size: 10, height: 40 },
+  "Flame Strike": {
+    shape: "cylinder",
+    size: 10,
+    height: 40,
+    outcome: { save: "dex", onPass: "half", damage: [{ formula: "5d6", type: "fire", perSlot: "1d6" }, { formula: "5d6", type: "radiant", perSlot: "1d6" }] },
+  },
   "Flaming Sphere": { skip: "a moving object that harms creatures within 5 feet of it" },
   "Fog Cloud": { shape: "sphere", size: 20 },
   Forbiddance: { skip: "a ward on floor space the caster chooses" },
   Forcecage: { shape: "cube", size: 20, manual: true, note: "A cage up to 20 feet on a side, or a solid box up to 10 feet." },
-  "Freezing Sphere": { shape: "sphere", size: 60 },
+  "Freezing Sphere": { shape: "sphere", size: 60, outcome: { save: "con", onPass: "half", damage: [{ formula: "10d6", type: "cold", perSlot: "1d6" }] } },
   "Globe of Invulnerability": { shape: "emanation", size: 10, note: "Immobile once cast." },
   "Glyph of Warding": { shape: "sphere", size: 20, note: "The explosive rune, centered on the glyph." },
-  Grease: { shape: "cube", size: 10, manual: true, note: "A 10-foot square on the ground.", triggers: ["enter", "turnEnd"] },
+  Grease: {
+    shape: "cube",
+    size: 10,
+    manual: true,
+    note: "A 10-foot square on the ground.",
+    triggers: ["enter", "turnEnd"],
+    outcome: { save: "dex", conditions: ["prone"] },
+  },
   "Guards and Wards": { skip: "a ward on floor space the caster chooses" },
-  "Gust of Wind": { shape: "line", size: 60, width: 10, triggers: ["turnEnd"] },
+  "Gust of Wind": { shape: "line", size: 60, width: 10, triggers: ["turnEnd"], outcome: { save: "str" } },
   Hallow: { skip: "an area the caster chooses, up to a 60-foot radius" },
   "Hallucinatory Terrain": { shape: "cube", size: 150 },
   "Heroes’ Feast": { skip: "where the feast appears" },
   "Holy Aura": { shape: "emanation", size: 30, attached: true },
-  "Hypnotic Pattern": { shape: "cube", size: 30 },
-  "Ice Knife": { shape: "emanation", size: 5, manual: true, note: "Around the target, which is also caught." },
-  "Ice Storm": { shape: "cylinder", size: 20, height: 40 },
-  "Incendiary Cloud": { shape: "sphere", size: 20, triggers: ["enter", "turnEnd"] },
-  "Insect Plague": { shape: "sphere", size: 20, triggers: ["enter", "turnEnd"] },
+  "Hypnotic Pattern": { shape: "cube", size: 30, outcome: { save: "wis", conditions: ["charmed", "incapacitated"] } },
+  "Ice Knife": {
+    shape: "emanation",
+    size: 5,
+    manual: true,
+    note: "Around the target, which is also caught.",
+    outcome: { save: "dex", damage: [{ formula: "2d6", type: "cold", perSlot: "1d6" }] },
+  },
+  "Ice Storm": {
+    shape: "cylinder",
+    size: 20,
+    height: 40,
+    outcome: { save: "dex", onPass: "half", damage: [{ formula: "2d10", type: "bludgeoning", perSlot: "1d10" }, { formula: "4d6", type: "cold" }] },
+  },
+  "Incendiary Cloud": {
+    shape: "sphere",
+    size: 20,
+    triggers: ["enter", "turnEnd"],
+    outcome: { save: "dex", onPass: "half", damage: [{ formula: "10d8", type: "fire" }] },
+  },
+  "Insect Plague": {
+    shape: "sphere",
+    size: 20,
+    triggers: ["enter", "turnEnd"],
+    outcome: { save: "con", onPass: "half", damage: [{ formula: "4d10", type: "piercing", perSlot: "1d10" }] },
+  },
   Light: { skip: "a light radius" },
-  "Lightning Bolt": { shape: "line", size: 100, width: 5 },
+  "Lightning Bolt": { shape: "line", size: 100, width: 5, outcome: { save: "dex", onPass: "half", damage: [{ formula: "8d6", type: "lightning", perSlot: "1d6" }] } },
   "Magic Circle": { shape: "cylinder", size: 10, height: 20 },
   "Magnificent Mansion": { skip: "the size of the dwelling" },
   "Major Image": { skip: "the largest illusion it can create" },
   "Mass Cure Wounds": { shape: "sphere", size: 30, note: "Up to six creatures in the area." },
-  "Meteor Swarm": { shape: "sphere", size: 40, note: "Four Spheres, each centered on a different point." },
+  "Meteor Swarm": {
+    shape: "sphere",
+    size: 40,
+    note: "Four Spheres, each centered on a different point.",
+    outcome: { save: "dex", onPass: "half", damage: [{ formula: "20d6", type: "fire" }, { formula: "20d6", type: "bludgeoning" }] },
+  },
   "Minor Illusion": { skip: "the largest illusion it can create" },
   "Mirage Arcane": { skip: "terrain up to 1 mile square" },
-  Moonbeam: { shape: "cylinder", size: 5, height: 40, triggers: ["enter", "turnEnd"] },
+  Moonbeam: {
+    shape: "cylinder",
+    size: 5,
+    height: 40,
+    triggers: ["enter", "turnEnd"],
+    outcome: { save: "con", onPass: "half", damage: [{ formula: "2d10", type: "radiant", perSlot: "1d10" }] },
+  },
   "Move Earth": { skip: "an area of terrain the caster chooses" },
   "Pass without Trace": { shape: "emanation", size: 30, attached: true },
   "Phantasmal Force": { skip: "the largest illusion it can create" },
   "Plant Growth": { shape: "sphere", size: 100, note: "The Overgrowth effect." },
-  "Prismatic Spray": { shape: "cone", size: 60 },
+  "Prismatic Spray": { shape: "cone", size: 60, outcome: { save: "dex", onPass: "half" } },
   "Private Sanctum": { skip: "a Cube the caster chooses, from 5 to 100 feet" },
   "Produce Flame": { skip: "a light radius" },
   "Programmed Illusion": { skip: "the largest illusion it can create" },
   "Purify Food and Drink": { shape: "sphere", size: 5 },
-  "Reverse Gravity": { shape: "cylinder", size: 50, height: 100 },
-  Shatter: { shape: "sphere", size: 10 },
+  "Reverse Gravity": { shape: "cylinder", size: 50, height: 100, outcome: { save: "dex" } },
+  Shatter: { shape: "sphere", size: 10, outcome: { save: "con", onPass: "half", damage: [{ formula: "3d8", type: "thunder", perSlot: "1d8" }] } },
   "Shining Smite": { skip: "a light radius" },
   Silence: { shape: "sphere", size: 20 },
   "Silent Image": { skip: "the largest illusion it can create" },
-  Sleep: { shape: "sphere", size: 5 },
-  "Sleet Storm": { shape: "cylinder", size: 20, height: 40, triggers: ["enter", "turnStart"] },
-  Slow: { shape: "cube", size: 40, note: "Up to six creatures in the area." },
+  Sleep: { shape: "sphere", size: 5, outcome: { save: "wis", conditions: ["incapacitated"], lasts: { at: "end", of: "target" } } },
+  "Sleet Storm": { shape: "cylinder", size: 20, height: 40, triggers: ["enter", "turnStart"], outcome: { save: "dex", conditions: ["prone"] } },
+  Slow: { shape: "cube", size: 40, note: "Up to six creatures in the area.", outcome: { save: "wis" } },
   "Speak with Plants": { shape: "emanation", size: 30, note: "Immobile once cast." },
-  "Spike Growth": { shape: "sphere", size: 20, triggers: ["enter"] },
-  "Spirit Guardians": { shape: "emanation", size: 15, attached: true, triggers: ["enter", "turnEnd"] },
+  "Spike Growth": { shape: "sphere", size: 20, triggers: ["enter"], outcome: { save: null, damage: [{ formula: "2d4", type: "piercing" }] } },
+  "Spirit Guardians": {
+    shape: "emanation",
+    size: 15,
+    attached: true,
+    triggers: ["enter", "turnEnd"],
+    outcome: { save: "wis", onPass: "half", damage: [{ formula: "3d8", type: "radiant", perSlot: "1d8" }] },
+  },
   "Starry Wisp": { skip: "a light radius" },
-  "Stinking Cloud": { shape: "sphere", size: 20, triggers: ["turnStart"] },
+  "Stinking Cloud": { shape: "sphere", size: 20, triggers: ["turnStart"], outcome: { save: "con", conditions: ["poisoned"] } },
   "Storm of Vengeance": { skip: "everything under a 300-foot-radius cloud at a height the spell does not give" },
   "Summon Dragon": { skip: "the Cone is the summoned spirit's Breath Weapon" },
-  Sunbeam: { shape: "line", size: 60, width: 5 },
-  Sunburst: { shape: "sphere", size: 60 },
+  Sunbeam: {
+    shape: "line",
+    size: 60,
+    width: 5,
+    outcome: { save: "con", onPass: "half", damage: [{ formula: "6d8", type: "radiant" }], conditions: ["blinded"], lasts: { at: "start", of: "self" } },
+  },
+  Sunburst: {
+    shape: "sphere",
+    size: 60,
+    outcome: { save: "con", onPass: "half", damage: [{ formula: "12d6", type: "radiant" }], conditions: ["blinded"], saveEnds: true },
+  },
   Symbol: { shape: "sphere", size: 60, note: "Centered on the glyph when it triggers.", triggers: ["enter", "turnEnd"] },
   "Teleportation Circle": { skip: "a portal" },
-  Thunderwave: { shape: "cube", size: 15 },
+  Thunderwave: { shape: "cube", size: 15, outcome: { save: "con", onPass: "half", damage: [{ formula: "2d8", type: "thunder", perSlot: "1d8" }] } },
   "Tiny Hut": { shape: "emanation", size: 10, note: "Stationary once cast." },
-  "Vitriolic Sphere": { shape: "sphere", size: 20 },
+  "Vitriolic Sphere": { shape: "sphere", size: 20, outcome: { save: "dex", onPass: "half", damage: [{ formula: "10d4", type: "acid", perSlot: "2d4" }] } },
   "Wall of Force": { skip: "a wall" },
   "Wall of Ice": { skip: "a wall" },
-  Web: { shape: "cube", size: 20, triggers: ["enter", "turnStart"] },
-  Weird: { shape: "sphere", size: 30 },
-  "Zone of Truth": { shape: "sphere", size: 15, triggers: ["enter", "turnStart"] },
+  Web: { shape: "cube", size: 20, triggers: ["enter", "turnStart"], outcome: { save: "dex", conditions: ["restrained"] } },
+  Weird: {
+    shape: "sphere",
+    size: 30,
+    outcome: { save: "wis", onPass: "half", damage: [{ formula: "10d10", type: "psychic" }], conditions: ["frightened"], saveEnds: true },
+  },
+  "Zone of Truth": { shape: "sphere", size: 15, triggers: ["enter", "turnStart"], outcome: { save: "cha" } },
 };
 
 function buildAreaSpells(spells: readonly Spell[]): AreaSpell[] {
@@ -595,6 +734,8 @@ function buildAreaSpells(spells: readonly Spell[]): AreaSpell[] {
     for (const trigger of review.triggers ?? []) {
       if (!TRIGGER_TEXT[trigger].test(flat)) problems.push(`${spell.name}: review says it hits on ${trigger}, but its text does not say so`);
     }
+    const o = review.outcome;
+    if (o) problems.push(...outcomeProblems(spell.name, flat, o));
     const entry: AreaSpell = {
       srdId: slug(spell.name),
       name: spell.name,
@@ -612,6 +753,14 @@ function buildAreaSpells(spells: readonly Spell[]): AreaSpell[] {
       ...(review.target ? { target: review.target } : {}),
       ...(review.catchesTarget === false ? { catchesTarget: false as const } : {}),
       ...(review.note ? { note: review.note } : {}),
+      ...(o?.save ? { save: o.save } : {}),
+      ...(o && o.save === null ? { noSave: true as const } : {}),
+      ...(o?.save ? { onPass: o.onPass ?? ("none" as const) } : {}),
+      ...(o?.damage ? { damage: o.damage } : {}),
+      ...(o?.cantrip ? { cantrip: true as const } : {}),
+      ...(o?.conditions ? { conditions: o.conditions } : {}),
+      ...(o?.lasts ? { lasts: o.lasts } : {}),
+      ...(o?.saveEnds ? { saveEnds: true as const } : {}),
     };
     out.push(entry);
   }

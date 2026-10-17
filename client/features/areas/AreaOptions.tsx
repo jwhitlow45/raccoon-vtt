@@ -585,7 +585,7 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
           priority: 3,
           control: (
             <OptButton ends onClick={() => openDamage(env.area, ui, template.id)}>
-              Damage
+              Save and damage
             </OptButton>
           ),
         },

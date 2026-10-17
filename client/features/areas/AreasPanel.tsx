@@ -7,7 +7,9 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { usePanelHere, type PanelProps } from "../panels.ts";
-import { AreaDamage } from "./AreaDamage.tsx";
+import { AreaSaveStart } from "./AreaSaveStart.tsx";
+import { GroupSave } from "../dice/groupSave/GroupSave.tsx";
+import { useGroupSave, useGroupSaveStore } from "../dice/groupSave/store.ts";
 import { pickTemplate } from "./AreaTool.tsx";
 import { caughtTokens, contextFrom, inAreaEntries, inAreaText } from "./coverage.ts";
 import { areaTitle } from "./labels.ts";
@@ -19,8 +21,9 @@ import { useLiveTokens } from "./useLiveTokens.ts";
  * Every area on the scene and who is in it, kept live as tokens move. This
  * is where an aura such as Spirit Guardians or Conjure Minor Elementals is
  * watched while the party walks with the select tool, which is when the
- * area tool's own bar is closed. The DM also deals an area's damage here,
- * in a form that takes the panel's place (AreaDamage.tsx).
+ * area tool's own bar is closed. The DM also rolls an area's save and
+ * applies its damage here, through the group save that takes the panel's
+ * place (docs/design-v1-roll-options.md 5.6).
  */
 
 const EMPTY: RoomState["templates"] = {};
@@ -41,11 +44,19 @@ export default function AreasPanel(props: PanelProps) {
   const scene = sceneId ? view?.scenes[sceneId] : undefined;
   const list = useMemo(() => Object.values(templates).filter((t): t is AreaTemplate => !!t && t.sceneId === sceneId), [templates, sceneId]);
   const closeDamage = useCallback(() => area.store.setState({ damageId: null }), [area]);
+  const groupStore = useGroupSaveStore();
+  const group = useGroupSave((s) => (s.shownIn === "areas" ? s.page : null));
   if (!view || !scene || !you) return null;
 
-  const damaged = damageId ? templates[damageId] : undefined;
-  if (you.role === "dm" && damaged && damaged.sceneId === scene.id) return <AreaDamage template={damaged} onDone={closeDamage} />;
   const ctx = contextFrom({ tokens: live.tokens, buildChunks: view.buildChunks, settings: view.meta.settings }, scene, samplesNow(live.moving));
+  // The rows of an area's group save follow its caught creatures as they move, until the roll.
+  const areaIds = (templateId: string) => {
+    const t = templates[templateId];
+    return t ? caughtTokens(t, ctx, t.sceneId) : [];
+  };
+  if (you.role === "dm" && group) return <GroupSave parent="Areas" onBack={() => groupStore.setState({ shownIn: null })} areaIds={areaIds} />;
+  const damaged = damageId ? templates[damageId] : undefined;
+  if (you.role === "dm" && damaged && damaged.sceneId === scene.id) return <AreaSaveStart template={damaged} onDone={closeDamage} />;
   const env = { actions, view, scene, role: you.role, youId: you.memberId, area };
 
   if (list.length === 0) {
@@ -99,10 +110,10 @@ export default function AreasPanel(props: PanelProps) {
               >
                 {editable ? "Edit" : "Show"}
               </Button>
-              {/* Every area's button is named Damage, so Back from the damage form finds this one by its area's id (features/panels.ts useSubpageFocus). */}
+              {/* Every area's button is named alike, so Back from its group save finds this one by its area's id (features/panels.ts useSubpageFocus). */}
               {you.role === "dm" ? (
                 <Button size="sm" onClick={() => openDamage(area, ui, t.id, here)} data-opener={`area-${t.id}`}>
-                  Damage
+                  Save and damage
                 </Button>
               ) : null}
               {editable ? (

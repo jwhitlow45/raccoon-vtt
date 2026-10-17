@@ -4,7 +4,7 @@ import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type RoomState, type SkillKe
 import { playersToken } from "#shared/project.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { pcSlots } from "#shared/rules/pcStats.ts";
-import { ABILITY_NAMES as ABILITY_NAMES_FULL, SKILLS } from "#shared/rules/skills.ts";
+import { SKILLS } from "#shared/rules/skills.ts";
 import { ABILITY_NAMES as ABILITY_SHORT } from "#shared/statBlock.ts";
 import { Chip, ChipRow } from "../../components/Chip.tsx";
 import { Loading } from "../../components/Loading.tsx";
@@ -40,6 +40,7 @@ import { presetFor } from "./presets.ts";
 import { useDiceView } from "./useDiceView.ts";
 import { GroupOptions } from "./groupSave/GroupOptions.tsx";
 import { useStartGroupSave } from "./groupSave/start.ts";
+import { actionFill } from "./groupSave/fills.ts";
 import { useActOnce, useInitiativeWrite, useRollBlocked, useRollOption, useRowResult } from "./useRollOption.ts";
 
 /**
@@ -576,23 +577,8 @@ function GroupSaveButton(props: { ctx: Ctx; named: NamedRoll }) {
   const roomId = useRoomView((s) => s.roomId);
   const [pending, setPending] = useState(false);
   const others = selected.filter((id) => id !== ctx.tokenId);
-  const parts = named.damage.filter((p) => !p.optional);
-  const damage = parts.map((p) => `${p.formula}${p.type ? ` ${p.type}` : ""}`).join(" + ");
-  const from = [`From ${named.name}: ${ABILITY_NAMES_FULL[save.ability]} save, DC ${save.dc}`, damage || null, damage ? (save.onPass === "half" ? "half on a pass" : "none on a pass") : null].filter(Boolean).join(", ");
-  const input = {
-    source: { kind: "selection" as const, tokenIds: others },
-    test: { kind: "save" as const, ability: save.ability },
-    dc: save.dc,
-    fill: { name: named.name, from: `${from}.`, ...(named.recharge !== undefined ? { recharge: { holder: ctx.key, key: named.key } } : {}), ...(parts[0]?.type ? { damageType: parts[0].type } : {}) },
-    outcome: {
-      damage,
-      onPass: save.onPass,
-      conditions: named.conditions ?? [],
-      lasts: named.lasts ? { mode: named.lasts.at === "start" ? ("turnStart" as const) : ("turnEnd" as const), rounds: 10, anchor: named.lasts.of === "target" ? "own" : (initiativeRow(ctx.dice.view, ctx.creature)?.id ?? "own") } : { mode: "none" as const, rounds: 10, anchor: "own" },
-      saveEnds: named.saveEnds ? { ability: save.ability, dc: save.dc } : null,
-    },
-    panel: "dice" as const,
-  };
+  const filled = actionFill(ctx.dice, named, { key: ctx.key, ...(ctx.tokenId ? { tokenId: ctx.tokenId } : {}) })!;
+  const input = { source: { kind: "selection" as const, tokenIds: others }, ...filled, panel: "dice" as const };
   const go = (replace: boolean) => {
     // A recharge action is spent when its group save starts (6.4), as its Damage tap spends it.
     if (named.recharge !== undefined) writeUsed(roomId, withUsed(readUsed(roomId), ctx.key, named.key, true));

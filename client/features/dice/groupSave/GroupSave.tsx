@@ -19,7 +19,7 @@ import { useRoomActions, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { usePanelHeader } from "../../panels.ts";
 import { EffectPicker } from "../../tokens/EffectsSection.tsx";
 import { SaveEndsFields, saveEndsForm, type SaveEndsForm } from "../../tokens/SaveEndsFields.tsx";
-import { FieldRow, Note, NumberField, Select } from "../../tokens/ui.tsx";
+import { FieldRow, Note, NumberField, Select, Stepper } from "../../tokens/ui.tsx";
 import { creatureRolls } from "../creature.ts";
 import { rollsOf } from "../logic.ts";
 import { creatureKey, readUsed, signedText, withUsed, writeUsed } from "../options.ts";
@@ -63,6 +63,7 @@ import { parseParts, worstCase } from "./outcome.ts";
 import { amountsOf, applyWaits, applyWords, buildPlan, rowOutcome } from "./plan.ts";
 import { countWords, d20Of, groupRows, rowTotal, type GroupTest, type Mark, type RowBase, type Way } from "./rows.ts";
 import { useGroupSave, useGroupSaveStore } from "./store.ts";
+import { actionFill, areaFill, casterActions } from "./fills.ts";
 
 /**
  * The group save (docs/design-v1-roll-options.md 5): rows rolled by the
@@ -107,6 +108,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   const roomId = useRoomView((s) => s.roomId);
   const viewing = useRoomView((s) => s.sceneId);
   const view = useRoomView((s) => s.view);
+  const me = useRoomView((s) => s.you?.memberId ?? "");
   const actions = useRoomActions();
   const ui = useRoomUi();
   const panel = useDicePanel();
@@ -320,8 +322,34 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       setPicking={setPicking}
       parsed={parsedParts}
       view={view}
+      me={me}
+      onSlot={
+        page.source.kind === "area" && page.outcome.slot !== undefined
+          ? (slot) => {
+              const template = view.templates[(page.source as { templateId: string }).templateId];
+              const filled = template ? areaFill(dice, template, slot) : null;
+              if (filled) update({ ...pageRef.current, fill: filled.fill, outcome: { ...pageRef.current.outcome, damage: filled.outcome.damage ?? "", slot } });
+            }
+          : undefined
+      }
     />
   );
+  const fillFrom =
+    page.phase === "setup" && page.source.kind === "area"
+      ? casterActions(dice, view.templates[page.source.templateId] ?? {}).map((named) => (
+          <Button
+            key={named.key}
+            size="sm"
+            onClick={() => {
+              const casterId = view.templates[(page.source as { templateId: string }).templateId]?.casterId;
+              const filled = actionFill(dice, named, { key: casterId ? `t:${casterId}` : "", ...(casterId ? { tokenId: casterId } : {}) });
+              if (filled) update({ ...pageRef.current, test: filled.test, dc: filled.dc, spell: false, fill: filled.fill, outcome: { ...pageRef.current.outcome, ...filled.outcome } });
+            }}
+          >
+            {`Fill from ${named.name}`}
+          </Button>
+        ))
+      : [];
 
   const rowList = (
     <div role="group" aria-label="Creatures" style={{ display: "grid", gap: theme.space(1) }}>
@@ -405,6 +433,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       ) : null}
       {page.phase === "setup" ? (
         <>
+          {fillFrom.length > 0 ? <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>{fillFrom}</div> : null}
           {setupControls}
           {page.test.kind !== "none" ? dcRow : null}
           {switches}
@@ -574,8 +603,11 @@ function OutcomePanel(props: {
   setPicking(v: boolean): void;
   parsed: ReturnType<typeof parseParts> | null;
   view: RoomState;
+  me: string;
+  onSlot?: (slot: number) => void;
 }) {
   const { page } = props;
+  const theirs = useMemo(() => othersDamage(props.view, props.me, page.fill?.name), [props.view.log, props.me, page.fill?.name]); // eslint-disable-line react-hooks/exhaustive-deps
   const [save, setSave] = useState<SaveEndsForm>(() => saveEndsForm(page.outcome.saveEnds ? { ...page.outcome.saveEnds } : undefined, { ability: page.test.kind === "none" ? "wis" : page.test.ability, dc: page.dc }));
   const frozen = page.phase === "applying" || page.phase === "applied";
   const setOutcome = (patch: Partial<Page["outcome"]>) => props.onChange({ ...page, outcome: { ...page.outcome, ...patch } });
@@ -623,6 +655,16 @@ function OutcomePanel(props: {
         ) : null}
       </form>
       {props.parsed && !props.parsed.ok ? <Note tone="error">{props.parsed.error}</Note> : rolledText ? <Note>{rolledText}</Note> : null}
+      {theirs && !frozen ? (
+        <ChipRow label="Rolled by someone else">
+          <Chip onClick={() => setOutcome({ damage: theirs.text })}>{theirs.chip}</Chip>
+        </ChipRow>
+      ) : null}
+      {props.onSlot && page.outcome.slot !== undefined ? (
+        <FieldRow label="Slot level">
+          <Stepper label="Slot level" value={page.outcome.slot} step={1} min={1} max={9} onChange={props.onSlot} />
+        </FieldRow>
+      ) : null}
       <FieldRow label="On a pass">
         <Segmented<"half" | "none">
           label="On a pass"
@@ -835,4 +877,24 @@ export function useRestoreGroupSave(): void {
     const draft = readDraft(roomId);
     store.setState({ restored: true, ...(draft ? { page: draft } : {}) });
   }, [dm, roomId, store]);
+}
+
+/**
+ * The newest damage line labelled with the fill's name that someone else
+ * rolled (5.4): "Use Bree's 28 (Fireball damage)", whose tap takes its
+ * totals, each with its type.
+ */
+function othersDamage(view: RoomState, me: string, name: string | undefined): { chip: string; text: string } | null {
+  if (!name) return null;
+  for (let i = view.log.length - 1; i >= 0; i--) {
+    const data = view.log[i]!.data;
+    if (data?.type !== "dice" || data.rolls.length === 0) continue;
+    if (!data.rolls.every((r) => r.label?.startsWith(`${name} damage`))) continue;
+    if (data.by === me) return null;
+    const total = data.rolls.reduce((n, r) => n + r.total, 0);
+    const who = view.members[data.by]?.name ?? "Someone";
+    const text = data.rolls.map((r) => `${r.total}${r.label?.includes(", ") ? ` ${r.label.split(", ").at(-1)}` : ""}`).join(" + ");
+    return { chip: `Use ${who}'s ${total} (${name} damage)`, text };
+  }
+  return null;
 }

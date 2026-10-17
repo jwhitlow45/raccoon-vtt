@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { LogNames } from "#shared/logText.ts";
 import type { PanelProps } from "../panels.ts";
 import { theme } from "../../lib/theme.ts";
-import { useRoomView } from "../../state/view.ts";
+import { useRoomUi, useRoomView } from "../../state/view.ts";
 import { RecentRolls } from "./RecentRolls.tsx";
 import { RollOptions } from "./RollOptions.tsx";
 import { LastResult, Roller } from "./Roller.tsx";
@@ -25,6 +25,7 @@ export default function DicePanel(props: PanelProps) {
   const me = useRoomView((s) => s.you?.memberId ?? "");
   const names = useMemo<LogNames>(() => ({ members: members ?? {}, tokens: tokens ?? {}, characters: characters ?? {}, handouts: handouts ?? {}, encounter }), [members, tokens, characters, handouts, encounter]);
   const panel = useDicePanel();
+  const ui = useRoomUi();
   const role = useRoomView((s) => s.you?.role ?? null);
   const groupStore = useGroupSaveStore();
   const group = useGroupSave((s) => s.page);
@@ -51,7 +52,17 @@ export default function DicePanel(props: PanelProps) {
     <section aria-label="Dice" style={{ display: "grid", gap: theme.space(2) }}>
       <LastResult onOpen={show} />
       <Roller />
-      {group && role === "dm" ? <OpenGroupSave page={group} onOpen={() => groupStore.setState({ shownIn: "dice" })} /> : null}
+      {group && role === "dm" ? (
+        <OpenGroupSave
+          page={group}
+          onOpen={() => {
+            // An area's page reads its creatures from the area, which the Areas panel holds.
+            const panel = group.source.kind === "area" ? "areas" : "dice";
+            groupStore.setState({ shownIn: panel });
+            if (panel === "areas") ui.openPanel("areas");
+          }}
+        />
+      ) : null}
       <RollOptions {...props} />
       <RecentRolls names={names} me={me} open={open} again={(rolls, to) => void panel.again(rolls, to)} />
     </section>

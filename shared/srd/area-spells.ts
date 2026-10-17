@@ -1,4 +1,5 @@
-import type { AreaShape, AreaTrigger } from "../model.ts";
+import type { AbilityKey, AreaShape, AreaTrigger, ConditionKey } from "../model.ts";
+import type { DamageType } from "../rules/damage.ts";
 import data from "./area-spells.json" with { type: "json" };
 
 /**
@@ -60,6 +61,23 @@ export type AreaSpell = {
   catchesTarget?: false;
   /** How the preset differs from a plain template, such as "Four Spheres". */
   note?: string;
+  /**
+   * What it does to the creatures it catches (docs/design-v1-roll-options.md
+   * 5.6), read by hand from the spell and checked against its text by
+   * scripts/srd-import.ts: the save it forces, or `noSave` where everyone
+   * takes it, half on a pass or none, the damage by typed part with the dice
+   * each slot above the spell's level adds, `cantrip` for dice that grow at
+   * character levels 5, 11 and 17, the conditions a failed save gives, the
+   * turn they last until, and a save at the end of each turn that ends them.
+   */
+  save?: AbilityKey;
+  noSave?: true;
+  onPass?: "half" | "none";
+  damage?: { formula: string; type: DamageType; perSlot?: string }[];
+  cantrip?: true;
+  conditions?: ConditionKey[];
+  lasts?: { at: "start" | "end"; of: "target" | "self" };
+  saveEnds?: true;
 };
 
 export const AREA_SPELLS = data as readonly AreaSpell[];
