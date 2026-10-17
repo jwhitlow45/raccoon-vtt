@@ -656,6 +656,23 @@ describe("raccoon-vtt short-screen reach", { timeout: 1_800_000 }, () => {
         const name = await frame.locator("strong").first().boundingBox();
         const closeBox = await close.boundingBox();
         if (name && closeBox && name.y >= closeBox.y + closeBox.height - 1) await miss(`${label}: the name sits under Close, not in the header's one row`);
+        // Its lines break only between words, read from the line each letter sits on, and its text keeps the whole name (W5B-P-9).
+        const lines = await frame.locator("strong").first().evaluate((el) => {
+          type Range = { setStart(n: unknown, i: number): void; setEnd(n: unknown, i: number): void; getBoundingClientRect(): { top: number } };
+          const strong = el as unknown as { textContent: string | null; firstChild: { textContent: string | null } | null; ownerDocument: { createRange(): Range } };
+          const node = strong.firstChild;
+          const text = node?.textContent ?? "";
+          const top = (i: number) => {
+            const range = strong.ownerDocument.createRange();
+            range.setStart(node, i);
+            range.setEnd(node, i + 1);
+            return Math.round(range.getBoundingClientRect().top);
+          };
+          const inWord: number[] = [];
+          for (let i = 0; i + 1 < text.length; i++) if (text[i] !== " " && text[i + 1] !== " " && top(i) !== top(i + 1)) inWord.push(i + 1);
+          return { name: strong.textContent, inWord };
+        });
+        if (lines.name !== "Goblin 1" || lines.inWord.length > 0) await miss(`${label}: the name breaks inside a word or lost its text: ${JSON.stringify(lines)}`);
         if (c.badge) {
           const where = (await frame.locator("[data-sticky-header]").getByText("↑10 ft", { exact: true }).count()) > 0 ? "header" : (await frame.locator("[data-vitals]").getByText("↑10 ft", { exact: true }).count()) > 0 ? "vitals" : "nowhere";
           if (where !== c.badge) await miss(`${label}: the elevation badge is in the ${where}, not the ${c.badge}`);

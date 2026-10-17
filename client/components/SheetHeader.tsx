@@ -246,7 +246,10 @@ export const STICKY_HEADER_ATTR = "data-sticky-header";
  * under a finger on it. `sticky` keeps the row at the top of the pane's
  * scrolling frame on an opaque fill that reaches across the frame's 12 px
  * side padding, so the handle and the close never scroll away. `lines`
- * lets the title wrap to that many lines before it is cut short.
+ * lets the title wrap to that many lines before it is cut short. Its lines
+ * break only between words, and a word longer than its line ends in an
+ * ellipsis (TITLE_STYLE), so a narrow window shows "Gob…" over "1" rather
+ * than "Gobli" over "n 1". The title's text keeps the whole name.
  * `beforeClose` sits left of the close, after the actions, as the
  * window's Reset does.
  */
@@ -293,7 +296,7 @@ export function PaneHeader(props: {
         fontSize: theme.font.input,
         fontWeight: theme.weight.bold,
         lineHeight: theme.leading.tight,
-        ...(lines ? { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", whiteSpace: "normal", overflowWrap: "anywhere" } : null),
+        ...(lines ? { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", whiteSpace: "normal" } : null),
       }}
     >
       {props.title}
