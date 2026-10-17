@@ -1003,10 +1003,19 @@ describe("the card's one answer path (docs/design-v1-roll-request.md 5.2, 5.6)",
   test("a rolled answer is final: no Send, no Fail, and an ask instead", () => {
     assert.equal(finalForPlayer(request, rolled), true);
     assert.deepEqual(offers(rolled, "12"), { roll: false, send: false, fail: false, ask: true, withdraw: false });
-    assert.deepEqual(offers({ ...rolled, change: { id: "a1", on: "t1", reason: "lucky" } }), { roll: false, send: false, fail: false, ask: false, withdraw: true });
+    assert.deepEqual(offers({ ...rolled, change: { id: "a1", on: "t1", reason: "lucky" } }), { roll: false, send: false, fail: false, ask: true, withdraw: true }, "a newer item replaces the ask");
+    assert.equal(offers({ ...rolled, tag: undefined }).ask, false, "an answer from before tags cannot be named");
     const seen = { test: DEX_SAVE, dcShown: true, resultShown: true };
     assert.equal(chipLine(seen, rolled), "Dex save: rolled 17 (1d20+5: 12). Pass. Final.");
     assert.equal(chipLine(seen, { ...rolled, result: "fail", dice: { ...rolled.dice, fails: "stunned" } }), "Dex save: rolled 17 (1d20+5: 12). Fail (Stunned). Final.");
+  });
+
+  test("a chip opens to change an answer, or to ask the DM once it is final", () => {
+    const seen = { test: DEX_SAVE, dcShown: true, resultShown: true, targets: [rolled] };
+    assert.equal(chipName(seen, ["x"]), "x Open to ask the DM to change it.");
+    const hidden = { test: DEX_SAVE, dcShown: false, dcHidden: true as const, resultShown: true, targets: [{ characterId: "ayla", total: 9, result: "fail" as const, tag: "t" }] };
+    assert.equal(chipName(hidden, ["x"]), "x Open to ask the DM to fix it.");
+    assert.equal(chipName({ targets: hidden.targets, resultShown: true }, ["x"]), "x Open to change it.", "with the DC shown a typed answer may change");
   });
 
   test("one op at a time, ended only by its own answer, and a lost one settled by where it landed", () => {

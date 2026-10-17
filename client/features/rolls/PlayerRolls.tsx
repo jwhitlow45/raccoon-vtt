@@ -7,6 +7,9 @@ import { choiceText } from "#shared/rules/skills.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 import { Button } from "../../components/Button.tsx";
 import { Chip } from "../../components/Chip.tsx";
+import { Menu } from "../../components/Menu.tsx";
+import { Popover, usePopover } from "../../components/Popover.tsx";
+import type { Rect } from "../../components/popoverPlace.ts";
 import { Input } from "../../components/Field.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { SheetGrabber } from "../../components/SheetGrabber.tsx";
@@ -29,8 +32,8 @@ import { useDiceView } from "../dice/useDiceView.ts";
 import { useOpenPcStats } from "../pcstats/open.ts";
 import { announceTurn } from "../encounter/alerts.ts";
 import { chromeZoom, screenHeight, smallUi, useLayoutSize } from "../device/layout.ts";
-import { useUiScale } from "../device/settings.ts";
-import { bestChoice, cardRoll, choiceLabel, naturalText, parseBonus, rolledDice, rolledNews, verdictText, type RollInputs } from "./card.ts";
+import { uiScale, useUiScale } from "../device/settings.ts";
+import { askedText, askItems, bestChoice, cardRoll, choiceLabel, KEPT, naturalText, parseBonus, rolledDice, rolledNews, verdictText, type AskItem, type RollInputs } from "./card.ts";
 import {
   answered,
   answerFlow,
@@ -41,6 +44,8 @@ import {
   landingOf,
   type AnswerEvent,
   type AnswerFlow,
+  type AnswerOffers,
+  type AnswerOp,
   askLine,
   CARD_MIN_WIDTH,
   cardFoldsUnderSheet,
@@ -725,6 +730,44 @@ function CreatureAnswer(props: {
     if (n === null) step({ t: "answer", tag, answer: "refused", text: "That answer could not be sent." });
   };
 
+  /*
+   * Asking the DM to change a final answer (5.5): each item sends at once,
+   * naming the answer it would change by its tag, and a newer item replaces
+   * the pending ask. Withdraw clears it. An ask that goes without a new
+   * answer, and not by this device's Withdraw, was kept by the DM.
+   */
+  const ask = (item: AskItem) => {
+    if (target.tag === undefined) return;
+    const id = actions.newId();
+    if (step({ t: "tap", op: "ask", tag: id, offers }).busy?.tag !== id) return;
+    const n = actions.dispatch(
+      { t: "roll.change", rollId: request.id, target: ref, ask: { id, on: target.tag, ...item.ask } },
+      { quiet: true, onAnswer: (a, refusal) => void settle(id, a, refusal) },
+    );
+    if (n === null) step({ t: "answer", tag: id, answer: "refused", text: "That ask could not be sent." });
+  };
+  const withdrew = useRef<string | null>(null);
+  const withdraw = () => {
+    const pending = target.change;
+    if (!pending) return;
+    const tag = actions.newId();
+    if (step({ t: "tap", op: "withdraw", tag, offers }).busy?.tag !== tag) return;
+    withdrew.current = pending.id;
+    const n = actions.dispatch(
+      { t: "roll.change", rollId: request.id, target: ref, clear: pending.id },
+      { quiet: true, onAnswer: (a, refusal) => void settle(tag, a, refusal) },
+    );
+    if (n === null) step({ t: "answer", tag, answer: "refused", text: "That could not be sent." });
+  };
+  const lastAsk = useRef(target.change?.id);
+  const [kept, setKept] = useState(false);
+  useEffect(() => {
+    const before = lastAsk.current;
+    lastAsk.current = target.change?.id;
+    if (target.change !== undefined) setKept(false);
+    else if (before !== undefined && withdrew.current !== before) setKept(true);
+  }, [target.change?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const submit = () => {
     const parsed = parseTotal(text);
     if (!parsed.ok) step({ t: "check", error: parsed.error });
@@ -761,10 +804,24 @@ function CreatureAnswer(props: {
       }}
     >
       {props.several || target.tokenId !== undefined ? <strong style={{ fontSize: theme.font.input }}>{name}</strong> : null}
-      {target.dice ? (
-        <RolledResult target={target} />
-      ) : final ? (
-        <div style={{ fontSize: theme.font.body14 }}>{finalAnswerText(target, request.test)}. Final. Ask the DM to change it.</div>
+      {target.dice || final ? (
+        <>
+          {target.dice ? <RolledResult target={target} /> : <div style={{ fontSize: theme.font.body14 }}>{finalAnswerText(target, request.test)}. Final.</div>}
+          <AskChange
+            target={target}
+            name={name}
+            offers={offers}
+            busy={busy}
+            kept={kept}
+            onAsk={ask}
+            onWithdraw={withdraw}
+          />
+          {flow.error ? (
+            <div role="alert" style={{ fontSize: theme.font.small, color: theme.color.dangerText }}>
+              {flow.error}
+            </div>
+          ) : null}
+        </>
       ) : (
         <>
           {two ? (
@@ -931,6 +988,68 @@ const BONUS_FIELD_WIDTH = 64;
 const EXTRA_FIELD_WIDTH = 88;
 
 /**
+ * "Ask to change it" under a final answer (5.5), a menu on the shared
+ * popover base whose every item sends at once, and while an ask waits the
+ * words of it with Withdraw. A rolled answer offers rerolls, Lucky and
+ * Bardic Inspiration, and a typed one "Fix my total".
+ */
+function AskChange(props: {
+  target: RollTarget;
+  name: string;
+  offers: AnswerOffers;
+  busy: AnswerOp | null;
+  kept: boolean;
+  onAsk(item: AskItem): void;
+  onWithdraw(): void;
+}) {
+  const { target } = props;
+  const menu = usePopover({ kind: "menu" });
+  const items = askItems(target);
+  const pending = target.change;
+  return (
+    <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>
+      {pending ? <div style={{ fontSize: theme.font.small }}>{askedText(pending)}</div> : props.kept ? <div style={{ fontSize: theme.font.small }}>{KEPT}</div> : null}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+        {props.offers.ask ? (
+          <>
+            <Button
+              {...menu.anchorProps}
+              size="sm"
+              busy={props.busy === "ask"}
+              disabled={props.busy !== null && props.busy !== "ask"}
+              aria-label={`Ask the DM to change ${props.name}'s answer`}
+            >
+              Ask to change it
+            </Button>
+            <Popover handle={menu} side="above" bound={viewportBound}>
+              <Menu
+                label={`Ask the DM to change ${props.name}'s answer`}
+                sections={[{ key: "asks", items: items.map((i) => ({ id: i.id, title: i.label })) }]}
+                onPick={(id) => {
+                  const item = items.find((i) => i.id === id);
+                  if (item) props.onAsk(item);
+                }}
+              />
+            </Popover>
+          </>
+        ) : null}
+        {pending && props.offers.withdraw ? (
+          <Button size="sm" busy={props.busy === "withdraw"} disabled={props.busy !== null && props.busy !== "withdraw"} onClick={props.onWithdraw}>
+            Withdraw
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** The screen, in the chrome's own px, as the popover base measures. */
+function viewportBound(): Rect {
+  const scale = uiScale();
+  return { left: 0, top: 0, right: window.innerWidth / scale, bottom: window.innerHeight / scale };
+}
+
+/**
  * A rolled answer in place of the creature's rows (5.4): "Rolled 17
  * (1d20+5 with advantage: 12, 7 dropped). Pass." with a dropped die struck
  * through, a natural 20 or 1, then "Final."
@@ -974,7 +1093,8 @@ function RollChip(props: { buttonRef?: RefObject<HTMLButtonElement | null>; requ
   const names = useRoomView((s) => (s.view ? request.targets.map((t) => creatureName(s.view!, t)).join("|") : ""));
   const several = request.targets.length > 1;
   const lines = request.targets.map((t, i) => chipLine(request, t, several ? { name: names.split("|")[i] ?? "" } : {}));
-  const changeable = request.targets.some((t) => !finalForPlayer(request, t));
+  // A final answer opens the card too, to ask the DM to change it (docs/design-v1-roll-request.md 5.4). Only an answer from before tags, which no ask can name, leaves nothing to open.
+  const changeable = request.targets.some((t) => !finalForPlayer(request, t) || t.tag !== undefined);
   const style = {
     ...cardStyle,
     minHeight: theme.touch,

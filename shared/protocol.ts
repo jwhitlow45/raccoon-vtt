@@ -1017,6 +1017,19 @@ const rollRequestInput = z.strictObject({
   /** The DM's: the effect a pass removes and its save occurrence. The reducer holds it to one creature with that effect, asked once. */
   ends: z.strictObject({ effect: id, occurrence: id }).optional(),
 });
+/**
+ * A player's ask to change an answer (docs/design-v1-roll-request.md 1.1):
+ * its own id, the `tag` of the answer it would change, the reason, and a
+ * reroll's face (an index into the answer's `dice.faces`) or Bardic
+ * Inspiration's die.
+ */
+const rollChange = z.strictObject({
+  id,
+  on: id,
+  reason: z.enum(["heroic-inspiration", "halfling-luck", "lucky", "bardic-inspiration", "fix-total"]),
+  face: z.number().int().min(0).max(LIMITS.dicePerOp + 2).optional(),
+  die: z.union([z.literal(6), z.literal(8), z.literal(10), z.literal(12)]).optional(),
+});
 
 // Dice (wave 7, docs/design-v1-dice.md 4.1 and 5.1).
 
@@ -1421,8 +1434,22 @@ export const clientOps = [
     (o) => o.total !== undefined || o.result !== undefined,
     { message: "an answer has a total or a result" },
   ),
-  /** Clears a target's answer, kept as `previous`, so its player may answer once more. */
-  op("roll.reopen", { rollId: id, target: actorTarget }),
+  /**
+   * Clears a target's answer, kept as `previous`, so its player may answer once more. With `change`, the
+   * DM's Allow of a "Fix my total" ask names it (docs/design-v1-roll-request.md 7.5), and the player may
+   * then type the answer again but not roll it.
+   */
+  op("roll.reopen", { rollId: id, target: actorTarget, change: id.optional() }),
+  /**
+   * A player's ask to change their answer, which the DM allows or keeps (docs/design-v1-roll-request.md
+   * 5.5 and 7.5), or the end of one: `ask` replaces any pending ask, and `clear` names the ask it ends,
+   * the player's Withdraw or the DM's Keep. A face goes only with a reroll and a die only with Bardic
+   * Inspiration, so the DM's card never reads a part the Allow would ignore.
+   */
+  op("roll.change", { rollId: id, target: actorTarget, ask: rollChange.optional(), clear: id.optional() })
+    .refine((o) => (o.ask === undefined) !== (o.clear === undefined), { message: "a change asks or clears, one of the two" })
+    .refine((o) => o.ask?.face === undefined || o.ask.reason === "heroic-inspiration" || o.ask.reason === "halfling-luck", { message: "a face goes with a reroll" })
+    .refine((o) => o.ask?.die === undefined || o.ask.reason === "bardic-inspiration", { message: "a die goes with Bardic Inspiration" }),
   /**
    * Closes requests, settling each in the same op (docs/design-v1-roll-request.md 1.1): a pending ask is
    * kept, and a "save ends" request's occurrence is settled as `settle`, doc 3's Accept failure or Dismiss,
@@ -1687,15 +1714,7 @@ export const dmToolSchemas = {
 /** Wave 7's shapes, so the stored-state schema checks imported dice lines by the same bounds (docs/design-v1-dice.md 5.3). */
 export const diceSchemas = { diceResult, critOn, advantageMode };
 /** Wave 7's answer fields, so the stored-state schema checks imported requests and lines by the same bounds. */
-export const rollAnswerSchemas = {
-  rollChange: z.strictObject({
-    id,
-    on: id,
-    reason: z.enum(["heroic-inspiration", "halfling-luck", "lucky", "bardic-inspiration", "fix-total"]),
-    face: z.number().int().min(0).max(LIMITS.dicePerOp + 2).optional(),
-    die: z.union([z.literal(6), z.literal(8), z.literal(10), z.literal(12)]).optional(),
-  }),
-};
+export const rollAnswerSchemas = { rollChange };
 /** A handout's pages and audience, so the stored-state schema checks imports by the same bounds (docs/design-v1-pdf-handouts.md 3.3). */
 export const handoutSchemas = { handoutPage, handoutPages, handoutTo };
 /** A document as its create op carries it, for the upload job to check its save before it sends it. */

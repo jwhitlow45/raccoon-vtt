@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DiceResult, RollTarget } from "#shared/model.ts";
 import { reminderPreset } from "#shared/rules/rollReminders.ts";
-import { bestChoice, cardRoll, dmRoll, choiceLabel, CLEAR_TOTAL, NO_INPUTS, parseBonus, rolledDice, rolledNews, rolledText, TYPE_BONUS, verdictText } from "./card.ts";
+import { askedText, askItems, askRowText, bestChoice, cardRoll, dmRoll, choiceLabel, CLEAR_TOTAL, NO_INPUTS, parseBonus, rolledDice, rolledNews, rolledText, TYPE_BONUS, verdictText } from "./card.ts";
 
 const DEX = { kind: "save", ability: "dex" } as const;
 const restrained = [{ key: "restrained" as const }];
@@ -90,5 +90,40 @@ describe("the DM's Roll for a waiting creature (6)", () => {
     const mr = reminderPreset([], { ...DEX, spell: true }, { magicResistance: true });
     assert.deepEqual(dmRoll({ bonus: 2, preset: mr }), { label: "Roll +2, Advantage (Magic Resistance)", fields: { mode: "adv" } });
     assert.deepEqual(dmRoll({ bonus: 2, preset: reminderPreset([{ key: "blessed" }], DEX) }), { label: "Roll +2, +1d4 (Blessed)", fields: { extra: "+1d4" } });
+  });
+});
+
+describe("asking the DM to change an answer (5.5)", () => {
+  const labels = (dice: DiceResult | undefined) => askItems({ dice }).map((i) => `${i.label}${i.ask.face !== undefined ? ` @${i.ask.face}` : ""}`);
+  test("a disadvantage roll with Bless: the kept d20 by default, every other die named, Lucky, and the four Bardic dice", () => {
+    const dis: DiceResult = { formula: "2d20kl1+3+1d4", faces: [14, 6, 3], total: 12, mode: "dis" };
+    assert.deepEqual(labels(dis), [
+      "Reroll: Heroic Inspiration @1",
+      "Reroll the d20 (14): Heroic Inspiration @0",
+      "Reroll the d4 (3): Heroic Inspiration @2",
+      "Advantage: Lucky",
+      "Add a d6 (Bardic Inspiration)",
+      "Add a d8 (Bardic Inspiration)",
+      "Add a d10 (Bardic Inspiration)",
+      "Add a d12 (Bardic Inspiration)",
+    ]);
+  });
+
+  test("an advantage roll rerolls the dropped die, offers no Lucky, and Halfling Luck only on a 1", () => {
+    const adv: DiceResult = { formula: "2d20kh1+5", faces: [1, 15], total: 20, mode: "adv" };
+    const items = labels(adv);
+    assert.equal(items[0], "Reroll: Heroic Inspiration @0", "the dropped one");
+    assert.ok(items.includes("Reroll: Halfling Luck @0"));
+    assert.ok(!items.some((i) => i.startsWith("Advantage: Lucky")), "Lucky changes nothing on an advantage roll");
+    assert.ok(!labels({ formula: "1d20+5", faces: [7], total: 12 }).some((i) => i.includes("Halfling")), "no d20 shows 1");
+    assert.ok(!labels({ formula: "1d20+5", faces: [7], total: 12, cancelled: true }).some((i) => i.includes("Lucky")), "nor on a cancelled one");
+  });
+
+  test("a typed answer that is final offers only Fix my total, and each ask has its words", () => {
+    assert.deepEqual(askItems({}).map((i) => i.label), ["Fix my total"]);
+    assert.equal(askedText({ reason: "heroic-inspiration" }), "Asked the DM to reroll (Heroic Inspiration).");
+    assert.equal(askRowText({ reason: "lucky" }), "Asks for advantage (Lucky)");
+    assert.equal(askRowText({ reason: "bardic-inspiration", die: 8 }), "Asks to add a d8 (Bardic Inspiration)");
+    assert.equal(askRowText({ reason: "fix-total" }, "Thorn"), "Thorn asks to fix the total");
   });
 });

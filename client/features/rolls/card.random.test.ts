@@ -183,7 +183,7 @@ test("2,000 sequences of 40 card events keep every invariant", () => {
               w.rolledHere.add(TKEY);
             } else if (op.op === "send" && !finalForPlayer(w.request, w.target)) serverAnswer(w, "mine", "send", op.tag, op.total);
             else if (op.op === "fail" && !finalForPlayer(w.request, w.target)) serverAnswer(w, "mine", "fail", op.tag);
-            else if (op.op === "ask" && w.target.change === undefined) withTarget(w, { ...w.target, change: { id: op.tag, on: w.target.tag ?? "", reason: "fix-total" } });
+            else if (op.op === "ask" && finalForPlayer(w.request, w.target)) withTarget(w, { ...w.target, change: { id: op.tag, on: w.target.tag ?? "", reason: "fix-total" } });
             else if (op.op === "withdraw" && w.target.change) {
               const { change: _c, ...rest } = w.target;
               withTarget(w, rest);
@@ -213,7 +213,7 @@ test("2,000 sequences of 40 card events keep every invariant", () => {
           break;
         case 9:
           // The DM reopens, or allows a Fix my total, or keeps an ask.
-          if (w.request && answered(w.target)) {
+          if (w.request && answered(w.target) && !(w.target.change && chance(r, 0.5))) {
             withTarget(w, { characterId: "thorn", previous: { total: w.target.total ?? 0 }, ...(w.target.change?.reason === "fix-total" && chance(r, 0.5) ? { retype: true as const } : {}) });
             hit("reopen");
           } else if (w.request && w.target.change) {

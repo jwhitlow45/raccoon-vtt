@@ -319,6 +319,11 @@ export function reads(op: Op, state: RoomState): Reads {
     // A player's view of a request lacks a hidden DC and the other targets, so an answer waits for the server.
     case "roll.answer":
       return of([{ key: keys.roll(op.rollId) }, ...endsReads(state, [op.rollId])], ["rolls"]);
+    // An ask reads the request's DC as an answer does, so a player's ask waits for the server and a DM's Keep is predicted.
+    case "roll.change":
+      return of([{ key: keys.roll(op.rollId) }], ["rolls"]);
+    // With `change`, the DM's Allow of "Fix my total" reads only the request, which every DM view holds, so it is predicted
+    // as a DM's answer is, and refused there too when the ask is stale.
     case "roll.reopen":
       return of([{ key: keys.roll(op.rollId) }]);
     case "roll.close":

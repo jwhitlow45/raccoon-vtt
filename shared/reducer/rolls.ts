@@ -1,6 +1,8 @@
+import { CANNOT_REROLL, LUCKY_CHANGES_NOTHING, rerollable, rerollFace, withDie, withLucky } from "../dice/roll.ts";
 import { keys } from "../keys.ts";
 import { answerProvenance } from "../migrate.ts";
-import type { LogEvent, RollAnswer, RollRequest, RollTarget } from "../model.ts";
+import type { LogEvent, RollAnswer, RollChange, RollRequest, RollTarget } from "../model.ts";
+import { SETTLED_MEANWHILE, fixPending } from "../permissions.ts";
 import { anyPlayer, playersToken } from "../project.ts";
 import type { ActorTarget, OpOf } from "../protocol.ts";
 import { effectEvent } from "../rules/hp.ts";
@@ -22,6 +24,14 @@ export const FINAL = "Ask the DM to change it.";
 export const ENDS_NEEDS_ONE = "Ends needs one creature with that effect.";
 /** The refusal of a second open request for one save occurrence, as from a second DM device. */
 export const ALREADY_ASKED = "That save was already asked.";
+/** The refusal of a reroll, Lucky or an added die asked on a typed answer, in the Allow's own words (dice/resolve.ts). */
+export const ROLLED_ONLY = "Only a rolled answer can be changed this way.";
+/** The refusal of a Bardic Inspiration ask with no die, in the Allow's own words (dice/resolve.ts). */
+export const DIE_NEEDED = "Bardic Inspiration names its die.";
+/** The refusal of "Fix my total" on a rolled answer, which a reroll or a die changes instead. */
+export const TYPED_ONLY = "Only a typed answer can be fixed this way.";
+/** The refusal of "Fix my total" on an answer the player may still change: they send the new total themselves. */
+export const SEND_INSTEAD = "Send the corrected total.";
 
 export function rollAsk(tx: Tx, op: OpOf<"roll.ask">): void {
   const input = op.request;
@@ -149,8 +159,9 @@ export function rollAnswer(tx: Tx, op: OpOf<"roll.answer">): void {
  * gives, so `resultOf` decides the result for every reader alike. A DM's
  * bare mark on an answer keeps the answer, its total and dice, and only
  * marks it. It takes the op's tag, so an ask made on the old tag is over and
- * goes. Anything else is a new answer, with no mark and no ask. The line
- * says whether a mark wrote it, so the projection never guesses.
+ * goes. Anything else is a new answer, with no mark, no ask and no
+ * `retype`. The line says whether a mark wrote it, so the projection never
+ * guesses.
  */
 function taggedAnswer(tx: Tx, request: RollRequest, index: number, current: RollTarget, op: OpOf<"roll.answer">, tag: string): void {
   const player = tx.actor.role === "player";
@@ -158,7 +169,7 @@ function taggedAnswer(tx: Tx, request: RollRequest, index: number, current: Roll
   const answered = current.total !== undefined || current.result !== undefined;
   let next: RollTarget;
   if (mark !== undefined && op.total === undefined && answered) {
-    const { change: _ask, ...kept } = current;
+    const { change: _ask, retype: _retype, ...kept } = current;
     next = { ...kept, mark, tag, by: tx.actor.memberId };
   } else {
     next = creatureOf(current);
@@ -192,15 +203,90 @@ function taggedAnswer(tx: Tx, request: RollRequest, index: number, current: Roll
   tx.addEvent(line);
 }
 
-/** Clears a target's answer, kept as `previous`, so its player may answer once more. A target with no answer is left as it is. */
+/**
+ * Clears a target's answer, kept as `previous`, so its player may answer
+ * once more, and with it any ask and `retype`. A target with no answer is
+ * left as it is. With `change`, the DM's Allow of a "Fix my total" ask
+ * (docs/design-v1-roll-request.md 5.5), the ask must still be pending on
+ * this answer, and the target then waits with `retype`, for a total typed
+ * again and never a roll. No line: the corrected answer writes its own.
+ */
 export function rollReopen(tx: Tx, op: OpOf<"roll.reopen">): void {
   const request = tx.state.rolls[op.rollId];
   if (!request) throw gone("roll request");
   const index = request.targets.findIndex((t) => sameCreature(t, op.target));
   const current = request.targets[index];
   if (!current) throw gone("roll target");
+  if (op.change !== undefined) {
+    if (!fixPending(current, op.change)) throw invalid(SETTLED_MEANWHILE);
+    writeTarget(tx, request, index, { ...creatureOf(current), previous: answerOf(current), retype: true });
+    return;
+  }
   if (current.total === undefined && current.result === undefined) return;
   writeTarget(tx, request, index, { ...creatureOf(current), previous: answerOf(current) });
+}
+
+/**
+ * A player's ask to change their answer, or its end
+ * (docs/design-v1-roll-request.md 5.5 and 7.5). An ask names the answer it
+ * would change by its tag, so one made on an answer since replaced, marked
+ * or reopened is over before it lands. It replaces any pending ask. `clear`,
+ * the player's Withdraw or the DM's Keep, ends only the pending ask it
+ * names, so a stale one ends nothing. Neither writes a line: an ask is
+ * between the player and the DM, and an allowed change writes its own.
+ */
+export function rollChange(tx: Tx, op: OpOf<"roll.change">): void {
+  const request = tx.state.rolls[op.rollId];
+  if (!request) throw gone("roll request");
+  const index = request.targets.findIndex((t) => sameCreature(t, op.target));
+  const current = request.targets[index];
+  if (!current) throw gone("roll target");
+  const ask = op.ask;
+  if (ask === undefined) {
+    if (op.clear === undefined || current.change?.id !== op.clear) throw invalid(SETTLED_MEANWHILE);
+    const { change: _cleared, ...rest } = current;
+    writeTarget(tx, request, index, rest);
+    return;
+  }
+  if (current.tag === undefined || ask.on !== current.tag) throw invalid(SETTLED_MEANWHILE);
+  const refusal = changeRefusal(request, current, ask);
+  if (refusal !== undefined) throw invalid(refusal);
+  const change: RollChange = { id: ask.id, on: ask.on, reason: ask.reason };
+  if (ask.face !== undefined) change.face = ask.face;
+  if (ask.die !== undefined) change.die = ask.die;
+  writeTarget(tx, request, index, { ...current, change });
+}
+
+/**
+ * Why the DM's Allow could not apply this ask to the target's answer, or
+ * undefined when it could, so no ask waits on the DM only to be refused at
+ * the Allow. A reroll, Lucky or an added die needs a rolled answer and is
+ * judged by the rules the Allow's resolve runs (dice/resolve.ts), never a
+ * copy of them. "Fix my total" needs a typed answer that is final for its
+ * player, since one that is not they correct by sending it again.
+ */
+export function changeRefusal(request: Pick<RollRequest, "dc" | "dcShown" | "resultShown">, target: Pick<RollTarget, "result" | "dice">, ask: Pick<RollChange, "reason" | "face" | "die">): string | undefined {
+  const dice = target.dice;
+  if (ask.reason === "fix-total") {
+    if (dice) return TYPED_ONLY;
+    return isFinal(request, target) ? undefined : SEND_INSTEAD;
+  }
+  if (!dice) return ROLLED_ONLY;
+  switch (ask.reason) {
+    case "heroic-inspiration":
+    case "halfling-luck": {
+      const face = ask.face ?? rerollFace(dice, ask.reason);
+      return face !== null && rerollable(dice, ask.reason, face) ? undefined : CANNOT_REROLL;
+    }
+    // Lucky and an added die refuse by the stored faces' shape alone, never by what is drawn, so a dry run answers as the Allow will.
+    case "lucky":
+      return withLucky(dice, () => 1).ok ? undefined : LUCKY_CHANGES_NOTHING;
+    case "bardic-inspiration": {
+      if (ask.die === undefined) return DIE_NEEDED;
+      const added = withDie(dice, ask.die, () => 1);
+      return added.ok ? undefined : added.error;
+    }
+  }
 }
 
 /**

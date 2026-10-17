@@ -49,7 +49,7 @@ import { sceneDuplicate } from "./reducer/duplicate.ts";
 import { journalCreate, journalDelete, journalReveal, journalUpdate } from "./reducer/journal.ts";
 import { actorEffects, tokenDeleteMany, tokenUpdateMany } from "./reducer/many.ts";
 import { pinPut, pinRemove } from "./reducer/pins.ts";
-import { endSaves, rollAnswer, rollAsk, rollClose, rollReopen } from "./reducer/rolls.ts";
+import { endSaves, rollAnswer, rollAsk, rollChange, rollClose, rollReopen } from "./reducer/rolls.ts";
 import { sysDice } from "./reducer/dice.ts";
 import { handoutClose, handoutDocCreate, handoutDocDelete, handoutShow, logChat, logWhisper, restore } from "./reducer/misc.ts";
 import { sceneSetPhase } from "./reducer/phases.ts";
@@ -342,6 +342,8 @@ function dispatch(tx: Tx, op: Op): void {
       return rollAnswer(tx, op);
     case "roll.reopen":
       return rollReopen(tx, op);
+    case "roll.change":
+      return rollChange(tx, op);
     case "roll.close":
       return rollClose(tx, op);
     case "sys.dice":

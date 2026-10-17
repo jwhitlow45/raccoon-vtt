@@ -772,12 +772,18 @@ export function chipLine(request: Pick<RollRequest, "test" | "dcHidden" | "resul
 
 /**
  * The name of a chip a tap opens: its lines, then "Open to change it."
- * once any creature on it has an answer. A request put off with Later has
- * nothing to change yet, so its name stops at "waiting for your roll."
+ * once any creature on it has an answer it may change, or "Open to ask the
+ * DM to change it." (a rolled answer) or "…to fix it." (a typed one) once
+ * every answer is final. A request put off with Later has nothing to change
+ * yet, so its name stops at "waiting for your roll."
  */
-export function chipName(request: Pick<RollRequest, "targets">, lines: readonly string[]): string {
+export function chipName(request: Pick<RollRequest, "targets" | "dcHidden" | "resultShown">, lines: readonly string[]): string {
   const text = lines.join(" ");
-  return request.targets.some(answered) ? `${text} Open to change it.` : text;
+  const done = request.targets.filter(answered);
+  if (done.length === 0) return text;
+  // An answer the player may still change opens to change it. A final one opens to ask the DM (docs/design-v1-roll-request.md 5.4).
+  if (done.some((t) => !finalForPlayer(request, t))) return `${text} Open to change it.`;
+  return done.some((t) => t.dice !== undefined) ? `${text} Open to ask the DM to change it.` : `${text} Open to ask the DM to fix it.`;
 }
 
 /** What a final answer says on the open card, before "Final. Ask the DM to change it.", read in the chip's order: "Sent Dex 13. Pass". */
@@ -1101,8 +1107,9 @@ export type AnswerOffers = Record<AnswerOp, boolean>;
  * What the card offers (5.2, 5.5): Roll only while the creature waits, not
  * for a retype, with the Total field empty, a bonus known or typed and the
  * socket open. Send and Fail only on an answer that is not final. Ask only
- * on a final answer with no ask pending, and Withdraw only with one. A
- * request that no longer holds the creature offers nothing.
+ * on a final answer, where a new ask replaces a pending one, and Withdraw
+ * only with one pending. A request that no longer holds the creature
+ * offers nothing.
  */
 export function answerOffers(input: {
   holds: boolean;
@@ -1120,7 +1127,8 @@ export function answerOffers(input: {
     roll: !answered(target) && target.retype !== true && !typed && input.connected && input.bonusReady,
     send: !final && typed,
     fail: !final && request.test.kind === "save",
-    ask: final && target.change === undefined,
+    // A newer item replaces a pending ask (5.5). An answer from before tags has none, and no ask can name it.
+    ask: final && target.tag !== undefined,
     withdraw: target.change !== undefined,
   };
 }

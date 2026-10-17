@@ -253,7 +253,10 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       // Only the DM's answers go on a stack (design 7.7): a player answers again to change theirs.
       return op.total === undefined ? `marking the roll of ${target(op.target)}` : `entering the roll of ${target(op.target)}`;
     case "roll.reopen":
-      return `reopening the roll of ${target(op.target)}`;
+      return op.change === undefined ? `reopening the roll of ${target(op.target)}` : `letting ${target(op.target)} fix the total`;
+    // On no stack (undo.ts records), named for completeness as a roll is.
+    case "roll.change":
+      return op.ask ? `asking to change the roll of ${target(op.target)}` : `settling the ask about the roll of ${target(op.target)}`;
     case "roll.close": {
       const first = op.rollIds.length === 1 ? before.rolls[op.rollIds[0]!] : undefined;
       if (first) return `closing the request for ${testText(first.test)}`;

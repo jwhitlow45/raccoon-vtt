@@ -241,6 +241,7 @@ describe("wave 5 undo labels (docs/design-v1-dm-tools.md 2.2)", () => {
     assert.equal(describeOp({ t: "roll.answer", rollId: "r1", target: { characterId: "c1" }, result: "pass" }, s), "marking the roll of Ayla");
     assert.equal(describeOp({ t: "roll.answer", rollId: "r1", target: { characterId: "c1" }, total: 9 }, s), "entering the roll of Ayla");
     assert.equal(describeOp({ t: "roll.reopen", rollId: "r1", target: { characterId: "c1" } }, s), "reopening the roll of Ayla");
+    assert.equal(describeOp({ t: "roll.reopen", rollId: "r1", target: { characterId: "c1" }, change: "a1" }, s), "letting Ayla fix the total");
     assert.equal(describeOp({ t: "roll.close", rollIds: ["r1"] }, s), "closing the request for a Dexterity saving throw");
     assert.equal(describeOp({ t: "roll.close", rollIds: ["r1", "r9"] }, s), "closing 2 roll requests");
   });

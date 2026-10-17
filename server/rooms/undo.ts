@@ -81,10 +81,14 @@ export class UndoStacks {
    * Whether an applied op by this role goes on the stack at all. A scene's
    * new thumbnail alone does not: a DM device uploads it in the background
    * (docs/design-v1-maps-vision.md 3.3), and Ctrl+Z must take back what the
-   * DM did, not a picture nobody asked for.
+   * DM did, not a picture nobody asked for. Nor does an ask to change a
+   * roll or its end (docs/design-v1-roll-request.md 7.5): the ask is the
+   * player's, so a DM's undo of Keep would bring back an ask the player was
+   * told was settled. Keep stands, as the Allow's roll does.
    */
   static records(role: "dm" | "player", op: Op): boolean {
     if (op.t.startsWith("sys.")) return false;
+    if (op.t === "roll.change") return false;
     if (op.t === "scene.update" && Object.keys(op.patch).every((field) => field === "thumb")) return false;
     if (role === "dm") return true;
     return onPlayerUndoStack(op);

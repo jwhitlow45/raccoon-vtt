@@ -410,6 +410,7 @@ const rollTarget = z
     by: id.optional(),
     previous: z.strictObject(rollAnswerFields).optional(),
     change: rollAnswerSchemas.rollChange.optional(),
+    retype: z.literal(true).optional(),
   })
   .refine((t) => (t.tokenId === undefined) !== (t.characterId === undefined), { message: "a roll target is one token or one character" });
 /** Never with `dcHidden`, which only player projections carry. */

@@ -1081,6 +1081,8 @@ function playerRollTarget(target: RollTarget, resultShown: boolean): RollTarget 
   if (target.typedBonus) out.typedBonus = true;
   if (target.change !== undefined) out.change = target.change;
   if (target.changed !== undefined) out.changed = target.changed;
+  // The card offers the Total field without a roll row while it is set (docs/design-v1-roll-request.md 5.5).
+  if (target.retype) out.retype = true;
   return out;
 }
 

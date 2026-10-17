@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { resolveDiceOp } from "../dice/resolve.ts";
-import type { Draw } from "../dice/roll.ts";
+import { CANNOT_REROLL, LUCKY_CHANGES_NOTHING, type Draw } from "../dice/roll.ts";
 import type { Actor, Effect, LogEntry, LogEvent, RollChange, RollTarget, RoomState, Viewer } from "../model.ts";
-import { ANSWER_NEEDS_TAG, SETTLED_MEANWHILE, canApply } from "../permissions.ts";
+import { ANSWER_NEEDS_TAG, ONLY_PLAYERS_ASK, SETTLED_MEANWHILE, TYPE_THE_TOTAL, canApply } from "../permissions.ts";
 import { projectState } from "../project.ts";
-import type { Op, OpOf, RestoreEntry, RollRequestInput } from "../protocol.ts";
+import { clientOpSchema, type Op, type OpOf, type RestoreEntry, type RollRequestInput } from "../protocol.ts";
+import { reads, satisfies } from "../reads.ts";
 import { applyOp } from "../reducer.ts";
 import { resultOf } from "../rules/rolls.ts";
 import { DM, P1, P2, actor, character, effect, env, room, token } from "../testutil.ts";
-import { ALREADY_ASKED, ENDS_NEEDS_ONE } from "./rolls.ts";
+import { ALREADY_ASKED, DIE_NEEDED, ENDS_NEEDS_ONE, FINAL, ROLLED_ONLY, SEND_INSTEAD, TYPED_ONLY } from "./rolls.ts";
 
 /**
  * Roll requests with wave 7's additions (docs/design-v1-roll-request.md 1.1
@@ -18,8 +19,8 @@ import { ALREADY_ASKED, ENDS_NEEDS_ONE } from "./rolls.ts";
  * close rule on every close path, and the rule that closes a save-ends
  * request on whatever op settles it. Each op runs as the actor runs it:
  * permissions, the resolve for a roll with a scripted draw, then the reducer.
- * `due` and a pending ask are written into the state directly, since doc 3's
- * turn end and `roll.change` come later.
+ * `due` is written into the state directly, since doc 3's turn end comes
+ * later. A player's ask to change an answer is a real `roll.change`.
  */
 const DEPS = { canUseAsset: () => true };
 const DEX = { kind: "save" as const, choices: [{ ability: "dex" as const }] };
@@ -85,11 +86,14 @@ const targetOf = (state: RoomState, rollId = "r1", i = 0): RollTarget => state.r
 const lineOf = (r: Ran) => r.log.find((e) => e.data?.type === "roll")!.data as Extract<LogEvent, { type: "roll" }>;
 const effectsOf = (state: RoomState, who: "thorn" | "pip" = "thorn"): Effect[] => (who === "thorn" ? state.characters.thorn!.actor.effects : (state.tokens.pip!.actor as { inline: Actor }).inline.effects);
 
-/** Writes into the state what doc 3 and `roll.change` write later: a target's pending ask, or an effect's occurrence. */
+const OWNERS: Record<string, Viewer> = { thorn: P1, pip: P1, vex: P2 };
+const ownerOf = (t: RollTarget): Viewer => OWNERS[t.tokenId ?? t.characterId!]!;
+const refOf = (t: RollTarget) => (t.tokenId !== undefined ? { tokenId: t.tokenId } : { characterId: t.characterId! });
+
+/** The first target's player asks to change its answer, naming the answer's tag as the card does. */
 function withAsk(state: RoomState, change: Omit<RollChange, "on">, rollId = "r1"): RoomState {
-  const request = state.rolls[rollId]!;
-  const [first, ...rest] = request.targets;
-  return { ...state, rolls: { ...state.rolls, [rollId]: { ...request, targets: [{ ...first!, change: { ...change, on: first!.tag! } }, ...rest] } } };
+  const first = state.rolls[rollId]!.targets[0]!;
+  return ok(send(state, { t: "roll.change", rollId, target: refOf(first), ask: { ...change, on: first.tag! } }, ownerOf(first))).state;
 }
 function withThornEffects(state: RoomState, effects: Effect[]): RoomState {
   const thorn = state.characters.thorn!;
@@ -380,5 +384,212 @@ describe("a save-ends request closes on whatever settles it (7.5)", () => {
     const server = ok(send(asked, answer({ result: "pass" }, PIP)));
     assert.equal(server.state.rolls.r1, undefined);
     assert.deepEqual(effectsOf(server.state, "pip"), []);
+  });
+});
+
+describe("asking to change an answer, and the DM's answer (5.5, 6, 7.5)", () => {
+  const change = (rest: Omit<OpOf<"roll.change">, "t" | "rollId" | "target">, target: { characterId: string } | { tokenId: string } = THORN, rollId = "r1"): OpOf<"roll.change"> => ({ t: "roll.change", rollId, target, ...rest });
+  const asking = (id: string, reason: RollChange["reason"], state: RoomState, extra: Partial<RollChange> = {}) => change({ ask: { id, on: targetOf(state).tag!, reason, ...extra } });
+  const refusal = (code: string, message: string) => ({ ok: false, code, message });
+  /** Thorn's save asked with the DC hidden, and rolled by his player: the faces are the d20s and any extra die. */
+  const rolled = (faces: number[], rest: Partial<OpOf<"roll.dice">> = {}, extra: Partial<RollRequestInput> = {}) => ok(send(ok(send(table(), ask("r1", extra))).state, roll(rest), P1, faces)).state;
+  const typed = (total: number, extra: Partial<RollRequestInput> = {}) => ok(send(ok(send(table(), ask("r1", extra))).state, answer({ total }), P1)).state;
+
+  test("the op asks or clears, one of the two, a face only with a reroll and a die only with Bardic Inspiration", () => {
+    const base = { t: "roll.change", rollId: "r1", target: THORN };
+    const ask_ = { id: "a1", on: "t1" };
+    assert.ok(clientOpSchema.safeParse({ ...base, ask: { ...ask_, reason: "heroic-inspiration", face: 1 } }).success);
+    assert.ok(clientOpSchema.safeParse({ ...base, ask: { ...ask_, reason: "bardic-inspiration", die: 8 } }).success);
+    assert.ok(clientOpSchema.safeParse({ ...base, clear: "a1" }).success);
+    for (const bad of [{}, { ask: { ...ask_, reason: "lucky" }, clear: "a1" }, { ask: { ...ask_, reason: "lucky", face: 0 } }, { ask: { ...ask_, reason: "heroic-inspiration", die: 6 } }, { ask: { ...ask_, reason: "fix-total", die: 6 } }]) {
+      assert.equal(clientOpSchema.safeParse({ ...base, ...bad }).success, false, JSON.stringify(bad));
+    }
+    assert.ok(clientOpSchema.safeParse({ t: "roll.reopen", rollId: "r1", target: THORN, change: "a1" }).success);
+  });
+
+  test("who may ask, withdraw, keep and allow: the creature's player asks and withdraws, the DM keeps and allows", () => {
+    const state = rolled([4]);
+    const heroic = asking("a1", "heroic-inspiration", state);
+    assert.deepEqual(send(state, heroic, DM), refusal("forbidden", ONLY_PLAYERS_ASK));
+    assert.deepEqual(send(state, heroic, P2), refusal("gone", "that is not here"), "Vex's player cannot see Thorn's target");
+    assert.equal(send(state, { ...heroic, rollId: "nope" }, P1).ok, false);
+    const pending = ok(send(state, heroic, P1)).state;
+    assert.deepEqual(send(pending, change({ clear: "a1" }), P2), refusal("gone", "that is not here"));
+    assert.ok(send(pending, change({ clear: "a1" }), P1).ok, "Withdraw");
+    assert.ok(send(pending, change({ clear: "a1" }), DM).ok, "Keep");
+    assert.deepEqual(send(pending, roll({ change: "a1" }), P1, [9]), refusal("forbidden", "Only the DM allows a change to a roll."));
+    assert.deepEqual(send(typed(3), { t: "roll.reopen", rollId: "r1", target: THORN, change: "a1" }, P1), refusal("forbidden", "only the DM can do that"));
+  });
+
+  test("an ask names the answer it would change, so one on an older answer, or on none, is settled meanwhile", () => {
+    const state = rolled([4]);
+    const stale = change({ ask: { id: "a1", on: "t-old", reason: "heroic-inspiration" } });
+    assert.deepEqual(send(state, stale, P1), refusal("invalid", SETTLED_MEANWHILE));
+    const waiting = ok(send(table(), ask("r1"))).state;
+    assert.deepEqual(send(waiting, stale, P1), refusal("invalid", SETTLED_MEANWHILE));
+    const marked = ok(send(state, answer({ result: "pass" }))).state;
+    assert.deepEqual(send(marked, asking("a1", "heroic-inspiration", state), P1), refusal("invalid", SETTLED_MEANWHILE), "the mark took a new tag");
+  });
+
+  test("each ask must be one the Allow could apply, in the Allow's own words", () => {
+    const typedFail = typed(3);
+    for (const reason of ["heroic-inspiration", "halfling-luck", "lucky"] as const) {
+      assert.deepEqual(send(typedFail, asking("a1", reason, typedFail), P1), refusal("invalid", ROLLED_ONLY), reason);
+    }
+    assert.deepEqual(send(typedFail, asking("a1", "bardic-inspiration", typedFail, { die: 6 }), P1), refusal("invalid", ROLLED_ONLY));
+    const four = rolled([4]);
+    assert.deepEqual(send(four, asking("a1", "halfling-luck", four), P1), refusal("invalid", CANNOT_REROLL), "no d20 shows 1");
+    assert.deepEqual(send(four, asking("a1", "heroic-inspiration", four, { face: 1 }), P1), refusal("invalid", CANNOT_REROLL), "no second die");
+    assert.deepEqual(send(four, asking("a1", "bardic-inspiration", four), P1), refusal("invalid", DIE_NEEDED));
+    assert.deepEqual(send(four, asking("a1", "fix-total", four), P1), refusal("invalid", TYPED_ONLY));
+    const one = rolled([1, 9], { mode: "adv" });
+    assert.ok(send(one, asking("a1", "halfling-luck", one), P1).ok, "the dropped 1");
+    assert.deepEqual(send(one, asking("a1", "halfling-luck", one, { face: 1 }), P1), refusal("invalid", CANNOT_REROLL), "a face showing 9");
+    assert.deepEqual(send(one, asking("a1", "lucky", one), P1), refusal("invalid", LUCKY_CHANGES_NOTHING), "advantage already");
+    const cancelled = rolled([7], { cancelled: true });
+    assert.deepEqual(send(cancelled, asking("a1", "lucky", cancelled), P1), refusal("invalid", LUCKY_CHANGES_NOTHING), "sources that cancelled");
+    const shown = typed(3, { dcShown: true });
+    assert.deepEqual(send(shown, asking("a1", "fix-total", shown), P1), refusal("invalid", SEND_INSTEAD), "with the DC shown the player sends again");
+    assert.ok(send(typedFail, asking("a1", "fix-total", typedFail), P1).ok, "a final typed answer");
+  });
+
+  test("an ask is stored as sent, writes no line, and another replaces it, so the first one's Allow is settled meanwhile", () => {
+    const state = rolled([4]);
+    const first = ok(send(state, asking("a1", "heroic-inspiration", state), P1));
+    assert.deepEqual(targetOf(first.state).change, { id: "a1", on: targetOf(state).tag, reason: "heroic-inspiration" });
+    assert.deepEqual(first.log, []);
+    const second = ok(send(first.state, asking("a2", "bardic-inspiration", state, { die: 6 }), P1)).state;
+    assert.equal(targetOf(second).change?.id, "a2");
+    assert.deepEqual(send(second, roll({ change: "a1" }), DM, [19]), refusal("invalid", SETTLED_MEANWHILE));
+    const allowed = ok(send(second, roll({ change: "a2" }), DM, [5])).state;
+    assert.deepEqual({ total: targetOf(allowed).total, changed: targetOf(allowed).changed?.id, change: targetOf(allowed).change }, { total: 9, changed: "a2", change: undefined });
+  });
+
+  test("withdrawn, then a stale Allow is refused, and asked again, the first ask's Allow is still refused", () => {
+    const state = rolled([4]);
+    const pending = ok(send(state, asking("a1", "heroic-inspiration", state), P1)).state;
+    const withdrawn = ok(send(pending, change({ clear: "a1" }), P1));
+    assert.equal(targetOf(withdrawn.state).change, undefined);
+    assert.deepEqual(withdrawn.log, []);
+    assert.deepEqual(send(withdrawn.state, roll({ change: "a1" }), DM, [19]), refusal("invalid", SETTLED_MEANWHILE));
+    assert.deepEqual(send(withdrawn.state, change({ clear: "a1" }), P1), refusal("invalid", SETTLED_MEANWHILE), "nothing left to withdraw");
+    const again = ok(send(withdrawn.state, asking("a2", "heroic-inspiration", state), P1)).state;
+    assert.deepEqual(send(again, roll({ change: "a1" }), DM, [19]), refusal("invalid", SETTLED_MEANWHILE));
+    assert.deepEqual(send(again, change({ clear: "a1" }), DM), refusal("invalid", SETTLED_MEANWHILE), "a Keep of the first ends nothing");
+    assert.equal(targetOf(again).change?.id, "a2");
+  });
+
+  test("two DM devices tap Allow: one change, and the second is refused before any draw", () => {
+    const state = rolled([4]);
+    const pending = ok(send(state, asking("a1", "heroic-inspiration", state), P1)).state;
+    const once = ok(send(pending, roll({ change: "a1" }), DM, [18])).state;
+    assert.equal(targetOf(once).total, 18);
+    assert.deepEqual(send(once, roll({ change: "a1" }), DM), refusal("invalid", SETTLED_MEANWHILE), "no face asked for");
+  });
+
+  test("Keep clears the ask and nothing else, with no line, and its Allow is then refused", () => {
+    const state = rolled([4]);
+    const pending = ok(send(state, asking("a1", "lucky", state), P1)).state;
+    const kept = ok(send(pending, change({ clear: "a1" }), DM));
+    assert.deepEqual(targetOf(kept.state), targetOf(state));
+    assert.deepEqual(kept.log, []);
+    assert.deepEqual(send(kept.state, roll({ change: "a1" }), DM, [20]), refusal("invalid", SETTLED_MEANWHILE));
+  });
+
+  test("Fix my total: the Allow reopens for typing alone, the player's roll is refused, the DM's is not, and a typed total clears retype", () => {
+    const fail = typed(3);
+    assert.deepEqual(send(fail, answer({ total: 13 }), P1), refusal("forbidden", FINAL));
+    const pending = ok(send(fail, asking("a1", "fix-total", fail), P1)).state;
+    const allow = { t: "roll.reopen" as const, rollId: "r1", target: THORN, change: "a1" };
+    assert.deepEqual(send(pending, { ...allow, change: "a9" }), refusal("invalid", SETTLED_MEANWHILE));
+    const reopened = ok(send(pending, allow));
+    const target = targetOf(reopened.state);
+    assert.deepEqual({ retype: target.retype, change: target.change, total: target.total, result: target.result }, { retype: true, change: undefined, total: undefined, result: undefined });
+    assert.deepEqual(target.previous, { total: 3, result: "fail", tag: targetOf(fail).tag });
+    assert.deepEqual(reopened.log, []);
+    assert.equal(projectState(reopened.state, P1, { sceneId: "s1" }).rolls.r1!.targets[0]!.retype, true, "the player's card knows");
+    assert.deepEqual(send(reopened.state, allow), refusal("invalid", SETTLED_MEANWHILE), "a second device's Allow");
+    assert.deepEqual(send(reopened.state, roll(), P1, [15]), refusal("invalid", TYPE_THE_TOTAL));
+    assert.ok(send(reopened.state, roll(), DM, [15]).ok, "the DM may still roll it");
+    const fixed = ok(send(reopened.state, answer({ total: 13 }), P1)).state;
+    assert.deepEqual({ total: targetOf(fixed).total, result: targetOf(fixed).result, retype: targetOf(fixed).retype }, { total: 13, result: "pass", retype: undefined });
+    assert.equal(targetOf(fixed).previous?.total, 3, "the fixed answer still reads as a change");
+    const failedInstead = ok(send(reopened.state, answer({ result: "fail" }), P1)).state;
+    assert.equal(targetOf(failedInstead).retype, undefined);
+    const marked = ok(send(reopened.state, answer({ result: "pass" }))).state;
+    assert.equal(targetOf(marked).retype, undefined);
+  });
+
+  test("the DM's undo of a fixed-total Allow brings back the answer and the ask it allowed", () => {
+    const fail = typed(3);
+    const pending = ok(send(fail, asking("a1", "fix-total", fail), P1)).state;
+    const reopened = ok(send(pending, { t: "roll.reopen", rollId: "r1", target: THORN, change: "a1" }));
+    const undone = ok(send(reopened.state, { t: "sys.restore", entries: reopened.inverse!, from: "undo", deps: true }));
+    const { rev: _was, ...before } = pending.rolls.r1!;
+    const { rev: _now, ...after } = undone.state.rolls.r1!;
+    assert.deepEqual(after, before);
+  });
+
+  test("a reopen or a new answer clears a pending ask", () => {
+    const state = rolled([4]);
+    const pending = ok(send(state, asking("a1", "heroic-inspiration", state), P1)).state;
+    const reopened = ok(send(pending, { t: "roll.reopen", rollId: "r1", target: THORN })).state;
+    assert.deepEqual(Object.keys(targetOf(reopened)).sort(), ["characterId", "previous"]);
+    assert.deepEqual(send(reopened, roll({ change: "a1" }), DM, [19]), refusal("invalid", SETTLED_MEANWHILE));
+    const replaced = ok(send(pending, answer({ total: 20 }))).state;
+    assert.equal(targetOf(replaced).change, undefined);
+  });
+
+  test("Heroic Inspiration on a disadvantage roll of 14 and 6 rerolls the 6 and keeps the 14", () => {
+    const state = rolled([14, 6], { mode: "dis" });
+    assert.equal(targetOf(state).total, 6);
+    const pending = ok(send(state, asking("a1", "heroic-inspiration", state), P1)).state;
+    const allowed = ok(send(pending, roll({ change: "a1" }), DM, [17]));
+    const target = targetOf(allowed.state);
+    assert.deepEqual({ faces: target.dice?.faces, total: target.total, result: target.result }, { faces: [14, 17], total: 14, result: "pass" });
+    assert.equal(target.previous?.total, 6);
+    assert.equal(lineOf(allowed).changed?.reason, "heroic-inspiration");
+  });
+
+  test("Heroic Inspiration naming Bless's d4 redraws the d4 alone", () => {
+    const state = rolled([12, 1], { extra: "1d4" });
+    assert.equal(targetOf(state).total, 13);
+    const pending = ok(send(state, asking("a1", "heroic-inspiration", state, { face: 1 }), P1)).state;
+    const target = targetOf(ok(send(pending, roll({ change: "a1" }), DM, [4])).state);
+    assert.deepEqual({ faces: target.dice?.faces, total: target.total }, { faces: [12, 4], total: 16 });
+  });
+
+  test("Lucky on a disadvantage roll draws nothing: the sources cancel, a normal roll on the first d20", () => {
+    const state = rolled([14, 6], { mode: "dis" });
+    const pending = ok(send(state, asking("a1", "lucky", state), P1)).state;
+    const target = targetOf(ok(send(pending, roll({ change: "a1" }), DM, [])).state);
+    assert.deepEqual({ faces: target.dice?.faces, total: target.total, cancelled: target.dice?.cancelled, result: target.result }, { faces: [14], total: 14, cancelled: true, result: "pass" });
+  });
+
+  test("Bardic Inspiration's d8 on 12 against DC 15 is judged against the DC again", () => {
+    const state = rolled([12], {}, { dc: 15 });
+    assert.equal(targetOf(state).result, "fail");
+    const pending = ok(send(state, asking("a1", "bardic-inspiration", state, { die: 8 }), P1)).state;
+    const target = targetOf(ok(send(pending, roll({ change: "a1" }), DM, [5])).state);
+    assert.deepEqual({ total: target.total, result: target.result, changed: target.changed?.die }, { total: 17, result: "pass", changed: 8 });
+  });
+
+  test("a close settles a pending ask with its request", () => {
+    const state = rolled([4]);
+    const pending = ok(send(state, asking("a1", "heroic-inspiration", state), P1)).state;
+    const closed = ok(send(pending, { t: "roll.close", rollIds: ["r1"] })).state;
+    assert.equal(closed.rolls.r1, undefined);
+    assert.equal(send(closed, roll({ change: "a1" }), DM, [19]).ok, false);
+  });
+
+  test("an ask waits for the server on a player's device, whose view may lack the DC, and a DM's Keep and Allow replay", () => {
+    const state = rolled([4]);
+    const pending = ok(send(state, asking("a1", "heroic-inspiration", state), P1)).state;
+    const opts = { sceneId: "s1" };
+    assert.ok(!satisfies(reads(asking("a2", "lucky", state), pending), projectState(pending, P1, opts), P1, opts));
+    assert.ok(satisfies(reads(change({ clear: "a1" }), pending), projectState(pending, DM, opts), DM, opts));
+    const fix = typed(3);
+    const fixPending = ok(send(fix, asking("a1", "fix-total", fix), P1)).state;
+    assert.ok(satisfies(reads({ t: "roll.reopen", rollId: "r1", target: THORN, change: "a1" }, fixPending), projectState(fixPending, DM, opts), DM, opts));
   });
 });

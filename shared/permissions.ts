@@ -1,6 +1,6 @@
 import { chunkKey, doorChunk, keys, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
-import type { Actor, BuildChunk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
+import type { Actor, BuildChunk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
 import type { ActorTarget, DoorRef, Op, OpOf, RefusalCode, TokenInput, TokenPatch } from "./protocol.ts";
 import { ownsCharacter, ownsToken, projectEntity, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { LIMITS } from "./limits.ts";
@@ -285,6 +285,11 @@ function forDm(op: Op, c: Check): Decision {
       return diceRollCheck(c, op);
     case "roll.dice":
       return rollDiceCheck(c, op);
+    case "roll.reopen":
+      return op.change === undefined ? OK : allowFixCheck(c, op);
+    // The DM keeps or allows a player's ask and never makes one (docs/design-v1-roll-request.md 7.5).
+    case "roll.change":
+      return op.ask === undefined ? OK : refuse("forbidden", ONLY_PLAYERS_ASK);
     // The DM's death roll needs a creature that exists, checked before anything is drawn.
     case "actor.deathRoll":
       return ("tokenId" in op.target ? c.state.tokens[op.target.tokenId] : c.state.characters[op.target.characterId]) ? OK : GONE;
@@ -405,6 +410,8 @@ function forPlayer(op: Op, c: Check): Decision {
 
     case "roll.answer":
       return rollAnswerCheck(c, op);
+    case "roll.change":
+      return rollChangeCheck(c, op);
 
     case "dice.roll":
       return diceRollCheck(c, op);
@@ -756,7 +763,9 @@ export const SETTLED_MEANWHILE = "It was settled meanwhile.";
  * `roll.answer` is checked: a player for a target they own now, else
  * `gone`, and the DM for any target. A player rolls only a creature still
  * waiting, as does any roll with `unanswered`, so a DM's Roll that crosses a
- * player's answer never replaces it. `change`, the DM's Allow, needs the
+ * player's answer never replaces it. Nor does a player roll a target whose
+ * "Fix my total" the DM allowed (`retype`): that reopens the answer for
+ * typing alone, while the DM may still roll it. `change`, the DM's Allow, needs the
  * target's pending ask to have that id, to name the current answer and that
  * answer to be rolled, so an ask replaced or withdrawn while the Allow
  * travels, or a second device's Allow, draws nothing. All before any draw.
@@ -769,10 +778,50 @@ function rollDiceCheck(c: Check, op: OpOf<"roll.dice">): Decision {
   const player = c.actor.role === "player";
   if (player && !("tokenId" in op.target ? c.ownsTokenId(op.target.tokenId) : c.ownsCharacterId(op.target.characterId))) return GONE;
   if (player && op.change !== undefined) return refuse("forbidden", "Only the DM allows a change to a roll.");
+  if (player && target.retype) return refuse("invalid", TYPE_THE_TOTAL);
   const answered = target.total !== undefined || target.result !== undefined;
   if (op.change === undefined) return (player || op.unanswered) && answered ? refuse("invalid", ANSWERED_MEANWHILE) : OK;
   const ask = target.change;
   return ask && ask.id === op.change && ask.on === target.tag && target.dice ? OK : refuse("invalid", SETTLED_MEANWHILE);
+}
+
+/** The refusal of a player's roll where the DM allowed "Fix my total", which reopens the answer for typing alone (docs/design-v1-roll-request.md 5.5). */
+export const TYPE_THE_TOTAL = "Type the corrected total.";
+/** The refusal of a DM's ask: an ask is the player's, and the DM changes an answer directly. */
+export const ONLY_PLAYERS_ASK = "Only a player asks to change a roll.";
+
+/**
+ * A player's ask to change their answer, or its Withdraw
+ * (docs/design-v1-roll-request.md 7.5), as `roll.answer` is checked: a
+ * request they can see that names a creature they own now, else `gone`.
+ * Whether the ask fits the answer it names is the reducer's, since it reads
+ * the request's DC, which a player's view may lack.
+ */
+function rollChangeCheck(c: Check, op: OpOf<"roll.change">): Decision {
+  const request = c.state.rolls[op.rollId];
+  if (!request || !c.visible(keys.roll(op.rollId))) return GONE;
+  const named = request.targets.some((t) => ("tokenId" in op.target ? t.tokenId === op.target.tokenId : t.characterId === op.target.characterId));
+  const owned = "tokenId" in op.target ? c.ownsTokenId(op.target.tokenId) : c.ownsCharacterId(op.target.characterId);
+  return named && owned ? OK : GONE;
+}
+
+/**
+ * The DM's Allow of a "Fix my total" ask (`roll.reopen { change }`), held
+ * to the ask it names as `roll.dice { change }` is: that ask pending, a fix
+ * of the total, and made on the answer the target holds now. So a stale
+ * Allow, a second device's, or one of an ask the player withdrew or
+ * replaced reopens nothing.
+ */
+function allowFixCheck(c: Check, op: OpOf<"roll.reopen">): Decision {
+  const target = c.state.rolls[op.rollId]?.targets.find((t) => ("tokenId" in op.target ? t.tokenId === op.target.tokenId : t.characterId === op.target.characterId));
+  if (!target) return GONE;
+  return fixPending(target, op.change) ? OK : refuse("invalid", SETTLED_MEANWHILE);
+}
+
+/** Whether the target's pending ask is the "Fix my total" this id names, made on the answer it holds now. */
+export function fixPending(target: Pick<RollTarget, "change" | "tag">, id: string | undefined): boolean {
+  const ask = target.change;
+  return ask !== undefined && ask.id === id && ask.reason === "fix-total" && ask.on === target.tag;
 }
 
 /** The refusal of a player's roll for a creature they see and do not own (docs/design-v1-dice.md 4.3). */

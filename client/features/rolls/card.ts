@@ -1,9 +1,9 @@
 import { advantageFields, applyMode, d20Formula, formatFormula, formulaRange, parseExtra, parseFormula, type AdvantageMode, type AdvantageSource } from "#shared/dice/formula.ts";
 import { OUT_OF_RANGE } from "#shared/dice/resolve.ts";
-import { naturalOf, rolledTerms } from "#shared/dice/roll.ts";
+import { naturalOf, rerollable, rerollFace, rolledTerms } from "#shared/dice/roll.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { effectName } from "#shared/logText.ts";
-import type { DiceResult, RollRequest, RollTarget } from "#shared/model.ts";
+import type { DiceResult, RollChange, RollRequest, RollTarget } from "#shared/model.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 
@@ -248,3 +248,73 @@ export function dmRoll(input: { bonus: number; preset: RollPreset | null; abilit
   if (preset?.fails) label += `: fails (${CONDITIONS[preset.fails].name})`;
   return { label, fields: { ...mode, ...(extra !== "" ? { extra } : {}) } };
 }
+
+// ------------------------------------------------------------ asking the DM to change an answer
+
+/** One item of "Ask to change it" (5.5): its words, and the ask it sends, which the device gives an id and the answer's tag. */
+export type AskItem = { id: string; label: string; ask: Pick<RollChange, "reason" | "face" | "die"> };
+
+const BARDIC_DICE = [6, 8, 10, 12] as const;
+/** At most this many extra Heroic Inspiration items, one per other die, so the menu stays short. */
+const OTHER_DICE = 3;
+
+/**
+ * The menu under a final answer (5.5), by doc 1 5.4's rules, which the
+ * server checks again: on a rolled answer Heroic Inspiration on the die
+ * `rerollFace` names, then one item per other die of the roll, Halfling
+ * Luck while a d20 shows 1, Lucky where it changes something (a normal roll
+ * whose sources did not cancel, or a disadvantage roll), and the four
+ * Bardic Inspiration dice. On a typed answer that is final, "Fix my total".
+ */
+export function askItems(target: Pick<RollTarget, "dice">): AskItem[] {
+  const dice = target.dice;
+  if (!dice) return [{ id: "fix-total", label: "Fix my total", ask: { reason: "fix-total" } }];
+  const items: AskItem[] = [];
+  const face = rerollFace(dice, "heroic-inspiration");
+  if (face !== null) items.push({ id: "heroic", label: "Reroll: Heroic Inspiration", ask: { reason: "heroic-inspiration", face } });
+  const terms = rolledTerms(dice) ?? [];
+  let others = 0;
+  for (const term of terms) {
+    if (!("kept" in term)) continue;
+    term.faces.forEach((value, i) => {
+      const at = term.first + i;
+      if (at === face || others >= OTHER_DICE || !rerollable(dice, "heroic-inspiration", at)) return;
+      others++;
+      items.push({ id: `heroic-${at}`, label: `Reroll the d${term.term.sides} (${value}): Heroic Inspiration`, ask: { reason: "heroic-inspiration", face: at } });
+    });
+  }
+  const one = rerollFace(dice, "halfling-luck");
+  if (one !== null) items.push({ id: "halfling", label: "Reroll: Halfling Luck", ask: { reason: "halfling-luck", face: one } });
+  if (dice.mode !== "adv" && !dice.cancelled) items.push({ id: "lucky", label: "Advantage: Lucky", ask: { reason: "lucky" } });
+  for (const die of BARDIC_DICE) items.push({ id: `bardic-${die}`, label: `Add a d${die} (Bardic Inspiration)`, ask: { reason: "bardic-inspiration", die } });
+  return items;
+}
+
+/** What an ask asks for, mid-sentence: "to reroll (Heroic Inspiration)", "for advantage (Lucky)", "to add a d8 (Bardic Inspiration)", "to fix the total". */
+function askWords(change: Pick<RollChange, "reason" | "die">): string {
+  switch (change.reason) {
+    case "heroic-inspiration":
+      return "to reroll (Heroic Inspiration)";
+    case "halfling-luck":
+      return "to reroll (Halfling Luck)";
+    case "lucky":
+      return "for advantage (Lucky)";
+    case "bardic-inspiration":
+      return `to add a d${change.die ?? "?"} (Bardic Inspiration)`;
+    case "fix-total":
+      return "to fix the total";
+  }
+}
+
+/** The player's card while an ask waits: "Asked the DM to reroll (Heroic Inspiration)." */
+export function askedText(change: Pick<RollChange, "reason" | "die">): string {
+  return `Asked the DM ${askWords(change)}.`;
+}
+
+/** The DM's row while an ask waits: "Asks to reroll (Heroic Inspiration)", and with the creature's name for a folded card's line. */
+export function askRowText(change: Pick<RollChange, "reason" | "die">, name?: string): string {
+  return name ? `${name} asks ${askWords(change)}` : `Asks ${askWords(change)}`;
+}
+
+/** The player's card once the DM kept the roll, or a close settled the ask as Keep (1.1). */
+export const KEPT = "The DM kept the roll.";

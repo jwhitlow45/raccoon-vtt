@@ -31,6 +31,12 @@ describe("UndoStacks", () => {
     // A background thumbnail is nobody's step, so it neither takes an undo slot nor clears redo.
     assert.equal(UndoStacks.records("dm", { t: "scene.update", sceneId: "s", patch: { thumb: "t" } }), false);
     assert.equal(UndoStacks.records("dm", { t: "scene.update", sceneId: "s", patch: { thumb: "t", name: "Crypt" } }), true);
+    // An ask to change a roll is the player's, so neither it nor the DM's Keep is a step. The DM's Allow of a fixed total is a reopen, which is.
+    const target = { characterId: "c" };
+    assert.equal(UndoStacks.records("player", { t: "roll.change", rollId: "r", target, ask: { id: "a", on: "t", reason: "lucky" } }), false);
+    assert.equal(UndoStacks.records("player", { t: "roll.change", rollId: "r", target, clear: "a" }), false);
+    assert.equal(UndoStacks.records("dm", { t: "roll.change", rollId: "r", target, clear: "a" }), false);
+    assert.equal(UndoStacks.records("dm", { t: "roll.reopen", rollId: "r", target, change: "a" }), true);
   });
 
   test("undo pops the newest, redo mirrors it, and a new op clears redo", () => {

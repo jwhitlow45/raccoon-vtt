@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bonusFor, testOf } from "#shared/dice/bonus.ts";
-import { ANSWERED_MEANWHILE } from "#shared/permissions.ts";
+import { ANSWERED_MEANWHILE, SETTLED_MEANWHILE } from "#shared/permissions.ts";
 import { ABILITY_NAMES } from "#shared/rules/skills.ts";
 import { useStore } from "zustand";
-import type { RollRequest, RollTarget } from "#shared/model.ts";
+import type { RollChange, RollRequest, RollTarget } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { useAlertsSummary } from "../../components/sheetFocus.ts";
 import { revealAndFocus } from "../../lib/reveal.ts";
@@ -11,14 +11,14 @@ import { theme } from "../../lib/theme.ts";
 import { dockSlot, focusAlert } from "../../pages/fold.ts";
 import { focusMap, mapFocusSlot } from "../../pages/mapFocus.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
-import { sheetOpen } from "../../state/types.ts";
+import { sheetOpen, type OpAnswer, type OpRefusal } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { creatureRolls } from "../dice/creature.ts";
 import { presetFor } from "../dice/presets.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "../dice/send.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useLayoutSize } from "../device/layout.ts";
-import { bestChoice, dmRoll } from "./card.ts";
+import { askRowText, bestChoice, dmRoll } from "./card.ts";
 import {
   allAnsweredIds,
   answered,
@@ -133,9 +133,18 @@ export function DmDesk() {
     if (focusAlert(scope.get(dockSlot).getState().column, null)) return;
     focusMap(scope.get(mapFocusSlot));
   }, [cards, scope]);
-  // Nothing waits for the DM's own answer, so the rolls never lead the dock's summary for a DM.
-  useAlertsSummary(cards.length > 0 ? { ...answeredCount(cards), waiting: false, requests: cards.length, open } : null);
+  // A player's ask to change a roll waits for the DM, so then the rolls lead the dock's summary (docs/design-v1-roll-request.md 6).
+  const asks = cards.reduce((n, c) => n + c.targets.filter((t) => t.change !== undefined).length, 0);
+  const counted = answeredCount(cards);
+  useAlertsSummary(
+    cards.length > 0
+      ? { ...counted, ...(asks > 0 ? { name: `${counted.name}, ${asks} ${asks === 1 ? "asks" : "ask"} to change a roll` } : {}), waiting: asks > 0, requests: cards.length, open }
+      : null,
+  );
 
+  // A card with an ask unfolds on a computer, since it waits for the DM. A phone's folded line names the ask instead.
+  const phone = size.width < theme.layout.wideMinWidth;
+  const opensAt = (request: RollRequest, i: number) => layout.startsOpen(i) || (!phone && request.targets.some((t) => t.change !== undefined));
   const summary = stack.button === "sheet" ? foldedChips(cards, "sheet") : stack.button ? foldedChips(cards.slice(PHONE_CHIPS), stack.button) : null;
   const summaryButton = summary ? (
     <Button
@@ -175,8 +184,8 @@ export function DmDesk() {
               toggleRef={toggleRef(request.id)}
               onClose={() => close([request.id], "card")}
               request={request}
-              open={toggled[request.id] ?? layout.startsOpen(i)}
-              onToggle={() => setToggled((t) => ({ ...t, [request.id]: !(t[request.id] ?? layout.startsOpen(i)) }))}
+              open={toggled[request.id] ?? opensAt(request, i)}
+              onToggle={() => setToggled((t) => ({ ...t, [request.id]: !(t[request.id] ?? opensAt(request, i)) }))}
             />
           ))}
           {summaryButton}
@@ -190,6 +199,9 @@ export function DmDesk() {
 function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; onClose(): void; request: RollRequest; open: boolean; onToggle(): void }) {
   const { request } = props;
   const tally = tallyText(request);
+  const asking = request.targets.filter((t) => t.change !== undefined);
+  const askName = useRoomView((s) => (s.view && asking.length === 1 ? targetName(s.view, asking[0]!, s.sceneId) : ""));
+  const asks = asking.length === 1 && asking[0]!.change ? askRowText(asking[0]!.change, askName) : tally.asks;
   const dc = dcText(request, "dm");
   const title = `${testShortText(request.test)}${dc ? `, ${dc}` : ""}`;
   const hidden = request.resultShown ? "" : ", pass or fail hidden from players";
@@ -221,7 +233,7 @@ function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; onClose(
             {tally.answered}
             {hidden}
           </span>
-          {tally.asks ? <span style={{ fontSize: theme.font.small, color: theme.color.text }}>{tally.asks}</span> : null}
+          {asks ? <span style={{ fontSize: theme.font.small, color: theme.color.text }}>{asks}</span> : null}
         </button>
         <Button
           size="sm"
@@ -287,6 +299,7 @@ function TargetRow(props: { request: RollRequest; target: RollTarget }) {
         ) : waiting ? (
           <DmRollButton request={request} target={target} name={name} />
         ) : null}
+        {target.change ? <AskRow request={request} target={target} change={target.change} name={name} /> : null}
       </div>
       <Button size="sm" pressed={target.result === "pass"} aria-label={`Mark ${name} passed`} title={`Mark ${name} passed`} onClick={() => mark("pass")} style={markStyle}>
         Pass
@@ -357,5 +370,59 @@ function DmRollButton(props: { request: RollRequest; target: RollTarget; name: s
     >
       {roll.label}
     </Button>
+  );
+}
+
+/**
+ * A player's ask to change a roll (docs/design-v1-roll-request.md 6):
+ * "Asks to reroll (Heroic Inspiration)" with Allow and Keep, one tap each,
+ * both naming the ask. Allow rolls on the server (`roll.dice` with
+ * `change`), or for "Fix my total" reopens the answer for typing alone
+ * (`roll.reopen` with `change`). Keep clears the ask. An ask replaced,
+ * withdrawn or settled meanwhile is refused before any draw, "It was
+ * settled meanwhile.", and the row then shows the ask that stands.
+ */
+function AskRow(props: { request: RollRequest; target: RollTarget; change: RollChange; name: string }) {
+  const { request, target, change, name } = props;
+  const actions = useRoomActions();
+  const ui = useRoomUi();
+  const sender = useRollSender();
+  const store = useRoomStore();
+  const ref = targetRef(target);
+  const [busy, setBusy] = useState<"allow" | "keep" | null>(null);
+  const done = (answer: OpAnswer, refusal?: OpRefusal) => {
+    setBusy(null);
+    if (answer === "refused") ui.notify(refusal?.text ?? SETTLED_MEANWHILE, "error");
+  };
+  const allow = () => {
+    if (busy) return;
+    if (change.reason === "fix-total") {
+      if (actions.dispatch({ t: "roll.reopen", rollId: request.id, target: ref, change: change.id }, { quiet: true, onAnswer: done }) !== null) setBusy("allow");
+      return;
+    }
+    const tag = actions.newId();
+    const n = sendRoll(sender, { t: "roll.dice", tag, rollId: request.id, target: ref, change: change.id }, {
+      onAnswer: (answer, refusal) => {
+        if (store.getState().view?.rolls[request.id]) sender.receipts.announced(tag);
+        done(answer, refusal);
+      },
+    });
+    if (n === null) ui.notify(NEEDS_CONNECTION, "error");
+    else setBusy("allow");
+  };
+  const keep = () => {
+    if (busy) return;
+    if (actions.dispatch({ t: "roll.change", rollId: request.id, target: ref, clear: change.id }, { quiet: true, onAnswer: done }) !== null) setBusy("keep");
+  };
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
+      <span style={{ fontSize: theme.font.small, flex: "1 1 120px" }}>{askRowText(change)}</span>
+      <Button size="sm" variant="primary" busy={busy === "allow"} disabled={busy === "keep"} aria-label={`Allow ${name}'s ask`} onClick={allow}>
+        Allow
+      </Button>
+      <Button size="sm" busy={busy === "keep"} disabled={busy === "allow"} aria-label={`Keep ${name}'s roll`} onClick={keep}>
+        Keep
+      </Button>
+    </div>
   );
 }

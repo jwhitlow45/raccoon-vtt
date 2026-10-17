@@ -397,6 +397,18 @@ describe("roomStateSchema, wave 5 (docs/design-v1-dm-tools.md 2.5)", () => {
     assert.deepEqual(parsed.ok && parsed.state, JSON.parse(JSON.stringify(state)));
   });
 
+  test("a pending ask and an allowed fix's retype parse, and retype is only ever true", () => {
+    const state = wave5();
+    const target = state.rolls.r1!.targets[0]!;
+    state.rolls.r1!.targets[0] = { ...target, tag: "t1", change: { id: "a1", on: "t1", reason: "fix-total" } };
+    assert.ok(parseRoomState(JSON.parse(JSON.stringify(state))).ok);
+    state.rolls.r1!.targets[0] = { characterId: "c1", previous: { total: 15, tag: "t1" }, retype: true };
+    assert.ok(parseRoomState(JSON.parse(JSON.stringify(state))).ok);
+    const loose = JSON.parse(JSON.stringify(state));
+    loose.rolls.r1.targets[0].retype = false;
+    assert.equal(parseRoomState(loose).ok, false);
+  });
+
   test("a backup from before wave 5 still imports, with none of them", () => {
     const { journal: _journal, pins: _pins, rolls: _rolls, ...v7 } = room();
     const parsed = parseRoomState(migrateSnapshot(JSON.parse(JSON.stringify(v7)), 7));
