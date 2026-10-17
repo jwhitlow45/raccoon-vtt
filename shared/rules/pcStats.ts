@@ -1,10 +1,11 @@
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Character, type PcDice, type PcRoll, type PcStats, type SkillKey, type Token } from "../model.ts";
 import type { PcStatsPatch } from "../protocol.ts";
 import type { DamagePart, NamedRoll, RollNumbers } from "../dice/bonus.ts";
+import type { Defense } from "../dice/defenses.ts";
 import { formatFormula, parseFormula, type DiceTerm, type Formula, type Term } from "../dice/formula.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
 import { ABILITY_NAMES, abilityMod } from "../statBlock.ts";
-import { DAMAGE_TYPES, type DamageType } from "./damage.ts";
+import { DAMAGE_TYPES } from "./damage.ts";
 import { SKILLS } from "./skills.ts";
 
 /**
@@ -549,9 +550,6 @@ export function pcSlots(character: Character, key: string): { from: number; at(s
   };
 }
 
-/** A damage defense in doc 3's `Defense` shape (docs/design-v1-roll-options.md 3.3), unqualified. */
-export type PcDefense = { kind: "immune" | "resist" | "vulnerable"; of: DamageType; source: string };
-
 const DEFENSE_KIND = { resistant: "resist", immune: "immune", vulnerable: "vulnerable" } as const;
 
 /**
@@ -560,7 +558,7 @@ const DEFENSE_KIND = { resistant: "resist", immune: "immune", vulnerable: "vulne
  * its block instead. Wild Shape keeps Evasion, and another shape takes it
  * away too.
  */
-export function pcDefenses(character: Pick<Character, "stats" | "actor">): { defenses: PcDefense[]; evasion: boolean } {
+export function pcDefenses(character: Pick<Character, "stats" | "actor">): { defenses: Defense[]; evasion: boolean } {
   const stats = character.stats;
   const shape = pcShape(character);
   if (!stats || shape === "other") return { defenses: [], evasion: false };
@@ -568,9 +566,9 @@ export function pcDefenses(character: Pick<Character, "stats" | "actor">): { def
   return { defenses: shape === "wild" ? [] : statsDefenses(stats), evasion: stats.evasion === true };
 }
 
-/** The damage defenses a block holds, whatever shape its character is in, for the block's own view. */
-export function statsDefenses(stats: Pick<PcStats, "defenses">): PcDefense[] {
-  const defenses: PcDefense[] = [];
+/** The damage defenses a block holds in doc 3's `Defense` shape, unqualified, whatever shape its character is in, for the block's own view. */
+export function statsDefenses(stats: Pick<PcStats, "defenses">): Defense[] {
+  const defenses: Defense[] = [];
   for (const type of DAMAGE_TYPES) {
     const kind = stats.defenses[type];
     if (kind !== undefined) defenses.push({ kind: DEFENSE_KIND[kind], of: type, source: "Stat block" });

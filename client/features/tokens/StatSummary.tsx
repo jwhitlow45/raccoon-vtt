@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ABILITY_KEYS, type AbilityKey, type Actor, type Character, type Token } from "#shared/model.ts";
-import { pcRollNumbers } from "#shared/dice/bonus.ts";
+import { pcRollNumbers, type RollNumbers } from "#shared/dice/bonus.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { AcBadge } from "../../components/AcBadge.tsx";
 import { Button } from "../../components/Button.tsx";
@@ -13,7 +13,7 @@ import { statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
 import type { TokenAccess } from "./access.ts";
 import { defenseLines, linkedBlockState, moreStatsShown, saveUnits, saveUnitsOf, type LinkedBlock, type VitalItem, type VitalUnit } from "./statSummary.ts";
 import { pcDefenseLines } from "../pcstats/reading.ts";
-import { shapedRollNumbers } from "../pcstats/shape.ts";
+import { useCharacterRollNumbers } from "../pcstats/useRollNumbers.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { useSrdBlocks } from "../monsters/srdBlocks.ts";
 
@@ -49,25 +49,30 @@ export function useLinkedBlock(
   const shown = statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion: token.companion !== undefined, character: character !== undefined });
   const pc = shown && character ? pcSummary(character) : null;
   const srd = useSrdList(shown && pc === null && tokenStatBlock(actor, monsters, blocks).kind === "srd");
+  // Wild Shape with a stat block rolls with the druid's and the beast's numbers mixed, as the server works them out (docs/design-v1-pc-stats.md 3.6).
+  const wild = shown && character?.stats !== undefined && character.actor.wildShape === true;
+  const shaped = useCharacterRollNumbers(wild && character ? character.id : null);
   if (pc) return pc;
   const block = shown ? linkedBlockState(actor, monsters, srd, blocks) : ({ kind: "none" } as const);
-  // Wild Shape with a stat block rolls with the druid's and the beast's numbers mixed, and the beast's defenses (docs/design-v1-pc-stats.md 3.6).
-  if (character?.stats && character.actor.wildShape && block.kind === "ready") {
-    const numbers = shapedRollNumbers(character, block.block);
-    const saves = {} as Record<AbilityKey, number>;
-    for (const key of ABILITY_KEYS) saves[key] = numbers.abilities[key].save;
-    return { kind: "numbers", saves, defenses: defenseLines(block.block) };
+  if (wild && block.kind === "ready") {
+    if (shaped.failed) return { kind: "failed" };
+    if (!shaped.numbers) return { kind: "loading" };
+    return { kind: "numbers", saves: savesOf(shaped.numbers), defenses: defenseLines(block.block) };
   }
   return block;
+}
+
+function savesOf(numbers: RollNumbers): Record<AbilityKey, number> {
+  const saves = {} as Record<AbilityKey, number>;
+  for (const key of ABILITY_KEYS) saves[key] = numbers.abilities[key].save;
+  return saves;
 }
 
 /** A player character's saves and defense lines from its own stat block, or null without one (docs/design-v1-pc-stats.md 7.4). */
 function pcSummary(character: Character): LinkedBlock | null {
   const numbers = pcRollNumbers(character);
   if (!numbers || character.actor.srdId !== undefined) return null;
-  const saves = {} as Record<AbilityKey, number>;
-  for (const key of ABILITY_KEYS) saves[key] = numbers.abilities[key].save;
-  return { kind: "numbers", saves, defenses: pcDefenseLines(character) };
+  return { kind: "numbers", saves: savesOf(numbers), defenses: pcDefenseLines(character) };
 }
 
 /** "Open the sheet ↗": the owner's D&D Beyond sheet in a new tab, with no referrer and no opener. 44 px tall. */

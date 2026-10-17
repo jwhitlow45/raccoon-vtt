@@ -9,11 +9,12 @@ import { useRoomActions } from "../../state/view.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { StatBlockView } from "../monsters/StatBlockView.tsx";
 import { useSrdList } from "../tokens/StatSummary.tsx";
-import { srdBlock, saveUnitsOf } from "../tokens/statSummary.ts";
+import { saveUnitsOf } from "../tokens/statSummary.ts";
 import { Note, Section, SmallButton } from "../tokens/ui.tsx";
 import { useOpenPcStats } from "./open.ts";
 import { PcStatsView } from "./PcStatsView.tsx";
-import { END_SHAPE, shapedRollNumbers, shapeNote } from "./shape.ts";
+import { END_SHAPE, shapeNote } from "./shape.ts";
+import { useCharacterRollNumbers } from "./useRollNumbers.ts";
 import { ShapePicker } from "./ShapePicker.tsx";
 
 /**
@@ -93,8 +94,8 @@ function ShapeBody(props: { character: Character }) {
   const srdId = character.actor.srdId!;
   const { list, failed } = useSrdList(true);
   const monster = list?.find((m) => m.srdId === srdId);
-  const block = monster ? srdBlock(monster) : null;
-  const numbers = block ? shapedRollNumbers(character, block) : null;
+  // The numbers its rolls get, read from the SRD table as the server reads them.
+  const { numbers } = useCharacterRollNumbers(character.id);
   const end = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
       <SmallButton onClick={() => actions.dispatch({ t: "character.update", characterId: character.id, patch: { actor: END_SHAPE } })}>End the shape</SmallButton>

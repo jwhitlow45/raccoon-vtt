@@ -1,7 +1,8 @@
 import type { NamedRoll } from "#shared/dice/bonus.ts";
 import type { PcRoll, PcStats } from "#shared/model.ts";
-import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
-import { namedRollOf, partFormula, pcDefenses, pcDerived, rollMod, type PcDefense, type PcNumber, type PcPart } from "#shared/rules/pcStats.ts";
+import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
+import { namedRollOf, partFormula, pcDefenses, pcDerived, rollMod, type PcNumber, type PcPart } from "#shared/rules/pcStats.ts";
+import type { Defense } from "#shared/dice/defenses.ts";
 import { ABILITY_NAMES } from "#shared/rules/skills.ts";
 import { signed } from "#shared/statBlock.ts";
 import type { DefenseLine } from "../tokens/statSummary.ts";
@@ -59,17 +60,17 @@ export function rollTitle(roll: Pick<PcRoll, "name" | "kind" | "level">): string
   return roll.level === 0 ? `${roll.name} (cantrip)` : `${roll.name} (level ${roll.level})`;
 }
 
-const KIND_LABEL: Record<PcDefense["kind"], DefenseLine["label"]> = { vulnerable: "Vulnerabilities", resist: "Resistances", immune: "Immunities" };
+const KIND_LABEL: Record<Defense["kind"], DefenseLine["label"]> = { vulnerable: "Vulnerabilities", resist: "Resistances", immune: "Immunities" };
 
 function capital(text: string): string {
   return `${text[0]!.toUpperCase()}${text.slice(1)}`;
 }
 
 /** Damage defenses in the 2024 block's words and order, as the bar's defense lines read a block's. */
-export function defenseLinesOf(defenses: readonly PcDefense[]): DefenseLine[] {
+export function defenseLinesOf(defenses: readonly Defense[]): DefenseLine[] {
   const lines: DefenseLine[] = [];
   for (const kind of ["vulnerable", "resist", "immune"] as const) {
-    const types = defenses.filter((d) => d.kind === kind).map((d) => d.of);
+    const types = defenses.filter((d): d is Defense & { of: DamageType } => d.kind === kind && (DAMAGE_TYPES as readonly string[]).includes(d.of)).map((d) => d.of);
     types.sort((a, b) => DAMAGE_TYPES.indexOf(a) - DAMAGE_TYPES.indexOf(b));
     if (types.length > 0) lines.push({ label: KIND_LABEL[kind], text: types.map(capital).join(", ") });
   }
