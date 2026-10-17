@@ -482,6 +482,7 @@ const logEvent = z.discriminatedUnion("type", [
         added: z.array(effectStored).max(32).optional(),
         removed: z.array(effectStored).max(32).optional(),
         anchors: z.record(id, z.union([z.strictObject({ tokenId: id }), z.strictObject({ characterId: id })])).optional(),
+        shapeTemp: z.strictObject({ srdId: actorSchemaForImport.shape.srdId.unwrap() }).optional(),
       })
       .optional(),
     back: z.literal(true).optional(),

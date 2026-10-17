@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { PcStats } from "#shared/model.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
-import { actor, character, room } from "#shared/testutil.ts";
+import { AT, actor, character, room } from "#shared/testutil.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
@@ -25,6 +25,17 @@ describe("a stat block in room.json", () => {
     const doubled = structuredClone(state);
     doubled.characters.bree!.stats!.rolls.push({ ...BLOCK.rolls[0]! });
     assert.equal(parseRoomState(doubled).ok, false, "two rolls with one id");
+  });
+
+  test("a shape's kept numbers and whose its pool is pass, on the actor and on an HP line that can be taken back (W7-SOL-07)", () => {
+    const shaped = actor({ srdId: "brown-bear", ac: 11, hp: { cur: 20, max: 20, temp: 30 }, unshaped: { ac: 14, speeds: { walk: 30 }, shapeTemp: true } });
+    const state = room({ characters: { bree: character("bree", { actor: shaped }) } });
+    const vitals = (temp: number) => ({ hp: { cur: 20, max: 20, temp }, life: "alive" as const, deathSaves: { ok: 0, fail: 0 } });
+    state.log.push({ id: "9:0", at: AT, kind: "event", data: { type: "hp", characterId: "bree", change: "temp", amount: 30, revert: { before: vitals(22), after: vitals(30), shapeTemp: { srdId: "brown-bear" } } } });
+    assert.ok(parseRoomState(structuredClone(state)).ok);
+    const bad = structuredClone(state);
+    (bad.log[0]!.data as { revert: { shapeTemp: object } }).revert.shapeTemp = { srdId: "brown-bear", amount: 22 };
+    assert.equal(parseRoomState(bad).ok, false);
   });
 
   test("the block travels through the remap, which names nothing in it, and a hand-made file's actor numbers follow it", () => {

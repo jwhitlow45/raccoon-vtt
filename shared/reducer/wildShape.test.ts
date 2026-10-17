@@ -137,15 +137,54 @@ describe("a shape's AC, speeds and temporary HP (W7B-P-9)", () => {
     });
   }
 
-  test("damage taken back from the log leaves the shape's pool its", () => {
+  /**
+   * Taking an HP change back from the log puts back whose the pool was with
+   * its numbers (W7-SOL-07, ASTRA-17). A step is an op, or "back" to take
+   * the last HP line back as the server does. Each run goes live and as ops
+   * stored at version 7 replay, and both must end alike.
+   */
+  type Step = Op | "back";
+  const backRuns: { name: string; steps: Step[]; temp: number; mark?: true; shaped?: false }[] = [
+    { name: "damage taken back, then End the shape", steps: [shape({ ...BEAR, hp: { temp: 22 } }), hit(10), "back", shape({ srdId: null })], temp: 0 },
+    { name: "a grant taken back makes the pool the shape's again", steps: [shape({ ...BEAR, hp: { temp: 22 } }), grant(30), "back"], temp: 22, mark: true },
+    { name: "a grant taken back, the shape then ended", steps: [shape({ ...BEAR, hp: { temp: 22 } }), grant(30), "back", shape({ srdId: null })], temp: 0, shaped: false },
+    { name: "a set taken back, the shape then ended", steps: [shape({ ...BEAR, hp: { temp: 22 } }), set({ temp: 12 }), "back", shape({ srdId: null })], temp: 0, shaped: false },
+    { name: "a grant taken back after the shape ended, whose pool went with it", steps: [shape({ ...BEAR, hp: { temp: 22 } }), grant(30), shape({ srdId: null }), "back"], temp: 0, shaped: false },
+    { name: "a grant taken back in another shape since, so no shape's", steps: [shape({ ...BEAR, hp: { temp: 22 } }), grant(30), shape({ srdId: null }), shape({ srdId: "wolf", wildShape: true }), "back"], temp: 22 },
+    { name: "a grant from before the shape taken back stays no shape's", steps: [grant(8), shape(BEAR), grant(30), "back", shape({ srdId: null })], temp: 8, shaped: false },
+  ];
+  for (const run of backRuns) {
+    test(`taken back from the log: ${run.name}`, () => {
+      for (const opVersion of [undefined, 7]) {
+        const at = (seq: number) => ({ ...env(seq), ...(opVersion !== undefined ? { opVersion } : {}) });
+        let s = setup();
+        for (const [i, step] of run.steps.entries()) {
+          let op: Op = step as Op;
+          if (step === "back") {
+            const line = s.log.findLast((e) => e.data?.type === "hp" && e.data.back !== true)!;
+            const built = hpUndoRestore(s, line.id);
+            assert.ok(built.ok, built.ok ? "" : built.message);
+            op = { t: "sys.restore", entries: built.entries, from: "undo", deps: true, undid: line.id };
+          }
+          const r = applyOp(s, op, DM, at(i + 1));
+          assert.ok(r.ok, `${op.t} at ${opVersion ?? "live"}`);
+          s = r.state;
+        }
+        const label = `at ${opVersion ?? "live"}`;
+        assert.equal(bree(s).hp.temp, run.temp, `the temporary HP ${label}`);
+        assert.equal(bree(s).unshaped?.shapeTemp, run.mark, `the mark ${label}`);
+        if (run.shaped === false) assert.equal("unshaped" in bree(s), false, label);
+      }
+    });
+  }
+
+  test("the line keeps whose the pool was only while a shape gave it", () => {
     let s = apply(setup(), shape({ ...BEAR, hp: { temp: 22 } }));
-    s = apply(s, hit(10));
-    const line = s.log.findLast((e) => e.data?.type === "hp")!;
-    const built = hpUndoRestore(s, line.id);
-    assert.ok(built.ok);
-    s = apply(s, { t: "sys.restore", entries: built.entries, from: "undo", deps: true, undid: line.id }, DM, 3);
-    assert.equal(bree(s).hp.temp, 22);
-    assert.equal(apply(s, shape({ srdId: null })).characters.bree!.actor.hp.temp, 0);
+    s = apply(s, grant(30), DM, 2);
+    const revert = (state: typeof s) => (state.log.findLast((e) => e.data?.type === "hp")!.data as { revert?: { shapeTemp?: unknown } }).revert;
+    assert.deepEqual(revert(s)?.shapeTemp, { srdId: "brown-bear" });
+    s = apply(s, hit(5), DM, 3);
+    assert.equal(revert(s)?.shapeTemp, undefined, "the 30 were another source's");
   });
 
   test("an op stored before version 7 neither keeps nor puts back, so it replays as it ran", () => {

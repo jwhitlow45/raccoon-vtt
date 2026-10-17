@@ -1550,8 +1550,13 @@ export type Vitals = { hp: { cur: number; max: number; temp: number }; life: Lif
  * effect's duration counts, a token or a character. The row can leave the
  * fight before the change is taken back, and the duration then pauses on
  * that creature, as it would have had the effect stayed (design 9.5).
+ *
+ * `shapeTemp` says the temporary HP before the change were the pool the
+ * shape linked as `srdId` gave (`Actor.unshaped.shapeTemp`). Taking the
+ * change back makes them that shape's again while it lasts, or empties them
+ * once it has ended, as End the shape would have (W7-SOL-07).
  */
-export type HpRevert = { before: Vitals; after: Vitals; added?: Effect[]; removed?: Effect[]; anchors?: Record<EntryId, DurationAnchor> };
+export type HpRevert = { before: Vitals; after: Vitals; added?: Effect[]; removed?: Effect[]; anchors?: Record<EntryId, DurationAnchor>; shapeTemp?: { srdId: string } };
 
 export type LogEvent =
   /**

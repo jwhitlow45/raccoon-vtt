@@ -14,8 +14,9 @@ import { guardHash, type Tx } from "./tx.ts";
  * line and the creature as it stands, and guarded by its value like every
  * other undo (design 7.7), so it is stored and replays the same way.
  *
- * Only what the change moved goes back: HP, life, death saves, and the
- * effects reaching or leaving 0 HP put on or took off. Everything else
+ * Only what the change moved goes back: HP, life, death saves, the
+ * effects reaching or leaving 0 HP put on or took off, and whether the
+ * temporary HP were a shape's (`withPoolOf`). Everything else
  * about the creature stays as it is now, so a move or a new condition since
  * survives. The undo is refused when the creature's HP state is no longer
  * what the change left, because someone changed it since: putting the old
@@ -45,7 +46,24 @@ export function hpRevertOf(before: Actor, after: Actor, entries: readonly InitEn
     if (entry && paused && !("entryId" in paused)) anchors[entry.id] = paused;
   }
   if (Object.keys(anchors).length > 0) out.anchors = anchors;
+  if (before.unshaped?.shapeTemp && before.srdId !== undefined) out.shapeTemp = { srdId: before.srdId };
   return out;
+}
+
+/**
+ * Whose the temporary HP put back are (W7-SOL-07). A pool a shape gave is
+ * that shape's again while the creature is still in it. Once the creature is
+ * in no shape, that pool went with the shape, as End the shape takes it, so
+ * none comes back. In another shape, or from any other source, the pool is
+ * no shape's.
+ */
+function withPoolOf(actor: Actor, shape: HpRevert["shapeTemp"]): Actor {
+  const { unshaped } = actor;
+  if (shape && unshaped && actor.srdId === shape.srdId) return { ...actor, unshaped: { ...unshaped, shapeTemp: true } };
+  if (shape && actor.srdId === undefined) return { ...actor, hp: { ...actor.hp, temp: 0 } };
+  if (!unshaped?.shapeTemp) return actor;
+  const { shapeTemp: _gone, ...rest } = unshaped;
+  return { ...actor, unshaped: rest };
 }
 
 /**
@@ -92,7 +110,7 @@ export function revertedActor(current: Actor, revert: HpRevert): Actor | null {
   }
   const added = new Set((revert.added ?? []).map((e) => e.id));
   const effects: Effect[] = [...current.effects.filter((e) => !added.has(e.id)), ...(revert.removed ?? [])];
-  return { ...current, hp: { ...revert.before.hp }, life: revert.before.life, deathSaves: { ...revert.before.deathSaves }, effects };
+  return withPoolOf({ ...current, hp: { ...revert.before.hp }, life: revert.before.life, deathSaves: { ...revert.before.deathSaves }, effects }, revert.shapeTemp);
 }
 
 /** Whether a later line already took this change back. */
