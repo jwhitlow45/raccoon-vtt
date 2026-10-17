@@ -47,6 +47,20 @@ export function oneSize(a: Pick<PathStop, "footprint">, b: Pick<PathStop, "footp
 }
 
 /**
+ * Whether the leg from `a` to `b` changed the creature's footprint rather
+ * than moved it (docs/design-v1-token-window.md 8.7): a resize, whose ends
+ * differ in size wherever it left the creature, or a squeeze taken or left
+ * where the creature stands. Neither is movement, so the reducer never
+ * counts such a leg and "Doesn't count" has nothing to mark on it. A move
+ * into or out of a squeeze goes somewhere, and is a move. `now` is the
+ * footprint now, which a stop without one was made at.
+ */
+export function reshapeLeg(a: PathStop, b: PathStop, now: { w: number; h: number; squeeze?: true }): boolean {
+  if (!oneSize(a, b, now)) return true;
+  return sameSpot(a, b) && (a.footprint ?? now).squeeze !== (b.footprint ?? now).squeeze;
+}
+
+/**
  * The path with one more stop. Once it holds MAX_PATH_STOPS, the oldest
  * corner whose two legs lie at one size goes, so they read as one straight
  * leg, and the start and the latest moves stay as they were. A resize's

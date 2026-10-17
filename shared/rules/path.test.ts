@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { PathStop } from "../model.ts";
 import { MAX_PATH_STOPS } from "../protocol.ts";
-import { oneSize, stopsForNonOwners, stopsForOwners, withStop } from "./path.ts";
+import { oneSize, reshapeLeg, stopsForNonOwners, stopsForOwners, withStop } from "./path.ts";
 
 /**
  * A path's stops each keep the size the creature had there
@@ -38,6 +38,19 @@ describe("each stop's size in what viewers get", () => {
     assert.equal(oneSize(at(0, MEDIUM), at(1), { w: 1, h: 1 }), true);
     assert.equal(oneSize(at(0, MEDIUM), at(1), { w: 2, h: 2 }), false);
     assert.equal(oneSize(at(0, { w: 2, h: 2, squeeze: true }), at(1), { w: 2, h: 2 }), true);
+  });
+
+  test("a leg that changed the footprint rather than moved it: a resize anywhere, or a squeeze taken or left in place", () => {
+    const LARGE = { w: 2, h: 2 };
+    const SQUEEZED = { w: 2, h: 2, squeeze: true as const };
+    assert.equal(reshapeLeg(at(0, MEDIUM), at(1), LARGE), true, "a resize that moved it");
+    assert.equal(reshapeLeg(at(0, MEDIUM), at(0), LARGE), true, "a resize in place");
+    assert.equal(reshapeLeg(at(0, SQUEEZED), at(0), LARGE), true, "a squeeze left in place");
+    assert.equal(reshapeLeg(at(0, LARGE), at(0), SQUEEZED), true, "a squeeze taken in place");
+    assert.equal(reshapeLeg(at(0, LARGE), at(3), SQUEEZED), false, "a move into a squeeze is a move");
+    assert.equal(reshapeLeg(at(0, SQUEEZED), at(3), LARGE), false, "and one out of it");
+    // A path stored before version 6 holds no footprints, and every leg of it is a move.
+    assert.equal(reshapeLeg(at(0), at(3), SQUEEZED), false);
   });
 
   test("a squeezed stop's footprint reaches owners and others with its squeeze", () => {

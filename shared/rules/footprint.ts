@@ -83,6 +83,11 @@ export function isSqueezed(token: PlacedToken): boolean {
   return token.squeeze === true && canSqueeze(token);
 }
 
+/** The footprint a turn's path stop keeps for the token as it stands (PathStop.footprint): its size, and whether it is squeezed. */
+export function stopFootprint(token: PlacedToken): { w: number; h: number; squeeze?: true } {
+  return { ...footprintSize(token), ...(isSqueezed(token) ? { squeeze: true as const } : {}) };
+}
+
 /**
  * The grid a token snaps to: half cells for footprints narrower than a cell
  * (Tiny, or a small custom size), whole cells otherwise.

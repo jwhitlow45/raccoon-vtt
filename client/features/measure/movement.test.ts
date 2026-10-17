@@ -4,7 +4,9 @@ import type { PathStop, RoomState, Token, TurnStart } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
+import { RESHAPE_NOT_A_MOVE } from "#shared/reducer/tokens.ts";
 import { DM, P1, P2, room, token } from "#shared/testutil.ts";
+import { resizeGroup } from "../tokens/resize.ts";
 import { dragReading, ellipseExit, leftText, movedFeet, movementText, pathNow, speedsLeft, turnTrail, type MovingToken, type TurnView } from "./movement.ts";
 
 const five = { feetPerCell: 5, diagonal: "five" as const };
@@ -263,5 +265,140 @@ describe("a resize on the turn (docs/design-v1-token-window.md 8.7)", () => {
       assert.equal(trail.movedFt, 2.5);
       assert.deepEqual(trail.rects.map((r) => r.w), [0.5, 0.5, 1]);
     }
+  });
+
+  /*
+   * A squeeze taken or left in place (the build review's round 2,
+   * W5-BUILD-DATA-01): a same-size update clears a squeeze where the
+   * creature stands, as a group's resize does for a member already at the
+   * size chosen, and a move to the spot it stands on may take or leave one.
+   */
+  const squeezedIn: Op[] = [{ t: "token.move", tokenId: "thorn", x: 13.5, y: 4.5, squeeze: true }];
+  const inCorridor = { size: "large" as const, x: 6, y: 4 };
+
+  test("a group's resize to the size a squeezed member already has leaves its earlier feet, for everyone, and its leg counts nothing", () => {
+    const mid = played(squeezedIn, inCorridor);
+    const group = resizeGroup(mid, [mid.tokens.thorn!], { size: "large" }, "dm", {});
+    assert.deepEqual(group.ops.map((op) => op.patch), [{ size: "large" }], "the squeezed member's patch keeps its place");
+    const state = played([...squeezedIn, ...group.ops], inCorridor);
+    assert.equal(state.tokens.thorn!.squeeze, undefined, "the same size still stands it full size");
+    for (const [i, trail] of trails(state).entries()) {
+      const who = ["the DM", "his owner", "another player"][i];
+      assert.equal(trail.movedFt, 37.5, `${who}: the same-size resize changed the feet moved before it`);
+      assert.deepEqual(trail.legs.map((l) => l.counted), [true, false], `${who}: the squeeze left in place counts`);
+    }
+    assert.deepEqual(state.tokens.thorn!.path!.stops.map((s) => s.footprint), [{ w: 2, h: 2 }, { w: 2, h: 2, squeeze: true }, undefined]);
+    const refused = applyOp(state, { t: "token.countLeg", tokenId: "thorn", counts: false }, DM, { seq: 99, at: "2026-10-12T20:00:00.000Z" });
+    assert.ok(!refused.ok && refused.message === RESHAPE_NOT_A_MOVE, "Doesn't count marks a leg that was no move");
+  });
+
+  test("a mixed group's resize, one member growing and the squeezed one staying its size, keeps every earlier leg of the squeezed one", () => {
+    for (const size of ["large", "huge"] as const) {
+      const mid = played(squeezedIn, inCorridor);
+      const group = resizeGroup(mid, [mid.tokens.thorn!, mid.tokens.gob!], { size }, "dm", {});
+      assert.equal(group.ops.length, 2, `${size}: both members resized`);
+      const state = played([...squeezedIn, ...group.ops], inCorridor);
+      assert.equal(state.tokens.gob!.size, size);
+      for (const trail of trails(state)) {
+        assert.equal(trail.movedFt, 37.5, `${size}: the group's resize changed the feet moved before it`);
+        assert.deepEqual(trail.legs.map((l) => l.counted), [true, false]);
+      }
+    }
+  });
+
+  test("a move to the spot it stands on that takes or leaves a squeeze counts nothing and keeps the feet before it, and a move into one still counts", () => {
+    const state = played(
+      [
+        ...squeezedIn,
+        { t: "token.move", tokenId: "thorn", x: 13.5, y: 4.5 },
+        { t: "token.move", tokenId: "thorn", x: 13.5, y: 4.5, squeeze: true },
+      ],
+      inCorridor,
+    );
+    for (const trail of trails(state)) {
+      assert.equal(trail.movedFt, 37.5);
+      assert.deepEqual(trail.legs.map((l) => l.counted), [true, false, false]);
+    }
+    const stops = state.tokens.thorn!.path!.stops;
+    assert.deepEqual(stops.map((s) => s.footprint), [{ w: 2, h: 2 }, { w: 2, h: 2, squeeze: true }, { w: 2, h: 2 }, undefined], "each stop keeps the footprint it was made with");
+    // The move into the corridor was a move: "Doesn't count" marks it.
+    const marked = applyOp(played(squeezedIn, inCorridor), { t: "token.countLeg", tokenId: "thorn", counts: false }, DM, { seq: 99, at: "2026-10-12T20:00:00.000Z" });
+    assert.ok(marked.ok, "a move into a squeeze is a move");
+  });
+
+  /*
+   * Random turns of moves, resizes, squeezes, group resizes, climbs,
+   * teleports and marks. The invariants: no op changes the feet or the
+   * count of any leg made before it, for the DM, the owner and another
+   * player alike (a mark changes only the last leg's count), and an op
+   * that leaves the creature where it stood adds no feet.
+   */
+  test("random turns: no op changes the feet of the legs before it, and nothing done in place adds feet", () => {
+    const SIZES = ["tiny", "small", "medium", "large", "huge", "gargantuan"] as const;
+    const DIAGONALS = ["five", "fiveTen", "euclid"] as const;
+    const viewers = [DM, P1, P2];
+    const at = "2026-10-12T20:00:00.000Z";
+    /** Each viewer's legs of Thorn's trail: the feet of a counted leg, measured on from the legs before it as the trail does. */
+    const legsOf = (state: RoomState) =>
+      viewers.map((viewer) => {
+        const copy = projectState(state, viewer, { sceneId: state.meta.playerSceneId }) as unknown as RoomState;
+        const thorn = copy.tokens.thorn as MovingToken;
+        const path = pathNow(copy.encounter as unknown as TurnView, thorn, viewer.role);
+        if (!path) return [];
+        const rules = { feetPerCell: state.meta.settings.feetPerCell, diagonal: state.meta.settings.diagonal };
+        const counter = { h: 0, v: 0 };
+        return path.stops.slice(1).map((to, i) => ({ counted: to.uncounted !== true, ft: to.uncounted === true ? 0 : movedFeet(thorn, path.stops[i]!, to, rules, counter) }));
+      });
+    const total = (legs: { ft: number }[]) => legs.reduce((sum, leg) => sum + leg.ft, 0);
+    // How often a change of footprint in place came up, so the run is known to try the case it guards.
+    let reshapedInPlace = 0;
+    for (let seed = 1; seed <= 150; seed++) {
+      let n = seed;
+      // mulberry32: a seeded sequence, so a failure names the seed that makes it again.
+      const random = () => {
+        n = (n + 0x6d2b79f5) | 0;
+        let t = Math.imul(n ^ (n >>> 15), 1 | n);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+      const pick = <T,>(list: readonly T[]): T => list[Math.floor(random() * list.length)]!;
+      const half = () => 2 + Math.floor(random() * 32) / 2;
+      let state = played([{ t: "room.update", settings: { diagonal: pick(DIAGONALS) } }], { size: pick(SIZES), x: 6, y: 4 });
+      let seq = 100;
+      const done: Op[] = [];
+      for (let step = 0; step < 30; step++) {
+        const thorn = state.tokens.thorn!;
+        const roll = random();
+        let ops: Op[];
+        if (roll < 0.25) ops = [{ t: "token.move", tokenId: "thorn", x: half(), y: half(), ...(random() < 0.5 ? { squeeze: true as const } : {}) }];
+        else if (roll < 0.4) ops = [{ t: "token.move", tokenId: "thorn", x: thorn.x, y: thorn.y, ...(thorn.squeeze ? {} : { squeeze: true as const }) }];
+        else if (roll < 0.52) ops = [{ t: "token.update", tokenId: "thorn", patch: { size: pick(SIZES), ...(random() < 0.5 ? { x: half(), y: half() } : {}) } }];
+        else if (roll < 0.62) ops = [{ t: "token.update", tokenId: "thorn", patch: { size: thorn.size } }];
+        else if (roll < 0.74) ops = resizeGroup(state, [thorn, state.tokens.gob!], { size: pick(SIZES) }, "dm", {}).ops;
+        else if (roll < 0.82) ops = [{ t: "token.update", tokenId: "thorn", patch: { elevation: thorn.elevation + (random() < 0.5 ? 5 : -5) } }];
+        else if (roll < 0.9) ops = [{ t: "token.move", tokenId: "thorn", x: half(), y: half(), teleport: "wall" }];
+        else ops = [{ t: "token.countLeg", tokenId: "thorn", counts: random() < 0.5 }];
+        for (const op of ops) {
+          const r = applyOp(state, op, DM, { seq: seq++, at });
+          if (!r.ok) continue;
+          done.push(op);
+          const was = legsOf(state);
+          const now = legsOf(r.state);
+          const stood = state.tokens.thorn!;
+          const stands = r.state.tokens.thorn!;
+          const why = `seed ${seed}, after ${JSON.stringify(done)}`;
+          for (const [v, before] of was.entries()) {
+            const after = now[v]!;
+            const kept = op.t === "token.countLeg" ? before.length - 1 : before.length;
+            assert.deepEqual(after.slice(0, kept), before.slice(0, kept), `${["the DM", "the owner", "another player"][v]}: a leg before the op changed, ${why}`);
+            const inPlace = stood.x === stands.x && stood.y === stands.y && stood.elevation === stands.elevation;
+            if (inPlace && op.t !== "token.countLeg") assert.equal(total(after), total(before), `${["the DM", "the owner", "another player"][v]}: an op in place added feet, ${why}`);
+            if (v === 0 && inPlace && after.length > before.length) reshapedInPlace++;
+          }
+          state = r.state;
+        }
+      }
+    }
+    assert.ok(reshapedInPlace > 100, `only ${reshapedInPlace} changes of footprint in place`);
   });
 });

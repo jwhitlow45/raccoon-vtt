@@ -4,8 +4,8 @@ import type { Actor, AreaTemplate, Character, Drawing, PathStop, RoomState, Toke
 import { inSightOfNonOwners } from "../project.ts";
 import { MAX_RULER_STOPS, type ActorPatch, type OpOf, type TokenPatch } from "../protocol.ts";
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
-import { footprintSize, isSqueezed } from "../rules/footprint.ts";
-import { oneSize, pathThisTurn, sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
+import { footprintSize, isSqueezed, stopFootprint } from "../rules/footprint.ts";
+import { pathThisTurn, reshapeLeg, sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
 import { deleteCharacterBlocks } from "./companionBlocks.ts";
 import {
   BLOCK_LINKS,
@@ -351,10 +351,15 @@ function placeMoved(tx: Tx, { move, token, next }: { move: Move; token: Token; n
  * turn, or to another scene, drops the path, which counts as empty by then
  * anyway. A change of facing alone is not movement and leaves it be.
  *
- * A resize, a change of the footprint's size, is not movement either
- * (docs/design-v1-token-window.md 8.7), and it appends an uncounted stop
- * where it leaves the creature, even in place. Whenever the footprint
- * changes, by a resize or a move into or out of a squeeze, every earlier
+ * A change of the footprint is not movement either
+ * (docs/design-v1-token-window.md 8.7) where it is not a move: a resize,
+ * wherever it leaves the creature, and a squeeze taken or left in place,
+ * as a same-size update or a group's resize to the size a member already
+ * has does when it clears a squeeze. Each appends an uncounted stop where
+ * it leaves the creature, even in place, since a squeezed footprint is
+ * read centered and unsnapped and a full one snapped, so the two differ
+ * by up to half a square where nothing moved. Whenever the footprint
+ * changes, by those or by a move into or out of a squeeze, every earlier
  * stop that holds no footprint takes the old one, squeeze and all, so each
  * leg keeps the feet and the look it had: a stop is read with the
  * footprint now unless it holds its own. Ops stored before version 6 did
@@ -367,7 +372,8 @@ function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted
   const sinceV6 = resizeStop(tx.env.opVersion);
   const resized = (from.w !== to.w || from.h !== to.h) && sinceV6;
   const reshaped = resized || (sinceV6 && isSqueezed(before) !== isSqueezed(after));
-  if (!resized && sameSpot(before, after)) return after;
+  const inPlace = sameSpot(before, after);
+  if (!reshaped && inPlace) return after;
   const encounter = tx.state.encounter;
   const turn = turnUnderWay(encounter);
   if (!turn) {
@@ -384,10 +390,11 @@ function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted
   // Where it stops is judged as the finished move will be: with it and every token moving with it there, their lights too.
   const stop = stopAt(judged.after(), after, tx.env);
   if (reshaped) {
-    const old = { w: from.w, h: from.h, ...(isSqueezed(before) ? { squeeze: true as const } : {}) };
+    const old = stopFootprint(before);
     path = { turn: path.turn, stops: path.stops.map((s): PathStop => (s.footprint ? s : { ...s, footprint: old })) };
   }
-  return { ...after, path: withStop(path, resized || uncounted ? { ...stop, uncounted: true } : stop, to) };
+  const counts = !resized && !(reshaped && inPlace) && !uncounted;
+  return { ...after, path: withStop(path, counts ? stop : { ...stop, uncounted: true }, to) };
 }
 
 function startStop(turn: TurnStart): PathStop {
@@ -422,8 +429,8 @@ export function tokenMoveMany(tx: Tx, op: OpOf<"token.moveMany">): void {
   for (const moved of moves) placeMoved(tx, moved, judged);
 }
 
-/** The refusal of "Doesn't count" on a resize's leg, which is no move and counts no movement. */
-export const RESIZE_NOT_A_MOVE = "its last change was a resize, not a move";
+/** The refusal of "Doesn't count" on a resize's leg or a squeeze's in place, which is no move and counts no movement. */
+export const RESHAPE_NOT_A_MOVE = "its last change was to its size or squeeze, not a move";
 
 /**
  * "Doesn't count" (features section 4): the last leg of the active
@@ -437,8 +444,8 @@ export function tokenCountLeg(tx: Tx, op: OpOf<"token.countLeg">): void {
   const path = pathThisTurn(tx.state.encounter, token);
   const last = path?.stops[path.stops.length - 1];
   if (!path || !last || path.stops.length < 2) throw invalid("it has not moved this turn");
-  // A resize's leg never counts (docs/design-v1-token-window.md 8.7). Only paths from version 6 on hold one, so replay is unchanged.
-  if (!oneSize(path.stops[path.stops.length - 2]!, last, footprintSize(token))) throw invalid(RESIZE_NOT_A_MOVE);
+  // A resize's leg, or a squeeze's in place, never counts (docs/design-v1-token-window.md 8.7). Only paths from version 6 on hold one, so replay is unchanged.
+  if (reshapeLeg(path.stops[path.stops.length - 2]!, last, stopFootprint(token))) throw invalid(RESHAPE_NOT_A_MOVE);
   if ((last.uncounted !== true) === op.counts) return;
   const { uncounted: _uncounted, ...counted } = last;
   const stops = [...path.stops.slice(0, -1), op.counts ? counted : { ...counted, uncounted: true as const }];

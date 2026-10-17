@@ -6,7 +6,7 @@ import { applyOp } from "../reducer.ts";
 import { creaturesInArea } from "../rules/aoe.ts";
 import { tokenHeightFt } from "../rules/footprint.ts";
 import { DM, P1, apply, entry, env, refused, room, template, token } from "../testutil.ts";
-import { RESIZE_NOT_A_MOVE } from "./tokens.ts";
+import { RESHAPE_NOT_A_MOVE } from "./tokens.ts";
 
 /**
  * A resize as the reducer applies it (docs/design-v1-token-window.md 8.5
@@ -109,8 +109,8 @@ describe("a resize on the acting creature's turn is not movement", () => {
   test("Doesn't count is refused on a resize's leg, which never counts", () => {
     const f = fight();
     f.run(move(4, 1), P1).run(resize("large", 4, 1), P1);
-    assert.equal(refused(f.state, { t: "token.countLeg", tokenId: "thorn", counts: true }, P1, 99).message, RESIZE_NOT_A_MOVE);
-    assert.equal(refused(f.state, { t: "token.countLeg", tokenId: "thorn", counts: false }, P1, 99).message, RESIZE_NOT_A_MOVE);
+    assert.equal(refused(f.state, { t: "token.countLeg", tokenId: "thorn", counts: true }, P1, 99).message, RESHAPE_NOT_A_MOVE);
+    assert.equal(refused(f.state, { t: "token.countLeg", tokenId: "thorn", counts: false }, P1, 99).message, RESHAPE_NOT_A_MOVE);
     f.run(move(7, 1), P1).run({ t: "token.countLeg", tokenId: "thorn", counts: false }, P1);
     assert.equal(f.stops().at(-1)!.uncounted, true, "the move after it is marked as before");
   });

@@ -2,8 +2,9 @@ import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, 
 import { useStore } from "zustand";
 import { healRevivesDead } from "#shared/migrate.ts";
 import { CONDITION_KEYS, STATUS_KEYS, type Actor, type Effect, type Token } from "#shared/model.ts";
+import { stopFootprint } from "#shared/rules/footprint.ts";
 import { hpLess, shownLife } from "#shared/rules/hp.ts";
-import { oneSize } from "#shared/rules/path.ts";
+import { reshapeLeg } from "#shared/rules/path.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
 import { RETURN_RANK, useSheetReturnFocus } from "../components/sheetFocus.ts";
@@ -592,8 +593,8 @@ function CountLegButton(props: { token: ViewToken }) {
   const path = pathNow(encounter, props.token, role);
   const last = path && path.stops.length >= 2 ? path.stops[path.stops.length - 1] : undefined;
   const before = path && path.stops.length >= 2 ? path.stops[path.stops.length - 2] : undefined;
-  // A resize's leg is no move, so it has nothing to stop counting (docs/design-v1-token-window.md 8.7).
-  if (!last || !before || !oneSize(before, last, footprint(props.token))) return null;
+  // A resize's leg, or a squeeze's in place, is no move, so it has nothing to stop counting (docs/design-v1-token-window.md 8.7).
+  if (!last || !before || reshapeLeg(before, last, stopFootprint(props.token))) return null;
   const off = last.uncounted === true;
   const press = () => {
     // The bar's undo waits for the server, and a second press meanwhile would act on a mark about to change.
