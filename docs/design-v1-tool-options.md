@@ -356,6 +356,8 @@ The popover holds today's row: one danger row per kept ruler, named "Remove the 
 
 ### 9.3 Area (`areas/AreaOptions.tsx`)
 
+Amended by docs/design-v1-area-from-character.md section 4.
+
 The More toggle and its store flag (`areas/store.ts:34`) go: its row is the tool's content always in ⋯. The spell results row goes too: results show in the shape popover under the spell field, or, while the field is in the row, in a "Spells" choice popover anchored to it that shows while the field has focus and text. Enter still applies the first match. The shape chip is named "Shape: Sphere" and its popover titled "Shape".
 
 **Idle.** Line: today's hint.
