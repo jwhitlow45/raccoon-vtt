@@ -45,6 +45,7 @@ import {
   rollWords,
   setAmount,
   setDc,
+  followSelection,
   settleTag,
   sourceIds,
   stateOf,
@@ -90,12 +91,6 @@ export function pageTitle(page: Pick<Page, "fill" | "test" | "rows" | "source">)
   return `${what} for ${n}`;
 }
 
-/** The tokens a page's rows come from while it is in setup (5.1): the selection as it is now for a live source, an area's caught creatures, or the tokens a quick tap rolled. */
-export function useSourceIds(page: Page, area?: (templateId: string) => string[]): string[] {
-  const selected = useRoomView((s) => s.local.selectedIds);
-  return sourceIds(page.source, selected, area);
-}
-
 export function GroupSave(props: { parent: "Dice" | "Areas"; onBack(): void; areaIds?: (templateId: string) => string[] }) {
   const store = useGroupSaveStore();
   const page = useGroupSave((s) => s.page);
@@ -131,7 +126,13 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   // The draft follows the page (5.10), inside try and catch.
   useEffect(() => writeDraft(roomId, page), [roomId, page]);
 
-  const fromSource = useSourceIds(page, props.areaIds);
+  const selected = useRoomView((s) => s.local.selectedIds);
+  const fromSource = sourceIds(page.source, selected, props.areaIds);
+  // The picks go into the page, and so into the draft, as the selection changes.
+  useEffect(() => {
+    const next = followSelection(pageRef.current, selected);
+    if (next !== pageRef.current) update(next);
+  }, [selected.join(","), page.phase]); // eslint-disable-line react-hooks/exhaustive-deps
   const ids = page.phase === "setup" ? fromSource : page.rows.map((r) => r.tokenId);
   const creatures = useMemo<ActorTarget[]>(() => ids.map((tokenId) => ({ tokenId })), [ids.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
   const { dice, loading, failed } = useDiceView(creatures);

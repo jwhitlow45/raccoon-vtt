@@ -28,16 +28,25 @@ export type Phase = "setup" | "rolled" | "applying" | "applied";
  * Where a page's rows come from until the roll freezes them (5.1): the
  * tokens a quick tap rolled, the room's selection as it changes (`live`,
  * less the creature acting, `except`), or an area's caught creatures.
- * `tokenIds` of a live source are the ones selected at the start, for a
- * title read before the page shows.
+ * `tokenIds` of a live source are its last picks (followSelection), kept in
+ * the draft, so a reload, which selects nothing, shows the same rows.
  */
 export type Source = { kind: "selection"; tokenIds: string[]; live?: true; except?: string } | { kind: "area"; templateId: string };
 
-/** The tokens a page in setup reads its rows from: the selection now for a live source, less the acting creature. */
+/** The tokens a page in setup reads its rows from: the selection now for a live source, less the acting creature, or its last picks while nothing is selected. */
 export function sourceIds(source: Source, selected: readonly string[], area?: (templateId: string) => string[]): string[] {
   if (source.kind === "area") return area ? area(source.templateId) : [];
-  if (!source.live) return source.tokenIds;
+  if (!source.live || selected.length === 0) return source.tokenIds;
   return selected.filter((id) => id !== source.except);
+}
+
+/** A live page in setup keeps its picks as the selection changes, so the draft holds them (W7B-R2-1). The same page when nothing changed. */
+export function followSelection(page: Page, selected: readonly string[]): Page {
+  const source = page.source;
+  if (page.phase !== "setup" || source.kind !== "selection" || !source.live || selected.length === 0) return page;
+  const ids = sourceIds(source, selected);
+  if (ids.length === source.tokenIds.length && ids.every((id, i) => id === source.tokenIds[i])) return page;
+  return { ...page, source: { ...source, tokenIds: ids } };
 }
 
 export type Fill = {
