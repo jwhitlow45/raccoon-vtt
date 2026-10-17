@@ -1365,6 +1365,12 @@ export type RollTarget = { tokenId?: TokenId; characterId?: CharacterId } & Roll
     previous?: RollAnswer;
     /** A player's pending ask to change the answer (docs/design-v1-roll-request.md 1.1), which the DM's Allow names by its id. */
     change?: RollChange;
+    /**
+     * An allowed "Fix my total" (docs/design-v1-roll-request.md 5.5): the
+     * player types the answer again and may not roll it, so a fixed typed
+     * total never turns into a fresh roll. The next answer clears it.
+     */
+    retype?: true;
   };
 
 /**

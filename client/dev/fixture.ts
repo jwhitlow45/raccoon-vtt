@@ -1,6 +1,6 @@
 import { createInitialState } from "#shared/initial.ts";
 import { wallChunk } from "#shared/keys.ts";
-import type { Actor, BuildChunk, Character, CustomMonster, Effect, FogTile, FreeWall, Light, Member, RoomState, Scene, Token } from "#shared/model.ts";
+import type { Actor, BuildChunk, Character, CustomMonster, Effect, FogTile, FreeWall, Light, Member, RollTest, RoomState, Scene, Token } from "#shared/model.ts";
 import { TILE_SUB } from "#shared/rules/fog.ts";
 import { withPcActorNumbers } from "#shared/rules/pcStats.ts";
 import { encodeTileFrom } from "../lib/fogTiles.ts";
@@ -106,7 +106,16 @@ function fogTiles(sceneId: string, bounds: { w: number; h: number }, mode: "norm
   return tiles;
 }
 
-export type FixtureOptions = { fog: "normal" | "off" | "corrupt" | "none"; blackout: boolean; areas?: boolean; walls?: boolean; text?: boolean; melee?: boolean; pcstats?: boolean };
+export type FixtureOptions = {
+  fog: "normal" | "off" | "corrupt" | "none";
+  blackout: boolean;
+  areas?: boolean;
+  walls?: boolean;
+  text?: boolean;
+  melee?: boolean;
+  pcstats?: boolean;
+  ask?: "save" | "check" | "two";
+};
 
 export function createFixtureState(options: FixtureOptions): RoomState {
   nextToken = 0;
@@ -328,7 +337,37 @@ export function createFixtureState(options: FixtureOptions): RoomState {
   if (options.text) textStress(state);
   if (options.melee) meleeGuardians(state);
   if (options.pcstats) thornStats(state);
+  if (options.ask) askThorn(state, options.ask);
   return state;
+}
+
+/**
+ * An open roll request for Thorn and Vex (`ask=save|check|two`,
+ * docs/design-v1-roll-request.md 5): a Dexterity save against DC 13 with
+ * Thorn Restrained and Blessed, a Wisdom (Perception) check, or a
+ * Strength or Dexterity save. The DM sees its live card, a player its card.
+ */
+function askThorn(state: RoomState, ask: "save" | "check" | "two"): void {
+  const thorn = state.characters[FIXTURE_IDS.thornChar];
+  if (thorn && ask === "save") {
+    thorn.actor = { ...thorn.actor, effects: [...thorn.actor.effects, { id: "fx-restrained", key: "restrained" }, { id: "fx-blessed", key: "blessed" }] };
+  }
+  const test: RollTest =
+    ask === "save"
+      ? { kind: "save", choices: [{ ability: "dex" }] }
+      : ask === "check"
+        ? { kind: "check", choices: [{ ability: "wis", skill: "perception" }] }
+        : { kind: "save", choices: [{ ability: "str" }, { ability: "dex" }] };
+  state.rolls["r-dev"] = {
+    id: "r-dev",
+    rev: 0,
+    test,
+    dc: 13,
+    dcShown: true,
+    resultShown: true,
+    at: T0,
+    targets: [{ characterId: FIXTURE_IDS.thornChar }, { characterId: FIXTURE_IDS.vexChar }],
+  };
 }
 
 /** Thorn at level 5 with a stat block (`pcstats=1`, docs/design-v1-pc-stats.md), its actor's numbers following it. */

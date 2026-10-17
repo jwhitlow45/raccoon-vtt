@@ -5,6 +5,9 @@ import { z } from "zod";
 import { dmToolSchemas, type ActorTarget, type ClientOp } from "#shared/protocol.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { ABILITY_NAMES, choiceText, SKILLS, testShortText, testText, TYPICAL_DCS } from "#shared/rules/skills.ts";
+import { answerDice } from "#shared/logText.ts";
+import { CONDITIONS } from "#shared/srd/conditions.ts";
+import { NO_INPUTS, type RollInputs } from "./card.ts";
 import { displayName } from "../../lib/scene.ts";
 
 /**
@@ -606,11 +609,14 @@ export function dcText(request: Pick<RollRequest, "dc" | "dcShown" | "dcHidden">
 }
 
 /**
- * What the player's card says: "The DM asks for a Strength (Athletics) or
- * Dexterity (Acrobatics) check: to break free of the grapple."
+ * What the player's card says, its DC joined to the question
+ * (docs/design-v1-roll-request.md 5.1): "The DM asks for a Strength
+ * (Athletics) or Dexterity (Acrobatics) check, DC 12: to break free of the
+ * grapple.", "…saving throw against a spell, DC hidden."
  */
-export function askLine(request: Pick<RollRequest, "test" | "note">): string {
-  return `The DM asks for ${testText(request.test)}${request.note ? `: ${request.note}` : ""}.`;
+export function askLine(request: Pick<RollRequest, "test" | "note" | "dc" | "dcShown" | "dcHidden" | "spell">): string {
+  const dc = dcText(request, "player");
+  return `The DM asks for ${testText(request.test)}${request.spell ? " against a spell" : ""}${dc ? `, ${dc}` : ""}${request.note ? `: ${request.note}` : ""}.`;
 }
 
 /** The test with its noun and no article, for a card's title: "Dexterity saving throw", "Strength or Dexterity saving throw". */
@@ -665,13 +671,16 @@ export function wantsMark(request: Pick<RollRequest, "dc">, target: RollTarget):
 }
 
 /**
- * Whether a player's answer is final in their own projection: the DC is
+ * Whether a player's answer is final in their own projection: a rolled one
+ * at once (docs/design-v1-dice.md 5.4), and a typed one when the DC is
  * hidden, pass or fail is shown, and the answer has a result, the reducer's
- * from the DC or a DM's mark. Then the chip reads "Final. Ask the DM to
- * change it." and offers no change. The reducer holds to it whatever this
- * says (shared/reducer/rolls.ts isFinal).
+ * from the DC or a DM's mark. Then the chip reads "Final." and the card
+ * offers no change of its own. The reducer holds to it whatever this says
+ * (shared/reducer/rolls.ts isFinal). A creature the DM rolled for reads
+ * the same, since the projection carries no `by`.
  */
-export function finalForPlayer(request: Pick<RollRequest, "dcHidden" | "resultShown">, target: Pick<RollTarget, "result">): boolean {
+export function finalForPlayer(request: Pick<RollRequest, "dcHidden" | "resultShown">, target: Pick<RollTarget, "result" | "dice">): boolean {
+  if (target.dice !== undefined) return true;
   return request.dcHidden === true && request.resultShown && target.result !== undefined;
 }
 
@@ -685,6 +694,12 @@ export function finalForPlayer(request: Pick<RollRequest, "dcHidden" | "resultSh
  */
 export function chipLine(request: Pick<RollRequest, "test" | "dcHidden" | "resultShown">, target: RollTarget, opts: { name?: string } = {}): string {
   const lead = `${testShortText(request.test)}${opts.name ? ` (${opts.name})` : ""}`;
+  if (target.dice !== undefined) {
+    // A rolled answer is final, with its dice: "Dex save: rolled 17 (1d20+5: 12). Pass. Final."
+    const choice = request.test.choices.length > 1 && target.choice !== undefined ? request.test.choices[target.choice] : undefined;
+    const verdict = target.result === undefined ? "" : target.result === "fail" && target.dice.fails ? ` Fail (${CONDITIONS[target.dice.fails].name}).` : ` ${RESULT[target.result]}.`;
+    return `${lead}: rolled ${choice ? `${choiceShort(choice)} ` : ""}${target.total ?? target.dice.total} (${answerDice(target.dice, target.typedBonus === true)}).${verdict} Final.`;
+  }
   // A DM's mark is a result like any other, so it is final on the same request (shared/reducer/rolls.ts isFinal).
   const final = finalForPlayer(request, target) ? " Final. Ask the DM to change it." : "";
   if (target.total !== undefined) {
@@ -734,16 +749,22 @@ export function parseTotal(text: string): { ok: true; total: number } | { ok: fa
  * portrait and landscape mounts it afresh, and focus in the field fell to
  * the page.
  */
-export type AnswerDraft = { text: string; choice: 0 | 1; base: string; focused?: boolean };
+export type AnswerDraft = { text: string; choice: 0 | 1; base: string; focused?: boolean; inputs?: RollInputs };
 
 /** The key of one creature's draft on one request. */
 export function draftKey(requestId: string, target: Pick<RollTarget, "tokenId" | "characterId">): string {
   return `${requestId}:${targetKey(target)}`;
 }
 
-/** A target's answer as the player's view holds it, as one value: equal keys mean the server's answer has not changed. */
-export function answerKey(target: RollAnswer): string {
-  return [target.total ?? "", target.choice ?? "", target.result ?? "", target.noRoll ? "no roll" : ""].join("|");
+/**
+ * A target's answer as the player's view holds it, as one value: equal keys
+ * mean the server's answer has not changed. The tag tells a roll or a mark
+ * from the answer before it, and an ask or an allowed retype changes it too
+ * (docs/design-v1-roll-request.md 5.7), so an answer or an ask from the
+ * player's other device forgets the draft.
+ */
+export function answerKey(target: RollAnswer & Pick<RollTarget, "change" | "retype">): string {
+  return [target.total ?? "", target.choice ?? "", target.result ?? "", target.noRoll ? "no roll" : "", target.tag ?? "", target.change?.id ?? "", target.retype ? "retype" : ""].join("|");
 }
 
 /**
@@ -777,9 +798,15 @@ export function keepFocusFor(drafts: Map<string, AnswerDraft>, shownId: string |
  * which then wins as it does today. The card can mount in the same render
  * the answer changes, before forgetStaleDrafts runs, so this checks too.
  */
-export function startingAnswer(target: RollAnswer, draft: AnswerDraft | undefined): { text: string; choice: 0 | 1; focused: boolean } {
-  if (draft && draft.base === answerKey(target)) return { text: draft.text, choice: draft.choice, focused: draft.focused === true };
-  return { text: target.total !== undefined ? String(target.total) : "", choice: target.choice ?? 0, focused: false };
+export function startingAnswer(
+  target: RollAnswer & Pick<RollTarget, "change" | "retype">,
+  draft: AnswerDraft | undefined,
+  best: 0 | 1 = 0,
+): { text: string; choice: 0 | 1; focused: boolean; inputs: RollInputs } {
+  if (draft && draft.base === answerKey(target)) return { text: draft.text, choice: draft.choice, focused: draft.focused === true, inputs: draft.inputs ?? NO_INPUTS };
+  // A rolled total is never typed again, so only a typed one fills the field. Two choices start at the higher bonus (5.1).
+  const text = target.total !== undefined && target.dice === undefined ? String(target.total) : "";
+  return { text, choice: target.choice ?? best, focused: false, inputs: NO_INPUTS };
 }
 
 /** Whether any of the creatures a request asked this player about, their own alone in their projection, still waits for an answer. */
@@ -993,6 +1020,101 @@ export function sheetSummary(requests: readonly RollRequest[], opens: string | n
   if (!summary.waiting) return foldedChips(requests, "sheet");
   return { text: summary.text, label: `${summary.text}: ${summary.name}. Close the sheet to answer.` };
 }
+
+// ------------------------------------------------------------ one creature's answer on the card
+
+/** What one creature's answer may send (docs/design-v1-roll-request.md 5.6). */
+export type AnswerOp = "roll" | "send" | "fail" | "ask" | "withdraw";
+
+/**
+ * One creature's answer on the player's card, as a small machine (5.6):
+ * idle, or busy with one op until that op's own answer, and the words of
+ * the last refusal under the rows. The card draws it, and its randomized
+ * test drives it (card.random.test.ts).
+ */
+export type AnswerFlow = { busy: { op: AnswerOp; tag: string } | null; error: string | null };
+
+export const IDLE: AnswerFlow = { busy: null, error: null };
+
+/** Which ops the card offers a creature now, whatever the flow: each needs the request to hold the creature still. */
+export type AnswerOffers = Record<AnswerOp, boolean>;
+
+/**
+ * What the card offers (5.2, 5.5): Roll only while the creature waits, not
+ * for a retype, with the Total field empty, a bonus known or typed and the
+ * socket open. Send and Fail only on an answer that is not final. Ask only
+ * on a final answer with no ask pending, and Withdraw only with one. A
+ * request that no longer holds the creature offers nothing.
+ */
+export function answerOffers(input: {
+  holds: boolean;
+  request: Pick<RollRequest, "test" | "dcHidden" | "resultShown">;
+  target: RollTarget;
+  text: string;
+  connected: boolean;
+  bonusReady: boolean;
+}): AnswerOffers {
+  const { request, target } = input;
+  if (!input.holds) return { roll: false, send: false, fail: false, ask: false, withdraw: false };
+  const final = finalForPlayer(request, target);
+  const typed = input.text.trim() !== "";
+  return {
+    roll: !answered(target) && target.retype !== true && !typed && input.connected && input.bonusReady,
+    send: !final && typed,
+    fail: !final && request.test.kind === "save",
+    ask: final && target.change === undefined,
+    withdraw: target.change !== undefined,
+  };
+}
+
+/** Where an op whose answer was lost landed, read from the target while the request is open (5.6). */
+export type Landing = "mine" | "other" | "none";
+
+export function landingOf(target: RollTarget | undefined, tag: string): Landing {
+  if (!target) return "none";
+  if (target.tag === tag || target.change?.id === tag) return "mine";
+  return answered(target) ? "other" : "none";
+}
+
+export type AnswerEvent =
+  /** A tap of one op, taken only when idle and offered, with the tag its op will carry. */
+  | { t: "tap"; op: AnswerOp; tag: string; offers: AnswerOffers }
+  /** What the card refuses before sending, in the server's own words. */
+  | { t: "check"; error: string }
+  /** The answer to the busy op. A lost one is settled by where it landed, never sent again. */
+  | { t: "answer"; tag: string; answer: "taken" | "refused" | "unknown"; text?: string; landing?: Landing }
+  /** A keystroke or a choice, which clears the last refusal. */
+  | { t: "edit" };
+
+export function answerFlow(state: AnswerFlow, event: AnswerEvent): AnswerFlow {
+  switch (event.t) {
+    case "tap":
+      return state.busy !== null || !event.offers[event.op] ? state : { busy: { op: event.op, tag: event.tag }, error: null };
+    case "check":
+      return state.busy !== null ? state : { busy: null, error: event.error };
+    case "answer": {
+      if (state.busy === null || state.busy.tag !== event.tag) return state;
+      if (event.answer === "taken") return IDLE;
+      if (event.answer === "refused") return { busy: null, error: event.text ?? "Not sent." };
+      // Unknown is settled by the target, never retried: this device's answer landed, another came first, or it never landed and Roll comes back.
+      return event.landing === "other" ? { busy: null, error: ANSWERED_FIRST } : IDLE;
+    }
+    case "edit":
+      return state.error === null ? state : { ...state, error: null };
+  }
+}
+
+/**
+ * Whether a typed Send or Fail folds the card (5.4): once every creature on
+ * it has an answer, unless it shows a result rolled while it was up, which
+ * waits for Done.
+ */
+export function foldsAfterSend(request: Pick<RollRequest, "targets">, sentKey: string, rolledHere: ReadonlySet<string>): boolean {
+  return rolledHere.size === 0 && request.targets.every((t) => targetKey(t) === sentKey || answered(t));
+}
+
+/** A lost answer whose creature another answer reached first, from the player's other device or the DM. */
+export const ANSWERED_FIRST = "Another answer came first.";
 
 const ASK_LOST = "The connection dropped before the server answered, so the request may not have gone out. Check the cards, then send again.";
 

@@ -1,0 +1,228 @@
+import { advantageFields, applyMode, d20Formula, formatFormula, formulaRange, parseExtra, parseFormula, type AdvantageMode, type AdvantageSource } from "#shared/dice/formula.ts";
+import { OUT_OF_RANGE } from "#shared/dice/resolve.ts";
+import { naturalOf, rolledTerms } from "#shared/dice/roll.ts";
+import { LIMITS } from "#shared/limits.ts";
+import { effectName } from "#shared/logText.ts";
+import type { DiceResult, RollRequest, RollTarget } from "#shared/model.ts";
+import type { RollPreset } from "#shared/rules/rollReminders.ts";
+import { CONDITIONS } from "#shared/srd/conditions.ts";
+
+/**
+ * The player's card rolls a request's answer on the server
+ * (docs/design-v1-roll-request.md 5.2 to 5.4), as plain functions for node
+ * --test: Roll's words and why it waits, the reading under the roll row,
+ * the op's roll fields, and the words of a rolled result. The DM's live
+ * card reads the same reading for its Roll (6).
+ */
+
+/** What the player adds for what the app does not know (5.2): Adv or Dis, extra dice, and a bonus typed where none is known. */
+export type RollInputs = { pressed: AdvantageMode | null; extra: string; bonus: string };
+
+export const NO_INPUTS: RollInputs = { pressed: null, extra: "", bonus: "" };
+
+export const TYPE_BONUS = "Type your bonus first, such as +5 or 0.";
+export const CLEAR_TOTAL = "Clear the total to roll instead.";
+export const BONUS_WORDS = "A bonus is a whole number from -20 to 30.";
+
+/** A bonus as written on a button: "+3", "-1", "+0". */
+export function signed(n: number): string {
+  return n < 0 ? `-${-n}` : `+${n}`;
+}
+
+/** A bonus the player types where the app knows none (5.2): a whole number from -20 to 30, a typographic minus allowed. Null while empty. */
+export function parseBonus(text: string): { ok: true; bonus: number } | { ok: false; error: string } | null {
+  const t = text.trim().replace(/[−–]/g, "-");
+  if (t === "") return null;
+  if (!/^[+-]?\d{1,2}$/.test(t)) return { ok: false, error: BONUS_WORDS };
+  const n = Number(t);
+  if (n < -20 || n > 30) return { ok: false, error: BONUS_WORDS };
+  return { ok: true, bonus: n === 0 ? 0 : n };
+}
+
+/** A source's name in a reading: "Restrained", "Magic Resistance", or "Advantage" for the one the player pressed. */
+export function sourceName(source: AdvantageSource): string {
+  if (source.from === "pressed") return source.kind === "adv" ? "Advantage" : "Disadvantage";
+  if (source.from === "magic-resistance") return "Magic Resistance";
+  if (source.from === "tracker") return "the tracker's mark";
+  return effectName(source.from);
+}
+
+/**
+ * Which effect a preset's extra term came from, for the reading's words. The
+ * table gives three (shared/rules/rollReminders.ts): Bless's +1d4, Bane's
+ * -1d4 and Exhaustion's -2 per level, each in a shape of its own.
+ */
+function extraName(term: string): string | null {
+  if (term === "+1d4") return effectName("blessed");
+  if (term === "-1d4") return effectName("baned");
+  if (/^-\d+$/.test(term)) return CONDITIONS.exhaustion.name;
+  return null;
+}
+
+/** The player's extra as it joins the preset's: signed, so "1d6" reads "+1d6" after "+1d4". */
+function signedExtra(text: string): string {
+  const t = text.trim().replace(/[−–]/g, "-");
+  return t === "" || /^[+-]/.test(t) ? t : `+${t}`;
+}
+
+/** The names of the sources of one kind, once each, in order. */
+function names(sources: readonly AdvantageSource[], kind?: "adv" | "dis"): string[] {
+  const out: string[] = [];
+  for (const s of sources) {
+    if (kind !== undefined && s.kind !== kind) continue;
+    const name = sourceName(s);
+    if (!out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+function list(words: readonly string[]): string {
+  if (words.length <= 1) return words[0] ?? "";
+  return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+}
+
+export type CardRoll = {
+  /** "Roll +3", "Roll d20" while no bonus is known or typed, "Roll d20+5". */
+  label: string;
+  /** Why Roll waits, its description while disabled: no bonus typed yet, or a total in the field. Null when it can go. */
+  blocked: string | null;
+  /** How the tap will roll (5.3), or null with no preset and nothing pressed or typed. */
+  reading: string | null;
+  /** How long the player's extra may be, so the whole extra keeps within its 40 characters. */
+  extraRoom: number;
+  /** The `roll.dice` fields the tap sends, or the words of what the server would refuse first. */
+  fields: { ok: true; value: { mode?: AdvantageMode; cancelled?: true; extra?: string; bonus?: number } } | { ok: false; error: string };
+};
+
+/**
+ * Roll on the card (5.2, 5.3) for one creature and one choice: `bonus` is
+ * the creature's as this device knows it, `preset` doc 3's for the test, read
+ * at the tap, and `inputs` the player's own. The preset's sources and the
+ * pressed chip resolve once by the cancel rule (docs/design-v1-dice.md 3.3),
+ * and the preset's extra comes before the player's.
+ */
+export function cardRoll(input: { bonus: number | null; preset: RollPreset | null; inputs: RollInputs; text: string }): CardRoll {
+  const { preset, inputs } = input;
+  const typed = input.bonus === null ? parseBonus(inputs.bonus) : null;
+  const bonus = input.bonus ?? (typed?.ok ? typed.bonus : null);
+  const label = input.bonus !== null ? `Roll ${signed(input.bonus)}` : typed?.ok ? `Roll d20${signed(typed.bonus)}` : "Roll d20";
+  const sources: AdvantageSource[] = [...(preset?.sources ?? []), ...(inputs.pressed ? [{ kind: inputs.pressed, from: "pressed" }] : [])];
+  const presetExtra = (preset?.extra ?? []).join("");
+  const own = signedExtra(inputs.extra);
+  const extra = `${presetExtra}${own}`;
+  const mode = advantageFields(sources);
+  const base = d20Formula(bonus ?? 0);
+
+  // The reading: the roll as it will go, its mode with its reasons, and each extra with its own.
+  const parts: string[] = [];
+  for (const term of preset?.extra ?? []) {
+    const name = extraName(term);
+    parts.push(name ? `${term} (${name})` : term);
+  }
+  if (own !== "") parts.push(own);
+  const extras = parts.length > 0 ? `, ${parts.join(", ")}` : "";
+  let reading: string | null = null;
+  if (mode.mode) {
+    // The player's own chip needs no naming beside the mode it gives: "with advantage", not "with advantage (Advantage)".
+    const why = names(sources.filter((src) => src.from !== "pressed"), mode.mode);
+    reading = `Rolls ${base} with ${mode.mode === "adv" ? "advantage" : "disadvantage"}${why.length > 0 ? ` (${list(why)})` : ""}${extras}.`;
+  }
+  else if (mode.cancelled) reading = `Rolls ${base}${extras}: ${list([...names(sources, "adv"), ...names(sources, "dis")])} cancel.`;
+  else if (parts.length > 0) reading = `Rolls ${base}${extras}.`;
+  if (preset?.fails) {
+    const fails = `${CONDITIONS[preset.fails].name}: this save fails whatever the roll.`;
+    reading = reading ? `${reading} ${fails}` : fails;
+  }
+
+  let blocked: string | null = null;
+  if (input.text.trim() !== "") blocked = CLEAR_TOTAL;
+  else if (bonus === null) blocked = TYPE_BONUS;
+
+  let fields: CardRoll["fields"];
+  if (typed && !typed.ok) fields = { ok: false, error: typed.error };
+  else if (bonus === null) fields = { ok: false, error: TYPE_BONUS };
+  else fields = rollFields(base, extra, own, mode, input.bonus === null ? bonus : undefined);
+  return { label, blocked, reading, extraRoom: Math.max(0, LIMITS.diceExtraChars - presetExtra.length), fields };
+}
+
+/** The checks the server makes first, in its words (5.2): the extra reads, and the roll keeps within -50 to 100. */
+function rollFields(base: string, extra: string, own: string, mode: { mode?: AdvantageMode; cancelled?: true }, bonus: number | undefined): CardRoll["fields"] {
+  if (own !== "") {
+    const parsed = parseExtra(own);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+  }
+  if (extra !== "") {
+    const whole = parseExtra(extra);
+    if (!whole.ok) return { ok: false, error: whole.error };
+  }
+  const parsed = parseFormula(`${base}${extra}`);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  const formula = mode.mode ? applyMode(parsed.formula, mode.mode) : parsed;
+  if (!formula.ok) return { ok: false, error: formula.error };
+  const range = formulaRange(formula.formula);
+  if (range.min < LIMITS.rollTotalMin || range.max > LIMITS.rollTotalMax) return { ok: false, error: OUT_OF_RANGE };
+  return { ok: true, value: { ...mode, ...(extra !== "" ? { extra } : {}), ...(bonus !== undefined ? { bonus } : {}) } };
+}
+
+/** A rolled result's dice for the screen: the formula as rolled, then each die, a dropped one marked to be struck through. */
+export function rolledDice(result: Pick<DiceResult, "formula" | "faces" | "mode">): { formula: string; faces: { face: number; dropped: boolean }[] } {
+  const parsed = parseFormula(result.formula);
+  const terms = rolledTerms(result);
+  const formula = parsed.ok ? formatFormula(parsed.formula, result.mode) : result.formula;
+  const faces = terms ? terms.flatMap((t) => ("kept" in t ? t.faces.map((face, i) => ({ face, dropped: !t.kept[i] })) : [])) : [];
+  return { formula, faces };
+}
+
+/** "Natural 20" or "Natural 1", where the kept d20 shows one. */
+export function naturalText(result: Pick<DiceResult, "formula" | "faces">): string | null {
+  const natural = naturalOf(result);
+  return natural === null ? null : `Natural ${natural}`;
+}
+
+/**
+ * A rolled answer's verdict as the player reads it: "Pass", "Fail", "Fail
+ * (Stunned)" when a condition failed it, or nothing while pass or fail is
+ * hidden from them.
+ */
+export function verdictText(target: Pick<RollTarget, "result" | "dice">): string | null {
+  if (target.result === undefined) return null;
+  if (target.result === "fail" && target.dice?.fails) return `Fail (${CONDITIONS[target.dice.fails].name})`;
+  return target.result === "pass" ? "Pass" : "Fail";
+}
+
+/**
+ * The card's result in words (5.4): "Rolled 17 (1d20+5 with advantage: 12, 7
+ * dropped). Pass.", with "Natural 20." where it shows one. The screen draws
+ * the same with a dropped die struck through.
+ */
+export function rolledText(target: Pick<RollTarget, "total" | "result" | "dice">): string {
+  const dice = target.dice;
+  if (!dice) return "";
+  const shown = rolledDice(dice);
+  const faces = shown.faces.map((f) => (f.dropped ? `${f.face} dropped` : String(f.face))).join(", ");
+  const natural = naturalText(dice);
+  const verdict = verdictText(target);
+  return `Rolled ${target.total ?? dice.total} (${shown.formula}${faces ? `: ${faces}` : ""}).${natural ? ` ${natural}.` : ""}${verdict ? ` ${verdict}.` : ""}`;
+}
+
+/** What the polite live region says when a roll lands while the card shows: "Thorn rolled 17. Pass." */
+export function rolledNews(name: string, target: Pick<RollTarget, "total" | "result" | "dice">): string {
+  const verdict = verdictText(target);
+  return `${name} rolled ${target.total ?? target.dice?.total ?? ""}.${verdict ? ` ${verdict}.` : ""}`;
+}
+
+/** The one of two choices a creature starts at (5.1): the higher bonus, the first on a tie or with none known. */
+export function bestChoice(bonuses: readonly (number | null)[]): 0 | 1 {
+  const [a, b] = bonuses;
+  return a !== null && a !== undefined && b !== null && b !== undefined && b > a ? 1 : 0;
+}
+
+/** The choice labels on a card with two (5.1): "Dexterity +3", or the name alone where no bonus is known. */
+export function choiceLabel(text: string, bonus: number | null): string {
+  return bonus === null ? text : `${text} ${signed(bonus)}`;
+}
+
+/** Whether a request is still open with this creature on it, the condition every tap on its card checks. */
+export function holds(request: Pick<RollRequest, "targets"> | undefined, target: Pick<RollTarget, "tokenId" | "characterId">): boolean {
+  return request !== undefined && request.targets.some((t) => (target.tokenId !== undefined ? t.tokenId === target.tokenId : t.characterId === target.characterId));
+}

@@ -33,6 +33,7 @@ import { drawMap, drawPortrait } from "./placeholders.ts";
  * - `text=1` puts board text at its worst: long names, packed crowds, long area and map labels.
  * - `melee=1` casts Spirit Guardians around Thorn with goblins in melee above and below him.
  * - `pcstats=1` gives Thorn a level and a stat block (docs/design-v1-pc-stats.md).
+ * - `ask=save|check|two` opens a roll request for Thorn and Vex, Thorn Restrained and Blessed for a save (docs/design-v1-roll-request.md 5).
  */
 function readOptions() {
   const q = new URLSearchParams(location.search);
@@ -55,6 +56,7 @@ function readOptions() {
       text: q.get("text") === "1",
       melee: q.get("melee") === "1",
       pcstats: q.get("pcstats") === "1",
+      ...(q.get("ask") === "save" || q.get("ask") === "check" || q.get("ask") === "two" ? { ask: q.get("ask") as "save" | "check" | "two" } : {}),
     } satisfies FixtureOptions,
   };
 }

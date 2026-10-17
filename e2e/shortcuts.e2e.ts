@@ -159,7 +159,8 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     assert.deepEqual(titles.slice(0, 2), ["Keys", "Android"], titles.join(", "));
     assert.ok(!titles.includes("Mouse with keys"), titles.join(", "));
     assert.ok(!titles.includes("Label, pin and light panes"), "the panes are the DM's");
-    assert.ok(!titles.includes("Roll requests"), "sending a request is the DM's");
+    // A player's roll card: Enter sends a typed total, or rolls from the Bonus or Extra dice field (docs/design-v1-roll-request.md 8).
+    assert.deepEqual(await inputs(sheet, "Roll requests"), ["Enter", "Enter"]);
 
     const keys = await inputs(sheet, "Keys");
     for (const k of ["Ctrl+Z", "V", "N", "Escape"]) assert.ok(keys.includes(k), `${k} in ${keys.join(", ")}`);

@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type Ref, type RefObject } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type Ref, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { Effect, RollRequest, RollTarget, RoomState } from "#shared/model.ts";
+import { bonusFor, testOf } from "#shared/dice/bonus.ts";
 import { rollReminders } from "#shared/rules/rollReminders.ts";
 import { choiceText } from "#shared/rules/skills.ts";
+import { CONDITIONS } from "#shared/srd/conditions.ts";
 import { Button } from "../../components/Button.tsx";
+import { Chip } from "../../components/Chip.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { SheetGrabber } from "../../components/SheetGrabber.tsx";
@@ -15,16 +18,29 @@ import { theme } from "../../lib/theme.ts";
 import { revealAndFocus } from "../../lib/reveal.ts";
 import { useStore } from "zustand";
 import { barDockSlot } from "../../canvas/barDock.ts";
+import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { useScoped } from "../../state/scope.ts";
-import { sheetOpen, type OpAnswer } from "../../state/types.ts";
-import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { sheetOpen, type OpAnswer, type OpRefusal } from "../../state/types.ts";
+import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
+import { creatureRolls } from "../dice/creature.ts";
+import { presetFor } from "../dice/presets.ts";
+import { NEEDS_CONNECTION, sendRoll, useRollSender } from "../dice/send.ts";
+import { useDiceView } from "../dice/useDiceView.ts";
+import { useOpenPcStats } from "../pcstats/open.ts";
 import { announceTurn } from "../encounter/alerts.ts";
 import { chromeZoom, screenHeight, smallUi, useLayoutSize } from "../device/layout.ts";
 import { useUiScale } from "../device/settings.ts";
+import { bestChoice, cardRoll, choiceLabel, naturalText, parseBonus, rolledDice, rolledNews, verdictText, type RollInputs } from "./card.ts";
 import {
   answered,
+  answerFlow,
   answerKey,
   answerLabel,
+  answerOffers,
+  IDLE,
+  landingOf,
+  type AnswerEvent,
+  type AnswerFlow,
   askLine,
   CARD_MIN_WIDTH,
   cardFoldsUnderSheet,
@@ -32,12 +48,12 @@ import {
   chipName,
   chipStack,
   chipsStayShown,
-  dcText,
   deskLayout,
   draftKey,
   finalAnswerText,
   finalForPlayer,
   foldedChips,
+  foldsAfterSend,
   forgetStaleDrafts,
   keepFocusFor,
   lookAtRequests,
@@ -349,14 +365,18 @@ export function PlayerRolls() {
   );
 }
 
-/** The creature a target names, as this player's view holds it: its name and the effects its reminders read. */
-function useCreature(target: RollTarget): { name: string; effects: readonly Effect[] } {
+/**
+ * The creature a target names, as this player's view holds it: its name,
+ * the effects its reminders read, and the character with no stat block
+ * yet, whose card offers "Add a stat block" (docs/design-v1-roll-request.md 5.2).
+ */
+function useCreature(target: RollTarget): { name: string; effects: readonly Effect[]; noBlock: string | null } {
   const token = useRoomView((s) => (target.tokenId !== undefined ? s.view?.tokens[target.tokenId] : undefined));
   const characterId = target.characterId ?? (token && "ref" in token.actor ? token.actor.ref : undefined);
   const character = useRoomView((s) => (characterId !== undefined ? s.view?.characters[characterId] : undefined));
   const name = token ? displayName(token) : (character?.name ?? "Your creature");
   const effects = token && "inline" in token.actor ? token.actor.inline.effects : (character?.actor.effects ?? []);
-  return { name, effects };
+  return { name, effects, noBlock: character && character.stats === undefined ? character.id : null };
 }
 
 function RollCard(props: {
@@ -383,7 +403,6 @@ function RollCard(props: {
   onFocusWithin(inside: boolean): void;
 }) {
   const { request } = props;
-  const dc = dcText(request, "player");
   const zoom = useUiScale();
   // The toolbar and the active tool's options as Room measured them (canvas/barDock.ts Chrome), in the card's own pixels.
   const chrome = useStore(useScoped(barDockSlot), (s) => s.chrome);
@@ -391,11 +410,38 @@ function RollCard(props: {
   useBackClose(props.sheet && !props.hidden, props.onFold);
   // At the screen's foot a swipe down puts it off as Later does, with what was typed kept, so unsaved input never holds it (docs/design-v1-sheet-swipe.md section 3).
   useSheetSwipe(props.cardRef, { enabled: props.sheet && !props.hidden, onClose: props.onFold, item: props.request.id, clip: "screen", keeps: true });
+  /*
+   * A roll that lands while the card shows, from its Roll or from the Dice
+   * panel, is news to the player, so the card shows its result in place
+   * and stays up until Done (docs/design-v1-roll-request.md 5.4). Each
+   * target's answer is remembered as the card first saw it, so a rolled
+   * answer it opened on is no news.
+   */
+  const seen = useRef<Map<string, string | undefined> | null>(null);
+  const [rolledHere, setRolledHere] = useState<ReadonlySet<string>>(() => new Set());
+  const [news, setNews] = useState("");
+  const headerButton = useRef<HTMLButtonElement>(null);
+  const names = useRoomView((s) => (s.view ? request.targets.map((t) => creatureName(s.view!, t)).join("|") : ""));
+  const { onEngage } = props;
+  useEffect(() => {
+    const before = seen.current;
+    seen.current = new Map(request.targets.map((t) => [targetKey(t), t.tag]));
+    if (!before) return;
+    const landed = request.targets.filter((t) => t.dice !== undefined && before.has(targetKey(t)) && before.get(targetKey(t)) !== t.tag);
+    if (landed.length === 0) return;
+    setRolledHere((r) => new Set([...r, ...landed.map(targetKey)]));
+    const list = names.split("|");
+    setNews(landed.map((t) => rolledNews(list[request.targets.indexOf(t)] || "Your creature", t)).join(" "));
+    onEngage();
+    // The roll row gave way to the result, so focus that was in it goes to the header's button rather than falling to the page.
+    const card = props.cardRef.current;
+    const active = document.activeElement;
+    if (card && (active === null || active === document.body || card.contains(active))) headerButton.current?.focus();
+  }, [request.targets, names, onEngage, props.cardRef]);
   const sent = (key: string) => {
-    // Folds once every creature it asked about has an answer, this one included.
-    const rest = request.targets.filter((t) => targetKey(t) !== key);
-    if (rest.every(answered)) props.onFold();
+    if (foldsAfterSend(request, key, rolledHere)) props.onFold();
   };
+  const done = request.targets.every(answered);
   /*
    * At the screen's foot the card's header (what to roll, and Later) sticks
    * to its top on an opaque fill, so it shows whatever scrolls under it,
@@ -416,7 +462,8 @@ function RollCard(props: {
       const lift = sticks ? 0 : theme.space(1);
       const head = header.offsetHeight + lift;
       const edges = 2 * theme.line.border;
-      const row = card.querySelector("form");
+      // The answer block (5.7): from "Fail (Stunned)" or the roll row down to the total and Send.
+      const row = card.querySelector<HTMLElement>("[data-answer]");
       if (!row) {
         const whole = edges + head + theme.space(4);
         onMeasure({ whole, least: whole });
@@ -435,7 +482,7 @@ function RollCard(props: {
   // Shown where it is too short for all of it, the card scrolls just far enough to show its first answer row whole, under the header as it sticks.
   useLayoutEffect(() => {
     const card = props.cardRef.current;
-    const row = card?.querySelector("form");
+    const row = card?.querySelector<HTMLElement>("[data-answer]");
     if (!props.sheet || props.hidden || !card || !row) return;
     const bottom = row.offsetTop + row.offsetHeight;
     if (bottom > card.scrollTop + card.clientHeight) card.scrollTop = bottom - card.clientHeight;
@@ -468,12 +515,18 @@ function RollCard(props: {
         {/* In the card's 16 px top padding, which the header takes into its own box: room enough for the pill with no growth. */}
         {props.sheet ? <SheetGrabber /> : null}
         <div style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
+          {/* The DC joins the question's line (5.1), one line less on every card. */}
           <div style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>{askLine(request)}</div>
-          {dc ? <div style={{ fontSize: theme.font.body14, color: theme.color.textMuted }}>{dc}</div> : null}
         </div>
-        <Button size="sm" aria-label="Fold it into a chip, to answer later" title="Fold it into a chip, to answer later" onClick={props.onFold}>
-          Later
-        </Button>
+        {done ? (
+          <Button ref={headerButton} size="sm" aria-label="Done, fold it into a chip" title="Done, fold it into a chip" onClick={props.onFold}>
+            Done
+          </Button>
+        ) : (
+          <Button ref={headerButton} size="sm" aria-label="Fold it into a chip, to answer later" title="Fold it into a chip, to answer later" onClick={props.onFold}>
+            Later
+          </Button>
+        )}
       </div>
       {request.targets.map((target) => (
         // Keyed by the total too, so an answer sent from this player's other device fills the field here.
@@ -487,6 +540,9 @@ function RollCard(props: {
           onSent={() => sent(targetKey(target))}
         />
       ))}
+      <div role="status" aria-live="polite" style={VISUALLY_HIDDEN}>
+        {news}
+      </div>
     </>
   );
   // The dialog itself takes focus when the summary opens it: it reads its request and opens no keyboard.
@@ -549,10 +605,15 @@ function RollCard(props: {
 }
 
 /**
- * One creature's answer: which choice it rolled when there are two, the
- * reminders its conditions and statuses give for that choice, the total,
- * Send, and on a save "Fail without rolling". Send waits for the server,
- * since a player's view of a request lacks what the reducer reads.
+ * One creature's answer (docs/design-v1-roll-request.md 5): which choice it
+ * rolls when there are two, the reminders its conditions and statuses give,
+ * and one answer path at a time. While the creature waits, Roll rolls on the
+ * server with its bonus, or one the player types, the presets and the
+ * player's Adv, Dis and extra dice read at the tap. Or the player types the
+ * total and taps Send, and on a save may fail without rolling, or fail by a
+ * condition first. A rolled answer shows in place, final. Every op waits for
+ * the server, since a player's view of a request lacks what the reducer
+ * reads, and its own answer alone ends the busy state (answerFlow).
  */
 function CreatureAnswer(props: {
   request: RollRequest;
@@ -564,50 +625,131 @@ function CreatureAnswer(props: {
 }) {
   const { request, target, drafts } = props;
   const actions = useRoomActions();
-  const { name, effects } = useCreature(target);
+  const store = useRoomStore();
+  const sender = useRollSender();
+  const openStats = useOpenPcStats();
+  const { name, effects, noBlock } = useCreature(target);
+  const tkey = targetKey(target);
+  const ref = useMemo(() => targetRef({ tokenId: target.tokenId, characterId: target.characterId }), [target.tokenId, target.characterId]);
+  const creatures = useMemo(() => [ref], [ref]);
+  const { dice } = useDiceView(creatures);
+  const rolls = dice ? creatureRolls(dice, ref) : null;
   const two = request.test.choices.length > 1;
+  const bonuses = request.test.choices.map((_, i) => (rolls?.numbers ? bonusFor(rolls.numbers, testOf(request, i)) : null));
   const key = draftKey(request.id, target);
-  const [start] = useState(() => startingAnswer(target, drafts.get(key)));
+  const [start] = useState(() => startingAnswer(target, drafts.get(key), bestChoice(bonuses)));
   const [choice, setChoice] = useState<0 | 1>(start.choice);
   const [text, setText] = useState(start.text);
-  const keep = (draft: { text?: string; choice?: 0 | 1; focused?: boolean }) =>
-    drafts.set(key, { text, choice, focused: drafts.get(key)?.focused === true, ...draft, base: answerKey(target) });
+  const [inputs, setInputs] = useState<RollInputs>(start.inputs);
+  const keep = (draft: { text?: string; choice?: 0 | 1; focused?: boolean; inputs?: RollInputs }) =>
+    drafts.set(key, { text, choice, inputs, focused: drafts.get(key)?.focused === true, ...draft, base: answerKey(target) });
   const field = useRef<HTMLInputElement>(null);
   // A card mounted afresh by turning the phone gives focus back to the field being typed in.
   useLayoutEffect(() => {
     if (start.focused) revealAndFocus(field.current);
   }, [start]);
-  const [sending, setSending] = useState(false);
   const connected = useRoomView((s) => s.connection === "open");
-  const [error, setError] = useState<string | null>(null);
+  // The flow is read and stepped at once by a tap, so a ref holds it beside the state that draws it.
+  const flowRef = useRef<AnswerFlow>(IDLE);
+  const [flow, setFlow] = useState<AnswerFlow>(IDLE);
+  const step = (event: AnswerEvent): AnswerFlow => {
+    const next = answerFlow(flowRef.current, event);
+    flowRef.current = next;
+    setFlow(next);
+    return next;
+  };
   const reminders = rollReminders(effects, request.test, two ? choice : undefined);
   const final = finalForPlayer(request, target);
+  const picked = two ? choice : 0;
+  const test = testOf(request, picked);
+  const bonus = bonuses[picked] ?? null;
+  const preset = dice ? presetFor(dice, ref, test, { rolls }) : null;
+  const roll = cardRoll({ bonus, preset, inputs, text });
+  const typedBonus = parseBonus(inputs.bonus);
+  const offers = answerOffers({ holds: true, request, target, text, connected, bonusReady: bonus !== null || typedBonus?.ok === true });
+  const waiting = !answered(target) && target.retype !== true;
+  const failsFirst = waiting && preset?.fails !== undefined && request.test.kind === "save" && !final;
+  const busy = flow.busy?.op ?? null;
+  const readingId = useId();
+  // Roll's description: why it waits, then how it will roll. Only the reading shows under the roll row (5.3): the field it
+  // waits on stands beside it, and a line more would fold the card on a phone on its side.
+  const waitsFor = !connected ? NEEDS_CONNECTION : roll.blocked;
+  const whyId = useId();
+  const failName = preset?.fails ? CONDITIONS[preset.fails].name : null;
 
-  const send = (op: { total: number } | { fail: true }) => {
-    if (sending) return;
-    const answer = "fail" in op ? { result: "fail" as const } : { total: op.total, ...(two ? { choice } : {}) };
-    const onAnswer = (a: OpAnswer) => {
-      setSending(false);
-      if (a === "refused") {
-        setError("Not sent.");
-        return;
-      }
-      drafts.delete(key);
-      props.onSent();
-    };
-    if (actions.dispatch({ t: "roll.answer", rollId: request.id, target: targetRef(target), ...answer, tag: actions.newId() }, { onAnswer }) === null) {
-      setError("That answer could not be sent.");
+  /** Settles one op by its own answer. A lost one is settled by where it landed while the request is open (5.6), never sent again. */
+  const settle = (tag: string, answer: OpAnswer, refusal?: OpRefusal) => {
+    const latest = store.getState().view?.rolls[request.id];
+    const now = latest?.targets.find((t) => targetKey(t) === tkey);
+    const landing = answer === "unknown" ? landingOf(now, tag) : undefined;
+    step({ t: "answer", tag, answer, ...(refusal ? { text: refusal.text } : {}), ...(landing ? { landing } : {}) });
+    return answer === "taken" || landing === "mine";
+  };
+
+  const tapRoll = () => {
+    const now = cardRoll({ bonus, preset: dice ? presetFor(dice, ref, test, { rolls }) : null, inputs, text });
+    if (!now.fields.ok) {
+      step({ t: "check", error: now.fields.error });
       return;
     }
-    setError(null);
-    setSending(true);
+    const tag = actions.newId();
+    if (step({ t: "tap", op: "roll", tag, offers }).busy?.tag !== tag) return;
+    props.onEngage();
+    const op = { t: "roll.dice" as const, tag, rollId: request.id, target: ref, ...(two ? { choice: picked } : {}), ...now.fields.value };
+    const n = sendRoll(sender, op, {
+      onAnswer: (answer, refusal) => {
+        // Shown here while the request is open. A save-ends pass closes it with the card, and the toast tells the result then (5.4).
+        if (store.getState().view?.rolls[request.id]) sender.receipts.announced(tag);
+        settle(tag, answer, refusal);
+      },
+    });
+    if (n === null) step({ t: "answer", tag, answer: "refused", text: connected ? "That roll could not be sent." : NEEDS_CONNECTION });
+  };
+
+  const send = (op: { total: number } | { fail: true }) => {
+    const tag = actions.newId();
+    if (step({ t: "tap", op: "fail" in op ? "fail" : "send", tag, offers: { ...offers, send: !final } }).busy?.tag !== tag) return;
+    const answer = "fail" in op ? { result: "fail" as const } : { total: op.total, ...(two ? { choice } : {}) };
+    // Quiet: a refusal shows under the rows in the server's words, such as the budget's (W7-P-55), not in a toast as well.
+    const n = actions.dispatch(
+      { t: "roll.answer", rollId: request.id, target: ref, ...answer, tag },
+      {
+        quiet: true,
+        onAnswer: (a, refusal) => {
+          if (!settle(tag, a, refusal)) return;
+          drafts.delete(key);
+          props.onSent();
+        },
+      },
+    );
+    if (n === null) step({ t: "answer", tag, answer: "refused", text: "That answer could not be sent." });
   };
 
   const submit = () => {
     const parsed = parseTotal(text);
-    if (!parsed.ok) setError(parsed.error);
+    if (!parsed.ok) step({ t: "check", error: parsed.error });
     else send({ total: parsed.total });
   };
+  const setInput = (patch: Partial<RollInputs>) => {
+    const next = { ...inputs, ...patch };
+    setInputs(next);
+    keep({ inputs: next });
+    step({ t: "edit" });
+    props.onEngage();
+  };
+
+  const failButton = (primary: boolean) => (
+    <Button
+      size="sm"
+      variant={primary ? "primary" : "secondary"}
+      busy={busy === "fail"}
+      disabled={busy !== null && busy !== "fail"}
+      onClick={() => send({ fail: true })}
+      style={primary ? { justifySelf: "start" } : undefined}
+    >
+      {primary && failName ? `Fail (${failName})` : "Fail without rolling"}
+    </Button>
+  );
 
   return (
     <div
@@ -619,7 +761,9 @@ function CreatureAnswer(props: {
       }}
     >
       {props.several || target.tokenId !== undefined ? <strong style={{ fontSize: theme.font.input }}>{name}</strong> : null}
-      {final ? (
+      {target.dice ? (
+        <RolledResult target={target} />
+      ) : final ? (
         <div style={{ fontSize: theme.font.body14 }}>{finalAnswerText(target, request.test)}. Final. Ask the DM to change it.</div>
       ) : (
         <>
@@ -628,7 +772,7 @@ function CreatureAnswer(props: {
               label="Which one you rolled"
               value={choice}
               grow
-              options={request.test.choices.map((c, i) => ({ value: i as 0 | 1, label: choiceText(c) }))}
+              options={request.test.choices.map((c, i) => ({ value: i as 0 | 1, label: choiceLabel(choiceText(c), bonuses[i] ?? null) }))}
               onChange={(i) => {
                 setChoice(i);
                 keep({ choice: i });
@@ -646,51 +790,176 @@ function CreatureAnswer(props: {
               ))}
             </ul>
           ) : null}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              submit();
-            }}
-            style={{ display: "flex", gap: theme.space(2) }}
-          >
-            <Input
-              ref={field}
-              aria-label={`Total ${name} rolled`}
-              value={text}
-              inputMode="numeric"
-              enterKeyHint="send"
-              autoComplete="off"
-              placeholder="Total"
-              error={error !== null}
-              onChange={(e) => {
-                setText(e.target.value);
-                keep({ text: e.target.value });
-                setError(null);
-                props.onEngage();
+          {/* The answer block (5.7), which a card at a phone's foot measures so all of it shows and takes a tap at once where it fits. */}
+          <div data-answer="" style={{ display: "grid", gap: theme.space(2) }}>
+            {failsFirst ? failButton(true) : null}
+            {waiting ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  tapRoll();
+                }}
+                style={{ display: "grid", gap: theme.space(1) }}
+              >
+                {/* Roll, Adv and Dis share the first line at every supported size. Each field follows on it while it fits whole, else starts the next (Appendix A). */}
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    variant={failsFirst || text.trim() !== "" ? "secondary" : "primary"}
+                    aria-label={`${roll.label} for ${name}`}
+                    aria-describedby={[waitsFor ? whyId : null, roll.reading ? readingId : null].filter((d) => d !== null).join(" ") || undefined}
+                    busy={busy === "roll"}
+                    disabled={busy === null ? !offers.roll : busy !== "roll"}
+                  >
+                    {roll.label}
+                  </Button>
+                  <span style={{ display: "inline-flex", gap: theme.space(1) }}>
+                    <Chip pressed={inputs.pressed === "adv"} aria-label="Advantage" disabled={busy !== null} onClick={() => setInput({ pressed: inputs.pressed === "adv" ? null : "adv" })}>
+                      Adv
+                    </Chip>
+                    <Chip pressed={inputs.pressed === "dis"} aria-label="Disadvantage" disabled={busy !== null} onClick={() => setInput({ pressed: inputs.pressed === "dis" ? null : "dis" })}>
+                      Dis
+                    </Chip>
+                  </span>
+                  {bonus === null ? (
+                    <Input
+                      aria-label={`Your bonus for ${name}`}
+                      value={inputs.bonus}
+                      placeholder="+0"
+                      enterKeyHint="go"
+                      autoComplete="off"
+                      maxLength={3}
+                      disabled={busy !== null}
+                      error={typedBonus?.ok === false}
+                      onChange={(e) => setInput({ bonus: e.target.value })}
+                      style={{ width: BONUS_FIELD_WIDTH, flex: "none", textAlign: "center" }}
+                    />
+                  ) : null}
+                  <Input
+                    aria-label={`Extra dice for ${name}`}
+                    value={inputs.extra}
+                    placeholder="+1d4"
+                    enterKeyHint="go"
+                    autoComplete="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    maxLength={roll.extraRoom}
+                    disabled={busy !== null}
+                    onChange={(e) => setInput({ extra: e.target.value })}
+                    style={{ width: EXTRA_FIELD_WIDTH, flex: "none" }}
+                  />
+                </div>
+                {waitsFor ? (
+                  <span id={whyId} style={VISUALLY_HIDDEN}>
+                    {waitsFor}
+                  </span>
+                ) : null}
+                {roll.reading ? (
+                  <div id={readingId} style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
+                    {roll.reading}
+                  </div>
+                ) : null}
+              </form>
+            ) : null}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                submit();
               }}
-              onFocus={() => keep({ focused: true })}
-              onBlur={() => {
-                if (drafts.has(key)) keep({ focused: false });
-              }}
-              style={{ flex: 1, width: 0 }}
-            />
-            <Button variant="primary" size="sm" busy={sending} disabled={!sending && text.trim() === ""} onClick={submit}>
-              {answerLabel(sending, connected, answered(target))}
-            </Button>
-          </form>
-          {request.test.kind === "save" ? (
-            <Button size="sm" disabled={sending} onClick={() => send({ fail: true })}>
-              Fail without rolling
-            </Button>
+              style={{ display: "flex", gap: theme.space(2) }}
+            >
+              <Input
+                ref={field}
+                aria-label={`Total ${name} rolled`}
+                value={text}
+                inputMode="numeric"
+                enterKeyHint="send"
+                autoComplete="off"
+                placeholder="Total"
+                error={flow.error !== null}
+                disabled={busy === "roll"}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  keep({ text: e.target.value });
+                  step({ t: "edit" });
+                  props.onEngage();
+                }}
+                onFocus={() => keep({ focused: true })}
+                onBlur={() => {
+                  if (drafts.has(key)) keep({ focused: false });
+                }}
+                style={{ flex: 1, width: 0 }}
+              />
+              <Button
+                type="submit"
+                variant={text.trim() !== "" ? "primary" : "secondary"}
+                size="sm"
+                busy={busy === "send"}
+                disabled={busy === null ? text.trim() === "" : busy !== "send"}
+              >
+                {answerLabel(busy === "send", connected, answered(target))}
+              </Button>
+            </form>
+          </div>
+          {/* After the block: the measure stops at the type row (5.7), so a plain fail never pushes Send out of reach. */}
+          {(request.test.kind === "save" && !failsFirst) || (waiting && bonus === null && noBlock) ? (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+              {request.test.kind === "save" && !failsFirst ? failButton(false) : null}
+              {waiting && bonus === null && noBlock ? (
+                <Button variant="quiet" size="sm" onClick={() => openStats(noBlock)} style={{ fontSize: theme.font.small }}>
+                  Add a stat block
+                </Button>
+              ) : null}
+            </div>
           ) : null}
           {answered(target) ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{chipLine(request, target)}</div> : null}
-          {error ? (
+          {flow.error ? (
             <div role="alert" style={{ fontSize: theme.font.small, color: theme.color.dangerText }}>
-              {error}
+              {flow.error}
             </div>
           ) : null}
         </>
       )}
+    </div>
+  );
+}
+
+/** The bonus field, as wide as "-20" in the 16 px field (Appendix A: 64 px). */
+const BONUS_FIELD_WIDTH = 64;
+/** The extra dice field (Appendix A: 88 px), as wide as "+1d4" with room to spare. */
+const EXTRA_FIELD_WIDTH = 88;
+
+/**
+ * A rolled answer in place of the creature's rows (5.4): "Rolled 17
+ * (1d20+5 with advantage: 12, 7 dropped). Pass." with a dropped die struck
+ * through, a natural 20 or 1, then "Final."
+ */
+function RolledResult(props: { target: RollTarget }) {
+  const { target } = props;
+  const dice = target.dice!;
+  const shown = rolledDice(dice);
+  const natural = naturalText(dice);
+  const verdict = verdictText(target);
+  return (
+    <div style={{ fontSize: theme.font.body14 }}>
+      Rolled <strong>{target.total ?? dice.total}</strong> ({shown.formula}
+      {shown.faces.length > 0 ? ": " : ""}
+      {shown.faces.map((f, i) => (
+        <Fragment key={i}>
+          {i > 0 ? ", " : ""}
+          {f.dropped ? (
+            <>
+              <s>{f.face}</s>
+              <span style={VISUALLY_HIDDEN}> dropped</span>
+            </>
+          ) : (
+            f.face
+          )}
+        </Fragment>
+      ))}
+      ).{natural ? ` ${natural}.` : ""}
+      {verdict ? ` ${verdict}.` : ""} Final.
     </div>
   );
 }

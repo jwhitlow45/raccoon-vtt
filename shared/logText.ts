@@ -87,7 +87,7 @@ export function rollText(data: RollEvent, who: string): string {
 const CHANGE_NAMES = { "heroic-inspiration": "Heroic Inspiration", "halfling-luck": "Halfling Luck" } as const;
 
 /** A rolled answer's dice inside its line: "1d20+5: 12", "1d20+3, your bonus: 9", "1d20+5 with advantage: 14, 7 dropped". */
-function answerDice(result: DiceResult, typedBonus: boolean): string {
+export function answerDice(result: DiceResult, typedBonus: boolean): string {
   const terms = rolledTerms(result);
   const parsed = parseFormula(result.formula);
   const formula = parsed.ok ? formatFormula(parsed.formula, result.mode) : result.formula;

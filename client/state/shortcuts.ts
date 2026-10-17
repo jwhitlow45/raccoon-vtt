@@ -482,6 +482,7 @@ export type Behavior = {
 
 const EVERYONE = ["dm", "player"] as const;
 const DM = ["dm"] as const;
+const PLAYER = ["player"] as const;
 
 /** Every row beside the keys, in the order the sheet lists them. */
 export const BEHAVIORS: readonly Behavior[] = [
@@ -692,6 +693,9 @@ export const BEHAVIORS: readonly Behavior[] = [
 
   // Request a roll's fields: features/rolls/RequestSheet.tsx, one form whose submit is Send (docs/design-v1-roll-request.md 8).
   { id: "rollAskEnter", input: "Enter", does: "Send the request", roles: DM, when: "in Request a roll's DC or note field", device: "keys", surface: "Roll requests" },
+  // The player's roll card: features/rolls/PlayerRolls.tsx. Send always took Enter in the Total field, and the sheet now lists it.
+  { id: "rollCardSend", input: "Enter", does: "Send the total you typed", roles: PLAYER, when: "in a roll card's Total field", device: "keys", surface: "Roll requests" },
+  { id: "rollCardRoll", input: "Enter", does: "Roll, with the bonus and extra dice you typed", roles: PLAYER, when: "in a roll card's Bonus or Extra dice field", device: "keys", surface: "Roll requests" },
 
   // The token's and characters' one-line fields: features/tokens/ui.tsx TextField and NumberField.
   { id: "fieldEnter", input: "Enter", does: "Save the field and leave it", roles: EVERYONE, when: "in a one-line field", device: "keys", surface: "Token and character fields" },

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { RollRequest, RoomState, Viewer } from "#shared/model.ts";
+import type { RollRequest, RollTarget, RoomState, Viewer } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
 import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { ABILITY_KEYS, SKILL_KEYS } from "#shared/model.ts";
 import { SKILLS } from "#shared/rules/skills.ts";
+import { NO_INPUTS } from "./card.ts";
 import { actor, chance, character, DM, env, int, P1, pick as pickOne, rng, room, token } from "#shared/testutil.ts";
 import { sheetOpen } from "../../state/types.ts";
 import {
@@ -60,6 +61,11 @@ import {
   removeChoice,
   samePick,
   testTitle as titleOf,
+  answerFlow,
+  answerOffers,
+  foldsAfterSend,
+  IDLE,
+  landingOf,
   dcChips,
   draftInput,
   fillDraft,
@@ -524,8 +530,11 @@ describe("the DM's sheet", () => {
   });
 
   test("the words a card reads", () => {
-    const grapple = { test: { kind: "check" as const, choices: [{ ability: "str" as const, skill: "athletics" as const }, { ability: "dex" as const, skill: "acrobatics" as const }] }, note: "to break free of the grapple" };
+    const grapple = { test: { kind: "check" as const, choices: [{ ability: "str" as const, skill: "athletics" as const }, { ability: "dex" as const, skill: "acrobatics" as const }] }, dcShown: true, note: "to break free of the grapple" };
     assert.equal(askLine(grapple), "The DM asks for a Strength (Athletics) or Dexterity (Acrobatics) check: to break free of the grapple.");
+    // The DC joins the question (docs/design-v1-roll-request.md 5.1), and a save against a spell says so.
+    assert.equal(askLine({ ...grapple, dc: 12 }), "The DM asks for a Strength (Athletics) or Dexterity (Acrobatics) check, DC 12: to break free of the grapple.");
+    assert.equal(askLine({ test: DEX_SAVE, dcShown: false, dcHidden: true, spell: true }), "The DM asks for a Dexterity saving throw against a spell, DC hidden.");
     assert.equal(testTitle({ kind: "save", choices: [{ ability: "str" }, { ability: "dex" }] }), "Strength or Dexterity saving throw");
     assert.equal(dcText({ dc: 15, dcShown: false }, "dm"), "DC 15, hidden from players");
     assert.equal(dcText({ dcShown: false, dcHidden: true }, "player"), "DC hidden");
@@ -911,15 +920,15 @@ describe("the DM's cards on a phone with no sheet open (docs/design-v1-visual.md
 describe("a total typed into a card and not sent (LPD-PLAYER-1)", () => {
   test("comes back when the card mounts again, as turning the phone does", () => {
     const draft = { text: "14", choice: 1 as const, base: answerKey({}) };
-    assert.deepEqual(startingAnswer({}, draft), { text: "14", choice: 1, focused: false });
-    assert.deepEqual(startingAnswer({}, undefined), { text: "", choice: 0, focused: false }, "with nothing typed the card starts empty");
+    assert.deepEqual(startingAnswer({}, draft), { text: "14", choice: 1, focused: false, inputs: NO_INPUTS });
+    assert.deepEqual(startingAnswer({}, undefined), { text: "", choice: 0, focused: false, inputs: NO_INPUTS }, "with nothing typed the card starts empty");
   });
 
   test("gives way to an answer sent since it was typed, from this player's other device", () => {
-    assert.deepEqual(startingAnswer({ total: 9, choice: 0 }, { text: "14", choice: 1, base: answerKey({}), focused: true }), { text: "9", choice: 0, focused: false });
+    assert.deepEqual(startingAnswer({ total: 9, choice: 0 }, { text: "14", choice: 1, base: answerKey({}), focused: true, inputs: NO_INPUTS }), { text: "9", choice: 0, focused: false, inputs: NO_INPUTS });
     const sent = answerKey({ total: 9, choice: 0 });
-    assert.deepEqual(startingAnswer({ total: 9, choice: 0 }, { text: "12", choice: 1, base: sent }), { text: "12", choice: 1, focused: false }, "a change typed over a sent answer stays");
-    assert.deepEqual(startingAnswer({ result: "fail", noRoll: true }, { text: "12", choice: 1, base: answerKey({}) }), { text: "", choice: 0, focused: false }, "a save failed without rolling elsewhere wins too");
+    assert.deepEqual(startingAnswer({ total: 9, choice: 0 }, { text: "12", choice: 1, base: sent }), { text: "12", choice: 1, focused: false, inputs: NO_INPUTS }, "a change typed over a sent answer stays");
+    assert.deepEqual(startingAnswer({ result: "fail", noRoll: true }, { text: "12", choice: 1, base: answerKey({}) }), { text: "", choice: 0, focused: false, inputs: NO_INPUTS }, "a save failed without rolling elsewhere wins too");
   });
 
   test("is forgotten once the answer changes, so a reopen after an answer from another device starts the card empty", () => {
@@ -941,12 +950,12 @@ describe("a total typed into a card and not sent (LPD-PLAYER-1)", () => {
     state = run(state, { t: "roll.reopen", rollId: "r1", target: { characterId: "ayla" } }, DM, 3);
     const reopened = view();
     forgetStaleDrafts(drafts, [reopened]);
-    assert.deepEqual(startingAnswer(reopened.targets[0]!, drafts.get(key)), { text: "", choice: 0, focused: false });
+    assert.deepEqual(startingAnswer(reopened.targets[0]!, drafts.get(key)), { text: "", choice: 0, focused: false, inputs: NO_INPUTS });
   });
 
   test("gives focus back to the Total field when the card mounts again, if the field had it", () => {
-    assert.equal(startingAnswer({}, { text: "14", choice: 0, base: answerKey({}), focused: true }).focused, true);
-    assert.equal(startingAnswer({}, { text: "", choice: 0, base: answerKey({}), focused: true }).focused, true, "a field focused with nothing typed yet too");
+    assert.equal(startingAnswer({}, { text: "14", choice: 0, base: answerKey({}), focused: true, inputs: NO_INPUTS }).focused, true);
+    assert.equal(startingAnswer({}, { text: "", choice: 0, base: answerKey({}), focused: true, inputs: NO_INPUTS }).focused, true, "a field focused with nothing typed yet too");
   });
 
   test("keeps the focus mark only while its request's card shows, so a card folded or put aside never takes focus when it comes back", () => {
@@ -973,5 +982,62 @@ describe("a total typed into a card and not sent (LPD-PLAYER-1)", () => {
   test("is kept per request and per creature", () => {
     assert.notEqual(draftKey("r1", { characterId: "ayla" }), draftKey("r1", { tokenId: "ayla" }));
     assert.notEqual(draftKey("r1", { characterId: "ayla" }), draftKey("r2", { characterId: "ayla" }));
+  });
+});
+
+describe("the card's one answer path (docs/design-v1-roll-request.md 5.2, 5.6)", () => {
+  const request = { test: DEX_SAVE, dc: 13, dcShown: true, resultShown: true, targets: [{ characterId: "ayla" }] };
+  const rolled = { characterId: "ayla", total: 17, result: "pass" as const, tag: "t1", dice: { formula: "1d20+5", faces: [12], total: 17 } };
+  const offers = (target: RollTarget, text = "", connected = true) => answerOffers({ holds: true, request, target, text, connected, bonusReady: true });
+
+  test("Roll only while the creature waits, the field is empty and the socket is open", () => {
+    assert.deepEqual(offers({ characterId: "ayla" }), { roll: true, send: false, fail: true, ask: false, withdraw: false });
+    assert.equal(offers({ characterId: "ayla" }, "9").roll, false, "Clear the total to roll instead");
+    assert.equal(offers({ characterId: "ayla" }, "", false).roll, false, "Rolling needs a connection");
+    assert.equal(offers({ characterId: "ayla", total: 9, result: "fail", tag: "t0" }).roll, false, "a typed answer takes the roll row away");
+    assert.equal(offers({ characterId: "ayla", retype: true }).roll, false, "an allowed retype types again and never rolls");
+    assert.equal(answerOffers({ holds: false, request, target: { characterId: "ayla" }, text: "", connected: true, bonusReady: true }).fail, false, "a request gone offers nothing");
+  });
+
+  test("a rolled answer is final: no Send, no Fail, and an ask instead", () => {
+    assert.equal(finalForPlayer(request, rolled), true);
+    assert.deepEqual(offers(rolled, "12"), { roll: false, send: false, fail: false, ask: true, withdraw: false });
+    assert.deepEqual(offers({ ...rolled, change: { id: "a1", on: "t1", reason: "lucky" } }), { roll: false, send: false, fail: false, ask: false, withdraw: true });
+    const seen = { test: DEX_SAVE, dcShown: true, resultShown: true };
+    assert.equal(chipLine(seen, rolled), "Dex save: rolled 17 (1d20+5: 12). Pass. Final.");
+    assert.equal(chipLine(seen, { ...rolled, result: "fail", dice: { ...rolled.dice, fails: "stunned" } }), "Dex save: rolled 17 (1d20+5: 12). Fail (Stunned). Final.");
+  });
+
+  test("one op at a time, ended only by its own answer, and a lost one settled by where it landed", () => {
+    const all = offers({ characterId: "ayla" });
+    let flow = answerFlow(IDLE, { t: "tap", op: "roll", tag: "a", offers: all });
+    assert.deepEqual(flow, { busy: { op: "roll", tag: "a" }, error: null });
+    assert.equal(answerFlow(flow, { t: "tap", op: "fail", tag: "b", offers: all }), flow, "a second tap while busy is not taken");
+    assert.equal(answerFlow(flow, { t: "answer", tag: "b", answer: "taken" }), flow, "another op's answer does not end it");
+    assert.deepEqual(answerFlow(flow, { t: "answer", tag: "a", answer: "refused", text: "You are going too fast. Wait a few seconds." }), { busy: null, error: "You are going too fast. Wait a few seconds." });
+    assert.deepEqual(answerFlow(flow, { t: "answer", tag: "a", answer: "unknown", landing: "other" }), { busy: null, error: "Another answer came first." });
+    assert.deepEqual(answerFlow(flow, { t: "answer", tag: "a", answer: "unknown", landing: "none" }), IDLE, "never landed: Roll comes back, nothing is sent again");
+    flow = answerFlow(IDLE, { t: "tap", op: "send", tag: "c", offers: { ...all, send: false } });
+    assert.equal(flow, IDLE, "an op not offered is not taken");
+    assert.equal(landingOf({ characterId: "ayla", total: 9, tag: "c" }, "c"), "mine");
+    assert.equal(landingOf({ characterId: "ayla", total: 9, tag: "x" }, "c"), "other");
+    assert.equal(landingOf({ characterId: "ayla" }, "c"), "none");
+  });
+
+  test("a typed answer folds the card once all have answered, unless it shows a roll that landed while it was up", () => {
+    const two = { targets: [{ characterId: "ayla", total: 9 }, { characterId: "bram" }] };
+    assert.equal(foldsAfterSend(two, "c:bram", new Set()), true);
+    assert.equal(foldsAfterSend(two, "c:bram", new Set(["c:ayla"])), false, "waits for Done");
+    assert.equal(foldsAfterSend({ targets: [{ characterId: "ayla" }, { characterId: "bram" }] }, "c:bram", new Set()), false, "Ayla still waits");
+  });
+
+  test("a draft keeps the player's own mode, extra and bonus, and an answer or an ask from another device forgets it", () => {
+    const target: RollTarget = { characterId: "ayla" };
+    const draft: AnswerDraft = { text: "", choice: 1, base: answerKey(target), inputs: { pressed: "adv", extra: "+1d4", bonus: "5" } };
+    assert.deepEqual(startingAnswer(target, draft).inputs, { pressed: "adv", extra: "+1d4", bonus: "5" });
+    assert.notEqual(answerKey({ ...target, change: { id: "a", on: "t", reason: "lucky" } }), draft.base, "an ask changes the key");
+    assert.notEqual(answerKey({ ...target, total: 12, tag: "t", dice: { formula: "1d20", faces: [12], total: 12 } }), draft.base);
+    assert.deepEqual(startingAnswer({ ...target, total: 12, tag: "t", dice: { formula: "1d20", faces: [12], total: 12 } }, draft).text, "", "a rolled total is never typed again");
+    assert.equal(startingAnswer(target, undefined, 1).choice, 1, "two choices start at the higher bonus");
   });
 });

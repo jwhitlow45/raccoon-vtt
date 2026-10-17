@@ -373,7 +373,8 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
 
     const card = player.getByRole("dialog", { name: "The DM asks for a roll" });
     await card.waitFor();
-    await card.getByText("The DM asks for a Strength or Dexterity saving throw.").waitFor();
+    // The DC joins the question's line (docs/design-v1-roll-request.md 5.1).
+    await card.getByText("The DM asks for a Strength or Dexterity saving throw, DC 12.").waitFor();
     await card.getByRole("radiogroup", { name: "Which one you rolled" }).getByRole("radio", { name: "Dexterity" }).tap();
     await card.getByLabel("Total Thorn rolled").fill("15");
     await shots.take(player, "tools-roll-card");
