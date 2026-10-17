@@ -692,14 +692,16 @@ export type PathStop = {
    */
   joinedUnseen?: true;
   /**
-   * The footprint in cells the creature had when the stop was made, where
-   * that differs from its size now: a resize on its turn writes its old
-   * size here on every earlier stop that holds none
-   * (docs/design-v1-token-window.md 8.7). A stop without it was made at the
-   * token's size now. So each leg is measured and drawn at the sizes it was
-   * made at, and a resize never changes the feet moved before it.
+   * The footprint in cells the creature had when the stop was made, and
+   * whether it was squeezed, where that differs from its footprint now: a
+   * resize on its turn, or a move into or out of a squeeze, writes the old
+   * one here on every earlier stop that holds none
+   * (docs/design-v1-token-window.md 8.7). A stop without it was made with
+   * the token's footprint now. So each leg is measured and drawn as it was
+   * made, and no later change of the footprint changes the feet moved
+   * before it.
    */
-  footprint?: { w: number; h: number };
+  footprint?: { w: number; h: number; squeeze?: true };
 };
 
 export type LifeState = "alive" | "dying" | "stable" | "dead";

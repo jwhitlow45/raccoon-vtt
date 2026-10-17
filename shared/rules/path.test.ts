@@ -11,7 +11,7 @@ import { oneSize, stopsForNonOwners, stopsForOwners, withStop } from "./path.ts"
  * has another corner to drop.
  */
 const MEDIUM = { w: 1, h: 1 };
-const at = (x: number, footprint?: { w: number; h: number }, more: Partial<PathStop> = {}): PathStop => ({ x, y: 0, elevation: 0, seen: true, ...(footprint ? { footprint } : {}), ...more });
+const at = (x: number, footprint?: PathStop["footprint"], more: Partial<PathStop> = {}): PathStop => ({ x, y: 0, elevation: 0, seen: true, ...(footprint ? { footprint } : {}), ...more });
 
 describe("each stop's size in what viewers get", () => {
   const stops = [at(0, MEDIUM), at(3, MEDIUM, { seen: undefined }), at(4, undefined, { uncounted: true }), at(6)];
@@ -34,6 +34,16 @@ describe("each stop's size in what viewers get", () => {
     assert.equal(oneSize(at(0, MEDIUM), at(1, { w: 1, h: 1 })), true);
     assert.equal(oneSize(at(0, MEDIUM), at(1)), false);
     assert.equal(oneSize(at(0, MEDIUM), at(1, { w: 2, h: 2 })), false);
+    // A stop without one was made at the size now, and a squeeze keeps the size.
+    assert.equal(oneSize(at(0, MEDIUM), at(1), { w: 1, h: 1 }), true);
+    assert.equal(oneSize(at(0, MEDIUM), at(1), { w: 2, h: 2 }), false);
+    assert.equal(oneSize(at(0, { w: 2, h: 2, squeeze: true }), at(1), { w: 2, h: 2 }), true);
+  });
+
+  test("a squeezed stop's footprint reaches owners and others with its squeeze", () => {
+    const squeezed = [at(0, { w: 2, h: 2, squeeze: true }), at(3)];
+    assert.deepEqual(stopsForOwners(squeezed)[0]!.footprint, { w: 2, h: 2, squeeze: true });
+    assert.deepEqual(stopsForNonOwners(squeezed)[0]!.footprint, { w: 2, h: 2, squeeze: true });
   });
 });
 

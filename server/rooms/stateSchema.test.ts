@@ -222,6 +222,8 @@ describe("roomStateSchema", () => {
     assert.equal(withPath([{ ...stop, footprint: { w: 0, h: 1 } }]).ok, false);
     assert.equal(withPath([{ ...stop, footprint: { w: 1 } }]).ok, false);
     assert.equal(withPath([{ ...stop, footprint: { w: 1, h: 1, d: 1 } }]).ok, false);
+    assert.equal(withPath([{ ...stop, footprint: { w: 2, h: 2, squeeze: true } }]).ok, true, "squeezed when it was made");
+    assert.equal(withPath([{ ...stop, footprint: { w: 2, h: 2, squeeze: false } }]).ok, false);
     assert.equal(parseRoomState(JSON.parse(JSON.stringify(room({ tokens: { t1: token("t1") } })))).ok, true);
   });
 

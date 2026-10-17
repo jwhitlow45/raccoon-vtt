@@ -585,7 +585,7 @@ function CountLegButton(props: { token: ViewToken }) {
   const last = path && path.stops.length >= 2 ? path.stops[path.stops.length - 1] : undefined;
   const before = path && path.stops.length >= 2 ? path.stops[path.stops.length - 2] : undefined;
   // A resize's leg is no move, so it has nothing to stop counting (docs/design-v1-token-window.md 8.7).
-  if (!last || !before || !oneSize(before, last)) return null;
+  if (!last || !before || !oneSize(before, last, footprint(props.token))) return null;
   const off = last.uncounted === true;
   const press = () => {
     // The bar's undo waits for the server, and a second press meanwhile would act on a mark about to change.

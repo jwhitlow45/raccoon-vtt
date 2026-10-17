@@ -33,13 +33,17 @@ export function pathThisTurn(encounter: Pick<Encounter, "activeEntryId" | "turnS
 }
 
 /**
- * Whether two stops were made at one size: neither holds a footprint, or
- * both hold the same one (docs/design-v1-token-window.md 8.7). A leg whose
- * ends differ is a resize's, or legs joined across one.
+ * Whether two stops were made at one size (docs/design-v1-token-window.md
+ * 8.7): a stop without a footprint was made at the size now (`now`). A leg
+ * whose ends differ is a resize's, or legs joined across one. A squeeze
+ * keeps the size, so a move into or out of one is a leg at one size.
+ * Without `now`, a stop with a footprint and one without differ.
  */
-export function oneSize(a: Pick<PathStop, "footprint">, b: Pick<PathStop, "footprint">): boolean {
-  if (!a.footprint || !b.footprint) return a.footprint === b.footprint;
-  return a.footprint.w === b.footprint.w && a.footprint.h === b.footprint.h;
+export function oneSize(a: Pick<PathStop, "footprint">, b: Pick<PathStop, "footprint">, now?: { w: number; h: number }): boolean {
+  const sa = a.footprint ?? now;
+  const sb = b.footprint ?? now;
+  if (!sa || !sb) return sa === sb;
+  return sa.w === sb.w && sa.h === sb.h;
 }
 
 /**
@@ -49,7 +53,8 @@ export function oneSize(a: Pick<PathStop, "footprint">, b: Pick<PathStop, "footp
  * stop and the stop before it are never such a corner, so a joined leg
  * never spans a resize while another corner remains. Where none does, as
  * in a turn of a move and a resize after another until the path is full,
- * the oldest corner goes all the same.
+ * the oldest corner goes all the same. `now` is the size the creature has
+ * now, which a stop without a footprint was made at (oneSize).
  *
  * The joined leg does not count only when neither leg counted, so the
  * distance never drops a leg that did. And the corner players who do not
@@ -58,11 +63,11 @@ export function oneSize(a: Pick<PathStop, "footprint">, b: Pick<PathStop, "footp
  * the mark would now tell them how the creature moved out of their sight.
  * The joined stop keeps the later stop's other fields, its size with them.
  */
-export function withStop(path: TokenPath, stop: PathStop): TokenPath {
+export function withStop(path: TokenPath, stop: PathStop, now?: { w: number; h: number }): TokenPath {
   const stops = [...path.stops, stop];
   while (stops.length > MAX_PATH_STOPS) {
     let i = 1;
-    while (i < stops.length - 1 && !(oneSize(stops[i - 1]!, stops[i]!) && oneSize(stops[i]!, stops[i + 1]!))) i++;
+    while (i < stops.length - 1 && !(oneSize(stops[i - 1]!, stops[i]!, now) && oneSize(stops[i]!, stops[i + 1]!, now))) i++;
     if (i === stops.length - 1) i = 1;
     const corner = stops[i]!;
     const { uncounted: _uncounted, ...next } = stops[i + 1]!;
@@ -105,6 +110,6 @@ export function stopsForOwners(stops: readonly PathStop[]): PathStop[] {
 function plainStop(stop: PathStop, uncounted: boolean): PathStop {
   const out: PathStop = { x: stop.x, y: stop.y, elevation: stop.elevation };
   if (uncounted) out.uncounted = true;
-  if (stop.footprint) out.footprint = { w: stop.footprint.w, h: stop.footprint.h };
+  if (stop.footprint) out.footprint = { w: stop.footprint.w, h: stop.footprint.h, ...(stop.footprint.squeeze ? { squeeze: true as const } : {}) };
   return out;
 }

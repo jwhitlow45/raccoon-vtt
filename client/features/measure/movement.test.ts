@@ -210,6 +210,47 @@ describe("a resize on the turn (docs/design-v1-token-window.md 8.7)", () => {
     }
   });
 
+  test("a squeezed Large shrunk to Medium in its corridor keeps every earlier leg's feet and look, for everyone, and on replay", () => {
+    const squeezedIn: Op[] = [{ t: "token.move", tokenId: "thorn", x: 13.5, y: 4.5, squeeze: true }];
+    const before = trails(played(squeezedIn, { size: "large", x: 6, y: 4 }));
+    const shrunk = played([...squeezedIn, { t: "token.update", tokenId: "thorn", patch: { size: "medium", x: 14, y: 5 } }], { size: "large", x: 6, y: 4 });
+    const after = trails(shrunk);
+    for (const [i, trail] of after.entries()) {
+      const who = ["the DM", "his owner", "another player"][i];
+      assert.equal(before[i]!.movedFt, 37.5, `${who}: the squeeze's leg`);
+      assert.equal(trail.movedFt, 37.5, `${who}: the shrink changed the feet moved before it`);
+      assert.deepEqual(trail.rects.slice(0, 2), before[i]!.rects.slice(0, 2), `${who}: the shrink redrew the earlier stops`);
+      assert.deepEqual(trail.legs.map((l) => l.counted), [true, false], `${who}: the shrink's leg does not count`);
+    }
+    // The start was made full size, the corridor's stop squeezed, and the shrink's stop at the size now.
+    assert.deepEqual(shrunk.tokens.thorn!.path!.stops.map((s) => s.footprint), [{ w: 2, h: 2 }, { w: 2, h: 2, squeeze: true }, undefined]);
+    // Replayed, the same ops make the same path. An op stored before version 6 replays as it did then, with no footprint.
+    assert.deepEqual(played([...squeezedIn, { t: "token.update", tokenId: "thorn", patch: { size: "medium", x: 14, y: 5 } }], { size: "large", x: 6, y: 4 }).tokens.thorn!.path, shrunk.tokens.thorn!.path);
+    const old = room({ tokens: { thorn: token("thorn", { kind: "npc", ownerIds: ["p1"], size: "large", x: 6, y: 4 }), gob: token("gob", { x: 20, y: 1 }) } });
+    let replayed = old;
+    for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "n1", tokenId: "thorn", value: 20 }, { id: "n2", tokenId: "gob", value: 10 }] }, { t: "encounter.next" }, ...squeezedIn, { t: "token.update", tokenId: "thorn", patch: { size: "medium", x: 14, y: 5 } }] as Op[]).entries()) {
+      const r = applyOp(replayed, op, DM, { seq: i + 1, at: "2026-10-12T20:00:00.000Z", opVersion: 5 });
+      assert.ok(r.ok);
+      replayed = r.state;
+    }
+    assert.equal(replayed.tokens.thorn!.path!.stops.some((s) => s.footprint !== undefined), false, "a version 5 op stamps nothing");
+  });
+
+  test("a move into a squeeze and back out keeps the first leg's feet, each stop read with the footprint it had", () => {
+    const state = played(
+      [
+        { t: "token.move", tokenId: "thorn", x: 13.5, y: 4.5, squeeze: true },
+        { t: "token.move", tokenId: "thorn", x: 16, y: 4 },
+      ],
+      { size: "large", x: 6, y: 4 },
+    );
+    const stops = state.tokens.thorn!.path!.stops;
+    assert.deepEqual(stops.map((s) => s.footprint), [{ w: 2, h: 2 }, { w: 2, h: 2, squeeze: true }, undefined], "each earlier stop holds the footprint it was made with");
+    const thorn = state.tokens.thorn as MovingToken;
+    assert.equal(movedFeet(thorn, stops[0]!, stops[1]!, five), 37.5, "into the corridor, between the middles");
+    for (const trail of trails(state)) assert.equal(trail.legs.length, 2);
+  });
+
   test("a Tiny familiar's half-square move, then its growth to Medium, still reads 2.5 ft", () => {
     const state = played(
       [
