@@ -581,7 +581,12 @@ Built in v1 wave 7 (docs/design-v1-dice.md), at the project owner's request of 2
 - Full stat blocks.
   - Built in v1 wave 5, read as the full 2024 stat block on the token. That reading is the design's recommendation, which the project owner approved on 2026-10-14. A monster or NPC token's panel shows the DM its whole block, from the SRD or from the room's own monster it was placed from, and a tracker row's options open it. The token's own HP, AC and conditions stay its own.
   - Under the block: Edit for the room's own monster, "Copy to this room's monsters and edit" for an SRD one, and Detach. A token with no block offers "Attach a stat block", which picks one from the monster browser and changes none of the token's numbers. A block deleted from the room says so.
-  - A player who plays an SRD creature, such as a druid's Wild Shape, sees its block too. A block from the room's own monsters never reaches a player, since it may come from a book the DM owns. Player characters keep their D&D Beyond link.
+  - A player who plays an SRD creature, such as a druid's Wild Shape placed as a token of its own, the 2014 way, sees its block too. A block from the room's own monsters never reaches a player, since it may come from a book the DM owns. Player characters keep their D&D Beyond link.
+- Stat blocks for player characters (the project owner, 2026-10-17: "I believe this will require adding support for pc stat blocks"), built in v1 wave 7 (docs/design-v1-pc-stats.md). Typed in with helpers: ability scores, level and proficiencies give the modifiers, saves, skills and proficiency bonus, and attacks and spells are named rolls. A typed total keeps its difference from the rules, so a level-up keeps an item's bonus.
+  - The DM and the character's players read and edit it, as its light stat card. Other players and the table display never receive it. Rolls made from it reach the log by the dice's own rules.
+  - Initiative and Passive Perception follow the block once there is one.
+  - Filled from pasted text by the "Paste a stat block" reader, or imported from D&D Beyond (the project owner's answer the same day): a public character's share link, fetched by the server through the strict egress port, or its JSON pasted and read in the browser. Best effort, since it is a third party's format that can change. It reads numbers and names, never D&D Beyond's text, and nothing is saved before the player looks over what it read.
+  - Wild Shape the 2024 way, on the character's own token: an SRD beast's Strength, Dexterity and Constitution, the druid's Intelligence, Wisdom and Charisma, and for each save and skill the higher of the two. The druid keeps its HP. Polymorph or another shape takes all of the creature's numbers. The separate SRD token above stays for the 2014 way.
 
 ## 16. Chat, handouts and notes
 
@@ -664,7 +669,7 @@ Built in v1 wave 7 (docs/design-v1-dice.md), at the project owner's request of 2
 
 - **Voice and video chat.** The app is built for a group in the same room, and a remote player can join by Discord or a call.
 - **Full character sheet builder.** D&D Beyond does this well. Tokens link to it instead.
-- **D&D Beyond import.** There is no public API, and scraping breaks its terms.
+- **D&D Beyond import.** Moved into the features on 2026-10-17 (section 15, stat blocks for player characters), best effort. There is no public API, so the server fetches only on a member's tap, only a character its owner made public, keeps no copy and reads no text, and an operator can turn the link import off.
 - **Macros, scripting and a plugin system.** Plugins are Foundry's biggest pain point. Features are built in instead.
 - **Hex and isometric grids.** Every rule in the app, from movement to areas of effect, is built on squares.
 - **Native apps.** The installable web app covers phones and tablets.

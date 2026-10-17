@@ -291,6 +291,7 @@ type Actor = {
   initBonus, initScore?: number, passivePerception, senses: string
   creatureType?, cr?, xp?, srdId?: string, sheetUrl?: string   // sheetUrl: https only, at most 500 chars
   monsterId?: MonsterId                   // v1 wave 5, DM only, never sent to owners: the room monster it was placed from (section 14.15)
+  wildShape?: true                        // v1 wave 7, a character's own actor only, with srdId: the SRD creature is its Wild Shape (docs/design-v1-pc-stats.md 3.6)
   effects: Effect[]
   deathSaves: { ok: 0..3, fail: 0..3 }
   legendary?: { actionsMax, actionsUsed, resistMax, resistUsed }
@@ -298,8 +299,20 @@ type Actor = {
 }
 
 type Character = { id, ownerIds: MemberId[], actor: Actor, defaultImage?, size, name,
-  level?: number }                        // 1 to 20 (v1), which the encounter builder's XP budget reads
+  level?: number,                         // 1 to 20 (v1), which the encounter builder's XP budget reads
+  stats?: PcStats }                       // v1 wave 7: the character's stat block (docs/design-v1-pc-stats.md 3.2)
 
+type PcStats = {                          // at most 12 KiB serialized (LIMITS.pcStatsBytes)
+  abilities: Record<AbilityKey, number>, saves: AbilityKey[], skills: { [skill]?: 'prof' | 'expert' },
+  jack?: true, alert?: true, spellAbility?: AbilityKey, critOn?: 19 | 18, evasion?: true,
+  adjust: { saves?, skills?, allSaves?, allChecks?, init?, passive?, spellDc?, spellAttack? },   // -20 to 20 each
+  defenses: { [damageType]?: 'resistant' | 'immune' | 'vulnerable' },
+  rolls: PcRoll[] }                       // at most 40: weapons, spells and other rolls with their dice
+```
+
+A character with a block has its actor's `initBonus` and `passivePerception` written from the block after every `character.create` and `character.update` (`shared/rules/pcStats.ts pcDerived`), clamped to the actor's bounds, and an actor patch that names either on such a character is refused. Every number is its derivation from the scores, the level's proficiency bonus and the proficiencies, plus a stored adjustment, so a level-up moves every number and keeps an item's bonus.
+
+```ts
 type Effect = {
   id, key: ConditionKey | StatusKey | 'custom'
   label?: string, glyph?: string, color?: string
@@ -732,7 +745,7 @@ Every op is a bounded zod schema in `shared/protocol.ts`. A permission rule in `
 | HP | `actor.hp` (`{damage}`, `{heal}`, `{set}`, `{temp}`), `actor.deathSave`, `actor.life` (DM revive or kill), `actor.rest` (v1: `short` with the HP the Hit Point Dice gave, or `long`) | DM. Owners, except `actor.life`. Any player on visible tokens when `playersApplyDamage` is on, `damage` and `heal` only. Healing the dead and Revive's 1 HP: docs/design-v1-combat-flow.md 3.4 and 3.5. |
 | Area damage (v1) | `actor.damageMany` (up to 100 `{target, amount}`, each through `actor.hp`'s damage, one undo step, section 9.3) | DM |
 | Effects | `actor.effect.add`, `actor.effect.update`, `actor.effect.remove`, and since v1 wave 5 `actor.effects { add?, remove? }`, up to 100 of each, each item checked as its single op would be, applied whole or not at all | DM, owners. Only the DM sets or clears `hiddenFromPlayers`, and an owner naming a hidden effect gets `gone`. |
-| Characters | `character.create`, `character.update`, `character.delete` | DM. Owners may update only `name`, `defaultImage`, `level`, the actor's `hp`, `speeds`, `ac`, `initBonus`, `passivePerception`, `senses`, `notes` and `sheetUrl`. When `playersCreateCharacters` is on, a player may `character.create` one owned by that player alone, unhurt (HP full and above 0, no temporary HP, alive, no death saves), with no effects or DM notes and a portrait they may use, up to `LIMITS.charactersPerPlayer` (3) owned characters. The DM keeps every power over these. A player may `character.delete` a character whose `ownerIds` is that player alone, whoever made it and whatever `playersCreateCharacters` says (`playsAlone`, decided 2026-10-16). It removes what the DM's removes: every token of the character and its companions on every scene, and their rows. One the player shares is refused with `forbidden` ("someone else plays that character too. Ask the DM to delete it"), and one they do not play with "that is not yours". It goes on no undo stack (section 7.7), so it cannot be undone, and it writes a DM-only `characterDeleted` log line (section 7.3). |
+| Characters | `character.create`, `character.update`, `character.delete` | DM. Owners may update only `name`, `defaultImage`, `level`, `stats` (v1 wave 7, the stat block, each part replaced whole and `null` removing it), the actor's `hp`, `speeds`, `ac`, `initBonus`, `passivePerception`, `senses`, `notes` and `sheetUrl`, and on the character's own actor `srdId` and `wildShape`, a shape (docs/design-v1-pc-stats.md 3.6 and 4.1). With a stat block, `initBonus` and `passivePerception` follow it and a patch naming either is refused, the DM's too. A player's op that writes a block, a create carrying one or an update naming `stats`, spends the companion blocks' per-member budget. When `playersCreateCharacters` is on, a player may `character.create` one owned by that player alone, unhurt (HP full and above 0, no temporary HP, alive, no death saves), with no effects or DM notes and a portrait they may use, up to `LIMITS.charactersPerPlayer` (3) owned characters. The DM keeps every power over these. A player may `character.delete` a character whose `ownerIds` is that player alone, whoever made it and whatever `playersCreateCharacters` says (`playsAlone`, decided 2026-10-16). It removes what the DM's removes: every token of the character and its companions on every scene, and their rows. One the player shares is refused with `forbidden` ("someone else plays that character too. Ask the DM to delete it"), and one they do not play with "that is not yours". It goes on no undo stack (section 7.7), so it cannot be undone, and it writes a DM-only `characterDeleted` log line (section 7.3). |
 | Areas | `template.create`, `template.update`, `template.delete` | DM. Players create their own and edit or delete only their own. |
 | Drawings | `drawing.create`, `drawing.delete`, `drawing.clear` (own or all), kept rulers included | DM. Authors on their own. Since v1 wave 5 a player's `drawing.create` of any kind but `ruler` needs `playersDraw` to allow them, else `forbidden`, "The DM has not let you draw." Erasing and clearing their own stay allowed. |
 | Fog | `fog.draft` (add or remove draft ops), `fog.publish`, `fog.discard`, `fog.live` (apply directly), `fog.reset` (all hidden or all revealed), `scene.update` for `fogEnabled` | DM |
@@ -1200,7 +1213,7 @@ With these limits, a projected scene snapshot is at most about 2.5 MB uncompress
 
 The app container has no route to the internet. It reaches out only through the `egress` squid container, which listens on two ports:
 
-- `3128` **strict:** allows `serpapi.com` (the API and its thumbnails), since v1 wave 5 `api.openverse.org` (the second image search and its access token, section 11.3), and, when configured, `challenges.cloudflare.com` for Turnstile verification. Nothing else.
+- `3128` **strict:** allows `serpapi.com` (the API and its thumbnails), since v1 wave 5 `api.openverse.org` (the second image search and its access token, section 11.3), since v1 wave 7 `character-service.dndbeyond.com` (a public D&D Beyond character a member imports, docs/design-v1-pc-stats.md 6.3, which an operator turns off by removing the host), and, when configured, `challenges.cloudflare.com` for Turnstile verification. Nothing else.
 - `3129` **public images:** allows any host on port 443, for URL imports and the import's fallback to a Google search thumbnail. It denies every private, loopback, link-local, CGNAT, multicast and reserved range, and denies `CONNECT` to ports other than 443.
 
 The app calls each port with an explicit `undici` `ProxyAgent`, never through environment proxy variables. So the choice of port is visible at each call site, and no fetch can silently go direct. TLS verification is never disabled.
@@ -1256,6 +1269,7 @@ Every non-GET route below applies the CSRF rule in 10.7. "Grant" means a valid, 
 | `GET /api/rooms/:id/log/sessions` | any grant, limited | v1 wave 5: the caller's play sessions in their projected log (14.16) |
 | `GET /api/rooms/:id/log/export?from=&to=&tz=` | any grant, limited | v1 wave 5: one session or the whole projected log as Markdown (14.16) |
 | `POST /api/rooms/:id/xcard` | any grant, limited | v1 wave 5: tap the X-card, unlogged and touching no session row (14.16) |
+| `POST /api/rooms/:id/ddb-import { link }` | any grant, limited | v1 wave 7: a public D&D Beyond character read into a stat block's fill. The server builds the one address it fetches from the link's digits, on the strict egress port, 10 s and 5 MiB, with hourly budgets per session, address and server and two slots, one a room. It answers `{ fill }` or `private`, `not_found`, `fetch_failed`, `unreadable`, `busy` or a `quota_*` code, and keeps no copy (docs/design-v1-pc-stats.md 6.3) |
 | `POST /api/rooms/:id/display/code` | DM grant | v1 wave 5: mint a table display code (10.2) |
 | `POST /api/display/redeem` | anyone with a code, limited | v1 wave 5: pair this device as a room's table display (10.2) |
 | `GET /api/rooms/:id/display/me`, `DELETE /api/display/session` | a display session | v1 wave 5: the display's room, and Leave (10.2) |
@@ -2121,6 +2135,7 @@ The project owner answered the open product questions after the design review:
 21. **Squeezing** (v1 wave 4, question 12, 2026-10-14): a creature may pass an opening sized for one size smaller, as the SRD's narrow opening allows, and a Large creature may stop squeezed in a 5 ft corridor, drawn full size over the walls while every rule counts it at its squeezed size. Nobody passes a wall, and the app does not charge the extra movement. After the build the owner tightened where a squeeze holds: only in a real narrow space, never beside one wall in the open (section 9.8).
 22. **Undoing fog keeps what was explored** (v1 wave 4, 2026-10-14): undoing an older DM fog edit takes back only the DM's edit, and anything the party explored since stays explored (section 13.6).
 23. **Hold means Ready** (2026-10-14): the "Hold and Ready markers" of features section 10 are one thing, the Ready marker wave 2 built (section 6). Nothing changed for it.
+24. **Stat blocks for player characters** (v1 wave 7, 2026-10-17, docs/design-v1-pc-stats.md): asked for dice "for saves, attack rolls, ability checks, and any other rolls", the project owner added "I believe this will require adding support for pc stat blocks", typed in with helpers and imported from D&D Beyond, a share link or its JSON, through the server's outbound proxy, best effort. A character's block is seen by the DM and that character's players only, as its light card, and rolls made from it reach the log by the dice's rules. A request card always offers a roll, "Roll d20" with a typed bonus where there is no block, and the stat block view stays text: every roll is made in the Dice panel.
 
 The project owner decided the addendum's other wave 3 questions on 2026-10-14, after every open question was listed with its recommendation: "All defaults good with me". So each keeps its recommendation: the DM may stamp images from the room's library (question 7), portals that do not block light import as windows unless the DM picks open doors (question 8), and a duplicate copies creatures but not player characters, fog or drawings unless asked (question 9).
 

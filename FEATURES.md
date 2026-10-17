@@ -296,6 +296,11 @@ The DM asks players for a saving throw or an ability check, and each player type
 ## Characters and monsters
 
 - Every token has a light stat card: HP, AC, speeds (walk, fly, swim, climb, burrow), initiative bonus, passive Perception, senses, size, creature type and notes. It is not a full character sheet.
+- A player character can have a stat block: level, ability scores, saving throw and skill proficiencies with expertise, Jack of All Trades, Alert, a spellcasting ability, resistances, immunities and vulnerabilities, a critical range for Improved Critical, Evasion, and its weapons, spells and other rolls, with riders such as Sneak Attack or Hunter's Mark on an attack. Modifiers, saves, skills, initiative, Passive Perception, spell save DC and spell attack follow the scores and the level. Type a total to keep a difference, such as a Cloak of Protection's.
+- The DM and the character's players read and edit it. Other players and the table display never see it.
+- Fill it from pasted text, read as a stat block, or from D&D Beyond with a public character's share link or its JSON. It reads numbers, proficiencies, weapons and spells, never their text, and lists what to check before anything is saved. Importing again replaces what it read and keeps the rolls you added. It changes the maximum HP but never brings a character back or puts one down, and never changes the size. It is best effort, since D&D Beyond can change its format.
+- A character with a stat block shows it in its token's panel under the image and on its card, its saves in the action bar, and "Stat block" in its tracker row's options. Its initiative and Passive Perception come from the stat block.
+- Take a shape on a character's own token: an SRD creature as Wild Shape, where the druid keeps Intelligence, Wisdom, Charisma and proficiencies and each save and skill takes the higher of the two, or as Polymorph, with all of the creature's numbers. HP stays the character's. End the shape to go back.
 - The DM sees every card. A player sees and edits their own character's card. Other players see only the name, conditions and whatever HP the DM allows.
 - Player characters belong to the room, so their HP and conditions follow their tokens to every scene. Monster tokens are independent copies.
 - "Players see the party's HP" shows every player the exact HP of the other player characters. Off, they see only Healthy, Bloodied or Dying.
@@ -563,6 +568,7 @@ For whoever runs RaccoonVTT. [README.md](README.md) has the setup steps and ever
 
 - It runs with Docker Compose behind any HTTPS reverse proxy or tunnel, such as Caddy, nginx or Cloudflare Tunnel, with no open ports. An outbound proxy is its only way to the internet, for image search and imports from a link.
 - Google image search needs a SerpApi key. Openverse needs none. The Turnstile human check is optional.
+- The strict egress port also allows `character-service.dndbeyond.com`, for the D&D Beyond import. Removing it from `docker/squid.conf` turns the link import off, and pasted JSON still works.
 - **Nightly backups**: every night (at 04:00 by default) a backup copies the database and the images it needs, then checks the copy. It keeps the newest 7 good backups and one from each of the last 4 weeks. A run that cannot finish deletes nothing, so the last good backup always remains, and every run leaves 2 GiB free on the disk. One command runs a backup now, and another restores one. The backups live on the same disk as everything else, so copy them off the server now and then.
 - **Admin page** at `/admin`, off until the server owner sets an admin password:
   - Storage: the image volume, the database, the images on disk, the images waiting for cleanup, and the last backup and the last good one. It warns when the last backup failed or no good one has run for 36 hours.
