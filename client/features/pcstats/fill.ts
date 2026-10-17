@@ -41,9 +41,11 @@ export function alsoLines(fill: PcFill, character: Pick<Character, "name" | "lev
     lines.push({ key: "level", text: `Level ${fill.level}, now ${character.level ?? "not set"}`, on: true });
   }
   const a = fill.actor;
-  if (a.ac !== undefined && a.ac !== actor.ac) lines.push({ key: "ac", text: `AC ${a.ac}, now ${actor.ac}`, on: true });
+  // In a shape the AC and speeds are the creature's, and End the shape puts the character's from before it back, so a fill leaves both (W7B-P-9).
+  const shaped = actor.srdId !== undefined;
+  if (!shaped && a.ac !== undefined && a.ac !== actor.ac) lines.push({ key: "ac", text: `AC ${a.ac}, now ${actor.ac}`, on: true });
   if (a.hpMax !== undefined && a.hpMax !== actor.hp.max) lines.push({ key: "hpMax", text: `Max HP ${a.hpMax}, now ${actor.hp.max}`, on: true });
-  if (a.speeds !== undefined && !sameSpeeds(a.speeds, actor.speeds)) lines.push({ key: "speeds", text: `Speed ${speedText(a.speeds)}, now ${speedText(actor.speeds)}`, on: true });
+  if (!shaped && a.speeds !== undefined && !sameSpeeds(a.speeds, actor.speeds)) lines.push({ key: "speeds", text: `Speed ${speedText(a.speeds)}, now ${speedText(actor.speeds)}`, on: true });
   if (a.senses !== undefined && sensesWords(a.senses) !== sensesWords(actor.senses)) {
     lines.push({ key: "senses", text: `Senses ${sensesWords(a.senses) || "none"}, now ${sensesWords(actor.senses) || "none"}`, on: true });
   }

@@ -1698,7 +1698,13 @@ export type HandoutDocInput = z.infer<typeof handoutDocInput>;
 export const actorTargetSchema = actorTarget;
 export const fogOpSchema = fogOp;
 export const effectInputSchema = effectInput;
-export const actorSchemaForImport = actorSchema;
+/**
+ * A file's actor also holds `unshaped`, which only the reducer writes, so no
+ * op's actor carries it (W7B-P-9).
+ */
+export const actorSchemaForImport = actorSchema.extend({
+  unshaped: z.strictObject({ ac: z.number().int().min(0).max(100), speeds, temp: hpValue.optional() }).optional(),
+});
 /** The stat block's fields, so the stored-state schema checks imported monsters by the same bounds. */
 export const statBlockFieldsForImport = statBlockFields;
 /** A custom monster as a create op carries it, for the editor to check a draft before it saves. */

@@ -1,14 +1,28 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { actor } from "#shared/testutil.ts";
-import { END_SHAPE, shapeNote, shapePatch } from "./shape.ts";
+import { END_SHAPE, shapeNote, shapePatch, shapeTempHp } from "./shape.ts";
 
 /** Take a shape and the section's words (docs/design-v1-pc-stats.md 7.3). The numbers a shape rolls with are doc 1's creatureNumbers (shared/rules/pcStats.shape.test.ts). */
 describe("shapes", () => {
-  test("one patch takes Wild Shape or another shape, and one ends either", () => {
-    assert.deepEqual(shapePatch("brown-bear", "wild"), { srdId: "brown-bear", wildShape: true });
-    assert.deepEqual(shapePatch("brown-bear", "other"), { srdId: "brown-bear" });
+  const bear = { srdId: "brown-bear", ac: 11, speeds: { walk: 40, climb: 30 }, hp: { average: 22, formula: "3d10 + 6" } };
+
+  test("one patch takes Wild Shape or another shape with the creature's AC and speeds, and one ends either", () => {
+    const bree = { actor: actor() };
+    assert.deepEqual(shapePatch(bear, "wild", bree), { srdId: "brown-bear", wildShape: true, ac: 11, speeds: { walk: 40, climb: 30 } });
+    assert.deepEqual(shapePatch(bear, "other", bree), { srdId: "brown-bear", ac: 11, speeds: { walk: 40, climb: 30 } });
     assert.deepEqual(END_SHAPE, { srdId: null });
+  });
+
+  test("the 2024 temporary HP: the level for Wild Shape, the creature's HP for Polymorph, and only more than the character holds (W7B-P-9)", () => {
+    assert.equal(shapeTempHp("wild", { level: 5 }, bear), 5);
+    assert.equal(shapeTempHp("wild", {}, bear), 1, "an unset level reads as 1");
+    assert.equal(shapeTempHp("other", { level: 5 }, bear), 22);
+    const holding = (temp: number) => ({ actor: actor({ hp: { cur: 30, max: 30, temp } }) });
+    assert.deepEqual(shapePatch(bear, "wild", holding(0), 5).hp, { temp: 5 });
+    assert.equal(shapePatch(bear, "wild", holding(5), 5).hp, undefined, "never fewer, and the same is no gain");
+    assert.equal(shapePatch(bear, "other", holding(30), 22).hp, undefined);
+    assert.equal(shapePatch(bear, "wild", holding(0)).hp, undefined, "unticked");
   });
 
   test("the section says what the shape does", () => {

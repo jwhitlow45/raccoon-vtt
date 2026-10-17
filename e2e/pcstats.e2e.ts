@@ -230,7 +230,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     assert.match(await savesLine(dm), /Dex \+7/);
   });
 
-  test("4. Take a shape as Wild Shape changes the bar's saves line, and End the shape restores it", async () => {
+  test("4. Take a shape as Wild Shape changes the bar's saves line, AC and speeds and gives the temporary HP, and End the shape restores the rest", async () => {
     const panel = await showBree(ana);
     await panel.getByRole("button", { name: "Take a shape" }).click();
     const picker = ana.getByRole("dialog", { name: "Take a shape" });
@@ -238,16 +238,26 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await picker.getByRole("button", { name: /Brown Bear/ }).first().click();
     const choice = ana.getByRole("dialog", { name: "Take the shape of Brown Bear" });
     assert.equal(await choice.getByRole("radio", { name: /Wild Shape/ }).isChecked(), true, "Wild Shape by default");
+    // Bree is level 9 since step 3, and the Druid level Wild Shape gives reads as it (W7B-P-9).
+    assert.equal(await choice.getByRole("checkbox", { name: "Gain 9 temporary HP (Wild Shape)" }).isChecked(), true, "the temporary HP on by default");
+    await shots.take(ana, "pcstats-shape-choice");
     await choice.getByRole("button", { name: "Take the shape", exact: true }).click();
-    await waitFor("Bree's shape", () => (anaSocket.state?.characters[run.bree.characterId]?.actor.wildShape ? true : null));
+    const breeActor = () => anaSocket.state?.characters[run.bree.characterId]?.actor;
+    await waitFor("Bree's shape", () => (breeActor()?.wildShape ? true : null));
     await panel.getByText("In Wild Shape as Brown Bear.", { exact: false }).waitFor();
+    // The bear's AC 11 and speeds take the place of Bree's AC 15 and 30 ft, and its 9 temporary HP come with it.
+    assert.deepEqual([breeActor()?.ac, breeActor()?.speeds, breeActor()?.hp.temp], [11, { walk: 40, climb: 30 }, 9]);
+    await bar(ana).getByRole("img", { name: "Armor Class 11" }).waitFor();
+    await bar(dm).getByRole("img", { name: "Armor Class 11" }).waitFor();
     // Strength from the bear (+3, its own save), Dexterity the bear's +1 with Bree's proficiency +4.
     await waitFor("the shaped saves line", async () => ((await savesLine(ana)).includes("Str +3") && (await savesLine(ana)).includes("Dex +5") ? true : null));
     await shots.take(ana, "pcstats-wild-shape");
     await panel.getByRole("button", { name: "End the shape" }).click();
-    await waitFor("the shape ended", () => (anaSocket.state?.characters[run.bree.characterId]?.actor.srdId === undefined ? true : null));
+    await waitFor("the shape ended", () => (breeActor()?.srdId === undefined ? true : null));
     await waitFor("the saves line back", async () => ((await savesLine(ana)).includes("Dex +7") ? true : null));
     assert.match(await savesLine(ana), /Str \+0/);
+    await bar(ana).getByRole("img", { name: "Armor Class 15" }).waitFor();
+    assert.deepEqual([breeActor()?.ac, breeActor()?.speeds, breeActor()?.hp.temp], [15, { walk: 30 }, 9], "Wild Shape's temporary HP stay");
   });
 
   test("5. a D&D Beyond character's JSON pasted fills the review, and Use it then Save keeps Ana's own block parts it did not read", async () => {

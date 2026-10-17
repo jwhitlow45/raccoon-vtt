@@ -1,5 +1,5 @@
 import { keys } from "../keys.ts";
-import { healRevivesDead, oneLinkPerActor, resizeStop } from "../migrate.ts";
+import { healRevivesDead, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import { MAX_RULER_STOPS, type ActorPatch, type OpOf, type TokenPatch } from "../protocol.ts";
@@ -22,7 +22,7 @@ import {
   syncOwners,
 } from "./companions.ts";
 import { removeEntries } from "./encounter.ts";
-import { applyPcStatsPatch, EMPTY_PC_STATS, pcNumbersFromBlock, pcStatsFits, pcStatsTooBig, WILD_SHAPE_ALONE, withPcActorNumbers } from "../rules/pcStats.ts";
+import { applyPcStatsPatch, EMPTY_PC_STATS, pcNumbersFromBlock, pcStatsFits, pcStatsTooBig, WILD_SHAPE_ALONE, withPcActorNumbers, withUnshaped } from "../rules/pcStats.ts";
 import { gone, invalid, Refuse, type Env, type ResolvedActor, type Tx } from "./tx.ts";
 
 function tokenDefaults(kind: Token["kind"]): Pick<Token, "disposition" | "layer" | "hpVisibility"> {
@@ -170,6 +170,7 @@ export function applyActorPatch(tx: Tx, resolved: ResolvedActor, patch: ActorPat
   else if (patch.srdId !== undefined || actor.srdId === undefined) delete actor.wildShape;
   setOrDelete(actor, "sheetUrl", patch.sheetUrl);
   setOrDelete(actor, "legendary", patch.legendary);
+  if (resolved.holder === "character" && shapeKeepsOwnNumbers(tx.env.opVersion)) actor = withUnshaped(resolved.actor, actor, patch);
   return { actor, events };
 }
 

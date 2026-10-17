@@ -36,6 +36,11 @@ describe("the review", () => {
     assert.deepEqual(alsoLines(FILL, same), [], "nothing changes, and a sheet link already chosen stays");
   });
 
+  test("in a shape, no AC or speeds line, as both are the creature's until End the shape puts the character's back (W7B-P-9)", () => {
+    const bear = character("bree", { name: "Bree", level: 5, actor: actor({ srdId: "brown-bear", wildShape: true, ac: 11, hp: { cur: 38, max: 38, temp: 5 }, speeds: { walk: 40, climb: 30 }, senses: "Darkvision 60 ft" }) });
+    assert.deepEqual(alsoLines(FILL, bear).map((l) => l.key), ["sheetUrl", "name"]);
+  });
+
   test("only the ticked fields are set", () => {
     const bree = character("bree", { name: "Bree", actor: actor({ ac: 15 }) });
     const lines = alsoLines(FILL, bree).map((l) => (l.key === "ac" ? { ...l, on: false } : l));

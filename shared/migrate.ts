@@ -338,6 +338,16 @@ export function answerProvenance(opVersion: number | undefined): boolean {
   return opVersion === undefined || opVersion >= 7;
 }
 
+/**
+ * Whether a shape on a character's own actor keeps the character's AC and
+ * speeds to put back when it ends, with the temporary HP Polymorph gave to
+ * take away (W7B-P-9). Ops stored before version 7 did neither and replay
+ * by that rule. Live ops carry no stored version and take today's rule.
+ */
+export function shapeKeepsOwnNumbers(opVersion: number | undefined): boolean {
+  return opVersion === undefined || opVersion >= 7;
+}
+
 /** Runs the steps that lead from `from` to `to`, in order, and refuses a version with no path. */
 export function runMigrations(value: unknown, from: number, to: number, steps: MigrationStep[]): unknown {
   if (from === to) return value;

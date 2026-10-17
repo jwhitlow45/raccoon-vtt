@@ -15,7 +15,7 @@ import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { SrdCredit, useSrdMonsters } from "../monsters/StatBlockView.tsx";
 import { whose } from "../tokens/companionBlocks.ts";
 import { monsterMatcher } from "../tokens/monsterSearch.ts";
-import { shapePatch, type ShapeKind } from "./shape.ts";
+import { shapePatch, shapeTempHp, type ShapeKind } from "./shape.ts";
 
 /** Whether an SRD creature is a Beast, which Wild Shape and Polymorph take. */
 function isBeast(m: SrdMonster): boolean {
@@ -26,15 +26,18 @@ function isBeast(m: SrdMonster): boolean {
  * "Take a shape" (docs/design-v1-pc-stats.md 7.3): the SRD's creatures with
  * the Beasts filtered in, then one step that says what the shape keeps,
  * Wild Shape by default, and Take the shape, one `character.update` on the
- * character's own actor. HP stays the character's.
+ * character's own actor with the creature's AC and speeds and the shape's
+ * temporary HP, a checkbox on by default (W7B-P-9). HP stays the
+ * character's.
  */
-export function ShapePicker(props: { character: Pick<Character, "id" | "name">; onClose(): void }) {
+export function ShapePicker(props: { character: Pick<Character, "id" | "name" | "level" | "actor">; onClose(): void }) {
   const actions = useRoomActions();
   const { monsters, failed } = useSrdMonsters();
   const [query, setQuery] = useState("");
   const [beastsOnly, setBeastsOnly] = useState(true);
   const [picked, setPicked] = useState<SrdMonster | null>(null);
   const [kind, setKind] = useState<ShapeKind>("wild");
+  const [gainTemp, setGainTemp] = useState(true);
   const deferred = useDeferredValue(query);
   const matches = useMemo(() => monsterMatcher(deferred), [deferred]);
   const rows = useMemo(
@@ -44,8 +47,11 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name">; 
   const name = props.character.name;
 
   if (picked) {
+    const temp = shapeTempHp(kind, props.character, picked);
+    const holding = props.character.actor.hp.temp;
     const take = () => {
-      if (actions.dispatch({ t: "character.update", characterId: props.character.id, patch: { actor: shapePatch(picked.srdId, kind) } }) !== null) props.onClose();
+      const patch = shapePatch(picked, kind, props.character, gainTemp ? temp : undefined);
+      if (actions.dispatch({ t: "character.update", characterId: props.character.id, patch: { actor: patch } }) !== null) props.onClose();
     };
     return (
       <Dialog
@@ -64,10 +70,20 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name">; 
         }
       >
         {/* Its step rises from the bottom on a phone, so a shape other than Wild Shape, which only Take the shape sends, holds it against a swipe (docs/design-v1-sheet-swipe.md 4.6). */}
-        <UnsavedInput unsaved={kind !== "wild"} />
+        <UnsavedInput unsaved={kind !== "wild" || !gainTemp} />
         <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
           <ShapeChoice name={name} creature={picked.name} value={kind} onChange={setKind} />
-          <Help>{`The token keeps ${whose(name)} HP, conditions and Passive Perception in either shape.`}</Help>
+          {holding >= temp ? (
+            <Help>{`${whose(name)} ${holding} temporary HP stay, as they are no fewer than the ${temp} the shape gives.`}</Help>
+          ) : (
+            <Checkbox
+              label={`Gain ${temp} temporary HP (${kind === "wild" ? "Wild Shape" : "Polymorph"})`}
+              help={kind === "wild" ? `The Druid level, read as ${whose(name)} level.` : `${whose(picked.name)} HP. What is left of them goes when the shape ends.`}
+              checked={gainTemp}
+              onChange={setGainTemp}
+            />
+          )}
+          <Help>{`The token takes ${whose(picked.name)} AC and speeds until the shape ends, then ${whose(name)} own come back. It keeps ${whose(name)} HP, conditions and Passive Perception in either shape.`}</Help>
         </div>
       </Dialog>
     );

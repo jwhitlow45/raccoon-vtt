@@ -1,5 +1,5 @@
-import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Character, type PcDice, type PcRoll, type PcStats, type SkillKey, type Token } from "../model.ts";
-import type { PcStatsPatch } from "../protocol.ts";
+import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type Character, type PcDice, type PcRoll, type PcStats, type SkillKey, type Token } from "../model.ts";
+import type { ActorPatch, PcStatsPatch } from "../protocol.ts";
 import type { DamagePart, NamedRoll, RollNumbers } from "../dice/bonus.ts";
 import type { Defense } from "../dice/defenses.ts";
 import { formatFormula, parseFormula, type DiceTerm, type Formula, type Term } from "../dice/formula.ts";
@@ -315,21 +315,48 @@ export function shapedInitiative(character: Pick<Character, "stats" | "level">, 
 }
 
 /**
+ * A shape's start and end on a character's own actor (W7B-P-9), after the
+ * patch is applied. A patch that takes a shape from none keeps the
+ * character's AC and speeds from before it, as the creature's take their
+ * place, and the temporary HP it gave in a shape other than Wild Shape, such
+ * as Polymorph's. The patch that ends the shape puts the AC and speeds back,
+ * unless it sets them itself, and takes away that temporary HP if no more
+ * than it remains, since a higher amount from elsewhere would have replaced
+ * it. A change from one creature to another keeps what the first stored.
+ */
+export function withUnshaped(before: Actor, after: Actor, patch: Pick<ActorPatch, "ac" | "speeds" | "hp">): Actor {
+  const was = before.srdId !== undefined;
+  const is = after.srdId !== undefined;
+  if (!was && is) {
+    const gave = after.wildShape === undefined && patch.hp?.temp !== undefined && after.hp.temp > before.hp.temp;
+    return { ...after, unshaped: { ac: before.ac, speeds: before.speeds, ...(gave ? { temp: after.hp.temp } : {}) } };
+  }
+  if (!was || is || after.unshaped === undefined) return after;
+  const { unshaped, ...out } = after;
+  if (patch.ac === undefined) out.ac = unshaped.ac;
+  if (patch.speeds === undefined) out.speeds = unshaped.speeds;
+  if (unshaped.temp !== undefined && patch.hp?.temp === undefined && out.hp.temp <= unshaped.temp) out.hp = { ...out.hp, temp: 0 };
+  return out;
+}
+
+/**
  * A hand-made or older file's Wild Shape marks within the rule: only on a
- * character's own actor and only beside its SRD creature (section 3.6).
+ * character's own actor and only beside its SRD creature (section 3.6). The
+ * AC and speeds a shape keeps go the same way: a file whose character is in
+ * no shape, or a token's own actor, has none to put back.
  */
 export function withShapeRules<S extends { characters: Record<string, Character>; tokens: Record<string, Token> }>(state: S): S {
   let characters: Record<string, Character> | null = null;
   for (const [id, character] of Object.entries(state.characters)) {
-    if (character.actor.wildShape === undefined || character.actor.srdId !== undefined) continue;
-    const { wildShape: _alone, ...actor } = character.actor;
+    if (character.actor.srdId !== undefined || (character.actor.wildShape === undefined && character.actor.unshaped === undefined)) continue;
+    const { wildShape: _alone, unshaped: _kept, ...actor } = character.actor;
     characters ??= { ...state.characters };
     characters[id] = { ...character, actor };
   }
   let tokens: Record<string, Token> | null = null;
   for (const [id, token] of Object.entries(state.tokens)) {
-    if (!("inline" in token.actor) || token.actor.inline.wildShape === undefined) continue;
-    const { wildShape: _theirs, ...actor } = token.actor.inline;
+    if (!("inline" in token.actor) || (token.actor.inline.wildShape === undefined && token.actor.inline.unshaped === undefined)) continue;
+    const { wildShape: _theirs, unshaped: _kept, ...actor } = token.actor.inline;
     tokens ??= { ...state.tokens };
     tokens[id] = { ...token, actor: { inline: actor } };
   }
