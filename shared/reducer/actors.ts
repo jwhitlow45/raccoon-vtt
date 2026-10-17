@@ -138,6 +138,11 @@ export function effectUpdate(tx: Tx, op: OpOf<"actor.effect.update">): void {
     checkAnchor(tx, p.duration);
     next.duration = resolveDuration(tx.state, p.duration);
   }
+  // An effect no save ends has no occurrence waiting, so a request linked to one closes (shared/reducer/rolls.ts endSaves).
+  if (p.save === null) {
+    delete next.save;
+    delete next.due;
+  } else if (p.save !== undefined) next.save = p.save;
   const effects = [...resolved.actor.effects];
   effects[index] = next;
   tx.putActor(resolved, { ...resolved.actor, effects });

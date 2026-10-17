@@ -451,10 +451,26 @@ function publicEffects(effects: Effect[], triggers: () => boolean): Effect[] {
   let shown: boolean | undefined;
   return effects.flatMap((e) => {
     if (e.hiddenFromPlayers) return [];
-    if (e.key !== "readied" || e.label === undefined || e.triggerShown === true || (shown ??= triggers())) return [e];
-    const { label: _trigger, ...rest } = e;
+    const seen = playerSave(e);
+    if (seen.key !== "readied" || seen.label === undefined || seen.triggerShown === true || (shown ??= triggers())) return [seen];
+    const { label: _trigger, ...rest } = seen;
     return [rest];
   });
+}
+
+/**
+ * A "save ends" effect as every player gets it, its owners included
+ * (docs/design-v1-roll-options.md 6.1): which save ends it and whether it is
+ * against a spell, never its DC, which stays the DM's to show on a request,
+ * and never its occurrence, which is the DM's in every projection.
+ */
+function playerSave(e: Effect): Effect {
+  if (e.save === undefined && e.due === undefined) return e;
+  const { save, due: _due, ...rest } = e;
+  if (!save) return rest;
+  // The model's `dc` is the stored one, which a player's view never has.
+  const seen = { ability: save.ability, ...(save.spell ? { spell: true as const } : {}) };
+  return { ...rest, save: seen as Effect["save"] };
 }
 
 /**
@@ -1286,6 +1302,9 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
       return data;
     case "teleport":
       // The DM's note (docs/design-v1-maps-vision.md 4.1). No player gets it, the token's owners included.
+      return null;
+    case "saveEnds":
+      // The DM's reminder with the save's DC (docs/design-v1-roll-options.md 6.1). A player's creature's player gets a request instead.
       return null;
     case "companion":
       // The DM's note that a player added a companion (docs/design-v1-combat-flow.md 3.6.3). No player gets it.

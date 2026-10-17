@@ -28,6 +28,7 @@ import {
   type SelfRef,
 } from "./durations.ts";
 import { EffectIcon } from "./EffectIcon.tsx";
+import { SaveEndsFields, sameSave, saveEndsForm, saveEndsText, saveOf } from "./SaveEndsFields.tsx";
 import { FieldRow, Note, NumberField, Section, Select, SmallButton, Stepper } from "./ui.tsx";
 
 /**
@@ -260,6 +261,7 @@ function EffectDetail(props: {
   const [color, setColor] = useState(existing?.color ?? CUSTOM_COLORS[0]!);
   const [hidden, setHidden] = useState(existing?.hiddenFromPlayers ?? false);
   const [triggerShown, setTriggerShown] = useState(existing?.triggerShown ?? false);
+  const [saveForm, setSaveForm] = useState(() => saveEndsForm(existing?.save));
   // A Ready action holds until the start of the creature's own next turn (SRD 5.2.1, "Ready").
   const [form, setForm] = useState<DurationForm>(() =>
     key === "readied" && !existing ? { ...emptyForm(view, options), mode: "turnStart", anchorKey: SELF_KEY } : emptyForm(view, options),
@@ -280,6 +282,12 @@ function EffectDetail(props: {
       return;
     }
     const duration = durationInput(form, options);
+    const save = saveOf(saveForm);
+    if (dm && !save.ok) {
+      setError(save.error);
+      return;
+    }
+    const saveValue = save.ok ? save.save : null;
     if (!existing) {
       const effect: EffectInput = { id: actions.newId(), key };
       if (key === "exhaustion") effect.level = level;
@@ -294,6 +302,7 @@ function EffectDetail(props: {
       if (duration) effect.duration = duration;
       if (dm && hidden) effect.hiddenFromPlayers = true;
       if (dm && key === "readied" && triggerShown) effect.triggerShown = true;
+      if (dm && saveValue) effect.save = saveValue;
       actions.dispatch({ t: "actor.effect.add", target, effect });
     } else {
       const patch: Extract<ClientOp, { t: "actor.effect.update" }>["patch"] = {};
@@ -312,6 +321,7 @@ function EffectDetail(props: {
       }
       if (dm && hidden !== (existing.hiddenFromPlayers ?? false)) patch.hiddenFromPlayers = hidden;
       if (dm && key === "readied" && triggerShown !== (existing.triggerShown ?? false)) patch.triggerShown = triggerShown;
+      if (dm && !sameSave(saveValue, existing.save)) patch.save = saveValue;
       if (Object.keys(patch).length > 0) {
         actions.dispatch({ t: "actor.effect.update", target, effectId: existing.id, patch });
       }
@@ -363,6 +373,7 @@ function EffectDetail(props: {
         </div>
       ) : null}
       {existing?.duration ? <Note tone="info">{describeDuration(view, existing.duration)}</Note> : null}
+      {existing?.save && !(dm && canEdit) ? <Note tone="info">{saveEndsText(existing.save)}</Note> : null}
 
       {canEdit ? (
         <>
@@ -445,6 +456,7 @@ function EffectDetail(props: {
               help="On a creature no player owns, players otherwise see only that it readied."
             />
           ) : null}
+          {dm ? <SaveEndsFields form={saveForm} onChange={setSaveForm} /> : null}
           {dm ? (
             <Checkbox
               checked={hidden}

@@ -1063,6 +1063,13 @@ export type Effect = {
    */
   duration?: { remaining: number; boundary: "turnStart" | "turnEnd"; anchor: DurationAnchor };
   /**
+   * Wave 7: a save at the end of each of the creature's own turns ends it
+   * (docs/design-v1-roll-options.md 6.1), `spell` when it is against a
+   * spell. Only the DM sets it. Players keep the ability and lose the DC
+   * (shared/project.ts playerSave), so a player's view has no `dc`.
+   */
+  save?: { ability: AbilityKey; dc: number; spell?: true };
+  /**
    * Wave 7: the pending save of a "save ends" effect, one per turn end that
    * asks it (docs/design-v1-roll-options.md 6.1 writes it). Closing the
    * request linked to it settles it (docs/design-v1-roll-request.md 1.1).
@@ -1550,6 +1557,12 @@ export type LogEvent =
   | (AboutCreature & { type: "life"; life: LifeState })
   | (AboutCreature & { type: "effect"; key: Effect["key"]; action: "add" | "remove" | "expire" | "pause"; spell?: string; hidden?: true })
   | (AboutCreature & { type: "concentration"; dc?: number; spell?: string; ended?: boolean; hidden?: true })
+  /**
+   * Wave 7: a creature ended its turn with an effect a save ends
+   * (docs/design-v1-roll-options.md 6.1). The line's id is the occurrence the
+   * effect's `due` names. DM only, as the DC is.
+   */
+  | (AboutCreature & { type: "saveEnds"; effectId: EffectId; key: Effect["key"]; ability: AbilityKey; dc: number })
   /** The counts are left out for a player who may not see the creature's exact HP. */
   | (AboutCreature & { type: "deathSave"; ok?: number; fail?: number })
   /**

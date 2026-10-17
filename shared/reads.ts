@@ -153,6 +153,9 @@ export function reads(op: Op, state: RoomState): Reads {
     }
     case "actor.effect.remove":
       return of([holderRead(state, op.target, ["effects"])]);
+    // A request linked to the occurrence refuses it, and a DM's view holds every request.
+    case "actor.saveDue":
+      return of([holderRead(state, op.target, ["effects"])], ["rolls"]);
 
     case "character.create":
       return of([]);

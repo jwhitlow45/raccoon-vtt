@@ -5,6 +5,7 @@ import {
   anchorsForEntry,
   bindToEntry,
   crossingsForNext,
+  entryMatchesAnchor,
   pausedAnchorForEntry,
   tickEffects,
   unbindFromEntry,
@@ -306,6 +307,8 @@ export function encounterNext(tx: Tx, op: OpOf<"encounter.next">): void {
     tx.putActor(resolved, { ...resolved.actor, effects: r.effects });
     for (const effect of r.expired) tx.addActorEvents(resolved, [effectEvent(effect, "expire")]);
   }
+  const ended = encounter.activeEntryId === null ? undefined : encounter.entries.find((e) => e.id === encounter.activeEntryId);
+  if (ended) askSavesAtTurnEnd(tx, ended, snapshot);
 
   const landingActor = landing.tokenId !== undefined
     ? tx.tryResolveActor({ tokenId: landing.tokenId })
@@ -322,6 +325,33 @@ export function encounterNext(tx: Tx, op: OpOf<"encounter.next">): void {
   writeEncounter(tx, withTurn(tx, { ...encounter, round, entries }, step.landing));
   tx.write(keys.encounterHistory, [...tx.state.encounterHistory, snapshot].slice(-MAX_HISTORY));
   tx.addEvent({ type: "turn", entryId: step.landing, round, ...(rowSeenByNonOwners(tx.state, landing, tx.env) ? { seen: true as const } : {}) });
+}
+
+/**
+ * The saves that end effects at the end of a turn (docs/design-v1-roll-options.md
+ * 6.1): on each creature the ended row stands for (a companion acting on
+ * its character's turn among them), each effect with `save` that is still
+ * there after the tick gets one `saveEnds` line, and that line's id becomes
+ * its pending occurrence. Only the row whose turn ended asks, never a row the
+ * step skipped. A request linked to the occurrence before closes in the same
+ * op (rolls.ts endSaves), and Previous puts the effects back as they were,
+ * since the step saves them first. No stored effect has `save`, so replay
+ * is unchanged.
+ */
+function askSavesAtTurnEnd(tx: Tx, ended: InitEntry, snapshot: EncounterSnapshot): void {
+  for (const resolved of tx.actors()) {
+    const of = resolved.holder === "token" ? { tokenId: resolved.id } : { characterId: resolved.id };
+    // A player's view has no DC, and the server writes the line for it.
+    const asks = (e: Effect) => e.save?.dc !== undefined;
+    if (!resolved.actor.effects.some(asks) || !entryMatchesAnchor(tx.state, ended, of)) continue;
+    snapshot.effects[holderId(resolved)] ??= resolved.actor.effects;
+    const effects = resolved.actor.effects.map((effect): Effect => {
+      if (!effect.save || effect.save.dc === undefined) return effect;
+      const line = tx.addEvent({ type: "saveEnds", ...of, effectId: effect.id, key: effect.key, ability: effect.save.ability, dc: effect.save.dc });
+      return { ...effect, due: { id: line.id, state: "pending" } };
+    });
+    tx.putActor(resolved, { ...resolved.actor, effects });
+  }
 }
 
 /**

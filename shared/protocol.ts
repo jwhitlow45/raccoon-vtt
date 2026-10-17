@@ -197,8 +197,18 @@ const effectBase = {
   triggerShown: z.boolean().optional(),
 };
 
-const effectInput = z.strictObject({ ...effectBase, duration: durationInput.optional() });
-const effectStored = z.strictObject({ ...effectBase, duration: durationStored.optional() });
+/** An effect a save at the end of each of the creature's turns ends (docs/design-v1-roll-options.md 6.1). The DC is doc 1's 1 to 50. */
+const effectSave = z.strictObject({
+  ability: z.enum(ABILITY_KEYS),
+  dc: z.number().int().min(LIMITS.rollDcMin).max(LIMITS.rollDcMax),
+  spell: z.literal(true).optional(),
+});
+
+/** The pending, resolved or dismissed save of one turn end, named by that turn end's line. The server writes it. */
+const effectDue = z.strictObject({ id: z.string().regex(/^\d{1,18}:\d{1,6}$/), state: z.enum(["pending", "resolved", "dismissed"]) });
+
+const effectInput = z.strictObject({ ...effectBase, save: effectSave.optional(), duration: durationInput.optional() });
+const effectStored = z.strictObject({ ...effectBase, save: effectSave.optional(), duration: durationStored.optional(), due: effectDue.optional() });
 
 const actorSchema = z.strictObject({
   hp: z.strictObject({ cur: hpValue, max: hpValue, temp: hpValue }),
@@ -1277,9 +1287,16 @@ export const clientOps = [
       hiddenFromPlayers: z.boolean().optional(),
       triggerShown: z.boolean().optional(),
       duration: durationInput.nullable().optional(),
+      save: effectSave.nullable().optional(),
     }),
   }),
   op("actor.effect.remove", { target: actorTarget, effectId: id }),
+  /**
+   * The DM settles a save-ends occurrence no request is linked to
+   * (docs/design-v1-roll-options.md 6.1): Accept failure or Dismiss on the
+   * card. `due` is the occurrence, so a tap on an older card changes nothing.
+   */
+  op("actor.saveDue", { target: actorTarget, effectId: id, due: z.string().regex(/^\d{1,18}:\d{1,6}$/), state: z.enum(["resolved", "dismissed"]) }),
   op("character.create", { character: characterInput }),
   op("character.update", { characterId: id, patch: characterPatch }),
   op("character.delete", { characterId: id }),

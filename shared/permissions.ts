@@ -174,8 +174,37 @@ export function canApply(op: Op, actor: Viewer, state: RoomState, deps: Permissi
   const decision = actor.role === "dm" ? forDm(op, check) : forPlayer(op, check);
   // After the role's checks, so a player who names a hidden effect hears that it is not there, never what it holds.
   if (!decision.ok) return decision;
+  if (actor.role !== "dm" && setsSave(op)) return refuse("forbidden", SAVE_IS_DMS);
   const levels = levelsFit(op, check);
   return levels.ok ? squeezeFits(op, check) : levels;
+}
+
+/** The refusal of a player's op that names an effect's save or its occurrence (docs/design-v1-roll-options.md 6.1). */
+export const SAVE_IS_DMS = "only the DM sets a save that ends an effect";
+
+/**
+ * Whether an op names a "save ends" save or occurrence on an effect. Only
+ * the DM sets one, since its DC is the DM's, and only the server writes an
+ * occurrence, so every op that carries effects is checked: an effect added
+ * one or many at a time, a change to one, and a creature created with its
+ * effects.
+ */
+function setsSave(op: Op): boolean {
+  const named = (effects: readonly { save?: unknown; due?: unknown }[]) => effects.some((e) => e.save !== undefined || e.due !== undefined);
+  switch (op.t) {
+    case "actor.effect.add":
+      return named([op.effect]);
+    case "actor.effect.update":
+      return op.patch.save !== undefined;
+    case "actor.effects":
+      return named((op.add ?? []).map((item) => item.effect));
+    case "token.create":
+      return "inline" in op.token.actor && named(op.token.actor.inline.effects);
+    case "character.create":
+      return named(op.character.actor.effects);
+    default:
+      return false;
+  }
 }
 
 /** The refusal of a squeeze flag on a move that is not into a narrow opening (docs/design-v1-maps-vision.md 4.1). */
@@ -381,6 +410,8 @@ function forPlayer(op: Op, c: Check): Decision {
     case "roll.ask":
     case "roll.reopen":
     case "roll.close":
+    // A save-ends occurrence is the DM's to settle (docs/design-v1-roll-options.md 6.1).
+    case "actor.saveDue":
       return FORBIDDEN;
 
     case "token.updateMany": {

@@ -419,7 +419,7 @@ function check(before: RoomState, after: RoomState, step: Step, stored: Op, log:
     const still = after.rolls[request.id];
     if (still) {
       assert.ok(effectAfter, `${at}: 10, ${request.id} outlived its effect`);
-      assert.ok(!effectAfter.due || effectAfter.due.id === request.ends.occurrence, `${at}: 10, ${request.id} outlived its occurrence`);
+      assert.ok(effectAfter.due?.id === request.ends.occurrence, `${at}: 10, ${request.id} outlived its occurrence`);
       assert.notEqual(resultOf(still.targets[0]!, still.dc), "pass", `${at}: 10, ${request.id} stayed open on a pass`);
       continue;
     }
@@ -436,7 +436,7 @@ function check(before: RoomState, after: RoomState, step: Step, stored: Op, log:
         reached.passClose = (reached.passClose ?? 0) + 1;
       }
     } else {
-      assert.ok(effectAfter.due && effectAfter.due.id !== request.ends.occurrence, `${at}: 10, ${request.id} closed for no reason`);
+      assert.ok(!effectAfter.due || effectAfter.due.id !== request.ends.occurrence, `${at}: 10, ${request.id} closed for no reason`);
       reached.nextClose = (reached.nextClose ?? 0) + 1;
     }
   }

@@ -2,7 +2,7 @@ import { formatFormula, parseFormula } from "./dice/formula.ts";
 import { hitOf, rolledTerms } from "./dice/roll.ts";
 import { compareLogIds } from "./keys.ts";
 import { CONDITION_KEYS, type ConditionKey, type DiceResult, type DiceRoll, type LogEntry, type LogEvent, type Member, type RoomState, type Token } from "./model.ts";
-import { testText } from "./rules/skills.ts";
+import { ABILITY_NAMES, testText } from "./rules/skills.ts";
 import { CONDITIONS } from "./srd/conditions.ts";
 import { STATUSES } from "./srd/statuses.ts";
 
@@ -364,6 +364,9 @@ function eventText(data: LogEvent, names: LogNames): string {
       }
       return `${who} changed.`;
     }
+    case "saveEnds":
+      // Only the DM's log holds it (docs/design-v1-roll-options.md 6.1).
+      return `${creatureName(names, data)} ended its turn ${effectName(data.key)}: a DC ${data.dc} ${ABILITY_NAMES[data.ability]} save ends it.`;
     case "teleport":
       // Only the DM's log holds it (docs/design-v1-maps-vision.md 4.1).
       return `${creatureName(names, data)} teleported past a ${data.past}.`;

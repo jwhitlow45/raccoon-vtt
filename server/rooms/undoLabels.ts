@@ -109,6 +109,8 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `changing an effect on ${target(op.target)}`;
     case "actor.effect.remove":
       return `removing an effect from ${target(op.target)}`;
+    case "actor.saveDue":
+      return op.state === "resolved" ? `accepting a failed save for ${target(op.target)}` : `dismissing a save for ${target(op.target)}`;
     case "character.create":
       return `adding ${the("character", op.character.name)}`;
     case "character.update": {

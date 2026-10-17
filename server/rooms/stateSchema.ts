@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CONDITION_KEYS, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, STAIRS_CHARS, STATUS_KEYS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
+import { ABILITY_KEYS, CONDITION_KEYS, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, STAIRS_CHARS, STATUS_KEYS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
 import {
@@ -490,6 +490,7 @@ const logEvent = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("life"), ...holder, life: lifeState }),
   z.strictObject({ type: z.literal("effect"), ...holder, key: effectKey, action: z.enum(["add", "remove", "expire", "pause"]), spell: shortText.optional(), hidden: z.literal(true).optional() }),
   z.strictObject({ type: z.literal("concentration"), ...holder, dc: z.number().int().min(0).max(30).optional(), spell: shortText.optional(), ended: z.boolean().optional(), hidden: z.literal(true).optional() }),
+  z.strictObject({ type: z.literal("saveEnds"), ...holder, effectId: id, key: effectKey, ability: z.enum(ABILITY_KEYS), dc: z.number().int().min(1).max(50) }),
   z.strictObject({ type: z.literal("deathSave"), ...holder, ok: z.number().int().min(0).max(3), fail: z.number().int().min(0).max(3) }),
   z.strictObject({
     type: z.literal("rest"),

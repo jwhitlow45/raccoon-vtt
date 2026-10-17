@@ -10,7 +10,7 @@ import { reads, satisfies } from "../reads.ts";
 import { applyOp } from "../reducer.ts";
 import { resultOf } from "../rules/rolls.ts";
 import { DM, P1, P2, actor, character, effect, env, room, token } from "../testutil.ts";
-import { ALREADY_ASKED, DIE_NEEDED, ENDS_NEEDS_ONE, FINAL, ROLLED_ONLY, SEND_INSTEAD, TYPED_ONLY } from "./rolls.ts";
+import { ALREADY_ASKED, DIE_NEEDED, ENDS_NEEDS_ONE, FINAL, ROLLED_ONLY, SAVE_SETTLED, SEND_INSTEAD, TYPED_ONLY } from "./rolls.ts";
 
 /**
  * Roll requests with wave 7's additions (docs/design-v1-roll-request.md 1.1
@@ -233,12 +233,13 @@ describe("the request's additions (1.1, 7.5)", () => {
     assert.ok(send(table(), endsAsk("r1", { targets: [PIP], ends: { effect: "pfx", occurrence: "pocc1" } })).ok, "a token's own effect");
   });
 
-  test("a second open request for one occurrence is refused, and asking again after a close is not", () => {
+  test("a second open request for one occurrence is refused, and so is one for an occurrence the close settled (docs/design-v1-roll-options.md 6.1)", () => {
     let state = ok(send(table(), endsAsk("r1"))).state;
     assert.deepEqual(send(state, endsAsk("r2")), { ok: false, code: "invalid", message: ALREADY_ASKED });
-    assert.ok(send(state, endsAsk("r2", { ends: { effect: "fx", occurrence: "occ2" } })).ok, "another occurrence is another save");
+    assert.ok(send(withThornEffects(state, [frightened("fx", "occ2")]), endsAsk("r2", { ends: { effect: "fx", occurrence: "occ2" } })).ok, "another occurrence is another save");
     state = ok(send(state, { t: "roll.close", rollIds: ["r1"] })).state;
-    assert.ok(send(state, endsAsk("r2")).ok);
+    assert.deepEqual(send(state, endsAsk("r2")), { ok: false, code: "invalid", message: SAVE_SETTLED });
+    assert.ok(send(withThornEffects(state, [frightened("fx", "occ2")]), endsAsk("r2", { ends: { effect: "fx", occurrence: "occ2" } })).ok, "the next turn end's occurrence can be asked");
   });
 });
 

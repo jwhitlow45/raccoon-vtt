@@ -145,7 +145,9 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   entries.assign(liveEntries.map((e) => e.id));
 
   const memberList = (ids: string[]): string[] => ids.filter((id) => members.has(id)).map((id) => members.of(id));
-  const effect = (e: Effect): Effect => {
+  const effect = (withDue: Effect): Effect => {
+    // An occurrence names a line of the old room's log, and the requests that answer it do not come through, so a save ends waits for the next turn end.
+    const { due: _due, ...e } = withDue;
     if (!e.duration) return e;
     const a = e.duration.anchor;
     const anchor =
@@ -463,7 +465,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       case "effect":
       case "concentration":
       case "deathSave":
-      case "rest": {
+      case "rest":
+      case "saveEnds": {
         const next = { ...data };
         if (data.tokenId !== undefined) next.tokenId = tokens.of(data.tokenId);
         if (data.characterId !== undefined) next.characterId = characters.of(data.characterId);

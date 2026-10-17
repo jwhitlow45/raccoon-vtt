@@ -32,6 +32,8 @@ export const DIE_NEEDED = "Bardic Inspiration names its die.";
 export const TYPED_ONLY = "Only a typed answer can be fixed this way.";
 /** The refusal of "Fix my total" on an answer the player may still change: they send the new total themselves. */
 export const SEND_INSTEAD = "Send the corrected total.";
+/** The refusal of a request for a save occurrence that is no longer pending: settled, or replaced by a newer turn end (docs/design-v1-roll-options.md 6.1). */
+export const SAVE_SETTLED = "That save is no longer waiting.";
 
 export function rollAsk(tx: Tx, op: OpOf<"roll.ask">): void {
   const input = op.request;
@@ -64,9 +66,11 @@ export function rollAsk(tx: Tx, op: OpOf<"roll.ask">): void {
     const target = input.targets.length === 1 ? input.targets[0] : undefined;
     const oneSave = input.cause === "saveEnds" && input.test.kind === "save" && input.test.choices.length === 1;
     const holder = oneSave && target ? tx.tryResolveActor(target) : undefined;
-    if (!holder?.actor.effects.some((e) => e.id === ends.effect)) throw invalid(ENDS_NEEDS_ONE);
+    const effect = holder?.actor.effects.find((e) => e.id === ends.effect);
+    if (!effect) throw invalid(ENDS_NEEDS_ONE);
     // Every request in the state is open, since a close removes it.
     if (Object.values(tx.state.rolls).some((r) => r.ends?.occurrence === ends.occurrence)) throw invalid(ALREADY_ASKED);
+    if (effect.due?.id !== ends.occurrence || effect.due.state !== "pending") throw invalid(SAVE_SETTLED);
     request.ends = { effect: ends.effect, occurrence: ends.occurrence };
   }
   tx.write(keys.roll(request.id), request);
@@ -335,6 +339,28 @@ function settleOccurrence(tx: Tx, request: RollRequest, settle: "resolved" | "di
   tx.putActor(holder, { ...holder.actor, effects: next });
 }
 
+/** The refusal of Accept failure or Dismiss on a save a request was sent for: closing the request settles it. */
+export const SAVE_ASKED = "That save was asked. Close its request instead.";
+
+/**
+ * The DM's Accept failure or Dismiss on a save-ends card with no request
+ * (docs/design-v1-roll-options.md 6.1). Only the effect's pending
+ * occurrence that the card named, so a tap on a card a newer turn end
+ * replaced, or one another DM device settled first, changes nothing. A
+ * linked request's occurrence is settled only by closing that request.
+ */
+export function actorSaveDue(tx: Tx, op: OpOf<"actor.saveDue">): void {
+  const resolved = tx.resolveActor(op.target);
+  const index = resolved.actor.effects.findIndex((e) => e.id === op.effectId);
+  const effect = resolved.actor.effects[index];
+  if (!effect) throw gone("effect");
+  if (effect.due?.id !== op.due || effect.due.state !== "pending") throw invalid(SAVE_SETTLED);
+  if (Object.values(tx.state.rolls).some((r) => r.ends?.occurrence === op.due)) throw invalid(SAVE_ASKED);
+  const effects = [...resolved.actor.effects];
+  effects[index] = { ...effect, due: { id: op.due, state: op.state } };
+  tx.putActor(resolved, { ...resolved.actor, effects });
+}
+
 /**
  * The life of a "save ends" request (docs/design-v1-roll-request.md 7.5,
  * "When an ends request closes"), as one rule after every op rather than a
@@ -344,7 +370,7 @@ function settleOccurrence(tx: Tx, request: RollRequest, settle: "resolved" | "di
  * writes the next occurrence. A pass removes the effect if it is still
  * there, with the line `actor.effect.remove` writes, after the answer's own
  * line, and closes the request. A request whose effect is gone, or whose
- * effect's occurrence is a newer one, closes. A fail leaves it open, so the
+ * effect's occurrence is another one or none, closes. A fail leaves it open, so the
  * answer can still be asked about or fixed. Requests go in id order, so the
  * lines come out the same on replay, and no stored request has `ends`, so
  * replay is unchanged.
@@ -372,7 +398,8 @@ export function endSaves(tx: Tx): void {
         tx.addActorEvents(holder, [effectEvent(effect, "remove")]);
       }
       tx.remove(keys.roll(request.id));
-    } else if (!effect || (effect.due !== undefined && effect.due.id !== ends.occurrence)) {
+    } else if (!effect || effect.due?.id !== ends.occurrence) {
+      // The effect is gone, or its occurrence is: a newer turn end, a save the DM took off, or a Previous that took the turn end back.
       tx.remove(keys.roll(request.id));
     }
   }
