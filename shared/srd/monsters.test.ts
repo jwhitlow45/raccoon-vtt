@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { statSync } from "node:fs";
 import { before, describe, test } from "node:test";
 import { SIZE_CELLS } from "../model.ts";
-import { loadMonsters, monsterActor, type SrdMonster } from "./monsters.ts";
+import { loadedMonsters, loadMonsters, monsterActor, type SrdMonster } from "./monsters.ts";
 
 /**
  * monsters.json ships to the DM's browser when the monster browser opens, so
@@ -32,6 +32,10 @@ before(async () => {
 describe("monsters.json", () => {
   test("has every SRD 5.2.1 stat block", () => {
     assert.equal(monsters.length, 330);
+  });
+
+  test("once loaded, the same blocks are there at once for a view that shows them again", () => {
+    assert.equal(loadedMonsters(), monsters);
   });
 
   test("stays within its size budget", () => {

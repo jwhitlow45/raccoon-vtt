@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { Actor, Token } from "#shared/model.ts";
-import { loadMonsters, type SrdMonster } from "#shared/srd/monsters.ts";
+import { loadedMonsters, loadMonsters, type SrdMonster } from "#shared/srd/monsters.ts";
 import { AcBadge } from "../../components/AcBadge.tsx";
 import { Button } from "../../components/Button.tsx";
 import { Icon } from "../../components/Icon.tsx";
@@ -21,19 +21,16 @@ import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
  * block's header. The rules are in statSummary.ts.
  */
 
-// The SRD chunk, once any summary has loaded it this page, so a later bar shows its saves without a wait.
-let srdLoaded: readonly SrdMonster[] | null = null;
-
 /** The SRD's blocks while `active`: loaded on first need and kept for the page. A failure stays until a reload (monsters/SrdLoadFailed.tsx). */
 export function useSrdList(active: boolean): { list: readonly SrdMonster[] | null; failed: boolean } {
-  const [list, setList] = useState(srdLoaded);
+  // Once any view has loaded the SRD chunk this page, a later bar shows its saves without a wait.
+  const [list, setList] = useState(loadedMonsters);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     if (!active || list) return;
     let live = true;
     loadMonsters().then(
       (loaded) => {
-        srdLoaded = loaded;
         if (live) setList(loaded);
       },
       () => {

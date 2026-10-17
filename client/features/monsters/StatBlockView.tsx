@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { loadMonsters, type SrdMonster, type StatBlockMonster } from "#shared/srd/monsters.ts";
+import { loadedMonsters, loadMonsters, type SrdMonster, type StatBlockMonster } from "#shared/srd/monsters.ts";
 import { Markdown } from "../../components/Markdown.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
@@ -32,9 +32,10 @@ export function SrdCredit() {
  * (SrdLoadFailed.tsx) instead of looking stuck.
  */
 export function useSrdMonsters(): { monsters: readonly SrdMonster[] | null; failed: boolean } {
-  const [monsters, setMonsters] = useState<readonly SrdMonster[] | null>(null);
+  const [monsters, setMonsters] = useState<readonly SrdMonster[] | null>(loadedMonsters);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
+    if (loadedMonsters()) return;
     let live = true;
     loadMonsters().then(
       (list) => live && setMonsters(list),

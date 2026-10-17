@@ -50,6 +50,7 @@ export type SrdMonster = {
 export type StatBlockMonster = Omit<SrdMonster, "srdId"> & { srdId?: string };
 
 let loading: Promise<readonly SrdMonster[]> | undefined;
+let loaded: readonly SrdMonster[] | null = null;
 
 /**
  * All 330 stat blocks, about half a megabyte. A dynamic import, so Vite puts
@@ -59,13 +60,22 @@ let loading: Promise<readonly SrdMonster[]> | undefined;
  */
 export function loadMonsters(): Promise<readonly SrdMonster[]> {
   loading ??= import("./monsters.json", { with: { type: "json" } })
-    .then((m) => m.default as unknown as SrdMonster[])
+    .then((m) => (loaded = m.default as unknown as SrdMonster[]))
     .catch((err: unknown) => {
       // Let the next caller try again, for example after a dropped connection.
       loading = undefined;
       throw err;
     });
   return loading;
+}
+
+/**
+ * The blocks once a load has finished on this page, else null: a view that
+ * shows them again starts from them, so it draws them in its first frame,
+ * and a panel that comes back, such as Monsters, opens on its whole list.
+ */
+export function loadedMonsters(): readonly SrdMonster[] | null {
+  return loaded;
 }
 
 /**

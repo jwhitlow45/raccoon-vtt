@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { loadMonsters, type SrdMonster } from "#shared/srd/monsters.ts";
+import { loadedMonsters, loadMonsters, type SrdMonster } from "#shared/srd/monsters.ts";
 import { srdIndex } from "./draft.ts";
 
 export type SrdList = {
@@ -18,9 +18,10 @@ export type SrdList = {
  * other finds them in memory.
  */
 export function useSrdMonsters(): SrdList {
-  const [list, setList] = useState<readonly SrdMonster[] | null>(null);
+  const [list, setList] = useState<readonly SrdMonster[] | null>(loadedMonsters);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
+    if (loadedMonsters()) return;
     let live = true;
     loadMonsters().then(
       (monsters) => live && setList(monsters),
