@@ -349,6 +349,27 @@ describe("preview to template", () => {
     assert.equal(d.yaw, 90);
     assert.equal(d.includeOrigin, false);
   });
+
+  test("off, a shape change, then on comes back from the same creature (docs/design-v1-area-from-character.md 3.4)", () => {
+    // From off: no caster, but the creature to turn on again.
+    const off = draft({ shape: "cone", point: { x: 4, y: 4, z: 0 }, lastCaster: "thorn" });
+    const line = withShape(off, "line");
+    assert.equal(line.lastCaster, "thorn");
+    assert.equal(line.casterId, undefined);
+    assert.equal(withShape(line, "sphere").lastCaster, "thorn");
+    assert.equal(withShape(draft({ shape: "cone" }), "line").lastCaster, undefined);
+  });
+
+  test("a shape change from a target emanation starts from its caster, not the target", () => {
+    const d = withShape(draft({ shape: "emanation", targetsOther: true, fromId: "goblin", casterId: "thorn" }), "cone");
+    assert.equal(d.fromId, "thorn");
+    assert.equal(d.casterId, "thorn");
+  });
+
+  test("a copy keeps the original's caster as the one to cast from again", () => {
+    const t = { id: "a", rev: 1, sceneId: "s", shape: "sphere", size: 20, origin: { x: 5, y: 5, z: 0 }, yaw: 0, includeOrigin: true, color: "#fff", ownerId: "m", visibility: "all", casterId: "goblin" } as AreaTemplate;
+    assert.equal(draftFromTemplate(t, "b", { goblin: tok("goblin") }, 5).lastCaster, "goblin");
+  });
 });
 
 describe("editing placed templates", () => {

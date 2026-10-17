@@ -65,6 +65,12 @@ export type AreaDraft = {
   fromId?: string;
   /** The caster, recorded on the template. Cones, lines and cubes use `fromId` instead. */
   casterId?: string;
+  /**
+   * The creature the area was last cast from, kept once its caster is
+   * dropped, so the From control can offer to cast from it again
+   * (docs/design-v1-area-from-character.md 3.1).
+   */
+  lastCaster?: string;
   /** An emanation around a token moves with it. */
   attached: boolean;
   /**
@@ -158,14 +164,20 @@ export function newDraft(id: string, shape: AreaShape, color: string): AreaDraft
   };
 }
 
-/** A shape change keeps the placement and the aim, and resets what only made sense for the old shape. */
+/**
+ * A shape change keeps the placement, the aim and the caster, and resets
+ * what only made sense for the old shape. A new shape never surrounds a
+ * target, so one leaving Ice Knife starts from its caster where it has
+ * one, not from the goblin it surrounded.
+ */
 export function withShape(d: AreaDraft, shape: AreaShape): AreaDraft {
   if (d.shape === shape) return d;
   const fresh = newDraft(d.id, shape, d.color);
-  return {
+  const origin = d.targetsOther ? (d.casterId ?? d.fromId) : (d.fromId ?? d.casterId);
+  const next: AreaDraft = {
     ...fresh,
     point: d.point,
-    fromId: usesFrom(shape) ? (d.fromId ?? d.casterId) : undefined,
+    fromId: usesFrom(shape) ? origin : undefined,
     casterId: d.casterId ?? d.fromId,
     yaw: d.yaw,
     pitch: canPitch(shape) ? d.pitch : 0,
@@ -173,6 +185,8 @@ export function withShape(d: AreaDraft, shape: AreaShape): AreaDraft {
     triggers: d.triggers,
     oncePerTurn: d.oncePerTurn,
   };
+  if (d.lastCaster !== undefined) next.lastCaster = d.lastCaster;
+  return next;
 }
 
 // ------------------------------------------------------------ angles
@@ -465,6 +479,7 @@ export function draftFromTemplate(t: AreaTemplate, id: string, tokens: AreaToken
   d.oncePerTurn = t.oncePerTurn === true;
   if (t.spell) d.spell = t.spell;
   const caster = t.casterId ?? undefined;
+  if (caster) d.lastCaster = caster;
   if (t.attachedTo && tokens[t.attachedTo]) {
     d.fromId = t.attachedTo;
     d.attached = true;

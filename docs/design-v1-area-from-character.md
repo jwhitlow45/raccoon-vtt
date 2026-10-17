@@ -85,7 +85,7 @@ The DM has no saved choice: the DM's areas start with none, as today, for today'
 - **`fromId` was it, and it was not the caster** (Ice Knife's target). The target goes, the caster stays, and the line asks for a new target, as a fresh Ice Knife's does (`placementHint`, `presets.ts:98-104`).
 - **Only `lastCaster` was it** (the caster already turned off). Only the offer to turn it back on goes. The area keeps its place and shape: Ice Knife on a goblin with From off still surrounds the goblin when Thorn is deleted.
 
-The control shows off, or disabled where you have no creature left here. Nothing stands in for the gone creature.
+Where the active caster is cleared, the control shows off, or disabled where you have no creature left here. Where only Ice Knife's target went, From stays on with its caster. Nothing stands in for the gone creature.
 
 A reload starts again from step 3, which is right for every player with one character, so no device storage is added (the tool options design adds none either). The DM's "View as a player" page keeps its own.
 

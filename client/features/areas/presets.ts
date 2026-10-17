@@ -56,14 +56,32 @@ function surroundsTarget(spell: AreaSpell): boolean {
   return spell.shape === "emanation" && !spell.fromCaster;
 }
 
+/** A cube spell placed by its center at a point, such as Entangle, rather than cast from the caster's edge (Thunderwave). */
+function cubeAtPoint(spell: AreaSpell): boolean {
+  return spell.shape === "cube" && !spell.fromCaster;
+}
+
 /**
- * A draft for a spell. It keeps the draft's id, color, aim and any point
- * already tapped, and casts from `casterId` when the spell starts from a
- * token and one is known. Without one, the tool asks for a tap.
+ * Whether a draft is a cube spell placed at a point that no token's edge
+ * holds yet: a caster only records who cast it, and never moves it to the
+ * caster's edge. A cube with no spell, or one already cast from an edge,
+ * is not.
+ */
+export function placedAtPoint(d: Pick<AreaDraft, "shape" | "spell" | "fromId">): boolean {
+  if (d.shape !== "cube" || d.fromId !== undefined || d.spell === undefined) return false;
+  const spell = AREA_SPELLS.find((s) => s.name === d.spell);
+  return spell !== undefined && cubeAtPoint(spell);
+}
+
+/**
+ * A draft for a spell. It keeps the draft's id, color, aim, any point
+ * already tapped and the creature it was last cast from, and casts from
+ * `casterId` when the spell starts from a token and one is known. Without
+ * one, the tool asks for a tap.
  */
 export function presetDraft(spell: AreaSpell, prev: AreaDraft, casterId: string | undefined): AreaDraft {
   const target = surroundsTarget(spell);
-  const fromToken = usesFrom(spell.shape) && !target && !(spell.shape === "cube" && !spell.fromCaster);
+  const fromToken = usesFrom(spell.shape) && !target && !cubeAtPoint(spell);
   const draft: AreaDraft = {
     id: prev.id,
     shape: spell.shape,
@@ -87,6 +105,8 @@ export function presetDraft(spell: AreaSpell, prev: AreaDraft, casterId: string 
   };
   if (fromToken && casterId) draft.fromId = casterId;
   if (casterId) draft.casterId = casterId;
+  const last = casterId ?? prev.lastCaster;
+  if (last !== undefined) draft.lastCaster = last;
   if (target && spell.target) draft.targetName = spell.target;
   if (spell.note) draft.note = spell.note;
   const range = rangeFeet(spell.range);
@@ -94,10 +114,16 @@ export function presetDraft(spell: AreaSpell, prev: AreaDraft, casterId: string 
   return draft;
 }
 
-/** What the tool says while a draft has nowhere to be yet. */
-export function placementHint(d: AreaDraft): string {
+/**
+ * What the tool says while a draft has nowhere to be yet. `yours` says the
+ * caster is one of the viewer's creatures, so a tap on a creature centers a
+ * cube placed at a point there rather than casting from it
+ * (docs/design-v1-area-from-character.md 3.5).
+ */
+export function placementHint(d: AreaDraft, yours = false): string {
   if (d.targetsOther) return `Tap the ${d.targetName ?? "target"}.`;
   if (d.shape === "sphere" || d.shape === "cylinder") return "Tap where it goes.";
+  if (d.shape === "cube" && !d.fromId && yours && d.casterId) return "Tap the middle of the square, or a creature to center it there.";
   if (d.shape === "cube" && !d.fromId) return "Tap a token to cast from it, or tap the middle of the square.";
   if (d.shape === "emanation") return "Tap the token it surrounds, or a point on the map.";
   return "Tap the caster, or a point on the map.";
