@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type PcDice, type PcRoll, type PcStats, type SkillKey } from "#shared/model.ts";
 import { MAX_PC_DICE_PARTS, MAX_PC_ROLLS, type CharacterPatch } from "#shared/protocol.ts";
@@ -538,6 +538,8 @@ function ReviewStep(props: { review: Review; onToggle(key: AlsoKey): void }) {
   );
 }
 
+const HIDDEN: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
+
 type StatsProps = { stats: PcStats; level: number | undefined; setStats(update: (stats: PcStats) => PcStats): void };
 
 /** A group of fields under a section label. */
@@ -657,7 +659,12 @@ function Abilities(props: StatsProps) {
               <>
                 <IntInput label={`${ABILITY_NAMES[a]} score`} value={stats.abilities[a]} min={1} max={30} onChange={(n) => setStats((s) => ({ ...s, abilities: { ...s.abilities, [a]: n ?? 10 } }))} width={64} />
                 <Checkbox
-                  label="Proficient"
+                  // Six of these sit in a column, so each says which save it is to a screen reader.
+                  label={
+                    <>
+                      Proficient<span style={HIDDEN}>{` in ${ABILITY_NAMES[a]} saves`}</span>
+                    </>
+                  }
                   checked={proficient}
                   onChange={(on) => setStats((s) => ({ ...s, saves: on ? ABILITY_KEYS.filter((k) => k === a || s.saves.includes(k)) : s.saves.filter((k) => k !== a) }))}
                 />
