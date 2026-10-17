@@ -407,7 +407,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     await step.getByRole("textbox", { name: "Max HP" }).press("Tab");
     await step.getByText("Hoot is unhurt, so it stays at full HP: 7 of 7.").waitFor();
     // Shrinking needs no room, so the Size line says nothing more.
-    await step.getByText("Size Tiny, now Small.", { exact: true }).waitFor();
+    await step.getByText("Size Tiny, now Small", { exact: true }).waitFor();
     const at = { x: companionOf("Hoot")!.x, y: companionOf("Hoot")!.y };
     await step.getByRole("button", { name: "Attach", exact: true }).click();
     await step.waitFor({ state: "detached" });
@@ -583,7 +583,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
 
     // The DM's attach in the same corridor grows at the base spot, unchecked.
     step = await attachDireWolf(dm);
-    await step.getByText("Size Large, now Small.", { exact: true }).waitFor();
+    await step.getByText("Size Large, now Small", { exact: true }).waitFor();
     await step.getByRole("button", { name: "Attach", exact: true }).click();
     await step.waitFor({ state: "detached" });
     await waitFor("Hoot Large in the corridor", () => {

@@ -280,8 +280,9 @@ export function sizePlan(input: {
   }
   const answer = resizePatch(input.view, token, { size }, role, input.growths);
   if ("refused" in answer) return { kind: "kept", line: `${head}${now}. ${answer.refused.replace(/\.$/, "")}: ${token.name} keeps its size.` };
-  const shift = answer.shifted && !dm ? " It moves a little to clear the wall." : "";
-  return { kind: "resize", line: `${head}${now}.${shift}`, patch: answer.patch, growths: answer.growths };
+  // Alone it reads as the number lines above it do, "AC 13, now 11", with no full stop. A sentence after it takes one.
+  const line = answer.shifted && !dm ? `${head}${now}. It moves a little to clear the wall.` : `${head}${now}`;
+  return { kind: "resize", line, patch: answer.patch, growths: answer.growths };
 }
 
 /**

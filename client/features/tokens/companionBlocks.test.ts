@@ -216,7 +216,7 @@ describe("the attach's size, through the token window's resize (docs/design-v1-c
     assert.deepEqual(plan(scene(), { size: "small" }), { kind: "none" });
     const open = plan(scene());
     assert.equal(open.kind, "resize");
-    assert.equal(open.kind === "resize" && open.line, "Size Large, now Small.");
+    assert.equal(open.kind === "resize" && open.line, "Size Large, now Small", "no full stop alone, as the number lines above it");
     const walled = plan(scene(RIGHT));
     assert.ok(walled.kind === "resize");
     assert.equal(walled.line, "Size Large, now Small. It moves a little to clear the wall.");
@@ -230,7 +230,7 @@ describe("the attach's size, through the token window's resize (docs/design-v1-c
   test("the DM's line shows no check, and a locked companion keeps its size for its players with the lock's line", () => {
     const dm = plan(scene(corridor()), { role: "dm", owner: false });
     assert.ok(dm.kind === "resize");
-    assert.equal(dm.line, "Size Large, now Small.");
+    assert.equal(dm.line, "Size Large, now Small");
     assert.deepEqual(plan(scene({}, { locked: true })), { kind: "kept", line: "Size Large: Hoot is locked, so its size stays. Ask the DM." });
     assert.equal(plan(scene({}, { locked: true }), { role: "dm", owner: false }).kind, "resize", "the DM's lock never stops the DM");
   });
