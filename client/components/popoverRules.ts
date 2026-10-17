@@ -51,6 +51,37 @@ export type CloseReason =
   /** Its consumer closed it for a change of state: a tool change, a sheet opening, a scene change. */
   | "state";
 
+/**
+ * Which closes the person made: a key, a press, a pick, focus moving on,
+ * another popover opening. The others are its consumer's own (a change of
+ * state) or its anchor leaving. Every reason is listed, so a new one must
+ * say which it is.
+ */
+const BY_PERSON: Readonly<Record<CloseReason, boolean>> = {
+  anchor: true,
+  press: true,
+  map: true,
+  escape: true,
+  back: true,
+  tab: true,
+  shiftTab: true,
+  pick: true,
+  focus: true,
+  replaced: true,
+  gone: false,
+  state: false,
+};
+
+/**
+ * Whether the person dismissed the popover. A consumer that opens one by
+ * itself, as the spell results open while their field has focus and
+ * text, keeps it closed after a dismissal until the person asks again,
+ * or the same state would open it at once.
+ */
+export function dismissedBy(reason: CloseReason): boolean {
+  return BY_PERSON[reason];
+}
+
 /** Where focus is as a popover closes, against it and its anchor. "page" is no element: the body, or nothing. */
 export type FocusAt = "inside" | "anchor" | "page" | "outside";
 

@@ -1066,7 +1066,7 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await reloadAt(dm, 1);
   });
 
-  test("4b. dismissed spell results stay closed until the words change or the field is pressed", async () => {
+  test("4b. dismissed spell results stay closed until the words change, the field is pressed or Down asks", async () => {
     await reloadAt(dm, 1);
     await view(dm, dmCdp, SIZES[1]!);
     await selectTool(dm, "a");
@@ -1097,6 +1097,28 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await results.waitFor();
     await dm.goBack();
     await stayClosed("Back");
+    // Shift+Tab from the first result puts focus back on the field and leaves them closed.
+    await dm.keyboard.press("ArrowDown");
+    await results.waitFor();
+    await results.getByRole("button").first().focus();
+    await dm.keyboard.press("Shift+Tab");
+    await stayClosed("Shift+Tab from a result");
+    assert.equal(await field.evaluate((e) => e === e.ownerDocument.activeElement), true, "Shift+Tab put focus on the field");
+    // Tab out past the last result, then back to the field: still closed.
+    await dm.keyboard.press("ArrowDown");
+    await results.waitFor();
+    await results.getByRole("button").last().focus();
+    await dm.keyboard.press("Tab");
+    await stayClosed("Tab out");
+    await field.focus();
+    await stayClosed("focus back after Tab out");
+    // A press outside, on the top bar's room name, then focus back by key: still closed.
+    await dm.keyboard.press("ArrowDown");
+    await results.waitFor();
+    await dm.locator("header h1").first().tap();
+    await stayClosed("a press outside");
+    await field.focus();
+    await stayClosed("focus back after a press outside");
     // A press on the field asks for them.
     await field.tap();
     await results.waitFor();

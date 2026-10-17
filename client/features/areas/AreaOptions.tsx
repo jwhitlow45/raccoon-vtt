@@ -5,7 +5,8 @@ import { AREA_MAX_FT, AREA_MIN_FT, canPitch, emanationFootprint, MAX_PITCH, pitc
 import { boxDistanceFt, pointCellBox, tokenCellBox } from "#shared/rules/distance.ts";
 import { displayName } from "../../lib/scene.ts";
 import { Icon, type IconName } from "../../components/Icon.tsx";
-import { Popover, usePopover, type CloseReason } from "../../components/Popover.tsx";
+import { Popover, usePopover } from "../../components/Popover.tsx";
+import { dismissedBy } from "../../components/popoverRules.ts";
 import { MEMBER_COLORS, theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import {
@@ -128,19 +129,18 @@ function inAreaLine(props: Parameters<typeof InArea>[0]): StripLine {
   return { tone: "reading", content: <InArea {...props} /> };
 }
 
-/** Closes that dismiss the spell results, as against focus moving on, which a return to the field undoes. */
-const SPELL_DISMISSALS: ReadonlySet<CloseReason> = new Set(["escape", "back", "press", "map"]);
-
 /**
  * The spell search. In the row it is a flexible field whose matches show
  * in a "Spells" popover anchored to it while it has focus and text. In
  * the shape chip's popover, or in ⋯, they show under it. Enter applies
  * the first match.
  *
- * Escape, Back or a press elsewhere dismisses the results, and they stay
- * closed while the field keeps its focus and its words, until the words
- * change, the field is pressed or Down asks for them. Otherwise the
- * focused field with text would open them again at once.
+ * Any close the person makes (Escape, Back, Tab or Shift+Tab out, a
+ * press elsewhere, components/popoverRules.ts dismissedBy) dismisses the
+ * results, and they stay closed while the field keeps its focus and its
+ * words, until the words change, the field is pressed or Down asks for
+ * them. Otherwise the focused field with text would open them again at
+ * once.
  */
 function SpellField(props: { env: AreaEnv; st: AreaToolState; base: () => AreaDraft }) {
   const { env, st } = props;
@@ -150,7 +150,7 @@ function SpellField(props: { env: AreaEnv; st: AreaToolState; base: () => AreaDr
   const results = usePopover({
     kind: "dialog",
     onClose: (reason) => {
-      if (SPELL_DISMISSALS.has(reason)) setDismissed(true);
+      if (dismissedBy(reason)) setDismissed(true);
     },
   });
   const [focused, setFocused] = useState(false);

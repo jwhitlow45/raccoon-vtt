@@ -4,6 +4,7 @@ import { mousePans } from "../lib/gestures.ts";
 import { RoomScope } from "../state/scope.ts";
 import { chromeRect, needsPlace, popoverPlace, type PlaceInput, type Rect } from "./popoverPlace.ts";
 import {
+  dismissedBy,
   escapeCloses,
   focusAfterLeave,
   focusMoveCloses,
@@ -180,6 +181,13 @@ describe("one open popover in the room", () => {
     dm.open(entry("setup", closes, dm));
     preview.open(entry("more", closes, preview));
     assert.deepEqual([dm.current()?.key, preview.current()?.key, closes], ["setup", "more", []]);
+  });
+});
+
+describe("a dismissal", () => {
+  test("is every close the person makes, and neither the consumer's own nor the anchor leaving", () => {
+    for (const reason of ["anchor", "press", "map", "escape", "back", "tab", "shiftTab", "pick", "focus", "replaced"] as const) assert.equal(dismissedBy(reason), true, reason);
+    for (const reason of ["gone", "state"] as const) assert.equal(dismissedBy(reason), false, reason);
   });
 });
 

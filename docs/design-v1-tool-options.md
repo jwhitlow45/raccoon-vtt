@@ -294,6 +294,7 @@ The base's rules (7.1), and for the tool popovers, Setup and Tools:
 - **Closes it, and acts as usual**: a press anywhere else outside it (7.1).
 - **Closes it, by state**: a tool change (a key, a tile, a panel), tucking, a phone sheet or the list of panels opening (which hides the options, as today), any modal dialog opening (the stamp picker, a handout, the very short sheet, the alerts over the screen), the scene changing, the role changing, and its anchor leaving the row for any reason but the hold rules of 6.4.
 - **A rotation or resize** places it again at its anchor. If the anchor no longer stands anywhere (a rotation into the pair takes Setup away), it closes.
+- **A popover that opens by itself**, as the spell results open while their field has focus and text (9.3), stays closed after any close the person makes (a key, Tab or Shift+Tab out, a press, a pick, focus moving on, another popover opening) until the person asks again: new words, a press on the field, or Down. Only its own state closing it, or its anchor leaving, is no dismissal. The base owns that list (`dismissedBy`), so no consumer keeps a copy.
 
 ### 7.5 Focus, Escape and Back
 
