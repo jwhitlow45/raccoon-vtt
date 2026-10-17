@@ -1299,8 +1299,9 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
       await region.getByRole("button", { name: "Close Panels" }).tap();
       return items;
     };
-    assert.deepEqual(await list(phone), ["# In play", "Token", "Initiative", "Party", "Log", "Journal", "Areas", "DM", "Scenes", "# Prepare", "Monsters", "Encounters", "Characters", "Outliner", "Library", "---", "Menu"]);
-    assert.deepEqual(await list(player), ["Token", "Initiative", "Log", "Journal", "Areas", "Characters", "Library", "Menu"]);
+    // Dice comes before Log among the panels (docs/design-v1-dice.md 8.1).
+    assert.deepEqual(await list(phone), ["# In play", "Token", "Initiative", "Party", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "# Prepare", "Monsters", "Encounters", "Characters", "Outliner", "Library", "---", "Menu"]);
+    assert.deepEqual(await list(player), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Characters", "Library", "Menu"]);
   });
 
   // ------------------------------------------------ the bar dock review's follow-ups in the notices and modal layers
@@ -1378,7 +1379,8 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
   test("5. at a computer, Hide panels and Panels hide and show the side panel, and focus follows", async () => {
     const side = sidePanel(desk);
     const map = desk.locator(".konvajs-content").first();
-    await desk.getByRole("tab", { name: /^Log/ }).click();
+    // The Dice tab took the Log's place in the row, so the Log may stand behind More (docs/design-v1-dice.md 8.1).
+    await openSideTab(desk, "Log");
     await desk.getByLabel("Message", { exact: true }).fill("Half a thought");
     const before = (await box(map)).width;
     await desk.getByRole("button", { name: "Hide panels" }).click();
@@ -1415,7 +1417,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
 
   test("5. S hides from a focused tab and shows from Panels, and a reload keeps the choice", async () => {
     const side = sidePanel(desk);
-    await desk.getByRole("tab", { name: /^Log/ }).focus();
+    await desk.getByRole("tab", { name: /^Log/ }).or(desk.getByRole("tab", { name: /^More/ })).first().focus();
     await desk.keyboard.press("s");
     await side.waitFor({ state: "hidden" });
     assert.deepEqual(await focused(desk), { tag: "button", role: null, name: "Panels" });
