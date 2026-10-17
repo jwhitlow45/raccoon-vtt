@@ -408,6 +408,8 @@ Swept as classes before reporting:
 
 ## 12. Build plan
 
+Built in wave 7. Names that differ from this text: the pick type is `RollPick` (TypeScript owns `Pick`), Send's draft path is `draftOp` (`draftInput` then `askOp`), and the save-ends request's life is one sweep, `endSaves` in `shared/reducer/rolls.ts`, which `applyOp` runs after every op.
+
 One builder, in this order:
 
 1. `fix(rolls): each choice in request a roll is one whole roll` (`Pick`, `choose`, `draftTest`, the three-row picker, two removable choices, the six-across rule, the picker's randomized test, `tools` and `rolls` e2e). Needs nothing from wave 7, so it can ship ahead of it.
