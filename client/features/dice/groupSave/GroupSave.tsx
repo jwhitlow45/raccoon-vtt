@@ -18,7 +18,7 @@ import { theme } from "../../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { usePanelHeader } from "../../panels.ts";
 import { EffectPicker } from "../../tokens/EffectsSection.tsx";
-import { SaveEndsFields, saveEndsForm, type SaveEndsForm } from "../../tokens/SaveEndsFields.tsx";
+import { SaveEndsFields, type SaveEndsForm } from "../../tokens/SaveEndsFields.tsx";
 import { FieldRow, Note, NumberField, Select, Stepper } from "../../tokens/ui.tsx";
 import { creatureRolls } from "../creature.ts";
 import { rollsOf } from "../logic.ts";
@@ -347,7 +347,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
             onClick={() => {
               const casterId = view.templates[(page.source as { templateId: string }).templateId]?.casterId;
               const filled = actionFill(dice, named, { key: casterId ? `t:${casterId}` : "", ...(casterId ? { tokenId: casterId } : {}) });
-              if (filled) update({ ...pageRef.current, test: filled.test, dc: filled.dc, spell: false, fill: filled.fill, outcome: { ...pageRef.current.outcome, ...filled.outcome } });
+              if (filled) update({ ...pageRef.current, test: filled.test, dc: filled.dc, spell: filled.spell, fill: filled.fill, outcome: { ...pageRef.current.outcome, ...filled.outcome } });
             }}
           >
             {`Fill from ${named.name}`}
@@ -612,7 +612,9 @@ function OutcomePanel(props: {
 }) {
   const { page } = props;
   const theirs = useMemo(() => othersDamage(props.view, props.me, page.fill?.name), [props.view.log, props.me, page.fill?.name]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [save, setSave] = useState<SaveEndsForm>(() => saveEndsForm(page.outcome.saveEnds ? { ...page.outcome.saveEnds } : undefined, { ability: page.test.kind === "none" ? "wis" : page.test.ability, dc: page.dc }));
+  // Read from the page each render, so the form follows a fill, a DC typed later and a reload, never a copy taken once.
+  const saveEnds = page.outcome.saveEnds;
+  const save: SaveEndsForm = { on: saveEnds !== null, ability: saveEnds?.ability ?? (page.test.kind === "none" ? "wis" : page.test.ability), dc: saveEnds?.dc ?? null, spell: page.spell };
   const frozen = page.phase === "applying" || page.phase === "applied";
   const setOutcome = (patch: Partial<Page["outcome"]>) => props.onChange({ ...page, outcome: { ...page.outcome, ...patch } });
   const damageState = page.damage;
@@ -729,13 +731,7 @@ function OutcomePanel(props: {
                 <NumberField label="Rounds" value={page.outcome.lasts.rounds} min={1} max={1000} onCommit={(n) => n !== null && setOutcome({ lasts: { ...page.outcome.lasts, rounds: n } })} />
               </FieldRow>
             ) : null}
-            <SaveEndsFields
-              form={save}
-              onChange={(f) => {
-                setSave(f);
-                setOutcome({ saveEnds: f.on && f.dc !== null ? { ability: f.ability, dc: f.dc } : null });
-              }}
-            />
+            <SaveEndsFields form={save} follows={{ dc: page.dc }} onChange={(f) => setOutcome({ saveEnds: f.on ? { ability: f.ability, dc: f.dc } : null })} />
           </>
         ) : null}
       </div>

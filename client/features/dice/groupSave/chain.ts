@@ -55,7 +55,8 @@ export type OutcomeForm = {
   conditions: string[];
   /** The conditions' end, as DurationFields keeps it, and the save that ends them. */
   lasts: { mode: "none" | "turnStart" | "turnEnd" | "rounds"; rounds: number; anchor: "own" | string };
-  saveEnds: { ability: "str" | "dex" | "con" | "int" | "wis" | "cha"; dc: number } | null;
+  /** `dc` null is the page's DC, as a repeated save is against the first one's, read when Apply builds its plan. */
+  saveEnds: { ability: "str" | "dex" | "con" | "int" | "wis" | "cha"; dc: number | null } | null;
   /** A spell's slot level, where it scales. */
   slot?: number;
 };

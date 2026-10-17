@@ -53,6 +53,18 @@ export function amountsOf(page: Page, fillType?: DamageType): PartAmount[] | nul
   return partAmounts(parsed.parts, page.damage?.state === "committed" ? (page.damage.amounts ?? []) : []);
 }
 
+/** The DC of the save that ends the conditions: the DM's own, else the page's, null while neither is set. */
+export function saveEndsDc(page: Page): number | null {
+  return page.outcome.saveEnds ? (page.outcome.saveEnds.dc ?? page.dc) : null;
+}
+
+/** The save a failed row's conditions carry, or undefined for none. */
+function saveOf(page: Page): NonNullable<Effect["save"]> | undefined {
+  const dc = saveEndsDc(page);
+  if (!page.outcome.saveEnds || dc === null) return undefined;
+  return { ability: page.outcome.saveEnds.ability, dc, ...(page.spell ? { spell: true as const } : {}) };
+}
+
 /** The conditions' end as a duration input on one creature (5.4): its own turn, or a row of the fight. */
 export function durationFor(page: Page, target: ActorTarget): DurationInput | undefined {
   const { lasts } = page.outcome;
@@ -95,7 +107,7 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
         continue;
       }
       const duration = durationFor(page, row.target);
-      const save = page.outcome.saveEnds ? { ability: page.outcome.saveEnds.ability, dc: page.outcome.saveEnds.dc, ...(page.spell ? { spell: true as const } : {}) } : undefined;
+      const save = saveOf(page);
       out.conditions.push({ key, ...(duration ? { duration } : {}), ...(save ? { save } : {}) });
     }
   }
@@ -108,6 +120,7 @@ export function applyWaits(page: Page, dice: DiceView, amounts: PartAmount[] | n
   if (page.rolls.some((r) => r.state === "sending") || page.dmRolls.some((r) => r.state === "sending")) return "Rolling…";
   if (page.damage?.state === "sending") return "Rolling…";
   if (amounts === null) return "Type the damage, or roll it";
+  if (page.outcome.saveEnds && page.outcome.conditions.length > 0 && saveEndsDc(page) === null) return "Give the save that ends it a DC";
   const live = page.rows.filter((r) => !stateOf(page, r).gone);
   const waiting = live.filter((r) => rowOutcome(page, r, dice, amounts).result === null).length;
   if (waiting > 0) return `${waiting} still waiting: mark them or wait`;

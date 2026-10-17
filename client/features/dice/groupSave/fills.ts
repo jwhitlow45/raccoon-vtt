@@ -59,7 +59,18 @@ function fromLine(name: string, test: GroupTest, dc: number | null, dcFrom: stri
   return `From ${name}: ${parts.join(", ")}.`;
 }
 
-/** A save action's fill (5.6): its ability, DC, parts that are not optional, half or none, conditions and how they end. */
+/** The character a token stands for, if any. */
+function characterOf(dice: DiceView, tokenId: string | undefined): Character | undefined {
+  const token = tokenId ? dice.view.tokens[tokenId] : undefined;
+  return token && "ref" in token.actor ? dice.view.characters[token.actor.ref] : undefined;
+}
+
+/**
+ * A save action's fill (5.6): its ability, DC, parts that are not optional,
+ * half or none, conditions and how they end, and "Against a spell" for a
+ * spell. The save that ends a condition takes the page's DC, as a repeated
+ * save does, unless the DM types its own.
+ */
 export function actionFill(dice: DiceView, named: NamedRoll, actor: { key: string; tokenId?: string }): FillInput | null {
   const save = named.save;
   if (!save) return null;
@@ -68,22 +79,24 @@ export function actionFill(dice: DiceView, named: NamedRoll, actor: { key: strin
   const conditions = named.conditions ?? [];
   const test: GroupTest = { kind: "save", ability: save.ability };
   const actingRow = actor.tokenId ? initiativeRow(dice.view, { tokenId: actor.tokenId }) : undefined;
+  // A character's spell arrives with its pass resolved by its stat block (pcNamedRolls): typed or read, else the SRD's rule by name. One rule, kept there.
+  const onPass = save.onPass;
   return {
     test,
     dc: save.dc,
-    spell: false,
+    spell: named.section === "spells",
     fill: {
       name: named.name,
-      from: fromLine(named.name, test, save.dc, null, damage, save.onPass, conditions),
+      from: fromLine(named.name, test, save.dc, null, damage, onPass, conditions),
       ...(named.recharge !== undefined ? { recharge: { holder: actor.key, key: named.key } } : {}),
       ...(parts[0]?.type ? { damageType: parts[0].type } : {}),
     },
     outcome: {
       damage,
-      onPass: save.onPass,
+      onPass,
       conditions,
       lasts: named.lasts ? { mode: named.lasts.at === "start" ? "turnStart" : "turnEnd", rounds: 10, anchor: named.lasts.of === "self" && actingRow ? actingRow.id : "own" } : { mode: "none", rounds: 10, anchor: "own" },
-      saveEnds: named.saveEnds ? { ability: save.ability, dc: save.dc } : null,
+      saveEnds: named.saveEnds ? { ability: save.ability, dc: null } : null,
     },
   };
 }
@@ -106,7 +119,7 @@ export function areaFill(dice: DiceView, template: Pick<AreaTemplate, "spell" | 
   const preset: AreaSpell | undefined = template.spell ? AREA_SPELLS.find((s) => s.name === template.spell) : undefined;
   if (!preset) return null;
   const caster = template.casterId ? dice.view.tokens[template.casterId] : undefined;
-  const casterChar = caster && "ref" in caster.actor ? dice.view.characters[caster.actor.ref] : undefined;
+  const casterChar = characterOf(dice, template.casterId);
   const numbers = caster ? creatureRolls(dice, { tokenId: caster.id })?.numbers : null;
   const own = ownSpell(casterChar, preset.name);
   const test: GroupTest = preset.noSave ? { kind: "none" } : preset.save ? { kind: "save", ability: own?.save?.ability ?? preset.save } : { kind: "save", ability: "dex" };
@@ -123,7 +136,8 @@ export function areaFill(dice: DiceView, template: Pick<AreaTemplate, "spell" | 
     parts = (preset.damage ?? []).map((p) => ({ formula: atSlot({ ...p, formula: times(p.formula, tier), perSlot: p.perSlot }, pick - level), type: p.type }));
   }
   const damage = partsTextOf(parts);
-  const onPass = own?.save?.onPass ?? preset.onPass ?? "none";
+  // The caster's own spell as its stat block resolves it, typed or read before the SRD's rule (pcNamedRolls). A caster without it takes the preset's.
+  const onPass = own?.save?.onPass ?? preset.onPass ?? "half";
   const conditions = preset.conditions ?? [];
   const casterRow = caster ? initiativeRow(dice.view, { tokenId: caster.id }) : undefined;
   return {
@@ -141,7 +155,7 @@ export function areaFill(dice: DiceView, template: Pick<AreaTemplate, "spell" | 
       conditions,
       ...(level > 0 && (preset.damage?.some((p) => p.perSlot) || own) ? { slot: pick } : {}),
       lasts: preset.lasts ? { mode: preset.lasts.at === "start" ? "turnStart" : "turnEnd", rounds: 10, anchor: preset.lasts.of === "self" && casterRow ? casterRow.id : "own" } : { mode: "none", rounds: 10, anchor: "own" },
-      saveEnds: preset.saveEnds && preset.save ? { ability: preset.save, dc: dc ?? 10 } : null,
+      saveEnds: preset.saveEnds && preset.save ? { ability: preset.save, dc: null } : null,
     },
   };
 }

@@ -38,8 +38,13 @@ export function saveEndsText(save: Pick<NonNullable<Effect["save"]>, "ability">)
 
 const ABILITY_OPTIONS = ABILITY_KEYS.map((key) => ({ value: key, label: ABILITY_NAMES[key] }));
 
-export function SaveEndsFields(props: { form: SaveEndsForm; onChange(form: SaveEndsForm): void }) {
-  const { form } = props;
+/**
+ * `follows` is the group save's (5.4): an empty DC there is the page's DC,
+ * which a repeated save takes, shown as the field's placeholder, and the
+ * page's own "Against a spell" covers the spell, so this form leaves it out.
+ */
+export function SaveEndsFields(props: { form: SaveEndsForm; onChange(form: SaveEndsForm): void; follows?: { dc: number | null } }) {
+  const { form, follows } = props;
   return (
     <div style={{ display: "grid", gap: theme.space(1) }}>
       <Checkbox
@@ -54,9 +59,22 @@ export function SaveEndsFields(props: { form: SaveEndsForm; onChange(form: SaveE
             <Select<AbilityKey> label="Save that ends it" value={form.ability} options={ABILITY_OPTIONS} onChange={(ability) => props.onChange({ ...form, ability })} />
           </FieldRow>
           <FieldRow label="DC">
-            <NumberField label="DC of the save that ends it" value={form.dc ?? undefined} min={LIMITS.rollDcMin} max={LIMITS.rollDcMax} nullable placeholder="15" onCommit={(dc) => props.onChange({ ...form, dc })} width={88} />
+            <NumberField
+              label="DC of the save that ends it"
+              value={form.dc ?? undefined}
+              min={LIMITS.rollDcMin}
+              max={LIMITS.rollDcMax}
+              nullable
+              placeholder={follows ? (follows.dc !== null ? String(follows.dc) : "DC") : "15"}
+              onCommit={(dc) => props.onChange({ ...form, dc })}
+              width={88}
+            />
           </FieldRow>
-          <Checkbox checked={form.spell} onChange={(spell) => props.onChange({ ...form, spell })} label="Against a spell" help="A creature with Magic Resistance makes it with advantage." />
+          {follows ? (
+            <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{form.dc === null ? "Left empty, it is the save's DC." : "Its own DC, not the save's."}</span>
+          ) : (
+            <Checkbox checked={form.spell} onChange={(spell) => props.onChange({ ...form, spell })} label="Against a spell" help="A creature with Magic Resistance makes it with advantage." />
+          )}
         </>
       ) : null}
     </div>
