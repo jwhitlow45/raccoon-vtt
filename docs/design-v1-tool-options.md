@@ -25,7 +25,7 @@ The handoff is the direction. These are the places this design changes it, each 
 
 | Handoff | This design | Why |
 |---|---|---|
-| The merged row falls back to Select and the last tool by the active tool's priority-1 widths (`renderVals`) | The fallback is decided by the screen and the role alone: the room the options get with the role's whole toolbar, against one floor, `MERGE_MIN` (4.1): the handoff's 240 px, raised to 256 so every player tool's priority-1 controls fit it | Decided per tool, picking Draw at 667 x 375 would have collapsed a player's five tools to two while picking the Ruler kept them: the toolbar would change under the finger with every tool |
+| The merged row falls back to Select and the last tool by the active tool's priority-1 widths (`renderVals`) | The fallback is decided by the screen and the role alone: the room the options get with the role's whole toolbar, against the role's floor (4.1): the handoff's 240 px, raised to 268 so every player tool's priority-1 controls fit it, and 301 for the DM | Decided per tool, picking Draw at 667 x 375 would have collapsed a player's five tools to two while picking the Ruler kept them: the toolbar would change under the finger with every tool |
 | Sideways screens either merge or fall back | A third outcome: where even Select and the last tool leave less than the floor (480 x 320 at 100% and 130%), the row stands above the full toolbar, as on an upright phone | 480 x 320 is in the project's reach sweep. Its pair would leave the options 174 px at 100% and 63 at 130% |
 | Desktop floats the row (section C) | A short sideways layout merges whatever its width, so a large phone held sideways at 100% (932 x 430, a wide layout) and a short computer window (1280 x 480) merge too | The rail served exactly these screens. A floating row there would take 59 px back from a map that had its whole height |
 | Controls that do not fit go to ⋯ | Before a priority-1 control goes to ⋯, controls with a compact form take it (a chip drops its words, a choice of two becomes a chip, a long label takes short words). Only then does a priority-1 control go to ⋯, and section 13.1 lists where | Real widths are wider than the mock's estimates. Without compact forms the stroke or Place would leave the row on narrow phones |
@@ -80,8 +80,8 @@ One pure function, `optionsArrangement` in a new `client/pages/optionsLayout.ts`
 1. **On a short sideways layout** (wider than tall and under 500 px tall), it tries, in order:
    - **merged**: the row stands in the toolbar's row, right of the role's whole toolbar (5.1), left of Panels.
    - **pair**: the same, beside only Select and the last tool used (5.2).
-   The first whose room is at least `MERGE_MIN`, 256 px, wins.
-2. **Otherwise**, or where neither leaves 256 px:
+   The first whose room is at least the role's floor wins: `MERGE_MIN`, 268 px, for a player, `MERGE_MIN_DM`, 301 px, for the DM.
+2. **Otherwise**, or where neither leaves that much:
    - **floating** on a wide layout: the row floats above the toolbar.
    - **stacked** on the phone layout: the row spans the map's width on top of the toolbar.
 
@@ -93,7 +93,7 @@ where `divider` is 5 when a divider stands among the buttons (1 px and its 4 px 
 
 In the stacked arrangement the room is `M − L − R − 16`. Floating, it is `min(640, M − L − R − 16) − 18`, the row's widest box less its padding and border.
 
-Why a floor and not the tool's own need: the arrangement then depends only on the screen, the interface size, the role, whether Draw shows for a player, and the side panel. Picking a tool never changes the arrangement, so no button moves under the finger that picked it (in the pair, the second button shows the new tool in the same place). The handoff's floor was 240. `MERGE_MIN` is 256: the widest player tool's priority-1 controls in their compact forms with ⋯ beside them, which is Draw's (its tool chip 89 px, keeping its words, 6.2, the color 44, the stroke's bar 66, their gaps and ⋯: 255). So every player tool's priority-1 controls fit, and the merged and pair arrangements always hold them inline (section 9 checks each, 14 tests it). No worked row of 4.3 moves between 240 and 256. A player meets a narrower room only in the stacked row of a 320 px phone at 130% (230 px), where Draw's stroke chip waits in ⋯ (13.1). A DM's tools hold theirs in every pair room a phone gives (301 px and up), with one exception listed in 13.1. The DM's narrower stacked rooms send a priority-1 control to ⋯ where they must, by the fit's own rule (6.3).
+Why a floor and not the tool's own need: the arrangement then depends only on the screen, the interface size, the role, whether Draw shows for a player, and the side panel. Picking a tool never changes the arrangement, so no button moves under the finger that picked it (in the pair, the second button shows the new tool in the same place). The handoff's floor was 240. `MERGE_MIN` is 268: the widest player tool's priority-1 controls in their compact forms with ⋯ beside them, which is Draw's, as the kit draws it (its tool chip 83.4 px at "Eraser", keeping its words, 6.2, the color chip 64, the stroke's bar 64, two 4 px gaps, and ⋯ with its gap 48: 267.4). `optionsLayout.test.ts` derives it from the kit's chip and the theme. The floor was 256 until the build review measured the chips as drawn. A player's merged room between the two now takes the pair, as at 844 x 390 at 115% (merged 260, the pair 428). So every player tool's priority-1 controls fit, and the merged and pair arrangements always hold them inline (section 9 checks each, 14 tests it). No worked row of 4.3 moves between 240 and 268. A player meets a narrower room only in the stacked rows of 320 x 568 and 480 x 320 at 130% (230 and 259 px), where Draw's stroke chip waits in ⋯ (13.1). A DM's tools hold theirs in every pair room a phone gives (301 px and up), with one exception listed in 13.1. So the DM's floor is `MERGE_MIN_DM`, 301: some sideways Android phones would merge a DM's whole toolbar in less (283 px at 800 x 360, where the builder's walls and doors sent its edge chip behind ⋯), and the DM takes the pair there, or the stacked row where the pair has less still (568 x 320 at 115%). The DM's narrower stacked rooms send a priority-1 control to ⋯ where they must, by the fit's own rule (6.3).
 
 ### 4.2 Each arrangement's shape
 
@@ -125,7 +125,7 @@ Insets as the reach and layout sweeps use them: 47 px at each side and 21 at the
 | 390 x 844, 320 x 568, 820 x 1180 | 100%, 130% | upright | stacked: 374, 304, 804 (284, 230, 615 at 130%) | the same |
 | 1280 x 800, 1180 x 820 | 100% | wide, not short | floating, 622 | floating, 622 |
 
-A DM's toolbar never merges whole on a phone: seven buttons leave under 256 px at every sideways phone size. That matches the handoff's frame 2d.
+A DM's toolbar never merges whole at the sizes of this table: seven buttons leave under 301 px at each. That matches the handoff's frame 2d. It merges only where they leave 301 px, as at 740 x 360 at 85% (354 px).
 
 ## 5. The toolbar
 
@@ -413,7 +413,7 @@ Line: today's hint by drawing tool, muted.
 
 **Eraser only** (a player not allowed to draw, `:341-355`): Undo 1, Clear mine 1. Line: today's hint.
 
-At 320 x 568 at 130% a player's Draw keeps its tool and color chips and sends its stroke chip behind ⋯, one tap away. That is a choice: the drawing tool chip keeps its words because Pen, Text and Eraser have no plain glyph (17.2), and that stacked 230 px row is the one room a player meets below `MERGE_MIN` (4.1). Every other player tool keeps its priority-1 controls inline there (13.1).
+At 320 x 568 at 130% a player's Draw keeps its tool and color chips and sends its stroke chip behind ⋯, one tap away. That is a choice: the drawing tool chip keeps its words because Pen, Text and Eraser have no plain glyph (17.2), and those stacked rows, 230 px there and 259 px at 480 x 320 at 130%, are the rooms a player meets below `MERGE_MIN` (4.1). Every other player tool keeps its priority-1 controls inline there (13.1).
 
 ### 9.5 Ping (`pings/PingTool.tsx:64-91`)
 
@@ -727,7 +727,7 @@ Insets as in 4.3. "Map" is the map's height between the top bar and what stands 
 | 667 x 375 | 100% | merged, 275 | pair, 455 | 262 (75) | A player's Draw shows its stroke chip as the bar alone here |
 | 667 x 375 | 130% (513 x 288) | pair, 301 | pair, 301 | 176 (32) | A DM's height stepper waits in ⋯ (9.9) |
 | 480 x 320 | 100% | stacked, 370 | stacked, 370 | 134 | The pair would leave 174 |
-| 480 x 320 | 130% (369 x 246) | stacked, 259 | stacked, 259 | 60, 12 with the band | The row and line stand over Reconnecting where they meet it. With the band the line hides from sight (8). Popovers rise over the top bars where under one row is left (7.3). Tuck gives back 53 px |
+| 480 x 320 | 130% (369 x 246) | stacked, 259 | stacked, 259 | 60, 12 with the band | Under `MERGE_MIN`: a player's Draw sends its stroke chip behind ⋯, as at 320 x 568. The row and line stand over Reconnecting where they meet it. With the band the line hides from sight (8). Popovers rise over the top bars where under one row is left (7.3). Tuck gives back 53 px |
 | 932 x 430, side panel hidden | 100% (wide) | merged, 422 | pair, 602 | 296 | |
 | 932 x 430, side panel shown | 100% | pair, 366 | pair, 366 | 296 | No Panels in the toolbar while the side panel shows |
 | 932 x 430 | 130% (717 x 331) | pair, 387 | pair, 387 | 197 | |
@@ -798,7 +798,7 @@ Swept against the matrix before commit. What it found, each fixed as a class:
 - **Radios duplicated by measuring**: the measuring mode (6.2).
 - **Keys and the hidden tools**: `useShortcuts` reads `toolsFor`, not the buttons (5.5).
 - **A ⋯ that held what it had room for**: with ⋯'s room always kept, the DM's Ruler at 343 px put its kept rulers behind ⋯. The fit now tries the row without ⋯ first (6.3 step 1). Multi-select's words became flexible text (9.1), so its count never waits behind ⋯ at any width.
-- **Priority-1 sets against the floor**: each player tool's was summed in compact forms with ⋯, each DM tool's against the narrowest pair room (301 px). Draw's widest set (255 px, its tool chip keeping its words since Pen, Text and Eraser have no glyph) set `MERGE_MIN` at 256. Draw's Undo at priority 1 made it outgrow the floor too, so it stays at the handoff's 2, where it still shows inline at 374 and 358 px. Draw's text Cancel went to 2 and the field's minimum to 96 px for the same reason. The one DM exception left is recorded where it lives (9.9) and in 13.1.
+- **Priority-1 sets against the floor**: each player tool's was summed in compact forms with ⋯, each DM tool's against the narrowest pair room (301 px). Draw's widest set (267.4 px as the kit draws it, its tool chip keeping its words since Pen, Text and Eraser have no glyph) set `MERGE_MIN` at 268, first set at 256 from narrower chips than the kit drew. The DM's own floor, `MERGE_MIN_DM` at 301, came from the same review: some sideways Android phones merged a DM's whole toolbar under 301 px. Draw's Undo at priority 1 made it outgrow the floor too, so it stays at the handoff's 2, where it still shows inline at 374 and 358 px. Draw's text Cancel went to 2 and the field's minimum to 96 px for the same reason. The one DM exception left is recorded where it lives (9.9) and in 13.1.
 - **Short words that misled**: the blank token kind's "Monster" beside "Monster…" was dropped, and the kind keeps no compact form.
 - **Focus out of ⋯**: a dialog opened from inside ⋯ returns focus to the anchor once its opener is gone (7.5).
 - **Escape in a field**: the room's handler leaves fields alone, so the base takes Escape in the capture phase, in the popover's own field and in the field it hangs from, and leaves it to any other field (7.1).
@@ -812,7 +812,7 @@ Round 1 of the design review found these, each fixed as a class:
 - **A pressed state lost to `aria-expanded`**: the active tool keeps `aria-pressed`, with shown or tucked in its description, and the merged row's Tab order is an accepted exception (11).
 - **A popover beside the token's bar**: Setup can share the screen with the spanning bar and the docked window, and the press and Escape rules say what happens (7.5, 13.3).
 - **A tuck that hid a task's way forward**: the "options hidden" pill (5.4, 8, 10.2).
-- **Chip icons** by the project owner's answer (17.3): the glyph is added from the room left, so it never pushes a control behind ⋯, and a chip whose options do not all have a glyph keeps its words. Draw's tool chip therefore has no compact form, which set the floor at 256 (4.1).
+- **Chip icons** by the project owner's answer (17.3): the glyph is added from the room left, so it never pushes a control behind ⋯, and a chip whose options do not all have a glyph keeps its words. Draw's tool chip therefore has no compact form, which set the floor at 268 (4.1).
 - **Sheet rows in the wrong shape**: 11.1 is in the registry's own shape and sections, holds keys only by the project owner's later word, and no user text calls a popover a panel.
 - **Build order**: after the rename (15).
 
@@ -833,7 +833,7 @@ Unit tests, `node:test`:
   - Focus: a key open puts focus on the chosen item or the first (Up, a menu's last), a pointer open puts it on the anchor, also where the browser would not (Safari). Tab past a popover's last control, or in a menu, closes it and moves on as from the anchor. Shift+Tab before a popover's first control, or in a menu, closes it with focus on the anchor. A move to another element outside closes, focus falling to the page does not, and a focused control that leaves hands focus to the next one.
   - The map press as a state machine over pointer events: one pointer down then up closes at up, a second touch before the first lifts cancels the close for that gesture, one of two fingers lifting then the other keeps it open, a right, middle or Space press and the wheel never close, a press elsewhere closes at once. The tool is suppressed from the first down for every consumer, More included.
 - New `client/pages/optionsLayout.test.ts`:
-  - `optionsArrangement`: every row of 4.3, rooms of 255 and 256, heights of 499 and 500, a square layout, the side panel shown and hidden, labelled and icon-only buttons, a DM's grouped and wide toolbars, a player with and without Draw.
+  - `optionsArrangement`: every row of 4.3, a room one under the floor and one at it, the floor itself as the kit's chip and the theme give it, the DM's floor at the sizes it changes, heights of 499 and 500, a square layout, the side panel shown and hidden, labelled and icon-only buttons, a DM's grouped and wide toolbars, a player with and without Draw.
   - `fitRow`, each its own case:
     - Everything fits in full forms with no ⋯.
     - Everything fits with no ⋯ once compact forms are taken (the DM's Ruler at 343).
@@ -863,7 +863,8 @@ New `e2e/options.e2e.ts`, on E2E_PORT plus 15 (plus 12 to 14 went to other build
    - `data-rvtt-arrangement` equals 4.3's.
    - The row's controls stand on one line, and the row neither scrolls nor overflows (`scrollWidth <= clientWidth`).
    - Every slot of the state is reachable: inline and whole in reach (`wholeInReach`, nothing scrolled), or in ⋯ or its home popover, which opens with one tap, where it is whole in reach once the popover scrolls to it.
-   - Every priority-1 slot is inline in the merged and pair arrangements: always for a player, and for the DM except the height stepper where 9.9 says.
+   - Every priority-1 slot is inline in the merged and pair arrangements, and for a player in every room at or over the floor: always for a player, and for the DM except the height stepper where 9.9 says.
+   - The same checks at rooms just over the floor on phones the sizes above do not hold: a player at 844 x 390 at 115% (the pair) and 568 x 320 at 85% (merged, 276), a DM at 800 x 360 at 100% and 915 x 412 at 115% (the pair, under the DM's floor) and 740 x 360 at 85% (merged, 354).
    - The line stands above the row (or the toolbar), inside the map, and when cut its tap shows the whole text.
    - The map's height between the bars equals 13.1's, with no row height in the merged and pair arrangements.
 3. **Nothing moves under the finger.** A `requestAnimationFrame` log shows a tool's first frame already in its arrangement. Picking Eraser in the drawing tool popover leaves Undo's box where it was. The first tap on Clear build (in ⋯) or a stamp's Delete leaves its box. Keeping a ruler with Keep leaves Keep and Clear where they were. A popover's controls stay put while Area's reminders grow it.

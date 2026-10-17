@@ -19,10 +19,22 @@ export type Arrangement = "stacked" | "floating" | "merged" | "pair";
 /**
  * The least room the merged and pair arrangements give the options: the
  * widest player tool's priority-1 controls in their compact forms with ⋯
- * beside them, which is Draw's (its tool chip keeping its words, the
- * color, the stroke's bar, their gaps and ⋯: 255).
+ * beside them, which is Draw's. Its tool chip keeps its words (83.4 px at
+ * "Eraser"), then the color chip (64) and the stroke's bar (64), two 4 px
+ * gaps, and ⋯ with its gap (48): 267.4. optionsLayout.test.ts derives it
+ * from the kit's chip and the theme, so the two cannot drift apart.
  */
-export const MERGE_MIN = 256;
+export const MERGE_MIN = 268;
+
+/**
+ * The DM's floor. Every DM tool's priority-1 set was summed against the
+ * narrowest pair room a phone gives, 301 px at 667 x 375 at 130% (13.4),
+ * the height stepper aside (9.9). Some sideways Android phones merge a
+ * DM's whole toolbar in less (283 px at 800 x 360), where the builder's
+ * walls and doors sent its edge chip behind ⋯, so there the DM takes the
+ * pair, or the stacked row where the pair has less room still.
+ */
+export const MERGE_MIN_DM = 301;
 
 /** A toolbar button in the merged and pair arrangements: its short name under its icon, or the icon alone for a mouse from 900 px up. */
 export const TOOL_BUTTON_NAMED = 56;
@@ -72,6 +84,8 @@ export type ArrangementInput = {
   toolbar: ToolbarShape;
   /** Each tool's short name under its icon: every touch screen and the phone layout. A mouse from 900 px up shows icons alone. */
   named: boolean;
+  /** The DM's room, whose floor is MERGE_MIN_DM. */
+  dm: boolean;
 };
 
 export type OptionsPlace = {
@@ -112,17 +126,19 @@ export function mergedRoom(input: ArrangementInput, toolbar: ToolbarShape): numb
  * Where the options stand (4.1), from the layout alone, never from a
  * measurement. On a short sideways layout the row stands in the toolbar's
  * row beside the whole toolbar, else beside Select and the last tool, the
- * first whose room is at least MERGE_MIN. Otherwise, and where neither
- * leaves that much, it floats above a wide layout's toolbar or stacks on a
- * phone's. Decided by the screen and the role's toolbar, never by the
- * tool, so picking a tool never moves a button under the finger.
+ * first whose room is at least the role's floor (MERGE_MIN, MERGE_MIN_DM).
+ * Otherwise, and where neither leaves that much, it floats above a wide
+ * layout's toolbar or stacks on a phone's. Decided by the screen and the
+ * role, never by the tool, so picking a tool never moves a button under
+ * the finger.
  */
 export function optionsArrangement(input: ArrangementInput): OptionsPlace {
   if (shortSideways(input.width, input.height)) {
+    const floor = input.dm ? MERGE_MIN_DM : MERGE_MIN;
     const merged = mergedRoom(input, input.toolbar);
-    if (merged >= MERGE_MIN) return { arrangement: "merged", room: merged };
+    if (merged >= floor) return { arrangement: "merged", room: merged };
     const pair = mergedRoom(input, PAIR);
-    if (pair >= MERGE_MIN) return { arrangement: "pair", room: pair };
+    if (pair >= floor) return { arrangement: "pair", room: pair };
   }
   const across = mapWidthOf(input) - input.safeLeft - (input.sidePanel ? 0 : input.safeRight);
   if (input.width >= theme.layout.wideMinWidth) return { arrangement: "floating", room: Math.min(FLOAT_MAX, across - STACKED_PADDING) - FLOAT_PADDING };

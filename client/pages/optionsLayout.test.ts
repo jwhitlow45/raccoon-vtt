@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { theme } from "../lib/theme.ts";
 import {
   fitRow,
   FIRST_LAST_TOOL,
@@ -7,6 +8,7 @@ import {
   lastToolAfter,
   lastToolIn,
   MERGE_MIN,
+  MERGE_MIN_DM,
   mergedEdges,
   mergedRoom,
   MORE_ROOM,
@@ -31,7 +33,7 @@ const DM = ["select", "ruler", "area", "fog", "draw", "ping", "add-token", "pin"
 function at(w: number, h: number, scale: number, side: number, tools: readonly { id: string }[], extra: Partial<ArrangementInput> = {}): ArrangementInput {
   const width = w / scale;
   const wide = width >= 900;
-  return { width, height: h / scale, sidePanel: false, safeLeft: side, safeRight: side, toolbar: toolbarShape(tools, wide), named: true, ...extra };
+  return { width, height: h / scale, sidePanel: false, safeLeft: side, safeRight: side, toolbar: toolbarShape(tools, wide), named: true, dm: tools.some((t) => t.id === "build"), ...extra };
 }
 
 function placeOf(input: ArrangementInput): string {
@@ -84,14 +86,36 @@ describe("where the options stand (4.1, 4.3)", () => {
     assert.equal(merged(at(667, 375, 1.3, 0, PLAYER)), 121);
   });
 
-  test("a room of 255 falls back and one of 256 merges", () => {
-    // 844 x 390 for a player has 358: widen the left inset until the room is exactly 256, then one more px.
+  test("the floor is Draw's priority-1 set as the kit draws it", () => {
+    // A value chip (features/measure/controls.tsx chipLook): its 1 px borders, 12 px before its content, 6 px after, a 4 px gap and the 16 px caret.
+    const chip = (content: number) => 2 * theme.line.border + theme.space(3) + theme.space(1.5) + theme.space(1) + theme.icon.sm + content;
+    // "Eraser", the widest drawing tool's name, at 14 px weight 600 as Chrome draws it: the tool chip measures 83.4 in the dev room.
+    const eraser = 43.4;
+    const set = chip(eraser) + SLOT_GAP + chip(theme.layout.options.disk) + SLOT_GAP + chip(theme.icon.lg) + MORE_ROOM;
+    assert.equal(MERGE_MIN, Math.ceil(set));
+  });
+
+  test("the DM's floor is the narrowest pair room a phone gives: under it a DM takes the pair, or the stacked row where the pair has less", () => {
+    assert.equal(MERGE_MIN_DM, 301);
+    // Sideways Android phones whose whole DM toolbar would leave 283 and 279 px.
+    assert.equal(placeOf(at(800, 360, 1, 0, DM)), "pair, 588");
+    assert.equal(placeOf(at(915, 412, 1.15, 0, DM)), "pair, 584");
+    assert.equal(placeOf(at(740, 360, 0.85, 0, DM)), "merged, 354");
+    assert.equal(placeOf(at(667, 375, 1.3, 0, DM)), "pair, 301", "the narrowest pair room holds");
+    // A 568 px phone at 115%: the pair's 282 is under the DM's floor, not a player's.
+    assert.equal(placeOf(at(568, 320, 1.15, 0, DM)), "stacked, 478");
+    assert.equal(placeOf(at(568, 320, 1.15, 0, PLAYER)), "pair, 282");
+    assert.equal(placeOf(at(800, 360, 1, 0, PLAYER)), "merged, 408");
+  });
+
+  test("a room one under the floor falls back and one at the floor merges", () => {
+    // 844 x 390 for a player has 358: widen the left inset until the room is exactly the floor, then one more px.
     const base = at(844, 390, 1, 47, PLAYER);
     const exact = { ...base, safeLeft: base.safeLeft + (358 - MERGE_MIN) };
     assert.equal(optionsArrangement(exact).arrangement, "merged");
     assert.equal(optionsArrangement(exact).room, MERGE_MIN);
     const short = { ...exact, safeLeft: exact.safeLeft + 1 };
-    assert.equal(optionsArrangement(short).arrangement, "pair", "255 falls back to the pair, whose room is larger");
+    assert.equal(optionsArrangement(short).arrangement, "pair", "one under the floor falls back to the pair, whose room is larger");
   });
 
   test("a layout 499 tall merges and 500 does not, and a square one never does", () => {

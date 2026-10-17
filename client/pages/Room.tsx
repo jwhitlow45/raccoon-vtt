@@ -489,7 +489,7 @@ function RoomPage() {
   const mapWidth = mapWidthOf({ width, sidePanel: sideShown });
   const optionsDrawn = tool.Options !== undefined && optionsShown && !sheet && !pickerOpen;
   const named = !wide || touchFirst;
-  const arrangementInput = { width, height, sidePanel: sideShown, safeLeft: safe.left, safeRight: safe.right, toolbar: toolbarShape(tools, wide), named };
+  const arrangementInput = { width, height, sidePanel: sideShown, safeLeft: safe.left, safeRight: safe.right, toolbar: toolbarShape(tools, wide), named, dm: role === "dm" };
   const optionsPlaceNow = optionsArrangement(arrangementInput);
   const optionsEdges = mergedEdges(arrangementInput, optionsPlaceNow.arrangement === "pair" ? PAIR : arrangementInput.toolbar);
   /*

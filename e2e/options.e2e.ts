@@ -34,7 +34,7 @@ const assetDir = path.join(work, "assets");
 const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 
 type Insets = { top?: number; side?: number; bottom?: number };
-type Size = { width: number; height: number; insets: Insets };
+type Size = { width: number; height: number; insets: Insets; expect?: Partial<Record<Role, string>> };
 type Role = "dm" | "player";
 
 /** The sizes of 4.3, with the notch and home bar each holds that way up. */
@@ -48,6 +48,25 @@ const SIZES: Size[] = [
   { width: 1280, height: 800, insets: {} },
 ];
 const SCALES = [1, 1.3] as const;
+
+/**
+ * Rooms near the floors, `MERGE_MIN` and `MERGE_MIN_DM` (4.1), on phones
+ * the main sweep does not hold, each with the arrangement it gives:
+ * every priority-1 control must still stand inline (9.4, 13.1).
+ */
+const FLOOR_ROWS: { role: Role; scale: number; size: Size }[] = [
+  // An iPhone 14 sideways at 115%: a player's merged room would be 260, under the floor, so the pair.
+  { role: "player", scale: 1.15, size: { width: 844, height: 390, insets: { side: 47, bottom: 21 }, expect: { player: "pair" } } },
+  // A 568 px phone sideways at 85%: a player merged at 276.
+  { role: "player", scale: 0.85, size: { width: 568, height: 320, insets: {}, expect: { player: "merged" } } },
+  // Sideways Android phones: a DM's whole toolbar would leave 283 and 279 px, under the DM's floor of 301, so the pair. At 85% it merges with 354.
+  { role: "dm", scale: 1, size: { width: 800, height: 360, insets: {}, expect: { dm: "pair" } } },
+  { role: "dm", scale: 1.15, size: { width: 915, height: 412, insets: {}, expect: { dm: "pair" } } },
+  { role: "dm", scale: 0.85, size: { width: 740, height: 360, insets: {}, expect: { dm: "merged" } } },
+];
+
+/** The two rooms of the sweep under the floor (13.1), where a player's Draw sends its stroke chip behind ⋯. */
+const UNDER_FLOOR = ["320x568@1.3", "480x320@1.3"];
 /** While fixing a miss: `OPTIONS_ONLY=dm` or `player`, `OPTIONS_SIZES=844x390`, `OPTIONS_SCALES=1.3`, `OPTIONS_STATES=Fog` (a name's start), and `OPTIONS_SHOTS=1`. */
 const ONLY = process.env.OPTIONS_ONLY ?? "";
 const ONLY_SIZES = process.env.OPTIONS_SIZES?.split(",") ?? null;
@@ -59,6 +78,8 @@ const scales = () => SCALES.filter((s) => !ONLY_SCALES || ONLY_SCALES.includes(s
 
 /** Where the row stands (4.3, 13.1). At 932 x 430 the side panel, shown, takes the map's width, and both roles take the pair. */
 function expectedArrangement(role: Role, size: Size, scale: number, sidePanel: boolean): string {
+  const set = size.expect?.[role];
+  if (set) return set;
   const key = `${size.width}x${size.height}`;
   if (key === "932x430" && sidePanel && scale === 1) return "pair";
   const pairForDm = role === "dm" && ["844x390", "667x375", "932x430"].includes(key);
@@ -451,15 +472,40 @@ const STATES: State[] = [
     enterAt: SIZES[1],
     async enter(p) {
       await selectTool(p, "v");
+      const socket = p === player ? playerSocket : dmSocket;
       const mine = p === player ? run.thorn.id : run.goblins[0]!;
-      const name = p === player ? "Thorn" : "Goblin 1";
-      const token = (p === player ? playerSocket : dmSocket).state!.tokens[mine]!;
+      const token = socket.state!.tokens[mine]!;
       await tapCellAt(p, { x: token.x, y: token.y });
-      const bar = p.getByRole("dialog", { name: `${name} actions` });
+      // Whichever token the tap took: the sweep's own states add tokens, which may stand on that cell by now.
+      const bar = p.getByRole("dialog", { name: / actions$/ }).first();
       await bar.getByRole("button", { name: "Multi-select", exact: true }).click();
       await options(p).getByText("1 selected.").first().waitFor();
-      // A tap off hides the group's bar, which on a short screen covers the row, and Actions shows.
-      await tapCellAt(p, { x: 5, y: 4 });
+      // A tap off hides the group's bar, which on a short screen covers the row, and Actions shows: on a cell no token stands on or beside, where the map, not the bar, takes the tap.
+      const tokens = Object.values(socket.state!.tokens);
+      const bounds = socket.state!.scenes[run.sceneId]!.bounds;
+      const origin = await pagePoint(p, bounds, { x: 0, y: 0 });
+      const unit = await pagePoint(p, bounds, { x: 1, y: 1 });
+      // Kept rulers take a tap too, so their boxes are no tap off either.
+      const drawn = Object.values(socket.state!.drawings).map((d) => {
+        const xs = d.points.filter((_, i) => i % 2 === 0);
+        const ys = d.points.filter((_, i) => i % 2 === 1);
+        return { left: Math.min(...xs) - 1, right: Math.max(...xs) + 1, top: Math.min(...ys) - 1, bottom: Math.max(...ys) + 1 };
+      });
+      const free: { x: number; y: number; px: number; py: number }[] = [];
+      for (let y = 0; y < bounds.h; y++) {
+        for (let x = 0; x < bounds.w; x++) {
+          if (!tokens.every((t) => Math.abs(t.x - x) > 2 || Math.abs(t.y - y) > 2)) continue;
+          if (drawn.some((b) => x + 1 >= b.left && x <= b.right && y + 1 >= b.top && y <= b.bottom)) continue;
+          free.push({ x, y, px: origin.x + (x + 0.5) * (unit.x - origin.x), py: origin.y + (y + 0.5) * (unit.y - origin.y) });
+        }
+      }
+      // Nearest the cell the earlier runs used first.
+      free.sort((a, b) => Math.hypot(a.x - 5, a.y - 4) - Math.hypot(b.x - 5, b.y - 4));
+      const onMap = await p.evaluate(
+        (cells) => cells.findIndex((c) => (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): { tagName: string } | null } }).document.elementFromPoint(c.px, c.py)?.tagName === "CANVAS"),
+        free,
+      );
+      await tapCellAt(p, free[onMap] ?? { x: 5, y: 4 });
       await options(p).getByRole("button", { name: "Actions", exact: true }).waitFor({ state: "attached" });
     },
     async leave(p) {
@@ -565,6 +611,8 @@ async function checkState(page: Page, role: Role, size: Size, scale: number, sta
     if (!(await wholeInReach(frame))) await miss(`${label}: the slot "${s.id}" is cut off or takes no tap`);
   }
   const inRow = facts.arrangement === "merged" || facts.arrangement === "pair";
+  // Priority 1 stays inline in the toolbar's row, and for a player in every room at or over the floor (4.1).
+  const p1Checked = inRow || (role === "player" && !UNDER_FLOOR.includes(`${size.width}x${size.height}@${scale}`));
   const p1Allowed = (id: string) => role === "dm" && id === "height";
   // ⋯ and what waits in it.
   if (facts.more) {
@@ -582,7 +630,7 @@ async function checkState(page: Page, role: Role, size: Size, scale: number, sta
         seen.ids.add(id);
         seen.where.set(id, "more");
         if (!(await controlsInReach(frame))) await miss(`${label}: "${id}" in ⋯ is cut off once scrolled to`);
-        if (inRow && priority === 1 && !p1Allowed(id)) await miss(`${label}: the priority-1 "${id}" waits in ⋯ in the toolbar's row`);
+        if (p1Checked && priority === 1 && !p1Allowed(id)) await miss(`${label}: the priority-1 "${id}" waits in ⋯`);
       }
       await closePopover(page);
     }
@@ -599,7 +647,7 @@ async function checkState(page: Page, role: Role, size: Size, scale: number, sta
         continue;
       }
       if (!(await controlsInReach(frame))) await miss(`${label}: "${id}" in its chip's popover is cut off`);
-      if (inRow && Number(await frame.getAttribute("data-rvtt-priority")) === 1 && !p1Allowed(id)) await miss(`${label}: the priority-1 "${id}" waits in a popover in the toolbar's row`);
+      if (p1Checked && Number(await frame.getAttribute("data-rvtt-priority")) === 1 && !p1Allowed(id)) await miss(`${label}: the priority-1 "${id}" waits in a popover`);
     }
     await closePopover(page);
   }
@@ -647,7 +695,7 @@ async function controlsInReach(frame: Locator): Promise<boolean> {
   return true;
 }
 
-async function sweep(page: Page, cdp: CDPSession, role: Role, scale: number): Promise<number> {
+async function sweep(page: Page, cdp: CDPSession, role: Role, scale: number, at: readonly Size[] = sizes()): Promise<number> {
   let steps = 0;
   for (const state of STATES.filter((s) => s.roles.includes(role) && (!ONLY_STATES || ONLY_STATES.some((o) => s.name.startsWith(o))))) {
     await view(page, cdp, state.enterAt ?? DESK);
@@ -659,7 +707,7 @@ async function sweep(page: Page, cdp: CDPSession, role: Role, scale: number): Pr
       continue;
     }
     let reference: Seen | null = null;
-    for (const size of sizes()) {
+    for (const size of at) {
       await view(page, cdp, size);
       const label = `${role}, ${sizeLabel(size, scale)}, ${state.name}`;
       const seen = await checkState(page, role, size, scale, state, label);
@@ -784,6 +832,20 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
       console.error(`player at ${scale}: ${steps} checks, ${misses.length - before} misses`);
     });
   }
+
+  test("2. the sweep at the floor: rooms just over it hold every priority-1 control", { skip: ONLY_SIZES !== null }, async () => {
+    for (const row of FLOOR_ROWS) {
+      if (ONLY && ONLY !== row.role) continue;
+      const page = row.role === "dm" ? dm : player;
+      await reloadAt(page, row.scale);
+      shotPage = page;
+      const before = misses.length;
+      const steps = await sweep(page, row.role === "dm" ? dmCdp : playerCdp, row.role, row.scale, [row.size]);
+      console.error(`${row.role} at ${row.scale}, ${row.size.width} x ${row.size.height}: ${steps} checks, ${misses.length - before} misses`);
+    }
+    await reloadAt(dm, 1);
+    await reloadAt(player, 1);
+  });
 
   test("2b. nothing in the sweep is out of reach", () => {
     assert.deepEqual(misses, []);
