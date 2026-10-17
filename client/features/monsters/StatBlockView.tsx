@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
-import { loadedMonsters, loadMonsters, type SrdMonster, type StatBlockMonster } from "#shared/srd/monsters.ts";
+import type { SrdMonster, StatBlockMonster } from "#shared/srd/monsters.ts";
 import { Markdown } from "../../components/Markdown.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
+import { useSrdBlocks } from "./srdBlocks.ts";
 
 /** The SRD's credit, which CC BY 4.0 asks for wherever its text is shown. */
 export const SRD_CREDIT = "Stat blocks from the System Reference Document 5.2.1 by Wizards of the Coast, licensed under CC-BY-4.0.";
@@ -32,18 +32,6 @@ export function SrdCredit() {
  * (SrdLoadFailed.tsx) instead of looking stuck.
  */
 export function useSrdMonsters(): { monsters: readonly SrdMonster[] | null; failed: boolean } {
-  const [monsters, setMonsters] = useState<readonly SrdMonster[] | null>(loadedMonsters);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    if (loadedMonsters()) return;
-    let live = true;
-    loadMonsters().then(
-      (list) => live && setMonsters(list),
-      () => live && setFailed(true),
-    );
-    return () => {
-      live = false;
-    };
-  }, []);
-  return { monsters, failed };
+  const { list, failed } = useSrdBlocks();
+  return { monsters: list, failed };
 }

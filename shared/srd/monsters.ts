@@ -51,6 +51,7 @@ export type StatBlockMonster = Omit<SrdMonster, "srdId"> & { srdId?: string };
 
 let loading: Promise<readonly SrdMonster[]> | undefined;
 let loaded: readonly SrdMonster[] | null = null;
+const loadedListeners = new Set<() => void>();
 
 /**
  * All 330 stat blocks, about half a megabyte. A dynamic import, so Vite puts
@@ -60,7 +61,11 @@ let loaded: readonly SrdMonster[] | null = null;
  */
 export function loadMonsters(): Promise<readonly SrdMonster[]> {
   loading ??= import("./monsters.json", { with: { type: "json" } })
-    .then((m) => (loaded = m.default as unknown as SrdMonster[]))
+    .then((m) => {
+      loaded = m.default as unknown as SrdMonster[];
+      for (const listener of loadedListeners) listener();
+      return loaded;
+    })
     .catch((err: unknown) => {
       // Let the next caller try again, for example after a dropped connection.
       loading = undefined;
@@ -76,6 +81,16 @@ export function loadMonsters(): Promise<readonly SrdMonster[]> {
  */
 export function loadedMonsters(): readonly SrdMonster[] | null {
   return loaded;
+}
+
+/**
+ * Hears the load finish, whoever asked for it, for a view that reads
+ * loadedMonsters as an external store (client/features/monsters/srdBlocks.ts).
+ * Returns what stops listening.
+ */
+export function onMonstersLoaded(listener: () => void): () => void {
+  loadedListeners.add(listener);
+  return () => void loadedListeners.delete(listener);
 }
 
 /**

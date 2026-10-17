@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { loadedMonsters, loadMonsters, type SrdMonster } from "#shared/srd/monsters.ts";
+import { useMemo } from "react";
+import type { SrdMonster } from "#shared/srd/monsters.ts";
+import { useSrdBlocks } from "../monsters/srdBlocks.ts";
 import { srdIndex } from "./draft.ts";
 
 export type SrdList = {
@@ -18,19 +19,7 @@ export type SrdList = {
  * other finds them in memory.
  */
 export function useSrdMonsters(): SrdList {
-  const [list, setList] = useState<readonly SrdMonster[] | null>(loadedMonsters);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    if (loadedMonsters()) return;
-    let live = true;
-    loadMonsters().then(
-      (monsters) => live && setList(monsters),
-      () => live && setFailed(true),
-    );
-    return () => {
-      live = false;
-    };
-  }, []);
+  const { list, failed } = useSrdBlocks();
   const byId = useMemo(() => (list ? srdIndex(list) : null), [list]);
   return { list, byId, failed };
 }

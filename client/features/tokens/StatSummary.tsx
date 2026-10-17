@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { Actor, Token } from "#shared/model.ts";
-import { loadedMonsters, loadMonsters, type SrdMonster } from "#shared/srd/monsters.ts";
+import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { AcBadge } from "../../components/AcBadge.tsx";
 import { Button } from "../../components/Button.tsx";
 import { Icon } from "../../components/Icon.tsx";
@@ -12,6 +12,7 @@ import { statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
 import type { TokenAccess } from "./access.ts";
 import { defenseLines, linkedBlockState, moreStatsShown, saveUnits, type LinkedBlock, type VitalItem, type VitalUnit } from "./statSummary.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
+import { useSrdBlocks } from "../monsters/srdBlocks.ts";
 
 /*
  * The stat summary (docs/design-v1-token-panel.md 3.2): the vitals line,
@@ -24,24 +25,7 @@ import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 /** The SRD's blocks while `active`: loaded on first need and kept for the page. A failure stays until a reload (monsters/SrdLoadFailed.tsx). */
 export function useSrdList(active: boolean): { list: readonly SrdMonster[] | null; failed: boolean } {
   // Once any view has loaded the SRD chunk this page, a later bar shows its saves without a wait.
-  const [list, setList] = useState(loadedMonsters);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    if (!active || list) return;
-    let live = true;
-    loadMonsters().then(
-      (loaded) => {
-        if (live) setList(loaded);
-      },
-      () => {
-        if (live) setFailed(true);
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [active, list]);
-  return { list, failed };
+  return useSrdBlocks(active);
 }
 
 /**
