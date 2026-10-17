@@ -466,6 +466,19 @@ export function resizeBox(input: { start: Box; corner: Corner; part: ResizePart;
 }
 
 /**
+ * Where a window is drawn while a drag or a resize holds it: the dragged
+ * box, held by the edge its spot's corner anchors, top or bottom, as at
+ * rest. Its height is a cap, so content that wraps to fewer lines as the
+ * window widens shrinks it away from that edge, which never moves under
+ * the gesture (5.4, the build review's W5-ASTRA-05). The width is exact,
+ * so the left and right edges are the box's.
+ */
+export function heldPlace(box: Box, corner: Corner, viewport: Size): { left: number; width: number; maxHeight: number; top?: number; bottom?: number } {
+  const across = { left: box.left, width: box.width, maxHeight: box.height };
+  return corner[0] === "b" ? { ...across, bottom: viewport.height - (box.top + box.height) } : { ...across, top: box.top };
+}
+
+/**
  * The spot a resize stores: the drawn box's anchored edges, keeping its
  * corner, unsnapped, so a window clamped against the free area never jumps
  * on release by the clamp it had.

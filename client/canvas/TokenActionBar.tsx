@@ -74,6 +74,7 @@ import {
   hangBox,
   hasSize,
   headerBand,
+  heldPlace,
   isDefaultSpot,
   keySize,
   keySpot,
@@ -1013,7 +1014,7 @@ function BarFrame(props: {
 
   const { hang } = placed;
   const where = dragBox
-    ? { left: dragBox.left, top: dragBox.top, width: dragBox.width, maxHeight: dragBox.height }
+    ? heldPlace(dragBox, spot.corner, props.viewport)
     : hang.anchor === "top"
       ? { left: hang.left, top: hang.at, width: hang.width, maxHeight: hang.room }
       : { left: hang.left, bottom: props.viewport.height - hang.at, width: hang.width, maxHeight: hang.room };

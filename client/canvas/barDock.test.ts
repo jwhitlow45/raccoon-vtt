@@ -22,6 +22,7 @@ import {
   DEFAULT_SPOT,
   defaultBarWidth,
   handleCorner,
+  heldPlace,
   keySize,
   limitMet,
   moveRoom,
@@ -370,6 +371,13 @@ describe("the stored spot", () => {
 });
 
 describe("the window's size on a computer (docs/design-v1-token-window.md 5 and 6)", () => {
+  test("held by a drag or a resize, a window keeps the edge its corner anchors, so content that shrinks moves only its far edge (W5-ASTRA-05)", () => {
+    const viewport = { width: 920, height: 800 };
+    const box = { left: 400, top: 300, width: 500, height: 432 };
+    for (const corner of ["br", "bl"] as const) assert.deepEqual(heldPlace(box, corner, viewport), { left: 400, width: 500, maxHeight: 432, bottom: 800 - 732 });
+    for (const corner of ["tr", "tl"] as const) assert.deepEqual(heldPlace(box, corner, viewport), { left: 400, width: 500, maxHeight: 432, top: 300 });
+  });
+
   test("the size key reads a width, a height or both, and anything else as the default, stored as no key", () => {
     assert.deepEqual(parseSize('{"w":400,"h":300}'), { w: 400, h: 300 });
     assert.deepEqual(parseSize('{"w":400}'), { w: 400 });

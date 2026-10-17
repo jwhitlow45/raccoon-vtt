@@ -1396,6 +1396,53 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await setUp(dm, { ...DESK, scale: 1 });
   });
 
+  test("18b. widening by the side band at each corner keeps the anchored edges while the pointer is down, as wrapped chips take fewer lines", async () => {
+    // Goblin 3 with ten statuses: their chips wrap to fewer lines in a wider window, so its content grows shorter mid-drag.
+    const goblin = run.goblins[2]!;
+    const keys = ["prone", "poisoned", "blinded", "charmed", "deafened", "frightened", "grappled", "restrained", "stunned", "invisible"];
+    const ids = keys.map(() => randomUUID());
+    for (const [i, key] of keys.entries()) await ops.send({ t: "actor.effect.add", target: { tokenId: goblin.id }, effect: { id: ids[i]!, key } });
+    const view = { width: 1920, height: 1080, scale: 1 };
+    /*
+     * One load, and the header dragged to each corner in turn: a load per
+     * corner, after the loads the tests before this one make, would take
+     * the DM's session past the server's snapshot budget, and the abuse rule
+     * would then close every socket of that session, this file's op socket
+     * with them.
+     */
+    await setUp(dm, view);
+    await clickCell(dm, goblin);
+    await dm.getByRole("dialog", { name: "Goblin 3 actions" }).waitFor();
+    for (const corner of ["br", "tl", "tr", "bl"] as const) {
+      if (corner !== "br") {
+        // Dragged past the free area's corner, the window stops in it and stores that corner.
+        await dragHeader(dm, { x: corner[1] === "l" ? 40 : view.width - 1, y: corner[0] === "t" ? 26 : view.height - 1 });
+        await waitFor(`the window stored ${corner}`, async () => ((JSON.parse((await storedSpot(dm)) ?? "{}") as { corner?: string }).corner === corner ? true : null));
+      }
+      const start = await barRect(dm);
+      const band = middle(await rectOf(bands(dm).nth(1)));
+      const out = corner[1] === "r" ? -1 : 1;
+      await dm.mouse.move(band.x, band.y);
+      await dm.mouse.down();
+      await dm.mouse.move(band.x + out * 12, band.y, { steps: 2 });
+      await dm.mouse.move(band.x + out * 220, band.y, { steps: 10 });
+      await dm.waitForTimeout(200);
+      const held = await rectOf(barFrame(dm));
+      assert.ok(held.right - held.left > start.right - start.left + 150, `${corner}: the band did not widen the window`);
+      assert.ok(held.bottom - held.top < start.bottom - start.top - 5, `${corner}: the wider window's content did not grow shorter, so this step tests nothing`);
+      if (corner[0] === "b") assert.ok(Math.abs(held.bottom - start.bottom) < 1, `${corner}: the bottom edge moved mid-drag: ${JSON.stringify({ start, held })}`);
+      else assert.ok(Math.abs(held.top - start.top) < 1, `${corner}: the top edge moved mid-drag: ${JSON.stringify({ start, held })}`);
+      if (corner[1] === "r") assert.ok(Math.abs(held.right - start.right) < 1, `${corner}: the right edge moved mid-drag`);
+      else assert.ok(Math.abs(held.left - start.left) < 1, `${corner}: the left edge moved mid-drag`);
+      if (corner === "br") await shots.take(dm, "token-window-widening-held-bottom-edge");
+      await dm.keyboard.press("Escape");
+      await dm.mouse.up();
+      assert.equal(await storedSize(dm), null, "Escape stored a size");
+    }
+    for (const id of ids) await ops.send({ t: "actor.effect.remove", target: { tokenId: goblin.id }, effectId: id });
+    await setUp(dm, { ...DESK, scale: 1 });
+  });
+
   test("19. the computer's reach sweep: every size and interface size, the side panel shown and hidden, no stored size, the smallest and the largest, the DM and Pat, out of a fight and with checks and a roll card, and a sheet on the right where there is one", async () => {
     const SWEEP = [
       { width: 1280, height: 800 },
