@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { d20Formula, type AdvantageSource } from "#shared/dice/formula.ts";
-import { hitOf } from "#shared/dice/roll.ts";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type SkillKey } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { ABILITY_NAMES as ABILITY_SHORT } from "#shared/statBlock.ts";
@@ -19,6 +18,7 @@ import { useDicePanel, type PanelRoll } from "../useDicePanel.ts";
 import { useDiceView } from "../useDiceView.ts";
 import { useReceipt } from "../useReceipt.ts";
 import { useRollBlocked } from "../useRollOption.ts";
+import { attackResults } from "./outcome.ts";
 import { ReplaceConfirm } from "./ReplaceConfirm.tsx";
 import { useAutoInitiativeFor } from "../../encounter/AutoInitiative.tsx";
 import { useStartGroupSave, type StartInput } from "./start.ts";
@@ -133,36 +133,37 @@ function SharedAttacks(props: { tokenIds: readonly string[]; blocked: string | n
   );
 }
 
-function SharedAttack(props: { name: string; each: { creature: ActorTarget; named: import("#shared/dice/bonus.ts").NamedRoll }[]; dice: NonNullable<ReturnType<typeof useDiceView>["dice"]>; blocked: string | null }) {
+type Attacker = { creature: ActorTarget; named: import("#shared/dice/bonus.ts").NamedRoll };
+
+function SharedAttack(props: { name: string; each: Attacker[]; dice: NonNullable<ReturnType<typeof useDiceView>["dice"]>; blocked: string | null }) {
   const panel = useDicePanel();
   const [ac, setAc] = useState<number | null>(null);
   // The attack sends the AC, and the field stays to read the hits, so the AC counts from the last attack on (docs/design-v1-sheet-swipe.md 4.6).
   const sentAc = useUnsavedSince(ac);
-  const [tag, setTag] = useState<string | null>(null);
+  // The attackers and AC as sent, so the results and their damage stay theirs when the selection changes after the tap.
+  const [sent, setSent] = useState<{ tag: string; each: Attacker[]; ac: number | null } | null>(null);
   const [damageTag, setDamageTag] = useState<string | null>(null);
-  const receipt = useReceipt(tag);
+  const receipt = useReceipt(sent?.tag ?? null);
   const damage = useReceipt(damageTag);
-  const rolled = receipt?.state === "committed" ? rollsOf(receipt.lines) : [];
+  const judgeBy = sent?.ac ?? ac;
+  const results = sent && receipt?.state === "committed" ? attackResults(sent.each, rollsOf(receipt.lines), judgeBy) : [];
+  const hits = results.filter((r) => r.verdict === "hit" || r.verdict === "critical");
   const n = props.each.length;
-  const hits = ac === null ? [] : rolled.flatMap((r, i) => {
-    const verdict = hitOf(r, ac);
-    return verdict === "miss" ? [] : [{ i, critical: verdict === "critical" }];
-  });
   const attack = () => {
     const rolls: PanelRoll[] = props.each.map(({ creature, named }) => {
       const preset = presetFor(props.dice, creature, { kind: "attack" });
       return { formula: withExtra(d20Formula(named.attack ?? 0), preset.extra), label: cutLabel(named.name), creature, sources: [...preset.sources] as AdvantageSource[], ...(named.critOn ? { critOn: named.critOn } : {}) };
     });
     setDamageTag(null);
-    setTag(panel.roll(rolls, ac !== null ? { ac } : {}));
+    const tag = panel.roll(rolls, ac !== null ? { ac } : {});
+    setSent(tag ? { tag, each: [...props.each], ac } : null);
     sentAc();
   };
   const rollDamage = () => {
-    const rolls = hits.flatMap(({ i, critical }) => {
-      const each = props.each[i];
-      if (!each) return [];
-      return damageRolls({ ...each.named, name: `${props.name} damage for ${hits.length} hits` }, { on: new Set(), critical, creature: each.creature }).map((r) => ({ ...r, label: cutLabel(`${props.name} damage for ${hits.length} hits${r.label?.includes(",") ? `,${r.label.split(",").at(-1)}` : ""}`) }));
-    });
+    const label = `${props.name} damage for ${hits.length} hits`;
+    const rolls = hits.flatMap(({ each, verdict }) =>
+      damageRolls({ ...each.named, name: label }, { on: new Set(), critical: verdict === "critical", creature: each.creature }).map((r) => ({ ...r, label: cutLabel(`${label}${r.label?.includes(",") ? `,${r.label.split(",").at(-1)}` : ""}`) })),
+    );
     setDamageTag(panel.roll(rolls));
   };
   const total = damage?.state === "committed" ? rollsOf(damage.lines).reduce((a, r) => a + r.total, 0) : null;
@@ -174,15 +175,8 @@ function SharedAttack(props: { name: string; each: { creature: ActorTarget; name
         </Button>
         <NumberField label="Target's AC" value={ac ?? undefined} min={1} max={50} nullable placeholder="AC" onCommit={setAc} width={72} />
       </div>
-      {rolled.length > 0 ? (
-        <Note>
-          {rolled
-            .map((r) => {
-              const verdict = ac === null ? null : hitOf(r, ac);
-              return `${r.total}${verdict === "critical" ? " critical hit" : verdict === "hit" ? " hit" : verdict === "miss" ? " miss" : ""}`;
-            })
-            .join(", ")}
-        </Note>
+      {results.length > 0 ? (
+        <Note>{results.map((r) => `${r.roll.total}${r.verdict === "critical" ? " critical hit" : r.verdict === "hit" ? " hit" : r.verdict === "miss" ? " miss" : ""}`).join(", ")}</Note>
       ) : null}
       {hits.length > 0 ? (
         <Button size="sm" disabled={props.blocked !== null} busy={damage?.state === "sending"} onClick={rollDamage}>

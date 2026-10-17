@@ -94,4 +94,15 @@ describe("HP chips", () => {
       ],
     );
   });
+
+  test("a roll sent as several lines, such as 21 hits' damage, is one chip of its whole total, and applying it takes every line (ASTRA-12)", () => {
+    const batched = (id: string, rolls: DiceRoll[]): LogEntry => ({ id, at: "", kind: "event", data: { type: "dice", by: "me", to: "all", batch: "b1", rolls } });
+    const hit = roll("Scimitar damage for 21 hits, slashing", 4);
+    const log = [line("me", [roll("Longsword damage, slashing", 6)]), batched("9:0", Array.from({ length: 20 }, () => hit)), batched("10:0", [hit])];
+    const [chip] = hpChips(log, "me", "damage", opts());
+    assert.equal(chip!.amount, 84);
+    assert.equal(chip!.text, "Use 84 (Scimitar damage for 21 hits)");
+    assert.deepEqual([...chip!.lineIds].sort(), ["10:0", "9:0"]);
+    assert.deepEqual(hpChips(log, "me", "damage", opts(["9:0"])), [], "an applied batch goes whole, and no older roll takes its place");
+  });
 });

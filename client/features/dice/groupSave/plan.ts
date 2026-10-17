@@ -4,7 +4,7 @@ import type { DamageType } from "#shared/rules/damage.ts";
 import { creatureRolls, type DiceView } from "../creature.ts";
 import type { Page } from "./chain.ts";
 import { stateOf } from "./chain.ts";
-import { conditionSkip, damageWords, parseParts, partAmounts, planTargets, rowDamage, type OutcomeCondition, type PartAmount, type PlanRow } from "./outcome.ts";
+import { conditionSkip, damageWords, parseParts, partAmounts, planTargets, rowDamage, worstCase, type OutcomeCondition, type PartAmount, type PlanRow } from "./outcome.ts";
 import { rowResult, type Mark, type RowBase } from "./rows.ts";
 
 /**
@@ -17,7 +17,10 @@ export type RowOutcome = {
   result: Mark | null;
   /** A failed save turned to a pass by Legendary Resistance. */
   resisted: boolean;
+  /** What the row takes: the DM's own amount where typed, else the worked-out one. */
   amount: number;
+  /** The worked-out amount, from the parts, the save and the row's defenses, whatever the DM typed over it. */
+  computed: number;
   /** "Immune to fire: 9 radiant", "17", or "" before the damage is known. */
   words: string;
   conditions: OutcomeCondition[];
@@ -88,11 +91,12 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
     .map((d) => ({ key: `${d.kind}:${d.of}:${d.qualifier ?? ""}:${d.source}`, words: `${d.kind === "immune" ? "Immune to" : d.kind === "resist" ? "Resists" : "Vulnerable to"} ${d.of} ${d.qualifier}` }));
   const evasionApplies = page.test.kind === "save" && page.test.ability === "dex" && page.outcome.onPass === "half";
   const evasion = state.evasion ?? rolls?.evasion ?? false;
-  const out: RowOutcome = { result, resisted, amount: 0, words: "", conditions: [], skips: [], legendaryLeft, qualified, evasionApplies, evasion };
+  const out: RowOutcome = { result, resisted, amount: 0, computed: 0, words: "", conditions: [], skips: [], legendaryLeft, qualified, evasionApplies, evasion };
   if (result === null || result === "skip" || state.gone) return out;
   if (amounts) {
     const dealt = rowDamage(amounts, result, { onPass: page.test.kind === "none" ? "none" : page.outcome.onPass, dexSave: evasionApplies, row: { defenses, qualifiedOn, evasion, effects } });
     out.amount = dealt.amount;
+    out.computed = dealt.amount;
     out.words = amounts.length > 0 ? damageWords(amounts, dealt) : "";
   }
   if (state.amount !== undefined) {
@@ -112,6 +116,26 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
     }
   }
   return out;
+}
+
+/**
+ * Whether the page's whole outcome fits one `actor.outcome` (5.5), sized
+ * as Apply would send it: each row's conditions with their end and the
+ * save that ends them, at the widest DC, so a plan that passes here never
+ * meets the op's bound after the rolls and requests went. Null when it fits.
+ */
+export function pageBound(page: Page, rows: readonly RowBase[]): string | null {
+  const ends = page.outcome.saveEnds;
+  const save = ends ? { ability: ends.ability, dc: 50, ...(page.spell ? { spell: true as const } : {}) } : undefined;
+  const conditions = page.outcome.conditions as ConditionKey[];
+  return worstCase(
+    rows.map((r) => r.target),
+    (target) => {
+      const duration = durationFor(page, target);
+      return conditions.map((key) => ({ key, ...(duration ? { duration } : {}), ...(save ? { save } : {}) }));
+    },
+    page.fill?.name,
+  );
 }
 
 /** Why Apply waits, in its words, or null when it may go (5.5). */

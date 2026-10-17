@@ -107,7 +107,7 @@ export function HpEntry(props: {
       return;
     }
     sendHpEntry(actions, props.targets, parsed.change, crit && showCrit);
-    if (filled) markApplied(filled.lineId);
+    if (filled) markApplied(filled.lineIds);
     setFilled(null);
     setMode(modeAfterApply(mode));
     setText("");

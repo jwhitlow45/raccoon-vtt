@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Defense } from "#shared/dice/defenses.ts";
 import { OUTCOME_TOO_BIG } from "#shared/protocol.ts";
-import { conditionSkip, damageWords, parseParts, partAmounts, planTargets, rowDamage, worstCase, type PartAmount } from "./outcome.ts";
+import { attackResults, conditionSkip, damageWords, parseParts, partAmounts, planTargets, rowDamage, worstCase, type PartAmount } from "./outcome.ts";
 
 /** A group save's outcome (docs/design-v1-roll-options.md 5.4 and 5.5). */
 
@@ -93,5 +93,15 @@ describe("conditions and the plan", () => {
     assert.equal(worstCase(hundred, two, "Hypnotic Pattern"), null);
     assert.equal(worstCase(hundred, [...two, { ...two[0]!, key: "prone" }], "Hypnotic Pattern"), OUTCOME_TOO_BIG);
     assert.match(worstCase([...hundred, { tokenId: "x" }], []) ?? "", /At most 100/);
+  });
+});
+
+describe("a shared attack's results", () => {
+  test("each result goes to the attacker that rolled it by its creature, whatever order the lines hold and whichever batch was refused (ASTRA-11)", () => {
+    const sent = [{ creature: { tokenId: "g1" }, name: "one" }, { creature: { tokenId: "g2" }, name: "two" }, { creature: { tokenId: "g3" }, name: "three" }];
+    const roll = (tokenId: string, face: number) => ({ formula: "1d20+4", faces: [face], total: face + 4, tokenId });
+    const results = attackResults(sent, [roll("g3", 20), roll("g1", 2)], 12);
+    assert.deepEqual(results.map((r) => [r.each.name, r.verdict]), [["one", "miss"], ["three", "critical"]]);
+    assert.deepEqual(attackResults(sent, [roll("g2", 10)], null).map((r) => [r.each.name, r.verdict]), [["two", null]], "no AC, no verdict");
   });
 });

@@ -3,7 +3,7 @@ import { d20Formula, doubleDice, formatFormula, parseFormula } from "#shared/dic
 import { keptD20 } from "#shared/dice/roll.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
-import type { CharacterId, DiceRoll, InitEntry, LogEntry, RollRequest, RollTarget, RoomState, TokenId } from "#shared/model.ts";
+import type { CharacterId, DiceRoll, InitEntry, LogEntry, LogEvent, RollRequest, RollTarget, RoomState, TokenId } from "#shared/model.ts";
 import { findEntryFor } from "#shared/rules/durations.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
@@ -330,8 +330,12 @@ export function spendOnStart(start: () => boolean, spend: (() => void) | null): 
 
 // ------------------------------------------------------------ HP chips
 
-/** A damage or healing line's total offered in an HP entry (4.3): "Use 9 (Bree's Longsword damage)". */
-export type HpChip = { lineId: string; amount: number; text: string; critical: boolean };
+/**
+ * A damage or healing roll's total offered in an HP entry (4.3): "Use 9
+ * (Bree's Longsword damage)". A roll the splitter sent as several lines is
+ * one chip: `lineIds` are all of them, `lineId` the newest.
+ */
+export type HpChip = { lineId: string; lineIds: string[]; amount: number; text: string; critical: boolean };
 
 const DAMAGE_LABEL = /\bdamage\b/i;
 const HEAL_LABEL = /\bhealing\b/i;
@@ -342,30 +346,44 @@ function chipWhat(roll: DiceRoll): string {
 }
 
 /**
- * The newest damage line or healing line in the viewer's log, this
+ * The newest damage roll or healing roll in the viewer's log, this
  * viewer's own and the newest of anyone else's, as chips for an HP entry
- * in that mode. A chip sums every roll of its line. A plain roll is never
- * one, since only damage and healing labels count. A line this device has
- * applied goes, and no older line of its side takes its place.
+ * in that mode. A chip sums every roll of its lines: a roll the splitter
+ * sent as several lines (one `batch`), such as 21 hits' damage, is one
+ * chip. A plain roll is never one, since only damage and healing labels
+ * count. A roll this device has applied goes, and no older one of its side
+ * takes its place.
  */
 export function hpChips(log: readonly LogEntry[], me: string, kind: "damage" | "heal", opts: { applied: ReadonlySet<string>; nameOf(memberId: string): string }): HpChip[] {
   const test = kind === "damage" ? DAMAGE_LABEL : HEAL_LABEL;
-  // Null once the newest line of its side is applied: that side then shows nothing, never an older line.
+  type Line = { entry: LogEntry; data: Extract<LogEvent, { type: "dice" }> };
+  const counts = (entry: LogEntry): Line | null => {
+    const data = entry.data;
+    if (entry.kind !== "event" || data?.type !== "dice" || data.rolls.length === 0) return null;
+    return data.rolls.every((r) => r.label !== undefined && test.test(r.label)) ? { entry, data } : null;
+  };
+  // Null once the newest roll of its side is applied: that side then shows nothing, never an older roll.
   let mine: HpChip | null | undefined;
   let theirs: HpChip | null | undefined;
   for (let i = log.length - 1; i >= 0 && (mine === undefined || theirs === undefined); i--) {
-    const entry = log[i]!;
-    const data = entry.data;
-    if (entry.kind !== "event" || data?.type !== "dice" || data.rolls.length === 0) continue;
-    if (!data.rolls.every((r) => r.label !== undefined && test.test(r.label))) continue;
+    const line = counts(log[i]!);
+    if (!line) continue;
+    const { entry, data } = line;
     const own = data.by === me;
     if ((own ? mine : theirs) !== undefined) continue;
+    const batch = data.batch;
+    const lines = batch === undefined ? [line] : log.flatMap((e) => {
+      const l = counts(e);
+      return l && l.data.batch === batch && l.data.by === data.by ? [l] : [];
+    });
+    const ids = lines.map((l) => l.entry.id);
+    const rolls = lines.flatMap((l) => l.data.rolls);
     let chip: HpChip | null = null;
-    if (!opts.applied.has(entry.id)) {
-      const amount = data.rolls.reduce((n, r) => n + r.total, 0);
+    if (!ids.some((id) => opts.applied.has(id))) {
+      const amount = rolls.reduce((n, r) => n + r.total, 0);
       const what = chipWhat(data.rolls[0]!);
       const text = own ? `Use ${amount} (${what})` : `Use ${amount} (${opts.nameOf(data.by)}'s ${what})`;
-      chip = { lineId: entry.id, amount, text, critical: data.rolls.some((r) => /\bcritical\b/i.test(r.label ?? "")) };
+      chip = { lineId: entry.id, lineIds: ids, amount, text, critical: rolls.some((r) => /\bcritical\b/i.test(r.label ?? "")) };
     }
     if (own) mine = chip;
     else theirs = chip;

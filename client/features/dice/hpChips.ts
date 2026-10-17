@@ -28,8 +28,8 @@ export function useHpChips(kind: "damage" | "heal" | null): HpChip[] {
   );
 }
 
-/** Marks a chip's line applied once its amount went out, so its chip goes. */
-export function useMarkChipApplied(): (lineId: string) => void {
+/** Marks a chip's lines applied once its amount went out, every line of its roll, so its chip goes. */
+export function useMarkChipApplied(): (lineIds: readonly string[]) => void {
   const store = useScoped(appliedSlot);
-  return useCallback((lineId: string) => store.setState((s) => ({ applied: new Set([...s.applied, lineId]) })), [store]);
+  return useCallback((lineIds: readonly string[]) => store.setState((s) => ({ applied: new Set([...s.applied, ...lineIds]) })), [store]);
 }

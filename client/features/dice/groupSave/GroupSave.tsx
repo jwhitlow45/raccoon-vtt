@@ -43,6 +43,7 @@ import {
   roll,
   rollAgain,
   rollWords,
+  setAmount,
   setDc,
   settleTag,
   sourceIds,
@@ -58,8 +59,8 @@ import {
   type ServerRoll,
   type Step,
 } from "./chain.ts";
-import { parseParts, worstCase } from "./outcome.ts";
-import { amountsOf, applyWaits, applyWords, buildPlan, rowOutcome } from "./plan.ts";
+import { parseParts } from "./outcome.ts";
+import { amountsOf, applyWaits, applyWords, buildPlan, pageBound, rowOutcome } from "./plan.ts";
 import { countWords, d20Of, groupRows, rowTotal, type GroupTest, type Mark, type RowBase, type Way } from "./rows.ts";
 import { useGroupSave, useGroupSaveStore } from "./store.ts";
 import { actionFill, areaFill, casterActions } from "./fills.ts";
@@ -166,8 +167,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   const outcomeList = [...outcomes.values()];
   const count = countWords(rows.filter((r) => stateOf(shown, r).mark !== "skip").map((r) => outcomes.get(r.holder)!.result));
   const conditions = page.outcome.conditions as ConditionKey[];
-  const condList = conditions.map((k) => ({ key: k }));
-  const bound = worstCase(rows.map((r) => r.target), condList, page.fill?.name);
+  const bound = pageBound(shown, rows);
   const parsedParts = page.outcome.damage.trim() ? parseParts(page.outcome.damage, fillType) : null;
 
   /** Takes a step of the page and sends its commands. True when something went. */
@@ -762,11 +762,20 @@ function GroupRow(props: {
   const markValue: Mark | null = outcome.result;
   const waitingAsk = s.asked && !s.answer;
   const set = (patch: Partial<typeof s>) => props.onChange({ ...page, states: { ...page.states, [row.holder]: { ...s, ...patch } } });
+  // The amount opens a field of its own (5.4): what the DM types there wins, and going back takes the worked-out amount again.
+  const [editing, setEditing] = useState(false);
+  const takes = !setup && !frozen && !s.gone && (outcome.result === "fail" || outcome.result === "pass");
   return (
     <div style={{ display: "grid", gap: theme.space(1), padding: `${theme.space(1)}px 0`, borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1) }}>
         <span style={{ fontWeight: theme.weight.strong, minWidth: 80, flex: "1 1 80px", overflowWrap: "anywhere" }}>{row.name}</span>
-        <span style={{ fontVariantNumeric: "tabular-nums", minWidth: 36, textAlign: "right" }}>{s.gone ? "Gone" : outcome.amount > 0 ? outcome.amount : ""}</span>
+        {takes ? (
+          <Button size="sm" variant="quiet" expanded={editing} aria-label={`${row.name}'s damage, ${outcome.amount}${s.amount !== undefined ? ", typed" : ""}. Change it`} onClick={() => setEditing((e) => !e)} style={{ fontVariantNumeric: "tabular-nums", minWidth: 44 }}>
+            {String(outcome.amount)}
+          </Button>
+        ) : (
+          <span style={{ fontVariantNumeric: "tabular-nums", minWidth: 36, textAlign: "right" }}>{s.gone ? "Gone" : outcome.amount > 0 ? outcome.amount : ""}</span>
+        )}
         <div style={{ flex: "1 1 170px", minWidth: 170 }}>
           <Segmented<Mark>
             label={`${row.name}: fail, pass or skip`}
@@ -778,6 +787,16 @@ function GroupRow(props: {
           />
         </div>
       </div>
+      {takes && editing ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), alignItems: "center" }}>
+          <NumberField label={`${row.name}'s damage`} value={s.amount} min={0} max={100_000} nullable placeholder={String(outcome.computed)} onCommit={(n) => props.onChange(setAmount(page, row.holder, n))} width={88} />
+          {s.amount !== undefined ? (
+            <Button size="sm" onClick={() => props.onChange(setAmount(page, row.holder, null))}>
+              {`Back to ${outcome.computed}`}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {setup && props.loading ? (
         <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>Loading</span>
       ) : setup && row.ways.length > 1 ? (

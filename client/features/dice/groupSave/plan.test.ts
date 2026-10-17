@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { actor, room, token } from "#shared/testutil.ts";
 import type { DiceView } from "../creature.ts";
-import { mark, newPage, setDc, type Page } from "./chain.ts";
-import { applyWaits, buildPlan, rowOutcome } from "./plan.ts";
+import { OUTCOME_TOO_BIG } from "#shared/protocol.ts";
+import { mark, newPage, setAmount, setDc, type Page } from "./chain.ts";
+import { worstCase } from "./outcome.ts";
+import { applyWaits, buildPlan, pageBound, rowOutcome } from "./plan.ts";
 import { groupRows } from "./rows.ts";
 
 /** What Apply freezes from the page (docs/design-v1-roll-options.md 5.4, 5.5). */
@@ -44,5 +46,32 @@ describe("the save that ends the conditions", () => {
     assert.equal(rowOutcome(sunburst(13, 12), ROWS[0]!, DICE, []).conditions[0]?.save?.dc, 12);
     assert.equal(applyWaits(sunburst(null), DICE, []), "Give the save that ends it a DC");
     assert.equal(applyWaits(sunburst(null, 15), DICE, []), null);
+  });
+});
+
+describe("the DM's own amount and the outcome's size", () => {
+  test("an amount the DM types wins over the worked-out one, which the row keeps to go back to (ASTRA-13)", () => {
+    const page = { ...sunburst(13), outcome: { ...sunburst(13).outcome, damage: "12" } };
+    const holder = ROWS[0]!.holder;
+    assert.deepEqual([rowOutcome(page, ROWS[0]!, DICE, [{ amount: 12 }]).amount, rowOutcome(page, ROWS[0]!, DICE, [{ amount: 12 }]).computed], [12, 12]);
+    const typed = setAmount(page, holder, 5);
+    assert.deepEqual([rowOutcome(typed, ROWS[0]!, DICE, [{ amount: 12 }]).amount, rowOutcome(typed, ROWS[0]!, DICE, [{ amount: 12 }]).computed], [5, 12]);
+    assert.equal(buildPlan(typed, DICE, [{ amount: 12 }], { plan: "p", newId: () => "e" })!.targets[0]!.amount, 5);
+    assert.equal(rowOutcome(setAmount(typed, holder, null), ROWS[0]!, DICE, [{ amount: 12 }]).amount, 12);
+  });
+
+  test("the bound counts each condition's end and save, so 100 creatures with three conditions that last and end on a save are refused before any roll (ASTRA-14)", () => {
+    const hundred = Array.from({ length: 100 }, (_, i) => `0192f0a8-6c1e-7a4b-9c3d-${String(i).padStart(12, "0")}`);
+    const tokens = Object.fromEntries(hundred.map((id) => [id, token(id, { kind: "monster", name: "Cultist", actor: { inline: actor() } })]));
+    const dice: DiceView = { ...DICE, view: room({ tokens }) };
+    const rows = groupRows(dice, hundred, { kind: "save", ability: "wis" }, false);
+    const page: Page = {
+      ...newPage({ id: "p", sceneId: "s", source: { kind: "selection", tokenIds: hundred }, test: { kind: "save", ability: "wis" }, dc: 15, secret: true, spell: true, switches: { dcShown: true, resultShown: true } }),
+      fill: { name: "Hypnotic Pattern", from: "" },
+      outcome: { damage: "", onPass: "none", conditions: ["charmed", "incapacitated", "prone"], lasts: { mode: "turnEnd", rounds: 10, anchor: "own" }, saveEnds: { ability: "wis", dc: null } },
+    };
+    assert.equal(worstCase(rows.map((r) => r.target), page.outcome.conditions.map((key) => ({ key: key as "charmed" })), "Hypnotic Pattern"), null, "the keys alone fit, which is what let it through");
+    assert.equal(pageBound(page, rows), OUTCOME_TOO_BIG);
+    assert.equal(pageBound({ ...page, outcome: { ...page.outcome, conditions: ["charmed", "incapacitated"] } }, rows), null, "two fit, as Hypnotic Pattern needs");
   });
 });

@@ -397,6 +397,16 @@ export function typeTotal(page: Page, holder: string, total: number | null): Pag
   return { ...page, states: { ...page.states, [holder]: total === null ? rest : { ...rest, typed: total } } };
 }
 
+/** A row's damage as the DM types it (5.4), which wins over what the outcome works out. Null goes back to the worked-out amount. */
+export function setAmount(page: Page, holder: string, amount: number | null): Page {
+  if (page.phase === "applying" || page.phase === "applied") return page;
+  const row = rowOf(page, holder);
+  const s = page.states[holder] ?? (row ? stateOf(page, row) : undefined);
+  if (!s) return page;
+  const { amount: _amount, ...rest } = s;
+  return { ...page, states: { ...page.states, [holder]: amount === null ? rest : { ...rest, amount } } };
+}
+
 /** A changed DC judges every total again at once and never a mark (5.3). */
 export function setDc(page: Page, dc: number | null): Page {
   if (page.phase === "applying" || page.phase === "applied") return page;
