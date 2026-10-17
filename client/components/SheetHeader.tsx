@@ -5,7 +5,7 @@ import { theme } from "../lib/theme.ts";
 import { Icon } from "./Icon.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { dangerLook } from "./looks.ts";
-import { SheetGrabber } from "./SheetGrabber.tsx";
+import { GRABBER_ROOM, SheetGrabber } from "./SheetGrabber.tsx";
 
 /**
  * Where a header's back button leads. `label` is its accessible name,
@@ -133,19 +133,20 @@ export function SheetHeader(props: {
   );
   const padding = theme.space(actions ? 1 : 2);
   const divider = props.divider ? `${theme.line.border}px solid ${theme.color.border}` : undefined;
+  // A grab area's pill wants more room above the buttons than a row or a stacked header keeps, so it grows its top padding by the difference (SheetGrabber).
+  const lift = props.grab ? GRABBER_ROOM - ROW_TOP_SPACE : 0;
   // Over the title's first 44 px, which it covers while it shows: on the title's line, after Back in one row.
   const fullScreen = props.fullScreen ? (
     <FullScreenButton
       {...props.fullScreen}
-      at={props.stacked ? { left: padding, top: STACKED_PAD + theme.touch + (STACKED_TITLE_LINE - theme.touch) / 2 } : { left: padding + (back ? theme.touch + theme.space(1) : 0), top: (56 - theme.touch) / 2 }}
+      at={props.stacked ? { left: padding, top: lift + STACKED_PAD + theme.touch + (STACKED_TITLE_LINE - theme.touch) / 2 } : { left: padding + (back ? theme.touch + theme.space(1) : 0), top: lift + ROW_TOP_SPACE }}
     />
   ) : null;
-  // In the room above the buttons, which a row and a stacked header both keep (SheetGrabber).
-  const grabber = props.grab ? <SheetGrabber space={props.stacked ? STACKED_PAD : ROW_TOP_SPACE} /> : null;
+  const grabber = props.grab ? <SheetGrabber /> : null;
   const lead = fullScreen || grabber ? { position: "relative" as const } : null;
   if (props.stacked) {
     return (
-      <header {...grab.attrs} style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, padding: `${STACKED_PAD}px ${padding}px`, borderBottom: divider, ...grab.style, ...lead }}>
+      <header {...grab.attrs} style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, padding: `${STACKED_PAD + lift}px ${padding}px ${STACKED_PAD}px`, borderBottom: divider, ...grab.style, ...lead }}>
         {grabber}
         {fullScreen}
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0, height: theme.touch }}>
@@ -169,7 +170,7 @@ export function SheetHeader(props: {
   const rowStyle: CSSProperties = { flex: "none", display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0, minHeight: 56, padding: `0 ${padding}px` };
   if (props.detail) {
     return (
-      <header {...grab.attrs} style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, borderBottom: divider, ...grab.style, ...lead }}>
+      <header {...grab.attrs} style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, paddingTop: lift, borderBottom: divider, ...grab.style, ...lead }}>
         {grabber}
         <div style={rowStyle}>{row}</div>
         <div id={props.detailId} style={{ minWidth: 0, padding: `0 ${padding + theme.space(2)}px ${theme.space(2)}px`, marginTop: -theme.space(2) }}>
@@ -179,7 +180,7 @@ export function SheetHeader(props: {
     );
   }
   return (
-    <header {...grab.attrs} style={{ ...rowStyle, borderBottom: divider, ...grab.style, ...lead }}>
+    <header {...grab.attrs} style={{ ...rowStyle, minHeight: lift + 56, padding: `${lift}px ${padding}px 0`, borderBottom: divider, ...grab.style, ...lead }}>
       {grabber}
       {row}
     </header>
@@ -216,10 +217,10 @@ function grabProps(on: boolean | undefined): { attrs: Record<string, string>; st
   return on ? { attrs: { [GRAB_ATTR]: "" }, style: GRAB_STYLE } : { attrs: {}, style: null };
 }
 
-/** The stacked header's padding above and below, and its title's line: 6 + 44 + 22 + 6 = 78 px (sheetCap.ts SHEET_HEADER_STACKED). */
+/** The stacked header's padding above and below, and its title's line: 6 + 44 + 22 + 6 = 78 px (sheetCap.ts SHEET_HEADER_STACKED), and 4 px more as a grab area, for its pill. */
 const STACKED_PAD = 6;
 const STACKED_TITLE_LINE = 22;
-/** The room above a 56 px row's 44 px buttons. */
+/** The room above a 56 px row's 44 px buttons, before a grab area grows it for its pill. */
 const ROW_TOP_SPACE = (56 - theme.touch) / 2;
 /** A pane's frame pads its top by this much above its header (builder/labelPaneFrame.ts), and a pane's 48 px header row centers its 44 px buttons under that. */
 const PANE_FRAME_TOP = theme.space(1);
@@ -370,10 +371,12 @@ export function PaneHeader(props: {
   /*
    * A grab area reaches up over the frame's top padding, taken back from
    * its margin, so the pill drawn there is on the header and a drag that
-   * starts on it moves the pane as one on the header does. Its buttons and
-   * title stay where they were. A sticky header reaches up already.
+   * starts on it moves the pane as one on the header does. A sticky header
+   * reaches up already. Either grows its top padding by what the pill
+   * needs beyond the room it had above its buttons (SheetGrabber).
    */
-  const reach: CSSProperties | null = props.grab && !sticky ? { position: "relative", marginTop: -PANE_FRAME_TOP, paddingTop: PANE_FRAME_TOP, minHeight: 48 + PANE_FRAME_TOP } : null;
+  const lift = props.grab ? GRABBER_ROOM - (sticky ? PANE_FRAME_TOP : PANE_TOP_SPACE) : 0;
+  const reach: CSSProperties | null = props.grab && !sticky ? { position: "relative", marginTop: -PANE_FRAME_TOP, paddingTop: PANE_FRAME_TOP + lift, minHeight: 48 + PANE_FRAME_TOP + lift } : null;
   return (
     <div
       {...(sticky ? { [STICKY_HEADER_ATTR]: "" } : {})}
@@ -398,13 +401,14 @@ export function PaneHeader(props: {
               zIndex: 1,
               // The frame's 4 px top padding and 12 px side padding, taken back so the fill covers what scrolls under it.
               margin: `-${theme.space(1)}px -${theme.space(3)}px 0`,
-              padding: `${theme.space(1)}px ${theme.space(3)}px 0`,
+              padding: `${theme.space(1) + lift}px ${theme.space(3)}px 0`,
+              minHeight: 48 + lift,
               background: theme.color.surface,
             }
           : null),
       }}
     >
-      {props.grab ? <SheetGrabber space={sticky ? PANE_FRAME_TOP : PANE_TOP_SPACE} /> : null}
+      {props.grab ? <SheetGrabber /> : null}
       {grip}
       {title}
       {props.actions}

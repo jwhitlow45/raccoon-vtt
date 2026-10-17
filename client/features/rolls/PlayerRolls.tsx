@@ -464,8 +464,8 @@ function RollCard(props: {
             : null),
         }}
       >
-        {/* Over the card's top padding, which a sticking header takes into its own box. */}
-        {props.sheet ? <SheetGrabber space={theme.space(4)} from={sticks ? 0 : -theme.space(4)} /> : null}
+        {/* In the card's 16 px top padding, which a sticking header takes into its own box: room enough for the pill with no growth. */}
+        {props.sheet ? <SheetGrabber from={sticks ? 0 : -theme.space(4)} /> : null}
         <div style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
           <div style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>{askLine(request)}</div>
           {dc ? <div style={{ fontSize: theme.font.body14, color: theme.color.textMuted }}>{dc}</div> : null}

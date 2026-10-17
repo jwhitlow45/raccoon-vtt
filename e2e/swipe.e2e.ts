@@ -1101,6 +1101,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await dm.keyboard.press("Shift+Tab");
     assert.equal(await button.evaluate((el) => (globalThis as unknown as Win).document.activeElement === (el as unknown as El)), true, "Shift+Tab from Back did not reach Full screen");
     assert.ok((await rectOf(button)).width >= 44, "Full screen does not show with keyboard focus");
+    assert.ok(Math.abs((await rectOf(button)).top - (await rectOf(sheet.getByRole("button", { name: "Close Log" }))).top) < 0.5, "Full screen does not stand on the row it covers");
     await dm.keyboard.press("Enter");
     await waitFor("full", async () => (await sheet.getAttribute("aria-modal")) === "true" || null, 3_000);
     assert.equal(await button.getAttribute("aria-pressed"), "true");
@@ -1234,7 +1235,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     const light = randomUUID();
     await ops.send({ t: "build.lights", sceneId: run.sceneId, put: [{ id: light, x: 12.5, y: 6.5, bright: 5, dim: 5, on: true, walls: true, label: "Candle" }] });
 
-    // The panel sheet at each phone size: one pill, the header as wave 6 left it (56 px, its buttons 6 px down), and Close by a tap.
+    // The panel sheet at each phone size: one pill, the header 4 px taller than wave 6's 56 px for it, its buttons 10 px down, and Close by a tap.
     for (const view of [
       { width: 375, height: 667, scale: 1 },
       { width: 375, height: 667, scale: 1.3 },
@@ -1247,8 +1248,8 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       await steadyRect(sheet);
       await expectGrabbers(dm, ["Log"], where);
       const fit = await checkFit(sheet, view.scale, where);
-      assert.ok(Math.abs(fit.area.height - 56 * view.scale) < 0.6, `${where}: the header is ${fit.area.height} px tall`);
-      assert.ok(fit.close && Math.abs(fit.close.top - fit.area.top - 6 * view.scale) < 0.6, `${where}: Close moved: ${JSON.stringify(fit)}`);
+      assert.ok(Math.abs(fit.area.height - 60 * view.scale) < 0.6, `${where}: the header is ${fit.area.height} px tall`);
+      assert.ok(fit.close && Math.abs(fit.close.top - fit.area.top - 10 * view.scale) < 0.6, `${where}: Close is not 10 px down: ${JSON.stringify(fit)}`);
       await shotsInBothSchemes(dm, `grabber-log-${view.width}x${view.height}-${view.scale * 100}`);
       await touchTap(dmCdp, dm, await middleOf(sheet.getByRole("button", { name: "Close Log" })));
       assert.equal(await settled(sheet), "gone", `${where}: a tap on Close did not close the sheet`);
@@ -1286,7 +1287,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       await fillScreen(sheet, view.scale, where);
       await expectGrabbers(dm, ["Log"], where);
       const fit = await checkFit(sheet, view.scale, where);
-      assert.ok(Math.abs(fit.area.height - 56 * view.scale) < 0.6, `${where}: the header is ${fit.area.height} px tall`);
+      assert.ok(Math.abs(fit.area.height - 60 * view.scale) < 0.6, `${where}: the header is ${fit.area.height} px tall`);
       await shotsInBothSchemes(dm, `grabber-full-${view.width}x${view.height}-${view.scale * 100}`);
       await touchTap(dmCdp, dm, await middleOf(sheet.getByRole("button", { name: "Close Log" })));
       assert.equal(await settled(sheet), "gone", `${where}: a tap on Close did not close the sheet`);
@@ -1354,7 +1355,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await card.getByRole("button", { name: /^Close/ }).click();
     await tall.getByRole("button", { name: "Close Monsters" }).click();
 
-    // The label, pin and light panes as sheets: the pane's header reaches over the frame's top padding to hold the pill, its buttons as before (1 px border, 4 px padding, 2 px over a 44 px button).
+    // The label, pin and light panes as sheets: the pane's header reaches over the frame's top padding to hold the pill, its buttons 4 px lower than before (1 px border, 4 px padding, 4 px for the pill, 2 px over a 44 px button).
     for (const scale of [1, 1.3]) {
       await setUp(dm, { width: 375, height: 667, scale });
       const label = await openLabel(0);
@@ -1391,7 +1392,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     }
     await dm.evaluate(() => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem("rvtt.sidePanel"));
 
-    // Sideways and in the very short mode nothing swipes, so nothing shows a pill.
+    // Sideways and in the very short mode nothing swipes, so nothing shows a pill, and the header keeps wave 6's 56 px.
     for (const view of [
       { width: 844, height: 390, scale: 1 },
       { width: 480, height: 320, scale: 1.3 },
@@ -1401,6 +1402,8 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       const sheet = await openPanel(dm, "Log");
       await steadyRect(sheet);
       await expectGrabbers(dm, [], where);
+      const header = await rectOf(sheet.locator("header").first());
+      assert.ok(Math.abs(header.height - 56 * view.scale) < 0.6, `${where}: the header is ${header.height} px tall`);
       await shotsInBothSchemes(dm, `grabber-log-${view.width}x${view.height}-${view.scale * 100}`);
       await sheet.getByRole("button", { name: "Close Log" }).click();
     }
@@ -1527,25 +1530,33 @@ async function grabberFit(surface: Locator): Promise<{ pill: Rect; area: Rect; s
   });
 }
 
-/** The pill is about 36 x 4 at the interface size, centered, inside its grab area above its first line, moves nothing, and lets a touch through to the header. */
+/**
+ * The pill is about 36 x 4 at the interface size, centered, 5 to 8 px
+ * under the surface's top edge (5 inside its 1 px border, or at the
+ * screen's top in full screen, where the sheet has none), inside its grab
+ * area and at least 1 px above its first line, moves nothing, and lets a
+ * touch through to the header.
+ */
 async function checkFit(surface: Locator, scale: number, where: string): Promise<Awaited<ReturnType<typeof grabberFit>>> {
   const fit = await grabberFit(surface);
   const say = `${where}: ${JSON.stringify(fit)}`;
   assert.ok(Math.abs(fit.pill.width - 36 * scale) < 0.6 && Math.abs(fit.pill.height - 4 * scale) < 0.6, `the pill's size, ${say}`);
   assert.ok(Math.abs((fit.pill.left + fit.pill.right) / 2 - (fit.surface.left + fit.surface.right) / 2) < 1, `the pill is off center, ${say}`);
-  assert.ok(fit.pill.top >= fit.area.top - 0.5 && fit.pill.top >= fit.surface.top, `the pill pokes out of its header, ${say}`);
-  assert.ok(fit.pill.bottom <= fit.firstLine + 0.5, `the pill reaches the header's buttons, title or text, ${say}`);
+  assert.ok(fit.pill.top >= fit.area.top - 0.5, `the pill pokes out of its header, ${say}`);
+  const below = (fit.pill.top - fit.surface.top) / scale;
+  assert.ok(below >= 5 - 0.5 && below <= 8 + 0.5, `the pill is ${below} px under the surface's top edge, ${say}`);
+  assert.ok(fit.pill.bottom <= fit.firstLine - scale + 0.5, `the pill comes within 1 px of the header's buttons, title or text, ${say}`);
   assert.ok(fit.same, `the pill moves the header's title or buttons, ${say}`);
   assert.equal(fit.hit, "area", `a touch on the pill does not reach the header under it, ${say}`);
   return fit;
 }
 
-/** A label, pin or light pane as a sheet: one pill, its close where it was before the pill (1 px border, 4 px padding, 2 px over a 44 px button), and closed by a tap on its close. */
+/** A label, pin or light pane as a sheet: one pill, its close 11 px down (1 px border, 4 px padding, 4 px for the pill, 2 px over a 44 px button), and closed by a tap on its close. */
 async function checkPane(pane: Locator, scale: number, where: string, shot: string): Promise<void> {
   await steadyRect(pane);
   await expectGrabbers(dm, [(await pane.getAttribute("aria-label")) ?? ""], where);
   const fit = await checkFit(pane, scale, where);
-  assert.ok(fit.close && Math.abs(fit.close.top - fit.surface.top - 7 * scale) < 0.6, `${where}: its close moved: ${JSON.stringify(fit)}`);
+  assert.ok(fit.close && Math.abs(fit.close.top - fit.surface.top - 11 * scale) < 0.6, `${where}: its close is not 11 px down: ${JSON.stringify(fit)}`);
   await shots.take(dm, shot);
   await touchTap(dmCdp, dm, await middleOf(pane.getByRole("button", { name: /^Close/ }).first()));
   assert.equal(await settled(pane), "gone", `${where}: a tap on its close did not close it`);
