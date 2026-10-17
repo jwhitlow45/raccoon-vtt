@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type Route } from "playwright-core";
 import { ConsoleWatch, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
@@ -148,6 +148,19 @@ type El = {
 type Doc = { activeElement: El | null; querySelector(s: string): El | null; querySelectorAll(s: string): ArrayLike<El> };
 
 /** Sets the safe areas, the window and the interface size, and loads the room again. Storage is left as the run set it, unless `folds` says. */
+/**
+ * Fails the SRD monsters' data and nothing else. The bundler can name a
+ * shared code chunk "monsters" too, after shared/srd/monsters.ts, and the
+ * room cannot load without that one, so a route by the name alone took
+ * the whole page down.
+ */
+async function failSrdData(route: Route): Promise<void> {
+  const response = await route.fetch();
+  const body = await response.text();
+  if (body.includes('"srdId":"aboleth"')) await route.abort();
+  else await route.fulfill({ response, body });
+}
+
 async function setUp(page: Page, cdp: CDPSession, view: View, folds?: string | null): Promise<void> {
   const i = view.insets ?? {};
   await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: i.bottom ?? 0, left: i.side ?? 0, right: i.side ?? 0 } });
@@ -1202,7 +1215,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.equal("ac" in ((goblinState.actor as { inline: Record<string, unknown> }).inline ?? {}), false, "the goblin's AC reached Pat");
 
     // A failed load says so and offers the reload, the one try that can work: Chrome keeps a failed module for the life of the page.
-    await player.route(/\/assets\/monsters-[^/]*\.js$/, (route) => route.abort());
+    await player.route(/\/assets\/monsters-[^/]*\.js$/, failSrdData);
     await setUp(player, playerCdp, DESK, null);
     await tapToken(player, run.bear.at);
     await bar(player, "Brown Bear").getByText("Saves did not load. Reload to try again.").waitFor();
@@ -1280,7 +1293,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
   });
 
   test("8c. the DM's SRD lists and blocks that did not load offer the reload, which brings them", async () => {
-    await dm.route(/\/assets\/monsters-[^/]*\.js$/, (route) => route.abort());
+    await dm.route(/\/assets\/monsters-[^/]*\.js$/, failSrdData);
     dmConsole.allow = [/monsters-/, /dynamically imported module/, /ERR_FAILED|net::/];
     await setUp(dm, dmCdp, DESK, null);
     await openSideTab(dm, "Monsters");
