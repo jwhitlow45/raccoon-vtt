@@ -1,7 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type PcDice, type PcRoll, type PcStats, type SkillKey } from "#shared/model.ts";
-import { MAX_PC_DICE_PARTS, MAX_PC_ROLLS } from "#shared/protocol.ts";
+import { MAX_PC_DICE_PARTS, MAX_PC_ROLLS, type CharacterPatch } from "#shared/protocol.ts";
+import { fillSummary } from "#shared/rules/pcFill.ts";
 import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
 import { pcActorNumbers, pcDerived, pcProficiency, type PcNumber } from "#shared/rules/pcStats.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
@@ -9,13 +10,13 @@ import { ABILITY_NAMES as ABILITY_SHORT, signed } from "#shared/statBlock.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Dialog, DiscardQuestion } from "../../components/Dialog.tsx";
-import { Input, Select } from "../../components/Field.tsx";
+import { Input, Select, TextArea } from "../../components/Field.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { Help, SectionLabel } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
-import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { ownsCharacter } from "../tokens/access.ts";
 import { whose } from "../tokens/companionBlocks.ts";
 import {
@@ -35,6 +36,10 @@ import {
   type PcDraft,
   type TotalKey,
 } from "./draft.ts";
+import { alsoAny, alsoLines, alsoPatch, readLine, type AlsoKey, type AlsoSet } from "./fill.ts";
+import { openFlow, stepFlow, type FlowEvent, type FlowState, type Review } from "./flow.ts";
+import { statsFromBlock } from "./fromBlock.ts";
+import { parseStatBlockText } from "../monsters/parse.ts";
 import { closePcStats, openPcStatsSlot } from "./open.ts";
 import { partsText, rollReading } from "./reading.ts";
 
@@ -59,26 +64,36 @@ export function PcStatsHost() {
  * is one field holding its total, with the parts it comes from under it.
  * A character that leaves the viewer's view meanwhile keeps the draft and
  * can no longer be saved.
+ *
+ * "Fill from" reads a block in (section 6): its steps show what was read
+ * and what it would change, and "Use it" only fills the draft, so a fill
+ * is looked over, changed or dropped before Save sends anything. The steps
+ * and the Save are one state machine (flow.ts).
  */
 export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
+  const store = useRoomStore();
   const character = useRoomView((s) => s.view?.characters[props.characterId]);
   const you = useRoomView((s) => s.you);
   // What the editor opened with, kept whatever the view says later: Save sends only what this draft changed from it.
   const [opened] = useState(() => openDraft(character ?? {}));
-  const [draft, setDraft] = useState<PcDraft>(opened.draft);
+  // The editor's steps and its Save (flow.ts). Answers arrive between renders, so the machine's state lives in a ref too.
+  const [flow, setFlow] = useState<FlowState>(() => openFlow(opened.draft));
+  const flowRef = useRef(flow);
+  const draft = flow.draft;
   const name = useRef(character?.name ?? "This character");
   if (character) name.current = character.name;
   const yours = character !== undefined && (you?.role === "dm" || ownsCharacter(you?.memberId, character));
   const gone = !yours;
-  const [held, setHeld] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [retryAt, setRetryAt] = useState<number | null>(null);
   const [leaving, setLeaving] = useState(false);
+  const [pasted, setPasted] = useState("");
   const problems = useMemo(() => draftProblems(draft), [draft]);
   const size = useMemo(() => sizeOf(draft.stats), [draft.stats]);
-  const dirty = draftDirty(opened.draft, draft);
+  const dirty = draftDirty(opened.draft, draft) || alsoAny(flow.also) || pasted.trim() !== "";
+  const held = flow.saving;
   // An answer that comes after the editor closed may only say what became of the save.
   const open = useRef(true);
   useEffect(() => {
@@ -93,19 +108,22 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     return () => clearTimeout(timer);
   }, [retryAt]);
 
-  const setStats = (update: (stats: PcStats) => PcStats) => setDraft((d) => ({ ...d, stats: update(d.stats) }));
-
-  const close = () => {
-    // A save in flight lands whatever the editor does, and a late refusal is a toast, so closing never waits on it.
-    if (dirty && !leaving && !held) setLeaving(true);
-    else props.onClose();
+  const send = (event: FlowEvent) => {
+    const { state, effects } = stepFlow(flowRef.current, event);
+    flowRef.current = state;
+    setFlow(state);
+    for (const effect of effects) {
+      if (effect.kind === "close") props.onClose();
+      else sendSave(state);
+    }
   };
 
-  const save = () => {
-    if (held || gone || retryAt !== null || problems.length > 0) return;
-    const patch = savePatch(opened.draft, opened.had, draft);
-    if (!patch) {
-      props.onClose();
+  /** The Save's one op: the parts that differ from the block as it opened, and what a fill set beside it, against the character as it is now. */
+  const sendSave = (state: FlowState) => {
+    const live = store.getState().view?.characters[props.characterId];
+    const patch: CharacterPatch = { ...(savePatch(opened.draft, opened.had, state.draft) ?? {}), ...(live ? alsoPatch(state.also, live) : {}) };
+    if (Object.keys(patch).length === 0) {
+      send({ t: "saved", answer: "taken" });
       return;
     }
     const who = name.current;
@@ -115,29 +133,103 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
         if (text) ui.notify(text, "error");
         return;
       }
-      setHeld(false);
       const outcome = saveOutcome(answer, refused, who);
-      if (outcome.kind === "saved") {
-        props.onClose();
-        return;
+      if (outcome.kind === "problem") {
+        setRefusal(outcome.text);
+        if (outcome.retryInMs !== undefined) setRetryAt(Date.now() + outcome.retryInMs);
       }
-      setRefusal(outcome.text);
-      if (outcome.retryInMs !== undefined) setRetryAt(Date.now() + outcome.retryInMs);
+      send({ t: "saved", answer });
     };
     setRefusal(null);
     // In "view as a player" nothing is sent: the preview says so, and the draft stays.
-    if (actions.dispatch({ t: "character.update", characterId: props.characterId, patch }, { onAnswer, quiet: true }) === null) return;
-    setHeld(true);
+    if (actions.dispatch({ t: "character.update", characterId: props.characterId, patch }, { onAnswer, quiet: true }) === null) send({ t: "saved", answer: "refused" });
   };
 
-  const footer = leaving ? (
+  const setDraft = (update: (d: PcDraft) => PcDraft) => send({ t: "edit", update });
+  const setStats = (update: (stats: PcStats) => PcStats) => setDraft((d) => ({ ...d, stats: update(d.stats) }));
+
+  const close = () => {
+    // A save in flight lands whatever the editor does, and a late refusal is a toast, so closing never waits on it.
+    if (dirty && !leaving && !held) setLeaving(true);
+    else send({ t: "close" });
+  };
+
+  const save = () => {
+    if (held || gone || retryAt !== null || problems.length > 0) return;
+    send({ t: "save" });
+  };
+
+  const readPaste = () => {
+    if (!character) return;
+    const parsed = parseStatBlockText(pasted);
+    const fill = statsFromBlock(parsed.block, draft.level, actions.newId);
+    fill.warnings.unshift(...parsed.warnings);
+    send({ t: "read", fill, lines: alsoLines(fill, character) });
+  };
+
+  const discard = leaving ? (
     <>
       <Button onClick={() => setLeaving(false)}>Keep editing</Button>
-      <Button variant="danger" armed onClick={props.onClose}>
+      <Button variant="danger" armed onClick={() => send({ t: "close" })}>
         Discard
       </Button>
     </>
-  ) : (
+  ) : null;
+  const status = leaving ? <DiscardQuestion /> : retryAt !== null ? "You can save again in a few seconds." : null;
+  const back = { label: "Back to the stat block", onBack: () => send({ t: "back" }) };
+
+  if (flow.step === "paste") {
+    return (
+      <Dialog
+        title="Paste text"
+        onClose={close}
+        back={back}
+        status={status}
+        phone="fill"
+        width="lg"
+        footer={
+          discard ?? (
+            <>
+              <Button onClick={() => send({ t: "back" })}>Back</Button>
+              <Button variant="primary" disabled={pasted.trim() === ""} onClick={readPaste}>
+                Read it
+              </Button>
+            </>
+          )
+        }
+      >
+        <PasteStep text={pasted} onText={setPasted} level={draft.level} name={name.current} />
+      </Dialog>
+    );
+  }
+
+  if (flow.step === "review" && flow.review) {
+    const review = flow.review;
+    return (
+      <Dialog
+        title="Check what was read"
+        onClose={close}
+        back={{ label: "Back", onBack: () => send({ t: "back" }) }}
+        status={status}
+        phone="fill"
+        width="lg"
+        footer={
+          discard ?? (
+            <>
+              <Button onClick={() => send({ t: "back" })}>Back</Button>
+              <Button variant="primary" onClick={() => send({ t: "use" })}>
+                Use it
+              </Button>
+            </>
+          )
+        }
+      >
+        <ReviewStep review={review} onToggle={(key) => send({ t: "toggle", key })} />
+      </Dialog>
+    );
+  }
+
+  const footer = discard ?? (
     <>
       <Button onClick={close}>Cancel</Button>
       <Button variant="primary" busy={held} disabled={gone || retryAt !== null || problems.length > 0} onClick={save}>
@@ -145,7 +237,6 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
       </Button>
     </>
   );
-  const status = leaving ? <DiscardQuestion /> : retryAt !== null ? "You can save again in a few seconds." : null;
 
   return (
     <Dialog title={`${whose(name.current)} stat block`} onClose={close} footer={footer} status={status} phone="fill" width="lg">
@@ -156,6 +247,8 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
             This stat block was deleted or is no longer yours, so it cannot be saved.
           </Notice>
         ) : null}
+        <FillFrom onPaste={() => send({ t: "open", step: "paste" })} />
+        {alsoAny(flow.also) ? <Help>{`Save also sets ${alsoWords(flow.also)}.`}</Help> : null}
         <LevelRow draft={draft} onLevel={(level) => setDraft((x) => ({ ...x, level }))} />
         <Abilities stats={draft.stats} level={draft.level} setStats={setStats} />
         <Skills stats={draft.stats} level={draft.level} setStats={setStats} />
@@ -183,6 +276,78 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
         ) : null}
       </fieldset>
     </Dialog>
+  );
+}
+
+/** "Fill from" (7.2): the steps that read a block in, one row. */
+function FillFrom(props: { onPaste(): void }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+      <span style={{ fontWeight: theme.weight.strong }}>Fill from</span>
+      <Button size="sm" onClick={props.onPaste}>
+        Paste text
+      </Button>
+    </div>
+  );
+}
+
+const ALSO_WORDS: Record<keyof AlsoSet, string> = { level: "the level", name: "the name", ac: "AC", hpMax: "max HP", speeds: "the speed", senses: "the senses", sheetUrl: "the sheet link" };
+
+/** "the level, AC and max HP" */
+function alsoWords(also: AlsoSet): string {
+  const words = (Object.keys(also) as (keyof AlsoSet)[]).map((k) => ALSO_WORDS[k]);
+  return words.length <= 1 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+}
+
+/** "Paste text" (6.2): a stat block copied whole, read on this device by the monster editor's reader. */
+function PasteStep(props: { text: string; onText(text: string): void; level: number | undefined; name: string }) {
+  const id = useId();
+  return (
+    <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
+      <label htmlFor={id} style={{ color: theme.color.textMuted, lineHeight: theme.leading.body }}>
+        Paste a whole stat block, from its name to its last action. It is read on this device, and you check what it read before anything is saved.
+      </label>
+      <TextArea
+        id={id}
+        value={props.text}
+        onChange={(e) => props.onText(e.target.value)}
+        rows={10}
+        spellCheck={false}
+        autoFocus
+        placeholder={"Bree Tallow\nMedium Humanoid, Neutral Good\nAC 15  Initiative +3 (13)\n…"}
+        style={{ width: "100%", fontFamily: theme.font.mono }}
+      />
+      {props.level === undefined ? <Notice tone="warning">{`Set ${whose(props.name)} level first, so proficiency reads right.`}</Notice> : null}
+    </div>
+  );
+}
+
+/** The review (6.1): what was read, what to check, what it replaces, and the other fields it sets, each ticked or not. */
+function ReviewStep(props: { review: Review; onToggle(key: AlsoKey): void }) {
+  const { review } = props;
+  return (
+    <div style={{ display: "grid", gap: theme.space(3), fontSize: theme.font.body14 }}>
+      <p style={{ margin: 0 }}>{readLine(review.fill)}</p>
+      {review.fill.warnings.length > 0 ? (
+        <section style={{ display: "grid", gap: theme.space(1) }}>
+          <SectionLabel>Check these</SectionLabel>
+          {review.fill.warnings.map((w, i) => (
+            <p key={i} style={{ margin: 0 }}>
+              {w}
+            </p>
+          ))}
+        </section>
+      ) : null}
+      <p style={{ margin: 0 }}>{fillSummary(review.fill, review.merge)}</p>
+      {review.lines.length > 0 ? (
+        <section style={{ display: "grid", gap: theme.space(1) }}>
+          <SectionLabel>Also set</SectionLabel>
+          {review.lines.map((line) => (
+            <Checkbox key={line.key} label={line.text} checked={line.on} onChange={() => props.onToggle(line.key)} />
+          ))}
+        </section>
+      ) : null}
+    </div>
   );
 }
 
