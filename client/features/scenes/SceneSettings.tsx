@@ -10,6 +10,7 @@ import { buttonLook } from "../../components/looks.ts";
 import { Help, Note, Section } from "../../components/Panel.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
 import { Switch } from "../../components/Switch.tsx";
+import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
@@ -233,6 +234,8 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close():
     setDown(squares.down);
     setCountsEdited(false);
   }, [scene.id, squares.across, squares.down]);
+  // Only Apply sends counts typed over the grid's own, so a sheet's swipe springs back until then (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedInput(countsEdited && (across !== squares.across || down !== squares.down));
   const counts = calibrationFromCounts(map, across, down);
 
   const applyCounts = () => {
@@ -328,6 +331,8 @@ function MapImageRow(props: { scene: Scene; close(): void }) {
   /** On the players' scene: the DM has read the warning, and the picker is out. */
   const [armed, setArmed] = useState(false);
   const [fogIt, setFogIt] = useState(true);
+  // The picked image reads the fog choice, so a sheet's swipe springs back while the picker is out with it changed (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedInput(armed && !fogIt);
   useEffect(() => setArmed(false), [scene.id]);
   /*
    * The button that arms the picker gives way to it, and Cancel gives way

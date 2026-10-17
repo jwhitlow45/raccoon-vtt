@@ -14,7 +14,7 @@ import { Loading } from "../../components/Loading.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
 import { Row } from "../../components/Row.tsx";
-import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
+import { useUnsavedInput, useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
@@ -292,6 +292,8 @@ function PlaceSection(props: { draft: Draft; srd: SrdList; close(): void }) {
   const monsters = useRoomMonsters();
   const [hidden, setHidden] = useState(false);
   const [addToFight, setAddToFight] = useState(true);
+  // Only Place sends the choices, so a sheet's swipe springs back once either changed (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedSince({ hidden, addToFight });
   const lines = props.draft.monsters;
   const waiting = lines.some((m) => "srdId" in m) && !props.srd.list;
   const deleted = lines.filter((m) => "monsterId" in m && !monsters?.[m.monsterId]).reduce((n, m) => n + m.count, 0);

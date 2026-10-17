@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Actor } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { Segmented } from "../../components/Segmented.tsx";
+import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { MAX_HP_AMOUNT } from "./hpInput.ts";
@@ -32,6 +33,8 @@ export function RestSection(props: { actor: Pick<Actor, "hp" | "life"> | undefin
   const [heal, setHeal] = useState<number | null>(null);
   const hp = props.actor?.hp;
   const canRest = !!hp && hp.cur >= 1 && props.actor?.life === "alive";
+  // A rest chosen and not yet finished keeps the sheet from a swipe's close: only its button sends it (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedInput(canRest && kind !== null);
   const fighting = useRoomView((s) => !!s.view?.encounter);
 
   const finish = () => {

@@ -9,6 +9,7 @@ import { Empty } from "../../components/Empty.tsx";
 import { FieldRow, Input } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
+import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
@@ -157,6 +158,8 @@ function MonsterDetail(props: {
   const [useTyped, setUseTyped] = useState(false);
   const [hidden, setHidden] = useState(false);
   const [inLair, setInLair] = useState(false);
+  // Only Place sends the choices, so a sheet's swipe springs back once any changed (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedSince({ count, typedHp, useTyped, hidden, inLair });
   const lair = hasLairValues(m);
   const srdImage = useRoomView((s) => (listed.source === "srd" ? s.view?.srdImages?.[listed.srd.srdId]?.image : undefined));
   const image = listed.source === "room" ? listed.monster.defaultImage : srdImage;

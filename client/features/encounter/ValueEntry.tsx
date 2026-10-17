@@ -4,6 +4,7 @@ import { MAX_ENTRIES_PER_OP } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Help } from "../../components/Panel.tsx";
+import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { entryName, groupEntries, valueChanges, valueText, type ValueField } from "./logic.ts";
@@ -25,6 +26,8 @@ export function ValueEntry(props: { entries: InitEntry[]; onDone(): void }) {
   const [split, setSplit] = useState<ReadonlySet<string>>(new Set());
   const [texts, setTexts] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Only Save sends the values typed, so a sheet's swipe springs back while any is typed (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedSince(texts);
   const byId = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries]);
 
   const fields = useMemo(() => {

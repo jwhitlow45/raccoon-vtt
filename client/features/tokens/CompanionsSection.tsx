@@ -20,7 +20,7 @@ import { ImagePreview } from "../images/IconDisk.tsx";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
 import { displayName, footprint } from "../../lib/scene.ts";
 import { handFocusOn } from "../../lib/handFocus.ts";
-import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
+import { useUnsavedInput, useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { initials } from "../../lib/tokenView.ts";
 import { useRoomScope } from "../../state/scope.ts";
@@ -536,7 +536,10 @@ export function MakeCompanion(props: { token: Token }) {
     focusOpener.current = false;
   }, [open]);
   // A companion has stats of its own, so a token that reads a character's cannot be one.
-  if (token.kind === "pc" || token.companion || "ref" in token.actor) return null;
+  const cannot = token.kind === "pc" || token.companion || "ref" in token.actor;
+  // Only its button sends the choices, so a sheet's swipe springs back while the form shows them changed (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedInput(open && !cannot && list.length > 0 && !make.waiting && (of !== NO_CHARACTER || turn !== "shared"));
+  if (cannot) return null;
   if (!open) {
     return (
       <div style={{ display: "flex" }}>

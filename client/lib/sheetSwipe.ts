@@ -625,11 +625,18 @@ export function UnsavedInput(props: { unsaved: boolean }): null {
  * what the form holds, compared as JSON with its value at the first render.
  * `active` false reports nothing, as while a Done already sent holds the
  * draft that the server will take.
+ *
+ * Returns the form's new start, for a form that stays on screen after its
+ * button sent it, or that fills itself anew (a suggested password): with
+ * no value, what it holds now, else the value given, such as what was sent.
  */
-export function useUnsavedSince(value: unknown, active = true): void {
+export function useUnsavedSince(value: unknown, active = true): (to?: unknown) => void {
   const now = JSON.stringify(value);
-  const [start] = useState(now);
+  const [start, setStart] = useState(now);
   useUnsavedInput(active && now !== start);
+  const latest = useRef(now);
+  latest.current = now;
+  return useCallback((to?: unknown) => setStart(to === undefined ? latest.current : JSON.stringify(to)), []);
 }
 
 // ------------------------------------------------------------ the hook

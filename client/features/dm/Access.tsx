@@ -11,7 +11,7 @@ import { Tag } from "../../components/Tag.tsx";
 import { api, ApiError, type DmDevice, type DmInviteState } from "../../lib/api.ts";
 import { forgetRoom, setHomeNotice } from "../../lib/knownRooms.ts";
 import { navigate } from "../../lib/navigation.ts";
-import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
+import { useUnsavedInput, useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { ConfirmAction, SecretLink } from "./controls.tsx";
@@ -179,6 +179,8 @@ export function PlayerPassword() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [changed, setChanged] = useState<string | null>(null);
+  // Only Change sends it, so a sheet's swipe springs back once a password is typed over the suggestion. A new suggestion, or a change that went through, is the new start (docs/design-v1-sheet-swipe.md 4.5).
+  const restart = useUnsavedSince(password, !busy);
   const problem = password.length > 0 ? passwordProblem(password) : "Enter a password.";
   return (
     <>
@@ -205,7 +207,15 @@ export function PlayerPassword() {
             setError(null);
           }}
           trailing={
-            <Button size="sm" onClick={() => setPassword(generatePassphrase())} aria-label="Suggest another password">
+            <Button
+              size="sm"
+              onClick={() => {
+                const next = generatePassphrase();
+                setPassword(next);
+                restart(next);
+              }}
+              aria-label="Suggest another password"
+            >
               New
             </Button>
           }
@@ -222,6 +232,7 @@ export function PlayerPassword() {
             try {
               await api.changePassword(roomId, password);
               setChanged(password);
+              restart(password);
             } catch (err) {
               setError(errorText(err));
             } finally {

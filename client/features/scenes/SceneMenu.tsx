@@ -6,7 +6,7 @@ import { IconButton } from "../../components/IconButton.tsx";
 import { Spinner } from "../../components/Loading.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { LIMITS } from "#shared/limits.ts";
-import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
+import { UnsavedInput, useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomStore } from "../../state/view.ts";
@@ -66,6 +66,8 @@ function SceneMenu(props: { scene: Scene; viewing: boolean; sceneCount: number; 
         }
       >
         <div style={{ display: "grid", gap: theme.space(1) }}>
+          {/* Only Duplicate sends the choices, so a swipe springs back once any changed, inside the sheet whose swipe it holds (docs/design-v1-sheet-swipe.md 4.5). */}
+          <UnsavedInput unsaved={!duplicate.busy && duplicate.changed} />
           <Help style={{ marginBottom: theme.space(2) }}>
             The copy, {`"${name} (copy)"`}, always gets the map and its phases, the build, labels, stamps and lights. Also copy:
           </Help>
@@ -150,7 +152,8 @@ function useDuplicate(scene: Scene, close: () => void) {
     if (n === null) finish(newSceneId, false, "The scene could not be duplicated.");
   };
 
-  return { include, set: (patch: Partial<DuplicateInclude>) => setInclude((i) => ({ ...i, ...patch })), busy, error, start };
+  const changed = (Object.keys(DUPLICATE_DEFAULTS) as (keyof DuplicateInclude)[]).some((k) => include[k] !== DUPLICATE_DEFAULTS[k]);
+  return { include, set: (patch: Partial<DuplicateInclude>) => setInclude((i) => ({ ...i, ...patch })), busy, error, start, changed };
 }
 
 /**

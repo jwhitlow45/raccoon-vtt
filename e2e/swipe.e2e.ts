@@ -692,6 +692,39 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await swipe(dmCdp, await headerPoint(pane), far(await steadyRect(pane)));
     assert.equal(await settled(pane), "gone", "an unchanged label kept its pane open");
     await pickTool(dm, "Select");
+
+    // A select-only draft: Make a companion's Belongs to, on a goblin's Token panel.
+    await touchTap(dmCdp, dm, await cellPoint(dm, { x: 6, y: 3 }));
+    await dm.getByRole("dialog", { name: "Goblin 1 actions" }).waitFor();
+    sheet = await openPanel(dm, "Token");
+    const settings = sheet.getByRole("button", { name: /^Token settings/ });
+    if ((await settings.getAttribute("aria-expanded")) === "false") await settings.click();
+    const make = sheet.getByRole("button", { name: "Make a companion" });
+    await make.scrollIntoViewIfNeeded();
+    await make.click();
+    const belongs = sheet.getByLabel("Belongs to");
+    await belongs.selectOption({ label: "Thorn" });
+    await belongs.blur();
+    await swipe(dmCdp, await headerPoint(sheet), far(await steadyRect(sheet)));
+    assert.equal(await settled(sheet), "rest", "a companion's owner chosen let the sheet close");
+    assert.equal(await belongs.locator("option:checked").textContent(), "Thorn");
+    await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
+    await swipe(dmCdp, await headerPoint(sheet), far(await steadyRect(sheet)));
+    assert.equal(await settled(sheet), "gone", "the companion form put away kept the sheet open");
+
+    // A blurred text draft: a player password typed over the suggestion. A new suggestion is a new start.
+    sheet = await openPanel(dm, "Menu");
+    await sheet.getByRole("button", { name: /^Members/ }).click();
+    const password = sheet.getByLabel("New player password");
+    await password.waitFor();
+    await password.fill("a password typed here");
+    await password.blur();
+    await swipe(dmCdp, await headerPoint(sheet), far(await steadyRect(sheet)));
+    assert.equal(await settled(sheet), "rest", "a typed password let the sheet close");
+    assert.equal(await password.inputValue(), "a password typed here");
+    await sheet.getByRole("button", { name: "Suggest another password" }).click();
+    await swipe(dmCdp, await headerPoint(sheet), far(await steadyRect(sheet)));
+    assert.equal(await settled(sheet), "gone", "a fresh suggestion kept the sheet open");
   });
 
   test("7. a dialog sheet over a panel closes alone, the X-card dismisses, and from 600 px a dialog's card does not swipe", async () => {

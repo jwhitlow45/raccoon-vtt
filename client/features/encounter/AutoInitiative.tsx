@@ -7,6 +7,7 @@ import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
+import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { describeRoll, noBonusSet, rollOps, rollRows, rowsToRoll, type RollMode, type RollRow } from "./autoRoll.ts";
@@ -58,6 +59,8 @@ export function AutoInitiativeControls() {
   const { store, mode, setMode } = useAuto();
   const { rows, skipped } = useRollRows();
   const [reroll, setReroll] = useState(false);
+  // Only Auto initiative reads the choice, so a sheet's swipe springs back once it is on. A roll leaves it on screen, and it counts from there (docs/design-v1-sheet-swipe.md 4.5).
+  const restart = useUnsavedSince(reroll);
   const scores = useRoomView((s) => s.view?.meta.settings.monsterInitScore ?? false);
   const { send, waiting } = useSendAll();
   const toRoll = rowsToRoll(rows, reroll);
@@ -85,6 +88,7 @@ export function AutoInitiativeControls() {
             if (waiting) return;
             // Without re-roll, monsters with a value keep it, and a waiting one may join its group's.
             rollAndSend(toRoll, mode, send, store, reroll ? [] : rows.filter((r) => r.value !== null));
+            restart();
           }}
         >
           {waiting ? "Rolling…" : `Auto initiative (${toRoll.length})`}

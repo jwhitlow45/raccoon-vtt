@@ -13,6 +13,7 @@ import type { PanelProps } from "../features/panels.ts";
 import { timerChoices } from "../features/encounter/timer.ts";
 import { ExportSection } from "../features/settings/ExportSection.tsx";
 import { drawersOf, moveAnyFor, moveAnyMode, parseFeetPerCell, parseRoomName, SETTING_GROUPS, settingsOp, toggleOn, withMover, type MoveAnyMode, type SettingField } from "../features/settings/form.ts";
+import { useUnsavedInput } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../state/view.ts";
 
@@ -186,6 +187,8 @@ function FeetPerCell(props: { label: string; help: string; value: number; onSave
     if (text === String(synced)) setText(String(props.value));
   }
   const dirty = text.trim() !== String(props.value);
+  // Typed values apply on Save, so a sheet's swipe springs back until then (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedInput(dirty);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const parsed = parseFeetPerCell(text);
@@ -223,6 +226,7 @@ function RoomName(props: { current: string; onSave(name: string): void }) {
     if (text === synced) setText(props.current);
   }
   const dirty = text.trim() !== props.current;
+  useUnsavedInput(dirty);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const parsed = parseRoomName(text);
