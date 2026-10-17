@@ -5,7 +5,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
-import { ConsoleWatch, openSideTab, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * Dice on the server (docs/design-v1-dice.md 13), on the real server serving
@@ -13,8 +13,9 @@ import { ConsoleWatch, openSideTab, Shots, SocketWatch, startServer, waitFor, ty
  * computer shows the same dice, as a toast while its Dice panel is closed,
  * a DM's secret roll reads "rolled in secret" for the player, a roll
  * survives a reload, Enter and Up in the field, Advantage taken by one tap
- * and pressed again before it lands, and at 375 x 667 at 100% and 130% the
- * sticky line, the field and the choices in view.
+ * and pressed again before it lands, at 375 x 667 at 100% and 130% the
+ * sticky line, the field and the choices in view, and Dice in the bottom
+ * one of two panels, rolling there and counting as on screen.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twenty, one file after
  * another as the others. The other environment variables are the smoke
@@ -233,6 +234,36 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       await shots.take(player, `dice-phone-${Math.round(scale * 100)}`);
     }
     await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    assert.deepEqual(dmConsole.errors, []);
+    assert.deepEqual(playerConsole.errors, []);
+  });
+
+  test("7. with two panels, Dice rolls in the bottom pane, and Pat's roll makes no toast while Dice shows there", async () => {
+    // The bottom pane counts as on screen (docs/design-v1-split-panel.md 3, docs/design-v1-dice.md 8.5).
+    await openSideTab(dm, "Initiative");
+    await dm.getByRole("tablist", { name: "Panels" }).locator('[role="tab"][aria-haspopup="menu"]').click();
+    await dm.getByRole("menu", { name: "More panels" }).getByRole("menuitemcheckbox", { name: "Two panels" }).click();
+    const bar = dm.locator("[data-pane-bar]");
+    await bar.getByRole("button", { name: / below$/ }).click();
+    await dm.getByRole("menu", { name: "Panel below" }).getByRole("menuitemradio", { name: sideTabName("Dice") }).click();
+    const below = dm.getByRole("group", { name: "Dice below", exact: true });
+    await below.waitFor();
+    const mine = await rollWithEnter(dm, dmSocket, "1d20+2 Below");
+    await below.locator("[data-dice-last]").getByText(String(mine.rolls[0]!.total), { exact: true }).waitFor();
+    await shots.take(dm, "dice-bottom-pane");
+
+    await openDicePhone(player);
+    const quiet = await rollWithEnter(player, playerSocket, "1d6 Quiet");
+    await waitFor("the DM's line", () => diceLines(dmSocket.state?.log).find((l) => l.data.tag === quiet.tag) ?? null);
+    await below.getByText("Quiet", { exact: true }).first().waitFor();
+    await dm.waitForTimeout(1_000);
+    assert.equal(await dm.getByText(`Pat rolled ${quiet.rolls[0]!.total} for Quiet.`).count(), 0, "no toast while Dice shows below");
+
+    // With the split closed and Initiative on top, Dice is off screen again, so the next roll toasts.
+    await bar.getByRole("button", { name: "Close Dice", exact: true }).click();
+    await bar.waitFor({ state: "detached" });
+    const loud = await rollWithEnter(player, playerSocket, "1d6 Loud");
+    await dm.getByText(`Pat rolled ${loud.rolls[0]!.total} for Loud.`).waitFor();
     assert.deepEqual(dmConsole.errors, []);
     assert.deepEqual(playerConsole.errors, []);
   });
