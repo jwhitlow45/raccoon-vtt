@@ -34,6 +34,7 @@ import {
   typeTotal,
   type Command,
   type Page,
+  type Settled,
   type ServerRoll,
 } from "./chain.ts";
 import { ANSWERED_MEANWHILE } from "#shared/permissions.ts";
@@ -65,8 +66,10 @@ const NOW = parseInt("0192f0a86c1e", 16) + 60 * 60 * 1000;
  * 8. A reload shows the same rows and results.
  * 9. A request refused at the cap leaves exactly its rows unasked, and every
  *    request and roll that went stands.
- * 10. A row whose request is reopened has no answer, and the DM's waiting
- *     Roll on it may go again (ASTRA-04).
+ * 10. A row whose request is reopened has no answer, and a row waiting on
+ *     its request takes the DM's Roll whenever no tap of the DM's is on its
+ *     way to it, whatever order its receipt, a Reopen and the DM leaving
+ *     the page and coming back arrive in (ASTRA-04, round 2).
  * 11. Apply waits on "Rolling…" only for a roll still on its way that it
  *     needs, never on the DM's tap at a row that has its answer, a reload
  *     between them included (ASTRA-02).
@@ -140,14 +143,41 @@ test("the group save's page keeps its invariants over 2,000 random sequences", (
     let frozen: OpOf<"actor.outcome"> | null = null;
     let discarded = false;
     const servedRolls = new Map<string, { holders: string[] }>();
-    /** Rows reopened since the DM's last tap on them. */
-    const reopened = new Set<string>();
+    /** The DM left the page: the view moves on and receipts settle in the tracker, and the page catches up on its return. */
+    let away = false;
+    const held: { tag: string; settled: Settled }[] = [];
     for (let step = 0; step < STEPS && !discarded; step++) {
       const at = `seed ${seed} step ${step}`;
-      const kind = pick(r, ["roll", "settle", "settle", "ask", "sync", "sync", "close", "dmRoll", "dmRoll", "dmSettle", "together", "mark", "type", "dc", "again", "damage", "apply", "applySettle", "applyAgain", "gone", "reload", "discard", "replace"] as const);
+      const kind = pick(r, ["roll", "settle", "settle", "ask", "sync", "sync", "close", "dmRoll", "dmRoll", "dmSettle", "together", "mark", "type", "dc", "again", "damage", "apply", "applySettle", "applyAgain", "gone", "reload", "discard", "replace", "leave", "return"] as const);
       const before = page;
       let send: Command[] = [];
+      // Away from the page, only the room moves: answers and Reopen on the live card, closes, and receipts the tracker holds for the page.
+      if (away && !["sync", "close", "dmSettle", "return"].includes(kind)) continue;
       switch (kind) {
+        case "leave": {
+          if (page.phase !== "rolled") break;
+          away = true;
+          count("leave");
+          break;
+        }
+        case "return": {
+          if (!away) break;
+          away = false;
+          // Back on the page, its watchers read every receipt that settled meanwhile, in any order, then the requests as they stand.
+          for (const h of [...held].sort(() => (chance(r, 0.5) ? 1 : -1))) page = settleTag(page, h.tag, h.settled, key);
+          held.length = 0;
+          page = syncRequests(page, view.rolls, key);
+          for (const req of page.requests) {
+            if (!view.rolls[req.rollId]) continue;
+            for (const h of req.holders) {
+              const copied = page.states[h]?.answer;
+              if (copied) (oracle[h] ??= {}).answer = copied;
+              else delete (oracle[h] ??= {}).answer;
+            }
+          }
+          count("return");
+          break;
+        }
         case "roll": {
           const open = chance(r, 0.2) ? LIMITS.openRollsPerRoom - 1 : int(r, 0, 5);
           const out = roll(page, { rows: ROWS, server: serverRolls(ROWS), tag: newId(), requestIds: newId, openRequests: open, taken: [], at: "2026-10-17T20:00:00.000Z" });
@@ -230,7 +260,10 @@ test("the group save's page keeps its invariants over 2,000 random sequences", (
                   : { characterId: t.characterId! };
           view = { ...view, rolls: { ...view.rolls, [id]: { ...request, targets: request.targets.map((x, j) => (j === i ? next : x)) } } };
           const holder = page.requests.find((q) => q.rollId === id)?.holders.find((h) => key((ROWS.find((w) => w.holder === h)!.askRef ?? {}) as { characterId?: string }) === key(t));
-          const hadAnswer = holder !== undefined && page.states[holder]?.answer !== undefined;
+          if (away) {
+            count(`away:${change}`);
+            break;
+          }
           page = syncRequests(page, view.rolls, key);
           // The oracle reads the request as the view holds it: an answer it holds is the row's, and a reopened target has none.
           if (holder) {
@@ -238,7 +271,6 @@ test("the group save's page keeps its invariants over 2,000 random sequences", (
               delete (oracle[holder] ??= {}).answer;
               // 10.
               assert.equal(page.states[holder]?.answer, undefined, `${at}: 10, a reopened row kept its old answer`);
-              if (hadAnswer) reopened.add(holder);
             } else if (page.states[holder]?.answer) (oracle[holder] ??= {}).answer = page.states[holder]!.answer;
           }
           count(`sync:${change}`);
@@ -257,17 +289,17 @@ test("the group save's page keeps its invariants over 2,000 random sequences", (
         }
         case "dmRoll": {
           const waiting = page.rows.filter((w) => page.states[w.holder]?.asked && !page.states[w.holder]?.answer);
-          const row = waiting.length > 0 ? pick(r, waiting) : undefined;
+          // Half the time the tap goes again where an earlier one settled, the order a reopen or a late receipt leaves.
+          const tappedBefore = waiting.filter((w) => page.dmRolls.some((d) => d.holder === w.holder && d.state !== "sending"));
+          const row = tappedBefore.length > 0 && chance(r, 0.5) ? pick(r, tappedBefore) : waiting.length > 0 ? pick(r, waiting) : undefined;
           if (!row) break;
+          if (tappedBefore.includes(row)) count("dmRoll:again");
           const s = page.states[row.holder]!;
           const onItsWay = page.dmRolls.some((d) => d.holder === row.holder && d.state === "sending");
           const out = dmRoll(page, row.holder, { t: "roll.dice", tag: newId(), rollId: s.asked!.rollId, target: row.askRef!, unanswered: true });
           // 10.
-          if (reopened.has(row.holder) && !onItsWay && page.phase === "rolled") assert.equal(out.send.length, 1, `${at}: 10, the DM's Roll on a reopened row was held back`);
-          if (out.send.length > 0) {
-            reopened.delete(row.holder);
-            count("dmRoll");
-          }
+          if (!onItsWay && page.phase === "rolled") assert.equal(out.send.length, 1, `${at}: 10, the DM's Roll on a waiting row was held back`);
+          if (out.send.length > 0) count("dmRoll");
           page = out.page;
           send = out.send;
           break;
@@ -277,7 +309,12 @@ test("the group save's page keeps its invariants over 2,000 random sequences", (
           const x = sending.length > 0 ? pick(r, sending) : undefined;
           if (!x) break;
           const outcome = pick(r, ["committed", "refused", "unknown"] as const);
-          const settled = outcome === "committed" ? { state: "committed" as const, lines: [] } : outcome === "refused" ? { state: "refused" as const, says: "It was answered meanwhile.", message: ANSWERED_MEANWHILE } : { state: "unknown" as const };
+          const settled: Settled = outcome === "committed" ? { state: "committed", lines: [] } : outcome === "refused" ? { state: "refused", says: "It was answered meanwhile.", message: ANSWERED_MEANWHILE } : { state: "unknown" };
+          if (away) {
+            if (!held.some((h) => h.tag === x.tag)) held.push({ tag: x.tag, settled });
+            count("dmSettle:away");
+            break;
+          }
           page = settleTag(page, x.tag, settled, key);
           assert.notEqual(page.dmRolls.find((d) => d.tag === x.tag)?.state, "sending", `${at}: a receipt left the DM's tap on its way`);
           count("dmSettle");
@@ -468,8 +505,8 @@ test("the group save's page keeps its invariants over 2,000 random sequences", (
       }
       if (page.plan && (page.apply === "taken" || page.apply === "unknown")) mayHave.add(page.plan.plan);
       assert.ok(committedPlans.size <= 1, `${at}: 1, two plans committed`);
-      // 5.
-      if (page.phase !== "setup") {
+      // 5: the page judges what it has seen, so not while the DM is away from it.
+      if (page.phase !== "setup" && !away) {
         const got = results(page);
         for (const row of page.rows) {
           if (oracle[row.holder]?.rolled && page.states[row.holder]?.status) continue;
@@ -479,7 +516,7 @@ test("the group save's page keeps its invariants over 2,000 random sequences", (
     }
     void applies;
   }
-  for (const k of ["rollRefused", "settle:all", "settle:some", "settle:refused", "settle:unknown", "askTaken", "askRefused", "sync:typed", "sync:rolled", "sync:mark", "sync:reopen", "closedElsewhere", "dmRoll", "dmSettle", "together", "again", "apply", "apply:committed", "apply:refused", "apply:unknown", "applyAgain", "gone", "reload", "reload:tap", "discard", "replace", "replace:refused"]) {
+  for (const k of ["rollRefused", "settle:all", "settle:some", "settle:refused", "settle:unknown", "askTaken", "askRefused", "sync:typed", "sync:rolled", "sync:mark", "sync:reopen", "closedElsewhere", "dmRoll", "dmSettle", "together", "again", "apply", "apply:committed", "apply:refused", "apply:unknown", "applyAgain", "gone", "reload", "reload:tap", "discard", "replace", "replace:refused", "leave", "return", "away:reopen", "dmSettle:away", "dmRoll:again"]) {
     assert.ok((reached[k] ?? 0) > 0, `never reached ${k}`);
   }
 });

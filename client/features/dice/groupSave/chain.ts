@@ -243,7 +243,7 @@ export function askAnswered(page: Page, rollId: string, answer: { ok: true } | {
  * The requests as the view holds them: each asked row copies its answer as
  * it arrives, kept once its request is closed elsewhere. A target the
  * request holds unanswered again, after Reopen, has no answer here either,
- * so its row waits, and the DM's one tap on it may go again.
+ * so its row waits, and the DM's one tap on it may go again (dmRoll).
  */
 export function syncRequests(page: Page, rolls: Readonly<Record<string, RollRequest | undefined>>, key: (t: { tokenId?: string; characterId?: string }) => string): Page {
   let next = page;
@@ -267,7 +267,7 @@ export function syncRequests(page: Page, rolls: Readonly<Record<string, RollRequ
         continue;
       }
       const { answer: _old, ...rest } = s;
-      next = { ...next, states: { ...next.states, [holder]: { ...rest, asked } }, dmRolls: next.dmRolls.filter((d) => d.holder !== holder || d.state === "sending") };
+      next = { ...next, states: { ...next.states, [holder]: { ...rest, asked } } };
     }
   }
   return next;
@@ -331,10 +331,17 @@ export function rollAgain(page: Page, input: { holders: readonly string[]; serve
   return { page: next, send: [{ kind: "dice", tag: input.tag, rolls, ...diceEnvelope(page) }] };
 }
 
-/** The DM's one tap on a waiting asked row (5.2): `roll.dice` with `unanswered`, so an answer that came first stands. */
+/**
+ * The DM's one tap on a waiting asked row (5.2): `roll.dice` with
+ * `unanswered`, so an answer that came first stands. Only a tap still on
+ * its way holds another back. A settled one never does, whatever order its
+ * receipt, a Reopen or the page's coming and going arrive in: the server
+ * refuses a second answer by `unanswered` itself, so a row waiting on its
+ * request can always be rolled once more.
+ */
 export function dmRoll(page: Page, holder: string, op: OpOf<"roll.dice">): Step {
   const s = page.states[holder];
-  if (page.phase !== "rolled" || !s?.asked || s.answer || page.dmRolls.some((r) => r.holder === holder && (r.state === "sending" || r.state === "committed"))) return { page, send: [] };
+  if (page.phase !== "rolled" || !s?.asked || s.answer || page.dmRolls.some((r) => r.holder === holder && r.state === "sending")) return { page, send: [] };
   return { page: { ...page, dmRolls: [...page.dmRolls, { tag: op.tag, holder, state: "sending" }] }, send: [{ kind: "op", op }] };
 }
 
