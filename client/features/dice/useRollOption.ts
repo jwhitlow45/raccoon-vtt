@@ -11,7 +11,7 @@ import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { PreviewContext } from "../dm/previewContext.ts";
 import { openAsk } from "../rolls/open.ts";
 import { rollsOf } from "./logic.ts";
-import { asSave, d20Roll, initiativeOp, routeOf, targetRef } from "./options.ts";
+import { asSave, d20Roll, initiativeOp, routedTest, routeOf, targetRef } from "./options.ts";
 import { logSeq, remembered, rowTag, useOption, useOptionStore, type OptionState } from "./optionState.ts";
 import { useReceipt, useReceipts, type ReceiptState, type ReceiptTracker } from "./useReceipt.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "./send.ts";
@@ -59,6 +59,12 @@ export function useRollOption() {
         test: D20Test;
         bonus: number;
         preset: RollPreset;
+        /**
+         * The creature's preset for another test, read at the tap. An answer
+         * rolls the request's own test, whose `spell` a creature's Magic
+         * Resistance reads (routedTest), which the option's preset knew nothing of.
+         */
+        presetOf?(test: D20Test): RollPreset;
         label: string;
         row: string;
         played: boolean;
@@ -75,10 +81,11 @@ export function useRollOption() {
           return "asked";
         }
         if (route.kind === "answer") {
+          const preset = input.presetOf ? input.presetOf(routedTest(route, input.test)) : input.preset;
           // The taken choices belong to this tap, as a panel roll's do, and come back if nothing went.
           const taken = panel.take();
           const tag = uuidv7();
-          const extra = input.preset.extra.join("").replace(/^\+/, "");
+          const extra = preset.extra.join("").replace(/^\+/, "");
           const n = sendRoll(
             sender,
             {
@@ -87,7 +94,7 @@ export function useRollOption() {
               rollId: route.request.id,
               target: targetRef(route.target),
               ...(route.request.test.choices.length > 1 ? { choice: route.choice === 1 ? (1 as const) : (0 as const) } : {}),
-              ...advantageFields([...input.preset.sources, ...taken.sources]),
+              ...advantageFields([...preset.sources, ...taken.sources]),
               ...(extra ? { extra } : {}),
               ...(dm ? { unanswered: true as const } : {}),
             },

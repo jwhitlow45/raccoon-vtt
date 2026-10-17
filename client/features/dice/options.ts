@@ -1,4 +1,4 @@
-import type { D20Test, DamagePart, NamedRoll } from "#shared/dice/bonus.ts";
+import { testOf, type D20Test, type DamagePart, type NamedRoll } from "#shared/dice/bonus.ts";
 import { d20Formula, doubleDice, formatFormula, parseFormula } from "#shared/dice/formula.ts";
 import { keptD20 } from "#shared/dice/roll.ts";
 import { LIMITS } from "#shared/limits.ts";
@@ -136,6 +136,17 @@ export function routeOf(input: { state: Pick<RoomState, "tokens" | "rolls">; cre
     if (input.dm && input.played && input.ask) return { kind: "ask" };
   }
   return { kind: "roll" };
+}
+
+/**
+ * The test a tap rolls by its route (docs/design-v1-roll-request.md 7.1):
+ * an answer rolls the request's own test, which carries its `spell` and
+ * `cause`, so a creature with Magic Resistance answers a spell request
+ * with advantage from the Dice panel as from its card. Any other route
+ * rolls the option's test.
+ */
+export function routedTest(route: Route, test: D20Test): D20Test {
+  return route.kind === "answer" ? testOf(route.request, route.choice) : test;
 }
 
 /** The request target a `roll.dice` names: the target as the request holds it. */

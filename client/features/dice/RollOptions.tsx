@@ -28,6 +28,7 @@ import {
   presetLine,
   readUsed,
   resultWords,
+  routedTest,
   routeOf,
   scoreOf,
   signedText,
@@ -339,8 +340,10 @@ function OptionCell(props: { text: string; sub?: string | undefined; name: strin
 function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; text: string; label?: string; critOn?: 18 | 19; rowKey?: string; onLanded?(critical: boolean): void }) {
   const { ctx, test } = props;
   const option = useRollOption();
-  const preset = presetFor(ctx.dice, ctx.creature, test, { rolls: ctx.rolls });
   const route = routeOf({ state: ctx.dice.view, creature: ctx.creature, test, dm: ctx.dice.you.role === "dm", played: ctx.played, ask: ctx.ask });
+  // An answer rolls the request's own test, with its `spell`, so the button shows the preset its tap sends.
+  const presetOf = (t: D20Test) => presetFor(ctx.dice, ctx.creature, t, { rolls: ctx.rolls });
+  const preset = presetOf(routedTest(route, test));
   const row = `${ctx.key}|${props.rowKey ?? JSON.stringify(test)}`;
   const { tag, rolls } = useRowResult(row);
   useActOnce(tag, rolls, (landed) => props.onLanded?.(critical(landed[0])));
@@ -362,6 +365,7 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; text: string; 
           test,
           bonus: props.bonus,
           preset,
+          presetOf,
           label,
           row,
           played: ctx.played,

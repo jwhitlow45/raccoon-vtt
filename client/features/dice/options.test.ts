@@ -5,10 +5,11 @@ import { createStore } from "zustand/vanilla";
 import type { DiceRoll, LogEntry, RollRequest, RoomState } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { actor, character, entry, room, token } from "#shared/testutil.ts";
+import { reminderPreset } from "#shared/rules/rollReminders.ts";
 import type { OptionState } from "./optionState.ts";
 import { ReceiptTracker } from "./useReceipt.ts";
 import { watchInitiative, type InitiativeEnv } from "./useRollOption.ts";
-import { asSave, critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, presetLine, resultWords, routeOf, scoreOf, spendOnStart, testLabel, withExtra, withUsed } from "./options.ts";
+import { asSave, critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, presetLine, resultWords, routedTest, routeOf, scoreOf, spendOnStart, testLabel, withExtra, withUsed } from "./options.ts";
 
 /** The roll options' rules (docs/design-v1-roll-options.md 4.2 and 4.3). */
 
@@ -38,6 +39,17 @@ describe("where a save or check tap goes", () => {
     }
     assert.equal(routeOf({ state, creature: { tokenId: "breeTok" }, test: { kind: "save", ability: "dex" }, dm: true, played: true, ask: true }).kind, "answer");
     assert.equal(routeOf({ state, creature: { tokenId: "breeTok" }, test: { kind: "save", ability: "str" }, dm: false, played: false, ask: false }).kind, "roll", "a test the request does not ask");
+  });
+
+  test("an answer rolls the request's own test, so a save against a spell keeps the creature's Magic Resistance (ASTRA-09)", () => {
+    const state = table({ r1: request({ spell: true, cause: "saveEnds" }) });
+    const dex = { kind: "save" as const, ability: "dex" as const };
+    const route = routeOf({ state, creature: { characterId: "bree" }, test: dex, dm: false, played: false, ask: false });
+    assert.deepEqual(routedTest(route, dex), { kind: "save", ability: "dex", cause: "saveEnds", spell: true });
+    assert.deepEqual(reminderPreset([], routedTest(route, dex), { magicResistance: true }).sources, [{ kind: "adv", from: "magic-resistance" }]);
+    assert.deepEqual(reminderPreset([], dex, { magicResistance: true }).sources, [], "the option's own test knows of no spell");
+    const free = routeOf({ state: table({}), creature: { characterId: "bree" }, test: dex, dm: false, played: false, ask: false });
+    assert.equal(routedTest(free, dex), dex, "a free roll rolls the option's test");
   });
 
   test("an answered target rolls, and a check matches its skill too", () => {
