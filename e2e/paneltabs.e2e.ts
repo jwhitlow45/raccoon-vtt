@@ -56,11 +56,11 @@ const run = {
   pin: randomUUID(),
 };
 
-const DM_PANELS = ["Token", "Initiative", "Log", "Journal", "Areas", "DM", "Scenes", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"];
-const PLAYER_PANELS = ["Token", "Initiative", "Log", "Journal", "Areas", "Characters", "Library", "Menu"];
+const DM_PANELS = ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"];
+const PLAYER_PANELS = ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Characters", "Library", "Menu"];
 // "Two panels" heads each menu, a checkbox this shape does not list, then the line under it (docs/design-v1-split-panel.md 6).
-const DM_MENU = ["---", "#In play", "Journal", "Areas", "DM", "Scenes", "#Prepare", "Monsters", "Encounters", "Characters", "Outliner", "Library", "---", "Menu"];
-const PLAYER_MENU = ["---", "Journal", "Areas", "Characters", "Library", "Menu"];
+const DM_MENU = ["---", "#In play", "Log", "Journal", "Areas", "DM", "Scenes", "#Prepare", "Monsters", "Encounters", "Characters", "Outliner", "Library", "---", "Menu"];
+const PLAYER_MENU = ["---", "Log", "Journal", "Areas", "Characters", "Library", "Menu"];
 
 type Box = { x: number; y: number; width: number; height: number };
 type Insets = { side?: number; bottom?: number };
@@ -280,7 +280,7 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
           const row = await rowTitles(page);
           const rowBox = await box(tablist(page).locator(".."));
           assert.ok(rowBox.height <= (44 + 16 + 1) * scale + 1, `${at}: the row is one tab tall with its padding, ${rowBox.height} px`);
-          if (size.width === 1280) assert.deepEqual(row, ["Token", "Initiative", "Log"], `${at}: the row`);
+          if (size.width === 1280) assert.deepEqual(row, ["Token", "Initiative", "Dice"], `${at}: the row`);
           await more(page).click();
           await menu(page).waitFor();
           const items = (await menuShape(page)).filter((s) => !s.startsWith("#") && s !== "---");
@@ -298,7 +298,7 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     }
   });
 
-  test("2. a panel opened from More names More and moves nothing, and a badge never widens a tab", async () => {
+  test("2. a panel opened from More names More and moves nothing, and the Log's badge in More moves no tab", async () => {
     await openSideTab(dm, "Initiative");
     const before = await rowBoxes(dm);
     for (const title of DM_PANELS.slice(3)) {
@@ -318,8 +318,8 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     await tablist(dm).getByRole("tab", { name: "Initiative", exact: true }).click();
     assert.ok(await tablist(dm).getByRole("tab", { name: "More panels" }).isVisible(), "More is More panels again");
 
-    const log = tablist(dm).getByRole("tab", { name: sideTabName("Log") });
-    const logBefore = await box(log);
+    // The Log is in More since Dice joined the row (docs/design-v1-dice.md 8.1), so its badge goes there with it.
+    const rowBefore = await rowBoxes(dm);
     const patCookie = (await patContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     const patOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie: patCookie });
     try {
@@ -327,10 +327,13 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     } finally {
       patOps.close();
     }
-    await tablist(dm).getByRole("tab", { name: "Log 1 unread" }).waitFor();
-    assert.ok(sameBox(await box(log), logBefore), "the badge sits on the corner and leaves Log's box");
+    await waitFor("More's description says 1 unread", async () => ((await moreDescription(dm)) === "1 unread" ? true : null));
+    assert.ok(
+      (await rowBoxes(dm)).every((b, i) => sameBox(b, rowBefore[i]!)),
+      "the badge sits on More's corner and moves no tab",
+    );
     await shots.take(dm, "paneltabs-dm-log-badge");
-    await log.click();
+    await openSideTab(dm, "Log");
   });
 
   test("3. More's keys and its menu's, with a goblin selected and the Select tool", async () => {
@@ -342,21 +345,21 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
       return t ? { x: t.x, y: t.y } : null;
     };
     const at = goblinAt();
-    const log = tablist(dm).getByRole("tab", { name: sideTabName("Log") });
+    const dice = tablist(dm).getByRole("tab", { name: sideTabName("Dice") });
     const item = (title: string) => menu(dm).getByRole("menuitemradio", { name: sideTabName(title) });
     const on = async (title: string, why: string) => waitFor(why, async () => ((await isFocused(item(title))) ? true : null), 2_000);
 
-    await openSideTab(dm, "Log");
-    await log.focus();
+    await openSideTab(dm, "Dice");
+    await dice.focus();
     await dm.keyboard.press("ArrowRight");
-    assert.ok(await isFocused(more(dm)), "Right from Log goes to More");
-    assert.equal(await log.getAttribute("aria-selected"), "true", "and Log stays chosen");
+    assert.ok(await isFocused(more(dm)), "Right from Dice goes to More");
+    assert.equal(await dice.getAttribute("aria-selected"), "true", "and Dice stays chosen");
     await dm.keyboard.press("Enter");
-    await on("Journal", "Enter opens the menu at its first item");
+    await on("Log", "Enter opens the menu at its first item");
     await dm.keyboard.press("ArrowDown");
-    await on("Areas", "Down");
+    await on("Journal", "Down");
     await dm.keyboard.press("ArrowUp");
-    await on("Journal", "Up");
+    await on("Log", "Up");
     await dm.keyboard.press("End");
     await on("Menu", "End");
     await dm.keyboard.press("Home");
@@ -421,7 +424,9 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     await tablist(dm).getByRole("tab", { name: "Token", exact: true }).click();
     await dm.keyboard.press("ArrowLeft");
     await dm.keyboard.press("Enter");
-    await on("Journal", "Enter on More");
+    await on("Log", "Enter on More");
+    await dm.keyboard.press("ArrowDown");
+    await on("Journal", "Down to the Journal");
     await dm.keyboard.press("Enter");
     await dm.getByRole("heading", { name: "Lore" }).waitFor();
     assert.ok(await isFocused(more(dm)), "focus stays on More");
@@ -519,11 +524,11 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
 
     await view(dm, dmCdp, { width: 1280, height: 800 });
     await reloadAt(dm, 1);
-    await openSideTab(dm, "Log");
-    await tablist(dm).getByRole("tab", { name: sideTabName("Log") }).focus();
+    await openSideTab(dm, "Dice");
+    await tablist(dm).getByRole("tab", { name: sideTabName("Dice") }).focus();
     await view(dm, dmCdp, { width: 932, height: 430 }, { side: 59, bottom: 21 });
-    await waitFor("Log in More, and focus on More", async () => ((await isFocused(more(dm))) ? true : null), 3_000);
-    assert.ok(await tablist(dm).getByRole("tab", { name: sideTabName("Log"), selected: true }).isVisible(), "More names the Log");
+    await waitFor("Dice in More, and focus on More", async () => ((await isFocused(more(dm))) ? true : null), 3_000);
+    assert.ok(await tablist(dm).getByRole("tab", { name: sideTabName("Dice"), selected: true }).isVisible(), "More names the Dice");
     await view(dm, dmCdp, { width: 1280, height: 800 });
     await openSideTab(dm, "Initiative");
   });
@@ -609,7 +614,7 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     assert.deepEqual(misses, []);
   });
 
-  test("8. a font as wide as DejaVu Sans keeps Token, Initiative and Log, cuts Encounters on More and names it above the panel", async () => {
+  test("8. a font as wide as DejaVu Sans keeps Token, Initiative and Dice, cuts Encounters on More and names it above the panel", async () => {
     // Verdana, which macOS has, draws these titles within a few px of DejaVu Sans (3.2). The room's CSP refuses a page's own style element, so this DM's second window lets the test add one.
     const wide = await browser.newContext({ viewport: { width: 1280, height: 800 }, bypassCSP: true, storageState: await dmContext.storageState() });
     try {
@@ -622,7 +627,7 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
       await page.addStyleTag({ content: 'aside, aside * { font-family: Verdana, "DejaVu Sans", sans-serif !important; }' });
       await page.waitForTimeout(300);
       await openSideTab(page, "Initiative");
-      assert.deepEqual(await rowTitles(page), ["Token", "Initiative", "Log"]);
+      assert.deepEqual(await rowTitles(page), ["Token", "Initiative", "Dice"]);
       const before = await rowBoxes(page);
       await openSideTab(page, "Encounters");
       const span = more(page).locator("span").first();

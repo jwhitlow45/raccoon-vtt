@@ -424,19 +424,20 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
 
     const oneRow = await Promise.all([...(await tablist(dm).getByRole("tab").all()), hidePanels(dm)].map((t) => t.boundingBox()));
     await toggleSplit(dm);
-    await tab(dm, "Log").click();
-    await topPane(dm, "Log").waitFor();
+    // Dice is the row's third tab since it took the Log's place (docs/design-v1-dice.md 8.1), so the row's own presses use it.
+    await tab(dm, "Dice").click();
+    await topPane(dm, "Dice").waitFor();
     await bottomPane(dm, "Token").waitFor();
 
     await tab(dm, "Token").click();
     await topPane(dm, "Token").waitFor();
-    await bottomPane(dm, "Log").waitFor();
-    assert.equal(await statusText(dm), "Token on top, Log below");
+    await bottomPane(dm, "Dice").waitFor();
+    assert.equal(await statusText(dm), "Token on top, Dice below");
     assert.ok(await isFocused(tab(dm, "Token")), "focus on the tab pressed");
 
     // Initiative on top, scrolled, and the Lore page below, scrolled down to its table and the table scrolled sideways.
     await openSideTab(dm, "Initiative");
-    await belowName(dm, "Log").click();
+    await belowName(dm, "Dice").click();
     await belowMenu(dm).getByRole("menuitemradio", { name: sideTabName("Journal") }).click();
     const journal = bottomPane(dm, "Journal");
     await journal.getByRole("button", { name: /^Lore/ }).click();
@@ -489,22 +490,22 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     // A tab press elsewhere replaces the top, and the arrows pass the bottom panel's tab without a swap.
     await openSideTab(dm, "Initiative");
     await belowName(dm, "Journal").click();
-    await belowMenu(dm).getByRole("menuitemradio", { name: sideTabName("Log") }).click();
-    await bottomPane(dm, "Log").waitFor();
+    await belowMenu(dm).getByRole("menuitemradio", { name: sideTabName("Dice") }).click();
+    await bottomPane(dm, "Dice").waitFor();
     await moreOpen(dm);
     await moreMenu(dm).getByRole("menuitemradio", { name: sideTabName("Journal") }).click();
     await topPane(dm, "Journal").waitFor();
-    await bottomPane(dm, "Log").waitFor();
+    await bottomPane(dm, "Dice").waitFor();
     await tab(dm, "Token").click();
-    await bottomPane(dm, "Log").waitFor();
+    await bottomPane(dm, "Dice").waitFor();
     await dm.keyboard.press("ArrowRight");
     await dm.keyboard.press("ArrowRight");
-    assert.ok(await isFocused(tab(dm, "Log")), "Right twice from Token rests on Log, the bottom panel's tab");
+    assert.ok(await isFocused(tab(dm, "Dice")), "Right twice from Token rests on Dice, the bottom panel's tab");
     await dm.waitForTimeout(150);
-    assert.equal(await bottomPane(dm, "Log").count(), 1, "passing over it swapped nothing");
+    assert.equal(await bottomPane(dm, "Dice").count(), 1, "passing over it swapped nothing");
     await dm.keyboard.press("ArrowLeft");
     await topPane(dm, "Initiative").waitFor();
-    await bottomPane(dm, "Log").waitFor();
+    await bottomPane(dm, "Dice").waitFor();
 
     const twoRow = await Promise.all([...(await tablist(dm).getByRole("tab").all()), hidePanels(dm)].map((t) => t.boundingBox()));
     assert.equal(twoRow.length, oneRow.length);
@@ -610,7 +611,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     const list = belowMenu(dm);
     await list.waitFor();
     const items = await list.getByRole("menuitemradio").evaluateAll((els) => els.map((el) => ((el as unknown as { firstChild: DomEl | null }).firstChild?.textContent ?? "").trim()));
-    assert.deepEqual(items, ["Token", "Initiative", "Log", "Journal", "Areas", "DM", "Scenes", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"]);
+    assert.deepEqual(items, ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"]);
     assert.equal(await list.getByRole("menuitemradio", { name: sideTabName("Log") }).getAttribute("aria-checked"), "true");
     assert.equal(await described(list.getByRole("menuitemradio", { name: "Initiative" })), "Shown on top");
     assert.ok(((await list.getByRole("menuitemradio", { name: "Initiative" }).textContent()) ?? "").includes("on top"));
