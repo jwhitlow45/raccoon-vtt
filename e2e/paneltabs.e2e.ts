@@ -58,8 +58,9 @@ const run = {
 
 const DM_PANELS = ["Token", "Initiative", "Log", "Journal", "Areas", "DM", "Scenes", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"];
 const PLAYER_PANELS = ["Token", "Initiative", "Log", "Journal", "Areas", "Characters", "Library", "Menu"];
-const DM_MENU = ["#In play", "Journal", "Areas", "DM", "Scenes", "#Prepare", "Monsters", "Encounters", "Characters", "Outliner", "Library", "---", "Menu"];
-const PLAYER_MENU = ["Journal", "Areas", "Characters", "Library", "Menu"];
+// "Two panels" heads each menu, a checkbox this shape does not list, then the line under it (docs/design-v1-split-panel.md 6).
+const DM_MENU = ["---", "#In play", "Journal", "Areas", "DM", "Scenes", "#Prepare", "Monsters", "Encounters", "Characters", "Outliner", "Library", "---", "Menu"];
+const PLAYER_MENU = ["---", "Journal", "Areas", "Characters", "Library", "Menu"];
 
 type Box = { x: number; y: number; width: number; height: number };
 type Insets = { side?: number; bottom?: number };
@@ -359,7 +360,7 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     await dm.keyboard.press("End");
     await on("Menu", "End");
     await dm.keyboard.press("Home");
-    await on("Journal", "Home");
+    await waitFor("Home goes to Two panels, the menu's first item", async () => ((await isFocused(menu(dm).getByRole("menuitemcheckbox", { name: "Two panels" }))) ? true : null), 2_000);
     await dm.keyboard.press("m");
     await on("Monsters", "m");
     await dm.keyboard.press("m");
@@ -581,6 +582,9 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
             });
             const mb = await box(menu(page).locator(".."));
             if (mb.x < inner.left - 0.5 || mb.x + mb.width > inner.right + 0.5 || mb.y < inner.top - 0.5 || mb.y + mb.height > inner.bottom + 0.5) misses.push(`${at}: the menu leaves the side panel`);
+            const split = menu(page).getByRole("menuitemcheckbox", { name: "Two panels" });
+            await split.scrollIntoViewIfNeeded();
+            await reach(split, "Two panels in More");
             for (const title of panels.slice(row.length)) {
               const item = menu(page).getByRole("menuitemradio", { name: sideTabName(title) });
               await item.scrollIntoViewIfNeeded();
