@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { headerSink, panelSections, panelsFor, type PanelHeader, type PanelSection } from "./panels.ts";
+import { headerSink, panelSections, panelsFor, scrollOf, scrollToRestore, type PanelHeader, type PanelSection } from "./panels.ts";
 
 describe("the panels' order and groups (docs/design-v1-layout-hierarchy.md M3)", () => {
   const titles = (role: "dm" | "player", wide: boolean) => panelsFor(role, wide).map((p) => p.title);
@@ -109,5 +109,39 @@ describe("a panel's subpage and its host", () => {
     publish(initiative);
     assert.equal(kept.tracker, initiative);
     assert.equal(kept.menu, null);
+  });
+});
+
+/*
+ * Each panel keeps its scroll as it leaves and shows again by any path: a
+ * tab, More, a link, either pane of two, a phone's sheet (the project
+ * owner, after wave 6).
+ */
+describe("a panel's scroll as it shows again", () => {
+  const box = (scrollTop: number, scrollHeight = 2000, clientHeight = 500) => ({ scrollTop, scrollLeft: 0, scrollHeight, clientHeight });
+
+  test("a panel left part way down opens where it was, on the page it showed", () => {
+    const saved = scrollOf({ ...box(640), scrollLeft: 30 }, null);
+    assert.deepEqual(saved, { top: 640, left: 30, end: false, page: null });
+    assert.deepEqual(scrollToRestore(saved, null, box(0)), { top: 640, left: 30 });
+  });
+
+  test("a panel left at its end opens at its new end, so what arrived meanwhile shows", () => {
+    const saved = scrollOf(box(1500), null);
+    assert.equal(saved.end, true);
+    assert.deepEqual(scrollToRestore(saved, null, box(0, 2600)), { top: 2100, left: 0 });
+  });
+
+  test("a panel at its top, or one that fit, is never at its end", () => {
+    assert.equal(scrollOf(box(0), null).end, false, "scrolled back to its top");
+    assert.equal(scrollOf(box(0, 400, 500), null).end, false, "it fit");
+    assert.deepEqual(scrollToRestore(scrollOf(box(0), null), null, box(0, 2600)), { top: 0, left: 0 });
+  });
+
+  test("a remembered subpage waits for its header, and nothing remembered leaves the panel's own first scroll", () => {
+    const saved = scrollOf(box(300), "Journal\nlore");
+    assert.equal(scrollToRestore(saved, null, box(0)), "wait", "the page has yet to publish its header");
+    assert.deepEqual(scrollToRestore(saved, "Journal\nlore", box(0)), { top: 300, left: 0 });
+    assert.equal(scrollToRestore(undefined, null, box(0)), null, "the Log's own start at its newest line stays");
   });
 });

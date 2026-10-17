@@ -1,7 +1,7 @@
 import { useCallback, useRef, type CSSProperties, type ReactNode, type Ref, type RefObject } from "react";
 import { chromeZoom, smallUi } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
-import { subpageBack, subpageKey, useSubpageFocus, type PanelHeader } from "../features/panels.ts";
+import { subpageBack, subpageKey, usePanelScroll, useSubpageFocus, type PanelHeader } from "../features/panels.ts";
 import { useSheetDialog } from "../lib/modalDialog.ts";
 import { DraftScope, useDraftRegistry, useSheetSwipe } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
@@ -69,6 +69,8 @@ export function Sheet(props: {
   onBack?(): void;
   backLabel?: string;
   subpage?: PanelHeader | null;
+  /** The panel it shows, whose scroll it keeps as the panel leaves and puts back as it shows again (features/panels.ts usePanelScroll). The list of panels has none. */
+  scrollKey?: string;
   reserveTop?: number;
   /** In the header, between the title and the close button, such as the dock's buttons when the dock has no room (3.2.1). */
   actions?: ReactNode;
@@ -129,6 +131,8 @@ export function Sheet(props: {
   // A drag above the normal top, and a step down from full screen, keep the whole screen's box beside the map until they come to rest.
   // Filled with focus outside it, as after a turn strip's tap, it lands on its title rather than its first control (sheetFocusAfter).
   useSheetDialog(dialogRef, { shown, modal: mode === "full" || (filled && !swipe.rising), onCancel: props.onClose, hideFocus: props.hideFocus, modalFocus: filled ? titleRef : undefined });
+  // After the dialog opens, since a closed dialog's body has no box to scroll.
+  usePanelScroll(props.scrollKey ?? null, subpage ?? null, bodyRef);
   const back: HeaderBack | null = subpage ? subpageBack(subpage) : props.onBack ? { label: props.backLabel ?? "Back", onBack: props.onBack } : null;
   const actionCount = props.actions ? (props.actionCount ?? 0) : 0;
   const stacked = headerStacks({ width: props.headerWidth, buttons: (back ? 1 : 0) + (onHide ? 1 : 0) + 1 + actionCount, actions: actionCount > 0 });

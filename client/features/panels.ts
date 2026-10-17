@@ -13,6 +13,7 @@ import {
 } from "react";
 import type { HeaderBack } from "../components/SheetHeader.tsx";
 import { retryableLazy } from "../lib/retryableLazy.ts";
+import { scopeSlot, useScoped } from "../state/scope.ts";
 
 /**
  * The room's panels (design section 14.4): bottom sheets on phones, sheets
@@ -445,4 +446,100 @@ export function useSubpageFocus(
     const view = scroller.getBoundingClientRect();
     if (row.top < view.top || row.bottom > view.bottom) back.scrollIntoView({ block: "nearest" });
   }, [key, title, body, root, fallback]);
+}
+
+/**
+ * Where a panel was scrolled when it last showed: its scroller's offsets,
+ * whether it sat at its end, and the page it showed then, null for its
+ * first page or a subpage's key (subpageKey).
+ */
+export type PanelScroll = { top: number; left: number; end: boolean; page: string | null };
+
+/**
+ * Each panel's last scroll, by panel id, for this Room page: a panel that
+ * shows again, by any path, opens where it was left, in either pane of the
+ * side panel or a phone's sheet. Numbers only, never an element, so a
+ * panel that left holds none of its DOM here.
+ */
+export const panelScrollSlot = scopeSlot(() => new Map<string, PanelScroll>());
+
+/** Under this many px from the foot, a scroller sits at its end. */
+const END_SLOP = 2;
+
+/**
+ * A scroller's place now, for `page`. At its end only once scrolled: a
+ * panel that fits its scroller, or one scrolled back to its top, opens at
+ * its top again even if it has grown since.
+ */
+export function scrollOf(el: { scrollTop: number; scrollLeft: number; scrollHeight: number; clientHeight: number }, page: string | null): PanelScroll {
+  const end = el.scrollTop > 0 && el.scrollHeight - el.scrollTop - el.clientHeight <= END_SLOP;
+  return { top: el.scrollTop, left: el.scrollLeft, end, page };
+}
+
+/**
+ * What a panel that shows again puts back, given where it was (`saved`)
+ * and the page it shows now: its offsets, the new end where it sat at its
+ * end so whatever arrived meanwhile (a Log message) shows, "wait" while a
+ * remembered subpage has yet to publish its header, or null with nothing
+ * remembered, which leaves the panel's own first scroll, such as the Log
+ * at its newest line.
+ */
+export function scrollToRestore(saved: PanelScroll | undefined, page: string | null, box: { scrollHeight: number; clientHeight: number }): { top: number; left: number } | "wait" | null {
+  if (!saved) return null;
+  if (saved.page !== page) return "wait";
+  return { top: saved.end ? Math.max(0, box.scrollHeight - box.clientHeight) : saved.top, left: saved.left };
+}
+
+/**
+ * Keeps a panel's scroll as it leaves and puts it back as it shows again
+ * (panelScrollSlot), for whatever scrolls a panel: a side panel's pane or
+ * a phone's sheet, whose body stays as one panel replaces another. Call it
+ * after useSubpageFocus on the same body, since that hook sets the offset
+ * as a subpage comes and goes, and this one has the last word.
+ *
+ * The offset is put back in a layout effect, before paint, so nothing
+ * jumps: after whatever opens the scroller, since a body with no box takes
+ * no offset. A subpage the panel shows again (a journal page) publishes
+ * its header in a commit of its own, still before paint, so the offset
+ * waits for that page, and stops waiting after the first frame drawn.
+ */
+export function usePanelScroll(id: string | null, subpage: PanelHeader | null, body: RefObject<HTMLElement | null>): void {
+  const kept = useScoped(panelScrollSlot);
+  const page = subpage ? subpageKey(subpage) : null;
+  const latest = useRef({ id, page });
+  latest.current = { id, page };
+  useEffect(() => {
+    const el = body.current;
+    if (!el) return;
+    const record = () => {
+      const now = latest.current;
+      if (now.id !== null) kept.set(now.id, scrollOf(el, now.page));
+    };
+    el.addEventListener("scroll", record, { passive: true });
+    return () => el.removeEventListener("scroll", record);
+  }, [body, kept]);
+  const shown = useRef<string | null>(null);
+  const pending = useRef<{ id: string; timed: boolean } | null>(null);
+  useLayoutEffect(() => {
+    if (shown.current !== id) {
+      shown.current = id;
+      pending.current = id === null ? null : { id, timed: false };
+    }
+    const ask = pending.current;
+    const el = body.current;
+    // A body with no box yet, as in a dialog not yet open or a hidden pane, takes no offset: the wait goes on until a commit that draws it.
+    if (!ask || !el || el.getClientRects().length === 0) return;
+    if (!ask.timed) {
+      ask.timed = true;
+      requestAnimationFrame(() => {
+        if (pending.current === ask) pending.current = null;
+      });
+    }
+    const to = scrollToRestore(kept.get(ask.id), page, el);
+    if (to === "wait") return;
+    pending.current = null;
+    if (!to) return;
+    if (el.scrollTop !== to.top) el.scrollTop = to.top;
+    if (el.scrollLeft !== to.left) el.scrollLeft = to.left;
+  });
 }

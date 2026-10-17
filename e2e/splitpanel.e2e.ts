@@ -314,7 +314,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     const entries = [{ id: "e-thorn", tokenId: run.thorn, value: 25 }, ...run.goblins.map((tokenId, i) => ({ id: `e-g${i}`, tokenId, value: 20 - i }))];
     await ops.send({ t: "encounter.start", entries });
     await ops.send({ t: "encounter.next" });
-    for (let i = 0; i < 12; i++) await ops.send({ t: "log.chat", text: `Message ${i + 1} about the goblins and the citadel.` });
+    for (let i = 0; i < 40; i++) await ops.send({ t: "log.chat", text: `Message ${i + 1} about the goblins and the citadel.` });
     await waitFor("the fight in the DM's view", () => (dmSocket.state?.encounter?.entries.length === GOBLINS + 1 && dmSocket.state.pins?.[run.pin] ? true : null));
 
     patConsole.allow = [/status of 403 .*\/api\/rooms\/[0-9A-Z]{8}\/me\)$/];
@@ -510,6 +510,62 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
       const a = oneRow[i]!;
       assert.ok(a && b && Math.abs(a.x - b.x) <= 0.5 && Math.abs(a.y - b.y) <= 0.5 && Math.abs(a.width - b.width) <= 0.5 && Math.abs(a.height - b.height) <= 0.5, `box ${i} moved: ${JSON.stringify(a)} to ${JSON.stringify(b)}`);
     }
+
+    // Each panel keeps its scroll as it leaves and shows again, by the row, More, a link, in either pane, and after a swap (the project owner, after wave 6).
+    const scrollOfPane = (pane: Locator) => pane.evaluate((el) => (el as unknown as DomEl).scrollTop);
+    const scrollPane = async (pane: Locator, top: number) => {
+      await pane.evaluate((el, t) => ((el as unknown as DomEl).scrollTop = t), top);
+      // The scroll event that records it comes with the next frame.
+      await dm.waitForTimeout(120);
+    };
+    const near = (a: number, b: number) => Math.abs(a - b) <= 1;
+    await oneOnly(dm);
+    await openSideTab(dm, "Log");
+    await scrollPane(topPane(dm, "Log"), 300);
+    await openSideTab(dm, "Initiative");
+    await openSideTab(dm, "Log");
+    assert.ok(near(await scrollOfPane(topPane(dm, "Log")), 300), "back by its tab, the Log is where it was");
+
+    await openSideTab(dm, "Journal");
+    // The Journal remembers the page it showed.
+    if ((await topPane(dm, "Journal").getByRole("button", { name: /^Lore/ }).count()) > 0) await topPane(dm, "Journal").getByRole("button", { name: /^Lore/ }).click();
+    await sidePanel(dm).getByRole("heading", { name: "Lore", exact: true }).waitFor();
+    await scrollPane(topPane(dm, "Journal"), 400);
+    await openSideTab(dm, "Initiative");
+    await openSideTab(dm, "Journal");
+    await sidePanel(dm).getByRole("heading", { name: "Lore", exact: true }).waitFor();
+    assert.ok(near(await scrollOfPane(topPane(dm, "Journal")), 400), "back through More, the journal page is where it was");
+    await dm.getByRole("button", { name: "Back to Journal" }).click();
+
+    await openSideTab(dm, "Initiative");
+    await scrollPane(topPane(dm, "Initiative"), 150);
+    await tapGoblin(dm);
+    await tokenBar(dm, "Goblin 1").getByRole("button", { name: "Details", exact: true }).click();
+    await topPane(dm, "Token").waitFor();
+    await dm.getByRole("button", { name: /Open the tracker\.$/ }).first().click();
+    await topPane(dm, "Initiative").waitFor();
+    assert.ok(near(await scrollOfPane(topPane(dm, "Initiative")), 150), "back by a link, Initiative is where it was");
+    await dm.keyboard.press("Escape");
+    await dm.keyboard.press("Escape");
+
+    await toggleSplit(dm);
+    await belowName(dm, "Token").click();
+    await belowMenu(dm).getByRole("menuitemradio", { name: sideTabName("Log") }).click();
+    const logBelow = bottomPane(dm, "Log").locator("[data-pane-body]");
+    await scrollPane(logBelow, 200);
+    await belowName(dm, "Log").click();
+    await belowMenu(dm).getByRole("menuitemradio", { name: sideTabName("Journal") }).click();
+    await bottomPane(dm, "Journal").waitFor();
+    await belowName(dm, "Journal").click();
+    await belowMenu(dm).getByRole("menuitemradio", { name: sideTabName("Log") }).click();
+    assert.ok(near(await scrollOfPane(bottomPane(dm, "Log").locator("[data-pane-body]")), 200), "below, the Log is where it was");
+
+    await swapButton(dm).click();
+    await topPane(dm, "Log").waitFor();
+    assert.ok(near(await scrollOfPane(topPane(dm, "Log")), 200), "a swap keeps it");
+    await openSideTab(dm, "Journal");
+    await openSideTab(dm, "Log");
+    assert.ok(near(await scrollOfPane(topPane(dm, "Log")), 200), "after a swap, back by its tab, the Log is where it was");
   });
 
   test("3. the bar's name lists every panel: the bottom one checked, the top one noted, a pick lands below with focus on its name", async () => {
@@ -793,7 +849,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
       }
       await panelsButton(dm).click();
       await dm.getByRole("region", { name: "Panels" }).getByRole("button", { name: new RegExp(`^${title}`) }).click();
-      await dm.getByRole("region", { name: title }).waitFor();
+      await dm.getByRole("region", { name: title }).first().waitFor();
     };
     await view(dm, dmCdp, { width: 800, height: 800 });
     await sidePanel(dm).waitFor({ state: "detached" });
@@ -823,6 +879,16 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await list("Menu");
     await menu.getByRole("button", { name: /^Members/ }).waitFor();
     assert.equal(await menu.getByRole("button", { name: "Back to Menu" }).count(), 0, "Menu opens on its first page, under its own name, with no Members header left over");
+
+    // A phone's sheet keeps each panel's scroll the same way.
+    await list("Log");
+    const logSheet = dm.getByRole("region", { name: "Log" }).locator("[data-pane-body]");
+    await logSheet.evaluate((el) => ((el as unknown as DomEl).scrollTop = 300));
+    await dm.waitForTimeout(120);
+    await list("Party");
+    await list("Log");
+    assert.ok(Math.abs((await logSheet.evaluate((el) => (el as unknown as DomEl).scrollTop)) - 300) <= 1, "the Log's sheet opens where it was");
+    await list("Party");
 
     await view(dm, dmCdp, { width: 1280, height: 800 });
     await openSideTab(dm, "Initiative");
