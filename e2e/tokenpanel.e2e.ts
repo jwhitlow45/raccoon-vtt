@@ -233,6 +233,38 @@ async function rectOf(locator: Locator): Promise<Rect> {
   return { left: b.x, top: b.y, right: b.x + b.width, bottom: b.y + b.height, width: b.width, height: b.height };
 }
 
+/**
+ * Where a button's label ends below the words "Scroll for more", each read
+ * from its own line of text, so neither the fade's padding nor the
+ * button's counts. Null while the label is clear or nothing fades.
+ */
+function labelUnderFade(b: Locator, name: string): Promise<{ label: number; wordsTop: number } | null> {
+  return b.evaluate((el, name) => {
+    type Rect = { top: number; bottom: number };
+    type Node = { tagName: string; textContent: string | null; ownerDocument: { createRange(): { selectNodeContents(n: unknown): void; getBoundingClientRect(): Rect } } };
+    const nodes = Array.from((el as unknown as { querySelectorAll(s: string): ArrayLike<Node> }).querySelectorAll("button, div"));
+    const button = nodes.find((n) => n.tagName === "BUTTON" && n.textContent?.trim() === name);
+    // The innermost box that holds the words: the fade's sticky holder holds them too.
+    const words = nodes.filter((n) => n.tagName === "DIV" && n.textContent === "Scroll for more").pop();
+    if (!button || !words) return null;
+    const text = (n: Node) => {
+      const range = n.ownerDocument.createRange();
+      range.selectNodeContents(n);
+      return range.getBoundingClientRect();
+    };
+    const label = text(button).bottom;
+    const wordsTop = text(words).top;
+    return label > wordsTop + 0.5 ? { label, wordsTop } : null;
+  }, name);
+}
+
+/** Size stands under the steady line in every layout, so it never pushes Conditions or Multi-select down (the project owner's answer to W5B-P-2). */
+async function steadyAboveSize(b: Locator, label: string): Promise<void> {
+  const steady = await rectOf(b.locator('[data-bar-row="play"]'));
+  const size = await rectOf(b.getByRole("group", { name: "Size", exact: true }));
+  assert.ok(steady.bottom <= size.top + 1, `${label}: Size stands above Conditions and Multi-select`);
+}
+
 /** Range rings in one block (docs/design-v1-token-panel.md 3.8): circle presets with their digits centered, and the field for another distance ending their row. */
 async function ringsCompact(panel: Locator, where: string): Promise<void> {
   const group = panel.getByRole("group", { name: "Range rings in feet", exact: true });
@@ -552,6 +584,8 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     const locked = await rectOf(goblin.getByRole("button", { name: "Locked", exact: true }));
     assert.ok(locked.top >= multiSelect.bottom, "Locked starts a line of its own");
     assert.ok(Math.abs(locked.left - (await rectOf(goblin.locator('[data-bar-row="less"]'))).left) < 1);
+    await steadyAboveSize(goblin, "a docked window");
+    assert.ok((await rectOf(goblin.getByRole("group", { name: "Size", exact: true }))).bottom <= locked.top + 1, "Size stands under the less-used buttons");
     await shots.take(dm, "tokenpanel-dm-goblin-bar");
 
     // The shield on the goblin's token, in its bottom left corner, and none on the chest.
@@ -1022,6 +1056,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       assert.ok((await rectOf(more)).top > apply.bottom, "More stats sits under the HP entry");
       assert.equal(await goblin.locator("[data-saves]").count(), 0);
       assert.equal(await fieldBeforeModes(goblin), true, `${size.label}: the short layout's field and Apply come after its modes in Tab order`);
+      await steadyAboveSize(goblin, `${size.label}, short`);
       await shots.take(dm, `tokenpanel-${size.label.replace(/ /g, "")}-short-bar`);
       await more.click();
       const opened = (await goblin.innerText()).replace(/\s+/g, " ");
@@ -1093,6 +1128,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       }
       await goblin.locator("[data-saves]").waitFor();
       await noSideScroll(goblin, `${size.label}, the bar`);
+      await steadyAboveSize(goblin, size.label);
       await goblin.getByRole("button", { name: "Stat block", exact: true }).click();
       const panel = tokenPanel(dm);
       await panel.getByRole("heading", { name: "Goblin Warrior" }).waitFor();
@@ -1117,6 +1153,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await tapToken(dm, run.goblin.at);
     const goblin = bar(dm, "Goblin 4");
     await goblin.waitFor();
+    await steadyAboveSize(goblin, "480 x 320 at 130%, very short");
     await goblin.getByRole("button", { name: "Stat block", exact: true }).click();
     const sheet = dm.locator('dialog[data-rvtt-sheet][aria-modal="true"]');
     await sheet.waitFor();
@@ -1193,6 +1230,14 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.equal(await thorn.getByRole("link", { name: "Open the sheet ↗" }).getAttribute("href"), SHEET);
     await thorn.getByRole("button", { name: "Details", exact: true }).waitFor();
     assert.equal(await thorn.locator("[data-saves]").count(), 0);
+    // Conditions and Multi-select in view as the bar opens, with Size under them (the project owner's answer to W5B-P-2).
+    const spanning = await rectOf(thorn.locator("[data-bar-scroll]"));
+    for (const name of ["Conditions", "Multi-select"]) {
+      const button = await rectOf(thorn.getByRole("button", { name, exact: true }));
+      assert.ok(button.top >= spanning.top && button.bottom <= spanning.bottom + 1, `an upright phone: Pat's ${name} needs a scroll: ${JSON.stringify({ spanning, button })}`);
+      assert.equal(await labelUnderFade(thorn, name), null, `an upright phone: Pat's ${name} runs under "Scroll for more"`);
+    }
+    await steadyAboveSize(thorn, "390 x 844, spanning");
     await shots.take(player, "tokenpanel-pat-thorn-bar");
     await player.keyboard.press("Escape");
 
@@ -1526,6 +1571,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await tapAt(player, { x: 4, y: 4 });
       await thorn.waitFor();
       const row = sizeRow(thorn);
+      await steadyAboveSize(thorn, label);
       await row.scrollIntoViewIfNeeded();
       for (const name of ["One size smaller", "One size larger"]) {
         const button = row.getByRole("button", { name });

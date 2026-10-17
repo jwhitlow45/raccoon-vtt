@@ -22,7 +22,7 @@ The project owner's decisions the same day: "Grow away from walls" (a player's r
 - **Remembered on this device.** A new key, `rvtt.tokenBarSize`, beside `rvtt.tokenBarSpot`. Every token window this device opens takes it. Where the room is smaller, the window shrinks for that opening and the stored size stays.
 - **Narrow windows.** Beside a phone's sideways sheet a docked window can be narrower than its header's row. Its header keeps one row: the elevation badge moves under the name, then a touch device's grip is drawn as its dots, and under that the window folds into the sheet's header.
 - **Apply stays in view.** A window under 300 px tall takes the token panel design's short layout, so the HP field and Apply show at the smallest height. The group window's HP entry follows the same rule.
-- **A creature's size on the fly.** The DM and the token's owners change it: a Size stepper in the token window, with the rows that say where the creature's body is (Elevation, then Size, then its other images), and a Size field in the token panel's Stats, which also has "Back to Medium" where the creature's own size is known. The footprint keeps its middle, and a shrink on the same device puts the creature back on the square it grew from while it has not moved since. On a scene that blocks moves, every owner's resize is checked like a move: its middle never crosses a wall, and a growth covers every square the creature filled and ends only where a move could end, the least distance from where it stood, or is refused with "No room to grow here". The DM's never are. A resize goes on its maker's undo stack and counts no movement.
+- **A creature's size on the fly.** The DM and the token's owners change it: a Size stepper in the token window, after Conditions, Hidden and Multi-select and before the less-used buttons, and a Size field in the token panel's Stats, which also has "Back to Medium" where the creature's own size is known. The footprint keeps its middle, and a shrink on the same device puts the creature back on the square it grew from while it has not moved since. On a scene that blocks moves, every owner's resize is checked like a move: its middle never crosses a wall, and a growth covers every square the creature filled and ends only where a move could end, the least distance from where it stood, or is refused with "No room to grow here". The DM's never are. A resize goes on its maker's undo stack and counts no movement.
 - No new op. The op version goes to 6, since a resize's path changes how a stored size and place update replays, and a path stop gains one optional field. One new localStorage key. One new permission rule and one new pure rule (`shared/rules/resize.ts`).
 
 ## 2. Today
@@ -373,21 +373,22 @@ The base spot, or the remembered square on a shrink, with no wall search and no 
 
 ### 8.9 In the token window
 
-The window holds the size where it holds the creature's body on the map, between Elevation and the other images:
+The window holds the size after the steady line and before the less-used buttons:
 
 ```
-| Elevation           [-5]  0 ft  [+5]  |
+| [Conditions] [Hidden] [Multi-select]  |   the steady line
+| [Light]                               |
 | Size                [-] Medium  [+]   |
-| [Swap image] ...                      |   other images
+| [Locked] [Duplicate] [Delete]         |   the less-used buttons
 ```
 
-- **Why there.** Elevation, the ground notice, Size and the other images are the rows that change the token as the map draws it: how high, how big, which picture. Size is used rarely but at a moment that matters, Enlarge or Reduce cast, a Wild Shape, a polymorph, and Wild Shape changes the picture with it, from the other images row right below. It is a control, not a reading, so it sits with the controls after Details, not in the vitals line, which only reads, and not in the button rows, which hold what play needs every turn and would break the steady line.
+- **Why there** (the project owner's answer to the build review's W5B-P-2). Size is used rarely but at a moment that matters, Enlarge or Reduce cast, a Wild Shape, a polymorph. Under Elevation, with the rows that change how the map draws the creature, it pushed Conditions and Multi-select out of a player's view on an upright phone, the device players use most, for a control used a few times a campaign. After the steady line it moves nothing that play needs every turn, in any layout: the spanning bar, a docked window, the short layout, a narrow window beside a sheet and the very short mode. The less-used buttons after it are the DM's and few players have any, so for most players it costs no line above anything. It is a control, not a reading, so it is not in the vitals line, which only reads, and not in the button rows, where it would break the steady line.
 - **A stepper, as Elevation is.** "One size smaller" and "One size larger", 44 px each, with the size between them, weight 700, in a slot as wide as "Gargantuan" in that font, so the buttons never move under the thumb. Each press is one size: Reduce and Enlarge are one size, and Medium steps to Small, which is the same square. The buttons disable at Tiny and Gargantuan. The value is `aria-live="polite"`, so a press is heard ("Large"). The row is a `group` named "Size".
 - **Who sees it**: whoever may resize the token now (`canResize`): a player's own creature and their companions, and every token for the DM. Not a locked token for its owners, and not another's creature.
 - **Custom**: a Custom token's row is its size read-only, "Custom, 2 by 3 squares", with ", set by the DM" for its owners. The DM changes it in Stats.
 - **Refused**: "No room to grow here." or "A wall is in the way." shows as the room's refusal toast. The size stays.
 - **The stepper row's width.** A label and a stepper that does not fit beside it wraps under it, right-aligned (`flex-wrap`, the stepper `flex: none` with `margin-left: auto`). One rule for Elevation and Size: it keeps both rows inside the window at any width and font. Measured, the size row needs about 209 px inside the window and Elevation about 214, so both stay one line in every window from 240 px (every computer's, and the one beside a sheet at 246 px) and wrap only in narrower ones: beside a sheet at 189 px, and the narrowest phone's spanning bar (320 px at 130%, 204 inside). Today Elevation runs about 10 px into the padding there. That is fixed by the same rule.
-- **Short and compact.** The row keeps its place in the short layout: "More stats" holds readings, and Size is a control, after the HP field and Apply, so Apply's reach does not change. The compact overlay scrolls as a whole, with the row in the same order. The upright phone's spanning bar holds it in the same place.
+- **Short and compact.** The row keeps its place in the short layout: "More stats" holds readings, and Size is a control, after the steady line, so neither Apply's reach nor the steady line's changes. The compact overlay scrolls as a whole, with the row in the same order. The upright phone's spanning bar holds it in the same place.
 - **The group window** has no Size row. The DM resizes a group from More, as today.
 
 ### 8.10 In the token panel's Stats
@@ -424,7 +425,7 @@ The project owner asked for it "in stats". The token panel's Stats section (`Tok
 
 - The play row splits into the passing line and the steady line, and Request a roll follows Multi-select (3.2). The less-often row loses Move bar and Reset bar position.
 - The short layout's rule holds, with capacity counting the cap (5.8). Its 300 px threshold and the spanning bar's 210 hold.
-- The body gains Size after Elevation and the ground notice (8.9).
+- The body gains Size after the steady line and before the less-often row (8.9).
 - Its mockups' widths are 278 px inside, which the default width makes about 290. Nothing there depended on 278.
 
 ### 9.3 docs/design-v1-layout-hierarchy.md
@@ -569,9 +570,9 @@ o----------------------------------------+
 | Saves Str -1 Dex +2 Con +0 Int +0 ...  |
 | [Stat block] [Details]                 |
 | Elevation             [-5]  0 ft  [+5] |
-| Size                  [-] Medium  [+]  |
 | [Conditions] [Hidden] [Multi-select]   |
 | [Light]                                |
+| Size                  [-] Medium  [+]  |
 | [Locked] [Duplicate] [Delete]          |
 +----------------------------------------+
 ```
@@ -637,10 +638,10 @@ A player's own creature on a phone held sideways, short, with its Size row after
 | [More stats                   v] |
 | [Open the sheet] [Details]       |
 | Elevation       [-5]  0 ft  [+5] |
-| Size            [-] Large   [+]  |
 | [Swap image]                     |
 | [Conditions] [Multi-select]      |
 | [Light]                          |
+| Size            [-] Large   [+]  |
 +----------------------------------+
 ```
 
@@ -726,7 +727,7 @@ In "Phones, tablets and connection":
 
 In "Tokens", after the line on what each token has:
 
-- "The DM and a creature's owners change its size on the fly, for Enlarge or Reduce, a Wild Shape or a polymorph: Size in its action bar, under Elevation, steps it one size larger or smaller, and Size in its Stats picks any, with "Back to Medium" where its character or stat block gives its own size. The creature keeps its middle and its elevation, and its height, reach rings and attached areas follow. Shrunk back on the same device before it moves, it returns to the square it grew from. On a scene where walls stop moves, a player's resize is checked like a move: the creature never crosses a wall, and grows over the squares it filled into the room around them, away from walls the least it must, or keeps its size with "No room to grow here". The DM's changes are never stopped. A size change undoes as one step, keeping damage dealt since, and counts no movement. The DM alone sets and changes a custom size, and a locked token keeps its size for its players."
+- "The DM and a creature's owners change its size on the fly, for Enlarge or Reduce, a Wild Shape or a polymorph: Size in its action bar, below Conditions and Multi-select, steps it one size larger or smaller, and Size in its Stats picks any, with "Back to Medium" where its character or stat block gives its own size. The creature keeps its middle and its elevation, and its height, reach rings and attached areas follow. Shrunk back on the same device before it moves, it returns to the square it grew from. On a scene where walls stop moves, a player's resize is checked like a move: the creature never crosses a wall, and grows over the squares it filled into the room around them, away from walls the least it must, or keeps its size with "No room to grow here". The DM's changes are never stopped. A size change undoes as one step, keeping damage dealt since, and counts no movement. The DM alone sets and changes a custom size, and a locked token keeps its size for its players."
 
 In "Several tokens at once":
 
@@ -767,7 +768,7 @@ By default, with the reason in the section named:
 21. The footprint keeps its middle, growing over its old squares and shrinking into them, ties to the old top-left (8.2). An owner's growth must cover every square the creature filled, so its undo and its remembered return always land inside it (8.3, the review's decision of round 2).
 22. Clearance is the move rules' standing test, so a resize and a move agree on where a creature may stand (8.3).
 23. A resize goes on its maker's undo stack, a player's included, takes back the size and place alone, and counts no movement, every path stop keeping the size it was made at. An undo or redo that changes a size needs the rights of a resize at that moment, and one that keeps the size keeps today's rule, the owner's in-place undo on a locked token included (8.7).
-24. In the window, Size is a stepper under Elevation, with the body's rows, not in the vitals or the button rows. In the panel, Size moves from Token settings to Stats (8.9, 8.10).
+24. In the window, Size is a stepper after the steady line and before the less-used buttons, not in the vitals or the button rows, by the project owner's answer to W5B-P-2. In the panel, Size moves from Token settings to Stats (8.9, 8.10).
 
 ## 19. Questions for the project owner
 

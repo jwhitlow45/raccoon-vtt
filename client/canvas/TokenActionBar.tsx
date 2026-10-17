@@ -401,9 +401,6 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
 
       <GroundNotice token={token} />
 
-      {/* With the rows that change how the map draws the creature: how high, how big, which picture (docs/design-v1-token-window.md 8.9). */}
-      {access.dm || (access.owner && !token.locked) ? <SizeRow token={token} owner={access.owner} canResize={access.resize} /> : null}
-
       {access.canEditToken("altImages") ? (
         <AltImagesRow
           token={token}
@@ -422,6 +419,8 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
       <div data-bar-row="play" style={BUTTON_ROW}>
         {rows.play.map(button)}
       </div>
+      {/* Used a few times a campaign, so after the steady line, which it would push out of view on an upright phone, and before the less-used buttons (docs/design-v1-token-window.md 8.9). */}
+      {access.dm || (access.owner && !token.locked) ? <SizeRow token={token} owner={access.owner} canResize={access.resize} /> : null}
       {rows.less.length > 0 ? (
         <div data-bar-row="less" style={BUTTON_ROW}>
           {rows.less.map(button)}

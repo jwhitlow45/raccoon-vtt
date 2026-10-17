@@ -661,6 +661,10 @@ describe("raccoon-vtt short-screen reach", { timeout: 1_800_000 }, () => {
           if (where !== c.badge) await miss(`${label}: the elevation badge is in the ${where}, not the ${c.badge}`);
         }
         await shots.take(dm, `reach-token-window-beside-sheet-${c.size.width}x${c.size.height}-${Math.round(c.scale * 100)}-${c.badge ? "badge" : "plain"}`);
+        // Size under the steady line here too (the project owner's answer to W5B-P-2).
+        const steadyBox = await frame.locator('[data-bar-row="play"]').boundingBox();
+        const sizeBox = await frame.getByRole("group", { name: "Size", exact: true }).boundingBox();
+        if (!steadyBox || !sizeBox || steadyBox.y + steadyBox.height > sizeBox.y + 1) await miss(`${label}: Size stands above Conditions and Multi-select`);
         for (const name of ["One size smaller", "One size larger"]) {
           const b = frame.getByRole("group", { name: "Size", exact: true }).getByRole("button", { name });
           if ((await b.count()) === 0 || (await b.isDisabled())) continue;
