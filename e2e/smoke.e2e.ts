@@ -288,6 +288,8 @@ describe("raccoon-vtt smoke run", { timeout: 300_000 }, () => {
   test("6. the player aims a cone from their token and sees what it catches", async () => {
     await player.getByRole("button", { name: "Area", exact: true }).click();
     const bar = player.getByRole("toolbar", { name: "Area options" });
+    // Thorn is the player's only creature here, so areas start from him (docs/design-v1-area-from-character.md 3.3).
+    await bar.getByRole("button", { name: "From Thorn", pressed: true }).first().waitFor();
     await pickOption(player, "Area", "Shape", "Cone");
     await dragCells(player, run.bounds, { x: 3, y: 5 }, { x: 6, y: 5 });
     await bar.getByText(/In area \(1\): Goblin Warrior( \d+)?$/).waitFor();

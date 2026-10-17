@@ -143,6 +143,9 @@ const run = {
   sceneId: "",
   patId: "",
   thorn: { id: randomUUID(), characterId: randomUUID() },
+  /** Thorn's companion and a scene to send Thorn to, for the From control's chip and its disabled form (docs/design-v1-area-from-character.md 6). */
+  pip: randomUUID(),
+  away: randomUUID(),
   goblins: [randomUUID(), randomUUID(), randomUUID()],
   kept: Array.from({ length: 10 }, () => randomUUID()),
   stamp: randomUUID(),
@@ -251,6 +254,7 @@ type State = { name: string; roles: readonly Role[]; tool: string; enter(page: P
 
 const BOTH: readonly Role[] = ["dm", "player"];
 const DM_ONLY: readonly Role[] = ["dm"];
+const PLAYER_ONLY: readonly Role[] = ["player"];
 
 async function selectTool(page: Page, letter: string): Promise<void> {
   await closePopover(page);
@@ -262,6 +266,39 @@ const STATES: State[] = [
   { name: "Ruler, ten kept rulers", roles: BOTH, tool: "Ruler", enter: (p) => selectTool(p, "r") },
   { name: "Area idle", roles: BOTH, tool: "Area", enter: (p) => selectTool(p, "a") },
   {
+    // The From control as a chip: Thorn and his companion Pip.
+    name: "Area idle, two creatures",
+    roles: PLAYER_ONLY,
+    tool: "Area",
+    async enter(p) {
+      await ops.send({
+        t: "token.create",
+        token: { id: run.pip, sceneId: run.sceneId, kind: "npc", name: "Pip", size: "tiny", x: 6, y: 8, visibility: "all", disposition: "ally", companion: { of: run.thorn.characterId, turn: "shared" }, actor: { inline: actor(4) } },
+      });
+      await selectTool(p, "a");
+      await options(p).locator('[data-rvtt-slot="from"] button[aria-haspopup="dialog"]').first().waitFor({ state: "attached" });
+    },
+    async leave() {
+      await ops.send({ t: "token.delete", tokenId: run.pip });
+    },
+  },
+  {
+    // The From control disabled, with its reason: Thorn on another scene.
+    name: "Area idle, no creature",
+    roles: PLAYER_ONLY,
+    tool: "Area",
+    async enter(p) {
+      if (!dmSocket.state?.scenes[run.away]) await ops.send({ t: "scene.create", scene: { id: run.away, name: "Away", bounds: { w: 10, h: 10 } } });
+      await ops.send({ t: "token.update", tokenId: run.thorn.id, patch: { sceneId: run.away } });
+      await selectTool(p, "a");
+      await options(p).locator('[data-rvtt-slot="from"] button[aria-disabled="true"]').first().waitFor({ state: "attached" });
+    },
+    async leave() {
+      await ops.send({ t: "token.update", tokenId: run.thorn.id, patch: { sceneId: run.sceneId } });
+      await waitFor("Thorn back", () => (playerSocket.state?.tokens[run.thorn.id] ? true : null));
+    },
+  },
+  {
     name: "Area placing",
     roles: BOTH,
     tool: "Area",
@@ -269,6 +306,21 @@ const STATES: State[] = [
       await selectTool(p, "a");
       await tapCellAt(p, { x: 20, y: 12 });
       await options(p).getByRole("button", { name: "Place", exact: true }).first().waitFor({ state: "attached" });
+    },
+    async leave(p) {
+      await key(p, "v");
+    },
+  },
+  {
+    // The DM's From toggle, once a tap casts from a goblin.
+    name: "Area placing, from a goblin",
+    roles: DM_ONLY,
+    tool: "Area",
+    async enter(p) {
+      await selectTool(p, "a");
+      const goblin = dmSocket.state!.tokens[run.goblins[0]!]!;
+      await tapCellAt(p, { x: goblin.x, y: goblin.y });
+      await options(p).locator('[data-rvtt-slot="from"] button[aria-pressed="true"]').first().waitFor({ state: "attached" });
     },
     async leave(p) {
       await key(p, "v");
