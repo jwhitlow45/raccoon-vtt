@@ -1,7 +1,7 @@
 import type { Actor, CompanionBlock, CreatureSize, ImageRef, MonsterSize, RoomState, Token } from "#shared/model.ts";
 import type { ActorPatch, ClientOp, TokenPatch } from "#shared/protocol.ts";
 import { fitLine, type SrdMonster, type StatBlockMonster } from "#shared/srd/monsters.ts";
-import { signed } from "#shared/statBlock.ts";
+import { signed, sizeAndType } from "#shared/statBlock.ts";
 import type { OnAnswer, OpAnswer, OpRefusal } from "../../state/types.ts";
 import { viewOf } from "../monsters/draft.ts";
 import type { ListedRow } from "../monsters/MonsterList.tsx";
@@ -52,6 +52,11 @@ export type PickerRow = ListedRow & { link: BlockLink; source: "block" | "srd"; 
 /** A character's block as a list row, tagged with whose it is. */
 export function blockRow(block: CompanionBlock, characterName: string): PickerRow {
   return { key: `block:${block.id}`, source: "block", view: viewOf(block), tag: whose(characterName), link: { blockId: block.id }, ...(block.defaultImage ? { picture: block.defaultImage } : {}) };
+}
+
+/** A block's second line in a character's list: "Small Fey, CR 1/4", or "Medium, CR 0" with no creature type. */
+export function blockDetail(block: Pick<CompanionBlock, "size" | "type" | "cr">): string {
+  return `${sizeAndType(block)}, CR ${block.cr}`;
 }
 
 /** An SRD monster as a list row. */

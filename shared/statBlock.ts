@@ -181,9 +181,16 @@ export function legendaryUses(m: Pick<StatBlock, "traits" | "legendaryActions">)
   return { ...(actions ? { legendaryActions: actions } : {}), ...(resistance ? { legendaryResistance: resistance } : {}) };
 }
 
+/** "Small Fey", or "Small" alone for a block typed or pasted with no creature type. */
+export function sizeAndType(m: { size: MonsterSize; type: string }): string {
+  return [SIZE_WORDS[m.size], m.type.trim()].filter(Boolean).join(" ");
+}
+
+/** "Small Fey, Unaligned". A typed or pasted block may have no creature type or alignment, and then the line has no gap or comma for it. */
 function sizeLine(m: StatBlock): string {
   const size = m.sizeAlt ? `${SIZE_WORDS[m.size]} or ${SIZE_WORDS[m.sizeAlt]}` : SIZE_WORDS[m.size];
-  return `${size} ${m.type}, ${m.alignment}`;
+  const kind = [size, m.type.trim()].filter(Boolean).join(" ");
+  return m.alignment.trim() ? `${kind}, ${m.alignment.trim()}` : kind;
 }
 
 export function hpLine(hp: StatBlock["hp"]): string {

@@ -26,6 +26,14 @@ function usualCr(markdown: string): string {
 }
 
 describe("custom monsters in the SRD shape", () => {
+  test("a block with no creature type or alignment reads without a gap or comma for them", () => {
+    const line = (over: Partial<ReturnType<typeof emptyStatBlock>>) => statBlockMarkdown({ ...emptyStatBlock(), name: "Wisp", ...over }).split("\n\n")[1];
+    assert.equal(line({}), "*Medium*");
+    assert.equal(line({ type: "Fey" }), "*Medium Fey*");
+    assert.equal(line({ alignment: "Unaligned" }), "*Medium, Unaligned*");
+    assert.equal(line({ type: "Fey", alignment: "Unaligned", sizeAlt: "small" }), "*Medium or Small Fey, Unaligned*");
+  });
+
   test("every SRD monster reads into fields and writes back to the same Markdown", () => {
     let unusual = 0;
     for (const m of monsters) {

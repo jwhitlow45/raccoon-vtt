@@ -12,6 +12,7 @@ import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import {
   afterLinkAnswer,
   attachActorPatch,
+  blockDetail,
   blockNumbers,
   blockRow,
   fromTheBlock,
@@ -398,6 +399,11 @@ describe("the companion picker's lists (docs/design-v1-companion-stat-blocks.md 
 });
 
 describe("words", () => {
+  test("a block's line in a character's list leaves out a creature type it does not have", () => {
+    assert.equal(blockDetail({ size: "small", type: "Fey", cr: "1/4" }), "Small Fey, CR 1/4");
+    assert.equal(blockDetail({ size: "medium", type: "", cr: "0" }), "Medium, CR 0");
+  });
+
   test("speeds read walk first, then each mode, with hover", () => {
     assert.equal(speedText({ walk: 30 }), "30 ft");
     assert.equal(speedText({ walk: 5, fly: 60, hover: true, swim: 10 }), "5 ft, fly 60 ft (hover), swim 10 ft");

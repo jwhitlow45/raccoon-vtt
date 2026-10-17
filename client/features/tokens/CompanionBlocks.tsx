@@ -13,13 +13,13 @@ import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { useSend } from "../encounter/hooks.ts";
 import { useOpenEditor } from "../monsters/EditorHost.tsx";
-import { SIZE_WORD } from "../monsters/MonsterList.tsx";
 import { CompanionPickerBody } from "../monsters/MonsterPicker.tsx";
 import { StatBlockView } from "../monsters/StatBlockView.tsx";
 import { blockLines, viewOf } from "../monsters/draft.ts";
 import type { TokenAccess } from "./access.ts";
 import {
   attachActorPatch,
+  blockDetail,
   blockNumbers,
   blockRow,
   characterBlocks,
@@ -312,11 +312,6 @@ export function ChooseBlockDialog(props: { character: Pick<Character, "id" | "na
       />
     </Dialog>
   );
-}
-
-/** A block's second line in a list: "Small Fey, CR 1/4". */
-function blockDetail(block: CompanionBlock): string {
-  return `${SIZE_WORD[block.size]} ${block.type}, CR ${block.cr}`;
 }
 
 /**

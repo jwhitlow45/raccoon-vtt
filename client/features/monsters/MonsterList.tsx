@@ -1,5 +1,6 @@
 import type { CustomMonster } from "#shared/model.ts";
 import type { SrdMonster, StatBlockMonster } from "#shared/srd/monsters.ts";
+import { sizeAndType } from "#shared/statBlock.ts";
 import { Row } from "../../components/Row.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
@@ -49,7 +50,7 @@ export function MonsterList(props: { items: readonly ListedRow[]; onPick(key: st
             onClick={() => props.onPick(m.key)}
             opener={props.subpages ? `monster-${m.key}` : undefined}
             title={m.view.name}
-            detail={`${SIZE_WORD[m.view.size]} ${m.view.type}`}
+            detail={sizeAndType(m.view)}
             trailing={
               <>
                 {m.source === "room" ? (
