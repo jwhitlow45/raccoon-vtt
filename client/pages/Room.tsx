@@ -30,6 +30,7 @@ import { EditorHost } from "../features/monsters/EditorHost.tsx";
 import { useJobWaiting, usePdfJobRoom } from "../features/handouts/pdf/live.ts";
 import { useJournalUnread } from "../features/journal/store.ts";
 import { useLogUnread } from "../features/log/useLogUnread.ts";
+import { useRollToasts } from "../features/dice/useRollToasts.ts";
 import { PhaseMenu } from "../features/phases/PhaseMenu.tsx";
 import { FrameViewBar } from "../features/scenes/FrameView.tsx";
 import { barInset, chromeZoom, layoutWidth, smallUi, useLayoutSize } from "../features/device/layout.ts";
@@ -412,6 +413,8 @@ function RoomPage() {
   }, [wide, ui]);
   // New chat and whispers mark the Log's button while it is not on screen.
   const unread = useLogUnread(wide ? sideShows("log") : sheet?.id === "log");
+  // Others' rolls as toasts while the Dice panel is not on screen (docs/design-v1-dice.md 8.5).
+  useRollToasts(wide ? sideShows("dice") : sheet?.id === "dice");
   const journalUnread = useJournalUnread();
   // A PDF upload waiting on the DM badges the DM panel, and on a phone the Panels button too (docs/design-v1-pdf-handouts.md 4.1.1).
   const uploadWaiting = useJobWaiting() && role === "dm" ? 1 : 0;

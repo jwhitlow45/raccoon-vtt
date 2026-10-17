@@ -151,6 +151,18 @@ export function ephRate(low: boolean): number {
   return low ? 15 : 30;
 }
 
+// ---------------------------------------------------------------- others' rolls
+
+/** "Show others' rolls as they happen" (docs/design-v1-dice.md 8.5), on by default. */
+export function parseRollToasts(raw: string | null): boolean {
+  return raw !== "off";
+}
+
+const rollToastsSetting = setting("rvtt.rollToasts", parseRollToasts, (on) => (on ? "on" : "off"));
+
+export const setRollToasts = rollToastsSetting.set;
+export const useRollToastsOn = rollToastsSetting.use;
+
 // ---------------------------------------------------------------- map detail
 
 /**

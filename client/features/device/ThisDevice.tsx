@@ -7,7 +7,7 @@ import { setShortcutSheet } from "../../state/shortcuts.ts";
 import { RadioGroup } from "../dm/controls.tsx";
 import { setSoundOn, useSoundOn } from "../encounter/alerts.ts";
 import { setSoundEnabled, usePingSound } from "../pings/feedback.ts";
-import { setLowPower, setMapDetail, setUiScale, UI_SCALES, uiScaleLabel, useLowPower, useMapVariant, useUiScale, type UiScale } from "./settings.ts";
+import { setLowPower, setMapDetail, setRollToasts, setUiScale, UI_SCALES, uiScaleLabel, useLowPower, useMapVariant, useRollToastsOn, useUiScale, type UiScale } from "./settings.ts";
 
 /**
  * Menu, This device (docs/design-v1-dm-tools.md 2.7): what belongs to this
@@ -21,6 +21,7 @@ export default function ThisDevice() {
   const variant = useMapVariant();
   const turnSound = useSoundOn();
   const pingSound = usePingSound();
+  const rollToasts = useRollToastsOn();
   return (
     <div style={{ display: "grid" }}>
       <Section label="Interface size" divider={false}>
@@ -56,6 +57,9 @@ export default function ThisDevice() {
           checked={pingSound}
           onChange={setSoundEnabled}
         />
+      </Section>
+      <Section label="Rolls">
+        <Switch label="Show others' rolls as they happen" help="A short note for each roll someone else makes, while the Dice panel is not on screen." checked={rollToasts} onChange={setRollToasts} />
       </Section>
       <Section label="Shortcuts">
         <Help>With a keyboard, letters pick tools, arrow keys move the selected tokens, and N moves the turn on. The list also says what Shift, Ctrl or Space do with the mouse.</Help>
