@@ -458,16 +458,19 @@ export type PanelScroll = { top: number; left: number; end: boolean; page: strin
 /**
  * Each panel's last scroll, by panel id, for this Room page: a panel that
  * shows again, by any path, opens where it was left, in either pane of the
- * side panel or a phone's sheet. Numbers only, never an element, so a
- * panel that left holds none of its DOM here.
+ * side panel or a phone's sheet. Numbers and keys only, never an element,
+ * so a panel that left holds none of its DOM here.
  */
 export const panelScrollSlot = scopeSlot(() => new Map<string, PanelScroll>());
 
 /** Under this many px from the foot, a scroller sits at its end. */
 const END_SLOP = 2;
 
+/** How long a panel that shows again keeps waiting for its content to hold its old offset, such as the monster list arriving after the panel draws. */
+export const RESTORE_WAIT_MS = 1000;
+
 /**
- * A scroller's place now, for `page`. At its end only once scrolled: a
+ * A scroller's place now, on `page`. At its end only once scrolled: a
  * panel that fits its scroller, or one scrolled back to its top, opens at
  * its top again even if it has grown since.
  */
@@ -477,69 +480,153 @@ export function scrollOf(el: { scrollTop: number; scrollLeft: number; scrollHeig
 }
 
 /**
- * What a panel that shows again puts back, given where it was (`saved`)
- * and the page it shows now: its offsets, the new end where it sat at its
- * end so whatever arrived meanwhile (a Log message) shows, "wait" while a
- * remembered subpage has yet to publish its header, or null with nothing
- * remembered, which leaves the panel's own first scroll, such as the Log
- * at its newest line.
+ * One try at putting a panel back where it was (`saved`), given the page
+ * it shows now and its scroller's size:
+ *
+ * - "done" with nothing to put back: nothing remembered, so the panel
+ *   keeps its own first scroll, its top, or the Log's newest line.
+ * - "wait" while a remembered subpage has yet to publish its header.
+ * - "set" an offset, and `held` once the content is tall enough to hold
+ *   it. Until then the caller tries again as content arrives. At its end,
+ *   it is the new end, so whatever arrived meanwhile (a Log line) shows.
  */
-export function scrollToRestore(saved: PanelScroll | undefined, page: string | null, box: { scrollHeight: number; clientHeight: number }): { top: number; left: number } | "wait" | null {
-  if (!saved) return null;
-  if (saved.page !== page) return "wait";
-  return { top: saved.end ? Math.max(0, box.scrollHeight - box.clientHeight) : saved.top, left: saved.left };
+export type RestoreStep = { kind: "done" } | { kind: "wait" } | { kind: "set"; top: number; left: number; held: boolean };
+
+export function restoreStep(saved: PanelScroll | undefined, now: { page: string | null; scrollHeight: number; clientHeight: number }): RestoreStep {
+  if (!saved) return { kind: "done" };
+  if (saved.page !== now.page) return { kind: "wait" };
+  const room = Math.max(0, now.scrollHeight - now.clientHeight);
+  if (saved.end) return { kind: "set", top: room, left: saved.left, held: true };
+  return { kind: "set", top: saved.top, left: saved.left, held: room >= saved.top - 1 };
+}
+
+/** What the keeper reads and sets of a panel's scroller, an element. No client rects means it has no box yet, as in a dialog not yet open or a hidden pane. */
+export type ScrollBox = { scrollTop: number; scrollLeft: number; readonly scrollHeight: number; readonly clientHeight: number; getClientRects(): { readonly length: number } };
+
+/**
+ * The rule of usePanelScroll, apart from React and the DOM so a test can
+ * run it through any order of events. A panel that shows again starts a
+ * restore, which stays pending until its content holds the offset, the
+ * viewer takes the scroller, or RESTORE_WAIT_MS passes after the scroller
+ * is first drawn. While it is pending no scroll is recorded, so a scroll
+ * the restore caused, clamped by content not there yet, never replaces
+ * the place it is putting back.
+ */
+export class PanelScrollKeeper {
+  private shown: string | null = null;
+  private pending: { id: string; since: number | null } | null = null;
+  private readonly kept: Map<string, PanelScroll>;
+  private readonly box: () => ScrollBox | null;
+  private readonly now: () => number;
+
+  constructor(kept: Map<string, PanelScroll>, box: () => ScrollBox | null, now: () => number) {
+    this.kept = kept;
+    this.box = box;
+    this.now = now;
+  }
+
+  /** Whether a restore is still pending. */
+  get waiting(): boolean {
+    return this.pending !== null;
+  }
+
+  /** The panel the body shows now. Another one than before starts a restore. */
+  show(id: string | null): void {
+    if (this.shown === id) return;
+    this.shown = id;
+    this.pending = id === null ? null : { id, since: null };
+  }
+
+  /**
+   * One try, on the page the panel shows now. Whether to try again on the
+   * next frame: only while pending with the scroller drawn. A scroller not
+   * drawn yet keeps the restore pending for the commit that draws it, with
+   * no frames meanwhile, so a hidden pane runs no loop.
+   */
+  attempt(page: string | null): boolean {
+    const ask = this.pending;
+    const el = this.box();
+    if (!ask || !el || el.getClientRects().length === 0) return false;
+    const now = this.now();
+    ask.since ??= now;
+    if (now - ask.since >= RESTORE_WAIT_MS) {
+      this.pending = null;
+      return false;
+    }
+    const step = restoreStep(this.kept.get(ask.id), { page, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight });
+    if (step.kind === "wait") return true;
+    if (step.kind === "set") {
+      if (el.scrollTop !== step.top) el.scrollTop = step.top;
+      if (el.scrollLeft !== step.left) el.scrollLeft = step.left;
+      if (!step.held) return true;
+    }
+    this.pending = null;
+    return false;
+  }
+
+  /** The scroller scrolled: kept as the panel's place, unless a restore is pending. */
+  scrolled(page: string | null): void {
+    const el = this.box();
+    if (this.shown === null || this.pending !== null || !el) return;
+    this.kept.set(this.shown, scrollOf(el, page));
+  }
+
+  /** The viewer wheeled, touched, pressed or typed in the scroller: a pending restore stops there, so content that fills in late never pulls them back. */
+  takeOver(): void {
+    this.pending = null;
+  }
 }
 
 /**
  * Keeps a panel's scroll as it leaves and puts it back as it shows again
- * (panelScrollSlot), for whatever scrolls a panel: a side panel's pane or
- * a phone's sheet, whose body stays as one panel replaces another. Call it
- * after useSubpageFocus on the same body, since that hook sets the offset
- * as a subpage comes and goes, and this one has the last word.
+ * (panelScrollSlot, PanelScrollKeeper), for whatever scrolls a panel: a
+ * side panel's pane or a phone's sheet. Call it after useSubpageFocus on
+ * the same body, since that hook sets the offset as a subpage comes and
+ * goes, and this one has the last word.
  *
- * The offset is put back in a layout effect, before paint, so nothing
- * jumps: after whatever opens the scroller, since a body with no box takes
- * no offset. A subpage the panel shows again (a journal page) publishes
- * its header in a commit of its own, still before paint, so the offset
- * waits for that page, and stops waiting after the first frame drawn.
+ * A panel shows again when the panel in the body changes. The first try
+ * is in a layout effect, before paint, so nothing jumps, and after
+ * whatever opens the scroller, since a body with no box takes no offset.
+ * Content may come later than the first frame: a remembered subpage
+ * publishes its header a commit later, and the monster list or a page's
+ * pictures fill in after the panel draws. So a pending restore tries again
+ * on each commit and each frame until it ends, which takes at most
+ * RESTORE_WAIT_MS.
  */
 export function usePanelScroll(id: string | null, subpage: PanelHeader | null, body: RefObject<HTMLElement | null>): void {
   const kept = useScoped(panelScrollSlot);
   const page = subpage ? subpageKey(subpage) : null;
-  const latest = useRef({ id, page });
-  latest.current = { id, page };
+  const pageNow = useRef(page);
+  pageNow.current = page;
+  const [keeper] = useState(() => new PanelScrollKeeper(kept, () => body.current, () => performance.now()));
+  const framing = useRef(false);
+  const tryRestore = useRef(() => {});
+  tryRestore.current = () => {
+    if (!keeper.attempt(pageNow.current) || framing.current) return;
+    framing.current = true;
+    const frame = () => {
+      if (keeper.attempt(pageNow.current)) requestAnimationFrame(frame);
+      else framing.current = false;
+    };
+    requestAnimationFrame(frame);
+  };
   useEffect(() => {
     const el = body.current;
     if (!el) return;
-    const record = () => {
-      const now = latest.current;
-      if (now.id !== null) kept.set(now.id, scrollOf(el, now.page));
-    };
+    const record = () => keeper.scrolled(pageNow.current);
+    const takeOver = () => keeper.takeOver();
     el.addEventListener("scroll", record, { passive: true });
-    return () => el.removeEventListener("scroll", record);
-  }, [body, kept]);
-  const shown = useRef<string | null>(null);
-  const pending = useRef<{ id: string; timed: boolean } | null>(null);
+    for (const type of VIEWER_INPUT) el.addEventListener(type, takeOver, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", record);
+      for (const type of VIEWER_INPUT) el.removeEventListener(type, takeOver);
+    };
+  }, [body, keeper]);
   useLayoutEffect(() => {
-    if (shown.current !== id) {
-      shown.current = id;
-      pending.current = id === null ? null : { id, timed: false };
-    }
-    const ask = pending.current;
-    const el = body.current;
-    // A body with no box yet, as in a dialog not yet open or a hidden pane, takes no offset: the wait goes on until a commit that draws it.
-    if (!ask || !el || el.getClientRects().length === 0) return;
-    if (!ask.timed) {
-      ask.timed = true;
-      requestAnimationFrame(() => {
-        if (pending.current === ask) pending.current = null;
-      });
-    }
-    const to = scrollToRestore(kept.get(ask.id), page, el);
-    if (to === "wait") return;
-    pending.current = null;
-    if (!to) return;
-    if (el.scrollTop !== to.top) el.scrollTop = to.top;
-    if (el.scrollLeft !== to.left) el.scrollLeft = to.left;
+    keeper.show(id);
+    tryRestore.current();
   });
 }
+
+/** What the viewer does to take a scroller over. */
+const VIEWER_INPUT = ["wheel", "touchstart", "pointerdown", "keydown"] as const;

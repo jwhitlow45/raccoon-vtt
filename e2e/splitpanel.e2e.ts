@@ -548,6 +548,15 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await dm.keyboard.press("Escape");
     await dm.keyboard.press("Escape");
 
+    // Monsters fills in its list after it draws, and still comes back where it was (GR-P-1).
+    await openSideTab(dm, "Monsters");
+    await topPane(dm, "Monsters").getByText(/^SRD 5\.2\.1 \(\d+\)$/).waitFor();
+    await scrollPane(topPane(dm, "Monsters"), 800);
+    await openSideTab(dm, "Initiative");
+    await openSideTab(dm, "Monsters");
+    await waitFor("Monsters back at 800", async () => (near(await scrollOfPane(topPane(dm, "Monsters")), 800) ? true : null), 2_500);
+    await openSideTab(dm, "Initiative");
+
     await toggleSplit(dm);
     await belowName(dm, "Token").click();
     await belowMenu(dm).getByRole("menuitemradio", { name: sideTabName("Log") }).click();
@@ -764,7 +773,26 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     } finally {
       await tablet.close();
     }
-    await reloadAt(dm, 1);
+
+    // Monsters in a short bottom pane: its list fills in after the pane draws, and it still comes back where it was, three times over (GR-P-1).
+    await belowName(dm, "Token").click();
+    await belowMenu(dm).getByRole("menuitemradio", { name: sideTabName("Monsters") }).click();
+    await grip(dm).focus();
+    for (let i = 0; i < 8; i++) await dm.keyboard.press("Shift+ArrowDown");
+    assert.ok(Math.abs(((await roomOf(dm)).below ?? 0) - 145) <= 1, "the bottom pane at its least height");
+    const monsters = () => bottomPane(dm, "Monsters").locator("[data-pane-body]");
+    await bottomPane(dm, "Monsters").getByText(/^SRD 5\.2\.1 \(\d+\)$/).waitFor();
+    await monsters().evaluate((el) => ((el as unknown as DomEl).scrollTop = 800));
+    await dm.waitForTimeout(120);
+    for (const round of [1, 2, 3]) {
+      await belowName(dm, "Monsters").click();
+      await belowMenu(dm).getByRole("menuitemradio", { name: sideTabName("Journal") }).click();
+      await bottomPane(dm, "Journal").waitFor();
+      await belowName(dm, "Journal").click();
+      await belowMenu(dm).getByRole("menuitemradio", { name: sideTabName("Monsters") }).click();
+      await waitFor(`Monsters below back at 800, return ${round}`, async () => (Math.abs((await monsters().evaluate((el) => (el as unknown as DomEl).scrollTop)) - 800) <= 1 ? true : null), 2_500);
+    }
+    await reloadAt(dm, 1, true);
   });
 
   test("6. a side panel too short for two: disabled where it never fits, the bottom pane hidden and kept, and a link placed once the room is known", async () => {

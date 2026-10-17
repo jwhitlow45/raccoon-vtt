@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { headerSink, panelSections, panelsFor, scrollOf, scrollToRestore, type PanelHeader, type PanelSection } from "./panels.ts";
+import { headerSink, PanelScrollKeeper, panelSections, panelsFor, RESTORE_WAIT_MS, restoreStep, scrollOf, type PanelHeader, type PanelScroll, type PanelSection } from "./panels.ts";
 
 describe("the panels' order and groups (docs/design-v1-layout-hierarchy.md M3)", () => {
   const titles = (role: "dm" | "player", wide: boolean) => panelsFor(role, wide).map((p) => p.title);
@@ -115,33 +115,225 @@ describe("a panel's subpage and its host", () => {
 /*
  * Each panel keeps its scroll as it leaves and shows again by any path: a
  * tab, More, a link, either pane of two, a phone's sheet (the project
- * owner, after wave 6).
+ * owner, after wave 6), and content that fills in late, such as the
+ * monster list, still lands it there (GR-P-1).
  */
 describe("a panel's scroll as it shows again", () => {
   const box = (scrollTop: number, scrollHeight = 2000, clientHeight = 500) => ({ scrollTop, scrollLeft: 0, scrollHeight, clientHeight });
+  const at = (page: string | null, scrollHeight: number, clientHeight = 500) => ({ page, scrollHeight, clientHeight });
 
-  test("a panel left part way down opens where it was, on the page it showed", () => {
+  test("a panel left part way down goes back there, held once its content is tall enough", () => {
     const saved = scrollOf({ ...box(640), scrollLeft: 30 }, null);
     assert.deepEqual(saved, { top: 640, left: 30, end: false, page: null });
-    assert.deepEqual(scrollToRestore(saved, null, box(0)), { top: 640, left: 30 });
+    assert.deepEqual(restoreStep(saved, at(null, 2000)), { kind: "set", top: 640, left: 30, held: true });
+    assert.deepEqual(restoreStep(saved, at(null, 600)), { kind: "set", top: 640, left: 30, held: false }, "the list has not filled in yet");
   });
 
-  test("a panel left at its end opens at its new end, so what arrived meanwhile shows", () => {
+  test("a panel left at its end goes to its new end, so what arrived meanwhile shows", () => {
     const saved = scrollOf(box(1500), null);
     assert.equal(saved.end, true);
-    assert.deepEqual(scrollToRestore(saved, null, box(0, 2600)), { top: 2100, left: 0 });
+    assert.deepEqual(restoreStep(saved, at(null, 2600)), { kind: "set", top: 2100, left: 0, held: true });
   });
 
   test("a panel at its top, or one that fit, is never at its end", () => {
     assert.equal(scrollOf(box(0), null).end, false, "scrolled back to its top");
     assert.equal(scrollOf(box(0, 400, 500), null).end, false, "it fit");
-    assert.deepEqual(scrollToRestore(scrollOf(box(0), null), null, box(0, 2600)), { top: 0, left: 0 });
+    assert.deepEqual(restoreStep(scrollOf(box(0), null), at(null, 2600)), { kind: "set", top: 0, left: 0, held: true });
   });
 
   test("a remembered subpage waits for its header, and nothing remembered leaves the panel's own first scroll", () => {
     const saved = scrollOf(box(300), "Journal\nlore");
-    assert.equal(scrollToRestore(saved, null, box(0)), "wait", "the page has yet to publish its header");
-    assert.deepEqual(scrollToRestore(saved, "Journal\nlore", box(0)), { top: 300, left: 0 });
-    assert.equal(scrollToRestore(undefined, null, box(0)), null, "the Log's own start at its newest line stays");
+    assert.deepEqual(restoreStep(saved, at(null, 2000)), { kind: "wait" }, "the page has yet to publish its header");
+    assert.deepEqual(restoreStep(saved, at("Journal\nlore", 2000)), { kind: "set", top: 300, left: 0, held: true });
+    assert.deepEqual(restoreStep(undefined, at(null, 2000)), { kind: "done" }, "the Log's own start at its newest line stays");
+  });
+});
+
+/** A scroller whose content height a test sets, clamping as a browser does, and counting the scroll events it would fire. */
+function fakeScroller(clientHeight = 300) {
+  const el = {
+    content: 0,
+    top: 0,
+    left: 0,
+    events: 0,
+    drawn: true,
+    clientHeight,
+    get scrollHeight() {
+      return Math.max(this.content, this.clientHeight);
+    },
+    get scrollTop() {
+      return this.top;
+    },
+    set scrollTop(v: number) {
+      const next = Math.max(0, Math.min(v, this.scrollHeight - this.clientHeight));
+      if (next !== this.top) this.events++;
+      this.top = next;
+    },
+    get scrollLeft() {
+      return this.left;
+    },
+    set scrollLeft(v: number) {
+      this.left = v;
+    },
+    getClientRects() {
+      return { length: this.drawn ? 1 : 0 };
+    },
+    /** Content that shrinks clamps the offset, and the browser says so with a scroll event. */
+    setContent(px: number) {
+      this.content = px;
+      this.scrollTop = this.top;
+    },
+  };
+  return el;
+}
+
+describe("the panel scroll keeper", () => {
+  test("the monster list filling in after the panel draws still lands it where it was, in a short pane too, and a clamp is never kept", () => {
+    const kept = new Map<string, PanelScroll>();
+    const el = fakeScroller(150);
+    let clock = 0;
+    const keeper = new PanelScrollKeeper(kept, () => el, () => clock);
+    el.setContent(4000);
+    keeper.show("monsters");
+    assert.equal(keeper.attempt(null), false, "nothing remembered: done at once");
+    el.scrollTop = 800;
+    keeper.scrolled(null);
+    assert.deepEqual(kept.get("monsters"), { top: 800, left: 0, end: false, page: null });
+
+    // Monsters shows again: only the filter bar and "Loading the monsters…" at first, taller than the short pane.
+    keeper.show("tracker");
+    keeper.show("monsters");
+    el.setContent(260);
+    el.top = 0;
+    assert.equal(keeper.attempt(null), true, "pending while the list is short");
+    assert.equal(el.scrollTop, 110, "clamped for now");
+    keeper.scrolled(null);
+    assert.equal(kept.get("monsters")?.top, 800, "the clamp's scroll event is not kept");
+    clock = 200;
+    el.setContent(4000);
+    assert.equal(keeper.attempt(null), false, "held, and done");
+    assert.equal(el.scrollTop, 800);
+    keeper.scrolled(null);
+    assert.deepEqual(kept.get("monsters"), { top: 800, left: 0, end: false, page: null });
+  });
+
+  test("the viewer taking the scroller ends the wait, and a list that fills in later never pulls them back", () => {
+    const kept = new Map<string, PanelScroll>([["monsters", { top: 800, left: 0, end: false, page: null }]]);
+    const el = fakeScroller();
+    const keeper = new PanelScrollKeeper(kept, () => el, () => 0);
+    el.setContent(400);
+    keeper.show("monsters");
+    assert.equal(keeper.attempt(null), true);
+    keeper.takeOver();
+    el.scrollTop = 20;
+    keeper.scrolled(null);
+    el.setContent(4000);
+    assert.equal(keeper.attempt(null), false);
+    assert.equal(el.scrollTop, 20);
+    assert.equal(kept.get("monsters")?.top, 20, "the viewer's place is kept from then on");
+  });
+
+  test("the wait ends after RESTORE_WAIT_MS from the first drawn try, and a scroller not drawn yet waits without frames", () => {
+    const kept = new Map<string, PanelScroll>([["journal", { top: 800, left: 0, end: false, page: null }]]);
+    const el = fakeScroller();
+    let clock = 0;
+    const keeper = new PanelScrollKeeper(kept, () => el, () => clock);
+    el.drawn = false;
+    keeper.show("journal");
+    assert.equal(keeper.attempt(null), false, "no frames while it has no box");
+    assert.equal(keeper.waiting, true, "but still pending");
+    clock = 5000;
+    el.drawn = true;
+    el.setContent(500);
+    assert.equal(keeper.attempt(null), true, "the clock starts at the first drawn try");
+    clock = 5000 + RESTORE_WAIT_MS;
+    assert.equal(keeper.attempt(null), false);
+    assert.equal(keeper.waiting, false);
+  });
+});
+
+/*
+ * Random orders of what a panel's scroller meets: the panel shown and
+ * shown again, content growing and shrinking, frames, scroll events, the
+ * viewer taking over and the clock. What must always hold:
+ * - no scroll is kept while a restore is pending, so a clamped offset the
+ *   restore caused never replaces the place it is putting back,
+ * - after the viewer takes over, the keeper never sets the offset again
+ *   until a panel shows anew,
+ * - no restore is pending longer than RESTORE_WAIT_MS of drawn time,
+ * - a restore that ends with its content tall enough leaves the saved
+ *   offset in place.
+ */
+describe("the panel scroll keeper under random orders", () => {
+  test("its invariants hold after every step", () => {
+    let seed = 0x5c011;
+    const random = () => {
+      seed = (seed * 1103515245 + 12345) % 2 ** 31;
+      return seed / 2 ** 31;
+    };
+    const pick = <T>(list: readonly T[]): T => list[Math.floor(random() * list.length)]!;
+    for (let run = 0; run < 300; run++) {
+      const kept = new Map<string, PanelScroll>();
+      const el = fakeScroller(pick([150, 300, 600]));
+      let clock = 0;
+      const keeper = new PanelScrollKeeper(kept, () => el, () => clock);
+      let shown: string | null = null;
+      let tookOver = false;
+      let pendingSince: number | null = null;
+      const steps: string[] = [];
+      for (let step = 0; step < 60; step++) {
+        const kind = pick(["show", "content", "attempt", "attempt", "scroll", "viewer", "tick", "draw"] as const);
+        const before: { top: number; saved: PanelScroll | undefined } = { top: el.scrollTop, saved: shown === null ? undefined : kept.get(shown) };
+        let setByKeeper = false;
+        if (kind === "show") {
+          const id = pick(["log", "monsters", "journal"]);
+          if (id !== shown) {
+            tookOver = false;
+            pendingSince = null;
+          }
+          shown = id;
+          keeper.show(id);
+          el.top = 0;
+          // The hook always tries right after a panel shows, in the same layout effect.
+          const top = el.scrollTop;
+          keeper.attempt(null);
+          setByKeeper = el.scrollTop !== top;
+          if (keeper.waiting && el.getClientRects().length > 0) pendingSince ??= clock;
+          steps.push(`show ${id}`);
+        } else if (kind === "content") {
+          el.setContent(pick([0, 200, 900, 3000]));
+          steps.push(`content ${el.content}`);
+        } else if (kind === "attempt") {
+          const top = el.scrollTop;
+          keeper.attempt(null);
+          setByKeeper = el.scrollTop !== top;
+          if (keeper.waiting && el.getClientRects().length > 0) pendingSince ??= clock;
+          steps.push("attempt");
+        } else if (kind === "scroll") {
+          const waiting = keeper.waiting;
+          const saved: PanelScroll | undefined = shown === null ? undefined : kept.get(shown);
+          el.scrollTop = Math.floor(random() * 3000);
+          keeper.scrolled(null);
+          if (waiting) assert.equal(shown === null ? undefined : kept.get(shown), saved, `a scroll was kept while pending: ${steps.join(", ")}`);
+          steps.push("scroll");
+        } else if (kind === "viewer") {
+          keeper.takeOver();
+          tookOver = true;
+          steps.push("viewer");
+        } else if (kind === "tick") {
+          clock += pick([16, 200, 600]);
+          steps.push("tick");
+        } else {
+          el.drawn = !el.drawn;
+          steps.push(`drawn ${el.drawn}`);
+        }
+        const at = steps.join(", ");
+        if (tookOver) assert.ok(!setByKeeper, `the keeper moved the scroller after the viewer took it: ${at}`);
+        if (!keeper.waiting) pendingSince = null;
+        if (pendingSince !== null) assert.ok(clock - pendingSince <= RESTORE_WAIT_MS + 600, `pending too long: ${at}`);
+        if (kind === "attempt" && !keeper.waiting && before.saved && !before.saved.end && el.scrollHeight - el.clientHeight >= before.saved.top - 1 && setByKeeper)
+          assert.equal(el.scrollTop, before.saved.top, `held, but not at the saved place: ${at}`);
+      }
+    }
   });
 });
