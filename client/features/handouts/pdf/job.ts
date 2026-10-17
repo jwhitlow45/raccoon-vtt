@@ -250,6 +250,8 @@ export function jobActive(job: PdfJob | null): boolean {
 export function jobHolds(job: PdfJob | null): boolean {
   if (!job) return false;
   const k = job.phase.k;
+  // A recovery with no pages to remove or keep, only a page that may be there, offers just Done, so it holds nothing.
+  if (job.phase.k === "recovery") return job.phase.ledger.ids.length > 0;
   return k !== "saved" && k !== "cancelled" && k !== "recovered" && k !== "refused";
 }
 

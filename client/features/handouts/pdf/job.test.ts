@@ -13,6 +13,7 @@ import {
   checkRange,
   isPdfFile,
   jobActive,
+  jobHolds,
   jobPageIds,
   pagesToDo,
   pdfPickRefusal,
@@ -547,6 +548,65 @@ describe("pausing and stopping (docs/design-v1-pdf-handouts.md 4.1.6)", () => {
     assert.equal(w.uploads.at(-1)!.page, 1, "on from page 1");
   });
 
+  test("Try again then Cancel while the last draw settles: the Cancel stands, with no new run and no create", async () => {
+    const w = world({ pages: 3, autoUpload: false, holdDraw: [2] });
+    await w.open();
+    w.runner.upload();
+    await settle();
+    w.uploads[0]!.reject(new ApiError(0, "x", "network", null));
+    await settle();
+    void w.runner.tryAgain();
+    await settle();
+    assert.equal(w.phase().k, "preparing", "the press claims the job at once");
+    await w.runner.cancel();
+    assert.equal(w.phase().k, "cancelled");
+    w.releaseDraw(2);
+    await settle();
+    assert.equal(w.phase().k, "cancelled", "no run restarts after it");
+    assert.equal(w.uploads.length, 1);
+    assert.equal(w.sent.length, 0, "no create");
+    assert.equal(w.opened.length, 1, "no fresh reader");
+  });
+
+  test("Try again pressed twice while the last draw settles is one press: one run, one create", async () => {
+    const w = world({ pages: 2, holdDraw: [2] });
+    const upload = w.deps.upload;
+    let calls = 0;
+    w.deps.upload = (blob, options) => (++calls === 1 ? Promise.reject(new ApiError(0, "x", "network", null)) : upload(blob, options));
+    await w.open();
+    w.runner.upload();
+    await settle();
+    assert.equal(w.phase().k, "paused");
+    void w.runner.tryAgain();
+    void w.runner.tryAgain();
+    void w.runner.leaveOut();
+    await settle();
+    for (let i = 0; i < 4; i++) {
+      w.releaseDraw(2);
+      await settle();
+    }
+    assert.equal(w.sent.filter((x) => x.op.t === "handoutDoc.create").length, 1);
+    assert.equal(w.mostDrawing(), 1);
+    assert.deepEqual(w.job().leftOut, [], "the later presses did nothing");
+  });
+
+  test("a last run that never settles is let go with its reader after the wait, and Try again goes on in a fresh one", async () => {
+    const w = world({ pages: 3, autoUpload: false, holdDraw: [2] });
+    w.deps.quietMs = 30;
+    await w.open();
+    w.runner.upload();
+    await settle();
+    w.uploads[0]!.reject(new ApiError(0, "x", "network", null));
+    await settle();
+    const resumed = w.runner.tryAgain();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await settle();
+    assert.deepEqual(w.destroyed, [1], "the stuck reader is ended");
+    assert.equal(w.opened.length, 2, "a fresh one opens");
+    assert.equal(w.uploads.at(-1)!.page, 1, "on from page 1");
+    void resumed;
+  });
+
   test("Leave this page out after a failed draw also waits for the reader to be free", async () => {
     const w = world({ pages: 3, failDraw: [2] });
     await w.throughUpload();
@@ -839,6 +899,45 @@ describe("Cancel upload (docs/design-v1-pdf-handouts.md 4.1.6)", () => {
     assert.deepEqual(w.ledger(), { docId: "doc-1", title: "Strange letter", ids: [], uncertain: w.job().uncertain });
     await w.runner.end();
     assert.equal(w.ledger(), null, "Done: the DM has read it");
+  });
+
+  test("a page that never answered, then the page left before Done: the next visit names it once, and a new PDF opens", async () => {
+    const w = world({ pages: 2, autoUpload: false });
+    w.holdSleeps();
+    await w.open();
+    w.runner.upload();
+    await settle();
+    w.uploads[0]!.resolve({});
+    await settle();
+    w.uploads[1]!.options.onSending?.(true);
+    const cancelling = w.runner.cancel();
+    await settle();
+    w.sleeps[0]!.resolve();
+    await cancelling;
+    assert.deepEqual(w.ledger()?.ids, [], "only the uncertain page is left");
+    // The page goes before Done: the runner ends with the room, and the ledger stays.
+    w.runner.dispose();
+    w.store.setState({ job: null });
+    const ledger = w.ledger()!;
+    assert.ok(ledger.uncertain);
+
+    // The next visit: the room offers it, with only Done, and it holds nothing.
+    const back = new JobRunner(w.deps, w.store);
+    assert.equal(recoveryOf(ledger, {}), "offer");
+    back.recover(ledger);
+    assert.equal(jobHolds(w.job()), false, "nothing to remove or keep, so nothing to wait on");
+    assert.equal(pdfPickRefusal({ size: 1_000 }, w.job()), null);
+    // A new PDF opens, and the old line goes.
+    await new JobRunner(w.deps, w.store).start(new Blob(["%PDF-"]), "Second.pdf");
+    assert.equal(w.phase().k, "range");
+    assert.equal(w.ledger(), null);
+
+    // Done on such a recovery clears it too.
+    writeLedger(w.storage, ledgerKey(ROOM, ME), ledger);
+    const again = new JobRunner(w.deps, w.store);
+    again.recover(ledger);
+    await again.end();
+    assert.equal(w.ledger(), null, "read, so not offered again");
   });
 
   test("a waiting retry or a share pause stops at once", async () => {

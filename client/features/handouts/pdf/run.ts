@@ -32,7 +32,7 @@ import {
   type Stop,
 } from "./job.ts";
 import { clearLedger, ledgerKey, readLedger, recoveryOf, writeLedger, type Ledger, type LedgerStorage, type UncertainPage } from "./ledger.ts";
-import { DrawCancelled, ReaderRefusal, type PdfDocument } from "./reader.ts";
+import { DESTROY_GRACE_MS, DrawCancelled, ReaderRefusal, type PdfDocument } from "./reader.ts";
 import { pdfTitle, titleProblem } from "./title.ts";
 
 /**
@@ -99,7 +99,23 @@ export type JobDeps = {
   onVisibility(listener: () => void): () => void;
   sleep(ms: number, signal?: AbortSignal): Promise<void>;
   now(): number;
+  /** How long a resume waits for the last run to settle, QUIET_MS unless a test says. */
+  quietMs?: number;
 };
+
+/**
+ * How long Try again or Leave this page out waits for the last run's draw,
+ * encode or cache cleanup to settle. Past it that reader is ended instead,
+ * so a stuck worker never leaves the button doing nothing, and the run
+ * goes on in a fresh one.
+ */
+export const QUIET_MS = 15_000;
+
+/** True when `promise` settles within `ms`, false when the time runs out first. */
+function within(promise: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([promise.then(() => true, () => true), new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(false), ms)))]).finally(() => clearTimeout(timer));
+}
 
 /** The page uploading now, which Cancel waits on or aborts (4.1.6). */
 type Inflight = { page: number; width: number; height: number; thumb: string | null; sending: boolean; controller: AbortController; done: Promise<boolean> };
@@ -176,8 +192,9 @@ export class JobRunner implements JobControl {
   async start(file: Blob, fileName: string): Promise<void> {
     const left = readLedger(this.#deps.storage, this.#ledgerKey);
     const found = recoveryOf(left, this.#deps.room().savedDocs ?? undefined);
-    if (found === "saved") clearLedger(this.#deps.storage, this.#ledgerKey);
-    if (found === "offer" && left) return this.recover(left);
+    // A ledger that names only a page that may be there has nothing to remove or keep, so it never holds the slot: the new upload goes ahead and replaces it.
+    if (found === "offer" && left && left.ids.length > 0) return this.recover(left);
+    if (found !== "none") clearLedger(this.#deps.storage, this.#ledgerKey);
     this.#file = file;
     this.#store.setState({
       job: {
@@ -271,22 +288,49 @@ export class JobRunner implements JobControl {
 
   // The pages.
 
-  /** A new run of the pages, once the one before has stopped. */
+  /** A new run of the pages, once the one before has stopped, whether it ended or threw. */
   #loop(): Promise<void> {
-    const before = this.#looping;
-    this.#looping = before.then(() => this.#pages());
-    return this.#looping;
+    const next = this.#looping.catch(() => undefined).then(() => this.#pages());
+    this.#looping = next;
+    return next;
   }
 
-  /** Stops a draw under way and waits until the loop has stopped, its draw and encode settled. */
+  /**
+   * Stops a draw under way and waits until the loop has stopped, its draw
+   * and encode settled, for at most QUIET_MS. A run still stuck then, in a
+   * worker that never answers, is let go with its reader, and the next run
+   * opens a fresh one.
+   */
   async #quiet(): Promise<void> {
     this.#doc?.cancelDraw();
-    await this.#looping;
+    if (await within(this.#looping, this.#deps.quietMs ?? QUIET_MS)) return;
+    this.#looping = Promise.resolve();
+    await this.#closeDoc();
+  }
+
+  /**
+   * Try again or Leave this page out while paused (4.1.6). The press claims
+   * the job at once, as preparing, so a second press finds nothing to do and
+   * Cancel works from there. The run it holds is the job's generation:
+   * Cancel, Done and the room going away move it on, and the resume starts
+   * its loop only if it is still the job's, on the same document, once the
+   * last run has settled.
+   */
+  async #resume(): Promise<void> {
+    const job = this.#job;
+    if (job.phase.k !== "paused") return;
+    const run = this.#run;
+    this.#set({ phase: { k: "preparing", waiting: false } });
+    await this.#quiet();
+    const now = this.#store.getState().job;
+    if (run !== this.#run || this.#disposed || this.#cancelling || now?.docId !== job.docId || now.phase.k !== "preparing") return;
+    return this.#loop();
   }
 
   async #pages(): Promise<void> {
-    // Cancel or Done came while the last loop was stopping.
-    if (this.#cancelling || this.#disposed || !this.#store.getState().job) return;
+    // Cancel or Done came while the last loop was stopping, or the job has ended: only a job about to upload goes on.
+    const phase = this.#store.getState().job?.phase.k;
+    if (this.#cancelling || this.#disposed || (phase !== "range" && phase !== "paused" && phase !== "preparing")) return;
     const run = ++this.#run;
     this.#lastShare = this.#deps.now();
     this.#waits = new AbortController();
@@ -326,7 +370,13 @@ export class JobRunner implements JobControl {
       }
       if (drawn.slow || ++this.#sinceCleanup >= CLEANUP_EVERY_PAGES) {
         this.#sinceCleanup = 0;
-        await this.#doc?.cleanup().catch(() => undefined);
+        // A worker that never finishes its cleanup is ended, and the pages go on in a fresh one.
+        const doc = this.#doc;
+        if (doc && !(await within(doc.cleanup(), DESTROY_GRACE_MS))) {
+          if (!live()) return;
+          if (!(await this.#reopen(run))) return;
+        }
+        if (!live()) return;
       }
       if (!(await this.#whenVisible(run))) return;
       pending = this.#uploadPage(run, page, drawn.encoded, drawn.thumb);
@@ -482,8 +532,7 @@ export class JobRunner implements JobControl {
     const job = this.#job;
     switch (job.phase.k) {
       case "paused":
-        await this.#quiet();
-        return this.#loop();
+        return this.#resume();
       case "saveFailed":
         if (!job.phase.gone) return this.#save();
         return this.#uploadMissing();
@@ -500,8 +549,7 @@ export class JobRunner implements JobControl {
     const job = this.#job;
     if (job.phase.k !== "paused") return;
     this.#set({ leftOut: [...job.leftOut, job.phase.page] });
-    await this.#quiet();
-    return this.#loop();
+    return this.#resume();
   }
 
   /** Save, once the title is fixed (4.1.5). */
@@ -753,7 +801,9 @@ export class JobRunner implements JobControl {
     const job = this.#store.getState().job;
     if (!job) return;
     const failed = (job.phase.k === "cancelled" || job.phase.k === "recovered") && job.phase.failed;
-    if (!failed && job.phase.k !== "recovery" && job.pages.every((p) => !p.created || job.phase.k === "saved")) clearLedger(this.#deps.storage, this.#ledgerKey);
+    // A recovery with pages to remove waits for Remove them or Keep them. One that only named a page that may be there is read once Done is pressed.
+    const holds = job.phase.k === "recovery" && job.phase.ledger.ids.length > 0;
+    if (!failed && !holds && job.pages.every((p) => !p.created || job.phase.k === "saved")) clearLedger(this.#deps.storage, this.#ledgerKey);
     this.#run++;
     this.#waits.abort();
     this.#opening?.abort();
