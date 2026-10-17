@@ -30,6 +30,7 @@ import { presetFor } from "../dice/presets.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "../dice/send.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useOpenPcStats } from "../pcstats/open.ts";
+import { editsPcStats } from "../tokens/access.ts";
 import { announceTurn } from "../encounter/alerts.ts";
 import { chromeZoom, screenHeight, smallUi, useLayoutSize } from "../device/layout.ts";
 import { uiScale, useUiScale } from "../device/settings.ts";
@@ -380,9 +381,11 @@ function useCreature(target: RollTarget): { name: string; effects: readonly Effe
   const token = useRoomView((s) => (target.tokenId !== undefined ? s.view?.tokens[target.tokenId] : undefined));
   const characterId = target.characterId ?? (token && "ref" in token.actor ? token.actor.ref : undefined);
   const character = useRoomView((s) => (characterId !== undefined ? s.view?.characters[characterId] : undefined));
+  const you = useRoomView((s) => s.you);
   const name = token ? displayName(token) : (character?.name ?? "Your creature");
   const effects = token && "inline" in token.actor ? token.actor.inline.effects : (character?.actor.effects ?? []);
-  return { name, effects, noBlock: character && character.stats === undefined ? character.id : null };
+  // Only a character the player owns offers its editor: a lent NPC's token is theirs to roll for, not to change.
+  return { name, effects, noBlock: character && character.stats === undefined && editsPcStats(you, character) ? character.id : null };
 }
 
 function RollCard(props: {

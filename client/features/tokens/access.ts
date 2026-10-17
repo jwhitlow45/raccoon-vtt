@@ -73,6 +73,17 @@ export function ownsCharacter(memberId: MemberId | null | undefined, character: 
   return listed(character.ownerIds, memberId);
 }
 
+/**
+ * Whether the viewer may add, edit or shape a character's stat block: the
+ * DM, or a player who owns the character, as the server's character.update
+ * allows. A player who owns only a token of it, such as the DM's NPC lent to
+ * them, may roll for it but not change it, so every entry point to the
+ * editor and to a shape asks this one question (ASTRA-18).
+ */
+export function editsPcStats(you: { memberId: MemberId; role: Role } | null | undefined, character: Pick<Character, "ownerIds">): boolean {
+  return you?.role === "dm" || ownsCharacter(you?.memberId, character);
+}
+
 export type Role = "dm" | "player";
 
 export type TokenAccess = {

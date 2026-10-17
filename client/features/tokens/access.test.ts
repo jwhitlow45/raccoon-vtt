@@ -5,7 +5,7 @@ import { projectState } from "#shared/project.ts";
 import type { ActorPatch, TokenPatch } from "#shared/protocol.ts";
 import type { RoomState } from "#shared/model.ts";
 import { DM, P1, P2, character, companionBlock, room, token } from "#shared/testutil.ts";
-import { characterAccess, ownsToken, tokenAccess } from "./access.ts";
+import { characterAccess, editsPcStats, ownsToken, tokenAccess } from "./access.ts";
 import { resizePatch } from "./resize.ts";
 
 const deps = { canUseAsset: () => true };
@@ -195,5 +195,21 @@ describe("character access", () => {
         assert.equal(access.canEditActor(field), allowed, `${viewer.memberId} actor.${field}`);
       }
     }
+  });
+});
+
+describe("who may add, edit or shape a character's stat block", () => {
+  test("the DM and the character's own players, never a player who owns only a token of it, such as a lent NPC, whom the editor and the server would refuse (ASTRA-18)", () => {
+    const sage = character("sage", { ownerIds: [] });
+    const bree = character("bree", { ownerIds: [P1.memberId] });
+    const state: RoomState = room({ characters: { sage, bree }, tokens: { sageTok: token("sageTok", { kind: "npc", ownerIds: [P1.memberId], actor: { ref: "sage" } }) } });
+    assert.equal(editsPcStats(DM, sage), true);
+    assert.equal(editsPcStats(P1, bree), true);
+    assert.equal(editsPcStats(P1, sage), false, "P1 rolls for Sage's token, but may not change Sage");
+    assert.equal(ownsToken(state, P1.memberId, state.tokens.sageTok!), true, "the token stays theirs to roll for");
+    assert.equal(editsPcStats(P2, bree), false);
+    assert.equal(editsPcStats(null, bree), false);
+    // The server agrees: a character.update from the lent token's owner is refused.
+    assert.equal(canApply({ t: "character.update", characterId: "sage", patch: { notes: "x" } } as never, P1, state, deps).ok, false);
   });
 });

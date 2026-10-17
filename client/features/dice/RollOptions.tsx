@@ -15,6 +15,7 @@ import { useRoomView } from "../../state/view.ts";
 import type { PanelProps } from "../panels.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { useOpenPcStats } from "../pcstats/open.ts";
+import { editsPcStats } from "../tokens/access.ts";
 import { Note, Section, SmallButton, Stepper } from "../tokens/ui.tsx";
 import { creatureRolls, type CreatureRolls, type DiceView } from "./creature.ts";
 import {
@@ -205,7 +206,7 @@ function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creature: Ac
       {!numbers ? (
         <>
           <Note>No stat block. Roll from the field above.</Note>
-          {character && actor?.srdId === undefined ? (
+          {character && actor?.srdId === undefined && editsPcStats(dice.you, character) ? (
             <div>
               <SmallButton onClick={() => openPcStats(character.id)}>Add a stat block</SmallButton>
             </div>

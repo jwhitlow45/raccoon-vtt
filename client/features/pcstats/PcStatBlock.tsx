@@ -5,7 +5,8 @@ import { pcShape } from "#shared/rules/pcStats.ts";
 import { signed } from "#shared/statBlock.ts";
 import { Loading } from "../../components/Loading.tsx";
 import { theme } from "../../lib/theme.ts";
-import { useRoomActions } from "../../state/view.ts";
+import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { editsPcStats } from "../tokens/access.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { StatBlockView } from "../monsters/StatBlockView.tsx";
 import { useSrdList } from "../tokens/StatSummary.tsx";
@@ -36,18 +37,22 @@ export function PcStatBlock(props: {
 }) {
   const { character, fold } = props;
   const openStats = useOpenPcStats();
+  const you = useRoomView((s) => s.you);
+  // A token's owner who does not own its character sees the block, never the buttons that change it.
+  const edits = editsPcStats(you, character);
   const [picking, setPicking] = useState(false);
   const shaped = pcShape(character) !== "none";
-  const take = shaped ? null : (
+  const take = shaped || !edits ? null : (
     <SmallButton wrap onClick={() => setPicking(true)}>
       Take a shape
     </SmallButton>
   );
-  const add = (ref?: Ref<HTMLButtonElement>) => (
-    <SmallButton ref={ref} wrap onClick={() => openStats(character.id)}>
-      Add a stat block
-    </SmallButton>
-  );
+  const add = (ref?: Ref<HTMLButtonElement>) =>
+    edits ? (
+      <SmallButton ref={ref} wrap onClick={() => openStats(character.id)}>
+        Add a stat block
+      </SmallButton>
+    ) : null;
   const picker = picking ? <ShapePicker character={character} onClose={() => setPicking(false)} /> : null;
   if (!character.stats && !shaped) {
     return (
@@ -77,10 +82,12 @@ export function PcStatBlock(props: {
   return (
     <>
       <Section title="Stat block" fold={{ ...fold, summary }}>
-        {shaped ? <ShapeBody character={character} /> : <PcStatsView character={character} />}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-          {character.stats ? <SmallButton onClick={() => openStats(character.id)}>Edit</SmallButton> : add()}
-        </div>
+        {shaped ? <ShapeBody character={character} edits={edits} /> : <PcStatsView character={character} />}
+        {edits ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+            {character.stats ? <SmallButton onClick={() => openStats(character.id)}>Edit</SmallButton> : add()}
+          </div>
+        ) : null}
       </Section>
       {picker}
     </>
@@ -88,7 +95,7 @@ export function PcStatBlock(props: {
 }
 
 /** A shape's part of the section: what it does, the numbers rolled with, the creature's block and "End the shape". */
-function ShapeBody(props: { character: Character }) {
+function ShapeBody(props: { character: Character; edits: boolean }) {
   const { character } = props;
   const actions = useRoomActions();
   const srdId = character.actor.srdId!;
@@ -96,11 +103,11 @@ function ShapeBody(props: { character: Character }) {
   const monster = list?.find((m) => m.srdId === srdId);
   // The numbers its rolls get, read from the SRD table as the server reads them.
   const { numbers } = useCharacterRollNumbers(character.id);
-  const end = (
+  const end = props.edits ? (
     <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
       <SmallButton onClick={() => actions.dispatch({ t: "character.update", characterId: character.id, patch: { actor: END_SHAPE } })}>End the shape</SmallButton>
     </div>
-  );
+  ) : null;
   if (failed) {
     return (
       <>

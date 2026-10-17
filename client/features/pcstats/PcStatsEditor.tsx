@@ -18,7 +18,7 @@ import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
-import { ownsCharacter } from "../tokens/access.ts";
+import { editsPcStats } from "../tokens/access.ts";
 import { whose } from "../tokens/companionBlocks.ts";
 import {
   draftDirty,
@@ -87,7 +87,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
   const draft = flow.draft;
   const name = useRef(character?.name ?? "This character");
   if (character) name.current = character.name;
-  const yours = character !== undefined && (you?.role === "dm" || ownsCharacter(you?.memberId, character));
+  const yours = character !== undefined && editsPcStats(you, character);
   const gone = !yours;
   const [refusal, setRefusal] = useState<string | null>(null);
   const [retryAt, setRetryAt] = useState<number | null>(null);
