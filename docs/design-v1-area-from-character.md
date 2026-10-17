@@ -116,6 +116,8 @@ For a player, **while the area's caster is one of your creatures** (placing), or
 | Sphere, cylinder | Goes on the token, as today (`:199-203`) |
 | Emanation around the caster | Stays around the caster |
 | Emanation around a target | Picks the target, as today |
+| Emanation cast by your creature but standing free (a copy of one that stayed put, `fromId` unset) | Goes on the token, as a sphere does |
+| Cone or line cast by your creature with no `fromId` (a copy whose caster moved off its edge, so it stands free) | Aims from its free origin toward the token's center, as the edge row does from the caster |
 
 A tap on the caster itself grabs the aim, as today (`:216-217`), except for a cube placed at a point (its row). To cast from someone else, Set caster in More area options picks any token, yours included. A chip pick picks among yours.
 
@@ -136,7 +138,7 @@ The control follows the taps by the table in 3.3. A press on the map moves nothi
 - **No glyph-and-words form.** The slot carries no `glyph` flag (tool options 6.2): words, or the square alone where the fit needs the room.
 - **Why first.** It says whose area this is before what shape it takes, and it stands in the same place in both states.
 - **Why not when picked.** That row edits a placed area, whose caster this control does not change, and its line already says "cast by Thorn". The control comes back with Done or a tap away.
-- **The fit**, from the real `fitRow` and measured widths (Appendix A). Area's priority-1 set while placing becomes From, Shape and Place: in compact forms with ⋯ it is 223 px (44 + 60 + 63, two gaps, ⋯), under `MERGE_MIN` (256, tool options 4.1) and the narrowest stacked room (230, at 320 x 568 at 130%). So From, Shape and Place are inline at every size in tool options 4.3 and 13.1, for any name length and either form. The costs, accepted (decided, 9.3): Cancel (priority 2), inline today from 304 px, waits behind ⋯ below 422 px with a short name (Appendix A gives the other forms). Shared (priority 4), inline today from 387 px, waits behind ⋯ below 538 px and from 591 to 622 (a computer's floating row, the DM's pair at 932 x 430, an upright tablet at 130%), and is inline from 715.
+- **The fit**, from the real `fitRow` and measured widths (Appendix A). Area's priority-1 set while placing becomes From, Shape and Place: in compact forms with ⋯ it is 223 px (44 + 60 + 63, two gaps, ⋯), under `MERGE_MIN` (268, tool options 4.1) and the narrowest stacked room (230, at 320 x 568 at 130%). So From, Shape and Place are inline at every size in tool options 4.3 and 13.1, for any name length and either form. The costs, accepted (decided, 9.3): Cancel (priority 2), inline today from 304 px, waits behind ⋯ below 422 px with a short name (Appendix A gives the other forms). Shared (priority 4), inline today from 387 px, waits behind ⋯ below 538 px and from 591 to 622 (a computer's floating row, the DM's pair at 932 x 430, an upright tablet at 130%), and is inline from 715.
 - Tuck, the holds, the pins and focus follow the strip's rules unchanged.
 
 ### 3.7 The DM
@@ -313,7 +315,7 @@ The project owner answered on 2026-10-17:
 
 ## Appendix A. Worked rows
 
-**Widths.** The shared controls' were read from the dev room's measuring layer (`[data-measure]`, `/dev/room` at 1280 x 800): Shape 111 (135 with its glyph, 167 hosting Size, 191 hosting with its glyph, 60 compact), Size 152, Place 63, Shared 74, Cancel 72, Spell 96 at least and 170 at most. The From control's were measured from its looks in Chrome, with the same mock giving Place, Cancel and Shared to the pixel: the toggle "From Thorn" 104 and at the name cap 133, the chip "From Thorn" 118 and at the cap 147, the compact square 44. ⋯ is 44 and its gap 4, slots 4 apart.
+**Widths.** The shared controls' were read from the dev room's measuring layer (`[data-measure]`, `/dev/room` at 1280 x 800): Shape 111 (135 with its glyph, 167 hosting Size, 191 hosting with its glyph, 60 compact), Size 152, Place 63, Shared 74, Cancel 72, Spell 96 at least and 170 at most. The From control's were measured from its looks in Chrome, with the same mock giving Place, Cancel and Shared to the pixel: the toggle "From Thorn" 104 and at the name cap 133, the chip "From Thorn" 118 and at the cap 147, the compact square 44. As built, with a 68 px name cap (`theme.layout.options.name`), the capped toggle measures 132.2 and the capped chip 146.2, which leave every row below as it is (`optionsLayout.test.ts`). ⋯ is 44 and its gap 4, slots 4 apart.
 
 **Method.** Each row below is the output of `fitRow` (`client/pages/optionsLayout.ts:282`) for that room, with no pins. The build's `optionsLayout.test.ts` cases are these rows. "Square" is From's compact form, "shape glyph" the shape chip's glyph alone, "glyph and Sphere" its glyph beside its words, "Sphere 20 ft" its words hosting Size.
 
@@ -334,9 +336,9 @@ The project owner answered on 2026-10-17:
 
 **Other forms**, where they differ from the rows above:
 
-- **A capped name** (toggle 133): the square from 230 to 304, with Cancel inline at 301 and 304. From 343 to 358: From, shape glyph, Place. 366 to 374: From, Sphere, Place. 387: glyph and Sphere. 422: Sphere 20 ft, Place. Cancel from 455, Shared from 538, Size from 602, Shared waiting at 602 to 622.
+- **A capped name** (toggle 132.2): the square from 230 to 304, with Cancel inline at 301 and 304. From 343 to 358: From, shape glyph, Place. 366 to 374: From, Sphere, Place. 387: glyph and Sphere. 422: Sphere 20 ft, Place. Cancel from 455, Shared from 538, Size from 602, Shared waiting at 602 to 622.
 - **The chip, short name** (118): the square from 230 to 284. 301 to 343: From, shape glyph, Place. 356 to 370: From, Sphere, Place. 374 and 387: glyph and Sphere. 422: Sphere 20 ft, Place, with Cancel behind ⋯. Cancel from 455, Shared from 538, Size from 591, Shared waiting at 591 to 622.
-- **The chip, capped name** (147): the square from 230 to 304, with Cancel inline at 301 and 304. 343 to 374: From, shape glyph, Place. 387: From, Sphere, Place. 422: glyph and Sphere. Cancel from 455, Shared from 538, Size from 615, Shared waiting at 615 and 622.
+- **The chip, capped name** (146.2): the square from 230 to 304, with Cancel inline at 301 and 304. 343 to 374: From, shape glyph, Place. 387: From, Sphere, Place. 422: glyph and Sphere. Cancel from 455, Shared from 538, Size from 615, Shared waiting at 615 and 622.
 - **Disabled**: "From Thorn" (104) as the toggle. "From you" (89) keeps its words from 275 and gives the shape chip its wider forms a step sooner (glyph and Sphere from 343, Sphere 20 ft at 387, 455 and 538), with Cancel from 422 and Shared as the toggle has it.
 
 The fit is not monotonic between neighboring rooms (a capped name shows Cancel at 301 but not at 343, where From keeps its words and the shape compacts). That is `fitRow`'s rule, owned by the tool options design (6.3 steps 2 and 3), and every one of those rows keeps From, Shape and Place inline.
