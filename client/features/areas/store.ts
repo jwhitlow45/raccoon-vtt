@@ -195,10 +195,14 @@ export function deleteTemplate(env: AreaEnv, id: string): void {
   if (env.area.store.getState().selectedId === id) select(env.area, null);
 }
 
-/** Opens the Areas panel on the damage form for a placed area (DM only). */
-export function openDamage(a: AreaScope, ui: { openPanel(id: string): void }, templateId: string): void {
+/**
+ * Opens the Areas panel on the damage form for a placed area (DM only).
+ * `from` is the panel the press was in, the Areas panel's own list, so
+ * with two panels its page opens where the panel is (docs/design-v1-split-panel.md 5.1).
+ */
+export function openDamage(a: AreaScope, ui: { openPanel(id: string, how?: { from: string }): void }, templateId: string, from?: string | null): void {
   a.store.setState({ damageId: templateId });
-  ui.openPanel("areas");
+  ui.openPanel("areas", from ? { from } : undefined);
 }
 
 /** Ends everything the tool showed: the draft (and its shared frame) and the selection. */

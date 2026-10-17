@@ -810,7 +810,7 @@ function RoomPage() {
               grouped={role === "dm"}
               onPick={(id) => {
                 focusNext.current = { kind: "panel" };
-                ui.openPanel(id);
+                ui.openPanel(id, { pane: "top" });
               }}
             />
           </Sheet>
@@ -880,7 +880,7 @@ function RoomPage() {
           badges={badges}
           badgeLabels={badgeLabels}
           grouped={role === "dm"}
-          onTab={(id) => ui.openPanel(id)}
+          onTab={(id) => ui.openPanel(id, { pane: "top" })}
           onHide={hideSidePanel}
           subpage={subpage}
           tabRef={sideTabRef}

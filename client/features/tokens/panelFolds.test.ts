@@ -114,7 +114,7 @@ describe("the request's override", () => {
     const s = storage(JSON.stringify({ statBlock: false }));
     const folds = createPanelFolds(s);
     folds.get(WIDE);
-    openStatBlock(scope, ui, "g1", WIDE);
+    openStatBlock(scope, ui, "g1", { layout: WIDE });
     assert.deepEqual(scope.get(statBlockOpenedSlot).getState(), { tokenId: "g1" });
     assert.equal(folds.get(WIDE).statBlock, false);
     assert.equal(s.writes(), 0);
@@ -130,7 +130,7 @@ describe("the request's override", () => {
         const folds = createPanelFolds(s);
         // A device with nothing stored resolves the default where it first reads. Folded by storage, it stays folded at both.
         const resolved = folds.get(from);
-        openStatBlock(scope, ui, "g1", from);
+        openStatBlock(scope, ui, "g1", { layout: from });
         const override = scope.get(statBlockOpenedSlot).getState();
         assert.equal(statBlockOpen(folds.get(from), override, "g1"), true);
         // The panel remounts in the other tree and reads the same Room's folds and override.

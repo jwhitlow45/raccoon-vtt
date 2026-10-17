@@ -5,7 +5,8 @@ import { projectState } from "#shared/project.ts";
 import { shareState } from "../../state/share.ts";
 import type { RoomUi } from "../../state/store.ts";
 import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "../../state/selection.ts";
-import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetHidden, withSidePanelHidden, type RoomActions, type RoomView } from "../../state/types.ts";
+import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type RoomActions, type RoomView } from "../../state/types.ts";
+import { panelById } from "../panels.ts";
 
 /**
  * "View as a player" (features section 13): the DM sees exactly what one
@@ -99,7 +100,11 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
     setMultiSelect: (on) => store.setState({ local: setMultiSelect(store.getState().local, on) }),
     doneSelecting: () => store.setState({ local: doneSelecting(store.getState().local) }),
     showActions: (open) => store.setState({ local: showActions(store.getState().local, open) }),
-    openPanel: (id) => store.setState({ local: withPanel(store.getState().local, id) }),
+    openPanel: (id, how) => store.setState({ local: withPanel(store.getState().local, id, how, panelById(id)?.narrowOnly === true) }),
+    // The preview is a player's room, so its split starts on a player's panels and never meets the DM's (docs/design-v1-split-panel.md 8).
+    splitPanels: (on, pair) => store.setState({ local: on ? withSplit(store.getState().local, "player", pair) : withoutBelow(store.getState().local) }),
+    swapPanels: () => store.setState({ local: withSwap(store.getState().local) }),
+    fitSplit: (fits) => store.setState({ local: withSplitFits(store.getState().local, fits) }),
     closePanel: () => store.setState({ local: withoutPanel(store.getState().local) }),
     showPanelList: (open) => store.setState({ local: withPanelList(store.getState().local, open) }),
     closeSheets: () => store.setState({ local: withoutSheets(store.getState().local) }),

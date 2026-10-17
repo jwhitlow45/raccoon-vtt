@@ -22,7 +22,7 @@ describe("openStatBlock", () => {
   test("selects the token, asks for its block with focus, and opens the token panel", () => {
     const scope = new RoomScope();
     const { calls, ui } = recorder();
-    openStatBlock(scope, ui, "g1", { width: 1280, height: 800 });
+    openStatBlock(scope, ui, "g1", { layout: { width: 1280, height: 800 } });
     assert.deepEqual(calls, ["select g1", "openPanel token"]);
     const request = scope.get(statBlockRequest).getState();
     assert.equal(request.tokenId, "g1");
@@ -32,9 +32,9 @@ describe("openStatBlock", () => {
   test("each press is a new request, so a second press scrolls and focuses the block again", () => {
     const scope = new RoomScope();
     const { ui } = recorder();
-    openStatBlock(scope, ui, "g1", { width: 1280, height: 800 });
+    openStatBlock(scope, ui, "g1", { layout: { width: 1280, height: 800 } });
     const first = scope.get(statBlockRequest).getState().seq;
-    openStatBlock(scope, ui, "g1", { width: 1280, height: 800 });
+    openStatBlock(scope, ui, "g1", { layout: { width: 1280, height: 800 } });
     assert.ok(scope.get(statBlockRequest).getState().seq > first);
   });
 
@@ -44,7 +44,7 @@ describe("openStatBlock", () => {
       const dock = scope.get(barDockSlot);
       dock.setState({ chrome: { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: { top: 0, right: safeLeft, bottom: 0, left: safeLeft }, sheet: 0 } });
       const { calls, ui } = recorder();
-      openStatBlock(scope, ui, "g1", { width, height });
+      openStatBlock(scope, ui, "g1", { layout: { width, height } });
       return calls.includes("showActions false");
     };
     assert.equal(at(390, 844), true, "a phone held upright");
@@ -61,7 +61,7 @@ describe("openStatBlock", () => {
       scope.get(barDockSlot).setState({ chrome: { top: 100, bottom: 81, controls: 81, toolbar: 81, safe: { top: 0, right: 47, bottom: 21, left: 47 }, sheet: 0 } });
       scope.get(dockSlot).setState({ sheetFullMode });
       const { calls, ui } = recorder();
-      openStatBlock(scope, ui, "g1", { width: 649, height: 300 });
+      openStatBlock(scope, ui, "g1", { layout: { width: 649, height: 300 } });
       return calls.includes("showActions false");
     };
     assert.equal(at(true), true, "844 x 390 at 130% with the turn band: the very short mode");

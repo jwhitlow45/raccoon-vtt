@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { LoadBoundary, LoadFailureNotice, type FallbackProps } from "../components/LoadBoundary.tsx";
 import { Loading } from "../components/Loading.tsx";
-import { PanelHeaderHost, panelById, type PanelHeader } from "../features/panels.ts";
+import { PanelHeaderHost, PanelHere, panelById, type PanelHeader } from "../features/panels.ts";
 import { rememberReopen, type Reopen } from "../lib/reopen.ts";
 import { useRoomView } from "../state/view.ts";
 
@@ -23,7 +23,9 @@ export function PanelBody(props: { id: string; shown: boolean; selectedTokenId: 
     // Keyed by panel, so a panel that failed does not keep its notice when another one opens.
     <LoadBoundary key={props.id} fallback={(f) => <RoomLoadNotice {...f} subject="This panel" reopen={{ panel: props.id }} />}>
       <Suspense fallback={<Loading text="Loading…" />}>
-        <Component selectedTokenId={props.selectedTokenId} close={props.close} shown={props.shown} />
+        <PanelHere id={props.id}>
+          <Component selectedTokenId={props.selectedTokenId} close={props.close} shown={props.shown} />
+        </PanelHere>
       </Suspense>
     </LoadBoundary>
   );

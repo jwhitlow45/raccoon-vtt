@@ -6,7 +6,7 @@ import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
-import type { PanelProps } from "../panels.ts";
+import { usePanelHere, type PanelProps } from "../panels.ts";
 import { AreaDamage } from "./AreaDamage.tsx";
 import { pickTemplate } from "./AreaTool.tsx";
 import { caughtTokens, contextFrom, inAreaEntries, inAreaText } from "./coverage.ts";
@@ -34,6 +34,7 @@ export default function AreasPanel(props: PanelProps) {
   const ui = useRoomUi();
   const scope = useRoomScope();
   const area = useAreaScope();
+  const here = usePanelHere();
   // Kept live while tokens are dragged, here or on another device.
   const live = useLiveTokens();
   const damageId = useAreaTool((s) => s.damageId);
@@ -100,7 +101,7 @@ export default function AreasPanel(props: PanelProps) {
               </Button>
               {/* Every area's button is named Damage, so Back from the damage form finds this one by its area's id (features/panels.ts useSubpageFocus). */}
               {you.role === "dm" ? (
-                <Button size="sm" onClick={() => openDamage(area, ui, t.id)} data-opener={`area-${t.id}`}>
+                <Button size="sm" onClick={() => openDamage(area, ui, t.id, here)} data-opener={`area-${t.id}`}>
                   Damage
                 </Button>
               ) : null}

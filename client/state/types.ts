@@ -168,7 +168,32 @@ export type LocalUi = {
    * Only for this page, never stored.
    */
   sheetHidden: boolean;
+  /**
+   * The panel below `tab` in the side panel (docs/design-v1-split-panel.md),
+   * or null with one panel: the split. Kept on a phone and in a side panel
+   * too short for two, so the pair shows again once there is room, and
+   * never `tab` itself or a phone-only panel.
+   */
+  below: string | null;
+  /**
+   * Whether the side panel holds two panels (3.2), set by the Room page:
+   * false below 900 px, and null while unknown, as while the side panel is
+   * hidden, since a hidden box measures nothing. Only for this page.
+   */
+  splitFits: boolean | null;
+  /** A request to open a panel that waits for the room to be measured before it is placed (5.1, `withSplitFits`). */
+  pendingOpen: PendingOpen | null;
 };
+
+/**
+ * How a panel was asked for (docs/design-v1-split-panel.md 5.1): in a pane
+ * by name, the top by a tab, More or a phone's list and the bottom by the
+ * bar's name, or by a link inside a panel, `from` naming that panel. Left
+ * out for every path outside the panels.
+ */
+export type PanelHow = { pane: "top" | "below" } | { from: string };
+
+export type PendingOpen = { id: string; how?: PanelHow };
 
 export const DEFAULT_TOOL = "select";
 
@@ -183,6 +208,9 @@ export const INITIAL_LOCAL: LocalUi = Object.freeze({
   tab: "tracker",
   sidePanelHidden: false,
   sheetHidden: false,
+  below: null,
+  splitFits: null,
+  pendingOpen: null,
 });
 
 /**
@@ -218,10 +246,97 @@ export function panelView(local: Pick<LocalUi, "panel" | "panelList" | "tab" | "
  * hands back the same object when nothing changes, so nothing renders.
  */
 
-/** Opens a panel, as a sheet or as the side panel's tab. A hidden side panel or sheet never swallows a request to see a panel. */
-export function withPanel(local: LocalUi, id: string): LocalUi {
-  if (local.panel === id && local.tab === id && !local.panelList && !local.sidePanelHidden && !local.sheetHidden) return local;
-  return { ...local, panel: id, tab: id, panelList: false, sidePanelHidden: false, sheetHidden: false };
+/** The same object when every field of `patch` already holds, so nothing renders. */
+function patched(local: LocalUi, patch: Partial<LocalUi>): LocalUi {
+  return (Object.keys(patch) as (keyof LocalUi)[]).every((k) => local[k] === patch[k]) ? local : { ...local, ...patch };
+}
+
+/** Whether two panels show: a split is kept and the side panel holds both (3.2). */
+export function twoShow(local: Pick<LocalUi, "below" | "splitFits">): boolean {
+  return local.below !== null && local.splitFits === true;
+}
+
+/** Which panel goes on top and which below, by the rules of docs/design-v1-split-panel.md 5.1. Pure and total. */
+function placed(local: LocalUi, id: string, how: PanelHow | undefined): Pick<LocalUi, "tab" | "below"> {
+  const { tab, below } = local;
+  const same = { tab, below };
+  const swapped = { tab: below ?? tab, below: below === null ? null : tab };
+  // Rule 1: one shows. The panel goes on top, and a kept split never holds it twice.
+  if (!twoShow(local)) return id === below ? swapped : { tab: id, below };
+  // Rule 2: a pane named. The panel goes there, taken from the other one by a swap.
+  if (how && "pane" in how) {
+    if (how.pane === "top") return id === tab ? same : id === below ? swapped : { tab: id, below };
+    return id === below ? same : id === tab ? swapped : { tab, below: id };
+  }
+  // Rule 3: a link to a panel already open leaves it where it is.
+  if (id === tab || id === below) return same;
+  // Rule 4: a link opens in the pane it was not pressed in, so it never covers the panel it sits in.
+  return how && how.from === below ? { tab: id, below } : { tab, below: id };
+}
+
+/**
+ * Opens a panel (docs/design-v1-split-panel.md 5.1): as a sheet below
+ * 900 px, and from there up on top or below by how it was asked. A hidden
+ * side panel or sheet never swallows a request to see a panel. `panel`,
+ * the phone's sheet, becomes it, so a rotation shows the panel opened last.
+ *
+ * A phone-only panel (rule 0) becomes the sheet alone and leaves the pair
+ * as it was, so the side panel never meets it. With a split kept and the
+ * room unknown, the request waits in `pendingOpen` until the Room page
+ * measures it (withSplitFits), since which pane it lands in depends on
+ * whether two show. A later request replaces a waiting one.
+ */
+export function withPanel(local: LocalUi, id: string, how?: PanelHow, phoneOnly = false): LocalUi {
+  const shown = { panelList: false, sidePanelHidden: false, sheetHidden: false } as const;
+  if (phoneOnly) return patched(local, { ...shown, panel: id, pendingOpen: null });
+  if (local.below !== null && local.splitFits === null) return patched(local, { ...shown, pendingOpen: how ? { id, how } : { id } });
+  return patched(local, { ...shown, ...placed(local, id, how), panel: id, pendingOpen: null });
+}
+
+/** The panel the bottom pane starts on (4.2): the role's stats, the DM's Token or a player's Characters, or Initiative when the stats are on top. */
+export function startBelow(top: string, role: "dm" | "player"): string {
+  const stats = role === "dm" ? "token" : "characters";
+  return top === stats ? "tracker" : stats;
+}
+
+/**
+ * Opens the split ("Two panels", 4.1): the open panel stays on top and the
+ * role's start panel goes below. `pair`, a split this device stored (8),
+ * sets both instead. An open split, or a pair that names one panel twice,
+ * changes nothing.
+ */
+export function withSplit(local: LocalUi, role: "dm" | "player", pair?: { top: string; below: string }): LocalUi {
+  if (pair) return pair.top === pair.below ? local : patched(local, { tab: pair.top, below: pair.below });
+  return local.below !== null ? local : { ...local, below: startBelow(local.tab, role) };
+}
+
+/**
+ * Closes the bottom panel. The phone's sheet, which named it, names the
+ * top one instead. A request that waited on the room's measure no longer
+ * depends on it, so it is placed at once.
+ */
+export function withoutBelow(local: LocalUi): LocalUi {
+  if (local.below === null) return local;
+  const closed = { ...local, below: null, panel: local.panel === local.below ? local.tab : local.panel, pendingOpen: null };
+  return local.pendingOpen ? withPanel(closed, local.pendingOpen.id, local.pendingOpen.how) : closed;
+}
+
+/** The two panels change places. */
+export function withSwap(local: LocalUi): LocalUi {
+  return local.below === null ? local : { ...local, tab: local.below, below: local.tab };
+}
+
+/**
+ * The Room page's measure of the side panel (3.2): whether it holds two,
+ * false below 900 px, null while unknown. A request that waited for it
+ * (`pendingOpen`) is placed in the same change, so it never paints a frame
+ * in the wrong pane.
+ */
+export function withSplitFits(local: LocalUi, fits: boolean | null): LocalUi {
+  const next = local.splitFits === fits ? local : { ...local, splitFits: fits };
+  const waiting = next.pendingOpen;
+  if (waiting === null || fits === null) return next;
+  return withPanel({ ...next, pendingOpen: null }, waiting.id, waiting.how);
 }
 
 /**

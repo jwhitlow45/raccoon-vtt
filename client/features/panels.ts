@@ -178,6 +178,25 @@ export type PanelHeader = {
 
 const PanelHeaderContext = createContext<((header: PanelHeader | null) => void) | null>(null);
 
+const PanelHereContext = createContext<string | null>(null);
+
+/**
+ * The id of the panel the calling code is drawn in, or null outside the
+ * panels, such as on the map or in the token window. A link inside a
+ * panel passes it as `from` when it opens another panel (state/types.ts
+ * PanelHow), so with two panels it opens in the other pane and never
+ * covers the one it was pressed in (docs/design-v1-split-panel.md 5.1). A
+ * panel never names itself, since the same code may draw in either pane.
+ */
+export function usePanelHere(): string | null {
+  return useContext(PanelHereContext);
+}
+
+/** Names the panel inside it for usePanelHere. PanelBody wraps each panel in one. */
+export function PanelHere(props: { id: string; children?: ReactNode }): ReactElement {
+  return createElement(PanelHereContext.Provider, { value: props.id }, props.children);
+}
+
 /**
  * Names the subpage a panel shows, or null while it shows its own first
  * page. The host around the panel (PanelHeaderHost) then titles its header

@@ -17,6 +17,7 @@ import { ownsToken } from "../tokens/access.ts";
 import { opensStatBlock, statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
 import { displayName } from "../../lib/scene.ts";
 import { openStatBlock } from "../tokens/statBlockOpen.ts";
+import { usePanelHere } from "../panels.ts";
 import { RowRollTools } from "./AutoInitiative.tsx";
 import { useSend } from "./hooks.ts";
 import { entryActor, entryName, hpView, nestedCompanions, parseInitiative, rollReminder, rowAc, valueText, type HpView } from "./logic.ts";
@@ -401,6 +402,7 @@ function CompanionMenu(props: { token: Token; entryId: string; dm: boolean; read
   const actions = useRoomActions();
   const ui = useRoomUi();
   const scope = useRoomScope();
+  const here = usePanelHere();
   const reviveNoteId = useId();
   const target = { tokenId: token.id };
   return (
@@ -423,7 +425,7 @@ function CompanionMenu(props: { token: Token; entryId: string; dm: boolean; read
       <ReadyControls answer={{ kind: "companion", tokenId: token.id, entryId: props.entryId }} target={target} readied={props.readied} dm={dm} playerOwned={props.playerOwned} />
       {props.statBlock ? (
         <div style={{ display: "flex" }}>
-          <Button size="sm" onClick={() => openStatBlock(scope, ui, token.id)}>
+          <Button size="sm" onClick={() => openStatBlock(scope, ui, token.id, { from: here })}>
             Stat block
           </Button>
         </div>
@@ -616,6 +618,7 @@ function RowMenu(props: {
   const actions = useRoomActions();
   const ui = useRoomUi();
   const scope = useRoomScope();
+  const here = usePanelHere();
   const remove = useSend();
   const reaction = useSend();
   const dm = role === "dm";
@@ -672,7 +675,7 @@ function RowMenu(props: {
             <div style={{ display: "flex" }}>
               <Button
                 size="sm"
-                onClick={() => openStatBlock(scope, ui, props.statBlockTokenId!)}
+                onClick={() => openStatBlock(scope, ui, props.statBlockTokenId!, { from: here })}
               >
                 Stat block
               </Button>
@@ -718,7 +721,7 @@ function RowMenu(props: {
           {props.target ? <ReadyControls answer={rowAnswer(entry)} target={props.target} readied={props.readied} dm={false} playerOwned={props.playerOwned} /> : null}
           {props.statBlockTokenId !== null ? (
             <div style={{ display: "flex" }}>
-              <Button size="sm" onClick={() => openStatBlock(scope, ui, props.statBlockTokenId!)}>
+              <Button size="sm" onClick={() => openStatBlock(scope, ui, props.statBlockTokenId!, { from: here })}>
                 Stat block
               </Button>
             </div>

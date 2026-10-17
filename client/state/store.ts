@@ -19,7 +19,8 @@ import { SCENE_LOAD_IDLE, sceneLoadFailureText, stepSceneLoad, type SceneLoad, t
 import { shareRecord, shareState } from "./share.ts";
 import { backoffDelay, realClock, Timer, type Clock } from "./timing.ts";
 import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
-import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetHidden, withSidePanelHidden, type Ended, type LocalUi, type OnAnswer, type OpAnswer, type OpRefusal, type PendingOp, type RoomView, type Toast, type UnknownCause, type You } from "./types.ts";
+import { panelById } from "../features/panels.ts";
+import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type Ended, type LocalUi, type OnAnswer, type OpAnswer, type OpRefusal, type PanelHow, type PendingOp, type RoomView, type Toast, type UnknownCause, type You } from "./types.ts";
 
 export type { PendingOp } from "./types.ts";
 
@@ -96,8 +97,19 @@ export type RoomUi = {
   /** Ends "Multi-select" and lets go of the group, as its Done does (selection.ts doneSelecting). */
   doneSelecting(): void;
   showActions(open: boolean): void;
-  openPanel(id: string): void;
+  /** Opens a panel, in the pane `how` asks for or the one its rules choose (state/types.ts withPanel, docs/design-v1-split-panel.md 5.1). */
+  openPanel(id: string, how?: PanelHow): void;
   closePanel(): void;
+  /**
+   * Opens or closes the side panel's second panel (state/types.ts withSplit,
+   * withoutBelow): the role's start panel below the open one, or `pair`,
+   * a split this device stored. Storing it is the page's (pages/splitPanes.ts).
+   */
+  splitPanels(on: boolean, pair?: { top: string; below: string }): void;
+  /** The side panel's two panels change places. */
+  swapPanels(): void;
+  /** Whether the side panel holds two panels, as the Room page measured it, null while unknown (state/types.ts withSplitFits). */
+  fitSplit(fits: boolean | null): void;
   /** Opens or closes a phone's list of every panel. Opening a panel takes the list's place. */
   showPanelList(open: boolean): void;
   /** Closes whatever sheet stands over a phone's map, a panel or the list of panels, in one change. */
@@ -444,8 +456,18 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     showActions(open) {
       setLocal(showActions(get().local, open));
     },
-    openPanel(id) {
-      setLocal(withPanel(get().local, id));
+    openPanel(id, how) {
+      setLocal(withPanel(get().local, id, how, panelById(id)?.narrowOnly === true));
+    },
+    splitPanels(on, pair) {
+      const local = get().local;
+      setLocal(on ? withSplit(local, get().you?.role ?? "player", pair) : withoutBelow(local));
+    },
+    swapPanels() {
+      setLocal(withSwap(get().local));
+    },
+    fitSplit(fits) {
+      setLocal(withSplitFits(get().local, fits));
     },
     showPanelList(open) {
       setLocal(withPanelList(get().local, open));

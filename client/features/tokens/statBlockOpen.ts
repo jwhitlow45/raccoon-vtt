@@ -6,6 +6,7 @@ import { theme } from "../../lib/theme.ts";
 import { dockSlot, foldsUnderSheet } from "../../pages/fold.ts";
 import { scopeSlot, useScoped, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
+import type { PanelHow } from "../../state/types.ts";
 import { useRoomView } from "../../state/view.ts";
 import { layoutSize } from "../device/layout.ts";
 import { uiScale } from "../device/settings.ts";
@@ -53,14 +54,20 @@ export function statBlockHidesBar(input: { width: number; height: number; safeLe
  * from 900 px up, the Token sheet below) and hides the bar only where it
  * cannot stand beside the panel. Elsewhere it leaves the bar as it was:
  * open from the bar, and as a tracker row found it.
+ *
+ * `from` is the panel the press was in (features/panels.ts usePanelHere),
+ * a tracker row's Initiative, so with two panels Token opens in the other
+ * pane and Initiative stays (docs/design-v1-split-panel.md 5.1). `layout`
+ * is the window in the chrome's px, read when left out.
  */
-export function openStatBlock(scope: RoomScope, ui: Pick<RoomUi, "select" | "showActions" | "openPanel">, tokenId: string, layout: Size = layoutSize(window, uiScale())): void {
+export function openStatBlock(scope: RoomScope, ui: Pick<RoomUi, "select" | "showActions" | "openPanel">, tokenId: string, options: { from?: string | null; layout?: Size } = {}): void {
   ui.select(tokenId);
   requestStatBlock(scope, tokenId);
   // Open whatever the folds say, without writing them (panelFolds.ts).
   scope.get(statBlockOpenedSlot).setState({ tokenId });
-  ui.openPanel("token");
-  const { width, height } = layout;
+  const how: PanelHow | undefined = options.from ? { from: options.from } : undefined;
+  ui.openPanel("token", how);
+  const { width, height } = options.layout ?? layoutSize(window, uiScale());
   const safeLeft = scope.get(barDockSlot).getState().chrome?.safe.left ?? 0;
   // Room knows whether the Token sheet would open over the whole screen, from the bars, the band and the safe areas (components/sheetCap.ts sheetMode).
   const veryShort = scope.get(dockSlot).getState().sheetFullMode;
