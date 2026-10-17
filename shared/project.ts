@@ -1296,7 +1296,35 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
       }
       return out;
     }
+    case "dice":
+      return projectDiceCtx(ctx, data);
   }
+}
+
+/**
+ * A `dice` line for a player (docs/design-v1-dice.md 5.2). Each roll is
+ * kept when it names no creature, a character, or a token the player may
+ * have the events of (holderOfEvent: in sight now, and seen then or
+ * owned), so a token's roll follows that token's events and none passes a
+ * blackout. With none kept there is no line. Open to everyone, or the
+ * player's own, it reads in full, the tag only for its roller. A secret
+ * roll of someone else's reads as the bare line, and only when the same
+ * roll made public would have reached the player, so a roll for a creature
+ * hidden or in the dark leaves no trace. A table display is no member of
+ * the room and gets no line, as it gets no `roll` line.
+ */
+function projectDiceCtx(ctx: Ctx, data: Extract<LogEvent, { type: "dice" }>): LogEvent | null {
+  if (!ctx.state.members[ctx.viewer.memberId]) return null;
+  const rolls = data.rolls.filter((roll) => roll.tokenId === undefined || holderOfEvent(ctx, roll) !== null);
+  if (rolls.length === 0) return null;
+  const mine = data.by === ctx.viewer.memberId;
+  if (data.to === "dm" && !mine) return { type: "dice", by: data.by, to: "dm", rolls: [] };
+  const out: Extract<LogEvent, { type: "dice" }> = { type: "dice", by: data.by, to: data.to, rolls };
+  if (mine && data.tag !== undefined) out.tag = data.tag;
+  if (data.batch !== undefined) out.batch = data.batch;
+  if (data.dc !== undefined) out.dc = data.dc;
+  if (data.ac !== undefined) out.ac = data.ac;
+  return out;
 }
 
 function projectLogEntryCtx(ctx: Ctx, entry: LogEntry): LogEntry | null {
@@ -1603,7 +1631,9 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
     const refsEncounter = data.type === "turn" && encounterTouched;
     // An area's reminder follows the area's own projection too.
     const refsTemplate = data.type === "area" && templateIds.has(data.templateId);
-    if (refsToken || refsCharacter || refsHandout || refsEncounter || refsTemplate) add(keys.log(entry.id));
+    // A dice line names a creature in each roll (docs/design-v1-dice.md 5.2).
+    const refsRoll = data.type === "dice" && data.rolls.some((r) => (r.tokenId !== undefined && tokenIds.has(r.tokenId)) || (r.characterId !== undefined && characterIds.has(r.characterId)));
+    if (refsToken || refsCharacter || refsHandout || refsEncounter || refsTemplate || refsRoll) add(keys.log(entry.id));
   }
   return out;
 }

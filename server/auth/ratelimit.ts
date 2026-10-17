@@ -1,6 +1,7 @@
 import rateLimit from "@fastify/rate-limit";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type pg from "pg";
+import { LIMITS } from "#shared/limits.ts";
 import type { Config } from "../config.ts";
 import { clientIp } from "./clientIp.ts";
 import { ipKey } from "./ipKey.ts";
@@ -211,6 +212,21 @@ export class SlowLimits {
 
   async recordLogExport(roomId: string, memberId: string, ip: string): Promise<void> {
     await this.#record(this.#pool, [`logx:${roomId}:${memberId}`, `logx:ip:${ip}`]);
+  }
+
+  /**
+   * The receipt lookup (docs/design-v1-dice.md 1.2), per member and room,
+   * checked and charged before anything is read. A device asks it only for
+   * an op whose answer it lost, so 60 an hour is far more than a session
+   * needs.
+   */
+  async receiptLookups(roomId: string, memberId: string): Promise<Verdict> {
+    const member = await this.#window(`rcpt:${roomId}:${memberId}`, HOUR);
+    return member.n >= LIMITS.receiptLookupsPerHour ? wait(member.oldestExpiresIn) : null;
+  }
+
+  async recordReceiptLookup(roomId: string, memberId: string): Promise<void> {
+    await this.#record(this.#pool, [`rcpt:${roomId}:${memberId}`]);
   }
 
   /**

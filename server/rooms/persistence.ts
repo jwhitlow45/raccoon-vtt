@@ -121,9 +121,24 @@ export type OpRecord = { seq: number; at: string; actor: Viewer; op: Op; log: Lo
 
 export type WatermarkKey = { sessionId: string; clientId: string };
 
+/** One receipt as the table holds it (docs/design-v1-dice.md 1.2). */
+export type ReceiptRow = {
+  memberId: string;
+  tag: string;
+  part: number;
+  state: "committed" | "refused";
+  seq: number | null;
+  code: string | null;
+  message: string | null;
+  /** ISO time it was written. */
+  at: string;
+};
+
 export type BatchWrite = {
   ops: readonly OpRecord[];
   watermarks: ReadonlyArray<WatermarkKey & { n: number }>;
+  /** The receipts of the tagged ops this batch settles, written with them, so a settled op and its receipt are durable together. */
+  receipts?: readonly ReceiptRow[];
   /**
    * The room's name after this batch, set only when an op in it renamed the
    * room. The join page, the DM link page and the admin CLI read `rooms.name`
@@ -143,8 +158,8 @@ export class CommitOutcomeUnknown extends Error {
 /**
  * Writes one batch in one transaction (design 7.2): the op rows, the log rows
  * they produced (`on conflict do nothing`, so a replay never duplicates
- * them), the room's new name if it changed, and the client watermarks.
- * Watermarks only ever move up.
+ * them), the room's new name if it changed, the receipts of the tagged ops
+ * it settles, and the client watermarks. Watermarks only ever move up.
  *
  * An error before COMMIT is a clean failure and is rethrown as it is. An
  * error from the COMMIT statement is wrapped, because the connection may
@@ -195,6 +210,28 @@ export async function commitBatch(pool: Pool, roomId: string, batch: BatchWrite)
       }
       if (batch.name === undefined) await client.query("update rooms set last_active_at = now() where id = $1", [roomId]);
       else await client.query("update rooms set last_active_at = now(), name = $2 where id = $1", [roomId, batch.name]);
+    }
+    const receipts = batch.receipts ?? [];
+    if (receipts.length > 0) {
+      // A tag used again after its 24 hours of memory replaces its old row, which keeps the newest outcome.
+      await client.query(
+        `insert into roll_receipts (room_id, member_id, tag, part, state, seq, code, message, at)
+         select $1, m, t, p, s, q, c, g, a::timestamptz
+         from unnest($2::text[], $3::text[], $4::int[], $5::text[], $6::bigint[], $7::text[], $8::text[], $9::text[]) as x(m, t, p, s, q, c, g, a)
+         on conflict (room_id, member_id, tag, part) do update
+           set state = excluded.state, seq = excluded.seq, code = excluded.code, message = excluded.message, at = excluded.at`,
+        [
+          roomId,
+          receipts.map((r) => r.memberId),
+          receipts.map((r) => r.tag),
+          receipts.map((r) => r.part),
+          receipts.map((r) => r.state),
+          receipts.map((r) => r.seq),
+          receipts.map((r) => r.code),
+          receipts.map((r) => r.message),
+          receipts.map((r) => r.at),
+        ],
+      );
     }
     if (batch.watermarks.length > 0) {
       await client.query(
@@ -272,6 +309,57 @@ export async function writeSnapshot(pool: Pool, roomId: string, seq: number, sta
     [roomId, LIMITS.logStored],
   );
   return Buffer.byteLength(json);
+}
+
+/** The room's receipts written since `since`: those younger than 24 hours, which the actor holds in memory (docs/design-v1-dice.md 1.2). */
+export async function loadReceipts(pool: Pool, roomId: string, since: Date): Promise<ReceiptRow[]> {
+  const { rows } = await pool.query<{ member_id: string; tag: string; part: number; state: ReceiptRow["state"]; seq: string | null; code: string | null; message: string | null; at: Date }>(
+    `select member_id, tag, part, state, seq::text, code, message, at from roll_receipts
+     where room_id = $1 and at > $2 order by at`,
+    [roomId, since.toISOString()],
+  );
+  return rows.map((r) => ({ memberId: r.member_id, tag: r.tag, part: r.part, state: r.state, seq: r.seq === null ? null : Number(r.seq), code: r.code, message: r.message, at: r.at.toISOString() }));
+}
+
+/** One member's receipts of one tag, every part, read by key: the lookup reads nothing of anyone else's. */
+export async function readReceipts(pool: Pool, roomId: string, memberId: string, tag: string): Promise<ReceiptRow[]> {
+  const { rows } = await pool.query<{ part: number; state: ReceiptRow["state"]; seq: string | null; code: string | null; message: string | null; at: Date }>(
+    `select part, state, seq::text, code, message, at from roll_receipts
+     where room_id = $1 and member_id = $2 and tag = $3 order by part`,
+    [roomId, memberId, tag],
+  );
+  return rows.map((r) => ({ memberId, tag, part: r.part, state: r.state, seq: r.seq === null ? null : Number(r.seq), code: r.code, message: r.message, at: r.at.toISOString() }));
+}
+
+/** The log rows one op wrote, `<seq>:<index>`, in order. The archive may have pruned them. */
+export async function readLogLines(pool: Pool, roomId: string, seq: number): Promise<LogEntry[]> {
+  const { rows } = await pool.query<{ entry: LogEntry }>(
+    `select entry from room_log where room_id = $1 and split_part(id, ':', 1) = $2
+     order by split_part(id, ':', 2)::int`,
+    [roomId, String(seq)],
+  );
+  return rows.map((r) => r.entry);
+}
+
+/**
+ * Receipt retention (docs/design-v1-dice.md 1.2): rows older than 7 days
+ * go, and of those older than 24 hours each room keeps its newest 10,000. A
+ * receipt younger than 24 hours is never deleted, by count or anything
+ * else, so the duplicate rule holds for its whole day. Run daily.
+ */
+export async function pruneReceipts(pool: Pool): Promise<number> {
+  const old = await pool.query("delete from roll_receipts where at < now() - interval '1 day' * $1", [LIMITS.receiptDays]);
+  const over = await pool.query(
+    `delete from roll_receipts r using (
+       select room_id, member_id, tag, part from (
+         select room_id, member_id, tag, part, row_number() over (partition by room_id order by at desc) as n
+         from roll_receipts where at < now() - interval '24 hours'
+       ) aged where aged.n > $1
+     ) x
+     where r.room_id = x.room_id and r.member_id = x.member_id and r.tag = x.tag and r.part = x.part`,
+    [LIMITS.receiptsKeptOlder],
+  );
+  return (old.rowCount ?? 0) + (over.rowCount ?? 0);
 }
 
 /** Watermark rows unused for 7 days (design 16.2). Run daily. */

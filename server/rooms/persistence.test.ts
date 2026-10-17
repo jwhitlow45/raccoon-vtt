@@ -82,7 +82,7 @@ describe("replaying stored ops", () => {
 
   test("an op with no migration path stops the replay read-only rather than failing the load", async () => {
     const reasons: string[] = [];
-    const loaded = await loadRoom(pool(7), "R", (_seq, reason) => reasons.push(reason));
+    const loaded = await loadRoom(pool(OP_VERSION + 1), "R", (_seq, reason) => reasons.push(reason));
     assert.equal(loaded?.replayFailed, true);
     assert.equal(loaded?.seq, 0);
     assert.match(reasons[0] ?? "", /cannot be migrated/);

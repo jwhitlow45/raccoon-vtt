@@ -16,6 +16,7 @@ import { registerDmRoutes } from "./http/dm.ts";
 import { registerExportRoutes, type ExportOptions } from "./http/export.ts";
 import { registerJoinRoutes } from "./http/join.ts";
 import { registerLogRoutes } from "./http/log.ts";
+import { registerReceiptRoutes } from "./http/receipts.ts";
 import { registerMemberRoutes } from "./http/members.ts";
 import { registerRoomRoutes } from "./http/rooms.ts";
 import { registerSecurity } from "./http/security.ts";
@@ -118,6 +119,7 @@ export async function buildApp({ config, pool, gateway, hasher, rooms, ws, expor
   await registerWebSocket(app, { manager, config, options: ws });
   await registerExportRoutes(app, kit, { manager, options: exportOptions });
   await registerLogRoutes(app, kit, { manager });
+  await registerReceiptRoutes(app, kit, { manager });
   await registerXCardRoutes(app, kit, { manager });
 
   // The built SPA, when there is one. In development Vite serves it instead.

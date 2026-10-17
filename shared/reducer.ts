@@ -50,6 +50,7 @@ import { journalCreate, journalDelete, journalReveal, journalUpdate } from "./re
 import { actorEffects, tokenDeleteMany, tokenUpdateMany } from "./reducer/many.ts";
 import { pinPut, pinRemove } from "./reducer/pins.ts";
 import { rollAnswer, rollAsk, rollClose, rollReopen } from "./reducer/rolls.ts";
+import { sysDice } from "./reducer/dice.ts";
 import { handoutClose, handoutDocCreate, handoutDocDelete, handoutShow, logChat, logWhisper, restore } from "./reducer/misc.ts";
 import { sceneSetPhase } from "./reducer/phases.ts";
 import { monsterCreate, monsterDelete, monsterSetSrdImage, monsterUpdate } from "./reducer/monsters.ts";
@@ -342,8 +343,12 @@ function dispatch(tx: Tx, op: Op): void {
       return rollReopen(tx, op);
     case "roll.close":
       return rollClose(tx, op);
+    case "sys.dice":
+      return sysDice(tx, op);
     case "undo":
     case "redo":
+    // The server rolls (docs/design-v1-dice.md 4.2): the actor stores the `sys.dice` it resolves in place of each.
+    case "dice.roll":
       throw invalid(`${op.t} is resolved by the server before it reaches the reducer`);
   }
 }

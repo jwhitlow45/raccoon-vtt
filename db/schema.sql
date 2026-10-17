@@ -200,3 +200,25 @@ alter table assets add column if not exists unused_since timestamptz;
 -- and never from a client: shared/protocol.ts assetCreditSchema. Null for
 -- every other image.
 alter table assets add column if not exists credit jsonb;
+-- Wave 7 (docs/design-v1-dice.md 1.2): the receipt of every admitted op
+-- that rolls or applies, by member, client tag and batch part, written in
+-- the same transaction as the batch that settles it. It holds the outcome
+-- alone (committed with the op's seq, or refused with the words), never the
+-- result, which the log rows the seq names hold and the archive may prune.
+-- The room actor holds every row younger than 24 hours in memory, so the
+-- primary key starting with the room keeps one member's tag from ever
+-- meeting another's. The daily prune deletes rows older than 7 days, and of
+-- those older than 24 hours keeps each room's newest 10,000.
+create table if not exists roll_receipts (
+  room_id text not null references rooms on delete cascade,
+  member_id text not null,
+  tag text not null,
+  part int not null,
+  state text not null check (state in ('committed', 'refused')),
+  seq bigint,
+  code text,
+  message text,
+  at timestamptz not null,
+  primary key (room_id, member_id, tag, part)
+);
+create index if not exists roll_receipts_room_at on roll_receipts (room_id, at);

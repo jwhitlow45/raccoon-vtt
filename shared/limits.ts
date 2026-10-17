@@ -597,6 +597,18 @@ export const BLOCKS_ROOM_TOO_FULL = "The room is too full to save this stat bloc
 /** A block save at the room's storage quota, in place of the quota's words (section 3.4). Deleting is still accepted. */
 export const BLOCKS_AT_QUOTA = "The room is at its storage limit, so stat blocks cannot be saved until the DM frees space. Deleting a stat block still works.";
 
+/*
+ * The admission refusals of a tagged op (docs/design-v1-dice.md 1.2 and
+ * 4.4), each with no receipt: the member's budget is spent, the room's day
+ * of receipts is full, the player's share of it is, or the players' shares
+ * together are, which keeps the DMs' floor of the day free whatever the
+ * players send. Every surface that rolls or applies reads them as they are.
+ */
+export const ROLLING_TOO_FAST = "You are going too fast. Wait a few seconds.";
+export const ROOM_ROLLED_TOO_MUCH = `This room has rolled and applied ${n(LIMITS.receiptsPerDay)} times in the last day. Wait a while.`;
+export const PLAYER_ROLLED_TOO_MUCH = `You have rolled and answered ${n(LIMITS.receiptsPerPlayerDay)} times in the last day. Wait a while.`;
+export const PLAYERS_ROLLED_TOO_MUCH = `The players have rolled and answered ${n(LIMITS.receiptsPerDay - LIMITS.receiptsDmFloor)} times in the last day. Wait a while.`;
+
 /** Sizes of companion blocks already measured, for the same reason as the monsters' (monsterSizes). */
 const blockSizes = new WeakMap<CompanionBlock, number>();
 

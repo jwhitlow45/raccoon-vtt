@@ -1,4 +1,6 @@
-import { allKeys, dependents, diffProjection, heldOf, projectEntity, projectState } from "#shared/project.ts";
+import { resolveDiceOp } from "#shared/dice/resolve.ts";
+import { serverDraw } from "#shared/dice/roll.ts";
+import { allKeys, dependents, diffProjection, hash128, heldOf, projectEntity, projectState } from "#shared/project.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { EntityKey } from "#shared/keys.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
@@ -99,6 +101,15 @@ export class LocalServer {
       if (!decision.ok) {
         rejects.push({ n, code: decision.code, message: decision.message });
         continue;
+      }
+      // The fixture rolls with the server's resolve (docs/design-v1-dice.md 4.2), with a stand-in batch id: it keeps no receipts.
+      if (next.t === "dice.roll") {
+        const resolved = resolveDiceOp(next, this.state, { draw: serverDraw, batch: hash128(`${this.viewer.memberId}\n${next.tag}`).slice(0, 16) });
+        if (!resolved.ok) {
+          rejects.push({ n, code: resolved.code, message: resolved.message });
+          continue;
+        }
+        next = resolved.op;
       }
       const result = applyOp(this.state, next, this.viewer, { seq: this.seq + 1, at: new Date().toISOString() });
       if (!result.ok) {

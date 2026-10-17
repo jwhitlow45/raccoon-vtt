@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LIMITS, serializedBytes } from "./limits.ts";
+import { applyMode, diceCount, parseFormula, type Formula } from "./dice/formula.ts";
 import { ICON_KEY_RE } from "./imageRef.ts";
 import {
   ABILITY_KEYS,
@@ -857,6 +858,62 @@ const rollRequestInput = z.strictObject({
   targets: rollTargets,
 });
 
+// Dice (wave 7, docs/design-v1-dice.md 4.1 and 5.1).
+
+const advantageMode = z.enum(["adv", "dis"]);
+const critOn = z.union([z.literal(18), z.literal(19), z.literal(20)]);
+/** One roll a `dice.roll` asks for. Its formula's grammar is checked on the client op, never on a stored one (diceRollAsked). */
+const diceRollInput = z.strictObject({
+  formula: line(LIMITS.diceFormulaChars),
+  mode: advantageMode.optional(),
+  label: line(LIMITS.diceLabelChars).optional(),
+  creature: actorTarget.optional(),
+  /** Its advantage sources held both kinds, so it rolls normally (3.3). */
+  cancelled: z.literal(true).optional(),
+  /** An attack roll's critical range (5.6). */
+  critOn: critOn.optional(),
+});
+const diceRollFields = {
+  /** The receipt's key (1.2): one tag for a whole group, and `part` 0 to 19 for each batch of it. */
+  tag: id,
+  part: z.number().int().min(0).max(LIMITS.diceBatchesPerTag - 1).optional(),
+  to: z.enum(["all", "dm"]),
+  /** Each total is compared with one of them at most: a DC for a check or save, an AC for an attack (5.6). */
+  dc: rollDc.optional(),
+  ac: rollDc.optional(),
+  rolls: z.array(diceRollInput).min(1).max(LIMITS.diceRollsPerOp),
+};
+
+/**
+ * Each formula as the resolve will roll it: parsed, with its mode applied.
+ * The words of the first that fails, so a raw op past a bound is refused
+ * in the bound's own words (Appendix A).
+ */
+function diceFormulas(rolls: readonly { formula: string; mode?: "adv" | "dis" }[]): { ok: true; formulas: Formula[] } | { ok: false; message: string } {
+  const formulas: Formula[] = [];
+  for (const roll of rolls) {
+    const parsed = parseFormula(roll.formula);
+    if (!parsed.ok) return { ok: false, message: parsed.error };
+    const applied = roll.mode ? applyMode(parsed.formula, roll.mode) : parsed;
+    if (!applied.ok) return { ok: false, message: applied.error };
+    formulas.push(applied.formula);
+  }
+  return { ok: true, formulas };
+}
+
+/** What a stored `sys.dice` asked: the client op's shape and length, with no formula parsed, so a later grammar never stops its replay. */
+const diceRollAsked = z.strictObject({ t: z.literal("dice.roll"), ...diceRollFields });
+
+/** What the server drew for one roll (DiceResult). Bounded by shape alone, as `asked` is. */
+const diceResult = z.strictObject({
+  formula: line(200),
+  faces: z.array(z.number().int().min(1).max(LIMITS.diceSidesMax)).max(LIMITS.dicePerOp + 2),
+  total: z.number().int().min(-200_000).max(200_000),
+  mode: advantageMode.optional(),
+  cancelled: z.literal(true).optional(),
+  fails: z.enum(CONDITION_KEYS).optional(),
+});
+
 /**
  * The fields one edit may set on a group of tokens (section 3.5): those
  * that make sense for every one of them alike. Names, notes, numbers, other
@@ -1157,15 +1214,32 @@ export const clientOps = [
    * A target's answer: a total with the choice rolled, or a save failed
    * without rolling (`result: "fail"`, no total). The DM may also mark a
    * result, alone or with a total. The reducer works out the result from a
-   * DC and a total, and keeps a replaced answer as `previous`.
+   * DC and a total, and keeps a replaced answer as `previous`. `tag` is the
+   * answer's client id, the key of its receipt (docs/design-v1-dice.md 1.2),
+   * so an answer sent again with it never applies twice. Optional only so
+   * stored ops replay (docs/design-v1-roll-request.md 7.5).
    */
-  op("roll.answer", { rollId: id, target: actorTarget, choice: rollChoiceIndex.optional(), total: rollTotal.optional(), result: rollResult.optional() }).refine(
+  op("roll.answer", { rollId: id, target: actorTarget, choice: rollChoiceIndex.optional(), total: rollTotal.optional(), result: rollResult.optional(), tag: id.optional() }).refine(
     (o) => o.total !== undefined || o.result !== undefined,
     { message: "an answer has a total or a result" },
   ),
   /** Clears a target's answer, kept as `previous`, so its player may answer once more. */
   op("roll.reopen", { rollId: id, target: actorTarget }),
   op("roll.close", { rollIds: z.array(id).min(1).max(LIMITS.openRollsPerRoom) }),
+  /**
+   * Rolls on the server (docs/design-v1-dice.md 4.1): 1 to 20 formulas, 100
+   * dice in all after each mode, every formula parsing and every mode
+   * applying, and the whole op at most 3 KiB serialized. The actor turns it
+   * into the `sys.dice` it stores, holding every die it drew.
+   */
+  op("dice.roll", diceRollFields)
+    .refine((o) => o.dc === undefined || o.ac === undefined, { message: "a roll is compared with a DC or an AC, not both" })
+    .superRefine((o, ctx) => {
+      const checked = diceFormulas(o.rolls);
+      if (!checked.ok) ctx.addIssue({ code: "custom", message: checked.message });
+      else if (checked.formulas.reduce((n, f) => n + diceCount(f), 0) > LIMITS.dicePerOp) ctx.addIssue({ code: "custom", message: "A roll needs 1 to 100 dice, as 1d20+5." });
+    })
+    .refine((o) => serializedBytes(o) <= LIMITS.diceOpBytes, { message: "That is too much to roll at once. Roll fewer at a time." }),
   op("undo", {
     /**
      * The `n` of this client's op that made the step the undo is meant for,
@@ -1228,6 +1302,17 @@ export const serverOnlyOps = [
       .min(1)
       .max((Math.floor(MAX_SCENE_CELLS / CHUNK_CELLS) + 1) ** 2),
   }),
+  /**
+   * A dice op as the server resolved it (docs/design-v1-dice.md 4.1): the
+   * client op as it arrived, its `batch` (16 characters of the SHA-256 of
+   * the roller and the tag), and one result per roll, in order, holding
+   * every die drawn. The reducer only copies them, so replay never rolls.
+   */
+  op("sys.dice", {
+    asked: z.discriminatedUnion("t", [diceRollAsked]),
+    batch: z.string().regex(/^[A-Za-z0-9_-]{16}$/, "not a batch id"),
+    results: z.array(diceResult).min(1).max(LIMITS.diceRollsPerOp),
+  }),
 ] as const;
 
 export const clientOpSchema = z.discriminatedUnion("t", [...clientOps]);
@@ -1276,6 +1361,8 @@ export function onPlayerUndoStack(op: Op): boolean {
 }
 
 export type ActorTarget = z.infer<typeof actorTarget>;
+export type DiceRollInput = z.infer<typeof diceRollInput>;
+export type DiceResultInput = z.infer<typeof diceResult>;
 export type DurationInput = z.infer<typeof durationInput>;
 export type EffectInput = z.infer<typeof effectInput>;
 export type ActorPatch = z.infer<typeof actorPatch>;
@@ -1372,6 +1459,8 @@ export const dmToolSchemas = {
   rollChoiceIndex,
   whichPlayers: moveAnyToken,
 };
+/** Wave 7's shapes, so the stored-state schema checks imported dice lines by the same bounds (docs/design-v1-dice.md 5.3). */
+export const diceSchemas = { diceResult, critOn, advantageMode };
 /** A handout's pages and audience, so the stored-state schema checks imports by the same bounds (docs/design-v1-pdf-handouts.md 3.3). */
 export const handoutSchemas = { handoutPage, handoutPages, handoutTo };
 /** A document as its create op carries it, for the upload job to check its save before it sends it. */

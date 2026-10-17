@@ -1479,7 +1479,23 @@ export type LogEvent =
       result?: "pass" | "fail";
       /** The player failed the save without rolling, which reaches the creature's players as a total does. */
       noRoll?: true;
-    };
+    }
+  /**
+   * A free roll on the server (wave 7, docs/design-v1-dice.md 5.1): one line
+   * per `dice.roll`, every roll with what was drawn. `to: 'dm'` is a secret
+   * roll, which other players read as the bare line `rolls: []` (5.2).
+   * `tag` reaches only the roller. `batch` is the same for every batch of one
+   * tag and says nothing of the tag, so every viewer groups a group's
+   * batches as one roll without learning the roller's ids.
+   */
+  | { type: "dice"; tag?: string; batch?: string; by: MemberId; to: "all" | "dm"; dc?: number; ac?: number; rolls: DiceRoll[] };
+
+/**
+ * One roll of a `dice` line: its result, the label and creature asked, and
+ * an attack roll's critical range. `seen` marks a roll for a token whose
+ * non-owners could see it when it was written, as other token events are.
+ */
+export type DiceRoll = DiceResult & { label?: string; tokenId?: TokenId; characterId?: CharacterId; seen?: true; critOn?: 18 | 19 | 20 };
 
 export type LogEntry = {
   /** `"<seq>:<index>"`, so a replay can never insert the same entry twice. */

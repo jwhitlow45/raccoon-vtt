@@ -51,6 +51,9 @@ export function reads(op: Op, state: RoomState): Reads {
     case "sys.memberRemove":
     case "sys.restore":
     case "sys.explore":
+    // The server rolls (docs/design-v1-dice.md 4.5), so no client predicts a roll. It waits for the `ev`.
+    case "sys.dice":
+    case "dice.roll":
       return NEVER;
 
     case "room.update":

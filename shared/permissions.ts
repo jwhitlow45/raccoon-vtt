@@ -273,6 +273,11 @@ function forDm(op: Op, c: Check): Decision {
       return pageReader(c, op.page.access);
     case "journal.update":
       return op.patch.access === undefined ? OK : pageReader(c, op.patch.access);
+    case "dice.roll":
+      return diceRollCheck(c, op);
+    // The rule of the op it carries (docs/design-v1-dice.md 4.2).
+    case "sys.dice":
+      return forDm(op.asked, c);
     default:
       return OK;
   }
@@ -387,6 +392,11 @@ function forPlayer(op: Op, c: Check): Decision {
 
     case "roll.answer":
       return rollAnswerCheck(c, op);
+
+    case "dice.roll":
+      return diceRollCheck(c, op);
+    case "sys.dice":
+      return forPlayer(op.asked, c);
 
     case "door.set":
       return doorCheck(c, op);
@@ -705,6 +715,33 @@ function rollAnswerCheck(c: Check, op: OpOf<"roll.answer">): Decision {
   if (!named || !owned) return GONE;
   if (op.result !== undefined && (op.result !== "fail" || op.total !== undefined || request.test.kind !== "save")) {
     return refuse("forbidden", "players send the total they rolled, or fail a saving throw without rolling");
+  }
+  return OK;
+}
+
+/** The refusal of a player's roll for a creature they see and do not own (docs/design-v1-dice.md 4.3). */
+export const NOT_YOUR_ROLL = "You roll only for your own creatures.";
+
+/**
+ * A free roll (docs/design-v1-dice.md 4.3), by anyone, for no creature or
+ * for creatures of their own, checked before anything is drawn. The DM may
+ * name any creature that exists, on any scene. A player names only one they
+ * own now, as for a roll answer: one they cannot see is `gone`, as a missing
+ * one is, and one they see and do not own is refused, so no refusal says a
+ * hidden creature exists.
+ */
+function diceRollCheck(c: Check, op: OpOf<"dice.roll">): Decision {
+  for (const roll of op.rolls) {
+    const creature = roll.creature;
+    if (!creature) continue;
+    if (c.actor.role === "dm") {
+      const exists = "tokenId" in creature ? c.state.tokens[creature.tokenId] !== undefined : c.state.characters[creature.characterId] !== undefined;
+      if (!exists) return GONE;
+      continue;
+    }
+    const t = c.target(creature);
+    if (!t.visible) return GONE;
+    if (!t.owned) return refuse("forbidden", NOT_YOUR_ROLL);
   }
   return OK;
 }

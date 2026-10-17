@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 10;
-export const OP_VERSION = 6;
+export const SNAPSHOT_VERSION = 11;
+export const OP_VERSION = 7;
 
 export type MigrationStep = {
   from: number;
@@ -93,6 +93,10 @@ export const snapshotMigrations: MigrationStep[] = [
     to: 10,
     apply: (state) => (state !== null && typeof state === "object" && !("companionBlocks" in state) ? { ...state, companionBlocks: {} } : state),
   },
+  // Wave 7's one bump (docs/design-v1-roll-request.md 7.5): dice lines, rolled answers, their provenance and PC stat
+  // blocks are optional fields and new log lines whose absence reads as before, so a v10 room is a v11 room as it is.
+  // The number moves so that an older build, which would drop or misread them, refuses a v11 snapshot instead.
+  { from: 10, to: 11, apply: (state) => state },
 ];
 
 /**
@@ -251,6 +255,23 @@ export const opMigrations: MigrationStep[] = [
     // the backup taken before the update.
     from: 5,
     to: 6,
+    apply: (op) => op,
+  },
+  {
+    // Wave 7's one bump (docs/design-v1-dice.md 12, docs/design-v1-roll-request.md
+    // 7.5), made by the first wave 7 build that landed, the dice's. Its new ops
+    // (`sys.dice`, which the server stores in place of each roll) are new
+    // shapes, and every older op keeps its shape, so the step is the identity.
+    // Every wave 7 rule that must replay older ops by their old rules, such
+    // as an answer's provenance, gates on this same number.
+    //
+    // Deploy: back up the database just before (README, Updating). The first
+    // op after it is stored at version 7, and the shutdown writes version 11
+    // snapshots. Rollback: an older build refuses to migrate a version 7 op
+    // or a version 11 snapshot down (runMigrations), so those rooms would
+    // not load there. Going back restores that backup, losing the play since.
+    from: 6,
+    to: 7,
     apply: (op) => op,
   },
 ];

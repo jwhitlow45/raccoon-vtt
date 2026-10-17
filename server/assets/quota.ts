@@ -5,9 +5,10 @@ import { KeyedMutex } from "./locks.ts";
 
 /**
  * Bytes a room owns in Postgres and on the asset volume (design sections 10.1
- * and 10.5): asset variants, the snapshot, op rows, log rows and watermark
- * rows. Row sizes come from pg_column_size, which is what the room actually
- * costs on disk after TOAST compression.
+ * and 10.5): asset variants, the snapshot, op rows, log rows, watermark
+ * rows and roll receipts (docs/design-v1-dice.md 1.2). Row sizes come from
+ * pg_column_size, which is what the room actually costs on disk after TOAST
+ * compression.
  */
 export async function roomStoredBytes(db: pg.Pool | pg.PoolClient, roomId: string): Promise<number> {
   const { rows } = await db.query<{ bytes: string }>(
@@ -17,6 +18,7 @@ export async function roomStoredBytes(db: pg.Pool | pg.PoolClient, roomId: strin
      + coalesce((select sum(pg_column_size(o.*)) from room_ops o where room_id = $1), 0)
      + coalesce((select sum(pg_column_size(l.*)) from room_log l where room_id = $1), 0)
      + coalesce((select sum(pg_column_size(w.*)) from client_watermarks w where room_id = $1), 0)
+     + coalesce((select sum(pg_column_size(r.*)) from roll_receipts r where room_id = $1), 0)
      as bytes`,
     [roomId],
   );

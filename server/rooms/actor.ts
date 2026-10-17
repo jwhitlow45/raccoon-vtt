@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
-import { BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, checkLimits, LIMITS, type LimitCheck } from "#shared/limits.ts";
+import { BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, checkLimits, LIMITS, ROLLING_TOO_FAST, type LimitCheck } from "#shared/limits.ts";
+import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { HandoutPage, LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { canApply, type PermissionDeps } from "#shared/permissions.ts";
@@ -17,6 +18,7 @@ import { roomStoredBytes } from "../assets/quota.ts";
 import { SnapshotBudget, TokenBucket, type Clock } from "./budgets.ts";
 import { CloseWrites } from "./closeWrites.ts";
 import { CLOSE, clientKey, type ClientKey, type Connection } from "./connection.ts";
+import { isDiceOp, resolveDice } from "./dice.ts";
 import { cancelPreviews, routeEphemeral } from "./ephemeral.ts";
 import { exploreOp } from "./explore.ts";
 import { buildSnapshot, publishBatch, type Reject, type Restored } from "./fanout.ts";
@@ -27,6 +29,7 @@ import {
   commitBatch,
   CommitOutcomeUnknown,
   loadAssetFacts,
+  loadReceipts,
   loadRoom,
   readWatermark,
   setReadOnly,
@@ -35,8 +38,10 @@ import {
   type BatchWrite,
   type OpRecord,
   type Pool,
+  type ReceiptRow,
   type RoomInfo,
 } from "./persistence.ts";
+import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCaps } from "./receipts.ts";
 import { growthBound, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { NOT_NEWEST, poseRestore, posesAfter, UndoStacks, type UndoEntry } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf } from "./undoLabels.ts";
@@ -71,6 +76,10 @@ export type ActorOptions = {
   now: Clock;
   /** The size guard's byte limits (design 10.5), lowered only by tests that fill a room. */
   sizeLimits: { stateLimit?: number; sceneLimit?: number };
+  /** The dice's draw (docs/design-v1-dice.md 4.2). Only tests script it. */
+  draw: Draw;
+  /** The receipt caps (docs/design-v1-dice.md 1.2), lowered only by tests that fill a room's day. */
+  receiptCaps: Partial<ReceiptCaps>;
 };
 
 export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
@@ -86,6 +95,8 @@ export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   retryMaxMs: 5_000,
   now: Date.now,
   sizeLimits: {},
+  draw: serverDraw,
+  receiptCaps: {},
 };
 
 export type ActorDeps = {
@@ -165,12 +176,17 @@ type Batch = {
   watermarks: Map<ClientKey, number>;
   hellos: Array<{ conn: Connection; key: ClientKey }>;
   sys: Array<{ resolve: () => void; reject: (err: Error) => void }>;
+  /** The receipts of the tagged ops this batch settles (docs/design-v1-dice.md 1.2), durable with it. */
+  receipts: Receipt[];
   timer: NodeJS.Timeout | null;
   state: RoomState;
   seq: number;
 };
 
 type Reduced = { ok: true; inverse: RestoreEntry[] | null } | { ok: false; code: RefusalCode; message: string };
+
+/** A tagged op past admission (docs/design-v1-dice.md 1.2): whatever becomes of it from here writes its receipt. */
+type Admitted = { memberId: string; player: boolean; tag: string; part: number };
 
 /** Ops a room at its storage quota still accepts (design 10.5): deletions only. A room whose replay failed accepts none. */
 const DELETIONS = new Set<Op["t"]>([
@@ -258,6 +274,10 @@ export class RoomActor {
   #roomRate: TokenBucket;
   /** Each member's budget of block saves (docs/design-v1-companion-stat-blocks.md 3.5), made at their first save. */
   #blockSaves = new Map<string, TokenBucket>();
+  /** Each member's budget of tagged ops (docs/design-v1-dice.md 4.4), by role, made at their first. */
+  #rollBudgets = new Map<string, TokenBucket>();
+  /** Every receipt younger than 24 hours, and the staged ones (docs/design-v1-dice.md 1.2). */
+  #receipts: ReceiptBook;
   #recheckTimer: NodeJS.Timeout | null = null;
   #reconciling: Promise<void> | null = null;
   #visibleCache = new Map<string, { seq: number; ids: Set<string> }>();
@@ -278,7 +298,7 @@ export class RoomActor {
   /** A deletion step's statement in flight: the queue waits for it. */
   #stepRunning: Promise<void> | null = null;
 
-  private constructor(deps: ActorDeps, loaded: { state: RoomState; seq: number; snapshotSeq: number; replayFailed: boolean; stateBytes: number }) {
+  private constructor(deps: ActorDeps, loaded: { state: RoomState; seq: number; snapshotSeq: number; replayFailed: boolean; stateBytes: number }, receipts: readonly ReceiptRow[]) {
     this.roomId = deps.info.roomId;
     this.pinned = deps.info.pinned;
     this.createdIp = deps.info.createdIp;
@@ -300,6 +320,21 @@ export class RoomActor {
     this.#sizes = new SizeGuard(this.#opts.sizeLimits);
     this.#sizes.stateMeasured(loaded.stateBytes);
     this.#roomRate = new TokenBucket(this.#opts.roomOpsPerSec, this.#opts.roomOpsPerSec * 2, this.#opts.now);
+    this.#receipts = new ReceiptBook(this.#opts.now, this.#opts.receiptCaps);
+    // Who admitted a stored receipt is read from the member's kind now, which the DM grants keep (reconcileKinds).
+    this.#receipts.load(
+      receipts.map((r) => ({
+        memberId: r.memberId,
+        tag: r.tag,
+        part: r.part,
+        state: r.state,
+        ...(r.seq !== null ? { seq: r.seq } : {}),
+        ...(r.code !== null ? { code: r.code as RefusalCode } : {}),
+        ...(r.message !== null ? { message: r.message } : {}),
+        at: Date.parse(r.at),
+        player: loaded.state.members[r.memberId]?.kind !== "dm",
+      })),
+    );
     this.#recheckTimer = setInterval(() => void this.#recheckGrants(), this.#opts.grantRecheckMs);
     this.#recheckTimer.unref();
   }
@@ -310,7 +345,10 @@ export class RoomActor {
       deps.log.error({ roomId: deps.info.roomId, seq, reason }, "room replay failed, serving it read-only");
     });
     if (!loaded) return null;
-    const actor = new RoomActor(deps, loaded);
+    // The receipts younger than 24 hours, so a restart keeps the duplicate rule and the day's caps (docs/design-v1-dice.md 1.2).
+    const now = deps.options?.now ?? DEFAULT_ACTOR_OPTIONS.now;
+    const receipts = await loadReceipts(deps.pool, deps.info.roomId, new Date(now() - DAY_MS));
+    const actor = new RoomActor(deps, loaded, receipts);
     await actor.reconcileKinds();
     if (actor.#opsSinceSnapshot >= actor.#opts.snapshotOps) actor.#scheduleSnapshot();
     return actor;
@@ -645,6 +683,23 @@ export class RoomActor {
     return ids;
   }
 
+  /**
+   * The lines a committed op of this seq wrote, `<seq>:<index>`, while the
+   * in-memory log still holds them, for the receipt lookup
+   * (docs/design-v1-dice.md 1.2). Null once they left it: the archive has
+   * them, or pruned them.
+   */
+  committedLines(seq: number): LogEntry[] | null {
+    const prefix = `${seq}:`;
+    const lines = this.#committed.state.log.filter((e) => e.id.startsWith(prefix));
+    return lines.length > 0 ? lines : null;
+  }
+
+  /** How many receipts the room holds younger than 24 hours, staged ones included, and one member's: for the receipt tests. */
+  receiptCounts(memberId?: string): { room: number; member: number; players: number } {
+    return { room: this.#receipts.size, member: memberId === undefined ? 0 : this.#receipts.countOf(memberId), players: this.#receipts.players };
+  }
+
   /** Projects log rows from the database for a viewer with the same rules as the live log (design 7.3). */
   projectLog(entries: LogEntry[], viewer: Viewer, sceneId: string | null): LogEntry[] {
     const state: RoomState = { ...this.#committed.state, log: entries };
@@ -712,6 +767,7 @@ export class RoomActor {
         // Simulating a crash: the accumulating batch is lost like it would be.
         if (this.#batch.timer) clearTimeout(this.#batch.timer);
         for (const s of this.#batch.sys) s.reject(new ActorClosedError(this.roomId));
+        this.#receipts.abandoned(this.#batch.receipts);
         this.#batch = null;
       }
       if (this.#inFlightDone) await this.#inFlightDone;
@@ -867,6 +923,15 @@ export class RoomActor {
       }
       op = checked.op;
     }
+    // A tag already settled is answered from its receipt, before anything else is looked at (docs/design-v1-dice.md 4.2).
+    const tagged = tagOf(op);
+    if (tagged) {
+      const settled = this.#receipts.find(viewer.memberId, tagged.tag, tagged.part);
+      if (settled) {
+        this.#answerFromReceipt(key, wm, n, settled);
+        return;
+      }
+    }
     if (this.replayFailed) {
       this.#refuse(key, wm, n, "quota", "the room could not be fully loaded and is read-only");
       return;
@@ -876,33 +941,69 @@ export class RoomActor {
       return;
     }
     /*
+     * Admission (docs/design-v1-dice.md 1.2), before any permission check, so an op that permissions refuse later has
+     * paid for its receipt: the day's caps must have room for one more, then the member's budget is charged. A refusal
+     * here leaves no receipt, draws nothing and applies nothing, so refused traffic never spends the room's day. Past
+     * this point every outcome writes the op's receipt, in the batch that settles it. Refused, never `busy`, so the
+     * device's later ops go on, as with block saves.
+     */
+    let admitted: Admitted | null = null;
+    if (tagged) {
+      const player = viewer.role === "player";
+      const full = this.#receipts.refusal(viewer.memberId, player);
+      if (full !== null) {
+        this.#refuse(key, wm, n, "quota", full);
+        return;
+      }
+      if (!this.#rollBudget(viewer).take(admissionCost(op))) {
+        this.#refuse(key, wm, n, "quota", ROLLING_TOO_FAST);
+        return;
+      }
+      admitted = { memberId: viewer.memberId, player, ...tagged };
+    }
+    /*
      * A player's block saves past their budget (docs/design-v1-companion-stat-blocks.md 3.5) are refused, never answered
      * `busy`: a refusal advances the op sequence, so the device's moves and HP changes after it go on at once, while `busy`
      * would hold every later op behind the save. A delete counts, so creating and deleting cannot churn the op log.
      */
     if (viewer.role === "player" && isBlockOp(op) && !this.#blockSaveBudget(viewer.memberId).take()) {
-      this.#refuse(key, wm, n, "quota", BLOCK_SAVES_TOO_FAST);
+      this.#refuse(key, wm, n, "quota", BLOCK_SAVES_TOO_FAST, admitted);
       return;
     }
     op = withAssetSizes(op, facts);
     const decision = canApply(op, viewer, this.#staged.state, this.#permissionDeps(viewer, facts));
     if (!decision.ok) {
       const message = restoredFrom && step ? `could not ${restoredFrom} ${step.label}: ${decision.message}` : decision.message;
-      this.#refuse(key, wm, n, decision.code, message);
+      this.#refuse(key, wm, n, decision.code, message, admitted);
       return;
+    }
+    // The server rolls, only now that the op is permitted, so no refusal depends on the dice (docs/design-v1-dice.md 4.2).
+    if (isDiceOp(op)) {
+      const resolved = resolveDice(op, this.#staged.state, viewer, { draw: this.#opts.draw });
+      if (!resolved.ok) {
+        this.#refuse(key, wm, n, resolved.code, resolved.message, admitted);
+        return;
+      }
+      const checked = checkServerOp(resolved.op);
+      if (!checked.ok) {
+        this.#refuse(key, wm, n, "invalid", checked.message, admitted);
+        return;
+      }
+      op = checked.op;
     }
     const before = this.#staged.state;
     const reduced = this.#reduce(op, viewer);
     if (!reduced.ok) {
       // A restore that failed says which step it was, so a refused undo is never a riddle.
       const message = restoredFrom && step ? `could not ${restoredFrom} ${step.label}: ${reduced.message}` : reduced.message;
-      this.#refuse(key, wm, n, reduced.code, message);
+      this.#refuse(key, wm, n, reduced.code, message, admitted);
       return;
     }
     wm.staged = n;
     const batch = this.#ensureBatch();
     push(batch.acks, key, n);
     batch.watermarks.set(key, n);
+    if (admitted) this.#stageReceipt(batch, admitted, { state: "committed", seq: this.#staged.seq });
     if (restoredFrom && step) {
       push(batch.restored, key, { n, what: step.label });
       const inverse = reduced.inverse;
@@ -930,10 +1031,52 @@ export class RoomActor {
     return bucket;
   }
 
-  #refuse(key: ClientKey, wm: Watermark, n: number, code: RefusalCode, message: string): void {
+  /** Each member's budget of tagged ops (docs/design-v1-dice.md 4.4), by the role they act in. */
+  #rollBudget(viewer: Viewer): TokenBucket {
+    const key = `${viewer.role}:${viewer.memberId}`;
+    let bucket = this.#rollBudgets.get(key);
+    if (!bucket) {
+      const dm = viewer.role === "dm";
+      bucket = new TokenBucket(1000 / (dm ? LIMITS.dmRollRefillMs : LIMITS.playerRollRefillMs), dm ? LIMITS.dmRollBurst : LIMITS.playerRollBurst, this.#opts.now);
+      this.#rollBudgets.set(key, bucket);
+    }
+    return bucket;
+  }
+
+  /**
+   * A refusal. One after admission (`admitted`) writes the op's receipt with
+   * the same words, so the same tag sent again is refused again.
+   */
+  #refuse(key: ClientKey, wm: Watermark, n: number, code: RefusalCode, message: string, admitted: Admitted | null = null): void {
     wm.staged = n;
     const batch = this.#ensureBatch();
-    push(batch.rejects, key, { n, code, message: message.slice(0, 200) });
+    const words = message.slice(0, 200);
+    push(batch.rejects, key, { n, code, message: words });
+    batch.watermarks.set(key, n);
+    if (admitted) this.#stageReceipt(batch, admitted, { state: "refused", code, message: words });
+    this.#scheduleCommit();
+  }
+
+  #stageReceipt(batch: Batch, admitted: Admitted, outcome: Pick<Receipt, "state" | "seq" | "code" | "message">): void {
+    const receipt: Receipt = { memberId: admitted.memberId, tag: admitted.tag, part: admitted.part, player: admitted.player, at: this.#opts.now(), ...outcome };
+    this.#receipts.stage(receipt);
+    batch.receipts.push(receipt);
+  }
+
+  /**
+   * A tagged op whose tag is settled (docs/design-v1-dice.md 1.2), whatever
+   * its `n`: a committed one is answered with its ack and no change, a
+   * refused one with the same refusal. It spends no budget and draws
+   * nothing, so any retry with the same tag within 24 hours is safe.
+   */
+  #answerFromReceipt(key: ClientKey, wm: Watermark, n: number, receipt: Receipt): void {
+    if (receipt.state === "refused") {
+      this.#refuse(key, wm, n, receipt.code ?? "invalid", receipt.message ?? "refused");
+      return;
+    }
+    wm.staged = n;
+    const batch = this.#ensureBatch();
+    push(batch.acks, key, n);
     batch.watermarks.set(key, n);
     this.#scheduleCommit();
   }
@@ -1166,6 +1309,7 @@ export class RoomActor {
         watermarks: new Map(),
         hellos: [],
         sys: [],
+        receipts: [],
         timer: null,
         state: this.#committed.state,
         seq: this.#committed.seq,
@@ -1247,6 +1391,16 @@ export class RoomActor {
         return { sessionId: wm.sessionId, clientId: wm.clientId, n };
       }),
       ...(batch.state.meta.name !== batch.before.meta.name ? { name: batch.state.meta.name } : {}),
+      receipts: batch.receipts.map((r) => ({
+        memberId: r.memberId,
+        tag: r.tag,
+        part: r.part,
+        state: r.state,
+        seq: r.seq ?? null,
+        code: r.code ?? null,
+        message: r.message ?? null,
+        at: new Date(r.at).toISOString(),
+      })),
     };
     let attempt = 0;
     // Once a COMMIT's answer is lost, the batch may be durable, so nothing is
@@ -1280,6 +1434,7 @@ export class RoomActor {
     }
     this.retrying = false;
     this.#committed = { state: batch.state, seq: batch.seq };
+    this.#receipts.committed(batch.receipts);
     for (const [key, n] of batch.watermarks) {
       const wm = this.#watermarks.get(key);
       if (wm && wm.committed < n) wm.committed = n;
@@ -1316,6 +1471,8 @@ export class RoomActor {
     this.retrying = false;
     this.#log.error({ err, roomId: this.roomId, ops: batch.ops.length }, "batch abandoned at shutdown");
     this.#staged = this.#committed;
+    // The batch's receipts go with it and give back their slots (docs/design-v1-dice.md 1.2). Their clients resend the ops.
+    this.#receipts.abandoned(batch.receipts);
     for (const s of batch.sys) s.reject(new ActorClosedError(this.roomId));
     this.#inFlight = null;
     this.#inFlightDone = null;

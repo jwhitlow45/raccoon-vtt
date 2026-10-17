@@ -490,6 +490,18 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
         if (data.characterId !== undefined) next.characterId = characters.of(data.characterId);
         return next;
       }
+      // The roller and each roll's creature follow their new ids (docs/design-v1-dice.md 5.3).
+      case "dice":
+        return {
+          ...data,
+          by: members.of(data.by),
+          rolls: data.rolls.map((roll) => {
+            const next = { ...roll };
+            if (roll.tokenId !== undefined) next.tokenId = tokens.of(roll.tokenId);
+            if (roll.characterId !== undefined) next.characterId = characters.of(roll.characterId);
+            return next;
+          }),
+        };
     }
   };
   // Log ids are `"<seq>:<index>"`. The new room's ops start at seq 1, so seq 0 can never collide.

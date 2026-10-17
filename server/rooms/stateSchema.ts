@@ -4,6 +4,7 @@ import { LIMITS } from "#shared/limits.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
 import {
   MAX_ALT_IMAGES,
+  diceSchemas,
   dmToolSchemas,
   MAX_EFFECTS,
   MAX_OWNERS,
@@ -520,6 +521,28 @@ const logEvent = z.discriminatedUnion("type", [
     total: dmToolSchemas.rollTotal.optional(),
     result: dmToolSchemas.rollResult.optional(),
     noRoll: z.literal(true).optional(),
+  }),
+  // A free roll's line with what was drawn (docs/design-v1-dice.md 5.3).
+  z.strictObject({
+    type: z.literal("dice"),
+    tag: id.optional(),
+    batch: z.string().regex(/^[A-Za-z0-9_-]{16}$/).optional(),
+    by: id,
+    to: z.enum(["all", "dm"]),
+    dc: dmToolSchemas.rollDc.optional(),
+    ac: dmToolSchemas.rollDc.optional(),
+    rolls: z
+      .array(
+        z.strictObject({
+          ...diceSchemas.diceResult.shape,
+          label: shortText.max(LIMITS.diceLabelChars).optional(),
+          tokenId: id.optional(),
+          characterId: id.optional(),
+          seen: z.literal(true).optional(),
+          critOn: diceSchemas.critOn.optional(),
+        }),
+      )
+      .max(LIMITS.diceRollsPerOp),
   }),
 ]);
 

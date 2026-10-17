@@ -208,7 +208,7 @@ describe("migrations", () => {
   });
 
   test("a version 10 snapshot never migrates down to 9, so going back to an older build is a restore (docs/design-v1-companion-stat-blocks.md 3.6)", () => {
-    assert.equal(SNAPSHOT_VERSION, 10);
+    assert.ok(SNAPSHOT_VERSION >= 10);
     assert.throws(() => runMigrations(room(), 10, 9, snapshotMigrations), /down/);
   });
 
@@ -422,8 +422,8 @@ describe("op version 5: healing the dead and Revive (docs/design-v1-combat-flow.
 });
 
 describe("op version 6: a resize is not movement (docs/design-v1-token-window.md 8.7)", () => {
-  test("is the version now, and the step from 5 returns every op unchanged", () => {
-    assert.equal(OP_VERSION, 6);
+  test("the step from 5 returns every op unchanged", () => {
+    assert.ok(OP_VERSION >= 6);
     const ops: unknown[] = [
       { t: "token.update", tokenId: "g1", patch: { size: "large", x: 3, y: 0 } },
       { t: "token.update", tokenId: "g1", patch: { size: "huge" } },
@@ -443,7 +443,7 @@ describe("op version 6: a resize is not movement (docs/design-v1-token-window.md
 
 describe("op version 6: an actor links one stat block (docs/design-v1-companion-stat-blocks.md 3.2 and 3.6)", () => {
   test("the step from 5 returns every op unchanged", () => {
-    assert.equal(OP_VERSION, 6);
+    assert.ok(OP_VERSION >= 6);
     const ops: unknown[] = [
       { t: "token.update", tokenId: "g1", patch: { actor: { srdId: "owl" } } },
       { t: "token.update", tokenId: "g1", patch: { actor: { srdId: "owl", monsterId: null } } },
@@ -464,5 +464,29 @@ describe("op version 6: an actor links one stat block (docs/design-v1-companion-
 
   test("a version 6 op never migrates down to 5", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 6, 5, opMigrations), /down/);
+  });
+});
+
+describe("wave 7's one bump: op version 7 and snapshot version 11 (docs/design-v1-roll-request.md 7.5)", () => {
+  test("is the version now, and both steps return what they are given", () => {
+    assert.equal(OP_VERSION, 7);
+    assert.equal(SNAPSHOT_VERSION, 11);
+    const ops: unknown[] = [
+      { t: "roll.answer", rollId: "r1", target: { tokenId: "g1" }, total: 12 },
+      { t: "log.chat", text: "hi" },
+      { t: "sys.restore", entries: [{ key: "token:g1", value: null, expectHash: "abc" }], from: "undo", deps: true },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 6, 7, opMigrations), op);
+    const state = room();
+    assert.equal(runMigrations(state, 10, 11, snapshotMigrations), state);
+    // Every older version reaches it.
+    assert.deepEqual(migrateOp({ t: "log.chat", text: "hi" }, 4), { t: "log.chat", text: "hi" });
+    const { companionBlocks: _c, ...v9 } = room();
+    assert.deepEqual(migrateSnapshot(v9, 9), room());
+  });
+
+  test("a version 7 op and a version 11 snapshot never migrate down, so going back is the backup's restore", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 7, 6, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 11, 10, snapshotMigrations), /down/);
   });
 });

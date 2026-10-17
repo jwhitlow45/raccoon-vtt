@@ -1,5 +1,7 @@
+import { formatFormula, parseFormula } from "./dice/formula.ts";
+import { hitOf, rolledTerms } from "./dice/roll.ts";
 import { compareLogIds } from "./keys.ts";
-import { CONDITION_KEYS, type ConditionKey, type LogEntry, type LogEvent, type Member, type RoomState, type Token } from "./model.ts";
+import { CONDITION_KEYS, type ConditionKey, type DiceResult, type DiceRoll, type LogEntry, type LogEvent, type Member, type RoomState, type Token } from "./model.ts";
 import { testText } from "./rules/skills.ts";
 import { CONDITIONS } from "./srd/conditions.ts";
 import { STATUSES } from "./srd/statuses.ts";
@@ -64,6 +66,93 @@ export function rollText(data: RollEvent, who: string): string {
   }
   const result = data.result !== undefined ? `: ${data.result}` : "";
   return `${who} rolled ${data.total} on ${test}${dc}${result}.`;
+}
+
+/** A count with thousands separators, as dice text writes every number. */
+function count(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+/**
+ * One roll's dice (docs/design-v1-dice.md 5.5): "2d6+3 (4, 6) = 13", and
+ * with a mode "1d20+5 with advantage (14, 7 dropped) = 19". A formula a
+ * later grammar refuses reads as its text and total.
+ */
+export function diceText(result: Pick<DiceResult, "formula" | "faces" | "total" | "mode">): string {
+  const terms = rolledTerms(result);
+  const parsed = parseFormula(result.formula);
+  if (!terms || !parsed.ok) return `${result.formula} = ${count(result.total)}`;
+  const faces = terms.flatMap((t) => ("kept" in t ? t.faces.map((face, i) => (t.kept[i] ? count(face) : `${count(face)} dropped`)) : []));
+  return `${formatFormula(parsed.formula, result.mode)} (${faces.join(", ")}) = ${count(result.total)}`;
+}
+
+type DiceEvent = Extract<LogEvent, { type: "dice" }>;
+
+/** The creature a roll names, mid-sentence: "Thorn", or "a creature" for one the viewer's view does not hold. */
+function rollCreature(roll: DiceRoll, names: LogNames): string | undefined {
+  if (roll.tokenId === undefined && roll.characterId === undefined) return undefined;
+  const name = creatureName(names, roll);
+  return name === A_CREATURE ? "a creature" : name;
+}
+
+/** "Longsword: ", "for Thorn, Stealth: " or "for Thorn: ", which a roll's text starts with. The label never names the creature (5.5). */
+function rollSubject(roll: DiceRoll, names: LogNames): string {
+  const creature = rollCreature(roll, names);
+  if (creature !== undefined) return roll.label !== undefined ? `for ${creature}, ${roll.label}: ` : `for ${creature}: `;
+  return roll.label !== undefined ? `${roll.label}: ` : "";
+}
+
+/** " against DC 15: fail", " against AC 15: critical hit", or nothing. */
+function rollVerdict(roll: DiceRoll, line: Pick<DiceEvent, "dc" | "ac">): string {
+  if (line.dc !== undefined) return ` against DC ${line.dc}: ${roll.fails || roll.total < line.dc ? "fail" : "pass"}`;
+  if (line.ac !== undefined) {
+    const hit = hitOf(roll, line.ac);
+    return ` against AC ${line.ac}: ${hit === "critical" ? "critical hit" : hit}`;
+  }
+  return "";
+}
+
+/**
+ * A `dice` line (5.5): "Bree rolled Longsword: 2d6+3 (4, 6) = 13.", for a
+ * creature "Bree rolled for Thorn, Stealth: ...", several rolls one line
+ * each under "Mara rolled 6 times:", and the bare line of someone else's
+ * secret roll "Mara rolled in secret.". A secret line read in full says so.
+ */
+export function diceLineText(data: DiceEvent, names: LogNames): string {
+  const who = memberName(names, data.by);
+  if (data.rolls.length === 0) return `${who} rolled in secret.`;
+  const secret = data.to === "dm" ? " (secret)" : "";
+  const one = (roll: DiceRoll) => `${rollSubject(roll, names)}${diceText(roll)}${rollVerdict(roll, data)}`;
+  if (data.rolls.length === 1) return `${who} rolled ${one(data.rolls[0]!)}${secret}.`;
+  return [`${who} rolled ${data.rolls.length} times${secret}:`, ...data.rolls.map((roll) => `${one(roll)}.`)].join("\n");
+}
+
+/** "Dexterity saves" for "Dexterity save": the labels doc 3 writes for a roll of one kind. Others read "Longsword 6 times". */
+function pluralLabel(label: string): string | null {
+  return /(save|check|attack|roll|throw)$/i.test(label) ? `${label}s` : null;
+}
+
+/**
+ * Someone else's rolls of one batch, as one toast (8.5): "Bree rolled 19
+ * for Stealth.", "Mara rolled 6 Dexterity saves." for several with one
+ * label, else "Mara rolled 6 times.".
+ */
+export function rollToastText(lines: readonly DiceEvent[], names: LogNames): string {
+  const rolls = lines.flatMap((l) => l.rolls);
+  const who = memberName(names, lines[0]?.by);
+  const only = rolls[0];
+  if (rolls.length === 1 && only) {
+    const creature = rollCreature(only, names);
+    const what = [creature, only.label].filter((part) => part !== undefined).join(", ");
+    return `${who} rolled ${count(only.total)}${what ? ` for ${what}` : ""}.`;
+  }
+  const labels = new Set(rolls.map((r) => r.label));
+  const label = labels.size === 1 ? only?.label : undefined;
+  if (label !== undefined) {
+    const plural = pluralLabel(label);
+    return plural ? `${who} rolled ${rolls.length} ${plural}.` : `${who} rolled ${label} ${rolls.length} times.`;
+  }
+  return `${who} rolled ${rolls.length} times.`;
 }
 
 export function memberName(names: { members: Readonly<Record<string, Member | undefined>> }, id: string | undefined): string {
@@ -261,6 +350,8 @@ function eventText(data: LogEvent, names: LogNames): string {
     case "characterDeleted":
       // Only the DM's log holds it. The character is gone, so the line keeps its name.
       return `${memberName(names, data.memberId)} deleted ${data.name}${deletedWith(data)}.`;
+    case "dice":
+      return diceLineText(data, names);
   }
 }
 

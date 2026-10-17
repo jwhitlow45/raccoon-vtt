@@ -485,6 +485,19 @@ pages and the pages of that companion's players receive them. A DM's room
 snapshot can now be up to 6 MiB, 3 MiB more than before for the stat blocks,
 so a DM's page may take a few seconds longer to load a room that holds many.
 
+The update that adds dice rolled on the server (docs/design-v1-dice.md), the
+first of wave 7, saves rooms at snapshot version 11 and stores changes at op
+version 7, which the builds before it cannot read: they answer "Something
+went wrong" for every room. It also adds the `roll_receipts` table, which
+the app creates on its own at start, and which older builds leave alone.
+Going back is the same restore: check out the commit you ran before (`git
+log` lists it), rebuild with
+`docker compose -f docker-compose.server.yml up -d --build`, then follow
+Restore under Backups with the backup taken just before the update. Every
+room loses what changed after that backup. Reload every page left open
+across the update, table displays included. Until it reloads, an old page
+has no Dice panel and shows each roll as an empty line in the Log.
+
 Compose rebuilds the image and replaces only the containers that changed. On
 the way down the app closes every WebSocket with code 1012, finishes each
 room's current write and saves a snapshot, so phones reconnect on their own

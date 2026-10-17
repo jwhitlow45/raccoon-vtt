@@ -9,7 +9,7 @@ import { TooBusyError } from "./errors.ts";
 import { RoomNotFoundError } from "./gateway.ts";
 
 export { TooBusyError } from "./errors.ts";
-import { pruneWatermarks, roomInfo, type RoomInfo } from "./persistence.ts";
+import { pruneReceipts, pruneWatermarks, roomInfo, type RoomInfo } from "./persistence.ts";
 
 /**
  * Loads rooms on demand, once each, and unloads them when idle or to make
@@ -384,6 +384,12 @@ export class RoomManager {
       if (n > 0) this.#log.info({ rows: n }, "pruned stale client watermarks");
     } catch (err) {
       this.#log.warn({ err }, "watermark prune failed");
+    }
+    try {
+      const n = await pruneReceipts(this.#pool);
+      if (n > 0) this.#log.info({ rows: n }, "pruned old roll receipts");
+    } catch (err) {
+      this.#log.warn({ err }, "receipt prune failed");
     }
   }
 }

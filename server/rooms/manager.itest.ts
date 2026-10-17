@@ -197,7 +197,7 @@ describe("idle unload, snapshots and recovery", () => {
     await back.waitClosed();
   });
 
-  test("a version 5 size and place update on the acting creature replays as a move, and a new resize is stored at version 6 as no movement", async () => {
+  test("a version 5 size and place update on the acting creature replays as a move, and a new resize is stored at version 6 or later as no movement", async () => {
     const owner = t.client();
     const { roomId } = await owner.createRoom("Op version 5");
     const s = await t.connect(roomId, owner);
@@ -245,7 +245,7 @@ describe("idle unload, snapshots and recovery", () => {
     back.n = 3;
     await back.apply({ t: "token.update", tokenId: thorn, patch: { size: "huge" } });
     const newest = await t.pool.query<{ op_version: number }>("select op_version from room_ops where room_id = $1 and seq = 7", [roomId]);
-    assert.equal(newest.rows[0]?.op_version, 6);
+    assert.equal(newest.rows[0]?.op_version, OP_VERSION);
     back.close();
     await back.waitClosed();
     const again = await t.connect(roomId, owner);
@@ -261,7 +261,7 @@ describe("idle unload, snapshots and recovery", () => {
     await again.waitClosed();
   });
 
-  test("a room stored at snapshot version 9 loads at 10 with no companion blocks, and a block saved then is stored and replays (docs/design-v1-companion-stat-blocks.md 3.6)", async () => {
+  test("a room stored at snapshot version 9 loads at 10 or later with no companion blocks, and a block saved then is stored and replays (docs/design-v1-companion-stat-blocks.md 3.6)", async () => {
     const owner = t.client();
     const { roomId } = await owner.createRoom("Snapshot 9");
     const s = await t.connect(roomId, owner);
@@ -285,7 +285,7 @@ describe("idle unload, snapshots and recovery", () => {
     assert.equal((await back.apply({ t: "companionBlock.create", block })).rejects, undefined);
     const op = await t.pool.query<{ op: { t: string }; op_version: number }>("select op, op_version from room_ops where room_id = $1 order by seq desc limit 1", [roomId]);
     assert.equal(op.rows[0]?.op.t, "companionBlock.create");
-    assert.equal(op.rows[0]?.op_version, 6, "stored at op version 6, from which an actor links one stat block");
+    assert.equal(op.rows[0]?.op_version, OP_VERSION, "stored at today's op version, 6 or later, from which an actor links one stat block");
     // A crash: the block comes back by replaying its op over the version 9 snapshot.
     await t.manager.unload(roomId, 1011, false);
     await back.waitClosed();
