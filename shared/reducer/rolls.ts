@@ -50,8 +50,13 @@ export function rollAsk(tx: Tx, op: OpOf<"roll.ask">): void {
  * read the DC from the passes and fails. With the DC shown there is nothing
  * to find, and with pass or fail hidden there is nothing to read, so they
  * may change freely. Only the DM changes a final answer, or reopens it.
+ *
+ * A rolled answer is final whatever the switches (docs/design-v1-dice.md
+ * 5.4): the server rolled it, so a typed total or a fail without rolling
+ * after it would be a second answer. The DM allows a change in one tap.
  */
-export function isFinal(request: Pick<RollRequest, "dc" | "dcShown" | "resultShown">, target: Pick<RollTarget, "result">): boolean {
+export function isFinal(request: Pick<RollRequest, "dc" | "dcShown" | "resultShown">, target: Pick<RollTarget, "result" | "dice">): boolean {
+  if (target.dice !== undefined) return true;
   return request.dc !== undefined && !request.dcShown && request.resultShown && target.result !== undefined;
 }
 
@@ -102,7 +107,7 @@ export function rollAnswer(tx: Tx, op: OpOf<"roll.answer">): void {
     if (previous) next.previous = previous;
   }
   writeTarget(tx, request, index, next);
-  const line: LogEvent = { type: "roll", test: request.test, ...creatureOf(next) };
+  const line: Extract<LogEvent, { type: "roll" }> = { type: "roll", test: request.test, ...creatureRef(next) };
   if (next.choice !== undefined) line.choice = next.choice;
   if (next.total !== undefined) line.total = next.total;
   if (next.result !== undefined) line.result = next.result;
@@ -131,24 +136,35 @@ export function rollClose(tx: Tx, op: OpOf<"roll.close">): void {
   for (const id of new Set(op.rollIds)) if (tx.state.rolls[id]) tx.remove(keys.roll(id));
 }
 
-function writeTarget(tx: Tx, request: RollRequest, index: number, target: RollTarget): void {
+export function writeTarget(tx: Tx, request: RollRequest, index: number, target: RollTarget): void {
   const targets = request.targets.map((t, i) => (i === index ? target : t));
   tx.write(keys.roll(request.id), { ...request, targets });
 }
 
-function sameCreature(target: RollTarget, ref: ActorTarget): boolean {
+export function sameCreature(target: RollTarget, ref: ActorTarget): boolean {
   return "tokenId" in ref ? target.tokenId === ref.tokenId : target.characterId === ref.characterId;
 }
 
-function creatureOf(target: RollTarget): RollTarget {
+/** The creature a target names, as a line names it. */
+export function creatureRef(target: RollTarget): { tokenId: string } | { characterId: string } {
   return target.tokenId !== undefined ? { tokenId: target.tokenId } : { characterId: target.characterId! };
 }
 
-function answerOf(target: RollTarget): RollAnswer {
+export function creatureOf(target: RollTarget): RollTarget {
+  return target.tokenId !== undefined ? { tokenId: target.tokenId } : { characterId: target.characterId! };
+}
+
+/** A target's answer alone, kept as `previous` when a later one replaces it, its dice and provenance with it. */
+export function answerOf(target: RollTarget): RollAnswer {
   const out: RollAnswer = {};
   if (target.choice !== undefined) out.choice = target.choice;
   if (target.total !== undefined) out.total = target.total;
   if (target.result !== undefined) out.result = target.result;
   if (target.noRoll) out.noRoll = true;
+  if (target.tag !== undefined) out.tag = target.tag;
+  if (target.dice !== undefined) out.dice = target.dice;
+  if (target.typedBonus) out.typedBonus = true;
+  if (target.mark !== undefined) out.mark = target.mark;
+  if (target.changed !== undefined) out.changed = target.changed;
   return out;
 }

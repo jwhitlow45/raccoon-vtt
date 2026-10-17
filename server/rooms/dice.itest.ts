@@ -267,6 +267,52 @@ describe("dice on the server", () => {
   });
 });
 
+describe("a request's answer and a death save rolled on the server", () => {
+  let t: Engine;
+  before(async () => {
+    t = await startEngine();
+  });
+  after(() => t.close());
+
+  test("a player's Roll with a typed bonus answers once, its tag answers again from its receipt, and a second Roll finds it answered", async () => {
+    const room = await setup(t, "Dice answer");
+    const pip = room.players[0]!;
+    const bree = uuidv7();
+    await room.dm.apply({ t: "character.create", character: { id: bree, name: "Bree", size: "medium", ownerIds: [pip.id], actor: inline } } as Op);
+    await room.dm.apply({ t: "roll.ask", request: { id: "r1", test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 13, dcShown: true, resultShown: true, targets: [{ characterId: bree }] } } as Op);
+    const tag = uuidv7();
+    const op = { t: "roll.dice", tag, rollId: "r1", target: { characterId: bree }, bonus: 4 } as Op;
+    const sent = await send(pip.socket, op);
+    assert.deepEqual(sent.answer, { ok: true });
+    const target = (sent.ev.changes.find((c) => c.key === "roll:r1") as { value: { targets: { total?: number; dice?: unknown; typedBonus?: true; tag?: string }[] } } | undefined)?.value.targets[0];
+    assert.ok(target?.dice, "the player's own view holds the dice");
+    assert.equal(target.typedBonus, true);
+    assert.equal(target.tag, tag);
+    const tab = await reconnect(t, room.roomId, pip.client);
+    const again = await send(tab, op);
+    assert.deepEqual(again.answer, { ok: true });
+    assert.equal(again.ev.changes.length, 0, "nothing applied twice");
+    const second = await send(pip.socket, { t: "roll.dice", tag: uuidv7(), rollId: "r1", target: { characterId: bree }, bonus: 4 } as Op);
+    assert.deepEqual(second.answer, { ok: false, code: "invalid", message: "It was answered meanwhile." });
+    const lookup = (await pip.client.get(`/api/rooms/${room.roomId}/receipts/${tag}`)).json<Lookup>();
+    assert.equal(lookup.parts[0]?.state, "committed");
+    assert.equal(lookup.parts[0]?.state === "committed" && lookup.parts[0].lines[0]?.data?.type, "roll");
+  });
+
+  test("a death save rolled for a dying token is counted by the server in the same op", async () => {
+    const room = await setup(t, "Dice death");
+    const pip = room.players[0]!;
+    const id = uuidv7();
+    await room.dm.apply({ t: "token.create", token: { id, sceneId: room.sceneId, kind: "pc", name: "Thorn", size: "medium", x: 2, y: 2, ownerIds: [pip.id], actor: { inline: { ...inline, hp: { cur: 0, max: 7, temp: 0 }, life: "dying" } } } } as Op);
+    const sent = await send(pip.socket, { t: "actor.deathRoll", tag: uuidv7(), target: { tokenId: id } } as Op);
+    assert.deepEqual(sent.answer, { ok: true });
+    const token = sent.ev.changes.find((c) => c.key === `token:${id}`) as { value: { actor: { inline: { deathSaves: { ok: number; fail: number }; life: string; hp: { cur: number } } } } } | undefined;
+    const after = token?.value.actor.inline;
+    assert.ok(after, "the token changed with the roll");
+    assert.ok(after.deathSaves.ok + after.deathSaves.fail > 0 || after.life === "alive");
+  });
+});
+
 describe("the day's caps and floods (docs/design-v1-dice.md 1.2 and 4.4)", () => {
   let t: Engine;
   before(async () => {

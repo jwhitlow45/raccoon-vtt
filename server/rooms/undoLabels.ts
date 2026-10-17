@@ -257,6 +257,10 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     // A roll is on no stack (docs/design-v1-dice.md 4.5): the stored op is the server's `sys.dice`.
     case "dice.roll":
       return "rolling dice";
+    case "roll.dice":
+      return `rolling for ${target(op.target)}`;
+    case "actor.deathRoll":
+      return `rolling a death save for ${target(op.target)}`;
     case "undo":
     case "redo":
       return op.t;

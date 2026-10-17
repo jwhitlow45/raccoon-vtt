@@ -68,3 +68,38 @@ describe("dice wording (docs/design-v1-dice.md 5.5)", () => {
     assert.equal(rollToastText([line([LONGSWORD, save])], names), "Bree rolled 2 times.");
   });
 });
+
+describe("a rolled answer's line (5.5)", () => {
+  type RollLine = Extract<LogEvent, { type: "roll" }>;
+  const owl = (extra: Partial<RollLine>): RollLine => ({
+    type: "roll",
+    test: { kind: "save", choices: [{ ability: "dex" }] },
+    characterId: "owl",
+    total: 12,
+    dc: 13,
+    dcShown: true,
+    resultShown: true,
+    result: "fail",
+    dice: { formula: "1d20+3", faces: [9], total: 12 },
+    tag: "t1",
+    ...extra,
+  });
+
+  test("the dice follow the total, a typed bonus and a failing condition say so", () => {
+    assert.equal(describeEvent(owl({}), names), "Owl rolled 12 (1d20+3: 9) on a Dexterity saving throw against DC 13: fail.");
+    assert.equal(describeEvent(owl({ typedBonus: true }), names), "Owl rolled 12 (1d20+3, your bonus: 9) on a Dexterity saving throw against DC 13: fail.");
+    assert.equal(describeEvent(owl({ total: 21, dice: { formula: "1d20+3", faces: [18], total: 21, fails: "stunned" } }), names), "Owl rolled 21 (1d20+3: 18) on a Dexterity saving throw against DC 13: fails (Stunned).");
+    assert.equal(describeEvent(owl({ total: 20, result: "pass", dice: { formula: "2d20kh1+3", faces: [17, 4], total: 20, mode: "adv" } }), names), "Owl rolled 20 (1d20+3 with advantage: 17, 4 dropped) on a Dexterity saving throw against DC 13: pass.");
+    assert.equal(describeEvent(owl({ total: 12, dice: undefined, tag: undefined }), names), "Owl rolled 12 on a Dexterity saving throw against DC 13: fail.", "a typed total reads as before");
+  });
+
+  test("an allowed change names its reason", () => {
+    const change = (reason: "heroic-inspiration" | "halfling-luck" | "lucky" | "bardic-inspiration", die?: 8) => ({ id: "a", on: "t0", reason, ...(die ? { die } : {}) });
+    assert.equal(
+      describeEvent(owl({ total: 17, result: "pass", dice: { formula: "1d20+3+1d4", faces: [11, 3], total: 17 }, changed: change("heroic-inspiration") }), names),
+      "Owl rerolled 17 (Heroic Inspiration, 1d20+3+1d4: 11, 3) on a Dexterity saving throw against DC 13: pass.",
+    );
+    assert.equal(describeEvent(owl({ total: 19, result: "pass", dice: { formula: "2d20kh1+3", faces: [9, 16], total: 19, mode: "adv" }, changed: change("lucky") }), names), "Owl used Lucky: 19 (1d20+3 with advantage: 9 dropped, 16) on a Dexterity saving throw against DC 13: pass.");
+    assert.equal(describeEvent(owl({ total: 15, result: "pass", dice: { formula: "1d20+3+1d8", faces: [9, 3], total: 15 }, changed: change("bardic-inspiration", 8) }), names), "Owl added Bardic Inspiration's 1d8: 3, now 15 on a Dexterity saving throw against DC 13: pass.");
+  });
+});

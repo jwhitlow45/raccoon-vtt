@@ -161,3 +161,20 @@ export function rollReminders(effects: readonly Pick<Effect, "key" | "level">[],
   }
   return out;
 }
+
+/** The conditions whose rule fails a Strength or Dexterity save outright, in the order the card lists them. */
+const SAVE_FAILERS: readonly ConditionKey[] = ["paralyzed", "petrified", "stunned", "unconscious"];
+
+/**
+ * The condition that fails a save whatever its total (docs/design-v1-dice.md
+ * 4.2): Paralyzed, Petrified, Stunned or Unconscious on a Strength or
+ * Dexterity save, by the rules above, among the creature's effects its
+ * players may see. The server stores it on a rolled save as `fails`, so a
+ * line never reveals a condition the DM hid, and replay never reads these
+ * rules. Docs/design-v1-roll-options.md's presets take this over with every
+ * other source.
+ */
+export function failingCondition(effects: readonly Pick<Effect, "key" | "hiddenFromPlayers">[], test: { kind: string; ability?: AbilityKey }): ConditionKey | undefined {
+  if (test.kind !== "save" || (test.ability !== "str" && test.ability !== "dex")) return undefined;
+  return SAVE_FAILERS.find((key) => effects.some((e) => e.key === key && e.hiddenFromPlayers !== true));
+}

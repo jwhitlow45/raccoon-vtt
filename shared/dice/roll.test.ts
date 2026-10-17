@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DiceResult } from "../model.ts";
 import { FORMULA_ERRORS, parseFormula, type Formula } from "./formula.ts";
-import { hitOf, keptD20, keptFaces, naturalOf, rerollable, rerollFace, rolledTerms, rollFormula, serverDraw, totalOf, type Draw } from "./roll.ts";
+import { CANNOT_REROLL, LUCKY_CHANGES_NOTHING, hitOf, keptD20, keptFaces, naturalOf, rerollable, rerolled, rerollFace, rolledTerms, rollFormula, serverDraw, totalOf, withDie, withLucky, type Draw } from "./roll.ts";
 
 function formula(text: string): Formula {
   const parsed = parseFormula(text);
@@ -132,5 +132,34 @@ describe("rerolls (5.4)", () => {
     assert.equal(rerollable(roll("1d20+1d4", [5, 1]), "halfling-luck", 1), false, "a d4 showing 1 is no d20");
     assert.equal(rerollable(blessed, "lucky", 0), false);
     assert.equal(rerollable(blessed, "bardic-inspiration", 0), false);
+  });
+});
+
+describe("an allowed change applied to the stored result (5.4)", () => {
+  test("a reroll redraws only the face it names, applies the kept rule again and sums again", () => {
+    const disadvantage = roll("1d20+3+1d4", [1, 18, 2], "dis");
+    assert.equal(disadvantage.total, 6);
+    const again = rerolled(disadvantage, "heroic-inspiration", 0, scripted([15]));
+    assert.deepEqual(again, { ok: true, result: { formula: "2d20kl1+3+1d4", faces: [15, 18, 2], total: 20, mode: "dis" } });
+    const bless = rerolled(disadvantage, "heroic-inspiration", 2, scripted([4]));
+    assert.ok(bless.ok);
+    assert.deepEqual(bless.result.faces, [1, 18, 4], "the Bless d4 alone");
+    const draw = scripted([9]);
+    assert.ok(rerolled(roll("1d20+3", [1]), "halfling-luck", 0, draw).ok);
+    assert.deepEqual(draw.asked, [20]);
+    assert.deepEqual(rerolled(roll("1d20+3", [12]), "halfling-luck", 0, scripted([])), { ok: false, error: CANNOT_REROLL });
+    assert.deepEqual(rerolled(roll("1d20+3", [12]), "heroic-inspiration", 5, scripted([])), { ok: false, error: CANNOT_REROLL });
+  });
+
+  test("Lucky draws a second d20 on a normal roll, cancels a disadvantage roll to its first d20, and changes nothing else", () => {
+    assert.deepEqual(withLucky(roll("1d20+3", [7]), scripted([16])), { ok: true, result: { formula: "2d20kh1+3", faces: [7, 16], total: 19, mode: "adv" } });
+    assert.deepEqual(withLucky(roll("1d20+3+1d4", [5, 18, 2], "dis"), scripted([])), { ok: true, result: { formula: "1d20+3+1d4", faces: [5, 2], total: 10, cancelled: true } });
+    assert.deepEqual(withLucky(roll("1d20+3", [5, 18], "adv"), scripted([])), { ok: false, error: LUCKY_CHANGES_NOTHING });
+    assert.deepEqual(withLucky({ ...roll("1d20+3", [5]), cancelled: true }, scripted([])), { ok: false, error: LUCKY_CHANGES_NOTHING });
+  });
+
+  test("an added die joins the roll with its own face, and a failing condition stays on the result", () => {
+    const base = { ...roll("1d20+3", [9]), fails: "stunned" as const };
+    assert.deepEqual(withDie(base, 8, scripted([5])), { ok: true, result: { formula: "1d20+3+1d8", faces: [9, 5], total: 17, fails: "stunned" } });
   });
 });

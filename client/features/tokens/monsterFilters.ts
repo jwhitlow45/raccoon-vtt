@@ -1,5 +1,6 @@
 import { CONDITION_KEYS, CR_VALUES, type ConditionKey, type MonsterSize } from "#shared/model.ts";
 import type { StatBlockMonster } from "#shared/srd/monsters.ts";
+import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
 import { SIZE_WORDS } from "#shared/statBlock.ts";
 import { hasLairValues } from "./factory.ts";
 
@@ -34,22 +35,8 @@ export const CREATURE_TYPES = [
 ] as const;
 export type CreatureType = (typeof CREATURE_TYPES)[number];
 
-export const DAMAGE_TYPES = [
-  "acid",
-  "bludgeoning",
-  "cold",
-  "fire",
-  "force",
-  "lightning",
-  "necrotic",
-  "piercing",
-  "poison",
-  "psychic",
-  "radiant",
-  "slashing",
-  "thunder",
-] as const;
-export type DamageType = (typeof DAMAGE_TYPES)[number];
+// One list of damage types for the filters and the dice (docs/design-v1-dice.md 6.2).
+export { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
 
 /** The nine alignments by the law and good axes, then Unaligned, as a 3 by 3 grid reads. */
 export const ALIGNMENTS = [

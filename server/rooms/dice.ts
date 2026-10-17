@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { resolveDiceOp, type DiceOp, type Resolved } from "#shared/dice/resolve.ts";
+import type { SrdRolls } from "#shared/dice/bonus.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 
-export type { DiceOp, Resolved } from "#shared/dice/resolve.ts";
+export { isDiceOp, type DiceOp, type Resolved } from "#shared/dice/resolve.ts";
 
 /**
  * The server's dice (docs/design-v1-dice.md 4.2): the resolve with the
@@ -22,11 +23,7 @@ export function batchOf(memberId: string, tag: string): string {
   return createHash("sha256").update(`${memberId}\n${tag}`).digest("base64url").slice(0, 16);
 }
 
-/** Whether an op is one the resolve rolls, which the actor stores as `sys.dice` in its place. */
-export function isDiceOp(op: { t: string }): op is DiceOp {
-  return op.t === "dice.roll";
-}
-
-export function resolveDice(op: DiceOp, state: RoomState, viewer: Viewer, deps: { draw?: Draw } = {}): Resolved {
-  return resolveDiceOp(op, state, { draw: deps.draw ?? serverDraw, batch: batchOf(viewer.memberId, op.tag) });
+/** `srd` is the SRD creatures' numbers once docs/design-v1-roll-options.md loads them at boot. */
+export function resolveDice(op: DiceOp, state: RoomState, viewer: Viewer, deps: { draw?: Draw; srd?: SrdRolls | null } = {}): Resolved {
+  return resolveDiceOp(op, state, { draw: deps.draw ?? serverDraw, batch: batchOf(viewer.memberId, op.tag), srd: deps.srd ?? null });
 }

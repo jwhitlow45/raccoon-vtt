@@ -349,6 +349,8 @@ function dispatch(tx: Tx, op: Op): void {
     case "redo":
     // The server rolls (docs/design-v1-dice.md 4.2): the actor stores the `sys.dice` it resolves in place of each.
     case "dice.roll":
+    case "roll.dice":
+    case "actor.deathRoll":
       throw invalid(`${op.t} is resolved by the server before it reaches the reducer`);
   }
 }

@@ -54,6 +54,8 @@ export function reads(op: Op, state: RoomState): Reads {
     // The server rolls (docs/design-v1-dice.md 4.5), so no client predicts a roll. It waits for the `ev`.
     case "sys.dice":
     case "dice.roll":
+    case "roll.dice":
+    case "actor.deathRoll":
       return NEVER;
 
     case "room.update":

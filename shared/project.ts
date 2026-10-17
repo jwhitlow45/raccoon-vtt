@@ -1059,12 +1059,25 @@ function projectRollCtx(ctx: Ctx, request: RollRequest): RollRequest | null {
   return out;
 }
 
+/**
+ * A target as its creature's players read it: the answer they gave or the
+ * server rolled for them, its dice and provenance and a pending ask
+ * (docs/design-v1-dice.md 5.2, docs/design-v1-roll-request.md 7.5), and the
+ * result and the DM's mark only while pass or fail is shown. `by` and
+ * `previous`, with the old dice, stay the DM's.
+ */
 function playerRollTarget(target: RollTarget, resultShown: boolean): RollTarget {
   const out: RollTarget = target.tokenId !== undefined ? { tokenId: target.tokenId } : { characterId: target.characterId! };
   if (target.choice !== undefined) out.choice = target.choice;
   if (target.total !== undefined) out.total = target.total;
   if (resultShown && target.result !== undefined) out.result = target.result;
+  if (resultShown && target.mark !== undefined) out.mark = target.mark;
   if (target.noRoll) out.noRoll = true;
+  if (target.tag !== undefined) out.tag = target.tag;
+  if (target.dice !== undefined) out.dice = target.dice;
+  if (target.typedBonus) out.typedBonus = true;
+  if (target.change !== undefined) out.change = target.change;
+  if (target.changed !== undefined) out.changed = target.changed;
   return out;
 }
 
@@ -1279,7 +1292,8 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
       // As the request itself (projectRollCtx): its creature's players now, under the same two switches.
       if (ctx.paused || !ownsRollCreature(ctx, data)) return null;
       // With pass or fail hidden a DM's mark adds nothing a player may read, and its line alone would tell them the DM judged it (LP5-ROLLS-4).
-      if (!data.resultShown && isMarkLine(data)) return null;
+      // A line written since wave 7 carries its tag and says itself whether a mark wrote it (docs/design-v1-roll-request.md 7.5).
+      if (!data.resultShown && (data.tag === undefined ? isMarkLine(data) : data.mark === true)) return null;
       const out: LogEvent = { type: "roll", test: data.test };
       if (data.tokenId !== undefined) out.tokenId = data.tokenId;
       if (data.characterId !== undefined) out.characterId = data.characterId;
@@ -1294,6 +1308,11 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
         out.resultShown = true;
         if (data.result !== undefined) out.result = data.result;
       }
+      // A rolled answer's dice reach the creature's players with its total (docs/design-v1-dice.md 5.2).
+      if (data.dice !== undefined) out.dice = data.dice;
+      if (data.typedBonus) out.typedBonus = true;
+      if (data.tag !== undefined) out.tag = data.tag;
+      if (data.changed !== undefined) out.changed = data.changed;
       return out;
     }
     case "dice":

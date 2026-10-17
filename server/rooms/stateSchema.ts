@@ -6,6 +6,7 @@ import {
   MAX_ALT_IMAGES,
   diceSchemas,
   dmToolSchemas,
+  rollAnswerSchemas,
   MAX_EFFECTS,
   MAX_OWNERS,
   MAX_PATH_STOPS,
@@ -391,6 +392,12 @@ const rollAnswerFields = {
   total: dmToolSchemas.rollTotal.optional(),
   result: dmToolSchemas.rollResult.optional(),
   noRoll: z.literal(true).optional(),
+  // Wave 7: a rolled answer's dice and provenance (docs/design-v1-dice.md 5.1, docs/design-v1-roll-request.md 1.1).
+  tag: id.optional(),
+  dice: diceSchemas.diceResult.optional(),
+  typedBonus: z.literal(true).optional(),
+  mark: dmToolSchemas.rollResult.optional(),
+  changed: rollAnswerSchemas.rollChange.optional(),
 };
 const rollTarget = z
   .strictObject({
@@ -399,6 +406,7 @@ const rollTarget = z
     ...rollAnswerFields,
     by: id.optional(),
     previous: z.strictObject(rollAnswerFields).optional(),
+    change: rollAnswerSchemas.rollChange.optional(),
   })
   .refine((t) => (t.tokenId === undefined) !== (t.characterId === undefined), { message: "a roll target is one token or one character" });
 /** Never with `dcHidden`, which only player projections carry. */
@@ -410,6 +418,8 @@ const rollRequest = z.strictObject({
   dcShown: z.boolean(),
   resultShown: z.boolean(),
   note: shortText.optional(),
+  spell: z.literal(true).optional(),
+  cause: z.literal("saveEnds").optional(),
   at: iso,
   targets: z.array(rollTarget).min(1).max(LIMITS.rollTargets),
 });
@@ -521,6 +531,11 @@ const logEvent = z.discriminatedUnion("type", [
     total: dmToolSchemas.rollTotal.optional(),
     result: dmToolSchemas.rollResult.optional(),
     noRoll: z.literal(true).optional(),
+    dice: diceSchemas.diceResult.optional(),
+    typedBonus: z.literal(true).optional(),
+    tag: id.optional(),
+    changed: rollAnswerSchemas.rollChange.optional(),
+    mark: z.literal(true).optional(),
   }),
   // A free roll's line with what was drawn (docs/design-v1-dice.md 5.3).
   z.strictObject({

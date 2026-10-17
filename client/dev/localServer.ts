@@ -1,4 +1,4 @@
-import { resolveDiceOp } from "#shared/dice/resolve.ts";
+import { isDiceOp, resolveDiceOp } from "#shared/dice/resolve.ts";
 import { serverDraw } from "#shared/dice/roll.ts";
 import { allKeys, dependents, diffProjection, hash128, heldOf, projectEntity, projectState } from "#shared/project.ts";
 import { canApply } from "#shared/permissions.ts";
@@ -103,7 +103,7 @@ export class LocalServer {
         continue;
       }
       // The fixture rolls with the server's resolve (docs/design-v1-dice.md 4.2), with a stand-in batch id: it keeps no receipts.
-      if (next.t === "dice.roll") {
+      if (isDiceOp(next)) {
         const resolved = resolveDiceOp(next, this.state, { draw: serverDraw, batch: hash128(`${this.viewer.memberId}\n${next.tag}`).slice(0, 16) });
         if (!resolved.ok) {
           rejects.push({ n, code: resolved.code, message: resolved.message });

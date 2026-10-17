@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { LIMITS, serializedBytes } from "./limits.ts";
-import { applyMode, diceCount, parseFormula, type Formula } from "./dice/formula.ts";
+import { applyMode, diceCount, parseExtra, parseFormula, type Formula } from "./dice/formula.ts";
 import { ICON_KEY_RE } from "./imageRef.ts";
 import {
   ABILITY_KEYS,
@@ -901,8 +901,46 @@ function diceFormulas(rolls: readonly { formula: string; mode?: "adv" | "dis" }[
   return { ok: true, formulas };
 }
 
+/**
+ * A request's answer rolled on the server (docs/design-v1-dice.md 4.1, 7):
+ * `extra` adds dice and numbers after the d20 and the bonus, `bonus` is the
+ * player's own, used only where the server knows none, `unanswered` rolls
+ * only a creature still waiting, and `change` is the DM's Allow of the ask
+ * with that id, which rolls nothing else.
+ */
+const rollDiceFields = {
+  tag: id,
+  rollId: id,
+  target: actorTarget,
+  choice: rollChoiceIndex.optional(),
+  mode: advantageMode.optional(),
+  cancelled: z.literal(true).optional(),
+  extra: line(LIMITS.diceExtraChars).optional(),
+  bonus: z.number().int().min(-20).max(30).optional(),
+  unanswered: z.literal(true).optional(),
+  change: id.optional(),
+};
+
+/** A death save rolled on the server and counted from the state then (docs/design-v1-roll-options.md 4.3). */
+const deathRollFields = {
+  tag: id,
+  target: actorTarget,
+  mode: advantageMode.optional(),
+  cancelled: z.literal(true).optional(),
+  extra: line(LIMITS.diceExtraChars).optional(),
+};
+
+/** An extra that parses, in the grammar's own words when it does not. */
+function extraParses(o: { extra?: string | undefined }, ctx: z.RefinementCtx): void {
+  if (o.extra === undefined) return;
+  const parsed = parseExtra(o.extra);
+  if (!parsed.ok) ctx.addIssue({ code: "custom", message: parsed.error });
+}
+
 /** What a stored `sys.dice` asked: the client op's shape and length, with no formula parsed, so a later grammar never stops its replay. */
 const diceRollAsked = z.strictObject({ t: z.literal("dice.roll"), ...diceRollFields });
+const rollDiceAsked = z.strictObject({ t: z.literal("roll.dice"), ...rollDiceFields });
+const deathRollAsked = z.strictObject({ t: z.literal("actor.deathRoll"), ...deathRollFields });
 
 /** What the server drew for one roll (DiceResult). Bounded by shape alone, as `asked` is. */
 const diceResult = z.strictObject({
@@ -1240,6 +1278,14 @@ export const clientOps = [
       else if (checked.formulas.reduce((n, f) => n + diceCount(f), 0) > LIMITS.dicePerOp) ctx.addIssue({ code: "custom", message: "A roll needs 1 to 100 dice, as 1d20+5." });
     })
     .refine((o) => serializedBytes(o) <= LIMITS.diceOpBytes, { message: "That is too much to roll at once. Roll fewer at a time." }),
+  /** A request's answer rolled on the server (docs/design-v1-dice.md 7). The Allow of an ask carries nothing else that rolls. */
+  op("roll.dice", rollDiceFields)
+    .superRefine(extraParses)
+    .refine((o) => o.change === undefined || (o.mode === undefined && o.cancelled === undefined && o.extra === undefined && o.bonus === undefined && o.choice === undefined && o.unanswered === undefined), {
+      message: "an allowed change rolls only what the ask names",
+    }),
+  /** A death save rolled on the server (docs/design-v1-dice.md 4.1), permitted as `actor.deathSave` is. */
+  op("actor.deathRoll", deathRollFields).superRefine(extraParses),
   op("undo", {
     /**
      * The `n` of this client's op that made the step the undo is meant for,
@@ -1309,9 +1355,11 @@ export const serverOnlyOps = [
    * every die drawn. The reducer only copies them, so replay never rolls.
    */
   op("sys.dice", {
-    asked: z.discriminatedUnion("t", [diceRollAsked]),
+    asked: z.discriminatedUnion("t", [diceRollAsked, rollDiceAsked, deathRollAsked]),
     batch: z.string().regex(/^[A-Za-z0-9_-]{16}$/, "not a batch id"),
     results: z.array(diceResult).min(1).max(LIMITS.diceRollsPerOp),
+    /** A request's answer rolled with the bonus the player typed, since the server knew none (4.1). */
+    typedBonus: z.literal(true).optional(),
   }),
 ] as const;
 
@@ -1461,6 +1509,16 @@ export const dmToolSchemas = {
 };
 /** Wave 7's shapes, so the stored-state schema checks imported dice lines by the same bounds (docs/design-v1-dice.md 5.3). */
 export const diceSchemas = { diceResult, critOn, advantageMode };
+/** Wave 7's answer fields, so the stored-state schema checks imported requests and lines by the same bounds. */
+export const rollAnswerSchemas = {
+  rollChange: z.strictObject({
+    id,
+    on: id,
+    reason: z.enum(["heroic-inspiration", "halfling-luck", "lucky", "bardic-inspiration", "fix-total"]),
+    face: z.number().int().min(0).max(LIMITS.dicePerOp + 2).optional(),
+    die: z.union([z.literal(6), z.literal(8), z.literal(10), z.literal(12)]).optional(),
+  }),
+};
 /** A handout's pages and audience, so the stored-state schema checks imports by the same bounds (docs/design-v1-pdf-handouts.md 3.3). */
 export const handoutSchemas = { handoutPage, handoutPages, handoutTo };
 /** A document as its create op carries it, for the upload job to check its save before it sends it. */

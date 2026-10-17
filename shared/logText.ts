@@ -64,8 +64,35 @@ export function rollText(data: RollEvent, who: string): string {
     if (data.result === undefined) return `${who} answered ${test}${dc}.`;
     return `${who} ${data.result === "pass" ? "passed" : "failed"} ${test}${dc}.`;
   }
-  const result = data.result !== undefined ? `: ${data.result}` : "";
-  return `${who} rolled ${data.total} on ${test}${dc}${result}.`;
+  // A save its condition failed says which, with its result (docs/design-v1-dice.md 5.5).
+  const failed = data.result === "fail" && data.dice?.fails ? `: fails (${effectName(data.dice.fails)})` : undefined;
+  const result = failed ?? (data.result !== undefined ? `: ${data.result}` : "");
+  if (!data.dice) return `${who} rolled ${data.total} on ${test}${dc}${result}.`;
+  const dice = answerDice(data.dice, data.typedBonus === true);
+  switch (data.changed?.reason) {
+    case "heroic-inspiration":
+    case "halfling-luck":
+      return `${who} rerolled ${count(data.total)} (${CHANGE_NAMES[data.changed.reason]}, ${dice}) on ${test}${dc}${result}.`;
+    case "lucky":
+      return `${who} used Lucky: ${count(data.total)} (${dice}) on ${test}${dc}${result}.`;
+    case "bardic-inspiration": {
+      const added = data.dice.faces.at(-1) ?? 0;
+      return `${who} added Bardic Inspiration's 1d${data.changed.die ?? "?"}: ${count(added)}, now ${count(data.total)} on ${test}${dc}${result}.`;
+    }
+    default:
+      return `${who} rolled ${count(data.total)} (${dice}) on ${test}${dc}${result}.`;
+  }
+}
+
+const CHANGE_NAMES = { "heroic-inspiration": "Heroic Inspiration", "halfling-luck": "Halfling Luck" } as const;
+
+/** A rolled answer's dice inside its line: "1d20+5: 12", "1d20+3, your bonus: 9", "1d20+5 with advantage: 14, 7 dropped". */
+function answerDice(result: DiceResult, typedBonus: boolean): string {
+  const terms = rolledTerms(result);
+  const parsed = parseFormula(result.formula);
+  const formula = parsed.ok ? formatFormula(parsed.formula, result.mode) : result.formula;
+  const faces = terms ? terms.flatMap((t) => ("kept" in t ? t.faces.map((face, i) => (t.kept[i] ? count(face) : `${count(face)} dropped`)) : [])) : [];
+  return `${formula}${typedBonus ? ", your bonus" : ""}${faces.length > 0 ? `: ${faces.join(", ")}` : ""}`;
 }
 
 /** A count with thousands separators, as dice text writes every number. */

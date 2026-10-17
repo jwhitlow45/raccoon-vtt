@@ -275,6 +275,11 @@ function forDm(op: Op, c: Check): Decision {
       return op.patch.access === undefined ? OK : pageReader(c, op.patch.access);
     case "dice.roll":
       return diceRollCheck(c, op);
+    case "roll.dice":
+      return rollDiceCheck(c, op);
+    // The DM's death roll needs a creature that exists, checked before anything is drawn.
+    case "actor.deathRoll":
+      return ("tokenId" in op.target ? c.state.tokens[op.target.tokenId] : c.state.characters[op.target.characterId]) ? OK : GONE;
     // The rule of the op it carries (docs/design-v1-dice.md 4.2).
     case "sys.dice":
       return forDm(op.asked, c);
@@ -395,6 +400,8 @@ function forPlayer(op: Op, c: Check): Decision {
 
     case "dice.roll":
       return diceRollCheck(c, op);
+    case "roll.dice":
+      return rollDiceCheck(c, op);
     case "sys.dice":
       return forPlayer(op.asked, c);
 
@@ -469,6 +476,8 @@ function forPlayer(op: Op, c: Check): Decision {
     }
 
     case "actor.deathSave":
+    // A death save rolled on the server, as its counts are set (docs/design-v1-dice.md 4.1).
+    case "actor.deathRoll":
     case "actor.rest": {
       const t = c.target(op.target);
       if (!t.visible) return GONE;
@@ -717,6 +726,35 @@ function rollAnswerCheck(c: Check, op: OpOf<"roll.answer">): Decision {
     return refuse("forbidden", "players send the total they rolled, or fail a saving throw without rolling");
   }
   return OK;
+}
+
+/** The refusal of a roll for a creature that has an answer by now (docs/design-v1-dice.md 4.3), a player's or one with `unanswered`. */
+export const ANSWERED_MEANWHILE = "It was answered meanwhile.";
+/** The refusal of the DM's Allow of an ask that is no longer the pending one (docs/design-v1-dice.md 4.3). */
+export const SETTLED_MEANWHILE = "It was settled meanwhile.";
+
+/**
+ * A request's answer rolled on the server (docs/design-v1-dice.md 4.3), as
+ * `roll.answer` is checked: a player for a target they own now, else
+ * `gone`, and the DM for any target. A player rolls only a creature still
+ * waiting, as does any roll with `unanswered`, so a DM's Roll that crosses a
+ * player's answer never replaces it. `change`, the DM's Allow, needs the
+ * target's pending ask to have that id, to name the current answer and that
+ * answer to be rolled, so an ask replaced or withdrawn while the Allow
+ * travels, or a second device's Allow, draws nothing. All before any draw.
+ */
+function rollDiceCheck(c: Check, op: OpOf<"roll.dice">): Decision {
+  const request = c.state.rolls[op.rollId];
+  if (!request || !c.visible(keys.roll(op.rollId))) return GONE;
+  const target = request.targets.find((t) => ("tokenId" in op.target ? t.tokenId === op.target.tokenId : t.characterId === op.target.characterId));
+  if (!target) return GONE;
+  const player = c.actor.role === "player";
+  if (player && !("tokenId" in op.target ? c.ownsTokenId(op.target.tokenId) : c.ownsCharacterId(op.target.characterId))) return GONE;
+  if (player && op.change !== undefined) return refuse("forbidden", "Only the DM allows a change to a roll.");
+  const answered = target.total !== undefined || target.result !== undefined;
+  if (op.change === undefined) return (player || op.unanswered) && answered ? refuse("invalid", ANSWERED_MEANWHILE) : OK;
+  const ask = target.change;
+  return ask && ask.id === op.change && ask.on === target.tag && target.dice ? OK : refuse("invalid", SETTLED_MEANWHILE);
 }
 
 /** The refusal of a player's roll for a creature they see and do not own (docs/design-v1-dice.md 4.3). */

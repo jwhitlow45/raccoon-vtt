@@ -1,6 +1,6 @@
-import type { DiceResult } from "../model.ts";
+import type { DiceResult, RollChange } from "../model.ts";
 import { randomIndex } from "../passphrase.ts";
-import { applyMode, formatFormula, parseFormula, type AdvantageMode, type DiceTerm, type Formula, type FormulaError, type NumberTerm } from "./formula.ts";
+import { applyMode, FORMULA_ERRORS, formatFormula, parseFormula, type AdvantageMode, type DiceTerm, type Formula, type FormulaError, type NumberTerm, type Term } from "./formula.ts";
 
 /**
  * Rolling a parsed formula, and reading a stored result back
@@ -20,7 +20,7 @@ export type Draw = (sides: number) => number;
 export const serverDraw: Draw = (sides) => randomIndex(sides) + 1;
 
 /** Why a player asks the DM to change a rolled answer (docs/design-v1-roll-request.md 1.1). */
-export type ChangeReason = "heroic-inspiration" | "halfling-luck" | "lucky" | "bardic-inspiration" | "fix-total";
+export type ChangeReason = RollChange["reason"];
 
 export type Rolled = { ok: true; result: DiceResult } | { ok: false; error: FormulaError };
 
@@ -188,4 +188,71 @@ export function rerollable(result: Pick<DiceResult, "formula" | "faces">, reason
   if (reason === "heroic-inspiration") return true;
   if (reason !== "halfling-luck") return false;
   return d20Terms(terms).some((t) => face >= t.first && face < t.first + t.faces.length) && result.faces[face] === 1;
+}
+
+/*
+ * The DM's Allow of a player's ask (5.4), applied to the stored result. Each
+ * keeps every face it does not name, applies the kept rule again and sums
+ * the total again, so the changed answer reads as one roll.
+ */
+
+export const CANNOT_REROLL = "That die cannot be rerolled this way.";
+export const LUCKY_CHANGES_NOTHING = "Lucky changes nothing on this roll.";
+
+export type Changed = { ok: true; result: DiceResult } | { ok: false; error: string };
+
+function withFaces(result: DiceResult, formula: Formula, faces: number[], mode: AdvantageMode | undefined, cancelled: boolean): DiceResult {
+  const out: DiceResult = { formula: formatFormula(formula), faces, total: totalOf(formula, faces) };
+  if (mode) out.mode = mode;
+  if (cancelled) out.cancelled = true;
+  if (result.fails) out.fails = result.fails;
+  return out;
+}
+
+/** A reroll (Heroic Inspiration, Halfling Luck): the one named face drawn again, by `rerollable`'s rule. */
+export function rerolled(result: DiceResult, reason: ChangeReason, face: number, draw: Draw): Changed {
+  const terms = rolledTerms(result);
+  const parsed = parseFormula(result.formula);
+  if (!terms || !parsed.ok || !rerollable(result, reason, face)) return { ok: false, error: CANNOT_REROLL };
+  const owner = terms.find((t): t is Extract<RolledTerm, { kept: boolean[] }> => "kept" in t && face >= t.first && face < t.first + t.faces.length);
+  if (!owner) return { ok: false, error: CANNOT_REROLL };
+  const faces = [...result.faces];
+  faces[face] = draw(owner.term.sides);
+  return { ok: true, result: withFaces(result, parsed.formula, faces, result.mode, result.cancelled === true) };
+}
+
+/**
+ * Lucky (2024): one more advantage source on the roll, resolved by the
+ * cancel rule with what it had (3.3). A normal roll draws one more d20 and
+ * keeps the higher. On a disadvantage roll the two cancel to a normal roll,
+ * so it keeps its first d20 and draws nothing. A roll with advantage
+ * already, or whose sources cancelled, changes nothing.
+ */
+export function withLucky(result: DiceResult, draw: Draw): Changed {
+  if (result.mode === "adv" || result.cancelled) return { ok: false, error: LUCKY_CHANGES_NOTHING };
+  const terms = rolledTerms(result);
+  const parsed = parseFormula(result.formula);
+  if (!terms || !parsed.ok) return { ok: false, error: LUCKY_CHANGES_NOTHING };
+  const at = terms.findIndex((t) => "kept" in t && t.term.sides === 20 && t.term.sign === 1 && (result.mode === "dis" ? t.term.count === 2 && t.term.keep?.high === false : t.term.count === 1 && !t.term.keep));
+  const d20 = terms[at];
+  if (!d20 || !("kept" in d20)) return { ok: false, error: LUCKY_CHANGES_NOTHING };
+  const faces = [...result.faces];
+  const formula: Term[] = [...parsed.formula];
+  if (result.mode === "dis") {
+    faces.splice(d20.first + 1, 1);
+    formula[at] = { kind: "dice", sign: 1, count: 1, sides: 20 };
+    return { ok: true, result: withFaces(result, formula, faces, undefined, true) };
+  }
+  faces.splice(d20.first + 1, 0, draw(20));
+  formula[at] = { kind: "dice", sign: 1, count: 2, sides: 20, keep: { high: true, n: 1 } };
+  return { ok: true, result: withFaces(result, formula, faces, "adv", false) };
+}
+
+/** An added die, Bardic Inspiration's: `+1dN` after the roll, with its new face. */
+export function withDie(result: DiceResult, sides: number, draw: Draw): Changed {
+  const parsed = parseFormula(result.formula);
+  if (!parsed.ok) return { ok: false, error: FORMULA_ERRORS.other };
+  const formula: Formula = [...parsed.formula, { kind: "dice", sign: 1, count: 1, sides }];
+  if (formula.length > 20) return { ok: false, error: FORMULA_ERRORS.terms };
+  return { ok: true, result: withFaces(result, formula, [...result.faces, draw(sides)], result.mode, result.cancelled === true) };
 }

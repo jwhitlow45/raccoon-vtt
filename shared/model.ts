@@ -1218,6 +1218,34 @@ export type RollAnswer = {
    * request is answered. A DM's bare mark never sets it.
    */
   noRoll?: true;
+  /**
+   * Wave 7. The client id of the op that wrote this answer, the key of its
+   * receipt (docs/design-v1-dice.md 1.2). An answer written before wave 7
+   * has none (docs/design-v1-roll-request.md 7.5).
+   */
+  tag?: string;
+  /** Present exactly when the total was rolled on the server, with `fails` on it when a condition failed it (docs/design-v1-dice.md 5.1). */
+  dice?: DiceResult;
+  /** Rolled with a bonus the player typed, since the server knew none for the roll (docs/design-v1-dice.md 4.1). */
+  typedBonus?: true;
+  /** The DM's own mark, kept apart from what a DC gives (docs/design-v1-roll-request.md 1.1). */
+  mark?: "pass" | "fail";
+  /** The ask an allowed change answered (docs/design-v1-dice.md 5.4). */
+  changed?: RollChange;
+};
+
+/**
+ * A player's ask to change a rolled answer (docs/design-v1-roll-request.md
+ * 1.1, docs/design-v1-dice.md 5.4): its own id, the `tag` of the answer it
+ * would change, the reason, and a reroll's face (an index into the
+ * answer's `dice.faces`) or Bardic Inspiration's die.
+ */
+export type RollChange = {
+  id: string;
+  on: string;
+  reason: "heroic-inspiration" | "halfling-luck" | "lucky" | "bardic-inspiration" | "fix-total";
+  face?: number;
+  die?: 6 | 8 | 10 | 12;
 };
 
 /**
@@ -1229,6 +1257,8 @@ export type RollTarget = { tokenId?: TokenId; characterId?: CharacterId } & Roll
     by?: MemberId;
     /** The answer this one replaced, or the one a reopen cleared. */
     previous?: RollAnswer;
+    /** A player's pending ask to change the answer (docs/design-v1-roll-request.md 1.1), which the DM's Allow names by its id. */
+    change?: RollChange;
   };
 
 /**
@@ -1254,6 +1284,10 @@ export type RollRequest = {
   resultShown: boolean;
   /** Single-line text, at most 80 characters: "against the poison". */
   note?: string;
+  /** Wave 7: a save against a spell, which the roll's test carries (docs/design-v1-roll-request.md 1.1, docs/design-v1-dice.md 6.1). */
+  spell?: true;
+  /** Wave 7: public, what the request is for (docs/design-v1-roll-request.md 1.1). */
+  cause?: "saveEnds";
   /** The envelope time it was asked. */
   at: string;
   /** 1 to 50, one per creature. */
@@ -1479,6 +1513,14 @@ export type LogEvent =
       result?: "pass" | "fail";
       /** The player failed the save without rolling, which reaches the creature's players as a total does. */
       noRoll?: true;
+      /** Wave 7: the answer's dice when the server rolled it, and whether with a bonus the player typed (docs/design-v1-dice.md 5.1). */
+      dice?: DiceResult;
+      typedBonus?: true;
+      /** The op that wrote it (docs/design-v1-roll-request.md 7.5), and for an allowed change the ask it answered (5.4). */
+      tag?: string;
+      changed?: RollChange;
+      /** A DM's mark wrote it, which the projection drops when pass or fail is hidden (docs/design-v1-roll-request.md 7.5). */
+      mark?: true;
     }
   /**
    * A free roll on the server (wave 7, docs/design-v1-dice.md 5.1): one line
