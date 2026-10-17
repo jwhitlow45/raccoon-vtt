@@ -7,6 +7,7 @@ import { Input } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
+import { UnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions } from "../../state/view.ts";
 import { MonsterList, type ListedRow } from "../monsters/MonsterList.tsx";
@@ -62,6 +63,8 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name">; 
           </>
         }
       >
+        {/* Its step rises from the bottom on a phone, so a shape other than Wild Shape, which only Take the shape sends, holds it against a swipe (docs/design-v1-sheet-swipe.md 4.6). */}
+        <UnsavedInput unsaved={kind !== "wild"} />
         <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
           <ShapeChoice name={name} creature={picked.name} value={kind} onChange={setKind} />
           <Help>{`The token keeps ${whose(name)} HP, conditions and Passive Perception in either shape.`}</Help>

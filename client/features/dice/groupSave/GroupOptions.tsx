@@ -7,6 +7,7 @@ import { ABILITY_NAMES as ABILITY_SHORT } from "#shared/statBlock.ts";
 import { SKILLS } from "#shared/rules/skills.ts";
 import { Button } from "../../../components/Button.tsx";
 import { displayName } from "../../../lib/scene.ts";
+import { useUnsavedInput, useUnsavedSince } from "../../../lib/sheetSwipe.ts";
 import { theme } from "../../../lib/theme.ts";
 import { useRoomView } from "../../../state/view.ts";
 import { FieldRow, Note, NumberField, Section } from "../../tokens/ui.tsx";
@@ -38,6 +39,8 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
   const open = useGroupSave((s) => s.page);
   const blocked = useRollBlocked();
   const [dc, setDc] = useState<number | null>(null);
+  // Only a tap below sends the DC, so a sheet's swipe springs back once one is typed (docs/design-v1-sheet-swipe.md 4.6). The page it starts takes the DC with it.
+  useUnsavedInput(dc !== null);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [pending, setPending] = useState<StartInput | null>(null);
   const creatures = useMemo<ActorTarget[]>(() => props.tokenIds.map((tokenId) => ({ tokenId })), [props.tokenIds]);
@@ -141,6 +144,8 @@ function SharedAttacks(props: { tokenIds: readonly string[]; blocked: string | n
 function SharedAttack(props: { name: string; each: { creature: ActorTarget; named: import("#shared/dice/bonus.ts").NamedRoll }[]; dice: NonNullable<ReturnType<typeof useDiceView>["dice"]>; blocked: string | null }) {
   const panel = useDicePanel();
   const [ac, setAc] = useState<number | null>(null);
+  // The attack sends the AC, and the field stays to read the hits, so the AC counts from the last attack on (docs/design-v1-sheet-swipe.md 4.6).
+  const sentAc = useUnsavedSince(ac);
   const [tag, setTag] = useState<string | null>(null);
   const [damageTag, setDamageTag] = useState<string | null>(null);
   const receipt = useReceipt(tag);
@@ -158,6 +163,7 @@ function SharedAttack(props: { name: string; each: { creature: ActorTarget; name
     });
     setDamageTag(null);
     setTag(panel.roll(rolls, ac !== null ? { ac } : {}));
+    sentAc();
   };
   const rollDamage = () => {
     const rolls = hits.flatMap(({ i, critical }) => {

@@ -271,7 +271,7 @@ function EffectDetail(props: {
   const [rulesOpen, setRulesOpen] = useState(!canEdit);
   const [error, setError] = useState<string | null>(null);
   // Only its button sends the effect, so a sheet's swipe springs back once anything in the form changed (docs/design-v1-sheet-swipe.md 4.5).
-  useUnsavedSince({ level, counter, spell, label, glyph, color, hidden, triggerShown, form });
+  useUnsavedSince({ level, counter, spell, label, glyph, color, hidden, triggerShown, form, saveForm });
 
   const shownLevel = key === "exhaustion" ? level : (counter ?? undefined);
   const chip = effectChip({ key, label: label || undefined, glyph: glyph || undefined, color, level: shownLevel, spell: spell || undefined });

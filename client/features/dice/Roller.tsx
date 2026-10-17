@@ -6,6 +6,7 @@ import { Input } from "../../components/Field.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
 import { Spinner, useDelayed } from "../../components/Loading.tsx";
 import { ScrollStrip } from "../../components/ScrollStrip.tsx";
+import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { readHistory, readingOf, rollsOf, stepHistory, withHistory, writeHistory } from "./logic.ts";
@@ -119,6 +120,8 @@ export function Roller() {
   const connected = useRoomView((s) => s.connection === "open");
   const panel = useDicePanel();
   const [text, setText] = useState("");
+  // A formula only Roll sends keeps the sheet from a swipe's close, and the field clears once it goes (docs/design-v1-sheet-swipe.md 4.6).
+  useUnsavedInput(text.trim() !== "");
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState<string | null>(null);
   const [history, setHistory] = useState<string[]>(() => readHistory(roomId));

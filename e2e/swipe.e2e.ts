@@ -651,6 +651,20 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await swipe(dmCdp, await headerPoint(sheet), far(r));
     assert.equal(await settled(sheet), "gone", "an empty composer kept the sheet open");
 
+    // A typed dice formula, blurred: only Roll sends it.
+    sheet = await openPanel(dm, "Dice");
+    r = await steadyRect(sheet);
+    const formula = sheet.getByLabel("Dice formula", { exact: true });
+    await formula.fill("2d6+3");
+    await formula.blur();
+    await swipe(dmCdp, await headerPoint(sheet), far(r));
+    assert.equal(await settled(sheet), "rest", "a typed formula let the sheet close");
+    assert.equal(await formula.inputValue(), "2d6+3");
+    await formula.fill("");
+    await formula.blur();
+    await swipe(dmCdp, await headerPoint(sheet), far(r));
+    assert.equal(await settled(sheet), "gone", "an empty formula field kept the sheet open");
+
     // A changed encounter: springs back, and its Back still asks.
     sheet = await openPanel(dm, "Encounters");
     await sheet.getByRole("button", { name: "New encounter" }).click();
