@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { menuAction, openingIndex, TYPEAHEAD_MS, typeahead, type MenuKey } from "./menuKeys.ts";
+import { menuAction, openingIndex, TYPEAHEAD_MS, typeahead, type MenuKey, type OpeningItem } from "./menuKeys.ts";
 
 /*
  * The menu's keys (docs/design-v1-panel-tabs.md 5.2), for the side
@@ -63,12 +63,35 @@ describe("moving in a menu", () => {
 });
 
 describe("the item a key open focuses", () => {
+  const radios = (checked: number): OpeningItem[] => MORE.map((_, i) => ({ checked: i === checked }));
   test("the checked one, else the first, or with Up the last", () => {
-    assert.equal(openingIndex(5, 10, "first"), 5);
-    assert.equal(openingIndex(5, 10, "last"), 5, "Up on More with Monsters open: Monsters");
-    assert.equal(openingIndex(-1, 10, "first"), 0);
-    assert.equal(openingIndex(-1, 10, "last"), 9);
-    assert.equal(openingIndex(-1, 0, "first"), -1, "an empty menu");
+    assert.equal(openingIndex(radios(5), "first"), 5);
+    assert.equal(openingIndex(radios(5), "last"), 5, "Up on More with Monsters open: Monsters");
+    assert.equal(openingIndex(radios(-1), "first"), 0);
+    assert.equal(openingIndex(radios(-1), "last"), 9);
+    assert.equal(openingIndex([], "first"), -1, "an empty menu");
+  });
+
+  // docs/design-v1-split-panel.md 6: "Two panels" heads More's menu and never takes the place a key open lands on.
+  test("the opening item skips a checkbox, checked or not", () => {
+    const withSplit = (on: boolean, checked: number): OpeningItem[] => [{ kind: "checkbox", checked: on }, ...radios(checked)];
+    assert.equal(openingIndex(withSplit(true, -1), "first"), 1, "the first panel, not Two panels");
+    assert.equal(openingIndex(withSplit(false, -1), "first"), 1);
+    assert.equal(openingIndex(withSplit(true, 4), "first"), 5, "the checked panel");
+    assert.equal(openingIndex(withSplit(true, -1), "last"), 10, "with Up, the last panel");
+    assert.equal(openingIndex([{ kind: "checkbox" }, { kind: "checkbox" }], "last"), 1, "a menu of checkboxes alone opens at its end");
+  });
+});
+
+describe("a disabled item", () => {
+  test("takes focus as any item and picks nothing, its keys still marked used", () => {
+    const disabled = (i: number) => i === 0;
+    assert.deepEqual(menuAction(key("ArrowDown"), 10, 11, false, disabled), { type: "focus", index: 0 }, "Down from the last reaches it");
+    assert.deepEqual(menuAction(key("ArrowDown"), 0, 11, false, disabled), { type: "focus", index: 1 }, "and moves on past it");
+    assert.deepEqual(menuAction(key("Home"), 5, 11, false, disabled), { type: "focus", index: 0 });
+    assert.deepEqual(menuAction(key("Enter"), 0, 11, false, disabled), { type: "focus", index: 0 }, "Enter stays on it");
+    assert.deepEqual(menuAction(key(" "), 0, 11, false, disabled), { type: "focus", index: 0 }, "Space stays on it");
+    assert.deepEqual(menuAction(key("Enter"), 1, 11, false, disabled), { type: "pick", index: 1 }, "the next item picks");
   });
 });
 

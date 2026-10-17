@@ -29,8 +29,12 @@ export type MenuAction =
  * Every action but "none" is marked used (preventDefault), so no room
  * shortcut runs while focus is in a menu: a letter goes to an item rather
  * than picking a tool, and S does not hide the side panel.
+ *
+ * A disabled item (`disabled`) takes focus, so its description is heard
+ * and the keys move past it as past any other, but Enter and Space on it
+ * pick nothing: focus stays on it, and the keys are still marked used.
  */
-export function menuAction(e: MenuKey, index: number, count: number, tiles: boolean): MenuAction {
+export function menuAction(e: MenuKey, index: number, count: number, tiles: boolean, disabled: (index: number) => boolean = () => false): MenuAction {
   if (e.ctrlKey || e.metaKey || e.altKey || count === 0) return { type: "none" };
   const next = (index + 1) % count;
   const previous = index <= 0 ? count - 1 : index - 1;
@@ -49,19 +53,29 @@ export function menuAction(e: MenuKey, index: number, count: number, tiles: bool
       return { type: "focus", index: count - 1 };
     case "Enter":
     case " ":
-      return index >= 0 ? { type: "pick", index } : { type: "none" };
+      if (index < 0) return { type: "none" };
+      return disabled(index) ? { type: "focus", index } : { type: "pick", index };
   }
   return e.letter !== null ? { type: "type", letter: e.letter } : { type: "none" };
 }
 
+/** What the opening item is chosen by: whether an item is one of the menu's one choice ("radio", the default) and whether it is checked. */
+export type OpeningItem = { kind?: "radio" | "checkbox"; checked?: boolean };
+
 /**
- * The item a key open focuses: the checked one (`checked`, -1 with none),
- * else the first, or with Up ("last") the last.
+ * The item a key open focuses: the checked one, else the first, or with
+ * Up ("last") the last. Only radio items count, so a checkbox at the top
+ * of the menu, such as More's "Two panels" (docs/design-v1-split-panel.md
+ * 6), never takes the place a key open lands on, checked or not. A menu
+ * of checkboxes alone opens at its first or last.
  */
-export function openingIndex(checked: number, count: number, from: "first" | "last"): number {
-  if (count === 0) return -1;
-  if (checked >= 0 && checked < count) return checked;
-  return from === "last" ? count - 1 : 0;
+export function openingIndex(items: readonly OpeningItem[], from: "first" | "last"): number {
+  if (items.length === 0) return -1;
+  const radio = items.flatMap((item, i) => ((item.kind ?? "radio") === "radio" ? [i] : []));
+  const checked = radio.find((i) => items[i]!.checked === true);
+  if (checked !== undefined) return checked;
+  if (radio.length === 0) return from === "last" ? items.length - 1 : 0;
+  return from === "last" ? radio[radio.length - 1]! : radio[0]!;
 }
 
 /** How long typed letters run together into one prefix. */

@@ -2,6 +2,7 @@ import { Fragment, useId, useLayoutEffect, useRef, type KeyboardEvent, type Reac
 import { flushSync } from "react-dom";
 import { theme } from "../lib/theme.ts";
 import { letterOf } from "../state/shortcuts.ts";
+import { Icon } from "./Icon.tsx";
 import { buttonLook } from "./looks.ts";
 import { menuAction, openingIndex, typeahead, type Typed } from "./menuKeys.ts";
 import { sectionLabelLook } from "./Panel.tsx";
@@ -14,7 +15,11 @@ import { focusInView, usePopoverContext } from "./Popover.tsx";
  * so all three take the same keys. Render it inside a "menu" Popover.
  *
  * `role="menu"` named by `label`, its items `menuitemradio`, the one in
- * use checked, since choosing among them is one choice. A section's
+ * use checked, since choosing among them is one choice. An item may be a
+ * `menuitemcheckbox` instead, a switch of its own beside that choice, such
+ * as More's "Two panels" (docs/design-v1-split-panel.md 6), and any item
+ * may be disabled: it takes focus, so its description is heard, and picks
+ * nothing. A section's
  * heading is hidden text that names its `role="group"`, and a section may
  * start after a `role="separator"` line. Keys (components/menuKeys.ts):
  * Down and Up, or in tiles also Right and Left, move and wrap, Home and
@@ -32,8 +37,14 @@ export type MenuItem = {
   badge?: ReactNode;
   /** Its description (`aria-describedby`), such as "Pick again to hide its options." */
   description?: string;
-  /** A tile's glyph, above its words. */
+  /** A tile's glyph, above its words, or a row's, before them. */
   glyph?: ReactNode;
+  /** "radio" (the default): one of the menu's one choice. "checkbox": a switch of its own, checked in the pressed look with a check mark at its end. */
+  kind?: "radio" | "checkbox";
+  /** `aria-disabled`: it stays focusable and picks nothing. */
+  disabled?: boolean;
+  /** Muted words at a row's end, such as "on top". Hidden from screen readers, since its description says it. */
+  note?: string;
 };
 
 export type MenuSection = {
@@ -70,7 +81,7 @@ export function Menu(props: {
   };
 
   useLayoutEffect(() => {
-    setInsideFocus((from) => focusItem(openingIndex(items.findIndex((item) => item.checked === true), items.length, from)));
+    setInsideFocus((from) => focusItem(openingIndex(items, from)));
     return () => setInsideFocus(null);
   });
 
@@ -81,6 +92,7 @@ export function Menu(props: {
    * falls to the page between the item going and the anchor taking it.
    */
   const pick = (id: string) => {
+    if (items.find((item) => item.id === id)?.disabled === true) return;
     flushSync(() => props.onPick(id));
     handle.close("pick");
   };
@@ -88,7 +100,7 @@ export function Menu(props: {
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.defaultPrevented) return;
     const focused = items.findIndex((item) => nodes.current.get(item.id) === document.activeElement);
-    const action = menuAction({ key: e.key, letter: letterOf(e), ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey }, focused, items.length, tiles);
+    const action = menuAction({ key: e.key, letter: letterOf(e), ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey }, focused, items.length, tiles, (i) => items[i]?.disabled === true);
     if (action.type === "none") return;
     e.preventDefault();
     if (action.type === "focus") focusItem(action.index);
@@ -108,7 +120,10 @@ export function Menu(props: {
 
   const item = (it: MenuItem) => {
     const checked = it.checked === true;
+    const checkbox = it.kind === "checkbox";
+    const disabled = it.disabled === true;
     const described = it.description ? `${ids}-${it.id}` : undefined;
+    const look = buttonLook("quiet", { pressed: checked, disabled });
     return (
       <div
         key={it.id}
@@ -116,12 +131,13 @@ export function Menu(props: {
           if (node) nodes.current.set(it.id, node);
           else nodes.current.delete(it.id);
         }}
-        role="menuitemradio"
+        role={checkbox ? "menuitemcheckbox" : "menuitemradio"}
         aria-checked={checked}
+        aria-disabled={disabled || undefined}
         aria-describedby={described}
         tabIndex={-1}
         onClick={() => pick(it.id)}
-        style={tiles ? { ...TILE, ...buttonLook("quiet", { pressed: checked }) } : { ...ROW, ...buttonLook("quiet", { pressed: checked }) }}
+        style={tiles ? { ...TILE, ...look } : { ...ROW, ...look, ...(disabled ? { cursor: "default" } : null) }}
       >
         {tiles ? (
           <>
@@ -130,8 +146,15 @@ export function Menu(props: {
           </>
         ) : (
           <>
+            {it.glyph ? <span aria-hidden style={{ display: "grid", placeItems: "center", flex: "none" }}>{it.glyph}</span> : null}
             <span style={{ flex: 1, minWidth: 0 }}>{it.title}</span>
+            {it.note ? (
+              <span aria-hidden style={{ flex: "none", color: theme.color.textMuted, fontSize: theme.font.small, fontWeight: theme.weight.regular }}>
+                {it.note}
+              </span>
+            ) : null}
             {it.badge}
+            {checkbox && checked ? <Icon name="check" size="sm" /> : null}
           </>
         )}
         {/* Hidden, so it is no part of the item's name, and still its description. */}
