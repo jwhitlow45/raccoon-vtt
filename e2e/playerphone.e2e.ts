@@ -234,12 +234,15 @@ async function cardInReach(label: string, shot: string): Promise<void> {
   const height = player.viewportSize()!.height;
   assert.ok(box.top >= -0.5 && box.bottom <= height + 0.5, `${label}: the roll card runs off the screen: ${JSON.stringify(box)}`);
   const title = card(player).getByText(/^The DM asks for/);
-  const parts = [
+  // Roll is the card's primary while the creature waits (docs/design-v1-roll-request.md 5.2), so it is in reach too (W7B-P-8).
+  const roll = card(player).getByRole("button", { name: /^Roll .* for / }).first();
+  const parts: (readonly [string, Locator])[] = [
     ["what to roll", title],
     ["Later", card(player).getByRole("button", { name: "Later" })],
+    ...((await roll.count()) > 0 ? [["Roll", roll] as const] : []),
     ["the total", card(player).getByLabel(/^Total /).first()],
     ["Send", card(player).getByRole("button", { name: "Send", exact: true }).first()],
-  ] as const;
+  ];
   const t = await rectOf(title);
   if (t.top >= box.top - 0.5 && t.bottom <= box.bottom + 0.5) {
     for (const [name, part] of parts) assert.ok(await wholeInReach(part), `${label}: ${name} is cut off or takes no tap`);

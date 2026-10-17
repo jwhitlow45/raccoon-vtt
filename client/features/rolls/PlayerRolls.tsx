@@ -337,6 +337,7 @@ export function PlayerRolls() {
       hidden={cardHidden || yieldsToBar}
       stand={stand}
       stickyHeader={stickyHeader}
+      whole={need.whole}
       onMeasure={measured}
       onFold={() => fold(shown.id)}
       onEngage={() => setOpened(shown.id)}
@@ -400,6 +401,8 @@ function RollCard(props: {
   stand: FootStand;
   /** The header sticks to the card's top while the card has room for it and an answer row under it. */
   stickyHeader: boolean;
+  /** At the screen's foot, all it needs to show down to its answer block (FootNeed `whole`), in its own pixels. */
+  whole: number;
   /** At the screen's foot, how tall it must stand to show what matters (FootNeed). */
   onMeasure(need: FootNeed): void;
   onFold(): void;
@@ -484,14 +487,28 @@ function RollCard(props: {
     for (const part of card.children) observer.observe(part);
     return () => observer.disconnect();
   }, [props.sheet, props.cardRef, onMeasure, sticks, shownRequest]);
-  // Shown where it is too short for all of it, the card scrolls just far enough to show its first answer row whole, under the header as it sticks.
+  /*
+   * Shown where it is too short for all of it, the card scrolls to show its
+   * answer block whole under the header as it sticks. Where the block is
+   * taller than that room, its top wins: Roll, Adv and Dis stay in sight
+   * first and the total follows a scroll, since Roll is the card's primary
+   * (docs/design-v1-roll-request.md 5.2). A scroll left from an earlier,
+   * smaller stand never keeps the block's top under the header.
+   */
   useLayoutEffect(() => {
     const card = props.cardRef.current;
     const row = card?.querySelector<HTMLElement>("[data-answer]");
+    const header = headerRef.current;
     if (!props.sheet || props.hidden || !card || !row) return;
-    const bottom = row.offsetTop + row.offsetHeight;
-    if (bottom > card.scrollTop + card.clientHeight) card.scrollTop = bottom - card.clientHeight;
-  }, [props.sheet, props.hidden, props.stand, props.cardRef, sticks]);
+    // How much of the card's top the header covers once it sticks: all of it, from the card's top edge (its `top` takes back the padding).
+    const cover = sticks && header ? header.offsetHeight : 0;
+    const top = row.offsetTop;
+    const bottom = top + row.offsetHeight;
+    let next = card.scrollTop;
+    if (bottom > next + card.clientHeight) next = bottom - card.clientHeight;
+    if (top - cover < next) next = top - cover;
+    card.scrollTop = Math.max(0, next);
+  }, [props.sheet, props.hidden, props.stand, props.cardRef, sticks, props.whole]);
   const body = (
     <>
       <div
@@ -588,7 +605,8 @@ function RollCard(props: {
           ? `min(${screenHeight(70)}, calc(${screenHeight(100)} - ${theme.safe.top} - ${theme.safe.bottom} - ${theme.layout.topBar + theme.layout.toolbar}px))`
           : props.stand === "screen"
             ? `calc(${screenHeight(100)} - ${chrome.safe.top + chrome.toolbar}px)`
-            : `min(${screenHeight(70)}, calc(${screenHeight(100)} - ${chrome.top + (props.stand === "options" ? chrome.bottom : chrome.toolbar)}px))`,
+            : // 70% of the screen, or all it needs where its stand was chosen for having that room (PlayerRolls `tooShort`), so it never scrolls there.
+              `min(max(${screenHeight(70)}, ${props.whole}px), calc(${screenHeight(100)} - ${chrome.top + (props.stand === "options" ? chrome.bottom : chrome.toolbar)}px))`,
         overflowY: "auto",
         overscrollBehavior: "contain",
         display: "grid",
