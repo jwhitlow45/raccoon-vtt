@@ -109,6 +109,13 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `changing an effect on ${target(op.target)}`;
     case "actor.effect.remove":
       return `removing an effect from ${target(op.target)}`;
+    case "actor.outcome": {
+      // A plan names 1 to 100 creatures. The test's smallest op names none.
+      const targets = op.targets ?? [];
+      const first = targets[0];
+      const who = targets.length === 1 && first ? target(first.target) : String(targets.length);
+      return op.label ? `applying ${op.label} to ${who}` : `applying a group save to ${who}`;
+    }
     case "actor.saveDue":
       return op.state === "resolved" ? `accepting a failed save for ${target(op.target)}` : `dismissing a save for ${target(op.target)}`;
     case "character.create":

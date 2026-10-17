@@ -410,8 +410,9 @@ function forPlayer(op: Op, c: Check): Decision {
     case "roll.ask":
     case "roll.reopen":
     case "roll.close":
-    // A save-ends occurrence is the DM's to settle (docs/design-v1-roll-options.md 6.1).
+    // A save-ends occurrence is the DM's to settle, and a group save's outcome the DM's to apply (docs/design-v1-roll-options.md 6.1, 5.5).
     case "actor.saveDue":
+    case "actor.outcome":
       return FORBIDDEN;
 
     case "token.updateMany": {

@@ -197,6 +197,9 @@ const effectBase = {
   triggerShown: z.boolean().optional(),
 };
 
+/** The refusal of an outcome past `LIMITS.outcomeOpBytes`, which the group save checks before any roll. */
+export const OUTCOME_TOO_BIG = "Too much for one step: remove a condition or split the group.";
+
 /** An effect a save at the end of each of the creature's turns ends (docs/design-v1-roll-options.md 6.1). The DC is doc 1's 1 to 50. */
 const effectSave = z.strictObject({
   ability: z.enum(ABILITY_KEYS),
@@ -1259,6 +1262,30 @@ export const clientOps = [
    * rules. One op, so it applies whole or not at all and one undo takes it
    * all back. DM only, since the DM confirms what an area deals.
    */
+  /**
+   * A group save's outcome (docs/design-v1-roll-options.md 5.5 and 8), the
+   * DM's: for each creature, its damage by `actor.hp`'s rules, the
+   * conditions to add as `actor.effects` adds them, the effects to remove,
+   * and one more Legendary Resistance used. Whole or not at all, one undo
+   * step, and its `plan` is its receipt's tag, so a plan sent again applies
+   * at most once. `label` names it for undo: "Fireball".
+   */
+  op("actor.outcome", {
+    plan: id,
+    label: shortText.optional(),
+    targets: z
+      .array(
+        z.strictObject({
+          target: actorTarget,
+          amount: z.number().int().min(1).max(100_000).optional(),
+          effects: z.array(effectInput).min(1).max(LIMITS.outcomeEffectsEach).optional(),
+          remove: z.array(id).min(1).max(LIMITS.outcomeEffectsEach).optional(),
+          resist: z.literal(true).optional(),
+        }),
+      )
+      .min(1)
+      .max(LIMITS.outcomeTargets),
+  }).refine((o) => serializedBytes(o) <= LIMITS.outcomeOpBytes, { message: OUTCOME_TOO_BIG }),
   op("actor.damageMany", {
     hits: z.array(z.strictObject({ target: actorTarget, amount: z.number().int().min(1).max(100_000) })).min(1).max(MAX_ENTRIES_PER_OP),
   }),

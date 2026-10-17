@@ -234,6 +234,15 @@ export const LIMITS = {
   tokensPerManyOp: 100,
   effectsPerManyOp: 100,
   /**
+   * One `actor.outcome` (docs/design-v1-roll-options.md 8, Appendix A): the
+   * most creatures one group save takes, the conditions and removals each
+   * may carry, and its serialized bytes, so 100 creatures with two
+   * conditions each fit under the socket's 64 KiB frame.
+   */
+  outcomeTargets: 100,
+  outcomeEffectsEach: 3,
+  outcomeOpBytes: 56 * 1024,
+  /**
    * Table displays (section 3.1): connected per room, live codes per room,
    * how long a code lives, and the wrong codes one address may try in its
    * own bucket before the growing delays. A display session ends 30 days

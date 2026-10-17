@@ -311,6 +311,34 @@ describe("a request's answer and a death save rolled on the server", () => {
     assert.ok(after, "the token changed with the roll");
     assert.ok(after.deathSaves.ok + after.deathSaves.fail > 0 || after.life === "alive");
   });
+
+  test("a group save's outcome applies once by its plan, from a new tab or after a restart (docs/design-v1-roll-options.md 5.5)", async () => {
+    const room = await setup(t, "Outcome once");
+    const goblin = uuidv7();
+    await room.dm.apply({ t: "token.create", token: { id: goblin, sceneId: room.sceneId, kind: "monster", name: "Goblin", size: "small", x: 2, y: 2, actor: { inline } } } as Op);
+    const plan = uuidv7();
+    const op = { t: "actor.outcome", plan, label: "Fireball", targets: [{ target: { tokenId: goblin }, amount: 3, effects: [{ id: uuidv7(), key: "prone" }] }] } as Op;
+    const first = await send(room.dm, op);
+    assert.deepEqual(first.answer, { ok: true });
+    const hpOf = (ev: Ev) => (ev.changes.find((c) => c.key === `token:${goblin}`) as { value?: { actor: { inline: { hp: { cur: number } } } } } | undefined)?.value?.actor.inline.hp.cur;
+    assert.equal(hpOf(first.ev), 4);
+    const tab = await reconnect(t, room.roomId, room.dmClient);
+    const again = await send(tab, op);
+    assert.deepEqual(again.answer, { ok: true });
+    assert.equal(hpOf(again.ev), undefined, "nothing applied again");
+    await t.restart();
+    const later = await t.connect(room.roomId, room.dmClient);
+    const snap = (await later.snapshot(uuidv7())).state as ProjectedState;
+    assert.equal((snap.tokens[goblin]!.actor as { inline: { hp: { cur: number } } }).inline.hp.cur, 4);
+    const third = await send(later, op);
+    assert.deepEqual(third.answer, { ok: true });
+    assert.equal(hpOf(third.ev), undefined);
+    const rows = await receiptRows(t, room.roomId, room.dmId);
+    assert.deepEqual(
+      rows.filter((r) => r.tag === plan).map((r) => r.state),
+      ["committed"],
+    );
+  });
 });
 
 describe("the day's caps and floods (docs/design-v1-dice.md 1.2 and 4.4)", () => {

@@ -50,6 +50,7 @@ import { journalCreate, journalDelete, journalReveal, journalUpdate } from "./re
 import { actorEffects, tokenDeleteMany, tokenUpdateMany } from "./reducer/many.ts";
 import { pinPut, pinRemove } from "./reducer/pins.ts";
 import { actorSaveDue, endSaves, rollAnswer, rollAsk, rollChange, rollClose, rollReopen } from "./reducer/rolls.ts";
+import { actorOutcome } from "./reducer/outcome.ts";
 import { sysDice } from "./reducer/dice.ts";
 import { handoutClose, handoutDocCreate, handoutDocDelete, handoutShow, logChat, logWhisper, restore } from "./reducer/misc.ts";
 import { sceneSetPhase } from "./reducer/phases.ts";
@@ -204,6 +205,8 @@ function dispatch(tx: Tx, op: Op): void {
       return effectRemove(tx, op);
     case "actor.saveDue":
       return actorSaveDue(tx, op);
+    case "actor.outcome":
+      return actorOutcome(tx, op);
     case "character.create":
       return characterCreate(tx, op);
     case "character.update":

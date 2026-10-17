@@ -44,6 +44,8 @@ const CAPS: ReceiptCaps = { perDay: LIMITS.receiptsPerDay, perPlayer: LIMITS.rec
 
 /** The receipt key an op carries, for every op that rolls or applies: its client `tag`, and a batch's `part`. Null for every other op. */
 export function tagOf(op: Op): { tag: string; part: number } | null {
+  // A group save's outcome is settled by its plan's id (docs/design-v1-roll-options.md 5.5).
+  if (op.t === "actor.outcome") return { tag: op.plan, part: 0 };
   if (!("tag" in op) || typeof op.tag !== "string") return null;
   const part = "part" in op && typeof op.part === "number" ? op.part : 0;
   return { tag: op.tag, part };

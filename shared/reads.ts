@@ -136,6 +136,18 @@ export function reads(op: Op, state: RoomState): Reads {
       return of([holderRead(state, op.target, ["hp", "life", "effects"])]);
     case "actor.damageMany":
       return of(op.hits.map((hit) => holderRead(state, hit.target, ["hp", "life", "effects"])));
+    case "actor.outcome": {
+      const r: Read[] = [];
+      for (const item of op.targets) {
+        r.push(holderRead(state, item.target, ["hp", "life", "effects", "legendary", "deathSaves"]));
+        for (const effect of item.effects ?? []) {
+          const of_ = effect.duration?.of;
+          if (of_ && "tokenId" in of_) r.push({ key: keys.token(of_.tokenId) });
+          else if (of_ && "characterId" in of_) r.push({ key: keys.character(of_.characterId) });
+        }
+      }
+      return of(r);
+    }
     case "actor.deathSave":
       return of([holderRead(state, op.target, ["deathSaves", "life"])]);
     case "actor.life":
