@@ -9,7 +9,7 @@ import { reminderPreset } from "#shared/rules/rollReminders.ts";
 import type { OptionState } from "./optionState.ts";
 import { ReceiptTracker } from "./useReceipt.ts";
 import { watchInitiative, type InitiativeEnv } from "./useRollOption.ts";
-import { asSave, critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, playerCreatures, presetLine, resultWords, routedTest, routeOf, scoreOf, spendOnStart, testLabel, withExtra, withUsed } from "./options.ts";
+import { asSave, creatureKey, critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, playerCreatures, presetLine, resultWords, routedTest, routeOf, scoreOf, spendOnStart, testLabel, withExtra, withUsed } from "./options.ts";
 
 /** The roll options' rules (docs/design-v1-roll-options.md 4.2 and 4.3). */
 
@@ -243,5 +243,18 @@ describe("a player's creatures", () => {
       playerCreatures(view, "p1", scene, (t) => t.name).map((p) => p.key),
       ["c:bree", "t:owl", "t:wolf"],
     );
+  });
+
+  test("a token they own of a character they do not, the DM's NPC lent to them, keyed as its selection is, so its bar's Roll picks it (W7B-R2-2)", () => {
+    const view = room({
+      characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }), sage: character("sage", { name: "Sage", ownerIds: [] }) },
+      tokens: {
+        breeTok: token("breeTok", { kind: "pc", name: "Bree", ownerIds: ["p1"], actor: { ref: "bree" } }),
+        sageTok: token("sageTok", { kind: "npc", name: "Sage", ownerIds: ["p1"], actor: { ref: "sage" } }),
+      },
+    });
+    const picks = playerCreatures(view, "p1", view.tokens.breeTok!.sceneId, (t) => t.name);
+    assert.deepEqual(picks.map((p) => [p.key, p.creature]), [["c:bree", { characterId: "bree" }], ["c:sage", { tokenId: "sageTok" }]]);
+    assert.equal(picks[1]!.key, creatureKey(view, { tokenId: "sageTok" }), "the key a selection of it reads");
   });
 });

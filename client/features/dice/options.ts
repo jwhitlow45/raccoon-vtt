@@ -108,9 +108,9 @@ export type Pickable = { key: string; creature: ActorTarget; name: string; token
 /**
  * A player's creatures (4.1): each character they own and each companion
  * of those characters on the scene, then every other token on the scene
- * they own, such as a summon or a beast token not made a companion, since
- * the server lets a player roll for any creature they own (doc 1 4.3).
- * Objects are never offered.
+ * they own, such as a summon, a beast token not made a companion, or the
+ * DM's NPC lent to them, since the server lets a player roll for any
+ * creature they own (doc 1 4.3). Objects are never offered.
  */
 export function playerCreatures(view: Pick<RoomState, "characters" | "tokens">, me: string, sceneId: string | null, nameOf: (token: RoomState["tokens"][string]) => string): Pickable[] {
   const out: Pickable[] = [];
@@ -126,8 +126,15 @@ export function playerCreatures(view: Pick<RoomState, "characters" | "tokens">, 
     }
   }
   // A player's view of a token they do not own carries no owners (design 7.3), so a missing list is nobody's.
-  const owned = Object.values(view.tokens).filter((t) => t.sceneId === sceneId && t.kind !== "object" && !("ref" in t.actor) && (t.ownerIds ?? []).includes(me) && !listed.has(t.id));
-  for (const token of owned.sort((a, b) => nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true }))) out.push({ key: `t:${token.id}`, creature: { tokenId: token.id }, name: nameOf(token), tokenId: token.id });
+  // A token of a character they do not own, the DM's NPC lent to them, is theirs by the token alone (shared/project.ts ownsToken).
+  const theirsByToken = (t: RoomState["tokens"][string]) => !("ref" in t.actor) || !(view.characters[t.actor.ref]?.ownerIds ?? []).includes(me);
+  const owned = Object.values(view.tokens).filter((t) => t.sceneId === sceneId && t.kind !== "object" && (t.ownerIds ?? []).includes(me) && theirsByToken(t) && !listed.has(t.id));
+  for (const token of owned.sort((a, b) => nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true }))) {
+    // Keyed as creatureKey keys its selection, so the token's bar Roll picks it: a token of a character by that character.
+    const key = "ref" in token.actor ? `c:${token.actor.ref}` : `t:${token.id}`;
+    if (out.some((o) => o.key === key)) continue;
+    out.push({ key, creature: { tokenId: token.id }, name: nameOf(token), tokenId: token.id });
+  }
   return out;
 }
 
