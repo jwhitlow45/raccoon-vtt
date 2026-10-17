@@ -318,18 +318,37 @@ export const RESET_WORDS = "Window back at bottom right";
 /*
  * A docked window narrower than the default width happens only beside a
  * phone's open sideways sheet, and its header follows the width it gets
- * (docs/design-v1-token-window.md 7.1). Each band counts Reset and an
- * elevation badge whether they show or not, so pressing nothing and moving
- * the window never changes the band.
+ * (docs/design-v1-token-window.md 7.1). A header in two rows there left a
+ * short window little more than its header, with Apply out of view (the
+ * build review's W5B-P-3), so the header keeps one row at every width the
+ * window shows at. What gives way first is what the window keeps elsewhere:
+ * an elevation badge moves to the end of the vitals line, under the name,
+ * and the Elevation row still says it. Then, on a touch device, where no
+ * arrow keys move the window, the grip gives way to its drawn dots, which
+ * drag as the header does. Narrower than that row, the window folds into
+ * the sheet's header. Reset counts whether it shows or not, so moving the
+ * window never changes the header. A computer's window is never narrower
+ * than the default width, and should one be, its grip stays a button, the
+ * keys' control, and the name gives up its floor instead.
  */
-/** One row: the grip, the name's 40 px floor, a badge up to "↑120 ft" (about 51 px), Reset and Close, four 4 px gaps and the frame's 26 px. */
-export const HEADER_ROW_MIN = 44 + 40 + 51 + 44 + 44 + 4 * 4 + 26;
-/** Stacked: the grip, Reset and Close at 44 px, two gaps and the frame's 26 px. Narrower, the window folds into the sheet's header. */
-export const WINDOW_FOLD_BELOW = 3 * 44 + 2 * 4 + 26;
+/** The grip as a button, and as the drawn dots a narrow window on a touch device keeps. */
+const GRIP_BUTTON = 44;
+const GRIP_DOTS = 16;
+/** A badge up to "↑120 ft", about 51 px, and its gap. */
+const BADGE = 51 + 4;
+/** One row with the grip, the name's 40 px floor, Reset and Close, three 4 px gaps and the frame's 26 px, and the badge where it shows. */
+export function headerRowMin(grip: "button" | "dots", badge: boolean): number {
+  return (grip === "button" ? GRIP_BUTTON : GRIP_DOTS) + 40 + 44 + 44 + 3 * 4 + 26 + (badge ? BADGE : 0);
+}
+/** Narrower than one row with the dots and no badge, the window folds into the sheet's header. */
+export const WINDOW_FOLD_BELOW = headerRowMin("dots", false);
 
-export function headerBand(width: number): "row" | "stacked" | "fold" {
-  if (width >= HEADER_ROW_MIN) return "row";
-  return width >= WINDOW_FOLD_BELOW ? "stacked" : "fold";
+/** A docked window's header at its width: whether its grip is a button or the dots, and whether an elevation badge stays in it. */
+export function headerLayout(width: number, finePointer: boolean): { grip: "button" | "dots"; badgeInHeader: boolean } {
+  return {
+    grip: finePointer || width >= headerRowMin("button", false) ? "button" : "dots",
+    badgeInHeader: width >= headerRowMin("button", true),
+  };
 }
 
 // ------------------------------------------------------------ the stored size

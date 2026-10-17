@@ -73,7 +73,7 @@ import {
   handleCorner,
   hangBox,
   hasSize,
-  headerBand,
+  headerLayout,
   heldPlace,
   isDefaultSpot,
   keySize,
@@ -316,15 +316,23 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
     </>
   );
 
+  const badgeText = badge ? <span style={{ flex: "none", color: theme.color.accentSoft, fontWeight: theme.weight.bold }}>{badge} ft</span> : null;
+  // A window too narrow for the badge in its header's one row shows it under the name instead (docs/design-v1-token-window.md 7.1).
+  const badgeInHeader = frame.header.badgeInHeader;
+
   return (
     <>
       <BarHeader
         // Two lines of the name at most: the frame's name holds all of it, and the token's plate shows it on the map.
         title={displayName(token)}
-        actions={badge ? <span style={{ flex: "none", color: theme.color.accentSoft, fontWeight: theme.weight.bold }}>{badge} ft</span> : null}
+        actions={badgeInHeader ? badgeText : null}
         onClose={props.onClose}
       />
-      <VitalsLine items={short ? split.line : items} afterTag={revive ? <ReviveButton target={target} describedBy={deadLineId} focusTo={REVIVE_FOCUS_IN_BAR} /> : undefined} />
+      <VitalsLine
+        items={short ? split.line : items}
+        afterTag={revive ? <ReviveButton target={target} describedBy={deadLineId} focusTo={REVIVE_FOCUS_IN_BAR} /> : undefined}
+        end={badgeInHeader ? undefined : badgeText}
+      />
       {deadLine ? (
         <div id={deadLineId} style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>
           {deadLine}
@@ -604,20 +612,23 @@ function CountLegButton(props: { token: ViewToken }) {
 /**
  * What a bar's frame hands its header and its rows: the header's handle,
  * with its grip, and stickiness, Reset while the window docks away from
- * its default (docs/design-v1-token-window.md 4.4), the header's band
- * (7.1), and whether the bar is short.
+ * its default (docs/design-v1-token-window.md 4.4), the narrow header's
+ * grip and badge (7.1), and whether the bar is short.
  */
 type FrameControls = {
   handle: PaneHandle | null;
   sticky: boolean;
   place: { moved: boolean; reset(): void; closeRef: RefObject<HTMLButtonElement | null>; onResetFocus(focused: boolean): void } | null;
-  /** A window narrower than one header row stacks its header (barDock.ts headerBand). */
-  stacked: boolean;
+  /** The grip a button or its dots, and where an elevation badge goes, by the docked window's width (barDock.ts headerLayout). */
+  header: { grip: "button" | "dots"; badgeInHeader: boolean };
   /** The bar has under 300 px where it stands (barButtons.ts barShort), whatever its content. */
   short: boolean;
 };
 
-const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, stacked: false, short: false });
+/** The header wherever the window does not dock, or docks at its full width. */
+const WHOLE_HEADER: FrameControls["header"] = { grip: "button", badgeInHeader: true };
+
+const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, header: WHOLE_HEADER, short: false });
 
 /** Reset's name and tooltip, on every device. */
 const RESET_LABEL = "Reset window position and size";
@@ -633,6 +644,7 @@ function BarHeader(props: { title: string; actions?: ReactNode; onClose(): void;
   const reset = place?.moved ? (
     <IconButton icon="windowHome" label={RESET_LABEL} onClick={place.reset} onFocus={() => place.onResetFocus(true)} onBlur={() => place.onResetFocus(false)} />
   ) : null;
+  const handle = frame.handle && frame.header.grip === "dots" ? { ...frame.handle, grip: { ...frame.handle.grip, dots: true } } : frame.handle;
   return (
     <PaneHeader
       title={props.title}
@@ -641,9 +653,8 @@ function BarHeader(props: { title: string; actions?: ReactNode; onClose(): void;
       onClose={props.onClose}
       closeLabel={props.closeLabel}
       closeRef={place?.closeRef}
-      handle={frame.handle ?? undefined}
+      handle={handle ?? undefined}
       sticky={frame.sticky}
-      stacked={frame.stacked}
       lines={2}
     />
   );
@@ -1009,8 +1020,8 @@ function BarFrame(props: {
       : null;
   // Read from where the bar stands at rest, never from its content or a drag under way, so the short layout, an opened "More stats" and a resize never flip it mid-gesture.
   const short = barShort({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, column, width, size, resizable: finePointer });
-  const stacked = mode === "dock" && headerBand(placed.hang.width) !== "row";
-  const controls: FrameControls = { handle, sticky: mode !== "compact", place, stacked, short };
+  const header = mode === "dock" ? headerLayout(placed.hang.width, finePointer) : WHOLE_HEADER;
+  const controls: FrameControls = { handle, sticky: mode !== "compact", place, header, short };
 
   const { hang } = placed;
   const where = dragBox

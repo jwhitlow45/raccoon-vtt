@@ -214,6 +214,9 @@ function BackButton(props: { back: HeaderBack; ref?: Ref<HTMLButtonElement> }) {
  * start, a button named by `grip.label` that takes the same drag and,
  * while it has focus, the arrow keys (`grip.onKeyDown`). A tap on the grip
  * does nothing. `grip.description` names its keys for a screen reader.
+ * `grip.dots` draws the grip as its dots alone, no button, where a narrow
+ * window on a touch device needs the room (barDock.ts headerLayout): the
+ * row still drags.
  */
 export type PaneHandle = {
   dragging: boolean;
@@ -221,7 +224,7 @@ export type PaneHandle = {
   onPointerMove(e: ReactPointerEvent<HTMLDivElement>): void;
   onPointerUp(e: ReactPointerEvent<HTMLDivElement>): void;
   onPointerCancel(e: ReactPointerEvent<HTMLDivElement>): void;
-  grip: { label: string; description: string; ref?: Ref<HTMLButtonElement>; onKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>): void };
+  grip: { label: string; description: string; ref?: Ref<HTMLButtonElement>; onKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>): void; dots?: boolean };
 };
 
 /** Marks the grip, so the header's handle takes a press on it while it skips the header's other buttons. */
@@ -245,9 +248,7 @@ export const STICKY_HEADER_ATTR = "data-sticky-header";
  * side padding, so the handle and the close never scroll away. `lines`
  * lets the title wrap to that many lines before it is cut short.
  * `beforeClose` sits left of the close, after the actions, as the
- * window's Reset does. `stacked` puts the grip, `beforeClose` and the
- * close on a first row and the title with its actions on a second, for a
- * window too narrow for one row (7.1).
+ * window's Reset does.
  */
 export function PaneHeader(props: {
   title: ReactNode;
@@ -261,11 +262,14 @@ export function PaneHeader(props: {
   handle?: PaneHandle;
   sticky?: boolean;
   lines?: number;
-  stacked?: boolean;
 }) {
   const { handle, sticky, lines } = props;
   const descriptionId = useId();
-  const grip = handle ? (
+  const grip = handle?.grip.dots ? (
+    <span aria-hidden {...{ [GRIP_ATTR]: "" }} style={{ flex: "none", width: 16, display: "grid", placeItems: "center", color: theme.color.textMuted }}>
+      <Icon name="grip" size={20} style={{ margin: "0 -2px" }} />
+    </span>
+  ) : handle ? (
     <>
       <IconButton
         ref={handle.grip.ref}
@@ -296,7 +300,6 @@ export function PaneHeader(props: {
     </strong>
   );
   const close = props.onClose ? <IconButton ref={props.closeRef} icon="close" label={props.closeLabel ?? "Close"} onClick={props.onClose} /> : null;
-  const row = { display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0 } as const;
   return (
     <div
       {...(sticky ? { [STICKY_HEADER_ATTR]: "" } : {})}
@@ -305,7 +308,11 @@ export function PaneHeader(props: {
       onPointerUp={handle?.onPointerUp}
       onPointerCancel={handle?.onPointerCancel}
       style={{
-        ...(props.stacked ? { display: "flex", flexDirection: "column", minWidth: 0 } : { ...row, minHeight: 48 }),
+        display: "flex",
+        alignItems: "center",
+        gap: theme.space(1),
+        minWidth: 0,
+        minHeight: 48,
         ...(handle ? { touchAction: "none", cursor: handle.dragging ? "grabbing" : "grab" } : null),
         ...(sticky
           ? {
@@ -320,28 +327,11 @@ export function PaneHeader(props: {
           : null),
       }}
     >
-      {props.stacked ? (
-        <>
-          <div style={{ ...row, minHeight: 48 }}>
-            {grip}
-            <span style={{ flex: 1 }} />
-            {props.beforeClose}
-            {close}
-          </div>
-          <div style={{ ...row, minHeight: theme.touch }}>
-            {title}
-            {props.actions}
-          </div>
-        </>
-      ) : (
-        <>
-          {grip}
-          {title}
-          {props.actions}
-          {props.beforeClose}
-          {close}
-        </>
-      )}
+      {grip}
+      {title}
+      {props.actions}
+      {props.beforeClose}
+      {close}
     </div>
   );
 }

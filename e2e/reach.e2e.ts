@@ -570,18 +570,21 @@ describe("raccoon-vtt short-screen reach", { timeout: 1_800_000 }, () => {
   }
 
   // The DM beside a sideways sheet: the token window narrows with the room the sheet leaves, and folds into the sheet's header where that is too little.
-  test("4. beside a sideways sheet, the token window moved off its spot with an elevation badge: one row, stacked, or folded into the sheet's header", { skip: ONLY === "player" }, async () => {
+  test("4. beside a sideways sheet, the token window moved off its spot, with and without an elevation badge: a header in one row and Apply clear of the fade, or folded into the sheet's header", { skip: ONLY === "player" }, async () => {
     shotPage = dm;
-    await ops.send({ t: "token.update", tokenId: run.goblin.id, patch: { elevation: 10 } });
     await setFight("none");
+    // Phones sideways at 100% and 130% (W5B-P-3). The badge leaves a header too narrow for it for the vitals line, then the grip gives way to its dots, since the DM's phone has no arrow keys.
     const cases = [
-      { size: { width: 667, height: 375, insets: {} }, scale: 1, band: "row" },
-      { size: { width: 844, height: 390, insets: { side: 47, bottom: 21 } }, scale: 1.3, band: "stacked" },
-      { size: { width: 667, height: 375, insets: {} }, scale: 1.3, band: "stacked" },
-      { size: { width: 480, height: 320, insets: { side: 47, bottom: 21 } }, scale: 1, band: "fold" },
+      { size: { width: 667, height: 375, insets: {} }, scale: 1, badge: "header", grip: "button", fold: false },
+      { size: { width: 844, height: 390, insets: { side: 47, bottom: 21 } }, scale: 1.3, badge: "vitals", grip: "button", fold: false },
+      { size: { width: 844, height: 390, insets: { side: 47, bottom: 21 } }, scale: 1.3, badge: null, grip: "button", fold: false },
+      { size: { width: 667, height: 375, insets: {} }, scale: 1.3, badge: "vitals", grip: "dots", fold: false },
+      { size: { width: 667, height: 375, insets: {} }, scale: 1.3, badge: null, grip: "dots", fold: false },
+      { size: { width: 480, height: 320, insets: { side: 47, bottom: 21 } }, scale: 1, badge: "vitals", grip: "button", fold: true },
     ] as const;
     for (const c of cases) {
-      const label = `DM beside a sheet, ${sizeLabel(c.size, c.scale)}`;
+      const label = `DM beside a sheet, ${sizeLabel(c.size, c.scale)}, ${c.badge ? "with" : "without"} a badge`;
+      await ops.send({ t: "token.update", tokenId: run.goblin.id, patch: { elevation: c.badge ? 10 : 0 } });
       await view(dm, dmCdp, c.size);
       // Moved 16 px up from its default, so Reset shows.
       await dm.evaluate(() => localStorage.setItem("rvtt.tokenBarSpot", '{"corner":"br","x":0,"y":16}'));
@@ -601,7 +604,7 @@ describe("raccoon-vtt short-screen reach", { timeout: 1_800_000 }, () => {
       await dm.getByRole("region", { name: "Panels" }).getByRole("button", { name: "Outliner", exact: true }).tap();
       await dm.locator('section[aria-label="Outliner"]').waitFor();
       await dm.waitForTimeout(400);
-      if (c.band === "fold") {
+      if (c.fold) {
         if (await frame.isVisible()) await miss(`${label}: the window does not fold beside the sheet`);
         const show = dm.getByRole("button", { name: "Show Goblin 1 actions", exact: true });
         await expectReach(label, "Show Goblin 1 actions in the sheet's header", show);
@@ -618,18 +621,55 @@ describe("raccoon-vtt short-screen reach", { timeout: 1_800_000 }, () => {
           await miss(`${label}: the window folded beside the sheet`);
           continue;
         }
-        await expectReach(label, "Move window", frame.getByRole("button", { name: "Move window", exact: true }));
+        const scroller = frame.locator("[data-bar-scroll]");
+        // Apply in view as the window opens, under the header, with nothing scrolled.
+        const shown = await scroller.boundingBox();
+        const apply = await frame.getByRole("button", { name: "Apply", exact: true }).boundingBox();
+        const field = await frame.getByRole("textbox", { name: "HP change" }).boundingBox();
+        const top = await scroller.evaluate((el) => (el as unknown as { scrollTop: number }).scrollTop);
+        if (!shown || !apply || !field || top !== 0 || apply.y + apply.height > shown.y + shown.height + 0.5 || field.y < shown.y) await miss(`${label}: Apply or the HP field is out of view: ${JSON.stringify({ shown, apply, field, top })}`);
+        // And its label clear of the words "Scroll for more": each read from its own line of text, so neither the fade's padding nor the button's own counts.
+        const covered = await frame.evaluate((el) => {
+          type Rect = { top: number; bottom: number };
+          type Node = { tagName: string; textContent: string | null; ownerDocument: { createRange(): { selectNodeContents(n: unknown): void; getBoundingClientRect(): Rect } } };
+          const nodes = Array.from((el as unknown as { querySelectorAll(s: string): ArrayLike<Node> }).querySelectorAll("button, div"));
+          const button = nodes.find((n) => n.tagName === "BUTTON" && n.textContent?.trim() === "Apply");
+          // The innermost box that holds the words: the fade's sticky holder holds them too.
+          const words = nodes.filter((n) => n.tagName === "DIV" && n.textContent === "Scroll for more").pop();
+          if (!button || !words) return null;
+          const text = (n: Node) => {
+            const range = n.ownerDocument.createRange();
+            range.selectNodeContents(n);
+            return range.getBoundingClientRect();
+          };
+          const label = text(button).bottom;
+          const wordsTop = text(words).top;
+          return label > wordsTop + 0.5 ? { label, wordsTop } : null;
+        });
+        if (covered) await miss(`${label}: Apply's label runs under "Scroll for more": ${JSON.stringify(covered)}`);
+        const grip = frame.getByRole("button", { name: "Move window", exact: true });
+        if (c.grip === "button") await expectReach(label, "Move window", grip);
+        else if ((await grip.count()) > 0 || (await frame.locator("[data-pane-grip]").count()) === 0) await miss(`${label}: the grip is not its dots`);
         await expectReach(label, "Reset", frame.getByRole("button", { name: "Reset window position and size", exact: true }));
-        await expectReach(label, "Close", frame.getByRole("button", { name: "Close", exact: true }));
-        const wide = await frame.evaluate((el) => (el as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth > (el as unknown as { clientWidth: number }).clientWidth + 1);
-        if (wide) await miss(`${label}: the window scrolls sideways`);
-        const grip = await frame.getByRole("button", { name: "Move window", exact: true }).boundingBox();
+        const close = frame.getByRole("button", { name: "Close", exact: true });
+        await expectReach(label, "Close", close);
         const name = await frame.locator("strong").first().boundingBox();
-        if (grip && name) {
-          const stacked = name.y >= grip.y + grip.height - 1;
-          if (stacked !== (c.band === "stacked")) await miss(`${label}: the header is ${stacked ? "stacked" : "one row"}, not ${c.band === "stacked" ? "stacked" : "one row"}`);
+        const closeBox = await close.boundingBox();
+        if (name && closeBox && name.y >= closeBox.y + closeBox.height - 1) await miss(`${label}: the name sits under Close, not in the header's one row`);
+        if (c.badge) {
+          const where = (await frame.locator("[data-sticky-header]").getByText("↑10 ft", { exact: true }).count()) > 0 ? "header" : (await frame.locator("[data-vitals]").getByText("↑10 ft", { exact: true }).count()) > 0 ? "vitals" : "nowhere";
+          if (where !== c.badge) await miss(`${label}: the elevation badge is in the ${where}, not the ${c.badge}`);
         }
-        await shots.take(dm, `reach-token-window-beside-sheet-${c.size.width}x${c.size.height}-${Math.round(c.scale * 100)}`);
+        await shots.take(dm, `reach-token-window-beside-sheet-${c.size.width}x${c.size.height}-${Math.round(c.scale * 100)}-${c.badge ? "badge" : "plain"}`);
+        for (const name of ["One size smaller", "One size larger"]) {
+          const b = frame.getByRole("group", { name: "Size", exact: true }).getByRole("button", { name });
+          if ((await b.count()) === 0 || (await b.isDisabled())) continue;
+          await b.evaluate((el) => (el as unknown as { scrollIntoView(o: object): void }).scrollIntoView({ block: "nearest" }));
+          await dm.waitForTimeout(80);
+          await expectReach(label, name, b);
+        }
+        const wide = await scroller.evaluate((el) => (el as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth > (el as unknown as { clientWidth: number }).clientWidth + 1);
+        if (wide) await miss(`${label}: the window scrolls sideways`);
       }
       const closeSheet = dm.getByRole("button", { name: /^Close Outliner/ }).first();
       if (await closeSheet.isVisible()) await closeSheet.tap();

@@ -45,8 +45,8 @@ import {
   isDefaultSpot,
   laneLeft,
   arrowStep,
-  headerBand,
-  HEADER_ROW_MIN,
+  headerLayout,
+  headerRowMin,
   keySpot,
   spotWords,
   WINDOW_FOLD_BELOW,
@@ -360,14 +360,24 @@ describe("the stored spot", () => {
     assert.equal(spotWords({ corner: "br", x: 120, y: 40 }), "Window 120 pixels from the right and 40 pixels from the bottom");
   });
 
-  test("a narrow window's header: one row from 265 px, stacked from 166, folded below, counting Reset and a badge whether they show or not", () => {
-    assert.equal(HEADER_ROW_MIN, 265);
-    assert.equal(WINDOW_FOLD_BELOW, 166);
-    assert.equal(headerBand(316), "row");
-    assert.equal(headerBand(265), "row");
-    assert.equal(headerBand(264), "stacked");
-    assert.equal(headerBand(166), "stacked");
-    assert.equal(headerBand(165), "fold");
+  test("a narrow window's header keeps one row: the badge moves to the vitals line first, then a touch device's grip becomes its dots, and narrower it folds (W5B-P-3)", () => {
+    assert.equal(headerRowMin("button", true), 265);
+    assert.equal(headerRowMin("button", false), 210);
+    assert.equal(headerRowMin("dots", false), 182);
+    assert.equal(WINDOW_FOLD_BELOW, 182);
+    const touch = (width: number) => headerLayout(width, false);
+    assert.deepEqual(touch(316), { grip: "button", badgeInHeader: true });
+    assert.deepEqual(touch(265), { grip: "button", badgeInHeader: true });
+    // 844 x 390 at 130% beside a sheet: 246 px. The grip stays a button, a badge goes under the name.
+    assert.deepEqual(touch(264), { grip: "button", badgeInHeader: false });
+    assert.deepEqual(touch(246), { grip: "button", badgeInHeader: false });
+    assert.deepEqual(touch(210), { grip: "button", badgeInHeader: false });
+    // 667 x 375 at 130%: 189 px. The dots, down to the fold.
+    assert.deepEqual(touch(209), { grip: "dots", badgeInHeader: false });
+    assert.deepEqual(touch(189), { grip: "dots", badgeInHeader: false });
+    assert.deepEqual(touch(182), { grip: "dots", badgeInHeader: false });
+    // A computer keeps the grip a button, the keys' control.
+    assert.deepEqual(headerLayout(189, true), { grip: "button", badgeInHeader: false });
   });
 });
 

@@ -119,10 +119,11 @@ function Unit(props: { unit: VitalUnit }) {
  * none is in the boxes the panel and the bar take, shrinks and wraps
  * inside rather than run out of it. Items stand a little further apart
  * than the units inside them. `afterTag` follows the life tag, where the
- * DM's Revive goes.
+ * DM's Revive goes, and `end` the last item, where a narrow token window's
+ * elevation badge goes.
  */
-export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: ReactNode }) {
-  if (props.items.length === 0) return null;
+export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: ReactNode; end?: ReactNode }) {
+  if (props.items.length === 0 && props.end == null) return null;
   return (
     <div data-vitals="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", rowGap: theme.space(1), columnGap: theme.space(1.5), fontSize: theme.font.body14, minWidth: 0 }}>
       {props.items.flatMap((item, i) =>
@@ -137,6 +138,7 @@ export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: Reac
           return unit.kind === "tag" && props.afterTag ? [shown, <span key={`${item.key}:after`} style={{ display: "inline-flex" }}>{props.afterTag}</span>] : [shown];
         }),
       )}
+      {props.end}
     </div>
   );
 }

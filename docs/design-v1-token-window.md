@@ -20,7 +20,7 @@ The project owner's decisions the same day: "Grow away from walls" (a player's r
 - **Move bar and Reset bar position leave the rows.** The header moves the window as today. Its grip becomes a focusable control, "Move window": it drags, a tap on it does nothing, and while it has focus the arrow keys move the window, Shift by more. The project owner's reset is an icon button in the header, left of Close, "Reset window position and size", shown only while the window is away from its default spot or size. It is the single-pointer way back.
 - **Resizable on a computer.** A round handle at the corner opposite the window's corner, and the two edges that meet there, resize it. A tap on the handle does nothing. The width is exact. The height is a cap: the window is as tall as its content up to that height, and scrolls inside past it, its header kept at the top. The handle, "Resize window", takes the arrow keys. Every limit keeps the whole handle on the map. Phones and touch screens keep today's sizes and get no handle.
 - **Remembered on this device.** A new key, `rvtt.tokenBarSize`, beside `rvtt.tokenBarSpot`. Every token window this device opens takes it. Where the room is smaller, the window shrinks for that opening and the stored size stays.
-- **Narrow windows.** Beside a phone's sideways sheet a docked window can be narrower than its header's row: its header then stacks, and under that it folds into the sheet's header.
+- **Narrow windows.** Beside a phone's sideways sheet a docked window can be narrower than its header's row. Its header keeps one row: the elevation badge moves under the name, then a touch device's grip is drawn as its dots, and under that the window folds into the sheet's header.
 - **Apply stays in view.** A window under 300 px tall takes the token panel design's short layout, so the HP field and Apply show at the smallest height. The group window's HP entry follows the same rule.
 - **A creature's size on the fly.** The DM and the token's owners change it: a Size stepper in the token window, with the rows that say where the creature's body is (Elevation, then Size, then its other images), and a Size field in the token panel's Stats, which also has "Back to Medium" where the creature's own size is known. The footprint keeps its middle, and a shrink on the same device puts the creature back on the square it grew from while it has not moved since. On a scene that blocks moves, every owner's resize is checked like a move: its middle never crosses a wall, and a growth covers every square the creature filled and ends only where a move could end, the least distance from where it stood, or is refused with "No room to grow here". The DM's never are. A resize goes on its maker's undo stack and counts no movement.
 - No new op. The op version goes to 6, since a resize's path changes how a stored size and place update replays, and a path stop gains one optional field. One new localStorage key. One new permission rule and one new pure rule (`shared/rules/resize.ts`).
@@ -101,13 +101,13 @@ So Conditions, Hidden and Multi-select are one line in every case, and nothing t
 [Move window grip] [name, two lines] [elevation badge] [Reset] [Close]
 ```
 
-- **Move window**: a 44 px `<button>` at the header's start holding the six-dot grip (now an `Icon`, `grip`, in `components/Icon.tsx`), named "Move window", with that tooltip. It drags, and with focus its arrow keys move the window (4.3). A tap, Enter or Space does nothing (4.2).
+- **Move window**: a 44 px `<button>` at the header's start holding the six-dot grip (now an `Icon`, `grip`, in `components/Icon.tsx`), named "Move window", with that tooltip. It drags, and with focus its arrow keys move the window (4.3). A tap, Enter or Space does nothing (4.2). A touch device's window under 210 px, beside a sideways sheet, draws the dots alone with no button (7.1).
 - **The name**, two lines at most, as today. It gives way first: below its 40 px floor it shrinks to nothing before any button leaves the window.
-- **The elevation badge**, as today.
+- **The elevation badge**, as today. A window under 265 px shows it under the name instead (7.1).
 - **Reset window position and size**: an `IconButton` left of Close, shown only while the window is away from its default spot or size (4.4). Its icon, `windowHome`, is a frame with its bottom right corner filled and an arrow toward it, so it reads as "back to its place" and never as Undo's curved arrow in the top bar (`RoomChrome.tsx:225`).
 - **Close**, as today.
 
-The grip and Reset show only where the window docks. A spanning bar and the compact overlay have neither, as they had no handle and no Move bar. Where the window is too narrow for this row, the header stacks or the window folds (7.1).
+The grip and Reset show only where the window docks. A spanning bar and the compact overlay have neither, as they had no handle and no Move bar. Where the window is too narrow for this row, the badge moves under the name, the grip becomes its dots, or the window folds (7.1).
 
 ### 4.2 Moving by pointer
 
@@ -189,7 +189,7 @@ The handle is a `<button>`, "Resize window", described (a visually hidden `aria-
 
 ### 5.6 Limits
 
-- **Narrowest: the default width** (3.3). Below it, Conditions, Hidden and Multi-select would leave their line, which the project owner asked to keep stable, and the header's one-row floor (265 px, 7.1) is under it anyway.
+- **Narrowest: the default width** (3.3). Below it, Conditions, Hidden and Multi-select would leave their line, which the project owner asked to keep stable, and the header's whole row (265 px, 7.1) fits it anyway.
 - **Shortest: 148 px** (`MIN_BAR_HEIGHT`, the header and two 44 px rows, the least a docked bar needs). In the short layout Apply ends 131 px below the window's top, inside.
 - **Smallest**: the default width by 148 px, 316 x 148 on macOS.
 - **Widest and tallest**: the window's room (5.3), measured from the anchored edges. The stored size may say more: it is clamped for each opening (section 7).
@@ -232,11 +232,12 @@ One rule: **the window is clamped for this opening, and the stored size stays**.
 
 ### 7.1 Narrow windows
 
-A window narrower than the default width happens only beside a phone's open sideways sheet, where the free area is what is left: 311 px at 667 x 375 at 100%, 246 at 844 x 390 at 130% (47 px insets, the sheet 340), 189 at 667 x 375 at 130% (the sheet 308, its 60%), and 129 at 480 x 320 at 100% (47 px insets, the sheet 288). There the header and the rows follow the width they get, in three bands. Each band counts Reset and an elevation badge whether they show or not, so pressing nothing and moving the window never changes the band.
+A window narrower than the default width happens only beside a phone's open sideways sheet, where the free area is what is left: 311 px at 667 x 375 at 100%, 246 at 844 x 390 at 130% (47 px insets, the sheet 340), 189 at 667 x 375 at 130% (the sheet 308, its 60%), and 129 at 480 x 320 at 100% (47 px insets, the sheet 288). There the header and the rows follow the width they get. The header keeps one row at every width the window shows at. A header in two rows left such a short window little more than its header, with the HP field and Apply under "Scroll for more" (the build review's W5B-P-3). So what gives way first is what the window also shows elsewhere. Reset counts whether it shows or not, so moving the window never changes the header.
 
-- **265 px and wider: one row**, as 4.1: the grip, the name's 40 px floor, a badge up to "↑120 ft" (about 51 px), Reset and Close, with four 4 px gaps and the frame's 26 px. The steady line wraps where the window is under the default width (3.4).
-- **166 to 264 px: the header stacks.** Its first row holds the grip at the start and Reset and Close at the end, its second the name, two lines at most, with the badge after it, as a sheet's stacked header does (`SheetHeader` `stacked`, `components/SheetHeader.tsx:120-131`). 166 is the grip, Reset and Close at 44 px, two gaps and the frame's 26 px. The header is about 48 px taller, and stays sticky.
-- **Under 166 px: the window folds** as under a very short sheet (docs/design-v1-layout-hierarchy.md 4.2): it takes `hidden` with its state kept, and its "Show Thorn actions" joins the sheet's header with the dock's other buttons (`DockHeaderActions`). `foldsUnderSheet` (`pages/fold.ts:33-35`) gains this case. Show closes the sheet, as it does under an upright sheet, and the window opens at its full width again. Only 480 x 320 at 100% with a side sheet is this narrow, and there the window was a 129 px column with 103 px of room for its controls.
+- **265 px and wider: the whole row**, as 4.1: the grip, the name's 40 px floor, a badge up to "↑120 ft" (about 51 px), Reset and Close, with four 4 px gaps and the frame's 26 px. The steady line wraps where the window is under the default width (3.4).
+- **210 to 264 px: the badge moves under the name**, to the end of the vitals line after AC and HP, in its own color. The Elevation row still says it. 210 is the row without it: the grip, the name's floor, Reset and Close, three gaps and the frame.
+- **182 to 209 px: the grip becomes its dots.** On a touch device the grip draws its six dots in 16 px, with no button. The header drags from them as from anywhere else on it, the arrow keys the button took need a keyboard a phone seldom has, and Reset still brings the window home. 182 is the row with the dots. A computer's window is never this narrow (5.6). Should one be, its grip stays a button, the keys' control, and the name gives up its floor instead.
+- **Under 182 px: the window folds** as under a very short sheet (docs/design-v1-layout-hierarchy.md 4.2): it takes `hidden` with its state kept, and its "Show Thorn actions" joins the sheet's header with the dock's other buttons (`DockHeaderActions`). `foldsUnderSheet` (`pages/fold.ts:33-35`) gains this case. Show closes the sheet, as it does under an upright sheet, and the window opens at its full width again. Only 480 x 320 at 100% with a side sheet is this narrow, and there the window was a 129 px column with 103 px of room for its controls.
 
 The compact overlay has no grip and no Reset, so its header is the name, the badge and Close at any width it takes.
 
@@ -385,7 +386,7 @@ The window holds the size where it holds the creature's body on the map, between
 - **Who sees it**: whoever may resize the token now (`canResize`): a player's own creature and their companions, and every token for the DM. Not a locked token for its owners, and not another's creature.
 - **Custom**: a Custom token's row is its size read-only, "Custom, 2 by 3 squares", with ", set by the DM" for its owners. The DM changes it in Stats.
 - **Refused**: "No room to grow here." or "A wall is in the way." shows as the room's refusal toast. The size stays.
-- **The stepper row's width.** A label and a stepper that does not fit beside it wraps under it, right-aligned (`flex-wrap`, the stepper `flex: none` with `margin-left: auto`). One rule for Elevation and Size: it keeps both rows inside the window at any width and font. Measured, the size row needs about 209 px inside the window and Elevation about 214, so both stay one line in every window from 240 px (every computer's, every one-row header, and the stacked one beside a sheet at 246 px) and wrap only in narrower ones: beside a sheet at 189 px, and the narrowest phone's spanning bar (320 px at 130%, 204 inside). Today Elevation runs about 10 px into the padding there. That is fixed by the same rule.
+- **The stepper row's width.** A label and a stepper that does not fit beside it wraps under it, right-aligned (`flex-wrap`, the stepper `flex: none` with `margin-left: auto`). One rule for Elevation and Size: it keeps both rows inside the window at any width and font. Measured, the size row needs about 209 px inside the window and Elevation about 214, so both stay one line in every window from 240 px (every computer's, and the one beside a sheet at 246 px) and wrap only in narrower ones: beside a sheet at 189 px, and the narrowest phone's spanning bar (320 px at 130%, 204 inside). Today Elevation runs about 10 px into the padding there. That is fixed by the same rule.
 - **Short and compact.** The row keeps its place in the short layout: "More stats" holds readings, and Size is a control, after the HP field and Apply, so Apply's reach does not change. The compact overlay scrolls as a whole, with the row in the same order. The upright phone's spanning bar holds it in the same place.
 - **The group window** has no Size row. The DM resizes a group from More, as today.
 
@@ -430,7 +431,7 @@ The project owner asked for it "in stats". The token panel's Stats section (`Tok
 
 - **3.5 and 8.2** (the free area with a rail, "Move bar" and the stored spot following the rail): hold for the stored size too, which clamps into the narrower free area. The rail itself goes with docs/design-v1-tool-options.md (section 12), and nothing here reads it.
 - **4.1 and 4.3** (the side panel hidden, the right safe area): change the free area, so the window clamps and grows back (section 7).
-- **4.2** (the sideways sheet and the very short mode): the window folds as the bar does, its size untouched, and also folds beside a side sheet that leaves it under 166 px (7.1).
+- **4.2** (the sideways sheet and the very short mode): the window folds as the bar does, its size untouched, and also folds beside a side sheet that leaves it under 182 px (7.1).
 - **8.1's table**: every docked row docks as before, a little wider by default (3.3). "480 x 320, 100%" with a side sheet folds the window into the sheet's header (7.1).
 
 ## 10. Accessibility
@@ -498,9 +499,9 @@ The DM's goblin, about 548 px of content at the default width. "Shown" and "hidd
 | 900 x 600, 130% | 692 x 461, phone layout, short | 676 x 332, or 284 if the strip needs a band. With a sheet, 336 wide | 316 x 328 full, or 280 short | 600 x 328, or 280 short | 672 x 328, or 332 beside a sheet | 316 x 148 |
 | 1280 x 480 window, 100% | wide, short: the side panel starts hidden | 1264 x 351, 904 x 351 shown | 316 x 347, scrolls | 600 x 347 | 1260 x 347 | 316 x 148 |
 | 844 x 390, 100%, touch, 47 px sides and 21 px foot | phone on its side | 734 x 241. With a sheet, 441 wide | 316 x 241, short. No handle, size not applied | not applied | not applied | none |
-| 844 x 390, 130%, touch | 649 x 300 | 539 x 151, or 99 with today's Multi-select bar. With a sheet, 246 wide | 316 x 151, short. Compact with today's Multi-select bar, 316 wide, over it. Docked once the options merge (section 12). Beside a sheet, 246 wide: stacked header (7.1) | not applied | not applied | none |
+| 844 x 390, 130%, touch | 649 x 300 | 539 x 151, or 99 with today's Multi-select bar. With a sheet, 246 wide | 316 x 151, short. Compact with today's Multi-select bar, 316 wide, over it. Docked once the options merge (section 12). Beside a sheet, 246 wide: one-row header, the badge under the name (7.1) | not applied | not applied | none |
 | 667 x 375, 100%, touch | phone on its side | 651 x 246. With a sheet, 311 wide | 316 x 246, short. Beside a sheet, 311 wide: one-row header, the steady line wraps (7.1) | not applied | not applied | none |
-| 667 x 375, 130%, touch | 513 x 288 | 497 x 160, 112 with the band. With a sheet, 189 wide | 316 x 160, short. Beside a sheet, 189 wide: stacked header. With the band the sheet is very short and the window folds | not applied | not applied | none |
+| 667 x 375, 130%, touch | 513 x 288 | 497 x 160, 112 with the band. With a sheet, 189 wide | 316 x 160, short. Beside a sheet, 189 wide: one-row header with the grip's dots, the badge under the name. With the band the sheet is very short and the window folds | not applied | not applied | none |
 | 480 x 320, 100%, touch, 47 px sides | phone on its side | 370 x 171. With a sheet, 129 wide | 316 x 171, short. Beside a sheet, 129 wide: folds into the sheet's header (7.1) | not applied | not applied | none |
 | 390 x 844, 320 x 480, any | upright | | Spans, as today, Size row inside. At 320 px and 130% (204 inside) Elevation and Size each wrap to two lines | | | |
 
@@ -520,8 +521,8 @@ At every computer's window the header holds the grip, Reset and Close and some o
 - **Dead**: Revive and its line sit above the HP field, so in the smallest window Apply needs a scroll, while Revive, the control that applies, is in view (as the token panel design accepts at 130%).
 - **Dying**: death saves come after the HP entry, so Apply's reach holds.
 - **HP-less**: no HP entry. The short layout changes nothing for it.
-- **A long name**: two lines in the header at any width, the name giving way first at 265 px, and on its own row when the header stacks.
-- **An elevation badge**: up to "↑120 ft" keeps the name's 40 px floor at 265 px. Longer, the name gives way. A stacked header puts it beside the name.
+- **A long name**: two lines in the header at any width, the name giving way first at 265 px. Beside a sheet at 189 px it keeps 47 px, where even "Goblin 1" breaks inside a word.
+- **An elevation badge**: up to "↑120 ft" keeps the name's 40 px floor at 265 px. Longer, the name gives way. Under 265 px it moves under the name (7.1).
 - **Light shown**: follows the steady line, on it where room is left (3.4).
 - **Custom size**: a read-only size row in the window and in Stats for its owners, "set by the DM". The DM edits it in Stats.
 - **Tiny**: half-cell spots (8.2). Its size row disables "One size smaller". A Tiny grown and shrunk on the same device, unmoved, returns to its quarter.
@@ -533,7 +534,7 @@ At every computer's window the header holds the grip, Reset and Close and some o
 
 - **A stored size larger than the area**: clamped for this opening, kept stored, Reset shown (section 7).
 - **The side panel opened and hidden**: the window shrinks and grows back.
-- **A sideways sheet opened on a phone**: the window narrows with the free area, its header stacking or the window folding by 7.1, and comes back whole when the sheet closes or hides.
+- **A sideways sheet opened on a phone**: the window narrows with the free area, its header keeping one row or the window folding by 7.1, and comes back whole when the sheet closes or hides.
 - **The lane sharing**: stacked, beside and summary as 9.1, the cap after them, the handle's reach kept.
 - **A fight starting**: the band and the cards (section 7). A resize during a turn appends an uncounted resize stop, keeps every earlier leg's feet and diagonals, and may remind of an area entered (8.5, 8.7).
 - **A resize after counted moves, diagonals or Tiny half-cell moves**: those legs keep their feet and the diagonal count runs on (8.7).
@@ -604,13 +605,12 @@ spot bottom left   the handle at the top right
 spot bottom right  the handle at the top left (the default)
 ```
 
-A phone on its side at 844 x 390 at 130% with a side sheet open: the window is 246 px wide, so its header stacks, with Reset counted:
+A phone on its side at 844 x 390 at 130% with a side sheet open: the window is 246 px wide, so its badge moves under the name, with Reset counted:
 
 ```
 +----------------------------+
-| ::                [<>] [X] |
-| Goblin 4  ↑10 ft           |
-| (15) HP 10/10              |
+| :: Goblin 4       [<>] [X] |
+| (15) HP 10/10  ↑10 ft      |
 | [7 or -7         ] [Apply] |
 | ...                        |
 +----------------------------+
@@ -658,8 +658,8 @@ Unit tests, `node:test`:
   - Key steps: 8 and 64 px, clamped, unsnapped, the nearest corner for a move and the kept corner for a resize.
   - The spot's words at a corner, an edge and neither, and the size's words with each limit.
   - `barCover`: a window against the right edge wider than the lane covers from its left, a narrower one covers the lane, one elsewhere picks the largest clear rectangle, and the lane's existing cases hold.
-  - The narrow bands of 7.1: 265 and 264, 166 and 165, with Reset and the badge counted though hidden.
-- `client/pages/fold.test.ts`: `foldsUnderSheet` folds a docked window beside a side sheet under 166 px and not at 166.
+  - The narrow header of 7.1: the badge in the header at 265 and under the name at 264, a touch device's grip a button at 210 and its dots at 209, a computer's a button at any width, and Reset counted though hidden.
+- `client/pages/fold.test.ts`: `foldsUnderSheet` folds a docked window beside a side sheet under 182 px and not at 182.
 - `shared/rules/resize.test.ts`, new:
   - `resizeBase` between every pair of the six sizes from whole and half cell positions: growing covers the old footprint, shrinking lies inside it, ties go to the old top-left, Small and Medium keep their place, Tiny on half cells, a Custom odd width taking the nearest middle, and the scene's edge moving it inside.
   - Growing: no wall (the base), a wall on each side, a corner (Huge grows away from both), round 1's short wall (Gargantuan to (3, 2), not (4, 3)), a 5 ft corridor to Large (none), a 10 ft corridor to Large (fits) and to Gargantuan (none), closed and locked doors counting, an open door not, an unfound secret door counting, a window and a pillar counting, a ground walker beside a 10 ft ledge and a flier above it, the ranking by distance from the current middle with its ties, a squeezed token's middle, and the candidates containing the old footprint and lying inside the scene. Round 2's two cases (a Large to Huge between two pairs of short walls) say "No room to grow here", and never offer (5, 4). For every growth the search allows, in every case above, the remembered return and the undo's footprint lie inside the grown footprint and pass rule 4.
@@ -688,7 +688,7 @@ e2e, one file after another as docs/design-v1-visual.md 5.3 says:
   - New, the handle's reach: at 1280 x 800 with `{"w":4096,"h":4096}` stored, at each of the four corners, with the side panel shown and hidden, and stacked under a concentration card, the topmost element at the disc's center and at its four extreme points, and at each band's middle, is the handle or its band.
   - New, a smaller room: `{"w":1100,"h":700}` at 1280 x 800 with the side panel hidden draws 1100 wide. S shows the side panel and the window is its room's 900, the key unchanged. S again, 1100. At 130% the same key draws 605 x 482, with Reset shown. In a fight with three concentration checks, the window and the cards never meet at the default spot with the stored size, after a resize dropped on the column, and at the smallest size.
   - New, the computer's reach sweep, one page per side resized between steps, misses collected as in `e2e/reach.e2e.ts`: 1280 x 800, 1920 x 1080, 1024 x 768 and 900 x 600 at 100% and 130%, the side panel shown and hidden where it exists, a stored size of none, the smallest and `{"w":4096,"h":4096}`, the DM on a goblin and on Thorn and Pat on Thorn, without a fight and with three checks and a roll card, and at 1024 x 768 and 900 x 600 at 130% with a sheet open on the right. Each time: the window inside its room, Move window, Reset where shown, Close, Resize window and the Size buttons whole on screen and each the topmost element at its center, no horizontal scroll in the scroller, and in the smallest window the HP field and Apply in view without scrolling.
-- `e2e/reach.e2e.ts`: the tool "Multi-select", and Move window whole in reach beside Close wherever the bar docks. New side-sheet steps with the window moved off its spot (Reset shown) and an elevation badge: at 667 x 375 at 100% (311 px, one row), 844 x 390 at 130% and 667 x 375 at 130% (246 and 189 px, stacked header), Move window, Reset, Close and the Size buttons whole in reach and no horizontal scroll, and at 480 x 320 at 100% the window folded with "Show Goblin 4 actions" whole in the sheet's header, its tap bringing the window back with focus on its frame.
+- `e2e/reach.e2e.ts`: the tool "Multi-select", and Move window whole in reach beside Close wherever the bar docks. New side-sheet steps with the window moved off its spot (Reset shown), with and without an elevation badge: at 667 x 375 at 100% (311 px, the whole row), 844 x 390 at 130% (246 px, the badge under the name) and 667 x 375 at 130% (189 px, the grip's dots too), the header in one row, the HP field and Apply in view at once with Apply's label clear of "Scroll for more", Move window or its dots, Reset, Close and the Size buttons whole in reach and no horizontal scroll, and at 480 x 320 at 100% the window folded with "Show Goblin 4 actions" whole in the sheet's header, its tap bringing the window back with focus on its frame.
 - `e2e/tokenpanel.e2e.ts`: test 1's rows read Conditions, Hidden, Multi-select, and Locked, Duplicate, Delete, with Multi-select on Conditions' top. Its `scrollTop` reads (`:207`, `:867`) read `[data-bar-scroll]`. New, sizes:
   - The DM steps a goblin Medium to Large to Huge from the window, its footprint's middle kept, and back to Medium on its own square. Stats holds Size with Custom and "Back to Medium" for a Large goblin. Token settings has no Size. A Custom goblin's window shows "Custom, 2 by 3 squares".
   - Pat grows Thorn in a walled corner of a scene that blocks moves: Huge grows right and down with its core clear of the walls. Shrunk back to Medium without moving, he is on his own square. In a 5 ft corridor, Large says "No room to grow here." and nothing changes. Ctrl+Z after a growth and a hit the DM deals puts Thorn back to Medium where he stood with the damage kept. A drag after a resize is judged at the new size. On a scene that does not block moves, Huge takes the base spot. Pat's locked token shows no Size row and a read-only size in Stats. Pat's Custom token shows "Custom, 2 by 3 squares, set by the DM" in both.
@@ -760,7 +760,7 @@ By default, with the reason in the section named:
 14. A width near the default stores none, and a height near the most it may take stores none (5.4).
 15. A token's window opens scrolled to its top. The group window keeps its scroll (5.7).
 16. A window under 300 px tall takes the short layout, and the group window's HP entry puts Apply first when short (5.8).
-17. Beside a sideways sheet a narrow window stacks its header from 264 px down and folds into the sheet's header under 166 (7.1).
+17. Beside a sideways sheet a narrow window keeps its header in one row, the badge moving under the name from 264 px down and a touch device's grip drawn as dots from 209, and folds into the sheet's header under 182 (7.1).
 18. The shortcut sheet's "Token action bar" becomes "Token window", and its dialogs' section is "Dialogs", as the registry already names it (section 11).
 19. Who changes a size: the DM and the token's owners, companions included, the six sizes for owners and Custom for the DM alone. A locked token takes no owner's resize (8.1).
 20. It is the token's size, not the character's or the stat block's, with "Back to" the base in Stats where one is known (8.8).

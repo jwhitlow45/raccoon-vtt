@@ -32,8 +32,8 @@ import { useRoomView } from "../state/view.ts";
  * that the sheet opens over all of it (`full`, the very short mode of
  * docs/design-v1-layout-hierarchy.md 4.2), as the upright sheet folds, or
  * the room the sheet leaves beside it (`sideRoom`, sideSheetRoom) is too
- * narrow for a docked window's stacked header, as on a phone 480 px wide
- * (docs/design-v1-token-window.md 7.1).
+ * narrow for a docked window's header in its one row, as on a phone 480 px
+ * wide (docs/design-v1-token-window.md 7.1).
  */
 export function foldsUnderSheet(input: { width: number; height: number; sheetOpen: boolean; full?: boolean; sideRoom?: number }): boolean {
   if (!input.sheetOpen) return false;

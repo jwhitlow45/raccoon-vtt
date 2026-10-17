@@ -34,10 +34,11 @@ describe("foldsUnderSheet", () => {
     assert.equal(foldsUnderSheet({ width: 900, height: 1200, sheetOpen: true }), false);
   });
 
-  test("a docked window beside a sideways sheet folds under 166 px of room, and not at 166 (docs/design-v1-token-window.md 7.1)", () => {
+  test("a docked window beside a sideways sheet folds under 182 px of room, one header row with the grip's dots, and not at 182 (docs/design-v1-token-window.md 7.1)", () => {
     assert.equal(foldsUnderSheet({ width: 480, height: 320, sheetOpen: true, sideRoom: 129 }), true);
-    assert.equal(foldsUnderSheet({ width: 480, height: 320, sheetOpen: true, sideRoom: 165 }), true);
-    assert.equal(foldsUnderSheet({ width: 480, height: 320, sheetOpen: true, sideRoom: 166 }), false);
+    assert.equal(foldsUnderSheet({ width: 480, height: 320, sheetOpen: true, sideRoom: 181 }), true);
+    assert.equal(foldsUnderSheet({ width: 480, height: 320, sheetOpen: true, sideRoom: 182 }), false);
+    assert.equal(foldsUnderSheet({ width: 667, height: 375, sheetOpen: true, sideRoom: 189 }), false);
     assert.equal(foldsUnderSheet({ width: 844, height: 390, sheetOpen: true, sideRoom: 246 }), false);
     assert.equal(foldsUnderSheet({ width: 480, height: 320, sheetOpen: false, sideRoom: 129 }), false, "a closed sheet folds nothing");
   });
