@@ -1,4 +1,5 @@
 import { naturalOf } from "../dice/roll.ts";
+import { startsSecret } from "../dice/secret.ts";
 import { healRevivesDead } from "../migrate.ts";
 import type { DiceRoll, LogEvent } from "../model.ts";
 import { ANSWERED_MEANWHILE, SETTLED_MEANWHILE } from "../permissions.ts";
@@ -116,15 +117,16 @@ function rolledAnswer(tx: Tx, op: Sys, asked: Asked<"roll.dice">): void {
  * now, so no later write can overwrite newer counts. 10 or more is a
  * success and less a failure, a natural 1 two failures, and a natural 20
  * regains 1 HP (SRD 5.2.1). A creature no longer dying gets the line and no
- * change. A DM's roll is secret, as every DM roll starts, and a player's
- * open.
+ * change. A DM's roll for a monster is secret, and every other roll open,
+ * as a roll's Secret starts (docs/design-v1-dice.md 17).
  */
 function deathRoll(tx: Tx, op: Sys, asked: Asked<"actor.deathRoll">): void {
   const result = op.results[0];
   if (!result || op.results.length !== 1) throw invalid("a death save rolls once");
   const resolved = tx.resolveActor(asked.target);
   const roll: DiceRoll = { ...result, label: "Death save", ...rollCreature(tx, asked.target) };
-  tx.addEvent({ type: "dice", tag: asked.tag, batch: op.batch, by: tx.actor.memberId, to: tx.actor.role === "dm" ? "dm" : "all", rolls: [roll] });
+  const to = startsSecret(tx.state, tx.actor.role === "dm", [asked.target]) ? "dm" : "all";
+  tx.addEvent({ type: "dice", tag: asked.tag, batch: op.batch, by: tx.actor.memberId, to, rolls: [roll] });
   const actor = resolved.actor;
   if (actor.life !== "dying") return;
   const natural = naturalOf(result);

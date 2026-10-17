@@ -3,10 +3,12 @@ import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { batchRolls } from "#shared/dice/batch.ts";
 import { advantageFields, applyMode, FORMULA_ERRORS, parseFormula, type AdvantageSource } from "#shared/dice/formula.ts";
+import { startsSecret } from "#shared/dice/secret.ts";
 import { uuidv7 } from "#shared/ids.ts";
-import type { DiceRollInput } from "#shared/protocol.ts";
+import type { ActorTarget, DiceRollInput } from "#shared/protocol.ts";
+import type { RoomView } from "../../state/types.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
-import { useRoomView } from "../../state/view.ts";
+import { useRoomStore, useRoomView } from "../../state/view.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender, type RollSender } from "./send.ts";
 
 /**
@@ -36,7 +38,11 @@ export type LastRoll =
 export type DiceState = {
   adv: boolean;
   dis: boolean;
-  /** Null is the role's start: pressed for a DM, whose rolls are behind the screen, not for a player. */
+  /**
+   * Null is the roll's own start (`startsSecret`): pressed for a DM's roll
+   * for a monster, and not for a free formula, a creature a player plays,
+   * or any player's roll.
+   */
   secret: boolean | null;
   version: number;
   last: LastRoll | null;
@@ -56,8 +62,8 @@ export type DicePanelApi = {
   adv: boolean;
   dis: boolean;
   secret: boolean;
-  /** The choices as sources, reset at once. */
-  take(): Taken;
+  /** The choices as sources, reset at once. `creatures` are the ones the roll is for, which set Secret's start. */
+  take(creatures?: readonly ActorTarget[]): Taken;
   /**
    * Rolls on the server. With no `to` it is a panel roll: it takes the
    * choices, goes under the taken Secret, and becomes the sticky line. With
@@ -71,12 +77,12 @@ export type DicePanelApi = {
   again(rolls: readonly DiceRollInput[], to: "all" | "dm"): string | null;
 };
 
-function take(store: StoreApi<DiceState>, dm: boolean): Taken {
+function take(store: StoreApi<DiceState>, start: boolean): Taken {
   const before = store.getState();
   const sources: AdvantageSource[] = [];
   if (before.adv) sources.push({ kind: "adv", from: "pressed" });
   if (before.dis) sources.push({ kind: "dis", from: "pressed" });
-  const secret = before.secret ?? dm;
+  const secret = before.secret ?? start;
   const version = before.version + 1;
   store.setState({ adv: false, dis: false, secret: null, version });
   return {
@@ -122,21 +128,27 @@ function send(sender: RollSender, rolls: DiceRollInput[], envelope: { to: "all" 
 /** What every panel surface calls, without React: the hook below, and the flow test that drives it against a fake server. */
 export type DicePanelActions = Omit<DicePanelApi, "adv" | "dis" | "secret">;
 
-export function createDicePanel(deps: { store: StoreApi<DiceState>; sender: RollSender; dm: boolean }): DicePanelActions {
-  const { store, sender, dm } = deps;
+/**
+ * `secretStart` gives Secret's start for a roll for these creatures, and
+ * with none, for the panel's own: a DM's Dice panel opened for a monster
+ * starts pressed, so the chip shows what its next roll does, a free
+ * formula typed there included.
+ */
+export function createDicePanel(deps: { store: StoreApi<DiceState>; sender: RollSender; secretStart(creatures: readonly ActorTarget[]): boolean }): DicePanelActions {
+  const { store, sender, secretStart } = deps;
   const fail = (error: string) => store.setState({ last: { error, at: Date.now() } });
   return {
-    take: () => take(store, dm),
+    take: (creatures = []) => take(store, secretStart(creatures)),
     press(choice) {
       const s = store.getState();
       const version = s.version + 1;
-      if (choice === "secret") store.setState({ secret: !(s.secret ?? dm), version });
+      if (choice === "secret") store.setState({ secret: !(s.secret ?? secretStart([])), version });
       else if (choice === "adv") store.setState({ adv: !s.adv, dis: false, version });
       else store.setState({ dis: !s.dis, adv: false, version });
     },
     roll(rolls, opts = {}) {
       const panel = opts.to === undefined;
-      const taken = panel ? take(store, dm) : null;
+      const taken = panel ? take(store, secretStart(rolls.flatMap((r) => (r.creature ? [r.creature] : [])))) : null;
       const to = opts.to ?? (taken?.secret ? "dm" : "all");
       const inputs: DiceRollInput[] = [];
       for (const roll of rolls) {
@@ -175,15 +187,27 @@ export function createDicePanel(deps: { store: StoreApi<DiceState>; sender: Roll
   };
 }
 
+/** The creatures a DM's Dice panel is opened for: the selected tokens, whose options it lists (docs/design-v1-roll-options.md 4). */
+function panelCreatures(s: Pick<RoomView, "local">): ActorTarget[] {
+  return s.local.selectedIds.map((tokenId) => ({ tokenId }));
+}
+
+/** Secret's start for a roll for these creatures, or with none for the panel's own (createDicePanel). */
+export function secretStartIn(s: Pick<RoomView, "view" | "you" | "local">, creatures: readonly ActorTarget[]): boolean {
+  if (!s.view || s.you?.role !== "dm") return false;
+  return startsSecret(s.view, true, creatures.length > 0 ? creatures : panelCreatures(s));
+}
+
 /** The panel's rolls and choices for any surface that rolls (8.4). */
 export function useDicePanel(): DicePanelApi {
   const store = useScoped(diceChoicesSlot);
   const sender = useRollSender();
-  const dm = useRoomView((s) => s.you?.role === "dm");
+  const room = useRoomStore();
+  const start = useRoomView((s) => secretStartIn(s, []));
   const adv = useStore(store, (s) => s.adv);
   const dis = useStore(store, (s) => s.dis);
-  const secret = useStore(store, (s) => s.secret ?? dm);
-  const actions = useMemo(() => createDicePanel({ store, sender, dm }), [store, sender, dm]);
+  const secret = useStore(store, (s) => s.secret ?? start);
+  const actions = useMemo(() => createDicePanel({ store, sender, secretStart: (creatures) => secretStartIn(room.getState(), creatures) }), [store, sender, room]);
   return useMemo(() => ({ ...actions, adv, dis, secret }), [actions, adv, dis, secret]);
 }
 

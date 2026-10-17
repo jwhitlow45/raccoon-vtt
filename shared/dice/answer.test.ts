@@ -289,12 +289,17 @@ describe("a death save rolled on the server", () => {
     assert.equal(line.to, "all");
   });
 
-  test("a DM's death roll is secret and an extra adds to the total", () => {
+  test("a DM's death roll for a player's creature is open, one for a monster secret, and an extra adds to the total", () => {
+    // docs/design-v1-dice.md 17: only a DM's roll for a monster starts hidden from players.
     const state = deathRoll(dying(), DM, [8], { extra: "2" });
     const line = state.log.find((e) => e.data?.type === "dice")!.data as Extract<LogEvent, { type: "dice" }>;
-    assert.equal(line.to, "dm");
+    assert.equal(line.to, "all");
     assert.equal((line.rolls[0] as DiceResult).total, 10);
     assert.deepEqual(saves(state).deathSaves, { ok: 1, fail: 0 });
+    const monster = dying();
+    monster.tokens.thorn = { ...monster.tokens.thorn!, kind: "npc", ownerIds: [] };
+    const hidden = deathRoll(monster, DM, [8]).log.find((e) => e.data?.type === "dice")!.data as Extract<LogEvent, { type: "dice" }>;
+    assert.equal(hidden.to, "dm");
   });
 
   test("a player rolls only for a creature of theirs, and the DM for one that exists", () => {

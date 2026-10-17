@@ -53,7 +53,7 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
     if (!start(input)) setPending(input);
   };
   const quick = (test: GroupTest) => {
-    const taken = panel.take();
+    const taken = panel.take(creatures);
     go({ source: { kind: "selection", tokenIds: [...props.tokenIds] }, test, dc, panel: "dice", rollNow: { sources: taken.sources, secret: taken.secret } });
   };
 

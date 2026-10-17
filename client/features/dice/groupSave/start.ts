@@ -43,7 +43,7 @@ export function useStartGroupSave(): (input: StartInput, opts?: { replace?: bool
         source: input.source,
         test: input.test,
         dc: input.dc,
-        // A DM's rolls are behind the screen until the DM shows them, as the panel's Secret starts (doc 1 8.2).
+        // The page rolls the monsters, a player's creature being asked, and a DM's roll for a monster starts hidden from players (doc 1 17).
         secret: input.rollNow?.secret ?? true,
         spell: input.spell ?? false,
         switches: askSwitches(roomId),

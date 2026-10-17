@@ -127,7 +127,7 @@ describe("the Dice panel's flow, randomized (docs/design-v1-dice.md 8.4 and 8.7)
       };
       const sender: RollSender = { dispatch: (op, opts) => roomStore.dispatch(op, opts), connected: () => roomStore.store.getState().connection === "open", receipts: tracker };
       const choices = createStore<DiceState>(() => ({ adv: false, dis: false, secret: null, version: 0, last: null }));
-      const panel = createDicePanel({ store: choices, sender, dm: false });
+      const panel = createDicePanel({ store: choices, sender, secretStart: () => false });
 
       const connect = () => {
         roomStore.prepareHello();
@@ -255,7 +255,8 @@ describe("a roll that cannot go (docs/design-v1-dice.md 4.5 and 11)", () => {
     const tracker = new ReceiptTracker();
     const choices = createStore<DiceState>(() => ({ adv: true, dis: false, secret: null, version: 3, last: null }));
     const full: RollSender = { dispatch: () => 1, connected: () => true, receipts: tracker, ...sender };
-    return { choices, panel: createDicePanel({ store: choices, sender: full, dm: true }) };
+    // A DM's panel: a roll for a creature, here a monster, starts secret, and a free formula in the open (docs/design-v1-dice.md 17).
+    return { choices, panel: createDicePanel({ store: choices, sender: full, secretStart: (creatures) => creatures.length > 0 }) };
   }
 
   test("offline, nothing is sent, the sticky line says why, and the taken choices come back", () => {
@@ -285,6 +286,8 @@ describe("a roll that cannot go (docs/design-v1-dice.md 4.5 and 11)", () => {
     assert.deepEqual(s.last && "error" in s.last ? s.last.error : null, "Advantage and disadvantage need one d20 in the roll.");
     assert.notEqual(panel.roll([{ formula: "2d6" }]), null);
     assert.equal((sent[0] as OpOf<"dice.roll">).rolls[0]?.mode, undefined, "Adv pressed never goes on damage");
-    assert.equal((sent[0] as OpOf<"dice.roll">).to, "dm", "a DM's roll starts secret");
+    assert.equal((sent[0] as OpOf<"dice.roll">).to, "all", "a DM's free formula starts in the open");
+    assert.notEqual(panel.roll([{ formula: "1d20+4", creature: { tokenId: "goblin" } }]), null);
+    assert.equal((sent[1] as OpOf<"dice.roll">).to, "dm", "a DM's roll for a monster starts secret");
   });
 });

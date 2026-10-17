@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { bonusFor } from "#shared/dice/bonus.ts";
+import { startsSecret } from "#shared/dice/secret.ts";
 import { pendingSaves, type PendingSave } from "#shared/rules/saveEnds.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
@@ -117,7 +118,7 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
         if (pending.request) {
           const op = waitingRollOp(pending, preset, chip, actions.newId());
           if (op) card.send(op);
-        } else card.roll([cardRoll(pending.target, bonus, preset, test, chip)], { to: "dm", dc: pending.effect.save.dc });
+        } else card.roll([cardRoll(pending.target, bonus, preset, test, chip)], { to: startsSecret(view, true, [pending.target]) ? "dm" : "all", dc: pending.effect.save.dc });
         return;
       }
       case "pass":

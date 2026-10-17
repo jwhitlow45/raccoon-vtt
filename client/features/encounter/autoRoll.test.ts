@@ -383,7 +383,7 @@ describe("the rolls sent to the server", () => {
     const sent: ClientOp[] = [];
     const store = createStore<DiceState>(() => ({ adv: false, dis: true, secret: false, version: 0, last: null }));
     const sender = { dispatch: (op: ClientOp) => sent.push(op), connected: () => true, receipts: new ReceiptTracker() };
-    const panel = createDicePanel({ store, sender, dm: true });
+    const panel = createDicePanel({ store, sender, secretStart: () => true });
     const groups = planRolls([row("a", { sources: [INVISIBLE] }), row("b", { sources: [INVISIBLE, POISONED] }), row("c")], "each");
     const tag = panel.roll(initiativeRolls(groups), { to: "dm" });
     assert.ok(tag);
@@ -711,7 +711,7 @@ function pressed(before: RoomState, mode: RollMode, faces: readonly number[], op
   if (press.groups.length > 0) {
     const sent: ClientOp[] = [];
     const store = createStore<DiceState>(() => ({ adv: false, dis: false, secret: null, version: 0, last: null }));
-    const panel = createDicePanel({ store, sender: { dispatch: (op) => sent.push(op), connected: () => true, receipts: new ReceiptTracker() }, dm: true });
+    const panel = createDicePanel({ store, sender: { dispatch: (op) => sent.push(op), connected: () => true, receipts: new ReceiptTracker() }, secretStart: () => true });
     const tag = panel.roll(initiativeRolls(press.groups), { to: "dm" });
     assert.ok(tag);
     press = { ...press, tag };

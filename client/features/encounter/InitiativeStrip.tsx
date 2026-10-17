@@ -45,6 +45,7 @@ import { EndTurnPill, Portrait, TimerClock, TURN_PILL_PX } from "./parts.tsx";
 import { RollAlerts } from "../rolls/RollAlerts.tsx";
 import { CARD_MIN_WIDTH } from "../rolls/logic.ts";
 import { bonusFor } from "#shared/dice/bonus.ts";
+import { startsSecret } from "#shared/dice/secret.ts";
 import { creatureRolls } from "../dice/creature.ts";
 import { readUsed } from "../dice/options.ts";
 import { presetFor } from "../dice/presets.ts";
@@ -1255,7 +1256,12 @@ function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone(): void;
   const tap = (action: ConcentrationAction) => {
     switch (action) {
       case "roll":
-        if (bonus !== null && preset) own.roll([cardRoll(prompt.target, bonus, preset, CONCENTRATION_TEST, chip)], { to: dm ? "dm" : "all", ...(prompt.dc !== undefined ? { dc: prompt.dc } : {}) });
+        if (bonus !== null && preset) {
+          // Hidden from players only for a monster's save, as every roll starts (docs/design-v1-dice.md 17).
+          const state = room.getState().view;
+          const to = state && startsSecret(state, dm, [prompt.target]) ? "dm" : "all";
+          own.roll([cardRoll(prompt.target, bonus, preset, CONCENTRATION_TEST, chip)], { to, ...(prompt.dc !== undefined ? { dc: prompt.dc } : {}) });
+        }
         return;
       case "pass":
         props.onDone();

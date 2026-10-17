@@ -9,7 +9,7 @@ The project owner asked on 2026-10-17: "We should also add support for rolling d
 - **One grammar** (`shared/dice/formula.ts`): dice `NdM` and `d%`, keep or drop the highest or lowest (`4d6kh3`, `2d20kl1`, `4d6dl1`), numbers, any mix joined by + and -, then words: `adv` or `dis`, and a label ("2d6+3 fire"). At most 100 dice and 20 parts a roll.
 - **The server rolls.** A client sends `dice.roll` (1 to 20 formulas), `roll.dice` (a request's answer, rolled with the creature's own bonus) or doc 3's `actor.deathRoll`. The room actor turns each into a stored server op, `sys.dice`, holding every die it drew, as it turns an undo into `sys.restore`. The reducer only copies those dice, so replay never rolls. The random source is Web Crypto's `getRandomValues` through the passphrase generator's rejection sampling. An op holds 20 rolls, 3 KiB and 100 dice, so a line stays near the size of the longest whisper the log holds, and larger groups go in batches every viewer sees as one.
 - **The record is a log line.** A free roll writes one `dice` line, a rolled answer the request's `roll` line with its dice. Snapshots, reconnects, older log pages and the session export carry both. A lost result is looked up, never rolled again.
-- **Who sees it.** Everyone, by default. A secret roll ("to the DM only", the DM's default) reaches the DMs and the roller with its numbers, and other players as a bare line, "Mara rolled in secret", only when the same roll made public would have reached them. A hidden creature's roll leaves no trace. A request's answer stays between the DM and the creature's players.
+- **Who sees it.** Everyone, by default. A secret roll ("to the DM only", where a DM's roll for a monster starts) reaches the DMs and the roller with its numbers, and other players as a bare line, "Mara rolled in secret", only when the same roll made public would have reached them. A hidden creature's roll leaves no trace. A request's answer stays between the DM and the creature's players.
 - **Every d20 roll is a `D20Test`**: saves (concentration and save ends included), death saves, checks, initiative and attacks. Advantage and disadvantage travel as named sources and resolve once, just before the op is built. Bonuses come from stat blocks through `creatureBonus` over `RollNumbers`, and attacks, save actions and heals share `NamedRoll`.
 - **The Dice panel**, for everyone: a sticky line with your last result, the formula field and Roll, quick dice, Adv, Dis and Secret as one-roll choices taken at the tap, then doc 3's options, then Recent rolls. Every surface that rolls shows the result at the control that rolled it. Others' rolls show as toasts.
 - **The request card always offers Roll** (doc 4 lays it out): with the creature's bonus, or "Roll d20" and a bonus the player types. A rolled answer is final for its player. The DM approves a reroll or an added die in one tap, and never overwrites an answer that came first.
@@ -323,7 +323,7 @@ Top to bottom, every row whole and none sideways but the dice:
 - **The formula field and Roll.** A one-line input at 16 px, named "Dice formula", placeholder "1d20+5 or 2d6+3 fire", with no autocorrect, capitals or spell check, and a clear button while it holds text. Roll is disabled while the field is empty or the socket is not open, and busy while its roll waits.
 - **The reading**, only while the field holds text: "2d6+3, fire: 5 to 15", or the error after a Roll that does not parse, as an alert, until the text changes. It is the field's description.
 - **Quick dice**: d4, d6, d8, d10, d12, d20 and d100, 44 px buttons named "Add a d6", in one row that scrolls sideways where the panel is too narrow (the existing `ScrollStrip`). A tap adds that die to the field (`addDie`).
-- **One-roll choices**, one row of three chips: Adv and Dis (named "Advantage" and "Disadvantage", at most one pressed), and Secret ("Hide from players" for a DM, pressed to start, "Only the DM sees it" for a player, not pressed). A tap that sends a panel roll takes them (8.4).
+- **One-roll choices**, one row of three chips: Adv and Dis (named "Advantage" and "Disadvantage", at most one pressed), and Secret ("Hide from players" for a DM, "Only the DM sees it" for a player). It starts pressed only for a DM's roll for a monster, a creature no player plays (`startsSecret`, section 17): pressed while the DM's panel is opened for one, and not for a free formula with nothing such selected, a creature a player plays, or any player's roll. A tap that sends a panel roll takes them (8.4).
 
 Opened for a creature (doc 3's bar Roll, or a new selection while it shows), the panel scrolls doc 3's options to just under the sticky line. Otherwise it opens at its top. Appendix C works the layout at 375 x 667 and 390 x 844, at 100% and 130%: the sticky line, the field and the start of the options are above the fold at each.
 
@@ -459,7 +459,7 @@ One builder, in this order, before docs 2 to 4 build on it:
 
 ## 16. Decided, for the project owner to overrule
 
-- Every DM roll starts secret, not only a monster's: a DM's free formula is behind the screen too. Secret and advantage are one-roll choices, taken by the tap that rolls.
+- Secret and advantage are one-roll choices, taken by the tap that rolls.
 - A secret roll shows other players a bare line only when the roll made public would have reached them. Table displays show no rolls. Others' rolls toast by default, with a switch in This device.
 - The budget: 20 rolls then one every 2 s for a player, 100 then two a second for a DM.
 
@@ -468,6 +468,7 @@ One builder, in this order, before docs 2 to 4 build on it:
 1. **Dice comes before Log among the tabs** (8.1).
 2. **A request's rolled answer reaches only the DM and that creature's players**, as a typed answer does (5.2).
 3. **A rolled answer is final for its player** (5.4). Round 1 added the DM's one-tap approval of a named reroll or an added die, and "Roll d20" with a typed bonus where no bonus is known (7).
+4. **Only a DM's rolls for monsters start secret** (8.2). A free formula the DM types starts public, and one tap hides it. This overrules this doc's first default, "Every DM roll starts secret". A monster is a creature no player plays, and a roll for several creatures starts secret when any is one. The DM's death roll, concentration and save-ends rolls follow the same rule. The group save's switch still starts on, since it hides the monsters' rolls.
 
 ## Appendix A. Formula errors
 

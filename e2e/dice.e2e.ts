@@ -11,7 +11,8 @@ import { ConsoleWatch, openSideTab, Shots, sideTabName, SocketWatch, startServer
  * Dice on the server (docs/design-v1-dice.md 13), on the real server serving
  * the production build: a player rolls 2d6+3 on a phone and the DM's
  * computer shows the same dice, as a toast while its Dice panel is closed,
- * a DM's secret roll reads "rolled in secret" for the player, a roll
+ * a DM's free formula starts in the open and, hidden with one tap, reads
+ * "rolled in secret" for the player, a roll
  * survives a reload, Enter and Up in the field, Advantage taken by one tap
  * and pressed again before it lands, at 375 x 667 at 100% and 130% the
  * sticky line, the field and the choices in view, and Dice in the bottom
@@ -166,16 +167,19 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     await shots.take(dm, "dice-panel-dm");
   });
 
-  test("3. the DM's roll is secret to start, and Pat reads only that the DM rolled in secret", async () => {
+  test("3. a DM's free formula starts in the open, one tap hides it, and Pat reads only that the DM rolled in secret", async () => {
     const secret = dm.getByRole("button", { name: "Hide from players" });
-    assert.equal(await secret.getAttribute("aria-pressed"), "true", "a DM's roll starts behind the screen");
+    // Only a DM's roll for a monster starts secret (docs/design-v1-dice.md 17).
+    assert.equal(await secret.getAttribute("aria-pressed"), "false", "a DM's free formula starts in the open");
+    await secret.click();
+    assert.equal(await secret.getAttribute("aria-pressed"), "true");
     const line = await rollWithEnter(dm, dmSocket, "1d20+4 Perception");
     assert.equal(line.to, "dm");
     const bare = await waitFor("the bare line on Pat's phone", () => diceLines(playerSocket.state?.log).find((l) => l.data.by === run.dmId)?.data ?? null);
     assert.deepEqual(bare, { type: "dice", by: run.dmId, to: "dm", rolls: [] });
     assert.ok(!playerSocket.everSaw("Perception"), "the secret roll's label never reached the phone");
     await player.getByText("Dana the DM rolled in secret.").waitFor();
-    assert.equal(await secret.getAttribute("aria-pressed"), "true", "and the choice is back to its start for the next roll");
+    assert.equal(await secret.getAttribute("aria-pressed"), "false", "and the choice is back to its start for the next roll");
     await shots.take(player, "dice-secret-for-player");
   });
 
