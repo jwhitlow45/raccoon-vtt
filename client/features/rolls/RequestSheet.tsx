@@ -2,12 +2,12 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "rea
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type SkillKey } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
-import { ABILITY_NAMES, SKILLS, TYPICAL_DCS } from "#shared/rules/skills.ts";
+import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Chip, ChipRow } from "../../components/Chip.tsx";
 import { Input, NUMBER_FIELD_WIDTH, Select } from "../../components/Field.tsx";
-import { Help, Note, SectionLabel } from "../../components/Panel.tsx";
+import { Help, Note, Section, SectionLabel } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { UnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
@@ -15,19 +15,30 @@ import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { SheetDialog } from "../tokens/SheetDialog.tsx";
 import {
   addChoice,
-  allChecks,
+  allSaves,
   answerAsk,
   askOp,
   askStatus,
   closedAskText,
+  dcChips,
   defaultTargets,
+  draftInput,
   editAsk,
   emptyDraft,
+  fillDraft,
   pendingAskCloseText,
   pickerSteps,
   pickerView,
+  readRecent,
+  recentLabel,
+  recentOf,
   removeChoice,
+  seenSummary,
   sendLabel,
+  switchesOf,
+  tapDc,
+  withRecent,
+  writeRecent,
   type AskDraft,
   type AskFrom,
   type AskSheet,
@@ -44,6 +55,7 @@ import {
 export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
+  const roomId = useRoomView((s) => s.roomId);
   const members = useRoomView((s) => s.view?.members);
   const characters = useRoomView((s) => s.view?.characters);
   const tokens = useRoomView((s) => s.view?.tokens);
@@ -54,7 +66,14 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
   const [options] = useState(() =>
     members && characters && tokens && meta ? defaultTargets({ members, characters, tokens, meta }, props.from, viewing) : [],
   );
-  const [sheet, setSheet] = useState<AskSheet>(() => ({ draft: emptyDraft(options.filter((o) => o.ticked).map((o) => o.ref)), sending: false, error: null }));
+  const [recent] = useState(() => readRecent(roomId));
+  const [sheet, setSheet] = useState<AskSheet>(() => {
+    const draft = emptyDraft(
+      options.filter((o) => o.ticked).map((o) => o.ref),
+      switchesOf(recent),
+    );
+    return { draft: props.from.fill ? fillDraft(draft, props.from.fill) : draft, sending: false, error: null };
+  });
   const { draft, sending, error } = sheet;
   // What the DM set up, as it was when the sheet opened: a swipe springs back once that has changed, until Send has it (docs/design-v1-sheet-swipe.md 4.5).
   const [opened] = useState(() => JSON.stringify(sheet.draft));
@@ -67,7 +86,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
       mounted.current = false;
     };
   }, []);
-  const dcField = useRef<HTMLInputElement>(null);
+  const formId = useId();
   const set = (patch: Partial<AskDraft>) => setSheet((s) => editAsk(s, patch));
   const setError = (problem: string) => setSheet((s) => ({ ...s, error: problem }));
   // Every change to a choice goes through the draft's own rules (logic.ts), so a pick a rule refuses changes nothing here either.
@@ -82,13 +101,23 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
     if (focusAfter === "or") orButton.current?.focus();
     else pickers.current?.querySelector<HTMLElement>('[data-choice="1"] :is(input, select):not(:disabled)')?.focus();
   }, [focusAfter]);
+  const [seenOpen, setSeenOpen] = useState(false);
   const ticked = (ref: ActorTarget) => draft.ticked.some((t) => sameRef(t, ref));
   const tick = (ref: ActorTarget, on: boolean) => set({ ticked: on ? [...draft.ticked, ref] : draft.ticked.filter((t) => !sameRef(t, ref)) });
-  const summary = useMemo(() => askStatus(draft), [draft]);
+  const status = useMemo(() => askStatus(draft), [draft]);
+  const seen = useMemo(() => seenSummary(draft), [draft]);
+  const hasDc = draft.dc.trim() !== "";
+  const chips = dcChips(draft);
+  const saves = allSaves(draft);
 
   const send = () => {
     if (sending) return;
-    const check = askOp(draft, actions.newId(), open);
+    const input = draftInput(draft);
+    if (!input.ok) {
+      setError(input.error);
+      return;
+    }
+    const check = askOp(input.input, actions.newId(), open);
     if (!check.ok) {
       setError(check.error);
       return;
@@ -97,6 +126,8 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
     const n = actions.dispatch(check.op, {
       quiet: true,
       onAnswer: (answer, refusal) => {
+        // Kept once the server takes it, whether or not the sheet is still open, so a repeat is one tap next time (4.7).
+        if (answer === "taken") writeRecent(roomId, withRecent(readRecent(roomId), recentOf(input.input)));
         if (!mounted.current) {
           // Closed while sending: no sheet is left to show why, so a failure says so in a toast.
           const text = closedAskText(answer, refusal);
@@ -132,129 +163,143 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
             {error}
           </span>
         ) : (
-          summary
+          status
         )
       }
       footer={
         <>
           <Button onClick={close}>{sending ? "Close" : "Cancel"}</Button>
-          <Button variant="primary" busy={sending} onClick={send}>
+          {/* The form's submit, so Enter in the DC or the note sends (section 8). */}
+          <Button variant="primary" type="submit" form={formId} busy={sending}>
             {sendLabel(sending, connected)}
           </Button>
         </>
       }
     >
       <UnsavedInput unsaved={unsaved} />
-      {/* Locked while the request waits for the server, so nothing set after Send is lost when the sheet closes on the answer. Closing stays, outside it. */}
-      <fieldset disabled={sending} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
-        <div style={{ display: "grid", gap: theme.space(4) }}>
-          <div ref={pickers} style={{ display: "grid", gap: theme.space(4) }}>
-            {draft.choices.map((_, i) => (
-              <ChoicePicker
-                key={i}
-                draft={draft}
-                index={i}
-                disabled={sending}
-                onStep={(step) => change((d) => step(d, i))}
-                onRemove={() => {
-                  change((d) => removeChoice(d, i));
-                  setFocusAfter("or");
-                }}
-              />
-            ))}
-          </div>
-          {draft.choices.length < LIMITS.rollChoices ? (
-            <div style={{ display: "grid", justifyItems: "start", gap: theme.space(1) }}>
-              <Button
-                ref={orButton}
-                size="sm"
-                onClick={() => {
-                  change(addChoice);
-                  setFocusAfter("second");
-                }}
-              >
-                Or a second choice
-              </Button>
-              <Help>The creature picks which one it rolls.</Help>
-            </div>
-          ) : null}
-          <Group title="DC">
-            <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-              <Input
-                ref={dcField}
-                aria-label="DC"
-                value={draft.dc}
-                inputMode="numeric"
-                enterKeyHint="done"
-                autoComplete="off"
-                placeholder="None"
-                maxLength={2}
-                onChange={(e) => set({ dc: e.target.value })}
-                style={{ width: NUMBER_FIELD_WIDTH, textAlign: "center" }}
-              />
-              {draft.dc.trim() ? (
-                <Button size="sm" onClick={() => set({ dc: "" })}>
-                  No DC
-                </Button>
-              ) : null}
-            </div>
-            {allChecks(draft) ? (
-              // A save's DC is the effect's (SRD 5.2.1 page 7), so only checks get the typical ones (page 6).
-              <ChipRow>
-                {TYPICAL_DCS.map((t) => (
-                  <Chip
-                    key={t.dc}
-                    pressed={draft.dc.trim() === String(t.dc)}
-                    disabled={sending}
-                    onClick={() => set({ dc: draft.dc.trim() === String(t.dc) ? "" : String(t.dc) })}
-                  >
-                    {t.name} {t.dc}
-                  </Chip>
-                ))}
-              </ChipRow>
-            ) : draft.choices.some((c) => c?.kind === "save") ? (
-              <Help>A save’s DC is set by the effect that causes it, or by you.</Help>
+      <form
+        id={formId}
+        onSubmit={(e) => {
+          e.preventDefault();
+          send();
+        }}
+        onKeyDown={(e) => {
+          // Enter sends from the DC and the note alone: on a radio or a checkbox a browser would submit the form too.
+          const target = e.target as HTMLElement;
+          if (e.key === "Enter" && target instanceof HTMLInputElement && (target.type === "radio" || target.type === "checkbox")) e.preventDefault();
+        }}
+      >
+        {/* Locked while the request waits for the server, so nothing set after Send is lost when the sheet closes on the answer. Closing stays, outside it. */}
+        <fieldset disabled={sending} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
+          <div style={{ display: "grid", gap: theme.space(4) }}>
+            {recent.length > 0 ? (
+              <Group title="Recent">
+                <div role="group" aria-label="Recent requests" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), minWidth: 0 }}>
+                  {recent.map((entry) => {
+                    const label = recentLabel(entry);
+                    return (
+                      <Button
+                        key={label}
+                        size="sm"
+                        title={entry.note ? `${label}: ${entry.note}` : label}
+                        onClick={() => change((d) => fillDraft(d, entry))}
+                        style={{ maxWidth: "100%", minWidth: 0 }}
+                      >
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{label}</span>
+                      </Button>
+                    );
+                  })}
+                </div>
+              </Group>
             ) : null}
-          </Group>
-          <Group title="What players see">
-            {/* Options that Send reads, so checkboxes rather than switches (docs/design-v1-visual.md 3.7). */}
-            <div style={{ display: "grid" }}>
-              <Checkbox label="Players see the DC" checked={draft.dcShown} disabled={sending} onChange={(dcShown) => set({ dcShown })} />
-              <Checkbox label="Players see pass or fail" checked={draft.resultShown} disabled={sending} onChange={(resultShown) => set({ resultShown })} />
-            </div>
-            {draft.dc.trim() && !draft.dcShown && draft.resultShown ? (
-              <Note>With the DC hidden, an answer is final once it passes or fails, so changed totals cannot find the DC. You can reopen one from its card.</Note>
-            ) : null}
-          </Group>
-          <Group title="Note">
-            <Input
-              aria-label="Note for the players"
-              value={draft.note}
-              maxLength={LIMITS.rollNoteChars}
-              placeholder="against the poison"
-              autoComplete="off"
-              enterKeyHint="done"
-              onChange={(e) => set({ note: e.target.value })}
-              style={{ width: "100%" }}
-            />
-          </Group>
-          <Group title="Who rolls">
-            {options.length === 0 ? <Help>No player plays a character yet.</Help> : null}
-            <div style={{ display: "grid" }}>
-              {options.map((o) => (
-                <Checkbox
-                  key={o.key}
-                  checked={ticked(o.ref)}
-                  disabled={o.blocked || sending}
-                  onChange={(on) => tick(o.ref, on)}
-                  label={o.name}
-                  help={o.why}
+            <div ref={pickers} style={{ display: "grid", gap: theme.space(4) }}>
+              {draft.choices.map((_, i) => (
+                <ChoicePicker
+                  key={i}
+                  draft={draft}
+                  index={i}
+                  disabled={sending}
+                  onStep={(step) => change((d) => step(d, i))}
+                  onRemove={() => {
+                    change((d) => removeChoice(d, i));
+                    setFocusAfter("or");
+                  }}
                 />
               ))}
             </div>
-          </Group>
-        </div>
-      </fieldset>
+            {draft.choices.length < LIMITS.rollChoices ? (
+              <div style={{ display: "grid", justifyItems: "start", gap: theme.space(1) }}>
+                <Button
+                  ref={orButton}
+                  size="sm"
+                  onClick={() => {
+                    change(addChoice);
+                    setFocusAfter("second");
+                  }}
+                >
+                  Or a second choice
+                </Button>
+                <Help>The creature picks which one it rolls.</Help>
+              </div>
+            ) : null}
+            {/* The DC and, for a check, its typical values on one row (4.4). An empty field is no DC. */}
+            <div style={{ containerType: "inline-size", minWidth: 0 }}>
+              <PickRow label="DC">
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), minWidth: 0 }}>
+                  <Input
+                    aria-label="DC"
+                    value={draft.dc}
+                    inputMode="numeric"
+                    enterKeyHint="send"
+                    autoComplete="off"
+                    placeholder="None"
+                    maxLength={2}
+                    onChange={(e) => set({ dc: e.target.value })}
+                    style={{ width: NUMBER_FIELD_WIDTH, textAlign: "center", marginRight: theme.space(1) }}
+                  />
+                  {/* A save's DC is the effect's (SRD 5.2.1 page 7), so only checks get the typical ones (page 6). */}
+                  {chips?.map((t) => (
+                    <Chip key={t.dc} circle aria-label={`${t.dc}, ${t.name}`} title={t.name} pressed={t.pressed} disabled={sending} onClick={() => change((d) => tapDc(d, t.dc))}>
+                      {t.dc}
+                    </Chip>
+                  ))}
+                </div>
+              </PickRow>
+            </div>
+            <Group title="Who rolls">
+              {options.length === 0 ? <Help>No player plays a character yet.</Help> : null}
+              <ChipRow label="Who rolls">
+                {options.map((o) => (
+                  <Chip key={o.key} pressed={ticked(o.ref)} unavailable={o.blocked} disabled={sending} onClick={() => tick(o.ref, !ticked(o.ref))}>
+                    {o.why ? `${o.name}, ${o.why}` : o.name}
+                  </Chip>
+                ))}
+              </ChipRow>
+            </Group>
+            <Section label="What players see" divider={false} fold={{ open: seenOpen, onToggle: () => setSeenOpen((v) => !v), summary: <span style={{ color: theme.color.textMuted }}>{seen}</span> }}>
+              {/* Options that Send reads, so checkboxes rather than switches (docs/design-v1-visual.md 3.7). Each shows only while it applies (4.6). */}
+              <div style={{ display: "grid" }}>
+                {hasDc ? <Checkbox label="Players see the DC" checked={draft.dcShown} disabled={sending} onChange={(dcShown) => set({ dcShown })} /> : null}
+                <Checkbox label="Players see pass or fail" checked={draft.resultShown} disabled={sending} onChange={(resultShown) => set({ resultShown })} />
+              </div>
+              {hasDc && !draft.dcShown && draft.resultShown ? (
+                <Note>With the DC hidden, a typed answer is final once it passes or fails, and a rolled one at once, so changed totals cannot find the DC. You can reopen one from its card.</Note>
+              ) : null}
+              {saves ? <Checkbox label="Against a spell" checked={draft.spell} disabled={sending} onChange={(spell) => set({ spell })} /> : null}
+              <Input
+                aria-label="Note for the players"
+                value={draft.note}
+                maxLength={LIMITS.rollNoteChars}
+                placeholder="Note, such as against the poison"
+                autoComplete="off"
+                enterKeyHint="send"
+                onChange={(e) => set({ note: e.target.value })}
+                style={{ width: "100%" }}
+              />
+            </Section>
+          </div>
+        </fieldset>
+      </form>
     </SheetDialog>
   );
 }

@@ -90,12 +90,12 @@ describe("roll answers (section 3.3)", () => {
 
   test("a player answers only for a creature they own in a request that names it, and anything else is gone", () => {
     const state = asked();
-    assert.equal(decide(state, { t: "roll.answer", rollId: "r1", target: { characterId: "thorn" }, total: 12 }).ok, true);
+    assert.equal(decide(state, { t: "roll.answer", rollId: "r1", target: { characterId: "thorn" }, total: 12, tag: "a1" }).ok, true);
     for (const [op, who] of [
-      [{ t: "roll.answer", rollId: "r9", target: { characterId: "thorn" }, total: 12 }, P1],
-      [{ t: "roll.answer", rollId: "r1", target: { characterId: "vex" }, total: 12 }, P1],
-      [{ t: "roll.answer", rollId: "r1", target: { characterId: "vex" }, total: 12 }, P2],
-      [{ t: "roll.answer", rollId: "r2", target: { characterId: "vex" }, total: 12 }, P1],
+      [{ t: "roll.answer", rollId: "r9", target: { characterId: "thorn" }, total: 12, tag: "a1" }, P1],
+      [{ t: "roll.answer", rollId: "r1", target: { characterId: "vex" }, total: 12, tag: "a1" }, P1],
+      [{ t: "roll.answer", rollId: "r1", target: { characterId: "vex" }, total: 12, tag: "a1" }, P2],
+      [{ t: "roll.answer", rollId: "r2", target: { characterId: "vex" }, total: 12, tag: "a1" }, P1],
     ] as const) {
       assert.deepEqual(decide(state, op as Op, who), { ok: false, code: "gone", message: "that is not here" });
     }
@@ -103,11 +103,11 @@ describe("roll answers (section 3.3)", () => {
 
   test("a player fails only a save without rolling, and never marks a pass", () => {
     const state = asked();
-    assert.equal(decide(state, { t: "roll.answer", rollId: "r1", target: { characterId: "thorn" }, result: "fail" }).ok, true);
-    assert.equal(decide(state, { t: "roll.answer", rollId: "r1", target: { characterId: "thorn" }, result: "pass" }).code, "forbidden");
-    assert.equal(decide(state, { t: "roll.answer", rollId: "r1", target: { characterId: "thorn" }, total: 9, result: "fail" }).code, "forbidden");
-    assert.equal(decide(state, { t: "roll.answer", rollId: "r2", target: { characterId: "thorn" }, result: "fail" }).code, "forbidden");
-    assert.equal(decide(state, { t: "roll.answer", rollId: "r2", target: { characterId: "vex" }, result: "pass" }, DM).ok, true);
+    assert.equal(decide(state, { t: "roll.answer", rollId: "r1", target: { characterId: "thorn" }, result: "fail", tag: "a1" }).ok, true);
+    assert.equal(decide(state, { t: "roll.answer", rollId: "r1", target: { characterId: "thorn" }, result: "pass", tag: "a1" }).code, "forbidden");
+    assert.equal(decide(state, { t: "roll.answer", rollId: "r1", target: { characterId: "thorn" }, total: 9, result: "fail", tag: "a1" }).code, "forbidden");
+    assert.equal(decide(state, { t: "roll.answer", rollId: "r2", target: { characterId: "thorn" }, result: "fail", tag: "a1" }).code, "forbidden");
+    assert.equal(decide(state, { t: "roll.answer", rollId: "r2", target: { characterId: "vex" }, result: "pass", tag: "a1" }, DM).ok, true);
   });
 
   test("asking, reopening and closing are the DM's", () => {

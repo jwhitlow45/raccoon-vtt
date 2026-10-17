@@ -349,6 +349,7 @@ No other key is added or changed.
 | Blessed and Exhaustion 2 on a save, the player types +1d6 | the roll adds "+1d4-4+1d6", named in the reading |
 | An extra that does not read, such as "+1d" | `parseExtra`'s error under the row, nothing sent |
 | Roll refused (budget, gone, final, answered) | busy ends, the server's words under the rows |
+| A typed Send or a fail refused by the budget, since every answer op carries a tag | busy ends, "You are going too fast. Wait a few seconds." under the rows, the total kept |
 | The request closes while rolling | `gone`, and the card goes with the request |
 | The DM rolls while the player types | the player's later Send is refused as final. The DM's Roll after the player's answer is refused by `unanswered` |
 | Doc 3's one-tap server roll and the live card's Roll on one row | the first to land stands, the other is refused by `unanswered` |

@@ -42,6 +42,22 @@ function holderRead(state: RoomState, target: ActorTarget, fields: string[]): Re
   return { key: keys.token(target.tokenId), fields: fields.map((f) => `actor.inline.${f}`) };
 }
 
+/**
+ * A "save ends" request's creature, whose effect a pass removes and a close
+ * settles (docs/design-v1-roll-request.md 7.5): an answer or a close of such
+ * a request reads its effects, so a DM's view that lacks the creature, a
+ * token on a scene the DM is not viewing, waits for the server.
+ */
+function endsReads(state: RoomState, rollIds: readonly string[]): Read[] {
+  const out: Read[] = [];
+  for (const id of rollIds) {
+    const request = state.rolls[id];
+    const target = request?.ends ? request.targets[0] : undefined;
+    if (target) out.push(holderRead(state, target.tokenId !== undefined ? { tokenId: target.tokenId } : { characterId: target.characterId! }, ["effects"]));
+  }
+  return out;
+}
+
 export function reads(op: Op, state: RoomState): Reads {
   switch (op.t) {
     case "undo":
@@ -302,11 +318,11 @@ export function reads(op: Op, state: RoomState): Reads {
     }
     // A player's view of a request lacks a hidden DC and the other targets, so an answer waits for the server.
     case "roll.answer":
-      return of([{ key: keys.roll(op.rollId) }], ["rolls"]);
+      return of([{ key: keys.roll(op.rollId) }, ...endsReads(state, [op.rollId])], ["rolls"]);
     case "roll.reopen":
       return of([{ key: keys.roll(op.rollId) }]);
     case "roll.close":
-      return of(op.rollIds.map((id) => ({ key: keys.roll(id) })));
+      return of([...op.rollIds.map((id) => ({ key: keys.roll(id) })), ...endsReads(state, op.rollIds)]);
   }
 }
 

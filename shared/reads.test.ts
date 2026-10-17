@@ -242,6 +242,32 @@ describe("wave 5 ops (docs/design-v1-dm-tools.md)", () => {
     assert.ok(satisfies(reads(op, state), dm.projected, DM, dm.opts));
   });
 
+  test("an answer or a close of a save-ends request waits for the server where the DM's view lacks its creature", () => {
+    const state = setup();
+    state.tokens.wolf = token("wolf", { ownerIds: ["p1"], x: 4, y: 4, actor: { inline: actor({ effects: [{ id: "fr", key: "frightened" }] }) } });
+    state.rolls.r1 = {
+      id: "r1",
+      rev: 0,
+      test: { kind: "save", choices: [{ ability: "wis" }] },
+      dc: 13,
+      dcShown: false,
+      resultShown: true,
+      cause: "saveEnds",
+      ends: { effect: "fr", occurrence: "o1" },
+      at: "x",
+      targets: [{ tokenId: "wolf" }],
+    };
+    const answer = { t: "roll.answer" as const, rollId: "r1", target: { tokenId: "wolf" }, result: "pass" as const, tag: "t1" };
+    const close = { t: "roll.close" as const, rollIds: ["r1"] };
+    const here = view(state, DM, "s1");
+    const away = view(state, DM, "s2");
+    // A pass removes the wolf's effect and a close settles it, so the view must hold the wolf to replay either.
+    assert.ok(satisfies(reads(answer, state), here.projected, DM, here.opts));
+    assert.ok(satisfies(reads(close, state), here.projected, DM, here.opts));
+    assert.ok(!satisfies(reads(answer, state), away.projected, DM, away.opts));
+    assert.ok(!satisfies(reads(close, state), away.projected, DM, away.opts));
+  });
+
   test("a DM on any scene replays journal edits, and a page's deletion only where every pin is held", () => {
     const state = setup();
     state.journal.pg1 = { id: "pg1", rev: 0, title: "P", access: "dm", blocks: [] };

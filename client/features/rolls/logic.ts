@@ -1,9 +1,10 @@
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Character, type CharacterId, type Member, type RollAnswer, type RollChoice, type RollRequest, type RollTarget, type RollTest, type RoomState, type SkillKey, type Token } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { anyPlayer, playersToken } from "#shared/project.ts";
-import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
+import { z } from "zod";
+import { dmToolSchemas, type ActorTarget, type ClientOp } from "#shared/protocol.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
-import { ABILITY_NAMES, choiceText, SKILLS, testShortText, testText } from "#shared/rules/skills.ts";
+import { ABILITY_NAMES, choiceText, SKILLS, testShortText, testText, TYPICAL_DCS } from "#shared/rules/skills.ts";
 import { displayName } from "../../lib/scene.ts";
 
 /**
@@ -58,7 +59,13 @@ export function characterToken(tokens: Readonly<Record<string, Token | undefined
 /** One creature the sheet lists, ticked or not. `why` says why one starts unticked, and `blocked` that it cannot be asked at all. */
 export type TargetOption = { key: string; ref: ActorTarget; name: string; ticked: boolean; why?: string; blocked?: boolean };
 
-export type AskFrom = { kind: "party" } | { kind: "selection"; tokenIds: readonly string[] };
+/**
+ * What a request opens the sheet with (docs/design-v1-roll-request.md
+ * 4.8): its creatures, and with `fill` the roll already chosen, as doc 3's
+ * Ask path opens it with the tapped test. The party bar passes none.
+ */
+export type AskFill = { test: RollTest; dc?: number; spell?: true; note?: string };
+export type AskFrom = ({ kind: "party" } | { kind: "selection"; tokenIds: readonly string[] }) & { fill?: AskFill };
 
 /**
  * The creatures a request starts with, defined once for every entry point.
@@ -153,13 +160,34 @@ export type AskDraft = {
   dc: string;
   dcShown: boolean;
   resultShown: boolean;
+  /** "Against a spell", which applies, and is sent, only while every pick is a save (4.6). */
+  spell: boolean;
   note: string;
   ticked: readonly ActorTarget[];
 };
 
-export function emptyDraft(ticked: readonly ActorTarget[]): AskDraft {
-  // Both switches start on: the design's example names the DC, "Dex save, DC 15" (question 12).
-  return { choices: [null], dc: "", dcShown: true, resultShown: true, note: "", ticked };
+/** The two switches a sheet starts with: `askSwitches`, else both on. */
+export type AskSwitches = { dcShown: boolean; resultShown: boolean };
+
+export function emptyDraft(ticked: readonly ActorTarget[], switches: AskSwitches = { dcShown: true, resultShown: true }): AskDraft {
+  return { choices: [null], dc: "", dcShown: switches.dcShown, resultShown: switches.resultShown, spell: false, note: "", ticked };
+}
+
+/**
+ * A draft filled with a roll (4.7, 4.8): the choices, the DC, "Against a
+ * spell" and the note, and the switches when the fill has them (a recent
+ * request), while who rolls stays as the entry point set it.
+ */
+export function fillDraft(draft: AskDraft, fill: AskFill & Partial<AskSwitches>): AskDraft {
+  return {
+    ...draft,
+    choices: fill.test.choices.map((c) => pickOf(fill.test.kind, c)),
+    dc: fill.dc !== undefined ? String(fill.dc) : "",
+    dcShown: fill.dcShown ?? draft.dcShown,
+    resultShown: fill.resultShown ?? draft.resultShown,
+    spell: fill.spell === true,
+    note: fill.note ?? "",
+  };
 }
 
 export function samePick(a: RollPick | null | undefined, b: RollPick | null | undefined): boolean {
@@ -298,27 +326,70 @@ function distinct(choices: readonly RollChoice[]): RollChoice[] {
   });
 }
 
-export type AskCheck = { ok: true; op: Extract<ClientOp, { t: "roll.ask" }> } | { ok: false; error: string };
+/** Whether every pick so far is a save, and there is one: "Against a spell" applies to saves alone (4.6). */
+export function allSaves(draft: Pick<AskDraft, "choices">): boolean {
+  const picks = draft.choices.filter((p): p is RollPick => p !== null);
+  return picks.length > 0 && picks.every((p) => p.kind === "save");
+}
 
-/** The `roll.ask` a draft sends, or what to fix first, in the sheet's words. */
-export function askOp(draft: AskDraft, id: string, open: number): AskCheck {
-  if (open >= LIMITS.openRollsPerRoom) return { ok: false, error: `${LIMITS.openRollsPerRoom} requests are open. Close one first.` };
+/**
+ * What a request asks (docs/design-v1-roll-request.md 7.3), whoever sends
+ * it: the sheet through `draftInput`, or doc 3's save-ends and group save
+ * pages directly. Each caller passes both switches itself, since
+ * `askSwitches` is only the sheet's default.
+ */
+export type AskInput = {
+  test: RollTest;
+  dc?: number;
+  dcShown: boolean;
+  resultShown: boolean;
+  spell?: true;
+  cause?: "saveEnds";
+  ends?: { effect: string; occurrence: string };
+  note?: string;
+  targets: readonly ActorTarget[];
+};
+
+/** The sheet's draft as a request (4.9), or what to pick or fix first, in the sheet's words. */
+export function draftInput(draft: AskDraft): { ok: true; input: AskInput } | { ok: false; error: string } {
   const empty = draft.choices.findIndex((c) => c === null);
   if (empty === 0) return { ok: false, error: "Pick what to roll first." };
   if (empty > 0) return { ok: false, error: "Pick the second choice, or remove it." };
-  if (draft.ticked.length === 0) return { ok: false, error: "Tick at least one creature to ask." };
-  if (draft.ticked.length > LIMITS.rollTargets) return { ok: false, error: `Ask at most ${LIMITS.rollTargets} creatures at once.` };
   const test = draftTest(draft)!;
-  if (distinct(test.choices).length !== test.choices.length) return { ok: false, error: "The two choices are the same. Change or remove one." };
   const dcText = draft.dc.trim();
   let dc: number | undefined;
   if (dcText !== "") {
-    if (!/^\d{1,2}$/.test(dcText) || Number(dcText) < LIMITS.rollDcMin || Number(dcText) > LIMITS.rollDcMax) {
-      return { ok: false, error: `A DC is a whole number from ${LIMITS.rollDcMin} to ${LIMITS.rollDcMax}, or empty for none.` };
-    }
+    if (!/^\d{1,2}$/.test(dcText)) return { ok: false, error: DC_WORDS };
     dc = Number(dcText);
   }
   const note = draft.note.replace(/\s+/g, " ").trim();
+  return {
+    ok: true,
+    input: {
+      test,
+      ...(dc !== undefined ? { dc } : {}),
+      dcShown: draft.dcShown,
+      resultShown: draft.resultShown,
+      // "Against a spell" is drawn only while every pick is a save, so it goes only then.
+      ...(draft.spell && test.kind === "save" ? { spell: true as const } : {}),
+      ...(note !== "" ? { note } : {}),
+      targets: draft.ticked,
+    },
+  };
+}
+
+const DC_WORDS = `A DC is a whole number from ${LIMITS.rollDcMin} to ${LIMITS.rollDcMax}, or empty for none.`;
+
+export type AskCheck = { ok: true; op: Extract<ClientOp, { t: "roll.ask" }> } | { ok: false; error: string };
+
+/** The `roll.ask` a request sends, or what to fix first, in the sheet's words: the checks the server makes, before it does. */
+export function askOp(input: AskInput, id: string, open: number): AskCheck {
+  if (open >= LIMITS.openRollsPerRoom) return { ok: false, error: `${LIMITS.openRollsPerRoom} requests are open. Close one first.` };
+  if (input.targets.length === 0) return { ok: false, error: "Choose at least one creature to ask." };
+  if (input.targets.length > LIMITS.rollTargets) return { ok: false, error: `Ask at most ${LIMITS.rollTargets} creatures at once.` };
+  if (distinct(input.test.choices).length !== input.test.choices.length) return { ok: false, error: "The two choices are the same. Change or remove one." };
+  if (input.dc !== undefined && (!Number.isInteger(input.dc) || input.dc < LIMITS.rollDcMin || input.dc > LIMITS.rollDcMax)) return { ok: false, error: DC_WORDS };
+  const note = input.note?.replace(/\s+/g, " ").trim() ?? "";
   if ([...note].length > LIMITS.rollNoteChars) return { ok: false, error: `A note holds at most ${LIMITS.rollNoteChars} characters.` };
   return {
     ok: true,
@@ -326,15 +397,149 @@ export function askOp(draft: AskDraft, id: string, open: number): AskCheck {
       t: "roll.ask",
       request: {
         id,
-        test,
-        ...(dc !== undefined ? { dc } : {}),
-        dcShown: draft.dcShown,
-        resultShown: draft.resultShown,
+        test: input.test,
+        ...(input.dc !== undefined ? { dc: input.dc } : {}),
+        dcShown: input.dcShown,
+        resultShown: input.resultShown,
+        ...(input.spell ? { spell: true as const } : {}),
+        ...(input.cause ? { cause: input.cause } : {}),
+        ...(input.ends ? { ends: { effect: input.ends.effect, occurrence: input.ends.occurrence } } : {}),
         ...(note !== "" ? { note } : {}),
-        targets: draft.ticked.map((t) => ("tokenId" in t ? { tokenId: t.tokenId } : { characterId: t.characterId })),
+        targets: input.targets.map((t) => ("tokenId" in t ? { tokenId: t.tokenId } : { characterId: t.characterId })),
       },
     },
   };
+}
+
+/**
+ * The typical DCs beside the DC field (4.4), while every pick is a check,
+ * else none: each pressed exactly while the field holds its number, so the
+ * chips are a view of the field and hold no value of their own.
+ */
+export function dcChips(draft: Pick<AskDraft, "choices" | "dc">): { dc: number; name: string; pressed: boolean }[] | null {
+  if (!allChecks(draft)) return null;
+  const typed = draft.dc.trim();
+  return TYPICAL_DCS.map((t) => ({ ...t, pressed: typed === String(t.dc) }));
+}
+
+/** A tap on a typical DC: the field takes its number, or empties when it already holds it. */
+export function tapDc(draft: AskDraft, dc: number): AskDraft {
+  return { ...draft, dc: draft.dc.trim() === String(dc) ? "" : String(dc) };
+}
+
+/** What the sheet's Send does: the draft as a request, then the request's own checks. */
+export function draftOp(draft: AskDraft, id: string, open: number): AskCheck {
+  const input = draftInput(draft);
+  return input.ok ? askOp(input.input, id, open) : input;
+}
+
+/**
+ * The fold's summary of what players see (4.6): the switches as they
+ * apply, "Against a spell." while it applies, then the note or "No
+ * note.", so the folded line always says what Send sends.
+ */
+export function seenSummary(draft: AskDraft): string {
+  const dc = draft.dc.trim() !== "";
+  let seen: string;
+  if (dc && draft.dcShown) seen = draft.resultShown ? "The DC and pass or fail." : "The DC. Pass or fail hidden.";
+  else if (dc) seen = draft.resultShown ? "DC hidden. Pass or fail shown." : "DC and pass or fail hidden.";
+  else seen = draft.resultShown ? "Pass or fail shown." : "Pass or fail hidden.";
+  const spell = draft.spell && allSaves(draft) ? " Against a spell." : "";
+  const note = draft.note.replace(/\s+/g, " ").trim();
+  return `${seen}${spell} ${note !== "" ? `Note: ${note}.` : "No note."}`;
+}
+
+// ------------------------------------------------------------ recent requests
+
+/** A request this device sent, to send again in one tap (4.7): the roll, its DC, the switches, "Against a spell" and the note. */
+export type RecentAsk = { test: RollTest; dc?: number; dcShown: boolean; resultShown: boolean; spell?: true; note?: string };
+
+export const RECENT_SIZE = 3;
+
+const recentEntry = z.strictObject({
+  test: dmToolSchemas.rollTest,
+  dc: dmToolSchemas.rollDc.optional(),
+  dcShown: z.boolean(),
+  resultShown: z.boolean(),
+  spell: z.literal(true).optional(),
+  note: z.string().max(LIMITS.rollNoteChars * 4).optional(),
+});
+
+function recentKey(roomId: string): string {
+  return `rvtt.askRecent.${roomId}`;
+}
+
+/** The stored list, newest first. Each entry is checked, and one that fails its check is dropped while the others stay. */
+export function parseRecent(raw: string | null): RecentAsk[] {
+  if (raw === null) return [];
+  let list: unknown;
+  try {
+    list = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(list)) return [];
+  const out: RecentAsk[] = [];
+  for (const item of list) {
+    const parsed = recentEntry.safeParse(item);
+    if (parsed.success && out.length < RECENT_SIZE) out.push(stripUndefined(parsed.data));
+  }
+  return out;
+}
+
+function stripUndefined(entry: RecentAsk): RecentAsk {
+  const out: RecentAsk = { test: entry.test, dcShown: entry.dcShown, resultShown: entry.resultShown };
+  if (entry.dc !== undefined) out.dc = entry.dc;
+  if (entry.spell) out.spell = true;
+  if (entry.note !== undefined && entry.note !== "") out.note = entry.note;
+  return out;
+}
+
+/** One entry per test and DC: a request sent again moves to the front with what it was sent with. */
+function sameRecent(a: RecentAsk, b: RecentAsk): boolean {
+  return a.dc === b.dc && a.test.kind === b.test.kind && JSON.stringify(a.test.choices) === JSON.stringify(b.test.choices);
+}
+
+/** The list with a request just taken: first, once per test and DC, at most three. */
+export function withRecent(list: readonly RecentAsk[], entry: RecentAsk): RecentAsk[] {
+  return [stripUndefined(entry), ...list.filter((e) => !sameRecent(e, entry))].slice(0, RECENT_SIZE);
+}
+
+/** A request's recent entry, from what it asked. */
+export function recentOf(input: AskInput): RecentAsk {
+  return stripUndefined({ test: input.test, dc: input.dc, dcShown: input.dcShown, resultShown: input.resultShown, spell: input.spell, note: input.note });
+}
+
+/** This device's recent requests in a room. Storage can be missing or blocked, as in a private window: then there are none. */
+export function readRecent(roomId: string): RecentAsk[] {
+  try {
+    return parseRecent(typeof localStorage === "undefined" ? null : localStorage.getItem(recentKey(roomId)));
+  } catch {
+    return [];
+  }
+}
+
+export function writeRecent(roomId: string, list: readonly RecentAsk[]): void {
+  try {
+    localStorage.setItem(recentKey(roomId), JSON.stringify(list.slice(0, RECENT_SIZE)));
+  } catch {
+    // Storage blocked or full: the request is sent, only not offered again.
+  }
+}
+
+/** A recent request's button: "Dex save, DC 15", "Wis (Perception) check". */
+export function recentLabel(entry: RecentAsk): string {
+  return `${testShortText(entry.test)}${entry.dc !== undefined ? `, DC ${entry.dc}` : ""}`;
+}
+
+/** The switches the sheet starts with (4.6): as the newest recent request had them, else both on. The sheet's default and nobody else's. */
+export function switchesOf(recent: readonly RecentAsk[]): AskSwitches {
+  const newest = recent[0];
+  return newest ? { dcShown: newest.dcShown, resultShown: newest.resultShown } : { dcShown: true, resultShown: true };
+}
+
+export function askSwitches(roomId: string): AskSwitches {
+  return switchesOf(readRecent(roomId));
 }
 
 /**
@@ -346,10 +551,16 @@ export function answered(target: RollAnswer): boolean {
   return target.total !== undefined || target.result !== undefined || target.noRoll === true;
 }
 
-/** "Close all answered": every request whose targets have all answered. */
+/**
+ * "Close all answered": every request whose targets have all answered and
+ * hold no player's ask to change a roll, which waits for the DM's Allow or
+ * Keep (docs/design-v1-roll-request.md 1.1). The server checks the same
+ * again when the op runs (`ifSettled`), so an ask that arrives meanwhile
+ * keeps its request open.
+ */
 export function allAnsweredIds(rolls: Readonly<Record<string, RollRequest | undefined>>): string[] {
   return Object.values(rolls)
-    .filter((r): r is RollRequest => r !== undefined && r.targets.every(answered))
+    .filter((r): r is RollRequest => r !== undefined && r.targets.every((t) => answered(t) && t.change === undefined))
     .map((r) => r.id);
 }
 

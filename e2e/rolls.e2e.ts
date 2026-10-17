@@ -479,10 +479,52 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     assert.deepEqual(sent.test, { kind: "check", choices: [{ ability: "str" }] }, "the DM asked for a Strength check and sent one");
     await card(player).getByText("The DM asks for a Strength check.").waitFor();
     await closeAll();
-    await dm.getByRole("button", { name: /^Close Party/ }).tap();
   });
 
-  test("11. nothing went wrong in the browsers", () => {
+  test("11. a recent request is one tap, Enter in the DC field sends, and what players see folds into one line that says it", async () => {
+    await openPanel(dm, "Party");
+    await dm.getByRole("button", { name: "Ask the party" }).first().tap();
+    const sheet = dm.getByRole("dialog", { name: "Request a roll" });
+    await sheet.waitFor();
+    const recent = sheet.getByRole("group", { name: "Recent requests" });
+    assert.deepEqual(await recent.getByRole("button").allInnerTexts(), ["Str check"], "the request step 10 sent");
+    await recent.getByRole("button", { name: "Str check" }).tap();
+    await sheet.getByText(/^Strength check, no DC\. 1 asked\.$/).waitFor();
+    assert.equal(await sheet.getByRole("radiogroup", { name: "Ability check" }).getByRole("radio", { name: "Strength" }).isChecked(), true, "the picker shows what the tap filled");
+
+    const fold = sheet.getByRole("button", { name: "What players see" });
+    assert.equal(await fold.getAttribute("aria-expanded"), "false", "folded at first");
+    await sheet.getByText("Pass or fail shown. No note.").waitFor();
+    assert.equal(await sheet.getByRole("checkbox", { name: "Players see the DC" }).count(), 0, "no DC, no switch for it");
+    await sheet.getByLabel("DC", { exact: true }).fill("12");
+    assert.equal(await sheet.getByRole("button", { name: "10, Easy" }).getAttribute("aria-pressed"), "false", "no typical DC is 12");
+    await sheet.getByText("The DC and pass or fail. No note.").waitFor();
+    await fold.tap();
+    await sheet.getByRole("checkbox", { name: "Players see the DC" }).uncheck();
+    await sheet.getByLabel("Note for the players").fill("to hear the guards");
+    await sheet.getByText("DC hidden. Pass or fail shown. Note: to hear the guards.").waitFor();
+    await shots.take(dm, "rolls-sheet-what-players-see");
+    await sheet.getByLabel("DC", { exact: true }).press("Enter");
+    await sheet.waitFor({ state: "detached" });
+    const sent = await waitFor("the request in the player's state", () => Object.values(playerSocket.state?.rolls ?? {})[0]);
+    run.open.push(sent.id);
+    assert.deepEqual({ test: sent.test, dcHidden: sent.dcHidden, dcShown: sent.dcShown, note: sent.note }, { test: { kind: "check", choices: [{ ability: "str" }] }, dcHidden: true, dcShown: false, note: "to hear the guards" });
+    await closeAll();
+
+    // The newest request comes first, and the switches start as it had them. On a phone the sheet took the Party panel's place.
+    await openPanel(dm, "Party");
+    await dm.getByRole("button", { name: "Ask the party" }).first().tap();
+    await sheet.waitFor();
+    assert.deepEqual(await recent.getByRole("button").allInnerTexts(), ["Str check, DC 12", "Str check"]);
+    await sheet.getByText("Pass or fail shown. No note.").waitFor();
+    await recent.getByRole("button", { name: "Str check, DC 12" }).tap();
+    await sheet.getByText("DC hidden. Pass or fail shown. Note: to hear the guards.").waitFor();
+    await shots.take(dm, "rolls-sheet-recent");
+    await sheet.getByRole("button", { name: "Cancel" }).tap();
+    await sheet.waitFor({ state: "detached" });
+  });
+
+  test("12. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });

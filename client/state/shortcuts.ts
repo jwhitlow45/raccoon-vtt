@@ -452,6 +452,7 @@ export const SURFACES = [
   "Token window",
   "Initiative",
   "Dice",
+  "Roll requests",
   "Token and character fields",
   "Label, pin and light panes",
   "Dialogs",
@@ -688,6 +689,9 @@ export const BEHAVIORS: readonly Behavior[] = [
     device: "keys",
     surface: "Dice",
   },
+
+  // Request a roll's fields: features/rolls/RequestSheet.tsx, one form whose submit is Send (docs/design-v1-roll-request.md 8).
+  { id: "rollAskEnter", input: "Enter", does: "Send the request", roles: DM, when: "in Request a roll's DC or note field", device: "keys", surface: "Roll requests" },
 
   // The token's and characters' one-line fields: features/tokens/ui.tsx TextField and NumberField.
   { id: "fieldEnter", input: "Enter", does: "Save the field and leave it", roles: EVERYONE, when: "in a one-line field", device: "keys", surface: "Token and character fields" },

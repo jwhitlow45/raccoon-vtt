@@ -7,7 +7,7 @@ import { LocalServer } from "../../dev/localServer.ts";
 import { createRoomStore } from "../../state/store.ts";
 import { FakeClock, FakeOutbox } from "../../state/testing.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
-import { answerAsk, answerLabel, askOp, closedAskText, editAsk, emptyDraft, pendingAskCloseText, sendLabel, type AskDraft, type AskSheet } from "./logic.ts";
+import { answerAsk, answerLabel, draftOp, closedAskText, editAsk, emptyDraft, pendingAskCloseText, sendLabel, type AskDraft, type AskSheet } from "./logic.ts";
 
 /** A draft with a Dexterity save picked, since the sheet opens with nothing picked. */
 const dexDraft = (ticked: AskDraft["ticked"]): AskDraft => ({ ...emptyDraft(ticked), choices: [{ kind: "save", ability: "dex" }] });
@@ -39,7 +39,7 @@ function party(): RoomState {
 
 /** Sends the sheet's request as the sheet does: locked until the answer, which closes it or unlocks it with the reason. */
 function send(t: ReturnType<typeof setup>, sheet: AskSheet, id: string) {
-  const check = askOp(sheet.draft, id, 0);
+  const check = draftOp(sheet.draft, id, 0);
   assert.ok(check.ok);
   const heard: { answer?: OpAnswer; refusal?: OpRefusal } = {};
   assert.notEqual(t.store.dispatch(check.op, { quiet: true, onAnswer: (answer, refusal) => Object.assign(heard, { answer, refusal }) }), null);

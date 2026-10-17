@@ -4,10 +4,11 @@ import type { AskFrom } from "./logic.ts";
 
 /**
  * Where "Request a roll" opens the DM's sheet from: the party bar's "Ask
- * the party", or a token's action bar with its selection. The sheet itself
- * lives with the DM's roll cards in the fight alerts column, which is
- * always mounted, so any entry point only names its targets here. Per Room
- * page (client/state/scope.ts).
+ * the party", or a token's action bar with its selection, and with `fill`
+ * the roll already chosen (docs/design-v1-roll-request.md 4.8). The sheet
+ * itself lives with the DM's roll cards in the fight alerts column, which
+ * is always mounted, so any entry point only names its targets here. Per
+ * Room page (client/state/scope.ts).
  */
 export const askSlot = scopeSlot(() => createStore<{ asking: AskFrom | null }>(() => ({ asking: null })));
 

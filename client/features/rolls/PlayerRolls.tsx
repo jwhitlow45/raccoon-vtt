@@ -595,7 +595,7 @@ function CreatureAnswer(props: {
       drafts.delete(key);
       props.onSent();
     };
-    if (actions.dispatch({ t: "roll.answer", rollId: request.id, target: targetRef(target), ...answer }, { onAnswer }) === null) {
+    if (actions.dispatch({ t: "roll.answer", rollId: request.id, target: targetRef(target), ...answer, tag: actions.newId() }, { onAnswer }) === null) {
       setError("That answer could not be sent.");
       return;
     }

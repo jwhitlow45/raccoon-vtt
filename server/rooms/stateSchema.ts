@@ -423,6 +423,7 @@ const rollRequest = z.strictObject({
   note: shortText.optional(),
   spell: z.literal(true).optional(),
   cause: z.literal("saveEnds").optional(),
+  ends: z.strictObject({ effect: id, occurrence: id }).optional(),
   at: iso,
   targets: z.array(rollTarget).min(1).max(LIMITS.rollTargets),
 });

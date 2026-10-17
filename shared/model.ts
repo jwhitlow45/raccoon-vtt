@@ -1062,6 +1062,13 @@ export type Effect = {
    * section 9.5.
    */
   duration?: { remaining: number; boundary: "turnStart" | "turnEnd"; anchor: DurationAnchor };
+  /**
+   * Wave 7: the pending save of a "save ends" effect, one per turn end that
+   * asks it (docs/design-v1-roll-options.md 6.1 writes it). Closing the
+   * request linked to it settles it (docs/design-v1-roll-request.md 1.1).
+   * The DM's.
+   */
+  due?: { id: string; state: "pending" | "resolved" | "dismissed" };
 };
 
 export type AreaShape = "sphere" | "cylinder" | "cone" | "cube" | "line" | "emanation";
@@ -1387,6 +1394,8 @@ export type RollRequest = {
   spell?: true;
   /** Wave 7: public, what the request is for (docs/design-v1-roll-request.md 1.1). */
   cause?: "saveEnds";
+  /** Wave 7, the DM's: the effect a pass removes, and the save occurrence (`Effect.due.id`) it answers (docs/design-v1-roll-request.md 1.1). */
+  ends?: { effect: EffectId; occurrence: string };
   /** The envelope time it was asked. */
   at: string;
   /** 1 to 50, one per creature. */

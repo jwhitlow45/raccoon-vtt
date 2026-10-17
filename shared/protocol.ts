@@ -976,6 +976,12 @@ const rollRequestInput = z.strictObject({
   resultShown: z.boolean(),
   note: line(LIMITS.rollNoteChars).optional(),
   targets: rollTargets,
+  /** Wave 7 (docs/design-v1-roll-request.md 1.1): a save against a spell, which the test's bonuses read. */
+  spell: z.literal(true).optional(),
+  /** Public: what the request is for, so a player's card and the roll's test know a "save ends" save. */
+  cause: z.literal("saveEnds").optional(),
+  /** The DM's: the effect a pass removes and its save occurrence. The reducer holds it to one creature with that effect, asked once. */
+  ends: z.strictObject({ effect: id, occurrence: id }).optional(),
 });
 
 // Dice (wave 7, docs/design-v1-dice.md 4.1 and 5.1).
@@ -1383,7 +1389,17 @@ export const clientOps = [
   ),
   /** Clears a target's answer, kept as `previous`, so its player may answer once more. */
   op("roll.reopen", { rollId: id, target: actorTarget }),
-  op("roll.close", { rollIds: z.array(id).min(1).max(LIMITS.openRollsPerRoom) }),
+  /**
+   * Closes requests, settling each in the same op (docs/design-v1-roll-request.md 1.1): a pending ask is
+   * kept, and a "save ends" request's occurrence is settled as `settle`, doc 3's Accept failure or Dismiss,
+   * else by whether it was answered. `ifSettled` is "Close all answered": the server skips a request that
+   * waits on a target or holds an ask when the op runs, so nothing that arrived after the tap closes unseen.
+   */
+  op("roll.close", {
+    rollIds: z.array(id).min(1).max(LIMITS.openRollsPerRoom),
+    settle: z.enum(["resolved", "dismissed"]).optional(),
+    ifSettled: z.literal(true).optional(),
+  }),
   /**
    * Rolls on the server (docs/design-v1-dice.md 4.1): 1 to 20 formulas, 100
    * dice in all after each mode, every formula parsing and every mode

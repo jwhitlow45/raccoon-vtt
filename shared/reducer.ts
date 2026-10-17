@@ -49,7 +49,7 @@ import { sceneDuplicate } from "./reducer/duplicate.ts";
 import { journalCreate, journalDelete, journalReveal, journalUpdate } from "./reducer/journal.ts";
 import { actorEffects, tokenDeleteMany, tokenUpdateMany } from "./reducer/many.ts";
 import { pinPut, pinRemove } from "./reducer/pins.ts";
-import { rollAnswer, rollAsk, rollClose, rollReopen } from "./reducer/rolls.ts";
+import { endSaves, rollAnswer, rollAsk, rollClose, rollReopen } from "./reducer/rolls.ts";
 import { sysDice } from "./reducer/dice.ts";
 import { handoutClose, handoutDocCreate, handoutDocDelete, handoutShow, logChat, logWhisper, restore } from "./reducer/misc.ts";
 import { sceneSetPhase } from "./reducer/phases.ts";
@@ -122,6 +122,7 @@ export function applyOp(state: RoomState, op: Op, actor: Viewer, env: Env): Appl
     // Areas that hit a creature again remind the table around the op itself (reducer/areaTriggers.ts).
     if (op.t === "encounter.next" && !pressChangesNothing(state, actor, op, env)) remindTurnEnd(tx);
     dispatch(tx, op);
+    endSaves(tx);
     remindAfter(tx, state, op);
     tx.finish();
   } catch (err) {

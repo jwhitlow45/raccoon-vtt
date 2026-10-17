@@ -169,6 +169,7 @@ class Check {
 }
 
 export function canApply(op: Op, actor: Viewer, state: RoomState, deps: PermissionDeps): Decision {
+  if (op.t === "roll.answer" && op.tag === undefined) return refuse("invalid", ANSWER_NEEDS_TAG);
   const check = new Check(state, actor, deps);
   const decision = actor.role === "dm" ? forDm(op, check) : forPlayer(op, check);
   // After the role's checks, so a player who names a hidden effect hears that it is not there, never what it holds.
@@ -734,6 +735,16 @@ function rollAnswerCheck(c: Check, op: OpOf<"roll.answer">): Decision {
   }
   return OK;
 }
+
+/**
+ * The refusal of a live answer without its tag, the DM's or a player's
+ * (docs/design-v1-roll-request.md 7.5). The tag is the answer's receipt key
+ * and its provenance, and the reducer judges an untagged answer by the rule
+ * from before them. So the rule lives here, where live ops arrive, and stored
+ * answers from before it replay as they were. Only a page loaded before the
+ * update still sends one.
+ */
+export const ANSWER_NEEDS_TAG = "An answer needs its tag. Reload the page.";
 
 /** The refusal of a roll for a creature that has an answer by now (docs/design-v1-dice.md 4.3), a player's or one with `unanswered`. */
 export const ANSWERED_MEANWHILE = "It was answered meanwhile.";

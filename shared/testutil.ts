@@ -782,8 +782,8 @@ function dmToolOp(r: () => number, state: RoomState, who: Viewer, ctx: { anyToke
       case 1: {
         const rollId = anyRoll();
         return chance(r, 0.8)
-          ? { t: "roll.answer", rollId, target: answerTarget(rollId), total: int(r, -2, 25), ...(chance(r, 0.3) ? { choice: 0 as const } : {}) }
-          : { t: "roll.answer", rollId, target: answerTarget(rollId), result: "fail" };
+          ? { t: "roll.answer", rollId, target: answerTarget(rollId), total: int(r, -2, 25), ...(chance(r, 0.3) ? { choice: 0 as const } : {}), tag: ctx.seqId }
+          : { t: "roll.answer", rollId, target: answerTarget(rollId), result: "fail", tag: ctx.seqId };
       }
       case 2:
         return { t: "token.updateMany", tokenIds: tokens, patch: chance(r, 0.5) ? { light: chance(r, 0.7) ? { bright: 20, dim: 20 } : null } : { image: { icon: "lorc/wolf-head", color: "#123456" } } };
@@ -822,7 +822,7 @@ function dmToolOp(r: () => number, state: RoomState, who: Viewer, ctx: { anyToke
       return { t: "roll.ask", request: { id: ctx.seqId, test: pick(r, ROLL_TESTS), ...(chance(r, 0.7) ? { dc: int(r, 5, 25) } : {}), dcShown: chance(r, 0.5), resultShown: chance(r, 0.5), targets: [...new Map([ctx.target(), ctx.target()].map((t) => [JSON.stringify(t), t])).values()] } };
     case 7: {
       const rollId = anyRoll();
-      return { t: "roll.answer", rollId, target: answerTarget(rollId), ...(chance(r, 0.5) ? { total: int(r, 0, 25) } : { result: pick(r, ["pass", "fail"] as const) }) };
+      return { t: "roll.answer", rollId, target: answerTarget(rollId), ...(chance(r, 0.5) ? { total: int(r, 0, 25) } : { result: pick(r, ["pass", "fail"] as const) }), tag: ctx.seqId };
     }
     case 8: {
       const rollId = anyRoll();

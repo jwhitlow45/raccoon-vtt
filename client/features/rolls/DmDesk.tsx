@@ -110,7 +110,9 @@ export function DmDesk() {
     const settled = () => {
       if (afterClose.current === ask) afterClose.current = null;
     };
-    if (actions.dispatch({ t: "roll.close", rollIds: [...ids] }, { onAnswer: settled }) === null) settled();
+    // "Close all answered" lets the server skip a request an ask or a reopen reached after the tap (docs/design-v1-roll-request.md 1.1).
+    const op = { t: "roll.close" as const, rollIds: [...ids], ...(by === "all" ? { ifSettled: true as const } : {}) };
+    if (actions.dispatch(op, { onAnswer: settled }) === null) settled();
   };
   useLayoutEffect(() => {
     const ask = afterClose.current;
@@ -240,7 +242,7 @@ function TargetRow(props: { request: RollRequest; target: RollTarget }) {
   const ref = targetRef(target);
   const mark = (result: "pass" | "fail") => {
     if (target.result === result) return;
-    actions.dispatch({ t: "roll.answer", rollId: request.id, target: ref, result });
+    actions.dispatch({ t: "roll.answer", rollId: request.id, target: ref, result, tag: actions.newId() });
   };
   // Tight, so the name and both marks fit the column's 300 px card.
   const markStyle = { padding: `0 ${theme.space(2)}px` };

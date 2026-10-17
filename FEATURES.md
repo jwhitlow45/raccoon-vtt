@@ -283,9 +283,10 @@ The DM asks players for a saving throw or an ability check, and each player type
 
 - "Request a roll" is in the action bar of one or several creatures that players play. "Ask the party" is in the party bar.
 - One tap picks the roll: a save or a check by ability, or a skill from a list, which starts at its usual ability and can go with another. Nothing is picked until the DM picks it, and a later tap replaces the whole roll. "Or a second choice" lets the creature pick between two, such as "Strength (Athletics) or Dexterity (Acrobatics)". Either can be removed.
-- Set a DC, or none. A check offers the typical DCs as chips, from Very easy (5) to Nearly impossible (30).
-- Two checkboxes, both on at first: "Players see the DC" and "Players see pass or fail". With the DC hidden and pass or fail shown, an answer is final once it passes or fails, so changing the total cannot find the DC. The DM can reopen it.
-- Add a note, such as "against the poison", and tick who rolls. "Ask the party" starts with the characters on the players' scene ticked, or every character when the DM is looking at another scene. If the server refuses the request, the sheet stays open with everything set and the reason. Closing the sheet while the request is sending does not stop it, and a refusal that comes after shows as a message.
+- The DC, or none, on one row with the typical DCs for a check as chips from 5 (Very easy) to 30 (Nearly impossible).
+- Who rolls, as chips. "Ask the party" starts with the characters on the players' scene picked, or every character when the DM is looking at another scene.
+- What players see (the DC, and pass or fail), "Against a spell" for a save, and a note such as "against the poison" fold into one line that says what they are. Both switches start as the DM's last request from that device had them, else on. With the DC hidden and pass or fail shown, a typed answer is final once it passes or fails, so changing the total cannot find the DC. The DM can reopen it.
+- The last three requests from that device are one tap each, with their DC, switches and note. Enter in the DC field or the note sends. If the server refuses the request, the sheet stays open with everything set and the reason. Closing the sheet while the request is sending does not stop it, and a refusal that comes after shows as a message.
 - The player's device shows a card, with a vibration on Android or the turn chime. It says what to roll, the DC or "DC hidden", and reminders from the creature's conditions, such as Restrained's disadvantage on Dexterity saves or an Exhaustion penalty. The reminders only remind. They decide nothing.
 - The player types the total and taps Send. A save also offers "Fail without rolling". The card then folds into a chip, such as "Dex save: sent 17. Pass." (with two choices it names the one rolled: "Str or Dex save: sent Dex 15. Pass."), which opens again to change the answer while the request is open. A card can also fold away to answer later. On a phone the chips fold into one button while a sheet covers the map, and otherwise only the newest two show, with a "Rolls" button that counts the answers (such as "Rolls 1/3"), shows the rest and folds them again. A card that would cover an open sheet on a phone folds too, into a "Roll asked" button that closes the sheet and opens the card again, with any total typed into it kept. On a phone a card at the screen's foot stands on the tool's options, such as the Multi-select bar, and the token's action bar keeps above it. Where the screen is too short for the card's question, Later and total, or for both it and the bar, the card folds, and a "Roll asked" row at the top of the map stands for it. Its tap, like a chip's, hides the bar, keeping the token or group selected, and opens the card over the tool's options, rising to the screen's top where it needs the room, with its question, Later, total and Send in reach at once, until it is answered or put off with Later.
 - The DM's live card shows each creature waiting, or with its choice, total and pass or fail. Pass and Fail mark a roll with no DC, or overrule one. "Reopen for one more answer", Close, and "Close all answered" finish it. On a phone the DM's cards start folded to one line, only the newest two show, with a "Rolls" button (such as "Rolls 1/3") for the rest, and all of them fold into one button while a sheet covers the map.
@@ -509,6 +510,12 @@ Where the action bar opens as a window: on a screen 600 px or wider, or a phone 
 | --- | --- | --- |
 | Enter | Roll what the field holds | everyone, in the Dice panel's formula field |
 | Up, Down | Go back through the formulas this device rolled, newest first, or forward again to what was being typed | everyone, in the formula field |
+
+### Roll requests
+
+| Key | Does | Who |
+| --- | --- | --- |
+| Enter | Send the request | DM, in Request a roll's DC or note field |
 
 ### Token and character fields
 

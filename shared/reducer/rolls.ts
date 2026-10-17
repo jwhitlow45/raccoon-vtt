@@ -1,7 +1,10 @@
 import { keys } from "../keys.ts";
+import { answerProvenance } from "../migrate.ts";
 import type { LogEvent, RollAnswer, RollRequest, RollTarget } from "../model.ts";
 import { anyPlayer, playersToken } from "../project.ts";
 import type { ActorTarget, OpOf } from "../protocol.ts";
+import { effectEvent } from "../rules/hp.ts";
+import { resultOf } from "../rules/rolls.ts";
 import { Refuse, gone, invalid, type Tx } from "./tx.ts";
 
 /**
@@ -15,6 +18,10 @@ import { Refuse, gone, invalid, type Tx } from "./tx.ts";
 export const NOT_PLAYED = "only creatures a player plays can be asked to roll";
 /** The refusal of a player's change to an answer that is final (`isFinal`). */
 export const FINAL = "Ask the DM to change it.";
+/** The refusal of a "save ends" request that is not one save of one creature with its effect (docs/design-v1-roll-request.md 7.5). */
+export const ENDS_NEEDS_ONE = "Ends needs one creature with that effect.";
+/** The refusal of a second open request for one save occurrence, as from a second DM device. */
+export const ALREADY_ASKED = "That save was already asked.";
 
 export function rollAsk(tx: Tx, op: OpOf<"roll.ask">): void {
   const input = op.request;
@@ -40,6 +47,18 @@ export function rollAsk(tx: Tx, op: OpOf<"roll.ask">): void {
   };
   if (input.dc !== undefined) request.dc = input.dc;
   if (input.note !== undefined) request.note = input.note;
+  if (input.spell) request.spell = true;
+  if (input.cause !== undefined) request.cause = input.cause;
+  if (input.ends !== undefined) {
+    const ends = input.ends;
+    const target = input.targets.length === 1 ? input.targets[0] : undefined;
+    const oneSave = input.cause === "saveEnds" && input.test.kind === "save" && input.test.choices.length === 1;
+    const holder = oneSave && target ? tx.tryResolveActor(target) : undefined;
+    if (!holder?.actor.effects.some((e) => e.id === ends.effect)) throw invalid(ENDS_NEEDS_ONE);
+    // Every request in the state is open, since a close removes it.
+    if (Object.values(tx.state.rolls).some((r) => r.ends?.occurrence === ends.occurrence)) throw invalid(ALREADY_ASKED);
+    request.ends = { effect: ends.effect, occurrence: ends.occurrence };
+  }
   tx.write(keys.roll(request.id), request);
 }
 
@@ -87,6 +106,10 @@ export function rollAnswer(tx: Tx, op: OpOf<"roll.answer">): void {
   if (op.choice !== undefined && (op.total === undefined || op.choice >= request.test.choices.length)) throw invalid("a choice comes with a total, and names one the test offers");
   const player = tx.actor.role === "player";
   if (player && isFinal(request, current)) throw new Refuse("forbidden", FINAL);
+  // The server refuses a live answer without its tag (permissions.ts ANSWER_NEEDS_TAG), so an untagged one is an op
+  // stored before op version 7, or a test's. Both keep the rule below, which they were written under, so stored ops
+  // replay to the same state and the older reducer tests still test what they did.
+  if (answerProvenance(tx.env.opVersion) && op.tag !== undefined) return taggedAnswer(tx, request, index, current, op, op.tag);
   const answered = current.total !== undefined || current.result !== undefined;
   let next: RollTarget;
   if (!player && op.total === undefined && answered) {
@@ -120,6 +143,55 @@ export function rollAnswer(tx: Tx, op: OpOf<"roll.answer">): void {
   tx.addEvent(line);
 }
 
+/**
+ * An answer with its provenance (docs/design-v1-roll-request.md 7.5): it
+ * keeps the op's tag, and the DM's own mark is kept apart from what the DC
+ * gives, so `resultOf` decides the result for every reader alike. A DM's
+ * bare mark on an answer keeps the answer, its total and dice, and only
+ * marks it. It takes the op's tag, so an ask made on the old tag is over and
+ * goes. Anything else is a new answer, with no mark and no ask. The line
+ * says whether a mark wrote it, so the projection never guesses.
+ */
+function taggedAnswer(tx: Tx, request: RollRequest, index: number, current: RollTarget, op: OpOf<"roll.answer">, tag: string): void {
+  const player = tx.actor.role === "player";
+  const mark = player ? undefined : op.result;
+  const answered = current.total !== undefined || current.result !== undefined;
+  let next: RollTarget;
+  if (mark !== undefined && op.total === undefined && answered) {
+    const { change: _ask, ...kept } = current;
+    next = { ...kept, mark, tag, by: tx.actor.memberId };
+  } else {
+    next = creatureOf(current);
+    if (op.total !== undefined) {
+      if (request.test.choices.length > 1) next.choice = op.choice ?? 0;
+      next.total = op.total;
+    }
+    if (mark !== undefined) next.mark = mark;
+    if (player && op.total === undefined && op.result === "fail") next.noRoll = true;
+    next.tag = tag;
+    next.by = tx.actor.memberId;
+    const previous = answered ? answerOf(current) : current.previous;
+    if (previous) next.previous = previous;
+  }
+  const result = resultOf(next, request.dc);
+  if (result === undefined) delete next.result;
+  else next.result = result;
+  writeTarget(tx, request, index, next);
+  const line: Extract<LogEvent, { type: "roll" }> = { type: "roll", test: request.test, ...creatureRef(next) };
+  if (next.choice !== undefined) line.choice = next.choice;
+  if (next.total !== undefined) line.total = next.total;
+  if (next.result !== undefined) line.result = next.result;
+  if (next.noRoll) line.noRoll = true;
+  if (request.dc !== undefined) {
+    line.dc = request.dc;
+    if (request.dcShown) line.dcShown = true;
+  }
+  if (request.resultShown) line.resultShown = true;
+  line.tag = tag;
+  if (mark !== undefined) line.mark = true;
+  tx.addEvent(line);
+}
+
 /** Clears a target's answer, kept as `previous`, so its player may answer once more. A target with no answer is left as it is. */
 export function rollReopen(tx: Tx, op: OpOf<"roll.reopen">): void {
   const request = tx.state.rolls[op.rollId];
@@ -131,9 +203,97 @@ export function rollReopen(tx: Tx, op: OpOf<"roll.reopen">): void {
   writeTarget(tx, request, index, { ...creatureOf(current), previous: answerOf(current) });
 }
 
-/** Closes requests, "Close all answered" several at once. One already closed, by another DM device, is passed over. */
+/**
+ * Closes requests, "Close all answered" several at once. One already
+ * closed, by another DM device, is passed over. Each close settles its
+ * request in the same op (docs/design-v1-roll-request.md 1.1), so no
+ * gesture is left half done. A pending ask goes with the request, kept as
+ * it stands, since nothing acts on it again. A "save ends" request settles
+ * its own occurrence (`settleOccurrence`).
+ *
+ * With `ifSettled` the op is "Close all answered", and the server checks
+ * each request as the op runs, not as the DM tapped: one still waiting on a
+ * target, or holding an ask, stays open, so an ask or a reopen that lands
+ * after the tap is never settled unseen. Stored closes carry neither field
+ * and no stored request has `ends`, so they replay as they applied.
+ */
 export function rollClose(tx: Tx, op: OpOf<"roll.close">): void {
-  for (const id of new Set(op.rollIds)) if (tx.state.rolls[id]) tx.remove(keys.roll(id));
+  for (const id of new Set(op.rollIds)) {
+    const request = tx.state.rolls[id];
+    if (!request) continue;
+    if (op.ifSettled && !request.targets.every((t) => isAnswered(t) && t.change === undefined)) continue;
+    if (request.ends) settleOccurrence(tx, request, op.settle);
+    tx.remove(keys.roll(id));
+  }
+}
+
+/**
+ * A closing "save ends" request's occurrence (docs/design-v1-roll-options.md
+ * 6.1), settled as the op names, doc 3's Accept failure or Dismiss, else
+ * resolved when its creature answered and dismissed when it did not. Only
+ * its own occurrence and only while pending: a newer occurrence, one
+ * settled already or an effect that is gone is left as it is.
+ */
+function settleOccurrence(tx: Tx, request: RollRequest, settle: "resolved" | "dismissed" | undefined): void {
+  const ends = request.ends;
+  const target = request.targets[0];
+  if (!ends || !target) return;
+  const holder = tx.tryResolveActor(creatureRef(target));
+  if (!holder) return;
+  const effects = holder.actor.effects;
+  const index = effects.findIndex((e) => e.id === ends.effect);
+  const effect = effects[index];
+  if (!effect?.due || effect.due.id !== ends.occurrence || effect.due.state !== "pending") return;
+  const next = [...effects];
+  next[index] = { ...effect, due: { id: effect.due.id, state: settle ?? (isAnswered(target) ? "resolved" : "dismissed") } };
+  tx.putActor(holder, { ...holder.actor, effects: next });
+}
+
+/**
+ * The life of a "save ends" request (docs/design-v1-roll-request.md 7.5,
+ * "When an ends request closes"), as one rule after every op rather than a
+ * call in every path that answers a target or removes an effect: an answer
+ * typed, rolled, marked or allowed after an ask, a removal by
+ * `actor.effect.remove`, `actor.effects` or an expiry, and a turn end that
+ * writes the next occurrence. A pass removes the effect if it is still
+ * there, with the line `actor.effect.remove` writes, after the answer's own
+ * line, and closes the request. A request whose effect is gone, or whose
+ * effect's occurrence is a newer one, closes. A fail leaves it open, so the
+ * answer can still be asked about or fixed. Requests go in id order, so the
+ * lines come out the same on replay, and no stored request has `ends`, so
+ * replay is unchanged.
+ *
+ * A creature that does not resolve is skipped. A DM's view holds the
+ * tokens of one scene only, and the client's store replays pending ops
+ * through this reducer, so a token missing from that view must not close
+ * anything there.
+ */
+export function endSaves(tx: Tx): void {
+  const open: RollRequest[] = [];
+  // Loading migrates every state to one with requests, but a replay test may hand the reducer a state from before them.
+  for (const request of Object.values(tx.state.rolls ?? {})) if (request.ends) open.push(request);
+  if (open.length === 0) return;
+  open.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const request of open) {
+    const ends = request.ends!;
+    const target = request.targets[0];
+    const holder = target ? tx.tryResolveActor(creatureRef(target)) : undefined;
+    if (!target || !holder) continue;
+    const effect = holder.actor.effects.find((e) => e.id === ends.effect);
+    if (resultOf(target, request.dc) === "pass") {
+      if (effect) {
+        tx.putActor(holder, { ...holder.actor, effects: holder.actor.effects.filter((e) => e.id !== ends.effect) });
+        tx.addActorEvents(holder, [effectEvent(effect, "remove")]);
+      }
+      tx.remove(keys.roll(request.id));
+    } else if (!effect || (effect.due !== undefined && effect.due.id !== ends.occurrence)) {
+      tx.remove(keys.roll(request.id));
+    }
+  }
+}
+
+function isAnswered(target: RollTarget): boolean {
+  return target.total !== undefined || target.result !== undefined;
 }
 
 export function writeTarget(tx: Tx, request: RollRequest, index: number, target: RollTarget): void {

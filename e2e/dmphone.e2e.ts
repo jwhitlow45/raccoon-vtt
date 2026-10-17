@@ -330,7 +330,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       // Each asked at a time of its own, so the newest is certain.
       await dm.waitForTimeout(20);
     }
-    await ops.send({ t: "roll.answer", rollId: ids.dex, target: { characterId }, result: "pass" });
+    await ops.send({ t: "roll.answer", rollId: ids.dex, target: { characterId }, result: "pass", tag: randomUUID() });
     const card = (test: string) => dm.getByRole("group", { name: `Roll request: ${test}` });
     await card("Wis save").waitFor();
 

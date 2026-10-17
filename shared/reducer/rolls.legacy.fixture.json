@@ -1,0 +1,458 @@
+{
+  "build": "7cbc2560",
+  "snapshotVersion": 10,
+  "opVersion": 6,
+  "state": {
+    "meta": {
+      "name": "Test room",
+      "settings": {
+        "feetPerCell": 5,
+        "diagonal": "five",
+        "aoeCoverage": "half",
+        "aoeInclusion": "anyCell",
+        "pcHpVisibleToParty": true,
+        "monstersDieAtZero": true,
+        "playersSeeAoeOfOthers": true,
+        "playersMoveAny": "none",
+        "playersCreateCharacters": false,
+        "playersApplyDamage": false,
+        "skipDefeated": true,
+        "monsterInitScore": false,
+        "revealHiddenOnTurn": true,
+        "turnTimerSec": 0,
+        "healRevives": true
+      },
+      "playerSceneId": "s1",
+      "view": {
+        "follow": false,
+        "blackout": false
+      }
+    },
+    "members": {
+      "dm1": {
+        "id": "dm1",
+        "rev": 0,
+        "name": "dm1",
+        "color": "#ff0000",
+        "kind": "dm",
+        "createdAt": "2026-10-12T20:00:00.000Z"
+      },
+      "p1": {
+        "id": "p1",
+        "rev": 0,
+        "name": "p1",
+        "color": "#ff0000",
+        "kind": "player",
+        "createdAt": "2026-10-12T20:00:00.000Z"
+      },
+      "p2": {
+        "id": "p2",
+        "rev": 0,
+        "name": "p2",
+        "color": "#ff0000",
+        "kind": "player",
+        "createdAt": "2026-10-12T20:00:00.000Z"
+      }
+    },
+    "scenes": {
+      "s1": {
+        "id": "s1",
+        "rev": 0,
+        "name": "s1",
+        "order": 0,
+        "bounds": {
+          "w": 40,
+          "h": 30
+        },
+        "grid": {
+          "show": true,
+          "color": "#ffffff",
+          "opacity": 0.25,
+          "lineWidth": 1
+        },
+        "background": "#2b2b31",
+        "fogEnabled": false,
+        "wallsVersion": 0
+      },
+      "s2": {
+        "id": "s2",
+        "rev": 0,
+        "name": "s2",
+        "order": 1,
+        "bounds": {
+          "w": 40,
+          "h": 30
+        },
+        "grid": {
+          "show": true,
+          "color": "#ffffff",
+          "opacity": 0.25,
+          "lineWidth": 1
+        },
+        "background": "#2b2b31",
+        "fogEnabled": false,
+        "wallsVersion": 0
+      }
+    },
+    "buildChunks": {},
+    "labels": {},
+    "fogTiles": {},
+    "fogDrafts": {},
+    "tokens": {},
+    "characters": {
+      "thorn": {
+        "id": "thorn",
+        "rev": 0,
+        "ownerIds": [
+          "p1"
+        ],
+        "name": "Thorn",
+        "size": "medium",
+        "actor": {
+          "hp": {
+            "cur": 20,
+            "max": 20,
+            "temp": 0
+          },
+          "life": "alive",
+          "ac": 14,
+          "speeds": {
+            "walk": 30
+          },
+          "initBonus": 2,
+          "passivePerception": 12,
+          "senses": "",
+          "effects": [],
+          "deathSaves": {
+            "ok": 0,
+            "fail": 0
+          },
+          "notes": "",
+          "dmNotes": "secret plan"
+        }
+      }
+    },
+    "templates": {},
+    "drawings": {},
+    "encounter": null,
+    "encounterHistory": [],
+    "handouts": {},
+    "log": [],
+    "monsters": {},
+    "srdImages": {},
+    "savedEncounters": {},
+    "stamps": {},
+    "lights": {},
+    "exploredTiles": {},
+    "journal": {},
+    "pins": {},
+    "rolls": {},
+    "handoutDocs": {},
+    "companionBlocks": {}
+  },
+  "snapshot": {
+    "meta": {
+      "name": "Test room",
+      "settings": {
+        "feetPerCell": 5,
+        "diagonal": "five",
+        "aoeCoverage": "half",
+        "aoeInclusion": "anyCell",
+        "pcHpVisibleToParty": true,
+        "monstersDieAtZero": true,
+        "playersSeeAoeOfOthers": true,
+        "playersMoveAny": "none",
+        "playersCreateCharacters": false,
+        "playersApplyDamage": false,
+        "skipDefeated": true,
+        "monsterInitScore": false,
+        "revealHiddenOnTurn": true,
+        "turnTimerSec": 0,
+        "healRevives": true
+      },
+      "playerSceneId": "s1",
+      "view": {
+        "follow": false,
+        "blackout": false
+      }
+    },
+    "members": {
+      "dm1": {
+        "id": "dm1",
+        "rev": 0,
+        "name": "dm1",
+        "color": "#ff0000",
+        "kind": "dm",
+        "createdAt": "2026-10-12T20:00:00.000Z"
+      },
+      "p1": {
+        "id": "p1",
+        "rev": 0,
+        "name": "p1",
+        "color": "#ff0000",
+        "kind": "player",
+        "createdAt": "2026-10-12T20:00:00.000Z"
+      },
+      "p2": {
+        "id": "p2",
+        "rev": 0,
+        "name": "p2",
+        "color": "#ff0000",
+        "kind": "player",
+        "createdAt": "2026-10-12T20:00:00.000Z"
+      }
+    },
+    "scenes": {
+      "s1": {
+        "id": "s1",
+        "rev": 0,
+        "name": "s1",
+        "order": 0,
+        "bounds": {
+          "w": 40,
+          "h": 30
+        },
+        "grid": {
+          "show": true,
+          "color": "#ffffff",
+          "opacity": 0.25,
+          "lineWidth": 1
+        },
+        "background": "#2b2b31",
+        "fogEnabled": false,
+        "wallsVersion": 0
+      },
+      "s2": {
+        "id": "s2",
+        "rev": 0,
+        "name": "s2",
+        "order": 1,
+        "bounds": {
+          "w": 40,
+          "h": 30
+        },
+        "grid": {
+          "show": true,
+          "color": "#ffffff",
+          "opacity": 0.25,
+          "lineWidth": 1
+        },
+        "background": "#2b2b31",
+        "fogEnabled": false,
+        "wallsVersion": 0
+      }
+    },
+    "buildChunks": {},
+    "labels": {},
+    "fogTiles": {},
+    "fogDrafts": {},
+    "tokens": {},
+    "characters": {
+      "thorn": {
+        "id": "thorn",
+        "rev": 0,
+        "ownerIds": [
+          "p1"
+        ],
+        "name": "Thorn",
+        "size": "medium",
+        "actor": {
+          "hp": {
+            "cur": 20,
+            "max": 20,
+            "temp": 0
+          },
+          "life": "alive",
+          "ac": 14,
+          "speeds": {
+            "walk": 30
+          },
+          "initBonus": 2,
+          "passivePerception": 12,
+          "senses": "",
+          "effects": [],
+          "deathSaves": {
+            "ok": 0,
+            "fail": 0
+          },
+          "notes": "",
+          "dmNotes": "secret plan"
+        }
+      }
+    },
+    "templates": {},
+    "drawings": {},
+    "encounter": null,
+    "encounterHistory": [],
+    "handouts": {},
+    "log": [
+      {
+        "id": "2001:0",
+        "at": "2026-10-01T20:00:01.000Z",
+        "kind": "event",
+        "data": {
+          "type": "roll",
+          "test": {
+            "kind": "save",
+            "choices": [
+              {
+                "ability": "dex"
+              }
+            ]
+          },
+          "characterId": "thorn",
+          "total": 3,
+          "result": "fail",
+          "dc": 13
+        }
+      },
+      {
+        "id": "2002:0",
+        "at": "2026-10-01T20:00:02.000Z",
+        "kind": "event",
+        "data": {
+          "type": "roll",
+          "test": {
+            "kind": "save",
+            "choices": [
+              {
+                "ability": "dex"
+              }
+            ]
+          },
+          "characterId": "thorn",
+          "total": 3,
+          "result": "pass",
+          "dc": 13
+        }
+      }
+    ],
+    "monsters": {},
+    "srdImages": {},
+    "savedEncounters": {},
+    "stamps": {},
+    "lights": {},
+    "exploredTiles": {},
+    "journal": {},
+    "pins": {},
+    "rolls": {
+      "r1": {
+        "id": "r1",
+        "rev": 3,
+        "test": {
+          "kind": "save",
+          "choices": [
+            {
+              "ability": "dex"
+            }
+          ]
+        },
+        "dcShown": false,
+        "resultShown": false,
+        "at": "2026-10-01T20:00:00.000Z",
+        "targets": [
+          {
+            "characterId": "thorn",
+            "total": 3,
+            "result": "pass",
+            "by": "dm1"
+          }
+        ],
+        "dc": 13
+      }
+    },
+    "handoutDocs": {},
+    "companionBlocks": {}
+  },
+  "steps": [
+    {
+      "who": "dm",
+      "op": {
+        "t": "roll.ask",
+        "request": {
+          "id": "r1",
+          "test": {
+            "kind": "save",
+            "choices": [
+              {
+                "ability": "dex"
+              }
+            ]
+          },
+          "dc": 13,
+          "dcShown": false,
+          "resultShown": false,
+          "targets": [
+            {
+              "characterId": "thorn"
+            }
+          ]
+        }
+      },
+      "after": "e4713625c4ac9c181c3297df5f0ab3bc"
+    },
+    {
+      "who": "player",
+      "op": {
+        "t": "roll.answer",
+        "rollId": "r1",
+        "target": {
+          "characterId": "thorn"
+        },
+        "total": 3
+      },
+      "after": "61d87457d5fcd11308b9fcfdb3bca629"
+    },
+    {
+      "who": "dm",
+      "op": {
+        "t": "roll.answer",
+        "rollId": "r1",
+        "target": {
+          "characterId": "thorn"
+        },
+        "result": "pass"
+      },
+      "after": "21d62355d40729332f12acbead27bb8d"
+    },
+    {
+      "who": "dm",
+      "op": {
+        "t": "sys.restore",
+        "entries": [
+          {
+            "key": "roll:r1",
+            "value": {
+              "id": "r1",
+              "rev": 2,
+              "test": {
+                "kind": "save",
+                "choices": [
+                  {
+                    "ability": "dex"
+                  }
+                ]
+              },
+              "dcShown": false,
+              "resultShown": false,
+              "at": "2026-10-01T20:00:00.000Z",
+              "targets": [
+                {
+                  "characterId": "thorn",
+                  "total": 3,
+                  "result": "fail",
+                  "by": "p1"
+                }
+              ],
+              "dc": 13
+            },
+            "expectHash": "59e232e00e3a7ddbfe9bf089d6e9c866"
+          }
+        ],
+        "from": "undo",
+        "deps": true
+      },
+      "after": "7873e2d518a6a174ca1bba66a8ad9f38"
+    }
+  ]
+}

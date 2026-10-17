@@ -1052,6 +1052,9 @@ function projectRollCtx(ctx: Ctx, request: RollRequest): RollRequest | null {
   if (targets.length === 0) return null;
   const out: RollRequest = { id: request.id, rev: 0, test: request.test, dcShown: request.dcShown, resultShown: request.resultShown, at: request.at, targets };
   if (request.note !== undefined) out.note = request.note;
+  // What the roll is for goes with it, and `ends`, which names the effect and its occurrence, stays the DM's (docs/design-v1-roll-request.md 7.5).
+  if (request.spell) out.spell = true;
+  if (request.cause !== undefined) out.cause = request.cause;
   if (request.dc !== undefined) {
     if (request.dcShown) out.dc = request.dc;
     else out.dcHidden = true;

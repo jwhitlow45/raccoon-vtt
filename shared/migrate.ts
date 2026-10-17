@@ -324,6 +324,20 @@ export function oneLinkPerActor(opVersion: number | undefined): boolean {
   return opVersion === undefined || opVersion >= 6;
 }
 
+/**
+ * Whether an answer records where it came from
+ * (docs/design-v1-roll-request.md 7.5): the op's `tag` on the answer and
+ * its line, and the DM's `mark` kept apart from what a DC gives. Ops
+ * stored before version 7 wrote neither, and a DM's mark there overwrote
+ * the result alone (step 6 to 7 above). They replay by that rule, so they
+ * rebuild the very entities they made, with the same hashes, and every
+ * stored undo guard still matches. Live ops carry no stored version and
+ * take today's rule.
+ */
+export function answerProvenance(opVersion: number | undefined): boolean {
+  return opVersion === undefined || opVersion >= 7;
+}
+
 /** Runs the steps that lead from `from` to `to`, in order, and refuses a version with no path. */
 export function runMigrations(value: unknown, from: number, to: number, steps: MigrationStep[]): unknown {
   if (from === to) return value;

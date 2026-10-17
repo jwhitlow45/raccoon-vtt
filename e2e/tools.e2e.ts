@@ -364,7 +364,7 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     await sheet.getByRole("group", { name: "First choice" }).getByRole("radiogroup", { name: "Saving throw" }).getByRole("radio", { name: "Strength", checked: true }).waitFor();
     await sheet.getByRole("group", { name: "Or the second" }).getByRole("radiogroup", { name: "Saving throw" }).getByRole("radio", { name: "Dexterity" }).click();
     await sheet.getByLabel("DC", { exact: true }).fill("12");
-    await sheet.getByRole("checkbox", { name: /^Thorn/, checked: true }).waitFor();
+    await sheet.getByRole("group", { name: "Who rolls" }).getByRole("button", { name: /^Thorn/, pressed: true }).waitFor();
     await shots.take(dm, "tools-roll-request");
     await sheet.getByRole("button", { name: "Send", exact: true }).click();
     await sheet.waitFor({ state: "detached" });
