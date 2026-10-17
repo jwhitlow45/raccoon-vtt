@@ -10,10 +10,10 @@ import { theme } from "../lib/theme.ts";
  * the top bars and its top edge: 24 px, so the map still shows above it,
  * or `reserveTop` when something docks there (the folded token bar and
  * the fight alerts, 3.2.1). It never goes below SHEET_MIN_HEIGHT: the
- * 56 px header, one 44 px row and the start of the next, so its body
- * still reads as a list that scrolls. When the bars, the safe areas and
- * the reserve leave less than that, the sheet keeps its minimum and the
- * gap gives way.
+ * 60 px header of a sheet that swipes, one 44 px row and the start of the
+ * next, so its body still reads as a list that scrolls. When the bars, the
+ * safe areas and the reserve leave less than that, the sheet keeps its
+ * minimum and the gap gives way.
  */
 
 export const SHEET_MIN_HEIGHT = 120;

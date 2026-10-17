@@ -56,9 +56,10 @@ export type SheetMode = "bottom" | "side" | "full";
  * Swiped up from its header, or by the Full screen button that Tab
  * reaches in its header, it fills the screen (`expanded`, 4.7): the very
  * short mode's shape, modal, with the upright sheet's rounded top corners,
- * its header still the upright sheet's, with no Hide. A short swipe down brings it back to its normal height. While a
- * drag holds it above its normal top it takes that shape beside the map,
- * drawn over the bars and clipped at the toolbar, so the drag lays out once.
+ * its header still the upright sheet's, with no Hide. A short swipe down
+ * brings it back to its normal height. While a drag holds it above its
+ * normal top it takes that shape beside the map, drawn over the bars and
+ * clipped at the toolbar, so the drag lays out once.
  */
 export function Sheet(props: {
   ref?: Ref<HTMLElement>;
