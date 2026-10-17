@@ -64,6 +64,8 @@ const run = {
   goblins: [6, 8, 10].map((x, i) => ({ id: randomUUID(), name: `Goblin ${i + 1}`, x, y: 3 })),
   /** A red dragon wyrmling, whose Fire Breath is a save action with its own Group save. */
   dragon: { id: randomUUID(), name: "Wyrmling", x: 13, y: 3 },
+  /** A wolf Pat owns that is neither her character nor a companion. */
+  wolf: { id: randomUUID(), name: "Wolf", x: 16, y: 3 },
   /** The goblins' save line and the damage line, read once each lands. */
   saves: [] as DiceRoll[],
   fire: 0,
@@ -377,6 +379,22 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     assert.equal(await creatures.getByText(run.dragon.name, { exact: true }).count(), 0, "the wyrmling is not its own target");
     await shots.take(dm, "groupsave-fire-breath-rows-130");
     await sheet.getByRole("button", { name: "Discard", exact: true }).tap();
+    await sheet.getByRole("button", { name: "Close Dice" }).tap();
+  });
+
+  test("7. Pat's own wolf, neither her character nor a companion, gets its options from its bar's Roll (W7B-P-7)", async () => {
+    await ops.send({ t: "token.create", token: { id: run.wolf.id, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: run.wolf.name, x: run.wolf.x, y: run.wolf.y, disposition: "ally", ownerIds: [run.patId], actor: { inline: actor(11, { srdId: "wolf" }) } } });
+    await waitFor("the wolf on Pat's map", () => playerSocket.state?.tokens[run.wolf.id]);
+    await tapCell(player, run.bounds, run.wolf);
+    const bar = player.getByRole("dialog", { name: `${run.wolf.name} actions` });
+    await bar.waitFor();
+    await bar.getByRole("button", { name: "Roll", exact: true }).tap();
+    const sheet = diceSheet(player);
+    await sheet.waitFor();
+    const options = sheet.locator("[data-roll-options]");
+    await options.getByText(`Rolls for ${run.wolf.name}`).waitFor();
+    await options.getByRole("button", { name: /^Bite/ }).first().waitFor();
+    await shots.take(player, "groupsave-player-wolf-options");
     await sheet.getByRole("button", { name: "Close Dice" }).tap();
   });
 

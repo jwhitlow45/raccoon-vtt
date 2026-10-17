@@ -102,6 +102,35 @@ export type Route =
   | { kind: "roll" };
 
 /** The creature a request target or a tap names, as one id: a token of a character is its character. */
+/** A creature a player may roll for, as the options' chips list it. */
+export type Pickable = { key: string; creature: ActorTarget; name: string; tokenId?: string };
+
+/**
+ * A player's creatures (4.1): each character they own and each companion
+ * of those characters on the scene, then every other token on the scene
+ * they own, such as a summon or a beast token not made a companion, since
+ * the server lets a player roll for any creature they own (doc 1 4.3).
+ * Objects are never offered.
+ */
+export function playerCreatures(view: Pick<RoomState, "characters" | "tokens">, me: string, sceneId: string | null, nameOf: (token: RoomState["tokens"][string]) => string): Pickable[] {
+  const out: Pickable[] = [];
+  const listed = new Set<string>();
+  const mine = Object.values(view.characters).filter((c) => (c.ownerIds ?? []).includes(me));
+  for (const character of mine.sort((a, b) => a.name.localeCompare(b.name))) {
+    const token = Object.values(view.tokens).find((t) => t.sceneId === sceneId && "ref" in t.actor && t.actor.ref === character.id);
+    out.push({ key: `c:${character.id}`, creature: { characterId: character.id }, name: character.name, ...(token ? { tokenId: token.id } : {}) });
+    for (const companion of Object.values(view.tokens)) {
+      if (companion.companion?.of !== character.id || companion.sceneId !== sceneId || companion.kind === "object") continue;
+      listed.add(companion.id);
+      out.push({ key: `t:${companion.id}`, creature: { tokenId: companion.id }, name: nameOf(companion), tokenId: companion.id });
+    }
+  }
+  // A player's view of a token they do not own carries no owners (design 7.3), so a missing list is nobody's.
+  const owned = Object.values(view.tokens).filter((t) => t.sceneId === sceneId && t.kind !== "object" && !("ref" in t.actor) && (t.ownerIds ?? []).includes(me) && !listed.has(t.id));
+  for (const token of owned.sort((a, b) => nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true }))) out.push({ key: `t:${token.id}`, creature: { tokenId: token.id }, name: nameOf(token), tokenId: token.id });
+  return out;
+}
+
 export function creatureKey(state: Pick<RoomState, "tokens">, creature: { tokenId?: TokenId; characterId?: CharacterId }): string {
   if (creature.characterId !== undefined) return `c:${creature.characterId}`;
   const token = creature.tokenId !== undefined ? state.tokens[creature.tokenId] : undefined;

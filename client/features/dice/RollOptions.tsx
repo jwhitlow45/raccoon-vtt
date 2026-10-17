@@ -25,6 +25,7 @@ import {
   initiativeRow,
   namedRoll,
   partToggleText,
+  playerCreatures,
   presetLine,
   readUsed,
   resultWords,
@@ -86,14 +87,13 @@ export function RollOptions(_props: PanelProps) {
   );
 }
 
-type Pickable = { key: string; creature: ActorTarget; name: string; tokenId?: string };
-
 /**
- * A player's creatures (4.1): each character they own and each companion
- * of those characters on the scene, by chips. The first pick is the
- * selected token when it is theirs, else their character, and a tap keeps
- * its pick for the page. Other creatures are never offered, since the
- * server refuses them.
+ * A player's creatures (4.1, `playerCreatures`) by chips: their
+ * characters, those characters' companions, and every other token they
+ * own on the scene. The first pick is the selected token when it is
+ * theirs, so a bar's Roll lands on it, else their character, and a tap
+ * keeps its pick for the page. Other creatures are never offered, since
+ * the server refuses them.
  */
 function PlayerOptions(props: { view: RoomState; selected: readonly string[] }) {
   const me = useRoomView((s) => s.you?.memberId ?? "");
@@ -101,19 +101,7 @@ function PlayerOptions(props: { view: RoomState; selected: readonly string[] }) 
   const picked = useOption((s) => s.picked);
   const store = useOptionStore();
   const { view } = props;
-  const options = useMemo(() => {
-    const out: Pickable[] = [];
-    const mine = Object.values(view.characters).filter((c) => c.ownerIds.includes(me));
-    for (const character of mine.sort((a, b) => a.name.localeCompare(b.name))) {
-      const token = Object.values(view.tokens).find((t) => t.sceneId === sceneId && "ref" in t.actor && t.actor.ref === character.id);
-      out.push({ key: `c:${character.id}`, creature: { characterId: character.id }, name: character.name, ...(token ? { tokenId: token.id } : {}) });
-      for (const companion of Object.values(view.tokens)) {
-        if (companion.companion?.of !== character.id || companion.sceneId !== sceneId || companion.kind === "object") continue;
-        out.push({ key: `t:${companion.id}`, creature: { tokenId: companion.id }, name: displayName(companion), tokenId: companion.id });
-      }
-    }
-    return out;
-  }, [view.characters, view.tokens, me, sceneId]);
+  const options = useMemo(() => playerCreatures(view, me, sceneId, displayName), [view, me, sceneId]);
   const last = props.selected[props.selected.length - 1];
   const selectedKey = last !== undefined ? creatureKey(view, { tokenId: last }) : null;
   const current = options.find((o) => o.key === picked) ?? options.find((o) => o.key === selectedKey) ?? options[0];

@@ -9,7 +9,7 @@ import { reminderPreset } from "#shared/rules/rollReminders.ts";
 import type { OptionState } from "./optionState.ts";
 import { ReceiptTracker } from "./useReceipt.ts";
 import { watchInitiative, type InitiativeEnv } from "./useRollOption.ts";
-import { asSave, critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, presetLine, resultWords, routedTest, routeOf, scoreOf, spendOnStart, testLabel, withExtra, withUsed } from "./options.ts";
+import { asSave, critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, playerCreatures, presetLine, resultWords, routedTest, routeOf, scoreOf, spendOnStart, testLabel, withExtra, withUsed } from "./options.ts";
 
 /** The roll options' rules (docs/design-v1-roll-options.md 4.2 and 4.3). */
 
@@ -220,5 +220,28 @@ describe("initiative written by the room, not the surface that rolled (ASTRA-08)
     tracker.answer("R", 0, "refused", { code: "quota", message: "You are going too fast.", text: "You are going too fast." });
     await tick();
     assert.deepEqual(sent, []);
+  });
+});
+
+describe("a player's creatures", () => {
+  test("their character, its companion, then a token they own that is neither, such as a beast not made a companion, and never another's or an object (W7B-P-7)", () => {
+    const view = room({
+      characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }), mara: character("mara", { name: "Mara", ownerIds: ["p2"] }) },
+      tokens: {
+        breeTok: token("breeTok", { kind: "pc", name: "Bree", ownerIds: ["p1"], actor: { ref: "bree" } }),
+        owl: token("owl", { kind: "monster", name: "Owl", ownerIds: ["p1"], companion: { of: "bree", turn: "own" }, actor: { inline: actor({ srdId: "owl" }) } }),
+        wolf: token("wolf", { kind: "monster", name: "Wolf", ownerIds: ["p1"], actor: { inline: actor({ srdId: "wolf" }) } }),
+        cart: token("cart", { kind: "object", name: "Cart", ownerIds: ["p1"] }),
+        theirs: token("theirs", { kind: "monster", name: "Hawk", ownerIds: ["p2"], actor: { inline: actor() } }),
+        elsewhere: token("elsewhere", { kind: "monster", name: "Mule", ownerIds: ["p1"], sceneId: "s2", actor: { inline: actor() } }),
+      },
+    });
+    // A player's projection leaves out the owners of a token they do not own.
+    delete (view.tokens.theirs as { ownerIds?: string[] }).ownerIds;
+    const scene = view.tokens.breeTok!.sceneId;
+    assert.deepEqual(
+      playerCreatures(view, "p1", scene, (t) => t.name).map((p) => p.key),
+      ["c:bree", "t:owl", "t:wolf"],
+    );
   });
 });
