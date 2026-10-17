@@ -185,13 +185,14 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
       assert.equal(await dm.getByRole("menu").count(), 0, "and opens nothing");
     };
 
-    await list.getByRole("tab", { name: sideTabName("Log") }).focus();
+    // At 1280 x 800 the row holds Token, Initiative and Dice, and Log stands in More (docs/design-v1-dice.md 8.1).
+    await list.getByRole("tab", { name: sideTabName("Dice") }).focus();
     await dm.keyboard.press("ArrowLeft");
     await on("Initiative");
     await dm.keyboard.press("ArrowRight");
-    await on("Log");
+    await on("Dice");
     await dm.keyboard.press("ArrowRight");
-    await onMore("Log");
+    await onMore("Dice");
     await dm.keyboard.press("ArrowRight");
     await on("Token");
     await dm.keyboard.press("ArrowLeft");
@@ -249,12 +250,15 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     const list = dm.getByRole("tablist", { name: "Panels" });
     const more = list.locator('[role="tab"][aria-haspopup="menu"]');
     const isFocused = (target: Locator) => target.evaluate((el) => el === el.ownerDocument.activeElement);
-    const log = list.getByRole("tab", { name: sideTabName("Log") });
-    await log.click();
+    // The row's last tab before More: Dice, since it took Log's place in the row (docs/design-v1-dice.md 8.1).
+    const last = list.getByRole("tab", { name: sideTabName("Dice") });
+    await last.click();
     await dm.keyboard.press("ArrowRight");
-    assert.ok(await isFocused(more), "Right from Log reaches More");
+    assert.ok(await isFocused(more), "Right from the row's last tab reaches More");
     await dm.keyboard.press("Enter");
     const item = dm.getByRole("menu", { name: "More panels" }).getByRole("menuitemradio", { name: sideTabName("Journal") });
+    // More's list opens on its first item, Log now that Dice holds its place in the row, so Down goes on to Journal.
+    for (let i = 0; i < 12 && !(await isFocused(item)); i++) await dm.keyboard.press("ArrowDown");
     await waitFor("focus on Journal in More's list", async () => ((await isFocused(item)) ? true : null));
     await dm.keyboard.press("Enter");
     await dm.getByRole("heading", { name: "Lore" }).waitFor();
@@ -262,8 +266,8 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     assert.equal(await more.getAttribute("aria-selected"), "true");
     assert.ok(await list.getByRole("tab", { name: sideTabName("Journal"), selected: true }).isVisible(), "More is named by the Journal");
     await dm.keyboard.press("ArrowLeft");
-    assert.ok(await isFocused(log), "the next arrow moved along the tabs");
-    assert.equal(await log.getAttribute("aria-selected"), "true");
+    assert.ok(await isFocused(last), "the next arrow moved along the tabs");
+    assert.equal(await last.getAttribute("aria-selected"), "true");
     // Nothing comes back to wait for when nothing moves, so this gives a stray move time to reach the DM's view.
     await dm.waitForTimeout(500);
     assert.deepEqual(goblin(), at, "the goblin stayed where it was");

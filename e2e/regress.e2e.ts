@@ -214,7 +214,8 @@ describe("raccoon-vtt older features on a wave 4 build", { timeout: 180_000 }, (
   });
 
   test("3. the phone's Panels button keeps its name while it counts unread messages (LP4-REGRESS-4)", async () => {
-    await dm.getByRole("tab", { name: "Log" }).click();
+    // The Dice tab took the Log's place in the row, so the Log may stand behind More (docs/design-v1-dice.md 8.1).
+    await openSideTab(dm, "Log");
     await dm.getByLabel("Message").fill("Roll initiative");
     await dm.getByRole("button", { name: "Send" }).click();
     await player.getByRole("button", { name: "Panels 1 unread", exact: true }).waitFor();
