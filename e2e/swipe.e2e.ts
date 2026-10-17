@@ -1276,7 +1276,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     }
     await list.getByRole("button", { name: "Close Panels" }).click();
 
-    // Full screen, and in a fight with the dock riding the sheet and then in its header.
+    // Full screen, its top corners round as at the normal height through the drag up, at rest and the step down, and in a fight with the dock riding the sheet and then in its header.
     for (const view of [
       { width: 375, height: 667, scale: 1 },
       { width: 320, height: 568, scale: 1.3 },
@@ -1284,11 +1284,18 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       const where = `full screen at ${view.width} x ${view.height} at ${view.scale * 100}%`;
       await setUp(dm, view);
       const sheet = await openPanel(dm, "Log");
-      await fillScreen(sheet, view.scale, where);
+      const corners = await sampleCorners(sheet);
+      const normal = await fillScreen(sheet, view.scale, where);
+      assert.deepEqual(await topCorners(sheet), ["16px", "16px"], `${where}: the full sheet's top corners are not round`);
       await expectGrabbers(dm, ["Log"], where);
       const fit = await checkFit(sheet, view.scale, where);
       assert.ok(Math.abs(fit.area.height - 60 * view.scale) < 0.6, `${where}: the header is ${fit.area.height} px tall`);
       await shotsInBothSchemes(dm, `grabber-full-${view.width}x${view.height}-${view.scale * 100}`);
+      await swipe(dmCdp, await headerPoint(sheet), 8 + Math.max(44 * view.scale, normal.top / 4) + 12);
+      await waitFor(`${where}: the sheet to step down`, async () => (await sheet.getAttribute("aria-modal")) === null || null, 3_000);
+      assert.equal(await settled(sheet), "rest");
+      assert.deepEqual(await corners(), ["16px 16px"], `${where}: the top corners squared off at some frame from the drag up to the step down`);
+      await fillScreen(sheet, view.scale, where);
       await touchTap(dmCdp, dm, await middleOf(sheet.getByRole("button", { name: "Close Log" })));
       assert.equal(await settled(sheet), "gone", `${where}: a tap on Close did not close the sheet`);
     }
@@ -1460,12 +1467,48 @@ async function openLabel(index: number): Promise<Locator> {
   return pane;
 }
 
-/** Swipes the panel sheet up from its header until it fills the screen, as test 12 does. */
-async function fillScreen(sheet: Locator, scale: number, where: string): Promise<void> {
+/** Swipes the panel sheet up from its header until it fills the screen, as test 12 does, and returns its box at the normal height. */
+async function fillScreen(sheet: Locator, scale: number, where: string): Promise<Rect> {
   const normal = await steadyRect(sheet);
   await swipe(dmCdp, await headerPoint(sheet), -(16 + Math.max(44 * scale, normal.top / 4) + 12));
   await waitFor(`${where}: the sheet to fill the screen`, async () => (await sheet.getAttribute("aria-modal")) === "true" || null, 3_000);
   assert.equal(await settled(sheet), "rest");
+  return normal;
+}
+
+type CornerPage = { requestAnimationFrame(fn: () => void): number; getComputedStyle(el: unknown): { borderTopLeftRadius: string; borderTopRightRadius: string } };
+
+/** The sheet's two top corner radii as the browser draws them now, in its own pixels. */
+function topCorners(sheet: Locator): Promise<string[]> {
+  return sheet.evaluate((el) => {
+    const style = (globalThis as unknown as CornerPage).getComputedStyle(el);
+    return [style.borderTopLeftRadius, style.borderTopRightRadius];
+  });
+}
+
+/** Reads the sheet's top corners on every frame while it shows, from now until the returned stop, which gives each pair seen. */
+async function sampleCorners(sheet: Locator): Promise<() => Promise<string[]>> {
+  const key = `__corners${Math.random().toString(36).slice(2, 8)}`;
+  await sheet.evaluate((el, k) => {
+    const g = globalThis as unknown as CornerPage & Record<string, { seen: Set<string>; on: boolean }>;
+    const state = { seen: new Set<string>(), on: true };
+    g[k] = state;
+    const tick = () => {
+      if (!state.on) return;
+      if ((el as unknown as { getClientRects(): ArrayLike<unknown> }).getClientRects().length > 0) {
+        const style = g.getComputedStyle(el);
+        state.seen.add(`${style.borderTopLeftRadius} ${style.borderTopRightRadius}`);
+      }
+      g.requestAnimationFrame(tick);
+    };
+    tick();
+  }, key);
+  return () =>
+    sheet.page().evaluate((k) => {
+      const state = (globalThis as unknown as Record<string, { seen: Set<string>; on: boolean }>)[k]!;
+      state.on = false;
+      return [...state.seen];
+    }, key);
 }
 
 /**

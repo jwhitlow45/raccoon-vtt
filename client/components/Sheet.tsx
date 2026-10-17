@@ -55,8 +55,8 @@ export type SheetMode = "bottom" | "side" | "full";
  *
  * Swiped up from its header, or by the Full screen button that Tab
  * reaches in its header, it fills the screen (`expanded`, 4.7): the very
- * short mode's shape, modal, its header still the upright sheet's, with no
- * Hide. A short swipe down brings it back to its normal height. While a
+ * short mode's shape, modal, with the upright sheet's rounded top corners,
+ * its header still the upright sheet's, with no Hide. A short swipe down brings it back to its normal height. While a
  * drag holds it above its normal top it takes that shape beside the map,
  * drawn over the bars and clipped at the toolbar, so the drag lays out once.
  */
@@ -186,9 +186,12 @@ export function Sheet(props: {
             boxShadow: theme.shadow.sheet,
           }
         : wholeScreen;
-  // Beside the map while a drag holds it above its normal top, so it is drawn over the bars as it rises, with the upright sheet's corners.
-  const rising: CSSProperties = { ...wholeScreen, borderRadius: `${theme.radius.lg}px ${theme.radius.lg}px 0 0`, zIndex: theme.z.overBars, boxShadow: theme.shadow.sheet };
-  const shape = swipe.rising ? rising : filled ? wholeScreen : box;
+  // Filled, it keeps the upright sheet's top corners, with the room behind showing in them, so they never square off as it reaches the top or round again on the step down.
+  const sheetCorners = `${theme.radius.lg}px ${theme.radius.lg}px 0 0`;
+  const fullHeight: CSSProperties = { ...wholeScreen, borderRadius: sheetCorners };
+  // Beside the map while a drag holds it above its normal top, so it is drawn over the bars as it rises.
+  const rising: CSSProperties = { ...fullHeight, zIndex: theme.z.overBars, boxShadow: theme.shadow.sheet };
+  const shape = swipe.rising ? rising : filled ? fullHeight : box;
   return (
     <dialog
       ref={setDialog}
