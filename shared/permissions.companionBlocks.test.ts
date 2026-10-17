@@ -41,7 +41,7 @@ const create = (block: CompanionBlockInput): Op => ({ t: "companionBlock.create"
 describe("a character's companion stat blocks", () => {
   test("its players create, edit and delete them with no room setting, a co-owner too", () => {
     const state = setup();
-    assert.equal(state.meta.settings.playersCreateCharacters, false);
+    state.meta.settings.playersCreateCharacters = false;
     for (const who of [P1, P2]) {
       assert.equal(decide(create(input("new", "bree")), who, state), "ok");
       assert.equal(decide({ t: "companionBlock.update", blockId: "moth", patch: { ac: 13 } }, who, state), "ok");

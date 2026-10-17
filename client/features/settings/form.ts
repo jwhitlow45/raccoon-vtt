@@ -61,7 +61,7 @@ export const SETTING_GROUPS: SettingGroup[] = [
         kind: "toggle",
         key: "playersCreateCharacters",
         label: "Players can create their own characters",
-        help: `Each player may make up to ${LIMITS.charactersPerPlayer} characters of their own and place their tokens on the players' scene. You can still edit, take over or delete them. Off by default.`,
+        help: `Each player may make up to ${LIMITS.charactersPerPlayer} characters of their own and place their tokens on the players' scene. You can still edit, take over or delete them. On by default in new rooms.`,
       },
       {
         kind: "toggle",

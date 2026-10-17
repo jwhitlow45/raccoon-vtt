@@ -312,6 +312,8 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     run.anaId = await join(anaContext, "Ana", "#30a46c");
     run.cyId = await join(cyContext, "Cy", "#3e63dd");
     await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { bounds: { w: 20, h: 14 }, fogEnabled: false } });
+    // New rooms let players create characters. This file checks companions work without that.
+    await ops.send({ t: "room.update", settings: { playersCreateCharacters: false } });
     await ops.send({ t: "character.create", character: { id: run.bree.characterId, name: "Bree", size: "medium", ownerIds: [run.anaId], actor: actor({ ac: 15, hp: { cur: 24, max: 24, temp: 0 } }) } });
     await ops.send({ t: "token.create", token: { id: run.bree.tokenId, sceneId: run.sceneId, kind: "pc", name: "Bree", size: "medium", x: 5, y: 5, disposition: "ally", actor: { ref: run.bree.characterId } } });
     await ana.goto(`${server.origin}/r/${run.roomId}`);

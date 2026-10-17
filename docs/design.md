@@ -206,7 +206,7 @@ type RoomSettings = {
   monstersDieAtZero: boolean              // default true
   playersSeeAoeOfOthers: boolean          // default true
   playersMoveAny: 'none' | 'all' | MemberId[]   // who may move tokens they do not own. Default 'none' (v1, was the project owner's switch)
-  playersCreateCharacters: boolean        // default false, and off in older rooms that lack it (section 8.1)
+  playersCreateCharacters: boolean        // default true in new rooms (the project owner, 2026-10-17), and off in older rooms that lack it (section 8.1)
   playersApplyDamage: boolean             // default false
   skipDefeated: boolean                   // default true
   monsterInitScore: boolean               // default false: use 10 + Dex modifier instead of a roll

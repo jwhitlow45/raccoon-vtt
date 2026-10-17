@@ -9,6 +9,23 @@ import { actor, apply, character, companionBlock, customMonster, DM, imageRef, r
 import { parseRoomState } from "./stateSchema.ts";
 
 describe("roomStateSchema", () => {
+  test("a new room lets a player create a character, and a stored room from before the setting still forbids it", () => {
+    const at = new Date().toISOString();
+    const fresh = createInitialState({ roomName: "R", dm: { id: "m1", rev: 1, name: "DM", color: "#f38400", kind: "dm", createdAt: at } });
+    fresh.members.p1 = { id: "p1", rev: 1, name: "Ana", color: "#0067a5", kind: "player", createdAt: at };
+    const create: Op = { t: "character.create", character: { id: "new", name: "Wren", size: "medium", ownerIds: ["p1"], actor: actor({ dmNotes: "" }) } } as Op;
+    const player = { memberId: "p1", role: "player" } as const;
+    const deps = { canUseAsset: () => true };
+    assert.equal(canApply(create, player, fresh, deps).ok, true);
+
+    const stored = JSON.parse(JSON.stringify(fresh));
+    delete stored.meta.settings.playersCreateCharacters;
+    const parsed = parseRoomState(stored);
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.equal(parsed.ok && parsed.state.meta.settings.playersCreateCharacters, false);
+    assert.equal(parsed.ok && canApply(create, player, parsed.state, deps).ok, false);
+  });
+
   test("a fresh room and random rooms parse after a JSON round trip", () => {
     const fresh = createInitialState({ roomName: "R", dm: { id: "m1", rev: 1, name: "DM", color: "#f38400", kind: "dm", createdAt: new Date().toISOString() } });
     assert.ok(parseRoomState(JSON.parse(JSON.stringify(fresh))).ok);

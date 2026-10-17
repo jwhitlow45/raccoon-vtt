@@ -359,6 +359,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
     await ops.send({ t: "scene.create", scene: { id: run.otherSceneId, name: "The road", bounds: { w: 30, h: 20 } } });
+    // New rooms let players create characters. Test 9 checks companions work without that.
+    await ops.send({ t: "room.update", settings: { playersCreateCharacters: false } });
     await ops.send({ t: "character.create", character: { id: run.bree.characterId, name: "Bree", size: "medium", ownerIds: [run.anaId], actor: actor(31, 16) } });
     await ops.send({ t: "character.create", character: { id: run.cyPc.characterId, name: "Cyra", size: "medium", ownerIds: [run.cyId], actor: actor(20, 14) } });
     const token = (id: string, extra: Record<string, unknown>) => ({ t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", ...extra } });

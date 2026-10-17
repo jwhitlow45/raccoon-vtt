@@ -52,7 +52,7 @@ const make = (input: TokenInput): Op => ({ t: "token.create", token: input });
 describe("a player's companion (section 3.6.3)", () => {
   test("for their own character, next to its token, without Players can create their own characters", () => {
     const state = setup();
-    assert.equal(state.meta.settings.playersCreateCharacters, false);
+    state.meta.settings.playersCreateCharacters = false;
     assert.equal(decide(make(spirit()), P1, state), "ok");
     assert.equal(decide(make(weapon({ x: 6 })), P1, state), "ok");
     assert.equal(decide(make(spirit({ x: 6, y: 6 })), P1, state), "ok", "a diagonal neighbor is 5 ft under the 2024 rule");

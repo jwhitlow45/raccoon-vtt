@@ -58,7 +58,9 @@ const settings = z.strictObject({
   monstersDieAtZero: z.boolean(),
   playersSeeAoeOfOthers: z.boolean(),
   playersMoveAny: moveAnyTokenSchema,
-  // Older rooms and backups have no such setting: it reads as off.
+  // Older rooms and backups have no such setting: it reads as off. This differs
+  // from DEFAULT_SETTINGS (on, for new rooms) on purpose, since those rooms were
+  // made under the old default and must not gain a permission.
   playersCreateCharacters: z.boolean().default(false),
   playersApplyDamage: z.boolean(),
   skipDefeated: z.boolean(),

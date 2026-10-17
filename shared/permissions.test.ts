@@ -12,6 +12,8 @@ const deps: PermissionDeps = { canUseAsset: (memberId, assetId) => assetId.start
 function setup() {
   const state = room();
   state.scenes.s1!.fogEnabled = true;
+  // New rooms let players create characters. Most tests here want the setting off.
+  state.meta.settings.playersCreateCharacters = false;
   state.characters.c1 = character("c1", { ownerIds: ["p1"] });
   state.tokens.pc1 = token("pc1", { kind: "pc", name: "Ayla", actor: { ref: "c1" }, x: 1, y: 1 });
   state.tokens.own = token("own", { name: "Familiar", ownerIds: ["p1"], x: 1, y: 2 });
@@ -642,7 +644,7 @@ describe("players creating their own characters", () => {
   const place = (over: Record<string, unknown> = {}): Op =>
     ({ t: "token.create", token: { id: "t9", sceneId: "s1", kind: "pc", name: "Ayla", size: "medium", x: 4, y: 4, actor: { ref: "c1" }, ...over } }) as Op;
 
-  test("off, as by default and in rooms from before the setting, players get today's refusal", () => {
+  test("off, and in rooms from before the setting, players get today's refusal", () => {
     assert.equal(code(create()), "forbidden");
     assert.equal(code(place()), "forbidden");
     const old = setup();

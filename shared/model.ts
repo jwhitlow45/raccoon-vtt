@@ -192,7 +192,7 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   monstersDieAtZero: true,
   playersSeeAoeOfOthers: true,
   playersMoveAny: "none",
-  playersCreateCharacters: false,
+  playersCreateCharacters: true,
   playersApplyDamage: false,
   skipDefeated: true,
   monsterInitScore: false,
