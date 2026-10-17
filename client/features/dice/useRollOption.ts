@@ -2,8 +2,9 @@ import { useContext, useEffect, useMemo } from "react";
 import type { D20Test } from "#shared/dice/bonus.ts";
 import { advantageFields } from "#shared/dice/formula.ts";
 import { uuidv7 } from "#shared/ids.ts";
-import type { ActorTarget } from "#shared/protocol.ts";
-import type { DiceRoll, RollTest } from "#shared/model.ts";
+import type { StoreApi } from "zustand";
+import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
+import type { DiceRoll, RollTest, RoomState } from "#shared/model.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
@@ -11,8 +12,8 @@ import { PreviewContext } from "../dm/previewContext.ts";
 import { openAsk } from "../rolls/open.ts";
 import { rollsOf } from "./logic.ts";
 import { d20Roll, initiativeOp, routeOf, targetRef } from "./options.ts";
-import { logSeq, remembered, rowTag, useOption, useOptionStore } from "./optionState.ts";
-import { useReceipt, type ReceiptState } from "./useReceipt.ts";
+import { logSeq, remembered, rowTag, useOption, useOptionStore, type OptionState } from "./optionState.ts";
+import { useReceipt, useReceipts, type ReceiptState, type ReceiptTracker } from "./useReceipt.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "./send.ts";
 import { useDicePanel, type PanelRoll } from "./useDicePanel.ts";
 
@@ -161,25 +162,63 @@ export function useActOnce(tag: string | null, rolls: readonly DiceRoll[], act: 
 /** The words when initiative landed after the row was changed by hand (4.3). */
 export const ROW_CHANGED = "Not set: the row changed meanwhile.";
 
+/** What writing a landed initiative roll needs, none of it a surface's. */
+export type InitiativeEnv = {
+  tracker: Pick<ReceiptTracker, "state" | "subscribe">;
+  store: StoreApi<OptionState>;
+  view(): RoomState | null;
+  dispatch(op: ClientOp): void;
+  dm: boolean;
+};
+
 /**
- * Initiative's roll written to its row once it lands (4.3), only while the
- * row still holds the value it had at the tap. Returns the words when it
- * could not be written, for the row to show.
+ * Initiative's roll written to its row once it lands (4.3), by a listener on
+ * the room's receipts rather than the surface that rolled, so closing the
+ * panel or picking another creature before the line lands loses nothing
+ * (ASTRA-08). The row and the value it held at the tap are kept with the
+ * tag. It writes once, only while the row still holds that value, and
+ * otherwise marks the tag changed for whichever surface shows it. A tag
+ * refused or unknown stops the listener with nothing written.
  */
-export function useInitiativeWrite(tag: string | null, rolls: readonly DiceRoll[], at: { entryId: string; before: number | null } | null): string | null {
-  const actions = useRoomActions();
-  const room = useRoomStore();
-  const dm = useRoomView((s) => s.you?.role === "dm");
-  const store = useOptionStore();
-  const changed = useOption((s) => (tag ? s.acted[`${tag}:changed`] === true : false));
-  // Only a surface that holds the tap's row and value writes, so one that shows the same row without them never spends the tag.
-  useActOnce(at ? tag : null, rolls, (landed) => {
-    const state = room.getState().view;
-    const total = landed[0]?.total;
-    if (!state || !at || total === undefined) return;
-    const op = initiativeOp(state, at.entryId, at.before, total, dm);
-    if (op) actions.dispatch(op);
-    else store.setState((s) => ({ acted: { ...s.acted, [`${tag}:changed`]: true } }));
+export function watchInitiative(env: InitiativeEnv, tag: string, at: { entryId: string; before: number | null }): void {
+  const settled = (): boolean => {
+    const state = env.tracker.state(tag);
+    if (!state || state.state === "sending" || state.state === "checking") return false;
+    const total = state.state === "committed" ? rollsOf(state.lines)[0]?.total : undefined;
+    if (total === undefined || env.store.getState().acted[tag]) return true;
+    env.store.setState((s) => ({ acted: { ...s.acted, [tag]: true } }));
+    // After the answer that settled it is done, since that answer arrives inside the store's own update.
+    queueMicrotask(() => {
+      const view = env.view();
+      const op = view ? initiativeOp(view, at.entryId, at.before, total, env.dm) : null;
+      if (op) env.dispatch(op);
+      else env.store.setState((s) => ({ acted: { ...s.acted, [`${tag}:changed`]: true } }));
+    });
+    return true;
+  };
+  if (settled()) return;
+  const stop = env.tracker.subscribe(() => {
+    if (settled()) stop();
   });
-  return changed ? ROW_CHANGED : null;
+}
+
+/** Starts the write of a tag's initiative to its row, with the value the row holds now (watchInitiative). */
+export function useWatchInitiative(): (tag: string, entryId: string) => void {
+  const tracker = useReceipts();
+  const store = useOptionStore();
+  const room = useRoomStore();
+  const actions = useRoomActions();
+  const dm = useRoomView((s) => s.you?.role === "dm");
+  return useMemo(() => {
+    const env: InitiativeEnv = { tracker, store, view: () => room.getState().view, dispatch: (op) => actions.dispatch(op), dm };
+    return (tag, entryId) => {
+      const row = room.getState().view?.encounter?.entries.find((e) => e.id === entryId);
+      if (row) watchInitiative(env, tag, { entryId, before: row.value });
+    };
+  }, [tracker, store, room, actions, dm]);
+}
+
+/** The words a surface shows when a tag's initiative landed after its row was changed by hand, else null. */
+export function useInitiativeChanged(tag: string | null): string | null {
+  return useOption((s) => (tag && s.acted[`${tag}:changed`] === true ? ROW_CHANGED : null));
 }

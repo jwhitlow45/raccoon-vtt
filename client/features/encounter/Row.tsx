@@ -11,12 +11,12 @@ import { Switch } from "../../components/Switch.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { creatureRolls, srdNeeds } from "../dice/creature.ts";
 import { signedText } from "../dice/options.ts";
 import { presetFor } from "../dice/presets.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
-import { useInitiativeWrite, useRollBlocked, useRollOption, useRowResult } from "../dice/useRollOption.ts";
+import { useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "../dice/useRollOption.ts";
 import { ownResultText } from "../dice/useRollToasts.ts";
 import { REVIVE_NOTE, ReviveButton, offersRevive } from "../tokens/Revive.tsx";
 import { ownsToken } from "../tokens/access.ts";
@@ -619,8 +619,8 @@ function ValueBox(props: { entry: InitEntry; name: string; editable: boolean; ro
 /** The value box's width, which a row's Roll measures its room against. */
 const VALUE_BOX_PX = 52;
 
-/** The row's place in a tap's roll: the row as it stood at the tap, which its write checks (useInitiativeWrite). */
-type RollAt = { entryId: string; before: number | null };
+/** The row a tap rolled for, whose words show under it until it lands (the write itself is the room's, useWatchInitiative). */
+type RollAt = { entryId: string };
 
 const INITIATIVE = { kind: "initiative" } as const;
 
@@ -693,8 +693,8 @@ function InitiativeRoll(props: { entry: InitEntry; creature: ActorTarget; name: 
   const creatures = useMemo(() => [creature], [creature]);
   const { dice, failed } = useDiceView(creatures);
   const option = useRollOption();
+  const watch = useWatchInitiative();
   const blocked = useRollBlocked();
-  const room = useRoomStore();
   const { waiting } = useRowResult(rollRow(entry.id));
   if (!dice) return null;
   const numbers = creatureRolls(dice, creature);
@@ -703,9 +703,6 @@ function InitiativeRoll(props: { entry: InitEntry; creature: ActorTarget; name: 
   if (numbers === null && !loading && !failed) return null;
   const roll = () => {
     if (!numbers) return;
-    // The value as the store holds it now, which the write compares against once the line lands.
-    const now = room.getState().view?.encounter?.entries.find((e) => e.id === entry.id);
-    const before = now ? now.value : entry.value;
     const tag = option.d20({
       creature,
       test: INITIATIVE,
@@ -716,7 +713,10 @@ function InitiativeRoll(props: { entry: InitEntry; creature: ActorTarget; name: 
       played: false,
       ask: false,
     });
-    if (tag !== null && tag !== "asked") props.onRolled({ entryId: entry.id, before });
+    if (tag === null || tag === "asked") return;
+    // The value the row holds now is what the write compares against once the line lands, wherever the row is by then.
+    watch(tag, entry.id);
+    props.onRolled({ entryId: entry.id });
   };
   const text = numbers ? `Roll ${signedText(numbers.initBonus)}` : "Roll";
   const reason = blocked ?? (failed ? "Its numbers did not load. Reload to try again." : null);
@@ -745,7 +745,7 @@ function InitiativeRoll(props: { entry: InitEntry; creature: ActorTarget; name: 
  */
 function RollLanding(props: { at: RollAt; indent: number }) {
   const { receipt, rolls, tag } = useRowResult(rollRow(props.at.entryId));
-  const changed = useInitiativeWrite(tag, rolls, props.at);
+  const changed = useInitiativeChanged(tag);
   let words: string | null = null;
   let refused = false;
   if (changed && rolls[0]) words = `Rolled ${rolls[0].total}. ${changed}`;

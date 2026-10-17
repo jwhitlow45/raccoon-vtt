@@ -42,7 +42,7 @@ import { useDiceView } from "./useDiceView.ts";
 import { GroupOptions } from "./groupSave/GroupOptions.tsx";
 import { useStartGroupSave } from "./groupSave/start.ts";
 import { actionFill } from "./groupSave/fills.ts";
-import { useActOnce, useInitiativeWrite, useRollBlocked, useRollOption, useRowResult } from "./useRollOption.ts";
+import { useActOnce, useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "./useRollOption.ts";
 
 /**
  * A creature's roll options, between the roller and Recent rolls
@@ -359,15 +359,15 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; text: string; 
  * Initiative (4.2, 4.3): "+2", in a fight "Initiative +2, sets its row",
  * and a monster in a room that uses scores "Score 12, sets its row", with
  * "Roll instead". The value is written only to a row that still holds what
- * it held at the tap.
+ * it held at the tap, by the room's listener, so the cell may close first.
  */
 function InitiativeCell(props: { ctx: Ctx }) {
   const { ctx } = props;
   const option = useRollOption();
-  const [at, setAt] = useState<{ entryId: string; before: number | null } | null>(null);
+  const watch = useWatchInitiative();
   const row = `${ctx.key}|initiative`;
   const { tag, rolls } = useRowResult(row);
-  const changed = useInitiativeWrite(tag, rolls, at);
+  const changed = useInitiativeChanged(tag);
   const state = ctx.dice.view;
   const entry = initiativeRow(state, ctx.creature);
   const score = entry ? scoreOf(state, ctx.creature) : null;
@@ -375,8 +375,8 @@ function InitiativeCell(props: { ctx: Ctx }) {
   const test: D20Test = { kind: "initiative" };
   const preset = presetFor(ctx.dice, ctx.creature, test, { rolls: ctx.rolls });
   const roll = () => {
-    setAt(entry ? { entryId: entry.id, before: entry.value } : null);
-    option.d20({ creature: ctx.creature, test, bonus: ctx.rolls.initBonus, preset, label: "Initiative", row, played: false, ask: false });
+    const sent = option.d20({ creature: ctx.creature, test, bonus: ctx.rolls.initBonus, preset, label: "Initiative", row, played: false, ask: false });
+    if (sent !== null && sent !== "asked" && entry) watch(sent, entry.id);
   };
   const bonus = signedText(ctx.rolls.initBonus);
   const scored = score !== null && entry !== undefined;

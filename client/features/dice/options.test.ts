@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { NamedRoll } from "#shared/dice/bonus.ts";
-import type { DiceRoll, RollRequest, RoomState } from "#shared/model.ts";
+import { createStore } from "zustand/vanilla";
+import type { DiceRoll, LogEntry, RollRequest, RoomState } from "#shared/model.ts";
+import type { ClientOp } from "#shared/protocol.ts";
 import { actor, character, entry, room, token } from "#shared/testutil.ts";
+import type { OptionState } from "./optionState.ts";
+import { ReceiptTracker } from "./useReceipt.ts";
+import { watchInitiative, type InitiativeEnv } from "./useRollOption.ts";
 import { critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, presetLine, resultWords, routeOf, scoreOf, spendOnStart, testLabel, withExtra, withUsed } from "./options.ts";
 
 /** The roll options' rules (docs/design-v1-roll-options.md 4.2 and 4.3). */
@@ -151,5 +156,51 @@ describe("HP chips once applied", () => {
     const nameOf = () => "Bree";
     assert.deepEqual(hpChips(log, "p1", "damage", { applied: new Set(), nameOf }).map((c) => c.lineId), ["2:0", "3:0"]);
     assert.deepEqual(hpChips(log, "p1", "damage", { applied: new Set(["2:0"]), nameOf }).map((c) => c.lineId), ["3:0"]);
+  });
+});
+
+describe("initiative written by the room, not the surface that rolled (ASTRA-08)", () => {
+  function setup(value: number | null) {
+    const view = room({ encounter: { rev: 0, round: 1, activeEntryId: null, entries: [entry("e1", { tokenId: "g1", value })] } });
+    const log: LogEntry[] = [];
+    const tracker = new ReceiptTracker();
+    tracker.env = { lookup: () => Promise.resolve({ parts: [] }), log: () => log };
+    const store = createStore<OptionState>(() => ({ tags: {}, since: {}, critical: {}, riders: {}, askOff: {}, picked: null, acted: {}, slots: {}, focus: 0, focused: 0 }));
+    const sent: ClientOp[] = [];
+    const env: InitiativeEnv = { tracker, store, view: () => view, dispatch: (op) => sent.push(op), dm: true };
+    const land = (tag: string, total: number) => {
+      log.push({ id: `${log.length + 1}:0`, at: "", kind: "event", data: { type: "dice", tag, by: "dm1", to: "dm", rolls: [{ formula: "1d20+2", faces: [total - 2], total }] } });
+      tracker.answer(tag, 0, "taken");
+    };
+    return { view, tracker, store, sent, env, land };
+  }
+  const tick = () => new Promise<void>((done) => queueMicrotask(done));
+
+  test("a roll that lands after its surface closed still sets its row, once, however many watch it", async () => {
+    const { tracker, sent, env, land } = setup(null);
+    tracker.sending("T", 0);
+    watchInitiative(env, "T", { entryId: "e1", before: null });
+    watchInitiative(env, "T", { entryId: "e1", before: null });
+    await tick();
+    assert.deepEqual(sent, [], "nothing until it lands");
+    land("T", 17);
+    await tick();
+    assert.deepEqual(sent, [{ t: "encounter.setValues", values: [{ entryId: "e1", value: 17 }] }]);
+  });
+
+  test("a row changed meanwhile keeps its value and says so, and a refused roll writes nothing", async () => {
+    const { view, tracker, store, sent, env, land } = setup(null);
+    tracker.sending("T", 0);
+    watchInitiative(env, "T", { entryId: "e1", before: null });
+    view.encounter!.entries[0]!.value = 12;
+    land("T", 17);
+    await tick();
+    assert.deepEqual(sent, []);
+    assert.equal(store.getState().acted["T:changed"], true);
+    tracker.sending("R", 0);
+    watchInitiative(env, "R", { entryId: "e1", before: 12 });
+    tracker.answer("R", 0, "refused", { code: "quota", message: "You are going too fast.", text: "You are going too fast." });
+    await tick();
+    assert.deepEqual(sent, []);
   });
 });
