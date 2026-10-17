@@ -1,13 +1,24 @@
 import assert from "node:assert/strict";
 import { before, describe, test } from "node:test";
 import type { SrdRolls } from "#shared/dice/bonus.ts";
-import type { RoomState } from "#shared/model.ts";
+import type { PcStats, RoomState } from "#shared/model.ts";
 import { loadMonsters, type SrdMonster } from "#shared/srd/monsters.ts";
 import { loadSrdRolls } from "#shared/srd/rolls.ts";
 import { actor, character, companionBlock, customMonster, effect, room, token } from "#shared/testutil.ts";
 import { creatureRolls, type DiceView } from "./creature.ts";
 
 /** One creature's rolls from each source, and only from a block the viewer reads (docs/design-v1-roll-options.md 3.4). */
+
+/** A rogue with a Rapier, Evasion and poison resistance. */
+const THORN: PcStats = {
+  abilities: { str: 10, dex: 18, con: 12, int: 10, wis: 12, cha: 10 },
+  saves: ["dex", "int"],
+  skills: {},
+  evasion: true,
+  adjust: {},
+  defenses: { poison: "resistant" },
+  rolls: [{ id: "r1", name: "Rapier", kind: "weapon", ability: "dex", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d8", mod: true, type: "piercing" }] }],
+};
 
 let monsters: readonly SrdMonster[] = [];
 let rolls: SrdRolls = {};
@@ -101,7 +112,7 @@ describe("a creature's rolls", () => {
     );
   });
 
-  test("a character, by token or by id, has its numbers and its effects' defenses until doc 2's model gives it rolls", () => {
+  test("a character with no stat block yet, by token or by id, has its initiative and its effects' defenses alone", () => {
     for (const creature of [{ tokenId: "breeTok" }, { characterId: "bree" }]) {
       const bree = creatureRolls(dice(P1, {}), creature)!;
       assert.equal(bree.numbers, null, "no stat block yet");
@@ -114,11 +125,57 @@ describe("a creature's rolls", () => {
     }
   });
 
+  test("a character's own block gives its rolls, defenses and Evasion to the DM and its players, never another player", () => {
+    const s = state();
+    s.characters.bree!.stats = THORN;
+    s.characters.bree!.level = 7;
+    for (const you of [P1, DM]) {
+      const bree = creatureRolls(dice(you, {}, s), { characterId: "bree" })!;
+      assert.equal(bree.numbers?.abilities.dex.save, 7, you.role);
+      assert.deepEqual(
+        bree.named.map((r) => [r.name, r.attack]),
+        [["Rapier", 7]],
+      );
+      assert.deepEqual(
+        bree.defenses.map((d) => [d.kind, d.of, d.source]),
+        [
+          ["resist", "poison", "Stat block"],
+          ["resist", "bludgeoning", "Raging"],
+          ["resist", "piercing", "Raging"],
+          ["resist", "slashing", "Raging"],
+        ],
+      );
+      assert.equal(bree.evasion, true);
+    }
+    const other = creatureRolls(dice({ memberId: "p2", role: "player" }, {}, s), { characterId: "bree" })!;
+    assert.deepEqual([other.named, other.evasion], [[], false]);
+  });
+
+  test("a character in Wild Shape lists its creature's actions and defenses, keeps its own other rolls and Evasion, and waits for both chunks", () => {
+    const s = state();
+    s.characters.bree!.stats = { ...THORN, rolls: [...THORN.rolls, { id: "r2", name: "Bardic Die", kind: "other", dice: [{ formula: "1d8" }] }] };
+    s.characters.bree!.level = 7;
+    s.characters.bree!.actor.srdId = "brown-bear";
+    s.characters.bree!.actor.wildShape = true;
+    assert.equal(creatureRolls(dice(P1, { rolls: true }, s), { characterId: "bree" }), null, "the creature's block is still loading");
+    const shaped = creatureRolls(dice(P1, undefined, s), { characterId: "bree" })!;
+    const names = shaped.named.map((r) => r.name);
+    assert.ok(names.includes("Bite") && names.includes("Claw"), names.join(", "));
+    assert.equal(names.at(-1), "Bardic Die", "the character's other rolls after the creature's");
+    assert.ok(!names.includes("Rapier"), "no weapons in Wild Shape");
+    assert.equal(shaped.evasion, true);
+    assert.deepEqual(
+      shaped.defenses.filter((d) => d.source === "Stat block"),
+      [],
+      "the creature's block gives the damage defenses, and the brown bear has none",
+    );
+  });
+
   test("a character in an SRD shape waits for the table, and a hand-made token or a gone one has nothing to wait for", () => {
     const shaped = state();
     shaped.characters.bree!.actor.srdId = "brown-bear";
     assert.equal(creatureRolls(dice(P1, {}, shaped), { characterId: "bree" }), null);
-    assert.equal(creatureRolls(dice(P1, { rolls: true }, shaped), { characterId: "bree" })!.numbers?.abilities.str.save, rolls["brown-bear"]!.abilities.str.save);
+    assert.equal(creatureRolls(dice(P1, undefined, shaped), { characterId: "bree" })!.numbers?.abilities.str.save, rolls["brown-bear"]!.abilities.str.save);
     const statue = creatureRolls(dice(DM, {}), { tokenId: "plain" })!;
     assert.deepEqual([statue.numbers, statue.named, statue.defenses], [null, [], []]);
     assert.equal(creatureRolls(dice(DM), { tokenId: "gone" }), null);

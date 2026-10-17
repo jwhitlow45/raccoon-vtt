@@ -137,14 +137,15 @@ describe("presetFor on every d20 path", () => {
 });
 
 describe("which SRD chunks a creature waits on", () => {
-  test("a room monster none, an SRD monster both for the DM, and a character in an SRD shape the table alone", () => {
+  test("a room monster none, an SRD monster both for the DM, and a character in an SRD shape both for its readers", () => {
     const s = state();
     s.tokens.gob = token("gob", { kind: "monster", name: "Goblin", actor: { inline: actor({ srdId: "goblin-warrior" }) } });
     s.characters.bree!.actor.srdId = "brown-bear";
     const dm = { you: { memberId: "dm1", role: "dm" } as const, view: s };
     assert.deepEqual(srdNeeds(dm, LURK), { monsters: false, rolls: false });
     assert.deepEqual(srdNeeds(dm, { tokenId: "gob" }), { monsters: true, rolls: true });
-    assert.deepEqual(srdNeeds(dm, { characterId: "bree" }), { monsters: false, rolls: true });
+    assert.deepEqual(srdNeeds(dm, { characterId: "bree" }), { monsters: true, rolls: true });
+    assert.deepEqual(srdNeeds({ you: { memberId: "p2", role: "player" }, view: s }, { characterId: "bree" }), { monsters: false, rolls: true }, "another player reads no block of Bree's");
     // A player reads no block on a monster they do not play, so only its numbers wait.
     assert.deepEqual(srdNeeds({ you: { memberId: "p1", role: "player" }, view: s }, { tokenId: "gob" }), { monsters: false, rolls: true });
     assert.deepEqual(srdNeeds(dm, { tokenId: "gone" }), { monsters: false, rolls: false });

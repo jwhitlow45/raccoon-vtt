@@ -1,13 +1,14 @@
 import { creatureBonus, creatureNumbers, type NamedRoll, type RollNumbers, type RollSources, type SrdRolls } from "#shared/dice/bonus.ts";
 import { blockDefenses, effectDefenses, type Defense } from "#shared/dice/defenses.ts";
 import { blockActions, hasTrait } from "#shared/dice/named.ts";
+import { pcDefenses, pcNamedRolls } from "#shared/rules/pcStats.ts";
 import type { Actor, Character, CompanionBlock, CustomMonster, RoomState, Token } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import type { SrdMonster, StatBlockMonster } from "#shared/srd/monsters.ts";
 import { monsterView, statBlockOf } from "#shared/statBlock.ts";
 import type { You } from "../../state/types.ts";
 import { statBlockShown, tokenStatBlock, type TokenStatBlock } from "../monsters/statBlockLink.ts";
-import { ownsToken } from "../tokens/access.ts";
+import { ownsCharacter, ownsToken } from "../tokens/access.ts";
 
 /**
  * One creature's rolls for the Dice panel and every card that rolls for it
@@ -83,11 +84,18 @@ function shownLink(dice: Pick<DiceView, "you" | "view">, token: Token, actor: Ac
  * SRD creature or a character in an SRD shape. The hook that loads them
  * (useDiceView.ts) asks this, so a page with no SRD creature loads neither.
  */
+/** Whether this viewer reads a character's own block, and so a shaped character's creature block: the DM and its players (docs/design-v1-pc-stats.md 7.3). */
+function readsCharacter(dice: Pick<DiceView, "you" | "view">, character: Character): boolean {
+  return dice.you.role === "dm" || ownsCharacter(dice.you.memberId, character);
+}
+
 export function srdNeeds(dice: Pick<DiceView, "you" | "view">, creature: ActorTarget): { monsters: boolean; rolls: boolean } {
   const found = find(dice.view, creature);
   if (!found) return { monsters: false, rolls: false };
   const { token, character, actor } = found;
-  const monsters = token !== undefined && character === undefined && shownLink(dice, token, actor).kind === "srd";
+  const monsters = character
+    ? actor.srdId !== undefined && readsCharacter(dice, character)
+    : token !== undefined && shownLink(dice, token, actor).kind === "srd";
   // creatureNumbers reads the table for an SRD creature, and for a character in an SRD shape whatever else its actor links.
   const rolls = actor.srdId !== undefined && (character !== undefined || (actor.blockId === undefined && actor.monsterId === undefined));
   return { monsters, rolls };
@@ -102,8 +110,7 @@ export function srdNeeds(dice: Pick<DiceView, "you" | "view">, creature: ActorTa
  *
  * A character's own rolls and defenses are doc 2's (pcNamedRolls and
  * pcDefenses, docs/design-v1-pc-stats.md 5), with a shaped character's
- * beast's block: until that model is built, a character has its numbers and
- * its effects' defenses alone.
+ * creature block before them.
  */
 export function creatureRolls(dice: DiceView, creature: ActorTarget): CreatureRolls | null {
   const state = dice.view;
@@ -121,20 +128,25 @@ export function creatureRolls(dice: DiceView, creature: ActorTarget): CreatureRo
   };
 
   let view: StatBlockMonster | null = null;
-  if (token && !character) {
+  if (character) {
+    // A character in a shape lists its creature's actions and defenses (docs/design-v1-pc-stats.md 3.6).
+    if (actor.srdId !== undefined && readsCharacter(dice, character)) view = dice.srd.monsters?.find((m) => m.srdId === actor.srdId) ?? null;
+  } else if (token) {
     const link = shownLink(dice, token, actor);
     if (link.kind === "room") view = roomView(link.monster);
     else if (link.kind === "block") view = storedView(link.block);
     else if (link.kind === "srd") view = dice.srd.monsters?.find((m) => m.srdId === link.srdId) ?? null;
   }
+  // A character's own block is read by the DM and its players. pcNamedRolls keeps only its other rolls in Wild Shape, and pcDefenses keeps Evasion there.
+  const own = character && readsCharacter(dice, character) ? { named: pcNamedRolls(character), ...pcDefenses(character) } : { named: [], defenses: [], evasion: false };
   const legendary = actor.legendary;
   return {
     numbers: creatureNumbers(sources, creature),
     initBonus: creatureBonus(sources, creature, { kind: "initiative" }) ?? 0,
-    named: view ? blockActions(view) : [],
-    defenses: [...(view ? blockDefenses(view) : []), ...effectDefenses(actor.effects)],
+    named: [...(view ? blockActions(view) : []), ...own.named],
+    defenses: [...own.defenses, ...(view ? blockDefenses(view) : []), ...effectDefenses(actor.effects)],
     magicResistance: view ? hasTrait(view, "Magic Resistance") : false,
-    evasion: view ? hasTrait(view, "Evasion") : false,
+    evasion: own.evasion || (view ? hasTrait(view, "Evasion") : false),
     legendaryLeft: legendary ? Math.max(0, legendary.resistMax - legendary.resistUsed) : 0,
   };
 }
