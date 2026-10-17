@@ -229,31 +229,59 @@ export class SheetSwipe {
 
 /**
  * The finger's speed at the lift, in screen px per ms, down positive: its
- * travel in the stroke it is making, over the last 100 ms at most, from
- * where it stood as that window opened (or where the stroke turned, or
- * where a younger touch went down) to its last sample. A finger that
- * rested still at the end has none there, so 0. The time is never under
- * one frame, so moves a browser delivers coalesced, two samples a
- * millisecond apart, never make a twitch a flick, while a stroke that
- * turns back keeps its own speed.
+ * travel in the stroke it is making, over the last 100 ms at most, to its
+ * last sample. The stroke starts where the window opens, at the position
+ * read between the samples on each side of that moment, or where the
+ * finger last turned back, by more than a few px, after it, or where a
+ * younger touch went down. A finger that rested still at the end has none
+ * there, so 0. The time is never under one frame, so moves a browser
+ * delivers coalesced, two samples a millisecond apart, never make a twitch
+ * a flick, and a px of tremor is no turn that would shrink the read to its
+ * last frame.
  */
 export function speedAt(samples: readonly Sample[], at: number): number {
   const last = samples[samples.length - 1];
   const opens = at - SPEED_WINDOW_MS;
   if (!last || last.at <= opens) return 0;
-  let i = samples.length - 1;
+  // The way the stroke goes: the finger's net travel to its last sample, once past a few px.
   let way = 0;
-  while (i > 0) {
-    const before = samples[i - 1]!;
-    const step = Math.sign(samples[i]!.dy - before.dy);
-    if (step !== 0 && way !== 0 && step !== way) break;
-    if (step !== 0) way = step;
-    i--;
-    if (before.at <= opens) break;
+  for (let j = samples.length - 2; j >= 0 && way === 0; j--) {
+    const d = last.dy - samples[j]!.dy;
+    if (Math.abs(d) > TURN_PX) way = Math.sign(d);
+    if (samples[j]!.at <= opens) break;
   }
-  const base = samples[i]!;
-  return (last.dy - base.dy) / Math.max(FRAME_MS, at - Math.max(base.at, opens));
+  // Back from the lift: the stroke began at the farthest point behind it, unless the finger was more than a few px ahead before that, a turn.
+  let behind = samples.length - 1;
+  for (let j = samples.length - 2; j >= 0; j--) {
+    const s = samples[j]!;
+    const back = (samples[behind]!.dy - s.dy) * way;
+    if (back < -TURN_PX) {
+      const turn = samples[behind]!;
+      return (last.dy - turn.dy) / Math.max(FRAME_MS, at - turn.at);
+    }
+    if (s.at <= opens) break;
+    if (back > 0) behind = j;
+  }
+  const base = positionAt(samples, opens);
+  return (last.dy - base.dy) / Math.max(FRAME_MS, at - base.at);
 }
+
+/** Where the finger stood at `when`, read on a line between the samples on each side of it, or where it went down if that came later. */
+function positionAt(samples: readonly Sample[], when: number): Sample {
+  const first = samples[0]!;
+  if (first.at >= when) return first;
+  for (let j = 1; j < samples.length; j++) {
+    const after = samples[j]!;
+    if (after.at < when) continue;
+    const before = samples[j - 1]!;
+    const share = after.at === before.at ? 1 : (when - before.at) / (after.at - before.at);
+    return { at: when, dy: before.dy + (after.dy - before.dy) * share };
+  }
+  return samples[samples.length - 1]!;
+}
+
+/** A reversal shorter than this is tremor, not a turn that starts a new stroke. */
+export const TURN_PX = 4;
 
 /** The shortest time a speed is read over: one frame. */
 export const FRAME_MS = 16;

@@ -14,6 +14,7 @@ import {
   normalFromHeld,
   SheetSwipe,
   SLIDE_MS,
+  SPEED_WINDOW_MS,
   slideDistance,
   speedAt,
   startsOn,
@@ -335,17 +336,41 @@ describe("6. release", () => {
 
   test("the speed is read over the last 100 ms of the stroke, never over less than a frame", () => {
     assert.equal(speedAt([{ at: 0, dy: 0 }, { at: 50, dy: 10 }, { at: 100, dy: 40 }], 100), 0.4);
-    assert.equal(speedAt([{ at: 0, dy: 0 }, { at: 190, dy: 10 }, { at: 200, dy: 40 }], 200), 0.4, "a quick 30 px after a pause reads over the window");
+    near(speedAt([{ at: 0, dy: 0 }, { at: 190, dy: 10 }, { at: 200, dy: 40 }], 200), (40 - 1000 / 190) / 100, "a quick 30 px after a pause reads over the window, from where the finger stood as it opened");
     assert.equal(speedAt([{ at: 0, dy: 0 }, { at: 10, dy: 100 }], 200), 0, "a finger that rested still");
     assert.ok(speedAt([{ at: 0, dy: 0 }, { at: 10, dy: -60 }], 12) < -1, "up is negative");
   });
 
+  test("a steady drag reads its own speed whatever the samples' times, so 0.9 px per ms is no flick", () => {
+    for (const v of [0.8, 0.85, 0.9, 0.99]) {
+      // Sampled every 16 ms, the window's opening falls between two samples.
+      const trail = Array.from({ length: 8 }, (_, i) => ({ at: 16 * i, dy: v * 16 * i }));
+      near(speedAt(trail, 112), v, `${v} px per ms`);
+      assert.ok(speedAt(trail, 112) < FLICK_SPEED);
+    }
+    // Through the machine: a steady 0.9 px per ms drag of 100 px, from a 400 px sheet, springs back.
+    const swipe = new SheetSwipe();
+    swipe.start(start());
+    for (let i = 1; i <= 8; i++) swipe.move({ dx: 0, dy: 0.9 * 16 * i, at: 16 * i, cancelable: true });
+    assert.equal(swipe.end(128).end, "normal");
+  });
+
+  test("a px of tremor is no turn: a 1 px step back before an 18 px last frame reads over the window", () => {
+    const trail = Array.from({ length: 7 }, (_, i) => ({ at: 16 * i, dy: 4.8 * i }));
+    const tremor = [...trail, { at: 112, dy: 27.8 }, { at: 128, dy: 45.8 }];
+    near(speedAt(tremor, 128), (45.8 - 8.4) / 100, "from where it stood as the window opened");
+    assert.ok(speedAt(tremor, 128) < FLICK_SPEED);
+    // A turn past a few px still starts its own stroke: a flick back up after a slow drag down.
+    near(speedAt([...trail, { at: 112, dy: 8.8 }, { at: 128, dy: -11.2 }], 128), (-11.2 - 28.8) / 32, "from the turn, not the window's opening");
+    assert.ok(speedAt([...trail, { at: 112, dy: 8.8 }, { at: 128, dy: -11.2 }], 128) <= -FLICK_SPEED);
+  });
+
   test("clustered samples, as a browser coalesces moves, never make the speed spike", () => {
-    assert.equal(speedAt([{ at: 0, dy: 0 }, { at: 300, dy: 20 }, { at: 301, dy: 30 }], 302), 0.3, "two samples a millisecond apart after a pause");
+    near(speedAt([{ at: 0, dy: 0 }, { at: 300, dy: 20 }, { at: 301, dy: 30 }], 302), (30 - (20 * 202) / 300) / 100, "two samples a millisecond apart after a pause");
     assert.equal(speedAt([{ at: 0, dy: 0 }, { at: 1, dy: 10 }], 2), 10 / FRAME_MS, "a young touch's first two samples: over a frame, not 2 ms");
     assert.ok(speedAt([{ at: 0, dy: 0 }, { at: 1, dy: 10 }], 2) < FLICK_SPEED);
     const slow = Array.from({ length: 10 }, (_, i) => ({ at: 30 * (i + 1), dy: 10 * (i + 1) }));
-    assert.equal(speedAt([{ at: 0, dy: 0 }, ...slow, { at: 301, dy: 105 }, { at: 302, dy: 110 }], 303), 0.5, "a slow drag ending in a coalesced pair: its last 100 ms, 50 px");
+    near(speedAt([{ at: 0, dy: 0 }, ...slow, { at: 301, dy: 105 }, { at: 302, dy: 110 }], 303), (110 - (60 + (10 * 23) / 30)) / 100, "a slow drag ending in a coalesced pair: its last 100 ms");
     // A stroke that turns back keeps its own speed: up 20 px in 6 ms after a slow drag down.
     assert.equal(speedAt([{ at: 0, dy: 0 }, { at: 90, dy: 90 }, { at: 100, dy: 100 }, { at: 102, dy: 90 }, { at: 104, dy: 80 }], 106), -20 / FRAME_MS);
   });
@@ -752,6 +777,10 @@ function sessionStart(over: Partial<SessionStart> = {}): SessionStart {
   return { ...start(over), closeAt: 400, ...over };
 }
 
+function near(actual: number, expected: number, what = ""): void {
+  assert.ok(Math.abs(actual - expected) < 1e-9, `${what}: ${actual}, not ${expected}`);
+}
+
 /** A small seeded generator, so a failure names a sequence that can be run again. */
 function random(seed: number): () => number {
   let s = seed >>> 0;
@@ -763,6 +792,32 @@ function random(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+describe("12a. randomized strokes for the lift's speed", () => {
+  test("a steady stroke never reads faster than the finger, at any sampling, and a px of tremor never makes a flick", () => {
+    for (let run = 1; run <= 3000; run++) {
+      const rnd = random(run * 7919);
+      const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)]!;
+      const v = (rnd() * 2 - 1) * pick([0.3, 0.9, 2]);
+      const trail = [{ at: 0, dy: 0 }];
+      const tremor = rnd() < 0.5 ? 1 : 0;
+      let at = 0;
+      const count = 1 + Math.floor(rnd() * 20);
+      for (let i = 0; i < count; i++) {
+        // Coalesced pairs a millisecond apart among frames and dropped frames.
+        at += pick([1, 1, 2, 5, 8, 16, 16, 33]);
+        const shake = i === count - 1 ? 0 : (rnd() * 2 - 1) * tremor;
+        trail.push({ at, dy: v * at + shake });
+      }
+      const lift = at + pick([0, 0, 1, 5, 20, 60]);
+      const speed = speedAt(trail, lift);
+      const where = `run ${run}: ${v} px per ms, ${count} samples, lift ${lift - at} ms after the last`;
+      if (tremor === 0) assert.ok(Math.abs(speed) <= Math.abs(v) + 1e-9, `${where}: read ${speed}`);
+      if (tremor === 0 && lift === at && at >= SPEED_WINDOW_MS) near(speed, v, where);
+      if (Math.abs(v) <= 0.9) assert.ok(Math.abs(speed) < FLICK_SPEED, `${where}: tremor made a flick of ${speed}`);
+    }
+  });
+});
 
 describe("12. randomized touches, from both stands", () => {
   test("the invariants hold after every event of many random sequences", () => {
