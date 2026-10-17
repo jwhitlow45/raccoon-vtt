@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { bonusFor } from "#shared/dice/bonus.ts";
-import { formatFormula, parseFormula, type AdvantageSource } from "#shared/dice/formula.ts";
+import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import { ABILITY_KEYS, CONDITION_KEYS, SKILL_KEYS, type AbilityKey, type ConditionKey, type Effect, type RoomState, type SkillKey } from "#shared/model.ts";
 import type { ActorTarget, OpOf } from "#shared/protocol.ts";
@@ -60,8 +60,8 @@ import {
   type Step,
 } from "./chain.ts";
 import { parseParts } from "./outcome.ts";
-import { amountsOf, applyWaits, applyWords, buildPlan, pageBound, rowOutcome } from "./plan.ts";
-import { countWords, d20Of, groupRows, rowTotal, type GroupTest, type Mark, type RowBase, type Way } from "./rows.ts";
+import { amountsOf, applyWaits, applyWords, buildPlan, damageTo, pageBound, rowOutcome, rowWords } from "./plan.ts";
+import { countWords, d20Of, groupRows, type GroupTest, type Mark, type RowBase, type Way } from "./rows.ts";
 import { useGroupSave, useGroupSaveStore } from "./store.ts";
 import { actionFill, areaFill, casterActions } from "./fills.ts";
 
@@ -253,7 +253,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     const rollsToSend = parsedParts.parts.flatMap((p) => ("formula" in p ? [{ formula: p.formula, label: `${page.fill?.name ?? "Group save"} damage${p.type ? `, ${p.type}` : ""}`.slice(0, 60) }] : []));
     if (rollsToSend.length === 0) return;
     const tag = uuidv7();
-    if (panel.roll(rollsToSend, { to: page.secret ? "dm" : "all", tag }) !== null) update(damageSent(pageRef.current, tag));
+    if (panel.roll(rollsToSend, { to: damageTo(page, view), tag }) !== null) update(damageSent(pageRef.current, tag));
   };
 
   const doApply = () => {
@@ -297,7 +297,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   const switches =
     page.phase === "setup" ? (
       <div style={{ display: "grid", gap: theme.space(1) }}>
-        <Switch label="Hide the monsters' rolls from players" checked={page.secret} onChange={(secret) => update({ ...pageRef.current, secret })} />
+        <Switch label="Hide the monsters' rolls from players" help="Their damage too, unless a player's creature cast it." checked={page.secret} onChange={(secret) => update({ ...pageRef.current, secret })} />
         {page.test.kind === "save" ? <Switch label="Against a spell" help="A creature with Magic Resistance rolls with advantage, asked or not." checked={page.spell} onChange={(spell) => update({ ...pageRef.current, spell })} /> : null}
         {anyAsk || (openRolls && page.dc !== null) ? (
           <details>
@@ -742,24 +742,13 @@ function GroupRow(props: {
   const s = stateOf(page, row);
   const setup = page.phase === "setup";
   const frozen = page.phase === "applying" || page.phase === "applied";
-  const total = rowTotal(s);
-  const dice = s.rolled ?? s.answer?.dice;
-  const details: ReactNode[] = [];
-  if (total !== undefined) {
-    const parsed = dice ? parseFormula(dice.formula) : null;
-    const formula = parsed?.ok ? formatFormula(parsed.formula, dice?.mode) : dice?.formula;
-    details.push(`${total}${formula ? ` (${formula}: ${dice?.faces.join(", ")})` : ""}${dice?.cancelled ? ", normal: advantage and disadvantage cancelled" : ""}`);
-  }
-  if (s.answer?.mark) details.push("The DM's mark on the request");
-  if (s.asked && s.asked.dc !== undefined && page.dc !== null && s.asked.dc !== page.dc) details.push(`Asked against DC ${s.asked.dc}`);
-  if (row.fails && s.way === "fails") details.push(`Fails: ${effectName(row.fails)}`);
+  const words = rowWords(page, row, outcome);
+  const details: string[] = [];
   if (s.says) details.push(s.says);
   if (row.why && setup) details.push(`Not asked: ${row.why}`);
-  if (outcome.resisted) details.push("Succeeds: Legendary Resistance");
-  if (outcome.words) details.push(outcome.words);
-  for (const skip of outcome.skips) details.push(skip);
-  if (outcome.conditions.length > 0) details.push(outcome.conditions.map((c) => effectName(c.key)).join(", "));
-  const markValue: Mark | null = outcome.result;
+  details.push(...words.notes);
+  // The control shows the DM's own mark alone: a computed pass or fail is the verdict beside the total, which a DC change judges again.
+  const markValue: Mark | null = s.mark ?? null;
   const waitingAsk = s.asked && !s.answer;
   const set = (patch: Partial<typeof s>) => props.onChange({ ...page, states: { ...page.states, [row.holder]: { ...s, ...patch } } });
   // The amount opens a field of its own (5.4): what the DM types there wins, and going back takes the worked-out amount again.
@@ -807,7 +796,14 @@ function GroupRow(props: {
           onChange={(way) => set({ way })}
         />
       ) : (
-        <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{s.way === "server" && row.bonus !== null ? `Server ${signedText(row.bonus)}` : WAY_WORDS[s.way]}</span>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
+          <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{words.how ?? (s.way === "server" && row.bonus !== null ? `Server ${signedText(row.bonus)}` : WAY_WORDS[s.way])}</span>
+          {words.verdict ? (
+            <span data-verdict="" style={{ fontSize: theme.font.small, color: theme.color.text, border: `${theme.line.border}px solid ${theme.color.controlBorder}`, borderRadius: theme.radius.sm, padding: `0 ${theme.space(1)}px` }}>
+              {words.verdict}
+            </span>
+          ) : null}
+        </div>
       )}
       {details.length > 0 ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted, display: "grid", gap: 2 }}>{details.map((d, i) => <span key={i}>{d}</span>)}</div> : null}
       {!setup && !frozen ? (

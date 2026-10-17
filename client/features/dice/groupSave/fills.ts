@@ -90,6 +90,7 @@ export function actionFill(dice: DiceView, named: NamedRoll, actor: { key: strin
       from: fromLine(named.name, test, save.dc, null, damage, onPass, conditions),
       ...(named.recharge !== undefined ? { recharge: { holder: actor.key, key: named.key } } : {}),
       ...(parts[0]?.type ? { damageType: parts[0].type } : {}),
+      ...(actor.tokenId ? { caster: actor.tokenId } : {}),
     },
     outcome: {
       damage,
@@ -148,6 +149,7 @@ export function areaFill(dice: DiceView, template: Pick<AreaTemplate, "spell" | 
       name: preset.name,
       from: fromLine(preset.name, test, dc, dcFrom, damage, onPass, conditions),
       ...(parts[0]?.type ? { damageType: parts[0].type } : {}),
+      ...(template.casterId ? { caster: template.casterId } : {}),
     },
     outcome: {
       damage,

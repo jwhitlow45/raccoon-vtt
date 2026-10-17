@@ -273,7 +273,9 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
       const r = dmSocket.state?.rolls[request.id];
       return r?.targets.some((t) => t.total === BREE_TOTAL) ? true : null;
     });
-    await sheet.getByRole("radiogroup", { name: "Bree: fail, pass or skip" }).getByRole("radio", { name: "Fail", checked: true }).waitFor();
+    // The answer and its verdict read in words beside it, apart from the DM's own mark, which stays unset (W7B-P-11, W7B-P-12).
+    await sheet.getByText(`Asked: typed ${BREE_TOTAL}`).locator("xpath=..").getByText(`Fail vs DC ${DC}`).waitFor();
+    assert.equal(await sheet.getByRole("radiogroup", { name: "Bree: fail, pass or skip" }).getByRole("radio", { checked: true }).count(), 0, "no mark of the DM's");
   });
 
   test("4. 5d6 fire + 5d6 radiant rolls in one line, the rolled page shows Apply in view at 130%, and Apply hurts each by its save in one step that the players see", async () => {

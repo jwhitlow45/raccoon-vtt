@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { actor, room, token } from "#shared/testutil.ts";
+import { actor, character, member, room, token } from "#shared/testutil.ts";
 import type { DiceView } from "../creature.ts";
 import { OUTCOME_TOO_BIG } from "#shared/protocol.ts";
-import { mark, newPage, setAmount, setDc, type Page } from "./chain.ts";
+import { mark, newPage, setAmount, setDc, typeTotal, type Page } from "./chain.ts";
 import { worstCase } from "./outcome.ts";
-import { applyWaits, buildPlan, pageBound, rowOutcome } from "./plan.ts";
+import { applyWaits, buildPlan, damageTo, pageBound, rowOutcome, rowWords } from "./plan.ts";
 import { groupRows } from "./rows.ts";
 
 /** What Apply freezes from the page (docs/design-v1-roll-options.md 5.4, 5.5). */
@@ -73,5 +73,47 @@ describe("the DM's own amount and the outcome's size", () => {
     assert.equal(worstCase(rows.map((r) => r.target), page.outcome.conditions.map((key) => ({ key: key as "charmed" })), "Hypnotic Pattern"), null, "the keys alone fit, which is what let it through");
     assert.equal(pageBound(page, rows), OUTCOME_TOO_BIG);
     assert.equal(pageBound({ ...page, outcome: { ...page.outcome, conditions: ["charmed", "incapacitated"] } }, rows), null, "two fit, as Hypnotic Pattern needs");
+  });
+});
+
+describe("a row in words", () => {
+  const page = (): Page => ({ ...sunburst(13), states: {}, outcome: { ...sunburst(13).outcome, damage: "12", conditions: [] } });
+  const holder = ROWS[0]!.holder;
+  const words = (p: Page) => rowWords(p, ROWS[0]!, rowOutcome(p, ROWS[0]!, DICE, [{ amount: 12 }]));
+
+  test("an asked row says how its answer came and its pass or fail against the DC beside it, never a bare number (W7B-P-11)", () => {
+    const asked: Page = { ...page(), states: { [holder]: { way: "ask", asked: { rollId: "r1", dc: 13 }, answer: { tokenId: "g1", tag: "a1", total: 8 } } } };
+    assert.deepEqual(words(asked), { how: "Asked: typed 8", verdict: "Fail vs DC 13", notes: [] });
+    const rolled: Page = { ...page(), states: { [holder]: { way: "server", rolled: { formula: "1d20+2", faces: [12], total: 14, tokenId: "g1" } } } };
+    assert.deepEqual(words(rolled), { how: "Rolled 14 (1d20+2: 12)", verdict: "Pass vs DC 13", notes: [] });
+    const waiting: Page = { ...page(), states: { [holder]: { way: "ask", asked: { rollId: "r1", dc: 15 } } } };
+    assert.deepEqual(words(waiting), { how: "Asked, waiting, asked against DC 15", verdict: null, notes: [] });
+  });
+
+  test("the DM's own mark shows in the control alone, a computed one as words a DC change judges again (W7B-P-12)", () => {
+    const typed = typeTotal({ ...page(), states: { [holder]: { way: "type" } } }, holder, 11);
+    assert.equal(words(typed).verdict, "Fail vs DC 13");
+    assert.equal(words(setDc(typed, 10)).verdict, "Pass vs DC 10");
+    assert.equal(words(mark(typed, holder, "pass")).verdict, null, "the mark is the DM's, so no verdict beside it");
+  });
+
+  test("the notes say only what the amount does not: a condition gained, a typed amount", () => {
+    const fails: Page = { ...sunburst(13), states: { [holder]: { way: "type", typed: 5 } } };
+    assert.deepEqual(words(fails).notes, ["Gains Blinded"]);
+    assert.deepEqual(words(setAmount(fails, holder, 3)).notes, ["Typed 3, worked out 12", "Gains Blinded"]);
+  });
+});
+
+describe("the damage line's readers", () => {
+  test("a player's creature's own spell rolls its damage in the open, and a monster's under the switch (W7B-P-20)", () => {
+    const view = room({
+      characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }) },
+      members: { p1: member("p1") },
+      tokens: { breeTok: token("breeTok", { kind: "pc", name: "Bree", ownerIds: ["p1"], actor: { ref: "bree" } }), g1: token("g1", { kind: "monster", name: "Goblin", actor: { inline: actor() } }) },
+    });
+    const base = { ...sunburst(13), secret: true };
+    assert.equal(damageTo({ ...base, fill: { name: "Fireball", from: "", caster: "breeTok" } }, view), "all");
+    assert.equal(damageTo({ ...base, fill: { name: "Fire Breath", from: "", caster: "g1" } }, view), "dm");
+    assert.equal(damageTo({ ...base, secret: false, fill: null }, view), "all");
   });
 });

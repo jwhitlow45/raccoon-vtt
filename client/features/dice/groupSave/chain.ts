@@ -49,6 +49,8 @@ export type Fill = {
   recharge?: { holder: string; key: string };
   /** The type a bare number in the damage field takes: "28" from Fireball is fire. */
   damageType?: import("#shared/rules/damage.ts").DamageType;
+  /** The token whose action or spell it is, whose own damage a player's creature rolls in the open. */
+  caster?: string;
 };
 
 export type OutcomeForm = {

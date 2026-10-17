@@ -1,6 +1,9 @@
-import type { ConditionKey, Effect } from "#shared/model.ts";
+import type { ConditionKey, Effect, RoomState } from "#shared/model.ts";
+import { playersToken } from "#shared/project.ts";
 import type { ActorTarget, DurationInput, OpOf } from "#shared/protocol.ts";
 import type { DamageType } from "#shared/rules/damage.ts";
+import { formatFormula, parseFormula } from "#shared/dice/formula.ts";
+import { effectName } from "#shared/logText.ts";
 import { creatureRolls, type DiceView } from "../creature.ts";
 import type { Page } from "./chain.ts";
 import { stateOf } from "./chain.ts";
@@ -21,7 +24,7 @@ export type RowOutcome = {
   amount: number;
   /** The worked-out amount, from the parts, the save and the row's defenses, whatever the DM typed over it. */
   computed: number;
-  /** "Immune to fire: 9 radiant", "17", or "" before the damage is known. */
+  /** What the amount alone does not say: "Immune to fire: 9 radiant", "Typed 5, worked out 12", else "". */
   words: string;
   conditions: OutcomeCondition[];
   /** Why a condition does not go on: "Immune to Frightened". */
@@ -97,11 +100,12 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
     const dealt = rowDamage(amounts, result, { onPass: page.test.kind === "none" ? "none" : page.outcome.onPass, dexSave: evasionApplies, row: { defenses, qualifiedOn, evasion, effects } });
     out.amount = dealt.amount;
     out.computed = dealt.amount;
-    out.words = amounts.length > 0 ? damageWords(amounts, dealt) : "";
+    // The amount shows on the row's first line, so words come only when a defense or Evasion changed it.
+    out.words = amounts.length > 0 && dealt.notes.length > 0 ? damageWords(amounts, dealt) : "";
   }
   if (state.amount !== undefined) {
     out.amount = state.amount;
-    out.words = `${state.amount}, typed`;
+    out.words = amounts ? `Typed ${state.amount}, worked out ${out.computed}` : `Typed ${state.amount}`;
   }
   if (result === "fail" && state.conditions !== "off") {
     for (const key of page.outcome.conditions as ConditionKey[]) {
@@ -187,4 +191,74 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
   const targets = planTargets(rows, ids.newId);
   if (targets.length === 0) return null;
   return { t: "actor.outcome", plan: ids.plan, ...(page.fill ? { label: page.fill.name } : {}), targets };
+}
+
+// ------------------------------------------------------------ a row in words (5.8)
+
+export type RowWords = {
+  /** How its total came: "Asked: typed 8", "Rolled 14 (1d20+2: 12)", "Fails: Stunned", or null before any. */
+  how: string | null;
+  /** Its pass or fail where the DM did not mark it, with why: "Fail vs DC 13", "Pass: Legendary Resistance". */
+  verdict: string | null;
+  /** What the outcome does that the amount does not say. */
+  notes: string[];
+};
+
+function rolledText(total: number, dice: { formula: string; faces: number[]; mode?: import("#shared/dice/formula.ts").AdvantageMode; cancelled?: true }): string {
+  const parsed = parseFormula(dice.formula);
+  const formula = parsed.ok ? formatFormula(parsed.formula, dice.mode) : dice.formula;
+  return `${total} (${formula}: ${dice.faces.join(", ")})${dice.cancelled ? ", normal: advantage and disadvantage cancelled" : ""}`;
+}
+
+/**
+ * A row's details in words (W7B-P-11, W7B-P-12): how its total came, its
+ * computed pass or fail apart from the DM's own mark, which the Fail, Pass
+ * and Skip control alone shows, so a later DC change re-judges only what
+ * reads as computed, and what the outcome does beyond its amount.
+ */
+export function rowWords(page: Page, row: RowBase, outcome: RowOutcome): RowWords {
+  const s = stateOf(page, row);
+  const a = s.answer;
+  const against = s.asked?.dc !== undefined && page.dc !== null && s.asked.dc !== page.dc ? `, asked against DC ${s.asked.dc}` : "";
+  let how: string | null = null;
+  if (s.asked || a) {
+    if (!a) how = `Asked, waiting${against}`;
+    else if (a.dice) how = `Asked: rolled ${rolledText(a.total ?? a.dice.total, a.dice)}${against}`;
+    else if (a.total !== undefined) how = `Asked: typed ${a.total}${against}`;
+    else if (a.noRoll) how = "Asked: failed without rolling";
+    else if (a.mark) how = "Asked: marked on the request";
+    else how = `Asked${against}`;
+  } else if (s.way === "fails" && row.fails) how = `Fails: ${effectName(row.fails)}`;
+  else if (s.rolled) how = `Rolled ${rolledText(s.rolled.total, s.rolled)}`;
+  else if (s.typed !== undefined) how = `Typed ${s.typed}`;
+
+  let verdict: string | null = null;
+  const r = outcome.result;
+  if (!s.mark && (r === "fail" || r === "pass") && page.test.kind !== "none") {
+    const word = r === "fail" ? "Fail" : "Pass";
+    const fails = a?.dice?.fails ?? s.rolled?.fails;
+    if (outcome.resisted) verdict = "Pass: Legendary Resistance";
+    else if (a?.mark) verdict = `${word}: the DM's mark on the request`;
+    else if (fails) verdict = `Fail: ${effectName(fails)}`;
+    else if (a?.noRoll) verdict = "Fail";
+    else if (s.way === "fails" && row.fails && !a) verdict = "Fail";
+    else verdict = page.dc !== null ? `${word} vs DC ${page.dc}` : word;
+  }
+
+  const notes: string[] = [];
+  if (outcome.words) notes.push(outcome.words);
+  notes.push(...outcome.skips);
+  if (outcome.conditions.length > 0) notes.push(`Gains ${outcome.conditions.map((c) => effectName(c.key)).join(" and ")}`);
+  return { how, verdict, notes };
+}
+
+/**
+ * Who reads the damage line: the switch hides a monster's damage, and a
+ * spell or action of a creature a player plays rolls in the open, as that
+ * player's own damage roll would (W7B-P-20).
+ */
+export function damageTo(page: Page, view: Pick<RoomState, "tokens" | "members" | "characters">): "all" | "dm" {
+  const caster = page.fill?.caster ? view.tokens[page.fill.caster] : undefined;
+  if (caster && playersToken(view, caster)) return "all";
+  return page.secret ? "dm" : "all";
 }
