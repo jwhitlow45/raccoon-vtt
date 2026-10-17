@@ -883,7 +883,8 @@ Existing files:
 - `e2e/playerphone.e2e.ts`: tests 10 to 18 run on the new arrangements (Actions and Done stay inline at every size, 9.1). Test 19 (`:1088`, the capped Ruler options) becomes: the way-back row covers no row control and not ⋯, and the kept rulers in their popover are in reach. Test 14's "the card does not show" precondition is derived again.
 - `e2e/dmphone.e2e.ts:602` and `:623`: their preconditions are derived again (the height 420 in `:623` was tuned to the old Ruler bar).
 - `e2e/smoke.e2e.ts:288`, `e2e/vision.e2e.ts:503,536`, `e2e/maps.e2e.ts:335,358`, `e2e/size.e2e.ts:481-501`, `e2e/table.e2e.ts:235`: native selects become `pickOption`. `size.e2e.ts`'s compact stamp Tint and More dialogs become the Tint chip's popover and ⋯.
-- Browsers: the e2e runs in Chrome only. Two things are checked by hand on an iPhone in Safari before the build merges, as the sheets' drafts were: a spell field focused inside a popover with the on-screen keyboard up, and a tap on a chip, Setup or the pair's button leaving focus on that button (7.1), which Safari does not do by itself.
+- Browsers: the e2e runs in Chrome only. These are checked by hand on real devices: on an iPhone in Safari, a spell field focused inside a popover with the on-screen keyboard up, a tap on a chip, Setup or the pair's button leaving focus on that button (7.1), which Safari does not do by itself, and, while typing Draw's text, whether a tap on the color chip drops the keyboard now that the base focuses the chip. On Android, Back closes a popover before anything else.
+- Waived before merge by the project owner (2026-10-17): the build ships, and these hand checks follow on the devices named above, as with the PDF handouts.
 
 ## 15. Build plan
 
