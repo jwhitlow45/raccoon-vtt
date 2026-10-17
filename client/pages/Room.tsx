@@ -38,6 +38,7 @@ import { SETUP_BUTTON, SETUP_TOOLS, toolbarButtons } from "../features/toolbarOr
 import { Icon } from "../components/Icon.tsx";
 import { Menu, type MenuItem, type MenuSection } from "../components/Menu.tsx";
 import { Popover, usePopover, type PopoverHandle } from "../components/Popover.tsx";
+import { popoverSlot } from "../components/popoverRules.ts";
 import { toolbarSlot, toolChanged, tuckEvent } from "../state/toolbar.ts";
 import { useDropHpDraftsOnSelect } from "../features/tokens/hpDraft.ts";
 import { useClearStatBlockOnSelect } from "../features/tokens/statBlockOpen.ts";
@@ -284,6 +285,14 @@ function RoomPage() {
     if (next.letGo) ui.select(null);
     // The gate is read through gateKey, which changes exactly when its kind or its scene does.
   }, [gateKey, ui]);
+  // A change of scene closes whatever popover is open (docs/design-v1-tool-options.md 13.3): a tool popover's choices and actions belong to the scene it opened on.
+  const sceneNow = useRoomView((s) => s.sceneId);
+  const sceneBefore = useRef(sceneNow);
+  useLayoutEffect(() => {
+    if (sceneBefore.current === sceneNow) return;
+    sceneBefore.current = sceneNow;
+    scope.get(popoverSlot).closeOpen("state");
+  }, [sceneNow, scope]);
   // HP typed before a blackout comes back with the token bar after it, and what no entry took back goes with a new selection (features/tokens/hpDraft.ts).
   useDropHpDraftsOnSelect();
   // A stat block a request opened stays open only while its token is the selection (features/tokens/panelFolds.ts).

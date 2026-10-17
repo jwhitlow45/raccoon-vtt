@@ -1105,6 +1105,31 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await key(dm, "v");
   });
 
+  test("4c. a scene change closes an open popover: a chip's and ⋯", async () => {
+    const other = randomUUID();
+    await ops.send({ t: "scene.create", scene: { id: other, name: "Elsewhere", bounds: { w: 10, h: 10 }, background: "#2b2b31", fogEnabled: false, autoWalls: "off" } });
+    await reloadAt(player, 1);
+    await view(player, playerCdp, SIZES[1]!);
+    await selectTool(player, "d");
+    const moveTo = async (sceneId: string) => {
+      await ops.send({ t: "room.setPlayerScene", sceneId });
+      await waitFor("the player on the scene", () => (playerSocket.state?.meta.playerSceneId === sceneId ? true : null));
+    };
+    await options(player).getByRole("button", { name: /^Color:/ }).tap();
+    const color = player.getByRole("dialog", { name: "Color" });
+    await color.waitFor();
+    await moveTo(other);
+    await color.waitFor({ state: "detached" });
+    await selectTool(player, "d");
+    await options(player).locator("[data-rvtt-more] button").first().tap();
+    const more = player.getByRole("dialog", { name: "More Draw options" });
+    await more.waitFor();
+    await moveTo(run.sceneId);
+    await more.waitFor({ state: "detached" });
+    await key(player, "v");
+    await ops.send({ t: "scene.delete", sceneId: other });
+  });
+
   test("5. the toolbar: Setup, the pair and keys", async () => {
     await view(dm, dmCdp, SIZES[1]!);
     await key(dm, "v");

@@ -224,6 +224,11 @@ export class PopoverRoom {
     if (before && before.key !== entry.key) before.close("replaced");
   }
 
+  /** Closes whichever popover is open, for a reason of the room's own: a scene change (13.3). */
+  closeOpen(reason: CloseReason): void {
+    this.#open?.close(reason);
+  }
+
   /** Clears the open popover if it is still `key`'s. */
   release(key: string): void {
     if (this.#open?.key !== key) return;

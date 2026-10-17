@@ -163,6 +163,16 @@ describe("one open popover in the room", () => {
     assert.ok(heard >= 4);
   });
 
+  test("the room closes the open one for a reason of its own, a scene change, and does nothing with none open", () => {
+    const room = new RoomScope().get(popoverSlot);
+    const closes: string[] = [];
+    room.closeOpen("state");
+    assert.deepEqual(closes, []);
+    room.open(entry("color", closes, room));
+    room.closeOpen("state");
+    assert.deepEqual(closes, ["color:state"]);
+  });
+
   test("each Room page has its own: the player preview's popovers never close the DM's", () => {
     const dm = new RoomScope().get(popoverSlot);
     const preview = new RoomScope().get(popoverSlot);
