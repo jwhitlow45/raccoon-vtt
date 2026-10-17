@@ -108,11 +108,11 @@ The block read is the one `tokenStatBlock` links and `statBlockShown` lets this 
 
 ### 4.2 One creature's list
 
-Each button is 44 px and rolls at once through `useDicePanel().roll`, with `presetFor`'s sources and the choices doc 1's `take()` consumes at the tap. It shows busy until its line lands, and its row then shows the newest result in place, one line under it: "17, Natural 20. Critical damage next." Doc 1 owns the panel's sticky last result. In this order:
+Each button is 44 px and rolls at once through `useDicePanel().roll`, with `presetFor`'s sources and the choices doc 1's `take()` consumes at the tap. It shows busy until its line lands, and its row then shows the newest result in place, one line under it: "17, Natural 20. Critical damage next." Doc 1 owns the panel's sticky last result. In this order, except that while the creature is dying its Death save leads, as the one roll it makes (build round 1, W7B-P-19):
 
 1. **Saves**: six in a 3-column grid, "Dex +2", the preset on a small second line ("Dis: Restrained", "Fails: Stunned", "+1d4: Blessed"). **Checks**: six in the same grid, then Skills, folded, each "Stealth +6".
 2. **Initiative** "+2". In a fight it reads "Initiative +2, sets its row". While the room uses initiative scores (`shared/rules/initiative.ts:119-122`), a monster's reads "Score 12, sets its row", which sets the score without a roll, and "Roll instead" beside it says it replaces the score.
-3. **Death save**, while the creature is dying.
+3. **Death save**, while the creature is dying, first of all.
 4. **Actions**, under the heading of the block's section each comes from: Traits, Actions, Bonus actions, Reactions and Legendary actions, each shown only when it holds a roll (build round 1, W7B-P-14). Under Actions the Multiattack note first, then one row per named roll: its name with uses, recharge and "Used" (6.4), then Attack "+4", Damage "1d6+2" with each optional part as a toggle beside it ("+1d4 if it had Advantage", doc 2's riders such as "+3d6 Sneak Attack") and, for a roll with an attack, a Critical toggle (only an attack roll scores a Critical Hit, so Fire Breath has none, W7B-P-13), Heal "3d6", a plain roll "1d8" under the roll's name, a Slot level stepper for a spell `pcSlots` scales, Recharge "1d6", and for a save action "Group save, DC 21 Dex" (5.6). One Damage tap rolls the parts and every toggled rider in one line, so a damage is never split across lines.
 5. **Spells**: the spell attack and DC from `RollNumbers`, then doc 2's spells as rows like actions.
 

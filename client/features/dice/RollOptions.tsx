@@ -185,6 +185,8 @@ function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creature: Ac
           onChange={(on) => store.setState((s) => ({ askOff: { ...s.askOff, [key]: !on } }))}
         />
       ) : null}
+      {/* While dying, its death save is the one roll it makes, so it leads (W7B-P-19). */}
+      {actor?.life === "dying" ? <DeathSaveCell ctx={ctx} bonus={numbers?.deathSave ?? 0} /> : null}
       {numbers ? (
         <>
           <Grid label="Saves">
@@ -210,7 +212,6 @@ function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creature: Ac
         </>
       ) : null}
       <InitiativeCell ctx={ctx} />
-      {actor?.life === "dying" ? <DeathSaveCell ctx={ctx} bonus={numbers?.deathSave ?? 0} /> : null}
       {!numbers ? (
         <>
           <Note>No stat block. Roll from the field above.</Note>
