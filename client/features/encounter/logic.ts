@@ -138,12 +138,15 @@ export function reorderTie(entries: readonly InitEntry[], entryId: string, toInd
 /**
  * Where a dragged row lands: the number of other rows whose middle is above
  * the pointer. `mids` are the rows' vertical centers, measured when the drag
- * began, in table order.
+ * began, in table order. A row below the dragged one counts once the
+ * pointer reaches its middle, as one above it does once the pointer leaves
+ * it: the drag stops at the last middle of its tie, and with both counted
+ * only past their middles a row dragged down never took the last place.
  */
 export function dropIndex(mids: readonly number[], from: number, y: number): number {
   let index = 0;
   for (let i = 0; i < mids.length; i++) {
-    if (i !== from && mids[i]! < y) index++;
+    if (i !== from && (i < from ? mids[i]! < y : mids[i]! <= y)) index++;
   }
   return index;
 }

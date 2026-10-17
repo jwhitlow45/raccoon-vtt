@@ -181,6 +181,14 @@ describe("dragging ties", () => {
     assert.equal(dropIndex(mids, 3, 0), 0);
     assert.equal(dropIndex(mids, 1, 60), 1);
   });
+
+  test("a tied row dragged as far as its tie lets it, onto the last row's middle or the first's, takes that place", () => {
+    const mids = [20, 60];
+    assert.equal(dropIndex(mids, 0, 60), 1, "down onto the last middle");
+    assert.equal(dropIndex(mids, 1, 20), 0, "up onto the first middle");
+    assert.equal(dropIndex(mids, 0, 59), 0);
+    assert.equal(dropIndex(mids, 1, 21), 1);
+  });
 });
 
 describe("turn banners", () => {
