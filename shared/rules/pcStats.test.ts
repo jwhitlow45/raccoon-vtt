@@ -273,6 +273,8 @@ describe("named rolls (docs/design-v1-pc-stats.md 3.4)", () => {
         roll("homebrew", { name: "Ember Burst", kind: "spell", ability: "spell", level: 2, save: save() }),
         roll("other", { name: "Acid Splash", kind: "other", save: save() }),
         roll("flame", { name: "Sacred Flame", kind: "spell", ability: "spell", level: 0, save: save() }),
+        roll("disintegrate", { name: "Disintegrate", kind: "spell", ability: "spell", level: 6, save: save() }),
+        roll("blight", { name: "blight", kind: "spell", ability: "spell", level: 4, save: save() }),
         roll("halved", { name: "Ember Burst", kind: "spell", ability: "spell", level: 2, save: save("half") }),
       ],
     };
@@ -283,11 +285,14 @@ describe("named rolls (docs/design-v1-pc-stats.md 3.4)", () => {
     assert.equal(onPass("splash"), "none");
     assert.equal(onPass("typed"), "none", "a typed none wins over the SRD's half");
     assert.equal(onPass("homebrew"), "half", "a leveled spell the SRD's table does not hold halves");
-    assert.equal(onPass("flame"), "none", "a cantrip the SRD's table does not hold takes none");
+    assert.equal(onPass("flame"), "none", "the SRD's Sacred Flame, a cantrip");
+    assert.equal(onPass("disintegrate"), "none", "a single-target SRD spell that takes none on a pass, not the leveled default (W7B-R2-3)");
+    assert.equal(onPass("blight"), "half");
     assert.equal(onPass("other"), "half", "only a spell reads the SRD's rule");
     assert.equal(onPass("halved"), "half");
     assert.equal(srdOnPass({ name: "Ember Burst", kind: "spell" }), undefined);
     assert.equal(unknownOnPass({ name: "Ember Burst", kind: "spell", level: 2 }), "half");
+    assert.equal(unknownOnPass({ name: "Frost Sting", kind: "spell", level: 0 }), "none", "a cantrip the SRD's tables do not hold");
   });
 
   test("a spell's `spell` ability without a spellcasting ability adds 0", () => {
