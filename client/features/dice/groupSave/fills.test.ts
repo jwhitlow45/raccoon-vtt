@@ -25,6 +25,7 @@ const UNSAID: PcStats = {
   rolls: [
     { id: "fb2", name: "Fireball", kind: "spell", ability: "spell", level: 3, save: { ability: "dex" }, dice: [{ formula: "8d6", type: "fire", upcast: "1d6" }] },
     { id: "ray", name: "Hold Ray", kind: "spell", ability: "spell", level: 2, save: { ability: "wis" }, dice: [{ formula: "4d6", type: "psychic" }] },
+    { id: "sf", name: "Sacred Flame", kind: "spell", ability: "spell", level: 0, save: { ability: "dex" }, dice: [{ formula: "1d8", type: "radiant" }] },
   ],
 };
 
@@ -65,6 +66,7 @@ describe("an area's fill", () => {
     const fill = areaFill(d, { spell: "Fireball", casterId: "wrenTok" })!;
     const resolved = pcNamedRolls(d.view.characters.wren!).find((r) => r.key === "fb2")!.save!.onPass;
     assert.equal(fill.outcome.onPass, resolved, "the stat block's resolution, never one of the fill's own");
+    assert.equal(resolved, "half", "an unset Fireball takes the SRD's half");
     assert.match(fill.fill.from, new RegExp(`${resolved} on a pass`));
     assert.equal(fill.outcome.damage, "8d6 fire", "its own dice still");
     assert.equal(areaFill(d, { spell: "Fireball", casterId: "breeTok" })!.outcome.onPass, "half", "typed half");
@@ -93,6 +95,12 @@ describe("a save action's fill", () => {
       assert.equal(fill.spell, true);
       assert.equal(fill.outcome.onPass, named.save!.onPass);
     }
+  });
+
+  test("an unset cantrip with no SRD area rule, such as Sacred Flame, takes none (W7B-P-2)", () => {
+    const d = dice();
+    const named = pcNamedRolls(d.view.characters.wren!).find((r) => r.key === "sf")!;
+    assert.equal(actionFill(d, named, { key: "t:wrenTok", tokenId: "wrenTok" })!.outcome.onPass, "none");
   });
 
   test("its ability, DC, parts that are not optional, half or none, conditions and their end on the acting creature", () => {
