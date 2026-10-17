@@ -26,7 +26,7 @@ import {
   type StripLine,
 } from "../measure/controls.tsx";
 import { POPOVER_MIN } from "../../pages/optionsLayout.ts";
-import { castFrom, choiceOf, draftCaster, fromOffers, withoutDeparted, type AreaCreature } from "./caster.ts";
+import { castFrom, choiceOf, draftCaster, fromOffers, idleHint, withoutDeparted, type AreaCreature } from "./caster.ts";
 import { caughtTokens, contextFrom, inAreaEntries, inAreaText } from "./coverage.ts";
 import { FromControl, NO_CREATURE } from "./FromControl.tsx";
 import { areaTitle, shapeName, SHAPES } from "./labels.ts";
@@ -386,7 +386,7 @@ function IdleOptions(props: { env: AreaEnv; st: AreaToolState }) {
     control.form === "disabled"
       ? `${NO_CREATURE} ${IDLE_HINT}`
       : casting
-        ? `Casting from ${casting.name}. Tap the map or a creature to aim or place it. Tap an area on the map to pick it.`
+        ? idleHint(st.shape, casting.name)
         : IDLE_HINT;
   return (
     <OptionsStrip

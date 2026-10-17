@@ -9,6 +9,7 @@ import {
   draftCaster,
   fromOffers,
   fromShows,
+  idleHint,
   idleTapPicks,
   pickedPress,
   savedChoice,
@@ -22,6 +23,14 @@ import {
 } from "./caster.ts";
 import { draftFromTemplate, draftTemplate, newDraft, withShape, type AreaDraft } from "./placement.ts";
 import { presetDraft } from "./presets.ts";
+
+describe("the idle line while From is on (3.5)", () => {
+  test("it says what a tap does with the last shape: aim, place, or start it around the caster", () => {
+    for (const shape of ["cone", "line", "cube"] as const) assert.equal(idleHint(shape, "Thorn"), "Casting from Thorn. Tap the map or a creature to aim it. Tap an area on the map to pick it.");
+    for (const shape of ["sphere", "cylinder"] as const) assert.equal(idleHint(shape, "Thorn"), "Casting from Thorn. Tap the map or a creature to place it. Tap an area on the map to pick it.");
+    assert.equal(idleHint("emanation", "Thorn"), "Casting from Thorn. Tap the map to start it around Thorn. Tap an area on the map to pick it.");
+  });
+});
 
 describe("a tap with nothing in progress", () => {
   test("a token inside a placed area casts from the token", () => {

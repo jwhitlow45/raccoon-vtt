@@ -1,4 +1,4 @@
-import type { BuildChunk, Character, CharacterId, MemberId, RoomState, Token } from "#shared/model.ts";
+import type { AreaShape, BuildChunk, Character, CharacterId, MemberId, RoomState, Token } from "#shared/model.ts";
 import { emanationFootprint, type AreaToken } from "#shared/rules/aoe.ts";
 import { footprintRect } from "#shared/rules/footprint.ts";
 import type { Point } from "#shared/rules/geom.ts";
@@ -298,6 +298,18 @@ export function tokenTap(d: Pick<AreaDraft, "shape" | "fromId" | "casterId" | "t
   if (d.fromId !== undefined) return tokenId === d.fromId ? "grab" : "aim";
   if (d.shape === "cube") return "center";
   return d.point ? "aim" : "cast";
+}
+
+/**
+ * The idle line's words while the next area starts from a creature (3.5):
+ * what a tap does with the last shape used. A cone, line or cube turns
+ * toward the tap, a sphere or cylinder goes where it lands, and an
+ * emanation starts around its caster wherever the tap is.
+ */
+export function idleHint(shape: AreaShape, name: string): string {
+  const tap =
+    shape === "emanation" ? `Tap the map to start it around ${name}.` : shape === "sphere" || shape === "cylinder" ? "Tap the map or a creature to place it." : "Tap the map or a creature to aim it.";
+  return `Casting from ${name}. ${tap} Tap an area on the map to pick it.`;
 }
 
 /**

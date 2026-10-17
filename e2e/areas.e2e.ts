@@ -308,7 +308,7 @@ describe("raccoon-vtt an area from your character", { timeout: 900_000 }, () => 
   test("1. Pat opens Area with nothing selected: From Thorn is pressed, and a drag from open map aims a cone from his edge", async () => {
     await pickTool(pat, "Area");
     await fromIs(pat, "From Thorn", "on");
-    assert.match(await line(pat), /^Casting from Thorn\. Tap the map or a creature to aim or place it\./);
+    assert.match(await line(pat), /^Casting from Thorn\. Tap the map or a creature to aim it\./);
     await shots.take(pat, "areas-from-thorn-idle");
     // From open map south of Thorn, dragged further south: the cone turns about Thorn and points down.
     await dragCells(pat, BOUNDS, { x: 3, y: 9 }, { x: 3, y: 11 });
@@ -404,6 +404,8 @@ describe("raccoon-vtt an area from your character", { timeout: 900_000 }, () => 
     await from(pat).click();
     await fromIs(pat, "From Thorn", "on");
     await pressSlot(pat, "cancel");
+    // The last shape is now Fireball's sphere: the idle line says a tap places it.
+    await waitFor("the sphere's idle line", async () => /^Casting from Thorn\. Tap the map or a creature to place it\./.test(await line(pat)));
   });
 
   test("5. Spirit Guardians surrounds Thorn and moves with him once placed", async () => {
@@ -413,6 +415,8 @@ describe("raccoon-vtt an area from your character", { timeout: 900_000 }, () => 
     assert.equal(aura.casterId, run.thorn);
     await pressSlot(pat, "delete");
     await idle(pat);
+    // An emanation's tap only starts it around Thorn, and the idle line says so.
+    await waitFor("the emanation's idle line", async () => /^Casting from Thorn\. Tap the map to start it around Thorn\./.test(await line(pat)));
   });
 
   test("7. off, a shape change, on: from Thorn again, and off, a spell, on: the same, Ice Knife's goblin included", async () => {
