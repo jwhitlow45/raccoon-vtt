@@ -455,9 +455,15 @@ cd ~/raccoon-vtt
 docker compose -f docker-compose.server.yml exec backup sh /backup/backup.sh once
 git pull
 docker compose -f docker-compose.server.yml up -d --build
+docker compose -f docker-compose.server.yml restart egress
 ```
 
-The backup prints one line ending in `good` when it worked.
+The backup prints one line ending in `good` when it worked. The last line
+is there because squid reads docker/squid.conf only when it starts, and
+Compose does not count a change to that file as a change to the `egress`
+container, so without it an update that allows a new host leaves the old
+list in force. Image search and imports fail for the second or two squid
+takes to start again.
 
 After the update that stands ruler stops on raised ground
 (docs/design-v1-heights-readout.md section 3), reload every page left open
@@ -495,13 +501,17 @@ first of wave 7, saves rooms at snapshot version 11 and stores changes at op
 version 7, which the builds before it cannot read: they answer "Something
 went wrong" for every room. It also adds the `roll_receipts` table, which
 the app creates on its own at start, and which older builds leave alone.
+The wave also adds `character-service.dndbeyond.com` to docker/squid.conf
+for the D&D Beyond import, which the recipe's `restart egress` puts in force.
 Going back is the same restore: check out the commit you ran before (`git
 log` lists it), rebuild with
-`docker compose -f docker-compose.server.yml up -d --build`, then follow
-Restore under Backups with the backup taken just before the update. Every
-room loses what changed after that backup. Reload every page left open
-across the update, table displays included. Until it reloads, an old page
-has no Dice panel and shows each roll as an empty line in the Log.
+`docker compose -f docker-compose.server.yml up -d --build`, run
+`docker compose -f docker-compose.server.yml restart egress` so squid drops
+the host again, then follow Restore under Backups with the backup taken just
+before the update. Every room loses what changed after that backup. Reload
+every page left open across the update, table displays included. Until it
+reloads, an old page has no Dice panel and shows each roll as an empty line
+in the Log.
 
 Compose rebuilds the image and replaces only the containers that changed. On
 the way down the app closes every WebSocket with code 1012, finishes each

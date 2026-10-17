@@ -2,6 +2,10 @@
 # reverse proxy (README, "Deploying").
 #
 #   docker compose -f docker-compose.server.yml up -d --build
+#   docker compose -f docker-compose.server.yml restart egress
+#
+# The restart is for updates: squid reads docker/squid.conf only at start,
+# and a changed bind-mounted file does not make Compose recreate `egress`.
 #
 # The shape, drawn with a tunnel as the front end:
 #
@@ -20,7 +24,8 @@
 #                    |
 #               [ egress ] ----- raccoon-egress ---- serpapi.com,
 #                                                    api.openverse.org,
-#                                                    challenges.cloudflare.com
+#                                                    challenges.cloudflare.com,
+#                                                    character-service.dndbeyond.com
 #                                                    and public images on 443
 #
 # There is no `ports:` key anywhere in this file, on purpose. The only way in
