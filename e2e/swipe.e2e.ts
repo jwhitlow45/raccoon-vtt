@@ -17,8 +17,8 @@ import { ConsoleWatch, OpSocket, pagePoint, pickOption, pickTool, readCamera, Sh
  * Chromium's touch emulation is not iOS Safari: what the browser does with
  * a pan it starts itself is the part this run cannot prove (13).
  *
- * It runs with `pnpm test:e2e` on E2E_PORT plus eighteen, the next free
- * offset after the split panel's seventeen, one file after another.
+ * It runs with `pnpm test:e2e` on E2E_PORT plus eighteen, which it shares
+ * with the areas run (areas.e2e.ts), since the runs go one after another.
  */
 
 const PORT = Number(process.env.E2E_PORT ?? 3100) + 18;

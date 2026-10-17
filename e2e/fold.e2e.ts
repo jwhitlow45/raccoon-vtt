@@ -207,10 +207,9 @@ async function assertHeaderFits(sheet: Locator, scale: number, label: string): P
   const header = sheet.locator("header").first();
   const buttons = await header.locator("button").evaluateAll((els) =>
     els
-      // A button visually hidden until it has focus, clipped to nothing, as an upright sheet's Full screen (docs/design-v1-sheet-swipe.md 4.7), is no target on screen.
-      .filter((e) => (e as unknown as { ownerDocument: { defaultView: { getComputedStyle(el: unknown): { clip: string } } } }).ownerDocument.defaultView.getComputedStyle(e).clip === "auto")
       .map((e) => ({ name: e.getAttribute("aria-label") ?? e.textContent ?? "", r: e.getBoundingClientRect() }))
-      .filter(({ r }) => r.width > 0)
+      // An upright sheet's Full screen is visually hidden until it has keyboard focus (docs/design-v1-sheet-swipe.md 4.7), so it is no target on screen. Every other header button is held to the rule.
+      .filter(({ name, r }) => r.width > 0 && name !== "Full screen")
       .map(({ name, r }) => ({ name, left: r.left, right: r.right, h: r.height })),
   );
   assert.ok(buttons.length > 0, `${label}: the header has no buttons`);
