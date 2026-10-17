@@ -1186,6 +1186,24 @@ export type RollChoice = { ability: AbilityKey; skill?: SkillKey };
 /** A saving throw or an ability check, with one choice or two the creature picks from (section 3.3). */
 export type RollTest = { kind: "save" | "check"; choices: RollChoice[] };
 
+/**
+ * What the server drew for one roll (wave 7, docs/design-v1-dice.md 5.1).
+ * The formula is text, so a line of 20 rolls stays within its bound, and
+ * shared/dice/roll.ts reads it back to pair each dice term with its faces.
+ */
+export type DiceResult = {
+  /** Canonical, as rolled: "2d20kh1+5" for 1d20+5 with advantage. */
+  formula: string;
+  /** Every die drawn, in the formula's order, kept or dropped. */
+  faces: number[];
+  total: number;
+  mode?: "adv" | "dis";
+  /** Its advantage sources held both kinds, so it rolled normally (3.3), which a later Lucky must know (5.4). */
+  cancelled?: true;
+  /** A rolled save its creature fails whatever the total, by a condition its players can see (4.2). */
+  fails?: ConditionKey;
+};
+
 /** A request's answer, or the one a later answer replaced. */
 export type RollAnswer = {
   /** Which of the test's choices was rolled, 0 or 1. Absent for a save failed without rolling, and for a DM's bare mark. */

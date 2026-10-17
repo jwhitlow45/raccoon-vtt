@@ -281,6 +281,46 @@ export const LIMITS = {
   orphanFileDays: 1,
   trashHours: 48,
   libraryDeleteMax: 500,
+
+  // Wave 7: dice (docs/design-v1-dice.md 3.2 and 4.4).
+
+  /**
+   * One `dice.roll`: its rolls, its dice after every mode, and its size
+   * serialized. A 3 KiB op makes a `dice` line of at most about 4.5 KB, near
+   * the longest line the log holds today, so a larger group goes in batches.
+   */
+  diceRollsPerOp: 20,
+  diceOpBytes: 3 * 1024,
+  dicePerOp: 100,
+  /** The batches of one tag, numbered by `part` 0 to 19. */
+  diceBatchesPerTag: 20,
+  /** One formula: its terms, a die's sides, a number, its canonical text, a label, and `roll.dice`'s extra. */
+  diceTermsPerFormula: 20,
+  diceSidesMax: 1_000,
+  diceNumberMax: 1_000,
+  diceFormulaChars: 100,
+  diceLabelChars: 60,
+  diceExtraChars: 40,
+  /**
+   * Each member's budget of tagged ops (4.4): a player's 20 then one every
+   * 2 s, a DM's 100 then two a second, whose group rolls come in bursts.
+   */
+  playerRollBurst: 20,
+  playerRollRefillMs: 2_000,
+  dmRollBurst: 100,
+  dmRollRefillMs: 500,
+  /**
+   * Receipts (1.2): lookups per member and room an hour, receipts a room
+   * holds younger than 24 hours, a player's share of them, the share kept
+   * for the DMs whatever the players send, and of the older rows, how many
+   * a room keeps and for how many days.
+   */
+  receiptLookupsPerHour: 60,
+  receiptsPerDay: 10_000,
+  receiptsPerPlayerDay: 2_000,
+  receiptsDmFloor: 2_000,
+  receiptsKeptOlder: 10_000,
+  receiptDays: 7,
 } as const;
 
 export type LimitCheck = { ok: true } | { ok: false; code: "quota"; message: string };
