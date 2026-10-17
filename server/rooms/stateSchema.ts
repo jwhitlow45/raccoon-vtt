@@ -17,6 +17,7 @@ import {
   actorSchemaForImport,
   areaTriggersSchema,
   moveAnyTokenSchema,
+  pcStatsForImport,
   fogOpSchema,
   handoutSchemas,
   mapSchemas,
@@ -264,6 +265,8 @@ const character = z.strictObject({
   actor: actorStored,
   // Backups from before character levels have none.
   level: z.number().int().min(1).max(20).optional(),
+  // Backups from before stat blocks for player characters have none (docs/design-v1-pc-stats.md 3.5).
+  stats: pcStatsForImport.optional(),
 });
 
 const areaFeet = z.number().min(5).max(1_000);

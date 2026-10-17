@@ -212,14 +212,35 @@ const DELETIONS = new Set<Op["t"]>([
   "companionBlock.delete",
 ]);
 
-/** A companion stat block's ops, which a player's save budget counts and the size refusals word for blocks. */
+/**
+ * A companion stat block's ops, which a player's save budget counts and the size refusals word for blocks, and every op
+ * that writes a character's own stat block, removing it included (docs/design-v1-pc-stats.md 4.1), so creating and
+ * deleting characters cannot churn stored blocks either.
+ */
 function isBlockOp(op: Op): boolean {
-  return op.t === "companionBlock.create" || op.t === "companionBlock.update" || op.t === "companionBlock.delete";
+  return op.t === "companionBlock.create" || op.t === "companionBlock.update" || op.t === "companionBlock.delete" || writesPcStats(op);
 }
 
 /** A block save, which a guard's refusal answers in the block's own words (docs/design-v1-companion-stat-blocks.md 3.4). */
 function isBlockSave(op: Op): boolean {
-  return op.t === "companionBlock.create" || op.t === "companionBlock.update";
+  return op.t === "companionBlock.create" || op.t === "companionBlock.update" || savesPcStats(op);
+}
+
+function writesPcStats(op: Op): boolean {
+  return (op.t === "character.create" && op.character.stats !== undefined) || (op.t === "character.update" && op.patch.stats !== undefined);
+}
+
+/**
+ * Removing a character's block and nothing else, which a room at its quota accepts as it accepts deleting a companion's,
+ * so BLOCKS_AT_QUOTA's "Deleting a stat block still works" holds for both (docs/design-v1-companion-stat-blocks.md 3.6).
+ */
+function removesPcStats(op: Op): boolean {
+  return op.t === "character.update" && op.patch.stats === null && Object.keys(op.patch).length === 1;
+}
+
+/** A character's block written rather than removed: the size guard's refusal of it reads in the block's words. */
+function savesPcStats(op: Op): boolean {
+  return (op.t === "character.create" && op.character.stats !== undefined) || (op.t === "character.update" && op.patch.stats !== undefined && op.patch.stats !== null);
 }
 
 const NO_FACTS: Map<string, AssetFact> = new Map();
@@ -936,7 +957,7 @@ export class RoomActor {
       this.#refuse(key, wm, n, "quota", "the room could not be fully loaded and is read-only");
       return;
     }
-    if (this.readOnly && !DELETIONS.has(op.t)) {
+    if (this.readOnly && !DELETIONS.has(op.t) && !removesPcStats(op)) {
       this.#refuse(key, wm, n, "quota", isBlockSave(op) ? BLOCKS_AT_QUOTA : "the room is full: it is at its storage quota, so only deletions are accepted");
       return;
     }

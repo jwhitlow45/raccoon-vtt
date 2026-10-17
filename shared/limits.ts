@@ -89,6 +89,13 @@ export const LIMITS = {
    */
   companionBlockWriteBurst: 10,
   companionBlockWriteRefillMs: 6_000,
+  /**
+   * A player character's stat block, serialized (docs/design-v1-pc-stats.md
+   * 3.5). It rides on the character, which is sent whole on every HP
+   * change, so it stays small: a wizard's 32 rolls take about 6.3 KB, and
+   * 50 characters at the cap are 600 KiB of a DM's 3 MiB scene.
+   */
+  pcStatsBytes: 12 * 1024,
   logInMemory: 200,
   logStored: 10_000,
   stateBytes: 8 * 1024 * 1024,

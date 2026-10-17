@@ -2,6 +2,7 @@ import { z } from "zod";
 import { LIMITS, serializedBytes } from "./limits.ts";
 import { applyMode, diceCount, parseExtra, parseFormula, type Formula } from "./dice/formula.ts";
 import { ICON_KEY_RE } from "./imageRef.ts";
+import { DAMAGE_TYPES } from "./rules/damage.ts";
 import {
   ABILITY_KEYS,
   CHUNK_CELLS,
@@ -506,6 +507,114 @@ const tokenPatch = z.strictObject({
 /** A character's level, as the XP budget table counts them. */
 const characterLevel = z.number().int().min(1).max(20);
 
+/*
+ * A player character's stat block (docs/design-v1-pc-stats.md 3.2 and 3.5).
+ * A formula is bounded by its length and its characters and never parsed
+ * here, so a later grammar never stops a stored op from replaying
+ * (docs/design-v1-dice.md 4.1). The editor refuses what parseFormula
+ * refuses, and a formula that stops parsing later shows as text with no
+ * roll. Every list is free of repeats, and the whole block, or a patch of
+ * it, is at most LIMITS.pcStatsBytes serialized.
+ */
+export const MAX_PC_ROLLS = 40;
+export const MAX_PC_DICE_PARTS = 4;
+const PC_FORMULA = /^[0-9dkhl%+\-− ]+$/i;
+const pcFormula = (max: number) => z.string().min(1).max(max).regex(PC_FORMULA, "a formula holds dice and numbers only");
+const pcName = (max: number) => z.string().min(1).max(max).regex(NAME_CHARS, "names cannot hold control or text direction characters");
+const pcAbility = z.enum(ABILITY_KEYS);
+const pcScore = z.number().int().min(1).max(30);
+const pcAdjustValue = z.number().int().min(-20).max(20);
+const pcDc = z.number().int().min(LIMITS.rollDcMin).max(LIMITS.rollDcMax);
+function perKey<K extends string, T extends z.ZodType>(keys: readonly K[], value: T) {
+  return z.strictObject(Object.fromEntries(keys.map((k) => [k, value.optional()])) as { [P in K]: z.ZodOptional<T> });
+}
+const unique = (list: readonly unknown[]) => new Set(list).size === list.length;
+const withinPcStatsBytes = { message: `a stat block is at most ${LIMITS.pcStatsBytes / 1024} KiB` };
+
+const pcDice = z
+  .strictObject({
+    formula: pcFormula(40),
+    mod: z.literal(true).optional(),
+    type: z.enum([...DAMAGE_TYPES, "healing"]).optional(),
+    grows: z.literal(true).optional(),
+    upcast: pcFormula(20).optional(),
+    optional: z.literal(true).optional(),
+    name: pcName(30).optional(),
+  })
+  .refine((d) => d.upcast === undefined || d.type !== undefined, { message: "only damage or healing grows with a higher slot" })
+  .refine((d) => d.name === undefined || d.optional === true, { message: "only a rider has a name of its own" })
+  // A rider is damage that applies only sometimes, which a named roll's damage parts alone can say.
+  .refine((d) => d.optional === undefined || (d.type !== undefined && d.type !== "healing"), { message: "a rider is a damage part" });
+
+const pcRoll = z
+  .strictObject({
+    id,
+    name: pcName(60),
+    kind: z.enum(["weapon", "spell", "other"]),
+    ability: z.union([pcAbility, z.literal("spell")]).optional(),
+    attack: z.strictObject({ prof: z.boolean(), bonus: pcAdjustValue }).optional(),
+    save: z
+      .strictObject({ ability: pcAbility, dc: pcDc.optional(), bonus: pcAdjustValue.optional(), onPass: z.literal("half").optional() })
+      .refine((s) => s.dc === undefined || s.bonus === undefined, { message: "a save's DC is typed or worked out, not both" })
+      .optional(),
+    level: z.number().int().min(0).max(9).optional(),
+    dice: z.array(pcDice).max(MAX_PC_DICE_PARTS),
+    ddb: z.literal(true).optional(),
+  })
+  .refine((r) => r.attack !== undefined || r.save !== undefined || r.dice.length > 0, { message: "a roll needs an attack, a save or dice" });
+
+const pcAdjust = z.strictObject({
+  saves: perKey(ABILITY_KEYS, pcAdjustValue).optional(),
+  skills: perKey(SKILL_KEYS, pcAdjustValue).optional(),
+  allSaves: pcAdjustValue.optional(),
+  allChecks: pcAdjustValue.optional(),
+  init: pcAdjustValue.optional(),
+  passive: pcAdjustValue.optional(),
+  spellDc: pcAdjustValue.optional(),
+  spellAttack: pcAdjustValue.optional(),
+});
+
+const pcParts = {
+  abilities: z.strictObject({ str: pcScore, dex: pcScore, con: pcScore, int: pcScore, wis: pcScore, cha: pcScore }),
+  saves: z.array(pcAbility).max(ABILITY_KEYS.length).refine(unique, { message: "a save is listed twice" }),
+  skills: perKey(SKILL_KEYS, z.enum(["prof", "expert"])),
+  adjust: pcAdjust,
+  defenses: perKey(DAMAGE_TYPES, z.enum(["resistant", "immune", "vulnerable"])),
+  rolls: z
+    .array(pcRoll)
+    .max(MAX_PC_ROLLS)
+    .refine((rolls) => unique(rolls.map((r) => r.id)), { message: "two rolls share an id" }),
+};
+const pcCritOn = z.union([z.literal(19), z.literal(18)]);
+
+const pcStats = z
+  .strictObject({
+    ...pcParts,
+    jack: z.literal(true).optional(),
+    alert: z.literal(true).optional(),
+    spellAbility: pcAbility.optional(),
+    critOn: pcCritOn.optional(),
+    evasion: z.literal(true).optional(),
+  })
+  .refine((s) => serializedBytes(s) <= LIMITS.pcStatsBytes, withinPcStatsBytes);
+
+/** Each part it names replaces that part whole, and null takes an optional one away (section 3.5). */
+const pcStatsPatch = z
+  .strictObject({
+    abilities: pcParts.abilities.optional(),
+    saves: pcParts.saves.optional(),
+    skills: pcParts.skills.optional(),
+    adjust: pcParts.adjust.optional(),
+    defenses: pcParts.defenses.optional(),
+    rolls: pcParts.rolls.optional(),
+    jack: z.literal(true).nullable().optional(),
+    alert: z.literal(true).nullable().optional(),
+    spellAbility: pcAbility.nullable().optional(),
+    critOn: pcCritOn.nullable().optional(),
+    evasion: z.literal(true).nullable().optional(),
+  })
+  .refine((s) => serializedBytes(s) <= LIMITS.pcStatsBytes, withinPcStatsBytes);
+
 const characterInput = z.strictObject({
   id,
   name,
@@ -514,6 +623,7 @@ const characterInput = z.strictObject({
   defaultImage: imageRef.optional(),
   actor: actorSchema,
   level: characterLevel.optional(),
+  stats: pcStats.optional(),
 });
 
 const characterPatch = z.strictObject({
@@ -523,6 +633,8 @@ const characterPatch = z.strictObject({
   defaultImage: imageRef.nullable().optional(),
   actor: actorPatch.optional(),
   level: characterLevel.nullable().optional(),
+  /** Null removes the block. The actor keeps its last initiative and Passive Perception (docs/design-v1-pc-stats.md 3.5). */
+  stats: pcStatsPatch.nullable().optional(),
 });
 
 /** A stat block line the DM reads as text, such as the skills or the languages. */
@@ -1420,6 +1532,7 @@ export type TokenPatch = z.infer<typeof tokenPatch>;
 export type CompanionLink = z.infer<typeof companion>;
 export type CharacterInput = z.infer<typeof characterInput>;
 export type CharacterPatch = z.infer<typeof characterPatch>;
+export type PcStatsPatch = z.infer<typeof pcStatsPatch>;
 export type MonsterInput = z.infer<typeof monsterInput>;
 export type MonsterPatch = z.infer<typeof monsterPatch>;
 export type CompanionBlockInput = z.infer<typeof companionBlockInput>;
@@ -1465,6 +1578,10 @@ export const areaTriggersSchema = areaTriggers;
 export const savedEncounterFieldsForImport = savedEncounterFields;
 /** A saved encounter as a create op carries it, for the builder to check a draft before it saves. */
 export const savedEncounterInputSchema = savedEncounterInput;
+/** A character's stat block, so the stored-state schema checks imported ones by the same bounds and the editor checks a draft before it saves. */
+export const pcStatsForImport = pcStats;
+/** A stat block's patch, for the editor to check what it sends. */
+export const pcStatsPatchSchema = pcStatsPatch;
 /** Who may move any token, so the stored-state schema checks imports the same way. */
 export const moveAnyTokenSchema = moveAnyToken;
 /** The text rules above, so the stored-state schema checks imports the same way. */

@@ -42,8 +42,8 @@ export const OWNER_ACTOR_FIELDS: ReadonlySet<keyof ActorPatch> = new Set([
  */
 const COMPANION_OWNER_ACTOR_FIELDS: ReadonlySet<keyof ActorPatch> = new Set([...OWNER_ACTOR_FIELDS, "srdId", "blockId"]);
 
-/** Character fields an owner may patch. `actor` is limited further by OWNER_ACTOR_FIELDS. */
-export const OWNER_CHARACTER_FIELDS: ReadonlySet<string> = new Set(["name", "defaultImage", "actor", "level"]);
+/** Character fields an owner may patch, the stat block among them (docs/design-v1-pc-stats.md 4.1). `actor` is limited further by OWNER_ACTOR_FIELDS. */
+export const OWNER_CHARACTER_FIELDS: ReadonlySet<string> = new Set(["name", "defaultImage", "actor", "level", "stats"]);
 
 type View = Pick<RoomState, "characters"> | null | undefined;
 
@@ -144,7 +144,7 @@ export type CharacterAccess = {
   dm: boolean;
   owner: boolean;
   full: boolean;
-  canEdit(field: "name" | "size" | "ownerIds" | "defaultImage" | "level"): boolean;
+  canEdit(field: "name" | "size" | "ownerIds" | "defaultImage" | "level" | "stats"): boolean;
   canEditActor(field: keyof ActorPatch): boolean;
 };
 

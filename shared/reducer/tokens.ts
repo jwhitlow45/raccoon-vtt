@@ -22,7 +22,8 @@ import {
   syncOwners,
 } from "./companions.ts";
 import { removeEntries } from "./encounter.ts";
-import { gone, invalid, type Env, type ResolvedActor, type Tx } from "./tx.ts";
+import { applyPcStatsPatch, EMPTY_PC_STATS, pcNumbersFromBlock, pcStatsFits, pcStatsTooBig, withPcActorNumbers } from "../rules/pcStats.ts";
+import { gone, invalid, Refuse, type Env, type ResolvedActor, type Tx } from "./tx.ts";
 
 function tokenDefaults(kind: Token["kind"]): Pick<Token, "disposition" | "layer" | "hpVisibility"> {
   return {
@@ -135,6 +136,8 @@ export function applyActorPatch(tx: Tx, resolved: ResolvedActor, patch: ActorPat
   const linking = linksSet(patch);
   if (oneLink && linking > 1) throw invalid(ONE_LINK);
   if (resolved.holder === "character" && patch.blockId !== undefined && patch.blockId !== null) throw invalid(BLOCK_OF_ITS_CHARACTER);
+  // A block gives these two, and its next edit would write over a typed one anyway (docs/design-v1-pc-stats.md 3.5). The DM too.
+  if (resolved.character?.stats && (patch.initBonus !== undefined || patch.passivePerception !== undefined)) throw invalid(pcNumbersFromBlock(resolved.character.name));
   let actor: Actor = { ...resolved.actor };
   const events: ActorEvent[] = [];
   if (patch.hp) {
@@ -466,7 +469,8 @@ export function characterCreate(tx: Tx, op: OpOf<"character.create">): void {
   };
   if (input.defaultImage !== undefined) character.defaultImage = input.defaultImage;
   if (input.level !== undefined) character.level = input.level;
-  tx.write(keys.character(character.id), character);
+  if (input.stats !== undefined) character.stats = input.stats;
+  tx.write(keys.character(character.id), withPcActorNumbers(character));
 }
 
 export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
@@ -478,6 +482,13 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
   if (p.ownerIds !== undefined) next.ownerIds = p.ownerIds;
   setOrDelete(next, "defaultImage", p.defaultImage);
   setOrDelete(next, "level", p.level);
+  if (p.stats === null) delete next.stats;
+  else if (p.stats !== undefined) {
+    next.stats = applyPcStatsPatch(character.stats ?? EMPTY_PC_STATS, p.stats);
+    // The patch's own bound holds what it sends. What it keeps from the block may still take the whole past it.
+    if (!pcStatsFits(next.stats)) throw new Refuse("quota", pcStatsTooBig(next.name));
+  }
+  // Written before the actor patch, which reads whether the character ends the op with a block.
   tx.write(keys.character(character.id), next);
   // Whoever plays the character plays its companions, on every scene (docs/design-v1-combat-flow.md 3.6.4).
   if (p.ownerIds !== undefined) syncOwners(tx, [character.id]);
@@ -487,6 +498,10 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
     tx.putActor(resolved, r.actor);
     tx.addActorEvents(resolved, r.events);
   }
+  // Initiative and Passive Perception follow the block after every edit, a level's included (docs/design-v1-pc-stats.md 3.5).
+  const after = tx.character(character.id);
+  const derived = withPcActorNumbers(after);
+  if (derived !== after) tx.write(keys.character(character.id), derived);
 }
 
 /**

@@ -10,6 +10,8 @@
  * feet. See design section 5.
  */
 
+import type { DamageType } from "./rules/damage.ts";
+
 export type MemberId = string;
 export type SceneId = string;
 export type TokenId = string;
@@ -758,6 +760,94 @@ export type Character = {
    * player sets it, and in rooms from before it.
    */
   level?: number;
+  /**
+   * The character's stat block (docs/design-v1-pc-stats.md 3.2), which the
+   * DM and its players read and edit. Absent until someone adds one, and in
+   * rooms from before it. While it is there the actor's `initBonus` and
+   * `passivePerception` follow it.
+   */
+  stats?: PcStats;
+};
+
+/**
+ * A player character's stat block (docs/design-v1-pc-stats.md 3.2): what
+ * the rules derive every save, check and attack from, and the adjustments
+ * the derivation does not know. It is not a character sheet: no spell
+ * slots, inventory or feature text.
+ */
+export type PcStats = {
+  /** Scores, 1 to 30. */
+  abilities: Record<AbilityKey, number>;
+  /** Proficient saving throws, each once. */
+  saves: AbilityKey[];
+  /** A skill left out has neither. */
+  skills: Partial<Record<SkillKey, "prof" | "expert">>;
+  /** Jack of All Trades. */
+  jack?: true;
+  /** Proficiency on initiative (Alert). */
+  alert?: true;
+  spellAbility?: AbilityKey;
+  /** A weapon attack's critical range: Improved or Superior Critical. */
+  critOn?: 19 | 18;
+  /** Evasion (Rogue 7, Monk 7): a Dexterity save for half takes none on a pass, half on a fail. */
+  evasion?: true;
+  adjust: PcAdjust;
+  defenses: Partial<Record<DamageType, "resistant" | "immune" | "vulnerable">>;
+  /** At most 40. */
+  rolls: PcRoll[];
+};
+
+/** What a number adds beyond its derivation: integers, -20 to 20, absent is 0. */
+export type PcAdjust = {
+  saves?: Partial<Record<AbilityKey, number>>;
+  skills?: Partial<Record<SkillKey, number>>;
+  allSaves?: number;
+  allChecks?: number;
+  init?: number;
+  passive?: number;
+  spellDc?: number;
+  spellAttack?: number;
+};
+
+/** Unique in its block, so a list can key by it. */
+export type PcRollId = string;
+
+/** One weapon, spell or other roll on a character's stat block. It needs an attack, a save or dice. */
+export type PcRoll = {
+  id: PcRollId;
+  /** 1 to 60 characters, one line. */
+  name: string;
+  kind: "weapon" | "spell" | "other";
+  /** `spell` reads the block's `spellAbility` at the time. */
+  ability?: AbilityKey | "spell";
+  /** An attack roll. */
+  attack?: { prof: boolean; bonus: number };
+  /** The save it forces: `dc` fixed, else derived with `bonus`, never both. A pass takes half the damage with `half`, else none. */
+  save?: { ability: AbilityKey; dc?: number; bonus?: number; onPass?: "half" };
+  /** A spell's level, 0 to 9, 0 for a cantrip. */
+  level?: number;
+  /** 0 to 4 parts, rolled together. */
+  dice: PcDice[];
+  /** Made by a D&D Beyond import. Editing the roll makes it the player's own. */
+  ddb?: true;
+};
+
+/** One part of a roll's dice. */
+export type PcDice = {
+  /** Dice and numbers, at most 40 characters: "1d8", "2d6+1". */
+  formula: string;
+  /** Adds the roll's ability modifier. */
+  mod?: true;
+  /** Neither: a plain roll, as Bardic Inspiration's d8. */
+  type?: DamageType | "healing";
+  /** A cantrip's dice, times 2 from level 5, 3 from 11, 4 from 17. */
+  grows?: true;
+  /** Damage or healing dice added per slot level above the spell's own: "1d6". */
+  upcast?: string;
+  /** A rider, rolled only when it applies, such as Sneak Attack. A damage part alone. */
+  optional?: true;
+  /** A rider's name, 30 characters. */
+  name?: string;
 };
 
 export type MonsterSize = Exclude<CreatureSize, "custom">;

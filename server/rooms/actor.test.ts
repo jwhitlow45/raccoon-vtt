@@ -2340,4 +2340,73 @@ describe("companion stat blocks at the room actor (docs/design-v1-companion-stat
       { sizeLimits: { stateLimit } },
     );
   });
+
+  /*
+   * A character's own stat block (docs/design-v1-pc-stats.md 4.1) spends the same budget: a create carrying one, and an
+   * update naming it, removing it included. An update of anything else is not counted.
+   */
+  const pcStats = (stats: object | null, characterId: string): Op => ({ t: "character.update", characterId, patch: { stats } as never });
+
+  test("every player op that writes a character's stat block spends the blocks' budget, and other character edits do not", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, characterId } = breeRoom(dm, player);
+    state.meta.settings.playersCreateCharacters = true;
+    await withSockets(state, dm, player, async (actor, { player: p }) => {
+      const mine = (id: string, stats?: object): Op => ({
+        t: "character.create",
+        character: { id, name: "Mira", size: "medium", ownerIds: [player.id], actor: { ...testActor(), dmNotes: "" }, ...(stats ? { stats } as never : {}) },
+      });
+      await actor.op(p.conn, 1, mine(uuidv7(), { abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }, saves: [], skills: {}, adjust: {}, defenses: {}, rolls: [] }));
+      for (let n = 2; n <= 8; n++) await actor.op(p.conn, n, pcStats({ saves: n % 2 ? ["dex"] : [] }, characterId));
+      await actor.op(p.conn, 9, pcStats(null, characterId));
+      await actor.op(p.conn, 10, { t: "character.update", characterId, patch: { name: "Bree Tallow" } });
+      await actor.op(p.conn, 11, mine(uuidv7()));
+      await actor.op(p.conn, 12, create(characterId));
+      await actor.op(p.conn, 13, pcStats({}, characterId));
+      for (let n = 1; n <= 12; n++) assert.equal(await answer(p.sent, n), null, `op ${n}`);
+      assert.deepEqual(await answer(p.sent, 13), { code: "quota", message: BLOCK_SAVES_TOO_FAST }, "a create with a block, seven saves, a removal and a companion block's create are ten");
+    });
+  });
+
+  test("a room at its storage quota takes a character's block removal alone, and refuses its save in the blocks' words", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, characterId } = breeRoom(dm, player);
+    state.characters[characterId] = { ...state.characters[characterId]!, stats: { abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }, saves: [], skills: {}, adjust: {}, defenses: {}, rolls: [] } };
+    await withSockets(
+      state,
+      dm,
+      player,
+      async (actor, { player: p }) => {
+        await actor.op(p.conn, 1, pcStats({ saves: ["dex"] }, characterId));
+        assert.deepEqual(await answer(p.sent, 1), { code: "quota", message: BLOCKS_AT_QUOTA });
+        await actor.op(p.conn, 2, { t: "character.update", characterId, patch: { stats: null, name: "Bree" } });
+        assert.equal((await answer(p.sent, 2))?.code, "quota", "a removal with another change is an edit");
+        await actor.op(p.conn, 3, pcStats(null, characterId));
+        assert.equal(await answer(p.sent, 3), null);
+        assert.equal(actor.committed.state.characters[characterId]!.stats, undefined);
+      },
+      { readOnly: true },
+    );
+  });
+
+  test("a character's block save the room's state limit refuses says what to do about it", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, characterId } = breeRoom(dm, player);
+    const stateLimit = serializedBytes(state) + 2_500;
+    await withSockets(
+      state,
+      dm,
+      player,
+      async (actor, { player: p }) => {
+        const rolls = Array.from({ length: 30 }, (_, i) => ({ id: `r${i}`, name: "x".repeat(60), kind: "other", dice: [{ formula: "1d6".padEnd(40, " ") }] }));
+        await actor.op(p.conn, 1, pcStats({ rolls }, characterId));
+        assert.deepEqual(await answer(p.sent, 1), { code: "quota", message: BLOCKS_ROOM_TOO_FULL });
+      },
+      {},
+      { sizeLimits: { stateLimit } },
+    );
+  });
 });

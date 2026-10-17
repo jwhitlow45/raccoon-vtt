@@ -30,6 +30,7 @@ import type {
   Token,
 } from "#shared/model.ts";
 import { normalizeCompanionState } from "#shared/reducer/companions.ts";
+import { withPcActors } from "#shared/rules/pcStats.ts";
 import { phaseMap, withPhaseLight } from "#shared/reducer/phases.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 
@@ -516,8 +517,9 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     }
     out.log.push(next);
   }
-  // A hand-made or older file is brought within the companion rules (docs/design-v1-combat-flow.md 4.7).
-  return normalizeCompanionState(out);
+  // A hand-made or older file is brought within the companion rules (docs/design-v1-combat-flow.md 4.7), and a character's
+  // initiative and Passive Perception follow its stat block (docs/design-v1-pc-stats.md 3.5).
+  return withPcActors(normalizeCompanionState(out));
 }
 
 /**

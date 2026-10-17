@@ -111,8 +111,13 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `removing an effect from ${target(op.target)}`;
     case "character.create":
       return `adding ${the("character", op.character.name)}`;
-    case "character.update":
-      return `changing ${the("character", before.characters[op.characterId]?.name)}`;
+    case "character.update": {
+      // A stat block edit names the block, which the DM's undo puts back with the two numbers it gave the actor.
+      const name = before.characters[op.characterId]?.name;
+      if (op.patch.stats === null) return `removing ${quoted(name, "a character")}'s stat block`;
+      if (op.patch.stats !== undefined) return `changing ${quoted(name, "a character")}'s stat block`;
+      return `changing ${the("character", name)}`;
+    }
     case "character.delete":
       return `deleting ${the("character", before.characters[op.characterId]?.name)}`;
     case "monster.create":

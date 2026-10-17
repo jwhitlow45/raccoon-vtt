@@ -1,6 +1,7 @@
-import { ABILITY_KEYS, type AbilityKey, type Actor, type Character, type CompanionBlock, type ConditionKey, type CustomMonster, type RollRequest, type SkillKey, type SrdId, type StatBlock, type Token } from "../model.ts";
+import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type Character, type CompanionBlock, type ConditionKey, type CustomMonster, type RollRequest, type SkillKey, type SrdId, type StatBlock, type Token } from "../model.ts";
 import type { ActorTarget } from "../protocol.ts";
 import type { DamageType } from "../rules/damage.ts";
+import { pcDerived } from "../rules/pcStats.ts";
 import { SKILLS } from "../rules/skills.ts";
 import { abilityMod } from "../statBlock.ts";
 
@@ -212,12 +213,29 @@ export function blockRollNumbers(block: Pick<StatBlock, "abilities" | "skills" |
 }
 
 /**
- * A character's numbers from its stat block (docs/design-v1-pc-stats.md 5),
- * which doc 2 adds. Until a character has one there are none, and its card
- * offers "Roll d20" with a typed bonus.
+ * A character's numbers from its stat block (docs/design-v1-pc-stats.md 5):
+ * every skill with its whole bonus, so Jack of All Trades needs no rule in
+ * bonusFor, a check only where the checks bonus moves it off the modifier,
+ * the spell numbers with a spellcasting ability, and a death save's bonus
+ * from the bonus to every save. Null without a block, where the card offers
+ * "Roll d20" with a typed bonus.
  */
-export function pcRollNumbers(_character: Character): RollNumbers | null {
-  return null;
+export function pcRollNumbers(character: Pick<Character, "stats" | "level">): RollNumbers | null {
+  if (!character.stats) return null;
+  const d = pcDerived(character.stats, character.level);
+  const abilities = {} as RollNumbers["abilities"];
+  for (const key of ABILITY_KEYS) {
+    abilities[key] = d.allChecks !== 0 ? { mod: d.mods[key], save: d.saves[key].total, check: d.checks[key].total } : { mod: d.mods[key], save: d.saves[key].total };
+  }
+  const skills: RollNumbers["skills"] = {};
+  for (const key of SKILL_KEYS) skills[key] = d.skills[key].total;
+  const out: RollNumbers = { abilities, skills };
+  if (d.spell) {
+    out.spellDc = d.spell.dc.total;
+    out.spellAttack = d.spell.attack.total;
+  }
+  if (d.allSaves !== 0) out.deathSave = d.allSaves;
+  return out;
 }
 
 /** One damage part of a named roll: canonical text "1d6+2", its type, and for an optional part its clause and own name. */

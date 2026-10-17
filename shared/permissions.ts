@@ -61,7 +61,8 @@ const GONE = refuse("gone", "that is not here");
 
 /** A token's light is its owners' to set (docs/design-v1-maps-vision.md 4.3.9). `partyVision` stays the DM's. */
 const OWNER_TOKEN_FIELDS = new Set(["image", "altImages", "rotation", "elevation", "name", "publicName", "notes", "rangeRings", "light"]);
-const OWNER_CHARACTER_FIELDS = new Set(["name", "defaultImage", "actor", "level"]);
+/** A character's stat block is its players', as its light card is (docs/design-v1-pc-stats.md 4.1). */
+const OWNER_CHARACTER_FIELDS = new Set(["name", "defaultImage", "actor", "level", "stats"]);
 const OWNER_ACTOR_FIELDS = new Set(["hp", "speeds", "ac", "initBonus", "passivePerception", "senses", "notes", "sheetUrl"]);
 
 class Check {
