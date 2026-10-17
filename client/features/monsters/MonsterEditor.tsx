@@ -1,7 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { ABILITY_KEYS, CR_VALUES, type Actor, type Character, type CompanionBlock, type CustomMonster, type MonsterSize, type StatBlock, type StatBlockEntry } from "#shared/model.ts";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
-import { stableStringify } from "#shared/project.ts";
 import { companionBlockInputSchema, MAX_LEGENDARY_USES, MAX_NAME, monsterInputSchema, type ClientOp } from "#shared/protocol.ts";
 import { tokenUses } from "#shared/srd/monsters.ts";
 import {
@@ -24,10 +23,11 @@ import { Markdown } from "../../components/Markdown.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { Help, SectionLabel } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
-import type { OpAnswer, OpRefusal } from "../../state/types.ts";
-import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import type { OpAnswer, OpRefusal, UnknownCause } from "../../state/types.ts";
+import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { ownsCharacter } from "../tokens/access.ts";
-import { blockSaveOutcome, issueText, lateBlockSaveText, monsterPatch, tidy, withCr, withImage, withScore } from "./draft.ts";
+import { answerSave, markSent, openSave, planSave, saveGone, saveHeld, settleSave, type BlockLive, type BlockSave, type SaveResult } from "./blockSave.ts";
+import { blockLines, isDirty, issueText, lateBlockSaveText, monsterPatch, tidy, withCr, withImage, withScore } from "./draft.ts";
 import { MonsterImageField } from "./MonsterImage.tsx";
 import { parseStatBlockText } from "./parse.ts";
 
@@ -69,14 +69,21 @@ export function MonsterEditor(props: {
   /** Opens with the paste box ready, for "Paste a stat block". */
   paste?: boolean;
   onClose(): void;
-  onSaved(id: string): void;
+  /** The draft is saved. A character's block comes with the block as the view holds it then. */
+  onSaved(id: string, block?: CompanionBlock): void;
 }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
-  // What an edit is diffed against: the block as it was when the editor opened, whatever arrives meanwhile.
-  const [base] = useState<StatBlock | null>(() => props.block?.existing ?? props.monster);
-  const target = props.block;
-  const [draft, setDraft] = useState<StatBlock>(props.initial);
+  const store = useRoomStore();
+  /*
+   * What the editor opened with, kept whatever the props say later: the
+   * block or monster it saves, and the lines its draft started from. A
+   * caller passing the live block, or a link that moves to another block
+   * meanwhile, never retargets the save or moves the baseline.
+   */
+  const [opened] = useState(() => ({ monster: props.monster, block: props.block, initial: props.initial }));
+  const target = opened.block;
+  const [draft, setDraft] = useState<StatBlock>(opened.initial);
   const [pasteOpen, setPasteOpen] = useState(props.paste ?? false);
   const [pasted, setPasted] = useState("");
   const [readBack, setReadBack] = useState<string[] | null>(null);
@@ -88,16 +95,22 @@ export function MonsterEditor(props: {
   // While the image picker or crop dialog is open over this one, Escape is theirs to close.
   const [imageOpen, setImageOpen] = useState(false);
   const problems = useRef<HTMLDivElement>(null);
-  const [saving, setSaving] = useState(false);
   // Past the saves budget, Save stays off until this moment (docs/design-v1-companion-stat-blocks.md 3.5).
   const [retryAt, setRetryAt] = useState<number | null>(null);
   // A new block's id, chosen once, so a save sent again after a lost answer finds the first one rather than making two.
   const [newBlockId] = useState(() => actions.newId());
   const blockId = target?.existing?.id ?? newBlockId;
-  const held = useRoomView((s) => (target ? s.view?.companionBlocks?.[blockId] : undefined));
+  // A block's save waits for its answer (blockSave.ts). The machine's state is read by answers that arrive between renders, so it lives in a ref.
+  const machine = useRef<BlockSave>(openSave(target?.existing ? blockLines(target.existing) : null));
+  const [held, setHeld] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const stored = useRoomView((s) => (target ? s.view?.companionBlocks?.[blockId] : undefined));
   const keeper = useRoomView((s) => (target ? s.view?.characters?.[target.character.id] : undefined));
+  const monsterHeld = useRoomView((s) => (opened.monster ? s.view?.monsters?.[opened.monster.id] !== undefined : true));
+  const snapshots = useRoomView((s) => s.snapshots ?? 0);
   const you = useRoomView((s) => s.you);
-  const gone = target !== undefined && !saving && (target.existing ? held === undefined : keeper === undefined || (you?.role !== "dm" && !ownsCharacter(you?.memberId, keeper)));
+  const characterYours = keeper !== undefined && (you?.role === "dm" || ownsCharacter(you?.memberId, keeper));
+  const gone = target ? saveGone(machine.current, { stored: stored ? blockLines(stored) : undefined, snapshots }, characterYours) : !monsterHeld;
   /*
    * An answer that comes after Cancel may only say what became of the save:
    * the editor that would have shown it is gone.
@@ -116,7 +129,10 @@ export function MonsterEditor(props: {
   }, [retryAt]);
 
   const tidied = useMemo(() => tidy(draft), [draft]);
-  const dirty = pasted.trim() !== "" || stableStringify(tidied) !== stableStringify(tidy(props.initial));
+  // The draft as answers read it: they arrive between renders.
+  const latest = useRef(tidied);
+  latest.current = tidied;
+  const dirty = isDirty(opened.initial, draft, pasted);
   const bytes = serializedBytes(tidied);
   const byteLimit = target ? LIMITS.companionBlockBytes : LIMITS.monsterBytes;
   const set = (patch: Partial<StatBlock>) => setDraft((d) => ({ ...d, ...patch }));
@@ -125,6 +141,39 @@ export function MonsterEditor(props: {
   useEffect(() => {
     if (errors.length > 0) problems.current?.scrollIntoView({ block: "nearest" });
   }, [errors]);
+
+  /** What the view holds of this block now, read from the store, since answers arrive between renders. */
+  const live = (): BlockLive => {
+    const s = store.getState();
+    const now = s.view?.companionBlocks?.[blockId];
+    return { stored: now ? blockLines(now) : undefined, snapshots: s.snapshots ?? 0 };
+  };
+  const commit = (next: BlockSave) => {
+    machine.current = next;
+    setHeld(saveHeld(next));
+    setChecking(next.unsure !== null);
+  };
+  const saved = () => props.onSaved(blockId, store.getState().view?.companionBlocks?.[blockId]);
+  const show = (result: SaveResult) => {
+    if (result.kind === "saved") {
+      saved();
+      return;
+    }
+    if (result.kind !== "problem") return;
+    setErrors([result.text]);
+    setRefused(true);
+    if (result.retryInMs !== undefined) setRetryAt(Date.now() + result.retryInMs);
+  };
+
+  // A snapshot settles an op whose answer was lost while the view could not yet say what it did.
+  useEffect(() => {
+    if (!target || machine.current.unsure === null) return;
+    const settled = settleSave(machine.current, latest.current, live());
+    if (!settled.result) return;
+    commit(settled.save);
+    show(settled.result);
+    // Only a new snapshot can settle it, so the snapshot count alone runs this.
+  }, [snapshots]);
 
   const close = () => {
     if (dirty && !leaving) setLeaving(true);
@@ -144,28 +193,28 @@ export function MonsterEditor(props: {
       saveBlock(target);
       return;
     }
-    const id = props.monster?.id ?? actions.newId();
+    if (gone) return;
+    const id = opened.monster?.id ?? actions.newId();
     const checked = monsterInputSchema.safeParse({ id, ...tidied });
     if (!checked.success) {
       setErrors(issueText(checked.error.issues));
       setPreview(false);
       return;
     }
-    if (props.monster && base) {
-      const patch = monsterPatch(base, tidied);
+    if (opened.monster) {
+      const patch = monsterPatch(opened.initial, tidied);
       if (Object.keys(patch).length > 0 && actions.dispatch({ t: "monster.update", monsterId: id, patch }) === null) return;
     } else if (actions.dispatch({ t: "monster.create", monster: checked.data }) === null) return;
     props.onSaved(id);
   };
 
-  /** A companion block's save, which waits for the server: a refusal keeps the draft here, where its player can act on it. */
+  /**
+   * A companion block's save, which waits for the server: a refusal keeps
+   * the draft here, where its player can act on it, and the editor closes
+   * only once the draft it holds is stored (blockSave.ts).
+   */
   const saveBlock = (block: NonNullable<typeof target>) => {
-    if (saving || gone || retryAt !== null) return;
-    // A create whose answer was lost and that went through after all is in the view now: it is saved.
-    if (!block.existing && held !== undefined) {
-      props.onSaved(blockId);
-      return;
-    }
+    if (held || gone || retryAt !== null) return;
     const checked = companionBlockInputSchema.safeParse({ id: blockId, characterId: block.character.id, ...(block.fromSrd ? { fromSrd: block.fromSrd } : {}), ...tidied });
     if (!checked.success) {
       setRefused(false);
@@ -173,39 +222,34 @@ export function MonsterEditor(props: {
       setPreview(false);
       return;
     }
-    let op: ClientOp;
-    if (block.existing && base) {
-      const patch = monsterPatch(base, tidied);
-      if (Object.keys(patch).length === 0) {
-        props.onSaved(blockId);
-        return;
-      }
-      op = { t: "companionBlock.update", blockId, patch };
-    } else op = { t: "companionBlock.create", block: checked.data };
+    const planned = planSave(machine.current, tidied, live());
+    const intent = planned.intent;
+    if (intent.kind === "busy") return;
+    if (intent.kind === "saved") {
+      commit(planned.save);
+      saved();
+      return;
+    }
+    const op: ClientOp = intent.kind === "create" ? { t: "companionBlock.create", block: checked.data } : { t: "companionBlock.update", blockId, patch: intent.patch };
     const name = tidied.name;
-    const onAnswer = (answer: OpAnswer, refusal?: OpRefusal) => {
+    const onAnswer = (answer: OpAnswer, refusal?: OpRefusal, cause?: UnknownCause) => {
       if (!open.current) {
         const text = lateBlockSaveText(name, block.character.name, answer, refusal);
         if (text) ui.notify(text, "error");
         return;
       }
-      setSaving(false);
-      const outcome = blockSaveOutcome(answer, refusal, block.character.name);
-      if (outcome.kind === "saved") {
-        props.onSaved(blockId);
-        return;
-      }
-      setErrors([outcome.text]);
-      setRefused(true);
-      if (outcome.retryInMs !== undefined) setRetryAt(Date.now() + outcome.retryInMs);
+      const answered = answerSave(machine.current, { answer, ...(refusal ? { refusal } : {}), ...(cause ? { cause } : {}) }, latest.current, live(), block.character.name);
+      commit(answered.save);
+      show(answered.result);
     };
     setErrors([]);
     setRefused(false);
     // In "view as a player" nothing is sent: the preview says so, and the draft stays.
-    if (actions.dispatch(op, { onAnswer, quiet: true }) !== null) setSaving(true);
+    if (actions.dispatch(op, { onAnswer, quiet: true }) === null) return;
+    commit(markSent(planned.save, intent));
   };
 
-  const title = target ? (target.existing ? `Edit ${target.existing.name}` : `New stat block for ${target.character.name}`) : props.monster ? `Edit ${props.monster.name}` : "New monster";
+  const title = target ? (target.existing ? `Edit ${target.existing.name}` : `New stat block for ${target.character.name}`) : opened.monster ? `Edit ${opened.monster.name}` : "New monster";
   const footer = leaving ? (
     <>
       <Button onClick={() => setLeaving(false)}>Keep editing</Button>
@@ -220,25 +264,20 @@ export function MonsterEditor(props: {
       </Button>
       <span style={{ flex: 1 }} />
       <Button onClick={close}>Cancel</Button>
-      <Button variant="primary" busy={saving} disabled={gone || retryAt !== null} onClick={save}>
-        {saving ? "Saving…" : "Save"}
+      <Button variant="primary" busy={held} disabled={gone || retryAt !== null} onClick={save}>
+        {held ? "Saving…" : "Save"}
       </Button>
     </>
   );
+  const status = leaving ? <DiscardQuestion /> : checking ? "The connection dropped. Checking whether it was saved…" : retryAt !== null ? "You can save again in a few seconds." : null;
 
   return (
-    <Dialog
-      title={title}
-      onClose={imageOpen ? () => {} : close}
-      footer={footer}
-      status={leaving ? <DiscardQuestion /> : retryAt !== null ? "You can save again in a few seconds." : null}
-      phone="fill"
-      width="lg"
-    >
-      <div style={{ display: "grid", gap: theme.space(4), fontSize: theme.font.body14 }}>
+    <Dialog title={title} onClose={imageOpen ? () => {} : close} footer={footer} status={status} phone="fill" width="lg">
+      {/* While a save waits, the draft it sent is the draft: the fields hold still until its answer, so nothing typed meanwhile is lost to a close. */}
+      <fieldset disabled={held} style={{ display: "grid", gap: theme.space(4), fontSize: theme.font.body14, border: 0, margin: 0, padding: 0, minWidth: 0 }}>
         {gone ? (
           <Notice tone="warning" role="alert">
-            This stat block was deleted or is no longer yours, so it cannot be saved.
+            {target ? "This stat block was deleted or is no longer yours, so it cannot be saved." : "This monster was deleted, so it cannot be saved."}
           </Notice>
         ) : null}
         {errors.length > 0 ? (
@@ -269,7 +308,7 @@ export function MonsterEditor(props: {
               onText={setPasted}
               onRead={read}
               readBack={readBack}
-              replacing={(target ? target.existing : props.monster) !== null}
+              replacing={(target ? target.existing : opened.monster) !== null}
               focus={props.paste ?? false}
             />
             <Group title={target ? "Picture" : "Token image"}>
@@ -295,7 +334,7 @@ export function MonsterEditor(props: {
             ))}
           </>
         )}
-      </div>
+      </fieldset>
     </Dialog>
   );
 }

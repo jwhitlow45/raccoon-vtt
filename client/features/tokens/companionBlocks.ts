@@ -1,4 +1,4 @@
-import type { Actor, CompanionBlock, CreatureSize, MonsterSize, RoomState, Token } from "#shared/model.ts";
+import type { Actor, CompanionBlock, CreatureSize, ImageRef, MonsterSize, RoomState, Token } from "#shared/model.ts";
 import type { ActorPatch, ClientOp, TokenPatch } from "#shared/protocol.ts";
 import { fitLine, type SrdMonster, type StatBlockMonster } from "#shared/srd/monsters.ts";
 import { signed } from "#shared/statBlock.ts";
@@ -46,11 +46,12 @@ export function characterBlocks(view: Pick<RoomState, "companionBlocks"> | null 
 }
 
 /** A row of the companion picker: a character's block or an SRD monster, with what it links. */
-export type PickerRow = ListedRow & { link: BlockLink; source: "block" | "srd" };
+/** `picture` is a stored block's own, carried with the row so whoever takes the row never looks the block up in a collection that may be older than it. */
+export type PickerRow = ListedRow & { link: BlockLink; source: "block" | "srd"; picture?: ImageRef };
 
 /** A character's block as a list row, tagged with whose it is. */
 export function blockRow(block: CompanionBlock, characterName: string): PickerRow {
-  return { key: `block:${block.id}`, source: "block", view: viewOf(block), tag: whose(characterName), link: { blockId: block.id } };
+  return { key: `block:${block.id}`, source: "block", view: viewOf(block), tag: whose(characterName), link: { blockId: block.id }, ...(block.defaultImage ? { picture: block.defaultImage } : {}) };
 }
 
 /** An SRD monster as a list row. */

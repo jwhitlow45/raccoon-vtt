@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
-import type { Actor, CompanionBlock, StatBlock, Token } from "#shared/model.ts";
+import type { Actor, CompanionBlock, CustomMonster, Token } from "#shared/model.ts";
 import type { ActorPatch } from "#shared/protocol.ts";
+import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { statBlockFromSrd, statBlockOf } from "#shared/statBlock.ts";
 import { Loading } from "../../components/Loading.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
-import { useRoomView } from "../../state/view.ts";
-import { viewOf } from "../monsters/draft.ts";
-import { MonsterEditor } from "../monsters/MonsterEditor.tsx";
+import { useRoomStore, useRoomView } from "../../state/view.ts";
+import { blockLines, viewOf } from "../monsters/draft.ts";
+import { useOpenEditor } from "../monsters/EditorHost.tsx";
 import { MonsterPicker } from "../monsters/MonsterPicker.tsx";
 import { StatBlockView, useSrdMonsters } from "../monsters/StatBlockView.tsx";
 import { attachPatch, DETACH_PATCH, OWNER_DETACH_PATCH, statBlockFoldable, statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
@@ -20,8 +21,6 @@ import { statBlockOpen, statBlockOpenedSlot, usePanelFolds } from "./panelFolds.
 import { statBlockRequest } from "./statBlockOpen.ts";
 import { Note, Section, SmallButton } from "./ui.tsx";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
-
-type Editing = { kind: "edit" } | { kind: "copy" } | null;
 
 /** A companion's character, as the section names it and saves blocks under it. */
 type Keeper = { id: string; name: string };
@@ -72,7 +71,8 @@ export function StatBlockSection(props: {
   const request = useScoped(statBlockRequest);
   const asked = useStore(request, (s) => (s.tokenId === token.id ? s : null));
   const open = statBlockOpen(folds, override, token.id);
-  const [editing, setEditing] = useState<Editing>(null);
+  const openEditor = useOpenEditor();
+  const store = useRoomStore();
   const [picking, setPicking] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const focusRef = useRef<HTMLButtonElement>(null);
@@ -93,6 +93,25 @@ export function StatBlockSection(props: {
 
   if (!statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion: keeper !== null })) return null;
   const link = tokenStatBlock(actor, monsters, blocks);
+  /*
+   * Each editor opens over the room with the block or monster as it is at
+   * this moment, and keeps it: the link changing or this section going
+   * away, with the block deleted, the companion's character deleted or no
+   * longer the viewer's, never takes the draft (monsters/openEditors.ts).
+   */
+  const editRoom = (monster: CustomMonster) => openEditor({ monster, initial: statBlockOf(monster) });
+  const editBlock = (block: CompanionBlock, of: Keeper) => openEditor({ monster: null, initial: blockLines(block), block: { character: of, existing: block } });
+  const copySrd = (monster: SrdMonster) => {
+    const attach = (id: string) => props.patchActor(attachPatch(keeper ? { blockId: id } : { monsterId: id }));
+    // A companion's copy is its character's block, which never takes the DM's image and keeps the SRD's credit (docs/design-v1-companion-stat-blocks.md 6.1).
+    if (keeper) {
+      openEditor({ monster: null, initial: statBlockFromSrd(monster), block: { character: keeper, existing: null, fromSrd: monster.srdId }, onSaved: attach });
+      return;
+    }
+    // A room monster's copy starts with the image the DM chose for that SRD monster, as the Monsters panel's copy starts.
+    const image = store.getState().view?.srdImages?.[monster.srdId]?.image;
+    openEditor({ monster: null, initial: { ...statBlockFromSrd(monster), ...(image ? { defaultImage: image } : {}) }, onSaved: attach });
+  };
   // A companion's players detach what they may link. The DM's Detach clears a room monster's link too.
   const detach =
     (access.dm || keeper !== null) && link.kind !== "none" ? <SmallButton onClick={() => props.patchActor(access.dm ? DETACH_PATCH : OWNER_DETACH_PATCH)}>Detach</SmallButton> : null;
@@ -115,7 +134,7 @@ export function StatBlockSection(props: {
               ) : null}
               {access.dm ? (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-                  <SmallButton onClick={() => setEditing({ kind: "edit" })}>Edit</SmallButton>
+                  <SmallButton onClick={() => editRoom(link.monster)}>Edit</SmallButton>
                   {change}
                   {detach}
                 </div>
@@ -131,13 +150,13 @@ export function StatBlockSection(props: {
                   {detach}
                 </>
               }
-              onCopy={() => setEditing({ kind: "copy" })}
+              onCopy={copySrd}
             />
           ) : link.kind === "block" ? (
             <>
               <StatBlockView view={viewOf(link.block)} source={link.block.fromSrd ? "srd" : "room"} credit={link.block.fromSrd !== undefined} />
               <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-                <SmallButton onClick={() => setEditing({ kind: "edit" })}>Edit</SmallButton>
+                {keeper ? <SmallButton onClick={() => editBlock(link.block, keeper)}>Edit</SmallButton> : null}
                 {change}
                 {detach}
               </div>
@@ -164,25 +183,6 @@ export function StatBlockSection(props: {
           ) : null}
         </Section>
       )}
-      {editing?.kind === "edit" && link.kind === "room" ? (
-        <MonsterEditor monster={link.monster} initial={statBlockOf(link.monster)} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />
-      ) : null}
-      {editing?.kind === "edit" && link.kind === "block" && keeper ? (
-        <MonsterEditor monster={null} initial={blockLines(link.block)} block={{ character: keeper, existing: link.block }} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />
-      ) : null}
-      {editing?.kind === "copy" && link.kind === "srd" ? (
-        <CopyEditor
-          srdId={link.srdId}
-          keeper={keeper}
-          onClose={() => setEditing(null)}
-          onSaved={(id) => {
-            setEditing(null);
-            // The copy is the block meant for this creature now, so the token follows it. A companion's copy was taken before
-            // this runs (the editor's answered save), so its link never names a block that was not saved.
-            props.patchActor(attachPatch(keeper ? { blockId: id } : { monsterId: id }));
-          }}
-        />
-      ) : null}
       {picking && keeper ? (
         <AttachBlockDialog
           token={token}
@@ -210,14 +210,8 @@ export function StatBlockSection(props: {
   );
 }
 
-/** A companion's stored block as the editor's draft holds it. */
-function blockLines(block: CompanionBlock): StatBlock {
-  const { id: _id, rev: _rev, characterId: _of, fromSrd: _from, ...lines } = block;
-  return lines;
-}
-
 /** An SRD monster's block. The SRD chunk loads only here, once the section is open on this device. */
-function SrdBlock(props: { srdId: string; copy: string | null; buttons: ReactNode; onCopy(): void }) {
+function SrdBlock(props: { srdId: string; copy: string | null; buttons: ReactNode; onCopy(monster: SrdMonster): void }) {
   const { monsters, failed } = useSrdMonsters();
   const monster = monsters?.find((m) => m.srdId === props.srdId);
   if (failed) return <SrdLoadFailed what="The stat block" inline />;
@@ -228,7 +222,7 @@ function SrdBlock(props: { srdId: string; copy: string | null; buttons: ReactNod
       {props.copy !== null ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
           {monster ? (
-            <SmallButton wrap onClick={props.onCopy}>
+            <SmallButton wrap onClick={() => props.onCopy(monster)}>
               {props.copy}
             </SmallButton>
           ) : null}
@@ -236,37 +230,5 @@ function SrdBlock(props: { srdId: string; copy: string | null; buttons: ReactNod
         </div>
       ) : null}
     </>
-  );
-}
-
-/**
- * The editor started from an SRD block. A room monster's copy starts with
- * the image the DM chose for that SRD monster, as the Monsters panel's copy
- * starts. A companion's copy is its character's block, which never takes
- * the DM's image and keeps the SRD's credit (docs/design-v1-companion-stat-blocks.md 6.1).
- */
-function CopyEditor(props: { srdId: string; keeper: Keeper | null; onClose(): void; onSaved(id: string): void }) {
-  const { monsters } = useSrdMonsters();
-  const image = useRoomView((s) => s.view?.srdImages?.[props.srdId]?.image);
-  const monster = monsters?.find((m) => m.srdId === props.srdId);
-  if (!monster) return null;
-  if (props.keeper) {
-    return (
-      <MonsterEditor
-        monster={null}
-        initial={statBlockFromSrd(monster)}
-        block={{ character: props.keeper, existing: null, fromSrd: props.srdId }}
-        onClose={props.onClose}
-        onSaved={props.onSaved}
-      />
-    );
-  }
-  return (
-    <MonsterEditor
-      monster={null}
-      initial={{ ...statBlockFromSrd(monster), ...(image ? { defaultImage: image } : {}) }}
-      onClose={props.onClose}
-      onSaved={props.onSaved}
-    />
   );
 }

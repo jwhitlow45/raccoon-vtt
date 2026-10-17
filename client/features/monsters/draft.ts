@@ -1,4 +1,4 @@
-import type { ImageRef, StatBlock, StatBlockEntry, AbilityKey } from "#shared/model.ts";
+import type { AbilityKey, CompanionBlock, ImageRef, StatBlock, StatBlockEntry } from "#shared/model.ts";
 import { BLOCK_SAVES_TOO_FAST, LIMITS } from "#shared/limits.ts";
 import type { MonsterPatch } from "#shared/protocol.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
@@ -62,6 +62,22 @@ export function monsterPatch(before: StatBlock, after: StatBlock): MonsterPatch 
   if (before.xpInLair !== undefined && after.xpInLair === undefined) patch.xpInLair = null;
   if (before.defaultImage !== undefined && after.defaultImage === undefined) patch.defaultImage = null;
   return patch as MonsterPatch;
+}
+
+/**
+ * Whether the editor holds anything to lose: text in the paste box, or a
+ * draft that differs from the block as the editor opened it. Never against
+ * the block as it is now, so a co-owner's edit arriving meanwhile leaves
+ * an untouched draft clean (docs/design-v1-companion-stat-blocks.md 6.2).
+ */
+export function isDirty(opened: StatBlock, draft: StatBlock, pasted: string): boolean {
+  return pasted.trim() !== "" || stableStringify(tidy(draft)) !== stableStringify(tidy(opened));
+}
+
+/** A companion's stored block as the editor's draft holds it: its lines, without what only the room keeps about it. */
+export function blockLines(block: CompanionBlock): StatBlock {
+  const { id: _id, rev: _rev, characterId: _of, fromSrd: _from, ...lines } = block;
+  return lines;
 }
 
 /** The draft with a new default image, or without one for null. */

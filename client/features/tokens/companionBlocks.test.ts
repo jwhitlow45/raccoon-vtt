@@ -13,6 +13,7 @@ import {
   afterLinkAnswer,
   attachActorPatch,
   blockNumbers,
+  blockRow,
   fromTheBlock,
   lateAttachText,
   pickerLists,
@@ -381,6 +382,12 @@ describe("the companion picker's lists (docs/design-v1-companion-stat-blocks.md 
     assert.deepEqual(cr.own, [], "a CR 1/4 block and a CR 0 one are out of range");
     assert.deepEqual(cr.sameName, []);
     assert.ok(cr.srd.length > 0 && cr.srd.length < SRD.length);
+  });
+
+  test("a block's row carries its own picture, so a picker that takes it never looks it up in an older collection", () => {
+    const pictured = companionBlock("lamp", "bree", { defaultImage: { icon: "lorc/wolf-head", color: "#336699" } });
+    assert.deepEqual(blockRow(pictured, "Bree").picture, { icon: "lorc/wolf-head", color: "#336699" });
+    assert.equal("picture" in blockRow(companionBlock("plain", "bree"), "Bree"), false);
   });
 
   test("before the SRD loads, the character's blocks list at once", () => {

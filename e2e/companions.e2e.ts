@@ -182,10 +182,77 @@ async function inReach(page: Page, button: Locator, label: string): Promise<void
 }
 
 /** Opens Bree's card in the Characters tab and a companion's bar from its row. */
-async function showCompanion(page: Page, name: string): Promise<void> {
-  await openSideTab(page, "Characters");
+async function showCompanion(page: Page, name: string, characterId: string = run.bree.characterId): Promise<void> {
+  await openCard(page, characterId);
   await page.getByRole("button", { name: new RegExp(`^${name}\\. Show it on the map`) }).click();
   await bar(page, name).waitFor();
+}
+
+/** A character's card in the Characters panel, open. One card is open at a time, so this opens it when another is. */
+async function openCard(page: Page, characterId: string): Promise<void> {
+  await openPanel(page, "Characters");
+  const blocks = page.locator(`[data-opener="blocks:${characterId}"]`);
+  if (!(await blocks.isVisible())) await page.locator(`[data-opener="character:${characterId}"]`).click();
+  await blocks.waitFor();
+}
+
+/** A stat block's lines, for blocks the DM makes by op. */
+const LINES = {
+  size: "small",
+  type: "Fey",
+  alignment: "Unaligned",
+  ac: 12,
+  initiative: 2,
+  hp: { average: 9, formula: "2d6 + 2" },
+  speed: "10 ft., Fly 40 ft. (hover)",
+  abilities: { str: { score: 6, save: -2 }, dex: { score: 15, save: 2 }, con: { score: 12, save: 1 }, int: { score: 4, save: -3 }, wis: { score: 13, save: 1 }, cha: { score: 8, save: -1 } },
+  skills: "",
+  vulnerabilities: "",
+  resistances: "",
+  immunities: "",
+  gear: "",
+  senses: "",
+  passivePerception: 11,
+  languages: "",
+  cr: "1/4",
+  xp: 50,
+  traits: [],
+  actions: [],
+  bonusActions: [],
+  reactions: [],
+  legendaryActions: [],
+};
+
+/**
+ * A character of Ana's with a companion on the players' scene and stat
+ * blocks of its own, made by the DM's ops. Returns their ids.
+ */
+async function charactersCompanion(name: string, companion: string, at: { x: number; y: number }, blocks: string[]): Promise<{ characterId: string; tokenId: string; blockIds: string[] }> {
+  const characterId = randomUUID();
+  const tokenId = randomUUID();
+  const blockIds = blocks.map(() => randomUUID());
+  await ops.send({ t: "character.create", character: { id: characterId, name, size: "medium", ownerIds: [run.anaId], actor: actor() } });
+  for (const [i, blockName] of blocks.entries()) await ops.send({ t: "companionBlock.create", block: { ...LINES, id: blockIds[i]!, characterId, name: blockName } });
+  await ops.send({
+    t: "token.create",
+    token: { id: tokenId, sceneId: run.sceneId, kind: "npc", name: companion, size: "small", x: at.x, y: at.y, disposition: "ally", companion: { of: characterId, turn: "shared" }, actor: { inline: actor(blockIds[0] ? { blockId: blockIds[0] } : {}) } },
+  });
+  await waitFor(`${companion} for Ana`, () => (anaSocket.state?.tokens[tokenId] && blockIds.every((id) => anaSocket.state?.companionBlocks[id]) ? true : null));
+  return { characterId, tokenId, blockIds };
+}
+
+/** The open editor's notice that its block cannot be saved, with its draft kept and Save off. */
+async function cannotSave(editor: Locator, field: Locator, value: string, label: string): Promise<void> {
+  await editor.getByText("This stat block was deleted or is no longer yours, so it cannot be saved.", { exact: true }).waitFor();
+  assert.ok(await editor.getByRole("button", { name: "Save", exact: true }).isDisabled(), `${label}: Save is off`);
+  assert.equal(await field.inputValue(), value, `${label}: the draft stays`);
+}
+
+/** Cancel, then Discard: the only way a draft goes without being saved. */
+async function discard(editor: Locator): Promise<void> {
+  await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+  await editor.getByRole("button", { name: "Discard" }).click();
+  await editor.waitFor({ state: "detached" });
 }
 
 describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
@@ -588,6 +655,208 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     await tokenPanel(ana).getByText("This companion’s stat block was deleted.").waitFor();
     assert.equal(inline("Hoot")!.ac, ac);
     await shots.take(ana, "companions-deleted-block");
+  });
+
+  test("8b. a block saved from either picker is the pick: New and Paste, in Attach and in Choose", async () => {
+    const save = async (editor: Locator) => {
+      await editor.getByRole("button", { name: "Save", exact: true }).click();
+      await editor.waitFor({ state: "detached" });
+    };
+    const paste = async (editor: Locator, name: string) => {
+      await editor.getByRole("textbox").first().fill(MOTH.replace("Moth Spirit", name));
+      await editor.getByRole("button", { name: "Read the stat block" }).click();
+      await valueIs(editor.getByRole("textbox", { name: "Name", exact: true }), name);
+    };
+    // Attach, from Hoot's panel: New, then Paste. Each saved block goes straight to its numbers step.
+    await showCompanion(ana, "Hoot");
+    await bar(ana, "Hoot").getByRole("button", { name: "Details", exact: true }).click();
+    const panel = tokenPanel(ana);
+    await panel.getByRole("button", { name: "Attach a stat block" }).click();
+    await ana.getByRole("dialog", { name: "Attach a stat block" }).getByRole("button", { name: "New stat block" }).click();
+    let editor = ana.getByRole("dialog", { name: "New stat block for Bree" });
+    await editor.getByRole("textbox", { name: "Name", exact: true }).fill("Gale Spirit");
+    await save(editor);
+    await ana.getByRole("dialog", { name: "Attach Gale Spirit" }).waitFor();
+    await shots.take(ana, "companions-new-block-picked");
+    await ana.keyboard.press("Escape");
+    await panel.getByRole("button", { name: "Attach a stat block" }).click();
+    await ana.getByRole("dialog", { name: "Attach a stat block" }).getByRole("button", { name: "Paste a stat block" }).click();
+    editor = ana.getByRole("dialog", { name: "New stat block for Bree" });
+    await paste(editor, "Dusk Moth");
+    await save(editor);
+    await ana.getByRole("dialog", { name: "Attach Dusk Moth" }).waitFor();
+    await ana.keyboard.press("Escape");
+    assert.equal(inline("Hoot")!.blockId !== undefined && dmSocket.state!.companionBlocks[inline("Hoot")!.blockId!] !== undefined, false, "nothing attached");
+
+    // Choose, from the add form: New fills the form, then Change and Paste fills the block field.
+    await openCard(ana, run.bree.characterId);
+    await ana.locator(`[data-opener="companion:${run.bree.characterId}"]`).click();
+    await ana.getByRole("button", { name: "Choose a stat block" }).click();
+    let choose = ana.getByRole("dialog", { name: "Choose a stat block" });
+    await choose.getByRole("button", { name: "New stat block" }).click();
+    editor = ana.getByRole("dialog", { name: "New stat block for Bree" });
+    await editor.getByRole("textbox", { name: "Name", exact: true }).fill("Cinder Imp");
+    await save(editor);
+    await choose.waitFor({ state: "detached" });
+    await valueIs(ana.getByRole("textbox", { name: "Name", exact: true }), "Cinder Imp");
+    await ana.getByText("Cinder Imp", { exact: true }).first().waitFor();
+    await ana.getByRole("button", { name: "Change", exact: true }).click();
+    choose = ana.getByRole("dialog", { name: "Choose a stat block" });
+    await choose.getByRole("button", { name: "Paste a stat block" }).click();
+    editor = ana.getByRole("dialog", { name: "New stat block for Bree" });
+    await paste(editor, "Ash Wisp");
+    await save(editor);
+    await choose.waitFor({ state: "detached" });
+    await ana.locator("strong").getByText("Ash Wisp", { exact: true }).waitFor();
+    await shots.take(ana, "companions-pasted-block-chosen");
+    await ana.getByRole("button", { name: "Cancel" }).first().click();
+    for (const name of ["Gale Spirit", "Dusk Moth", "Cinder Imp", "Ash Wisp"]) assert.ok(Object.values(dmSocket.state!.companionBlocks).some((b) => b?.name === name && b.characterId === run.bree.characterId), `${name} saved`);
+  });
+
+  test("8c. while a block's save or an attach waits, what was sent holds still: the fields and the numbers step's choices", async () => {
+    const cass = await charactersCompanion("Cass", "Pip", { x: 14, y: 11 }, ["Lamp Moth"]);
+    await showCompanion(ana, "Pip", cass.characterId);
+    await bar(ana, "Pip").getByRole("button", { name: "Stat block", exact: true }).click();
+    const section = ana.locator("[data-stat-block]");
+    await section.getByRole("button", { name: "Edit", exact: true }).click();
+    const editor = ana.getByRole("dialog", { name: "Edit Lamp Moth" });
+    await editor.getByLabel("AC", { exact: true }).fill("15");
+    consoles.ana.expectSocketFailures = true;
+    await anaContext.setOffline(true);
+    await editor.getByRole("button", { name: "Save", exact: true }).click();
+    await editor.getByRole("button", { name: "Saving…", exact: true }).waitFor();
+    assert.ok(await editor.getByRole("textbox", { name: "Name", exact: true }).isDisabled(), "the fields hold while the save waits");
+    assert.ok(await editor.getByLabel("AC", { exact: true }).isDisabled());
+    await shots.take(ana, "companions-editor-saving");
+    await anaContext.setOffline(false);
+    await editor.waitFor({ state: "detached", timeout: 30_000 });
+    await waitFor("AC 15 stored", () => (dmSocket.state?.companionBlocks[cass.blockIds[0]!]?.ac === 15 ? true : null));
+
+    // The attach: Use and Keep and Max HP hold while the link waits, and the Size line after.
+    await section.getByRole("button", { name: "Change", exact: true }).click();
+    const dialog = ana.getByRole("dialog", { name: "Attach a stat block" });
+    await dialog.getByRole("searchbox", { name: "Search monsters" }).fill("wolf");
+    await dialog.getByRole("button", { name: /^Wolf\b/ }).first().click();
+    const step = ana.getByRole("dialog", { name: "Attach Wolf" });
+    await anaContext.setOffline(true);
+    await step.getByRole("button", { name: "Attach", exact: true }).click();
+    await step.getByRole("button", { name: "Attaching…", exact: true }).waitFor();
+    assert.ok(await step.getByRole("radio", { name: "Keep Pip’s numbers" }).isDisabled(), "Use and Keep hold while the link waits");
+    assert.ok(await step.getByRole("radio", { name: /^Average/ }).isDisabled());
+    await shots.take(ana, "companions-attach-waiting");
+    await anaContext.setOffline(false);
+    await step.waitFor({ state: "detached", timeout: 30_000 });
+    await waitFor("Pip a wolf", () => (anaSocket.state?.tokens[cass.tokenId]?.actor && "inline" in anaSocket.state.tokens[cass.tokenId]!.actor && (anaSocket.state.tokens[cass.tokenId]!.actor as { inline: { srdId?: string } }).inline.srdId === "wolf" ? true : null));
+    consoles.ana.expectSocketFailures = false;
+    await ops.send({ t: "character.delete", characterId: cass.characterId });
+    await waitFor("Cass gone for Ana", () => (anaSocket.state?.characters[cass.characterId] ? null : true));
+  });
+
+  test("8d. an editor opened from a companion's panel keeps its block and its draft: the link moved to another block, the block deleted, the character no longer Ana's, the character deleted", async () => {
+    const cass = await charactersCompanion("Cass", "Pip", { x: 14, y: 11 }, ["Lamp Moth", "Reed Moth"]);
+    const [lamp, reed] = cass.blockIds as [string, string];
+    const editFromPanel = async (companion: string, characterId: string, block: string) => {
+      await showCompanion(ana, companion, characterId);
+      await bar(ana, companion).getByRole("button", { name: "Stat block", exact: true }).click();
+      await ana.locator("[data-stat-block]").getByRole("button", { name: "Edit", exact: true }).click();
+      return ana.getByRole("dialog", { name: `Edit ${block}` });
+    };
+
+    // The link moves to Reed Moth while Lamp Moth's editor is open: it still edits Lamp Moth, and Save changes Lamp Moth alone.
+    let editor = await editFromPanel("Pip", cass.characterId, "Lamp Moth");
+    await editor.getByLabel("AC", { exact: true }).fill("17");
+    await ops.send({ t: "token.update", tokenId: cass.tokenId, patch: { actor: { blockId: reed } } });
+    await waitFor("Pip on Reed Moth for Ana", () => ((anaSocket.state?.tokens[cass.tokenId]?.actor as { inline?: { blockId?: string } })?.inline?.blockId === reed ? true : null));
+    await tokenPanel(ana).getByText("Reed Moth", { exact: false }).first().waitFor();
+    assert.equal(await editor.getByLabel("AC", { exact: true }).inputValue(), "17", "the draft stays");
+    await editor.getByRole("button", { name: "Save", exact: true }).click();
+    await editor.waitFor({ state: "detached" });
+    await waitFor("Lamp Moth AC 17", () => (dmSocket.state?.companionBlocks[lamp]?.ac === 17 ? true : null));
+    assert.equal(dmSocket.state!.companionBlocks[reed]!.ac, 12, "the block the link moved to is untouched");
+
+    // Reed Moth deleted while its editor is open.
+    editor = await editFromPanel("Pip", cass.characterId, "Reed Moth");
+    let name = editor.getByRole("textbox", { name: "Name", exact: true });
+    await name.fill("Reed Moth, mended");
+    await ops.send({ t: "companionBlock.delete", blockId: reed });
+    await cannotSave(editor, name, "Reed Moth, mended", "deleted from the panel");
+    await shots.take(ana, "companions-editor-block-deleted");
+    await discard(editor);
+
+    // Cass no longer Ana's: the section goes, the editor stays.
+    await ops.send({ t: "token.update", tokenId: cass.tokenId, patch: { actor: { blockId: lamp } } });
+    editor = await editFromPanel("Pip", cass.characterId, "Lamp Moth");
+    name = editor.getByRole("textbox", { name: "Name", exact: true });
+    await name.fill("Lamp Moth, mine");
+    await ops.send({ t: "character.update", characterId: cass.characterId, patch: { ownerIds: [] } });
+    await cannotSave(editor, name, "Lamp Moth, mine", "no longer Ana's, from the panel");
+    await discard(editor);
+    await ops.send({ t: "character.update", characterId: cass.characterId, patch: { ownerIds: [run.anaId] } });
+    await waitFor("Lamp Moth back for Ana", () => (anaSocket.state?.companionBlocks[lamp] ? true : null));
+
+    // Cass deleted, and Pip with her: the panel goes, the editor stays.
+    editor = await editFromPanel("Pip", cass.characterId, "Lamp Moth");
+    name = editor.getByRole("textbox", { name: "Name", exact: true });
+    await name.fill("Lamp Moth, last");
+    await ops.send({ t: "character.delete", characterId: cass.characterId });
+    await waitFor("Pip gone for Ana", () => (anaSocket.state?.tokens[cass.tokenId] ? null : true));
+    await cannotSave(editor, name, "Lamp Moth, last", "character deleted, from the panel");
+    await shots.take(ana, "companions-editor-character-deleted");
+    await discard(editor);
+  });
+
+  test("8e. an editor opened from a character's stat blocks page keeps its draft: a co-owner's edit then Cancel, the block deleted, the character no longer Ana's, the character deleted", async () => {
+    const dov = await charactersCompanion("Dov", "Nib", { x: 16, y: 11 }, ["Ash Moth", "Fern Moth", "Dew Moth"]);
+    const [ash, fern, dew] = dov.blockIds as [string, string, string];
+    const editFromPage = async (block: string) => {
+      const heading = ana.getByRole("heading", { name: "Dov’s stat blocks" });
+      if (!(await heading.isVisible())) {
+        await openCard(ana, dov.characterId);
+        await ana.locator(`[data-opener="blocks:${dov.characterId}"]`).click();
+        await heading.waitFor();
+      }
+      // A row stays open as it was left, so a second edit of the same block finds it open.
+      const row = ana.getByRole("button", { name: new RegExp(`^${block}`) });
+      if ((await row.getAttribute("aria-expanded")) !== "true") await row.click();
+      await ana.getByRole("button", { name: "Edit", exact: true }).click();
+      return ana.getByRole("dialog", { name: `Edit ${block}` });
+    };
+
+    // A co-owner's edit arriving while the draft is untouched leaves it untouched: Cancel closes at once.
+    let editor = await editFromPage("Ash Moth");
+    await ops.send({ t: "companionBlock.update", blockId: ash, patch: { ac: 14 } });
+    await waitFor("AC 14 for Ana", () => (anaSocket.state?.companionBlocks[ash]?.ac === 14 ? true : null));
+    await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+    await editor.waitFor({ state: "detached" });
+
+    // Deleted while open.
+    editor = await editFromPage("Fern Moth");
+    let name = editor.getByRole("textbox", { name: "Name", exact: true });
+    await name.fill("Fern Moth, mended");
+    await ops.send({ t: "companionBlock.delete", blockId: fern });
+    await cannotSave(editor, name, "Fern Moth, mended", "deleted from the page");
+    await discard(editor);
+
+    // No longer Ana's.
+    editor = await editFromPage("Dew Moth");
+    name = editor.getByRole("textbox", { name: "Name", exact: true });
+    await name.fill("Dew Moth, mine");
+    await ops.send({ t: "character.update", characterId: dov.characterId, patch: { ownerIds: [] } });
+    await cannotSave(editor, name, "Dew Moth, mine", "no longer Ana's, from the page");
+    await discard(editor);
+    await ops.send({ t: "character.update", characterId: dov.characterId, patch: { ownerIds: [run.anaId] } });
+    await waitFor("Dew Moth back for Ana", () => (anaSocket.state?.companionBlocks[dew] ? true : null));
+
+    // Deleted with the character: the page goes, the editor stays.
+    editor = await editFromPage("Dew Moth");
+    name = editor.getByRole("textbox", { name: "Name", exact: true });
+    await name.fill("Dew Moth, last");
+    await ops.send({ t: "character.delete", characterId: dov.characterId });
+    await waitFor("Dov gone for Ana", () => (anaSocket.state?.characters[dov.characterId] ? null : true));
+    await cannotSave(editor, name, "Dew Moth, last", "character deleted, from the page");
+    await discard(editor);
+    // Bree's card open again, as the steps after expect.
+    await openCard(ana, run.bree.characterId);
   });
 
   test("9. viewing as Ana, Save in the editor flashes refused and the editor stays open", async () => {

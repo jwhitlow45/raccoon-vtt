@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Actor, Character, CompanionBlock, Token } from "#shared/model.ts";
-import { emptyStatBlock, statBlockOf } from "#shared/statBlock.ts";
+import { emptyStatBlock } from "#shared/statBlock.ts";
 import { Button } from "../../components/Button.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
 import { Empty } from "../../components/Empty.tsx";
@@ -12,11 +12,11 @@ import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { useSend } from "../encounter/hooks.ts";
-import { MonsterEditor } from "../monsters/MonsterEditor.tsx";
+import { useOpenEditor } from "../monsters/EditorHost.tsx";
 import { SIZE_WORD } from "../monsters/MonsterList.tsx";
 import { CompanionPickerBody } from "../monsters/MonsterPicker.tsx";
 import { StatBlockView } from "../monsters/StatBlockView.tsx";
-import { viewOf } from "../monsters/draft.ts";
+import { blockLines, viewOf } from "../monsters/draft.ts";
 import type { TokenAccess } from "./access.ts";
 import {
   attachActorPatch,
@@ -42,21 +42,25 @@ import { ConfirmButton, NumberField } from "./ui.tsx";
  * save sends nothing more and says why in the editor (6.1).
  */
 
-/** "Paste a stat block" and "New stat block" open the editor for the character. */
-type Making = "paste" | "new" | null;
-
-/** The editor for a new block of a character, empty or with the paste box ready. */
-function NewBlockEditor(props: { character: Pick<Character, "id" | "name">; paste: boolean; onClose(): void; onSaved(id: string): void }) {
-  return <MonsterEditor monster={null} initial={emptyStatBlock()} paste={props.paste} block={{ character: props.character, existing: null }} onClose={props.onClose} onSaved={props.onSaved} />;
-}
-
-/** The row of a block just saved, read from the view, which holds it once its save is taken. */
-function useRowOf(character: Pick<Character, "id" | "name">): (id: string) => PickerRow | null {
-  const blocks = useRoomView((s) => s.view?.companionBlocks);
-  return (id) => {
-    const block = blocks?.[id];
-    return block && block.characterId === character.id ? blockRow(block, character.name) : null;
-  };
+/**
+ * "Paste a stat block" or "New stat block": the editor for a new block of
+ * the character, held over the room (monsters/openEditors.ts), so it stays
+ * whatever happens to the dialog or page that opened it. Once the block is
+ * saved, `use` gets its row, built from the block the save's answer found
+ * in the view.
+ */
+function useNewBlock(character: Pick<Character, "id" | "name">, use: (row: PickerRow) => void): (paste: boolean) => void {
+  const open = useOpenEditor();
+  return (paste) =>
+    open({
+      monster: null,
+      initial: emptyStatBlock(),
+      paste,
+      block: { character, existing: null },
+      onSaved: (_id, block) => {
+        if (block && block.characterId === character.id) use(blockRow(block, character.name));
+      },
+    });
 }
 
 /**
@@ -88,11 +92,9 @@ export function AttachBlockDialog(props: {
   const role = props.access.dm ? "dm" : "player";
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<PickerRow | null>(null);
-  const [making, setMaking] = useState<Making>(null);
   const [use, setUse] = useState(true);
   const [hp, setHp] = useState<HpChoice>({ kind: "average" });
   const [phase, setPhase] = useState<AttachPhase>({ phase: "ready" });
-  const rowOf = useRowOf(character);
   const open = useRef(true);
   useEffect(() => {
     open.current = true;
@@ -113,6 +115,7 @@ export function AttachBlockDialog(props: {
     setHp(row.view.hp.average >= 1 ? { kind: "average" } : { kind: "keep" });
     setPhase({ phase: "ready" });
   };
+  const newBlock = useNewBlock(character, choose);
   const numbers = picked ? blockNumbers(picked.view, token, props.actor, hp) : null;
   const linking = phase.phase === "linking" || phase.phase === "resizing";
   const missingHp = use && hp.kind === "typed" && numbers?.max === null;
@@ -178,7 +181,18 @@ export function AttachBlockDialog(props: {
         }
       >
         {picked && numbers ? (
-          <NumbersStep token={token} actor={props.actor} block={picked.view.name} numbers={numbers} sizeLine={sizeLine} use={use} onUse={setUse} hp={hp} onHp={setHp} />
+          <NumbersStep
+            token={token}
+            actor={props.actor}
+            block={picked.view.name}
+            numbers={numbers}
+            sizeLine={sizeLine}
+            frozen={linking || phase.phase === "sizeStopped"}
+            use={use}
+            onUse={setUse}
+            hp={hp}
+            onHp={setHp}
+          />
         ) : (
           <CompanionPickerBody
             character={character}
@@ -187,23 +201,11 @@ export function AttachBlockDialog(props: {
             query={query}
             onQuery={setQuery}
             onPick={choose}
-            onPaste={() => setMaking("paste")}
-            onNew={() => setMaking("new")}
+            onPaste={() => newBlock(true)}
+            onNew={() => newBlock(false)}
           />
         )}
       </Dialog>
-      {making ? (
-        <NewBlockEditor
-          character={character}
-          paste={making === "paste"}
-          onClose={() => setMaking(null)}
-          onSaved={(id) => {
-            setMaking(null);
-            const row = rowOf(id);
-            if (row) choose(row);
-          }}
-        />
-      ) : null}
     </>
   );
 }
@@ -221,6 +223,12 @@ function NumbersStep(props: {
   numbers: ReturnType<typeof blockNumbers>;
   /** The Size line: the size it sets and what the resize rule makes of it, or how the resize stands once sent. */
   sizeLine: string | null;
+  /**
+   * Sent, or done but for the size: the choices hold still. Attach sends
+   * what they said when it was pressed, so a change made while its answer
+   * waits would show one thing and do another.
+   */
+  frozen: boolean;
   use: boolean;
   onUse(use: boolean): void;
   hp: HpChoice;
@@ -234,11 +242,12 @@ function NumbersStep(props: {
     ...(current !== undefined ? [{ value: "keep" as const, label: `Keep ${current}` }] : []),
   ];
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(3), fontSize: theme.font.body14 }}>
+    <fieldset disabled={props.frozen} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(3), fontSize: theme.font.body14, border: 0, margin: 0, padding: 0, minWidth: 0 }}>
       <Segmented<"use" | "keep">
         label="Numbers"
         value={props.use ? "use" : "keep"}
         wrap
+        disabled={props.frozen}
         options={[
           { value: "use", label: `Use ${whose(props.block)} numbers` },
           { value: "keep", label: `Keep ${whose(token.name)} numbers` },
@@ -265,10 +274,11 @@ function NumbersStep(props: {
             label="Max HP"
             value={props.hp.kind}
             options={hpOptions}
+            disabled={props.frozen}
             onChange={(kind) => props.onHp(kind === "typed" ? { kind, value: props.hp.kind === "typed" ? props.hp.value : null } : { kind })}
           />
           {props.hp.kind === "typed" ? (
-            <NumberField label="Max HP" value={props.hp.value ?? undefined} min={1} max={100_000} nullable onCommit={(value) => props.onHp({ kind: "typed", value })} />
+            <NumberField label="Max HP" value={props.hp.value ?? undefined} min={1} max={100_000} nullable disabled={props.frozen} onCommit={(value) => props.onHp({ kind: "typed", value })} />
           ) : null}
           {numbers.hpLine ? <Help style={{ overflowWrap: "anywhere" }}>{numbers.hpLine}</Help> : <Help>Type the maximum this casting gives it.</Help>}
           <Help>Temporary HP, conditions and effects stay.</Help>
@@ -276,7 +286,7 @@ function NumbersStep(props: {
       ) : (
         <Help style={{ overflowWrap: "anywhere" }}>{`Only the stat block is attached. ${token.name} keeps its AC, HP, speeds, senses and initiative.`}</Help>
       )}
-    </div>
+    </fieldset>
   );
 }
 
@@ -287,35 +297,20 @@ function NumbersStep(props: {
  */
 export function ChooseBlockDialog(props: { character: Pick<Character, "id" | "name">; name: string; onChoose(row: PickerRow): void; onClose(): void }) {
   const [query, setQuery] = useState("");
-  const [making, setMaking] = useState<Making>(null);
-  const rowOf = useRowOf(props.character);
+  const newBlock = useNewBlock(props.character, props.onChoose);
   return (
-    <>
-      <Dialog title="Choose a stat block" onClose={props.onClose} phone="fill" width="md">
-        <CompanionPickerBody
-          character={props.character}
-          name={props.name}
-          help={`${whose(props.character.name)} players and the DM read it. Its numbers fill in the form, and you can change them there.`}
-          query={query}
-          onQuery={setQuery}
-          onPick={props.onChoose}
-          onPaste={() => setMaking("paste")}
-          onNew={() => setMaking("new")}
-        />
-      </Dialog>
-      {making ? (
-        <NewBlockEditor
-          character={props.character}
-          paste={making === "paste"}
-          onClose={() => setMaking(null)}
-          onSaved={(id) => {
-            setMaking(null);
-            const row = rowOf(id);
-            if (row) props.onChoose(row);
-          }}
-        />
-      ) : null}
-    </>
+    <Dialog title="Choose a stat block" onClose={props.onClose} phone="fill" width="md">
+      <CompanionPickerBody
+        character={props.character}
+        name={props.name}
+        help={`${whose(props.character.name)} players and the DM read it. Its numbers fill in the form, and you can change them there.`}
+        query={query}
+        onQuery={setQuery}
+        onPick={props.onChoose}
+        onPaste={() => newBlock(true)}
+        onNew={() => newBlock(false)}
+      />
+    </Dialog>
   );
 }
 
@@ -336,8 +331,9 @@ export function CharacterBlocksPage(props: { character: Pick<Character, "id" | "
   const stored = useRoomView((s) => s.view?.companionBlocks);
   const blocks = useMemo(() => characterBlocks({ companionBlocks: stored ?? {} }, character.id), [stored, character.id]);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [making, setMaking] = useState<Making>(null);
-  const [editing, setEditing] = useState<CompanionBlock | null>(null);
+  const newBlock = useNewBlock(character, (row) => setOpenId("blockId" in row.link ? row.link.blockId : null));
+  const openEditor = useOpenEditor();
+  const edit = (block: CompanionBlock) => openEditor({ monster: null, initial: blockLines(block), block: { character, existing: block } });
   const heading = useRef<HTMLHeadingElement>(null);
   // The opener went with the card this page replaced, so focus starts at the page's heading.
   useEffect(() => heading.current?.focus(), []);
@@ -352,10 +348,10 @@ export function CharacterBlocksPage(props: { character: Pick<Character, "id" | "
         </Button>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-        <Button size="sm" onClick={() => setMaking("paste")}>
+        <Button size="sm" onClick={() => newBlock(true)}>
           Paste a stat block
         </Button>
-        <Button size="sm" onClick={() => setMaking("new")}>
+        <Button size="sm" onClick={() => newBlock(false)}>
           New stat block
         </Button>
       </div>
@@ -364,24 +360,10 @@ export function CharacterBlocksPage(props: { character: Pick<Character, "id" | "
       ) : (
         <RowList label={`${whose(character.name)} stat blocks`}>
           {blocks.map((block) => (
-            <BlockRow key={block.id} block={block} open={openId === block.id} onToggle={() => setOpenId(openId === block.id ? null : block.id)} onEdit={() => setEditing(block)} />
+            <BlockRow key={block.id} block={block} open={openId === block.id} onToggle={() => setOpenId(openId === block.id ? null : block.id)} onEdit={() => edit(block)} />
           ))}
         </RowList>
       )}
-      {making ? (
-        <NewBlockEditor
-          character={character}
-          paste={making === "paste"}
-          onClose={() => setMaking(null)}
-          onSaved={(id) => {
-            setMaking(null);
-            setOpenId(id);
-          }}
-        />
-      ) : null}
-      {editing ? (
-        <MonsterEditor monster={null} initial={statBlockOf(editing)} block={{ character, existing: editing }} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />
-      ) : null}
     </div>
   );
 }

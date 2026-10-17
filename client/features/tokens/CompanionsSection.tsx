@@ -221,8 +221,7 @@ export function CompanionForm(props: {
     changeRef.current?.focus();
   });
   const choose = (row: PickerRow) => {
-    const stored = "blockId" in row.link ? blocks?.[row.link.blockId] : undefined;
-    const chosen: ChosenBlock = { link: row.link, view: row.view, source: row.source, ...(stored?.defaultImage ? { picture: stored.defaultImage } : {}) };
+    const chosen: ChosenBlock = { link: row.link, view: row.view, source: row.source, ...(row.picture ? { picture: row.picture } : {}) };
     setDraft((d) => withBlock(d, chosen));
     setBlockGone(false);
     setError(null);
