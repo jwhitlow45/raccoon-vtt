@@ -8,6 +8,7 @@ import { Help } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { PaneHeader } from "../../components/SheetHeader.tsx";
 import { useBackClose } from "../../lib/backClose.ts";
+import { useSheetSwipe } from "../../lib/sheetSwipe.ts";
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
@@ -81,15 +82,19 @@ export default function LightPane(props: { light: Light; camera: Camera; viewpor
     if (anchor) requestPan(scope, { sceneId: light.sceneId, x: light.x, y: light.y, anchor });
   });
 
+  // As a bottom sheet it swipes down to close, as its close does. Each choice is sent as it is made and its name on blur, so the focus rule alone holds it (docs/design-v1-sheet-swipe.md 4.6).
+  const sheet = place.kind === "sheet";
+  useSheetSwipe(paneRef, { enabled: sheet, onClose: () => closeRef.current(), item: light.id, clip: "foot" });
+
   return (
     <div ref={paneRef} role="dialog" aria-label="Edit light" data-map-pane="" style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text }}>
       {/* Keyed by light, so a half-typed name or an armed Delete never carries over to the next light tapped. */}
-      <LightEditor key={light.id} light={light} onClose={props.onClose} />
+      <LightEditor key={light.id} light={light} onClose={props.onClose} sheet={sheet} />
     </div>
   );
 }
 
-function LightEditor(props: { light: Light; onClose(): void }) {
+function LightEditor(props: { light: Light; onClose(): void; sheet: boolean }) {
   const { light } = props;
   const actions = useRoomActions();
   const scope = useRoomScope();
@@ -110,7 +115,7 @@ function LightEditor(props: { light: Light; onClose(): void }) {
 
   return (
     <div style={{ display: "grid", gap: theme.space(2) }}>
-      <PaneHeader title={light.label || "Light"} onClose={props.onClose} />
+      <PaneHeader title={light.label || "Light"} onClose={props.onClose} grab={props.sheet} />
       <Help>{lightCaption({ ...light, label: undefined }, feetPerCell)}</Help>
       <div role="group" aria-label="Light sources" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
         {PLACED_LIGHTS.map((p) => (

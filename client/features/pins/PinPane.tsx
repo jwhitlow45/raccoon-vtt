@@ -9,6 +9,7 @@ import { Help, Note } from "../../components/Panel.tsx";
 import { PaneHeader } from "../../components/SheetHeader.tsx";
 import { Swatches } from "../../components/Swatches.tsx";
 import { useBackClose } from "../../lib/backClose.ts";
+import { DraftScope, useDraftRegistry, useSheetSwipe, useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { isCoarsePointer } from "../../lib/device.ts";
 import { MEMBER_COLORS, theme } from "../../lib/theme.ts";
@@ -84,15 +85,22 @@ export default function PinPane(props: { pin: Pin; camera: Camera; viewport: Siz
     if (anchor) requestPan(scope, { sceneId: pin.sceneId, x: pin.x, y: pin.y, anchor });
   });
 
+  // As a bottom sheet it swipes down to close, through the editor's own close as × does (docs/design-v1-sheet-swipe.md section 3).
+  const sheet = place.kind === "sheet";
+  const drafts = useDraftRegistry();
+  useSheetSwipe(paneRef, { enabled: sheet, onClose: () => dismissRef.current(), item: pin.id, clip: "foot", drafts });
+
   return (
     <div ref={paneRef} role="dialog" aria-label="Edit pin" data-map-pane="" style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text }}>
       {/* Keyed by pin, so a draft or an armed Delete never carries over to the next pin tapped. */}
-      <PinEditor key={pin.id} pin={pin} onClose={props.onClose} dismissRef={dismissRef} />
+      <DraftScope value={drafts}>
+        <PinEditor key={pin.id} pin={pin} onClose={props.onClose} dismissRef={dismissRef} sheet={sheet} />
+      </DraftScope>
     </div>
   );
 }
 
-function PinEditor(props: { pin: Pin; onClose(): void; dismissRef: { current: () => void } }) {
+function PinEditor(props: { pin: Pin; onClose(): void; dismissRef: { current: () => void }; sheet: boolean }) {
   const { pin } = props;
   const actions = useRoomActions();
   const ui = useRoomUi();
@@ -104,6 +112,8 @@ function PinEditor(props: { pin: Pin; onClose(): void; dismissRef: { current: ()
   // The draft locks while Done is pending (journal/pendingSave.ts), so nothing changed then is lost when the acknowledgment closes the pane.
   const [state, setState] = useState(() => saveState<PinDraft>(pinDraftOf(pin)));
   const { draft, pending: saving, failure } = state;
+  // Only Done sends it, so a swipe springs back once the draft changed, until Done has sent it (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedSince(draft, !saving);
   const setDraft = (change: (d: PinDraft) => PinDraft) => setState((s) => editDraft(s, change));
   const [armedAt, setArmedAt] = useState<number | null>(null);
   // A page deleted on another DM device takes the link with it, and the pin is DM only now (rules.ts withPageGone).
@@ -192,7 +202,7 @@ function PinEditor(props: { pin: Pin; onClose(): void; dismissRef: { current: ()
   // One column no wider than the pane: a field's own minimum width would otherwise widen it and scroll the pane sideways.
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
-      <PaneHeader title="Pin" closeLabel={saving ? "Close" : "Close without saving"} onClose={close} />
+      <PaneHeader title="Pin" closeLabel={saving ? "Close" : "Close without saving"} onClose={close} grab={props.sheet} />
       {/*
         Disabled as a whole while Done is pending, as editDraft refuses their edits: the label, the page, the color and DM only.
         Each control is told as well, since a fieldset disables its controls but cannot give them the disabled look

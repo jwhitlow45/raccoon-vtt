@@ -8,6 +8,7 @@ import { Note } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { PaneHeader } from "../../components/SheetHeader.tsx";
 import { useBackClose } from "../../lib/backClose.ts";
+import { DraftScope, useDraftRegistry, useSheetSwipe, useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { isCoarsePointer } from "../../lib/device.ts";
 import { theme } from "../../lib/theme.ts";
@@ -82,6 +83,11 @@ export default function LabelPane(props: { label: Label; camera: Camera; viewpor
     if (anchor) requestPan(scope, { sceneId: label.sceneId, x: label.x, y: label.y, anchor });
   });
 
+  // As a bottom sheet it swipes down to close, as its close does (docs/design-v1-sheet-swipe.md section 3).
+  const sheet = place.kind === "sheet";
+  const drafts = useDraftRegistry();
+  useSheetSwipe(paneRef, { enabled: sheet, onClose: () => closeRef.current(), item: label.id, clip: "foot", drafts });
+
   return (
     <div
       ref={paneRef}
@@ -91,15 +97,19 @@ export default function LabelPane(props: { label: Label; camera: Camera; viewpor
       style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text }}
     >
       {/* Keyed by label, so a draft or an armed Delete never carries over to the next label tapped. */}
-      <LabelEditor key={label.id} label={label} onClose={props.onClose} />
+      <DraftScope value={drafts}>
+        <LabelEditor key={label.id} label={label} onClose={props.onClose} sheet={sheet} />
+      </DraftScope>
     </div>
   );
 }
 
-function LabelEditor(props: { label: Label; onClose(): void }) {
+function LabelEditor(props: { label: Label; onClose(): void; sheet: boolean }) {
   const { label } = props;
   const actions = useRoomActions();
   const [draft, setDraft] = useState<LabelDraft>({ text: label.text, size: label.size });
+  // Only Done sends it, so a swipe springs back once the text or the size changed (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedSince(draft);
   const [armedAt, setArmedAt] = useState<number | null>(null);
   const fieldRef = useRef<HTMLDivElement>(null);
 
@@ -134,7 +144,7 @@ function LabelEditor(props: { label: Label; onClose(): void }) {
   // One column no wider than the pane: a field's own minimum width would otherwise widen it and scroll the pane sideways.
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
-      <PaneHeader title="Label" closeLabel="Close without saving" onClose={props.onClose} />
+      <PaneHeader title="Label" closeLabel="Close without saving" onClose={props.onClose} grab={props.sheet} />
       <div ref={fieldRef}>
         <Input
           type="text"

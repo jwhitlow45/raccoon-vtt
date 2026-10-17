@@ -303,8 +303,11 @@ export function PaneHeader(props: {
   handle?: PaneHandle;
   sticky?: boolean;
   lines?: number;
+  /** The grab area of a pane standing as a bottom sheet, which swipes (lib/sheetSwipe.ts). */
+  grab?: boolean;
 }) {
   const { handle, sticky, lines } = props;
+  const grab = grabProps(props.grab);
   const descriptionId = useId();
   const grip = handle?.grip.dots ? (
     <span aria-hidden {...{ [GRIP_ATTR]: "" }} style={{ flex: "none", width: 16, display: "grid", placeItems: "center", color: theme.color.textMuted }}>
@@ -344,6 +347,7 @@ export function PaneHeader(props: {
   return (
     <div
       {...(sticky ? { [STICKY_HEADER_ATTR]: "" } : {})}
+      {...grab.attrs}
       onPointerDown={handle?.onPointerDown}
       onPointerMove={handle?.onPointerMove}
       onPointerUp={handle?.onPointerUp}
@@ -354,6 +358,7 @@ export function PaneHeader(props: {
         gap: theme.space(1),
         minWidth: 0,
         minHeight: 48,
+        ...grab.style,
         ...(handle ? { touchAction: "none", cursor: handle.dragging ? "grabbing" : "grab" } : null),
         ...(sticky
           ? {
