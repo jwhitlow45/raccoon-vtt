@@ -202,6 +202,22 @@ function tokenPanel(page: Page): Locator {
   return page.getByRole("tabpanel", { name: "Token" }).or(page.getByRole("region", { name: "Token" }));
 }
 
+/**
+ * Whether the HP field comes before the mode buttons in the page, the order
+ * Tab and a screen reader follow: in the short layout, which draws the
+ * field first (docs/design-v1-token-window.md 5.8, W5B-P-5).
+ */
+function fieldBeforeModes(b: Locator): Promise<boolean> {
+  return b.evaluate((el) => {
+    type N = { querySelector(s: string): N | null; compareDocumentPosition(o: N): number };
+    const root = el as unknown as N;
+    const field = root.querySelector('input[aria-label="HP change"]');
+    const modes = root.querySelector('[role="radiogroup"][aria-label="What the number does"]');
+    // DOCUMENT_POSITION_FOLLOWING: the modes follow the field.
+    return field !== null && modes !== null && (field.compareDocumentPosition(modes) & 4) !== 0;
+  });
+}
+
 /** Apply shows whole inside the bar's box with the bar at its top, so an HP change needs no scroll. */
 async function applyInView(b: Locator, label: string): Promise<void> {
   // The window scrolls inside its frame, in its scroller (docs/design-v1-token-window.md 5.7).
@@ -520,6 +536,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await saves.waitFor();
     assert.equal((await saves.innerText()).replace(/\s+/g, " ").trim(), "Saves Str −1 Dex +2 Con +0 Int +0 Wis −1 Cha −1");
     const entry = goblin.getByRole("textbox", { name: "HP change" });
+    assert.equal(await fieldBeforeModes(goblin), false, "the full layout's modes come first in Tab order, as it draws them");
     const statBlock = goblin.getByRole("button", { name: "Stat block", exact: true });
     const details = goblin.getByRole("button", { name: "Details", exact: true });
     const tops = await Promise.all([vitals, entry, saves, statBlock].map(async (l) => (await rectOf(l)).top));
@@ -558,6 +575,29 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await ops.send({ t: "actor.life", target: { tokenId: run.goblin.id }, life: "alive" });
     await ops.send({ t: "actor.hp", target: { tokenId: run.goblin.id }, change: { kind: "set", cur: 10 } });
     await goblin.getByRole("img", { name: "Armor Class 15" }).waitFor();
+  });
+
+  test("1b. a flip to the short layout while the HP field has focus keeps its focus and what was typed, and the page's order follows what shows once focus leaves", async () => {
+    await setUp(dm, dmCdp, DESK, null);
+    await tapToken(dm, run.goblin.at);
+    const goblin = bar(dm, "Goblin 4");
+    await goblin.waitFor();
+    const field = goblin.getByRole("textbox", { name: "HP change" });
+    await field.click();
+    await field.fill("3");
+    // A shorter window leaves the docked bar under 300 px: the short layout.
+    await resize(dm, dmCdp, { width: DESK.width, height: 430 });
+    const modes = goblin.getByRole("radiogroup", { name: "What the number does" });
+    assert.ok((await rectOf(field)).top < (await rectOf(modes)).top, "the short layout does not draw the field first");
+    assert.equal(await field.evaluate((el) => (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement === el), true, "the flip dropped the field's focus");
+    assert.equal(await field.inputValue(), "3");
+    assert.equal(await fieldBeforeModes(goblin), false, "the page moved the focused field");
+    // Focus leaves the entry: the page's order follows what shows.
+    await goblin.focus();
+    await waitFor("the field first in the page", async () => ((await fieldBeforeModes(goblin)) ? true : null), 3000);
+    await resize(dm, dmCdp, { width: DESK.width, height: DESK.height });
+    await waitFor("the modes first in the page again", async () => ((await fieldBeforeModes(goblin)) ? null : true), 3000);
+    await field.fill("");
   });
 
   test("2. Stat block keeps the bar beside the Token tab at the block, with focus on its disclosure; Escape hides the bar, a second lets go", async () => {
@@ -981,6 +1021,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       assert.equal(await more.getAttribute("aria-expanded"), "false", `${size.label}: More stats starts open`);
       assert.ok((await rectOf(more)).top > apply.bottom, "More stats sits under the HP entry");
       assert.equal(await goblin.locator("[data-saves]").count(), 0);
+      assert.equal(await fieldBeforeModes(goblin), true, `${size.label}: the short layout's field and Apply come after its modes in Tab order`);
       await shots.take(dm, `tokenpanel-${size.label.replace(/ /g, "")}-short-bar`);
       await more.click();
       const opened = (await goblin.innerText()).replace(/\s+/g, " ");

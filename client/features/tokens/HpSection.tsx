@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { healRevivesDead } from "#shared/migrate.ts";
 import type { Actor, HpVisibility, LifeState, TokenKind } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
@@ -93,52 +93,68 @@ export function HpEntry(props: {
   };
 
   /*
-   * The mode buttons and the field stay mounted in one order and swap
-   * places by CSS order, so the short layout flipping as the window is
-   * resized or alert cards come and go never drops focus from a mode button
-   * or the field (docs/design-v1-token-window.md 5.8). Tab follows the
-   * modes, then the field, in both.
+   * Tab and a screen reader follow what shows: the field first in the
+   * short layout, the modes first otherwise, in the page's own order. A
+   * flip while focus is inside the entry, as the window is resized or alert
+   * cards come and go, keeps that order and shows the new one by CSS order
+   * alone, since moving the focused element would drop its focus
+   * (docs/design-v1-token-window.md 5.8). Once focus leaves, the order
+   * follows what shows again.
    */
+  const fieldFirst = props.fieldFirst === true;
+  const formRef = useRef<HTMLFormElement>(null);
+  const [fieldFirstInPage, setFieldFirstInPage] = useState(fieldFirst);
+  useLayoutEffect(() => {
+    if (fieldFirstInPage === fieldFirst) return;
+    const active = document.activeElement;
+    if (active && formRef.current?.contains(active)) return;
+    setFieldFirstInPage(fieldFirst);
+  }, [fieldFirst, fieldFirstInPage]);
   const modeButtons = (
     <Segmented<HpMode>
+      key="modes"
       label="What the number does"
       even
       value={mode}
       options={modes.map((m) => ({ value: m.mode, label: m.label, chosenStyle: modeLook(m.mode) }))}
       onChange={setMode}
-      style={{ order: props.fieldFirst ? 1 : 0 }}
+      style={{ order: fieldFirst ? 1 : 0 }}
     />
+  );
+  const fieldRow = (
+    <div key="field" style={{ display: "flex", gap: theme.space(1), order: fieldFirst ? 0 : 1 }}>
+      <input
+        aria-label="HP change"
+        value={text}
+        inputMode="numeric"
+        enterKeyHint="done"
+        autoComplete="off"
+        placeholder={mode === "damage" ? "7 or -7" : mode === "heal" ? "5 or +5" : mode === "set" ? "20 or =20" : "5 or t5"}
+        onChange={(e) => {
+          setText(e.target.value);
+          setError(null);
+        }}
+        style={{ ...fieldStyle(), flex: 1, width: 0 }}
+      />
+      <SmallButton type="submit" tone="primary" disabled={!text.trim() || refusal !== null}>
+        Apply
+      </SmallButton>
+    </div>
   );
 
   return (
     <form
+      ref={formRef}
       onSubmit={(e) => {
         e.preventDefault();
         apply();
       }}
+      onBlur={(e) => {
+        if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) setFieldFirstInPage(fieldFirst);
+      }}
       style={{ display: "grid", gap: theme.space(1) }}
     >
-      <div style={{ display: "grid", gap: theme.space(1) }}>
-        {modeButtons}
-        <div style={{ display: "flex", gap: theme.space(1), order: props.fieldFirst ? 0 : 1 }}>
-          <input
-            aria-label="HP change"
-            value={text}
-            inputMode="numeric"
-            enterKeyHint="done"
-            autoComplete="off"
-            placeholder={mode === "damage" ? "7 or -7" : mode === "heal" ? "5 or +5" : mode === "set" ? "20 or =20" : "5 or t5"}
-            onChange={(e) => {
-              setText(e.target.value);
-              setError(null);
-            }}
-            style={{ ...fieldStyle(), flex: 1, width: 0 }}
-          />
-          <SmallButton type="submit" tone="primary" disabled={!text.trim() || refusal !== null}>
-            Apply
-          </SmallButton>
-        </div>
-      </div>
+      <div style={{ display: "grid", gap: theme.space(1) }}>{fieldFirstInPage ? [fieldRow, modeButtons] : [modeButtons, fieldRow]}</div>
       {showCrit ? (
         <Checkbox checked={crit} onChange={setCrit} label="Critical hit (two failed death saves)" />
       ) : null}
