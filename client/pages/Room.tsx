@@ -1608,7 +1608,8 @@ const TOOLBAR_LINES = {
   shown: "Press again to hide its options.",
   hidden: "Its options are hidden. Press again to show them.",
   menuTucked: "Its options are hidden. Pick it again in the menu to show them.",
-  again: "Tap again for all tools.",
+  again: "In use. Tap again for all tools.",
+  pairIdle: "Tap it, then again for all tools.",
   tileShown: "Pick again to hide its options.",
   tileHidden: "Its options are hidden. Pick again to show them.",
 } as const;
@@ -1735,9 +1736,10 @@ function Toolbar(props: {
           floating={wide}
           iconOnly
           size={size}
-          mark={opensMenu ? (tucked ? "tucked" : "caret") : own && tucked ? "tucked" : null}
+          // The pair's second button carries its caret whether or not its tool is active, so the other tools behind it always show (5.1). While active, its menu takes the place of a pressed state, so its description says it is in use.
+          mark={second ? (active && tucked ? "tucked" : "caret") : own && tucked ? "tucked" : null}
           controls={active ? props.optionsId : undefined}
-          describedBy={own ? line(tucked ? "hidden" : "shown") : opensMenu ? [line("again"), tucked ? line("menuTucked") : ""].filter(Boolean).join(" ") : undefined}
+          describedBy={own ? line(tucked ? "hidden" : "shown") : opensMenu ? [line("again"), tucked ? line("menuTucked") : ""].filter(Boolean).join(" ") : second ? line("pairIdle") : undefined}
         >
           {content(t)}
         </ToolButton>
@@ -1842,6 +1844,7 @@ function Toolbar(props: {
         <span id={line("hidden")}>{TOOLBAR_LINES.hidden}</span>
         <span id={line("menuTucked")}>{TOOLBAR_LINES.menuTucked}</span>
         <span id={line("again")}>{TOOLBAR_LINES.again}</span>
+        <span id={line("pairIdle")}>{TOOLBAR_LINES.pairIdle}</span>
         {props.hiddenSheet ? <span id={`${ids}-sheet`}>{`Shows ${props.hiddenSheet} again.`}</span> : null}
       </span>
     </nav>

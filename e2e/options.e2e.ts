@@ -1195,7 +1195,7 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     }
     await key(dm, "v");
 
-    // Setup over the token's bar (7.5): spanning at 390 x 844, docked at 820 x 1180. Escape closes Setup first and leaves the bar, and a press on the docked window's Conditions closes Setup and opens Conditions. The spanning bar's Conditions stands under the menu, and so does the window's where it docks, below its Size row, so the window first moves up by its grip and its Reset puts it back after.
+    // Setup over the token's bar (7.5): spanning at 390 x 844, docked at 820 x 1180. Escape closes Setup first and leaves the bar, and a press on the docked window's Conditions closes Setup and opens Conditions. The spanning bar's Conditions stands under the menu, and the window's may too where it docks at the foot, so the window first moves up by its grip and its Reset puts it back after.
     for (const size of [SIZES[1]!, { width: 820, height: 1180, insets: {} }]) {
       await view(dm, dmCdp, size);
       await selectTool(dm, "v");
@@ -1230,7 +1230,16 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await view(dm, dmCdp, SIZES[2]!);
     assert.deepEqual(await tools(dm).locator("button[data-active]").evaluateAll((bs) => bs.map((b) => b.getAttribute("title"))), ["Select", "Ruler", "Panels"]);
     const ruler = tools(dm).getByRole("button", { name: "Ruler" });
+    // Its caret shows before its tool is active, and once active its description says it is in use, in place of a pressed state.
+    const described = (b: Locator) => b.evaluate((el) => {
+      const doc = (globalThis as unknown as { document: { getElementById(id: string): { textContent: string | null } | null } }).document;
+      return (el.getAttribute("aria-describedby") ?? "").split(" ").map((id: string) => doc.getElementById(id)?.textContent ?? "").join(" ");
+    });
+    // The mark stands in the button's corner, the button's own last child.
+    assert.equal(await ruler.locator(":scope > span[aria-hidden] > svg").count(), 1, "the caret shows while Select is active");
+    assert.equal(await described(ruler), "Tap it, then again for all tools.");
     await ruler.tap();
+    assert.match(await described(ruler), /^In use\. Tap again for all tools\./);
     await ruler.tap();
     const all = dm.getByRole("menu", { name: "Tools" });
     await all.waitFor();
