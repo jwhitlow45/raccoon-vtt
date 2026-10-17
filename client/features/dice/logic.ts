@@ -81,10 +81,15 @@ export function collapseBare(rows: readonly RecentRow[]): RecentRow[] {
  * Every line of one tag in the viewer's log, oldest first: a group's
  * batches, or a request's answer. Only the roller's own dice lines carry
  * the tag, so this finds only what this member rolled (doc 3 reads a
- * group's results with it).
+ * group's results with it). With `part`, only that batch's own line: a
+ * line of the tag says nothing of another part's outcome.
  */
-export function findRolls(log: readonly LogEntry[], tag: string): LogEntry[] {
-  return log.filter((e) => e.kind === "event" && (e.data?.type === "dice" || e.data?.type === "roll") && e.data.tag === tag);
+export function findRolls(log: readonly LogEntry[], tag: string, part?: number): LogEntry[] {
+  return log.filter((e) => {
+    const data = e.data;
+    if (e.kind !== "event" || (data?.type !== "dice" && data?.type !== "roll") || data.tag !== tag) return false;
+    return part === undefined || (data.type === "dice" ? (data.part ?? 0) : 0) === part;
+  });
 }
 
 /** Every roll the lines of a tag hold, in order. */

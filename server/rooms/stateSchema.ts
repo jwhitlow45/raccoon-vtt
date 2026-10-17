@@ -547,6 +547,7 @@ const logEvent = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("dice"),
     tag: id.optional(),
+    part: z.number().int().min(0).max(LIMITS.diceBatchesPerTag - 1).optional(),
     batch: z.string().regex(/^[A-Za-z0-9_-]{16}$/).optional(),
     by: id,
     to: z.enum(["all", "dm"]),

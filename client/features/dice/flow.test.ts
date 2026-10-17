@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import { parseFormula } from "#shared/dice/formula.ts";
 import { rollFormula } from "#shared/dice/roll.ts";
+import { compareLogIds } from "#shared/keys.ts";
 import type { LogEntry, Viewer } from "#shared/model.ts";
 import type { ClientMessage, ClientOp, OpOf, ServerMessage } from "#shared/protocol.ts";
 import { chance, int, pick, rng, room } from "#shared/testutil.ts";
@@ -11,6 +12,7 @@ import { createRoomStore, OP_ANSWER_MS } from "../../state/store.ts";
 import { FakeClock } from "../../state/testing.ts";
 import type { RollSender } from "./send.ts";
 import { createDicePanel, type DiceState } from "./useDicePanel.ts";
+import { findRolls } from "./logic.ts";
 import { ReceiptTracker } from "./useReceipt.ts";
 
 /**
@@ -32,6 +34,8 @@ class FakeServer {
   seq = 0;
   watermark = 0;
   log: LogEntry[] = [];
+  /** Every line ever written, which the receipt lookup reads as the room's stored log does. */
+  archive: LogEntry[] = [];
   receipts = new Map<string, Receipt>();
   /** What each tag part drew, and with which op numbers it arrived. */
   draws = new Map<string, number>();
@@ -69,8 +73,9 @@ class FakeServer {
       return rolled.result;
     });
     this.seq++;
-    const entry: LogEntry = { id: `${this.seq}:0`, at: "2026-10-17T20:00:00.000Z", kind: "event", data: { type: "dice", tag: op.tag, batch: "AbCdEfGhIjKlMnOp", by: ME.memberId, to: op.to, rolls: results } };
+    const entry: LogEntry = { id: `${this.seq}:0`, at: "2026-10-17T20:00:00.000Z", kind: "event", data: { type: "dice", tag: op.tag, ...(op.part !== undefined ? { part: op.part } : {}), batch: "AbCdEfGhIjKlMnOp", by: ME.memberId, to: op.to, rolls: results } };
     this.log.push(entry);
+    this.archive.push(entry);
     this.receipts.set(key, { state: "committed", seq: this.seq });
     const changes: Extract<ServerMessage, { t: "ev" }>["changes"] = [{ key: `log:${entry.id}`, value: entry }];
     // The live log keeps its newest lines only, as the room's 200 do.
@@ -82,13 +87,13 @@ class FakeServer {
     return { t: "snapshot", seq: this.seq, state: { ...room(), log: [...this.log] }, you: { memberId: ME.memberId, role: "player", sceneId: "s1" }, watermark: this.watermark };
   }
 
-  /** The receipt lookup: every part of the tag the server holds a receipt for. Lines come from what it still holds. */
+  /** The receipt lookup: every part of the tag the server holds a receipt for, with lines the live log may have trimmed. */
   lookup(tag: string): ReceiptLookup {
     const parts: ReceiptLookup["parts"] = [];
     for (const [key, receipt] of this.receipts) {
       const [t, part] = key.split("|");
       if (t !== tag) continue;
-      if (receipt.state === "committed") parts.push({ part: Number(part), state: "committed", seq: receipt.seq, lines: this.log.filter((e) => e.id === `${receipt.seq}:0`) });
+      if (receipt.state === "committed") parts.push({ part: Number(part), state: "committed", seq: receipt.seq, lines: this.archive.filter((e) => e.id === `${receipt.seq}:0`) });
       else parts.push({ part: Number(part), state: "refused", code: receipt.code, message: receipt.message });
     }
     return { parts };
@@ -240,13 +245,25 @@ describe("the Dice panel's flow, randomized (docs/design-v1-dice.md 8.4 and 8.7)
         assert.ok(state && state.state !== "sending" && state.state !== "checking", `seed ${seed}: ${tag} is still ${state?.state}`);
         saw(state.state);
         const held = [...server.receipts.entries()].filter(([k]) => k.startsWith(`${tag}|`)).map(([, v]) => v);
-        if (state.state === "committed") assert.ok(held.some((h) => h.state === "committed"), `seed ${seed}: committed on the server too`);
+        if (state.state === "committed") {
+          assert.ok(held.some((h) => h.state === "committed"), `seed ${seed}: committed on the server too`);
+          // One line for each part the server committed, however much of them the live log trimmed: none lost, none twice, in log order.
+          const ids = state.lines.map((l) => l.id);
+          assert.equal(ids.length, held.filter((h) => h.state === "committed").length, `seed ${seed}: ${tag} shows ${ids.length} lines for its committed parts`);
+          assert.equal(new Set(ids).size, ids.length, `seed ${seed}: ${tag} shows a line twice`);
+          assert.deepEqual(ids, [...ids].sort(compareLogIds), `seed ${seed}: ${tag}'s lines are out of order`);
+          // A part the server refused never reads as committed because another part of its tag committed.
+          if (held.some((h) => h.state === "refused")) assert.ok(state.refused, `seed ${seed}: ${tag} hides the refusal of one of its parts`);
+          const live = findRolls(roomStore.store.getState().view?.log ?? [], tag).length;
+          if (live > 0 && live < ids.length) saw("partly trimmed");
+          if (ids.length > 1) saw("committed group");
+        }
         if (state.state === "refused") assert.ok(held.every((h) => h.state === "refused"), `seed ${seed}: refused on the server too, or at admission`);
       }
       assert.equal(roomStore.store.getState().pending.length, 0, `seed ${seed}: nothing is left pending`);
       roomStore.dispose();
     }
-    for (const what of ["committed", "refused", "unknown", "lookup"]) assert.ok((seen.get(what) ?? 0) > 0, `the runs never reached: ${what}`);
+    for (const what of ["committed", "refused", "unknown", "lookup", "committed group", "partly trimmed"]) assert.ok((seen.get(what) ?? 0) > 0, `the runs never reached: ${what}`);
   });
 });
 

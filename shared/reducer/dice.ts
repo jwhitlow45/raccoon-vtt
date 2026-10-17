@@ -51,7 +51,8 @@ function diceLine(tx: Tx, op: Sys, asked: Asked<"dice.roll">): void {
     if (roll.critOn !== undefined) out.critOn = roll.critOn;
     return out;
   });
-  const line: LogEvent = { type: "dice", tag: asked.tag, batch: op.batch, by: tx.actor.memberId, to: asked.to, rolls };
+  const line: Extract<LogEvent, { type: "dice" }> = { type: "dice", tag: asked.tag, batch: op.batch, by: tx.actor.memberId, to: asked.to, rolls };
+  if (asked.part !== undefined) line.part = asked.part;
   if (asked.dc !== undefined) line.dc = asked.dc;
   if (asked.ac !== undefined) line.ac = asked.ac;
   tx.addEvent(line);

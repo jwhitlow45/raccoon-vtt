@@ -1653,11 +1653,13 @@ export type LogEvent =
    * A free roll on the server (wave 7, docs/design-v1-dice.md 5.1): one line
    * per `dice.roll`, every roll with what was drawn. `to: 'dm'` is a secret
    * roll, which other players read as the bare line `rolls: []` (5.2).
-   * `tag` reaches only the roller. `batch` is the same for every batch of one
-   * tag and says nothing of the tag, so every viewer groups a group's
-   * batches as one roll without learning the roller's ids.
+   * `tag` reaches only the roller, with `part`, the batch of the tag the line
+   * is, so each part's own line settles that part alone (1.2). `batch` is the
+   * same for every batch of one tag and says nothing of the tag, so every
+   * viewer groups a group's batches as one roll without learning the
+   * roller's ids.
    */
-  | { type: "dice"; tag?: string; batch?: string; by: MemberId; to: "all" | "dm"; dc?: number; ac?: number; rolls: DiceRoll[] };
+  | { type: "dice"; tag?: string; part?: number; batch?: string; by: MemberId; to: "all" | "dm"; dc?: number; ac?: number; rolls: DiceRoll[] };
 
 /**
  * One roll of a `dice` line: its result, the label and creature asked, and

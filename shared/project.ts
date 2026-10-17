@@ -1364,6 +1364,7 @@ function projectDiceCtx(ctx: Ctx, data: Extract<LogEvent, { type: "dice" }>): Lo
   if (data.to === "dm" && !mine) return { type: "dice", by: data.by, to: "dm", rolls: [] };
   const out: Extract<LogEvent, { type: "dice" }> = { type: "dice", by: data.by, to: data.to, rolls };
   if (mine && data.tag !== undefined) out.tag = data.tag;
+  if (mine && data.part !== undefined) out.part = data.part;
   if (data.batch !== undefined) out.batch = data.batch;
   if (data.dc !== undefined) out.dc = data.dc;
   if (data.ac !== undefined) out.ac = data.ac;

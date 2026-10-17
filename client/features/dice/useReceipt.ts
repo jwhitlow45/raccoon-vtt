@@ -1,4 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
+import { compareLogIds } from "#shared/keys.ts";
 import type { LogEntry } from "#shared/model.ts";
 import { api, type ReceiptLookup } from "../../lib/api.ts";
 import { scopeSlot } from "../../state/scope.ts";
@@ -111,11 +112,12 @@ export class ReceiptTracker {
   /** The store's answer to a part: taken, refused, or unknown with how it came about. */
   answer(tag: string, part: number, answer: OpAnswer, refusal?: OpRefusal, cause?: UnknownCause): void {
     const entry = this.#entry(tag);
-    if (answer === "taken") entry.parts.set(part, { state: "committed", lines: this.#lines(tag) });
+    if (answer === "taken") entry.parts.set(part, { state: "committed", lines: this.#lines(tag, part) });
     else if (answer === "refused") entry.parts.set(part, { state: "refused", code: refusal?.code ?? "invalid", message: refusal?.message ?? "", text: refusal?.text ?? refusal?.message ?? "" });
     else {
-      // A snapshot that settled the op is in the view now, so its lines, if it committed, are there to find.
-      const lines = cause === "snapshot" ? this.#lines(tag) : [];
+      // A snapshot that settled the op is in the view now, so this part's own line, if it committed, is there to find.
+      // Another part's line of the same tag says nothing of this one, which may have been refused (W7-SOL-02).
+      const lines = cause === "snapshot" ? this.#lines(tag, part) : [];
       if (lines.length > 0) entry.parts.set(part, { state: "committed", lines });
       else {
         entry.parts.set(part, { state: "checking" });
@@ -127,8 +129,8 @@ export class ReceiptTracker {
     this.#changed();
   }
 
-  #lines(tag: string): LogEntry[] {
-    return this.env ? findRolls(this.env.log(), tag) : [];
+  #lines(tag: string, part?: number): LogEntry[] {
+    return this.env ? findRolls(this.env.log(), tag, part) : [];
   }
 
   /**
@@ -185,9 +187,12 @@ export class ReceiptTracker {
     const committed = parts.filter((p): p is Extract<PartState, { state: "committed" }> => p.state === "committed");
     const refused = parts.find((p): p is Extract<PartState, { state: "refused" }> => p.state === "refused");
     if (committed.length === 0 && refused) return refused;
-    // The live log is newer than what an answer kept, unless it has trimmed the lines away since.
-    const live = this.#lines(tag);
-    const lines = live.length > 0 ? live : committed.flatMap((p) => p.lines);
+    // What the answers and lookups kept, merged with the live log by entry id, the live entry winning and in log order:
+    // the live log may have trimmed some of a group's lines and not others, and a lookup may hold all of them.
+    const byId = new Map<string, LogEntry>();
+    for (const p of committed) for (const line of p.lines) byId.set(line.id, line);
+    for (const line of this.#lines(tag)) byId.set(line.id, line);
+    const lines = [...byId.values()].sort((a, b) => compareLogIds(a.id, b.id));
     return refused ? { state: "committed", lines, refused: { code: refused.code, message: refused.message, text: refused.text } } : { state: "committed", lines };
   }
 

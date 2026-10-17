@@ -60,6 +60,15 @@ describe("who receives a dice line (docs/design-v1-dice.md 5.2)", () => {
     assert.equal(seen(state, entry, DISPLAY), null);
   });
 
+  test("a group's part goes with its tag: the roller's line says which batch it is, another player's never", () => {
+    const { state, entry } = roll(P1, table(), "all", [FREE], { part: 2 });
+    assert.equal(entry.data?.type === "dice" && entry.data.part, 2, "the line names its part, so a reconnect settles each part from its own line");
+    assert.equal(seen(state, entry, P1)?.part, 2);
+    assert.equal(seen(state, entry, P2)?.part, undefined);
+    const single = roll(P1, table(), "all", [FREE]);
+    assert.equal(single.entry.data?.type === "dice" && "part" in single.entry.data, false, "a single op's line has none");
+  });
+
   test("a secret free roll reaches the DMs and the roller in full, and another player as the bare line", () => {
     const { state, entry } = roll(P1, table(), "dm", [FREE]);
     assert.equal(seen(state, entry, DM)?.rolls.length, 1);

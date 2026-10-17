@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
 import { askedFormula, collapseBare, findRolls, readingOf, recentRolls, stepHistory, withHistory, type RecentRow } from "./logic.ts";
+import type { ReceiptLookup } from "../../lib/api.ts";
 import { ReceiptTracker } from "./useReceipt.ts";
 
 /** What the Dice panel reads from the log (docs/design-v1-dice.md 8.3 and 8.6). */
@@ -70,6 +71,26 @@ describe("Recent rolls", () => {
       [answer.id],
     );
   });
+
+  test("a part's lines are its own: a line with no part is part 0, as a request's answer is", () => {
+    const zero = entry(dice({ tag: "P" }));
+    const two = entry(dice({ tag: "P", part: 2 }));
+    const answer = entry({ type: "roll", test: { kind: "save", choices: [{ ability: "dex" }] }, characterId: "c1", total: 14, tag: "Q" });
+    const log = [zero, two, answer];
+    assert.deepEqual(
+      findRolls(log, "P", 0).map((e) => e.id),
+      [zero.id],
+    );
+    assert.deepEqual(
+      findRolls(log, "P", 2).map((e) => e.id),
+      [two.id],
+    );
+    assert.deepEqual(findRolls(log, "P", 1), []);
+    assert.deepEqual(
+      findRolls(log, "Q", 0).map((e) => e.id),
+      [answer.id],
+    );
+  });
 });
 
 describe("the field", () => {
@@ -105,7 +126,7 @@ describe("the field", () => {
 });
 
 describe("a tag's receipt (docs/design-v1-dice.md 8.7)", () => {
-  function tracker(log: LogEntry[] = [], lookup: () => Promise<{ parts: never[] }> = () => Promise.resolve({ parts: [] })) {
+  function tracker(log: LogEntry[] = [], lookup: () => Promise<ReceiptLookup> = () => Promise.resolve({ parts: [] })) {
     const t = new ReceiptTracker();
     t.env = { lookup, log: () => log };
     return t;
@@ -152,6 +173,59 @@ describe("a tag's receipt (docs/design-v1-dice.md 8.7)", () => {
     assert.equal(lost.state("L")?.state, "unknown");
     await lost.lookup("L");
     assert.equal(asked, 1, "looked up once");
+  });
+
+  test("after a reconnect, each part settles from its own line, so another part's line never commits a refused one", async () => {
+    const first = entry(dice({ tag: "G", part: 0 }));
+    let asked = 0;
+    const t = tracker([first], () => {
+      asked++;
+      return Promise.resolve({ parts: [{ part: 0, state: "committed", seq: 1, lines: [first] }, { part: 1, state: "refused", code: "forbidden", message: "You roll only for your own creatures." }] });
+    });
+    t.sending("G", 0);
+    t.sending("G", 1);
+    t.answer("G", 0, "unknown", undefined, "snapshot");
+    t.answer("G", 1, "unknown", undefined, "snapshot");
+    assert.equal(t.state("G")?.state, "checking", "part 1 has no line of its own, so it is looked up");
+    await t.lookup("G");
+    const state = t.state("G");
+    assert.ok(state?.state === "committed" && state.refused?.code === "forbidden", "committed beside the refusal of part 1");
+    assert.deepEqual(state.lines, [first]);
+    assert.equal(asked, 1);
+  });
+
+  test("after a reconnect, a part the server never got stays unknown beside a committed one", async () => {
+    const first = entry(dice({ tag: "H", part: 0 }));
+    const t = tracker([first], () => Promise.resolve({ parts: [{ part: 0, state: "committed", seq: 1, lines: [first] }] }));
+    t.sending("H", 0);
+    t.sending("H", 1);
+    t.answer("H", 0, "unknown", undefined, "snapshot");
+    t.answer("H", 1, "unknown", undefined, "snapshot");
+    await t.lookup("H");
+    assert.equal(t.state("H")?.state, "unknown", "never committed on part 0's line");
+  });
+
+  test("a group's lines are every committed part's, kept and live merged by entry, the live one winning, in log order", async () => {
+    const lines = [0, 1, 2].map((part) => entry(dice({ tag: "E", part })));
+    const log = [...lines];
+    const t = tracker(log);
+    for (const part of [0, 1, 2]) t.sending("E", part);
+    for (const part of [0, 1, 2]) t.answer("E", part, "taken");
+    log.splice(0, 1);
+    const trimmed = t.state("E");
+    assert.ok(trimmed?.state === "committed");
+    assert.deepEqual(
+      trimmed.lines.map((l) => l.id),
+      lines.map((l) => l.id),
+      "trimming part 0's line from the live log loses nothing",
+    );
+    // A reload: the lookup holds every line, the live log only the newest, which may have changed since.
+    const newer = { ...lines[2]!, at: "2026-10-17T21:00:00.000Z" };
+    const reloaded = tracker([newer], () => Promise.resolve({ parts: lines.map((line, part) => ({ part, state: "committed" as const, seq: Number(line.id.split(":")[0]), lines: [line] })).reverse() }));
+    await reloaded.lookup("E");
+    const merged = reloaded.state("E");
+    assert.ok(merged?.state === "committed");
+    assert.deepEqual(merged.lines, [lines[0], lines[1], newer], "each line once, in log order, the live one in place of the kept");
   });
 
   test("a settled tag no surface shows is announced once, and one a surface showed never", () => {

@@ -186,8 +186,8 @@ type DiceResult = { formula: string,   // canonical, as rolled: "2d20kh1+5" for 
   fails?: ConditionKey }                // a rolled save its creature fails whatever the total (4.2)
 
 // LogEvent gains
-type DiceEvent = { type: 'dice', tag?, batch?, by: MemberId, to: 'all' | 'dm', dc?, ac?,
-  rolls: DiceRoll[] }        // 1 to 20, and none in the bare line (5.2)
+type DiceEvent = { type: 'dice', tag?, part?, batch?, by: MemberId, to: 'all' | 'dm', dc?, ac?,
+  rolls: DiceRoll[] }        // 1 to 20, and none in the bare line (5.2). `part` is the op's, so each part settles from its own line (8.7)
 type DiceRoll = DiceResult & { label?, tokenId? | characterId?, seen?: true, critOn?: 18 | 19 | 20 }
 
 // The request's `roll` line, RollTarget and RollAnswer (as `previous`) gain `dice?: DiceResult` and `typedBonus?: true`,
@@ -206,7 +206,7 @@ type DiceRoll = DiceResult & { label?, tokenId? | characterId?, seen?: true, cri
 
 1. **Each roll is kept** when it names no creature, names a character, or names a token that passes `holderOfEvent`: visible now, and seen then or owned. So a token's roll follows that token's events, and none passes a blackout.
 2. **No roll kept**: no line.
-3. **Open**, when `to` is `all` or the viewer rolled it: the line with the rolls kept, `dc`, `ac` and `batch`, and `tag` only for the roller.
+3. **Open**, when `to` is `all` or the viewer rolled it: the line with the rolls kept, `dc`, `ac` and `batch`, and `tag` and `part` only for the roller.
 4. **Secret**, to any other player: the bare line `{ type: 'dice', by, to: 'dm', rolls: [] }`, "Mara rolled in secret."
 
 So a secret roll for a goblin the party sees reads "Mara rolled in secret", as the project owner asked, while one for a goblin hidden or in the dark sends nothing. A DM's secret free roll names no creature and reaches every player as a bare line, as chat reaches them.
