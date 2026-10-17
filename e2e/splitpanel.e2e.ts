@@ -760,6 +760,12 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
       if ((await bar(page).count()) === 0) await toggleSplit(page);
       await bar(page).waitFor();
       const cdp = await tablet.newCDPSession(page);
+      // The new page's party bar and panels fill in after its first frame, and the room with them, so the bar is measured once it has come to rest.
+      await waitFor("the bar at rest", async () => {
+        const one = (await roomOf(page)).barTop;
+        await page.waitForTimeout(250);
+        return one !== null && one === (await roomOf(page)).barTop ? true : null;
+      });
       const b = await grip(page).boundingBox();
       assert.ok(b);
       const before = await roomOf(page);
