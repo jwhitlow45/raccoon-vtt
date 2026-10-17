@@ -505,6 +505,7 @@ export function HandoutViewer(props: {
   const fit = state.stage && state.layout ? fitScale(state.stage, state.layout) : 1;
   const outOff = zoomOutDisabled(state);
   const inOff = zoomInDisabled(state);
+  const reset = resetShown(state);
   const several = count > 1 && state.layout !== null && state.layout.pages.length === count;
   const rects = several ? pageRects(state) : null;
   /*
@@ -651,13 +652,23 @@ export function HandoutViewer(props: {
               onPointerDown={(e) => e.stopPropagation()}
               style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: theme.space(2), pointerEvents: "auto" }}
             >
+              {/*
+               * Reset zoom, an icon to the left of the zoom buttons, keeps its
+               * place while hidden, so the zoom buttons and the page row never
+               * move as it comes and goes (the project owner, after deploy).
+               * Hidden, it takes no tap, no focus and no screen reader's notice.
+               */}
+              <IconButton
+                ref={resetRef}
+                icon="resetZoom"
+                label="Reset zoom"
+                onClick={() => control({ t: "reset" })}
+                aria-hidden={reset ? undefined : true}
+                tabIndex={reset ? undefined : -1}
+                style={{ ...overLook(false), visibility: reset ? "visible" : "hidden" }}
+              />
               <IconButton ref={zoomOutRef} icon="minus" label="Zoom out" disabled={outOff} onClick={() => control({ t: "out" })} style={overLook(outOff)} />
               <IconButton ref={zoomInRef} icon="plus" label="Zoom in" disabled={inOff} onClick={() => control({ t: "in" })} style={overLook(inOff)} />
-              {resetShown(state) ? (
-                <Button ref={resetRef} size="sm" onClick={() => control({ t: "reset" })} style={{ background: theme.color.overlay }}>
-                  Reset zoom
-                </Button>
-              ) : null}
             </div>
           </div>
         ) : null}

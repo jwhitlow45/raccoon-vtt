@@ -336,7 +336,8 @@ One model answers how the viewer is moved without a gesture, where its controls 
 - **After a press** the indicator shows the page the button brought to the top, or the last page when Next page clamped at the end, until the view moves any other way. The status line speaks that page. A button disabled under focus hands focus to the other, else to a zoom button (`handsOnFocus`). `pageStep(state, ±1)` in `zoom.ts` is pure and tested, and returns the view and that page.
 - **The current page,** otherwise, is the page with the most height showing in the stage, the earlier one on a tie, except that at the very top it is page 1 and scrolled to the very end it is the last page, however short. `currentPage(state)` in `zoom.ts` is pure.
 - **When every page shows whole** (two short pages, or a short document at the page fit), the indicator reads "All 2 pages", both page buttons are disabled, and the page keys do nothing.
-- **Room.** The page row and the zoom buttons share the stage's bottom edge. Where they do not fit side by side, as on a 320 px phone while magnified with Reset zoom showing, the page row moves to its own line above, at the left. They never overlap.
+- **Room.** The page row and the zoom buttons share the stage's bottom edge. Where they do not fit side by side, as on a 320 px phone, the page row takes its own line above, at the left. They never overlap.
+- **Reset zoom** is an icon button, a turning arrow named "Reset zoom" with that title, to the left of the zoom buttons. Its place is kept while it is hidden, so the zoom buttons and the page row never move as it comes and goes, at any width or zoom (the project owner, after deploy). Hidden, it takes no tap, no focus and no screen reader's notice.
 
 ### 5.4 Loading pages
 
@@ -470,11 +471,11 @@ A player's phone, a document at its width fit, page 2 still loading:
 |+----------------------------+|
 ||     (o) Loading page 2     ||
 ||                            ||
-||[<] 1 of 3 [>]       [-][+] ||
+||[<] 1 of 3 [>]    [ ][-][+] ||
 +------------------------------+
 ```
 
-The same at 320 px, magnified, where the page row takes its own line:
+The same at 320 px, magnified, where the page row takes its own line and Reset zoom, an icon, shows to the left of the zoom buttons. `[ ]` is its place while hidden:
 
 ```
 +--------------------------+
@@ -483,7 +484,7 @@ The same at 320 px, magnified, where the page row takes its own line:
 |   zoomed page 1          |
 |                          |
 | [<] 1 of 3 [>]           |
-|     [-][+] [Reset zoom]  |
+|               [R][-][+]  |
 +--------------------------+
 ```
 
@@ -574,7 +575,7 @@ The viewer keeps 100% at every interface size (`zoom={false}`, as built), so 130
 
 | Size | Viewer | Page row and zoom buttons | Job block, form and Library |
 | --- | --- | --- | --- |
-| 320 x 480 | Whole screen. A Letter page at the width fit is a little taller than the stage. The page fit shows it whole. | One row at the width fit, where Reset zoom is hidden. Magnified, or zoomed out to the page fit, Reset zoom shows and the page row moves above. | The block's progress line wraps to two lines, and its buttons wrap. |
+| 320 x 480 | Whole screen. A Letter page at the width fit is a little taller than the stage. The page fit shows it whole. | The page row on its own line above the zoom buttons, since Reset zoom's place beside them is kept while it is hidden. Nothing moves as it shows, magnified or at the page fit. | The block's progress line wraps to two lines, and its buttons wrap. |
 | 320 x 480 at 130% (246 x 369) | As at 100% | As at 100% | The block and the form at 246 px: every line wraps, the range fields stack, nothing scrolls sideways. |
 | 390 x 844 | Whole screen. A little more than one page per screen at the width fit. | One row | As today |
 | 844 x 390 | Whole screen from the start (a short layout). A page at the width fit is about three stages tall, so the page buttons, PageDown and the page fit matter most here. | One row | The sideways sheet, or the very short mode, as built |

@@ -884,19 +884,43 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     assert.ok(p1);
   });
 
-  test("7b. at 320 x 480, magnified, the page row takes its own line and never meets the zoom buttons", async () => {
-    await phone.setViewportSize({ width: 320, height: 480 });
+  test("7b. Reset zoom comes and goes to the left of the zoom buttons, which never move, at 320 x 480, 390 x 844 and a very short 844 x 390, and at 320 px the page row has its own line", async () => {
     const popup = viewer(phone, "Strange letter");
-    await popup.getByRole("button", { name: "Zoom in" }).tap();
-    await popup.getByRole("button", { name: "Reset zoom" }).waitFor();
-    const row = popup.getByRole("button", { name: "Previous page" }).locator("..");
-    const zoom = popup.getByRole("button", { name: "Zoom in" }).locator("..");
-    const [a, b] = (await settledBoxes([row, zoom], "the page row and the zoom buttons at 320 px")) as [Box, Box];
-    assert.equal(intersects(a, b), false, `the page row ${JSON.stringify(a)} meets the zoom buttons ${JSON.stringify(b)}`);
-    assert.ok(a.y + a.height <= b.y + 1, "the page row is not above the zoom buttons");
-    await shots.take(phone, "pdf-popup-320-magnified");
-    await popup.getByRole("button", { name: "Reset zoom" }).tap();
-    await phone.setViewportSize({ width: 390, height: 844 });
+    const reset = popup.getByRole("button", { name: "Reset zoom" });
+    const zoomButtons = [popup.getByRole("button", { name: "Zoom out" }), popup.getByRole("button", { name: "Zoom in" })];
+    try {
+      for (const size of [
+        { width: 320, height: 480 },
+        { width: 390, height: 844 },
+        { width: 844, height: 390 },
+      ]) {
+        await phone.setViewportSize(size);
+        const what = `${size.width} x ${size.height}`;
+        const atRest = await settledBoxes(zoomButtons, `the zoom buttons at rest at ${what}`);
+        assert.equal(await reset.count(), 0, `Reset zoom at rest at ${what}`);
+        await zoomButtons[1]!.tap();
+        await reset.waitFor();
+        const magnified = await settledBoxes(zoomButtons, `the zoom buttons magnified at ${what}`);
+        assert.deepEqual(magnified, atRest, `Reset zoom moved the zoom buttons at ${what}`);
+        const icon = (await reset.boundingBox())!;
+        assert.ok(icon.x + icon.width <= magnified[0]!.x + 1 && Math.abs(icon.y - magnified[0]!.y) < 1, `Reset zoom is not to the left of the zoom buttons at ${what}: ${JSON.stringify(icon)}`);
+        assert.ok(icon.width >= 44 && icon.height >= 44, `Reset zoom is too small at ${what}`);
+        assert.equal(await reset.getAttribute("title"), "Reset zoom");
+        if (size.width === 320) {
+          const row = popup.getByRole("button", { name: "Previous page" }).locator("..");
+          const zoom = popup.getByRole("button", { name: "Zoom in" }).locator("..");
+          const [a, b] = (await settledBoxes([row, zoom], "the page row and the zoom buttons at 320 px")) as [Box, Box];
+          assert.equal(intersects(a, b), false, `the page row ${JSON.stringify(a)} meets the zoom buttons ${JSON.stringify(b)}`);
+          assert.ok(a.y + a.height <= b.y + 1, "the page row is not above the zoom buttons");
+          await shots.take(phone, "pdf-popup-320-magnified");
+        } else await shots.take(phone, `pdf-popup-${size.width}-reset-zoom`);
+        await reset.tap();
+        await reset.waitFor({ state: "hidden" });
+        assert.deepEqual(await settledBoxes(zoomButtons, `the zoom buttons after Reset zoom at ${what}`), atRest, `the zoom buttons moved as Reset zoom left at ${what}`);
+      }
+    } finally {
+      await phone.setViewportSize({ width: 390, height: 844 });
+    }
   });
 
   test("7c. turning the phone on page 2 keeps page 2 (step 8)", async () => {
@@ -1048,13 +1072,16 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     assert.deepEqual(back.filter((t) => t !== "4 of 4"), ["3 of 4", "2 of 4", "1 of 4"], `Previous page did not cross every page: ${back.join(", ")}`);
     await shots.take(desk, "pdf-desk-card");
 
-    // Zoom out from the card's width fit reaches the page fit, where a whole page shows, and stops there.
+    // Zoom out from the card's width fit reaches the page fit, where a whole page shows, and stops there. Reset zoom comes at the zoom buttons' left, and they stay where they were.
+    const deskZoom = [popup.getByRole("button", { name: "Zoom out" }), popup.getByRole("button", { name: "Zoom in" })];
+    const cardRest = await settledBoxes(deskZoom, "the card's zoom buttons at rest");
     const out = popup.getByRole("button", { name: "Zoom out" });
     for (let i = 0; (await out.isEnabled()) && i < 10; i++) await out.click();
     assert.equal(await out.isEnabled(), false);
     const stageBox = (await stage(popup).boundingBox())!;
     const first = (await pageImage(popup, "Mixed pages", 1, 4).boundingBox())!;
     assert.ok(first.height <= stageBox.height + 1, `no whole page at the page fit: ${JSON.stringify(first)} in ${JSON.stringify(stageBox)}`);
+    assert.deepEqual(await settledBoxes(deskZoom, "the card's zoom buttons at the page fit"), cardRest, "Reset zoom moved the card's zoom buttons");
     await shots.take(desk, "pdf-desk-page-fit");
     await popup.getByRole("button", { name: "Reset zoom" }).click();
     await indicatorIs(popup, "1 of 4", "Reset zoom on the same page");
