@@ -1,6 +1,6 @@
 # RaccoonVTT features
 
-RaccoonVTT is a self-hosted virtual tabletop for D&D groups playing the 2024 rules (5.5e) on a square grid, 5 ft per square. It is made for phones first, and it works on tablets, laptops and a TV too. It suits a group around one table, players joining from elsewhere, or both. It has no voice or video chat: a group that plays apart uses a call of its own for that. One server hosts many groups at once, each in its own room. There is no dice roller: everyone rolls real dice or uses the D&D Beyond app and types in the result. The one exception is auto initiative, which rolls for the DM's monsters.
+RaccoonVTT is a self-hosted virtual tabletop for D&D groups playing the 2024 rules (5.5e) on a square grid, 5 ft per square. It is made for phones first, and it works on tablets, laptops and a TV too. It suits a group around one table, players joining from elsewhere, or both. It has no voice or video chat: a group that plays apart uses a call of its own for that. One server hosts many groups at once, each in its own room. Dice roll on the server, so everyone sees the same result. Anyone can still roll real dice and type the total.
 
 This page lists what RaccoonVTT does today, grouped by area. "The DM" means anyone who holds DM in the room, co-DMs included. [docs/features.md](docs/features.md) is the planning list: what is planned next, and what was skipped and why.
 
@@ -264,6 +264,19 @@ The Builder tool is the DM's. Its modes:
 - Effects on a companion that acts on its character's turn count that character's turns.
 - A companion stays on its scene when the party moves on. The DM finds the ones left behind by searching "companion" in that scene's outliner.
 
+## Dice
+
+Every roll happens on the server, with a secure random source, so everyone sees the same result and nobody can fake one.
+
+- The Dice panel is for everyone, after Initiative among the tabs. Type any formula and tap Roll, or press Enter: "10d4+1d8", "4d6kh3" (keep the three highest), "4d6dl1" (drop the lowest), "d%", "2d6+3 fire" (the words after the formula are its label) or "1d20+5 Stealth adv". A roll holds up to 100 dice and 20 parts. The line under the field reads the roll and its range before you roll it, such as "2d6+3, fire: 5 to 15". Quick dice, d4 to d100, add a die to the field.
+- Adv, Dis and Secret are for the next roll only: the tap that rolls takes them, and they go back to their start, so a second roll never shares the first one's Advantage. Advantage and disadvantage cancel to a normal roll however many of each a roll has, the words "adv" and "dis" typed in the field included.
+- Secret: a DM's rolls start secret, and a player can send one roll to the DM only. The DMs and the roller read it in full. Other players read "Mara rolled in secret." only when the same roll made public would have reached them, so a roll for a creature they cannot see leaves no trace.
+- The newest roll stays at the top of the panel, with its dice as chips, a dropped die struck through and a natural 20 or 1 marked, and Again rolls it once more. A refusal shows there with its reason. A tap on it opens the roll in Recent rolls.
+- Recent rolls lists every roll in the log, newest first, a roll of several dice groups as one row, with Again on your own. Older rolls are in the Log.
+- Others' rolls show as toasts while your Dice panel is not on screen, one for each roll ("Bree rolled 19 for Stealth."), and a roll of your own whose panel closed before it landed shows as one too. This device can turn the others' off.
+- Rolling very fast pauses you for a few seconds ("You are going too fast. Wait a few seconds."). A room's day holds 10,000 rolls and applied changes, a player's 2,000, and the players together leave the DMs 2,000 of them.
+- A roll needs a connection: Roll waits while the room is offline. A roll sent just before the connection dropped is sent again and still rolls once. If its answer was lost, the device asks the server what became of it, and never rolls it again by itself: "This may have happened. Check the log."
+
 ## Rolls
 
 The DM asks players for a saving throw or an ability check, and each player types in the total they rolled.
@@ -367,6 +380,7 @@ Menu, This device holds settings kept on this device alone:
 - **Low power**: draws the map at a lower resolution, loads the phone size map, and skips small animations, to save battery on long sessions. Text on the map looks softer.
 - **Map detail**: Phone size (up to 4096 pixels across, loads faster) or Full size (sharper on a large screen).
 - **Turn sound** and **Ping sound**.
+- **Show others' rolls as they happen**: a toast for each roll someone else makes while the Dice panel is not on screen. On at first.
 - "Show the shortcuts": the keys, and what a key or another mouse button does with a click, a drag or the wheel.
 
 ## Shortcuts

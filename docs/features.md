@@ -2,7 +2,7 @@
 
 A self-hosted virtual tabletop for D&D groups playing the 2024 rules (5.5e). One server hosts many groups, each campaign in its own room. Square grid, 5 ft per square. Mobile first, and it also works on tablets and desktops. Exposed to the internet through a Cloudflare tunnel.
 
-It suits a group playing in person, each with a phone at the table, and players who join from elsewhere. Players roll their own dice or use the D&D Beyond app, so there is no dice roller. The one exception is the DM's auto initiative for monsters (section 10).
+It suits a group playing in person, each with a phone at the table, and players who join from elsewhere. Dice roll on the server since v1 wave 7, so everyone sees the same result, and players may still roll their own dice or use the D&D Beyond app and type the total (section 14).
 
 This list comes from research into Owlbear Rodeo 2.4, Foundry V14 with dnd5e 6.x, Roll20, AboveVTT, D&D Beyond Maps, Shard, Alchemy, EncounterPlus, Improved Initiative, Fantasy Grounds, PlanarAlly, dungeon-revealer, Mythic Table, Dungeon Scrawl and Dungeondraft, plus the SRD 5.2.1 rules text and the community's most requested features. Ideas are borrowed, never code.
 
@@ -524,7 +524,13 @@ Tiers:
 
 ## 14. Dice
 
-Not built, except auto initiative for the DM's monsters (section 10). Players roll physical dice or use the D&D Beyond app. Wherever the app needs a result (initiative, saves against an area, death saves, concentration, and since v1 wave 5 a roll the DM requests), players type it in or tap pass or fail.
+Built in v1 wave 7 (docs/design-v1-dice.md), at the project owner's request of 2026-10-17. Every roll happens on the server with a cryptographic random source, so everyone sees the same result and nobody can fake one, and a roll needs a connection.
+
+- The Dice panel, for everyone, after Party and before Log: any formula ("10d4+1d8", "4d6kh3", "1d20+5 Stealth adv"), quick dice, and Adv, Dis and Secret for the next roll only. Advantage and disadvantage from any sources cancel to a normal roll.
+- Rolls are public by default and the DM's start secret. Anyone can send one roll to the DM only. Other players read "rolled in secret" only when the same roll made public would have reached them.
+- The newest roll stays at the top of the panel, and Recent rolls lists the log's rolls, newest first. Others' rolls come as toasts while the panel is closed, which This device can turn off.
+- The server also rolls a request's answer (`roll.dice`) with the creature's bonus or one the player types, keeps the dice on the answer, and makes a rolled answer final for its player. The request card's Roll button comes with docs/design-v1-roll-request.md.
+- Players can still type any total from real dice, as before.
 
 ## 15. Characters and monsters
 
@@ -657,7 +663,6 @@ Not built, except auto initiative for the DM's monsters (section 10). Players ro
 ## 19. Skipped, and why
 
 - **Voice and video chat.** The app is built for a group in the same room, and a remote player can join by Discord or a call.
-- **Dice roller.** Players use physical dice or the D&D Beyond app. The one exception is the DM's auto initiative for monsters, which the project owner asked for later (section 10).
 - **Full character sheet builder.** D&D Beyond does this well. Tokens link to it instead.
 - **D&D Beyond import.** There is no public API, and scraping breaks its terms.
 - **Macros, scripting and a plugin system.** Plugins are Foundry's biggest pain point. Features are built in instead.
