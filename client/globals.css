@@ -233,6 +233,42 @@ summary::-webkit-details-marker {
   }
 }
 
+/* Six even options, such as the six abilities of Request a roll
+   (docs/design-v1-roll-request.md 4.2), need 6 x 44 + 5 x 4 = 284 px.
+   Narrower, they go three by three, never two by two, so two even rows
+   keep the abilities in their usual order. */
+@container (width < 284px) {
+  .rvtt-even-choices.rvtt-even-six {
+    flex-wrap: wrap !important;
+  }
+  .rvtt-even-choices.rvtt-even-six > .rvtt-choice {
+    flex: 1 1 calc((100% - 8px) / 3) !important;
+  }
+}
+
+/* A row of Request a roll's picker (features/rolls/RequestSheet.tsx): its
+   label stands at the row's start while six 44 px options fit beside a
+   48 px label (332 px), else above them. The picker is the container. */
+.rvtt-pick-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: start;
+  row-gap: 4px;
+}
+/* Beside its options the label is one touch target tall, so it lines up
+   with their first line even when the skill's row wraps. */
+.rvtt-pick-row > .rvtt-pick-label {
+  line-height: 44px;
+}
+@container (width < 332px) {
+  .rvtt-pick-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .rvtt-pick-row > .rvtt-pick-label {
+    line-height: normal;
+  }
+}
+
 /* The token window's resize handle shows the accent under a hovering mouse
    and while focused (canvas/TokenActionBar.tsx). It shows at rest too, so
    nothing depends on hover. Its inline muted color would otherwise win. */

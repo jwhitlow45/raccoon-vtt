@@ -54,7 +54,9 @@ export function Segmented<T extends string | number>(props: {
    * choice in a narrow place such as the token action bar. `grow` lets each
    * option keep its own width and wrap, which there would break the row
    * into uneven pieces. The side padding shrinks so four labels still fit,
-   * and under 210 px, too narrow even so, they go two by two.
+   * and under 210 px, too narrow even so, they go two by two. Six options,
+   * such as the six abilities, go three by three where six cannot keep
+   * 44 px each (docs/design-v1-roll-request.md 4.2).
    */
   even?: boolean;
   /** Labels wrap inside their option, for a choice that names something of any length, such as a creature. */
@@ -70,7 +72,7 @@ export function Segmented<T extends string | number>(props: {
       aria-label={props.labelledBy ? undefined : props.label}
       aria-labelledby={props.labelledBy}
       aria-disabled={props.disabled ? true : undefined}
-      className={props.even ? "rvtt-even-choices" : undefined}
+      className={props.even ? (props.options.length === 6 ? "rvtt-even-choices rvtt-even-six" : "rvtt-even-choices") : undefined}
       style={{ display: "flex", flexWrap: props.even ? "nowrap" : "wrap", gap: theme.space(1), minWidth: 0, ...(props.even ? null : props.style) }}
     >
       {props.options.map((o) => {

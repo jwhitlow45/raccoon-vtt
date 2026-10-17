@@ -357,12 +357,12 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     await dm.getByRole("button", { name: "Ask the party" }).click();
     const sheet = dm.getByRole("dialog", { name: "Request a roll" });
     await sheet.waitFor();
-    await sheet.getByRole("radio", { name: "Saving throw" }).click();
-    await sheet.getByRole("radiogroup", { name: "Ability", exact: true }).getByRole("radio", { name: "Strength" }).click();
-    await sheet.getByRole("button", { name: "Or…" }).click();
-    // With a second choice, each group is named by its place in the pair (LPD-DMPHONE-6).
-    await sheet.getByRole("radiogroup", { name: "First ability", exact: true }).getByRole("radio", { name: "Strength", checked: true }).waitFor();
-    await sheet.getByRole("radiogroup", { name: "Second ability", exact: true }).getByRole("radio", { name: "Dexterity" }).click();
+    // Each choice is one whole roll, picked in one of its rows (docs/design-v1-roll-request.md 3).
+    await sheet.getByRole("radiogroup", { name: "Saving throw" }).getByRole("radio", { name: "Strength" }).click();
+    await sheet.getByRole("button", { name: "Or a second choice" }).click();
+    // With a second choice, each picker is a group named by its place in the pair (LPD-DMPHONE-6).
+    await sheet.getByRole("group", { name: "First choice" }).getByRole("radiogroup", { name: "Saving throw" }).getByRole("radio", { name: "Strength", checked: true }).waitFor();
+    await sheet.getByRole("group", { name: "Or the second" }).getByRole("radiogroup", { name: "Saving throw" }).getByRole("radio", { name: "Dexterity" }).click();
     await sheet.getByLabel("DC", { exact: true }).fill("12");
     await sheet.getByRole("checkbox", { name: /^Thorn/, checked: true }).waitFor();
     await shots.take(dm, "tools-roll-request");

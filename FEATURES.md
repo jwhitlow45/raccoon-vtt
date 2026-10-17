@@ -282,7 +282,7 @@ Every roll happens on the server, with a secure random source, so everyone sees 
 The DM asks players for a saving throw or an ability check, and each player types in the total they rolled.
 
 - "Request a roll" is in the action bar of one or several creatures that players play. "Ask the party" is in the party bar.
-- Choose Save or Check, then the ability. A check can name a skill, which fills in its usual ability. "Or…" adds a second choice, such as "Strength (Athletics) or Dexterity (Acrobatics)", and the creature picks which one it rolls.
+- One tap picks the roll: a save or a check by ability, or a skill from a list, which starts at its usual ability and can go with another. Nothing is picked until the DM picks it, and a later tap replaces the whole roll. "Or a second choice" lets the creature pick between two, such as "Strength (Athletics) or Dexterity (Acrobatics)". Either can be removed.
 - Set a DC, or none. A check offers the typical DCs as chips, from Very easy (5) to Nearly impossible (30).
 - Two checkboxes, both on at first: "Players see the DC" and "Players see pass or fail". With the DC hidden and pass or fail shown, an answer is final once it passes or fails, so changing the total cannot find the DC. The DM can reopen it.
 - Add a note, such as "against the poison", and tick who rolls. "Ask the party" starts with the characters on the players' scene ticked, or every character when the DM is looking at another scene. If the server refuses the request, the sheet stays open with everything set and the reason. Closing the sheet while the request is sending does not stop it, and a refusal that comes after shows as a message.

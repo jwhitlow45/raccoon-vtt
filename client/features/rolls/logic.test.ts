@@ -5,7 +5,9 @@ import { canApply } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
 import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { actor, character, DM, env, P1, room, token } from "#shared/testutil.ts";
+import { ABILITY_KEYS, SKILL_KEYS } from "#shared/model.ts";
+import { SKILLS } from "#shared/rules/skills.ts";
+import { actor, chance, character, DM, env, int, P1, pick as pickOne, rng, room, token } from "#shared/testutil.ts";
 import { sheetOpen } from "../../state/types.ts";
 import {
   allAnsweredIds,
@@ -47,13 +49,24 @@ import {
   targetName,
   testTitle,
   wantsMark,
-  withKind,
-  withSkill,
+  addChoice,
+  askStatus,
+  choose,
+  draftTest,
+  pickerView,
+  pickRefusal,
+  pickerSteps,
+  removeChoice,
+  samePick,
+  testTitle as titleOf,
   type AnswerDraft,
+  type AskDraft,
+  type RollPick,
 } from "./logic.ts";
 
 const P2: Viewer = { memberId: "p2", role: "player" };
 const DEX_SAVE = { kind: "save" as const, choices: [{ ability: "dex" as const }] };
+const DEX_PICK: RollPick = { kind: "save", ability: "dex" };
 const deps = { canUseAsset: () => true };
 
 /** Ayla (p1) on the players' scene, Bram (p2) on another, a DM-owned NPC character, and p1's wolf. */
@@ -78,6 +91,8 @@ function setup(): RoomState {
 }
 
 function run(state: RoomState, op: ClientOp, who: Viewer = DM, seq = 1): RoomState {
+  // Every answer carries its tag, as the cards send it (docs/design-v1-roll-request.md 7.5).
+  if (op.t === "roll.answer" && op.tag === undefined) op = { ...op, tag: `answer-${seq}` };
   assert.ok(clientOpSchema.safeParse(op).success, `${op.t} is a valid op`);
   const allowed = canApply(op, who, state, deps);
   assert.ok(allowed.ok, `${op.t}: ${allowed.ok ? "" : allowed.message}`);
@@ -87,7 +102,7 @@ function run(state: RoomState, op: ClientOp, who: Viewer = DM, seq = 1): RoomSta
 }
 
 function ask(state: RoomState, patch: Partial<ReturnType<typeof emptyDraft>> = {}, id = "r1"): RoomState {
-  const draft = { ...emptyDraft([{ characterId: "ayla" }, { characterId: "bram" }]), ...patch };
+  const draft = { ...emptyDraft([{ characterId: "ayla" }, { characterId: "bram" }]), choices: [DEX_PICK], ...patch };
   const check = askOp(draft, id, Object.keys(state.rolls).length);
   assert.ok(check.ok, check.ok ? "" : check.error);
   return run(state, check.op);
@@ -173,7 +188,7 @@ describe("who a request asks", () => {
       ],
       "only a party character is asked as itself",
     );
-    const check = askOp(emptyDraft(targets.filter((t) => t.ticked).map((t) => t.ref)), "r1", 0);
+    const check = askOp({ ...emptyDraft(targets.filter((t) => t.ticked).map((t) => t.ref)), choices: [DEX_PICK] }, "r1", 0);
     assert.ok(check.ok);
     state = run(state, check.op);
     state = run(state, { t: "roll.answer", rollId: "r1", target: { tokenId: "cap" }, total: 14 }, P1, 2);
@@ -204,21 +219,183 @@ describe("who a request asks", () => {
   });
 });
 
+/**
+ * The picker's randomized test (docs/design-v1-roll-request.md 11.1): 2,000
+ * sequences of 40 random steps through the sheet's own handlers (a row
+ * tap, a skill, "Choose a skill", another ability for a skill, Or, Remove
+ * and a DC typed), disabled options included. After every step:
+ * - every picker shows exactly its pick, with at most one row holding a value;
+ * - the status line names `draftTest`, and `askOp` sends exactly it;
+ * - two choices never differ in kind and never match;
+ * - a skill's ability is its usual one unless "with" changed it since the skill was picked;
+ * - a step a rule forbids (a disabled option) changes nothing.
+ */
+describe("the picker, at random", () => {
+  type Step = { name: string; i: number; apply(d: AskDraft): AskDraft; forbidden(d: AskDraft): boolean; touches?: "pick" | "with" };
+  const randomStep = (r: () => number, d: AskDraft): Step => {
+    const i = int(r, 0, d.choices.length - 1);
+    const kind = int(r, 0, 6);
+    const ability = pickOne(r, ABILITY_KEYS);
+    const skill = pickOne(r, SKILL_KEYS);
+    switch (kind) {
+      case 0:
+        return { name: `save ${ability} on ${i}`, i, apply: (x) => pickerSteps.save(x, i, ability), forbidden: (x) => pickerView(x, i).save.disabled.includes(ability), touches: "pick" };
+      case 1:
+        return { name: `check ${ability} on ${i}`, i, apply: (x) => pickerSteps.check(x, i, ability), forbidden: (x) => pickerView(x, i).check.disabled.includes(ability), touches: "pick" };
+      case 2:
+        return chance(r, 0.15)
+          ? { name: `no skill on ${i}`, i, apply: (x) => pickerSteps.skill(x, i, null), forbidden: () => false, touches: "pick" }
+          : { name: `skill ${skill} on ${i}`, i, apply: (x) => pickerSteps.skill(x, i, skill), forbidden: (x) => pickerView(x, i).skill.disabled.includes(skill), touches: "pick" };
+      case 3:
+        return { name: `with ${ability} on ${i}`, i, apply: (x) => pickerSteps.with(x, i, ability), forbidden: (x) => pickerView(x, i).with?.disabled.includes(ability) ?? false, touches: "with" };
+      case 4:
+        return { name: "or", i, apply: addChoice, forbidden: () => false };
+      case 5:
+        return { name: `remove ${i}`, i, apply: (x) => removeChoice(x, i), forbidden: () => false };
+      default: {
+        const dc = pickOne(r, ["", "15", "5", "30", "51", "x", " 12 "]);
+        return { name: `dc "${dc}"`, i, apply: (x) => ({ ...x, dc }), forbidden: () => false };
+      }
+    }
+  };
+
+  test("2,000 sequences of 40 steps keep every invariant", () => {
+    let forbiddenSeen = 0;
+    let skillsSeen = 0;
+    let withSeen = 0;
+    for (let seed = 1; seed <= 2000; seed++) {
+      const r = rng(seed);
+      let draft: AskDraft = emptyDraft([{ characterId: "ayla" }]);
+      // Whether "with" changed choice i's ability since its skill was picked.
+      let withChanged: boolean[] = [false];
+      const trail: string[] = [];
+      for (let n = 0; n < 40; n++) {
+        const step = randomStep(r, draft);
+        trail.push(step.name);
+        const where = `seed ${seed}: ${trail.join(", ")}`;
+        const before = draft;
+        const forbidden = step.forbidden(before);
+        draft = step.apply(before);
+        if (forbidden) {
+          forbiddenSeen++;
+          assert.equal(draft, before, `a forbidden step changes nothing, ${where}`);
+        }
+        if (step.name === "or" && draft !== before) withChanged = [...withChanged, false];
+        if (step.name.startsWith("remove") && draft !== before) withChanged = withChanged.filter((_, j) => j !== step.i);
+        if (draft !== before && step.touches === "pick") withChanged[step.i] = false;
+        if (draft !== before && step.touches === "with") {
+          withChanged[step.i] = true;
+          withSeen++;
+        }
+        assert.equal(withChanged.length, draft.choices.length, where);
+
+        for (let i = 0; i < draft.choices.length; i++) {
+          const p = draft.choices[i]!;
+          const view = pickerView(draft, i);
+          const shown = [view.save.value, view.check.value, view.skill.value].filter((v) => v !== null);
+          assert.ok(shown.length <= 1, `at most one row holds a value, ${where}`);
+          const skill = p?.kind === "check" ? p.skill : undefined;
+          assert.equal(view.save.value, p?.kind === "save" ? p.ability : null, `the Save row shows its pick, ${where}`);
+          assert.equal(view.check.value, p?.kind === "check" && skill === undefined ? p.ability : null, `the Check row shows its pick, ${where}`);
+          assert.equal(view.skill.value, skill ?? null, `the Skill dropdown shows its pick, ${where}`);
+          assert.deepEqual(view.with ? [view.with.skill, view.with.value] : null, skill !== undefined ? [skill, p!.ability] : null, `with shows the skill's ability, ${where}`);
+          if (skill !== undefined) {
+            skillsSeen++;
+            if (!withChanged[i]) assert.equal(p!.ability, SKILLS[skill].ability, `a skill keeps its usual ability until with changes it, ${where}`);
+          }
+        }
+        const [a, b] = draft.choices;
+        if (a && b) {
+          assert.equal(a.kind, b.kind, `two choices share a kind, ${where}`);
+          assert.ok(!samePick(a, b), `two choices never match, ${where}`);
+        }
+        const test = draftTest(draft);
+        const status = askStatus(draft);
+        const check = askOp(draft, "r1", 0);
+        if (test === null) {
+          assert.match(status, /^Pick what to roll\./, where);
+          assert.equal(check.ok, false, where);
+        } else {
+          assert.ok(status.startsWith(titleOf(test)), `the status line names the test, ${where}`);
+          if (check.ok) assert.deepEqual(check.op.request.test, test, `Send sends exactly the test, ${where}`);
+          else assert.match(check.error, /^A DC is/, `only a DC typed wrong stops a whole draft here, ${where}`);
+        }
+      }
+    }
+    assert.ok(forbiddenSeen > 1000, `forbidden steps were tried: ${forbiddenSeen}`);
+    assert.ok(skillsSeen > 1000 && withSeen > 100, `skills ${skillsSeen}, with ${withSeen}`);
+  });
+});
+
 describe("the DM's sheet", () => {
-  test("a skill fills in its usual ability, which the DM can still change, and a save drops skills", () => {
-    const athletics = withSkill({ ability: "dex" }, "athletics");
-    assert.deepEqual(athletics, { ability: "str", skill: "athletics" });
-    assert.deepEqual(withSkill(athletics, "athletics"), { ability: "str" }, "picked again, it clears");
-    const draft = { ...emptyDraft([{ characterId: "ayla" }]), kind: "check" as const, choices: [{ ability: "dex" as const, skill: "athletics" as const }, { ability: "dex" as const, skill: "acrobatics" as const }] };
-    const save = withKind(draft, "save");
-    assert.deepEqual(save.choices, [{ ability: "dex" }], "two choices that become the same keep one");
+  test("nothing is picked at open, and Send says what to pick first", () => {
+    const draft = emptyDraft([{ characterId: "ayla" }]);
+    assert.deepEqual(draft.choices, [null]);
+    assert.equal(draftTest(draft), null);
+    assert.equal(askStatus(draft), "Pick what to roll. 1 asked.");
+    const view = pickerView(draft, 0);
+    assert.deepEqual([view.save.value, view.check.value, view.skill.value, view.with], [null, null, null, null], "no row shows a value nobody picked");
+    const refused = askOp(draft, "r1", 0);
+    assert.deepEqual(refused, { ok: false, error: "Pick what to roll first." });
+    const second = addChoice(choose(draft, 0, DEX_PICK));
+    assert.deepEqual(askOp(second, "r1", 0), { ok: false, error: "Pick the second choice, or remove it." });
+  });
+
+  test("the reported bug: Perception, then Strength in the Check row, asks a Strength check", () => {
+    let draft = emptyDraft([{ characterId: "ayla" }]);
+    draft = choose(draft, 0, { kind: "check", ability: "wis", skill: "perception" });
+    assert.equal(askStatus(draft), "Wisdom (Perception) check, no DC. 1 asked.");
+    assert.deepEqual(pickerView(draft, 0).with, { skill: "perception", value: "wis", disabled: [] });
+    draft = choose(draft, 0, { kind: "check", ability: "str" });
+    const view = pickerView(draft, 0);
+    assert.equal(view.check.value, "str");
+    assert.equal(view.skill.value, null, "Perception's dropdown goes back to Choose a skill");
+    assert.equal(view.with, null);
+    assert.equal(askStatus(draft), "Strength check, no DC. 1 asked.");
     const check = askOp(draft, "r1", 0);
     assert.ok(check.ok);
-    assert.deepEqual(check.op.request.test.choices, draft.choices);
+    assert.deepEqual(check.op.request.test, { kind: "check", choices: [{ ability: "str" }] });
+    draft = choose(draft, 0, { kind: "save", ability: "dex" });
+    assert.deepEqual([pickerView(draft, 0).save.value, pickerView(draft, 0).check.value], ["dex", null], "a save after a check shows in the Save row alone");
+  });
+
+  test("a skill starts at its usual ability, another goes with it, and a new pick starts again at the usual one", () => {
+    let draft = choose(emptyDraft([]), 0, { kind: "check", ability: "wis", skill: "perception" });
+    draft = choose(draft, 0, { kind: "check", ability: "cha", skill: "perception" });
+    assert.equal(askStatus(draft), "Charisma (Perception) check, no DC. 0 asked.");
+    draft = choose(draft, 0, { kind: "check", ability: "wis", skill: "insight" });
+    assert.deepEqual(draftTest(draft), { kind: "check", choices: [{ ability: "wis", skill: "insight" }] }, "Insight with Wisdom, its usual");
+    assert.equal(choose(draft, 0, null).choices[0], null, "Choose a skill clears the pick");
+  });
+
+  test("two choices share one kind and never match, and Remove on the first makes the second the first", () => {
+    let draft = choose(addChoice(choose(emptyDraft([{ characterId: "ayla" }]), 0, { kind: "save", ability: "str" })), 1, { kind: "save", ability: "dex" });
+    assert.equal(addChoice(draft), draft, "no third choice");
+    const second = pickerView(draft, 1);
+    assert.deepEqual(second.check.disabled, ["str", "dex", "con", "int", "wis", "cha"], "the Check row is disabled while the first is a save");
+    assert.equal(second.skill.disabled.length, 18);
+    assert.deepEqual(second.save.disabled, ["str"], "the first choice's own pick");
+    assert.equal(second.why, "Both choices are saves. Str save is the first choice.");
+    assert.equal(pickRefusal(draft, 1, { kind: "check", ability: "dex" }), "Both choices are saves.");
+    assert.equal(pickRefusal(draft, 1, { kind: "save", ability: "str" }), "That is the first choice.");
+    assert.equal(choose(draft, 1, { kind: "check", ability: "dex" }), draft, "a refused pick changes nothing");
+    assert.equal(choose(draft, 1, { kind: "save", ability: "str" }), draft);
+    assert.equal(askStatus(draft), "Strength or Dexterity saving throw, no DC. 1 asked.");
+    const removed = removeChoice(draft, 0);
+    assert.deepEqual(removed.choices, [{ kind: "save", ability: "dex" }]);
+    assert.equal(removeChoice(removed, 0), removed, "the last choice stays");
+    // With the second empty, the first may change kind freely.
+    const open = choose(addChoice(choose(emptyDraft([]), 0, DEX_PICK)), 0, { kind: "check", ability: "str", skill: "athletics" });
+    assert.ok(samePick(open.choices[0], { kind: "check", ability: "str", skill: "athletics" }));
+    // A skill's other ability that would match the other choice is not offered.
+    let skills = choose(addChoice(choose(emptyDraft([]), 0, { kind: "check", ability: "cha", skill: "perception" })), 1, { kind: "check", ability: "wis", skill: "perception" });
+    assert.deepEqual(pickerView(skills, 1).with?.disabled, ["cha"]);
+    skills = choose(skills, 1, { kind: "check", ability: "cha", skill: "perception" });
+    assert.ok(samePick(skills.choices[1], { kind: "check", ability: "wis", skill: "perception" }), "refused, it stays");
   });
 
   test("both switches start on, the DC is optional, and what to fix is said in words", () => {
-    const draft = emptyDraft([{ characterId: "ayla" }]);
+    const draft: AskDraft = { ...emptyDraft([{ characterId: "ayla" }]), choices: [DEX_PICK] };
     assert.equal(draft.dcShown, true);
     assert.equal(draft.resultShown, true);
     const none = askOp(draft, "r1", 0);
@@ -232,7 +409,7 @@ describe("the DM's sheet", () => {
     assert.equal(askOp({ ...draft, dc: "1.5" }, "r1", 0).ok, false);
     assert.equal(askOp({ ...draft, ticked: [] }, "r1", 0).ok, false);
     assert.equal(askOp({ ...draft, note: "x".repeat(81) }, "r1", 0).ok, false);
-    assert.equal(askOp({ ...draft, choices: [{ ability: "str" }, { ability: "str" }] }, "r1", 0).ok, false);
+    assert.equal(askOp({ ...draft, choices: [{ kind: "save", ability: "str" }, { kind: "save", ability: "str" }] }, "r1", 0).ok, false);
     const full = askOp(draft, "r1", 20);
     assert.equal(full.ok, false);
     assert.match(full.ok ? "" : full.error, /20 requests are open/);
@@ -283,7 +460,7 @@ describe("answers on the DM's card", () => {
   });
 
   test("two choices name the one rolled, and Close all answered closes only requests every target answered", () => {
-    let state = ask(setup(), { kind: "check", choices: [{ ability: "str", skill: "athletics" }, { ability: "dex", skill: "acrobatics" }] });
+    let state = ask(setup(), { choices: [{ kind: "check", ability: "str", skill: "athletics" }, { kind: "check", ability: "dex", skill: "acrobatics" }] });
     state = ask(state, {}, "r2");
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, choice: 1, total: 14 }, P1, 3);
     assert.equal(dmAnswerText(state.rolls.r1!.targets[0]!, state.rolls.r1!.test), "Dex (Acrobatics) 14");
@@ -420,8 +597,8 @@ describe("the player's card and chip", () => {
     assert.equal(chipLine(seenNone, seenNone.targets[0]!), "Dex save: sent 12.");
     assert.equal(finalForPlayer(seenNone, seenNone.targets[0]!), false);
     // The reducer holds to it whatever a device shows.
-    assert.equal(canApply({ t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, total: 18 }, P1, hidden, deps).ok, true);
-    assert.equal(applyOp(hidden, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, total: 18 }, P1, env(3)).ok, false);
+    assert.equal(canApply({ t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, total: 18, tag: "answer-3" }, P1, hidden, deps).ok, true);
+    assert.equal(applyOp(hidden, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, total: 18, tag: "answer-3" }, P1, env(3)).ok, false);
   });
 
   test("with pass or fail hidden the chip says only what was sent, and a player holds only their own target", () => {
@@ -476,14 +653,14 @@ describe("the player's card and chip", () => {
     assert.equal(finalForPlayer(seen, seen.targets[0]!), true);
     assert.equal(chipLine(seen, seen.targets[0]!), "Dex save: marked Pass by the DM. Final. Ask the DM to change it.");
     assert.equal(finalAnswerText(seen.targets[0]!, DEX_SAVE), "Marked Pass by the DM", "never a fail without rolling the player did not send");
-    assert.equal(applyOp(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, total: 9 }, P1, env(3)).ok, false, "the reducer holds to it");
+    assert.equal(applyOp(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, total: 9, tag: "answer-3" }, P1, env(3)).ok, false, "the reducer holds to it");
     assert.equal(finalAnswerText({ characterId: "ayla", total: 12, result: "fail" }, DEX_SAVE), "Sent 12. Fail", "with the result, as the chip says it (LP5-ROLLS-5)");
     assert.equal(finalAnswerText({ characterId: "ayla", noRoll: true, result: "fail" }, DEX_SAVE), "Failed without rolling");
     assert.equal(finalAnswerText({ characterId: "ayla", result: "fail" }, DEX_SAVE), "Marked Fail by the DM");
   });
 
   test("with two choices the chip and the final line say which one was rolled", () => {
-    let state = ask(setup(), { choices: [{ ability: "str" }, { ability: "dex" }], dc: "15", dcShown: false });
+    let state = ask(setup(), { choices: [{ kind: "save", ability: "str" }, { kind: "save", ability: "dex" }], dc: "15", dcShown: false });
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, choice: 1, total: 12 }, P1, 2);
     const seen = projectState(state, P1, { sceneId: null }).rolls.r1!;
     assert.equal(chipLine(seen, seen.targets[0]!), "Str or Dex save: sent Dex 12. Fail. Final. Ask the DM to change it.");

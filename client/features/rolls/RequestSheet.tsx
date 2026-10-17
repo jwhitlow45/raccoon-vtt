@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ABILITY_KEYS, type AbilityKey, type RollChoice } from "#shared/model.ts";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type SkillKey } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
-import { ABILITY_NAMES, SKILLS, skillsOf, TYPICAL_DCS } from "#shared/rules/skills.ts";
+import { ABILITY_NAMES, SKILLS, TYPICAL_DCS } from "#shared/rules/skills.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Chip, ChipRow } from "../../components/Chip.tsx";
-import { Input, NUMBER_FIELD_WIDTH } from "../../components/Field.tsx";
+import { Input, NUMBER_FIELD_WIDTH, Select } from "../../components/Field.tsx";
 import { Help, Note, SectionLabel } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { UnsavedInput } from "../../lib/sheetSwipe.ts";
@@ -14,28 +14,32 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { SheetDialog } from "../tokens/SheetDialog.tsx";
 import {
+  addChoice,
+  allChecks,
   answerAsk,
   askOp,
+  askStatus,
   closedAskText,
   defaultTargets,
   editAsk,
   emptyDraft,
   pendingAskCloseText,
+  pickerSteps,
+  pickerView,
+  removeChoice,
   sendLabel,
-  testTitle,
-  withKind,
-  withSkill,
   type AskDraft,
   type AskFrom,
   type AskSheet,
 } from "./logic.ts";
 
 /**
- * The DM's "Request a roll" (docs/design-v1-dm-tools.md 3.3): a saving
- * throw or an ability check, the ability, for a check perhaps a skill,
- * "Or" for a second choice the creature picks from, the DC or none, the
- * two options for what players see, a note, and who is asked. Send asks
- * every ticked creature's player and opens the live card.
+ * The DM's "Request a roll" (docs/design-v1-dm-tools.md 3.3,
+ * docs/design-v1-roll-request.md 4): what to roll, picked whole in one of
+ * three rows (a save, a check, or a skill), "Or a second choice" for one
+ * the creature picks from, the DC or none, the two options for what
+ * players see, a note, and who is asked. Send asks every ticked
+ * creature's player and opens the live card.
  */
 export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
   const actions = useRoomActions();
@@ -66,13 +70,21 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
   const dcField = useRef<HTMLInputElement>(null);
   const set = (patch: Partial<AskDraft>) => setSheet((s) => editAsk(s, patch));
   const setError = (problem: string) => setSheet((s) => ({ ...s, error: problem }));
-  const setChoice = (i: number, choice: RollChoice) => set({ choices: draft.choices.map((c, j) => (j === i ? choice : c)) });
+  // Every change to a choice goes through the draft's own rules (logic.ts), so a pick a rule refuses changes nothing here either.
+  const change = (next: (d: AskDraft) => AskDraft) => setSheet((s) => (s.sending ? s : { ...s, draft: next(s.draft), error: null }));
+  const pickers = useRef<HTMLDivElement>(null);
+  const orButton = useRef<HTMLButtonElement>(null);
+  // Or and Remove each take their own button away, so focus goes to what stands in its place rather than falling to the page.
+  const [focusAfter, setFocusAfter] = useState<"second" | "or" | null>(null);
+  useEffect(() => {
+    if (focusAfter === null) return;
+    setFocusAfter(null);
+    if (focusAfter === "or") orButton.current?.focus();
+    else pickers.current?.querySelector<HTMLElement>('[data-choice="1"] :is(input, select):not(:disabled)')?.focus();
+  }, [focusAfter]);
   const ticked = (ref: ActorTarget) => draft.ticked.some((t) => sameRef(t, ref));
   const tick = (ref: ActorTarget, on: boolean) => set({ ticked: on ? [...draft.ticked, ref] : draft.ticked.filter((t) => !sameRef(t, ref)) });
-  const summary = useMemo(() => {
-    const dc = draft.dc.trim() ? `, DC ${draft.dc.trim()}` : ", no DC";
-    return `${testTitle({ kind: draft.kind, choices: draft.choices })}${dc}`;
-  }, [draft]);
+  const summary = useMemo(() => askStatus(draft), [draft]);
 
   const send = () => {
     if (sending) return;
@@ -120,7 +132,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
             {error}
           </span>
         ) : (
-          `${summary}. ${draft.ticked.length} asked.`
+          summary
         )
       }
       footer={
@@ -136,36 +148,34 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
       {/* Locked while the request waits for the server, so nothing set after Send is lost when the sheet closes on the answer. Closing stays, outside it. */}
       <fieldset disabled={sending} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
         <div style={{ display: "grid", gap: theme.space(4) }}>
-          <Group title="What to roll">
-            <Segmented
-              label="What to roll"
-              value={draft.kind}
-              disabled={sending}
-              options={[
-                { value: "save", label: "Saving throw" },
-                { value: "check", label: "Ability check" },
-              ]}
-              onChange={(kind) => set(withKind(draft, kind))}
-            />
-          </Group>
-          {draft.choices.map((choice, i) => (
-            <ChoiceEditor
-              key={i}
-              index={i}
-              two={draft.choices.length > 1}
-              kind={draft.kind}
-              choice={choice}
-              disabled={sending}
-              onChange={(next) => setChoice(i, next)}
-              onRemove={() => set({ choices: draft.choices.filter((_, j) => j !== i) })}
-            />
-          ))}
+          <div ref={pickers} style={{ display: "grid", gap: theme.space(4) }}>
+            {draft.choices.map((_, i) => (
+              <ChoicePicker
+                key={i}
+                draft={draft}
+                index={i}
+                disabled={sending}
+                onStep={(step) => change((d) => step(d, i))}
+                onRemove={() => {
+                  change((d) => removeChoice(d, i));
+                  setFocusAfter("or");
+                }}
+              />
+            ))}
+          </div>
           {draft.choices.length < LIMITS.rollChoices ? (
             <div style={{ display: "grid", justifyItems: "start", gap: theme.space(1) }}>
-              <Button size="sm" onClick={() => set({ choices: [...draft.choices, nextChoice(draft.choices[0]!)] })}>
-                Or…
+              <Button
+                ref={orButton}
+                size="sm"
+                onClick={() => {
+                  change(addChoice);
+                  setFocusAfter("second");
+                }}
+              >
+                Or a second choice
               </Button>
-              <Help>A second choice: the creature picks which one it rolls.</Help>
+              <Help>The creature picks which one it rolls.</Help>
             </div>
           ) : null}
           <Group title="DC">
@@ -188,7 +198,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
                 </Button>
               ) : null}
             </div>
-            {draft.kind === "check" ? (
+            {allChecks(draft) ? (
               // A save's DC is the effect's (SRD 5.2.1 page 7), so only checks get the typical ones (page 6).
               <ChipRow>
                 {TYPICAL_DCS.map((t) => (
@@ -202,9 +212,9 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
                   </Chip>
                 ))}
               </ChipRow>
-            ) : (
+            ) : draft.choices.some((c) => c?.kind === "save") ? (
               <Help>A save’s DC is set by the effect that causes it, or by you.</Help>
-            )}
+            ) : null}
           </Group>
           <Group title="What players see">
             {/* Options that Send reads, so checkboxes rather than switches (docs/design-v1-visual.md 3.7). */}
@@ -249,66 +259,114 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
   );
 }
 
-/** A second choice that differs from the first: the next ability round the six, with no skill yet. */
-function nextChoice(first: RollChoice): RollChoice {
-  const i = ABILITY_KEYS.indexOf(first.ability);
-  return { ability: ABILITY_KEYS[(i + 1) % ABILITY_KEYS.length]! };
-}
+const SHORT: Record<AbilityKey, string> = Object.fromEntries(ABILITY_KEYS.map((a) => [a, ABILITY_NAMES[a].slice(0, 3)])) as Record<AbilityKey, string>;
 
-function ChoiceEditor(props: {
-  index: number;
-  two: boolean;
-  kind: AskDraft["kind"];
-  choice: RollChoice;
-  disabled: boolean;
-  onChange(choice: RollChoice): void;
-  onRemove(): void;
-}) {
-  const { choice } = props;
+/** The 18 skills by name, each with its usual ability: "Perception (Wis)". */
+const SKILLS_BY_NAME: readonly SkillKey[] = [...SKILL_KEYS].sort((a, b) => SKILLS[a].name.localeCompare(SKILLS[b].name));
+
+/**
+ * One choice's picker (docs/design-v1-roll-request.md 4.2): Save, Check and
+ * Skill, each a view of the choice's one pick (`pickerView`), so a tap in
+ * any row replaces the whole pick. With two choices each is a named group
+ * with Remove.
+ */
+function ChoicePicker(props: { draft: AskDraft; index: number; disabled: boolean; onStep(step: (draft: AskDraft, i: number) => AskDraft): void; onRemove(): void }) {
+  const two = props.draft.choices.length > 1;
+  const view = pickerView(props.draft, props.index);
+  const whyId = useId();
+  const title = two ? (props.index === 0 ? "First choice" : "Or the second") : "What to roll";
+  const abilities = (disabled: readonly AbilityKey[]) =>
+    ABILITY_KEYS.map((a) => ({ value: a, label: SHORT[a], title: ABILITY_NAMES[a], disabled: disabled.includes(a) }));
   return (
-    <Group
-      title={props.two ? (props.index === 0 ? "First choice" : "Or the second") : "Ability"}
-      aside={
-        props.index > 0 ? (
-          <Button size="sm" onClick={props.onRemove}>
-            Remove
-          </Button>
-        ) : null
-      }
-    >
-      <Segmented
-        // Two groups both named "Ability" could not be told apart by name, so each takes its place in the pair.
-        label={props.two ? (props.index === 0 ? "First ability" : "Second ability") : "Ability"}
-        value={choice.ability}
-        disabled={props.disabled}
-        options={ABILITY_KEYS.map((a) => ({ value: a, label: ABILITY_NAMES[a] }))}
-        onChange={(ability) => props.onChange({ ...choice, ability })}
-        // Three across, so the six abilities line up in two even rows on a phone and a computer alike.
-        style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}
-      />
-      {props.kind === "check" ? (
-        <div style={{ display: "grid", gap: theme.space(1) }}>
-          <Help>Skill, if any. It fills in its usual ability, which you can still change.</Help>
-          {ABILITY_KEYS.filter((a) => skillsOf(a).length > 0).map((a) => (
-            <SkillRow key={a} ability={a} choice={choice} disabled={props.disabled} onPick={(skill) => props.onChange(withSkill(choice, skill))} />
-          ))}
+    <div role={two ? "group" : undefined} aria-label={two ? title : undefined} aria-describedby={view.why ? whyId : undefined} data-choice={props.index}>
+      <Group
+        title={title}
+        aside={
+          two ? (
+            <Button size="sm" aria-label={`Remove the ${props.index === 0 ? "first" : "second"} choice`} onClick={props.onRemove}>
+              Remove
+            </Button>
+          ) : null
+        }
+      >
+        {/* The rows measure the room they share, so each label stands beside its options or above them (globals.css .rvtt-pick-row). */}
+        <div style={{ containerType: "inline-size", minWidth: 0, display: "grid", gap: theme.space(2) }}>
+          <PickRow label="Save">
+            <Segmented
+              label="Saving throw"
+              even
+              value={view.save.value}
+              disabled={props.disabled}
+              options={abilities(view.save.disabled)}
+              onChange={(ability) => props.onStep((d, i) => pickerSteps.save(d, i, ability))}
+            />
+          </PickRow>
+          <PickRow label="Check">
+            <Segmented
+              label="Ability check"
+              even
+              value={view.check.value}
+              disabled={props.disabled}
+              options={abilities(view.check.disabled)}
+              onChange={(ability) => props.onStep((d, i) => pickerSteps.check(d, i, ability))}
+            />
+          </PickRow>
+          <PickRow label="Skill">
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minWidth: 0 }}>
+              <Select
+                aria-label="Skill check"
+                value={view.skill.value ?? ""}
+                disabled={props.disabled}
+                onChange={(e) => {
+                  const skill = e.target.value === "" ? null : (e.target.value as SkillKey);
+                  props.onStep((d, i) => pickerSteps.skill(d, i, skill));
+                }}
+                style={{ flex: "1 1 160px", minWidth: 0 }}
+              >
+                <option value="">Choose a skill</option>
+                {SKILLS_BY_NAME.map((s) => (
+                  <option key={s} value={s} disabled={view.skill.disabled.includes(s)}>
+                    {SKILLS[s].name} ({SHORT[SKILLS[s].ability]})
+                  </option>
+                ))}
+              </Select>
+              {view.with ? (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(2) }}>
+                  <span aria-hidden="true">with</span>
+                  <Select
+                    aria-label={`Ability for ${SKILLS[view.with.skill].name}`}
+                    value={view.with.value}
+                    disabled={props.disabled}
+                    onChange={(e) => {
+                      const ability = e.target.value as AbilityKey;
+                      props.onStep((d, i) => pickerSteps.with(d, i, ability));
+                    }}
+                  >
+                    {ABILITY_KEYS.map((a) => (
+                      <option key={a} value={a} disabled={view.with!.disabled.includes(a)}>
+                        {ABILITY_NAMES[a]}
+                      </option>
+                    ))}
+                  </Select>
+                </span>
+              ) : null}
+            </div>
+          </PickRow>
         </div>
-      ) : null}
-    </Group>
+        {view.why ? <Help id={whyId}>{view.why}</Help> : null}
+      </Group>
+    </div>
   );
 }
 
-function SkillRow(props: { ability: AbilityKey; choice: RollChoice; disabled: boolean; onPick(skill: RollChoice["skill"]): void }) {
+/** One row of a picker: its label at the start while six options fit beside it, else above them (globals.css). */
+function PickRow(props: { label: string; children: ReactNode }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: `${theme.space(9)}px minmax(0, 1fr)`, alignItems: "start", gap: theme.space(1) }}>
-      <span style={{ lineHeight: `${theme.touch}px`, fontSize: theme.font.small, color: theme.color.textMuted }}>{ABILITY_NAMES[props.ability].slice(0, 3)}</span>
-      <ChipRow>
-        {skillsOf(props.ability).map((skill) => (
-          <Chip key={skill} pressed={props.choice.skill === skill} disabled={props.disabled} onClick={() => props.onPick(skill)}>
-            {SKILLS[skill].name}
-          </Chip>
-        ))}
-      </ChipRow>
+    <div className="rvtt-pick-row">
+      <span aria-hidden="true" className="rvtt-pick-label" style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>
+        {props.label}
+      </span>
+      {props.children}
     </div>
   );
 }

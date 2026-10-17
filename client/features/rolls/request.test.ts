@@ -7,7 +7,10 @@ import { LocalServer } from "../../dev/localServer.ts";
 import { createRoomStore } from "../../state/store.ts";
 import { FakeClock, FakeOutbox } from "../../state/testing.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
-import { answerAsk, answerLabel, askOp, closedAskText, editAsk, emptyDraft, pendingAskCloseText, sendLabel, type AskSheet } from "./logic.ts";
+import { answerAsk, answerLabel, askOp, closedAskText, editAsk, emptyDraft, pendingAskCloseText, sendLabel, type AskDraft, type AskSheet } from "./logic.ts";
+
+/** A draft with a Dexterity save picked, since the sheet opens with nothing picked. */
+const dexDraft = (ticked: AskDraft["ticked"]): AskDraft => ({ ...emptyDraft(ticked), choices: [{ kind: "save", ability: "dex" }] });
 
 /** The DM's store against a local server whose answers arrive only when the test delivers them: a slow acknowledgment. */
 function setup(state: RoomState) {
@@ -46,7 +49,7 @@ function send(t: ReturnType<typeof setup>, sheet: AskSheet, id: string) {
 describe("the request sheet while the server has not answered", () => {
   test("it is locked, an edit made meanwhile changes nothing, and the late acknowledgment closes it on what was sent", () => {
     const t = setup(party());
-    const start: AskSheet = { draft: { ...emptyDraft([{ characterId: "ayla" }]), dc: "15" }, sending: false, error: null };
+    const start: AskSheet = { draft: { ...dexDraft([{ characterId: "ayla" }]), dc: "15" }, sending: false, error: null };
     const { sheet, heard } = send(t, start, "r1");
     assert.equal(sendLabel(sheet.sending, true), "Sending…");
     assert.equal(sendLabel(sheet.sending, false), "Waiting for the connection to send…", "offline, it says what it waits for");
@@ -65,7 +68,7 @@ describe("the request sheet while the server has not answered", () => {
   test("a refusal arriving late unlocks the sheet with the reason and keeps what the DM set up", () => {
     const t = setup(party());
     // A creature no player plays: the server refuses the whole request.
-    const start: AskSheet = { draft: { ...emptyDraft([{ tokenId: "goblin" }]), note: "against the poison" }, sending: false, error: null };
+    const start: AskSheet = { draft: { ...dexDraft([{ tokenId: "goblin" }]), note: "against the poison" }, sending: false, error: null };
     const { sheet, heard } = send(t, start, "r2");
     t.deliver();
     assert.equal(heard.answer, "refused");
@@ -86,7 +89,7 @@ describe("the request sheet closed while its request is sending (W5UI-15)", () =
 
   test("a refusal arriving after the sheet closed still reaches the DM, with the reason", () => {
     const t = setup(party());
-    const start: AskSheet = { draft: emptyDraft([{ tokenId: "goblin" }]), sending: false, error: null };
+    const start: AskSheet = { draft: dexDraft([{ tokenId: "goblin" }]), sending: false, error: null };
     // Sent, then the sheet closes before the server answers: only the toast is left to say what happened.
     const { heard } = send(t, start, "r3");
     t.deliver();
@@ -96,7 +99,7 @@ describe("the request sheet closed while its request is sending (W5UI-15)", () =
 
   test("a request that went out says nothing, and one whose answer was lost says to check the cards", () => {
     const t = setup(party());
-    const { heard } = send(t, { draft: emptyDraft([{ characterId: "ayla" }]), sending: false, error: null }, "r4");
+    const { heard } = send(t, { draft: dexDraft([{ characterId: "ayla" }]), sending: false, error: null }, "r4");
     t.deliver();
     assert.equal(heard.answer, "taken");
     assert.equal(closedAskText(heard.answer!, heard.refusal), null);

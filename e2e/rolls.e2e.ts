@@ -134,6 +134,13 @@ async function openLog(page: Page): Promise<void> {
   await page.getByRole("region", { name: "Log" }).waitFor();
 }
 
+/** Opens a panel's sheet on a phone: the Panels button, then the panel. */
+async function openPanel(page: Page, name: string): Promise<void> {
+  const picker = page.getByRole("list", { name: "Panels" });
+  if (!(await picker.isVisible())) await page.locator('button[title="Panels"]').tap();
+  await picker.getByRole("button", { name: new RegExp(`^${name}( ?\\d+ unread)?$`) }).tap();
+}
+
 async function logOpen(page: Page): Promise<boolean> {
   return page.getByRole("region", { name: "Log" }).isVisible();
 }
@@ -427,7 +434,55 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await closeAll();
   });
 
-  test("10. nothing went wrong in the browsers", () => {
+  test("10. the DM's sheet picks one whole roll: nothing at open, Perception then Strength sends a Strength check, and either of two choices can go", async () => {
+    // The reported bug (docs/design-v1-roll-request.md 2): a skill stayed picked under the ability tapped after it.
+    await openPanel(dm, "Party");
+    await dm.getByRole("button", { name: "Ask the party" }).first().tap();
+    const sheet = dm.getByRole("dialog", { name: "Request a roll" });
+    await sheet.waitFor();
+    assert.equal(await sheet.locator("input[type=radio]:checked").count(), 0, "nothing is picked at open");
+    assert.equal(await sheet.getByRole("combobox", { name: "Skill check" }).inputValue(), "");
+    await sheet.getByText(/^Pick what to roll\. 1 asked\.$/).waitFor();
+    await sheet.getByRole("button", { name: "Send", exact: true }).tap();
+    await sheet.getByRole("alert").filter({ hasText: "Pick what to roll first." }).waitFor();
+    await shots.take(dm, "rolls-sheet-nothing-picked");
+
+    await sheet.getByRole("radiogroup", { name: "Ability check" }).getByRole("radio", { name: "Dexterity" }).tap();
+    await sheet.getByRole("combobox", { name: "Skill check" }).selectOption("perception");
+    await sheet.getByText(/^Wisdom \(Perception\) check, no DC\. 1 asked\.$/).waitFor();
+    assert.equal(await sheet.locator("input[type=radio]:checked").count(), 0, "the Check row shows nothing while a skill is picked");
+    assert.equal(await sheet.getByRole("combobox", { name: "Ability for Perception" }).inputValue(), "wis");
+    await sheet.getByRole("radiogroup", { name: "Ability check" }).getByRole("radio", { name: "Strength" }).tap();
+    await sheet.getByText(/^Strength check, no DC\. 1 asked\.$/).waitFor();
+    assert.equal(await sheet.getByRole("combobox", { name: "Skill check" }).inputValue(), "", "Perception went back to Choose a skill");
+    await shots.take(dm, "rolls-sheet-strength-check");
+
+    // Two choices: each has Remove, and removing the first makes the second the first.
+    await sheet.getByRole("button", { name: "Or a second choice" }).tap();
+    const second = sheet.getByRole("group", { name: "Or the second" });
+    await second.getByRole("radiogroup", { name: "Ability check" }).getByRole("radio", { name: "Dexterity" }).tap();
+    assert.equal(await second.getByRole("radiogroup", { name: "Saving throw" }).getByRole("radio", { name: "Dexterity" }).isDisabled(), true, "a save cannot join a check");
+    assert.equal(await second.getByRole("radiogroup", { name: "Ability check" }).getByRole("radio", { name: "Strength" }).isDisabled(), true, "nor the first choice itself");
+    await second.getByText("Both choices are checks. Str check is the first choice.").waitFor();
+    await sheet.getByText(/^Strength or Dexterity check, no DC\. 1 asked\.$/).waitFor();
+    await shots.take(dm, "rolls-sheet-two-choices");
+    await sheet.getByRole("button", { name: "Remove the first choice" }).tap();
+    await sheet.getByText(/^Dexterity check, no DC\. 1 asked\.$/).waitFor();
+    assert.equal(await sheet.getByRole("group", { name: "Or the second" }).count(), 0);
+    assert.equal(await sheet.getByRole("button", { name: /^Remove/ }).count(), 0, "one choice has no Remove");
+
+    await sheet.getByRole("radiogroup", { name: "Ability check" }).getByRole("radio", { name: "Strength" }).tap();
+    await sheet.getByRole("button", { name: "Send", exact: true }).tap();
+    await sheet.waitFor({ state: "detached" });
+    const sent = await waitFor("the request in the player's state", () => Object.values(playerSocket.state?.rolls ?? {})[0]);
+    run.open.push(sent.id);
+    assert.deepEqual(sent.test, { kind: "check", choices: [{ ability: "str" }] }, "the DM asked for a Strength check and sent one");
+    await card(player).getByText("The DM asks for a Strength check.").waitFor();
+    await closeAll();
+    await dm.getByRole("button", { name: /^Close Party/ }).tap();
+  });
+
+  test("11. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });

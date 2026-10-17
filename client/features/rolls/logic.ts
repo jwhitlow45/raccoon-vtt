@@ -1,4 +1,4 @@
-import type { Character, CharacterId, Member, RollAnswer, RollChoice, RollRequest, RollTarget, RollTest, RoomState, Token } from "#shared/model.ts";
+import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Character, type CharacterId, type Member, type RollAnswer, type RollChoice, type RollRequest, type RollTarget, type RollTest, type RoomState, type SkillKey, type Token } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { anyPlayer, playersToken } from "#shared/project.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
@@ -133,11 +133,22 @@ export function offersRequest(view: Pick<RoomState, "members" | "characters" | "
   });
 }
 
+/**
+ * One choice of a request (docs/design-v1-roll-request.md 3): a whole roll,
+ * a save of an ability, a check of an ability, or a check of a skill with
+ * its ability, usually the skill's own. The sheet's three rows are views of
+ * this one value, so a tap in any of them replaces it whole, and no earlier
+ * tap can outlive a later one: a skill held apart from its ability stayed
+ * picked under a new ability, and the DM sent Strength (Perception) when
+ * they asked for a Strength check. Named RollPick, since `Pick` is
+ * TypeScript's own.
+ */
+export type RollPick = { kind: "save"; ability: AbilityKey } | { kind: "check"; ability: AbilityKey; skill?: SkillKey };
+
 /** What the DM's sheet holds before Send. */
 export type AskDraft = {
-  kind: RollTest["kind"];
-  /** One or two, each an ability with an optional skill. */
-  choices: RollChoice[];
+  /** One or two, each null until the DM picks it: nothing is picked before the DM picks it. */
+  choices: (RollPick | null)[];
   /** As typed: empty for a roll with no DC. */
   dc: string;
   dcShown: boolean;
@@ -148,19 +159,133 @@ export type AskDraft = {
 
 export function emptyDraft(ticked: readonly ActorTarget[]): AskDraft {
   // Both switches start on: the design's example names the DC, "Dex save, DC 15" (question 12).
-  return { kind: "save", choices: [{ ability: "dex" }], dc: "", dcShown: true, resultShown: true, note: "", ticked };
+  return { choices: [null], dc: "", dcShown: true, resultShown: true, note: "", ticked };
 }
 
-/** A save names no skill, so switching to one drops them, and a second choice that became the same as the first goes. */
-export function withKind(draft: AskDraft, kind: RollTest["kind"]): AskDraft {
-  const choices = kind === "save" ? draft.choices.map((c) => ({ ability: c.ability })) : draft.choices;
-  return { ...draft, kind, choices: distinct(choices) };
+export function samePick(a: RollPick | null | undefined, b: RollPick | null | undefined): boolean {
+  if (!a || !b) return !a && !b;
+  return a.kind === b.kind && a.ability === b.ability && (a.kind === "check" ? a.skill : undefined) === (b.kind === "check" ? b.skill : undefined);
 }
 
-/** Picking a skill fills in its usual ability (SRD 5.2.1 page 9). Picking it again clears it. The ability can still be changed after. */
-export function withSkill(choice: RollChoice, skill: RollChoice["skill"]): RollChoice {
-  if (skill === undefined || choice.skill === skill) return { ability: choice.ability };
-  return { ability: SKILLS[skill].ability, skill };
+/** The pick a request's choice is, as a recent request or a fill holds it. */
+export function pickOf(kind: RollTest["kind"], choice: RollChoice): RollPick {
+  if (kind === "save") return { kind, ability: choice.ability };
+  return choice.skill === undefined ? { kind, ability: choice.ability } : { kind, ability: choice.ability, skill: choice.skill };
+}
+
+/** A pick in the test's own words, short: "Dex save", "Wis (Perception) check". */
+export function pickText(pick: RollPick): string {
+  return testShortText({ kind: pick.kind, choices: [choiceOf(pick)] });
+}
+
+function choiceOf(pick: RollPick): RollChoice {
+  return pick.kind === "check" && pick.skill !== undefined ? { ability: pick.ability, skill: pick.skill } : { ability: pick.ability };
+}
+
+/**
+ * Why choice `i` cannot take a pick (4.3), or null when it can. A test
+ * holds one kind (RollTest), so with the other choice picked, a pick of
+ * the other kind is refused, and so is the other choice's own pick, since
+ * a request offers two different rolls.
+ */
+export function pickRefusal(draft: Pick<AskDraft, "choices">, i: number, pick: RollPick): string | null {
+  const other = draft.choices.length > 1 ? draft.choices[1 - i] : null;
+  if (!other) return null;
+  if (other.kind !== pick.kind) return other.kind === "save" ? "Both choices are saves." : "Both choices are checks.";
+  return samePick(other, pick) ? `That is the ${i === 0 ? "second" : "first"} choice.` : null;
+}
+
+/** Choice `i` becomes `pick`, whole, or nothing (null) again. A pick a rule refuses changes nothing. */
+export function choose(draft: AskDraft, i: number, pick: RollPick | null): AskDraft {
+  if (i < 0 || i >= draft.choices.length || samePick(draft.choices[i], pick)) return draft;
+  if (pick !== null && pickRefusal(draft, i, pick) !== null) return draft;
+  return { ...draft, choices: draft.choices.map((c, j) => (j === i ? pick : c)) };
+}
+
+/**
+ * What each control of choice `i`'s picker does (4.2), as the sheet wires
+ * them and the picker's randomized test drives them: a tap in the Save or
+ * Check row, a pick in the Skill dropdown, which starts at the skill's
+ * usual ability (SRD 5.2.1 page 9), and "with", which changes a picked
+ * skill's ability. "Choose a skill" clears only a skill: the dropdown
+ * shows it for every other pick, so it never fires then.
+ */
+export const pickerSteps = {
+  save: (draft: AskDraft, i: number, ability: AbilityKey): AskDraft => choose(draft, i, { kind: "save", ability }),
+  check: (draft: AskDraft, i: number, ability: AbilityKey): AskDraft => choose(draft, i, { kind: "check", ability }),
+  skill: (draft: AskDraft, i: number, skill: SkillKey | null): AskDraft => {
+    if (skill !== null) return choose(draft, i, { kind: "check", ability: SKILLS[skill].ability, skill });
+    const pick = draft.choices[i];
+    return pick?.kind === "check" && pick.skill !== undefined ? choose(draft, i, null) : draft;
+  },
+  with: (draft: AskDraft, i: number, ability: AbilityKey): AskDraft => {
+    const pick = draft.choices[i];
+    return pick?.kind === "check" && pick.skill !== undefined ? choose(draft, i, { kind: "check", ability, skill: pick.skill }) : draft;
+  },
+};
+
+/** "Or a second choice": an empty second picker, while there is one choice. */
+export function addChoice(draft: AskDraft): AskDraft {
+  return draft.choices.length < LIMITS.rollChoices ? { ...draft, choices: [...draft.choices, null] } : draft;
+}
+
+/** Remove on either of two choices. Removing the first makes the second the first. The last one stays. */
+export function removeChoice(draft: AskDraft, i: number): AskDraft {
+  if (draft.choices.length < 2 || i < 0 || i >= draft.choices.length) return draft;
+  return { ...draft, choices: draft.choices.filter((_, j) => j !== i) };
+}
+
+/** The test the draft asks for, which Send sends and the status line names, or null while a choice is empty. */
+export function draftTest(draft: Pick<AskDraft, "choices">): RollTest | null {
+  const picks = draft.choices;
+  if (picks.length === 0 || picks.some((p) => p === null)) return null;
+  const kind = picks[0]!.kind;
+  return { kind, choices: (picks as RollPick[]).map(choiceOf) };
+}
+
+/** Whether every pick so far is a check, and there is one: the typical DCs are for checks (SRD 5.2.1 page 6). */
+export function allChecks(draft: Pick<AskDraft, "choices">): boolean {
+  const picks = draft.choices.filter((p): p is RollPick => p !== null);
+  return picks.length > 0 && picks.every((p) => p.kind === "check");
+}
+
+/**
+ * What choice `i`'s picker shows (4.2), worked out from its one pick, so no
+ * control holds a value of its own: the Save row its ability only for a
+ * save, the Check row only for a check with no skill, the Skill dropdown
+ * only for a skill, with "with" showing that skill's ability. At most one
+ * row shows a value. Each list names what is disabled now, by
+ * `pickRefusal`, and `why` says so under the picker.
+ */
+export type PickerView = {
+  save: { value: AbilityKey | null; disabled: readonly AbilityKey[] };
+  check: { value: AbilityKey | null; disabled: readonly AbilityKey[] };
+  skill: { value: SkillKey | null; disabled: readonly SkillKey[] };
+  with: { skill: SkillKey; value: AbilityKey; disabled: readonly AbilityKey[] } | null;
+  why: string | null;
+};
+
+export function pickerView(draft: Pick<AskDraft, "choices">, i: number): PickerView {
+  const pick = draft.choices[i] ?? null;
+  const refused = (p: RollPick) => pickRefusal(draft, i, p) !== null;
+  const skill = pick?.kind === "check" ? pick.skill : undefined;
+  const other = draft.choices.length > 1 ? draft.choices[1 - i] : null;
+  return {
+    save: { value: pick?.kind === "save" ? pick.ability : null, disabled: ABILITY_KEYS.filter((a) => refused({ kind: "save", ability: a })) },
+    check: { value: pick?.kind === "check" && skill === undefined ? pick.ability : null, disabled: ABILITY_KEYS.filter((a) => refused({ kind: "check", ability: a })) },
+    skill: { value: skill ?? null, disabled: SKILL_KEYS.filter((s) => refused({ kind: "check", ability: SKILLS[s].ability, skill: s })) },
+    with: pick && skill !== undefined ? { skill, value: pick.ability, disabled: ABILITY_KEYS.filter((a) => a !== pick.ability && refused({ kind: "check", ability: a, skill })) } : null,
+    why: other ? `${other.kind === "save" ? "Both choices are saves." : "Both choices are checks."} ${pickText(other)} is the ${i === 0 ? "second" : "first"} choice.` : null,
+  };
+}
+
+/** The sheet's status line (4.9): the test it would send with its DC, or what to pick, then how many are asked. */
+export function askStatus(draft: AskDraft): string {
+  const asked = `${draft.ticked.length} asked.`;
+  const test = draftTest(draft);
+  if (!test) return `Pick what to roll. ${asked}`;
+  const dc = draft.dc.trim() ? `, DC ${draft.dc.trim()}` : ", no DC";
+  return `${testTitle(test)}${dc}. ${asked}`;
 }
 
 function distinct(choices: readonly RollChoice[]): RollChoice[] {
@@ -178,10 +303,13 @@ export type AskCheck = { ok: true; op: Extract<ClientOp, { t: "roll.ask" }> } | 
 /** The `roll.ask` a draft sends, or what to fix first, in the sheet's words. */
 export function askOp(draft: AskDraft, id: string, open: number): AskCheck {
   if (open >= LIMITS.openRollsPerRoom) return { ok: false, error: `${LIMITS.openRollsPerRoom} requests are open. Close one first.` };
+  const empty = draft.choices.findIndex((c) => c === null);
+  if (empty === 0) return { ok: false, error: "Pick what to roll first." };
+  if (empty > 0) return { ok: false, error: "Pick the second choice, or remove it." };
   if (draft.ticked.length === 0) return { ok: false, error: "Tick at least one creature to ask." };
   if (draft.ticked.length > LIMITS.rollTargets) return { ok: false, error: `Ask at most ${LIMITS.rollTargets} creatures at once.` };
-  const choices = distinct(draft.choices);
-  if (choices.length !== draft.choices.length) return { ok: false, error: "The two choices are the same. Change or remove one." };
+  const test = draftTest(draft)!;
+  if (distinct(test.choices).length !== test.choices.length) return { ok: false, error: "The two choices are the same. Change or remove one." };
   const dcText = draft.dc.trim();
   let dc: number | undefined;
   if (dcText !== "") {
@@ -192,7 +320,6 @@ export function askOp(draft: AskDraft, id: string, open: number): AskCheck {
   }
   const note = draft.note.replace(/\s+/g, " ").trim();
   if ([...note].length > LIMITS.rollNoteChars) return { ok: false, error: `A note holds at most ${LIMITS.rollNoteChars} characters.` };
-  const test: RollTest = { kind: draft.kind, choices: draft.kind === "save" ? choices.map((c) => ({ ability: c.ability })) : choices };
   return {
     ok: true,
     op: {
