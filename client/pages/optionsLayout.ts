@@ -386,8 +386,14 @@ function placedOrWaiting(id: string, placed: ReadonlyMap<string, SlotForm>, wait
  * between the row and ⋯. A slot that goes leaves from wherever it is, and
  * a slot that appears joins its home. While ⋯ is open it stays, even with
  * nothing left in it, until the popover closes, and then the row refits
- * once. Where the held row no longer fits the room (a rotation to a
- * narrower one), the hold gives way to a refit, which keeps an open ⋯.
+ * once. A flexible slot keeps the width it had, so nothing beside it
+ * moves, and gives back what it grew where the room shrinks.
+ *
+ * The held row is checked as it would draw: its widths as returned, with
+ * ⋯'s room kept wherever ⋯ shows, also for ⋯ that a newly waiting slot
+ * brings. Where it no longer fits the room (a rotation to a narrower
+ * one), the hold gives way to a refit, which keeps ⋯'s room while ⋯ is
+ * open.
  */
 export function heldFit(previous: RowFit, input: FitInput, moreOpen = true): RowFit {
   const ids = new Set(input.slots.map((s) => s.id));
@@ -396,10 +402,6 @@ export function heldFit(previous: RowFit, input: FitInput, moreOpen = true): Row
   for (const slot of input.slots) {
     const form = was.get(slot.id);
     if (form !== undefined) placed.set(slot.id, form);
-  }
-  if (rowWidth(input.slots, placed) > input.room - (moreOpen || previous.hasMore ? MORE_ROOM : 0)) {
-    const fit = fitRow(input);
-    return moreOpen ? { ...fit, hasMore: true } : fit;
   }
   const homeOf = new Map(Object.entries(previous.homes).flatMap(([chip, held]) => held.map((id) => [id, chip] as const)));
   const homes: Record<string, string[]> = {};
@@ -412,14 +414,28 @@ export function heldFit(previous: RowFit, input: FitInput, moreOpen = true): Row
     if (home) (homes[home] ??= []).push(slot.id);
     else more.push(slot.id);
   }
+  const hasMore = moreOpen || previous.hasMore || input.alwaysMore || more.length > 0;
+  const limit = input.room - (hasMore ? MORE_ROOM : 0);
+  const widths = new Map<string, number>();
+  for (const slot of input.slots) {
+    const kept = previous.row.find((p) => p.id === slot.id);
+    if (slot.max !== undefined && kept && placed.get(slot.id) === "full") widths.set(slot.id, Math.min(slot.max, Math.max(slot.full, kept.width)));
+  }
+  // What a flexible slot grew it gives back first, the last first, before the hold gives way.
+  let over = rowWidth(input.slots, placed, widths) - limit;
+  for (const slot of [...input.slots].reverse()) {
+    const width = widths.get(slot.id);
+    if (over <= 0 || width === undefined) continue;
+    const give = Math.min(over, width - slot.full);
+    widths.set(slot.id, width - give);
+    over -= give;
+  }
+  if (over > 0) return fitRow(moreOpen ? { ...input, alwaysMore: true } : input);
   const row = input.slots.flatMap((slot) => {
     const form = placed.get(slot.id);
-    if (form === undefined) return [];
-    const kept = previous.row.find((p) => p.id === slot.id);
-    // A flexible slot keeps the width it had, so nothing beside it moves.
-    return [{ id: slot.id, form, width: slot.max !== undefined && kept ? kept.width : formWidth(slot, form) }];
+    return form === undefined ? [] : [{ id: slot.id, form, width: widths.get(slot.id) ?? formWidth(slot, form) }];
   });
-  return { row, more, homes, hasMore: moreOpen || previous.hasMore || input.alwaysMore || more.length > 0, broken: [] };
+  return { row, more, homes, hasMore, broken: [] };
 }
 
 // ------------------------------------------------------------ the toolbar (5.2, 5.4)

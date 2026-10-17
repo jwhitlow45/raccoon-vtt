@@ -296,6 +296,31 @@ describe("what holds still (6.4)", () => {
     assert.deepEqual(grew.more, ["kept"]);
   });
 
+  test("a held row is checked as it draws, so it never outgrows its room", () => {
+    // The row as drawn: its widths as returned, a gap between each, and ⋯ with its gap where it shows.
+    const drawn = (fit: RowFit) => fit.row.reduce((sum, p, i) => sum + p.width + (i > 0 ? SLOT_GAP : 0), 0) + (fit.hasMore ? MORE_ROOM : 0);
+    // A flexible field grown to 170 beside a 72 px button and ⋯ in 294, then narrowed to 220 with ⋯ open: it gives back what it grew.
+    const field = [slot("button", 1, 72), slot("field", 2, 96, { max: 170 })];
+    const grown = fitRow({ room: 294, slots: field, alwaysMore: true, pins: [] });
+    assert.equal(grown.row[1]?.width, 170);
+    const narrowed = heldFit(grown, { room: 220, slots: field, alwaysMore: true, pins: [] });
+    assert.equal(ids(narrowed), "button field …", "nothing crosses");
+    assert.equal(narrowed.row[1]?.width, 96);
+    assert.ok(drawn(narrowed) <= 220, `${drawn(narrowed)} in 220`);
+    // A refit with ⋯ open keeps ⋯'s room: two 150 px slots in 320 do not both stay beside it.
+    const before = fitRow({ room: 400, slots: [slot("a", 1, 150), slot("b", 2, 150), slot("c", 3, 100)], alwaysMore: false, pins: [] });
+    assert.equal(ids(before), "a b …");
+    const refit = heldFit(before, { room: 320, slots: [slot("a", 1, 150), slot("b", 2, 150)], alwaysMore: false, pins: [] });
+    assert.equal(ids(refit), "a …");
+    assert.ok(drawn(refit) <= 320, `${drawn(refit)} in 320`);
+    // During a press, a slot that appears brings ⋯, whose room the held row then needs: two 120 px slots in 270 give way.
+    const pressed = fitRow({ room: 270, slots: [slot("keep", 2, 120), slot("clear", 2, 120)], alwaysMore: false, pins: [] });
+    assert.equal(ids(pressed), "keep clear");
+    const appeared = heldFit(pressed, { room: 270, slots: [slot("keep", 2, 120), slot("clear", 2, 120), slot("kept", 3, 140)], alwaysMore: false, pins: [] }, false);
+    assert.equal(appeared.hasMore, true);
+    assert.ok(drawn(appeared) <= 270, `${drawn(appeared)} in 270`);
+  });
+
   test("⋯ and its gap take 48 px", () => {
     assert.equal(MORE_ROOM, 48);
   });
