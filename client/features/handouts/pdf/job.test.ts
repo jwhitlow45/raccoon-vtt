@@ -47,7 +47,7 @@ type Sent = { op: ClientOp; onAnswer: OnAnswer };
  * A room, a PDF and a server for one job: every upload, op and wait is the
  * test's to answer, unless it says to answer them as they come.
  */
-function world(opts: { pages?: number; title?: string | null; failDraw?: number[]; tooLarge?: number[]; openFails?: ReaderRefusal; autoUpload?: boolean; holdDraw?: number[]; holdOpen?: boolean; holdDestroy?: boolean; pageMs?: number } = {}) {
+function world(opts: { pages?: number; title?: string | null; failDraw?: number[]; tooLarge?: number[]; openFails?: ReaderRefusal; autoUpload?: boolean; holdDraw?: number[]; holdOpen?: boolean; holdDestroy?: boolean; pageMs?: number; holdDrawOf?: [number, number][]; holdCleanup?: boolean } = {}) {
   const numPages = opts.pages ?? 3;
   const state: { view: RoomState; online: string[]; connection: string; snapshots: number } = { view: testRoom(), online: [ME], connection: "open", snapshots: 1 };
   const listeners = new Set<() => void>();
@@ -71,8 +71,11 @@ function world(opts: { pages?: number; title?: string | null; failDraw?: number[
   let docs = 0;
   let holdSleeps = false;
   let cancelled: (() => void) | null = null;
+  // Each held draw is held once: a page of the first reader to draw it, or of the reader named.
   const holdDraw = new Set(opts.holdDraw ?? []);
-  const releases = new Map<number, () => void>();
+  const holdDrawOf = new Set((opts.holdDrawOf ?? []).map(([doc, page]) => `${doc}:${page}`));
+  const releases = new Map<string, { resolve(): void; reject(err: unknown): void }>();
+  const canvases: { width: number; height: number }[] = [];
   let drawing = 0;
   let mostDrawing = 0;
   const openSignals: AbortSignal[] = [];
@@ -97,8 +100,9 @@ function world(opts: { pages?: number; title?: string | null; failDraw?: number[
           canvas.width = 1583;
           canvas.height = 2048;
           if (failDraw.has(page)) throw new PageDrawFailure(page, 'Warning: Unable to decode image "img_p0_1"');
-          // A held page stands for the encode after a draw, which no cancel reaches: it ends only when released.
-          if (holdDraw.has(page)) await new Promise<void>((resolve) => releases.set(page, resolve));
+          // A held page stands for the encode after a draw, which no cancel reaches: it ends only when released, or fails then.
+          const held = holdDrawOf.delete(`${id}:${page}`) || holdDraw.delete(page);
+          if (held) await new Promise<void>((resolve, reject) => releases.set(`${id}:${page}`, { resolve, reject }));
           else
             await new Promise<void>((resolve, reject) => {
               cancelled = () => reject(new DrawCancelled());
@@ -110,7 +114,7 @@ function world(opts: { pages?: number; title?: string | null; failDraw?: number[
         }
       },
       cancelDraw: () => cancelled?.(),
-      cleanup: async () => void cleaned.push(lastPage),
+      cleanup: () => (opts.holdCleanup ? new Promise<void>(() => {}) : Promise.resolve(void cleaned.push(lastPage))),
       destroy: () =>
         opts.holdDestroy
           ? new Promise<void>((resolve) =>
@@ -134,9 +138,14 @@ function world(opts: { pages?: number; title?: string | null; failDraw?: number[
       if (opts.openFails) throw opts.openFails;
       return doc();
     },
-    canvas: () => ({ width: 0, height: 0 }) as HTMLCanvasElement,
+    canvas: () => {
+      const canvas = { width: 0, height: 0 };
+      canvases.push(canvas);
+      return canvas as HTMLCanvasElement;
+    },
     async encode(canvas) {
-      if (tooLarge.has(lastPage)) return null;
+      // An emptied canvas has nothing to encode, as a real one would come out blank and too small.
+      if (tooLarge.has(lastPage) || canvas.width === 0) return null;
       return { blob: new Blob([`page ${lastPage}`], { type: "image/webp" }), width: canvas.width, height: canvas.height };
     },
     thumb: () => `data:image/jpeg;base64,page${lastPage}`,
@@ -228,8 +237,18 @@ function world(opts: { pages?: number; title?: string | null; failDraw?: number[
     drawn: () => drawn,
     /** The most draws under way at once. */
     mostDrawing: () => mostDrawing,
-    /** Lets a held page's draw finish. */
-    releaseDraw: (page: number) => releases.get(page)?.(),
+    /** Lets a held page's draw finish, on the reader given or any, or fail. */
+    releaseDraw: (page: number, how: { doc?: number; fail?: boolean } = {}) => {
+      for (const [key, held] of releases) {
+        const [doc, p] = key.split(":").map(Number);
+        if (p !== page || (how.doc !== undefined && doc !== how.doc)) continue;
+        releases.delete(key);
+        if (how.fail) held.reject(new PageDrawFailure(page, "late"));
+        else held.resolve();
+        return;
+      }
+    },
+    canvases,
     openSignals,
     /** Lets every held destroy finish. */
     finishDestroys: () => destroys.splice(0).forEach((f) => f()),
@@ -605,6 +624,76 @@ describe("pausing and stopping (docs/design-v1-pdf-handouts.md 4.1.6)", () => {
     assert.equal(w.opened.length, 2, "a fresh one opens");
     assert.equal(w.uploads.at(-1)!.page, 1, "on from page 1");
     void resumed;
+  });
+
+  test("a run let go after the wait keeps its own canvas and reader: its encode ending late, either way, leaves the new run's alone", async () => {
+    for (const late of ["resolves", "rejects"] as const) {
+      // Reader 1's page 2 is stuck in its encode. Reader 2's page 1 is held mid-draw while the stuck one ends.
+      const w = world({ pages: 3, autoUpload: false, holdDraw: [2], holdDrawOf: [[2, 1]] });
+      w.deps.quietMs = 20;
+      await w.open();
+      w.runner.upload();
+      await settle();
+      w.uploads[0]!.reject(new ApiError(0, "x", "network", null));
+      await settle();
+      void w.runner.tryAgain();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await settle();
+      assert.deepEqual(w.destroyed, [1], `${late}: the stuck reader is ended`);
+      assert.equal(w.opened.length, 2);
+      assert.equal(w.canvases.length, 2, `${late}: the new run draws on a canvas of its own`);
+      assert.equal(w.canvases[1]!.width, 1583, "the new run is drawing");
+      w.releaseDraw(2, { doc: 1, fail: late === "rejects" });
+      await settle();
+      assert.equal(w.canvases[1]!.width, 1583, `${late}: the new run's canvas keeps its size`);
+      assert.deepEqual(w.destroyed, [1], `${late}: the new run's reader stays open`);
+      w.releaseDraw(1, { doc: 2 });
+      await settle();
+      assert.equal(w.phase().k, "preparing", `${late}: the new run goes on`);
+      assert.equal(w.uploads.at(-1)!.page, 1);
+    }
+  });
+
+  test("Cancel or the room going away while a stuck cleanup's reader closes: no new reader starts", async () => {
+    for (const how of ["cancel", "dispose"] as const) {
+      const w = world({ pages: 8, holdCleanup: true, holdDestroy: true });
+      w.deps.cleanupMs = 20;
+      await w.open();
+      w.runner.upload();
+      // The cleanup after five pages never ends, so its reader is ended, and that end is held.
+      for (let i = 0; i < 20 && w.store.getState().job?.phase.k === "preparing" && w.uploads.length < 5; i++) await settle();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await settle();
+      assert.equal(w.opened.length, 1, `${how}: the old reader still closing`);
+      if (how === "cancel") void w.runner.cancel();
+      else w.runner.dispose();
+      await settle();
+      w.finishDestroys();
+      await settle();
+      w.finishDestroys();
+      await settle();
+      assert.equal(w.opened.length, 1, `${how}: no reader opened for a run that is over`);
+      if (how === "cancel") assert.equal(w.phase().k, "cancelled");
+    }
+  });
+
+  test("a run that throws pauses the job with Try again, and the next run still goes", async () => {
+    const w = world({ pages: 2 });
+    await w.open();
+    const room = w.deps.room;
+    let reads = 0;
+    // Upload's own read checks the range. The run's first read, for the share pause, throws once.
+    w.deps.room = () => {
+      if (++reads === 2) throw new Error("boom");
+      return room();
+    };
+    w.runner.upload();
+    await settle();
+    assert.deepEqual(w.phase(), { k: "paused", page: 1, stop: { k: "failed", words: "The upload stopped. Try again." } });
+    void w.runner.tryAgain();
+    for (let i = 0; i < 5 && w.sent.length === 0; i++) await settle();
+    assert.equal(w.uploads.length, 2, "the later run uploads every page");
+    assert.equal(w.sent.length, 1, "and saves");
   });
 
   test("Leave this page out after a failed draw also waits for the reader to be free", async () => {

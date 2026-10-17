@@ -101,6 +101,8 @@ export type JobDeps = {
   now(): number;
   /** How long a resume waits for the last run to settle, QUIET_MS unless a test says. */
   quietMs?: number;
+  /** How long a reader's cache cleanup gets before the reader is replaced, DESTROY_GRACE_MS unless a test says. */
+  cleanupMs?: number;
 };
 
 /**
@@ -288,11 +290,25 @@ export class JobRunner implements JobControl {
 
   // The pages.
 
-  /** A new run of the pages, once the one before has stopped, whether it ended or threw. */
+  /**
+   * A new run of the pages, once the one before has stopped, whether it
+   * ended or threw. A run that throws, which no step should, pauses the job
+   * with Try again rather than leaving it preparing for good.
+   */
   #loop(): Promise<void> {
-    const next = this.#looping.catch(() => undefined).then(() => this.#pages());
+    const next = this.#looping
+      .catch(() => undefined)
+      .then(() => this.#pages())
+      .catch(() => this.#runThrew());
     this.#looping = next;
     return next;
+  }
+
+  #runThrew(): void {
+    const job = this.#store.getState().job;
+    if (!job || this.#disposed || this.#cancelling || job.phase.k !== "preparing") return;
+    const page = pagesToDo(job)[0] ?? job.range?.from ?? 1;
+    this.#pause(this.#run, page, { k: "failed", words: "The upload stopped. Try again." });
   }
 
   /**
@@ -305,7 +321,9 @@ export class JobRunner implements JobControl {
     this.#doc?.cancelDraw();
     if (await within(this.#looping, this.#deps.quietMs ?? QUIET_MS)) return;
     this.#looping = Promise.resolve();
-    await this.#closeDoc();
+    // The stuck run keeps its canvas and its reader, which is ended, so whatever it does when it settles touches only them. The next run gets fresh ones.
+    this.#canvas = null;
+    await this.#closeReader(this.#doc);
   }
 
   /**
@@ -343,12 +361,14 @@ export class JobRunner implements JobControl {
     for (const page of pagesToDo(this.#job)) {
       if (!(await this.#whenVisible(run))) return;
       let drawn: { encoded: Encoded | null; thumb: string | null; slow: boolean };
+      // This run's reader: a failure closes it and no other, however late it comes.
+      const reader = this.#doc;
       try {
         drawn = await this.#draw(page);
       } catch (err) {
         const failed = !(err instanceof DrawCancelled);
         // A reader whose page failed is never drawn with again, whatever stops the job first (4.2.1).
-        if (failed) await this.#closeDoc();
+        if (failed) await this.#closeReader(reader);
         // The page uploading first is told first: its stop comes before this one.
         if (pending && !(await pending)) return;
         if (!live() || !failed) return;
@@ -372,7 +392,7 @@ export class JobRunner implements JobControl {
         this.#sinceCleanup = 0;
         // A worker that never finishes its cleanup is ended, and the pages go on in a fresh one.
         const doc = this.#doc;
-        if (doc && !(await within(doc.cleanup(), DESTROY_GRACE_MS))) {
+        if (doc && !(await within(doc.cleanup(), this.#deps.cleanupMs ?? DESTROY_GRACE_MS))) {
           if (!live()) return;
           if (!(await this.#reopen(run))) return;
         }
@@ -498,10 +518,16 @@ export class JobRunner implements JobControl {
     return this.#deps.room().online.some((id) => id !== this.#deps.memberId);
   }
 
-  /** A fresh worker and the file opened again: after a page failed, whose decoders' state and caches it would carry (4.2.1). */
+  /**
+   * A fresh worker and the file opened again: after a page failed, whose
+   * decoders' state and caches it would carry (4.2.1). Cancel, Done or the
+   * room going away while the old reader closes leave it at that: no new
+   * reader starts for a run that is over, and the one that opens is the
+   * job's opening, which Cancel aborts.
+   */
   async #reopen(run: number): Promise<boolean> {
     await this.#closeDoc();
-    if (!this.#file) return false;
+    if (run !== this.#run || this.#disposed || this.#cancelling || !this.#file) return false;
     try {
       const doc = await this.#openFile(this.#file);
       if (run !== this.#run || this.#disposed) {
@@ -520,9 +546,19 @@ export class JobRunner implements JobControl {
   }
 
   async #closeDoc(): Promise<void> {
-    const doc = this.#doc;
-    this.#doc = null;
-    await doc?.destroy().catch(() => undefined);
+    await this.#closeReader(this.#doc);
+  }
+
+  /** Readers already ended, so a late failure from a run let go never ends one twice. */
+  readonly #closed = new WeakSet<PdfDocument>();
+
+  /** Ends `doc`, and lets go of it if it is still the job's reader. Any other reader stays as it is. */
+  async #closeReader(doc: PdfDocument | null): Promise<void> {
+    if (!doc) return;
+    if (this.#doc === doc) this.#doc = null;
+    if (this.#closed.has(doc)) return;
+    this.#closed.add(doc);
+    await doc.destroy().catch(() => undefined);
   }
 
   // The DM's buttons while paused.
