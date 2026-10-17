@@ -7,6 +7,7 @@ import { projectEntity } from "#shared/project.ts";
 import type { ActorTarget, Op } from "#shared/protocol.ts";
 import { reminderPreset, type RollPreset } from "#shared/rules/rollReminders.ts";
 import { pendingSaves, type PendingSave } from "#shared/rules/saveEnds.ts";
+import { logSeq, remembered, rowTag } from "../dice/optionState.ts";
 import { actor, apply, AT, character, DM, effect, entry, P1, P2, room, token } from "#shared/testutil.ts";
 import {
   askSaveOp,
@@ -336,6 +337,7 @@ describe("recharge prompts", () => {
       ["Fire Breath can recharge (5–6)."],
     );
     assert.equal(prompts[0]?.row, "t:d1|actions:fire-breath|recharge");
+    assert.equal(prompts[0]?.after, 9, "the card reads only rolls sent since its turn's line");
     // Nothing marked Used: no prompt, and no block to load.
     assert.equal(rechargeTurn(view, "9:0", "x1", {}), null);
     // A creature a player plays is never prompted.
@@ -358,6 +360,17 @@ describe("recharge prompts", () => {
  * it (W7-SOL-01): a DC the players' view of the creature lacks never
  * reaches them on the roll's line either.
  */
+test("a recharge card reads its row's roll of this turn only, and the Dice panel's roll of it this turn too", () => {
+  const row = "t:d1|actions:fire-breath|recharge";
+  // Rolled and failed on the dragon's turn of seq 4, from the card or the panel alike.
+  let store = remembered({ tags: {}, since: {} }, row, "tag-old", logSeq([{ id: "3:0" }, { id: "4:1" }]));
+  assert.equal(rowTag(store, row), "tag-old", "the Dice panel's row shows its newest roll");
+  assert.equal(rowTag(store, row, 9), null, "the next turn's card, from seq 9, offers Roll again");
+  store = remembered(store, row, "tag-new", logSeq([{ id: "4:1" }, { id: "9:0" }]));
+  assert.equal(rowTag(store, row, 9), "tag-new", "a roll sent since the turn began is the card's, wherever it was tapped");
+  assert.equal(logSeq([]), 0);
+});
+
 describe("a card's roll keeps a DC players may not see off its line", () => {
   function rolled(state: RoomState, by: Viewer, target: ActorTarget, envelope: { to: "all" | "dm"; dc?: number }): { state: RoomState; id: string } {
     const op: Op = { t: "sys.dice", asked: { t: "dice.roll", tag: "0192f0a8-6c1e-7a4b-9c3d-2e1f0a9b8c7d", rolls: [{ formula: "1d20+1", creature: target }], ...envelope }, batch: "AbCdEfGhIjKlMnOp", results: [{ formula: "1d20+1", faces: [16], total: 17 }] };

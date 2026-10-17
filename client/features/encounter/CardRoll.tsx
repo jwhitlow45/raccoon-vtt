@@ -3,8 +3,8 @@ import type { ClientOp } from "#shared/protocol.ts";
 import { Button, type ButtonVariant } from "../../components/Button.tsx";
 import { Chip } from "../../components/Chip.tsx";
 import { theme } from "../../lib/theme.ts";
-import { useRoomActions } from "../../state/view.ts";
-import { useOptionStore } from "../dice/optionState.ts";
+import { useRoomActions, useRoomStore } from "../../state/view.ts";
+import { logSeq, remembered, useOptionStore } from "../dice/optionState.ts";
 import { sendRoll, useRollSender, type TaggedOp } from "../dice/send.ts";
 import { useDicePanel, type PanelRoll } from "../dice/useDicePanel.ts";
 import type { ReceiptState } from "../dice/useReceipt.ts";
@@ -24,16 +24,18 @@ import { pressChip, type CardButton, type CardChip } from "./saveCards.ts";
  * in the open, with its own sources only: the Dice panel's choices are
  * neither applied nor taken (6.3), so it works with the panel closed. `row`
  * names it in the options' store, which holds its newest tag for the page.
+ * `after`, a room seq, keeps a card of one moment to the rolls sent since.
  */
-export function useCardRoll(row: string) {
+export function useCardRoll(row: string, after?: number) {
   const panel = useDicePanel();
   const sender = useRollSender();
   const store = useOptionStore();
-  const result = useRowResult(row);
+  const room = useRoomStore();
+  const result = useRowResult(row, after);
   const [unsent, setUnsent] = useState(false);
   const remember = (tag: string | null) => {
     setUnsent(tag === null);
-    if (tag) store.setState((s) => ({ tags: { ...s.tags, [row]: tag } }));
+    if (tag) store.setState((s) => remembered(s, row, tag, logSeq(room.getState().view?.log)));
     return tag;
   };
   return {

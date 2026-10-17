@@ -463,19 +463,29 @@ export function rechargeTurn(view: Pick<RoomState, "tokens" | "characters" | "en
   return keys.length > 0 ? { logId, creature, holder, used: [...keys] } : null;
 }
 
-export type RechargePrompt = { id: string; key: string; name: string; recharge: number; text: string; row: string };
+export type RechargePrompt = {
+  id: string;
+  key: string;
+  name: string;
+  recharge: number;
+  text: string;
+  row: string;
+  /** The seq of the turn's line: the card reads only a roll of its row sent since, so an earlier turn's result is not this one's (ASTRA-06). */
+  after: number;
+};
 
 /**
  * The recharge prompts of one turn start: each named roll with a recharge
  * that was marked Used when the turn started. An action never marked Used
  * is never prompted. `row` is the Dice panel's own row for that recharge
- * (RollOptions.tsx), so the result shows there too and is acted on once.
+ * (RollOptions.tsx), so the result shows there too and is acted on once,
+ * and `after` keeps the card to this turn's rolls of it.
  */
 export function rechargePrompts(turn: RechargeTurn, named: readonly NamedRoll[]): RechargePrompt[] {
   const used = new Set(turn.used);
   return named
     .filter((r): r is NamedRoll & { recharge: NonNullable<NamedRoll["recharge"]> } => r.recharge !== undefined && used.has(r.key))
-    .map((r) => ({ id: `${turn.logId}|${r.key}`, key: r.key, name: r.name, recharge: r.recharge, text: rechargeText(r.name, r.recharge), row: `${turn.holder}|${r.key}|recharge` }));
+    .map((r) => ({ id: `${turn.logId}|${r.key}`, key: r.key, name: r.name, recharge: r.recharge, text: rechargeText(r.name, r.recharge), row: `${turn.holder}|${r.key}|recharge`, after: Number(turn.logId.split(":")[0]) }));
 }
 
 /** A recharge roll's success: its total at or above the action's recharge. */

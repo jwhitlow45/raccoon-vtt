@@ -51,13 +51,14 @@ type RechargeAction = "roll" | "dismiss" | "done";
  * "Fire Breath can recharge (5–6). Roll", for the DM: 1d6 to the DM,
  * labelled "Fire Breath recharge", whose success clears Used on this
  * device. It shares the Dice panel's row for that recharge, so the result
- * shows in both and Used is cleared once.
+ * shows in both and Used is cleared once, but reads only a roll sent since
+ * its turn started: the row's roll of an earlier turn is that turn's.
  */
 export function RechargeCard(props: { prompt: RechargePrompt; creature: ActorTarget; holder: string; onDone(): void }) {
   const { prompt } = props;
   const roomId = useRoomView((s) => s.roomId);
   const blocked = useRollBlocked();
-  const card = useCardRoll(prompt.row);
+  const card = useCardRoll(prompt.row, prompt.after);
   useActOnce(card.tag, card.rolls, (landed) => {
     if (recharged(landed[0]?.total ?? 0, prompt.recharge)) writeUsed(roomId, withUsed(readUsed(roomId), props.holder, prompt.key, false));
   });

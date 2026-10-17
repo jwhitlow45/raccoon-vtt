@@ -11,7 +11,7 @@ import { PreviewContext } from "../dm/previewContext.ts";
 import { openAsk } from "../rolls/open.ts";
 import { rollsOf } from "./logic.ts";
 import { d20Roll, initiativeOp, routeOf, targetRef } from "./options.ts";
-import { useOption, useOptionStore } from "./optionState.ts";
+import { logSeq, remembered, rowTag, useOption, useOptionStore } from "./optionState.ts";
 import { useReceipt, type ReceiptState } from "./useReceipt.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "./send.ts";
 import { useDicePanel, type PanelRoll } from "./useDicePanel.ts";
@@ -48,7 +48,7 @@ export function useRollOption() {
   const dm = useRoomView((s) => s.you?.role === "dm");
   return useMemo(() => {
     const remember = (row: string, tag: string | null) => {
-      if (tag) store.setState((s) => ({ tags: { ...s.tags, [row]: tag } }));
+      if (tag) store.setState((s) => remembered(s, row, tag, logSeq(room.getState().view?.log)));
       return tag;
     };
     return {
@@ -129,9 +129,13 @@ export function useRollOption() {
   }, [panel, sender, scope, store, room, actions, dm]);
 }
 
-/** A row's newest roll as it stands: its tag, its receipt, the rolls it landed, and whether it waits. */
-export function useRowResult(row: string): { tag: string | null; receipt: ReceiptState | null; rolls: DiceRoll[]; waiting: boolean } {
-  const tag = useOption((s) => s.tags[row] ?? null);
+/**
+ * A row's newest roll as it stands: its tag, its receipt, the rolls it
+ * landed, and whether it waits. With `after`, only a roll sent at or after
+ * that room seq counts (rowTag).
+ */
+export function useRowResult(row: string, after?: number): { tag: string | null; receipt: ReceiptState | null; rolls: DiceRoll[]; waiting: boolean } {
+  const tag = useOption((s) => rowTag(s, row, after));
   const receipt = useReceipt(tag);
   const rolls = useMemo(() => (receipt?.state === "committed" ? rollsOf(receipt.lines) : []), [receipt]);
   const waiting = receipt !== null && (receipt.state === "sending" || receipt.state === "checking");

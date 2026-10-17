@@ -259,7 +259,7 @@ Cards roll with `useDicePanel().roll(rolls, { to })`, which works with the Dice 
 
 ### 6.4 Recharge
 
-Tapping an action's Damage or Group save, or Apply on a group save filled from it (an area's "Fill from Fire Breath" included), marks it "Used" on this device (per token and action, in session storage), and its row's "Used" toggles it by hand. At the start of that monster's turn, the DM's fight alerts show "Fire Breath can recharge (5–6). Roll", which rolls 1d6 and clears Used on a success. An action never marked Used is never prompted.
+Tapping an action's Damage or Group save, or Apply on a group save filled from it (an area's "Fill from Fire Breath" included), marks it "Used" on this device (per token and action, in session storage), and its row's "Used" toggles it by hand. At the start of that monster's turn, the DM's fight alerts show "Fire Breath can recharge (5–6). Roll", which rolls 1d6 and clears Used on a success. The card shares the Dice panel's recharge row but reads only a roll of it sent since that turn's line, so a failed roll of an earlier turn leaves the next turn's card offering Roll (build round 1, ASTRA-06). An action never marked Used is never prompted.
 
 ## 7. Auto initiative on the server
 
