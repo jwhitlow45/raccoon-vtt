@@ -5,6 +5,7 @@ import { theme } from "../lib/theme.ts";
 import { Icon } from "./Icon.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { dangerLook } from "./looks.ts";
+import { SheetGrabber } from "./SheetGrabber.tsx";
 
 /**
  * Where a header's back button leads. `label` is its accessible name,
@@ -139,10 +140,13 @@ export function SheetHeader(props: {
       at={props.stacked ? { left: padding, top: STACKED_PAD + theme.touch + (STACKED_TITLE_LINE - theme.touch) / 2 } : { left: padding + (back ? theme.touch + theme.space(1) : 0), top: (56 - theme.touch) / 2 }}
     />
   ) : null;
-  const lead = fullScreen ? { position: "relative" as const } : null;
+  // In the room above the buttons, which a row and a stacked header both keep (SheetGrabber).
+  const grabber = props.grab ? <SheetGrabber space={props.stacked ? STACKED_PAD : ROW_TOP_SPACE} /> : null;
+  const lead = fullScreen || grabber ? { position: "relative" as const } : null;
   if (props.stacked) {
     return (
       <header {...grab.attrs} style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, padding: `${STACKED_PAD}px ${padding}px`, borderBottom: divider, ...grab.style, ...lead }}>
+        {grabber}
         {fullScreen}
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0, height: theme.touch }}>
           {backButton}
@@ -166,6 +170,7 @@ export function SheetHeader(props: {
   if (props.detail) {
     return (
       <header {...grab.attrs} style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, borderBottom: divider, ...grab.style, ...lead }}>
+        {grabber}
         <div style={rowStyle}>{row}</div>
         <div id={props.detailId} style={{ minWidth: 0, padding: `0 ${padding + theme.space(2)}px ${theme.space(2)}px`, marginTop: -theme.space(2) }}>
           {props.detail}
@@ -175,6 +180,7 @@ export function SheetHeader(props: {
   }
   return (
     <header {...grab.attrs} style={{ ...rowStyle, borderBottom: divider, ...grab.style, ...lead }}>
+      {grabber}
       {row}
     </header>
   );
@@ -213,6 +219,11 @@ function grabProps(on: boolean | undefined): { attrs: Record<string, string>; st
 /** The stacked header's padding above and below, and its title's line: 6 + 44 + 22 + 6 = 78 px (sheetCap.ts SHEET_HEADER_STACKED). */
 const STACKED_PAD = 6;
 const STACKED_TITLE_LINE = 22;
+/** The room above a 56 px row's 44 px buttons. */
+const ROW_TOP_SPACE = (56 - theme.touch) / 2;
+/** A pane's frame pads its top by this much above its header (builder/labelPaneFrame.ts), and a pane's 48 px header row centers its 44 px buttons under that. */
+const PANE_FRAME_TOP = theme.space(1);
+const PANE_TOP_SPACE = PANE_FRAME_TOP + (48 - theme.touch) / 2;
 
 /**
  * One `<button>` in both states, so arming it changes its content, name
@@ -356,6 +367,13 @@ export function PaneHeader(props: {
     </strong>
   );
   const close = props.onClose ? <IconButton ref={props.closeRef} icon="close" label={props.closeLabel ?? "Close"} onClick={props.onClose} /> : null;
+  /*
+   * A grab area reaches up over the frame's top padding, taken back from
+   * its margin, so the pill drawn there is on the header and a drag that
+   * starts on it moves the pane as one on the header does. Its buttons and
+   * title stay where they were. A sticky header reaches up already.
+   */
+  const reach: CSSProperties | null = props.grab && !sticky ? { position: "relative", marginTop: -PANE_FRAME_TOP, paddingTop: PANE_FRAME_TOP, minHeight: 48 + PANE_FRAME_TOP } : null;
   return (
     <div
       {...(sticky ? { [STICKY_HEADER_ATTR]: "" } : {})}
@@ -371,6 +389,7 @@ export function PaneHeader(props: {
         minWidth: 0,
         minHeight: 48,
         ...grab.style,
+        ...reach,
         ...(handle ? { touchAction: "none", cursor: handle.dragging ? "grabbing" : "grab" } : null),
         ...(sticky
           ? {
@@ -385,6 +404,7 @@ export function PaneHeader(props: {
           : null),
       }}
     >
+      {props.grab ? <SheetGrabber space={sticky ? PANE_FRAME_TOP : PANE_TOP_SPACE} /> : null}
       {grip}
       {title}
       {props.actions}

@@ -3,8 +3,8 @@
    and the disclosure marker, selection, the loading spinner's turn and
    delay, the "Your turn" notice's keyframes, the interface size's two
    rules, the room focus keeps under the tracker's sticky header, the HP
-   pair's container query, and reduced motion. Everything else is inline
-   from lib/theme.ts. */
+   pair's container query, reduced motion, and the sheet grabber under
+   forced colors. Everything else is inline from lib/theme.ts. */
 
 /* Native checkboxes, radios, selects, date fields and scrollbars draw for
    a dark page. Without it an unchecked box is a white square. */
@@ -239,4 +239,14 @@ summary::-webkit-details-marker {
 [data-resize-handle]:hover,
 [data-resize-handle]:focus-visible {
   color: var(--rvtt-accent, #f7df00) !important;
+}
+
+/* Forced colors drop the sheet grabber's fill (components/SheetGrabber.tsx),
+   which would leave the pill unseen, so it takes the system's muted text
+   color there. */
+@media (forced-colors: active) {
+  [data-sheet-grabber] {
+    forced-color-adjust: none;
+    background: GrayText !important;
+  }
 }

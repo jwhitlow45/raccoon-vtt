@@ -6,6 +6,7 @@ import { choiceText } from "#shared/rules/skills.ts";
 import { Button } from "../../components/Button.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
+import { SheetGrabber } from "../../components/SheetGrabber.tsx";
 import { dockSummaryButton, RETURN_RANK, sheetFocusSlot, useAlertsSummary, useSheetReturnFocus } from "../../components/sheetFocus.ts";
 import { useBackClose } from "../../lib/backClose.ts";
 import { displayName } from "../../lib/scene.ts";
@@ -448,7 +449,7 @@ function RollCard(props: {
           display: "flex",
           alignItems: "flex-start",
           gap: theme.space(2),
-          ...(props.sheet ? GRAB_STYLE : null),
+          ...(props.sheet ? { ...GRAB_STYLE, position: "relative" } : null),
           ...(sticks
             ? {
                 position: "sticky",
@@ -463,6 +464,8 @@ function RollCard(props: {
             : null),
         }}
       >
+        {/* Over the card's top padding, which a sticking header takes into its own box. */}
+        {props.sheet ? <SheetGrabber space={theme.space(4)} from={sticks ? 0 : -theme.space(4)} /> : null}
         <div style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
           <div style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>{askLine(request)}</div>
           {dc ? <div style={{ fontSize: theme.font.body14, color: theme.color.textMuted }}>{dc}</div> : null}

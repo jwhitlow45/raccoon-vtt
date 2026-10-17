@@ -42,6 +42,8 @@ export const UP_CLAIM_PX = 2 * TAP_SLOP_PX;
 export const GRAB_ATTR = "data-sheet-grab";
 /** On the surface while a swipe moves it: what measures it, such as Room's sheet height, holds still (4.7). */
 export const SWIPING_ATTR = "data-sheet-swipe";
+/** On the surface while it can swipe, so a check can hold its grabber (components/SheetGrabber.tsx) to the swipe's own condition. */
+export const SWIPES_ATTR = "data-sheet-swipes";
 /** On the surface during its slide: the position the slide ends at, for the e2e to check what it hides. */
 export const SLIDE_TO_ATTR = "data-sheet-swipe-to";
 /** Sent on the surface once a swipe is over and it stands at rest again, for whatever held its measure. */
@@ -1067,6 +1069,13 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
       if (session.current === swipe) session.current = null;
     };
   }, [surface, enabled, riderKey]);
+
+  useEffect(() => {
+    const el = surface.current;
+    if (!enabled || !el) return;
+    el.setAttribute(SWIPES_ATTR, "");
+    return () => el.removeAttribute(SWIPES_ATTR);
+  }, [surface, enabled]);
 
   // A new item ends a drag at once, without motion, and drops a slide's close (4.5).
   const { item } = options;
