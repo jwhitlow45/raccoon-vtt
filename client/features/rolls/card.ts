@@ -226,3 +226,25 @@ export function choiceLabel(text: string, bonus: number | null): string {
 export function holds(request: Pick<RollRequest, "targets"> | undefined, target: Pick<RollTarget, "tokenId" | "characterId">): boolean {
   return request !== undefined && request.targets.some((t) => (target.tokenId !== undefined ? t.tokenId === target.tokenId : t.characterId === target.characterId));
 }
+
+/**
+ * The DM's Roll for a creature still waiting (6): its bonus from the DM's
+ * view, the preset over every effect and the request's `spell`, worded as
+ * doc 3's buttons are, "Roll +5", "Roll Dex +5, Disadvantage (Restrained)"
+ * or "Roll +5: fails (Stunned)", and the fields its `roll.dice` sends with
+ * `unanswered`, so an answer that came first stands.
+ */
+export function dmRoll(input: { bonus: number; preset: RollPreset | null; ability?: string }): { label: string; fields: { mode?: AdvantageMode; cancelled?: true; extra?: string } } {
+  const { preset } = input;
+  const sources = preset?.sources ?? [];
+  const mode = advantageFields(sources);
+  const extra = (preset?.extra ?? []).join("");
+  let label = `Roll ${input.ability ? `${input.ability} ` : ""}${signed(input.bonus)}`;
+  if (mode.mode) label += `, ${mode.mode === "adv" ? "Advantage" : "Disadvantage"} (${list(names(sources, mode.mode))})`;
+  for (const term of preset?.extra ?? []) {
+    const name = extraName(term);
+    label += `, ${term}${name ? ` (${name})` : ""}`;
+  }
+  if (preset?.fails) label += `: fails (${CONDITIONS[preset.fails].name})`;
+  return { label, fields: { ...mode, ...(extra !== "" ? { extra } : {}) } };
+}

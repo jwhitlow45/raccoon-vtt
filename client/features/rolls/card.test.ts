@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DiceResult, RollTarget } from "#shared/model.ts";
 import { reminderPreset } from "#shared/rules/rollReminders.ts";
-import { bestChoice, cardRoll, choiceLabel, CLEAR_TOTAL, NO_INPUTS, parseBonus, rolledDice, rolledNews, rolledText, TYPE_BONUS, verdictText } from "./card.ts";
+import { bestChoice, cardRoll, dmRoll, choiceLabel, CLEAR_TOTAL, NO_INPUTS, parseBonus, rolledDice, rolledNews, rolledText, TYPE_BONUS, verdictText } from "./card.ts";
 
 const DEX = { kind: "save", ability: "dex" } as const;
 const restrained = [{ key: "restrained" as const }];
@@ -79,5 +79,16 @@ describe("a rolled result's words (5.4)", () => {
     assert.equal(rolledText(twenty), "Rolled 25 (1d20+5: 20). Natural 20. Pass.");
     assert.equal(verdictText({ result: "fail", dice: { ...dis, fails: "stunned" } }), "Fail (Stunned)");
     assert.equal(verdictText({ dice: dis }), null, "pass or fail hidden");
+  });
+});
+
+describe("the DM's Roll for a waiting creature (6)", () => {
+  test("worded as doc 3's buttons, with the fields its unanswered roll sends", () => {
+    assert.deepEqual(dmRoll({ bonus: 5, preset: reminderPreset([], DEX) }), { label: "Roll +5", fields: {} });
+    assert.deepEqual(dmRoll({ bonus: 5, preset: reminderPreset(restrained, DEX), ability: "Dex" }), { label: "Roll Dex +5, Disadvantage (Restrained)", fields: { mode: "dis" } });
+    assert.deepEqual(dmRoll({ bonus: 5, preset: reminderPreset([{ key: "stunned" }], DEX) }).label, "Roll +5: fails (Stunned)");
+    const mr = reminderPreset([], { ...DEX, spell: true }, { magicResistance: true });
+    assert.deepEqual(dmRoll({ bonus: 2, preset: mr }), { label: "Roll +2, Advantage (Magic Resistance)", fields: { mode: "adv" } });
+    assert.deepEqual(dmRoll({ bonus: 2, preset: reminderPreset([{ key: "blessed" }], DEX) }), { label: "Roll +2, +1d4 (Blessed)", fields: { extra: "+1d4" } });
   });
 });

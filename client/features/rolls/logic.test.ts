@@ -66,6 +66,7 @@ import {
   foldsAfterSend,
   IDLE,
   landingOf,
+  tallyText,
   dcChips,
   draftInput,
   fillDraft,
@@ -559,7 +560,7 @@ describe("answers on the DM's card", () => {
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, total: 17 }, P1, 3);
     const target = state.rolls.r1!.targets[0]!;
     assert.equal(target.result, "pass");
-    assert.equal(dmAnswerText(target, state.rolls.r1!.test), "17, changed from 12 (Fail)");
+    assert.equal(dmAnswerText(target, state.rolls.r1!.test), "typed 17, changed from typed 12 (Fail)");
     assert.equal(dmAnswerText(state.rolls.r1!.targets[1]!, state.rolls.r1!.test), "waiting");
   });
 
@@ -570,7 +571,7 @@ describe("answers on the DM's card", () => {
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, result: "pass" }, DM, 3);
     assert.equal(wantsMark(state.rolls.r1!, state.rolls.r1!.targets[0]!), false);
     state = run(state, { t: "roll.reopen", rollId: "r1", target: { characterId: "ayla" } }, DM, 4);
-    assert.equal(dmAnswerText(state.rolls.r1!.targets[0]!, state.rolls.r1!.test), "waiting again, was 9 (Pass)");
+    assert.equal(dmAnswerText(state.rolls.r1!.targets[0]!, state.rolls.r1!.test), "waiting again, was typed 9, marked Pass");
     assert.equal(dmAnswerText({ characterId: "x", result: "fail", noRoll: true }, state.rolls.r1!.test), "failed without rolling");
     assert.equal(dmAnswerText({ characterId: "x", result: "pass", noRoll: true }, state.rolls.r1!.test), "failed without rolling, marked Pass");
     assert.equal(dmAnswerText({ characterId: "x", result: "fail" }, state.rolls.r1!.test), "marked Fail", "a DM's bare mark");
@@ -580,7 +581,7 @@ describe("answers on the DM's card", () => {
     let state = ask(setup(), { choices: [{ kind: "check", ability: "str", skill: "athletics" }, { kind: "check", ability: "dex", skill: "acrobatics" }] });
     state = ask(state, {}, "r2");
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, choice: 1, total: 14 }, P1, 3);
-    assert.equal(dmAnswerText(state.rolls.r1!.targets[0]!, state.rolls.r1!.test), "Dex (Acrobatics) 14");
+    assert.equal(dmAnswerText(state.rolls.r1!.targets[0]!, state.rolls.r1!.test), "Dex (Acrobatics): typed 14");
     assert.deepEqual(allAnsweredIds(state.rolls), []);
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "bram" }, total: 3 }, P2, 4);
     assert.deepEqual(allAnsweredIds(state.rolls), ["r1"]);
@@ -745,7 +746,7 @@ describe("the player's card and chip", () => {
     state = run(state, { t: "roll.reopen", rollId: "r1", target: { characterId: "ayla" } }, DM, 3);
     assert.equal(playerNeedsAnswer(seen()), true, "the reopen reaches the player");
     assert.deepEqual(cameUp(before, new Map([["r1", playerNeedsAnswer(seen())]])), { unfold: ["r1"], chime: false }, "and the card comes up again");
-    assert.equal(dmAnswerText(state.rolls.r1!.targets[0]!, state.rolls.r1!.test), "waiting again, was a fail without rolling");
+    assert.equal(dmAnswerText(state.rolls.r1!.targets[0]!, state.rolls.r1!.test), "waiting again, was failed without rolling");
 
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, result: "fail" }, P1, 4);
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, total: 11 }, P1, 5);
@@ -1039,5 +1040,37 @@ describe("the card's one answer path (docs/design-v1-roll-request.md 5.2, 5.6)",
     assert.notEqual(answerKey({ ...target, total: 12, tag: "t", dice: { formula: "1d20", faces: [12], total: 12 } }), draft.base);
     assert.deepEqual(startingAnswer({ ...target, total: 12, tag: "t", dice: { formula: "1d20", faces: [12], total: 12 } }, draft).text, "", "a rolled total is never typed again");
     assert.equal(startingAnswer(target, undefined, 1).choice, 1, "two choices start at the higher bonus");
+  });
+});
+
+describe("the DM's live card (docs/design-v1-roll-request.md 6)", () => {
+  const dice = (formula: string, faces: number[], total: number, extra: object = {}) => ({ formula, faces, total, ...extra });
+  test("an answer tells how it came: rolled with its dice, typed, marked, failed by a condition, changed", () => {
+    assert.equal(dmAnswerText({ characterId: "a", total: 17, result: "pass", tag: "t", dice: dice("1d20+5", [12], 17) }, DEX_SAVE), "rolled 17 (1d20+5: 12)");
+    assert.equal(dmAnswerText({ characterId: "a", total: 25, result: "pass", tag: "t", dice: dice("1d20+5", [20], 25) }, DEX_SAVE), "rolled 25 (1d20+5: 20), natural 20");
+    assert.equal(dmAnswerText({ characterId: "a", total: 17, result: "fail", tag: "t", dice: dice("1d20+5", [12], 17, { fails: "stunned" }) }, DEX_SAVE), "rolled 17 (1d20+5: 12), fails (Stunned)");
+    assert.equal(dmAnswerText({ characterId: "a", total: 17, result: "pass", mark: "pass", tag: "t", dice: dice("1d20+5", [12], 17, { fails: "stunned" }) }, DEX_SAVE), "rolled 17 (1d20+5: 12), marked Pass", "the DM's Pass over a condition's fail");
+    assert.equal(dmAnswerText({ characterId: "a", total: 9, tag: "t", typedBonus: true, dice: dice("1d20+5", [4], 9) }, DEX_SAVE), "rolled 9 (1d20+5, your bonus: 4)");
+    assert.equal(dmAnswerText({ characterId: "a", total: 3, result: "pass", mark: "pass", tag: "t" }, DEX_SAVE), "typed 3, marked Pass");
+    assert.equal(dmAnswerText({ characterId: "a", result: "fail", mark: "fail", tag: "t" }, DEX_SAVE), "marked Fail");
+    const two = { kind: "save" as const, choices: [{ ability: "str" as const }, { ability: "dex" as const }] };
+    assert.equal(dmAnswerText({ characterId: "a", choice: 1, total: 17, tag: "t", dice: dice("1d20+5", [12], 17) }, two), "Dex: rolled 17 (1d20+5: 12)");
+    assert.equal(
+      dmAnswerText({ characterId: "a", total: 15, result: "pass", tag: "u", previous: { total: 12, result: "fail", tag: "t", dice: dice("1d20+5", [7], 12) } }, DEX_SAVE),
+      "typed 15, changed from rolled 12 (1d20+5: 7) (Fail)",
+    );
+    assert.equal(
+      dmAnswerText(
+        { characterId: "a", total: 19, result: "pass", tag: "u", dice: dice("1d20+5", [14], 19), changed: { id: "k", on: "t", reason: "heroic-inspiration", face: 0 }, previous: { total: 9, tag: "t", dice: dice("1d20+5", [4], 9) } },
+        DEX_SAVE,
+      ),
+      "rerolled 19 (Heroic Inspiration), was 9",
+    );
+  });
+
+  test("the title row counts passes and fails, and the asks waiting for the DM", () => {
+    const request = { targets: [{ characterId: "a", total: 17, result: "pass" as const }, { characterId: "b", total: 9, result: "fail" as const, change: { id: "k", on: "t", reason: "lucky" as const } }, { characterId: "c" }] };
+    assert.deepEqual(tallyText(request), { answered: "2 of 3 answered: 1 pass, 1 fail", asks: "1 asks to change a roll" });
+    assert.deepEqual(tallyText({ targets: [{ characterId: "a", total: 9 }, { characterId: "c" }] }), { answered: "1 of 2 answered", asks: null });
   });
 });

@@ -1,4 +1,4 @@
-import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Character, type CharacterId, type Member, type RollAnswer, type RollChoice, type RollRequest, type RollTarget, type RollTest, type RoomState, type SkillKey, type Token } from "#shared/model.ts";
+import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Character, type CharacterId, type Member, type RollAnswer, type RollChange, type RollChoice, type RollRequest, type RollTarget, type RollTest, type RoomState, type SkillKey, type Token } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { anyPlayer, playersToken } from "#shared/project.ts";
 import { z } from "zod";
@@ -6,6 +6,7 @@ import { dmToolSchemas, type ActorTarget, type ClientOp } from "#shared/protocol
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { ABILITY_NAMES, choiceText, SKILLS, testShortText, testText, TYPICAL_DCS } from "#shared/rules/skills.ts";
 import { answerDice } from "#shared/logText.ts";
+import { naturalOf } from "#shared/dice/roll.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 import { NO_INPUTS, type RollInputs } from "./card.ts";
 import { displayName } from "../../lib/scene.ts";
@@ -647,22 +648,79 @@ function answerWords(answer: RollAnswer, test: RollTest): string | null {
   return null;
 }
 
+/** The reasons a player may ask with, as the DM's row and the menu name them. */
+export const CHANGE_REASONS: Record<RollChange["reason"], string> = {
+  "heroic-inspiration": "Heroic Inspiration",
+  "halfling-luck": "Halfling Luck",
+  lucky: "Lucky",
+  "bardic-inspiration": "Bardic Inspiration",
+  "fix-total": "Fix my total",
+};
+
+/**
+ * One answer as the DM reads it (docs/design-v1-roll-request.md 6): "rolled
+ * 17 (1d20+5: 12)", "typed 17", "failed without rolling", "marked Pass",
+ * with a natural 20 or 1, a condition that failed a rolled save, the DM's
+ * own mark beside a total, and the choice first when the test offered two,
+ * "Dex: rolled 17 (…)". An allowed change names its reason.
+ */
+function dmWords(answer: RollAnswer, test: RollTest): string | null {
+  let words: string;
+  if (answer.dice !== undefined) {
+    const total = answer.total ?? answer.dice.total;
+    const dice = answerDice(answer.dice, answer.typedBonus === true);
+    const changed = answer.changed;
+    if (changed && (changed.reason === "heroic-inspiration" || changed.reason === "halfling-luck")) words = `rerolled ${total} (${CHANGE_REASONS[changed.reason]})`;
+    else if (changed?.reason === "lucky") words = `rerolled ${total} with advantage (Lucky)`;
+    else if (changed?.reason === "bardic-inspiration") words = `added a d${changed.die ?? "?"}, now ${total} (Bardic Inspiration)`;
+    else words = `rolled ${total} (${dice})`;
+    const natural = naturalOf(answer.dice);
+    if (natural !== null) words += `, natural ${natural}`;
+    if (answer.dice.fails && answer.result === "fail") words += `, fails (${CONDITIONS[answer.dice.fails].name})`;
+  } else if (answer.total !== undefined) words = `typed ${answer.total}`;
+  else if (answer.noRoll) words = "failed without rolling";
+  else if (answer.result !== undefined) return `marked ${RESULT[answer.result]}`;
+  else return null;
+  if (answer.mark !== undefined) words += `, marked ${RESULT[answer.mark]}`;
+  // A pass over a fail without rolling, from before marks were kept apart, reads as the overrule it was.
+  else if (answer.noRoll && answer.result === "pass") words += ", marked Pass";
+  const choice = test.choices.length > 1 && answer.choice !== undefined ? test.choices[answer.choice] : undefined;
+  return choice ? `${choiceShort(choice)}: ${words}` : words;
+}
+
 /**
  * The DM's line for one target, beside the Pass and Fail marks: "waiting",
- * "17", "Dex 17", "failed without rolling", "marked Pass", a fail without
- * rolling the DM overruled, and an answer that replaced another says so:
- * "17, changed from 12 (Fail)".
+ * "rolled 17 (1d20+5: 12)", "typed 17", "Dex: typed 17", "failed without
+ * rolling", "marked Pass", and an answer that replaced another says so:
+ * "typed 15, changed from rolled 12 (1d20+5: 7) (Fail)", an allowed change
+ * "rerolled 19 (Heroic Inspiration), was 9", a reopen "waiting again, was
+ * typed 9 (Pass)".
  */
 export function dmAnswerText(target: RollTarget, test: RollTest): string {
-  let now: string;
-  if (target.total !== undefined) now = answerWords(target, test)!;
-  else if (target.noRoll) now = target.result === "pass" ? "failed without rolling, marked Pass" : "failed without rolling";
-  else if (target.result !== undefined) now = `marked ${RESULT[target.result]}`;
-  else now = "waiting";
+  const now = dmWords(target, test) ?? "waiting";
   const previous = target.previous;
   if (!previous || !answered(previous)) return now;
-  const was = previous.total !== undefined ? `${answerWords(previous, test)}${previous.result ? ` (${RESULT[previous.result]})` : ""}` : answerWords(previous, test)!;
+  if (target.changed && answered(target)) return `${now}, was ${previous.total ?? "no total"}`;
+  const words = dmWords(previous, test)!;
+  const was = previous.total !== undefined && previous.result !== undefined && previous.mark === undefined ? `${words} (${RESULT[previous.result]})` : words;
   return answered(target) ? `${now}, changed from ${was}` : `waiting again, was ${was}`;
+}
+
+/**
+ * The live card's tally (6): "2 of 3 answered: 1 pass, 1 fail", the counts
+ * left out while no answer has a result, and "1 asks to change a roll"
+ * while a player's ask waits for the DM.
+ */
+export function tallyText(request: Pick<RollRequest, "targets">): { answered: string; asks: string | null } {
+  const done = request.targets.filter(answered);
+  const pass = done.filter((t) => t.result === "pass").length;
+  const fail = done.filter((t) => t.result === "fail").length;
+  const counts = [pass > 0 ? `${pass} pass` : "", fail > 0 ? `${fail} fail` : ""].filter((c) => c !== "").join(", ");
+  const asking = request.targets.filter((t) => t.change !== undefined).length;
+  return {
+    answered: `${done.length} of ${request.targets.length} answered${counts ? `: ${counts}` : ""}`,
+    asks: asking === 0 ? null : `${asking} ${asking === 1 ? "asks" : "ask"} to change a roll`,
+  };
 }
 
 /** Whether a DM's mark is still wanted: an answer with a total on a request with no DC, and no result yet. */

@@ -1,4 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { bonusFor, testOf } from "#shared/dice/bonus.ts";
+import { ANSWERED_MEANWHILE } from "#shared/permissions.ts";
+import { ABILITY_NAMES } from "#shared/rules/skills.ts";
 import { useStore } from "zustand";
 import type { RollRequest, RollTarget } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
@@ -9,8 +12,13 @@ import { dockSlot, focusAlert } from "../../pages/fold.ts";
 import { focusMap, mapFocusSlot } from "../../pages/mapFocus.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { sheetOpen } from "../../state/types.ts";
-import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
+import { creatureRolls } from "../dice/creature.ts";
+import { presetFor } from "../dice/presets.ts";
+import { NEEDS_CONNECTION, sendRoll, useRollSender } from "../dice/send.ts";
+import { useDiceView } from "../dice/useDiceView.ts";
 import { useLayoutSize } from "../device/layout.ts";
+import { bestChoice, dmRoll } from "./card.ts";
 import {
   allAnsweredIds,
   answered,
@@ -24,6 +32,7 @@ import {
   foldedChips,
   newestFirst,
   PHONE_CHIPS,
+  tallyText,
   targetKey,
   targetName,
   targetRef,
@@ -180,7 +189,7 @@ export function DmDesk() {
 
 function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; onClose(): void; request: RollRequest; open: boolean; onToggle(): void }) {
   const { request } = props;
-  const count = request.targets.filter(answered).length;
+  const tally = tallyText(request);
   const dc = dcText(request, "dm");
   const title = `${testShortText(request.test)}${dc ? `, ${dc}` : ""}`;
   const hidden = request.resultShown ? "" : ", pass or fail hidden from players";
@@ -209,8 +218,10 @@ function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; onClose(
         >
           <span style={{ fontWeight: theme.weight.bold, fontSize: theme.font.body14 }}>{title}</span>
           <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
-            {count} of {request.targets.length} answered{hidden}
+            {tally.answered}
+            {hidden}
           </span>
+          {tally.asks ? <span style={{ fontSize: theme.font.small, color: theme.color.text }}>{tally.asks}</span> : null}
         </button>
         <Button
           size="sm"
@@ -240,6 +251,7 @@ function TargetRow(props: { request: RollRequest; target: RollTarget }) {
   const actions = useRoomActions();
   const name = useRoomView((s) => (s.view ? targetName(s.view, target, s.sceneId) : ""));
   const ref = targetRef(target);
+  const waiting = !answered(target);
   const mark = (result: "pass" | "fail") => {
     if (target.result === result) return;
     actions.dispatch({ t: "roll.answer", rollId: request.id, target: ref, result, tag: actions.newId() });
@@ -272,6 +284,8 @@ function TargetRow(props: { request: RollRequest; target: RollTarget }) {
           >
             Reopen for one more answer
           </Button>
+        ) : waiting ? (
+          <DmRollButton request={request} target={target} name={name} />
         ) : null}
       </div>
       <Button size="sm" pressed={target.result === "pass"} aria-label={`Mark ${name} passed`} title={`Mark ${name} passed`} onClick={() => mark("pass")} style={markStyle}>
@@ -281,5 +295,67 @@ function TargetRow(props: { request: RollRequest; target: RollTarget }) {
         Fail
       </Button>
     </li>
+  );
+}
+
+/**
+ * Roll for a creature still waiting (docs/design-v1-roll-request.md 6),
+ * where Reopen stands on an answered row: shown only while the DM's view
+ * knows the bonus, so a token on a scene the DM is not viewing has none.
+ * The preset reads every effect over the DM's view and the request's
+ * `spell`, and two choices roll the higher bonus. It sends `unanswered`,
+ * so an answer that came first stands and this roll is refused before any
+ * draw. Its result shows in the row itself, which the answer fills.
+ */
+function DmRollButton(props: { request: RollRequest; target: RollTarget; name: string }) {
+  const { request, target, name } = props;
+  const ui = useRoomUi();
+  const sender = useRollSender();
+  const store = useRoomStore();
+  const actions = useRoomActions();
+  const ref = useMemo(() => targetRef({ tokenId: target.tokenId, characterId: target.characterId }), [target.tokenId, target.characterId]);
+  const creatures = useMemo(() => [ref], [ref]);
+  const { dice } = useDiceView(creatures);
+  const [busy, setBusy] = useState(false);
+  const connected = useRoomView((s) => s.connection === "open");
+  const rolls = dice ? creatureRolls(dice, ref) : null;
+  const two = request.test.choices.length > 1;
+  const bonuses = request.test.choices.map((_, i) => (rolls?.numbers ? bonusFor(rolls.numbers, testOf(request, i)) : null));
+  const choice = two ? bestChoice(bonuses) : 0;
+  const bonus = bonuses[choice] ?? null;
+  if (!dice || bonus === null) return null;
+  const test = testOf(request, choice);
+  const picked = request.test.choices[choice]!;
+  const roll = dmRoll({ bonus, preset: presetFor(dice, ref, test, { rolls }), ...(two ? { ability: ABILITY_NAMES[picked.ability].slice(0, 3) } : {}) });
+  const tap = () => {
+    if (busy) return;
+    // Read again at the tap, so the effects and Magic Resistance then decide (doc 3 3.2).
+    const now = dmRoll({ bonus, preset: presetFor(dice, ref, test, { rolls }) });
+    const tag = actions.newId();
+    const op = { t: "roll.dice" as const, tag, rollId: request.id, target: ref, ...(two ? { choice } : {}), ...now.fields, unanswered: true as const };
+    const n = sendRoll(sender, op, {
+      onAnswer: (answer, refusal) => {
+        setBusy(false);
+        if (store.getState().view?.rolls[request.id]) sender.receipts.announced(tag);
+        if (answer !== "refused") return;
+        ui.notify(refusal?.message === ANSWERED_MEANWHILE ? `${name} answered before your roll.` : (refusal?.text ?? "The roll was refused."), "error");
+      },
+    });
+    if (n === null) ui.notify(NEEDS_CONNECTION, "error");
+    else setBusy(true);
+  };
+  return (
+    <Button
+      variant="quiet"
+      size="sm"
+      busy={busy}
+      disabled={!connected}
+      title={connected ? undefined : NEEDS_CONNECTION}
+      aria-label={`${roll.label} for ${name}`}
+      onClick={tap}
+      style={{ justifySelf: "start", padding: 0, fontSize: theme.font.small, textAlign: "left" }}
+    >
+      {roll.label}
+    </Button>
   );
 }
