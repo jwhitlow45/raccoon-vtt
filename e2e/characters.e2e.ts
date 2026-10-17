@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Deleting characters (features section 15), on the real server serving
@@ -398,8 +398,9 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     // The DM's log, and no player's, says who deleted what.
     const said = "Pat deleted Bree, with 2 tokens, 1 companion and its place in the fight.";
     assert.ok(state.log.some((e) => e.data?.type === "characterDeleted"), "the DM's log holds the line");
-    await dm.getByRole("tab", { name: "Log" }).click();
-    await dm.getByRole("tabpanel", { name: "Log" }).getByText(said, { exact: true }).waitFor();
+    // The Log is in More since Dice joined the row (docs/design-v1-dice.md 8.1).
+    await openSideTab(dm, "Log");
+    await dm.getByRole("tabpanel", { name: sideTabName("Log") }).getByText(said, { exact: true }).waitFor();
     await shots.take(dm, "characters-dm-log-player-delete");
     assert.equal(patSocket.everSaw("characterDeleted"), false, "the line never reached Pat");
     patConsole.expectSocketFailures = false;
