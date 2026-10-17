@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
+import type { LogEvent } from "#shared/model.ts";
 import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
@@ -688,6 +689,31 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await shots.take(dm, "combat-order-dm");
     await openTracker(ana);
     assert.deepEqual(await headings(ana), ["Several at once", "HP changes", "This device"], "Bree is in the fight already, so Join the fight is gone");
+  });
+
+  test("5b. auto initiative's dice are the server's, secret to the DM, and a row's Roll sets the goblin's row and Ana's sets Bree's to the total that landed (docs/design-v1-roll-options.md 4.5, 7)", async () => {
+    type DiceLine = Extract<LogEvent, { type: "dice" }>;
+    const lines = (): DiceLine[] => (dmSocket.state?.log ?? []).flatMap((e) => (e.data?.type === "dice" ? [e.data] : []));
+    const auto = lines().filter((l) => l.rolls.some((r) => r.label?.startsWith("Initiative")));
+    assert.ok(auto.length > 0 && auto.every((l) => l.to === "dm"), "test 5's auto initiative left no secret dice line");
+    const value = (entryId: string) => dmSocket.state?.encounter?.entries.find((e) => e.id === entryId)?.value;
+    // Roll sits beside the value box where the row has room, else in the row's options.
+    const rollRow = async (page: Page, name: string, entryId: string) => {
+      const roll = page.getByRole("button", { name: new RegExp(`^Roll [+−-]\\d+ initiative for ${name}$`) }).first();
+      if (!(await roll.isVisible())) await page.getByRole("button", { name: `${name} options` }).click();
+      const before = lines().length;
+      await roll.click();
+      const line = await waitFor(`${name}'s initiative line`, () => lines().slice(before).find((l) => l.rolls[0]?.label === "Initiative") ?? null);
+      const total = line.rolls[0]!.total;
+      await waitFor(`${name}'s row set to ${total}`, () => (value(entryId) === total ? true : null));
+    };
+    await setUp(dm, dmCdp, { ...DESK, scale: 1 });
+    await openTracker(dm);
+    await rollRow(dm, goblinName(0), "e-g0");
+    await openTracker(ana);
+    await rollRow(ana, "Bree", "e-bree");
+    // Bree leads the order again, as the steps after this one expect.
+    await ops.send({ t: "encounter.setValues", values: [{ entryId: "e-bree", value: 25 }] });
   });
 
   test("6. AC shields: the DM's on every living row, a player's on their own creatures only, and each row's description reads its AC and HP", async () => {
