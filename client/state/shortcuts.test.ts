@@ -14,6 +14,7 @@ import {
   shortcutSheetSlot,
   shortcutsFor,
   sidePanelKeysSlot,
+  splitKeysSlot,
   stageKeysSlot,
   SURFACES,
   undoShortcut,
@@ -303,13 +304,34 @@ describe("the shortcut table", () => {
     }
   });
 
+  // docs/design-v1-split-panel.md 9.4.
+  test("O goes to the other of two panels, for the DM and players, only while two show", () => {
+    for (const role of ["dm", "player"] as const) {
+      const { env: e, scope } = env({ role });
+      let went = 0;
+      assert.equal(run(e, press({ key: "o", code: "KeyO" })), null, "with one panel Room sets no slot");
+      scope.get(splitKeysSlot).other = () => void went++;
+      assert.equal(run(e, press({ key: "o", code: "KeyO" })), "otherPanel");
+      assert.equal(run(e, press({ key: "щ", code: "KeyO" })), "otherPanel", "by its place on a Russian layout");
+      assert.equal(run(e, press({ key: "o", code: "KeyO", target: { tagName: "TEXTAREA" } })), null, "O in a text field types");
+      assert.equal(went, 2);
+    }
+  });
+
+  test("the split's grip, a separator, keeps the arrow and Page keys, so no token moves", () => {
+    const { env: e } = env({ selected: ["t1"] });
+    const grip = { tagName: "DIV", closest: (selector: string) => (selector.includes('[role="separator"]') ? {} : null) };
+    for (const key of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown"]) assert.equal(run(e, press({ key, code: key, target: grip })), null, key);
+  });
+
   test("the sheet lists each role's keys from the table itself", () => {
     const dm = shortcutsFor("dm").map((s) => s.keys);
     const player = shortcutsFor("player").map((s) => s.keys);
     for (const k of ["V", "T", "M", "F", "B", "G", "H", "L", "Delete, Backspace", "/", "?", "Ctrl+Z"]) assert.ok(dm.includes(k), k);
     for (const k of ["T", "F", "H", "L", "/"]) assert.ok(!player.includes(k), k);
-    for (const k of ["V", "D", "Arrow keys", "N", "+", "?", "S"]) assert.ok(player.includes(k), k);
+    for (const k of ["V", "D", "Arrow keys", "N", "+", "?", "S", "O"]) assert.ok(player.includes(k), k);
     assert.ok(dm.includes("S"));
+    assert.ok(dm.includes("O"));
   });
 });
 
@@ -442,6 +464,22 @@ describe("the sheet's rows beside the keys", () => {
     assert.ok(rows.every((b) => b.device === "keys" && b.roles.includes("dm") && b.roles.includes("player")));
     assert.ok(!BEHAVIORS.some((b) => b.id === "tabsWheel"), "the row no longer scrolls");
     assert.deepEqual(inputs("dm", DESKTOP, "Side panel tabs"), inputs("player", DESKTOP, "Side panel tabs"));
+  });
+
+  test("two panels: its own surface after the tabs, keys only, the same for the DM and players (docs/design-v1-split-panel.md 9.4)", () => {
+    assert.equal(SURFACES.indexOf("Two panels"), SURFACES.indexOf("Side panel tabs") + 1);
+    const rows = BEHAVIORS.filter((b) => b.surface === "Two panels");
+    assert.deepEqual(
+      rows.map((b) => b.id),
+      ["splitGripKeys", "splitDragEscape", "splitNameKeys"],
+    );
+    assert.ok(rows.every((b) => b.device === "keys" && b.roles.includes("dm") && b.roles.includes("player")));
+    assert.deepEqual(inputs("dm", DESKTOP, "Two panels"), inputs("player", DESKTOP, "Two panels"));
+    assert.match(section("player", DESKTOP, "Two panels")?.intro ?? "", /never move a token/);
+    const does = (id: string) => BEHAVIORS.find((b) => b.id === id)?.does ?? "";
+    assert.match(does("tabsSide"), /on the panel open below, stop there and switch nothing/);
+    assert.match(does("tabsEnds"), /switching as Left and Right do/);
+    assert.match(does("tabsListPick"), /turn Two panels on or off/);
   });
 
   test("a tool's options keep their keys in their own section, on every device", () => {

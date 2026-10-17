@@ -2,9 +2,9 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import { flushSync } from "react-dom";
 import { Icon } from "../components/Icon.tsx";
 import { PRESSED } from "../components/looks.ts";
-import { Menu, type MenuSection } from "../components/Menu.tsx";
+import { Menu, type MenuItem, type MenuSection } from "../components/Menu.tsx";
 import { Popover, usePopover, type Rect } from "../components/Popover.tsx";
-import { HideButton, SheetHeader } from "../components/SheetHeader.tsx";
+import { HideButton } from "../components/SheetHeader.tsx";
 import { panelSections, type PanelDef } from "../features/panels.ts";
 import { tabKeyIndex, VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { theme } from "../lib/theme.ts";
@@ -50,6 +50,25 @@ const TAB_REST: CSSProperties = { background: "transparent", border: `${theme.li
 /** More's place among the row's stops for the tab keys. */
 const MORE = "\u0000more";
 
+/** "Two panels" in More's menu, an id no panel has. */
+const SPLIT_ITEM = "\u0000split";
+
+/**
+ * The bottom panel's mark on its tab (docs/design-v1-split-panel.md 6): a
+ * 2 px accent line along its foot, over its 1 px border, inside the tab's
+ * fixed box, so the fit reads nothing new. A border, unlike a shadow,
+ * stays in forced colors.
+ */
+const BELOW_MARK: CSSProperties = {
+  position: "absolute",
+  left: theme.space(1),
+  right: theme.space(1),
+  bottom: -theme.line.border,
+  height: 0,
+  borderBottom: `${theme.line.strong}px solid ${theme.color.accent}`,
+  pointerEvents: "none",
+};
+
 type Layout = { fit: TabFit; widths: TabWidths };
 
 function sameLayout(a: Layout | null, b: Layout | null): boolean {
@@ -64,8 +83,8 @@ function sameLayout(a: Layout | null, b: Layout | null): boolean {
   );
 }
 
-/** The side panel's box inside its border and padding, which hold the safe areas, in its own px. */
-function innerBox(el: HTMLElement, zoom: number): Rect {
+/** The side panel's box inside its border and padding, which hold the safe areas, in its own px. More's menu and the split's "Panel below" keep inside it. */
+export function innerBox(el: HTMLElement, zoom: number): Rect {
   const r = el.getBoundingClientRect();
   const cs = getComputedStyle(el);
   const px = (v: string) => Number.parseFloat(v) || 0;
@@ -89,8 +108,18 @@ export function SideTabs(props: {
   grouped: boolean;
   onTab(id: string): void;
   onHide(): void;
-  /** Whether the side panel draws a subpage's header, which names the panel in full in its Back. */
-  subpage: boolean;
+  /**
+   * Two panels (docs/design-v1-split-panel.md 6): whether the split is on,
+   * whether the side panel holds two, and the bottom panel while it shows,
+   * whose tab or More item carries its mark and swaps the two when pressed.
+   */
+  split: { on: boolean; fits: boolean | null; below: string | null; onToggle(): void };
+  /**
+   * The chosen panel's full name while More cuts it (3.8), else null, for
+   * the side panel to name above the top panel, where it takes room from
+   * that panel alone and never from the split.
+   */
+  onCutTitle(title: string | null): void;
   /** The chosen tab, More while the open panel is in it. */
   tabRef: RefObject<HTMLButtonElement | null>;
   /**
@@ -107,6 +136,8 @@ export function SideTabs(props: {
   const measureRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const describedId = useId();
+  const belowDescribedId = useId();
+  const below = props.split.below;
   const [layout, setLayout] = useState<Layout | null>(null);
   const latest = useRef({ tabs, zoom: props.zoom });
   latest.current = { tabs, zoom: props.zoom };
@@ -222,7 +253,8 @@ export function SideTabs(props: {
       moreRef.current?.focus();
       return;
     }
-    props.onTab(next);
+    // The bottom panel's tab takes focus and chooses nothing, as More does, so passing over it never changes the panes.
+    if (next !== below) props.onTab(next);
     document.getElementById(props.tabId(next))?.focus();
   };
 
@@ -234,17 +266,48 @@ export function SideTabs(props: {
     return label && (props.badges[p.id] ?? 0) > 0 ? [label] : [];
   });
   const description = [chosenHeld ? "More panels" : null, heldUnread > 0 ? `${heldUnread} unread` : null, ...heldLabels].filter((s) => s !== null).join(", ");
-  const sections: MenuSection[] = panelSections(held, props.grouped).map((s) => ({
-    key: s.key,
-    ...(s.label ? { heading: s.label } : null),
-    separator: s.line,
-    items: s.panels.map((p) => {
-      const n = props.badges[p.id] ?? 0;
-      return { id: p.id, title: p.title, checked: p.id === tab, ...(n > 0 ? { badge: <Badge count={n} label={props.badgeLabels[p.id]} /> } : null) };
-    }),
-  }));
+  // "Two panels" heads the menu, then a line, then the panels (docs/design-v1-split-panel.md 4.1, 6).
+  const split = props.split;
+  const tooShort = split.fits === false;
+  const splitItem: MenuItem = {
+    id: SPLIT_ITEM,
+    title: "Two panels",
+    kind: "checkbox",
+    checked: split.on,
+    glyph: <Icon name="splitPanel" size="sm" />,
+    ...(split.on
+      ? tooShort
+        ? { description: "Too short for two now. They come back when the side panel is taller." }
+        : null
+      : tooShort
+        ? { disabled: true, note: "too short", description: "The side panel is too short for two panels." }
+        : null),
+  };
+  const sections: MenuSection[] = [
+    { key: "split", items: [splitItem] },
+    ...panelSections(held, props.grouped).map((s, i) => ({
+      key: s.key,
+      ...(s.label ? { heading: s.label } : null),
+      separator: s.line || i === 0,
+      items: s.panels.map((p) => {
+        const n = props.badges[p.id] ?? 0;
+        return {
+          id: p.id,
+          title: p.title,
+          checked: p.id === tab,
+          ...(p.id === below ? { note: "below", description: "Shown below" } : null),
+          ...(n > 0 ? { badge: <Badge count={n} label={props.badgeLabels[p.id]} /> } : null),
+        };
+      }),
+    })),
+  ];
+  const pick = (id: string) => (id === SPLIT_ITEM ? split.onToggle() : props.onTab(id));
   const chosenIndex = tabs.findIndex((p) => p.id === tab);
   const cutTitle = layout && chosenHeld && nameCut(layout.fit, layout.widths, chosenIndex) ? chosenHeld.title : null;
+  // Before paint, so the name and the panel under it draw in one frame.
+  const onCutTitle = useRef(props.onCutTitle);
+  onCutTitle.current = props.onCutTitle;
+  useLayoutEffect(() => onCutTitle.current(cutTitle), [cutTitle]);
 
   return (
     <>
@@ -253,6 +316,7 @@ export function SideTabs(props: {
         <div ref={listRef} role="tablist" aria-label="Panels" onKeyDown={onTabKey} style={{ flex: "1 1 auto", minWidth: 0, display: "flex", alignItems: "center", gap: TAB_GAP }}>
           {row.map((p, i) => {
             const chosen = p.id === tab;
+            const marked = p.id === below;
             const opensGroup = i > 0 && row[i - 1]?.group !== p.group;
             return (
               <button
@@ -263,6 +327,7 @@ export function SideTabs(props: {
                 role="tab"
                 aria-selected={chosen}
                 aria-controls={chosen ? props.panelId : undefined}
+                aria-describedby={marked ? belowDescribedId : undefined}
                 tabIndex={p.id === stop ? 0 : -1}
                 data-active={chosen}
                 data-stop={p.id}
@@ -272,6 +337,7 @@ export function SideTabs(props: {
               >
                 {p.title}
                 <Badge count={props.badges[p.id] ?? 0} corner label={props.badgeLabels[p.id]} />
+                {marked ? <span aria-hidden data-below-mark="" style={BELOW_MARK} /> : null}
               </button>
             );
           })}
@@ -311,7 +377,7 @@ export function SideTabs(props: {
           ) : null}
         </div>
         <Popover handle={menu} side="below" bound={() => innerBox(listRef.current?.closest("aside") ?? document.body, latest.current.zoom)}>
-          <Menu label="More panels" sections={sections} onPick={props.onTab} data={{ "data-tabs-menu": "" }} />
+          <Menu label="More panels" sections={sections} onPick={pick} data={{ "data-tabs-menu": "" }} />
         </Popover>
         <HideButton label="Hide panels" onClick={props.onHide} style={{ flex: "none" }} />
         {/* More's description, outside it so it is no part of its name or its text, and hidden, as only a screen reader reads it. */}
@@ -320,6 +386,9 @@ export function SideTabs(props: {
             {description}
           </span>
         ) : null}
+        <span id={belowDescribedId} hidden>
+          Shown below
+        </span>
         {/* Every title in the tab look and in More's, measured where they draw: hidden spans with no role, taking no room. */}
         <div ref={measureRef} aria-hidden style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0, overflow: "hidden", visibility: "hidden", pointerEvents: "none" }}>
           <div style={{ display: "flex", width: "max-content" }}>
@@ -341,12 +410,6 @@ export function SideTabs(props: {
           </div>
         </div>
       </div>
-      {/* A name More cuts is named in full above the panel (3.8). A subpage's header names it in its Back instead. */}
-      {cutTitle && !props.subpage ? (
-        <div style={{ flex: "none", borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>
-          <SheetHeader title={cutTitle} />
-        </div>
-      ) : null}
     </>
   );
 }

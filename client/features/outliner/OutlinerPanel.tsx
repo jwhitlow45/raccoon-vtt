@@ -30,7 +30,7 @@ export default function OutlinerPanel(props: PanelProps) {
   const sceneId = useRoomView((s) => s.sceneId);
   if (role !== "dm") return <Empty>Only the DM has the outliner.</Empty>;
   if (!sceneId) return <Empty>There is no scene to list yet. Make one in Scenes.</Empty>;
-  return <Outliner sceneId={sceneId} close={props.close} />;
+  return <Outliner sceneId={sceneId} close={props.close} shown={props.shown} />;
 }
 
 /** The parts of the view the rows read. Each keeps its identity until it changes, so the rows are made again only then. */
@@ -58,7 +58,7 @@ function useScenePieces(): RoomState | null {
   return useMemo(() => view, pieces);
 }
 
-function Outliner(props: { sceneId: string; close(): void }) {
+function Outliner(props: { sceneId: string; close(): void; shown: boolean }) {
   const view = useScenePieces();
   const scope = useRoomScope();
   const ui = useRoomUi();
@@ -69,21 +69,30 @@ function Outliner(props: { sceneId: string; close(): void }) {
   const [folded, setFolded] = useState<ReadonlySet<OutlineGroup>>(new Set());
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // `/` opens the outliner with its search focused (state/shortcuts.ts), whether it was open already or not.
+  /*
+   * `/` opens the outliner with its search focused (state/shortcuts.ts),
+   * whether it was open already or not. A hidden pane cannot take focus, and
+   * the outliner may be in one as `/` is pressed: the side panel hidden, or
+   * the bottom of two panels in a side panel too short for both. So the
+   * shortcut's call only marks the request, and the search takes it in an
+   * effect once the panel shows (docs/design-v1-split-panel.md 9.2).
+   */
+  const [asked, setAsked] = useState(0);
   useEffect(() => {
     const slot = scope.get(outlinerSearchSlot);
-    const take = () => {
-      if (!slot.focusNext) return;
-      slot.focusNext = false;
-      searchRef.current?.focus();
-      searchRef.current?.select();
-    };
-    take();
-    slot.listeners.add(take);
+    const mark = () => setAsked((n) => n + 1);
+    slot.listeners.add(mark);
     return () => {
-      slot.listeners.delete(take);
+      slot.listeners.delete(mark);
     };
   }, [scope]);
+  useEffect(() => {
+    const slot = scope.get(outlinerSearchSlot);
+    if (!props.shown || !slot.focusNext) return;
+    slot.focusNext = false;
+    searchRef.current?.focus();
+    searchRef.current?.select();
+  }, [scope, props.shown, asked]);
 
   const rows = useMemo(() => (view ? outlineRows(view, props.sceneId) : []), [view, props.sceneId]);
   const shown = useMemo(() => filterRows(rows, query, group), [rows, query, group]);

@@ -27,6 +27,8 @@ export type IconName =
   | "filter"
   | "expand"
   | "collapsePanel"
+  | "splitPanel"
+  | "swapPanels"
   | "resetZoom"
   | "grip"
   | "windowHome"
@@ -84,6 +86,15 @@ const SHAPES: Record<IconName, ReactNode> = {
       <path d="M15 4v16M8 9l3 3-3 3" />
     </g>
   ),
+  // A framed panel split across its middle, for More's "Two panels" (docs/design-v1-split-panel.md 4.1): one panel above another.
+  splitPanel: (
+    <g {...STROKE}>
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M4 12h16" />
+    </g>
+  ),
+  // An up arrow beside a down arrow, for the split's Swap: the two panels change places.
+  swapPanels: <path {...STROKE} d="M8 19V5M4 9l4-4 4 4M16 5v14M12 15l4 4 4-4" />,
   // An arrow turning back around a center dot, for the handout viewer's Reset zoom: back to the fit, about the view's middle. The dot keeps it apart from an undo arrow.
   resetZoom: (
     <g {...STROKE}>

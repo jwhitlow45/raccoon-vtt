@@ -53,6 +53,7 @@ This page lists what RaccoonVTT does today, grouped by area. "The DM" means anyo
 - The fit button in the top bar ("Fit the map to the screen") brings the map back into view. A pinch anywhere but the map never zooms the page.
 - Android's Back button and the Escape key close an open sheet, handout or action bar before they leave the room. While the token's panel shows that token, they and the bar's Close put the bar away and keep the token in the panel. With the bar away, Escape lets go of the token.
 - On a phone, panels open as sheets from the bottom, and the toolbar names each tool under its icon, as it does on any touch screen. On a screen 900 px or wider, panels are tabs in a side panel, in one row: the most used first, as many as fit, then More, which lists the rest. A panel opened from More shows its name on More, and the tabs never move. A long name there may end in "…", and the panel then shows its full name at its top. A count on a panel inside More shows on More too. Hide panels at the end of the tabs, or the S key, hides the side panel, and Panels in the toolbar brings it back. This device remembers the choice. A short screen, such as a large phone held sideways, starts with it hidden. The toolbar scrolls sideways when its tools do not fit, and with a mouse the wheel scrolls it. On a phone held sideways, Hide in a panel's header tucks the panel away with its place kept, and Panels brings it back. Where the screen is too short for a panel beside the map, it opens over the whole screen, with the token's actions and the fight's alerts as buttons in its header, and the room's notices, "Your turn" and messages between the header and the panel.
+- Two panels, at the top of More, shows two panels at once, one above the other, such as Initiative above a token's stats, or for a player their character's card. The tabs pick the top one. The bottom one starts on Token for the DM and Characters for a player. The bar between them names it: press its name to pick another, or use Swap or Close, and drag the bar, or move it with the keys, to share the room. A link that opens a panel, such as Stat block, Details or a pin's page, leaves an open panel where it is and otherwise opens in the other pane, so the panel you are reading stays. This device remembers the two panels and where the bar sits, for a DM and for a player. A side panel too short for two shows the top one until there is room, and a phone shows one panel at a time.
 - On a phone, the DM's setup tools (Add token, Pin, Map builder and Line up grid) sit behind Setup in the toolbar, which then shows the one in use. Their keys still pick them directly. On a computer all ten tools stay in the toolbar.
 - A tool's options take one row. On a phone held upright it sits above the toolbar. On a phone held sideways it shares the toolbar's row, so the map keeps its whole height, and where the tools and the options do not fit side by side the toolbar shows Select and the last tool you used, whose second tap opens every tool. On a computer it floats above the toolbar. What does not fit the row waits behind ⋯ (More options), and a wider screen shows more of it. Choices with many values, such as the drawing tool, a color or an area's shape, show their value on a button that opens a small pop-up above the row, and the map stays live under it: two fingers still pan and zoom, and a tap on the map closes it without drawing or pinging. The tool's hint or reading floats above the row on one line, and a tap shows all of it when it is cut. A second tap on the active tool hides its options, and another brings them back, while the tool stays in use. For a tool behind Setup or the tool menu, picking it again there does the same. While a task is under way, such as an area not yet placed, a small "options hidden" line stays, and a tap on it brings them back. Buttons that show a value, such as an area's shape, add their icon where the row has room.
 - Panels are listed with the ones used in play first, in an order that never changes with use. A DM's phone list and the side panel's More group them under In play and Prepare.
@@ -389,6 +390,7 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | 0 | Fit the map | everyone |
 | / | Search the scene in the outliner | DM |
 | S | Hide or show the side panel, on a screen 900 px or wider | everyone |
+| O | Go to the other panel, with two in the side panel | everyone |
 | ? | Show the shortcuts | everyone |
 | Escape | Close an open pop-up first, then a sheet, else the token's action bar, else let go of the selection and end Multi-select. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done. A field outside the pop-up keeps its Escape | everyone |
 
@@ -434,14 +436,24 @@ On a screen 900 px or wider, with a tab or More's list focused. There, and on a 
 
 | Key | Does | Who |
 | --- | --- | --- |
-| Left, Right | Switch to the tab beside it, wrapping around at the ends. On More, stop there and open nothing | everyone |
-| Home, End | Switch to the first tab, or go to More, the last | everyone |
+| Left, Right | Switch to the tab beside it, wrapping around at the ends. On More, or on the panel open below, stop there and switch nothing | everyone |
+| Home, End | Go to the first tab, or to More, the last, switching as Left and Right do | everyone |
 | Enter, Space, Down, Up on More | Open the list, at the open panel or the first, or with Up the last | everyone |
 | Up, Down, Home, End in the list | Move through it, wrapping around at the ends | everyone |
 | Letters in the list | Go to the next panel whose name starts with them | everyone |
-| Enter, Space in the list | Open the panel and close the list. More then shows its name | everyone |
+| Enter, Space in the list | Open the panel, or turn Two panels on or off, and close the list. More then shows the panel's name | everyone |
 | Tab, Shift+Tab in the list | Close it. Tab goes on to the next control, Shift+Tab back to More | everyone |
 | Escape in the list | Close it, back to More | everyone |
+
+### Two panels
+
+On a screen 900 px or wider, with two panels in the side panel. With the bar's grip focused, the arrow keys move the bar and never move a token.
+
+| Key | Does | Who |
+| --- | --- | --- |
+| Up, Down | Move the bar 8 px, or 64 px with Shift | everyone, with its grip focused |
+| Escape | Put the bar back where it was | everyone, while you drag it |
+| Enter, Space, Down, Up on the bottom panel's name | Open its list of panels, at the one open or the first, or with Up the last. The list takes More's list keys | everyone |
 
 ### Handout viewer
 

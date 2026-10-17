@@ -64,8 +64,8 @@ export function isTextField(target: unknown): boolean {
   return !NOT_TYPED.has(typeof el.type === "string" ? el.type.toLowerCase() : "text");
 }
 
-/** The groups whose arrow and Page keys move their own choice, value, tab or item. */
-const NAVIGATES = '[role="radiogroup"], [role="slider"], [role="tablist"], [role="listbox"], [role="menu"]';
+/** The groups whose arrow and Page keys move their own choice, value, tab or item, and the split's bar, whose grip is a separator they move (docs/design-v1-split-panel.md 9.1). */
+const NAVIGATES = '[role="radiogroup"], [role="slider"], [role="tablist"], [role="listbox"], [role="menu"], [role="separator"]';
 
 /**
  * Whether focus is on a control that answers the arrow and Page keys
@@ -149,6 +149,13 @@ export const stageKeysSlot = scopeSlot(() => ({
  * side panel, and clears it below, so S does nothing on a phone.
  */
 export const sidePanelKeysSlot = scopeSlot(() => ({ toggle: null as (() => void) | null }));
+
+/**
+ * O between the side panel's two panels (docs/design-v1-split-panel.md
+ * 9.4): the Room page sets `other` while two show and clears it otherwise,
+ * so O does nothing with one panel or on a phone.
+ */
+export const splitKeysSlot = scopeSlot(() => ({ other: null as (() => void) | null }));
 
 /** The outliner's search takes focus when it next shows, after `/` (features/outliner). */
 export const outlinerSearchSlot = scopeSlot(() => ({ focusNext: false, listeners: new Set<() => void>() }));
@@ -391,6 +398,15 @@ export const SHORTCUTS: readonly Shortcut[] = [
     run: (env) => env.scope.get(sidePanelKeysSlot).toggle?.(),
   },
   {
+    id: "otherPanel",
+    keys: "O",
+    does: "Go to the other panel, with two in the side panel",
+    roles: ["dm", "player"],
+    match: letter("o"),
+    when: (env) => env.scope.get(splitKeysSlot).other !== null,
+    run: (env) => env.scope.get(splitKeysSlot).other?.(),
+  },
+  {
     id: "sheet",
     keys: "?",
     does: "Show these shortcuts",
@@ -431,6 +447,7 @@ export const SURFACES = [
   "Toolbar",
   "Tool options",
   "Side panel tabs",
+  "Two panels",
   "Handout viewer",
   "Token window",
   "Initiative",
@@ -562,16 +579,23 @@ export const BEHAVIORS: readonly Behavior[] = [
   {
     id: "tabsSide",
     input: "Left, Right",
-    does: "Switch to the tab beside it, wrapping around at the ends. On More, stop there and open nothing",
+    does: "Switch to the tab beside it, wrapping around at the ends. On More, or on the panel open below, stop there and switch nothing",
     roles: EVERYONE,
     device: "keys",
     surface: "Side panel tabs",
   },
-  { id: "tabsEnds", input: "Home, End", does: "Switch to the first tab, or go to More, the last", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
+  { id: "tabsEnds", input: "Home, End", does: "Go to the first tab, or to More, the last, switching as Left and Right do", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
   { id: "tabsMoreKeys", input: "Enter, Space, Down, Up on More", does: "Open the list, at the open panel or the first, or with Up the last", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
   { id: "tabsListMove", input: "Up, Down, Home, End in the list", does: "Move through it, wrapping around at the ends", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
   { id: "tabsListType", input: "Letters in the list", does: "Go to the next panel whose name starts with them", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
-  { id: "tabsListPick", input: "Enter, Space in the list", does: "Open the panel and close the list. More then shows its name", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
+  {
+    id: "tabsListPick",
+    input: "Enter, Space in the list",
+    does: "Open the panel, or turn Two panels on or off, and close the list. More then shows the panel's name",
+    roles: EVERYONE,
+    device: "keys",
+    surface: "Side panel tabs",
+  },
   {
     id: "tabsListLeave",
     input: "Tab, Shift+Tab in the list",
@@ -581,6 +605,18 @@ export const BEHAVIORS: readonly Behavior[] = [
     surface: "Side panel tabs",
   },
   { id: "tabsListEscape", input: "Escape in the list", does: "Close it, back to More", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
+
+  // Two panels in the side panel: pages/SplitBar.tsx, pages/splitPanes.ts gripStep, components/Menu.tsx and menuKeys.ts for its list.
+  { id: "splitGripKeys", input: "Up, Down", does: "Move the bar 8 px, or 64 px with Shift", roles: EVERYONE, when: "with its grip focused", device: "keys", surface: "Two panels" },
+  { id: "splitDragEscape", input: "Escape", does: "Put the bar back where it was", roles: EVERYONE, when: "while you drag it", device: "keys", surface: "Two panels" },
+  {
+    id: "splitNameKeys",
+    input: "Enter, Space, Down, Up on the bottom panel's name",
+    does: "Open its list of panels, at the one open or the first, or with Up the last. The list takes More's list keys",
+    roles: EVERYONE,
+    device: "keys",
+    surface: "Two panels",
+  },
 
   // The handout viewer: features/handouts/HandoutViewer.tsx, zoom.ts viewerKey.
   { id: "viewerZoom", input: "+, -", does: "Zoom in, zoom out", roles: EVERYONE, device: "keys", surface: "Handout viewer" },
@@ -684,6 +720,7 @@ const SURFACE_INTRO: Partial<Record<Surface, string>> = {
   "Tool options": "A tool's options row, its More options and the pop-ups its buttons open.",
   "Side panel tabs":
     "On a screen 900 px or wider, with a tab or More's list focused. There, and on a focused choice or slider, the arrow and Page keys never move a token, and in the list a letter goes to a panel instead of running a shortcut.",
+  "Two panels": "On a screen 900 px or wider, with two panels in the side panel. With the bar's grip focused, the arrow keys move the bar and never move a token.",
   "Handout viewer": "A handout the DM shows, or a picture or a PDF opened from the Library.",
   "Token window": "Where the action bar opens as a window: on a screen 600 px or wider, or a phone on its side. With its grip or corner handle focused, the arrow keys move or resize it and never move a token.",
 };

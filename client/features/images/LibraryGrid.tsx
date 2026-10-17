@@ -455,9 +455,9 @@ function focusHeading(section: HTMLElement | null): void {
 
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/** The panel's first control: in the desktop panel's tab panel, or the phone sheet's region, which holds its header too. */
+/** The panel's first control: in its pane of the desktop side panel (either of two, docs/design-v1-split-panel.md 9.1), or the phone sheet's region, which holds its header too. */
 function focusPanel(root: HTMLElement | null): void {
-  const panel = root?.closest<HTMLElement>('[role="tabpanel"], section[aria-label]') ?? root?.parentElement ?? null;
+  const panel = root?.closest<HTMLElement>("[data-pane]") ?? root?.closest<HTMLElement>('[role="tabpanel"], section[aria-label]') ?? root?.parentElement ?? null;
   const first = panel ? [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].find((el) => el.getClientRects().length > 0) : undefined;
   first?.focus();
 }

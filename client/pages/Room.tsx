@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref, type RefObject } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, noticePlace, type Chrome } from "../canvas/barDock.ts";
@@ -55,7 +55,7 @@ import { theme } from "../lib/theme.ts";
 import { PanelBody, RoomLoadNotice } from "../panels/Panels.tsx";
 import { RoomScope, RoomScopeProvider, useRoomScope, useScoped } from "../state/scope.ts";
 import { TOAST_MS } from "../state/store.ts";
-import { sidePanelKeysSlot, useShortcuts } from "../state/shortcuts.ts";
+import { sidePanelKeysSlot, splitKeysSlot, useShortcuts } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
 import type { Ended, Toast } from "../state/types.ts";
@@ -67,6 +67,8 @@ import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, focusAlert, foldsUnderShe
 import { mapFocusSlot } from "./mapFocus.ts";
 import { firstSidePanel, readSidePanel, writeSidePanel } from "./sidePanel.ts";
 import { SideTabs } from "./SideTabs.tsx";
+import { SplitBar } from "./SplitBar.tsx";
+import { readSplit, roomForTwo, sameSplit, shareOf, splitPanes, swapFocus, writeSplit, type SplitEntry } from "./splitPanes.ts";
 import { inModal, ModalSlots, useModalSlot } from "./modalSlot.tsx";
 import {
   FLOAT_MAX,
@@ -276,7 +278,9 @@ function RoomPage() {
   const ended = useRoomView((s) => s.ended);
   const roomId = useRoomView((s) => s.roomId);
   const gate = useRoomView(useShallow((s) => sceneGate({ view: s.view, sceneId: s.sceneId, role })));
-  const { selectedId, panel, tab, tool: toolId, actionBar, sidePanelHidden, sheetHidden } = useRoomView(useShallow((s) => s.local));
+  const { selectedId, panel, tab, tool: toolId, actionBar, sidePanelHidden, sheetHidden, below, splitFits } = useRoomView(useShallow((s) => s.local));
+  // The state this render draws, so a focus request waits for the render that draws the latest (placeFocus).
+  const localNow = useRoomView((s) => s.local);
   const select = useCallback((id: string | null, add?: boolean) => ui.tap(id, add), [ui]);
 
   // A change of scene lets go of the selection, and a blackout does not (lib/scene.ts selectionScene).
@@ -307,7 +311,8 @@ function RoomPage() {
    * panel's tab panel), or a tile in the list of panels. See the effect
    * after useDockFocus below.
    */
-  const focusNext = useRef<{ kind: "panel" } | { kind: "tile"; panelId: string } | { kind: "panels" } | null>(null);
+  // A panel's request names it when it may be the bottom of two, whose name takes focus in place of the chosen tab (docs/design-v1-split-panel.md 9.2).
+  const focusNext = useRef<{ kind: "panel"; id?: string } | { kind: "tile"; panelId: string } | { kind: "panels" } | null>(null);
 
   // The action bar steps aside once the token's panel is open, and focus, which went with the bar's Details, goes to the panel.
   const openDetails = useCallback(
@@ -315,7 +320,7 @@ function RoomPage() {
       ui.select(id);
       ui.showActions(false);
       ui.openPanel("token");
-      focusNext.current = { kind: "panel" };
+      focusNext.current = { kind: "panel", id: "token" };
     },
     [ui],
   );
@@ -393,8 +398,20 @@ function RoomPage() {
   const mounted = !wide && panel ? panels.find((p) => p.id === panel) : undefined;
   const sheet = mounted && !sheetHidden ? mounted : undefined;
   const tabId = panelById(tab) && panels.some((p) => p.id === tab) ? tab : (panels[0]?.id ?? "");
+  /*
+   * The side panel's second panel (docs/design-v1-split-panel.md): kept on
+   * a phone and in a side panel too short for two, and on screen only while
+   * two show. Everything that reads "the open panel" counts it then (10).
+   */
+  const belowId = below !== null && below !== tabId && panels.some((p) => p.id === below) ? below : null;
+  const twoShown = sideShown && belowId !== null && splitFits === true;
+  const sideShows = (id: string) => sideShown && (tabId === id || (twoShown && belowId === id));
+  // Outside the side panel there is no room to measure.
+  useLayoutEffect(() => {
+    if (!wide) ui.fitSplit(false);
+  }, [wide, ui]);
   // New chat and whispers mark the Log's button while it is not on screen.
-  const unread = useLogUnread(wide ? sideShown && tabId === "log" : sheet?.id === "log");
+  const unread = useLogUnread(wide ? sideShows("log") : sheet?.id === "log");
   const journalUnread = useJournalUnread();
   // A PDF upload waiting on the DM badges the DM panel, and on a phone the Panels button too (docs/design-v1-pdf-handouts.md 4.1.1).
   const uploadWaiting = useJobWaiting() && role === "dm" ? 1 : 0;
@@ -431,7 +448,7 @@ function RoomPage() {
    * does both everywhere. Neither ends the mode while the token's panel
    * shows the selection (state/selection.ts dismissal).
    */
-  const tokenPanelShown = wide ? sideShown && tabId === "token" : sheet?.id === "token";
+  const tokenPanelShown = wide ? sideShows("token") : sheet?.id === "token";
   const away = useRoomView((s) => dismissal(s.local, tokenPanelShown));
   /*
    * While the token's panel shows the token, the bar's Close, Escape and
@@ -441,7 +458,7 @@ function RoomPage() {
    */
   const hideBar = useCallback(() => {
     ui.showActions(false);
-    focusNext.current = { kind: "panel" };
+    focusNext.current = { kind: "panel", id: "token" };
   }, [ui]);
   const putAway = useCallback(() => {
     const local = store.getState().local;
@@ -466,8 +483,67 @@ function RoomPage() {
     const rect = sheetShown ? sheetRef.current?.getBoundingClientRect() : undefined;
     return rect ? { placement: landscape ? "right" : "bottom", width: rect.width, height: rect.height } : null;
   }, [landscape, sheetShown]);
-  // The subpage the open panel names (features/panels.ts usePanelHeader), for the sheet's or side panel's header.
-  const [subpage, setSubpage] = useState<PanelHeader | null>(null);
+  /*
+   * The subpage each panel names (features/panels.ts usePanelHeader), for
+   * the sheet's header or its pane's in the side panel. Kept by panel, so
+   * a swap of the side panel's two panels carries each pane's header with it.
+   */
+  const [subpages, setSubpages] = useState<Readonly<Record<string, PanelHeader | null>>>({});
+  const headerOf = useCallback((id: string) => (header: PanelHeader | null) => setSubpages((all) => (all[id] === header ? all : { ...all, [id]: header })), []);
+
+  /*
+   * What this device remembers of the split (pages/splitPanes.ts): read
+   * once per page, once the viewer's role is known, before paint, so a
+   * stored split shows from the first frame. Written as the split opens,
+   * closes or swaps, as either of its panels changes, and as a drag or a
+   * key step ends. One panel's tab presses write nothing. A store
+   * subscription, so every path that changes the panels writes, whatever
+   * called it.
+   */
+  const splitRole = useRoomView((s) => s.you?.role ?? null);
+  const [share, setShare] = useState<number | null>(null);
+  const shareRef = useRef<number | null>(null);
+  const splitStored = useRef<SplitEntry | null>(null);
+  const saveSplit = useRef<(() => void) | null>(null);
+  useLayoutEffect(() => {
+    if (splitStored.current !== null || splitRole === null) return;
+    const has = new Set(panelsFor(splitRole, true).map((p) => p.id));
+    const entry = readSplit(splitRole, (id) => has.has(id));
+    splitStored.current = entry;
+    shareRef.current = entry.share;
+    setShare(entry.share);
+    if (entry.pair) ui.splitPanels(true, entry.pair);
+  }, [splitRole, ui]);
+  useEffect(() => {
+    if (splitRole === null) return;
+    const save = () => {
+      const l = store.getState().local;
+      const entry: SplitEntry = { share: shareRef.current, pair: l.below !== null ? { top: l.tab, below: l.below } : null };
+      if (splitStored.current && sameSplit(entry, splitStored.current)) return;
+      splitStored.current = entry;
+      writeSplit(splitRole, entry, { preview });
+    };
+    saveSplit.current = save;
+    const unsubscribe = store.subscribe((s, prev) => {
+      if (s.local.tab === prev.local.tab && s.local.below === prev.local.below) return;
+      if (s.local.below === null && prev.local.below === null) return;
+      save();
+    });
+    return () => {
+      unsubscribe();
+      saveSplit.current = null;
+    };
+  }, [splitRole, store, preview]);
+  const placeShare = useCallback((next: number) => {
+    shareRef.current = next;
+    setShare(next);
+    saveSplit.current?.();
+  }, []);
+  // The bar's Close, whose bar goes with the bottom panel: focus goes to the chosen tab (9.2).
+  const closeBelow = useCallback(() => {
+    focusNext.current = { kind: "panel" };
+    ui.splitPanels(false);
+  }, [ui]);
 
   // ------------------------------------------------ the dock (pages/fold.ts)
   const dockStore = scope.get(dockSlot);
@@ -680,13 +756,17 @@ function RoomPage() {
    */
   const sheetTitleRef = useRef<HTMLHeadingElement>(null);
   const sideTabRef = useRef<HTMLButtonElement>(null);
+  const belowNameRef = useRef<HTMLButtonElement>(null);
   const placeFocus = () => {
     const ask = focusNext.current;
     if (!ask) return;
     // The side panel draws no tabs until it has fitted them to its row (pages/SideTabs.tsx), at most one commit later and before paint, and then asks again (onTabsDrawn).
     if (ask.kind === "panel" && wide && sideShown && !sideTabRef.current) return;
+    // A panel waiting on the side panel's measure is placed in a commit of its own, before paint (state/types.ts pendingOpen): the request waits for the render that draws it.
+    if (ask.kind === "panel" && store.getState().local !== localNow) return;
     focusNext.current = null;
-    if (ask.kind === "panel") (wide ? sideTabRef.current : sheetTitleRef.current)?.focus({ preventScroll: true });
+    // A panel's name takes focus: the chosen tab for the top one, the bar's name for the bottom one (docs/design-v1-split-panel.md 9.2).
+    if (ask.kind === "panel") (wide ? (ask.id !== undefined && ask.id === belowId && twoShown ? belowNameRef.current : sideTabRef.current) : sheetTitleRef.current)?.focus({ preventScroll: true });
     else if (ask.kind === "panels") panelsRef.current?.focus({ preventScroll: true });
     else sheetRef.current?.querySelector<HTMLElement>(`[data-opener="${panelTile(ask.panelId)}"]`)?.focus();
   };
@@ -774,7 +854,7 @@ function RoomPage() {
             onHide={() => ui.hideSheet(true)}
             hideFocus={panelsRef}
             backLabel="All panels"
-            subpage={subpage}
+            subpage={subpages[mounted.id] ?? null}
             reserveTop={reserveTop}
             actions={headerActions}
             actionCount={headerActionCount}
@@ -784,7 +864,7 @@ function RoomPage() {
             closeRef={closeRef}
             titleRef={sheetTitleRef}
           >
-            <PanelBody id={mounted.id} shown={sheet !== undefined} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={setSubpage} />
+            <PanelBody id={mounted.id} shown={sheet !== undefined} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={headerOf(mounted.id)} />
           </Sheet>
         ) : null}
         {pickerOpen ? (
@@ -804,7 +884,7 @@ function RoomPage() {
           >
             <PanelPicker
               panels={panels}
-              current={tabId}
+              current={panel ?? tabId}
               badges={badges}
               badgeLabels={badgeLabels}
               grouped={role === "dm"}
@@ -877,17 +957,26 @@ function RoomPage() {
           zoom={zoom}
           tabs={panels}
           tab={tabId}
+          below={belowId}
+          fits={splitFits}
+          share={share}
           badges={badges}
           badgeLabels={badgeLabels}
           grouped={role === "dm"}
           onTab={(id) => ui.openPanel(id, { pane: "top" })}
+          onBelow={(id) => ui.openPanel(id, { pane: "below" })}
+          onSplit={(on) => ui.splitPanels(on)}
+          onSwap={() => ui.swapPanels()}
+          onCloseBelow={closeBelow}
+          onFits={(fits) => ui.fitSplit(fits)}
+          onShare={placeShare}
           onHide={hideSidePanel}
-          subpage={subpage}
+          subpages={subpages}
+          panel={(id, shown) => <PanelBody id={id} shown={shown} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={headerOf(id)} />}
           tabRef={sideTabRef}
+          nameRef={belowNameRef}
           onTabsDrawn={placeFocus}
-        >
-          {tabId ? <PanelBody id={tabId} shown={sideShown} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={setSubpage} /> : null}
-        </SidePanel>
+        />
       ) : null}
       <FoldStatus folded={folded || columnSummary} />
       <HandoutPopup />
@@ -2026,11 +2115,13 @@ function ToolButton(props: {
 
 /**
  * The side panel from 900 px up: the party bar, the tabs, and the open
- * panel. While the panel shows a subpage (features/panels.ts
- * usePanelHeader), a header above it names the subpage with "Back to" its
- * panel, and focus follows it in and out (useSubpageFocus). With no
- * subpage there is no header, since the chosen tab already names the
- * panel, unless More cuts its name (pages/SideTabs.tsx).
+ * panel, or two of them one above the other with a bar between
+ * (docs/design-v1-split-panel.md). While a panel shows a subpage
+ * (features/panels.ts usePanelHeader), a header at the top of its pane
+ * names the subpage with "Back to" its panel, and focus follows it in and
+ * out (useSubpageFocus). With no subpage there is no header, since the
+ * chosen tab or the bar already names the panel, unless More cuts the top
+ * panel's name (pages/SideTabs.tsx).
  *
  * "Hide panels" at the end of the tab row hides it (`hidden`), its content
  * kept mounted, so a half-typed message, an open journal page and each
@@ -2038,6 +2129,12 @@ function ToolButton(props: {
  * tabs stand in one row at every height, the rest behind More
  * (docs/design-v1-panel-tabs.md), so the open panel keeps a body to show:
  * at 932 x 430 a DM's wrapped tabs left it 45 px.
+ *
+ * Under the tab row, the room holds the top pane, and with a split the
+ * bar and the bottom pane. Its height alone decides whether two show and
+ * how tall each pane is (pages/splitPanes.ts), measured before paint and
+ * on every resize, never from what the panes hold. Too short for two, the
+ * top pane fills it and the bottom one stays mounted and hidden.
  */
 function SidePanel(props: {
   ref?: Ref<HTMLElement>;
@@ -2048,12 +2145,28 @@ function SidePanel(props: {
   zoom: number;
   tabs: PanelDef[];
   tab: string;
+  /** The panel below the top one while a split is kept, one of `tabs` and never `tab`, else null. */
+  below: string | null;
+  /** Whether the room holds two, as the room's state has it (state/types.ts splitFits). */
+  fits: boolean | null;
+  /** The bar's stored place, in thousandths, or null for the default (pages/splitPanes.ts). */
+  share: number | null;
   badges: Record<string, number>;
   /** What a tab's count says to a screen reader where it is not "N unread". */
   badgeLabels: Record<string, string>;
   grouped: boolean;
   onTab(id: string): void;
-  subpage: PanelHeader | null;
+  /** A pick in the bar's "Panel below". */
+  onBelow(id: string): void;
+  /** "Two panels" in More's menu. */
+  onSplit(on: boolean): void;
+  onSwap(): void;
+  onCloseBelow(): void;
+  onFits(fits: boolean | null): void;
+  onShare(share: number): void;
+  subpages: Readonly<Record<string, PanelHeader | null>>;
+  /** A panel's body, mounted in its pane. */
+  panel(id: string, shown: boolean): ReactNode;
   /**
    * The chosen tab, which takes focus from script when Details opens the
    * token's panel: "Token, tab, selected". The tab panel itself takes no
@@ -2061,22 +2174,237 @@ function SidePanel(props: {
    * More, while the open panel is in it.
    */
   tabRef: RefObject<HTMLButtonElement | null>;
+  /** The bottom panel's name in the bar, which takes focus for it as the chosen tab does for the top one. */
+  nameRef: RefObject<HTMLButtonElement | null>;
   /** The tabs have just been drawn for a new fit, in a commit of the side panel's own. */
   onTabsDrawn(): void;
-  children: ReactNode;
 }) {
-  const titleRef = useRef<HTMLHeadingElement>(null);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  // Where Back lands when the row that opened the subpage is gone (a page deleted from inside it): the header goes with the subpage, and the panel's tab stays.
-  const chosenTabRef = props.tabRef;
-  useSubpageFocus(props.subpage, { title: titleRef, body: bodyRef, fallback: chosenTabRef });
+  const { tabRef, nameRef } = props;
+  const scope = useRoomScope();
+  const store = useRoomStore();
+  const latest = useRef(props);
+  latest.current = props;
   // The panel is named by its chosen tab, so a screen reader entering it hears "Initiative" rather than a bare "tab panel".
   const ids = useId();
   const tabId = (id: string) => `${ids}-tab-${id}`;
   const panelId = `${ids}-panel`;
+  const topPaneId = `${ids}-top`;
+  const nameId = `${ids}-below`;
+  const asideRef = useRef<HTMLElement | null>(null);
+  const asideRefs = useCallback(
+    (el: HTMLElement | null) => {
+      asideRef.current = el;
+      const outer = latest.current.ref;
+      if (typeof outer === "function") outer(el);
+      else if (outer) outer.current = el;
+    },
+    [],
+  );
+  const roomRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState<number | null>(null);
+  const [dragTop, setDragTop] = useState<number | null>(null);
+  const [cutTitle, setCutTitle] = useState<string | null>(null);
+  const [status, setStatus] = useState("");
+
+  const top = props.tabs.find((p) => p.id === props.tab);
+  const below = props.below !== null ? props.tabs.find((p) => p.id === props.below) : undefined;
+  const two = !props.hidden && below !== undefined && props.fits === true;
+
+  /*
+   * The room's measure (3.2): before the first paint, as the side panel
+   * shows and at a new interface size, then on every resize, committed at
+   * once as the tabs' fit is, so no frame paints one pane and the next
+   * two. A hidden side panel measures nothing, so its room is unknown.
+   */
+  const measure = useCallback(() => {
+    const el = roomRef.current;
+    if (!el) return;
+    const p = latest.current;
+    if (p.hidden) {
+      p.onFits(null);
+      return;
+    }
+    const height = el.getBoundingClientRect().height / p.zoom;
+    setRoom((was) => (was !== null && Math.abs(was - height) < 0.5 ? was : height));
+    p.onFits(roomForTwo(height));
+  }, []);
+  useLayoutEffect(measure, [measure, props.hidden, props.zoom]);
+  useEffect(() => {
+    const el = roomRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => flushSync(measure));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [measure]);
+
+  const sizes = splitPanes({ room: room ?? 0, share: props.share, initiative: props.tab === "tracker" ? "top" : props.below === "tracker" ? "below" : null });
+  const topPx = dragTop ?? sizes.top;
+  const drawn = { ...sizes, top: topPx, below: sizes.top + sizes.below - topPx };
+
+  /*
+   * A swap moves the panes and the bar with `insertBefore` (react-dom has
+   * no `moveBefore` here), which drops every scroll offset in what moved
+   * and, by the browser's focus fixup, the focus inside it (4.3). So the
+   * room keeps every offset as it happens, and focus is read as the swap
+   * is asked for: zustand calls a subscriber inside the state change,
+   * before React commits the move, whichever path asked.
+   */
+  const offsets = useRef(new Map<Element, { top: number; left: number }>());
+  useEffect(() => {
+    const el = roomRef.current;
+    if (!el) return;
+    const keep = (e: Event) => {
+      if (e.target instanceof Element) offsets.current.set(e.target, { top: e.target.scrollTop, left: e.target.scrollLeft });
+    };
+    el.addEventListener("scroll", keep, true);
+    return () => el.removeEventListener("scroll", keep, true);
+  }, []);
+  const swapAsked = useRef<{ before: Element | null } | null>(null);
+  useEffect(
+    () =>
+      store.subscribe((s, prev) => {
+        const a = s.local;
+        const b = prev.local;
+        if (b.below !== null && a.tab === b.below && a.below === b.tab) swapAsked.current = { before: document.activeElement };
+      }),
+    [store],
+  );
+  // The last element focused in the room, for a pane that hides after the browser already let its focus go.
+  const lastIn = useRef<Element | null>(null);
+  useEffect(() => {
+    const onIn = (e: FocusEvent) => {
+      lastIn.current = e.target instanceof Element && roomRef.current?.contains(e.target) ? e.target : null;
+    };
+    document.addEventListener("focusin", onIn);
+    return () => document.removeEventListener("focusin", onIn);
+  }, []);
+
+  /*
+   * After each commit, before paint: the offsets and the focus a swap
+   * took, and a pane that hid with focus inside it, whose focus goes to
+   * the chosen tab (9.2). A request that focuses something itself, as
+   * Stat block does at its block, runs after this and wins.
+   */
+  const wasTwo = useRef(two);
+  useLayoutEffect(() => {
+    const roomEl = roomRef.current;
+    const hadTwo = wasTwo.current;
+    wasTwo.current = two;
+    if (!roomEl) return;
+    const hiddenHere = (el: Element | null) => {
+      const hidden = el?.closest("[hidden]");
+      return hidden != null && hidden !== roomEl && roomEl.contains(hidden);
+    };
+    let lost = false;
+    const ask = swapAsked.current;
+    if (ask) {
+      swapAsked.current = null;
+      for (const [el, at] of offsets.current) {
+        if (!el.isConnected || !roomEl.contains(el)) {
+          offsets.current.delete(el);
+          continue;
+        }
+        if (el.scrollTop !== at.top) el.scrollTop = at.top;
+        if (el.scrollLeft !== at.left) el.scrollLeft = at.left;
+      }
+      const back = swapFocus(ask.before, document.activeElement, roomEl, document.body);
+      if (back instanceof HTMLElement) {
+        if (hiddenHere(back)) lost = true;
+        else back.focus({ preventScroll: true });
+      }
+    }
+    if (props.hidden) return;
+    const active = document.activeElement;
+    if (hiddenHere(active)) lost = true;
+    if (hadTwo && !two && (active === null || active === document.body) && hiddenHere(lastIn.current)) lost = true;
+    if (lost) tabRef.current?.focus({ preventScroll: true });
+  });
+
+  // The status says what moved while focus stays put (9.3): the split opening, and any swap. A close and a new bottom panel say nothing, since focus moves to what names them.
+  const pairWas = useRef({ tab: props.tab, below: props.below });
+  useLayoutEffect(() => {
+    const was = pairWas.current;
+    if (was.tab === props.tab && was.below === props.below) return;
+    pairWas.current = { tab: props.tab, below: props.below };
+    const title = (id: string | null) => props.tabs.find((p) => p.id === id)?.title ?? "";
+    if (props.below !== null && was.below === null) setStatus(`Two panels, ${title(props.below)} below`);
+    else if (props.below !== null && was.tab === props.below && was.below === props.tab) setStatus(`${title(props.tab)} on top, ${title(props.below)} below`);
+    else setStatus("");
+  });
+
+  // O goes between the two (9.4): from the side panel above the bar to the bottom panel's name, and from anywhere else to the chosen tab.
+  const splitKeys = scope.get(splitKeysSlot);
+  useEffect(() => {
+    if (!two) return;
+    splitKeys.other = () => {
+      const active = document.activeElement;
+      const bar = barRef.current;
+      const above = active !== null && bar !== null && !bar.contains(active) && asideRef.current?.contains(active) === true && (bar.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_PRECEDING) !== 0;
+      (above ? nameRef.current : tabRef.current)?.focus({ preventScroll: true });
+    };
+    return () => {
+      splitKeys.other = null;
+    };
+  }, [two, splitKeys, nameRef, tabRef]);
+
+  const topPane = top ? (
+    <SidePane
+      key={top.id}
+      rootId={topPaneId}
+      style={two ? { flex: "none", height: drawn.top } : { flex: "1 1 0" }}
+      subpage={props.subpages[top.id] ?? null}
+      cutTitle={cutTitle}
+      fallback={tabRef}
+      body={{ id: panelId, role: "tabpanel", "aria-labelledby": tabId(top.id) }}
+    >
+      {props.panel(top.id, !props.hidden)}
+    </SidePane>
+  ) : null;
+  const panes = below
+    ? [
+        topPane,
+        <SplitBar
+          key={"\u0000bar"}
+          hidden={!two}
+          zoom={props.zoom}
+          panels={props.tabs}
+          grouped={props.grouped}
+          top={top ?? below}
+          below={below}
+          badges={props.badges}
+          badgeLabels={props.badgeLabels}
+          sizes={drawn}
+          topPaneId={topPaneId}
+          nameId={nameId}
+          nameRef={nameRef}
+          barRef={barRef}
+          onPick={props.onBelow}
+          onSwap={props.onSwap}
+          onClose={props.onCloseBelow}
+          onDrag={setDragTop}
+          onPlace={(px) => {
+            if (room !== null) props.onShare(shareOf(px, room));
+          }}
+        />,
+        <SidePane
+          key={below.id}
+          hidden={!two}
+          style={{ flex: "1 1 0" }}
+          subpage={props.subpages[below.id] ?? null}
+          cutTitle={null}
+          fallback={nameRef}
+          root={{ role: "group", "aria-labelledby": nameId }}
+          body={{}}
+        >
+          {props.panel(below.id, two)}
+        </SidePane>,
+      ]
+    : [topPane];
+
   return (
     <aside
-      ref={props.ref}
+      ref={asideRefs}
       id={props.id}
       hidden={props.hidden}
       {...smallUi(props.zoom)}
@@ -2104,27 +2432,65 @@ function SidePanel(props: {
         grouped={props.grouped}
         onTab={props.onTab}
         onHide={props.onHide}
-        subpage={props.subpage !== null}
-        tabRef={chosenTabRef}
+        split={{ on: below !== undefined, fits: props.fits, below: two ? (below?.id ?? null) : null, onToggle: () => props.onSplit(below === undefined) }}
+        onCutTitle={setCutTitle}
+        tabRef={tabRef}
         onTabsDrawn={props.onTabsDrawn}
         tabId={tabId}
         panelId={panelId}
       />
-      {props.subpage ? (
-        <div style={{ flex: "none", borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>
-          <SheetHeader title={props.subpage.title} back={subpageBack(props.subpage)} titleRef={titleRef} />
-        </div>
-      ) : null}
+      {/* The room: its height alone sets the panes', so nothing a panel shows ever moves the bar. */}
+      <div ref={roomRef} data-split-room="" style={{ flex: "1 1 0", minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {panes}
+      </div>
+      <div role="status" style={VISUALLY_HIDDEN}>
+        {status}
+      </div>
+    </aside>
+  );
+}
+
+/**
+ * One pane of the side panel: a header slot, for a subpage's header or
+ * the name More cut, above its own scrolling body, so a sticky header or
+ * footer inside a panel meets its own pane's edges (`data-pane-body`).
+ * Each runs its own subpage focus, its fallback the name of the pane: the
+ * chosen tab for the top one, the bar's name for the bottom one.
+ */
+function SidePane(props: {
+  rootId?: string;
+  hidden?: boolean;
+  style: CSSProperties;
+  subpage: PanelHeader | null;
+  cutTitle: string | null;
+  fallback: RefObject<HTMLElement | null>;
+  root?: { role?: string; "aria-labelledby"?: string };
+  body: { id?: string; role?: string; "aria-labelledby"?: string };
+  children: ReactNode;
+}) {
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Where Back lands when the row that opened the subpage is gone (a page deleted from inside it): the header goes with the subpage, and the pane's name stays.
+  useSubpageFocus(props.subpage, { title: titleRef, body: bodyRef, root: rootRef, fallback: props.fallback });
+  const header = props.subpage ? (
+    <SheetHeader title={props.subpage.title} back={subpageBack(props.subpage)} titleRef={titleRef} />
+  ) : props.cutTitle ? (
+    // A name More cuts is named in full above the panel (docs/design-v1-panel-tabs.md 3.8). A subpage's header names it in its Back instead.
+    <SheetHeader title={props.cutTitle} />
+  ) : null;
+  return (
+    <div ref={rootRef} id={props.rootId} hidden={props.hidden} {...props.root} style={{ display: "flex", flexDirection: "column", minHeight: 0, ...props.style }}>
+      {header ? <div style={{ flex: "none", borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>{header}</div> : null}
       <div
         ref={bodyRef}
-        id={panelId}
-        role="tabpanel"
-        aria-labelledby={tabId(props.tab)}
+        {...props.body}
+        data-pane=""
         data-pane-body=""
-        style={{ ...paneBodyPadding(theme.space(4), theme.space(4)), flex: 1, overflowY: "auto", padding: theme.space(4) }}
+        style={{ ...paneBodyPadding(theme.space(4), theme.space(4)), flex: "1 1 0", minHeight: 0, overflowY: "auto", padding: theme.space(4) }}
       >
         {props.children}
       </div>
-    </aside>
+    </div>
   );
 }

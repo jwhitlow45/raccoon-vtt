@@ -165,6 +165,7 @@ This header moves no focus and is not a subpage: `useSubpageFocus` keys on subpa
 - Grouped as the phone's list groups them, through one helper both use: `panelSections(panels, grouped)` in `features/panels.ts`, in place of PanelPicker's own loop (`Room.tsx:1601-1645`, `GROUP_LABELS` at `:1591`). For a DM: "In play" and "Prepare" headings over their panels, and Menu after a plain line. A heading shows only for a group with a panel in More. A player's menu has no headings or line, as a player's list has none (the layout design's 6.4): five panels read at a glance.
 - Each item: the panel's title, its badge at the end, 44 px tall, the menu's full width. The open panel's item is in the chosen look, and checked (5.1).
 - The headings take the section label's look (`SectionLabel`, `components/Panel.tsx:23`), not its heading element (5.1).
+- Extended by docs/design-v1-split-panel.md 6: "Two panels", a checkbox item, heads the menu with a line under it, and the panel shown below carries "below" at its end.
 
 ### 4.2 Where and how big
 
@@ -288,6 +289,8 @@ The comment above the section's rows names its code: `pages/Room.tsx`, `pages/ta
 **Rows this design does not add.** No click or tap: a click or tap on a tab, on More, on a panel in the list, or outside the list is a plain pointer press, which the sheet no longer lists. The row and the menu add no key-plus-pointer combination. Android's Back closes the list as it closes any popover on the shared base, under the room rows that docs/design-v1-tool-options.md keeps for an open popover. Escape anywhere closes the list under that design's room Escape row too, and `tabsListEscape` says what it does inside the list, where focus then goes back to More. S ("Hide or show the side panel") and `/` keep their rows and roles in "Keys".
 
 ## 6. Opening a panel from anywhere
+
+Changed by docs/design-v1-split-panel.md 5.1: every caller now says how it asked for the panel, and with two panels a link opens in the pane it was not pressed in. With one panel what follows still holds.
 
 No caller changes. Every path in 2.2 sets `tab`, and the row shows it: a tab in the row is chosen, or More names the panel and is chosen. No tab moves, the menu stays shut, and focus goes where the caller sends it. So `/` shows "Outliner ▾" chosen with focus in its search, a pin's journal page shows "Journal ▾" for a DM, and Add token's Monsters shows "Monsters ▾". A reload that opens a panel in More again shows it the same way. Details, "Stat block" and "Open the sheet" open Token, which is always first in the row.
 

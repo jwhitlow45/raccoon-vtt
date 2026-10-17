@@ -154,6 +154,18 @@ describe("the measured fonts (3.2)", () => {
     assert.equal(fitTabs(widths(DEJAVU_8, DM, 295))!.count, 2);
   });
 
+  // docs/design-v1-split-panel.md 6: "Two panels" heads More's menu, so More must always be there. A registry that one day fits every tab in the row needs another place for it.
+  test("More holds a panel for both roles at every room up to the 360 px side panel's widest row, so Two panels always has its place", () => {
+    for (const [name, font] of [["macOS", MACOS], ["Segoe UI", SEGOE], ["DejaVu Sans", DEJAVU]] as const) {
+      for (const [role, panels] of [["DM", DM], ["player", PLAYER]] as const) {
+        for (let room = 1; room <= 295; room++) {
+          const fit = fitTabs(widths(font, panels, room));
+          assert.ok(fit && fit.count < panels.length, `${name}, ${role}, ${room} px: More holds nothing`);
+        }
+      }
+    }
+  });
+
   test("a name is cut only for a panel in More", () => {
     const w = widths(DEJAVU, DM, 295);
     const fit = fitTabs(w)!;

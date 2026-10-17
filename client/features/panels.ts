@@ -400,8 +400,10 @@ export function useSubpageFocus(
      * moved to the subpage's title, the next arrow left the tab list and
      * moved the selected token. The side panel's More menu is part of the
      * tabs: a panel picked there keeps focus for More (pages/SideTabs.tsx).
+     * The split's bar (pages/SplitBar.tsx) names the bottom panel as a tab
+     * names the top one, and its own menu carries `data-tabs-menu`.
      */
-    if (active instanceof Element && active.closest('[role="tablist"], [data-tabs-menu]')) return;
+    if (active instanceof Element && active.closest('[role="tablist"], [data-tabs-menu], [data-pane-bar]')) return;
     target?.focus({ preventScroll: true });
     /*
      * The row Back found can lie outside the view the offset put back: a
