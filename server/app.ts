@@ -22,6 +22,7 @@ import { registerRoomRoutes } from "./http/rooms.ts";
 import { registerSecurity } from "./http/security.ts";
 import { registerStatic } from "./http/static.ts";
 import { registerXCardRoutes } from "./http/xcard.ts";
+import { registerDdbImportRoutes, type DdbImportOptions } from "./http/ddbImport.ts";
 import { TooBusyError } from "./rooms/errors.ts";
 import { RoomNotFoundError, type RoomGateway } from "./rooms/gateway.ts";
 import { RoomManager, type ManagerOptions } from "./rooms/manager.ts";
@@ -40,6 +41,8 @@ export type AppDeps = {
   export?: ExportOptions;
   /** When image cleanup's daily job first runs (docs/design-v1-dm-tools.md 3.19). */
   cleanup?: CleanupOptions;
+  /** The D&D Beyond import's limits and way out, for tests (docs/design-v1-pc-stats.md 6.3). */
+  ddb?: Partial<DdbImportOptions>;
 };
 
 /**
@@ -50,7 +53,7 @@ export type AppDeps = {
  * server/rooms/*). Add the registration here, one line per module, after
  * setupAuth: the rate limiter only covers routes registered after it.
  */
-export async function buildApp({ config, pool, gateway, hasher, rooms, ws, export: exportOptions, cleanup }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ config, pool, gateway, hasher, rooms, ws, export: exportOptions, cleanup, ddb }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: config.NODE_ENV === "test" ? false : { level: config.production ? "info" : "debug" },
     // cloudflared keeps idle origin connections for 90 s. A shorter Node
@@ -121,6 +124,8 @@ export async function buildApp({ config, pool, gateway, hasher, rooms, ws, expor
   await registerLogRoutes(app, kit, { manager });
   await registerReceiptRoutes(app, kit, { manager });
   await registerXCardRoutes(app, kit, { manager });
+  // On the strict egress port, whose squid list names D&D Beyond's character service alone (docs/design-v1-pc-stats.md 6.3).
+  await registerDdbImportRoutes(app, { dispatcher: app.assets.egress.strict, ...ddb });
 
   // The built SPA, when there is one. In development Vite serves it instead.
   const dist = fileURLToPath(new URL("../dist/", import.meta.url));

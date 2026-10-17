@@ -1,5 +1,6 @@
 import type { AbilityKey, Actor, PcRoll, PcStats } from "../model.ts";
-import { MAX_PC_ROLLS } from "../protocol.ts";
+import { MAX_PC_ROLLS, pcFillSchema, pcStatsForImport } from "../protocol.ts";
+import { EMPTY_PC_STATS } from "./pcStats.ts";
 
 /**
  * What a fill read (docs/design-v1-pc-stats.md 6.1): pasted text through
@@ -126,4 +127,17 @@ export function fillSummary(fill: PcFill, merge: FillMerge): string {
   }
   if (merge.dropped > 0) sentences.push(`${merge.dropped} more ${merge.dropped === 1 ? "roll was" : "rolls were"} left out. At most ${MAX_PC_ROLLS} rolls fit.`);
   return sentences.length > 0 ? sentences.join(" ") : "Changes nothing in the stat block.";
+}
+
+/**
+ * A fill as the protocol bounds it, or null: every part within the block's
+ * own bounds, and the block it makes on its own within the block's size.
+ * The D&D Beyond route checks what it read with this before it answers,
+ * and the editor checks what it receives or reads from pasted JSON.
+ */
+export function checkedFill(value: unknown): PcFill | null {
+  const parsed = pcFillSchema.safeParse(value);
+  if (!parsed.success) return null;
+  const fill = parsed.data as PcFill;
+  return pcStatsForImport.safeParse(mergeFill(EMPTY_PC_STATS as PcStats, fill).stats).success ? fill : null;
 }

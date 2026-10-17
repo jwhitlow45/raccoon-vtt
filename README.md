@@ -118,11 +118,16 @@ containers, and none of them publishes a port:
   `raccoon-backups` volume (see Backups below). It reaches postgres and
   nothing else.
 - `egress`, a squid proxy and the app's only way to the internet. Port 3128
-  allows only `serpapi.com`, `api.openverse.org` and
-  `challenges.cloudflare.com`. Port 3129 allows any public host on port 443
-  (for "import an image from a URL"). Both refuse every private, loopback and
-  link-local address. The rules and their reasons are in
-  [docker/squid.conf](docker/squid.conf).
+  allows only `serpapi.com`, `api.openverse.org`,
+  `character-service.dndbeyond.com` and `challenges.cloudflare.com`. Port
+  3129 allows any public host on port 443 (for "import an image from a URL").
+  Both refuse every private, loopback and link-local address. The rules and
+  their reasons are in [docker/squid.conf](docker/squid.conf).
+  `character-service.dndbeyond.com` is for importing a public D&D Beyond
+  character into a stat block. To turn that off, remove it from the
+  `strict_hosts` line of docker/squid.conf and restart the `egress`
+  container: the link import then says D&D Beyond did not answer, and
+  pasting the character's JSON still works.
 
 Your HTTPS front end (a reverse proxy or a tunnel) reaches the app over the
 `raccoon-edge` network at `http://raccoon:3000`. The header of

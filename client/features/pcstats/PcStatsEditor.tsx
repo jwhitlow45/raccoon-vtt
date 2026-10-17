@@ -13,6 +13,7 @@ import { Dialog, DiscardQuestion } from "../../components/Dialog.tsx";
 import { Input, Select, TextArea } from "../../components/Field.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { Help, SectionLabel } from "../../components/Panel.tsx";
+import { Loading } from "../../components/Loading.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
@@ -38,6 +39,8 @@ import {
 } from "./draft.ts";
 import { alsoAny, alsoLines, alsoPatch, readLine, type AlsoKey, type AlsoSet } from "./fill.ts";
 import { openFlow, stepFlow, type FlowEvent, type FlowState, type Review } from "./flow.ts";
+import { DDB_LINK_ERROR, ddbCharacterId, ddbCharacterUrl } from "#shared/ddb/link.ts";
+import { getDdbFill, importErrorText, readPastedJson } from "./ddb.ts";
 import { statsFromBlock } from "./fromBlock.ts";
 import { parseStatBlockText } from "../monsters/parse.ts";
 import { closePcStats, openPcStatsSlot } from "./open.ts";
@@ -90,9 +93,14 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
   const [retryAt, setRetryAt] = useState<number | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [pasted, setPasted] = useState("");
+  // The D&D Beyond step's field starts with the sheet link when that is a D&D Beyond one.
+  const [ddbLink, setDdbLink] = useState(() => (character?.actor.sheetUrl && ddbCharacterId(character.actor.sheetUrl) ? character.actor.sheetUrl : ""));
+  const [ddbJson, setDdbJson] = useState("");
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [readingJson, setReadingJson] = useState(false);
   const problems = useMemo(() => draftProblems(draft), [draft]);
   const size = useMemo(() => sizeOf(draft.stats), [draft.stats]);
-  const dirty = draftDirty(opened.draft, draft) || alsoAny(flow.also) || pasted.trim() !== "";
+  const dirty = draftDirty(opened.draft, draft) || alsoAny(flow.also) || pasted.trim() !== "" || ddbJson.trim() !== "";
   const held = flow.saving;
   // An answer that comes after the editor closed may only say what became of the save.
   const open = useRef(true);
@@ -114,8 +122,39 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     setFlow(state);
     for (const effect of effects) {
       if (effect.kind === "close") props.onClose();
-      else sendSave(state);
+      else if (effect.kind === "send") sendSave(state);
+      else if (effect.kind === "fetch") startGet(effect.id);
+      else {
+        gets.current.get(effect.id)?.abort();
+        gets.current.delete(effect.id);
+      }
     }
+  };
+
+  // D&D Beyond requests in flight, by the flow's number, so a newer Get it, Back or closing aborts the one it names.
+  const gets = useRef(new Map<number, AbortController>());
+  useEffect(() => {
+    const live = gets.current;
+    return () => {
+      for (const controller of live.values()) controller.abort();
+    };
+  }, []);
+  const roomId = useRoomView((s) => s.roomId);
+  const startGet = (id: number) => {
+    const controller = new AbortController();
+    gets.current.set(id, controller);
+    getDdbFill(roomId, ddbLink, controller.signal).then(
+      (fill) => {
+        gets.current.delete(id);
+        // A character gone from the view meanwhile still gets its review, with nothing beside the block to set.
+        const live = store.getState().view?.characters[props.characterId];
+        if (open.current) send({ t: "got", id, result: { fill, lines: live ? alsoLines(fill, live) : [] } });
+      },
+      (err: unknown) => {
+        gets.current.delete(id);
+        if (!controller.signal.aborted && open.current) send({ t: "got", id, result: { error: importErrorText(err) } });
+      },
+    );
   };
 
   /** The Save's one op: the parts that differ from the block as it opened, and what a fill set beside it, against the character as it is now. */
@@ -167,6 +206,36 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     send({ t: "read", fill, lines: alsoLines(fill, character) });
   };
 
+  const getIt = () => {
+    if (flow.get !== null) return;
+    if (!ddbCharacterId(ddbLink)) {
+      setLinkError(DDB_LINK_ERROR);
+      return;
+    }
+    setLinkError(null);
+    send({ t: "get" });
+  };
+
+  const readJson = () => {
+    if (readingJson || !character) return;
+    setReadingJson(true);
+    setLinkError(null);
+    readPastedJson(ddbJson).then(
+      (result) => {
+        setReadingJson(false);
+        const live = store.getState().view?.characters[props.characterId];
+        if (!open.current) return;
+        if ("error" in result) setLinkError(result.error);
+        else send({ t: "read", fill: result.fill, lines: live ? alsoLines(result.fill, live) : [] });
+      },
+      () => {
+        setReadingJson(false);
+        // The reader's chunk did not load: the shared notice offers a reload.
+        if (open.current) setLinkError("The reader did not load. Check the connection, then try again.");
+      },
+    );
+  };
+
   const discard = leaving ? (
     <>
       <Button onClick={() => setLeaving(false)}>Keep editing</Button>
@@ -199,6 +268,45 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
         }
       >
         <PasteStep text={pasted} onText={setPasted} level={draft.level} name={name.current} />
+      </Dialog>
+    );
+  }
+
+  if (flow.step === "ddb") {
+    return (
+      <Dialog
+        title="D&D Beyond"
+        onClose={close}
+        back={back}
+        status={status}
+        phone="fill"
+        width="lg"
+        footer={
+          discard ?? (
+            <>
+              <Button onClick={() => send({ t: "back" })}>Back</Button>
+              <Button variant="primary" busy={flow.get !== null} onClick={getIt}>
+                {flow.get !== null ? "Getting it…" : "Get it"}
+              </Button>
+            </>
+          )
+        }
+      >
+        <DdbStep
+          link={ddbLink}
+          onLink={(v) => {
+            setDdbLink(v);
+            setLinkError(null);
+          }}
+          onGet={getIt}
+          waiting={flow.get !== null}
+          error={linkError ?? flow.error}
+          json={ddbJson}
+          onJson={setDdbJson}
+          onReadJson={readJson}
+          readingJson={readingJson}
+          name={name.current}
+        />
       </Dialog>
     );
   }
@@ -247,7 +355,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
             This stat block was deleted or is no longer yours, so it cannot be saved.
           </Notice>
         ) : null}
-        <FillFrom onPaste={() => send({ t: "open", step: "paste" })} />
+        <FillFrom onPaste={() => send({ t: "open", step: "paste" })} onDdb={() => send({ t: "open", step: "ddb" })} />
         {alsoAny(flow.also) ? <Help>{`Save also sets ${alsoWords(flow.also)}.`}</Help> : null}
         <LevelRow draft={draft} onLevel={(level) => setDraft((x) => ({ ...x, level }))} />
         <Abilities stats={draft.stats} level={draft.level} setStats={setStats} />
@@ -280,13 +388,92 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
 }
 
 /** "Fill from" (7.2): the steps that read a block in, one row. */
-function FillFrom(props: { onPaste(): void }) {
+function FillFrom(props: { onPaste(): void; onDdb(): void }) {
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
       <span style={{ fontWeight: theme.weight.strong }}>Fill from</span>
       <Button size="sm" onClick={props.onPaste}>
         Paste text
       </Button>
+      <Button size="sm" onClick={props.onDdb}>
+        D&amp;D Beyond
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * "D&D Beyond" (6.3): a public character's share link or number, which the
+ * server fetches, or its JSON pasted and read on this device. Get it is
+ * busy under the shared delayed indicator and refuses a second tap. Once a
+ * number is known, the step links to the data's own page, whose text can be
+ * copied whole.
+ */
+function DdbStep(props: {
+  link: string;
+  onLink(link: string): void;
+  onGet(): void;
+  waiting: boolean;
+  error: string | null;
+  json: string;
+  onJson(json: string): void;
+  onReadJson(): void;
+  readingJson: boolean;
+  name: string;
+}) {
+  const linkId = useId();
+  const jsonId = useId();
+  const [pasting, setPasting] = useState(false);
+  const id = ddbCharacterId(props.link);
+  return (
+    <div style={{ display: "grid", gap: theme.space(3), fontSize: theme.font.body14 }}>
+      <Help>{`The character must be Public in D&D Beyond. The import reads numbers, proficiencies, weapons and spells, never their text, and you check what it read before anything is saved. It is best effort: D&D Beyond can change its format.`}</Help>
+      <label htmlFor={linkId} style={{ fontWeight: theme.weight.strong }}>
+        Share link or character number
+      </label>
+      <Input
+        id={linkId}
+        type="text"
+        inputMode="url"
+        value={props.link}
+        maxLength={300}
+        placeholder="dndbeyond.com/characters/12345678"
+        spellCheck={false}
+        onChange={(e) => props.onLink(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            props.onGet();
+          }
+        }}
+        style={{ width: "100%" }}
+      />
+      {props.waiting ? <Loading text={`Getting ${props.name} from D&D Beyond…`} /> : null}
+      {props.error ? (
+        <Notice tone="danger" role="alert">
+          {props.error}
+        </Notice>
+      ) : null}
+      {id ? (
+        <a href={ddbCharacterUrl(id)} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" style={{ display: "inline-flex", alignItems: "center", minHeight: theme.touch, color: theme.color.accent, fontWeight: theme.weight.strong }}>
+          Open its data in D&amp;D Beyond ↗
+        </a>
+      ) : null}
+      <Button size="sm" expanded={pasting} onClick={() => setPasting((p) => !p)} style={{ justifySelf: "start" }}>
+        Paste its JSON instead
+      </Button>
+      {pasting ? (
+        <>
+          <label htmlFor={jsonId} style={{ color: theme.color.textMuted, lineHeight: theme.leading.body }}>
+            Open its data in D&amp;D Beyond, copy the whole page, and paste it here. It is read on this device, up to 5 MiB.
+          </label>
+          <TextArea id={jsonId} value={props.json} onChange={(e) => props.onJson(e.target.value)} rows={8} spellCheck={false} style={{ width: "100%", fontFamily: theme.font.mono }} />
+          <Button size="sm" variant="primary" busy={props.readingJson} disabled={props.json.trim() === ""} onClick={props.onReadJson} style={{ justifySelf: "start" }}>
+            {props.readingJson ? "Reading…" : "Read it"}
+          </Button>
+          {props.readingJson ? <Loading text="Reading the character…" /> : null}
+        </>
+      ) : null}
     </div>
   );
 }

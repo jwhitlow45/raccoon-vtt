@@ -623,6 +623,40 @@ const pcStatsPatch = z
   })
   .refine((s) => serializedBytes(s) <= LIMITS.pcStatsBytes, withinPcStatsBytes);
 
+/**
+ * What a fill read (docs/design-v1-pc-stats.md 6.1, shared/rules/pcFill.ts),
+ * as the D&D Beyond route answers it and the editor takes it: the block's
+ * parts it read, each bounded as in the block, and the fields beside it. A
+ * fill is checked by this before the route sends it and before the editor
+ * shows it, so one that fails reads as `unreadable`.
+ */
+const pcFill = z.strictObject({
+  source: z.enum(["paste", "ddb"]),
+  stats: z.strictObject({
+    abilities: pcParts.abilities.optional(),
+    saves: pcParts.saves.optional(),
+    skills: pcParts.skills.optional(),
+    adjust: pcParts.adjust.optional(),
+    defenses: pcParts.defenses.optional(),
+    spellAbility: pcAbility.nullable().optional(),
+    jack: z.boolean().optional(),
+    alert: z.boolean().optional(),
+    evasion: z.boolean().optional(),
+    critOn: pcCritOn.nullable().optional(),
+    rolls: pcParts.rolls,
+  }),
+  level: characterLevel.optional(),
+  name: name.optional(),
+  actor: z.strictObject({
+    ac: z.number().int().min(0).max(100).optional(),
+    hpMax: z.number().int().min(1).max(100_000).optional(),
+    speeds: speeds.optional(),
+    senses: shortText.optional(),
+    sheetUrl: sheetUrl.optional(),
+  }),
+  warnings: z.array(line(400)).max(50),
+});
+
 const characterInput = z.strictObject({
   id,
   name,
@@ -1606,6 +1640,8 @@ export const savedEncounterInputSchema = savedEncounterInput;
 export const pcStatsForImport = pcStats;
 /** A stat block's patch, for the editor to check what it sends. */
 export const pcStatsPatchSchema = pcStatsPatch;
+/** A fill as the D&D Beyond route answers it (docs/design-v1-pc-stats.md 6.3). */
+export const pcFillSchema = pcFill;
 /** Who may move any token, so the stored-state schema checks imports the same way. */
 export const moveAnyTokenSchema = moveAnyToken;
 /** The text rules above, so the stored-state schema checks imports the same way. */

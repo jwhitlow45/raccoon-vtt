@@ -449,6 +449,9 @@ export const api = {
   /** The caller's own receipts of one tag, for an op whose answer this device lost (docs/design-v1-dice.md 1.2). */
   getReceipts: (roomId: string, tag: string) => request<ReceiptLookup>("GET", `${room(roomId)}/receipts/${encodeURIComponent(tag)}`),
 
+  /** A public D&D Beyond character read by the server into a stat block's fill (docs/design-v1-pc-stats.md 6.3). The caller checks the fill. */
+  ddbImport: (roomId: string, link: string, signal?: AbortSignal) => request<{ fill: unknown }>("POST", `${room(roomId)}/ddb-import`, { json: { link }, signal }),
+
   getLog: (roomId: string, options: { before?: string; sceneId?: string | null; limit?: number } = {}) => {
     const q = new URLSearchParams();
     if (options.before !== undefined) q.set("before", options.before);
