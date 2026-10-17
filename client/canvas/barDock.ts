@@ -298,9 +298,18 @@ export function spotWords(spot: Spot): string {
   const v = spot.corner[0] === "t" ? "top" : "bottom";
   const h = spot.corner[1] === "l" ? "left" : "right";
   if (spot.x === 0 && spot.y === 0) return `Window at ${v} ${h}`;
-  if (spot.y === 0) return `Window at the ${v} edge, ${spot.x} px from the ${h}`;
-  if (spot.x === 0) return `Window at the ${h} edge, ${spot.y} px from the ${v}`;
-  return `Window ${spot.x} px from the ${h} and ${spot.y} px from the ${v}`;
+  if (spot.y === 0) return `Window at the ${v} edge, ${pixels(spot.x)} from the ${h}`;
+  if (spot.x === 0) return `Window at the ${h} edge, ${pixels(spot.y)} from the ${v}`;
+  return `Window ${pixels(spot.x)} from the ${h} and ${pixels(spot.y)} from the ${v}`;
+}
+
+/**
+ * A distance as the status speaks it: "pixels" in full, since several
+ * screen readers spell "px" out as two letters (the build review's W5B-P-6).
+ */
+export function pixels(n: number): string {
+  const whole = Math.round(n);
+  return `${whole} ${whole === 1 ? "pixel" : "pixels"}`;
 }
 
 /** What the status says once Reset brings the window home. */
@@ -536,9 +545,9 @@ export function limitMet(input: { start: Box; box: Box; dx: number; dy: number; 
   return null;
 }
 
-/** What the status says after the handle's keys: "Window 316 by 400 px", and the limit a press met. */
+/** What the status says after the handle's keys: "Window 316 by 400 pixels", and the limit a press met. */
 export function sizeWords(box: Pick<Box, "width" | "height">, limit: ReturnType<typeof limitMet>): string {
-  const words = `Window ${Math.round(box.width)} by ${Math.round(box.height)} px`;
+  const words = `Window ${Math.round(box.width)} by ${pixels(box.height)}`;
   return limit ? `${words}, ${limit} it can be here` : words;
 }
 

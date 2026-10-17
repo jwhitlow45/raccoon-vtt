@@ -28,6 +28,7 @@ import {
   moveRoom,
   NO_SIZE,
   parseSize,
+  pixels,
   readSize,
   releaseSize,
   resizeBox,
@@ -354,9 +355,9 @@ describe("the stored spot", () => {
   test("the status names a corner, an edge and the gap along it, or both gaps", () => {
     assert.equal(spotWords(DEFAULT_SPOT), "Window at bottom right");
     assert.equal(spotWords({ corner: "tl", x: 0, y: 0 }), "Window at top left");
-    assert.equal(spotWords({ corner: "br", x: 24, y: 0 }), "Window at the bottom edge, 24 px from the right");
-    assert.equal(spotWords({ corner: "tl", x: 0, y: 40 }), "Window at the left edge, 40 px from the top");
-    assert.equal(spotWords({ corner: "br", x: 120, y: 40 }), "Window 120 px from the right and 40 px from the bottom");
+    assert.equal(spotWords({ corner: "br", x: 24, y: 0 }), "Window at the bottom edge, 24 pixels from the right");
+    assert.equal(spotWords({ corner: "tl", x: 0, y: 40 }), "Window at the left edge, 40 pixels from the top");
+    assert.equal(spotWords({ corner: "br", x: 120, y: 40 }), "Window 120 pixels from the right and 40 pixels from the bottom");
   });
 
   test("a narrow window's header: one row from 265 px, stacked from 166, folded below, counting Reset and a badge whether they show or not", () => {
@@ -532,9 +533,12 @@ describe("the window's size on a computer (docs/design-v1-token-window.md 5 and 
     assert.equal(met(-8, 0, { ...start, width: 900 }), "widest");
     assert.equal(met(0, 8, { ...start, height: 148 }), "shortest");
     assert.equal(met(-8, 0, { ...start, width: 400 }), null);
-    assert.equal(sizeWords({ width: 316, height: 400 }, null), "Window 316 by 400 px");
-    assert.equal(sizeWords({ width: 316, height: 400 }, "narrowest"), "Window 316 by 400 px, narrowest it can be here");
-    assert.equal(sizeWords({ width: 900.2, height: 668 }, "tallest"), "Window 900 by 668 px, tallest it can be here");
+    assert.equal(sizeWords({ width: 316, height: 400 }, null), "Window 316 by 400 pixels");
+    assert.equal(sizeWords({ width: 316, height: 400 }, "narrowest"), "Window 316 by 400 pixels, narrowest it can be here");
+    assert.equal(sizeWords({ width: 900.2, height: 668 }, "tallest"), "Window 900 by 668 pixels, tallest it can be here");
+    // Spoken in full: "px" reads as two letters on several screen readers.
+    assert.equal(pixels(1), "1 pixel");
+    assert.equal(pixels(24.4), "24 pixels");
   });
 
   test("a move by pointer or key is clamped into the room, the handle's reach on its free sides", () => {

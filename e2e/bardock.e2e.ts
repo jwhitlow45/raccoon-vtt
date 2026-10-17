@@ -583,7 +583,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     const left = await barRect(dm);
     assert.ok(Math.abs(home.left - left.left - 24) < 1 && Math.abs(home.top - left.top) < 1, `three steps left: ${JSON.stringify({ home, left })}`);
     assert.equal(await storedSpot(dm), '{"corner":"br","x":24,"y":0}');
-    assert.deepEqual(await said(), ["Window at the bottom edge, 24 px from the right"]);
+    assert.deepEqual(await said(), ["Window at the bottom edge, 24 pixels from the right"]);
     assert.deepEqual(thornAt(), thornBefore, "the arrow keys moved the selected token");
     assert.equal(await focusedName(dm), "Move window", "the keys took focus off the grip");
 
@@ -612,7 +612,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     assert.match((await storedSpot(dm)) ?? "", /^\{"corner":"bl","x":0,"y":64\}$/);
     assert.ok(edge.bottom <= c.toolbar, "the window left the free area");
     await dm.waitForTimeout(900);
-    assert.deepEqual(await said(), ["Window at the left edge, 64 px from the bottom"], "a held key was heard more than once");
+    assert.deepEqual(await said(), ["Window at the left edge, 64 pixels from the bottom"], "a held key was heard more than once");
     assert.deepEqual(thornAt(), thornBefore, "the held key moved the selected token");
 
     // Enter and Space on the grip change nothing.
@@ -1278,7 +1278,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     assert.ok(Math.abs(keyed.bottom - keyed.top - 364) <= 1, "Shift+ArrowUp did not heighten by 64");
     assert.equal(await storedSize(dm), `{"w":${defaultWidth + 8},"h":364}`);
     await dm.waitForTimeout(800);
-    assert.equal((await barFrame(dm).getByRole("status").textContent())?.trim(), `Window ${defaultWidth + 8} by 364 px`);
+    assert.equal((await barFrame(dm).getByRole("status").textContent())?.trim(), `Window ${defaultWidth + 8} by 364 pixels`);
     await dm.waitForTimeout(300);
     assert.deepEqual({ x: dmSocket.state?.tokens[run.thorn.id]?.x, y: dmSocket.state?.tokens[run.thorn.id]?.y }, thornBefore, "the handle's keys moved the selected token");
     await shots.take(dm, "token-window-handle-keys");
