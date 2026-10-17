@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { LogEntry, LogEvent } from "#shared/model.ts";
-import { AT, P1, character, member, room, token } from "#shared/testutil.ts";
+import { AT, DM, P1, actor, character, member, room, token } from "#shared/testutil.ts";
 import { batchOf, resolveDice } from "./dice.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
@@ -44,6 +44,29 @@ describe("the server's dice (docs/design-v1-dice.md 4.2)", () => {
       { formula: "1d20+1", faces: [9], total: 10, cancelled: true },
     ]);
     assert.equal(resolved.op.asked.t, "dice.roll");
+  });
+
+  test("an SRD creature's save rolls with the table loaded at boot (docs/design-v1-roll-options.md 3.4), and with none it has no bonus", () => {
+    const state = room({
+      tokens: { gob: token("gob", { kind: "monster", name: "Goblin", actor: { inline: actor({ srdId: "goblin-warrior" }) } }) },
+      rolls: {
+        r1: {
+          id: "r1",
+          rev: 0,
+          test: { kind: "save", choices: [{ ability: "dex" }] },
+          dc: 13,
+          dcShown: false,
+          resultShown: true,
+          at: AT,
+          targets: [{ tokenId: "gob" }],
+        },
+      },
+    });
+    const op = { t: "roll.dice", tag: TAG, rollId: "r1", target: { tokenId: "gob" } } as const;
+    const loaded = resolveDice(op, state, DM, { draw: () => 9 });
+    assert.ok(loaded.ok);
+    assert.deepEqual(loaded.op.results, [{ formula: "1d20+2", faces: [9], total: 11 }]);
+    assert.equal(resolveDice(op, state, DM, { draw: () => 9, srd: null }).ok, false);
   });
 });
 

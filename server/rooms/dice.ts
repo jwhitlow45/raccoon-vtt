@@ -3,6 +3,7 @@ import { resolveDiceOp, type DiceOp, type Resolved } from "#shared/dice/resolve.
 import type { SrdRolls } from "#shared/dice/bonus.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
+import srdRolls from "#shared/srd/rolls.json" with { type: "json" };
 
 export { isDiceOp, type DiceOp, type Resolved } from "#shared/dice/resolve.ts";
 
@@ -23,7 +24,10 @@ export function batchOf(memberId: string, tag: string): string {
   return createHash("sha256").update(`${memberId}\n${tag}`).digest("base64url").slice(0, 16);
 }
 
-/** `srd` is the SRD creatures' numbers once docs/design-v1-roll-options.md loads them at boot. */
+/** The SRD creatures' numbers (shared/srd/rolls.ts), read once when the server starts, so an SRD token's save rolls with its bonus. */
+const SRD_ROLLS = srdRolls as unknown as SrdRolls;
+
+/** `srd` replaces the SRD table for a test, null for none. */
 export function resolveDice(op: DiceOp, state: RoomState, viewer: Viewer, deps: { draw?: Draw; srd?: SrdRolls | null } = {}): Resolved {
-  return resolveDiceOp(op, state, { draw: deps.draw ?? serverDraw, batch: batchOf(viewer.memberId, op.tag), srd: deps.srd ?? null });
+  return resolveDiceOp(op, state, { draw: deps.draw ?? serverDraw, batch: batchOf(viewer.memberId, op.tag), srd: deps.srd === undefined ? SRD_ROLLS : deps.srd });
 }

@@ -1,4 +1,5 @@
 import type { AbilityKey, ConditionKey, Effect, RollTest, StatusKey } from "../model.ts";
+import { INCAPACITATING_KEYS } from "./hp.ts";
 
 /**
  * What a creature's conditions and statuses say about a requested roll
@@ -160,6 +161,16 @@ export function rollReminders(effects: readonly Pick<Effect, "key" | "level">[],
     out.push({ key: rule.key, text: rule.text(effect) });
   }
   return out;
+}
+
+/**
+ * Whether a creature has the Incapacitated condition or one that includes
+ * it (docs/design-v1-roll-options.md 3.2). Every rule that ends with
+ * Incapacitated asks this one predicate, in presets and defenses alike:
+ * Rage's advantage and resistance, Evasion, and Dodging.
+ */
+export function incapacitated(effects: readonly Pick<Effect, "key">[]): boolean {
+  return effects.some((e) => INCAPACITATING_KEYS.has(e.key));
 }
 
 /** The conditions whose rule fails a Strength or Dexterity save outright, in the order the card lists them. */

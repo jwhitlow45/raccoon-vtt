@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { CONDITION_KEYS, STATUS_KEYS, type AreaShape, type AreaTrigger, type ConditionKey, type StatusKey } from "../shared/model.ts";
 import type { AreaSpell } from "../shared/srd/area-spells.ts";
 import type { SrdMonster } from "../shared/srd/monsters.ts";
+import { srdRollsOf } from "../shared/srd/rolls.ts";
 import type { RulesText, RulesTextEntry } from "../shared/srd/rules-text.ts";
 import type { XpBudgetRow } from "../shared/srd/xp-budget.ts";
 
@@ -11,9 +12,12 @@ import type { XpBudgetRow } from "../shared/srd/xp-budget.ts";
  * monsters.json (every stat block), area-spells.json (spell presets for area
  * templates), rules-text.json (the conditions and the statuses the SRD
  * defines) and xp-budget.json (the encounter XP budget per character). The hand-written parts, such as summaries and colors, live in
- * conditions.ts and statuses.ts and are never touched here.
+ * conditions.ts and statuses.ts and are never touched here. rolls.json (each
+ * creature's saves, skills and spell numbers) is read from the stat blocks,
+ * so `--rolls` writes it again from monsters.json alone.
  *
  *   node scripts/srd-import.ts <srd-5.2.1.txt>
+ *   node scripts/srd-import.ts --rolls
  *
  * The input is the PDF's text as pypdf 6.20.1 extracts it, one page at a
  * time, each page preceded by a "=====PAGE n=====" line:
@@ -1108,6 +1112,11 @@ function parseXpBudget(lines: readonly Line[]): XpBudgetRow[] {
 
 function main(): void {
   const path = process.argv[2];
+  if (path === "--rolls") {
+    const monsters = JSON.parse(readFileSync(new URL("monsters.json", OUT_DIR), "utf8")) as SrdMonster[];
+    writeRolls(monsters);
+    return;
+  }
   if (!path) {
     console.error("usage: node scripts/srd-import.ts <srd-5.2.1.txt>  (see the comment at the top of this file)");
     process.exit(2);
@@ -1150,6 +1159,7 @@ function main(): void {
     console.log(`line-end hyphens removed without evidence, in published text: ${used.join(", ")}`);
   }
   writeFileSync(new URL("monsters.json", OUT_DIR), jsonLines(monsters.sort((a, b) => a.name.localeCompare(b.name))));
+  writeRolls(monsters);
   writeFileSync(new URL("area-spells.json", OUT_DIR), jsonLines(areaSpells));
   writeFileSync(new URL("rules-text.json", OUT_DIR), `${JSON.stringify(rulesText, null, 2)}\n`);
   writeFileSync(new URL("xp-budget.json", OUT_DIR), jsonLines(xpBudget));
@@ -1158,6 +1168,14 @@ function main(): void {
 /** A JSON array with one element per line, so a diff shows which entry changed. */
 function jsonLines(items: readonly unknown[]): string {
   return `[\n${items.map((x) => JSON.stringify(x)).join(",\n")}\n]\n`;
+}
+
+/** rolls.json, one creature a line in monsters.json's order, as jsonLines writes an array. */
+function writeRolls(monsters: readonly SrdMonster[]): void {
+  const rolls = srdRollsOf(monsters);
+  const lines = Object.entries(rolls).map(([id, numbers]) => `${JSON.stringify(id)}:${JSON.stringify(numbers)}`);
+  writeFileSync(new URL("rolls.json", OUT_DIR), `{\n${lines.join(",\n")}\n}\n`);
+  console.log(`roll numbers: ${lines.length}`);
 }
 
 main();
