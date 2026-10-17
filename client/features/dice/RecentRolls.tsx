@@ -8,6 +8,7 @@ import { Button } from "../../components/Button.tsx";
 import { Empty } from "../../components/Empty.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
+import { usePanelHere } from "../panels.ts";
 import { askedFormula, recentRolls, type RecentRow } from "./logic.ts";
 
 /**
@@ -166,6 +167,7 @@ function Row(props: { row: RecentRow; names: LogNames; me: string; open: boolean
 export function RecentRolls(props: { names: LogNames; me: string; open: string | null; again(rolls: DiceRollInput[], to: "all" | "dm"): void }) {
   const log = useRoomView((s) => s.view?.log ?? EMPTY_LOG);
   const ui = useRoomUi();
+  const here = usePanelHere();
   const rows = useMemo(() => recentRolls(log), [log]);
   return (
     <section aria-labelledby="dice-recent" style={{ display: "grid", gap: theme.space(1) }}>
@@ -182,7 +184,7 @@ export function RecentRolls(props: { names: LogNames; me: string; open: string |
         </ol>
       )}
       <div>
-        <Button size="sm" variant="quiet" onClick={() => ui.openPanel("log")}>
+        <Button size="sm" variant="quiet" onClick={() => ui.openPanel("log", here ? { from: here } : undefined)}>
           Older rolls are in the Log
         </Button>
       </div>

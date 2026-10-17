@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { LogNames } from "#shared/logText.ts";
-import type { PanelProps } from "../panels.ts";
+import { usePanelHere, type PanelProps } from "../panels.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
 import { RecentRolls } from "./RecentRolls.tsx";
@@ -26,6 +26,7 @@ export default function DicePanel(props: PanelProps) {
   const names = useMemo<LogNames>(() => ({ members: members ?? {}, tokens: tokens ?? {}, characters: characters ?? {}, handouts: handouts ?? {}, encounter }), [members, tokens, characters, handouts, encounter]);
   const panel = useDicePanel();
   const ui = useRoomUi();
+  const here = usePanelHere();
   const role = useRoomView((s) => s.you?.role ?? null);
   const groupStore = useGroupSaveStore();
   const group = useGroupSave((s) => s.page);
@@ -56,10 +57,10 @@ export default function DicePanel(props: PanelProps) {
         <OpenGroupSave
           page={group}
           onOpen={() => {
-            // An area's page reads its creatures from the area, which the Areas panel holds.
+            // An area's page reads its creatures from the area, which the Areas panel holds. With two panels it opens beside this one (docs/design-v1-split-panel.md 5.1).
             const panel = group.source.kind === "area" ? "areas" : "dice";
             groupStore.setState({ shownIn: panel });
-            if (panel === "areas") ui.openPanel("areas");
+            if (panel === "areas") ui.openPanel("areas", here ? { from: here } : undefined);
           }}
         />
       ) : null}
