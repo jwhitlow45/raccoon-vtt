@@ -183,6 +183,7 @@ describe("readDdbCharacter: spells", () => {
         spell("Magic Missile", 1, { modifiers: [damage("force", "1d4 + 1")] }, { prepared: false, alwaysPrepared: false, countsAsKnownSpell: false }),
         spell("Cure Wounds", 1, { scaleType: "spellscale", modifiers: [{ type: "bonus", subType: "hit-points", die: { diceString: "2d8" }, usePrimaryStat: true, atHigherLevels: { higherLevelDefinitions: [{ level: 1, dice: { diceString: "2d8" } }] } }] }),
         spell("Prism Orb", 1, { requiresAttackRoll: true, modifiers: ["acid", "cold", "fire"].map((t) => damage(t, "3d8")) }),
+        spell("Ember Burst", 2, { requiresSavingThrow: true, saveDcAbilityId: 2, modifiers: [damage("fire", "3d6")] }),
         spell("Odd Cantrip", 0, { requiresAttackRoll: true, scaleType: "characterlevel", modifiers: [damage("cold", "1d6", [{ level: 5, dice: { diceString: "1d8" } }, { level: 11, dice: { diceString: "1d10" } }])] }),
       ]),
       ids,
@@ -200,7 +201,10 @@ describe("readDdbCharacter: spells", () => {
     assert.deepEqual(by("Odd Cantrip")?.dice, [{ formula: "1d8", type: "cold" }], "scaling off the tier rule is read at level 5");
     assert.ok(fill.warnings.some((w) => /Odd Cantrip's dice were read at level 5/.test(w)));
     assert.ok(fill.warnings.some((w) => /Prism Orb deals one of several damage types\. Acid was read/.test(w)));
-    assert.ok(fill.warnings.some((w) => /halves the damage was not read for Fireball\./.test(w)));
+    // Fireball's half comes from the SRD's rule when it is rolled, so only the spell the SRD does not hold is named.
+    assert.ok(fill.warnings.some((w) => /halves the damage is not known for Ember Burst\. A cantrip's pass takes none and another spell's half until you set On a pass\./.test(w)));
+    assert.ok(!fill.warnings.some((w) => /halves the damage.*Fireball/.test(w)));
+    assert.deepEqual(by("Ember Burst")?.save, { ability: "dex" });
     assert.ok(checkedFill(fill));
   });
 

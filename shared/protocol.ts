@@ -575,7 +575,7 @@ const pcRoll = z
     ability: z.union([pcAbility, z.literal("spell")]).optional(),
     attack: z.strictObject({ prof: z.boolean(), bonus: pcAdjustValue }).optional(),
     save: z
-      .strictObject({ ability: pcAbility, dc: pcDc.optional(), bonus: pcAdjustValue.optional(), onPass: z.literal("half").optional() })
+      .strictObject({ ability: pcAbility, dc: pcDc.optional(), bonus: pcAdjustValue.optional(), onPass: z.enum(["half", "none"]).optional() })
       .refine((s) => s.dc === undefined || s.bonus === undefined, { message: "a save's DC is typed or worked out, not both" })
       .optional(),
     level: z.number().int().min(0).max(9).optional(),

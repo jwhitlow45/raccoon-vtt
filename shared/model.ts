@@ -832,7 +832,13 @@ export type PcRoll = {
   /** An attack roll. */
   attack?: { prof: boolean; bonus: number };
   /** The save it forces: `dc` fixed, else derived with `bonus`, never both. A pass takes half the damage with `half`, else none. */
-  save?: { ability: AbilityKey; dc?: number; bonus?: number; onPass?: "half" };
+  /**
+   * What a pass takes: half the damage or none. Absent is not known, never
+   * typed nor read, and reads as unknownOnPass in shared/rules/pcStats.ts
+   * gives it: the SRD's rule for a spell of the same name, so an unset
+   * Fireball still halves.
+   */
+  save?: { ability: AbilityKey; dc?: number; bonus?: number; onPass?: "half" | "none" };
   /** A spell's level, 0 to 9, 0 for a cantrip. */
   level?: number;
   /** 0 to 4 parts, rolled together. */

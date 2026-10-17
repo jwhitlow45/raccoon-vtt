@@ -91,7 +91,7 @@ describe("statsFromBlock", () => {
   test("a save DC no ability gives stays fixed, and an unset level reads at +2", () => {
     const odd = blockOf(customMonster("odd", { actions: [{ name: "Gaze", text: "Wisdom Saving Throw: DC 17, one creature it can see. Failure: 9 (2d8) Psychic damage." }] }));
     const [gaze] = statsFromBlock(odd, 5, ids()).stats.rolls;
-    assert.deepEqual(gaze?.save, { ability: "wis", dc: 17 });
+    assert.deepEqual(gaze?.save, { ability: "wis", dc: 17, onPass: "none" }, "the text reads no half, so none is read, not unknown");
     assert.equal(gaze?.ability, undefined);
     // At +2, Str 16's printed +6 is nearer 3 + 2 than 3, with 1 left over.
     const unset = statsFromBlock(KNIGHT, undefined, ids());

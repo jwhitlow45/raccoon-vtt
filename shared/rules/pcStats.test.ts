@@ -14,7 +14,9 @@ import {
   pcRollFits,
   pcSlots,
   sortedRolls,
+  srdOnPass,
   statsDefenses,
+  unknownOnPass,
   withPcActorNumbers,
   withPcActors,
 } from "./pcStats.ts";
@@ -253,9 +255,39 @@ describe("named rolls (docs/design-v1-pc-stats.md 3.4)", () => {
       ],
     };
     const named = pcNamedRolls(pc(5, block));
-    assert.deepEqual(named.find((r) => r.key === "breath")?.save, { ability: "dex", dc: 8 + 0 + 3 + 1, onPass: "none" });
-    assert.deepEqual(named.find((r) => r.key === "trip")?.save, { ability: "str", dc: 14, onPass: "none" });
-    assert.deepEqual(named.find((r) => r.key === "hold")?.save, { ability: "wis", dc: 8 + 4 + 3 + 1, onPass: "none" });
+    assert.deepEqual(named.find((r) => r.key === "breath")?.save, { ability: "dex", dc: 8 + 0 + 3 + 1, onPass: "half" });
+    assert.deepEqual(named.find((r) => r.key === "trip")?.save, { ability: "str", dc: 14, onPass: "half" });
+    assert.deepEqual(named.find((r) => r.key === "hold")?.save, { ability: "wis", dc: 8 + 4 + 3 + 1, onPass: "half" });
+  });
+
+  test("an unset On a pass is not known: a spell takes the SRD's rule by its name, else a cantrip none and the rest half, and a typed one wins (W7B-P-2)", () => {
+    const save = (onPass?: "half" | "none") => ({ ability: "dex" as const, ...(onPass ? { onPass } : {}) });
+    const block = {
+      ...caster,
+      rolls: [
+        roll("fireball", { name: "Fireball", kind: "spell", ability: "spell", level: 3, save: save() }),
+        roll("cased", { name: "  fireBALL ", kind: "spell", ability: "spell", level: 3, save: save() }),
+        roll("breath", { name: "Dragon's Breath", kind: "spell", ability: "spell", level: 2, save: save() }),
+        roll("splash", { name: "Acid Splash", kind: "spell", ability: "spell", level: 0, save: save() }),
+        roll("typed", { name: "Fireball", kind: "spell", ability: "spell", level: 3, save: save("none") }),
+        roll("homebrew", { name: "Ember Burst", kind: "spell", ability: "spell", level: 2, save: save() }),
+        roll("other", { name: "Acid Splash", kind: "other", save: save() }),
+        roll("flame", { name: "Sacred Flame", kind: "spell", ability: "spell", level: 0, save: save() }),
+        roll("halved", { name: "Ember Burst", kind: "spell", ability: "spell", level: 2, save: save("half") }),
+      ],
+    };
+    const onPass = (key: string) => pcNamedRolls(pc(5, block)).find((r) => r.key === key)?.save?.onPass;
+    assert.equal(onPass("fireball"), "half");
+    assert.equal(onPass("cased"), "half", "the name matches trimmed and in any case");
+    assert.equal(onPass("breath"), "half", "a straight apostrophe matches the SRD's curly one");
+    assert.equal(onPass("splash"), "none");
+    assert.equal(onPass("typed"), "none", "a typed none wins over the SRD's half");
+    assert.equal(onPass("homebrew"), "half", "a leveled spell the SRD's table does not hold halves");
+    assert.equal(onPass("flame"), "none", "a cantrip the SRD's table does not hold takes none");
+    assert.equal(onPass("other"), "half", "only a spell reads the SRD's rule");
+    assert.equal(onPass("halved"), "half");
+    assert.equal(srdOnPass({ name: "Ember Burst", kind: "spell" }), undefined);
+    assert.equal(unknownOnPass({ name: "Ember Burst", kind: "spell", level: 2 }), "half");
   });
 
   test("a spell's `spell` ability without a spellcasting ability adds 0", () => {

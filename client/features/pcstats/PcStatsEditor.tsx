@@ -4,7 +4,7 @@ import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type PcDice, type PcRoll, ty
 import { MAX_PC_DICE_PARTS, MAX_PC_ROLLS, type CharacterPatch } from "#shared/protocol.ts";
 import { fillSummary } from "#shared/rules/pcFill.ts";
 import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
-import { pcActorNumbers, pcDerived, pcProficiency, type PcNumber } from "#shared/rules/pcStats.ts";
+import { pcActorNumbers, pcDerived, pcProficiency, srdOnPass, unknownOnPass, type PcNumber } from "#shared/rules/pcStats.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { ABILITY_NAMES as ABILITY_SHORT, signed } from "#shared/statBlock.ts";
 import { Button } from "../../components/Button.tsx";
@@ -1101,19 +1101,24 @@ function RollRow(props: { roll: PcRoll; stats: PcStats; level: number | undefine
                 {(id) => (
                   <Select
                     id={id}
-                    value={roll.save!.onPass ?? "none"}
+                    value={roll.save!.onPass ?? ""}
                     onChange={(e) => {
                       const { onPass: _onPass, ...rest } = roll.save!;
-                      set({ save: e.target.value === "half" ? { ...rest, onPass: "half" } : rest });
+                      const value = e.target.value;
+                      set({ save: value === "half" || value === "none" ? { ...rest, onPass: value } : rest });
                     }}
                     style={{ width: 120 }}
                   >
-                    <option value="none">None</option>
+                    <option value="">Not set</option>
                     <option value="half">Half</option>
+                    <option value="none">None</option>
                   </Select>
                 )}
               </Labeled>
             </FieldsRow>
+          ) : null}
+          {roll.save && roll.save.onPass === undefined ? (
+            <Help>{onPassHint(roll)}</Help>
           ) : null}
           {roll.dice.map((part, i) => (
             <PartFields key={i} roll={roll} part={part} index={i} onChange={(next) => setPart(i, next)} onRemove={() => onChange({ ...roll, dice: roll.dice.filter((_, k) => k !== i) })} />
@@ -1130,6 +1135,13 @@ function RollRow(props: { roll: PcRoll; stats: PcStats; level: number | undefine
       ) : null}
     </div>
   );
+}
+
+/** What an unset "On a pass" reads as, and where that comes from (W7B-P-2). */
+function onPassHint(roll: PcRoll): string {
+  const reads = unknownOnPass(roll) === "half" ? "half the damage" : "no damage";
+  if (srdOnPass(roll)) return `Not set takes the SRD's rule for ${roll.name.trim()}: ${reads} on a pass.`;
+  return roll.kind === "spell" && roll.level === 0 ? `Not set takes ${reads} on a pass, as most cantrips do.` : `Not set takes ${reads} on a pass, as most saves that deal damage do.`;
 }
 
 /** One part of a roll's dice: its formula, the modifier, its type, a rider's name, and for a spell how it grows. */

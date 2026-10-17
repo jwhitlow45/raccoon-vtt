@@ -4,7 +4,7 @@ import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type PcDice, typ
 import { MAX_PC_DICE_PARTS, MAX_PC_ROLLS } from "../protocol.ts";
 import { DAMAGE_TYPES, type DamageType } from "../rules/damage.ts";
 import type { PcFill } from "../rules/pcFill.ts";
-import { cantripTier, pcProficiency } from "../rules/pcStats.ts";
+import { cantripTier, pcProficiency, srdOnPass } from "../rules/pcStats.ts";
 import { abilityMod } from "../statBlock.ts";
 import { ddbSheetUrl } from "./link.ts";
 
@@ -338,7 +338,8 @@ function spellRolls(data: Obj, ctx: Ctx, casting: AbilityKey | null): { rolls: P
     if (attack) roll.attack = { prof: true, bonus: 0 };
     if (saveAbility) {
       roll.save = { ability: saveAbility };
-      if (dice.some((p) => p.type !== undefined && p.type !== "healing")) unhalved.push(sname);
+      // D&D Beyond's data does not say whether a pass halves. The SRD's rule answers for its spells, so only the rest are named.
+      if (dice.some((p) => p.type !== undefined && p.type !== "healing") && srdOnPass(roll) === undefined) unhalved.push(sname);
     }
     rolls.push(roll);
   }
@@ -460,7 +461,7 @@ function read(json: unknown, newId: () => string): PcFill | null {
   const actions = actionRolls(data, ctx);
   const all = [...weapons, ...spells.rolls, ...actions];
   if (spells.unhalved.length > 0) {
-    warnings.push(`Whether a pass halves the damage was not read for ${spells.unhalved.slice(0, 8).join(", ")}${spells.unhalved.length > 8 ? " and others" : ""}. Set On a pass for each.`);
+    warnings.push(`Whether a pass halves the damage is not known for ${spells.unhalved.slice(0, 8).join(", ")}${spells.unhalved.length > 8 ? " and others" : ""}. A cantrip's pass takes none and another spell's half until you set On a pass.`);
   }
   if (all.length > MAX_PC_ROLLS) warnings.push(`${all.length - MAX_PC_ROLLS} more ${all.length - MAX_PC_ROLLS === 1 ? "roll was" : "rolls were"} left out. At most ${MAX_PC_ROLLS} rolls fit.`);
 

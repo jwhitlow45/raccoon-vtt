@@ -79,6 +79,12 @@ describe("a stat block's schema", () => {
     assert.equal(ok(update({ rolls: [roll({ name: "Long‮sword" })] })), false, "no text direction controls");
   });
 
+  test("On a pass is half, none, or unset for not known", () => {
+    for (const onPass of ["half", "none"] as const) assert.ok(ok(update({ rolls: [roll({ save: { ability: "dex", onPass } })] })));
+    assert.ok(ok(update({ rolls: [roll({ save: { ability: "dex" } })] })));
+    assert.equal(ok(update({ rolls: [roll({ save: { ability: "dex", onPass: "quarter" as "half" } })] })), false);
+  });
+
   test("upcast only on damage or healing, a name only on a rider, and a rider is damage", () => {
     assert.equal(ok(update({ rolls: [roll({ dice: [{ formula: "1d8", upcast: "1d8" }] })] })), false);
     assert.ok(ok(update({ rolls: [roll({ dice: [{ formula: "1d8", type: "healing", upcast: "1d8" }] })] })));

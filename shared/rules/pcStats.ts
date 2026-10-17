@@ -7,6 +7,7 @@ import { LIMITS, serializedBytes } from "../limits.ts";
 import { ABILITY_NAMES, abilityMod } from "../statBlock.ts";
 import { DAMAGE_TYPES } from "./damage.ts";
 import { SKILLS } from "./skills.ts";
+import { AREA_SPELLS } from "../srd/area-spells.ts";
 
 /**
  * A player character's numbers from its stat block
@@ -406,6 +407,32 @@ function rollDc(dc: number): number {
   return clamp(dc, LIMITS.rollDcMin, LIMITS.rollDcMax);
 }
 
+/** A spell's name as the SRD's table keys it: any case, either apostrophe. */
+function spellKey(name: string): string {
+  return name.trim().toLowerCase().replace(/[’']/g, "'");
+}
+
+const SRD_ON_PASS = new Map(AREA_SPELLS.filter((s) => s.onPass !== undefined).map((s) => [spellKey(s.name), s.onPass!]));
+
+/**
+ * What the SRD 5.2.1 says a pass takes for a spell of this name, from the
+ * area spells' table checked against its text, or undefined.
+ */
+export function srdOnPass(roll: Pick<PcRoll, "name" | "kind">): "half" | "none" | undefined {
+  return roll.kind === "spell" ? SRD_ON_PASS.get(spellKey(roll.name)) : undefined;
+}
+
+/**
+ * What a pass takes for a roll whose `onPass` was never typed nor read
+ * (W7B-P-2). An unset value is not known, so it must never become "none"
+ * and outrank the SRD's half. The SRD's rule for a spell of this name comes
+ * first. Without one, a cantrip's pass takes none and anything else halves,
+ * as the rules give for most saves that deal damage.
+ */
+export function unknownOnPass(roll: Pick<PcRoll, "name" | "kind" | "level">): "half" | "none" {
+  return srdOnPass(roll) ?? (roll.kind === "spell" && roll.level === 0 ? "none" : "half");
+}
+
 /** One roll of a block as doc 1's NamedRoll at a level, for the editor's and the view's readings of a roll as it stands. */
 export function namedRollOf(stats: PcStats, level: number | undefined, roll: PcRoll): NamedRoll {
   return namedRoll(stats, pcDerived(stats, level), roll);
@@ -423,7 +450,7 @@ function namedRoll(stats: PcStats, d: PcDerived, roll: PcRoll): NamedRoll {
   }
   if (roll.save) {
     const dc = roll.save.dc ?? 8 + m + d.pb + (roll.save.bonus ?? 0) + (spell ? (stats.adjust.spellDc ?? 0) : 0);
-    out.save = { ability: roll.save.ability, dc: rollDc(dc), onPass: roll.save.onPass ?? "none" };
+    out.save = { ability: roll.save.ability, dc: rollDc(dc), onPass: roll.save.onPass ?? unknownOnPass(roll) };
   }
   const heals: string[] = [];
   const healUpcasts: string[] = [];

@@ -78,8 +78,8 @@ function rollOf(named: NamedRoll, id: string, ctx: { mods: Record<AbilityKey, nu
     mod = mods[ability];
   }
   if (named.save) {
-    const save: NonNullable<PcRoll["save"]> = { ability: named.save.ability };
-    if (named.save.onPass === "half") save.onPass = "half";
+    // The block's text says whether a pass halves, so its none is read, not unknown.
+    const save: NonNullable<PcRoll["save"]> = { ability: named.save.ability, onPass: named.save.onPass };
     const dc = named.save.dc;
     const derives = (a: AbilityKey) => 8 + mods[a] + pb === dc;
     // The attack's ability gives the DC where it matches. A roll with no attack takes the ability that matches, else the DC stays as printed.
