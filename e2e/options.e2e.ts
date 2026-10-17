@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * Tool options in one row (docs/design-v1-tool-options.md section 14): the
@@ -1382,6 +1382,65 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     });
     assert.ok(!focused.body && (focused.more || (focused.slot !== null && focused.slot !== "discard")), `focus went to the next control${inMore ? " in ⋯" : " in the row"} (${focused.what})`);
     await closePopover(dm);
+    await key(dm, "v");
+  });
+
+  test("8b. focus in a popover stays there when its control goes, and the row keeps focus in its own room", async () => {
+    /** The focused element: its name, and whether it stands inside `within`. */
+    const focusIn = (page: Page, within: string) =>
+      page.evaluate((sel) => {
+        const active = (globalThis as unknown as { document: PageDoc }).document.activeElement;
+        return { name: active?.getAttribute("aria-label") ?? active?.textContent ?? "", inside: active?.closest(sel) !== null && active?.closest(sel) !== undefined, body: active?.tagName === "BODY" };
+      }, within);
+
+    // A key open puts focus on the first kept ruler's Remove: removing it hands focus to the next one, inside, and so does one reached by Tab.
+    await reloadAt(player, 1);
+    await view(player, playerCdp, SIZES[1]!);
+    await selectTool(player, "r");
+    const chip = options(player).getByRole("button", { name: /^Kept rulers/ });
+    await chip.focus();
+    await player.keyboard.press("Enter");
+    const kept = player.getByRole("dialog", { name: "Kept rulers" });
+    await kept.waitFor();
+    const removes = kept.getByRole("button", { name: /^Remove the kept ruler/ });
+    const count = await removes.count();
+    assert.ok(count >= 3, `${count} kept rulers to remove`);
+    assert.match((await focusIn(player, "[data-rvtt-popover]")).name, /^Remove the kept ruler/, "the key open put focus on the first ruler");
+    await player.keyboard.press("Enter");
+    await waitFor("one ruler fewer", async () => ((await removes.count()) === count - 1 ? true : null));
+    let at = await focusIn(player, "[data-rvtt-popover]");
+    assert.ok(at.inside && /^Remove the kept ruler/.test(at.name), `focus went to the next ruler in the popover, not behind it (${at.name})`);
+    await player.keyboard.press("Tab");
+    await player.keyboard.press("Enter");
+    await waitFor("two rulers fewer", async () => ((await removes.count()) === count - 2 ? true : null));
+    at = await focusIn(player, "[data-rvtt-popover]");
+    assert.ok(at.inside && !at.body, `focus stayed in the popover after a ruler reached by Tab went (${at.name})`);
+    await closePopover(player);
+    await key(player, "v");
+
+    // In "Viewing as Pat", over the DM's room with Draw active, ending a text drawing moves focus to the preview's own next control.
+    await view(dm, dmCdp, DESK);
+    await selectTool(dm, "d");
+    await openSideTab(dm, "DM");
+    await dm.getByRole("button", { name: "View", exact: true }).click();
+    const preview = dm.locator('dialog[aria-label="Viewing as Pat"]');
+    await preview.waitFor();
+    await pickTool(dm, "Draw", preview);
+    const previewOptions = preview.getByRole("toolbar", { name: "Draw options" });
+    await previewOptions.getByRole("button", { name: /^Drawing tool:/ }).click();
+    await dm.getByRole("dialog", { name: "Drawing tool" }).getByRole("radio", { name: "Text", exact: true }).click();
+    const map = await preview.locator(".konvajs-content").first().boundingBox();
+    assert.ok(map);
+    await dm.mouse.click(map.x + map.width / 2, map.y + map.height / 2);
+    const text = previewOptions.getByRole("textbox", { name: "Text" });
+    await text.waitFor();
+    await previewOptions.getByRole("button", { name: "Cancel", exact: true }).focus();
+    await dm.keyboard.press("Enter");
+    await text.waitFor({ state: "detached" });
+    at = await focusIn(dm, 'dialog[aria-label="Viewing as Pat"]');
+    assert.ok(at.inside && !at.body, `focus went to the preview's next control, not the room behind it (${at.name})`);
+    await preview.getByRole("button", { name: "Exit", exact: true }).click();
+    await preview.waitFor({ state: "detached" });
     await key(dm, "v");
   });
 

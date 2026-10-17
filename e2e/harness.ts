@@ -269,12 +269,21 @@ export async function pickTool(page: Page, label: string, within?: Locator): Pro
   // A preview such as "Viewing as Pat" draws a second toolbar of its own.
   const nav = (within ?? page).locator('nav[aria-label="Tools"]');
   const own = nav.getByRole("button", { name: label, exact: true });
-  if ((await own.count()) > 0 && (await own.first().isVisible())) {
+  const setup = nav.getByRole("button", { name: /^Setup tools/ });
+  const shows = async (l: Locator) => (await l.count()) > 0 && (await l.first().isVisible());
+  // A toolbar that just appeared, as a preview's, draws its buttons once it has measured its room: wait for the tool's own button, Setup, or the pair.
+  await nav.first().waitFor();
+  const deadline = Date.now() + 3_000;
+  for (;;) {
+    const buttons = await nav.locator("button[data-active]").count();
+    if ((await shows(own)) || (await shows(setup)) || (buttons > 0 && buttons <= 3) || Date.now() > deadline) break;
+    await sleep(100);
+  }
+  if (await shows(own)) {
     if ((await own.first().getAttribute("data-active")) !== "true") await own.first().click();
     return;
   }
-  const setup = nav.getByRole("button", { name: /^Setup tools/ });
-  if ((await setup.count()) > 0 && (await setup.first().isVisible())) {
+  if (await shows(setup)) {
     if ((await setup.first().getAttribute("aria-label")) === `Setup tools: ${label}`) return;
     await setup.first().click();
     await page.getByRole("menu", { name: "Setup tools" }).getByRole("menuitemradio", { name: label, exact: true }).click();

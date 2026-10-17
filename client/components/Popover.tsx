@@ -248,6 +248,17 @@ export type PopoverProps = {
   children: ReactNode;
 };
 
+/**
+ * Whether an element stands inside an open popover. Focus there is the
+ * popover's to keep: when its control goes, the popover moves focus to its
+ * next control, else to its anchor. A consumer that keeps focus for its
+ * own controls, such as the options row, leaves such focus alone, so it
+ * never pulls it out to a control behind the popover.
+ */
+export function inPopoverBox(el: Element | null): boolean {
+  return el?.closest("[data-rvtt-popover]") != null;
+}
+
 /** Drawn while its handle is open. */
 export function Popover(props: PopoverProps) {
   return props.handle.open ? <OpenPopover {...props} /> : null;
@@ -335,8 +346,9 @@ function OpenPopover(props: PopoverProps) {
     const h = latest.current.handle;
     const box = h.box.current;
     if (!box) return;
-    /** The focused control inside, and the controls as they stood then, for when it leaves. */
-    let held: { control: HTMLElement; controls: HTMLElement[] } | null = null;
+    /** The focused control inside, and the controls as they stood then, for when it leaves. A key open has already put focus inside, before this runs. */
+    const first = document.activeElement;
+    let held: { control: HTMLElement; controls: HTMLElement[] } | null = first instanceof HTMLElement && first !== box && box.contains(first) ? { control: first, controls: controlsIn(box) } : null;
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
@@ -412,6 +424,7 @@ function OpenPopover(props: PopoverProps) {
     <PopoverContext.Provider value={context}>
       <div
         ref={handle.box}
+        data-rvtt-popover=""
         id={dialog ? handle.contentId : undefined}
         role={dialog ? "dialog" : undefined}
         aria-labelledby={dialog && props.title && !props.label ? titleId : undefined}

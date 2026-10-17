@@ -22,7 +22,7 @@ import { Icon, type IconName } from "../../components/Icon.tsx";
 import { buttonLook, choiceLook } from "../../components/looks.ts";
 import { MeasuringContext } from "../../components/measuring.ts";
 import { sectionLabelLook } from "../../components/Panel.tsx";
-import { Popover, usePopover, type PopoverHandle } from "../../components/Popover.tsx";
+import { inPopoverBox, Popover, usePopover, type PopoverHandle } from "../../components/Popover.tsx";
 import type { Rect } from "../../components/popoverPlace.ts";
 import { Segmented, type SegmentedOption } from "../../components/Segmented.tsx";
 import { Swatches, type SwatchOption } from "../../components/Swatches.tsx";
@@ -297,7 +297,8 @@ export function OptionsStrip(props: {
   });
 
   // Focus never falls to the page (6.4): the control holding it left the row.
-  const focus = useFocusKeeper({ fit, order: inRow.map((s) => s.id), moreButton, toolButton, onFocused: setFocused });
+  const rowEl = useRef<HTMLDivElement | null>(null);
+  const focus = useFocusKeeper({ fit, order: inRow.map((s) => s.id), row: rowEl, moreButton, toolButton, onFocused: setFocused });
 
   // The row refits once the press that began on it ends.
   const onPointerDown = () => {
@@ -357,6 +358,7 @@ export function OptionsStrip(props: {
         ) : null}
         {slots.length === 0 ? null : (
         <div
+          ref={rowEl}
           data-options-row=""
           hidden={tucked}
           onPointerDownCapture={onPointerDown}
@@ -473,6 +475,8 @@ function MeasureLayer(props: { ref: Ref<HTMLDivElement>; slots: readonly Slot[] 
 function useFocusKeeper(input: {
   fit: RowFit | null;
   order: readonly string[];
+  /** This strip's own row: a player preview draws a second room with slots of the same names. */
+  row: { current: HTMLElement | null };
   moreButton: { current: HTMLElement | null };
   toolButton: { current: (() => HTMLElement | null) | undefined };
   /** The slot holding focus in the row, or null, which the fit keeps in the row (6.4). */
@@ -490,15 +494,17 @@ function useFocusKeeper(input: {
     const at = was.order.indexOf(was.id);
     const after = was.order.slice(Math.max(0, at)).find((id) => inline.has(id) && order.includes(id));
     const before = was.order.slice(0, Math.max(0, at)).reverse().find((id) => inline.has(id));
-    const pick = (id: string | undefined) => (id ? firstControl(document.querySelector(`[data-options-row] [data-rvtt-slot="${CSS.escape(id)}"]`)) : null);
+    const pick = (id: string | undefined) => (id ? firstControl(input.row.current?.querySelector(`:scope > [data-rvtt-slot="${CSS.escape(id)}"]`) ?? null) : null);
     const target = pick(after) ?? pick(before) ?? (input.moreButton.current?.isConnected ? input.moreButton.current : null) ?? input.toolButton.current?.() ?? null;
     target?.focus({ preventScroll: true });
   });
   return {
     onFocus(e: { target: EventTarget }) {
       const el = e.target instanceof HTMLElement ? e.target : null;
-      const slot = el?.closest<HTMLElement>("[data-rvtt-slot]");
-      if (!el || !slot?.closest("[data-options-row]")) return;
+      // Only the row's own inline controls: focus in a popover is the popover's to keep (components/Popover.tsx inPopoverBox).
+      if (!el || inPopoverBox(el)) return;
+      const slot = el.closest<HTMLElement>("[data-rvtt-slot]");
+      if (!slot || slot.parentElement !== input.row.current) return;
       held.current = { id: slot.dataset.rvttSlot ?? "", el, order };
       input.onFocused(held.current.id);
     },
@@ -508,7 +514,7 @@ function useFocusKeeper(input: {
       queueMicrotask(() => {
         if (held.current?.el !== el || !held.current.el.isConnected || document.activeElement === el) return;
         held.current = null;
-        if (!(document.activeElement instanceof Element && document.activeElement.closest("[data-options-row]"))) input.onFocused(null);
+        if (!input.row.current?.contains(document.activeElement)) input.onFocused(null);
       });
     },
   };
