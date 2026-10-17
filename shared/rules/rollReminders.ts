@@ -68,6 +68,8 @@ const CHECK = (test: D20Test) => test.kind === "check";
 const SAVE = (test: D20Test) => test.kind === "save" || test.kind === "deathSave";
 const ATTACK = (test: D20Test) => test.kind === "attack";
 const INITIATIVE = (test: D20Test) => test.kind === "initiative";
+/** An ability check, Initiative among them: in 2024 Initiative is a Dexterity check, so what bears on checks bears on it (W7B-P-22). */
+const CHECK_OR_INITIATIVE = (test: D20Test) => CHECK(test) || INITIATIVE(test);
 const ANY = () => true;
 const has = (effects: readonly Pick<Effect, "key">[], key: Key) => effects.some((e) => e.key === key);
 const ADV = { kind: "adv" } as const;
@@ -115,7 +117,7 @@ export const ROLL_REMINDER_RULES: readonly Rule[] = [
     key: "blinded",
     source: "conditions",
     quotes: ["automatically fail any ability check that requires sight"],
-    applies: CHECK,
+    applies: CHECK_OR_INITIATIVE,
     does: NOTE,
     text: () => "Blinded: automatically fail any ability check that requires sight.",
   },
@@ -131,7 +133,7 @@ export const ROLL_REMINDER_RULES: readonly Rule[] = [
     key: "deafened",
     source: "conditions",
     quotes: ["automatically fail any ability check that requires hearing"],
-    applies: CHECK,
+    applies: CHECK_OR_INITIATIVE,
     does: NOTE,
     text: () => "Deafened: automatically fail any ability check that requires hearing.",
   },
@@ -172,9 +174,12 @@ export const ROLL_REMINDER_RULES: readonly Rule[] = [
     key: "frightened",
     source: "conditions",
     quotes: ["You have Disadvantage on ability checks and attack rolls while the source of fear is within line of sight."],
-    applies: CHECK,
+    applies: CHECK_OR_INITIATIVE,
     does: NOTE,
-    text: () => "Frightened: Disadvantage on ability checks while the source of fear is within line of sight.",
+    text: (_effect, test) =>
+      test.kind === "initiative"
+        ? "Frightened: Disadvantage on Initiative, a Dexterity check, while the source of fear is within line of sight."
+        : "Frightened: Disadvantage on ability checks while the source of fear is within line of sight.",
   },
   {
     key: "frightened",
@@ -228,9 +233,10 @@ export const ROLL_REMINDER_RULES: readonly Rule[] = [
     source: "statuses",
     // The effect does not store which ability the hex chose, so the reminder stays general.
     quotes: ["The target has Disadvantage on ability checks made with the chosen ability."],
-    applies: CHECK,
+    applies: CHECK_OR_INITIATIVE,
     does: NOTE,
-    text: () => "Hexed: Disadvantage on ability checks made with the ability the hex chose.",
+    text: (_effect, test) =>
+      test.kind === "initiative" ? "Hexed: Disadvantage on Initiative if the hex chose Dexterity." : "Hexed: Disadvantage on ability checks made with the ability the hex chose.",
   },
   {
     key: "baned",

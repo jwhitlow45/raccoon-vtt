@@ -437,9 +437,9 @@ Bree (spell save DC 15, doc 2) casts Flame Strike, 5d6 fire and 5d6 radiant, on 
 | Paralyzed, Petrified, Stunned, Unconscious | fails Str, Dex | | | the tracker's hint | |
 | Restrained | dis Dex | | dis | | |
 | Poisoned | | dis | dis | dis | |
-| Prone, Blinded | | Blinded: note (sight) | dis | | |
+| Prone, Blinded | | Blinded: note (sight) | dis | Blinded: note (sight) | |
 | Invisible | | | adv (note: a target that sees it) | adv | |
-| Frightened, Grappled, Deafened, Hexed | | note | note | | |
+| Frightened, Grappled, Deafened, Hexed | | note | note | note, Grappled none (Initiative is a Dexterity check, build round 1 W7B-P-22) | |
 | Exhaustion | -2 per level | -2 per level | -2 per level | -2 per level | -2 per level |
 | Blessed, Baned | +1d4, -1d4 | | +1d4, -1d4 | | +1d4, -1d4 |
 | Dodging (not while `incapacitated`, Grappled or Restrained) | adv Dex | | | | |

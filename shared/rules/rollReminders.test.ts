@@ -133,6 +133,8 @@ describe("presets for every d20 roll (docs/design-v1-roll-options.md 3.2, Append
         [KINDS[6]!, { notes: ["blinded"] }],
         [KINDS[7]!, { notes: ["blinded"] }],
         [KINDS[8]!, { notes: ["blinded"] }],
+        // Initiative is a Dexterity check in 2024, so a check's note reaches it (W7B-P-22).
+        [INITIATIVE, { notes: ["blinded"] }],
         [ATTACK, { sources: ["dis:blinded"] }],
       ]),
     );
@@ -145,12 +147,14 @@ describe("presets for every d20 roll (docs/design-v1-roll-options.md 3.2, Append
     );
   });
 
-  test("Frightened, Grappled, Deafened and Hexed remind only, where their words reach", () => {
-    const checks = (key: string): [D20Test, Partial<Short>][] => [KINDS[6]!, KINDS[7]!, KINDS[8]!].map((t) => [t, { notes: [key] }]);
+  test("Frightened, Grappled, Deafened and Hexed remind only, where their words reach, Initiative among the checks", () => {
+    const checks = (key: string): [D20Test, Partial<Short>][] => [KINDS[6]!, KINDS[7]!, KINDS[8]!, INITIATIVE].map((t) => [t, { notes: [key] }]);
     onlyOn(["frightened"], new Map<D20Test, Partial<Short>>([...checks("frightened"), [ATTACK, { notes: ["frightened"] }]]));
     onlyOn(["grappled"], new Map<D20Test, Partial<Short>>([[ATTACK, { notes: ["grappled"] }]]));
     onlyOn(["deafened"], new Map<D20Test, Partial<Short>>(checks("deafened")));
     onlyOn(["hexed"], new Map<D20Test, Partial<Short>>(checks("hexed")));
+    assert.equal(reminderPreset([{ key: "frightened" }], INITIATIVE).notes[0]?.text, "Frightened: Disadvantage on Initiative, a Dexterity check, while the source of fear is within line of sight.");
+    assert.equal(reminderPreset([{ key: "hexed" }], INITIATIVE).notes[0]?.text, "Hexed: Disadvantage on Initiative if the hex chose Dexterity.");
   });
 
   test("Exhaustion takes 2 a level off every d20 roll, and Heroic Inspiration reminds on every one", () => {
