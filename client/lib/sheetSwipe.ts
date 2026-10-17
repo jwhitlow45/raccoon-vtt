@@ -24,10 +24,10 @@ import { theme } from "./theme.ts";
  * place: 0 at rest, minus `up` when the panel sheet fills the screen.
  */
 
-/** A slow drag closes past this share of the surface's normal height. */
-export const SWIPE_SHARE = 1 / 4;
-/** A flick, in screen px per ms, down positive. */
-export const FLICK_SPEED = 0.5;
+/** A slow release settles on the nearest stand: past this share of the way to the next one, it moves on (4.4). */
+export const SNAP_SHARE = 1 / 2;
+/** A flick, in screen px per ms, down positive: fast enough that a slow swipe's last twitch never reads as one. */
+export const FLICK_SPEED = 1;
 /** A flick closes once the surface has travelled this share of the floor (one touch target). */
 export const FLICK_TRAVEL = 1 / 2;
 /** The finger's speed at the lift is read over its moves in this window. */
@@ -67,8 +67,8 @@ export type SwipeStart = {
   typing: boolean;
   /** Fingers on the screen as it started, this one included. */
   fingers: number;
-  /** The surface's normal height in screen px, in either stand (4.4). */
-  height: number;
+  /** Where the surface is closed: the position at which it, and what rides it, is fully off screen at its clip edge (4.4, 4.5). */
+  closeAt: number;
   /** The interface size. */
   scale: number;
   at: number;
@@ -179,7 +179,7 @@ export class SheetSwipe {
     if (!s) return { end: null, cancel: false };
     if (phase === "slop" || phase === "upward") return { end: "tap", cancel: false };
     if (phase !== "claimed") return { end: null, cancel: took };
-    const end = swipeEnd({ stand: s.stand, position: this.raw, speed: speedAt(this.samples, at), height: s.height, up: s.up, scale: s.scale, unsaved: this.unsaved });
+    const end = swipeEnd({ stand: s.stand, position: this.raw, speed: speedAt(this.samples, at), closeAt: s.closeAt, up: s.up, scale: s.scale, unsaved: this.unsaved });
     return { end, cancel: true };
   }
 
@@ -222,54 +222,74 @@ export class SheetSwipe {
 
   private sample(m: SwipeMove): void {
     this.samples.push({ at: m.at, dy: m.dy });
-    // Only the last window counts at the lift, and a lift comes after the last move.
-    while (this.samples.length > 2 && this.samples[0]!.at < m.at - SPEED_WINDOW_MS) this.samples.shift();
+    // Only the last window counts at the lift, which comes after the last move, and where the finger stood as it opened: the last sample before it.
+    while (this.samples.length > 2 && this.samples[1]!.at <= m.at - SPEED_WINDOW_MS) this.samples.shift();
   }
 }
 
 /**
  * The finger's speed at the lift, in screen px per ms, down positive: its
- * travel over its samples in the last 100 ms, from the first of them to the
- * lift. A finger that rested still at the end has none there, so 0.
+ * travel in the stroke it is making, over the last 100 ms at most, from
+ * where it stood as that window opened (or where the stroke turned, or
+ * where a younger touch went down) to its last sample. A finger that
+ * rested still at the end has none there, so 0. The time is never under
+ * one frame, so moves a browser delivers coalesced, two samples a
+ * millisecond apart, never make a twitch a flick, while a stroke that
+ * turns back keeps its own speed.
  */
 export function speedAt(samples: readonly Sample[], at: number): number {
-  const recent = samples.filter((p) => p.at >= at - SPEED_WINDOW_MS && p.at <= at);
-  const first = recent[0];
-  const last = recent[recent.length - 1];
-  if (!first || !last || first === last) return 0;
-  return (last.dy - first.dy) / Math.max(1, at - first.at);
+  const last = samples[samples.length - 1];
+  const opens = at - SPEED_WINDOW_MS;
+  if (!last || last.at <= opens) return 0;
+  let i = samples.length - 1;
+  let way = 0;
+  while (i > 0) {
+    const before = samples[i - 1]!;
+    const step = Math.sign(samples[i]!.dy - before.dy);
+    if (step !== 0 && way !== 0 && step !== way) break;
+    if (step !== 0) way = step;
+    i--;
+    if (before.at <= opens) break;
+  }
+  const base = samples[i]!;
+  return (last.dy - base.dy) / Math.max(FRAME_MS, at - Math.max(base.at, opens));
 }
+
+/** The shortest time a speed is read over: one frame. */
+export const FRAME_MS = 16;
 
 /**
  * Where a release leaves the surface (4.4, 4.7). The floor is one touch
- * target at the interface size, a flick's travel half of it. From either
- * stand a flick down closes, and a flick up goes up one stand from where
- * the release finds the surface. Otherwise the distance decides: the
- * surface moves on to the next stand in the direction it went once it has
- * travelled the larger of the floor and a quarter of the way there, and
- * closes once its top is the larger of the floor and a quarter of its
- * normal height below its normal top, from either stand. Unsaved input
- * blocks only the close, which then stops at normal.
+ * target at the interface size, a flick's travel half of it. A flick down
+ * closes from either stand, and a flick up goes up one stand from where
+ * the release finds the surface. A slow release settles on the nearest
+ * stand of full, normal and closed, closed being the surface fully off
+ * screen (`closeAt`): it moves on to the next stand once past half the way
+ * there, and never for less than the floor, so a small move stays put.
+ * Unsaved input blocks only the close, so the nearest other stand takes it.
  */
-export function swipeEnd(i: { stand: SwipeStand; position: number; speed: number; height: number; up: number; scale: number; unsaved: boolean }): SwipeEnd {
+export function swipeEnd(i: { stand: SwipeStand; position: number; speed: number; closeAt: number; up: number; scale: number; unsaved: boolean }): SwipeEnd {
   const floor = theme.touch * i.scale;
   const travel = floor * FLICK_TRAVEL;
   const from = i.stand === "full" ? -i.up : 0;
-  const close = closeDistance(i.height, i.scale);
-  const step = Math.max(floor, i.up * SWIPE_SHARE);
   const p = i.position;
   let end: SwipeEnd;
   if (i.speed >= FLICK_SPEED && p - from >= travel) end = "closed";
   else if (i.speed <= -FLICK_SPEED) end = i.up > 0 && p <= -travel ? "full" : "normal";
-  else if (p >= close) end = "closed";
-  else if (i.stand === "normal") end = i.up > 0 && -p >= step ? "full" : "normal";
-  else end = p - from >= step ? "normal" : "full";
+  else if (p >= closeDistance(i.closeAt, i.scale)) end = "closed";
+  else if (i.stand === "normal") end = i.up > 0 && -p >= stepDistance(i.up, i.scale) ? "full" : "normal";
+  else end = p - from >= stepDistance(i.up, i.scale) ? "normal" : "full";
   return end === "closed" && i.unsaved ? "normal" : end;
 }
 
-/** How far below its normal top a slow drag closes the surface: a quarter of its normal height, and never less than one touch target. */
-export function closeDistance(height: number, scale: number): number {
-  return Math.max(height * SWIPE_SHARE, theme.touch * scale);
+/** How far below its normal top a slow release closes the surface: half the way to fully off screen, and never less than one touch target. */
+export function closeDistance(closeAt: number, scale: number): number {
+  return Math.max(closeAt * SNAP_SHARE, theme.touch * scale);
+}
+
+/** How far a slow release must carry the panel sheet between normal and full screen: half the way, and never less than one touch target. */
+export function stepDistance(up: number, scale: number): number {
+  return Math.max(up * SNAP_SHARE, theme.touch * scale);
 }
 
 // ------------------------------------------------------------ the surface over time
@@ -303,7 +323,7 @@ export type SwipeHost = {
 };
 
 /** A touch's start, with where a close slides the surface to: until it shows none of itself or its riders (4.5). */
-export type SessionStart = SwipeStart & { closeAt: number };
+export type SessionStart = SwipeStart;
 
 export class SwipeSession {
   readonly touch = new SheetSwipe();
@@ -914,21 +934,21 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
     };
 
     /** The normal stand's geometry for this touch, read from the sheet as it stands, or from what was held while it fills the screen (4.7). */
-    const readGeometry = (stand: SwipeStand): { geometry: SwipeGeometry; height: number; closeAt: number } => {
+    const readGeometry = (stand: SwipeStand): { geometry: SwipeGeometry; closeAt: number } => {
       const o = latest.current.options;
       const s = latest.current.scale;
       const screen = window.innerHeight;
       if (stand === "normal") {
         const r = el.getBoundingClientRect();
         const g: SwipeGeometry = { normalTop: r.top, normalBottom: r.bottom, up: o.full ? Math.max(0, r.top) : 0, scale: s, boxTop: 0, boxHeight: screen, off: 0, wholeScreen: false };
-        return { geometry: g, height: r.height, closeAt: slideDistance(el as unknown as SwipeNode, list as unknown as SwipeNode[], o.clip, screen) };
+        return { geometry: g, closeAt: slideDistance(el as unknown as SwipeNode, list as unknown as SwipeNode[], o.clip, screen) };
       }
       const normal = normalFromHeld(held.current, { scale: s, screen, cap: o.full?.cap ?? 0 });
       const g: SwipeGeometry = { normalTop: normal.normalTop, normalBottom: normal.normalBottom, up: normal.up, scale: s, boxTop: 0, boxHeight: screen, off: 0, wholeScreen: true };
       geometry = g;
       measureBox();
       // From full screen it is drawn over everything, so a close slides it past the screen's foot.
-      return { geometry: g, height: normal.height, closeAt: screen - normal.normalTop + g.off + 1 };
+      return { geometry: g, closeAt: screen - normal.normalTop + g.off + 1 };
     };
 
     const onPointerDown = (e: PointerEvent) => {
@@ -994,7 +1014,7 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
       const stand: SwipeStand = o.full?.on ? "full" : "normal";
       const read = readGeometry(stand);
       geometry = read.geometry;
-      const started = swipe.begin({ on, atTop: top, typing, fingers: e.touches.length, height: read.height, scale: latest.current.scale, at: e.timeStamp, stand, up: read.geometry.up, closeAt: read.closeAt });
+      const started = swipe.begin({ on, atTop: top, typing, fingers: e.touches.length, scale: latest.current.scale, at: e.timeStamp, stand, up: read.geometry.up, closeAt: read.closeAt });
       if (started) followed = { id: t.identifier, x: t.clientX, y: t.clientY };
     };
     const onMove = (e: TouchEvent) => {

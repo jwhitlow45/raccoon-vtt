@@ -253,6 +253,32 @@ async function settled(surface: Locator): Promise<"gone" | "rest"> {
   );
 }
 
+/*
+ * A slow release settles on the nearest stand (docs/design-v1-sheet-swipe.md
+ * 4.4): closed past half the way to fully off screen, full past half the way
+ * up, never for less than one touch target. `off` is how far below its
+ * normal top a surface is fully off screen: its height and what rides it.
+ * The finger travels the slop (8 px down, 16 up) before the surface moves.
+ */
+function closePast(off: number, scale = 1): number {
+  return 8 + Math.max(off / 2, 44 * scale) + 20;
+}
+
+/** Past a quarter of the way, short of half: a slow release there springs back. */
+function closeShort(off: number, scale = 1): number {
+  return 8 + Math.max(off / 2, 44 * scale) - 20;
+}
+
+/** Half the way between normal and full, `up` the normal top's distance from the screen's top: the step either way. */
+function stepOf(up: number, scale = 1): number {
+  return Math.max(up / 2, 44 * scale);
+}
+
+/** From full screen down past the normal top by half the way to the screen's foot, where the full sheet is fully off screen. */
+function longFromFull(up: number, screen: number): number {
+  return 8 + up + (screen - up) / 2 + 20;
+}
+
 /** The middle of an element, as a point to press. */
 async function middleOf(locator: Locator): Promise<Pt> {
   const r = await rectOf(locator);
@@ -401,7 +427,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
   });
 
-  test("1. the panel sheet: a slow header drag past the distance closes it as Close does, short of it springs back", async () => {
+  test("1. the panel sheet: a slow header drag past half closes it as Close does, past a quarter but short of half springs back", async () => {
     for (const view of [
       { width: 375, height: 667, scale: 1 },
       { width: 375, height: 667, scale: 1.3 },
@@ -413,7 +439,6 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       await setUp(dm, view);
       const sheet = await openPanel(dm, "Log");
       const before = await steadyRect(sheet);
-      const distance = Math.max(before.height / 4, 44 * view.scale);
       const from = await headerPoint(sheet);
       if (view.width === 375) {
         // Held mid-drag, for the screenshots: the sheet follows the finger down.
@@ -426,14 +451,15 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
         await held.up();
         assert.equal(await settled(sheet), "rest");
       }
-      // Short of it: springs back, and at rest no transform is left.
-      await swipe(dmCdp, from, 8 + distance - 12);
-      assert.equal(await settled(sheet), "rest", `${where}: a short drag closed the sheet`);
+      // Past a quarter, short of half: springs back, and at rest no transform is left.
+      assert.ok(closeShort(before.height, view.scale) - 8 > before.height / 4);
+      await swipe(dmCdp, from, closeShort(before.height, view.scale));
+      assert.equal(await settled(sheet), "rest", `${where}: a slow drag short of half closed the sheet`);
       assert.deepEqual(await rectOf(sheet), before, `${where}: the sheet is not back in its place`);
       const overlay = await dm.evaluate(() => (globalThis as unknown as Win).history.state);
-      // Past it: closes after its slide, with the Back entry gone as after Close.
-      await swipe(dmCdp, from, 8 + distance + 12);
-      assert.equal(await settled(sheet), "gone", `${where}: a drag past the distance left the sheet open`);
+      // Past half: closes after its slide, with the Back entry gone as after Close.
+      await swipe(dmCdp, from, closePast(before.height, view.scale));
+      assert.equal(await settled(sheet), "gone", `${where}: a slow drag past half left the sheet open`);
       const state = await dm.evaluate(() => (globalThis as unknown as Win).history.state);
       assert.notDeepEqual(state, overlay, `${where}: the overlay's Back entry is still there`);
       const inClosed = await dm.evaluate(() => (globalThis as unknown as Win).document.activeElement?.closest("dialog") != null);
@@ -446,8 +472,8 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     const button = (sheet: Locator) => sheet.getByRole("button", { name: "Paste a stat block" });
     let sheet = await openPanel(dm, "Monsters");
     const rest = await steadyRect(sheet);
-    await swipe(dmCdp, await middleOf(button(sheet)), 8 + rest.height / 4 + 12);
-    assert.equal(await settled(sheet), "gone", "a slow content drag past the distance");
+    await swipe(dmCdp, await middleOf(button(sheet)), closePast(rest.height));
+    assert.equal(await settled(sheet), "gone", "a slow content drag past half");
     sheet = await openPanel(dm, "Monsters");
     await steadyRect(sheet);
     await swipe(dmCdp, await middleOf(button(sheet)), 60, { flick: true });
@@ -472,7 +498,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await panelsButton(dm).click();
     const list = sheetOf(dm, "Panels");
     const r = await steadyRect(list);
-    await swipe(dmCdp, await headerPoint(list), 8 + r.height / 4 + 20);
+    await swipe(dmCdp, await headerPoint(list), closePast(r.height));
     assert.equal(await settled(list), "gone", "the Panels list stayed");
   });
 
@@ -570,7 +596,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await dm.keyboard.press("End");
     await dm.keyboard.type("5");
     const h = await steadyRect(sheet);
-    await swipe(dmCdp, await headerPoint(sheet), 8 + Math.max(h.height / 4, 44) + 12);
+    await swipe(dmCdp, await headerPoint(sheet), closePast(h.height));
     assert.equal(await settled(sheet), "rest", "a changed field let the swipe close the sheet");
     assert.equal(await across.inputValue(), `${was}5`, "the typed value was lost");
     await across.fill(was);
@@ -582,9 +608,9 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     const log = await steadyRect(sheet);
     const message = sheet.getByLabel("Message");
     await message.focus();
-    await swipe(dmCdp, await middleOf(sheet.getByRole("button", { name: "Export" })), 8 + log.height / 4 + 12);
+    await swipe(dmCdp, await middleOf(sheet.getByRole("button", { name: "Export" })), closePast(log.height));
     assert.equal(await settled(sheet), "rest", "a content drag moved the sheet while a field took typing");
-    await swipe(dmCdp, await headerPoint(sheet), 8 + log.height / 4 + 12);
+    await swipe(dmCdp, await headerPoint(sheet), closePast(log.height));
     assert.equal(await settled(sheet), "gone", "a header drag with nothing typed left the sheet open");
   });
 
@@ -594,7 +620,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     const rest = await steadyRect(sheet);
     const f = new Finger(dmCdp, dm);
     await f.down(await headerPoint(sheet));
-    await f.drag(8 + rest.height / 4 + 40);
+    await f.drag(closePast(rest.height) + 20);
     await f.rest(100);
     await f.second(mapPoint());
     await f.up(100);
@@ -603,7 +629,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await sheet.getByRole("button", { name: "Close Log" }).click();
     sheet = await openPanel(dm, "Monsters");
     const monsters = await steadyRect(sheet);
-    await swipe(dmCdp, await middleOf(sheet.getByRole("button", { name: "Paste a stat block" })), 8 + monsters.height / 4 + 40, { hold: 500 });
+    await swipe(dmCdp, await middleOf(sheet.getByRole("button", { name: "Paste a stat block" })), closePast(monsters.height) + 20, { hold: 500 });
     assert.equal(await settled(sheet), "rest", "a held press swiped the sheet");
     assert.deepEqual(await rectOf(sheet), monsters);
     await sheet.getByRole("button", { name: "Close Monsters" }).click();
@@ -611,7 +637,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
 
   test("6. unsaved input springs back with what was typed kept, and with nothing typed each closes", async () => {
     await setUp(dm, { width: 375, height: 667, scale: 1 });
-    const far = (r: Rect) => 8 + Math.max(r.height / 4, 44) + 30;
+    const far = (r: Rect) => closePast(r.height) + 10;
     // A half-typed Log message, blurred.
     let sheet = await openPanel(dm, "Log");
     let r = await steadyRect(sheet);
@@ -735,7 +761,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await opener.click();
     const filters = dm.getByRole("dialog", { name: "Monster filters" }).locator("section").first();
     await filters.waitFor();
-    await swipe(dmCdp, await headerPoint(filters), 8 + Math.max((await steadyRect(filters)).height / 4, 44) + 20);
+    await swipe(dmCdp, await headerPoint(filters), closePast((await steadyRect(filters)).height));
     assert.equal(await settled(filters), "gone", "the filters stayed");
     assert.ok(await sheet.isVisible(), "the Monsters panel closed with its filters");
     await waitFor("focus back on Filters", async () => (await opener.evaluate((el) => (globalThis as unknown as Win).document.activeElement === (el as unknown as El))) || null, 3_000);
@@ -747,7 +773,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     const card = dm.getByRole("dialog", { name: "X-card" }).locator("section").first();
     await card.waitFor();
     const c = await steadyRect(card);
-    await swipe(dmCdp, { x: c.left + c.width / 2, y: c.top + 30 }, 8 + Math.max(c.height / 4, 44) + 20);
+    await swipe(dmCdp, { x: c.left + c.width / 2, y: c.top + 30 }, closePast(c.height));
     assert.equal(await settled(card), "gone", "the X-card stayed");
 
     // At 768 x 1024 a dialog is a card in the middle, and a drag on it does nothing.
@@ -803,7 +829,8 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     const held = { sheet: await rectOf(sheet), dock: await rectOf(dock) };
     assert.ok(Math.abs(held.sheet.top - rest.top - (held.dock.top - dockRest.top)) < 1, `the dock did not ride the sheet: ${JSON.stringify({ rest, dockRest, held })}`);
     assert.ok(held.sheet.top > rest.top + 20);
-    await f.drag(8 + rest.height / 4 + 20);
+    // Fully off screen once the dock above the sheet is too.
+    await f.drag(closePast(rest.bottom - dockRest.top) - 60);
     await f.up();
     const to = Number(await sheet.getAttribute("data-sheet-swipe-to"));
     const foot = await toolbarTop(dm);
@@ -828,7 +855,8 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     assert.ok(cardRest.bottom < (await toolbarTop(player)) - 20, `the card does not stand on Multi-select's bar: ${JSON.stringify(cardRest)}`);
     const g = new Finger(playerCdp, player);
     await g.down(await headerPoint(card));
-    await g.drag(8 + Math.max(cardRest.height / 4, 44) + 20);
+    // Drawn over everything, it is fully off screen at the screen's foot.
+    await g.drag(closePast((await player.evaluate(() => (globalThis as unknown as Win).innerHeight)) - cardRest.top));
     await g.up();
     const slide = Number(await card.getAttribute("data-sheet-swipe-to"));
     const screen = await player.evaluate(() => (globalThis as unknown as Win).innerHeight);
@@ -853,7 +881,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       if (view.width > 900) await dm.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.sidePanel", "shown"));
       const pane = await openLabel(0);
       const r = await steadyRect(pane);
-      await swipe(dmCdp, await headerPoint(pane), 8 + Math.max(r.height / 4, 44) + 20);
+      await swipe(dmCdp, await headerPoint(pane), closePast(r.height));
       assert.equal(await settled(pane), "gone", `${view.width} x ${view.height}: the label pane stayed`);
     }
     // A second label tapped during the closing slide: its pane stays open.
@@ -861,7 +889,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     const first = await openLabel(0);
     const r = await steadyRect(first);
     const second = await cellPoint(dm, { x: 7, y: 6 });
-    await swipe(dmCdp, await headerPoint(first), 8 + Math.max(r.height / 4, 44) + 20);
+    await swipe(dmCdp, await headerPoint(first), closePast(r.height));
     await touchTap(dmCdp, dm, second);
     await dm.getByRole("dialog", { name: "Edit label" }).getByLabel("Label text").and(dm.locator('[value="Gate 2"]')).waitFor();
     await sleep(400);
@@ -874,7 +902,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await openNotes(sheet, "The first page.");
     const page = await steadyRect(sheet);
     const pin = await pagePoint(dm, run.bounds, { x: 10.5, y: 3.5 });
-    await swipe(dmCdp, await headerPoint(sheet), 8 + page.height / 4 + 20);
+    await swipe(dmCdp, await headerPoint(sheet), closePast(page.height));
     await touchTap(dmCdp, dm, { x: pin.x, y: pin.y - 14 });
     await sheet.getByText("The second page.").waitFor();
     await sleep(400);
@@ -890,7 +918,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await f.drag(40);
     await ops.send({ t: "journal.update", pageId: run.pages[0], patch: { title: "Old notes" } });
     await sheet.getByRole("heading", { name: "Old notes" }).waitFor();
-    await f.drag(opened.height / 4 + 20);
+    await f.drag(closePast(opened.height) - 40);
     await f.up();
     assert.equal(await settled(sheet), "gone", "a rename mid-drag kept the page open");
     await ops.send({ t: "journal.update", pageId: run.pages[0], patch: { title: "Notes" } });
@@ -902,7 +930,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       await setUp(dm, { width: 375, height: 667, scale: 1 });
       const sheet = await openPanel(dm, "Log");
       const r = await steadyRect(sheet);
-      await swipe(dmCdp, await headerPoint(sheet), 8 + r.height / 4 + 20);
+      await swipe(dmCdp, await headerPoint(sheet), closePast(r.height));
       await dm.evaluate(() => new Promise((resolve) => (globalThis as unknown as { requestAnimationFrame(fn: () => void): void }).requestAnimationFrame(() => resolve(null))));
       assert.equal(await sheet.count(), 0, "the sheet still showed a frame after the lift");
     } finally {
@@ -922,10 +950,10 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       let sheet = await openPanel(dm, "Log");
       const normal = await steadyRect(sheet);
       const up = normal.top;
-      const step = Math.max(44 * view.scale, up / 4);
+      const step = stepOf(up, view.scale);
       const fullScreen = sheet.getByRole("button", { name: "Full screen" });
       assert.equal(await fullScreen.getAttribute("aria-pressed"), "false");
-      // Short of a quarter: back to normal.
+      // Short of half the way up: back to normal.
       await swipe(dmCdp, await headerPoint(sheet), -(16 + step - 12));
       assert.equal(await settled(sheet), "rest");
       assert.deepEqual(await rectOf(sheet), normal, `${where}: a short drag up moved the sheet`);
@@ -947,7 +975,15 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       await swipe(dmCdp, await headerPoint(sheet), -(16 + step + 12));
       await waitFor(`${where}: full again`, async () => (await sheet.getAttribute("aria-modal")) === "true" || null, 3_000);
       await settled(sheet);
-      await swipe(dmCdp, await headerPoint(sheet), 8 + up + Math.max(normal.height / 4, 44 * view.scale) + 12);
+      // A slow drag well past normal, short of halfway to closed, settles at normal.
+      await swipe(dmCdp, await headerPoint(sheet), longFromFull(up, view.height) - 60);
+      await waitFor(`${where}: the slow drag to settle at normal`, async () => (await sheet.getAttribute("aria-modal")) === null || null, 3_000);
+      assert.equal(await settled(sheet), "rest", `${where}: a slow drag short of half from full closed the sheet`);
+      assert.deepEqual(await steadyRect(sheet), normal);
+      await swipe(dmCdp, await headerPoint(sheet), -(16 + step + 12));
+      await waitFor(`${where}: full again`, async () => (await sheet.getAttribute("aria-modal")) === "true" || null, 3_000);
+      await settled(sheet);
+      await swipe(dmCdp, await headerPoint(sheet), longFromFull(up, view.height));
       assert.equal(await settled(sheet), "gone", `${where}: a long swipe from full left it open`);
       // Opened again: its normal height. Then up, and a flick down closes it.
       sheet = await openPanel(dm, "Log");
@@ -971,7 +1007,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     // A typed Log message: a long swipe from full stops at normal.
     await sheet.getByLabel("Message").fill("still typing");
     await sheet.getByLabel("Message").blur();
-    await swipe(dmCdp, await headerPoint(sheet), 8 + normal.top + normal.height / 4 + 40);
+    await swipe(dmCdp, await headerPoint(sheet), longFromFull(normal.top, 667) + 10);
     await waitFor("the long swipe to stop at normal", async () => (await sheet.getAttribute("aria-modal")) === null || null, 3_000);
     assert.equal(await settled(sheet), "rest");
     assert.equal(await sheet.getByLabel("Message").inputValue(), "still typing");
@@ -987,7 +1023,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     assert.ok((await bodyScroll(sheet)) > 0, "a content drag up did not scroll");
     assert.deepEqual(await rectOf(sheet), monsters, "a content drag up moved the sheet");
     await sheet.locator("[data-pane-body]").first().evaluate((el) => ((el as unknown as El).scrollTop = 0));
-    await swipe(dmCdp, await headerPoint(sheet), -(16 + Math.max(44, monsters.top / 4) + 12));
+    await swipe(dmCdp, await headerPoint(sheet), -(16 + stepOf(monsters.top) + 12));
     await waitFor("full", async () => (await sheet.getAttribute("aria-modal")) === "true" || null, 3_000);
     await settled(sheet);
     const fullBody = await rectOf(sheet.locator("[data-pane-body]").first());
@@ -1002,10 +1038,10 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     assert.equal(await sheet.getAttribute("aria-modal"), "true", "a subpage ended full screen");
     // From full, content at its top steps down under a short drag, as the header does.
     await sheet.locator("[data-pane-body]").first().evaluate((el) => ((el as unknown as El).scrollTop = 0));
-    await swipe(dmCdp, await middleOf(sheet.getByRole("button", { name: "Paste a stat block" })), 8 + Math.max(44, monsters.top / 4) + 12);
+    await swipe(dmCdp, await middleOf(sheet.getByRole("button", { name: "Paste a stat block" })), 8 + stepOf(monsters.top) + 12);
     await waitFor("a content drag to step down", async () => (await sheet.getAttribute("aria-modal")) === null || null, 3_000);
     await settled(sheet);
-    await swipe(dmCdp, await headerPoint(sheet), -(16 + Math.max(44, monsters.top / 4) + 12));
+    await swipe(dmCdp, await headerPoint(sheet), -(16 + stepOf(monsters.top) + 12));
     await waitFor("full again", async () => (await sheet.getAttribute("aria-modal")) === "true" || null, 3_000);
     await settled(sheet);
     // Turned sideways and back: the side sheet, then full again.
@@ -1050,14 +1086,14 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       boxes.push(await box());
     }
     assert.equal(new Set(boxes).size, 1, `the sheet's layout box changed during the drag: ${boxes.join(" | ")}`);
-    await f.drag(-(Math.max(44, normal.top / 4)));
+    await f.drag(-stepOf(normal.top));
     await f.up();
     await waitFor("full", async () => (await sheet.getAttribute("aria-modal")) === "true" || null, 3_000);
     await settled(sheet);
     await sheet.getByRole("button", { name: /^Show Goblin 1 actions/ }).waitFor();
     assert.equal(await dock.count(), 0, "the dock stayed on the edge of a full sheet");
     await shots.take(dm, "swipe-full-fight-dock-in-header");
-    await swipe(dmCdp, await headerPoint(sheet), 8 + Math.max(44, normal.top / 4) + 12);
+    await swipe(dmCdp, await headerPoint(sheet), 8 + stepOf(normal.top) + 12);
     await waitFor("the step down", async () => (await sheet.getAttribute("aria-modal")) === null || null, 3_000);
     await settled(sheet);
     await dock.waitFor();
@@ -1118,7 +1154,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     const titleFocused = (sheet: Locator) => sheet.locator("header h2").first().evaluate((el) => (globalThis as unknown as Win).document.activeElement === (el as unknown as El));
     const up = async (sheet: Locator) => {
       const r = await steadyRect(sheet);
-      await swipe(dmCdp, await headerPoint(sheet), -(16 + Math.max(44, r.top / 4) + 12));
+      await swipe(dmCdp, await headerPoint(sheet), -(16 + stepOf(r.top) + 12));
       await waitFor("full", async () => (await sheet.getAttribute("aria-modal")) === "true" || null, 3_000);
       await settled(sheet);
       return r;
@@ -1131,7 +1167,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     let normal = await up(sheet);
     assert.equal(await fullButtonHidden(sheet), true, "Full screen drew itself over the title of a sheet filled with focus on the page");
     assert.equal(await titleFocused(sheet), true, "focus did not land on the full sheet's title");
-    await swipe(dmCdp, await headerPoint(sheet), 8 + Math.max(44, normal.top / 4) + 12);
+    await swipe(dmCdp, await headerPoint(sheet), 8 + stepOf(normal.top) + 12);
     await waitFor("the step down", async () => (await sheet.getAttribute("aria-modal")) === null || null, 3_000);
     await settled(sheet);
     assert.equal(await fullButtonHidden(sheet), true, "Full screen stayed over the title after the step down");
@@ -1152,7 +1188,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       assert.equal(await fullButtonHidden(sheet), true, "Full screen drew itself over the title of Initiative opened from the turn strip");
       assert.equal(await titleFocused(sheet), true, "focus did not land on Initiative's title");
       await shots.take(dm, "swipe-full-from-turn-strip");
-      await swipe(dmCdp, await headerPoint(sheet), 8 + Math.max(44, normal.top / 4) + 12);
+      await swipe(dmCdp, await headerPoint(sheet), 8 + stepOf(normal.top) + 12);
       await waitFor("the step down", async () => (await sheet.getAttribute("aria-modal")) === null || null, 3_000);
       await settled(sheet);
       assert.equal(await fullButtonHidden(sheet), true);
@@ -1507,7 +1543,7 @@ async function openLabel(index: number): Promise<Locator> {
 /** Swipes the panel sheet up from its header until it fills the screen, as test 12 does, and returns its box at the normal height. */
 async function fillScreen(sheet: Locator, scale: number, where: string): Promise<Rect> {
   const normal = await steadyRect(sheet);
-  await swipe(dmCdp, await headerPoint(sheet), -(16 + Math.max(44 * scale, normal.top / 4) + 12));
+  await swipe(dmCdp, await headerPoint(sheet), -(16 + stepOf(normal.top, scale) + 12));
   await waitFor(`${where}: the sheet to fill the screen`, async () => (await sheet.getAttribute("aria-modal")) === "true" || null, 3_000);
   assert.equal(await settled(sheet), "rest");
   return normal;

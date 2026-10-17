@@ -6,6 +6,9 @@ import {
   atTop,
   cancelPress,
   closeDistance,
+  FLICK_SPEED,
+  FRAME_MS,
+  stepDistance,
   drawnAt,
   GRAB_ATTR,
   normalFromHeld,
@@ -89,7 +92,7 @@ function sheet() {
 }
 
 function start(over: Partial<SwipeStart> = {}): SwipeStart {
-  return { on: "grab", atTop: true, typing: false, fingers: 1, height: 400, scale: 1, at: 0, stand: "normal", up: 0, ...over };
+  return { on: "grab", atTop: true, typing: false, fingers: 1, closeAt: 400, scale: 1, at: 0, stand: "normal", up: 0, ...over };
 }
 
 /** Moves straight down by each step, 30 ms apart, as the e2e's slow drag. */
@@ -262,22 +265,26 @@ describe("6. release", () => {
     return { end: swipe.end(at).end, last: steps[steps.length - 1]?.position };
   };
 
-  test("by distance, a quarter of the drawn height at 100% and 130% (the appendix)", () => {
-    // 375 x 667: the sheet draws 400 px at either size, so its distance is 100 screen px at both.
+  test("a slow release goes to the nearest stand: closed only past half the way to fully off screen, at 100% and 130% (the appendix)", () => {
+    // 375 x 667: the sheet draws 400 px at either size, so it is fully off screen 400 screen px down, and closes past 200 at both.
     for (const scale of [1, 1.3]) {
-      assert.equal(release(ramp(107), { scale }).end, "normal", `99 px at ${scale}`);
-      assert.equal(release(ramp(108), { scale }).end, "closed", `100 px at ${scale}`);
+      assert.equal(release(ramp(8 + 199), { scale }).end, "normal", `199 px at ${scale}`);
+      assert.equal(release(ramp(8 + 200), { scale }).end, "closed", `200 px at ${scale}`);
+      assert.equal(release(ramp(8 + 150), { scale }).end, "normal", "past a quarter but short of half: springs back");
     }
-    // 390 x 844: 506 px, so 127.
-    assert.equal(release(ramp(134), { height: 506 }).end, "normal");
-    assert.equal(release(ramp(135), { height: 506 }).end, "closed");
+    // 390 x 844: 506 px, so 253.
+    assert.equal(release(ramp(8 + 252), { closeAt: 506 }).end, "normal");
+    assert.equal(release(ramp(8 + 253), { closeAt: 506 }).end, "closed");
+    // The dock rides it: off screen with the dock, 400 + 56, so half of that.
+    assert.equal(release(ramp(8 + 227), { closeAt: 456 }).end, "normal");
+    assert.equal(release(ramp(8 + 228), { closeAt: 456 }).end, "closed");
   });
 
-  test("the floor sets the distance on a 153 px sheet at 130%", () => {
-    const over = { height: 153 * 1.3, scale: 1.3 };
-    assert.equal(closeDistance(153 * 1.3, 1.3), 44 * 1.3);
-    assert.equal(release(ramp(8 + 57), over).end, "normal");
-    assert.equal(release(ramp(8 + 58), over).end, "closed");
+  test("the floor keeps a small move in place", () => {
+    assert.equal(closeDistance(100, 1.3), 44 * 1.3);
+    assert.equal(stepDistance(60, 1), 44, "half of a 60 px rise is under the floor");
+    assert.equal(release(ramp(-(16 + 40)), { up: 60 }).end, "normal", "40 px up, past half of 60 but under the floor");
+    assert.equal(release(ramp(-(16 + 44)), { up: 60 }).end, "full");
   });
 
   test("a flick closes once past half the floor, and a fast sloppy tap springs back", () => {
@@ -291,14 +298,26 @@ describe("6. release", () => {
     assert.deepEqual(swipe.end(16), { end: "normal", cancel: true }, "12 px in 15 ms: claimed, 4 px, under half the floor");
   });
 
-  test("a flick back up springs back however far the drag, and a rest of 100 ms before the lift closes by distance", () => {
+  test("only a real flick closes in one go: a moderate lift and a slow swipe's last twitch do not", () => {
+    // 0.7 px per ms over the last 100 ms, past a quarter, short of half: a flick under the old 0.5, now the nearest stand.
+    assert.equal(release(ramp(8 + 150), {}, { every: 14 }).end, "normal");
+    const twitch = new SheetSwipe();
+    twitch.start(start());
+    drag(twitch, ramp(158));
+    // Coalesced, two moves a millisecond apart, then the lift.
+    twitch.move({ dx: 0, dy: 168, at: 16 * 30 + 1, cancelable: true });
+    twitch.move({ dx: 0, dy: 178, at: 16 * 30 + 2, cancelable: true });
+    assert.equal(twitch.end(16 * 30 + 3).end, "normal", "170 px down, the last 20 in 2 ms");
+  });
+
+  test("a flick back up springs back however far the drag, and a rest of 100 ms before the lift goes to the nearest stand", () => {
     const swipe = new SheetSwipe();
     swipe.start(start());
     drag(swipe, ramp(300));
-    for (let i = 1; i <= 4; i++) swipe.move({ dx: 0, dy: 300 - 10 * i, at: 300 + 2 * i, cancelable: true });
-    assert.equal(swipe.end(310).end, "normal");
-    assert.equal(release(ramp(208), {}, { liftAfter: 100 }).end, "closed", "speed 0, past the distance");
-    assert.equal(release(ramp(90), {}, { liftAfter: 100 }).end, "normal");
+    for (let i = 1; i <= 4; i++) swipe.move({ dx: 0, dy: 300 - 10 * i, at: 900 + 2 * i, cancelable: true });
+    assert.equal(swipe.end(910).end, "normal");
+    assert.equal(release(ramp(8 + 210), {}, { liftAfter: 100 }).end, "closed", "speed 0, past half");
+    assert.equal(release(ramp(8 + 150), {}, { liftAfter: 100 }).end, "normal");
   });
 
   test("a flick down after the drag went back up closes once past half the floor, and a drag that turns sideways follows only its vertical part", () => {
@@ -306,19 +325,29 @@ describe("6. release", () => {
     swipe.start(start());
     drag(swipe, ramp(200));
     drag(swipe, [150, 100, 50, 20], { from: 200 * 3 });
-    for (let i = 1; i <= 3; i++) swipe.move({ dx: 0, dy: 20 + 6 * i, at: 900 + 2 * i, cancelable: true });
-    assert.equal(swipe.end(907).end, "closed", "38 - 8 = 30 px below its place, flicked");
+    for (let i = 1; i <= 8; i++) swipe.move({ dx: 0, dy: 20 + 15 * i, at: 900 + 2 * i, cancelable: true });
+    assert.equal(swipe.end(917).end, "closed", "140 - 8 = 132 px below its place, short of half, flicked");
     const turn = new SheetSwipe();
     turn.start(start());
     turn.move({ dx: 0, dy: 20, at: 30, cancelable: true });
     assert.equal(turn.move({ dx: 140, dy: 40, at: 60, cancelable: true }).position, 32, "only the 40 px down, less the slop");
   });
 
-  test("the speed is read over the last 100 ms of moves", () => {
+  test("the speed is read over the last 100 ms of the stroke, never over less than a frame", () => {
     assert.equal(speedAt([{ at: 0, dy: 0 }, { at: 50, dy: 10 }, { at: 100, dy: 40 }], 100), 0.4);
-    assert.equal(speedAt([{ at: 0, dy: 0 }, { at: 190, dy: 10 }, { at: 200, dy: 40 }], 200), 3, "a quick 30 px after a slow start is a flick");
+    assert.equal(speedAt([{ at: 0, dy: 0 }, { at: 190, dy: 10 }, { at: 200, dy: 40 }], 200), 0.4, "a quick 30 px after a pause reads over the window");
     assert.equal(speedAt([{ at: 0, dy: 0 }, { at: 10, dy: 100 }], 200), 0, "a finger that rested still");
-    assert.ok(speedAt([{ at: 0, dy: 0 }, { at: 10, dy: -60 }], 12) < -0.5, "up is negative");
+    assert.ok(speedAt([{ at: 0, dy: 0 }, { at: 10, dy: -60 }], 12) < -1, "up is negative");
+  });
+
+  test("clustered samples, as a browser coalesces moves, never make the speed spike", () => {
+    assert.equal(speedAt([{ at: 0, dy: 0 }, { at: 300, dy: 20 }, { at: 301, dy: 30 }], 302), 0.3, "two samples a millisecond apart after a pause");
+    assert.equal(speedAt([{ at: 0, dy: 0 }, { at: 1, dy: 10 }], 2), 10 / FRAME_MS, "a young touch's first two samples: over a frame, not 2 ms");
+    assert.ok(speedAt([{ at: 0, dy: 0 }, { at: 1, dy: 10 }], 2) < FLICK_SPEED);
+    const slow = Array.from({ length: 10 }, (_, i) => ({ at: 30 * (i + 1), dy: 10 * (i + 1) }));
+    assert.equal(speedAt([{ at: 0, dy: 0 }, ...slow, { at: 301, dy: 105 }, { at: 302, dy: 110 }], 303), 0.5, "a slow drag ending in a coalesced pair: its last 100 ms, 50 px");
+    // A stroke that turns back keeps its own speed: up 20 px in 6 ms after a slow drag down.
+    assert.equal(speedAt([{ at: 0, dy: 0 }, { at: 90, dy: 90 }, { at: 100, dy: 100 }, { at: 102, dy: 90 }, { at: 104, dy: 80 }], 106), -20 / FRAME_MS);
   });
 });
 
@@ -547,7 +576,12 @@ describe("11. three ends", () => {
     assert.deepEqual(drag(back, [-6, -12, -4, 4, 8]).map((step) => step.press), [false, false, false, false, false], "back down inside the slop below: nothing yet");
     assert.deepEqual(back.move({ dx: 0, dy: 9, at: 200, cancelable: true }), { cancel: true, position: 1, press: true });
     drag(back, ramp(120).filter((d) => d > 9), { from: 200 });
-    assert.equal(back.end(1000).end, "closed", "a backswing then a slow drag past the distance");
+    const far = new SheetSwipe();
+    far.start(normal());
+    drag(far, [-6, -12, -4, 9]);
+    drag(far, ramp(220).filter((d) => d > 9), { from: 120 });
+    assert.equal(far.end(1000).end, "closed", "a backswing then a slow drag past half");
+    assert.equal(back.end(1000).end, "normal", "a backswing then a slow drag short of half");
     const across = new SheetSwipe();
     across.start(normal());
     drag(across, [-12, 4]);
@@ -555,37 +589,39 @@ describe("11. three ends", () => {
     assert.deepEqual(across.end(100), { end: "tap", cancel: false });
   });
 
-  test("from normal: up past a quarter of up fills the screen, short of it does not, and a flick up fills it above the normal top", () => {
+  test("from normal: up past half of up fills the screen, short of it does not, and a flick up fills it above the normal top", () => {
     const end = (dys: readonly number[], every = 30) => {
       const swipe = new SheetSwipe();
       swipe.start(normal());
       drag(swipe, dys, { every });
       return swipe.end(dys.length * every + 5).end;
     };
-    assert.equal(end(ramp(-(16 + 52))), "full", "52 px up, the step");
-    assert.equal(end(ramp(-(16 + 51))), "normal");
+    assert.equal(end(ramp(-(16 + 104))), "full", "104 px up, past half of 207");
+    assert.equal(end(ramp(-(16 + 103))), "normal");
     assert.equal(end(ramp(-(16 + 30)), 2), "full", "a flick up");
     const below = new SheetSwipe();
     below.start(normal());
     drag(below, ramp(80));
     for (let i = 1; i <= 3; i++) below.move({ dx: 0, dy: 80 - 10 * i, at: 240 + 2 * i, cancelable: true });
     assert.equal(below.end(250).end, "normal", "a flick up below the normal top returns it");
-    assert.equal(end([...ramp(-100), ...ramp(108).filter((d) => d > -100)]), "closed", "up then down past the close distance");
+    assert.equal(end([...ramp(-100), ...ramp(200).filter((d) => d > -100)]), "closed", "up then down past half the way to closed");
   });
 
-  test("from full: a quarter of up down steps down, past the normal top by the close distance closes, a flick closes, short stays", () => {
+  test("from full: half of up down steps down, more than halfway past normal toward closed closes, a flick closes, short stays", () => {
+    // Fully off screen from full screen: the screen's foot, 667 - 207 + 1 below the normal top.
     const end = (dys: readonly number[], over: Partial<SwipeStart> = {}, every = 30) => {
       const swipe = new SheetSwipe();
-      swipe.start(full(over));
+      swipe.start(full({ closeAt: 461, ...over }));
       drag(swipe, dys, { every });
       return swipe.end(dys.length * every + 5).end;
     };
-    assert.equal(end(ramp(8 + 52)), "normal");
-    assert.equal(end(ramp(8 + 51)), "full");
-    assert.equal(end(ramp(8 + 307)), "closed", "the long swipe: 207 + 100");
-    assert.equal(end(ramp(8 + 306)), "normal");
+    assert.equal(end(ramp(8 + 104)), "normal");
+    assert.equal(end(ramp(8 + 103)), "full");
+    assert.equal(end(ramp(8 + 207 + 231)), "closed", "the long swipe: 207 + half of 461");
+    assert.equal(end(ramp(8 + 207 + 230)), "normal", "a slow drag well past normal, short of half, steps to normal");
     assert.equal(end(ramp(8 + 30), {}, 2), "closed", "a flick down");
-    assert.equal(end(ramp(8 + 307), { scale: 1.3, up: 189 }), "closed", "at 130% too, 189 + 100 = 289 is less");
+    assert.equal(end(ramp(8 + 189 + 240), { scale: 1.3, up: 189, closeAt: 479 }), "closed", "at 130%: 189 + half of 479");
+    assert.equal(end(ramp(8 + 189 + 239), { scale: 1.3, up: 189, closeAt: 479 }), "normal");
   });
 
   test("with unsaved input every close ends normal, and with up 0 no upward claim happens", () => {
@@ -603,20 +639,22 @@ describe("11. three ends", () => {
   });
 
   test("the positions at 100% and 130% (the appendix), and never above full", () => {
-    for (const [scale, up, step] of [[1, 207, 207 / 4], [1.3, 189, 44 * 1.3]] as const) {
-      assert.equal(swipeEnd({ stand: "normal", position: -step, speed: 0, height: 400, up, scale, unsaved: false }), "full");
-      assert.equal(swipeEnd({ stand: "normal", position: -step + 0.5, speed: 0, height: 400, up, scale, unsaved: false }), "normal");
+    for (const [scale, up, step] of [[1, 207, 207 / 2], [1.3, 189, 189 / 2]] as const) {
+      assert.equal(stepDistance(up, scale), step);
+      assert.equal(swipeEnd({ stand: "normal", position: -step, speed: 0, closeAt: 400, up, scale, unsaved: false }), "full");
+      assert.equal(swipeEnd({ stand: "normal", position: -step + 0.5, speed: 0, closeAt: 400, up, scale, unsaved: false }), "normal");
       const swipe = new SheetSwipe();
       swipe.start(normal({ up, scale }));
       assert.equal(Math.min(...drag(swipe, ramp(-600)).map((s) => s.position ?? 0)), -up);
     }
   });
 
-  test("the close distance from full uses the normal height held, never the whole screen's, and after a change of layout size the cap for the layout now", () => {
+  test("the close distance from full is measured from the normal top held, never from the full sheet's top, and after a change of layout size from the cap for the layout now", () => {
     const held = { height: 400, foot: 60, scale: 1, stale: false };
     assert.deepEqual(normalFromHeld(held, { scale: 1, screen: 667, cap: 400 }), { height: 400, normalTop: 207, normalBottom: 607, up: 207 });
-    assert.equal(swipeEnd({ stand: "full", position: 100, speed: 0, height: 400, up: 207, scale: 1, unsaved: false }), "closed");
-    assert.equal(swipeEnd({ stand: "full", position: 99, speed: 0, height: 400, up: 207, scale: 1, unsaved: false }), "normal", "a quarter of the whole screen would ask for 374");
+    assert.equal(swipeEnd({ stand: "full", position: 231, speed: 0, closeAt: 461, up: 207, scale: 1, unsaved: false }), "closed");
+    assert.equal(swipeEnd({ stand: "full", position: 230, speed: 0, closeAt: 461, up: 207, scale: 1, unsaved: false }), "normal", "half of the whole screen from the full top would ask for 333 from the normal top less");
+    assert.equal(swipeEnd({ stand: "full", position: 300, speed: 0, closeAt: 461, up: 207, scale: 1, unsaved: true }), "normal", "unsaved input: the nearest stand that is not closed");
     // A 200 px panel held, then turned sideways and back: the cap for the layout now.
     const after = normalFromHeld({ height: 200, foot: 60, scale: 1, stale: true }, { scale: 1, screen: 667, cap: 400 });
     assert.equal(after.height, 400);
@@ -751,7 +789,6 @@ describe("12. randomized touches, from both stands", () => {
           atTop: rnd() < 0.7,
           typing: rnd() < 0.15,
           fingers: rnd() < 0.1 ? 2 : 1,
-          height: 150 + Math.floor(rnd() * 450),
           scale: pick([0.85, 1, 1.15, 1.3]),
           at: 0,
           stand,
@@ -773,6 +810,8 @@ describe("12. randomized touches, from both stands", () => {
         let cancelledMove = false;
         let stopped = false;
         let unsavedAtClaim = false;
+        /** The finger as the machine samples it, for the release's own read of its speed. */
+        const trail = [{ at: 0, dy: 0 }];
         const steps = 1 + Math.floor(rnd() * 25);
         const drift = pick([-12, -4, 4, 12]);
         for (let i = 0; i < steps; i++) {
@@ -791,6 +830,7 @@ describe("12. randomized touches, from both stands", () => {
             dy += Math.round((rnd() - 0.5) * pick([4, 16, 60, 160]) + drift);
             const presses = page.presses;
             const cancel = session.move({ dx, dy, at, cancelable: rnd() < 0.95 });
+            trail.push({ at, dy });
             if (page.presses > presses) {
               claimedAt = i;
               unsavedAtClaim = page.unsavedNow;
@@ -807,6 +847,8 @@ describe("12. randomized touches, from both stands", () => {
           page.looks = [];
         }
         at += pick([1, 5, 40, 150]);
+        const atLift = session.touch.position;
+        const speed = speedAt(trail, at);
         const liftCancelled = session.end(at);
         if (liftCancelled) assert.notEqual(claimedAt, null, `${where}: a lift cancelled for an unclaimed touch`);
         // Other presses on the surface or a rider while it slides or rests: one held is stopped to its end, after the slide too, and one at rest is never held.
@@ -858,6 +900,9 @@ describe("12. randomized touches, from both stands", () => {
         assert.ok(ends <= 1, `${where}: ${ends} ends in one touch`);
         if (stopped || claimedAt === null) assert.equal(ends, 0, `${where}: an end after a cancel, a replacement or no claim`);
         if (page.closes > closesBefore) assert.equal(unsavedAtClaim, false, `${where}: closed with unsaved input`);
+        // Only a real flick closes in one go: a slow release closes only past half the way to fully off screen, and fills the screen only past half the way up.
+        if (page.closes > closesBefore) assert.ok(speed >= FLICK_SPEED || atLift >= closeDistance(s.closeAt, s.scale) - 1e-9, `${where}: a slow release at ${atLift} closed, short of ${closeDistance(s.closeAt, s.scale)}`);
+        if (page.stands.slice(standsBefore).includes(true)) assert.ok(speed <= -FLICK_SPEED || -atLift >= stepDistance(up, s.scale) - 1e-9, `${where}: a slow release at ${atLift} filled the screen, short of ${stepDistance(up, s.scale)}`);
         if (claimedAt !== null) reached.claims++;
         else if (followed && !stopped) reached.taps++;
         reached.closes += page.closes - closesBefore;
