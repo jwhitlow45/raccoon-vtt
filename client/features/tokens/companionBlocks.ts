@@ -327,7 +327,8 @@ export type AttachDeps = {
   /** Whether the dialog is still open, so an answer may move it. */
   open(): boolean;
   phase(next: AttachPhase): void;
-  notify(text: string): void;
+  /** A toast. A late attach that worked is news, in `info`, and a refusal or a lost answer is an `error`. */
+  notify(text: string, tone: "info" | "error"): void;
 };
 
 /**
@@ -353,7 +354,7 @@ export function startAttach(
   const onLink = (answer: OpAnswer, refusal?: OpRefusal) => {
     if (!deps.open()) {
       const text = lateAttachText(input.block, input.companion, answer, refusal, wanted);
-      if (text) deps.notify(text);
+      if (text) deps.notify(text, answer === "taken" ? "info" : "error");
       return;
     }
     const next = afterLinkAnswer(answer, input.companion, refusal);
@@ -367,7 +368,7 @@ export function startAttach(
     if (plan.kind === "kept") return deps.phase(plan.line === input.previewed ? next : { phase: "sizeStopped", line: plan.line });
     const onResize = (answer: OpAnswer, refusal?: OpRefusal) => {
       if (deps.open()) deps.phase(afterResizeAnswer(answer, input.companion, refusal));
-      else if (answer === "refused") deps.notify(refusal?.text ?? refusalLine(refusal, "The server refused the new size."));
+      else if (answer === "refused") deps.notify(refusal?.text ?? refusalLine(refusal, "The server refused the new size."), "error");
     };
     if (deps.dispatch({ t: "token.update", tokenId: input.tokenId, patch: plan.patch }, { onAnswer: onResize, quiet: true }) === null) return deps.phase({ phase: "sizeStopped", line: `${input.companion} keeps its size.` });
     deps.setGrowths(plan.growths);

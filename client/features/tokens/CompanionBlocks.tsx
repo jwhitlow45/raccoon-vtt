@@ -135,7 +135,7 @@ export function AttachBlockDialog(props: {
         setGrowths: (list) => growths.setState({ [token.id]: list }),
         open: () => open.current,
         phase: moveTo,
-        notify: (text) => ui.notify(text, "error"),
+        notify: (text, tone) => ui.notify(text, tone),
       },
       {
         tokenId: token.id,

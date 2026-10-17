@@ -255,7 +255,7 @@ describe("the attach's size, through the token window's resize (docs/design-v1-c
       setGrowths: (g) => (growths = g),
       open: () => open,
       phase: (p) => phases.push(p),
-      notify: (t) => toasts.push(t),
+      notify: (t, tone) => toasts.push(`${tone}: ${t}`),
     };
     const go = (previewed?: string) =>
       startAttach(deps, { tokenId: "hoot", patch: { blockId: "wolf", ac: 13 }, size: "large", use: true, block: "Wolf", companion: "Hoot", ...(previewed ? { previewed } : {}) });
@@ -329,12 +329,12 @@ describe("the attach's size, through the token window's resize (docs/design-v1-c
     h.close();
     h.sent[0]!.answer("taken");
     assert.equal(h.sent.length, 1);
-    assert.deepEqual(h.toasts, ["Wolf is attached to Hoot. Its size stayed Small."]);
+    assert.deepEqual(h.toasts, ["info: Wolf is attached to Hoot. Its size stayed Small."], "news, not an error");
     const r = harness(scene());
     r.go();
     r.close();
     r.sent[0]!.answer("refused", refusal("that is not yours"));
-    assert.deepEqual(r.toasts, ["Wolf was not attached to Hoot. That is not yours."]);
+    assert.deepEqual(r.toasts, ["error: Wolf was not attached to Hoot. That is not yours."]);
     // With nothing to resize, a late taken says nothing.
     const same = harness(scene({}, { size: "large" }));
     same.go();
@@ -351,7 +351,7 @@ describe("the attach's size, through the token window's resize (docs/design-v1-c
     h.close();
     h.sent[1]!.answer("refused", refusal("that token is locked"));
     assert.equal(h.phases.length, phases, "the closed dialog moves no more");
-    assert.deepEqual(h.toasts, ["That token is locked."]);
+    assert.deepEqual(h.toasts, ["error: That token is locked."]);
   });
 
   test("the DM's attach grows at the base spot, unchecked", () => {
