@@ -451,6 +451,7 @@ export const SURFACES = [
   "Handout viewer",
   "Token window",
   "Initiative",
+  "Dice",
   "Token and character fields",
   "Label, pin and light panes",
   "Dialogs",
@@ -674,6 +675,18 @@ export const BEHAVIORS: readonly Behavior[] = [
     when: "while typing several values",
     device: "keys",
     surface: "Initiative",
+  },
+
+  // The Dice panel's formula field: features/dice/Roller.tsx. The field's own keys, so the room's shortcuts stand aside there.
+  { id: "diceEnter", input: "Enter", does: "Roll what the field holds", roles: EVERYONE, when: "in the Dice panel's formula field", device: "keys", surface: "Dice" },
+  {
+    id: "diceHistory",
+    input: "Up, Down",
+    does: "Go back through the formulas this device rolled, newest first, or forward again to what was being typed",
+    roles: EVERYONE,
+    when: "in the formula field",
+    device: "keys",
+    surface: "Dice",
   },
 
   // The token's and characters' one-line fields: features/tokens/ui.tsx TextField and NumberField.

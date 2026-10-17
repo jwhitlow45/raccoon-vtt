@@ -67,6 +67,15 @@ export type LogPage = {
   /** Pass as `before` for the page after this one. Null when there are no older entries. */
   nextBefore: string | null;
 };
+/**
+ * What the server holds of the caller's own ops of one tag
+ * (docs/design-v1-dice.md 1.2): each part committed with the lines it wrote,
+ * projected for the caller, or refused with its words. A part the answer
+ * lacks is unknown.
+ */
+export type ReceiptLookup = {
+  parts: ({ part: number; state: "committed"; seq: number; lines: LogEntry[] } | { part: number; state: "refused"; code: string; message: string })[];
+};
 /** One evening of the log, as the caller's own Log panel holds it (docs/design-v1-dm-tools.md 3.10). */
 export type LogSession = { from: string; to: string; lines: number };
 /** A file the server rendered, with the name it asked to be saved under. */
@@ -437,6 +446,9 @@ export const api = {
    * Older log entries, projected for the caller. A DM names the scene it is
    * viewing, because creature events are projected per scene.
    */
+  /** The caller's own receipts of one tag, for an op whose answer this device lost (docs/design-v1-dice.md 1.2). */
+  getReceipts: (roomId: string, tag: string) => request<ReceiptLookup>("GET", `${room(roomId)}/receipts/${encodeURIComponent(tag)}`),
+
   getLog: (roomId: string, options: { before?: string; sceneId?: string | null; limit?: number } = {}) => {
     const q = new URLSearchParams();
     if (options.before !== undefined) q.set("before", options.before);

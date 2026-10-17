@@ -489,6 +489,13 @@ Where the action bar opens as a window: on a screen 600 px or wider, or a phone 
 | Escape | Drop the initiative you typed | everyone, in a row's initiative box |
 | Enter | Go to the next box, and save after the last | DM, while typing several values |
 
+### Dice
+
+| Key | Does | Who |
+| --- | --- | --- |
+| Enter | Roll what the field holds | everyone, in the Dice panel's formula field |
+| Up, Down | Go back through the formulas this device rolled, newest first, or forward again to what was being typed | everyone, in the formula field |
+
 ### Token and character fields
 
 | Key | Does | Who |

@@ -98,6 +98,7 @@ function panel(def: {
 export const PANELS: readonly PanelDef[] = [
   panel({ id: "token", title: "Token", order: 10, group: "play", subject: "selection", load: () => import("../panels/TokenPanel.tsx") }),
   panel({ id: "tracker", title: "Initiative", order: 12, group: "play", load: () => import("../panels/TrackerPanel.tsx") }),
+  panel({ id: "dice", title: "Dice", order: 15, group: "play", load: () => import("./dice/DicePanel.tsx") }),
   panel({ id: "scenes", title: "Scenes", order: 24, group: "play", dmOnly: true, load: () => import("../panels/ScenesPanel.tsx") }),
   panel({ id: "library", title: "Library", order: 48, group: "prepare", load: () => import("../panels/LibraryPanel.tsx") }),
   panel({ id: "areas", title: "Areas", order: 20, group: "play", load: () => import("./areas/AreasPanel.tsx") }),
