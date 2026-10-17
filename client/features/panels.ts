@@ -98,7 +98,7 @@ function panel(def: {
 export const PANELS: readonly PanelDef[] = [
   panel({ id: "token", title: "Token", order: 10, group: "play", subject: "selection", load: () => import("../panels/TokenPanel.tsx") }),
   panel({ id: "tracker", title: "Initiative", order: 12, group: "play", load: () => import("../panels/TrackerPanel.tsx") }),
-  panel({ id: "dice", title: "Dice", order: 15, group: "play", load: () => import("./dice/DicePanel.tsx") }),
+  panel({ id: "dice", title: "Dice", order: 15, group: "play", subject: "selection", load: () => import("./dice/DicePanel.tsx") }),
   panel({ id: "scenes", title: "Scenes", order: 24, group: "play", dmOnly: true, load: () => import("../panels/ScenesPanel.tsx") }),
   panel({ id: "library", title: "Library", order: 48, group: "prepare", load: () => import("../panels/LibraryPanel.tsx") }),
   panel({ id: "areas", title: "Areas", order: 20, group: "play", load: () => import("./areas/AreasPanel.tsx") }),
@@ -470,7 +470,7 @@ export const panelScrollSlot = scopeSlot(() => new Map<string, PanelScroll>());
 /**
  * What a panel is about, where that comes from outside it: the selected
  * token for a panel whose registry entry says `subject: "selection"` (the
- * Token panel), else null. A panel that shows again about another subject
+ * Token panel, and Dice, whose options are the selected token's), else null. A panel that shows again about another subject
  * opens at its top, since its old place belonged to something else.
  */
 export function panelSubject(id: string, selectedTokenId: string | null): string | null {

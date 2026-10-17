@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { headerSink, PanelScrollKeeper, panelSections, panelsFor, RESTORE_WAIT_MS, restoreStep, scrollOf, type PanelHeader, type PanelScroll, type PanelSection } from "./panels.ts";
+import { headerSink, PanelScrollKeeper, panelSections, panelsFor, panelSubject, RESTORE_WAIT_MS, restoreStep, scrollOf, type PanelHeader, type PanelScroll, type PanelSection } from "./panels.ts";
 
 describe("the panels' order and groups (docs/design-v1-layout-hierarchy.md M3)", () => {
   const titles = (role: "dm" | "player", wide: boolean) => panelsFor(role, wide).map((p) => p.title);
@@ -296,6 +296,12 @@ describe("a panel about another subject", () => {
     show("token", "g1");
     assert.equal(el.scrollTop, 0, "left on Goblin 2, so Goblin 1's old place is gone");
     assert.deepEqual(restoreStep({ top: 200, left: 0, end: false, page: null, subject: "g1" }, { page: null, subject: "g2", scrollHeight: 3000, clientHeight: 300 }), { kind: "done" });
+  });
+
+  test("Dice is about the selection too, since its options are the selected token's, and Log about nothing", () => {
+    assert.equal(panelSubject("dice", "g1"), "g1");
+    assert.equal(panelSubject("token", "g1"), "g1");
+    assert.equal(panelSubject("log", "g1"), null);
   });
 
   test("a subject that changes in place keeps the place now about the new one", () => {
