@@ -21,12 +21,12 @@ import { useAssets, useRoomView } from "../state/view.ts";
  * showing them, so one closed by mistake can be opened again (features
  * section 16).
  */
-export default function LibraryPanel(props: PanelProps) {
+export default function LibraryPanel(_props: PanelProps) {
   const role = useRoomView((s) => s.you?.role);
   const roomId = useRoomView((s) => s.roomId);
   return (
     <div style={{ display: "grid", gap: theme.space(3) }}>
-      {role === "player" ? <ShowingHandouts close={props.close} /> : null}
+      {role === "player" ? <ShowingHandouts /> : null}
       <LibraryGrid
         roomId={roomId}
         empty="No images yet. Add one with the image picker of a token or a character."
@@ -36,7 +36,7 @@ export default function LibraryPanel(props: PanelProps) {
   );
 }
 
-function ShowingHandouts(props: { close(): void }) {
+function ShowingHandouts() {
   const handouts = useRoomView((s) => s.view?.handouts);
   const assets = useAssets();
   const closedStore = useScoped(closedSlot);
@@ -44,11 +44,14 @@ function ShowingHandouts(props: { close(): void }) {
     () => Object.values(handouts ?? {}).filter((h): h is Handout => h !== undefined).sort((a, b) => (a.shownAt < b.shownAt ? 1 : -1)),
     [handouts],
   );
-  // The thumbnail and Open both open the handout's own popup, with its Download, at the page it was left on (the project owner, 2026-10-16).
-  const reopen = (h: Handout) => {
-    openHandout(closedStore, h);
-    props.close();
-  };
+  /*
+   * The thumbnail and Open both open the handout's own popup, with its
+   * Download, at the page it was left on (the project owner, 2026-10-16).
+   * The popup opens over the Library, which stays open under it, so closing
+   * the popup comes back to the Library with focus on what opened it. It
+   * closed the panel before, and a phone lost the Library at every look.
+   */
+  const reopen = (h: Handout) => openHandout(closedStore, h);
   if (showing.length === 0) return null;
   return (
     <Section label="Handouts from the DM" divider={false} style={{ borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>

@@ -321,6 +321,21 @@ function focusedName(page: Page): Promise<string> {
   });
 }
 
+/**
+ * The Library on a phone, opened from the Panels list unless it is open
+ * already: it stays open under a handout or an image opened from it, and
+ * the Panels button would close it.
+ */
+async function phoneLibrary(page: Page): Promise<Locator> {
+  const library = page.getByRole("region", { name: "Library" });
+  if (!(await library.isVisible())) {
+    await page.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
+    await page.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Library/ }).tap();
+  }
+  await library.waitFor();
+  return library;
+}
+
 type Box = { x: number; y: number; width: number; height: number };
 
 /** The boxes of `parts`, read until two reads agree: a resize or a row that wraps lays the controls out again a moment later (PB-P-14). */
@@ -1084,8 +1099,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     const popup = viewer(phone, "Strange letter");
     await popup.getByRole("button", { name: /^Close/ }).tap();
     await popup.waitFor({ state: "detached" });
-    await phone.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
-    await phone.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Library/ }).tap();
+    await phoneLibrary(phone);
     const row = phone.getByRole("region", { name: "Library" }).getByRole("listitem").filter({ hasText: "Strange letter" });
     await row.getByText("3 pages").waitFor();
     await shots.take(phone, "pdf-library-row-pages");
@@ -1268,8 +1282,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await popupPhone.waitFor({ state: "detached" });
     release();
     await phone.unroute(second);
-    await phone.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
-    await phone.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Library/ }).tap();
+    await phoneLibrary(phone);
     await phone.getByRole("region", { name: "Library" }).getByRole("listitem").filter({ hasText: "Strange letter" }).getByRole("button", { name: "Open" }).tap();
     await popupPhone.waitFor();
     await phone.waitForTimeout(500);
@@ -1444,8 +1457,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
       t: "token.create",
       token: { id: randomUUID(), sceneId: dmSocket.state!.meta.playerSceneId, size: "medium", visibility: "all", kind: "monster", name: "Statue", x: 2, y: 2, image: { assetId: tokenId, crop: { cx: 0, cy: 0, zoom: 1 } }, actor: { inline: actor } },
     });
-    await phone.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
-    await phone.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Library/ }).tap();
+    await phoneLibrary(phone);
     const tokens = phone.getByRole("list", { name: "Token images in this room" });
     const playerTile = tokens.locator(`li:has(img[src*="${tokenId}"]) > button`);
     await playerTile.waitFor();
@@ -1490,4 +1502,99 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await ops.send({ t: "handout.close", handoutId: id });
     await popup.waitFor({ state: "detached" });
   });
+
+  test("16. opening a handout or an image from the Library or the DM panel and closing it comes back to the panel, with focus on what opened it, on a phone, a very short screen and a computer (the project owner, 2026-10-16)", async () => {
+    const doc = await documentOf("Loop letter", [await paper(1584, 2048, 1), await paper(1584, 2048, 2)]);
+    const id = await show(doc);
+    const closePopup = async (page: Page) => {
+      const popup = viewer(page, "Loop letter");
+      await popup.waitFor();
+      await popup.getByRole("button", { name: /^Close/ }).click();
+      await popup.waitFor({ state: "detached" });
+    };
+    // The popup the showing opens on its own, closed first.
+    await closePopup(phone);
+    await closePopup(desk);
+    const backTo = async (page: Page, region: string, focused: string, what: string) => {
+      assert.equal(await page.getByRole("region", { name: region }).isVisible(), true, `${what}: the ${region} sheet closed`);
+      await waitFor(`${what}: focus on ${focused}`, async () => (await focusedName(page)) === focused);
+    };
+
+    // A player's phone: Open, the thumbnail, and a token image's tile.
+    let library = await phoneLibrary(phone);
+    const row = library.getByRole("listitem").filter({ hasText: "Loop letter" });
+    await row.getByRole("button", { name: "Open" }).tap();
+    await closePopup(phone);
+    await backTo(phone, "Library", "Open", "Open on a phone");
+    await row.getByRole("button", { name: "View Loop letter" }).tap();
+    await closePopup(phone);
+    await backTo(phone, "Library", "View Loop letter", "the thumbnail on a phone");
+    const tile = library.getByRole("list", { name: "Token images in this room" }).getByRole("button").first();
+    const tileName = (await tile.getAttribute("aria-label")) ?? "";
+    await tile.tap();
+    const image = viewer(phone, tileName);
+    await image.waitFor();
+    await shots.take(phone, "pdf-phone-library-under-viewer");
+    await image.getByRole("button", { name: /^Close/ }).tap();
+    await image.waitFor({ state: "detached" });
+    await backTo(phone, "Library", tileName, "a tile on a phone");
+    await shots.take(phone, "pdf-phone-library-after-viewer");
+
+    // A very short screen, the phone held sideways.
+    await phone.setViewportSize({ width: 844, height: 390 });
+    try {
+      library = await phoneLibrary(phone);
+      await row.getByRole("button", { name: "Open" }).tap();
+      await closePopup(phone);
+      await backTo(phone, "Library", "Open", "Open on a very short screen");
+      await tile.tap();
+      await image.waitFor();
+      await image.getByRole("button", { name: /^Close/ }).tap();
+      await image.waitFor({ state: "detached" });
+      await backTo(phone, "Library", tileName, "a tile on a very short screen");
+      await shots.take(phone, "pdf-short-library-after-viewer");
+    } finally {
+      await phone.setViewportSize({ width: 390, height: 844 });
+    }
+
+    // The DM on a phone: Showing now's thumbnail in the DM panel, and a Library tile.
+    await dm.setViewportSize({ width: 390, height: 844 });
+    try {
+      const panels = dm.locator('nav[aria-label="Tools"] button[title="Panels"]');
+      // The Panels button closes a sheet another panel has open, and opens the list from nothing.
+      const panel = async (name: string) => {
+        const region = dm.getByRole("region", { name });
+        const list = dm.getByRole("list", { name: "Panels" });
+        for (let i = 0; i < 3 && !(await region.isVisible()); i++) {
+          if (await list.isVisible()) await list.getByRole("button", { name: new RegExp(`^${name}`) }).click();
+          else await panels.click();
+          await dm.waitForTimeout(200);
+        }
+        await region.waitFor();
+        return region;
+      };
+      const dmPanel = await panel("DM");
+      await dmPanel.getByRole("button", { name: "View Loop letter" }).click();
+      await closePopup(dm);
+      await backTo(dm, "DM", "View Loop letter", "Showing now on a phone");
+      const dmLibrary = await panel("Library");
+      const dmTile = dmLibrary.getByRole("list", { name: "Handouts in this room" }).getByRole("button", { name: "Loop letter, handout, 2 pages, showing now", exact: true });
+      await dmTile.click();
+      await closePopup(dm);
+      await backTo(dm, "Library", "Loop letter, handout, 2 pages, showing now", "a Library tile on the DM's phone");
+    } finally {
+      await dm.setViewportSize({ width: 1280, height: 800 });
+    }
+
+    // A computer's side panel.
+    await dm.getByRole("tab", { name: "Library", exact: true }).click();
+    const side = dm.getByRole("tabpanel", { name: "Library" });
+    const sideTile = side.getByRole("list", { name: "Handouts in this room" }).getByRole("button", { name: "Loop letter, handout, 2 pages, showing now", exact: true });
+    await sideTile.click();
+    await closePopup(dm);
+    assert.equal(await side.isVisible(), true, "the side panel's Library closed");
+    await waitFor("focus on the tile at a computer", async () => (await focusedName(dm)) === "Loop letter, handout, 2 pages, showing now");
+    await ops.send({ t: "handout.close", handoutId: id });
+  });
+
 });

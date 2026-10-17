@@ -315,9 +315,13 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     const reopen = async () => {
       await popup.getByRole("button", { name: "Close" }).tap();
       await popup.waitFor({ state: "detached" });
-      await player.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
-      await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Library/ }).tap();
-      await player.getByRole("region", { name: "Library" }).getByRole("listitem").filter({ hasText: "Strange letter" }).getByRole("button", { name: "Open" }).tap();
+      // The Library stays open under the popup it opened, so the Panels button is needed only the first time.
+      const library = player.getByRole("region", { name: "Library" });
+      if (!(await library.isVisible())) {
+        await player.locator('nav[aria-label="Tools"] button[title="Panels"]').tap();
+        await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Library/ }).tap();
+      }
+      await library.getByRole("listitem").filter({ hasText: "Strange letter" }).getByRole("button", { name: "Open" }).tap();
       await popup.waitFor();
     };
     const hold = async () => {
