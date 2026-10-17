@@ -1048,7 +1048,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await dmCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
   });
 
-  test("15. the rows: the window is the measured default width, Conditions, Hidden and Multi-select share one line, the passing line leads above it, and Request a roll and Light follow", async () => {
+  test("15. the rows: the window is the measured default width, Conditions, Hidden and Multi-select share one line, the passing line leads above it, and Roll and Light follow", async () => {
     const STEADY = ["Conditions", "Hidden", "Multi-select"];
     for (const view of [
       { ...DESK, scale: 1 },
@@ -1071,26 +1071,32 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
       await barFrame(dm).waitFor({ state: "detached" });
     }
 
-    // On a creature a player plays, Request a roll starts the next line, after Multi-select.
+    // On a creature a player plays, Roll takes Request a roll's place after Multi-select (docs/design-v1-roll-options.md 4.5), and the single bar has no Request a roll.
     await setUp(dm, { ...DESK, scale: 1 });
     await selectThorn();
     const thornForDm = dm.getByRole("dialog", { name: "Thorn actions" });
     assert.ok(oneTop(await buttonTops(thornForDm, STEADY)), "Thorn's steady line wraps for the DM");
     const multi = await rectOf(thornForDm.getByRole("button", { name: "Multi-select", exact: true }));
-    const request = await rectOf(thornForDm.getByRole("button", { name: "Request a roll", exact: true }));
-    assert.ok(request.top >= multi.bottom - 0.5, `Request a roll shares the steady line: ${JSON.stringify({ multi, request })}`);
+    const rollButton = await rectOf(thornForDm.getByRole("button", { name: "Roll", exact: true }));
+    assert.ok(rollButton.top >= multi.top - 0.5 && (rollButton.top >= multi.bottom - 0.5 || rollButton.left >= multi.right - 0.5), `Roll follows Multi-select: ${JSON.stringify({ multi, rollButton })}`);
+    assert.equal(await thornForDm.getByRole("button", { name: "Request a roll", exact: true }).count(), 0, "Roll replaces Request a roll on the DM's single bar");
     await clickCell(dm, EMPTY);
     await barFrame(dm).waitFor({ state: "detached" });
 
-    // Pat's Thorn, lit: Conditions, Multi-select and Light on one line. In a fight on his turn, a move puts Undo move and Doesn't count on a line above them.
+    // Pat's Thorn, lit: Conditions and Multi-select on one line, Roll and Light after them. In a fight on his turn, a move puts Undo move and Doesn't count on a line above them.
     await ops.send({ t: "token.update", tokenId: run.thorn.id, patch: { light: { bright: 20, dim: 20 } } });
     await waitFor("Thorn's light for Pat", () => (playerSocket.state?.tokens[run.thorn.id]?.light?.bright === 20 ? true : null));
     await setUp(player, { width: 900, height: 800, scale: 1 });
     await selectThorn(player);
     const patThorn = player.getByRole("dialog", { name: "Thorn actions" });
     // Lit, Light is named by its light ("Light: 20 ft bright, 20 ft dim").
-    const patLine = ["Conditions", "Multi-select", /^Light/];
-    assert.ok(oneTop(await buttonTops(patThorn, patLine)), "Pat's Conditions, Multi-select and Light wrap");
+    const patLine = ["Conditions", "Multi-select"];
+    assert.ok(oneTop(await buttonTops(patThorn, patLine)), "Pat's Conditions and Multi-select wrap");
+    const patMulti = await rectOf(patThorn.getByRole("button", { name: "Multi-select", exact: true }));
+    for (const after of [patThorn.getByRole("button", { name: "Roll", exact: true }), patThorn.getByRole("button", { name: /^Light/ })]) {
+      const r = await rectOf(after);
+      assert.ok(r.top >= patMulti.top - 0.5, `Roll and Light follow Multi-select: ${JSON.stringify({ patMulti, r })}`);
+    }
     const before = (await buttonTops(patThorn, patLine))[0]! - (await barRect(player)).top;
     await clickCell(player, EMPTY);
     await barFrame(player).waitFor({ state: "detached" });
@@ -1108,7 +1114,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     const passing = await buttonTops(patThorn, ["Undo move", countsNot]);
     assert.ok(oneTop(passing), "Undo move and Doesn't count are not on one line");
     const steady = await buttonTops(patThorn, patLine);
-    assert.ok(oneTop(steady), "the passing line moved Conditions, Multi-select or Light off their line");
+    assert.ok(oneTop(steady), "the passing line moved Conditions or Multi-select off their line");
     const doesntCount = await rectOf(patThorn.getByRole("button", { name: countsNot }));
     assert.ok(steady[0]! >= doesntCount.bottom - 0.5, "the passing line is not above the steady line");
     assert.ok(steady[0]! - (await barRect(player)).top > before, "the steady line did not move down a line under the passing line");

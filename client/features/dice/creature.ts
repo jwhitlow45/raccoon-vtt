@@ -1,6 +1,6 @@
 import { creatureBonus, creatureNumbers, type NamedRoll, type RollNumbers, type RollSources, type SrdRolls } from "#shared/dice/bonus.ts";
 import { blockDefenses, effectDefenses, type Defense } from "#shared/dice/defenses.ts";
-import { blockActions, hasTrait } from "#shared/dice/named.ts";
+import { blockActions, hasTrait, multiattackNote } from "#shared/dice/named.ts";
 import { pcDefenses, pcNamedRolls } from "#shared/rules/pcStats.ts";
 import type { Actor, Character, CompanionBlock, CustomMonster, RoomState, Token } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
@@ -25,6 +25,8 @@ export type CreatureRolls = {
   evasion: boolean;
   /** The token's Legendary Resistance uses left, resistMax less resistUsed. */
   legendaryLeft: number;
+  /** The block's Multiattack paragraph, which heads the actions as a note (4.2). */
+  multiattack: string | null;
 };
 
 /** What creatureRolls reads: the viewer, their view of the room, and the SRD's two chunks once each has loaded (null until then). */
@@ -148,5 +150,6 @@ export function creatureRolls(dice: DiceView, creature: ActorTarget): CreatureRo
     magicResistance: view ? hasTrait(view, "Magic Resistance") : false,
     evasion: own.evasion || (view ? hasTrait(view, "Evasion") : false),
     legendaryLeft: legendary ? Math.max(0, legendary.resistMax - legendary.resistUsed) : 0,
+    multiattack: view ? multiattackNote(view) : null,
   };
 }

@@ -13,6 +13,7 @@ import { IconButton } from "../components/IconButton.tsx";
 import { GRIP_ATTR, PaneHeader, STICKY_HEADER_ATTR, type PaneHandle } from "../components/SheetHeader.tsx";
 import { useLayoutSize } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
+import { useOptionStore } from "../features/dice/optionState.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { useSend } from "../features/encounter/hooks.ts";
 import { tokenAccess } from "../features/tokens/access.ts";
@@ -174,8 +175,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const blocks = useRoomView((s) => s.view?.companionBlocks);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const scope = useRoomScope();
-  // Only a creature a player plays, askable where it stands, offers a roll request (docs/design-v1-dm-tools.md 3.3, rolls/logic.ts askTarget).
-  const played = useRoomView((s) => (s.view ? offersRequest(s.view, [token]) : false));
+  const openRolls = useOpenRollOptions();
   const undoOffer = useStore(useScoped(lastMoveSlot), offered);
 
   const access = useMemo(
@@ -240,7 +240,6 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
     // A player's own token: the door button finds the nearest door in reach itself, and shows nothing without one.
     door: true,
     light: (scene !== undefined && visionOn(scene)) || (token.light !== undefined && (token.light.bright > 0 || token.light.dim > 0)),
-    played,
     companion: isCompanion(token),
   });
   const button = (id: BarButtonId): ReactNode => {
@@ -257,10 +256,10 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
             Conditions
           </BarButton>
         );
-      case "requestRoll":
+      case "roll":
         return (
-          <BarButton key={id} onClick={() => openAsk(scope, { kind: "selection", tokenIds: [token.id] })}>
-            Request a roll
+          <BarButton key={id} onClick={openRolls}>
+            Roll
           </BarButton>
         );
       // Toggles named for the state they are in, lit while it holds, so a lit button never reads as the opposite.
@@ -355,6 +354,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
         <DeathSaves
           saves={actor.deathSaves}
           canEdit
+          target={target}
           onChange={(ok, fail) => actions.dispatch({ t: "actor.deathSave", target, ok, fail })}
         />
       ) : null}
@@ -438,7 +438,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
  * docs/design-v1-dm-tools.md 3.5): who is in the group, one HP entry for
  * all of them, dragging any of them moves the group (lib/group.ts), and the
  * edits that make sense for a group: conditions and elevation, and for the
- * DM Hidden, Locked, Add to the fight, Delete and More. An action shows only
+ * DM Hidden, Roll, Locked, Add to the fight, Delete and More. An action shows only
  * when the viewer may apply it to every selected token, so nothing here is
  * refused. Each tap is one undo step.
  */
@@ -476,6 +476,7 @@ export function GroupActionBar(props: {
   const outOfFight = fightCandidates(tokens, encounter).length;
   const scope = useRoomScope();
   const anyPlayed = useRoomView((s) => (s.view ? offersRequest(s.view, tokens) : false));
+  const openRolls = useOpenRollOptions();
 
   return (
     <BarFrame
@@ -524,6 +525,7 @@ export function GroupActionBar(props: {
         <BarButton pressed={multi} onClick={() => ui.setMultiSelect(!multi)}>
           Multi-select
         </BarButton>
+        {offers.dm ? <BarButton onClick={openRolls}>Roll</BarButton> : null}
         {offers.dm && anyPlayed ? <BarButton onClick={() => openAsk(scope, { kind: "selection", tokenIds: ids })}>Request a roll</BarButton> : null}
         {offers.dm ? (
           <BarButton pressed={locked === "all"} half={locked === "some"} onClick={() => send(updateManyOps(ids, flagPatch(tokens, "locked")))}>
@@ -552,6 +554,21 @@ export function GroupActionBar(props: {
       {more ? <GroupMoreSheet tokens={tokens} opener={moreButton} onClose={() => setMore(false)} /> : null}
     </BarFrame>
   );
+}
+
+/**
+ * A bar's Roll (docs/design-v1-roll-options.md 4.1): the Dice panel, asked
+ * to scroll to the roll options. A bar shows only for a selection, so the
+ * options already name its tokens. A player's earlier pick of another of
+ * their creatures gives way, so the options are this token's.
+ */
+function useOpenRollOptions(): () => void {
+  const ui = useRoomUi();
+  const options = useOptionStore();
+  return () => {
+    options.setState((s) => ({ focus: s.focus + 1, picked: null }));
+    ui.openPanel("dice");
+  };
 }
 
 /** The group's HP entry, field and Apply first while the window is short, as the frame decides (5.8). */

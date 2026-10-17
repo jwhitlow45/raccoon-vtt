@@ -688,10 +688,17 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await swipe(dmCdp, await headerPoint(sheet), far(await steadyRect(sheet)));
     assert.equal(await settled(sheet), "gone", "an untouched companion form kept the sheet open");
 
-    // Request a roll with its DC typed, over the room.
-    await touchTap(dmCdp, dm, await cellPoint(dm, run.thorn));
-    const bar = dm.getByRole("dialog", { name: "Thorn actions" });
-    await bar.getByRole("button", { name: "Request a roll", exact: true }).click();
+    // Request a roll with its DC typed, asked of the party, since Roll took its place on the DM's single bar (docs/design-v1-roll-options.md 4.5).
+    // The party's Ask is in its dock where that shows, else in the Party panel, whose place the request's sheet takes on a phone.
+    const askParty = async () => {
+      const shown = dm.getByRole("button", { name: "Ask the party" }).filter({ visible: true });
+      if ((await shown.count()) === 0) {
+        await panelsButton(dm).click();
+        await dm.getByRole("region", { name: "Panels" }).getByRole("button", { name: "Party", exact: true }).click();
+      }
+      await shown.first().click();
+    };
+    await askParty();
     let ask = dm.getByRole("dialog", { name: "Request a roll" }).locator("section").first();
     await ask.waitFor();
     await ask.getByLabel(/^DC/).fill("13");
@@ -700,7 +707,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     assert.equal(await settled(ask), "rest", "a changed request let the sheet close");
     assert.equal(await ask.getByLabel(/^DC/).inputValue(), "13");
     await ask.getByRole("button", { name: "Cancel" }).click();
-    await bar.getByRole("button", { name: "Request a roll", exact: true }).click();
+    await askParty();
     ask = dm.getByRole("dialog", { name: "Request a roll" }).locator("section").first();
     await ask.waitFor();
     await swipe(dmCdp, await headerPoint(ask), far(await steadyRect(ask)));

@@ -242,7 +242,7 @@ export function useReceipts(): ReceiptTracker {
  */
 export function useReceipt(tag: string | null): ReceiptState | null {
   const tracker = useReceipts();
-  useSyncExternalStore(tracker.subscribe, tracker.version);
+  useSyncExternalStore(tracker.subscribe, tracker.version, tracker.version);
   useEffect(() => {
     if (tag === null) return;
     const stop = tracker.watch(tag);

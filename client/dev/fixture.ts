@@ -115,6 +115,7 @@ export type FixtureOptions = {
   melee?: boolean;
   pcstats?: boolean;
   ask?: "save" | "check" | "two";
+  rolls?: boolean;
 };
 
 export function createFixtureState(options: FixtureOptions): RoomState {
@@ -338,6 +339,7 @@ export function createFixtureState(options: FixtureOptions): RoomState {
   if (options.melee) meleeGuardians(state);
   if (options.pcstats) thornStats(state);
   if (options.ask) askThorn(state, options.ask);
+  if (options.rolls) srdGoblins(state);
   return state;
 }
 
@@ -368,6 +370,14 @@ function askThorn(state: RoomState, ask: "save" | "check" | "two"): void {
     at: T0,
     targets: [{ characterId: FIXTURE_IDS.thornChar }, { characterId: FIXTURE_IDS.vexChar }],
   };
+}
+
+/** The goblins linked to the SRD's Goblin Warrior (`rolls=1`), so the Dice panel lists their saves and actions (docs/design-v1-roll-options.md 4). */
+function srdGoblins(state: RoomState): void {
+  for (const token of Object.values(state.tokens)) {
+    if (token.name !== "Goblin" || !("inline" in token.actor)) continue;
+    state.tokens[token.id] = { ...token, actor: { inline: { ...token.actor.inline, srdId: "goblin-warrior" } } };
+  }
 }
 
 /** Thorn at level 5 with a stat block (`pcstats=1`, docs/design-v1-pc-stats.md), its actor's numbers following it. */

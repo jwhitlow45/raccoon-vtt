@@ -1,4 +1,4 @@
-import { useId, useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type Ref } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject } from "react";
 import type { Effect, InitEntry, Token } from "#shared/model.ts";
 import { playerPlays, type ProjectedActor } from "#shared/project.ts";
 import { hpLess, shownLife } from "#shared/rules/hp.ts";
@@ -11,7 +11,13 @@ import { Switch } from "../../components/Switch.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
+import { creatureRolls, srdNeeds } from "../dice/creature.ts";
+import { signedText } from "../dice/options.ts";
+import { presetFor } from "../dice/presets.ts";
+import { useDiceView } from "../dice/useDiceView.ts";
+import { useInitiativeWrite, useRollBlocked, useRollOption, useRowResult } from "../dice/useRollOption.ts";
+import { ownResultText } from "../dice/useRollToasts.ts";
 import { REVIVE_NOTE, ReviveButton, offersRevive } from "../tokens/Revive.tsx";
 import { ownsToken } from "../tokens/access.ts";
 import { opensStatBlock, statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
@@ -111,6 +117,14 @@ export function EntryRow(props: {
   const pcBlock = (dm || mine) && token !== undefined && "ref" in token.actor && (character?.stats !== undefined || character?.actor.srdId !== undefined);
   const drag = props.drag;
   const slotted = handleSlot(dm, drag);
+  // Whoever rolls this creature's initiative rolls it from the row: a player their own, the DM a creature no player plays (docs/design-v1-roll-options.md 4.5).
+  const creature = useMemo(() => rowCreature(entry.tokenId, entry.characterId), [entry.tokenId, entry.characterId]);
+  const rolls = creature !== null && (mine || (dm && !playerOwned));
+  const [rollAt, setRollAt] = useState<RollAt | null>(null);
+  const lineRef = useRef<HTMLDivElement>(null);
+  const linePx = useWidth(lineRef, rolls);
+  const rollButton = rolls && creature ? <InitiativeRoll entry={entry} creature={creature} name={name} onRolled={setRollAt} /> : null;
+  const rollBeside = rollFitsBeside(linePx, slotted);
 
   const rowStyle: CSSProperties = {
     position: "relative",
@@ -133,7 +147,7 @@ export function EntryRow(props: {
       data-entry-row=""
       data-standard-row={companions.length === 0 && !props.expanded ? "" : undefined}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), minHeight: 56 }}>
+      <div ref={lineRef} style={{ display: "flex", alignItems: "center", gap: theme.space(1), minHeight: 56 }}>
         {slotted ? <DragHandle drag={drag} name={name} /> : null}
         <button
           type="button"
@@ -222,7 +236,7 @@ export function EntryRow(props: {
             </span>
           </span>
         </button>
-        <ValueBox entry={entry} name={name} editable={dm || mine} />
+        <ValueBox entry={entry} name={name} editable={dm || mine} roll={rollBeside ? rollButton : null} />
         {dm || mine ? (
           // A disclosure: open shows in aria-expanded and the pressed look, never aria-pressed.
           <IconButton icon="more" label={`${name} options`} onClick={props.onExpand} pressed={props.expanded} aria-pressed={undefined} aria-expanded={props.expanded} />
@@ -231,12 +245,14 @@ export function EntryRow(props: {
           <span style={{ width: theme.touch, flex: "none" }} />
         )}
       </div>
+      {rollAt ? <RollLanding at={rollAt} indent={slotted ? theme.touch + theme.space(1) : theme.space(2)} /> : null}
       {props.expanded ? (
         <RowMenu
           entry={entry}
           name={name}
           role={role}
           drag={drag}
+          roll={rollBeside ? null : rollButton}
           legendaryTarget={legendaryTarget(token, characterId)}
           actor={actor}
           target={rowTarget({ tokens: token ? { [token.id]: token } : {}, characters: character ? { [character.id]: character } : {} }, entry)}
@@ -491,7 +507,7 @@ function DragHandle(props: { drag: RowDrag | null; name: string }) {
  * beside it for the rare negative roll. A player's value waits on the
  * server (design 7.4), with a spinner until it lands.
  */
-function ValueBox(props: { entry: InitEntry; name: string; editable: boolean }) {
+function ValueBox(props: { entry: InitEntry; name: string; editable: boolean; roll?: ReactNode }) {
   const { entry } = props;
   const { send, waiting } = useSend();
   const [text, setText] = useState<string | null>(null);
@@ -511,7 +527,7 @@ function ValueBox(props: { entry: InitEntry; name: string; editable: boolean }) 
 
   const boxStyle: CSSProperties = {
     flex: "none",
-    width: 52,
+    width: VALUE_BOX_PX,
     minHeight: theme.touch,
     borderRadius: theme.radius.sm,
     fontFamily: theme.font.body,
@@ -520,7 +536,7 @@ function ValueBox(props: { entry: InitEntry; name: string; editable: boolean }) 
 
   if (text === null) {
     const label = entry.value === null ? (props.editable ? "Set" : "?") : String(entry.value);
-    return (
+    const box = (
       <button
         type="button"
         disabled={!props.editable || waiting}
@@ -543,6 +559,13 @@ function ValueBox(props: { entry: InitEntry; name: string; editable: boolean }) 
       >
         {waiting ? <Spinner label="Saving the value" /> : label}
       </button>
+    );
+    if (!props.roll) return box;
+    return (
+      <span style={{ flex: "none", display: "flex", alignItems: "center", gap: theme.space(1) }}>
+        {props.roll}
+        {box}
+      </span>
     );
   }
 
@@ -593,6 +616,150 @@ function ValueBox(props: { entry: InitEntry; name: string; editable: boolean }) 
   );
 }
 
+/** The value box's width, which a row's Roll measures its room against. */
+const VALUE_BOX_PX = 52;
+
+/** The row's place in a tap's roll: the row as it stood at the tap, which its write checks (useInitiativeWrite). */
+type RollAt = { entryId: string; before: number | null };
+
+const INITIATIVE = { kind: "initiative" } as const;
+
+/** The option store's row for a tracker row's roll, so a remounted row shows the roll still under way. */
+function rollRow(entryId: string): string {
+  return `init:${entryId}`;
+}
+
+/** The creature a row rolls for: its token, else its character. A label-only row has none. */
+function rowCreature(tokenId: string | undefined, characterId: string | undefined): ActorTarget | null {
+  if (tokenId !== undefined) return { tokenId };
+  if (characterId !== undefined) return { characterId };
+  return null;
+}
+
+/** An element's width while `on`, kept current as it resizes. 0 until measured. */
+function useWidth(ref: RefObject<HTMLElement | null>, on: boolean): number {
+  const [px, setPx] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!on || !el) return;
+    const measure = () => setPx(el.clientWidth);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref, on]);
+  return px;
+}
+
+/**
+ * Roll's fixed width: "Roll +10", the widest a bonus makes it, at the small
+ * button's size with its tighter padding. Fixed, so the spinner that stands
+ * in for the words while it rolls never moves the value box.
+ */
+const ROLL_PX = 72;
+/** The least a name keeps beside Roll, as the group save's rows keep for theirs (docs/design-v1-roll-options.md Appendix D). */
+const NAME_MIN_PX = 80;
+
+/**
+ * Whether a row's line has room for Roll beside its value box with 80 px
+ * left for the name. The line holds the drag handle's slot where the row
+ * has one, the row button around the name (its side padding, the 36 px
+ * portrait and the gap after it), Roll, the box and the options button,
+ * 4 px apart. That is 352 px for the DM's rows with the slot and 320 px
+ * for a player's, so a 390 px phone has room. On a narrower line, such as
+ * a phone's sheet at 130% or the DM's side panel, Roll waits at the top of
+ * the row's options instead, so the name is never squeezed out. An
+ * unmeasured line (0) has no room.
+ */
+function rollFitsBeside(linePx: number, slotted: boolean): boolean {
+  const gap = theme.space(1);
+  const slot = slotted ? theme.touch + gap : 0;
+  const button = 2 * (slotted ? 0 : theme.space(2)) + 36 + theme.space(2);
+  const rest = gap + ROLL_PX + gap + VALUE_BOX_PX + gap + theme.touch;
+  return linePx - slot - button - rest >= NAME_MIN_PX;
+}
+
+/**
+ * The row's "Roll +2" (docs/design-v1-roll-options.md 4.5): initiative
+ * rolled on the server with the creature's bonus, its preset and the Dice
+ * panel's choices, as the panel's own Initiative option rolls it. Busy
+ * until its line lands, and disabled with the reason while a roll cannot
+ * go. A creature this view does not hold, such as a token on another
+ * scene, has no Roll: its bonus is not known here.
+ */
+function InitiativeRoll(props: { entry: InitEntry; creature: ActorTarget; name: string; onRolled(at: RollAt): void }) {
+  const { entry, creature } = props;
+  const creatures = useMemo(() => [creature], [creature]);
+  const { dice, failed } = useDiceView(creatures);
+  const option = useRollOption();
+  const blocked = useRollBlocked();
+  const room = useRoomStore();
+  const { waiting } = useRowResult(rollRow(entry.id));
+  if (!dice) return null;
+  const numbers = creatureRolls(dice, creature);
+  const needs = srdNeeds(dice, creature);
+  const loading = numbers === null && !failed && (needs.monsters || needs.rolls);
+  if (numbers === null && !loading && !failed) return null;
+  const roll = () => {
+    if (!numbers) return;
+    // The value as the store holds it now, which the write compares against once the line lands.
+    const now = room.getState().view?.encounter?.entries.find((e) => e.id === entry.id);
+    const before = now ? now.value : entry.value;
+    const tag = option.d20({
+      creature,
+      test: INITIATIVE,
+      bonus: numbers.initBonus,
+      preset: presetFor(dice, creature, INITIATIVE, { rolls: numbers }),
+      label: "Initiative",
+      row: rollRow(entry.id),
+      played: false,
+      ask: false,
+    });
+    if (tag !== null && tag !== "asked") props.onRolled({ entryId: entry.id, before });
+  };
+  const text = numbers ? `Roll ${signedText(numbers.initBonus)}` : "Roll";
+  const reason = blocked ?? (failed ? "Its numbers did not load. Reload to try again." : null);
+  return (
+    <Button
+      size="sm"
+      busy={waiting || loading}
+      disabled={reason !== null}
+      title={reason ?? undefined}
+      aria-label={`${text} initiative for ${props.name}`}
+      onClick={roll}
+      style={{ flex: "none", width: ROLL_PX, padding: `0 ${theme.space(2)}px` }}
+    >
+      {waiting || loading ? null : text}
+    </Button>
+  );
+}
+
+/**
+ * What a row's Roll left once its line landed (docs/design-v1-roll-options.md
+ * 4.3): the value written once, as a typed value goes, while the row still
+ * holds the value it had at the tap. The box shows a value that went in, so
+ * a line shows only when it did not: the row changed meanwhile, the server
+ * refused the roll, or nobody knows yet whether it rolled. Mounted from the
+ * tap on, so a row that never rolled reads no receipts.
+ */
+function RollLanding(props: { at: RollAt; indent: number }) {
+  const { receipt, rolls, tag } = useRowResult(rollRow(props.at.entryId));
+  const changed = useInitiativeWrite(tag, rolls, props.at);
+  let words: string | null = null;
+  let refused = false;
+  if (changed && rolls[0]) words = `Rolled ${rolls[0].total}. ${changed}`;
+  else if (receipt?.state === "refused" || receipt?.state === "unknown" || (receipt?.state === "committed" && rolls.length === 0)) {
+    words = ownResultText(receipt);
+    refused = receipt.state === "refused";
+  }
+  return (
+    <div role="status" style={{ padding: words ? `0 ${theme.space(2)}px ${theme.space(1)}px ${props.indent}px` : 0, fontSize: theme.font.small, color: refused ? theme.color.dangerText : theme.color.textMuted }}>
+      {words}
+    </div>
+  );
+}
+
 type Legendary = { actionsMax: number; actionsUsed: number; resistMax: number; resistUsed: number };
 
 function RowMenu(props: {
@@ -614,6 +781,8 @@ function RowMenu(props: {
   statBlockTokenId: string | null;
   /** The row's creature is dead: the DM's Revive comes first, for a row whose token has no bar in this view (docs/design-v1-combat-flow.md 3.5). */
   revive: boolean;
+  /** The row's Roll, here when its line has no room for it beside the value box. */
+  roll?: ReactNode;
 }) {
   const { entry, role, drag } = props;
   const reviveNoteId = useId();
@@ -650,6 +819,12 @@ function RowMenu(props: {
           <span id={reviveNoteId} style={{ flex: 1, minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>
             {REVIVE_NOTE}
           </span>
+        </div>
+      ) : null}
+      {props.roll ? (
+        <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>Initiative, sets its row</span>
+          {props.roll}
         </div>
       ) : null}
       {dm ? (

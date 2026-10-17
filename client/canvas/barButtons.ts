@@ -10,10 +10,10 @@ export type BarButtonId =
   | "countLeg"
   | "door"
   | "conditions"
-  | "requestRoll"
   | "hidden"
   | "light"
   | "multiSelect"
+  | "roll"
   | "locked"
   | "duplicate"
   | "delete"
@@ -32,8 +32,6 @@ export type BarButtonInput = {
   door: boolean;
   /** The viewer may change the token's light, on a vision scene or while it is lit. */
   light: boolean;
-  /** A creature a player plays, so the DM may request a roll of it. */
-  played: boolean;
   /** The token is a companion (docs/design-v1-combat-flow.md 3.6), whose owners dismiss it. */
   companion: boolean;
 };
@@ -45,11 +43,14 @@ export type BarButtonInput = {
  * them shows. The steady line starts with Conditions, Hidden and
  * Multi-select, which the default width keeps on one line
  * (docs/design-v1-token-window.md 3.2), so nothing that comes and goes
- * moves them: Request a roll and Light follow, on the same line where room
- * is left. The less-often row keeps the destructive and setup buttons
- * apart, so a quick tap meant for Conditions or Hidden never lands on
- * Delete. Each button shows only where it always has. Details is in none:
- * it sits in the read-more row with the summary it expands.
+ * moves them: Roll and Light follow, on the same line where room is left.
+ * Roll opens the Dice panel's options, whose Ask switch asks the player of
+ * a creature a player plays, so the single bar has no Request a roll
+ * (docs/design-v1-roll-options.md 4.5). The less-often row keeps the
+ * destructive and setup buttons apart, so a quick tap meant for Conditions
+ * or Hidden never lands on Delete. Each button shows only where it always
+ * has. Details is in none: it sits in the read-more row with the summary
+ * it expands.
  */
 export function barButtons(input: BarButtonInput): { passing: BarButtonId[]; play: BarButtonId[]; less: BarButtonId[] } {
   const { dm, owner } = input;
@@ -61,8 +62,8 @@ export function barButtons(input: BarButtonInput): { passing: BarButtonId[]; pla
   if (dm || owner) play.push("conditions");
   if (dm) play.push("hidden");
   play.push("multiSelect");
-  // After Multi-select: between Conditions and Hidden it would push the two to the next line on every creature a player plays.
-  if (dm && input.played) play.push("requestRoll");
+  // After Multi-select: any earlier, Roll would push Multi-select to a second line at the default width.
+  if (dm || owner) play.push("roll");
   if ((dm || owner) && input.light) play.push("light");
   const less: BarButtonId[] = [];
   if (dm) less.push("locked", "duplicate", "delete");

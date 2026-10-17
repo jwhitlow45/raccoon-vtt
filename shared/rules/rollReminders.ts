@@ -30,6 +30,8 @@ export type RollPreset = {
   sources: AdvantageSource[];
   /** Terms to add, in the table's order: "+1d4", "-4". */
   extra: string[];
+  /** The effect each extra comes from, in the same order, so a button can say "+1d4: Blessed". Absent with no extra. */
+  extraFrom?: string[];
   /** The condition that fails this save whatever its total. */
   fails?: ConditionKey;
   notes: RollReminder[];
@@ -352,7 +354,10 @@ export function reminderPreset(effects: readonly Pick<Effect, "key" | "level">[]
     const does = rule.does;
     if (does.kind === "adv" || does.kind === "dis") out.sources.push({ kind: does.kind, from: effect.key });
     else if (does.kind === "fails") out.fails ??= effect.key as ConditionKey;
-    else if (does.kind === "extra") out.extra.push(does.term(effect));
+    else if (does.kind === "extra") {
+      out.extra.push(does.term(effect));
+      (out.extraFrom ??= []).push(effect.key);
+    }
     if (does.kind === "note" || rule.noted) out.notes.push({ key: rule.key, text: rule.text(effect, test) });
   }
   if (ctx.magicResistance && test.kind === "save" && test.spell) out.sources.push({ kind: "adv", from: "magic-resistance" });

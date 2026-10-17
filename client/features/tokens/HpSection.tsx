@@ -1,9 +1,11 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { healRevivesDead } from "#shared/migrate.ts";
 import type { Actor, HpVisibility, LifeState, TokenKind } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
+import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
+import { Chip, ChipRow } from "../../components/Chip.tsx";
 import { fieldStyle, NUMBER_FIELD_WIDTH } from "../../components/Field.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { Tag } from "../../components/Tag.tsx";
@@ -11,6 +13,11 @@ import { handFocusOn } from "../../lib/handFocus.ts";
 import { hpDisplay, hpLabel, hpText, type HpView } from "../../lib/tokenView.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { useHpChips, useMarkChipApplied } from "../dice/hpChips.ts";
+import { resultWords, type HpChip } from "../dice/options.ts";
+import { presetFor } from "../dice/presets.ts";
+import { useDiceView } from "../dice/useDiceView.ts";
+import { useRollBlocked, useRollOption, useRowResult } from "../dice/useRollOption.ts";
 import { deadLines, entryOperation, entryRefusal, sendHpEntry, type HpTarget } from "./groupHp.ts";
 import { hpDraftKey, useKeepHpDraft, useKeptHpDraft, type HpPlace } from "./hpDraft.ts";
 import { HP_MODES, MAX_HP_AMOUNT, modeAfterApply, parseHpInput, type HpMode } from "./hpInput.ts";
@@ -72,6 +79,21 @@ export function HpEntry(props: {
   const revives = useRoomView((s) => healRevivesDead(s.view?.meta.settings ?? {}));
   const dm = useRoomView((s) => s.you?.role === "dm");
   const lines = deadLines(props.targets, entryOperation(props.access, mode, preview), { revives, dm });
+  // The newest rolled damage or healing, offered under Damage and Heal (docs/design-v1-roll-options.md 4.3).
+  const chips = useHpChips(mode === "damage" || mode === "heal" ? mode : null);
+  const markApplied = useMarkChipApplied();
+  // The chip whose amount the field holds, so Apply takes that chip away. Once the viewer types or picks another mode, the amount is their own.
+  const [filled, setFilled] = useState<HpChip | null>(null);
+
+  const fillFrom = (chip: HpChip) => {
+    setText(String(chip.amount));
+    setError(null);
+    setFilled(chip);
+    // A bare amount parses as damage in Damage mode, so this is when the critical box shows for it.
+    if (chip.critical && atZero && mode === "damage") setCrit(true);
+    // The previous chip's tick goes with it, so picking another chip never carries its critical hit over.
+    else if (filled?.critical) setCrit(false);
+  };
 
   const apply = () => {
     const parsed = parseHpInput(text, mode);
@@ -85,6 +107,8 @@ export function HpEntry(props: {
       return;
     }
     sendHpEntry(actions, props.targets, parsed.change, crit && showCrit);
+    if (filled) markApplied(filled.lineId);
+    setFilled(null);
     setMode(modeAfterApply(mode));
     setText("");
     setCrit(false);
@@ -117,7 +141,10 @@ export function HpEntry(props: {
       even
       value={mode}
       options={modes.map((m) => ({ value: m.mode, label: m.label, chosenStyle: modeLook(m.mode) }))}
-      onChange={setMode}
+      onChange={(next) => {
+        setMode(next);
+        setFilled(null);
+      }}
       style={{ order: fieldFirst ? 1 : 0 }}
     />
   );
@@ -133,6 +160,7 @@ export function HpEntry(props: {
         onChange={(e) => {
           setText(e.target.value);
           setError(null);
+          setFilled(null);
         }}
         style={{ ...fieldStyle(), flex: 1, width: 0 }}
       />
@@ -155,6 +183,18 @@ export function HpEntry(props: {
       style={{ display: "grid", gap: theme.space(1) }}
     >
       <div style={{ display: "grid", gap: theme.space(1) }}>{fieldFirstInPage ? [fieldRow, modeButtons] : [modeButtons, fieldRow]}</div>
+      {chips.length > 0 ? (
+        <ChipRow label="Rolled amounts">
+          {chips.map((chip) => (
+            // A long label wraps inside its chip rather than pushing the entry wider than a phone.
+            <span key={chip.lineId} style={{ display: "grid", maxWidth: "100%" }}>
+              <Chip onClick={() => fillFrom(chip)}>
+                <span style={{ whiteSpace: "normal", textAlign: "center" }}>{chip.text}</span>
+              </Chip>
+            </span>
+          ))}
+        </ChipRow>
+      ) : null}
       {showCrit ? (
         <Checkbox checked={crit} onChange={setCrit} label="Critical hit (two failed death saves)" />
       ) : null}
@@ -288,7 +328,12 @@ export function HpSection(props: {
       ) : null}
 
       {life === "dying" && actor?.deathSaves ? (
-        <DeathSaves saves={actor.deathSaves} canEdit={access.deathSaves} onChange={(ok, fail) => actions.dispatch({ t: "actor.deathSave", target, ok, fail })} />
+        <DeathSaves
+          saves={actor.deathSaves}
+          canEdit={access.deathSaves}
+          target={target}
+          onChange={(ok, fail) => actions.dispatch({ t: "actor.deathSave", target, ok, fail })}
+        />
       ) : null}
       {life === "stable" ? <Note>Stable: unconscious, but no more death saves.</Note> : null}
 
@@ -335,8 +380,10 @@ function Bar(props: { fraction: number }) {
  * Three success and three failure pips. Tapping the third pip of a row
  * fills three, tapping a filled last pip empties it again, so a mistap is
  * one more tap to undo. The rules turn three of either into stable or dead.
+ * With the creature as `target`, whoever may change the counts also gets
+ * Roll (DeathRoll).
  */
-export function DeathSaves(props: { saves: { ok: number; fail: number }; canEdit: boolean; onChange(ok: number, fail: number): void }) {
+export function DeathSaves(props: { saves: { ok: number; fail: number }; canEdit: boolean; target?: ActorTarget; onChange(ok: number, fail: number): void }) {
   const { ok, fail } = props.saves;
   const pip = (kind: "ok" | "fail", i: number) => {
     const count = kind === "ok" ? ok : fail;
@@ -365,9 +412,10 @@ export function DeathSaves(props: { saves: { ok: number; fail: number }; canEdit
       </button>
     );
   };
+  const note = <Note>Death saves{props.canEdit ? ": tap to fill" : ""}</Note>;
   return (
     <div style={{ display: "grid", gap: theme.space(0.5) }}>
-      <Note>Death saves{props.canEdit ? ": tap to fill" : ""}</Note>
+      {props.canEdit && props.target ? <DeathRoll target={props.target}>{note}</DeathRoll> : note}
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap" }}>
         <span style={{ width: 72, fontSize: theme.font.small, color: theme.color.textMuted }}>Successes</span>
         {[0, 1, 2].map((i) => pip("ok", i))}
@@ -377,6 +425,65 @@ export function DeathSaves(props: { saves: { ok: number; fail: number }; canEdit
         {[0, 1, 2].map((i) => pip("fail", i))}
       </div>
     </div>
+  );
+}
+
+/**
+ * The death save row's Roll (docs/design-v1-roll-options.md 4.5), beside
+ * the row's note, with its result on one line under it. It sends
+ * `actor.deathRoll`, which the server rolls and counts from the state
+ * then, so nothing follows once the line lands and a heal meanwhile is
+ * never overwritten. The row key is the Dice panel's own, so both show
+ * the same newest result.
+ */
+function DeathRoll(props: { target: ActorTarget; children: ReactNode }) {
+  const { target } = props;
+  const option = useRollOption();
+  const blocked = useRollBlocked();
+  const { dice } = useDiceView([target]);
+  const row = `deathSave:${"tokenId" in target ? target.tokenId : target.characterId}`;
+  const { receipt, rolls, waiting } = useRowResult(row);
+  const blockedId = useId();
+  const roll = () => {
+    if (waiting || blocked || !dice) return;
+    // The preset is read at the tap, from the creature's effects then (presets.ts).
+    option.deathSave(target, presetFor(dice, target, { kind: "deathSave" }), row);
+  };
+  const said = blocked
+    ? null
+    : receipt?.state === "refused"
+      ? receipt.text || receipt.message
+      : receipt?.state === "unknown"
+        ? "This may have happened. Check the log."
+        : rolls.length > 0
+          ? resultWords(rolls, "d20")
+          : null;
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2) }}>
+        {props.children}
+        <Button
+          size="sm"
+          busy={waiting}
+          disabled={blocked !== null || !dice}
+          aria-label={waiting ? "Rolling a death save" : "Roll a death save"}
+          aria-describedby={blocked ? blockedId : undefined}
+          onClick={roll}
+          style={{ flex: "none", whiteSpace: "nowrap" }}
+        >
+          {waiting ? "Rolling…" : "Roll"}
+        </Button>
+      </div>
+      {blocked ? (
+        <span id={blockedId} style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
+          {blocked}
+        </span>
+      ) : said ? (
+        <span role="status" style={{ fontSize: theme.font.small, color: receipt?.state === "refused" ? theme.color.dangerText : theme.color.textMuted, overflowWrap: "anywhere" }}>
+          {said}
+        </span>
+      ) : null}
+    </>
   );
 }
 
