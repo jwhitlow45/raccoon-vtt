@@ -44,10 +44,11 @@ function targetKey(creature: ActorTarget): string {
 
 /**
  * A DiceView for these creatures, null until the room's first snapshot.
- * creatureRolls is null for one of them while a chunk it needs loads, and
- * `failed` says a chunk did not load, for SrdLoadFailed's reload.
+ * creatureRolls is null for one of them while a chunk it needs loads, which
+ * `loading` says, and `failed` says a chunk did not load, for
+ * SrdLoadFailed's reload.
  */
-export function useDiceView(creatures: readonly ActorTarget[]): { dice: DiceView | null; failed: boolean } {
+export function useDiceView(creatures: readonly ActorTarget[]): { dice: DiceView | null; loading: boolean; failed: boolean } {
   const you = useRoomView((s) => s.you);
   const view = useRoomView((s) => s.view);
   const key = creatures.map(targetKey).join(",");
@@ -66,5 +67,6 @@ export function useDiceView(creatures: readonly ActorTarget[]): { dice: DiceView
   const monsters = useChunk(monsterChunk, loadMonsters, needs.monsters);
   const rolls = useChunk(rollsChunk, loadSrdRolls, needs.rolls);
   const dice = useMemo(() => (you && view ? { you, view, srd: { monsters: monsters.value, rolls: rolls.value } } : null), [you, view, monsters.value, rolls.value]);
-  return { dice, failed: (needs.monsters && monsters.failed) || (needs.rolls && rolls.failed) };
+  const waits = (need: boolean, chunk: { value: unknown; failed: boolean }) => need && chunk.value === null && !chunk.failed;
+  return { dice, loading: waits(needs.monsters, monsters) || waits(needs.rolls, rolls), failed: (needs.monsters && monsters.failed) || (needs.rolls && rolls.failed) };
 }

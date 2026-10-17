@@ -1,0 +1,838 @@
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { bonusFor } from "#shared/dice/bonus.ts";
+import { formatFormula, parseFormula, type AdvantageSource } from "#shared/dice/formula.ts";
+import { uuidv7 } from "#shared/ids.ts";
+import { ABILITY_KEYS, CONDITION_KEYS, SKILL_KEYS, type AbilityKey, type ConditionKey, type Effect, type RoomState, type SkillKey } from "#shared/model.ts";
+import type { ActorTarget, OpOf } from "#shared/protocol.ts";
+import { ANSWERED_MEANWHILE } from "#shared/permissions.ts";
+import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
+import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
+import { effectName } from "#shared/logText.ts";
+import { Button } from "../../../components/Button.tsx";
+import { Checkbox } from "../../../components/Checkbox.tsx";
+import { Chip, ChipRow } from "../../../components/Chip.tsx";
+import { Input } from "../../../components/Field.tsx";
+import { Segmented } from "../../../components/Segmented.tsx";
+import { Switch } from "../../../components/Switch.tsx";
+import { theme } from "../../../lib/theme.ts";
+import { useRoomActions, useRoomUi, useRoomView } from "../../../state/view.ts";
+import { usePanelHeader } from "../../panels.ts";
+import { EffectPicker } from "../../tokens/EffectsSection.tsx";
+import { SaveEndsFields, saveEndsForm, type SaveEndsForm } from "../../tokens/SaveEndsFields.tsx";
+import { FieldRow, Note, NumberField, Select } from "../../tokens/ui.tsx";
+import { creatureRolls } from "../creature.ts";
+import { rollsOf } from "../logic.ts";
+import { creatureKey, readUsed, signedText, withUsed, writeUsed } from "../options.ts";
+import { presetFor } from "../presets.ts";
+import { useRollSender } from "../send.ts";
+import { useDicePanel } from "../useDicePanel.ts";
+import { useDiceView } from "../useDiceView.ts";
+import { SrdLoadFailed } from "../../monsters/SrdLoadFailed.tsx";
+import { useReceipt, type ReceiptState } from "../useReceipt.ts";
+import { useRollBlocked } from "../useRollOption.ts";
+import {
+  apply,
+  applyAgain,
+  mayApplyAgain,
+  applySettled,
+  askAnswered,
+  damageSent,
+  damageSettled,
+  discard,
+  dmRoll,
+  dmRollSettled,
+  mark,
+  markGone,
+  results,
+  roll,
+  rollAgain,
+  rollSettled,
+  rollWords,
+  setDc,
+  stateOf,
+  syncRequests,
+  typeTotal,
+  readDraft,
+  writeDraft,
+  type Command,
+  type Page,
+  type ServerRoll,
+  type Step,
+} from "./chain.ts";
+import { parseParts, worstCase } from "./outcome.ts";
+import { amountsOf, applyWaits, applyWords, buildPlan, rowOutcome } from "./plan.ts";
+import { countWords, d20Of, groupRows, rowTotal, type GroupTest, type Mark, type RowBase, type Way } from "./rows.ts";
+import { useGroupSave, useGroupSaveStore } from "./store.ts";
+
+/**
+ * The group save (docs/design-v1-roll-options.md 5): rows rolled by the
+ * server, asked, typed or failing outright, pass or fail against the DC,
+ * then the outcome, each row overridable, and one Apply the server applies
+ * as one op and one undo. A page of the Dice panel or of the Areas panel,
+ * on the DM's device only. All its rules are chain.ts, rows.ts, outcome.ts
+ * and plan.ts: this sends what they return and shows what they hold.
+ */
+
+const WAY_WORDS: Record<Way, string> = { fails: "Fails", ask: "Ask", server: "Server", type: "Type" };
+const MARKS: readonly { value: Mark; label: string }[] = [
+  { value: "fail", label: "Fail" },
+  { value: "pass", label: "Pass" },
+  { value: "skip", label: "Skip" },
+];
+
+/** The page's title: "Fireball's save", "Dexterity save for 6". */
+export function pageTitle(page: Pick<Page, "fill" | "test" | "rows" | "source">): string {
+  if (page.fill) return page.test.kind === "none" ? page.fill.name : `${page.fill.name}'s ${page.test.kind}`;
+  const n = page.rows.length || (page.source.kind === "selection" ? page.source.tokenIds.length : 0);
+  if (page.test.kind === "none") return `Damage for ${n}`;
+  const what = page.test.kind === "save" ? `${ABILITY_NAMES[page.test.ability]} save` : page.test.skill ? `${SKILLS[page.test.skill].name} check` : `${ABILITY_NAMES[page.test.ability]} check`;
+  return `${what} for ${n}`;
+}
+
+/** The tokens a page's rows come from while it is in setup: the selection it was started on. Step 7 adds an area's. */
+export function useSourceIds(page: Page, area?: (templateId: string) => string[]): string[] {
+  if (page.source.kind === "selection") return page.source.tokenIds;
+  return area ? area(page.source.templateId) : [];
+}
+
+export function GroupSave(props: { parent: "Dice" | "Areas"; onBack(): void; areaIds?: (templateId: string) => string[] }) {
+  const store = useGroupSaveStore();
+  const page = useGroupSave((s) => s.page);
+  if (!page) return null;
+  return <GroupSavePage page={page} parent={props.parent} onBack={props.onBack} set={(p) => store.setState({ page: p })} {...(props.areaIds ? { areaIds: props.areaIds } : {})} />;
+}
+
+function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): void; set(page: Page | null): void; areaIds?: (templateId: string) => string[] }) {
+  const { page, set } = props;
+  const roomId = useRoomView((s) => s.roomId);
+  const viewing = useRoomView((s) => s.sceneId);
+  const view = useRoomView((s) => s.view);
+  const actions = useRoomActions();
+  const ui = useRoomUi();
+  const panel = useDicePanel();
+  const sender = useRollSender();
+  const blocked = useRollBlocked();
+  const [error, setError] = useState<string | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [outcomeOpen, setOutcomeOpen] = useState(page.phase === "setup");
+  const pageRef = useRef(page);
+  pageRef.current = page;
+  const update = (next: Page) => {
+    const prev = pageRef.current;
+    // A roll belongs to the parts it rolled: new parts drop it, so its amounts never land on parts it did not roll.
+    const checked = next.outcome.damage !== prev.outcome.damage && next.damage !== null && next.damage === prev.damage ? { ...next, damage: null } : next;
+    pageRef.current = checked;
+    set(checked);
+  };
+
+  // The draft follows the page (5.10), inside try and catch.
+  useEffect(() => writeDraft(roomId, page), [roomId, page]);
+
+  const sourceIds = useSourceIds(page, props.areaIds);
+  const ids = page.phase === "setup" ? sourceIds : page.rows.map((r) => r.tokenId);
+  const creatures = useMemo<ActorTarget[]>(() => ids.map((tokenId) => ({ tokenId })), [ids.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { dice, loading, failed } = useDiceView(creatures);
+  const live = dice && page.phase === "setup" ? groupRows(dice, sourceIds, page.test, page.spell) : page.rows;
+  const rows = live;
+  const tooMany = rows.length > 100;
+  const shown: Page = page.phase === "setup" ? { ...page, rows } : page;
+  const key = (t: { tokenId?: string; characterId?: string }) => (view ? creatureKey(view, t) : "");
+
+  // Answers come from the requests in the view (5.3), and creatures that left are marked gone, after the roll.
+  useEffect(() => {
+    if (!view || page.phase === "setup") return;
+    let next = syncRequests(pageRef.current, view.rolls, key);
+    next = markGone(next, (row) => view.tokens[row.tokenId] !== undefined);
+    if (next !== pageRef.current) update(next);
+  }, [view?.rolls, view?.tokens, page.phase]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const title = pageTitle(shown);
+  usePanelHeader({ title, parent: props.parent, onBack: props.onBack });
+  const rollNowRef = useRef<() => void>(() => undefined);
+  // A quick tap waits for the stat blocks, so a monster whose bonus is still loading is never left to be typed.
+  const ready = view !== null && dice !== null && rows.length > 0 && !loading;
+  useEffect(() => {
+    if (ready && page.phase === "setup" && page.rollNow) rollNowRef.current();
+  }, [ready, page.phase, page.rollNow]);
+  if (!view || !dice) return <Note>Loading the creatures…</Note>;
+
+  const offScene = page.sceneId !== viewing;
+  const sceneName = view.scenes[page.sceneId]?.name ?? "another scene";
+  const fillType = page.fill?.damageType;
+  const amounts = amountsOf(shown, fillType);
+  const outcomes = new Map(rows.map((r) => [r.holder, rowOutcome(shown, r, dice, amounts)]));
+  const outcomeList = [...outcomes.values()];
+  const count = countWords(rows.filter((r) => stateOf(shown, r).mark !== "skip").map((r) => outcomes.get(r.holder)!.result));
+  const conditions = page.outcome.conditions as ConditionKey[];
+  const condList = conditions.map((k) => ({ key: k }));
+  const bound = worstCase(rows.map((r) => r.target), condList, page.fill?.name);
+  const parsedParts = page.outcome.damage.trim() ? parseParts(page.outcome.damage, fillType) : null;
+
+  const run = (step: Step) => {
+    if (step.error) {
+      setError(step.error);
+      return;
+    }
+    setError(null);
+    update(step.page);
+    send(step.send);
+  };
+
+  const send = (commands: readonly Command[]) => {
+    for (const c of commands) {
+      if (c.kind === "dice") panel.roll(c.rolls, { to: c.to, tag: c.tag, ...(c.dc !== undefined ? { dc: c.dc } : {}) });
+      else if (c.kind === "outcome") sendOutcome(c.op);
+      else if (c.op.t === "roll.ask") {
+        const rollId = c.op.request.id;
+        actions.dispatch(c.op, {
+          quiet: true,
+          onAnswer: (answer, refusal) => {
+            if (answer === "taken") update(askAnswered(pageRef.current, rollId, { ok: true }));
+            else if (answer === "refused") update(askAnswered(pageRef.current, rollId, { ok: false, message: refusal?.text ?? refusal?.message ?? "the request was refused" }));
+          },
+        });
+      } else if (c.op.t === "roll.dice") {
+        const tag = c.op.tag;
+        actions.dispatch(c.op, {
+          quiet: true,
+          onAnswer: (answer, refusal) => {
+            if (answer === "refused") {
+              const says = refusal?.message === ANSWERED_MEANWHILE ? "Answered before your roll." : (refusal?.text ?? refusal?.message ?? "");
+              update(dmRollSettled(pageRef.current, tag, "refused", says));
+            } else update(dmRollSettled(pageRef.current, tag, answer === "taken" ? "committed" : "unknown"));
+          },
+        });
+      } else actions.dispatch(c.op);
+    }
+  };
+
+  // The outcome is tagged by its plan (doc 1 1.2): its receipt settles it, and only the DM's Apply again sends it again.
+  const sendOutcome = (op: OpOf<"actor.outcome">) => {
+    sender.receipts.sending(op.plan, 0);
+    const n = actions.dispatch(op, { quiet: true, onAnswer: (answer, refusal, cause) => sender.receipts.answer(op.plan, 0, answer, refusal, cause) });
+    if (n === null) sender.receipts.forget(op.plan, 0);
+  };
+
+  const serverRolls = (holders: readonly RowBase[]): ServerRoll[] => {
+    const d20 = d20Of(page.test, page.spell);
+    if (!d20) return [];
+    return holders.flatMap((r) => {
+      const rolls = creatureRolls(dice, r.target);
+      const bonus = rolls?.numbers ? bonusFor(rolls.numbers, d20) : null;
+      if (bonus === null) return [];
+      const preset = presetFor(dice, r.target, d20, { rolls });
+      return [{ holder: r.holder, target: r.target, bonus, sources: preset.sources, extra: preset.extra }];
+    });
+  };
+
+  const startRoll = (given?: AdvantageSource[]) => {
+    if (bound) {
+      setError(bound);
+      return;
+    }
+    // A quick tap took the panel's choices when it was made, so they are its own. Otherwise this tap takes them.
+    const taken = given ? { sources: given, restore: () => undefined } : panel.take();
+    const step = roll(pageRef.current, { rows, server: serverRolls(rows), tag: uuidv7(), requestIds: () => actions.newId(), openRequests: Object.keys(view.rolls).length, taken: taken.sources, at: new Date().toISOString() });
+    if (step.error) taken.restore();
+    run(step);
+    setOutcomeOpen(false);
+  };
+
+  rollNowRef.current = () => {
+    const sources = pageRef.current.rollNow?.sources ?? [];
+    // Once only: a refusal leaves the page in setup without the flag, for the DM's own Roll.
+    const { rollNow: _done, ...rest } = pageRef.current;
+    pageRef.current = rest;
+    startRoll(sources);
+  };
+
+  const rollDamage = () => {
+    if (!parsedParts?.ok) return;
+    const rollsToSend = parsedParts.parts.flatMap((p) => ("formula" in p ? [{ formula: p.formula, label: `${page.fill?.name ?? "Group save"} damage${p.type ? `, ${p.type}` : ""}`.slice(0, 60) }] : []));
+    if (rollsToSend.length === 0) return;
+    const tag = uuidv7();
+    if (panel.roll(rollsToSend, { to: page.secret ? "dm" : "all", tag }) !== null) update(damageSent(pageRef.current, tag));
+  };
+
+  const doApply = () => {
+    const waits = applyWaits(shown, dice, amounts);
+    if (waits) {
+      setError(waits);
+      return;
+    }
+    const plan = buildPlan(shown, dice, amounts, { plan: uuidv7(), newId: actions.newId });
+    if (!plan) {
+      setError("Nothing would change.");
+      return;
+    }
+    const base = page.phase === "setup" ? { ...page, rows, phase: "rolled" as const } : page;
+    run(apply(base, plan));
+    // An action filled from a recharge is spent (6.4).
+    const recharge = page.fill?.recharge;
+    if (recharge) writeUsed(roomId, withUsed(readUsed(roomId), recharge.holder, recharge.key, true));
+  };
+
+  const close = () => {
+    send(discard(page));
+    writeDraft(roomId, null);
+    set(null);
+    props.onBack();
+  };
+
+  const rolledAny = page.rolls.length > 0 || page.requests.length > 0 || page.damage !== null;
+  const doneWords = page.apply === "taken" ? `Applied to ${page.plan?.targets.length ?? 0}. Undo takes it all back.` : null;
+
+  // ---- the parts
+
+  const setupControls = page.phase === "setup" ? <TestPicker page={page} onChange={update} /> : null;
+  const dcRow = (
+    <FieldRow label="DC">
+      <NumberField label="DC" value={page.dc ?? undefined} min={1} max={50} nullable placeholder="None" onCommit={(dc) => update(setDc(pageRef.current, dc))} width={88} />
+    </FieldRow>
+  );
+  const anyAsk = rows.some((r) => stateOf(shown, r).way === "ask");
+  const switches =
+    page.phase === "setup" ? (
+      <div style={{ display: "grid", gap: theme.space(1) }}>
+        <Switch label="Hide the monsters' rolls from players" checked={page.secret} onChange={(secret) => update({ ...pageRef.current, secret })} />
+        {page.test.kind === "save" ? <Switch label="Against a spell" help="A creature with Magic Resistance rolls with advantage, asked or not." checked={page.spell} onChange={(spell) => update({ ...pageRef.current, spell })} /> : null}
+        {anyAsk ? (
+          <details>
+            <summary style={{ minHeight: theme.touch, display: "flex", alignItems: "center", cursor: "pointer" }}>What players see</summary>
+            {page.dc !== null ? <Checkbox checked={page.switches.dcShown} onChange={(dcShown) => update({ ...pageRef.current, switches: { ...pageRef.current.switches, dcShown } })} label="Players see the DC" /> : null}
+            <Checkbox checked={page.switches.resultShown} onChange={(resultShown) => update({ ...pageRef.current, switches: { ...pageRef.current.switches, resultShown } })} label="Players see pass or fail" />
+          </details>
+        ) : null}
+      </div>
+    ) : null;
+
+  const outcomeSummary = `${page.outcome.damage.trim() || "No damage"}${page.outcome.damage.trim() ? `, ${page.outcome.onPass === "half" ? "half" : "none"} on a pass` : ""}${conditions.length > 0 ? `, ${conditions.map(effectName).join(", ")} on a fail` : ""}.`;
+  const outcome = (
+    <OutcomePanel
+      page={page}
+      open={outcomeOpen || page.phase === "setup"}
+      summary={outcomeSummary}
+      onOpen={() => setOutcomeOpen(true)}
+      onChange={update}
+      onRoll={rollDamage}
+      picking={picking}
+      setPicking={setPicking}
+      parsed={parsedParts}
+      view={view}
+    />
+  );
+
+  const rowList = (
+    <div role="group" aria-label="Creatures" style={{ display: "grid", gap: theme.space(1) }}>
+      <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
+        <span style={{ fontWeight: theme.weight.strong, flex: 1 }}>{page.phase === "setup" && page.test.kind !== "none" ? `${rows.length} creatures` : count}</span>
+        <Button size="sm" disabled={page.phase === "applying" || page.phase === "applied"} onClick={() => update(rows.reduce((p, r) => (stateOf(p, r).mark === "skip" && r.skip ? p : mark(p, r.holder, "fail")), { ...pageRef.current, rows } as Page))}>
+          All fail
+        </Button>
+        <Button size="sm" disabled={page.phase === "applying" || page.phase === "applied"} onClick={() => update(rows.reduce((p, r) => (stateOf(p, r).mark === "skip" && r.skip ? p : mark(p, r.holder, "pass")), { ...pageRef.current, rows } as Page))}>
+          All pass
+        </Button>
+      </div>
+      {tooMany ? <Note tone="error">At most 100 creatures in one group save.</Note> : null}
+      {rows.length === 0 ? <Note>Select the creatures it hits, or place an area from it.</Note> : null}
+      {rows.map((row) => (
+        <GroupRow
+          key={row.holder}
+          page={shown}
+          row={row}
+          outcome={outcomes.get(row.holder)!}
+          loading={loading && row.bonus === null}
+          blocked={blocked ?? (offScene ? "Go back to the scene first." : null)}
+          onChange={(next) => update(page.phase === "setup" ? { ...next, rows: pageRef.current.rows } : next)}
+          onDmRoll={() => {
+            const s = stateOf(page, row);
+            const d20 = d20Of(page.test, page.spell);
+            if (!s.asked || !d20 || !row.askRef) return;
+            const preset = presetFor(dice, row.target, d20);
+            const op: OpOf<"roll.dice"> = {
+              t: "roll.dice",
+              tag: uuidv7(),
+              rollId: s.asked.rollId,
+              target: row.askRef,
+              unanswered: true,
+              ...(preset.extra.length > 0 ? { extra: preset.extra.join("").replace(/^\+/, "") } : {}),
+              ...modeOf(preset.sources),
+            };
+            run(dmRoll(pageRef.current, row.holder, op));
+          }}
+          onRollAgain={() => run(rollAgain(pageRef.current, { holders: [row.holder], server: serverRolls([row]), tag: uuidv7() }))}
+        />
+      ))}
+    </div>
+  );
+
+  const waits = page.phase === "applied" ? null : applyWaits(shown, dice, amounts);
+  const applyButton =
+    page.phase === "applied" ? (
+      <div style={{ display: "grid", gap: theme.space(1) }}>
+        <Note tone="info">{doneWords}</Note>
+        <Button variant="primary" onClick={close}>
+          Done
+        </Button>
+      </div>
+    ) : page.apply === "unknown" ? (
+      <div style={{ display: "grid", gap: theme.space(1) }}>
+        <Note tone="error">This may have happened. Check the log.</Note>
+        {mayApplyAgain(page, Date.now()) ? (
+          <Button variant="primary" onClick={() => run(applyAgain(pageRef.current))} disabled={blocked !== null}>
+            Apply again
+          </Button>
+        ) : null}
+      </div>
+    ) : (
+      <Button variant="primary" busy={page.apply === "sending"} disabled={blocked !== null || offScene || waits !== null || bound !== null || tooMany} onClick={doApply}>
+        {waits ?? bound ?? applyWords(outcomeList, conditions)}
+      </Button>
+    );
+
+  return (
+    <div style={{ display: "grid", gap: theme.space(3) }}>
+      <Watchers page={page} update={update} key_={key} />
+      {page.fill ? <Note tone="info">{page.fill.from}</Note> : null}
+      {failed ? <SrdLoadFailed what="The stat blocks" inline /> : null}
+      {offScene ? <Note tone="error">{`This group save is on ${sceneName}. Go back to it to apply.`}</Note> : null}
+      {page.apply === "refused" && page.applySays ? <Note tone="error">{page.applySays}</Note> : null}
+      {error ? (
+        <div role="alert">
+          <Note tone="error">{error}</Note>
+        </div>
+      ) : null}
+      {page.phase === "setup" ? (
+        <>
+          {setupControls}
+          {page.test.kind !== "none" ? dcRow : null}
+          {switches}
+          {outcome}
+          {rowList}
+          {page.test.kind !== "none" ? (
+            <Button variant="primary" busy={loading} disabled={blocked !== null || offScene || rows.length === 0 || tooMany || bound !== null} onClick={() => startRoll()}>
+              {bound ?? (loading ? "Loading the stat blocks…" : rollWords(shown))}
+            </Button>
+          ) : null}
+        </>
+      ) : (
+        <>
+          {rowList}
+          {page.test.kind !== "none" ? dcRow : null}
+          {outcome}
+        </>
+      )}
+      {page.phase !== "applying" && page.phase !== "applied" ? (
+        confirmDiscard ? (
+          <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap", alignItems: "center" }}>
+            <span>{`Discard the ${title}?`}</span>
+            <Button variant="danger" onClick={close}>
+              Discard
+            </Button>
+            <Button onClick={() => setConfirmDiscard(false)}>Keep it</Button>
+          </div>
+        ) : (
+          <Button onClick={() => (rolledAny ? setConfirmDiscard(true) : close())}>Discard</Button>
+        )
+      ) : null}
+      {/* Apply alone in the foot, so the count, the first row and Apply share a 130% phone's sheet with no scroll (5.8, Appendix D). */}
+      {page.phase !== "setup" || page.test.kind === "none" ? (
+        <div style={{ position: "sticky", bottom: 0, background: theme.color.surface, paddingTop: theme.space(1), paddingBottom: theme.space(2), display: "grid", gap: theme.space(1) }}>{applyButton}</div>
+      ) : null}
+      {page.apply === "taken" ? <AppliedToast page={page} ui={ui} /> : null}
+    </div>
+  );
+}
+
+function modeOf(sources: readonly { kind: "adv" | "dis" }[]): { mode?: "adv" | "dis"; cancelled?: true } {
+  const adv = sources.some((s) => s.kind === "adv");
+  const dis = sources.some((s) => s.kind === "dis");
+  if (adv && dis) return { cancelled: true };
+  if (adv) return { mode: "adv" };
+  if (dis) return { mode: "dis" };
+  return {};
+}
+
+/** The toast once Apply is taken: "Fireball: 5 took damage, 3 are Frightened. Undo takes it all back." Once per plan. */
+function AppliedToast(props: { page: Page; ui: ReturnType<typeof useRoomUi> }) {
+  const told = useRef<string | null>(null);
+  const { page, ui } = props;
+  useEffect(() => {
+    const plan = page.plan;
+    if (!plan || told.current === plan.plan) return;
+    told.current = plan.plan;
+    const hurt = plan.targets.filter((t) => t.amount !== undefined).length;
+    const conditioned = plan.targets.filter((t) => t.effects && t.effects.length > 0).length;
+    const name = page.fill?.name ?? "Group save";
+    const parts = [hurt > 0 ? `${hurt} took damage` : null, conditioned > 0 ? `${conditioned} gained ${page.outcome.conditions.map(effectName).join(" and ")}` : null].filter(Boolean);
+    ui.notify(`${name}: ${parts.join(", ") || "applied"}. Undo takes it all back.`, "info");
+  }, [page, ui]);
+  return null;
+}
+
+/** Each roll, request and the plan the page waits on, settled by its receipt as it lands (doc 1 1.2). */
+function Watchers(props: { page: Page; update(page: Page): void; key_: (t: { tokenId?: string; characterId?: string }) => string }) {
+  const { page } = props;
+  return (
+    <>
+      {page.rolls.filter((r) => r.state === "sending").map((r) => (
+        <ReceiptWatch key={r.tag} tag={r.tag} onSettled={(receipt) => props.update(rollSettled(page, r.tag, settledOf(receipt), props.key_))} />
+      ))}
+      {page.damage?.state === "sending" ? (
+        <ReceiptWatch
+          key={page.damage.tag}
+          tag={page.damage.tag}
+          onSettled={(receipt) => {
+            const s = settledOf(receipt);
+            props.update(damageSettled(page, page.damage!.tag, s.state === "committed" ? { state: "committed", amounts: damageAmounts(page, s.lines) } : s));
+          }}
+        />
+      ) : null}
+      {page.plan && (page.apply === "sending" || page.apply === "unknown") ? (
+        <ReceiptWatch key={`plan:${page.plan.plan}:${page.apply}`} tag={page.plan.plan} onSettled={(receipt) => props.update(applySettled(page, settledOf(receipt)))} />
+      ) : null}
+    </>
+  );
+}
+
+function damageAmounts(page: Page, lines: readonly import("#shared/model.ts").LogEntry[]): (number | undefined)[] {
+  const parsed = parseParts(page.outcome.damage, page.fill?.damageType);
+  if (!parsed.ok) return [];
+  const rolled = rollsOf(lines);
+  let i = 0;
+  return parsed.parts.map((p) => ("formula" in p ? rolled[i++]?.total : undefined));
+}
+
+type Settled = { state: "committed"; lines: readonly import("#shared/model.ts").LogEntry[]; refused?: string } | { state: "refused"; says: string } | { state: "unknown" };
+
+function settledOf(receipt: ReceiptState): Settled {
+  if (receipt.state === "committed") return { state: "committed", lines: receipt.lines, ...(receipt.refused ? { refused: receipt.refused.text || receipt.refused.message } : {}) };
+  if (receipt.state === "refused") return { state: "refused", says: receipt.text || receipt.message };
+  return { state: "unknown" };
+}
+
+function ReceiptWatch(props: { tag: string; onSettled(receipt: ReceiptState): void }) {
+  const receipt = useReceipt(props.tag);
+  const said = useRef(false);
+  useEffect(() => {
+    if (said.current || !receipt || receipt.state === "sending" || receipt.state === "checking") return;
+    said.current = true;
+    props.onSettled(receipt);
+  }, [receipt]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
+}
+
+/** The test: a save, a check or a skill, or "No save: everyone takes it" (5.1). */
+function TestPicker(props: { page: Page; onChange(page: Page): void }) {
+  const { page } = props;
+  const kind = page.test.kind;
+  const ability: AbilityKey = page.test.kind === "none" ? "dex" : page.test.ability;
+  const skill = page.test.kind === "check" ? page.test.skill : undefined;
+  const set = (test: GroupTest) => props.onChange({ ...page, test });
+  return (
+    <div style={{ display: "grid", gap: theme.space(1) }}>
+      <Segmented<GroupTest["kind"]>
+        label="What they roll"
+        value={kind}
+        options={[
+          { value: "save", label: "Save" },
+          { value: "check", label: "Check" },
+          { value: "none", label: "No save" },
+        ]}
+        onChange={(k) => set(k === "none" ? { kind: "none" } : k === "save" ? { kind: "save", ability } : { kind: "check", ability })}
+        grow
+      />
+      {kind === "none" ? <Note>No save: everyone takes it.</Note> : null}
+      {kind !== "none" ? (
+        <FieldRow label="Ability">
+          <Select<AbilityKey> label="Ability" value={ability} options={ABILITY_KEYS.map((a) => ({ value: a, label: ABILITY_NAMES[a] }))} onChange={(a) => set(kind === "save" ? { kind: "save", ability: a } : { kind: "check", ability: a })} />
+        </FieldRow>
+      ) : null}
+      {kind === "check" ? (
+        <FieldRow label="Skill">
+          <Select<SkillKey | "">
+            label="Skill"
+            value={skill ?? ""}
+            options={[{ value: "", label: "None" }, ...SKILL_KEYS.map((k) => ({ value: k, label: SKILLS[k].name }))]}
+            onChange={(k) => set(k === "" ? { kind: "check", ability } : { kind: "check", ability: SKILLS[k].ability, skill: k })}
+          />
+        </FieldRow>
+      ) : null}
+    </div>
+  );
+}
+
+function OutcomePanel(props: {
+  page: Page;
+  open: boolean;
+  summary: string;
+  onOpen(): void;
+  onChange(page: Page): void;
+  onRoll(): void;
+  picking: boolean;
+  setPicking(v: boolean): void;
+  parsed: ReturnType<typeof parseParts> | null;
+  view: RoomState;
+}) {
+  const { page } = props;
+  const [save, setSave] = useState<SaveEndsForm>(() => saveEndsForm(page.outcome.saveEnds ? { ...page.outcome.saveEnds } : undefined, { ability: page.test.kind === "none" ? "wis" : page.test.ability, dc: page.dc }));
+  const frozen = page.phase === "applying" || page.phase === "applied";
+  const setOutcome = (patch: Partial<Page["outcome"]>) => props.onChange({ ...page, outcome: { ...page.outcome, ...patch } });
+  const damageState = page.damage;
+  if (!props.open) {
+    return (
+      <div style={{ display: "flex", gap: theme.space(2), alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ flex: 1, minWidth: 0 }}>{props.summary}</span>
+        <Button size="sm" onClick={props.onOpen}>
+          Edit
+        </Button>
+      </div>
+    );
+  }
+  const rolledText =
+    damageState?.state === "committed" && damageState.amounts
+      ? `Rolled: ${damageState.amounts.flatMap((a, i) => (a === undefined ? [] : [`${a}${props.parsed?.ok && props.parsed.parts[i]?.type ? ` ${props.parsed.parts[i]!.type}` : ""}`])).join(" + ")}`
+      : damageState?.state === "sending" ? "Rolling…" : damageState?.state === "refused" ? damageState.says : damageState?.state === "unknown" ? "This may have happened. Check the log." : null;
+  const hasDice = props.parsed?.ok === true && props.parsed.parts.some((p) => "formula" in p);
+  const fight = props.view.encounter?.entries ?? [];
+  return (
+    <div role="group" aria-label="Outcome" style={{ display: "grid", gap: theme.space(2) }}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (hasDice) props.onRoll();
+        }}
+        style={{ display: "flex", gap: theme.space(1) }}
+      >
+        <Input
+          aria-label="Damage"
+          value={page.outcome.damage}
+          disabled={frozen}
+          placeholder="8d6 fire, or 28"
+          enterKeyHint="done"
+          autoComplete="off"
+          onChange={(e) => setOutcome({ damage: e.target.value })}
+          error={props.parsed !== null && !props.parsed.ok}
+          style={{ flex: 1, width: 0 }}
+        />
+        {hasDice ? (
+          <Button type="submit" size="sm" disabled={frozen} busy={damageState?.state === "sending"}>
+            {damageState?.state === "committed" ? "Roll again" : "Roll"}
+          </Button>
+        ) : null}
+      </form>
+      {props.parsed && !props.parsed.ok ? <Note tone="error">{props.parsed.error}</Note> : rolledText ? <Note>{rolledText}</Note> : null}
+      <FieldRow label="On a pass">
+        <Segmented<"half" | "none">
+          label="On a pass"
+          value={page.outcome.onPass}
+          options={[
+            { value: "half", label: "Half" },
+            { value: "none", label: "None" },
+          ]}
+          onChange={(onPass) => setOutcome({ onPass })}
+          disabled={frozen}
+        />
+      </FieldRow>
+      <div style={{ display: "grid", gap: theme.space(1) }}>
+        <ChipRow label="On a fail">
+          {page.outcome.conditions.map((k) => (
+            <Chip key={k} remove onClick={() => setOutcome({ conditions: page.outcome.conditions.filter((c) => c !== k) })} aria-label={`Remove ${effectName(k)}`}>
+              {effectName(k)}
+            </Chip>
+          ))}
+          {page.outcome.conditions.length < 3 && !frozen ? <Chip onClick={() => props.setPicking(!props.picking)}>Add a condition</Chip> : null}
+        </ChipRow>
+        {props.picking ? (
+          <EffectPicker
+            present={page.outcome.conditions.map((k) => ({ id: k, key: k }) as Effect)}
+            onPick={(k) => {
+              if ((CONDITION_KEYS as readonly string[]).includes(k) && !page.outcome.conditions.includes(k)) setOutcome({ conditions: [...page.outcome.conditions, k] });
+              props.setPicking(false);
+            }}
+          />
+        ) : null}
+        {page.outcome.conditions.length > 0 ? (
+          <>
+            <FieldRow label="It lasts">
+              <Select<"none" | "turnStart" | "turnEnd" | "rounds">
+                label="It lasts"
+                value={page.outcome.lasts.mode}
+                options={[
+                  { value: "none", label: "Until removed" },
+                  { value: "turnStart", label: "Until the start of the next turn" },
+                  { value: "turnEnd", label: "Until the end of the next turn" },
+                  { value: "rounds", label: "For a number of rounds" },
+                ]}
+                onChange={(mode) => setOutcome({ lasts: { ...page.outcome.lasts, mode } })}
+              />
+            </FieldRow>
+            {page.outcome.lasts.mode !== "none" ? (
+              <FieldRow label="Whose turn">
+                <Select<string>
+                  label="Whose turn"
+                  value={page.outcome.lasts.anchor}
+                  options={[{ value: "own", label: "Each creature's own turn" }, ...fight.map((e) => ({ value: e.id, label: e.label ?? entryName(props.view, e) }))]}
+                  onChange={(anchor) => setOutcome({ lasts: { ...page.outcome.lasts, anchor } })}
+                />
+              </FieldRow>
+            ) : null}
+            {page.outcome.lasts.mode === "rounds" ? (
+              <FieldRow label="Rounds">
+                <NumberField label="Rounds" value={page.outcome.lasts.rounds} min={1} max={1000} onCommit={(n) => n !== null && setOutcome({ lasts: { ...page.outcome.lasts, rounds: n } })} />
+              </FieldRow>
+            ) : null}
+            <SaveEndsFields
+              form={save}
+              onChange={(f) => {
+                setSave(f);
+                setOutcome({ saveEnds: f.on && f.dc !== null ? { ability: f.ability, dc: f.dc } : null });
+              }}
+            />
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function entryName(view: RoomState, entry: { tokenId?: string; characterId?: string }): string {
+  if (entry.tokenId) return view.tokens[entry.tokenId]?.name ?? "A creature";
+  if (entry.characterId) return view.characters[entry.characterId]?.name ?? "A character";
+  return "A creature";
+}
+
+/**
+ * One row (5.2, 5.4, 5.8): its name and amount on the first line, its
+ * Fail, Pass and Skip, then its details: its total and dice, its way, its
+ * outcome in words, and the switches only it needs.
+ */
+function GroupRow(props: {
+  page: Page;
+  row: RowBase;
+  outcome: ReturnType<typeof rowOutcome>;
+  /** Its stat block is still loading, so how it rolls is not known yet. */
+  loading: boolean;
+  blocked: string | null;
+  onChange(page: Page): void;
+  onDmRoll(): void;
+  onRollAgain(): void;
+}) {
+  const { page, row, outcome } = props;
+  const s = stateOf(page, row);
+  const setup = page.phase === "setup";
+  const frozen = page.phase === "applying" || page.phase === "applied";
+  const total = rowTotal(s);
+  const dice = s.rolled ?? s.answer?.dice;
+  const details: ReactNode[] = [];
+  if (total !== undefined) {
+    const parsed = dice ? parseFormula(dice.formula) : null;
+    const formula = parsed?.ok ? formatFormula(parsed.formula, dice?.mode) : dice?.formula;
+    details.push(`${total}${formula ? ` (${formula}: ${dice?.faces.join(", ")})` : ""}${dice?.cancelled ? ", normal: advantage and disadvantage cancelled" : ""}`);
+  }
+  if (s.answer?.mark) details.push("The DM's mark on the request");
+  if (s.asked && s.asked.dc !== undefined && page.dc !== null && s.asked.dc !== page.dc) details.push(`Asked against DC ${s.asked.dc}`);
+  if (row.fails && s.way === "fails") details.push(`Fails: ${effectName(row.fails)}`);
+  if (s.says) details.push(s.says);
+  if (row.why && setup) details.push(`Not asked: ${row.why}`);
+  if (outcome.resisted) details.push("Succeeds: Legendary Resistance");
+  if (outcome.words) details.push(outcome.words);
+  for (const skip of outcome.skips) details.push(skip);
+  if (outcome.conditions.length > 0) details.push(outcome.conditions.map((c) => effectName(c.key)).join(", "));
+  const markValue: Mark | null = outcome.result;
+  const waitingAsk = s.asked && !s.answer;
+  const set = (patch: Partial<typeof s>) => props.onChange({ ...page, states: { ...page.states, [row.holder]: { ...s, ...patch } } });
+  return (
+    <div style={{ display: "grid", gap: theme.space(1), padding: `${theme.space(1)}px 0`, borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1) }}>
+        <span style={{ fontWeight: theme.weight.strong, minWidth: 80, flex: "1 1 80px", overflowWrap: "anywhere" }}>{row.name}</span>
+        <span style={{ fontVariantNumeric: "tabular-nums", minWidth: 36, textAlign: "right" }}>{s.gone ? "Gone" : outcome.amount > 0 ? outcome.amount : ""}</span>
+        <div style={{ flex: "1 1 170px", minWidth: 170 }}>
+          <Segmented<Mark>
+            label={`${row.name}: fail, pass or skip`}
+            value={markValue}
+            options={MARKS}
+            onChange={(m) => props.onChange(mark(page, row.holder, s.mark === m ? null : m))}
+            disabled={frozen}
+            grow
+          />
+        </div>
+      </div>
+      {setup && props.loading ? (
+        <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>Loading</span>
+      ) : setup && row.ways.length > 1 ? (
+        <Segmented<Way>
+          label={`How ${row.name} rolls`}
+          value={s.way}
+          options={row.ways.map((w) => ({ value: w, label: w === "server" && row.bonus !== null ? `Server ${signedText(row.bonus)}` : WAY_WORDS[w] }))}
+          onChange={(way) => set({ way })}
+        />
+      ) : (
+        <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{s.way === "server" && row.bonus !== null ? `Server ${signedText(row.bonus)}` : WAY_WORDS[s.way]}</span>
+      )}
+      {details.length > 0 ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted, display: "grid", gap: 2 }}>{details.map((d, i) => <span key={i}>{d}</span>)}</div> : null}
+      {!setup && !frozen ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), alignItems: "center" }}>
+          {waitingAsk && row.bonus !== null ? (
+            <Button size="sm" disabled={props.blocked !== null} busy={page.dmRolls.some((r) => r.holder === row.holder && r.state === "sending")} onClick={props.onDmRoll}>
+              {`Roll ${signedText(row.bonus)}`}
+            </Button>
+          ) : null}
+          {s.status === "notRolled" || s.status === "unknown" ? (
+            <Button size="sm" disabled={props.blocked !== null || row.bonus === null} onClick={props.onRollAgain}>
+              {s.status === "unknown" ? "Roll again" : "Roll them"}
+            </Button>
+          ) : null}
+          {s.way === "type" || s.status ? (
+            <NumberField label={`${row.name}'s total`} value={s.typed} min={-50} max={100} nullable placeholder="Total" onCommit={(n) => props.onChange(typeTotal(page, row.holder, n))} width={88} />
+          ) : null}
+          {outcome.legendaryLeft > 0 ? (
+            <Checkbox checked={s.legendary === true} onChange={(legendary) => set({ legendary })} label={`Use Legendary Resistance (${outcome.legendaryLeft} left)`} />
+          ) : null}
+          {outcome.evasionApplies ? <Checkbox checked={outcome.evasion} onChange={(evasion) => set({ evasion })} label="Evasion" /> : null}
+          {outcome.qualified.map((q) => (
+            <Checkbox
+              key={q.key}
+              checked={(s.qualifiedOn ?? []).includes(q.key)}
+              onChange={(on) => set({ qualifiedOn: on ? [...(s.qualifiedOn ?? []), q.key] : (s.qualifiedOn ?? []).filter((k) => k !== q.key) })}
+              label={q.words}
+            />
+          ))}
+          {outcome.skips.length > 0 || (s.conditions === "off" && page.outcome.conditions.length > 0) ? (
+            <Checkbox checked={s.conditions === "on"} onChange={(on) => set({ conditions: on ? "on" : undefined })} label="Give the conditions anyway" />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export { DAMAGE_TYPES, type DamageType };
+
+/** The Dice panel's row for the open group save (5.1): "Fireball's save: 2 waiting. Open". */
+export function OpenGroupSave(props: { page: Page; onOpen(): void }) {
+  const { page } = props;
+  const waiting = page.phase === "setup" ? null : [...results(page).values()].filter((r) => r === null).length;
+  const state = page.phase === "applied" ? "applied" : page.phase === "setup" ? "set up" : waiting ? `${waiting} waiting` : "ready to apply";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
+      <span style={{ flex: 1, minWidth: 0 }}>{`${pageTitle(page)}: ${state}.`}</span>
+      <Button size="sm" onClick={props.onOpen}>
+        Open
+      </Button>
+    </div>
+  );
+}
+
+/** A reload brings the tab's group save back from its draft (5.10), once, for the DM. */
+export function useRestoreGroupSave(): void {
+  const store = useGroupSaveStore();
+  const roomId = useRoomView((s) => s.roomId);
+  const dm = useRoomView((s) => s.you?.role === "dm");
+  useEffect(() => {
+    if (!dm || store.getState().page || store.getState().restored) return;
+    const draft = readDraft(roomId);
+    store.setState({ restored: true, ...(draft ? { page: draft } : {}) });
+  }, [dm, roomId, store]);
+}

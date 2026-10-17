@@ -7,6 +7,8 @@ import { RecentRolls } from "./RecentRolls.tsx";
 import { RollOptions } from "./RollOptions.tsx";
 import { LastResult, Roller } from "./Roller.tsx";
 import { useDicePanel } from "./useDicePanel.ts";
+import { GroupSave, OpenGroupSave, useRestoreGroupSave } from "./groupSave/GroupSave.tsx";
+import { useGroupSave, useGroupSaveStore } from "./groupSave/store.ts";
 
 /**
  * The Dice panel (docs/design-v1-dice.md 8), for everyone: the newest
@@ -23,6 +25,11 @@ export default function DicePanel(props: PanelProps) {
   const me = useRoomView((s) => s.you?.memberId ?? "");
   const names = useMemo<LogNames>(() => ({ members: members ?? {}, tokens: tokens ?? {}, characters: characters ?? {}, handouts: handouts ?? {}, encounter }), [members, tokens, characters, handouts, encounter]);
   const panel = useDicePanel();
+  const role = useRoomView((s) => s.you?.role ?? null);
+  const groupStore = useGroupSaveStore();
+  const group = useGroupSave((s) => s.page);
+  const groupShown = useGroupSave((s) => s.shownIn === "dice");
+  useRestoreGroupSave();
   // The line a tap on the sticky result opened, unfolded in Recent rolls and scrolled into view.
   const [open, setOpen] = useState<string | null>(null);
   const show = (lineId: string) => {
@@ -32,10 +39,19 @@ export default function DicePanel(props: PanelProps) {
       row?.scrollIntoView({ block: "nearest" });
     });
   };
+  if (groupShown && group) {
+    return (
+      // The page shows its own results, and its rolls never become the panel's last roll, so the sticky line would only take room.
+      <section aria-label="Dice" style={{ display: "grid", gap: theme.space(2) }}>
+        <GroupSave parent="Dice" onBack={() => groupStore.setState({ shownIn: null })} />
+      </section>
+    );
+  }
   return (
     <section aria-label="Dice" style={{ display: "grid", gap: theme.space(2) }}>
       <LastResult onOpen={show} />
       <Roller />
+      {group && role === "dm" ? <OpenGroupSave page={group} onOpen={() => groupStore.setState({ shownIn: "dice" })} /> : null}
       <RollOptions {...props} />
       <RecentRolls names={names} me={me} open={open} again={(rolls, to) => void panel.again(rolls, to)} />
     </section>

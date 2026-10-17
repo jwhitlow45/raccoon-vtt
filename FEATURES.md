@@ -517,6 +517,7 @@ Where the action bar opens as a window: on a screen 600 px or wider, or a phone 
 | --- | --- | --- |
 | Enter | Roll what the field holds | everyone, in the Dice panel's formula field |
 | Up, Down | Go back through the formulas this device rolled, newest first, or forward again to what was being typed | everyone, in the formula field |
+| Enter | Roll the parts, or take the typed numbers | DM, in the group save's damage field |
 
 ### Roll requests
 

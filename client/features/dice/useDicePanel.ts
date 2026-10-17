@@ -64,7 +64,7 @@ export type DicePanelApi = {
    * `to` it goes under that visibility with only its own sources. Returns
    * its tag, or null when nothing was sent.
    */
-  roll(rolls: PanelRoll[], opts?: { dc?: number; ac?: number; to?: "all" | "dm" }): string | null;
+  roll(rolls: PanelRoll[], opts?: { dc?: number; ac?: number; to?: "all" | "dm"; tag?: string }): string | null;
   /** A chip's tap. Adv and Dis are never pressed together. */
   press(choice: "adv" | "dis" | "secret"): void;
   /** Again: rolls exactly what was rolled, under its own visibility, taking no choice. */
@@ -99,8 +99,9 @@ function hasOneD20(formula: string): boolean {
  * Sends a group of rolls as one tag, split by the splitter. Every op goes,
  * or none does. `onRefused` hears once if any part is refused.
  */
-function send(sender: RollSender, rolls: DiceRollInput[], envelope: { to: "all" | "dm"; dc?: number; ac?: number }, onRefused: () => void): { ok: true; tag: string } | { ok: false; error: string } {
-  const tag = uuidv7();
+function send(sender: RollSender, rolls: DiceRollInput[], envelope: { to: "all" | "dm"; dc?: number; ac?: number }, onRefused: () => void, given?: string): { ok: true; tag: string } | { ok: false; error: string } {
+  // A group save names its tag before it sends, so its page can keep the tag with the rows it rolls (docs/design-v1-roll-options.md 5.2).
+  const tag = given ?? uuidv7();
   const batched = batchRolls(rolls, { tag, ...envelope });
   if (!batched.ok) return { ok: false, error: batched.error };
   if (!sender.connected()) return { ok: false, error: NEEDS_CONNECTION };
@@ -153,7 +154,7 @@ export function createDicePanel(deps: { store: StoreApi<DiceState>; sender: Roll
         inputs.push({ ...rest, ...advantageFields([...sources, ...(taken?.sources ?? [])]) });
       }
       const envelope = { to, ...(opts.dc !== undefined ? { dc: opts.dc } : {}), ...(opts.ac !== undefined ? { ac: opts.ac } : {}) };
-      const sent = send(sender, inputs, envelope, () => taken?.restore());
+      const sent = send(sender, inputs, envelope, () => taken?.restore(), opts.tag);
       if (!sent.ok) {
         taken?.restore();
         if (panel) fail(sent.error);

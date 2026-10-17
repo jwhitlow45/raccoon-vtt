@@ -4,7 +4,7 @@ import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type RoomState, type SkillKe
 import { playersToken } from "#shared/project.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { pcSlots } from "#shared/rules/pcStats.ts";
-import { SKILLS } from "#shared/rules/skills.ts";
+import { ABILITY_NAMES as ABILITY_NAMES_FULL, SKILLS } from "#shared/rules/skills.ts";
 import { ABILITY_NAMES as ABILITY_SHORT } from "#shared/statBlock.ts";
 import { Chip, ChipRow } from "../../components/Chip.tsx";
 import { Loading } from "../../components/Loading.tsx";
@@ -38,6 +38,8 @@ import {
 import { useOption, useOptionStore } from "./optionState.ts";
 import { presetFor } from "./presets.ts";
 import { useDiceView } from "./useDiceView.ts";
+import { GroupOptions } from "./groupSave/GroupOptions.tsx";
+import { useStartGroupSave } from "./groupSave/start.ts";
 import { useActOnce, useInitiativeWrite, useRollBlocked, useRollOption, useRowResult } from "./useRollOption.ts";
 
 /**
@@ -69,7 +71,8 @@ export function RollOptions(_props: PanelProps) {
     const id = selected.length === 1 ? selected[0] : undefined;
     const token = id !== undefined ? view.tokens[id] : undefined;
     if (selected.length === 0) body = <Note>Select a token to roll for it.</Note>;
-    else if (!token) body = <Note>Select one token to roll for it.</Note>;
+    else if (selected.length > 1) body = <GroupOptions tokenIds={selected} />;
+    else if (!token) body = <Note>Select a token to roll for it.</Note>;
     else body = <CreatureOptions key={token.id} creature={{ tokenId: token.id }} tokenId={token.id} name={displayName(token)} />;
   } else body = <PlayerOptions view={view} selected={selected} />;
   return (
@@ -530,6 +533,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
             onTap={() => option.rolls([namedRoll(named.dice!, named.name, ctx.creature)], diceRow)}
           />
         ) : null}
+        {named.save && ctx.dice.you.role === "dm" ? <GroupSaveButton ctx={ctx} named={named} /> : null}
         {named.recharge !== undefined ? (
           <OptionCell
             text="Recharge 1d6"
@@ -553,6 +557,65 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
           <Chip pressed={crit} onClick={() => setCrit(!crit)} aria-label={`Critical hit for ${named.name}'s next damage`}>
             Critical
           </Chip>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * A save action's "Group save, DC 21 Dex" (5.6): the group save's setup
+ * filled from the action, on the selection less the acting creature. With
+ * nobody else selected the page says to select the creatures it hits.
+ */
+function GroupSaveButton(props: { ctx: Ctx; named: NamedRoll }) {
+  const { ctx, named } = props;
+  const save = named.save!;
+  const start = useStartGroupSave();
+  const selected = useRoomView((s) => s.local.selectedIds);
+  const roomId = useRoomView((s) => s.roomId);
+  const [pending, setPending] = useState(false);
+  const others = selected.filter((id) => id !== ctx.tokenId);
+  const parts = named.damage.filter((p) => !p.optional);
+  const damage = parts.map((p) => `${p.formula}${p.type ? ` ${p.type}` : ""}`).join(" + ");
+  const from = [`From ${named.name}: ${ABILITY_NAMES_FULL[save.ability]} save, DC ${save.dc}`, damage || null, damage ? (save.onPass === "half" ? "half on a pass" : "none on a pass") : null].filter(Boolean).join(", ");
+  const input = {
+    source: { kind: "selection" as const, tokenIds: others },
+    test: { kind: "save" as const, ability: save.ability },
+    dc: save.dc,
+    fill: { name: named.name, from: `${from}.`, ...(named.recharge !== undefined ? { recharge: { holder: ctx.key, key: named.key } } : {}), ...(parts[0]?.type ? { damageType: parts[0].type } : {}) },
+    outcome: {
+      damage,
+      onPass: save.onPass,
+      conditions: named.conditions ?? [],
+      lasts: named.lasts ? { mode: named.lasts.at === "start" ? ("turnStart" as const) : ("turnEnd" as const), rounds: 10, anchor: named.lasts.of === "target" ? "own" : (initiativeRow(ctx.dice.view, ctx.creature)?.id ?? "own") } : { mode: "none" as const, rounds: 10, anchor: "own" },
+      saveEnds: named.saveEnds ? { ability: save.ability, dc: save.dc } : null,
+    },
+    panel: "dice" as const,
+  };
+  const go = (replace: boolean) => {
+    // A recharge action is spent when its group save starts (6.4), as its Damage tap spends it.
+    if (named.recharge !== undefined) writeUsed(roomId, withUsed(readUsed(roomId), ctx.key, named.key, true));
+    return start(input, { replace });
+  };
+  return (
+    <div style={{ display: "grid", gap: theme.space(1) }}>
+      <SmallButton disabled={ctx.blocked !== null} onClick={() => !go(false) && setPending(true)}>
+        {`Group save, DC ${save.dc} ${ABILITY_SHORT[save.ability]}`}
+      </SmallButton>
+      {pending ? (
+        <div role="alert" style={{ display: "flex", gap: theme.space(1), flexWrap: "wrap" }}>
+          <span>Discard the open group save?</span>
+          <SmallButton
+            tone="danger"
+            onClick={() => {
+              go(true);
+              setPending(false);
+            }}
+          >
+            Discard
+          </SmallButton>
+          <SmallButton onClick={() => setPending(false)}>Keep it</SmallButton>
         </div>
       ) : null}
     </div>
