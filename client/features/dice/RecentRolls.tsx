@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { formatFormula, parseFormula } from "#shared/dice/formula.ts";
 import { hitOf, naturalOf, rolledTerms } from "#shared/dice/roll.ts";
 import { creatureName, describeEvent, diceText, memberName, type LogNames } from "#shared/logText.ts";
@@ -6,6 +6,7 @@ import type { DiceResult, DiceRoll, LogEntry } from "#shared/model.ts";
 import type { DiceRollInput } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
 import { Empty } from "../../components/Empty.tsx";
+import { IconButton } from "../../components/IconButton.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
 import { usePanelHere } from "../panels.ts";
@@ -78,8 +79,13 @@ export function rollVerdict(roll: DiceRoll, row: { dc?: number; ac?: number }): 
   return [nat, verdict].filter(Boolean).join(", ") || null;
 }
 
-/** One roll of a row: its creature and label, its total, its dice and its verdict. */
-function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; names: LogNames }) {
+/**
+ * One roll of a row: its total, its creature and label, its dice and its
+ * verdict. `lead` goes before them, a single roll's roller, and `end` after,
+ * at the line's far end, the row's Again, so a row of one roll takes one or
+ * two lines rather than three.
+ */
+function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; names: LogNames; lead?: ReactNode; end?: ReactNode }) {
   const { roll } = props;
   const creature = roll.tokenId !== undefined || roll.characterId !== undefined ? creatureName(props.names, roll) : null;
   const what = [creature, roll.label].filter(Boolean).join(", ");
@@ -88,11 +94,13 @@ function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; na
   const formula = parsed.ok ? formatFormula(parsed.formula, roll.mode) : roll.formula;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1) }}>
+      {props.lead}
       <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, minWidth: 28 }}>{roll.total.toLocaleString("en-US")}</span>
       {what ? <span style={{ fontSize: theme.font.body14, overflowWrap: "anywhere" }}>{what}</span> : null}
       <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{formula}</span>
       <DiceFaces result={roll} />
       {verdict ? <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>{verdict}</span> : null}
+      {props.end ? <span style={{ marginLeft: "auto", display: "inline-flex" }}>{props.end}</span> : null}
     </div>
   );
 }
@@ -137,28 +145,36 @@ function Row(props: { row: RecentRow; names: LogNames; me: string; open: boolean
   const inputs = mine ? row.rolls.map(againInput) : [];
   const canAgain = mine && inputs.every((i): i is DiceRollInput => i !== null);
   const first = row.rolls[0];
+  const single = row.rolls.length === 1;
+  const who = (
+    <span style={{ display: "inline-flex", gap: theme.space(2), fontSize: theme.font.small }}>
+      <span style={{ fontWeight: theme.weight.strong, color: member?.color ?? theme.color.text }}>{memberName(names, row.by)}</span>
+      {row.to === "dm" ? <span style={{ color: theme.color.textMuted }}>Secret</span> : null}
+      {single ? null : <span style={{ color: theme.color.textMuted }}>{row.rolls.length} rolls</span>}
+    </span>
+  );
+  const again =
+    canAgain && first ? (
+      <IconButton
+        icon="redo"
+        label={`Roll again: ${[askedFormula(first), first.label].filter(Boolean).join(" ")}${single ? "" : ` and ${row.rolls.length - 1} more`}`}
+        title="Again"
+        onClick={() => props.again(inputs as DiceRollInput[], row.to)}
+      />
+    ) : null;
   return (
     <li data-roll-row={row.ids.join(" ")} style={base}>
-      <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), fontSize: theme.font.small }}>
-        <span style={{ fontWeight: theme.weight.strong, color: member?.color ?? theme.color.text }}>{memberName(names, row.by)}</span>
-        {row.to === "dm" ? <span style={{ color: theme.color.textMuted }}>Secret</span> : null}
-        {row.rolls.length > 1 ? <span style={{ color: theme.color.textMuted }}>{row.rolls.length} rolls</span> : null}
-      </div>
+      {single ? null : who}
       {shown.map((roll, i) => (
-        <RollLine key={i} roll={roll} row={row} names={names} />
+        <RollLine key={i} roll={roll} row={row} names={names} lead={single ? who : undefined} end={i === shown.length - 1 ? again : undefined} />
       ))}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-        {row.rolls.length > FOLDED && !all ? (
+      {row.rolls.length > FOLDED && !all ? (
+        <div>
           <Button size="sm" variant="quiet" onClick={() => setAll(true)}>
             Show all {row.rolls.length}
           </Button>
-        ) : null}
-        {canAgain && first ? (
-          <Button size="sm" variant="quiet" icon="redo" aria-label={`Roll again: ${[askedFormula(first), first.label].filter(Boolean).join(" ")}${row.rolls.length > 1 ? ` and ${row.rolls.length - 1} more` : ""}`} onClick={() => props.again(inputs as DiceRollInput[], row.to)}>
-            Again
-          </Button>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </li>
   );
 }
