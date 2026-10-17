@@ -127,7 +127,8 @@ export function Sheet(props: {
   const full = onExpand ? { on: filled, set: onExpand, cap: props.cap ?? 0 } : undefined;
   const swipe = useSheetSwipe(dialogRef, { enabled: mode === "bottom" && shown, onClose: props.onClose, scroller: bodyRef, riders: props.riders, item, clip: "foot", drafts, full });
   // A drag above the normal top, and a step down from full screen, keep the whole screen's box beside the map until they come to rest.
-  useSheetDialog(dialogRef, { shown, modal: mode === "full" || (filled && !swipe.rising), onCancel: props.onClose, hideFocus: props.hideFocus });
+  // Filled with focus outside it, as after a turn strip's tap, it lands on its title rather than its first control (sheetFocusAfter).
+  useSheetDialog(dialogRef, { shown, modal: mode === "full" || (filled && !swipe.rising), onCancel: props.onClose, hideFocus: props.hideFocus, modalFocus: filled ? titleRef : undefined });
   const back: HeaderBack | null = subpage ? subpageBack(subpage) : props.onBack ? { label: props.backLabel ?? "Back", onBack: props.onBack } : null;
   const actionCount = props.actions ? (props.actionCount ?? 0) : 0;
   const stacked = headerStacks({ width: props.headerWidth, buttons: (back ? 1 : 0) + (onHide ? 1 : 0) + 1 + actionCount, actions: actionCount > 0 });

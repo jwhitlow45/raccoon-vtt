@@ -134,12 +134,18 @@ export function sheetDialogSteps(now: SheetDialogState, want: { shown: boolean; 
  * - Closed with focus inside: on `hide`, the element that stands for the
  *   sheet (Panels), else lost to the page, as when a sheet unmounted, for
  *   Room's own decision after a sheet closes. Focus elsewhere stays there.
+ * - Made modal with focus outside it or on the page, for a sheet that names
+ *   a `title` to land on: its title. The browser's own pick is the dialog's
+ *   first control, which for a sheet swiped up to fill the screen was the
+ *   Full screen button kept hidden until it has keyboard focus
+ *   (docs/design-v1-sheet-swipe.md 4.7).
  * Null leaves focus where the browser put it, and "page" blurs it.
  */
-export function sheetFocusAfter(input: { steps: readonly SheetDialogStep[]; before: "inside" | "outside" | "page"; hiding: boolean }): "before" | "page" | "hide" | null {
+export function sheetFocusAfter(input: { steps: readonly SheetDialogStep[]; before: "inside" | "outside" | "page"; hiding: boolean; title?: boolean }): "before" | "page" | "hide" | "title" | null {
   const { steps, before } = input;
   if (steps.length === 0) return null;
   const last = steps[steps.length - 1];
+  if (input.title && last === "showModal" && before !== "inside") return "title";
   if (last === "close") {
     if (before === "outside") return "before";
     return input.hiding ? "hide" : "page";
@@ -230,7 +236,14 @@ export function sheetStepping(): boolean {
  */
 export function useSheetDialog(
   dialog: RefObject<HTMLDialogElement | null>,
-  options: { shown: boolean; modal: boolean; onCancel(): void; hideFocus?: RefObject<HTMLElement | null> },
+  options: {
+    shown: boolean;
+    modal: boolean;
+    onCancel(): void;
+    hideFocus?: RefObject<HTMLElement | null>;
+    /** Where focus goes when the sheet turns modal with focus outside it or on the page (sheetFocusAfter "title"). */
+    modalFocus?: RefObject<HTMLElement | null>;
+  },
 ): void {
   const latest = useRef(options);
   latest.current = options;
@@ -253,7 +266,7 @@ export function useSheetDialog(
     if (steps.length === 0) return;
     const active = focusedElement();
     const before = active === null || active === document.body ? "page" : el.contains(active) ? "inside" : "outside";
-    const focus = sheetFocusAfter({ steps, before, hiding: !shown });
+    const focus = sheetFocusAfter({ steps, before, hiding: !shown, title: latest.current.modalFocus !== undefined });
     const keep = held.current;
     held.current = null;
     /*
@@ -281,6 +294,7 @@ export function useSheetDialog(
         if (target?.isConnected) target.focus({ preventScroll: true });
         else focusedElement()?.blur();
       } else if (focus === "page") focusedElement()?.blur();
+      else if (focus === "title") latest.current.modalFocus?.current?.focus({ preventScroll: true });
     } finally {
       stepping--;
       hear?.();

@@ -1063,8 +1063,11 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     sheet = await openPanel(dm, "Log");
     const normal = await steadyRect(sheet);
     const button = sheet.getByRole("button", { name: "Full screen" });
-    await button.focus();
-    assert.ok((await rectOf(button)).width >= 44, "Full screen does not show with focus");
+    // By the keyboard: Shift+Tab from Back, the header's next stop, reaches it.
+    await sheet.getByRole("button", { name: "All panels" }).focus();
+    await dm.keyboard.press("Shift+Tab");
+    assert.equal(await button.evaluate((el) => (globalThis as unknown as Win).document.activeElement === (el as unknown as El)), true, "Shift+Tab from Back did not reach Full screen");
+    assert.ok((await rectOf(button)).width >= 44, "Full screen does not show with keyboard focus");
     await dm.keyboard.press("Enter");
     await waitFor("full", async () => (await sheet.getAttribute("aria-modal")) === "true" || null, 3_000);
     assert.equal(await button.getAttribute("aria-pressed"), "true");
@@ -1074,6 +1077,55 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     assert.equal(await button.evaluate((el) => (globalThis as unknown as Win).document.activeElement === (el as unknown as El)), true, "focus left Full screen");
     assert.deepEqual(await steadyRect(sheet), normal);
     await sheet.getByRole("button", { name: "Close Log" }).click();
+  });
+
+  test("12e. a sheet filled with focus outside it lands focus on its title, and Full screen never draws over the title without the keyboard", async () => {
+    const fullButtonHidden = (sheet: Locator) => sheet.getByRole("button", { name: "Full screen" }).evaluate((el) => (el as unknown as El).getBoundingClientRect().width <= 2);
+    const titleFocused = (sheet: Locator) => sheet.locator("header h2").first().evaluate((el) => (globalThis as unknown as Win).document.activeElement === (el as unknown as El));
+    const up = async (sheet: Locator) => {
+      const r = await steadyRect(sheet);
+      await swipe(dmCdp, await headerPoint(sheet), -(16 + Math.max(44, r.top / 4) + 12));
+      await waitFor("full", async () => (await sheet.getAttribute("aria-modal")) === "true" || null, 3_000);
+      await settled(sheet);
+      return r;
+    };
+    // Focus on the page, as after a tap on the map.
+    await setUp(dm, { width: 375, height: 667, scale: 1 });
+    let sheet = await openPanel(dm, "Log");
+    await steadyRect(sheet);
+    await dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur(): void } | null } }).document.activeElement?.blur());
+    let normal = await up(sheet);
+    assert.equal(await fullButtonHidden(sheet), true, "Full screen drew itself over the title of a sheet filled with focus on the page");
+    assert.equal(await titleFocused(sheet), true, "focus did not land on the full sheet's title");
+    await swipe(dmCdp, await headerPoint(sheet), 8 + Math.max(44, normal.top / 4) + 12);
+    await waitFor("the step down", async () => (await sheet.getAttribute("aria-modal")) === null || null, 3_000);
+    await settled(sheet);
+    assert.equal(await fullButtonHidden(sheet), true, "Full screen stayed over the title after the step down");
+    await sheet.getByRole("button", { name: "Close Log" }).click();
+    // Initiative from the turn strip, which keeps focus on the strip.
+    await ops.send({
+      t: "encounter.start",
+      entries: [
+        { id: run.entries.goblins[0], tokenId: run.goblins[0], value: 18 },
+        { id: run.entries.thorn, tokenId: run.thorn.id, value: 15 },
+      ],
+    });
+    try {
+      await dm.getByRole("button", { name: /^Initiative, round/ }).first().click();
+      sheet = sheetOf(dm, "Initiative");
+      await sheet.waitFor();
+      normal = await up(sheet);
+      assert.equal(await fullButtonHidden(sheet), true, "Full screen drew itself over the title of Initiative opened from the turn strip");
+      assert.equal(await titleFocused(sheet), true, "focus did not land on Initiative's title");
+      await shots.take(dm, "swipe-full-from-turn-strip");
+      await swipe(dmCdp, await headerPoint(sheet), 8 + Math.max(44, normal.top / 4) + 12);
+      await waitFor("the step down", async () => (await sheet.getAttribute("aria-modal")) === null || null, 3_000);
+      await settled(sheet);
+      assert.equal(await fullButtonHidden(sheet), true);
+      await sheet.getByRole("button", { name: "Close Initiative" }).click();
+    } finally {
+      await ops.send({ t: "encounter.end" });
+    }
   });
 });
 

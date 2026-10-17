@@ -182,15 +182,27 @@ export function SheetHeader(props: {
 
 /**
  * Full screen without the gesture (4.7): visually hidden until it has
- * focus, then drawn over the start of the title, so nothing moves and the
- * header's stacking rule never counts it. A screen reader meets it in the
- * header's reading order, and Tab reaches it. Pressed while the sheet
- * fills the screen.
+ * keyboard focus, then drawn over the start of the title, so nothing moves
+ * and the header's stacking rule never counts it. A screen reader meets it
+ * in the header's reading order, and Tab reaches it. Pressed while the
+ * sheet fills the screen. Focus a script or the browser gives it, such as
+ * a dialog's own pick of its first control, draws nothing, or it would
+ * cover the title with no keyboard in sight.
  */
 function FullScreenButton(props: { pressed: boolean; onPress(): void; at: { left: number; top: number } }) {
-  const [focused, setFocused] = useState(false);
-  const place: CSSProperties = focused ? { position: "absolute", left: props.at.left, top: props.at.top, zIndex: 1, ...(props.pressed ? null : { background: theme.color.surface }) } : { ...VISUALLY_HIDDEN, minWidth: 0, minHeight: 0, border: "none" };
-  return <IconButton icon="expand" label="Full screen" pressed={props.pressed} onClick={props.onPress} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} style={place} />;
+  const [shown, setShown] = useState(false);
+  const place: CSSProperties = shown ? { position: "absolute", left: props.at.left, top: props.at.top, zIndex: 1, ...(props.pressed ? null : { background: theme.color.surface }) } : { ...VISUALLY_HIDDEN, minWidth: 0, minHeight: 0, border: "none" };
+  return <IconButton icon="expand" label="Full screen" pressed={props.pressed} onClick={props.onPress} onFocus={(e) => setShown(keyboardFocus(e.currentTarget))} onBlur={() => setShown(false)} style={place} />;
+}
+
+/** Whether focus on `el` came from the keyboard, as the browser judges `:focus-visible`. */
+function keyboardFocus(el: Element): boolean {
+  try {
+    return el.matches(":focus-visible");
+  } catch {
+    // A browser without the selector: every focus counts, as before it existed.
+    return true;
+  }
 }
 
 /** A grab area's mark and style, or nothing. */
