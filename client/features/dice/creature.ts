@@ -1,12 +1,12 @@
 import { creatureBonus, creatureNumbers, type NamedRoll, type RollNumbers, type RollSources, type SrdRolls } from "#shared/dice/bonus.ts";
 import { blockDefenses, effectDefenses, type Defense } from "#shared/dice/defenses.ts";
 import { blockActions, hasTrait } from "#shared/dice/named.ts";
-import type { Actor, CompanionBlock, CustomMonster, RoomState, Token } from "#shared/model.ts";
+import type { Actor, Character, CompanionBlock, CustomMonster, RoomState, Token } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import type { SrdMonster, StatBlockMonster } from "#shared/srd/monsters.ts";
 import { monsterView, statBlockOf } from "#shared/statBlock.ts";
 import type { You } from "../../state/types.ts";
-import { statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
+import { statBlockShown, tokenStatBlock, type TokenStatBlock } from "../monsters/statBlockLink.ts";
 import { ownsToken } from "../tokens/access.ts";
 
 /**
@@ -55,21 +55,42 @@ function storedView(block: CompanionBlock): StatBlockMonster {
   return view;
 }
 
-/**
- * The block this viewer reads on this token, as the token panel shows it
- * (statBlockLink.ts tokenStatBlock and statBlockShown): undefined while the
- * SRD's monsters are still loading, null for none.
- */
-function blockView(dice: DiceView, token: Token, actor: Actor): StatBlockMonster | null | undefined {
+type Found = { token?: Token; character?: Character; actor: Actor };
+
+function find(state: RoomState, creature: ActorTarget): Found | null {
+  if ("tokenId" in creature) {
+    const token = state.tokens[creature.tokenId];
+    if (!token) return null;
+    if ("inline" in token.actor) return { token, actor: token.actor.inline };
+    const character = state.characters[token.actor.ref];
+    return character ? { token, character, actor: character.actor } : null;
+  }
+  const character = state.characters[creature.characterId];
+  return character ? { character, actor: character.actor } : null;
+}
+
+/** The link of the block this viewer reads on a token's own actor, as the token panel shows it (statBlockLink.ts tokenStatBlock and statBlockShown). */
+function shownLink(dice: Pick<DiceView, "you" | "view">, token: Token, actor: Actor): TokenStatBlock {
   const dm = dice.you.role === "dm";
   const owner = !dm && ownsToken(dice.view, dice.you.memberId, token);
-  if (!statBlockShown({ dm, owner, kind: token.kind, actor, companion: token.companion !== undefined })) return null;
-  const link = tokenStatBlock(actor, dice.view.monsters, dice.view.companionBlocks);
-  if (link.kind === "room") return roomView(link.monster);
-  if (link.kind === "block") return storedView(link.block);
-  if (link.kind !== "srd") return null;
-  if (dice.srd.monsters === null) return undefined;
-  return dice.srd.monsters.find((m) => m.srdId === link.srdId) ?? null;
+  if (!statBlockShown({ dm, owner, kind: token.kind, actor, companion: token.companion !== undefined })) return { kind: "none" };
+  return tokenStatBlock(actor, dice.view.monsters, dice.view.companionBlocks);
+}
+
+/**
+ * Which of the SRD's chunks creatureRolls waits on for this creature: the
+ * monsters for an SRD block the viewer reads, and the numbers table for an
+ * SRD creature or a character in an SRD shape. The hook that loads them
+ * (useDiceView.ts) asks this, so a page with no SRD creature loads neither.
+ */
+export function srdNeeds(dice: Pick<DiceView, "you" | "view">, creature: ActorTarget): { monsters: boolean; rolls: boolean } {
+  const found = find(dice.view, creature);
+  if (!found) return { monsters: false, rolls: false };
+  const { token, character, actor } = found;
+  const monsters = token !== undefined && character === undefined && shownLink(dice, token, actor).kind === "srd";
+  // creatureNumbers reads the table for an SRD creature, and for a character in an SRD shape whatever else its actor links.
+  const rolls = actor.srdId !== undefined && (character !== undefined || (actor.blockId === undefined && actor.monsterId === undefined));
+  return { monsters, rolls };
 }
 
 /**
@@ -86,15 +107,11 @@ function blockView(dice: DiceView, token: Token, actor: Actor): StatBlockMonster
  */
 export function creatureRolls(dice: DiceView, creature: ActorTarget): CreatureRolls | null {
   const state = dice.view;
-  const token = "tokenId" in creature ? state.tokens[creature.tokenId] : undefined;
-  if ("tokenId" in creature && !token) return null;
-  const character = token ? ("ref" in token.actor ? state.characters[token.actor.ref] : undefined) : "characterId" in creature ? state.characters[creature.characterId] : undefined;
-  const actor = token && "inline" in token.actor ? token.actor.inline : character?.actor;
-  if (!actor) return null;
-
-  // creatureNumbers reads the SRD table for an SRD creature and for a character in an SRD shape.
-  const ownSrd = actor.srdId !== undefined && (character !== undefined || (actor.blockId === undefined && actor.monsterId === undefined));
-  if (ownSrd && dice.srd.rolls === null) return null;
+  const found = find(state, creature);
+  if (!found) return null;
+  const { token, character, actor } = found;
+  const needs = srdNeeds(dice, creature);
+  if ((needs.monsters && dice.srd.monsters === null) || (needs.rolls && dice.srd.rolls === null)) return null;
   const sources: RollSources = {
     tokens: state.tokens,
     characters: state.characters,
@@ -105,9 +122,10 @@ export function creatureRolls(dice: DiceView, creature: ActorTarget): CreatureRo
 
   let view: StatBlockMonster | null = null;
   if (token && !character) {
-    const read = blockView(dice, token, actor);
-    if (read === undefined) return null;
-    view = read;
+    const link = shownLink(dice, token, actor);
+    if (link.kind === "room") view = roomView(link.monster);
+    else if (link.kind === "block") view = storedView(link.block);
+    else if (link.kind === "srd") view = dice.srd.monsters?.find((m) => m.srdId === link.srdId) ?? null;
   }
   const legendary = actor.legendary;
   return {
