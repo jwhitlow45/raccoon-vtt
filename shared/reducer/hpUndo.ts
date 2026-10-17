@@ -46,8 +46,22 @@ export function hpRevertOf(before: Actor, after: Actor, entries: readonly InitEn
     if (entry && paused && !("entryId" in paused)) anchors[entry.id] = paused;
   }
   if (Object.keys(anchors).length > 0) out.anchors = anchors;
-  if (before.unshaped?.shapeTemp && before.srdId !== undefined) out.shapeTemp = { srdId: before.srdId };
+  const pool: NonNullable<HpRevert["shapeTemp"]> = {};
+  const was = poolShape(before);
+  const is = poolShape(after);
+  if (was !== undefined) pool.before = was;
+  if (is !== undefined) pool.after = is;
+  if (was !== undefined || is !== undefined) out.shapeTemp = pool;
   return out;
+}
+
+/**
+ * The shape whose pool the temporary HP are, by its `srdId`, or undefined
+ * for an empty pool or one no shape gave. An empty pool belongs to no one,
+ * so a mark left on 0 never blocks taking a change back.
+ */
+function poolShape(actor: Actor): string | undefined {
+  return actor.hp.temp > 0 && actor.unshaped?.shapeTemp && actor.srdId !== undefined ? actor.srdId : undefined;
 }
 
 /**
@@ -57,10 +71,10 @@ export function hpRevertOf(before: Actor, after: Actor, entries: readonly InitEn
  * none comes back. In another shape, or from any other source, the pool is
  * no shape's.
  */
-function withPoolOf(actor: Actor, shape: HpRevert["shapeTemp"]): Actor {
+function withPoolOf(actor: Actor, shape: string | undefined): Actor {
   const { unshaped } = actor;
-  if (shape && unshaped && actor.srdId === shape.srdId) return { ...actor, unshaped: { ...unshaped, shapeTemp: true } };
-  if (shape && actor.srdId === undefined) return { ...actor, hp: { ...actor.hp, temp: 0 } };
+  if (shape !== undefined && unshaped && actor.srdId === shape) return { ...actor, unshaped: { ...unshaped, shapeTemp: true } };
+  if (shape !== undefined && actor.srdId === undefined) return { ...actor, hp: { ...actor.hp, temp: 0 } };
   if (!unshaped?.shapeTemp) return actor;
   const { shapeTemp: _gone, ...rest } = unshaped;
   return { ...actor, unshaped: rest };
@@ -90,14 +104,15 @@ function same(a: unknown, b: unknown): boolean {
 
 /**
  * The actor with the change taken back, or null when it changed since: its
- * HP, life or death saves differ from what the change left, an effect the
- * change put on is gone or different, or one it took off is back. A removed
- * condition whose kind the creature has again (a new concentration, an
- * Unconscious the DM applied) also counts, since putting the old one back
- * would give it two.
+ * HP, life or death saves differ from what the change left, its temporary
+ * HP belong to another than then (W7-SOL-08), an effect the change put on
+ * is gone or different, or one it took off is back. A removed condition
+ * whose kind the creature has again (a new concentration, an Unconscious
+ * the DM applied) also counts, since putting the old one back would give it
+ * two.
  */
 export function revertedActor(current: Actor, revert: HpRevert): Actor | null {
-  if (!same(vitals(current), revert.after)) return null;
+  if (!same(vitals(current), revert.after) || poolShape(current) !== revert.shapeTemp?.after) return null;
   const byId = new Map(current.effects.map((e) => [e.id, e]));
   for (const effect of revert.added ?? []) {
     const now = byId.get(effect.id);
@@ -110,7 +125,7 @@ export function revertedActor(current: Actor, revert: HpRevert): Actor | null {
   }
   const added = new Set((revert.added ?? []).map((e) => e.id));
   const effects: Effect[] = [...current.effects.filter((e) => !added.has(e.id)), ...(revert.removed ?? [])];
-  return withPoolOf({ ...current, hp: { ...revert.before.hp }, life: revert.before.life, deathSaves: { ...revert.before.deathSaves }, effects }, revert.shapeTemp);
+  return withPoolOf({ ...current, hp: { ...revert.before.hp }, life: revert.before.life, deathSaves: { ...revert.before.deathSaves }, effects }, revert.shapeTemp?.before);
 }
 
 /** Whether a later line already took this change back. */

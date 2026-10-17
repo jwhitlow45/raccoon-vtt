@@ -31,10 +31,10 @@ describe("a stat block in room.json", () => {
     const shaped = actor({ srdId: "brown-bear", ac: 11, hp: { cur: 20, max: 20, temp: 30 }, unshaped: { ac: 14, speeds: { walk: 30 }, shapeTemp: true } });
     const state = room({ characters: { bree: character("bree", { actor: shaped }) } });
     const vitals = (temp: number) => ({ hp: { cur: 20, max: 20, temp }, life: "alive" as const, deathSaves: { ok: 0, fail: 0 } });
-    state.log.push({ id: "9:0", at: AT, kind: "event", data: { type: "hp", characterId: "bree", change: "temp", amount: 30, revert: { before: vitals(22), after: vitals(30), shapeTemp: { srdId: "brown-bear" } } } });
+    state.log.push({ id: "9:0", at: AT, kind: "event", data: { type: "hp", characterId: "bree", change: "temp", amount: 30, revert: { before: vitals(22), after: vitals(30), shapeTemp: { before: "brown-bear" } } } });
     assert.ok(parseRoomState(structuredClone(state)).ok);
     const bad = structuredClone(state);
-    (bad.log[0]!.data as { revert: { shapeTemp: object } }).revert.shapeTemp = { srdId: "brown-bear", amount: 22 };
+    (bad.log[0]!.data as { revert: { shapeTemp: object } }).revert.shapeTemp = { before: "brown-bear", amount: 22 };
     assert.equal(parseRoomState(bad).ok, false);
   });
 

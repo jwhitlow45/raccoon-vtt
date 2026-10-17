@@ -1551,12 +1551,22 @@ export type Vitals = { hp: { cur: number; max: number; temp: number }; life: Lif
  * fight before the change is taken back, and the duration then pauses on
  * that creature, as it would have had the effect stayed (design 9.5).
  *
- * `shapeTemp` says the temporary HP before the change were the pool the
- * shape linked as `srdId` gave (`Actor.unshaped.shapeTemp`). Taking the
- * change back makes them that shape's again while it lasts, or empties them
- * once it has ended, as End the shape would have (W7-SOL-07).
+ * `shapeTemp` names, by its `srdId`, the shape whose pool the temporary HP
+ * were before and after the change (`Actor.unshaped.shapeTemp`), each absent
+ * for an empty pool or one no shape gave. Taking the change back is refused
+ * when the pool's owner now differs from `after`, as for changed numbers
+ * (W7-SOL-08). Otherwise it makes the pool `before`'s again while that shape
+ * lasts, or empties it once the shape has ended, as End the shape would have
+ * (W7-SOL-07).
  */
-export type HpRevert = { before: Vitals; after: Vitals; added?: Effect[]; removed?: Effect[]; anchors?: Record<EntryId, DurationAnchor>; shapeTemp?: { srdId: string } };
+export type HpRevert = {
+  before: Vitals;
+  after: Vitals;
+  added?: Effect[];
+  removed?: Effect[];
+  anchors?: Record<EntryId, DurationAnchor>;
+  shapeTemp?: { before?: string; after?: string };
+};
 
 export type LogEvent =
   /**

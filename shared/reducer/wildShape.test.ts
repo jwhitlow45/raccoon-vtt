@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import type { LogEvent } from "../model.ts";
 import { clientOpSchema, type ActorPatch, type Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
-import { hpUndoRestore } from "./hpUndo.ts";
+import { hpUndoRestore, revertedActor } from "./hpUndo.ts";
+import { CHANGED_SINCE } from "./misc.ts";
 import { WILD_SHAPE_ALONE, withShapeRules } from "../rules/pcStats.ts";
 import { DM, actor, apply, character, env, refused, room, token } from "../testutil.ts";
 
@@ -66,6 +68,7 @@ describe("a shape's AC, speeds and temporary HP (W7B-P-9)", () => {
   const hit = (amount: number): Op => ({ t: "actor.hp", target: BREE, change: { kind: "damage", amount } });
   const grant = (amount: number): Op => ({ t: "actor.hp", target: BREE, change: { kind: "temp", amount } });
   const set = (values: { cur?: number; temp?: number }): Op => ({ t: "actor.hp", target: BREE, change: { kind: "set", ...values } });
+  const heal = (amount: number): Op => ({ t: "actor.hp", target: BREE, change: { kind: "heal", amount } });
 
   test("Wild Shape takes the creature's AC and speeds and keeps the character's, which End the shape puts back, and its temporary HP stay", () => {
     let s = apply(setup(), shape({ ...BEAR, wildShape: true, hp: { temp: 5 } }));
@@ -152,6 +155,7 @@ describe("a shape's AC, speeds and temporary HP (W7B-P-9)", () => {
     { name: "a grant taken back after the shape ended, whose pool went with it", steps: [shape({ ...BEAR, hp: { temp: 22 } }), grant(30), shape({ srdId: null }), "back"], temp: 0, shaped: false },
     { name: "a grant taken back in another shape since, so no shape's", steps: [shape({ ...BEAR, hp: { temp: 22 } }), grant(30), shape({ srdId: null }), shape({ srdId: "wolf", wildShape: true }), "back"], temp: 22 },
     { name: "a grant from before the shape taken back stays no shape's", steps: [grant(8), shape(BEAR), grant(30), "back", shape({ srdId: null })], temp: 8, shaped: false },
+    { name: "damage that emptied the shape's pool, taken back after the shape ended", steps: [shape({ ...BEAR, hp: { temp: 22 } }), hit(30), shape({ srdId: null }), "back"], temp: 0, shaped: false },
   ];
   for (const run of backRuns) {
     test(`taken back from the log: ${run.name}`, () => {
@@ -178,11 +182,44 @@ describe("a shape's AC, speeds and temporary HP (W7B-P-9)", () => {
     });
   }
 
+  /**
+   * A line whose pool has another owner since is refused, as one whose
+   * numbers changed is, even where the numbers match (W7-SOL-08): the
+   * restore would put the shape's mark on another source's pool, or empty
+   * it as a shape's that ended.
+   */
+  const staleRuns: { name: string; steps: Op[]; back: "damage" | "heal"; temp: number }[] = [
+    { name: "damage, then another source's grant of the same amount", steps: [shape({ ...BEAR, hp: { temp: 22 } }), hit(10), grant(12)], back: "damage", temp: 12 },
+    { name: "a heal, then the shape ended and another source's grant of the same amount", steps: [set({ cur: 10 }), shape({ ...BEAR, hp: { temp: 22 } }), heal(5), shape({ srdId: null }), grant(22)], back: "heal", temp: 22 },
+  ];
+  for (const run of staleRuns) {
+    test(`refused once the pool has another owner: ${run.name}`, () => {
+      for (const opVersion of [undefined, 7]) {
+        const label = `at ${opVersion ?? "live"}`;
+        let s = setup();
+        for (const [i, op] of run.steps.entries()) {
+          const r = applyOp(s, op, DM, { ...env(i + 1), ...(opVersion !== undefined ? { opVersion } : {}) });
+          assert.ok(r.ok, `${op.t} ${label}`);
+          s = r.state;
+        }
+        const line = s.log.findLast((e) => e.data?.type === "hp" && e.data.change === run.back)!;
+        const data = line.data as Extract<LogEvent, { type: "hp" }>;
+        assert.deepEqual(data.revert?.after.hp, bree(s).hp, `the numbers match ${label}`);
+        assert.equal(revertedActor(bree(s), data.revert!), null, `no Take back offered ${label}`);
+        const built = hpUndoRestore(s, line.id);
+        assert.deepEqual(built.ok ? null : built.message, CHANGED_SINCE, label);
+        const ended = applyOp(s, shape({ srdId: null }), DM, { ...env(run.steps.length + 1), ...(opVersion !== undefined ? { opVersion } : {}) });
+        assert.ok(ended.ok);
+        assert.equal(ended.state.characters.bree!.actor.hp.temp, run.temp, `the other source's pool stays ${label}`);
+      }
+    });
+  }
+
   test("the line keeps whose the pool was only while a shape gave it", () => {
     let s = apply(setup(), shape({ ...BEAR, hp: { temp: 22 } }));
     s = apply(s, grant(30), DM, 2);
     const revert = (state: typeof s) => (state.log.findLast((e) => e.data?.type === "hp")!.data as { revert?: { shapeTemp?: unknown } }).revert;
-    assert.deepEqual(revert(s)?.shapeTemp, { srdId: "brown-bear" });
+    assert.deepEqual(revert(s)?.shapeTemp, { before: "brown-bear" }, "the shape's 22 before, another source's 30 after");
     s = apply(s, hit(5), DM, 3);
     assert.equal(revert(s)?.shapeTemp, undefined, "the 30 were another source's");
   });
