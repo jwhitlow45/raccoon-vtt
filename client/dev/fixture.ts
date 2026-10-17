@@ -2,6 +2,7 @@ import { createInitialState } from "#shared/initial.ts";
 import { wallChunk } from "#shared/keys.ts";
 import type { Actor, BuildChunk, Character, CustomMonster, Effect, FogTile, FreeWall, Light, Member, RoomState, Scene, Token } from "#shared/model.ts";
 import { TILE_SUB } from "#shared/rules/fog.ts";
+import { withPcActorNumbers } from "#shared/rules/pcStats.ts";
 import { encodeTileFrom } from "../lib/fogTiles.ts";
 import { FIXTURE_MAP } from "./placeholders.ts";
 
@@ -105,7 +106,7 @@ function fogTiles(sceneId: string, bounds: { w: number; h: number }, mode: "norm
   return tiles;
 }
 
-export type FixtureOptions = { fog: "normal" | "off" | "corrupt" | "none"; blackout: boolean; areas?: boolean; walls?: boolean; text?: boolean; melee?: boolean };
+export type FixtureOptions = { fog: "normal" | "off" | "corrupt" | "none"; blackout: boolean; areas?: boolean; walls?: boolean; text?: boolean; melee?: boolean; pcstats?: boolean };
 
 export function createFixtureState(options: FixtureOptions): RoomState {
   nextToken = 0;
@@ -326,7 +327,42 @@ export function createFixtureState(options: FixtureOptions): RoomState {
   }
   if (options.text) textStress(state);
   if (options.melee) meleeGuardians(state);
+  if (options.pcstats) thornStats(state);
   return state;
+}
+
+/** Thorn at level 5 with a stat block (`pcstats=1`, docs/design-v1-pc-stats.md), its actor's numbers following it. */
+function thornStats(state: RoomState): void {
+  const thorn = state.characters[FIXTURE_IDS.thornChar]!;
+  state.characters[thorn.id] = withPcActorNumbers({
+    ...thorn,
+    level: 5,
+    stats: {
+      abilities: { str: 16, dex: 10, con: 14, int: 8, wis: 12, cha: 16 },
+      saves: ["wis", "cha"],
+      skills: { athletics: "prof", insight: "prof", perception: "prof", persuasion: "expert" },
+      spellAbility: "cha",
+      adjust: { allSaves: 1 },
+      defenses: { necrotic: "resistant" },
+      rolls: [
+        {
+          id: "r-longsword",
+          name: "Longsword",
+          kind: "weapon",
+          ability: "str",
+          attack: { prof: true, bonus: 0 },
+          dice: [
+            { formula: "1d8", type: "slashing", mod: true },
+            { formula: "2d8", type: "radiant", optional: true, name: "Divine Smite" },
+          ],
+        },
+        { id: "r-javelin", name: "Javelin", kind: "weapon", ability: "str", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d6", type: "piercing", mod: true }] },
+        { id: "r-bless", name: "Bless", kind: "spell", ability: "spell", level: 1, dice: [{ formula: "1d4" }] },
+        { id: "r-cure", name: "Cure Wounds", kind: "spell", ability: "spell", level: 1, dice: [{ formula: "2d8", type: "healing", mod: true, upcast: "2d8" }] },
+        { id: "r-fear", name: "Turn the Unholy", kind: "other", ability: "cha", save: { ability: "wis" }, dice: [] },
+      ],
+    },
+  });
 }
 
 /**

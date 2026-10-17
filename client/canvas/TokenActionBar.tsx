@@ -198,9 +198,11 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const short = frame.short;
   const items = vitals({ actor, token, fullAccess: props.fullAccess || access.full, place: "bar" });
   const split = shortSplit(items);
-  const block = useLinkedBlock(token, actor, access);
-  // A creature companion's players read its block here too, as the DM does a monster's (docs/design-v1-companion-stat-blocks.md 6.6).
-  const statBlock = opensStatBlock(statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion: token.companion !== undefined }), tokenStatBlock(actor, monsters, blocks));
+  const block = useLinkedBlock(token, actor, access, character);
+  // A creature companion's players read its block here too, as the DM does a monster's (docs/design-v1-companion-stat-blocks.md 6.6),
+  // and a player character's DM and players its own stat block (docs/design-v1-pc-stats.md 7.4).
+  const shown = statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion: token.companion !== undefined, character: character !== undefined });
+  const statBlock = (shown && character?.stats !== undefined) || opensStatBlock(shown, tokenStatBlock(actor, monsters, blocks));
   const sheetUrl = actor?.sheetUrl ? validSheetUrl(actor.sheetUrl) : null;
   // A dead creature's bar offers the DM Revive after the Dead tag, and tells a player who may heal it what healing will do (docs/design-v1-combat-flow.md 3.5).
   // An HP-less token shows no life tag, so it has neither (docs/design-v1-token-panel.md 3.2).

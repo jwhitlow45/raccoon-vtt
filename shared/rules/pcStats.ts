@@ -296,13 +296,23 @@ function canonical(terms: Formula): string | null {
   return parseFormula(text).ok ? text : null;
 }
 
-/** One part's dice at the character's level: a cantrip's grown by its tier, and the modifier added. Null when its formula does not read. */
-export function partFormula(part: Pick<PcDice, "formula" | "mod" | "grows">, mod: number, level: number | undefined): string | null {
+function partTerms(part: Pick<PcDice, "formula" | "mod" | "grows">, mod: number, level: number | undefined): Formula | null {
   const parsed = parseFormula(part.formula);
   if (!parsed.ok) return null;
   let terms = part.grows ? scaledDice(parsed.formula, cantripTier(level)) : parsed.formula;
   if (part.mod && mod !== 0) terms = [...terms, { kind: "number", sign: mod < 0 ? -1 : 1, value: Math.abs(mod) }];
-  return canonical(terms);
+  return canonical(terms) === null ? null : terms;
+}
+
+/** One part's dice at the character's level: a cantrip's grown by its tier, and the modifier added. Null when its formula does not read. */
+export function partFormula(part: Pick<PcDice, "formula" | "mod" | "grows">, mod: number, level: number | undefined): string | null {
+  const terms = partTerms(part, mod, level);
+  return terms ? formatFormula(terms) : null;
+}
+
+/** A part's `upcast` for so many slot levels above the spell's own. */
+function upcastTerms(per: Formula, extra: number): Formula {
+  return per.map((t): Term => (t.kind === "dice" ? { ...t, count: t.count * extra } : { ...t, value: t.value * extra }));
 }
 
 function joined(formulas: readonly string[]): string | null {
@@ -320,6 +330,11 @@ function upcastText(upcast: string | undefined): string | undefined {
 /** A DC as dice.roll carries it. */
 function rollDc(dc: number): number {
   return clamp(dc, LIMITS.rollDcMin, LIMITS.rollDcMax);
+}
+
+/** One roll of a block as doc 1's NamedRoll at a level, for the editor's and the view's readings of a roll as it stands. */
+export function namedRollOf(stats: PcStats, level: number | undefined, roll: PcRoll): NamedRoll {
+  return namedRoll(stats, pcDerived(stats, level), roll);
 }
 
 /** One roll as doc 1's NamedRoll (section 3.4). */
@@ -407,8 +422,32 @@ function upcastAt(formula: string, upcast: string | undefined, extra: number): s
   const base = parseFormula(formula);
   const per = parseFormula(upcast);
   if (!base.ok || !per.ok) return formula;
-  const added = per.formula.map((t): Term => (t.kind === "dice" ? { ...t, count: t.count * extra } : { ...t, value: t.value * extra }));
-  return canonical(withAdded(base.formula, added)) ?? formula;
+  return canonical(withAdded(base.formula, upcastTerms(per.formula, extra))) ?? formula;
+}
+
+/**
+ * Whether a roll stays within the dice's bounds at its largest: at level 20
+ * and, for a spell that scales, cast with a 9th-level slot, each part
+ * reading as a formula and all of them together within one roll's dice
+ * (docs/design-v1-dice.md 3.2). The editor refuses one that does not, so a
+ * roll never grows past what can be rolled as the character levels up.
+ */
+export function pcRollFits(stats: PcStats, roll: PcRoll): boolean {
+  const mod = rollMod(stats, pcDerived(stats, 20), roll);
+  const extra = roll.kind === "spell" && roll.level !== undefined && roll.level >= 1 ? 9 - roll.level : 0;
+  let dice = 0;
+  for (const part of roll.dice) {
+    let terms = partTerms(part, mod, 20);
+    if (terms === null) return false;
+    if (part.upcast !== undefined && part.type !== undefined && extra > 0) {
+      const per = parseFormula(part.upcast);
+      if (!per.ok) return false;
+      terms = withAdded(terms, upcastTerms(per.formula, extra));
+      if (canonical(terms) === null) return false;
+    }
+    for (const t of terms) if (t.kind === "dice") dice += t.count;
+  }
+  return dice <= LIMITS.dicePerOp;
 }
 
 /**
@@ -447,10 +486,15 @@ const DEFENSE_KIND = { resistant: "resist", immune: "immune", vulnerable: "vulne
 export function pcDefenses(character: Pick<Character, "stats" | "actor">): { defenses: PcDefense[]; evasion: boolean } {
   const stats = character.stats;
   if (!stats || pcShape(character) !== "none") return { defenses: [], evasion: false };
+  return { defenses: statsDefenses(stats), evasion: stats.evasion === true };
+}
+
+/** The damage defenses a block holds, whatever shape its character is in, for the block's own view. */
+export function statsDefenses(stats: Pick<PcStats, "defenses">): PcDefense[] {
   const defenses: PcDefense[] = [];
   for (const type of DAMAGE_TYPES) {
     const kind = stats.defenses[type];
     if (kind !== undefined) defenses.push({ kind: DEFENSE_KIND[kind], of: type, source: "Stat block" });
   }
-  return { defenses, evasion: stats.evasion === true };
+  return defenses;
 }

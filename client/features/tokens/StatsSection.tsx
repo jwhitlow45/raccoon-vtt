@@ -39,13 +39,15 @@ export function StatsSection(props: {
   notesTitle?: string;
   /** Whether the DM's notes show here. */
   dmNotes?: boolean;
+  /** A character whose stat block gives its initiative and Passive Perception (StatsFields). */
+  fromBlock?: boolean;
 }) {
   const { actor, canEdit, onPatch, dm } = props;
   if (!props.full) return null;
   return (
     <>
       <Section title="Stats">
-        <StatsFields actor={actor} canEdit={canEdit} onPatch={onPatch} dm={dm} noAc={hpLess(actor)} />
+        <StatsFields actor={actor} canEdit={canEdit} onPatch={onPatch} dm={dm} noAc={hpLess(actor)} fromBlock={props.fromBlock} />
       </Section>
       <SheetLink actor={actor} editable={canEdit("sheetUrl")} onPatch={onPatch} />
       <Section title={props.notesTitle ?? "Notes"}>
@@ -87,8 +89,15 @@ export function StatsFields(props: {
   dm: boolean;
   /** No AC to show while `hpLess` holds, an effect's stored AC included (docs/design-v1-combat-flow.md 3.6.6). */
   noAc?: boolean;
+  /**
+   * The character's stat block gives its initiative and Passive Perception
+   * (docs/design-v1-pc-stats.md 7.1), so they show as text that says so,
+   * for the DM too, and are changed in the block.
+   */
+  fromBlock?: boolean;
 }) {
   const { actor, canEdit, onPatch, dm } = props;
+  const fromBlock = props.fromBlock === true;
   const speeds: Speeds = actor.speeds ?? { walk: 30 };
 
   const setSpeed = (key: (typeof SPEED_KEYS)[number], value: number | null) => {
@@ -134,7 +143,7 @@ export function StatsFields(props: {
       ) : speeds.hover ? (
         <Note>Hovers.</Note>
       ) : null}
-      <Stat label="Initiative bonus" value={signed(actor.initBonus)} editable={canEdit("initBonus")}>
+      <Stat label="Initiative bonus" value={fromBlock ? withSource(signed(actor.initBonus)) : signed(actor.initBonus)} editable={!fromBlock && canEdit("initBonus")}>
         <Stepper label="Initiative bonus" value={actor.initBonus ?? 0} step={1} min={-20} max={40} onChange={(n) => onPatch({ initBonus: n })} />
       </Stat>
       {dm || actor.initScore !== undefined ? (
@@ -155,7 +164,7 @@ export function StatsFields(props: {
           />
         </Stat>
       ) : null}
-      <Stat label="Passive Perception" value={actor.passivePerception} editable={canEdit("passivePerception")}>
+      <Stat label="Passive Perception" value={fromBlock ? withSource(actor.passivePerception) : actor.passivePerception} editable={!fromBlock && canEdit("passivePerception")}>
         <NumberField
           label="Passive Perception"
           value={actor.passivePerception}
@@ -186,6 +195,11 @@ export function StatsFields(props: {
       {dm ? <LegendaryFields actor={actor} onPatch={onPatch} /> : null}
     </>
   );
+}
+
+/** "+2, from the stat block". */
+function withSource(value: string | number | undefined): string | undefined {
+  return value === undefined ? undefined : `${value}, from the stat block`;
 }
 
 function signed(n: number | undefined): string | undefined {

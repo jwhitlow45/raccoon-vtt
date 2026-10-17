@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { Character, CreatureSize, Member } from "#shared/model.ts";
 import type { ActorPatch, CharacterPatch } from "#shared/protocol.ts";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -16,6 +16,7 @@ import { RestSection } from "./RestSection.tsx";
 import { StatsSection } from "./StatsSection.tsx";
 import { NumberField, TextField } from "./ui.tsx";
 import { isAssetImage } from "#shared/imageRef.ts";
+import { PcStatBlock } from "../pcstats/PcStatBlock.tsx";
 
 export const SIZE_OPTIONS: { value: CreatureSize; label: string }[] = [
   { value: "tiny", label: "Tiny" },
@@ -31,7 +32,8 @@ export const SIZE_OPTIONS: { value: CreatureSize; label: string }[] = [
  * lives at room level and every token of it points here, so HP and
  * conditions follow the PC from scene to scene. The DM edits everything.
  * The owning player edits the fields design 8.1 allows: name, image, level,
- * HP and the stat card's numbers, senses, notes and the sheet link.
+ * HP and the stat card's numbers, senses, notes, the sheet link and the
+ * stat block (docs/design-v1-pc-stats.md 7.1).
  */
 export function CharacterCard(props: { character: Character }) {
   const { character } = props;
@@ -88,7 +90,7 @@ export function CharacterCard(props: { character: Character }) {
           </FieldRow>
         ) : null}
         {access.canEdit("level") ? (
-          <FieldRow label="Level" hint={access.dm ? "The encounter builder's XP budget counts it." : undefined}>
+          <FieldRow label="Level" hint={access.dm ? "The encounter builder's XP budget counts it. Sets the proficiency bonus too." : "Sets the proficiency bonus too."}>
             <NumberField label="Character level" value={character.level} min={1} max={20} nullable placeholder="Not set" onCommit={(level) => update({ level })} />
           </FieldRow>
         ) : null}
@@ -108,16 +110,24 @@ export function CharacterCard(props: { character: Character }) {
         canEdit={access.full}
       />
       {access.full ? <RestSection actor={character.actor} target={{ characterId: character.id }} /> : null}
+      {access.full ? <CardStatBlock character={character} /> : null}
       <StatsSection
         actor={character.actor}
         canEdit={access.canEditActor}
         onPatch={(patch: ActorPatch) => update({ actor: patch })}
         dm={access.dm}
         full={access.full}
+        fromBlock={character.stats !== undefined}
       />
       {access.dm ? <CharacterOwners character={character} update={update} /> : null}
     </div>
   );
+}
+
+/** The card's "Stat block" (docs/design-v1-pc-stats.md 7.1): the token panel's view and buttons, folded to start. */
+function CardStatBlock(props: { character: Character }) {
+  const [open, setOpen] = useState(false);
+  return <PcStatBlock character={props.character} fold={{ open, onToggle: () => setOpen((o) => !o) }} />;
 }
 
 function CharacterOwners(props: { character: Character; update(patch: CharacterPatch): void }) {

@@ -52,16 +52,19 @@ export function statBlockFoldable(link: TokenStatBlock): boolean {
 }
 
 /**
- * Who reads the block on this token. On a companion, the DM and its
+ * Who reads the block on this token. On a token of a player character, the
+ * DM and the character's players, who read and edit its own stat block
+ * (docs/design-v1-pc-stats.md 7.3). On a companion, the DM and its
  * players, whatever it links, while it is a creature: an effect has no
  * block (docs/design-v1-companion-stat-blocks.md 5.5). Elsewhere the DM, on
  * a monster or an NPC, and an owner only for an SRD monster they play, such
- * as a druid's Wild Shape: the SRD is openly licensed and the owner already
- * receives `srdId`. A room monster's block never reaches a player, since
- * it may be text from a book the group owns, and their projection never
- * carries `monsterId` anyway.
+ * as a druid's Wild Shape the 2014 way: the SRD is openly licensed and the
+ * owner already receives `srdId`. A room monster's block never reaches a
+ * player, since it may be text from a book the group owns, and their
+ * projection never carries `monsterId` anyway.
  */
-export function statBlockShown(input: { dm: boolean; owner: boolean; kind: Token["kind"]; actor: Pick<Actor, "srdId"> | undefined; companion?: boolean }): boolean {
+export function statBlockShown(input: { dm: boolean; owner: boolean; kind: Token["kind"]; actor: Pick<Actor, "srdId"> | undefined; companion?: boolean; character?: boolean }): boolean {
+  if (input.character) return input.dm || input.owner;
   if (input.companion) return (input.dm || input.owner) && input.kind !== "object";
   if (input.dm) return input.kind === "monster" || input.kind === "npc";
   return input.owner && input.actor?.srdId !== undefined;

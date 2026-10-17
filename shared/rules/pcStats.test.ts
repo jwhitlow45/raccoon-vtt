@@ -11,8 +11,10 @@ import {
   pcDerived,
   pcNamedRolls,
   pcProficiency,
+  pcRollFits,
   pcSlots,
   sortedRolls,
+  statsDefenses,
   withPcActorNumbers,
   withPcActors,
 } from "./pcStats.ts";
@@ -388,5 +390,21 @@ describe("defenses (docs/design-v1-pc-stats.md 3.6)", () => {
     assert.deepEqual(pcDefenses(character("c")), { defenses: [], evasion: false });
     const shaped = pc(5, stats({ defenses: { fire: "resistant" }, evasion: true }), { actor: actor({ srdId: "brown-bear" }) });
     assert.deepEqual(pcDefenses(shaped), { defenses: [], evasion: false });
+  });
+});
+
+describe("the largest a roll grows (docs/design-v1-pc-stats.md 7.2)", () => {
+  test("a cantrip at level 20 and a spell at a 9th-level slot stay within one roll's 100 dice, the modifier included", () => {
+    const block = stats({ spellAbility: "int" });
+    assert.equal(pcRollFits(block, roll("c", { kind: "spell", level: 0, dice: [{ formula: "25d10", type: "fire", grows: true }] })), true, "100 dice");
+    assert.equal(pcRollFits(block, roll("c", { kind: "spell", level: 0, dice: [{ formula: "26d10", type: "fire", grows: true }] })), false);
+    assert.equal(pcRollFits(block, roll("f", { kind: "spell", level: 3, dice: [{ formula: "8d6", type: "fire", upcast: "1d6" }] })), true);
+    assert.equal(pcRollFits(block, roll("f", { kind: "spell", level: 1, dice: [{ formula: "50d6", type: "fire", upcast: "7d6" }] })), false, "50 and 56 more");
+    assert.equal(pcRollFits(block, roll("p", { dice: [{ formula: "60d6", type: "fire" }, { formula: "41d6", type: "cold" }] })), false, "all parts together");
+    assert.equal(pcRollFits(block, roll("x", { dice: [{ formula: "1d8+", type: "fire" }] })), false, "a formula that does not read");
+  });
+
+  test("a block's defenses whatever shape its character is in, for its own view", () => {
+    assert.deepEqual(statsDefenses({ defenses: { fire: "resistant" } }), [{ kind: "resist", of: "fire", source: "Stat block" }]);
   });
 });

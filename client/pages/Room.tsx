@@ -27,6 +27,7 @@ import { PartyDock } from "../features/party/PartyDock.tsx";
 import type { OpenSheet } from "../features/find/findToken.ts";
 import { HandoutPopup } from "../features/handouts/HandoutPopup.tsx";
 import { EditorHost } from "../features/monsters/EditorHost.tsx";
+import { PcStatsHost } from "../features/pcstats/PcStatsEditor.tsx";
 import { useJobWaiting, usePdfJobRoom } from "../features/handouts/pdf/live.ts";
 import { useJournalUnread } from "../features/journal/store.ts";
 import { useLogUnread } from "../features/log/useLogUnread.ts";
@@ -241,6 +242,7 @@ export function Room() {
       <RoomPage />
       {/* Beside the page rather than in it, so an open stat block editor keeps its draft through whatever the page shows. */}
       <EditorHost />
+      <PcStatsHost />
     </RoomScopeProvider>
   );
 }

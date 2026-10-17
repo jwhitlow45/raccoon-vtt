@@ -32,6 +32,7 @@ import { drawMap, drawPortrait } from "./placeholders.ts";
  * - `color=8e4ec6` gives the viewer that member color, to watch the accent follow it (lib/accent.ts).
  * - `text=1` puts board text at its worst: long names, packed crowds, long area and map labels.
  * - `melee=1` casts Spirit Guardians around Thorn with goblins in melee above and below him.
+ * - `pcstats=1` gives Thorn a level and a stat block (docs/design-v1-pc-stats.md).
  */
 function readOptions() {
   const q = new URLSearchParams(location.search);
@@ -53,6 +54,7 @@ function readOptions() {
       walls: q.get("walls") === "1" || q.get("sight") === "1",
       text: q.get("text") === "1",
       melee: q.get("melee") === "1",
+      pcstats: q.get("pcstats") === "1",
     } satisfies FixtureOptions,
   };
 }

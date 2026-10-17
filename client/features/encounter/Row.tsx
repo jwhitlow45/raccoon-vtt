@@ -107,6 +107,8 @@ export function EntryRow(props: {
   const dead = life === "dead";
   // A companion's players open its block from its row where its bar would (docs/design-v1-companion-stat-blocks.md 6.7).
   const playerBlock = useCompanionBlockOpens(!dm && mine ? token : undefined);
+  // A player character's own stat block opens from its row for the DM and its players, on its token (docs/design-v1-pc-stats.md 7.4).
+  const pcBlock = (dm || mine) && token !== undefined && "ref" in token.actor && character?.stats !== undefined;
   const drag = props.drag;
   const slotted = handleSlot(dm, drag);
 
@@ -240,7 +242,7 @@ export function EntryRow(props: {
           target={rowTarget({ tokens: token ? { [token.id]: token } : {}, characters: character ? { [character.id]: character } : {} }, entry)}
           readied={readied}
           playerOwned={playerOwned}
-          statBlockTokenId={token && (dm ? token.kind === "monster" || token.kind === "npc" : playerBlock) ? token.id : null}
+          statBlockTokenId={token && ((dm ? token.kind === "monster" || token.kind === "npc" : playerBlock) || pcBlock) ? token.id : null}
           revive={offersRevive(life, token?.kind)}
         />
       ) : null}

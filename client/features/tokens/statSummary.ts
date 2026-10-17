@@ -1,4 +1,4 @@
-import type { Actor, CompanionBlock, CustomMonster, HpVisibility, LifeState, StatBlock, TokenKind } from "#shared/model.ts";
+import type { AbilityKey, Actor, CompanionBlock, CustomMonster, HpVisibility, LifeState, StatBlock, TokenKind } from "#shared/model.ts";
 import { ABILITY_KEYS } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
@@ -160,6 +160,11 @@ export function saveUnits(block: Pick<StatBlock, "abilities">): string[] {
   return ABILITY_KEYS.map((k) => `${ABILITY_NAMES[k]} ${signed(block.abilities[k].save)}`);
 }
 
+/** The same from the numbers a creature rolls with, such as a player character's stat block's (docs/design-v1-pc-stats.md 7.4). */
+export function saveUnitsOf(saves: Readonly<Record<AbilityKey, number>>): string[] {
+  return ABILITY_KEYS.map((k) => `${ABILITY_NAMES[k]} ${signed(saves[k])}`);
+}
+
 export type DefenseLine = { label: "Vulnerabilities" | "Resistances" | "Immunities"; text: string };
 
 /** The block's defenses in the 2024 block's words and order, each only when it says something. */
@@ -171,8 +176,17 @@ export function defenseLines(block: Pick<StatBlock, "vulnerabilities" | "resista
   return lines;
 }
 
-/** Where the saves and defenses stand: no block to read, the SRD chunk on its way, its load failed, or the block. */
-export type LinkedBlock = { kind: "none" } | { kind: "loading" } | { kind: "failed" } | { kind: "ready"; block: StatBlock };
+/**
+ * Where the saves and defenses stand: no block to read, the SRD chunk on
+ * its way, its load failed, or the block. A player character's own stat
+ * block gives its numbers and defense lines instead (docs/design-v1-pc-stats.md 7.4).
+ */
+export type LinkedBlock =
+  | { kind: "none" }
+  | { kind: "loading" }
+  | { kind: "failed" }
+  | { kind: "ready"; block: StatBlock }
+  | { kind: "numbers"; saves: Readonly<Record<AbilityKey, number>>; defenses: readonly DefenseLine[] };
 
 // The SRD's blocks are fixed once the chunk loads, so each is read once a page.
 const srdBlocks = new WeakMap<SrdMonster, StatBlock | null>();

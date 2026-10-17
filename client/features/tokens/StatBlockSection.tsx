@@ -21,6 +21,7 @@ import { statBlockOpen, statBlockOpenedSlot, usePanelFolds } from "./panelFolds.
 import { statBlockRequest } from "./statBlockOpen.ts";
 import { Note, Section, SmallButton } from "./ui.tsx";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
+import { PcStatBlock } from "../pcstats/PcStatBlock.tsx";
 
 /** A companion's character, as the section names it and saves blocks under it. */
 type Keeper = { id: string; name: string };
@@ -43,6 +44,10 @@ type Keeper = { id: string; name: string };
  * say, scrolls it to the top of the panel and moves focus to its
  * disclosure, which is named "Stat block" whether open or folded.
  *
+ * On a player character's token the section is its character's own stat
+ * block (docs/design-v1-pc-stats.md 7.3, pcstats/PcStatBlock.tsx), for the
+ * DM and the character's players.
+ *
  * On a creature companion the DM and its players share the section
  * (docs/design-v1-companion-stat-blocks.md 6.5): Attach, Change and Detach
  * for both, the block kept by its character with Edit, and an SRD block's
@@ -63,6 +68,8 @@ export function StatBlockSection(props: {
   const monsters = useRoomView((s) => s.view?.monsters);
   const blocks = useRoomView((s) => s.view?.companionBlocks);
   const keeperName = useRoomView((s) => (token.companion ? s.view?.characters[token.companion.of]?.name : undefined));
+  // A player character's token shows its character's own stat block (docs/design-v1-pc-stats.md 7.3).
+  const pc = useRoomView((s) => ("ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
   const keeper: Keeper | null = token.companion ? { id: token.companion.of, name: keeperName ?? "its character" } : null;
   const { folds, slot } = usePanelFolds();
   const preview = usePreview() !== null;
@@ -91,7 +98,19 @@ export function StatBlockSection(props: {
     });
   }, [askedSeq, askedFocus, request]);
 
-  if (!statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion: keeper !== null })) return null;
+  if (!statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion: keeper !== null, character: "ref" in token.actor })) return null;
+  const toggle = () => {
+    // A tap is the viewer's own choice: the request's override gives way to it, and it is what this device remembers.
+    openedStore.setState({ tokenId: null });
+    slot.tap("statBlock", !open, !preview);
+  };
+  if ("ref" in token.actor) {
+    return (
+      <div ref={ref} data-stat-block="" style={{ scrollMarginTop: theme.space(2), overflowWrap: "anywhere" }}>
+        {pc ? <PcStatBlock character={pc} fold={{ open, onToggle: toggle, foldRef: focusRef }} summary={props.summary} /> : <Section title="Stat block">{props.summary}</Section>}
+      </div>
+    );
+  }
   const link = tokenStatBlock(actor, monsters, blocks);
   /*
    * Each editor opens over the room with the block or monster as it is at
@@ -116,11 +135,6 @@ export function StatBlockSection(props: {
   const detach =
     (access.dm || keeper !== null) && link.kind !== "none" ? <SmallButton onClick={() => props.patchActor(access.dm ? DETACH_PATCH : OWNER_DETACH_PATCH)}>Detach</SmallButton> : null;
   const change = keeper ? <SmallButton onClick={() => setPicking(true)}>Change</SmallButton> : null;
-  const toggle = () => {
-    // A tap is the viewer's own choice: the request's override gives way to it, and it is what this device remembers.
-    openedStore.setState({ tokenId: null });
-    slot.tap("statBlock", !open, !preview);
-  };
 
   return (
     // Its lines and buttons name the companion's character, whose name may be long and unbroken: it wraps rather than run out of the panel.

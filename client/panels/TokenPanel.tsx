@@ -127,7 +127,7 @@ function TokenDetails(props: PanelProps) {
     owner: access.owner,
     kind: token.kind,
     companion,
-    statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion }),
+    statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion, character: "ref" in token.actor }),
     summary: summary !== null,
     actor: actor !== undefined,
     ownerRenames: !access.dm && access.canEditToken("name"),
@@ -174,7 +174,7 @@ function TokenDetails(props: PanelProps) {
         return actor ? (
           <Section key={id} title="Stats" fold={fold("stats")}>
             <SizeField token={token} actor={actor} access={access} feetPerCell={feetPerCell} />
-            <StatsFields actor={actor} canEdit={access.canEditActor} onPatch={patchActor} dm={access.dm} noAc={hpLess(actor, token)} />
+            <StatsFields actor={actor} canEdit={access.canEditActor} onPatch={patchActor} dm={access.dm} noAc={hpLess(actor, token)} fromBlock={character?.stats !== undefined} />
             {access.canEditActor("sheetUrl") ? (
               <FieldRow label="Sheet link">
                 <SheetUrlField value={actor.sheetUrl ?? ""} onPatch={patchActor} />

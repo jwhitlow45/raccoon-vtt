@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import type { Actor, Token } from "#shared/model.ts";
+import { ABILITY_KEYS, type AbilityKey, type Actor, type Character, type Token } from "#shared/model.ts";
+import { pcRollNumbers } from "#shared/dice/bonus.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { AcBadge } from "../../components/AcBadge.tsx";
 import { Button } from "../../components/Button.tsx";
@@ -10,7 +11,8 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
 import type { TokenAccess } from "./access.ts";
-import { defenseLines, linkedBlockState, moreStatsShown, saveUnits, type LinkedBlock, type VitalItem, type VitalUnit } from "./statSummary.ts";
+import { defenseLines, linkedBlockState, moreStatsShown, saveUnits, saveUnitsOf, type LinkedBlock, type VitalItem, type VitalUnit } from "./statSummary.ts";
+import { pcDefenseLines } from "../pcstats/reading.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { useSrdBlocks } from "../monsters/srdBlocks.ts";
 
@@ -34,13 +36,30 @@ export function useSrdList(active: boolean): { list: readonly SrdMonster[] | nul
  * companion's stored block reads at once from the view, so only an SRD
  * block loads the chunk. The vitals never wait for it.
  */
-export function useLinkedBlock(token: Pick<Token, "kind" | "companion">, actor: Partial<Actor> | undefined, access: Pick<TokenAccess, "dm" | "owner">): LinkedBlock {
+export function useLinkedBlock(
+  token: Pick<Token, "kind" | "companion">,
+  actor: Partial<Actor> | undefined,
+  access: Pick<TokenAccess, "dm" | "owner">,
+  /** The character a player character's token is of, whose own stat block gives its saves and defenses. */
+  character?: Character,
+): LinkedBlock {
   const monsters = useRoomView((s) => s.view?.monsters);
   const blocks = useRoomView((s) => s.view?.companionBlocks);
-  const shown = statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion: token.companion !== undefined });
-  const srd = useSrdList(shown && tokenStatBlock(actor, monsters, blocks).kind === "srd");
+  const shown = statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion: token.companion !== undefined, character: character !== undefined });
+  const pc = shown && character ? pcSummary(character) : null;
+  const srd = useSrdList(shown && pc === null && tokenStatBlock(actor, monsters, blocks).kind === "srd");
+  if (pc) return pc;
   const block = shown ? linkedBlockState(actor, monsters, srd, blocks) : ({ kind: "none" } as const);
   return block;
+}
+
+/** A player character's saves and defense lines from its own stat block, or null without one (docs/design-v1-pc-stats.md 7.4). */
+function pcSummary(character: Character): LinkedBlock | null {
+  const numbers = pcRollNumbers(character);
+  if (!numbers || character.actor.srdId !== undefined) return null;
+  const saves = {} as Record<AbilityKey, number>;
+  for (const key of ABILITY_KEYS) saves[key] = numbers.abilities[key].save;
+  return { kind: "numbers", saves, defenses: pcDefenseLines(character) };
 }
 
 /** "Open the sheet ↗": the owner's D&D Beyond sheet in a new tab, with no referrer and no opener. 44 px tall. */
@@ -145,7 +164,7 @@ export function SavesLine(props: { block: LinkedBlock }) {
   return (
     <div data-saves="" style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", rowGap: theme.space(1), columnGap: theme.space(1.5), fontSize: theme.font.body14 }}>
       <span style={{ color: theme.color.textMuted }}>Saves</span>
-      {saveUnits(block.block).map((text) => {
+      {(block.kind === "numbers" ? saveUnitsOf(block.saves) : saveUnits(block.block)).map((text) => {
         const [ability, value] = text.split(" ");
         return (
           <span key={ability} style={{ whiteSpace: "nowrap" }}>
@@ -165,8 +184,8 @@ export function SavesLine(props: { block: LinkedBlock }) {
  * room monster may type 500 characters, and the block holds the rest.
  */
 export function DefenseLines(props: { block: LinkedBlock; clamp?: boolean }) {
-  if (props.block.kind !== "ready") return null;
-  const lines = defenseLines(props.block.block);
+  if (props.block.kind !== "ready" && props.block.kind !== "numbers") return null;
+  const lines = props.block.kind === "numbers" ? props.block.defenses : defenseLines(props.block.block);
   if (lines.length === 0) return null;
   return (
     <div style={{ display: "grid", gap: theme.space(1), fontSize: theme.font.body14 }}>
