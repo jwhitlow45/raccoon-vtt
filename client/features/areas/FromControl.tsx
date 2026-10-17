@@ -187,10 +187,18 @@ function face(control: ShownFrom, form: SlotForm): ReactNode {
 
 function CompactPicture(props: { control: ShownFrom }) {
   const { control } = props;
-  if (control.form === "toggle") return <Picture creature={control.offer} />;
+  if (control.form === "toggle") {
+    return (
+      <Marked state={control.on ? "on" : "off"}>
+        <Picture creature={control.offer} />
+      </Marked>
+    );
+  }
   if (control.form === "disabled") {
     return control.characterId !== undefined ? (
-      <Portrait entry={{ characterId: control.characterId, label: control.name ?? "" }} size={theme.layout.options.disk} />
+      <Marked state="disabled">
+        <Portrait entry={{ characterId: control.characterId, label: control.name ?? "" }} size={theme.layout.options.disk} />
+      </Marked>
     ) : (
       <Icon name="noCaster" size={theme.layout.options.disk} />
     );
@@ -198,6 +206,29 @@ function CompactPicture(props: { control: ShownFrom }) {
   const on = control.offers.find((o) => o.tokenId === control.on);
   return on ? <Picture creature={on} /> : <Icon name="noCaster" size={theme.layout.options.disk} />;
 }
+
+/**
+ * The square's words are gone, so its picture says the state as well as its
+ * fill does (WCAG 1.4.1): on, the portrait as it is. Off, the portrait
+ * faded under the no-caster slash. Disabled, grey and fainter still, under
+ * a slash in the disabled text color.
+ */
+function Marked(props: { state: "on" | "off" | "disabled"; children: ReactNode }) {
+  const { state } = props;
+  return (
+    <span data-rvtt-from={state} style={{ position: "relative", display: "grid", placeItems: "center" }}>
+      <span style={{ display: "grid", opacity: state === "on" ? 1 : state === "off" ? 0.5 : 0.35, filter: state === "disabled" ? "grayscale(1)" : undefined }}>{props.children}</span>
+      {state === "on" ? null : (
+        <span aria-hidden style={{ position: "absolute", inset: -(SLASH - theme.layout.options.disk) / 2, display: "grid", placeItems: "center" }}>
+          <Icon name="noCaster" size={SLASH} />
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** The slash's circle stands just outside the 24 px portrait. */
+const SLASH = 32;
 
 /** The creature's portrait as the tracker draws it: the token's image, else its character's, else initials. */
 function Picture(props: { creature: AreaCreature }) {

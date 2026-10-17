@@ -647,6 +647,27 @@ describe("raccoon-vtt an area from your character", { timeout: 900_000 }, () => 
       );
       await shots.take(pat, `areas-320-130-placing-${name.toLowerCase()}`);
       await pressSlot(pat, "cancel");
+      if (name !== "Thorn") continue;
+      // The square says on, off and disabled by its picture too: off fades it under the slash, disabled greys it.
+      const square = options(pat).locator('[data-options-row] > [data-rvtt-slot="from"] [data-rvtt-from]');
+      assert.equal(await square.getAttribute("data-rvtt-from"), "on");
+      assert.equal(await square.locator("svg").count(), 0, "no slash while on");
+      await from(pat).click();
+      await fromIs(pat, "From Thorn", "off");
+      assert.equal(await square.getAttribute("data-rvtt-from"), "off");
+      assert.equal(await square.locator("svg").count(), 1, "the slash over the portrait");
+      assert.equal(await square.locator(":scope > span").first().evaluate((e) => (globalThis as unknown as { getComputedStyle(e: unknown): { opacity: string } }).getComputedStyle(e).opacity), "0.5");
+      await shots.take(pat, "areas-320-130-square-off");
+      await from(pat).click();
+      await fromIs(pat, "From Thorn", "on");
+      await ops.send({ t: "token.update", tokenId: run.thorn, patch: { sceneId: run.secondId } });
+      await fromIs(pat, "From Thorn", "disabled");
+      assert.equal(await square.getAttribute("data-rvtt-from"), "disabled");
+      const look = await square.locator(":scope > span").first().evaluate((e) => (globalThis as unknown as { getComputedStyle(e: unknown): { filter: string } }).getComputedStyle(e).filter);
+      assert.match(look, /grayscale/);
+      await shots.take(pat, "areas-320-130-square-disabled");
+      await ops.send({ t: "token.update", tokenId: run.thorn, patch: { sceneId: run.sceneId } });
+      await fromIs(pat, "From Thorn", "on");
     }
     // A long name ends in an ellipsis at the cap, so it never sets the row's width, and the whole name stays its name.
     await ops.send({ t: "character.update", characterId: run.thornChar, patch: { name: "Kethryllia the Bold" } });
