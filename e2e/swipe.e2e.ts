@@ -1327,7 +1327,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       const fit = await checkFit(sheet, view.scale, where);
       assert.ok(Math.abs(fit.area.height - 60 * view.scale) < 0.6, `${where}: the header is ${fit.area.height} px tall`);
       await shotsInBothSchemes(dm, `grabber-full-${view.width}x${view.height}-${view.scale * 100}`);
-      await swipe(dmCdp, await headerPoint(sheet), 8 + Math.max(44 * view.scale, normal.top / 4) + 12);
+      await swipe(dmCdp, await headerPoint(sheet), 8 + stepOf(normal.top, view.scale) + 12);
       await waitFor(`${where}: the sheet to step down`, async () => (await sheet.getAttribute("aria-modal")) === null || null, 3_000);
       assert.equal(await settled(sheet), "rest");
       assert.deepEqual(await corners(), ["16px 16px"], `${where}: the top corners squared off at some frame from the drag up to the step down`);
@@ -1500,7 +1500,9 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
         await shots.take(player, `grabber-roll-card-unstuck-320x${height}-130`);
         const pill = await middleOf(rollCard.locator("[data-sheet-grabber]"));
         const card = await rectOf(rollCard);
-        await swipe(playerCdp, pill, 8 + Math.max(card.height / 4, 44 * 1.3) + 20, {}, player);
+        // Drawn over everything, the card is fully off screen at the screen's foot.
+        const screen = await player.evaluate(() => (globalThis as unknown as Win).innerHeight);
+        await swipe(playerCdp, pill, closePast(screen - card.top, 1.3), {}, player);
         assert.equal(await settled(rollCard), "gone", `${where}: a drag from the pill with the total focused did not put the card off`);
         break;
       }
