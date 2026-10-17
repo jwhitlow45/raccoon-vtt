@@ -252,6 +252,23 @@ describe("the panel scroll keeper", () => {
   });
 });
 
+// A sheet outside any Room, as on the dev kit page, has no map to keep in.
+describe("a panel scroll keeper with no Room", () => {
+  test("keeps nothing and puts nothing back", () => {
+    const el = fakeScroller();
+    el.setContent(3000);
+    const keeper = new PanelScrollKeeper(null, () => el, () => 0);
+    keeper.show("menu");
+    assert.equal(keeper.waiting, false);
+    el.scrollTop = 400;
+    keeper.scrolled(null);
+    keeper.note(null, null);
+    keeper.show("log");
+    assert.equal(keeper.attempt(null), false);
+    assert.equal(el.scrollTop, 400, "the scroller left as it is");
+  });
+});
+
 // The coordinator's decision on the review's Q1: a panel whose subject changed opens at its top.
 describe("a panel about another subject", () => {
   test("Token comes back at its place only about the token it was left on", () => {

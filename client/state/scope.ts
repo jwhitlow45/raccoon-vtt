@@ -66,3 +66,13 @@ export function useRoomScope(): RoomScope {
 export function useScoped<T>(slot: ScopeSlot<T>): T {
   return useRoomScope().get(slot);
 }
+
+/**
+ * A slot's value for the Room this component renders in, or null outside
+ * any Room, for a shared component that also renders without one, such as
+ * a sheet on the dev kit page: it then goes without what the slot gives.
+ */
+export function useScopedIfAny<T>(slot: ScopeSlot<T>): T | null {
+  const scope = useContext(ScopeContext);
+  return scope ? scope.get(slot) : null;
+}

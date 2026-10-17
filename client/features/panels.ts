@@ -13,7 +13,7 @@ import {
 } from "react";
 import type { HeaderBack } from "../components/SheetHeader.tsx";
 import { retryableLazy } from "../lib/retryableLazy.ts";
-import { scopeSlot, useScoped } from "../state/scope.ts";
+import { scopeSlot, useScopedIfAny } from "../state/scope.ts";
 
 /**
  * The room's panels (design section 14.4): bottom sheets on phones, sheets
@@ -524,16 +524,17 @@ export type ScrollBox = { scrollTop: number; scrollLeft: number; readonly scroll
  * viewer takes the scroller, or RESTORE_WAIT_MS passes after the scroller
  * is first drawn. While it is pending no scroll is recorded, so a scroll
  * the restore caused, clamped by content not there yet, never replaces
- * the place it is putting back.
+ * the place it is putting back. With no map (`kept` null, outside any
+ * Room) it keeps and puts back nothing.
  */
 export class PanelScrollKeeper {
   private shown: string | null = null;
   private pending: { id: string; since: number | null } | null = null;
-  private readonly kept: Map<string, PanelScroll>;
+  private readonly kept: Map<string, PanelScroll> | null;
   private readonly box: () => ScrollBox | null;
   private readonly now: () => number;
 
-  constructor(kept: Map<string, PanelScroll>, box: () => ScrollBox | null, now: () => number) {
+  constructor(kept: Map<string, PanelScroll> | null, box: () => ScrollBox | null, now: () => number) {
     this.kept = kept;
     this.box = box;
     this.now = now;
@@ -548,7 +549,7 @@ export class PanelScrollKeeper {
   show(id: string | null): void {
     if (this.shown === id) return;
     this.shown = id;
-    this.pending = id === null ? null : { id, since: null };
+    this.pending = id === null || this.kept === null ? null : { id, since: null };
   }
 
   /**
@@ -561,7 +562,7 @@ export class PanelScrollKeeper {
   attempt(page: string | null, subject: string | null = null): boolean {
     const ask = this.pending;
     const el = this.box();
-    if (!ask || !el || el.getClientRects().length === 0) return false;
+    if (!ask || !el || !this.kept || el.getClientRects().length === 0) return false;
     const now = this.now();
     ask.since ??= now;
     if (now - ask.since >= RESTORE_WAIT_MS) {
@@ -582,7 +583,7 @@ export class PanelScrollKeeper {
   /** The scroller scrolled: kept as the panel's place, unless a restore is pending. */
   scrolled(page: string | null, subject: string | null = null): void {
     const el = this.box();
-    if (this.shown === null || this.pending !== null || !el) return;
+    if (this.shown === null || this.pending !== null || !el || !this.kept) return;
     this.kept.set(this.shown, scrollOf(el, page, subject));
   }
 
@@ -593,7 +594,7 @@ export class PanelScrollKeeper {
    * it was left on, and never about one it showed earlier.
    */
   note(page: string | null, subject: string | null): void {
-    if (this.shown === null || this.pending !== null) return;
+    if (this.shown === null || this.pending !== null || !this.kept) return;
     const saved = this.kept.get(this.shown);
     if (saved === undefined || saved.subject !== subject) this.scrolled(page, subject);
   }
@@ -621,7 +622,8 @@ export class PanelScrollKeeper {
  * RESTORE_WAIT_MS.
  */
 export function usePanelScroll(id: string | null, subpage: PanelHeader | null, body: RefObject<HTMLElement | null>, subject: string | null = null): void {
-  const kept = useScoped(panelScrollSlot);
+  // A sheet outside any Room, as on the dev kit page, renders without keeping scroll.
+  const kept = useScopedIfAny(panelScrollSlot);
   const page = subpage ? subpageKey(subpage) : null;
   const now = useRef({ page, subject });
   now.current = { page, subject };
