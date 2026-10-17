@@ -114,7 +114,7 @@ export type FixtureOptions = {
   text?: boolean;
   melee?: boolean;
   pcstats?: boolean;
-  ask?: "save" | "check" | "two";
+  ask?: "save" | "check" | "two" | "saveends";
   rolls?: boolean;
 };
 
@@ -344,13 +344,41 @@ export function createFixtureState(options: FixtureOptions): RoomState {
 }
 
 /**
- * An open roll request for Thorn and Vex (`ask=save|check|two`,
+ * An open roll request for Thorn and Vex (`ask=save|check|two`, or with
+ * `ask=saveends` a save-ends request of Thorn's with a pending ask,
  * docs/design-v1-roll-request.md 5): a Dexterity save against DC 13 with
  * Thorn Restrained and Blessed, a Wisdom (Perception) check, or a
  * Strength or Dexterity save. The DM sees its live card, a player its card.
  */
-function askThorn(state: RoomState, ask: "save" | "check" | "two"): void {
+function askThorn(state: RoomState, ask: "save" | "check" | "two" | "saveends"): void {
   const thorn = state.characters[FIXTURE_IDS.thornChar];
+  if (thorn && ask === "saveends") {
+    // Frightened that a Wisdom save ends, asked of Thorn, rolled as a fail, and a Heroic Inspiration ask waiting for the DM.
+    const frightened: Effect = { id: "fx-frightened", key: "frightened", save: { ability: "wis", dc: 13 }, due: { id: "occ-dev", state: "pending" } };
+    thorn.actor = { ...thorn.actor, effects: [...thorn.actor.effects, frightened] };
+    state.rolls["r-dev"] = {
+      id: "r-dev",
+      rev: 0,
+      test: { kind: "save", choices: [{ ability: "wis" }] },
+      dc: 13,
+      dcShown: false,
+      resultShown: true,
+      cause: "saveEnds",
+      ends: { effect: "fx-frightened", occurrence: "occ-dev" },
+      at: T0,
+      targets: [
+        {
+          characterId: FIXTURE_IDS.thornChar,
+          total: 8,
+          result: "fail",
+          tag: "t-dev",
+          dice: { formula: "1d20+1", faces: [7], total: 8 },
+          change: { id: "ask-dev", on: "t-dev", reason: "heroic-inspiration", face: 0 },
+        },
+      ],
+    };
+    return;
+  }
   if (thorn && ask === "save") {
     thorn.actor = { ...thorn.actor, effects: [...thorn.actor.effects, { id: "fx-restrained", key: "restrained" }, { id: "fx-blessed", key: "blessed" }] };
   }

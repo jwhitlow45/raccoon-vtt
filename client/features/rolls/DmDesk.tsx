@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bonusFor, testOf } from "#shared/dice/bonus.ts";
-import { ANSWERED_MEANWHILE, SETTLED_MEANWHILE } from "#shared/permissions.ts";
+import { ANSWERED_MEANWHILE } from "#shared/permissions.ts";
 import { ABILITY_NAMES } from "#shared/rules/skills.ts";
 import { useStore } from "zustand";
-import type { RollChange, RollRequest, RollTarget } from "#shared/model.ts";
+import type { RollRequest, RollTarget } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { useAlertsSummary } from "../../components/sheetFocus.ts";
 import { revealAndFocus } from "../../lib/reveal.ts";
@@ -11,13 +11,14 @@ import { theme } from "../../lib/theme.ts";
 import { dockSlot, focusAlert } from "../../pages/fold.ts";
 import { focusMap, mapFocusSlot } from "../../pages/mapFocus.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
-import { sheetOpen, type OpAnswer, type OpRefusal } from "../../state/types.ts";
+import { sheetOpen } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { creatureRolls } from "../dice/creature.ts";
 import { presetFor } from "../dice/presets.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "../dice/send.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useLayoutSize } from "../device/layout.ts";
+import { AskRow } from "./AskRow.tsx";
 import { askRowText, bestChoice, dmRoll } from "./card.ts";
 import {
   allAnsweredIds,
@@ -370,59 +371,5 @@ function DmRollButton(props: { request: RollRequest; target: RollTarget; name: s
     >
       {roll.label}
     </Button>
-  );
-}
-
-/**
- * A player's ask to change a roll (docs/design-v1-roll-request.md 6):
- * "Asks to reroll (Heroic Inspiration)" with Allow and Keep, one tap each,
- * both naming the ask. Allow rolls on the server (`roll.dice` with
- * `change`), or for "Fix my total" reopens the answer for typing alone
- * (`roll.reopen` with `change`). Keep clears the ask. An ask replaced,
- * withdrawn or settled meanwhile is refused before any draw, "It was
- * settled meanwhile.", and the row then shows the ask that stands.
- */
-function AskRow(props: { request: RollRequest; target: RollTarget; change: RollChange; name: string }) {
-  const { request, target, change, name } = props;
-  const actions = useRoomActions();
-  const ui = useRoomUi();
-  const sender = useRollSender();
-  const store = useRoomStore();
-  const ref = targetRef(target);
-  const [busy, setBusy] = useState<"allow" | "keep" | null>(null);
-  const done = (answer: OpAnswer, refusal?: OpRefusal) => {
-    setBusy(null);
-    if (answer === "refused") ui.notify(refusal?.text ?? SETTLED_MEANWHILE, "error");
-  };
-  const allow = () => {
-    if (busy) return;
-    if (change.reason === "fix-total") {
-      if (actions.dispatch({ t: "roll.reopen", rollId: request.id, target: ref, change: change.id }, { quiet: true, onAnswer: done }) !== null) setBusy("allow");
-      return;
-    }
-    const tag = actions.newId();
-    const n = sendRoll(sender, { t: "roll.dice", tag, rollId: request.id, target: ref, change: change.id }, {
-      onAnswer: (answer, refusal) => {
-        if (store.getState().view?.rolls[request.id]) sender.receipts.announced(tag);
-        done(answer, refusal);
-      },
-    });
-    if (n === null) ui.notify(NEEDS_CONNECTION, "error");
-    else setBusy("allow");
-  };
-  const keep = () => {
-    if (busy) return;
-    if (actions.dispatch({ t: "roll.change", rollId: request.id, target: ref, clear: change.id }, { quiet: true, onAnswer: done }) !== null) setBusy("keep");
-  };
-  return (
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
-      <span style={{ fontSize: theme.font.small, flex: "1 1 120px" }}>{askRowText(change)}</span>
-      <Button size="sm" variant="primary" busy={busy === "allow"} disabled={busy === "keep"} aria-label={`Allow ${name}'s ask`} onClick={allow}>
-        Allow
-      </Button>
-      <Button size="sm" busy={busy === "keep"} disabled={busy === "allow"} aria-label={`Keep ${name}'s roll`} onClick={keep}>
-        Keep
-      </Button>
-    </div>
   );
 }

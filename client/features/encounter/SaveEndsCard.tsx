@@ -11,6 +11,7 @@ import { useDiceView } from "../dice/useDiceView.ts";
 import { useActOnce, useRollBlocked } from "../dice/useRollOption.ts";
 import { alertCard } from "./alertCard.ts";
 import { CardButtons, CardChips, rollTrouble, useCardRoll, useCardSend } from "./CardRoll.tsx";
+import { AskRow } from "../rolls/AskRow.tsx";
 import {
   askSaveOp,
   cardRoll,
@@ -161,6 +162,10 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
           {model.status ? <span>{model.status}</span> : null}
           {trouble ? <span style={{ color: error || card.receipt?.state === "refused" ? theme.color.dangerText : theme.color.textMuted }}>{trouble}</span> : null}
         </div>
+      ) : null}
+      {/* A player's ask on the linked request's answer, with the live card's Allow and Keep, so it is settled here too (docs/design-v1-roll-request.md 1.1). */}
+      {pending.request && pending.request.targets[0]?.change ? (
+        <AskRow request={pending.request} target={pending.request.targets[0]} change={pending.request.targets[0].change} name={facts.name} words={false} />
       ) : null}
       {failed ? <SrdLoadFailed what="The save bonus" inline /> : null}
       {model.rollNote ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{model.rollNote}</div> : null}
