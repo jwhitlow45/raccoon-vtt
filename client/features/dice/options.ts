@@ -86,6 +86,11 @@ export function d20Roll(creature: ActorTarget, bonus: number, preset: RollPreset
   return roll;
 }
 
+/** A roll as a save of its test's ability, so the server records the condition that fails it (W7B-P-21). Any other test leaves it as it is. */
+export function asSave(roll: PanelRoll, test: D20Test): PanelRoll {
+  return test.kind === "save" ? { ...roll, save: test.ability } : roll;
+}
+
 // ------------------------------------------------------------ routing
 
 /** Where a save or check tap goes (4.2, 4.3). */

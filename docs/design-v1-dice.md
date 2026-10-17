@@ -125,7 +125,8 @@ op('dice.roll', {
 })                            // and the whole op at most 3 KiB serialized (LIMITS.diceOpBytes)
 type DiceRollInput = { formula: string(100), mode?: AdvantageMode, label?: line(60), creature?: ActorTarget,
   cancelled?: true,           // its sources held both kinds, so it rolls normally (3.3)
-  critOn?: 18 | 19 | 20 }     // an attack roll's critical range (5.6)
+  critOn?: 18 | 19 | 20,      // an attack roll's critical range (5.6)
+  save?: AbilityKey }         // a save for `creature`: the resolve records `fails` as on a rolled request (4.2, build round 1 W7B-P-21)
 op('actor.deathRoll', { tag: id, target: ActorTarget, mode?: AdvantageMode, cancelled?: true, extra?: string(40) })   // doc 3 4.3
 op('roll.dice', { tag: id, rollId: id, target: ActorTarget, choice?: 0 | 1, mode?: AdvantageMode, cancelled?: true,
   extra?: string(40),         // parseExtra: added after the d20 and bonus, as "+1d4" or "-4"
@@ -198,7 +199,7 @@ type DiceRoll = DiceResult & { label?, tokenId? | characterId?, seen?: true, cri
 - `batch` is the same for every batch of one tag and says nothing of the tag: other players group a batch by it (8.3, 8.5) without learning the roller's id.
 - The formula is text, so 20 rolls fit a line's bound. `rolledTerms(result)` reads it back with `parseFormula` and pairs each dice term with its faces. A formula a later grammar would refuse shows as its text and total. `keptFaces(term)` derives the kept dice: the n highest or lowest, and of equal faces the earlier. `naturalOf(result)` is 20 or 1 when the result has one d20 term keeping one face that shows it, else null.
 - `typedBonus` marks an answer rolled with the player's own bonus (4.1), so the DM's card can say so.
-- The `sys.dice` reducer (`shared/reducer/dice.ts`): for `dice.roll`, one `dice` line, each roll its result with the asked label, creature and `critOn`. For `roll.dice`, `rollAnswer` (`rolls.ts:75`) with the result's total and the choice, keeping `dice` on the target and on its line, and `result: 'fail'` with the total kept when the result holds `fails`. The reducer stores `result` as doc 4's `resultOf(answer, request.dc)` (doc 4 1.1): the DM's mark, then `fails`, then `noRoll`, then the DC. With `change` the new answer keeps the ask as `changed`, `change` clears, and `previous` keeps the old.
+- The `sys.dice` reducer (`shared/reducer/dice.ts`): for `dice.roll`, one `dice` line, each roll its result with the asked label, creature and `critOn`, and the resolve's `fails` on a roll asked as a `save` of its creature. For `roll.dice`, `rollAnswer` (`rolls.ts:75`) with the result's total and the choice, keeping `dice` on the target and on its line, and `result: 'fail'` with the total kept when the result holds `fails`. The reducer stores `result` as doc 4's `resultOf(answer, request.dc)` (doc 4 1.1): the DM's mark, then `fails`, then `noRoll`, then the DC. With `change` the new answer keeps the ask as `changed`, `change` clears, and `previous` keeps the old.
 
 ### 5.2 Who receives it
 

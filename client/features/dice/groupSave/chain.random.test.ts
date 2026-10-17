@@ -426,6 +426,7 @@ test("the server rolls carry the DC in the open only while players see it, and a
       const dice = step.send.find((c): c is Extract<Command, { kind: "dice" }> => c.kind === "dice");
       assert.ok(dice, `${secret}/${dcShown}: the monsters roll`);
       assert.equal(dice.to, secret ? "dm" : "all");
+      assert.ok(dice.rolls.every((r) => r.save === "dex"), "each is a Dexterity save of its creature, so the server records a condition that fails it");
       assert.equal(dice.dc, secret || dcShown ? 14 : undefined, `secret ${secret}, players see the DC ${dcShown}`);
       const m1 = "token:m1";
       const again = rollAgain({ ...step.page, states: { ...step.page.states, [m1]: { ...stateOf(step.page, monsters[0]!), status: "notRolled" } } }, { holders: [m1], server: serverRolls(monsters), tag });

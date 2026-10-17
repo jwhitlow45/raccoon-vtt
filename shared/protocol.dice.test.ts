@@ -7,7 +7,7 @@ import { resolveDiceOp } from "./dice/resolve.ts";
 import { LIMITS, serializedBytes } from "./limits.ts";
 import { clientOpSchema, opSchema, serverOnlyOpSchema, type OpOf } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
-import { DM, chance, int, pick, rng, room, scene, token } from "./testutil.ts";
+import { DM, actor, chance, effect, int, pick, rng, room, scene, token } from "./testutil.ts";
 
 /** The dice ops' bounds (docs/design-v1-dice.md 4.1 and 4.4) and the size of the line the largest one writes (Appendix B). */
 const TAG = "0192f0a8-6c1e-7a4b-9c3d-2e1f0a9b8c7d";
@@ -88,12 +88,13 @@ describe("dice.roll's bounds", () => {
 describe("the largest dice line (Appendix B)", () => {
   test("a dice.roll at 3 KiB writes a line under 4.5 KB, near the longest whisper the log holds", () => {
     const tokens = Array.from({ length: 20 }, () => randomUUID());
-    const state = room({ scenes: { s1: scene("s1") }, tokens: Object.fromEntries(tokens.map((id) => [id, token(id)])) });
+    // Each one Unconscious, the longest condition that fails a save, so every result carries `fails` too.
+    const state = room({ scenes: { s1: scene("s1") }, tokens: Object.fromEntries(tokens.map((id) => [id, token(id, { actor: { inline: actor({ effects: [effect("e1", { key: "unconscious" })] }) } })])) });
     // Every roll at once at the dice bound and the label bound, then labels shortened until the op fits 3 KiB.
     let label = 60;
     let asked: OpOf<"dice.roll">;
     for (;;) {
-      asked = { t: "dice.roll", tag: randomUUID(), to: "dm", dc: 50, rolls: tokens.map((id, i) => ({ formula: i === 0 ? "1d20+4d1000-1000" : "5d1000-1000", label: "x".repeat(label), creature: { tokenId: id }, critOn: 19 })) };
+      asked = { t: "dice.roll", tag: randomUUID(), to: "dm", dc: 50, rolls: tokens.map((id, i) => ({ formula: i === 0 ? "1d20+4d1000-1000" : "5d1000-1000", label: "x".repeat(label), creature: { tokenId: id }, critOn: 19, save: "dex" })) };
       if (serializedBytes(asked) <= LIMITS.diceOpBytes) break;
       label--;
     }
@@ -103,6 +104,7 @@ describe("the largest dice line (Appendix B)", () => {
     const applied = applyOp(state, resolved.op, { memberId: randomUUID(), role: DM.role }, { seq: 123_456_789, at: new Date().toISOString() });
     assert.ok(applied.ok);
     const line = applied.log[0]!;
+    assert.ok(line.data?.type === "dice" && line.data.rolls.every((r) => r.fails === "unconscious"), "a free save for an Unconscious creature fails");
     const bytes = serializedBytes(line);
     assert.ok(bytes <= 4_608, `${bytes} bytes`);
     assert.ok(serializedBytes(resolved.op) <= 5_120, `the stored op is ${serializedBytes(resolved.op)} bytes`);

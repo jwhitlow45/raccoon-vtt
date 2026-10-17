@@ -1058,6 +1058,12 @@ const diceRollInput = z.strictObject({
   cancelled: z.literal(true).optional(),
   /** An attack roll's critical range (5.6). */
   critOn: critOn.optional(),
+  /**
+   * A save of this ability for its creature, so the resolve records `fails`
+   * on it from a condition that fails that save whatever the total, as a
+   * request's rolled save does (4.2, W7B-P-21). Ignored without `creature`.
+   */
+  save: ability.optional(),
 });
 const diceRollFields = {
   /** The receipt's key (1.2): one tag for a whole group, and `part` 0 to 19 for each batch of it. */

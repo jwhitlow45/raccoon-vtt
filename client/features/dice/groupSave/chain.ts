@@ -6,7 +6,7 @@ import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { dcOnLine } from "#shared/dice/secret.ts";
 import { askOp } from "../../rolls/logic.ts";
 import { MAX_OP_AGE_MS } from "../../../state/store.ts";
-import { cutLabel, testLabel, withExtra } from "../options.ts";
+import { asSave, cutLabel, testLabel, withExtra } from "../options.ts";
 import type { PanelRoll } from "../useDicePanel.ts";
 import { d20Of, rowResult, type GroupTest, type Mark, type RowBase, type RowState, type Way } from "./rows.ts";
 
@@ -175,7 +175,7 @@ export function roll(page: Page, input: { rows: RowBase[]; server: readonly Serv
   if (serverRows.length > 0) {
     const d20 = d20Of(test, page.spell)!;
     const label = cutLabel(page.fill ? `${page.fill.name}, ${testLabel(d20)}` : testLabel(d20));
-    const rolls = serverRows.map((s): PanelRoll => ({ formula: withExtra(d20Formula(s.bonus), s.extra), label, creature: s.target, sources: [...s.sources, ...input.taken] }));
+    const rolls = serverRows.map((s): PanelRoll => asSave({ formula: withExtra(d20Formula(s.bonus), s.extra), label, creature: s.target, sources: [...s.sources, ...input.taken] }, d20));
     send.push({ kind: "dice", tag: input.tag, rolls, ...diceEnvelope(page) });
     next = { ...next, rolls: [...next.rolls, { tag: input.tag, holders: serverRows.map((s) => s.holder), state: "sending" }] };
     for (const s of serverRows) next = withState(next, s.holder, { batch: { tag: input.tag, part: 0 } }, rowOf(next, s.holder));
@@ -296,7 +296,7 @@ export function rollAgain(page: Page, input: { holders: readonly string[]; serve
   const label = cutLabel(page.fill ? `${page.fill.name}, ${testLabel(d20)}` : testLabel(d20));
   let next: Page = { ...page, rolls: [...page.rolls, { tag: input.tag, holders: again.map((s) => s.holder), state: "sending" }] };
   for (const s of again) next = withState(next, s.holder, { status: undefined, says: undefined, batch: { tag: input.tag, part: 0 } });
-  const rolls = again.map((s): PanelRoll => ({ formula: withExtra(d20Formula(s.bonus), s.extra), label, creature: s.target, sources: [...s.sources] }));
+  const rolls = again.map((s): PanelRoll => asSave({ formula: withExtra(d20Formula(s.bonus), s.extra), label, creature: s.target, sources: [...s.sources] }, d20));
   return { page: next, send: [{ kind: "dice", tag: input.tag, rolls, ...diceEnvelope(page) }] };
 }
 

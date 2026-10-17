@@ -11,7 +11,7 @@ import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { PreviewContext } from "../dm/previewContext.ts";
 import { openAsk } from "../rolls/open.ts";
 import { rollsOf } from "./logic.ts";
-import { d20Roll, initiativeOp, routeOf, targetRef } from "./options.ts";
+import { asSave, d20Roll, initiativeOp, routeOf, targetRef } from "./options.ts";
 import { logSeq, remembered, rowTag, useOption, useOptionStore, type OptionState } from "./optionState.ts";
 import { useReceipt, useReceipts, type ReceiptState, type ReceiptTracker } from "./useReceipt.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "./send.ts";
@@ -99,7 +99,7 @@ export function useRollOption() {
           }
           return remember(input.row, tag);
         }
-        return remember(input.row, panel.roll([d20Roll(input.creature, input.bonus, input.preset, input.label, input.critOn)]));
+        return remember(input.row, panel.roll([asSave(d20Roll(input.creature, input.bonus, input.preset, input.label, input.critOn), input.test)]));
       },
       /** A death save, counted by the server from the state then (4.3). */
       deathSave(creature: ActorTarget, preset: RollPreset, row: string): string | null {

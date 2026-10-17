@@ -10,7 +10,7 @@ import type { PendingSave } from "#shared/rules/saveEnds.ts";
 import { ABILITY_NAMES } from "#shared/rules/skills.ts";
 import { effectName } from "#shared/logText.ts";
 import { effectChip } from "../../lib/tokenView.ts";
-import { creatureKey, d20Roll, presetLine, signedText, testLabel } from "../dice/options.ts";
+import { asSave, creatureKey, d20Roll, presetLine, signedText, testLabel } from "../dice/options.ts";
 import type { PanelRoll } from "../dice/useDicePanel.ts";
 import { askOp, targetRef, type AskCheck } from "../rolls/logic.ts";
 import { entryName, playerOwnedEntry } from "./logic.ts";
@@ -44,7 +44,7 @@ export function pressChip(chip: CardChip, pressed: "adv" | "dis"): CardChip {
 
 /** A card's d20 roll for its creature: the bonus, the preset's sources and extra, and the card's chip. */
 export function cardRoll(creature: ActorTarget, bonus: number, preset: RollPreset, test: D20Test, chip: CardChip): PanelRoll {
-  const roll = d20Roll(creature, bonus, preset, testLabel(test));
+  const roll = asSave(d20Roll(creature, bonus, preset, testLabel(test)), test);
   return { ...roll, sources: [...(roll.sources ?? []), ...chipSources(chip)] };
 }
 

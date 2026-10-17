@@ -8,7 +8,7 @@ import { actor, character, entry, room, token } from "#shared/testutil.ts";
 import type { OptionState } from "./optionState.ts";
 import { ReceiptTracker } from "./useReceipt.ts";
 import { watchInitiative, type InitiativeEnv } from "./useRollOption.ts";
-import { critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, presetLine, resultWords, routeOf, scoreOf, spendOnStart, testLabel, withExtra, withUsed } from "./options.ts";
+import { asSave, critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, presetLine, resultWords, routeOf, scoreOf, spendOnStart, testLabel, withExtra, withUsed } from "./options.ts";
 
 /** The roll options' rules (docs/design-v1-roll-options.md 4.2 and 4.3). */
 
@@ -127,6 +127,12 @@ describe("damage, critical hits and results", () => {
     assert.equal(resultWords([{ formula: "1d6", faces: [5], total: 5 }], "recharge", { recharge: 5 }), "Recharged (5)");
     assert.equal(resultWords([{ formula: "1d6", faces: [3], total: 3 }], "recharge", { recharge: 5 }), "Not yet (3)");
     assert.equal(resultWords([{ formula: "1d8+4", faces: [3], total: 7, label: "Rapier damage, piercing" }, { formula: "2d6", faces: [2, 2], total: 4, label: "Rapier damage, fire" }], "damage"), "11: 7 piercing, 4 fire");
+  });
+
+  test("a save goes as a save of its ability, so the server records what fails it, and a check does not", () => {
+    const roll = d20Roll({ tokenId: "gob" }, 2, { sources: [], extra: [], notes: [] }, "Dexterity save");
+    assert.equal(asSave(roll, { kind: "save", ability: "dex" }).save, "dex");
+    assert.equal(asSave(roll, { kind: "check", ability: "dex" }).save, undefined);
   });
 
   test("Used is kept per creature and action", () => {

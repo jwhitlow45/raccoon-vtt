@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DiceResult, LogEvent, RollChange, RollRequest, RollTarget, RoomState, Viewer } from "../model.ts";
+import { keys } from "../keys.ts";
 import { ANSWERED_MEANWHILE, SETTLED_MEANWHILE, canApply } from "../permissions.ts";
 import { projectEntity } from "../project.ts";
 import type { Op, OpOf } from "../protocol.ts";
@@ -155,6 +156,40 @@ describe("a request's answer rolled on the server", () => {
     assert.equal((roll(setup(), P2, { target: { tokenId: "owl" } }, []) as { code: string }).code, "gone");
     assert.equal((roll(setup(), P1, { target: { tokenId: "owl" }, rollId: "nope" }, []) as { code: string }).code, "gone");
     assert.equal((roll(setup(), DM, { target: { tokenId: "nobody" } }, []) as { code: string }).code, "gone");
+  });
+});
+
+describe("a free save for a creature (W7B-P-21)", () => {
+  /** The owl Stunned, as the DM shows it or hides it. */
+  function stunnedOwl(hidden: boolean): RoomState {
+    const state = setup();
+    const owl = state.tokens.owl!;
+    state.tokens.owl = { ...owl, actor: { inline: { ...(owl.actor as { inline: ReturnType<typeof actor> }).inline, effects: [effect("e1", { key: "stunned", ...(hidden ? { hiddenFromPlayers: true as const } : {}) })] } } };
+    return state;
+  }
+  function freeRoll(state: RoomState, roll: OpOf<"dice.roll">["rolls"][number]): DiceResult {
+    const resolved = resolveDiceOp({ t: "dice.roll", tag: `tag-${++tags}`, to: "all", rolls: [roll] }, state, { draw: draws([18]), batch: BATCH });
+    assert.ok(resolved.ok);
+    return resolved.op.results[0]!;
+  }
+
+  test("fails a Dexterity save as its request would, and its line says so to whoever reads the roll", () => {
+    const state = stunnedOwl(false);
+    const result = freeRoll(state, { formula: "1d20+2", label: "Dexterity save", creature: { tokenId: "owl" }, save: "dex" });
+    assert.equal(result.total, 20);
+    assert.equal(result.fails, "stunned");
+    const op: Op = { t: "sys.dice", asked: { t: "dice.roll", tag: "t1", to: "all", rolls: [{ formula: "1d20+2", creature: { tokenId: "owl" }, save: "dex" }] }, batch: BATCH, results: [result] };
+    const applied = applyOp(state, op, P1, env(50));
+    assert.ok(applied.ok);
+    const seen = projectEntity(keys.log(applied.state.log.at(-1)!.id), applied.state, P2, { sceneId: "s1" }) as { data: Extract<LogEvent, { type: "dice" }> } | null;
+    assert.equal(seen?.data.rolls[0]?.fails, "stunned");
+  });
+
+  test("a Stunned the DM hid, a Wisdom save, a roll that is no save, or one for no creature records no fail", () => {
+    assert.equal(freeRoll(stunnedOwl(true), { formula: "1d20+2", creature: { tokenId: "owl" }, save: "dex" }).fails, undefined);
+    assert.equal(freeRoll(stunnedOwl(false), { formula: "1d20+2", creature: { tokenId: "owl" }, save: "wis" }).fails, undefined);
+    assert.equal(freeRoll(stunnedOwl(false), { formula: "1d20+2", creature: { tokenId: "owl" } }).fails, undefined);
+    assert.equal(freeRoll(stunnedOwl(false), { formula: "1d20+2", save: "dex" }).fails, undefined);
   });
 });
 

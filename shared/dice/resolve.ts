@@ -41,7 +41,7 @@ function refuse(message: string, code: RefusalCode = "invalid"): Resolved {
 export function resolveDiceOp(op: DiceOp, state: RoomState, deps: ResolveDeps): Resolved {
   switch (op.t) {
     case "dice.roll":
-      return freeRolls(op, deps);
+      return freeRolls(op, state, deps);
     case "roll.dice":
       return op.change !== undefined ? changedAnswer(op, op.change, state, deps) : rolledAnswer(op, state, deps);
     case "actor.deathRoll":
@@ -49,14 +49,16 @@ export function resolveDiceOp(op: DiceOp, state: RoomState, deps: ResolveDeps): 
   }
 }
 
-function freeRolls(op: OpOf<"dice.roll">, deps: ResolveDeps): Resolved {
+function freeRolls(op: OpOf<"dice.roll">, state: RoomState, deps: ResolveDeps): Resolved {
   const results: DiceResult[] = [];
   for (const roll of op.rolls) {
     const parsed = parseFormula(roll.formula);
     if (!parsed.ok) return refuse(parsed.error);
     const rolled = rollFormula(parsed.formula, deps.draw, roll.mode);
     if (!rolled.ok) return refuse(rolled.error);
-    results.push(roll.cancelled ? { ...rolled.result, cancelled: true } : rolled.result);
+    const result = roll.cancelled ? { ...rolled.result, cancelled: true as const } : rolled.result;
+    // A free save for a creature fails as its request's would, so its line and every verdict read the fail (W7B-P-21).
+    results.push(roll.save !== undefined && roll.creature ? withFails(result, state, roll.creature, { kind: "save", ability: roll.save }) : result);
   }
   return { ok: true, op: { t: "sys.dice", asked: op, batch: deps.batch, results } };
 }
