@@ -198,7 +198,8 @@ export function EntryRow(props: {
                     </Tag>
                   ) : null,
                   companionOf !== undefined ? (
-                    <Tag tone="muted" dense>
+                    // A character's name of any length: cut, so the row's other tags keep their room.
+                    <Tag tone="muted" dense cut={160} title={`Companion of ${companionOf}`}>
                       Companion of {companionOf}
                     </Tag>
                   ) : null,

@@ -214,14 +214,18 @@ function NameBlock(props: { token: Token; name: string; feetPerCell: number }) {
   if (token.locked) badges.push("Locked");
   if (token.nameHidden) badges.push("Name hidden");
   return (
-    <div style={{ display: "grid", gap: theme.space(1), paddingTop: theme.space(2) }}>
+    // One column no wider than the panel, so a badge too long for it is cut rather than widening the column.
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1), paddingTop: theme.space(2) }}>
       <h3 style={{ margin: 0, fontSize: theme.font.heading, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>{props.name}</h3>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
         <span style={{ color: theme.color.textMuted, fontSize: theme.font.small, marginRight: theme.space(1) }}>
           {SIZE_NAMES[token.size] ?? token.size} ({sizeText}){token.kind === "object" ? ", object" : ""}
         </span>
         {badges.map((b) => (
-          <Tag key={b}>{b}</Tag>
+          // "Companion of" names a character, of any length: no badge runs wider than the row.
+          <Tag key={b} cut="100%">
+            {b}
+          </Tag>
         ))}
       </div>
     </div>

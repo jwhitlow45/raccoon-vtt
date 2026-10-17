@@ -20,6 +20,9 @@ export const SIZE_WORD: Record<SrdMonster["size"], string> = {
   gargantuan: "Gargantuan",
 };
 
+/** The widest a tag naming a character draws in a row or field, so a long name leaves room for what the row is about. */
+export const SOURCE_TAG_PX = 88;
+
 export type Listed = { key: string; view: StatBlockMonster } & ({ source: "room"; monster: CustomMonster } | { source: "srd"; srd: SrdMonster });
 
 /**
@@ -49,7 +52,14 @@ export function MonsterList(props: { items: readonly ListedRow[]; onPick(key: st
             detail={`${SIZE_WORD[m.view.size]} ${m.view.type}`}
             trailing={
               <>
-                {m.source === "room" ? <RoomBadge /> : m.tag ? <Tag tone="muted">{m.tag}</Tag> : null}
+                {m.source === "room" ? (
+                  <RoomBadge />
+                ) : m.tag ? (
+                  // A character's name, of any length: cut so the row keeps room for the block's own name.
+                  <Tag tone="muted" cut={SOURCE_TAG_PX}>
+                    {m.tag}
+                  </Tag>
+                ) : null}
                 <span style={{ fontSize: theme.font.small, color: theme.color.textMuted, whiteSpace: "nowrap" }}>CR {m.view.cr}</span>
               </>
             }

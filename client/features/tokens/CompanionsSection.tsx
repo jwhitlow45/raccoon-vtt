@@ -10,6 +10,7 @@ import { Help, Section as PanelSection } from "../../components/Panel.tsx";
 import { Row, RowList } from "../../components/Row.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { Tag } from "../../components/Tag.tsx";
+import { SOURCE_TAG_PX } from "../monsters/MonsterList.tsx";
 import { layoutSize } from "../device/layout.ts";
 import { uiScale } from "../device/settings.ts";
 import { panAnchor, requestPan } from "../encounter/pan.ts";
@@ -274,10 +275,10 @@ export function CompanionForm(props: {
   };
 
   return (
-    // One column no wider than the pane, so a long turn label shortens its Select rather than widening the form.
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14 }}>
+    // One column no wider than the pane, so a long turn label shortens its Select rather than widening the form, and a character's long unbroken name wraps in the heading and the lines that name it.
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14, overflowWrap: "anywhere" }}>
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-        <h3 ref={heading} tabIndex={-1} style={{ margin: 0, flex: 1, fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>
+        <h3 ref={heading} tabIndex={-1} style={{ margin: 0, flex: 1, minWidth: 0, fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>
           Add a companion for {name}
         </h3>
         <Button size="sm" onClick={props.onDone}>
@@ -356,13 +357,16 @@ function BlockField(props: {
 }) {
   const { chosen } = props;
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1), fontSize: theme.font.body14 }}>
+    // A character's name of any length, unbroken too, wraps in the help line rather than run out of the form.
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1), fontSize: theme.font.body14, overflowWrap: "anywhere" }}>
       <span>Stat block</span>
       {chosen ? (
         <>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
             <strong style={{ minWidth: 0, overflowWrap: "anywhere" }}>{chosen.view.name}</strong>
-            <Tag tone="muted">{chosen.source === "srd" ? "SRD" : whose(props.character.name)}</Tag>
+            <Tag tone="muted" cut={SOURCE_TAG_PX}>
+              {chosen.source === "srd" ? "SRD" : whose(props.character.name)}
+            </Tag>
             <span style={{ flex: 1 }} />
             <Button ref={props.changeRef} size="sm" onClick={props.onChoose}>
               Change

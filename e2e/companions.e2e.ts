@@ -972,6 +972,61 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     }
   });
 
+  test("10a. characters with an 80 character name, with spaces and unbroken, at 390 x 844 and 130%: the tags, labels and lines that name them stay inside the picker, the add form, the stat blocks page and the panel", async () => {
+    const cdp = await anaContext.newCDPSession(ana);
+    const spaced = "Bree the Wandering Hedge Witch of the Far Northern Marches and the Old Salt Road".slice(0, 80);
+    const unbroken = "Q".repeat(80);
+    const made: { id: string; name: string; companion: string }[] = [];
+    for (const [i, name] of [spaced, unbroken].entries()) {
+      const c = await charactersCompanion(name, `Kit${i}`, { x: 2 + i * 2, y: 12 }, [`Ember Moth ${i}`]);
+      // The companion starts with no block, so its panel offers Attach.
+      await ops.send({ t: "token.update", tokenId: c.tokenId, patch: { actor: { blockId: null } } });
+      made.push({ id: c.characterId, name, companion: `Kit${i}` });
+    }
+    await setUp(ana, cdp, { width: 390, height: 844, scale: 1.3 });
+    for (const [i, c] of made.entries()) {
+      const label = i === 0 ? "the spaced name" : "the unbroken name";
+      // The stat blocks page.
+      await openCard(ana, c.id);
+      await noSideScroll(ana.locator("[data-pane-body]").first(), `${label}: the card`);
+      await ana.locator(`[data-opener="blocks:${c.id}"]`).click();
+      const page = ana.locator("[data-pane-body]").filter({ has: ana.getByRole("heading", { name: `${c.name}’s stat blocks` }) }).first();
+      await page.waitFor();
+      await noSideScroll(page, `${label}: the stat blocks page`);
+      await shots.take(ana, `companions-long-name-${i}-blocks-page`);
+      await ana.getByRole("button", { name: "Done", exact: true }).click();
+      // The add form's picker and the form with the block chosen.
+      await ana.locator(`[data-opener="companion:${c.id}"]`).click();
+      await ana.getByRole("button", { name: "Choose a stat block" }).click();
+      const choose = ana.getByRole("dialog", { name: "Choose a stat block" });
+      await choose.getByText(`${c.name}’s stat blocks (1)`).waitFor();
+      await noSideScroll(choose.locator("section").first(), `${label}: choose`);
+      await shots.take(ana, `companions-long-name-${i}-choose`);
+      await choose.getByRole("button", { name: new RegExp(`^Ember Moth ${i}`) }).click();
+      await choose.waitFor({ state: "detached" });
+      const form = ana.locator("[data-pane-body]").filter({ has: ana.getByRole("button", { name: "Add and place" }) }).first();
+      await noSideScroll(form, `${label}: the add form`);
+      await shots.take(ana, `companions-long-name-${i}-form`);
+      await ana.getByRole("button", { name: "Cancel" }).first().click();
+      // The companion's panel and its picker.
+      await ana.getByRole("button", { name: new RegExp(`^${c.companion}\\. Show it on the map`) }).click();
+      await bar(ana, c.companion).getByRole("button", { name: "Details", exact: true }).click();
+      const panel = tokenPanel(ana);
+      await panel.getByRole("button", { name: "Attach a stat block" }).waitFor();
+      await noSideScroll(panel, `${label}: the token panel`);
+      await shots.take(ana, `companions-long-name-${i}-panel`);
+      await panel.getByRole("button", { name: "Attach a stat block" }).click();
+      const dialog = ana.getByRole("dialog", { name: "Attach a stat block" });
+      await dialog.getByText(`${c.name}’s stat blocks (1)`).waitFor();
+      await noSideScroll(dialog.locator("section").first(), `${label}: attach, the lists`);
+      await shots.take(ana, `companions-long-name-${i}-attach`);
+      await ana.keyboard.press("Escape");
+      await dialog.waitFor({ state: "detached" });
+      await openPanel(ana, "Characters");
+    }
+    for (const c of made) await ops.send({ t: "character.delete", characterId: c.id });
+  });
+
   test("10b. no page errors along the way", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label} page errors`);
   });

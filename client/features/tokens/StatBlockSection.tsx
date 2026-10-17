@@ -123,7 +123,8 @@ export function StatBlockSection(props: {
   };
 
   return (
-    <div ref={ref} data-stat-block="" style={{ scrollMarginTop: theme.space(2) }}>
+    // Its lines and buttons name the companion's character, whose name may be long and unbroken: it wraps rather than run out of the panel.
+    <div ref={ref} data-stat-block="" style={{ scrollMarginTop: theme.space(2), overflowWrap: "anywhere" }}>
       {statBlockFoldable(link) ? (
         <Section title="Stat block" fold={{ open, onToggle: toggle, foldRef: focusRef, summary: props.summary ? <div style={{ flexBasis: "100%", minWidth: 0, paddingBottom: theme.space(1) }}>{props.summary}</div> : undefined }}>
           {link.kind === "room" ? (

@@ -338,7 +338,8 @@ export function CharacterBlocksPage(props: { character: Pick<Character, "id" | "
   // The opener went with the card this page replaced, so focus starts at the page's heading.
   useEffect(() => heading.current?.focus(), []);
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14 }}>
+    // The heading, the empty line and the rows name the character, whose name may be long and unbroken: it wraps rather than run out of the page.
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14, overflowWrap: "anywhere" }}>
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
         <h3 ref={heading} tabIndex={-1} style={{ margin: 0, flex: 1, minWidth: 0, overflowWrap: "anywhere", fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>
           {whose(character.name)} stat blocks

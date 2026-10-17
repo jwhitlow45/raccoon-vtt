@@ -111,7 +111,8 @@ export function CompanionPickerBody(props: {
     if (row) props.onPick(row);
   };
   return (
-    <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
+    // The help and the list labels name the character, whose name may be long and unbroken: it wraps rather than run out of the picker.
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14, overflowWrap: "anywhere" }}>
       <Help>{props.help}</Help>
       <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
         <Button size="sm" onClick={props.onPaste}>
