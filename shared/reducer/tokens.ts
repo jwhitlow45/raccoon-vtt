@@ -22,7 +22,7 @@ import {
   syncOwners,
 } from "./companions.ts";
 import { removeEntries } from "./encounter.ts";
-import { applyPcStatsPatch, EMPTY_PC_STATS, pcNumbersFromBlock, pcStatsFits, pcStatsTooBig, withPcActorNumbers } from "../rules/pcStats.ts";
+import { applyPcStatsPatch, EMPTY_PC_STATS, pcNumbersFromBlock, pcStatsFits, pcStatsTooBig, WILD_SHAPE_ALONE, withPcActorNumbers } from "../rules/pcStats.ts";
 import { gone, invalid, Refuse, type Env, type ResolvedActor, type Tx } from "./tx.ts";
 
 function tokenDefaults(kind: Token["kind"]): Pick<Token, "disposition" | "layer" | "hpVisibility"> {
@@ -66,6 +66,7 @@ export function tokenCreate(tx: Tx, op: OpOf<"token.create">): void {
   if ("ref" in input.actor) tx.character(input.actor.ref);
   // An actor links one stat block, and one of its character's only on a companion (docs/design-v1-companion-stat-blocks.md 3.2).
   if ("inline" in input.actor && input.actor.inline.blockId !== undefined && linksSet(input.actor.inline) > 1) throw invalid(ONE_LINK);
+  if ("inline" in input.actor && input.actor.inline.wildShape !== undefined) throw invalid(WILD_SHAPE_ALONE);
   const defaults = tokenDefaults(input.kind);
   const token: Token = {
     id: input.id,
@@ -136,6 +137,7 @@ export function applyActorPatch(tx: Tx, resolved: ResolvedActor, patch: ActorPat
   const linking = linksSet(patch);
   if (oneLink && linking > 1) throw invalid(ONE_LINK);
   if (resolved.holder === "character" && patch.blockId !== undefined && patch.blockId !== null) throw invalid(BLOCK_OF_ITS_CHARACTER);
+  if (patch.wildShape !== undefined && (resolved.holder !== "character" || patch.srdId === undefined || patch.srdId === null)) throw invalid(WILD_SHAPE_ALONE);
   // A block gives these two, and its next edit would write over a typed one anyway (docs/design-v1-pc-stats.md 3.5). The DM too.
   if (resolved.character?.stats && (patch.initBonus !== undefined || patch.passivePerception !== undefined)) throw invalid(pcNumbersFromBlock(resolved.character.name));
   let actor: Actor = { ...resolved.actor };
@@ -163,6 +165,9 @@ export function applyActorPatch(tx: Tx, resolved: ResolvedActor, patch: ActorPat
   if (oneLink && linking === 1) {
     for (const field of BLOCK_LINKS) if (patch[field] === undefined || patch[field] === null) delete actor[field];
   }
+  // A shape is set whole: the patch that links the creature says whether it is Wild Shape, and a shape that ends takes the mark with it.
+  if (patch.srdId !== undefined && patch.srdId !== null && patch.wildShape === true) actor.wildShape = true;
+  else if (patch.srdId !== undefined || actor.srdId === undefined) delete actor.wildShape;
   setOrDelete(actor, "sheetUrl", patch.sheetUrl);
   setOrDelete(actor, "legendary", patch.legendary);
   return { actor, events };
@@ -459,6 +464,7 @@ export function characterCreate(tx: Tx, op: OpOf<"character.create">): void {
   const input = op.character;
   if (tx.state.characters[input.id]) throw invalid("character already exists");
   if (input.actor.blockId !== undefined) throw invalid(BLOCK_OF_ITS_CHARACTER);
+  if (input.actor.wildShape !== undefined && input.actor.srdId === undefined) throw invalid(WILD_SHAPE_ALONE);
   const character: Character = {
     id: input.id,
     rev: 0,

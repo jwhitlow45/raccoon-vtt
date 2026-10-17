@@ -737,6 +737,15 @@ export type Actor = {
    * as deleted until someone attaches another or detaches.
    */
   blockId?: CompanionBlockId;
+  /**
+   * On a character's own actor only, with `srdId`: the SRD creature is the
+   * character's Wild Shape (docs/design-v1-pc-stats.md 3.6), so its rolls
+   * take the creature's Strength, Dexterity and Constitution and keep the
+   * character's own Intelligence, Wisdom, Charisma and proficiencies. An
+   * `srdId` without it is another shape, such as Polymorph, which takes
+   * every number of the creature.
+   */
+  wildShape?: true;
   /** https only, at most 500 characters. */
   sheetUrl?: string;
   effects: Effect[];

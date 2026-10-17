@@ -56,4 +56,13 @@ describe("stat block permissions", () => {
     const restore: Op = { t: "sys.restore", entries: [{ key: "character:bree", value: character("bree", { ownerIds: ["p1"], stats: BLOCK }) }], from: "undo" };
     assert.equal(decide(restore), "forbidden: only the DM can do that");
   });
+
+  test("a character's players take a shape on it, and never link a room monster or shape another's character", () => {
+    const shape = (characterId: string, actor: object): Op => ({ t: "character.update", characterId, patch: { actor } as never });
+    assert.equal(decide(shape("bree", { srdId: "brown-bear", wildShape: true })), "ok");
+    assert.equal(decide(shape("bree", { srdId: null }), P2), "ok");
+    assert.equal(decide(shape("bree", { monsterId: "m1" })), "forbidden: owners cannot change monsterId");
+    assert.equal(decide(shape("cy", { srdId: "brown-bear" })), "forbidden: that is not yours");
+    assert.equal(decide(shape("cy", { monsterId: "m1" }), DM), "ok");
+  });
 });

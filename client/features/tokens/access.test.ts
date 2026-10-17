@@ -71,6 +71,7 @@ const ACTOR_SAMPLES: { [K in keyof ActorPatch]-?: ActorPatch[K] } = {
   srdId: "goblin-warrior",
   monsterId: "m1",
   blockId: "b1",
+  wildShape: true,
   sheetUrl: "https://example.com/sheet",
   legendary: { actionsMax: 3, actionsUsed: 0, resistMax: 0, resistUsed: 0 },
   notes: "note",

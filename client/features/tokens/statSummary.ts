@@ -191,7 +191,7 @@ export type LinkedBlock =
 // The SRD's blocks are fixed once the chunk loads, so each is read once a page.
 const srdBlocks = new WeakMap<SrdMonster, StatBlock | null>();
 
-function srdBlock(monster: SrdMonster): StatBlock | null {
+export function srdBlock(monster: SrdMonster): StatBlock | null {
   if (srdBlocks.has(monster)) return srdBlocks.get(monster) ?? null;
   let block: StatBlock | null;
   try {

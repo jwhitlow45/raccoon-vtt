@@ -1,6 +1,6 @@
-import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Character, type PcDice, type PcRoll, type PcStats, type SkillKey } from "../model.ts";
+import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Character, type PcDice, type PcRoll, type PcStats, type SkillKey, type Token } from "../model.ts";
 import type { PcStatsPatch } from "../protocol.ts";
-import type { DamagePart, NamedRoll } from "../dice/bonus.ts";
+import type { DamagePart, NamedRoll, RollNumbers } from "../dice/bonus.ts";
 import { formatFormula, parseFormula, type DiceTerm, type Formula, type Term } from "../dice/formula.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
 import { ABILITY_NAMES, abilityMod } from "../statBlock.ts";
@@ -93,7 +93,8 @@ export function pcDerived(stats: PcStats, level: number | undefined): PcDerived 
   return derived;
 }
 
-function derive(stats: PcStats, level: number): PcDerived {
+/** `mods` stands in for some of the scores' modifiers: a Wild Shape's Strength, Dexterity and Constitution (section 3.6). */
+function derive(stats: PcStats, level: number, mods_?: Partial<Record<AbilityKey, number>>): PcDerived {
   const pb = pcProficiency(level);
   const adjust = stats.adjust;
   const allSaves = adjust.allSaves ?? 0;
@@ -102,7 +103,7 @@ function derive(stats: PcStats, level: number): PcDerived {
   const saves = {} as PcDerived["saves"];
   const checks = {} as PcDerived["checks"];
   for (const a of ABILITY_KEYS) {
-    const mod = abilityMod(stats.abilities[a]);
+    const mod = mods_?.[a] ?? abilityMod(stats.abilities[a]);
     mods[a] = mod;
     const proficient = stats.saves.includes(a);
     saves[a] = number(
@@ -254,11 +255,83 @@ export function pcNumbersFromBlock(name: string): string {
   return `${name}'s initiative and Passive Perception come from the stat block. Change them there.`;
 }
 
-/** What shape a character is in (section 3.6): none, or an SRD creature linked on its actor. */
-export type PcShape = "none" | "other";
+/** The refusal of a Wild Shape mark anywhere but beside the SRD creature a character's own actor takes the shape of (section 3.6). */
+export const WILD_SHAPE_ALONE = "Wild Shape goes with the SRD creature a character takes the shape of";
+
+/** What shape a character is in (section 3.6): none, Wild Shape, or another shape such as Polymorph, by the SRD creature linked on its actor. */
+export type PcShape = "none" | "wild" | "other";
 
 export function pcShape(character: Pick<Character, "actor">): PcShape {
-  return character.actor.srdId !== undefined ? "other" : "none";
+  if (character.actor.srdId === undefined) return "none";
+  return character.actor.wildShape ? "wild" : "other";
+}
+
+/** The physical abilities a Wild Shape takes from the creature. The character keeps the rest. */
+const BEAST_ABILITIES = ["str", "dex", "con"] as const;
+
+/**
+ * A character's numbers in Wild Shape with a stat block (section 3.6, SRD
+ * 5.2.1 Druid): the creature's Strength, Dexterity and Constitution, the
+ * character's own Intelligence, Wisdom and Charisma, and for each save and
+ * skill the higher of the character's rule on those modifiers, its
+ * proficiencies and adjustments kept, and the creature's printed bonus. A
+ * check is the modifier and the checks bonus, and the spell numbers stay
+ * the character's. `beast` is the creature's numbers from doc 1's SrdRolls.
+ */
+export function shapedNumbers(character: Pick<Character, "stats" | "level">, beast: RollNumbers): RollNumbers | null {
+  const stats = character.stats;
+  if (!stats) return null;
+  const mods: Partial<Record<AbilityKey, number>> = {};
+  for (const a of BEAST_ABILITIES) mods[a] = beast.abilities[a].mod;
+  const d = derive(stats, pcLevel(character.level), mods);
+  const abilities = {} as RollNumbers["abilities"];
+  for (const a of ABILITY_KEYS) {
+    const save = Math.max(d.saves[a].total, beast.abilities[a].save);
+    abilities[a] = d.allChecks !== 0 ? { mod: d.mods[a], save, check: d.checks[a].total } : { mod: d.mods[a], save };
+  }
+  const skills: RollNumbers["skills"] = {};
+  for (const s of SKILL_KEYS) {
+    const usual = SKILLS[s].ability;
+    const printed = beast.skills[s] ?? beast.abilities[usual].check ?? beast.abilities[usual].mod;
+    skills[s] = Math.max(d.skills[s].total, printed);
+  }
+  const own = pcDerived(stats, character.level);
+  const out: RollNumbers = { abilities, skills };
+  if (own.spell) {
+    out.spellDc = own.spell.dc.total;
+    out.spellAttack = own.spell.attack.total;
+  }
+  if (own.allSaves !== 0) out.deathSave = own.allSaves;
+  return out;
+}
+
+/** A Wild Shape's initiative with a stat block: the creature's Dexterity modifier, then Alert, the checks bonus and the initiative adjustment (section 3.6). */
+export function shapedInitiative(character: Pick<Character, "stats" | "level">, beast: RollNumbers): number | null {
+  const stats = character.stats;
+  if (!stats) return null;
+  return derive(stats, pcLevel(character.level), { dex: beast.abilities.dex.mod }).initiative.total;
+}
+
+/**
+ * A hand-made or older file's Wild Shape marks within the rule: only on a
+ * character's own actor and only beside its SRD creature (section 3.6).
+ */
+export function withShapeRules<S extends { characters: Record<string, Character>; tokens: Record<string, Token> }>(state: S): S {
+  let characters: Record<string, Character> | null = null;
+  for (const [id, character] of Object.entries(state.characters)) {
+    if (character.actor.wildShape === undefined || character.actor.srdId !== undefined) continue;
+    const { wildShape: _alone, ...actor } = character.actor;
+    characters ??= { ...state.characters };
+    characters[id] = { ...character, actor };
+  }
+  let tokens: Record<string, Token> | null = null;
+  for (const [id, token] of Object.entries(state.tokens)) {
+    if (!("inline" in token.actor) || token.actor.inline.wildShape === undefined) continue;
+    const { wildShape: _theirs, ...actor } = token.actor.inline;
+    tokens ??= { ...state.tokens };
+    tokens[id] = { ...token, actor: { inline: actor } };
+  }
+  return characters || tokens ? { ...state, ...(characters ? { characters } : {}), ...(tokens ? { tokens } : {}) } : state;
 }
 
 /** Weapons by name, then spells by level and name, then other rolls by name, each tie by id. */
@@ -388,8 +461,9 @@ const namedCache = new WeakMap<Character, NamedRoll[]>();
 /**
  * A character's rolls as doc 1's NamedRoll (section 3.4), weapons, then
  * spells by level, then other rolls. In a shape its own rolls give way to
- * the creature's, which come from that creature's block (docs/design-v1-roll-options.md).
- * Empty without a block. Cached per character object, since an entity is
+ * the creature's, which come from that creature's block (docs/design-v1-roll-options.md):
+ * Wild Shape keeps only the other rolls, and another shape none. Empty
+ * without a block. Cached per character object, since an entity is
  * never changed in place.
  */
 export function pcNamedRolls(character: Character): NamedRoll[] {
@@ -397,9 +471,11 @@ export function pcNamedRolls(character: Character): NamedRoll[] {
   if (known) return known;
   const stats = character.stats;
   let out: NamedRoll[] = [];
-  if (stats && pcShape(character) === "none") {
+  const shape = pcShape(character);
+  if (stats && shape !== "other") {
     const d = pcDerived(stats, character.level);
-    out = sortedRolls(stats.rolls).map((roll) => namedRoll(stats, d, roll));
+    // Wild Shape casts no spells and wields no weapons, so only the character's other rolls stay.
+    out = sortedRolls(stats.rolls.filter((r) => shape === "none" || r.kind === "other")).map((roll) => namedRoll(stats, d, roll));
   }
   namedCache.set(character, out);
   return out;
@@ -481,12 +557,15 @@ const DEFENSE_KIND = { resistant: "resist", immune: "immune", vulnerable: "vulne
 /**
  * A character's damage defenses and Evasion (section 3.6), from its block,
  * in the damage types' order. A shape takes the creature's defenses from
- * its block instead, and another shape takes Evasion away too.
+ * its block instead. Wild Shape keeps Evasion, and another shape takes it
+ * away too.
  */
 export function pcDefenses(character: Pick<Character, "stats" | "actor">): { defenses: PcDefense[]; evasion: boolean } {
   const stats = character.stats;
-  if (!stats || pcShape(character) !== "none") return { defenses: [], evasion: false };
-  return { defenses: statsDefenses(stats), evasion: stats.evasion === true };
+  const shape = pcShape(character);
+  if (!stats || shape === "other") return { defenses: [], evasion: false };
+  // Evasion is a class feature the druid keeps in Wild Shape. The creature's block gives its own damage defenses.
+  return { defenses: shape === "wild" ? [] : statsDefenses(stats), evasion: stats.evasion === true };
 }
 
 /** The damage defenses a block holds, whatever shape its character is in, for the block's own view. */

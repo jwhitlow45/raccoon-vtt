@@ -64,6 +64,12 @@ const OWNER_TOKEN_FIELDS = new Set(["image", "altImages", "rotation", "elevation
 /** A character's stat block is its players', as its light card is (docs/design-v1-pc-stats.md 4.1). */
 const OWNER_CHARACTER_FIELDS = new Set(["name", "defaultImage", "actor", "level", "stats"]);
 const OWNER_ACTOR_FIELDS = new Set(["hp", "speeds", "ac", "initBonus", "passivePerception", "senses", "notes", "sheetUrl"]);
+/**
+ * A character's players take a shape on its own actor (docs/design-v1-pc-stats.md
+ * 4.1): an SRD creature and whether it is Wild Shape. A room monster's link
+ * stays the DM's.
+ */
+const CHARACTER_OWNER_ACTOR_FIELDS = new Set([...OWNER_ACTOR_FIELDS, "srdId", "wildShape"]);
 
 class Check {
   readonly state: RoomState;
@@ -519,7 +525,7 @@ function forPlayer(op: Op, c: Check): Decision {
         if (!OWNER_CHARACTER_FIELDS.has(field)) return refuse("forbidden", `owners cannot change ${field}`);
       }
       for (const field of Object.keys(op.patch.actor ?? {})) {
-        if (!OWNER_ACTOR_FIELDS.has(field)) return refuse("forbidden", `owners cannot change ${field}`);
+        if (!CHARACTER_OWNER_ACTOR_FIELDS.has(field)) return refuse("forbidden", `owners cannot change ${field}`);
       }
       if (!imageUsable(c, op.patch.defaultImage)) return GONE;
       return OK;

@@ -1,7 +1,7 @@
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type Character, type CompanionBlock, type ConditionKey, type CustomMonster, type RollRequest, type SkillKey, type SrdId, type StatBlock, type Token } from "../model.ts";
 import type { ActorTarget } from "../protocol.ts";
 import type { DamageType } from "../rules/damage.ts";
-import { pcDerived } from "../rules/pcStats.ts";
+import { pcDerived, shapedInitiative, shapedNumbers } from "../rules/pcStats.ts";
 import { SKILLS } from "../rules/skills.ts";
 import { abilityMod } from "../statBlock.ts";
 
@@ -103,16 +103,32 @@ function inlineActor(sources: RollSources, token: Token): { actor: Actor; charac
 }
 
 /**
- * A character's numbers (docs/design-v1-pc-stats.md 3.6): with an SRD
- * shape linked on its actor, Wild Shape without a stat block or another
- * shape such as Polymorph, the creature's own numbers. Doc 2 adds Wild Shape
- * with a stat block, which mixes the druid's and the beast's. With no shape,
- * its stat block's.
+ * A character's numbers (docs/design-v1-pc-stats.md 3.6): in Wild Shape
+ * with a stat block, the druid's and the beast's mixed (`shapedNumbers`).
+ * In Wild Shape without a block, or another shape such as Polymorph, the
+ * creature's own. With no shape, its stat block's. A shape whose creature
+ * the SRD table lacks, or a table not loaded, gives none.
  */
 function characterNumbers(sources: RollSources, character: Character): RollNumbers | null {
   const shape = character.actor.srdId;
-  if (shape !== undefined) return sources.srd?.[shape] ?? null;
-  return pcRollNumbers(character);
+  if (shape === undefined) return pcRollNumbers(character);
+  const beast = sources.srd?.[shape];
+  if (!beast) return null;
+  return character.actor.wildShape && character.stats ? shapedNumbers(character, beast) : beast;
+}
+
+/**
+ * A character's initiative: the actor's own, which the reducer derives from
+ * the druid's block, except in Wild Shape with a block, where the beast's
+ * Dexterity counts (`shapedInitiative`), and none while that creature's
+ * numbers are unknown here. Another shape keeps the actor's, since such a
+ * spell is cast in a fight.
+ */
+function characterInitiative(sources: RollSources, character: Character): number | null {
+  const shape = character.actor.srdId;
+  if (shape === undefined || !character.actor.wildShape || !character.stats) return character.actor.initBonus;
+  const beast = sources.srd?.[shape];
+  return beast ? shapedInitiative(character, beast) : null;
 }
 
 /**
@@ -147,15 +163,21 @@ export function creatureNumbers(sources: RollSources, creature: ActorTarget): Ro
 
 /**
  * A creature's bonus for a test, or null when none is known. Initiative is
- * the actor's own `initBonus` (doc 2 adds a shaped druid's), and an attack's
- * is its NamedRoll's, never the creature's.
+ * the actor's own `initBonus`, or a druid's in Wild Shape with a stat block
+ * (docs/design-v1-pc-stats.md 3.6), and an attack's is its NamedRoll's,
+ * never the creature's.
  */
 export function creatureBonus(sources: RollSources, creature: ActorTarget, test: D20Test): number | null {
   if (test.kind === "attack") return null;
   if (test.kind === "initiative") {
-    if ("characterId" in creature) return sources.characters[creature.characterId]?.actor.initBonus ?? null;
+    if ("characterId" in creature) {
+      const character = sources.characters[creature.characterId];
+      return character ? characterInitiative(sources, character) : null;
+    }
     const token = sources.tokens[creature.tokenId];
-    return token ? (inlineActor(sources, token)?.actor.initBonus ?? null) : null;
+    const held = token ? inlineActor(sources, token) : null;
+    if (!held) return null;
+    return held.character ? characterInitiative(sources, held.character) : held.actor.initBonus;
   }
   const numbers = creatureNumbers(sources, creature);
   return numbers ? bonusFor(numbers, test) : null;

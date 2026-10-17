@@ -217,6 +217,8 @@ const actorSchema = z.strictObject({
   monsterId: id.optional(),
   /** One of its character's companion stat blocks, on a companion only (docs/design-v1-companion-stat-blocks.md 3.2). */
   blockId: id.optional(),
+  /** The SRD link is a character's Wild Shape (docs/design-v1-pc-stats.md 3.6). */
+  wildShape: z.literal(true).optional(),
   sheetUrl: sheetUrl.optional(),
   effects: z.array(effectStored).max(MAX_EFFECTS),
   deathSaves: z.strictObject({ ok: z.number().int().min(0).max(3), fail: z.number().int().min(0).max(3) }),
@@ -246,6 +248,12 @@ const actorPatch = z.strictObject({
    * three links to a value clears the other two.
    */
   blockId: id.nullable().optional(),
+  /**
+   * Goes with an `srdId` set in the same patch, on a character's own actor:
+   * the shape is Wild Shape. A patch that sets `srdId` without it takes
+   * another shape, and clearing `srdId` ends either (docs/design-v1-pc-stats.md 3.6).
+   */
+  wildShape: z.literal(true).optional(),
   sheetUrl: sheetUrl.nullable().optional(),
   legendary: legendary.nullable().optional(),
   notes: notes.optional(),

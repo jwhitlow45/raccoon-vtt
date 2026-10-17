@@ -42,6 +42,13 @@ export const OWNER_ACTOR_FIELDS: ReadonlySet<keyof ActorPatch> = new Set([
  */
 const COMPANION_OWNER_ACTOR_FIELDS: ReadonlySet<keyof ActorPatch> = new Set([...OWNER_ACTOR_FIELDS, "srdId", "blockId"]);
 
+/**
+ * The shape a character's players take on its own actor beside those
+ * (docs/design-v1-pc-stats.md 4.1): an SRD creature and whether it is Wild
+ * Shape, through `character.update`.
+ */
+const CHARACTER_OWNER_ACTOR_FIELDS: ReadonlySet<keyof ActorPatch> = new Set([...OWNER_ACTOR_FIELDS, "srdId", "wildShape"]);
+
 /** Character fields an owner may patch, the stat block among them (docs/design-v1-pc-stats.md 4.1). `actor` is limited further by OWNER_ACTOR_FIELDS. */
 export const OWNER_CHARACTER_FIELDS: ReadonlySet<string> = new Set(["name", "defaultImage", "actor", "level", "stats"]);
 
@@ -128,7 +135,7 @@ export function tokenAccess(input: {
     canEditActor(field) {
       if (dm) return true;
       if (companionOwner) return COMPANION_OWNER_ACTOR_FIELDS.has(field);
-      return owner && actorVia === "character" && OWNER_ACTOR_FIELDS.has(field);
+      return owner && actorVia === "character" && CHARACTER_OWNER_ACTOR_FIELDS.has(field);
     },
     hp: full ? "all" : view?.meta?.settings?.playersApplyDamage ? "relative" : "none",
     effects: full,
@@ -156,6 +163,6 @@ export function characterAccess(input: { role: Role; memberId: MemberId | null |
     owner,
     full: dm || owner,
     canEdit: (field) => dm || (owner && OWNER_CHARACTER_FIELDS.has(field)),
-    canEditActor: (field) => dm || (owner && OWNER_ACTOR_FIELDS.has(field)),
+    canEditActor: (field) => dm || (owner && CHARACTER_OWNER_ACTOR_FIELDS.has(field)),
   };
 }

@@ -13,6 +13,7 @@ import { statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
 import type { TokenAccess } from "./access.ts";
 import { defenseLines, linkedBlockState, moreStatsShown, saveUnits, saveUnitsOf, type LinkedBlock, type VitalItem, type VitalUnit } from "./statSummary.ts";
 import { pcDefenseLines } from "../pcstats/reading.ts";
+import { shapedRollNumbers } from "../pcstats/shape.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { useSrdBlocks } from "../monsters/srdBlocks.ts";
 
@@ -50,6 +51,13 @@ export function useLinkedBlock(
   const srd = useSrdList(shown && pc === null && tokenStatBlock(actor, monsters, blocks).kind === "srd");
   if (pc) return pc;
   const block = shown ? linkedBlockState(actor, monsters, srd, blocks) : ({ kind: "none" } as const);
+  // Wild Shape with a stat block rolls with the druid's and the beast's numbers mixed, and the beast's defenses (docs/design-v1-pc-stats.md 3.6).
+  if (character?.stats && character.actor.wildShape && block.kind === "ready") {
+    const numbers = shapedRollNumbers(character, block.block);
+    const saves = {} as Record<AbilityKey, number>;
+    for (const key of ABILITY_KEYS) saves[key] = numbers.abilities[key].save;
+    return { kind: "numbers", saves, defenses: defenseLines(block.block) };
+  }
   return block;
 }
 
