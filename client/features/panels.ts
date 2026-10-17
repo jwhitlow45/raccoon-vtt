@@ -68,6 +68,8 @@ export type PanelDef = {
   /** Position among the tabs and toolbar buttons, lowest first. */
   order: number;
   group: PanelGroup;
+  /** What the panel is about, where that comes from outside it: "selection", the selected token (panelSubject). */
+  subject?: "selection";
   Component: ComponentType<PanelProps>;
 };
 
@@ -78,11 +80,12 @@ function panel(def: {
   group: PanelGroup;
   dmOnly?: boolean;
   narrowOnly?: boolean;
+  subject?: "selection";
   load: () => Promise<{ default: ComponentType<PanelProps> }>;
 }): PanelDef {
   const dmOnly = def.dmOnly ?? false;
   const Component = retryableLazy(def.load, { roles: dmOnly ? ["dm"] : ["dm", "player"] });
-  return { id: def.id, title: def.title, order: def.order, group: def.group, dmOnly, narrowOnly: def.narrowOnly ?? false, Component };
+  return { id: def.id, title: def.title, order: def.order, group: def.group, dmOnly, narrowOnly: def.narrowOnly ?? false, ...(def.subject ? { subject: def.subject } : null), Component };
 }
 
 /**
@@ -93,7 +96,7 @@ function panel(def: {
  * side panel's default tab.
  */
 export const PANELS: readonly PanelDef[] = [
-  panel({ id: "token", title: "Token", order: 10, group: "play", load: () => import("../panels/TokenPanel.tsx") }),
+  panel({ id: "token", title: "Token", order: 10, group: "play", subject: "selection", load: () => import("../panels/TokenPanel.tsx") }),
   panel({ id: "tracker", title: "Initiative", order: 12, group: "play", load: () => import("../panels/TrackerPanel.tsx") }),
   panel({ id: "scenes", title: "Scenes", order: 24, group: "play", dmOnly: true, load: () => import("../panels/ScenesPanel.tsx") }),
   panel({ id: "library", title: "Library", order: 48, group: "prepare", load: () => import("../panels/LibraryPanel.tsx") }),
@@ -450,10 +453,10 @@ export function useSubpageFocus(
 
 /**
  * Where a panel was scrolled when it last showed: its scroller's offsets,
- * whether it sat at its end, and the page it showed then, null for its
- * first page or a subpage's key (subpageKey).
+ * whether it sat at its end, the page it showed then, null for its first
+ * page or a subpage's key (subpageKey), and what it was about (panelSubject).
  */
-export type PanelScroll = { top: number; left: number; end: boolean; page: string | null };
+export type PanelScroll = { top: number; left: number; end: boolean; page: string | null; subject: string | null };
 
 /**
  * Each panel's last scroll, by panel id, for this Room page: a panel that
@@ -463,6 +466,16 @@ export type PanelScroll = { top: number; left: number; end: boolean; page: strin
  */
 export const panelScrollSlot = scopeSlot(() => new Map<string, PanelScroll>());
 
+/**
+ * What a panel is about, where that comes from outside it: the selected
+ * token for a panel whose registry entry says `subject: "selection"` (the
+ * Token panel), else null. A panel that shows again about another subject
+ * opens at its top, since its old place belonged to something else.
+ */
+export function panelSubject(id: string, selectedTokenId: string | null): string | null {
+  return panelById(id)?.subject === "selection" ? selectedTokenId : null;
+}
+
 /** Under this many px from the foot, a scroller sits at its end. */
 const END_SLOP = 2;
 
@@ -470,20 +483,21 @@ const END_SLOP = 2;
 export const RESTORE_WAIT_MS = 1000;
 
 /**
- * A scroller's place now, on `page`. At its end only once scrolled: a
- * panel that fits its scroller, or one scrolled back to its top, opens at
- * its top again even if it has grown since.
+ * A scroller's place now, on `page`, about `subject`. At its end only once
+ * scrolled: a panel that fits its scroller, or one scrolled back to its
+ * top, opens at its top again even if it has grown since.
  */
-export function scrollOf(el: { scrollTop: number; scrollLeft: number; scrollHeight: number; clientHeight: number }, page: string | null): PanelScroll {
+export function scrollOf(el: { scrollTop: number; scrollLeft: number; scrollHeight: number; clientHeight: number }, page: string | null, subject: string | null = null): PanelScroll {
   const end = el.scrollTop > 0 && el.scrollHeight - el.scrollTop - el.clientHeight <= END_SLOP;
-  return { top: el.scrollTop, left: el.scrollLeft, end, page };
+  return { top: el.scrollTop, left: el.scrollLeft, end, page, subject };
 }
 
 /**
  * One try at putting a panel back where it was (`saved`), given the page
- * it shows now and its scroller's size:
+ * and subject it shows now and its scroller's size:
  *
- * - "done" with nothing to put back: nothing remembered, so the panel
+ * - "done" with nothing to put back: nothing remembered, or a place about
+ *   another subject (the Token panel left on another token), so the panel
  *   keeps its own first scroll, its top, or the Log's newest line.
  * - "wait" while a remembered subpage has yet to publish its header.
  * - "set" an offset, and `held` once the content is tall enough to hold
@@ -492,8 +506,8 @@ export function scrollOf(el: { scrollTop: number; scrollLeft: number; scrollHeig
  */
 export type RestoreStep = { kind: "done" } | { kind: "wait" } | { kind: "set"; top: number; left: number; held: boolean };
 
-export function restoreStep(saved: PanelScroll | undefined, now: { page: string | null; scrollHeight: number; clientHeight: number }): RestoreStep {
-  if (!saved) return { kind: "done" };
+export function restoreStep(saved: PanelScroll | undefined, now: { page: string | null; subject?: string | null; scrollHeight: number; clientHeight: number }): RestoreStep {
+  if (!saved || saved.subject !== (now.subject ?? null)) return { kind: "done" };
   if (saved.page !== now.page) return { kind: "wait" };
   const room = Math.max(0, now.scrollHeight - now.clientHeight);
   if (saved.end) return { kind: "set", top: room, left: saved.left, held: true };
@@ -538,12 +552,13 @@ export class PanelScrollKeeper {
   }
 
   /**
-   * One try, on the page the panel shows now. Whether to try again on the
-   * next frame: only while pending with the scroller drawn. A scroller not
-   * drawn yet keeps the restore pending for the commit that draws it, with
-   * no frames meanwhile, so a hidden pane runs no loop.
+   * One try, on the page and about the subject the panel shows now.
+   * Whether to try again on the next frame: only while pending with the
+   * scroller drawn. A scroller not drawn yet keeps the restore pending for
+   * the commit that draws it, with no frames meanwhile, so a hidden pane
+   * runs no loop.
    */
-  attempt(page: string | null): boolean {
+  attempt(page: string | null, subject: string | null = null): boolean {
     const ask = this.pending;
     const el = this.box();
     if (!ask || !el || el.getClientRects().length === 0) return false;
@@ -553,7 +568,7 @@ export class PanelScrollKeeper {
       this.pending = null;
       return false;
     }
-    const step = restoreStep(this.kept.get(ask.id), { page, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight });
+    const step = restoreStep(this.kept.get(ask.id), { page, subject, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight });
     if (step.kind === "wait") return true;
     if (step.kind === "set") {
       if (el.scrollTop !== step.top) el.scrollTop = step.top;
@@ -565,10 +580,22 @@ export class PanelScrollKeeper {
   }
 
   /** The scroller scrolled: kept as the panel's place, unless a restore is pending. */
-  scrolled(page: string | null): void {
+  scrolled(page: string | null, subject: string | null = null): void {
     const el = this.box();
     if (this.shown === null || this.pending !== null || !el) return;
-    this.kept.set(this.shown, scrollOf(el, page));
+    this.kept.set(this.shown, scrollOf(el, page, subject));
+  }
+
+  /**
+   * After each commit: a panel now about another subject than its kept
+   * place, shown again so or changed in place (Token on another token),
+   * keeps its place now about that subject. So it comes back about the one
+   * it was left on, and never about one it showed earlier.
+   */
+  note(page: string | null, subject: string | null): void {
+    if (this.shown === null || this.pending !== null) return;
+    const saved = this.kept.get(this.shown);
+    if (saved === undefined || saved.subject !== subject) this.scrolled(page, subject);
   }
 
   /** The viewer wheeled, touched, pressed or typed in the scroller: a pending restore stops there, so content that fills in late never pulls them back. */
@@ -593,19 +620,19 @@ export class PanelScrollKeeper {
  * on each commit and each frame until it ends, which takes at most
  * RESTORE_WAIT_MS.
  */
-export function usePanelScroll(id: string | null, subpage: PanelHeader | null, body: RefObject<HTMLElement | null>): void {
+export function usePanelScroll(id: string | null, subpage: PanelHeader | null, body: RefObject<HTMLElement | null>, subject: string | null = null): void {
   const kept = useScoped(panelScrollSlot);
   const page = subpage ? subpageKey(subpage) : null;
-  const pageNow = useRef(page);
-  pageNow.current = page;
+  const now = useRef({ page, subject });
+  now.current = { page, subject };
   const [keeper] = useState(() => new PanelScrollKeeper(kept, () => body.current, () => performance.now()));
   const framing = useRef(false);
   const tryRestore = useRef(() => {});
   tryRestore.current = () => {
-    if (!keeper.attempt(pageNow.current) || framing.current) return;
+    if (!keeper.attempt(now.current.page, now.current.subject) || framing.current) return;
     framing.current = true;
     const frame = () => {
-      if (keeper.attempt(pageNow.current)) requestAnimationFrame(frame);
+      if (keeper.attempt(now.current.page, now.current.subject)) requestAnimationFrame(frame);
       else framing.current = false;
     };
     requestAnimationFrame(frame);
@@ -613,7 +640,7 @@ export function usePanelScroll(id: string | null, subpage: PanelHeader | null, b
   useEffect(() => {
     const el = body.current;
     if (!el) return;
-    const record = () => keeper.scrolled(pageNow.current);
+    const record = () => keeper.scrolled(now.current.page, now.current.subject);
     const takeOver = () => keeper.takeOver();
     el.addEventListener("scroll", record, { passive: true });
     for (const type of VIEWER_INPUT) el.addEventListener(type, takeOver, { passive: true });
@@ -625,6 +652,7 @@ export function usePanelScroll(id: string | null, subpage: PanelHeader | null, b
   useLayoutEffect(() => {
     keeper.show(id);
     tryRestore.current();
+    keeper.note(page, subject);
   });
 }
 

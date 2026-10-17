@@ -124,7 +124,7 @@ describe("a panel's scroll as it shows again", () => {
 
   test("a panel left part way down goes back there, held once its content is tall enough", () => {
     const saved = scrollOf({ ...box(640), scrollLeft: 30 }, null);
-    assert.deepEqual(saved, { top: 640, left: 30, end: false, page: null });
+    assert.deepEqual(saved, { top: 640, left: 30, end: false, page: null, subject: null });
     assert.deepEqual(restoreStep(saved, at(null, 2000)), { kind: "set", top: 640, left: 30, held: true });
     assert.deepEqual(restoreStep(saved, at(null, 600)), { kind: "set", top: 640, left: 30, held: false }, "the list has not filled in yet");
   });
@@ -198,7 +198,7 @@ describe("the panel scroll keeper", () => {
     assert.equal(keeper.attempt(null), false, "nothing remembered: done at once");
     el.scrollTop = 800;
     keeper.scrolled(null);
-    assert.deepEqual(kept.get("monsters"), { top: 800, left: 0, end: false, page: null });
+    assert.deepEqual(kept.get("monsters"), { top: 800, left: 0, end: false, page: null, subject: null });
 
     // Monsters shows again: only the filter bar and "Loading the monsters…" at first, taller than the short pane.
     keeper.show("tracker");
@@ -214,11 +214,11 @@ describe("the panel scroll keeper", () => {
     assert.equal(keeper.attempt(null), false, "held, and done");
     assert.equal(el.scrollTop, 800);
     keeper.scrolled(null);
-    assert.deepEqual(kept.get("monsters"), { top: 800, left: 0, end: false, page: null });
+    assert.deepEqual(kept.get("monsters"), { top: 800, left: 0, end: false, page: null, subject: null });
   });
 
   test("the viewer taking the scroller ends the wait, and a list that fills in later never pulls them back", () => {
-    const kept = new Map<string, PanelScroll>([["monsters", { top: 800, left: 0, end: false, page: null }]]);
+    const kept = new Map<string, PanelScroll>([["monsters", { top: 800, left: 0, end: false, page: null, subject: null }]]);
     const el = fakeScroller();
     const keeper = new PanelScrollKeeper(kept, () => el, () => 0);
     el.setContent(400);
@@ -234,7 +234,7 @@ describe("the panel scroll keeper", () => {
   });
 
   test("the wait ends after RESTORE_WAIT_MS from the first drawn try, and a scroller not drawn yet waits without frames", () => {
-    const kept = new Map<string, PanelScroll>([["journal", { top: 800, left: 0, end: false, page: null }]]);
+    const kept = new Map<string, PanelScroll>([["journal", { top: 800, left: 0, end: false, page: null, subject: null }]]);
     const el = fakeScroller();
     let clock = 0;
     const keeper = new PanelScrollKeeper(kept, () => el, () => clock);
@@ -249,6 +249,49 @@ describe("the panel scroll keeper", () => {
     clock = 5000 + RESTORE_WAIT_MS;
     assert.equal(keeper.attempt(null), false);
     assert.equal(keeper.waiting, false);
+  });
+});
+
+// The coordinator's decision on the review's Q1: a panel whose subject changed opens at its top.
+describe("a panel about another subject", () => {
+  test("Token comes back at its place only about the token it was left on", () => {
+    const kept = new Map<string, PanelScroll>();
+    const el = fakeScroller();
+    el.setContent(3000);
+    const keeper = new PanelScrollKeeper(kept, () => el, () => 0);
+    const show = (id: string, subject: string | null) => {
+      keeper.show(id);
+      if (id === "token") el.top = 0;
+      keeper.attempt(null, subject);
+      keeper.note(null, subject);
+    };
+    show("token", "g1");
+    el.scrollTop = 200;
+    keeper.scrolled(null, "g1");
+    show("tracker", null);
+    show("token", "g1");
+    assert.equal(el.scrollTop, 200, "the same token: where it was");
+    show("tracker", null);
+    show("token", "g2");
+    assert.equal(el.scrollTop, 0, "another token: its top");
+    assert.equal(kept.get("token")?.subject, "g2", "its place is now about the token it shows");
+    show("tracker", null);
+    show("token", "g1");
+    assert.equal(el.scrollTop, 0, "left on Goblin 2, so Goblin 1's old place is gone");
+    assert.deepEqual(restoreStep({ top: 200, left: 0, end: false, page: null, subject: "g1" }, { page: null, subject: "g2", scrollHeight: 3000, clientHeight: 300 }), { kind: "done" });
+  });
+
+  test("a subject that changes in place keeps the place now about the new one", () => {
+    const kept = new Map<string, PanelScroll>();
+    const el = fakeScroller();
+    el.setContent(3000);
+    const keeper = new PanelScrollKeeper(kept, () => el, () => 0);
+    keeper.show("token");
+    keeper.attempt(null, "g1");
+    el.scrollTop = 250;
+    keeper.scrolled(null, "g1");
+    keeper.note(null, "g2");
+    assert.deepEqual(kept.get("token"), { top: 250, left: 0, end: false, page: null, subject: "g2" });
   });
 });
 

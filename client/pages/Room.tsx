@@ -22,7 +22,7 @@ import { Sheet, paneBodyPadding, type SheetMode } from "../components/Sheet.tsx"
 import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, sheetCap, sheetMode, sideSheetWidth } from "../components/sheetCap.ts";
 import { SHORT_LANDSCAPE_MAX, useRecordOverflow, useTopBars, useTurnPlacement, type TurnPlacement } from "../features/encounter/band.ts";
 import { FightWatch, InitiativeStrip, useYourTurnNotice } from "../features/encounter/InitiativeStrip.tsx";
-import { panelById, panelSections, panelsFor, subpageBack, usePanelScroll, useSubpageFocus, type PanelDef, type PanelHeader } from "../features/panels.ts";
+import { panelById, panelSections, panelsFor, panelSubject, subpageBack, usePanelScroll, useSubpageFocus, type PanelDef, type PanelHeader } from "../features/panels.ts";
 import { PartyDock } from "../features/party/PartyDock.tsx";
 import type { OpenSheet } from "../features/find/findToken.ts";
 import { HandoutPopup } from "../features/handouts/HandoutPopup.tsx";
@@ -854,6 +854,7 @@ function RoomPage() {
             ref={sheetElRef}
             title={mounted.title}
             scrollKey={mounted.id}
+            scrollSubject={panelSubject(mounted.id, selectedId)}
             mode={sheetModeNow}
             shown={sheet !== undefined}
             inset={{ top: topInset, bottom: TOOLBAR }}
@@ -993,6 +994,7 @@ function RoomPage() {
           onHide={hideSidePanel}
           subpages={subpages}
           panel={(id, shown) => <PanelBody id={id} shown={shown} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={headerOf(id)} />}
+          scrollSubject={(id) => panelSubject(id, selectedId)}
           tabRef={sideTabRef}
           nameRef={belowNameRef}
           onTabsDrawn={placeFocus}
@@ -2187,6 +2189,8 @@ function SidePanel(props: {
   subpages: Readonly<Record<string, PanelHeader | null>>;
   /** A panel's body, mounted in its pane. */
   panel(id: string, shown: boolean): ReactNode;
+  /** What a panel is about, so it opens at its top when that changed (features/panels.ts panelSubject). */
+  scrollSubject(id: string): string | null;
   /**
    * The chosen tab, which takes focus from script when Details opens the
    * token's panel: "Token, tab, selected". The tab panel itself takes no
@@ -2367,6 +2371,7 @@ function SidePanel(props: {
     <SidePane
       key={top.id}
       panelId={top.id}
+      subject={props.scrollSubject(top.id)}
       rootId={topPaneId}
       style={two ? { flex: "none", height: drawn.top } : { flex: "1 1 0" }}
       subpage={props.subpages[top.id] ?? null}
@@ -2406,6 +2411,7 @@ function SidePanel(props: {
         <SidePane
           key={below.id}
           panelId={below.id}
+          subject={props.scrollSubject(below.id)}
           hidden={!two}
           style={{ flex: "1 1 0" }}
           subpage={props.subpages[below.id] ?? null}
@@ -2477,6 +2483,8 @@ function SidePanel(props: {
 function SidePane(props: {
   /** The panel it shows, whose scroll it keeps as the panel leaves and puts back as it shows again. */
   panelId: string;
+  /** What the panel is about: a place about another subject is not put back. */
+  subject: string | null;
   rootId?: string;
   hidden?: boolean;
   style: CSSProperties;
@@ -2492,7 +2500,7 @@ function SidePane(props: {
   const rootRef = useRef<HTMLDivElement>(null);
   // Where Back lands when the row that opened the subpage is gone (a page deleted from inside it): the header goes with the subpage, and the pane's name stays.
   useSubpageFocus(props.subpage, { title: titleRef, body: bodyRef, root: rootRef, fallback: props.fallback });
-  usePanelScroll(props.panelId, props.subpage, bodyRef);
+  usePanelScroll(props.panelId, props.subpage, bodyRef, props.subject);
   const header = props.subpage ? (
     <SheetHeader title={props.subpage.title} back={subpageBack(props.subpage)} titleRef={titleRef} />
   ) : props.cutTitle ? (

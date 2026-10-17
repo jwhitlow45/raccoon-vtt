@@ -550,6 +550,31 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await dm.keyboard.press("Escape");
     await dm.keyboard.press("Escape");
 
+    // Token comes back at its place only about the token it was left on, and at its top about another (the coordinator's decision on the review's Q1).
+    const details = async (name: string, cell: { x: number; y: number }) => {
+      const p = await pagePoint(dm, run.bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+      await dm.mouse.click(p.x, p.y);
+      await tokenBar(dm, name).getByRole("button", { name: "Details", exact: true }).click();
+      await topPane(dm, "Token").getByRole("heading", { name }).first().waitFor();
+    };
+    // Away by its tab, the token kept selected: Escape would let go of it, and Token would then be about no token.
+    const leave = () => openSideTab(dm, "Initiative");
+    await details("Goblin 1", GOBLIN_AT);
+    await scrollPane(topPane(dm, "Token"), 150);
+    assert.ok((await scrollOfPane(topPane(dm, "Token"))) > 50, "Token scrolls");
+    const tokenAt = await scrollOfPane(topPane(dm, "Token"));
+    await leave();
+    await details("Goblin 1", GOBLIN_AT);
+    assert.ok(near(await scrollOfPane(topPane(dm, "Token")), tokenAt), "the same token: where it was");
+    await leave();
+    await details("Goblin 2", { x: 15, y: 2 });
+    assert.equal(await scrollOfPane(topPane(dm, "Token")), 0, "another token: its top");
+    await leave();
+    await details("Goblin 1", GOBLIN_AT);
+    assert.equal(await scrollOfPane(topPane(dm, "Token")), 0, "left on Goblin 2, so Goblin 1 opens at its top too");
+    await leave();
+    await dm.keyboard.press("Escape");
+
     // Monsters fills in its list after it draws, and still comes back where it was (GR-P-1).
     await openSideTab(dm, "Monsters");
     await topPane(dm, "Monsters").getByText(/^SRD 5\.2\.1 \(\d+\)$/).waitFor();
