@@ -325,7 +325,7 @@ Settled by the project owner (2026-10-17): a sheet with unsaved input springs ba
 
 For the project owner to overrule:
 1. **The panes and the roll card swipe too**, since they rise from the bottom as the panels do. The roll card's swipe is Later, which keeps the answer typed so far, as Back already does.
-2. **No drawn grab handle.** The header is the grab area. A handle bar would take height from a 120 px sheet, and the gesture is an extra.
+2. **A drawn grabber, in the header's top space** (the project owner, 2026-10-17: "add a grabber bar like YouTube comments at the top of the mobile panels to indicate swipe gestures work"). One `SheetGrabber` pill, 36 x 4 layout px, sits centered in the 6 px above every swiping grab area's buttons, so it takes no height from a 120 px sheet. It is decorative (`aria-hidden`, `pointer-events: none`), and the header stays the grab area. This replaces the first draft's "no drawn grab handle".
 3. **The sideways modes do not swipe**: they do not rise from the bottom (section 3).
 4. **A surface with unsaved input follows the finger at half its distance** before it springs back, so the drag itself shows that it will not close.
 5. **Full screen covers the toolbar too**, as the very short mode does, since the owner asked for "the entire screen". The alternative was stopping above the toolbar.
