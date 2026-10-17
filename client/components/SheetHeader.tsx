@@ -1,4 +1,4 @@
-import { useId, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
+import { useId, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { GRAB_ATTR, GRAB_STYLE } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
@@ -96,6 +96,8 @@ export function SheetHeader(props: {
   detailId?: string;
   /** The header is the grab area of a sheet that swipes (lib/sheetSwipe.ts): a drag on it always moves the sheet. */
   grab?: boolean;
+  /** "Full screen", for a sheet that fills the screen when swiped up (docs/design-v1-sheet-swipe.md 4.7): first in the header, hidden until it has focus. */
+  fullScreen?: { pressed: boolean; onPress(): void };
 }) {
   const { back, level = 2 } = props;
   const grab = grabProps(props.grab);
@@ -130,9 +132,18 @@ export function SheetHeader(props: {
   );
   const padding = theme.space(actions ? 1 : 2);
   const divider = props.divider ? `${theme.line.border}px solid ${theme.color.border}` : undefined;
+  // Over the title's first 44 px, which it covers while it shows: on the title's line, after Back in one row.
+  const fullScreen = props.fullScreen ? (
+    <FullScreenButton
+      {...props.fullScreen}
+      at={props.stacked ? { left: padding, top: STACKED_PAD + theme.touch + (STACKED_TITLE_LINE - theme.touch) / 2 } : { left: padding + (back ? theme.touch + theme.space(1) : 0), top: (56 - theme.touch) / 2 }}
+    />
+  ) : null;
+  const lead = fullScreen ? { position: "relative" as const } : null;
   if (props.stacked) {
     return (
-      <header {...grab.attrs} style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, padding: `${STACKED_PAD}px ${padding}px`, borderBottom: divider, ...grab.style }}>
+      <header {...grab.attrs} style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, padding: `${STACKED_PAD}px ${padding}px`, borderBottom: divider, ...grab.style, ...lead }}>
+        {fullScreen}
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0, height: theme.touch }}>
           {backButton}
           <span style={{ flex: 1 }} />
@@ -144,6 +155,7 @@ export function SheetHeader(props: {
   }
   const row = (
     <>
+      {fullScreen}
       {backButton}
       {heading(false)}
       {trailing}
@@ -153,7 +165,7 @@ export function SheetHeader(props: {
   const rowStyle: CSSProperties = { flex: "none", display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0, minHeight: 56, padding: `0 ${padding}px` };
   if (props.detail) {
     return (
-      <header {...grab.attrs} style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, borderBottom: divider, ...grab.style }}>
+      <header {...grab.attrs} style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, borderBottom: divider, ...grab.style, ...lead }}>
         <div style={rowStyle}>{row}</div>
         <div id={props.detailId} style={{ minWidth: 0, padding: `0 ${padding + theme.space(2)}px ${theme.space(2)}px`, marginTop: -theme.space(2) }}>
           {props.detail}
@@ -162,10 +174,23 @@ export function SheetHeader(props: {
     );
   }
   return (
-    <header {...grab.attrs} style={{ ...rowStyle, borderBottom: divider, ...grab.style }}>
+    <header {...grab.attrs} style={{ ...rowStyle, borderBottom: divider, ...grab.style, ...lead }}>
       {row}
     </header>
   );
+}
+
+/**
+ * Full screen without the gesture (4.7): visually hidden until it has
+ * focus, then drawn over the start of the title, so nothing moves and the
+ * header's stacking rule never counts it. A screen reader meets it in the
+ * header's reading order, and Tab reaches it. Pressed while the sheet
+ * fills the screen.
+ */
+function FullScreenButton(props: { pressed: boolean; onPress(): void; at: { left: number; top: number } }) {
+  const [focused, setFocused] = useState(false);
+  const place: CSSProperties = focused ? { position: "absolute", left: props.at.left, top: props.at.top, zIndex: 1, ...(props.pressed ? null : { background: theme.color.surface }) } : { ...VISUALLY_HIDDEN, minWidth: 0, minHeight: 0, border: "none" };
+  return <IconButton icon="expand" label="Full screen" pressed={props.pressed} onClick={props.onPress} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} style={place} />;
 }
 
 /** A grab area's mark and style, or nothing. */

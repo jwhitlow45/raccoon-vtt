@@ -52,6 +52,13 @@ export type SheetMode = "bottom" | "side" | "full";
  * body once that is at its top. `riders` ride its top edge and move with
  * it, the dock's row (pages/RoomDock.tsx). It provides its panel the
  * context that reports unsaved input, which makes a swipe spring back.
+ *
+ * Swiped up from its header, or by the Full screen button that Tab
+ * reaches in its header, it fills the screen (`expanded`, 4.7): the very
+ * short mode's shape, modal, its header still the upright sheet's, with no
+ * Hide. A short swipe down brings it back to its normal height. While a
+ * drag holds it above its normal top it takes that shape beside the map,
+ * drawn over the bars and clipped at the toolbar, so the drag lays out once.
  */
 export function Sheet(props: {
   ref?: Ref<HTMLElement>;
@@ -84,6 +91,12 @@ export function Sheet(props: {
   notices?: ReactNode;
   /** What rides the sheet's top edge at the foot: the dock's row. */
   riders?: readonly (HTMLElement | null)[];
+  /** At the foot, the sheet fills the screen. Room keeps it latent elsewhere. */
+  expanded?: boolean;
+  /** Fills the screen or brings the sheet back to its normal height, by a swipe or the Full screen button. Without it the sheet never fills the screen. */
+  onExpand?(on: boolean): void;
+  /** The sheet's height cap at the foot for the layout now, in layout px (sheetCap.ts), which a long swipe from full screen measures by after a change of layout. */
+  cap?: number;
   children: ReactNode;
 }) {
   const { mode, inset, subpage } = props;
@@ -106,16 +119,32 @@ export function Sheet(props: {
   );
   const onHide = mode === "bottom" ? undefined : props.onHide;
   const shown = props.shown ?? true;
-  useSheetDialog(dialogRef, { shown, modal: mode === "full", onCancel: props.onClose, hideFocus: props.hideFocus });
   const drafts = useDraftRegistry();
   // What it shows: the panel by its name, and its subpage by the key focus follows, so a new page or subpage ends a drag and drops a slide's close.
   const item = `${props.title}\n${subpage ? subpageKey(subpage) : ""}`;
-  useSheetSwipe(dialogRef, { enabled: mode === "bottom" && shown, onClose: props.onClose, scroller: bodyRef, riders: props.riders, item, clip: "foot", drafts });
+  const filled = mode === "bottom" && props.expanded === true;
+  const { onExpand } = props;
+  const full = onExpand ? { on: filled, set: onExpand, cap: props.cap ?? 0 } : undefined;
+  const swipe = useSheetSwipe(dialogRef, { enabled: mode === "bottom" && shown, onClose: props.onClose, scroller: bodyRef, riders: props.riders, item, clip: "foot", drafts, full });
+  // A drag above the normal top, and a step down from full screen, keep the whole screen's box beside the map until they come to rest.
+  useSheetDialog(dialogRef, { shown, modal: mode === "full" || (filled && !swipe.rising), onCancel: props.onClose, hideFocus: props.hideFocus });
   const back: HeaderBack | null = subpage ? subpageBack(subpage) : props.onBack ? { label: props.backLabel ?? "Back", onBack: props.onBack } : null;
   const actionCount = props.actions ? (props.actionCount ?? 0) : 0;
   const stacked = headerStacks({ width: props.headerWidth, buttons: (back ? 1 : 0) + (onHide ? 1 : 0) + 1 + actionCount, actions: actionCount > 0 });
   const insetTop = `calc(${theme.safe.top} + ${inset.top}px)`;
   const insetBottom = `calc(${theme.safe.bottom} + ${inset.bottom}px)`;
+  const wholeScreen: CSSProperties = {
+    // Modal, in the browser's top layer: the whole screen, its content inside the safe areas on all four sides. No border: at the screen's edges it frames nothing, and the body is short enough here to want its 2 px.
+    position: "fixed",
+    border: "none",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    maxWidth: "none",
+    maxHeight: "none",
+    borderRadius: 0,
+    padding: `${theme.safe.top} ${theme.safe.right} ${theme.safe.bottom} ${theme.safe.left}`,
+  };
   const box: CSSProperties =
     mode === "bottom"
       ? {
@@ -149,18 +178,10 @@ export function Sheet(props: {
             zIndex: theme.z.sheet,
             boxShadow: theme.shadow.sheet,
           }
-        : {
-            // Modal, in the browser's top layer: the whole screen, its content inside the safe areas on all four sides. No border: at the screen's edges it frames nothing, and the body is short enough here to want its 2 px.
-            position: "fixed",
-            border: "none",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            maxWidth: "none",
-            maxHeight: "none",
-            borderRadius: 0,
-            padding: `${theme.safe.top} ${theme.safe.right} ${theme.safe.bottom} ${theme.safe.left}`,
-          };
+        : wholeScreen;
+  // Beside the map while a drag holds it above its normal top, so it is drawn over the bars as it rises, with the upright sheet's corners.
+  const rising: CSSProperties = { ...wholeScreen, borderRadius: `${theme.radius.lg}px ${theme.radius.lg}px 0 0`, zIndex: theme.z.overBars, boxShadow: theme.shadow.sheet };
+  const shape = swipe.rising ? rising : filled ? wholeScreen : box;
   return (
     <dialog
       ref={setDialog}
@@ -179,7 +200,7 @@ export function Sheet(props: {
         background: theme.color.surface,
         color: theme.color.text,
         border: `${theme.line.border}px solid ${theme.color.border}`,
-        ...box,
+        ...shape,
       }}
     >
       <section ref={sectionRef} aria-label={props.title} style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -196,8 +217,9 @@ export function Sheet(props: {
           closeRef={props.closeRef}
           titleRef={titleRef}
           grab={mode === "bottom"}
+          fullScreen={mode === "bottom" && onExpand ? { pressed: filled, onPress: () => swipe.expand(!filled) } : undefined}
         />
-        {mode === "full" ? props.notices : null}
+        {mode === "full" || filled ? props.notices : null}
         {/* Every mode keeps this shape, so a change of mode never mounts the panel again. */}
         <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
           {/* The 4 px on top hold the focus ring of a first full-width control (2 px out, 2 px wide), which the scrolling body would clip. */}

@@ -5,7 +5,7 @@ import { projectState } from "#shared/project.ts";
 import { shareState } from "../../state/share.ts";
 import type { RoomUi } from "../../state/store.ts";
 import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "../../state/selection.ts";
-import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type RoomActions, type RoomView } from "../../state/types.ts";
+import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type RoomActions, type RoomView } from "../../state/types.ts";
 import { panelById } from "../panels.ts";
 
 /**
@@ -109,6 +109,7 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
     showPanelList: (open) => store.setState({ local: withPanelList(store.getState().local, open) }),
     closeSheets: () => store.setState({ local: withoutSheets(store.getState().local) }),
     hideSheet: (hidden) => store.setState({ local: withSheetHidden(store.getState().local, hidden) }),
+    expandSheet: (on) => store.setState({ local: withSheetExpanded(store.getState().local, on) }),
     hideSidePanel: (hidden) => store.setState({ local: withSidePanelHidden(store.getState().local, hidden) }),
     crossWide: (wide) => store.setState({ local: crossWide(store.getState().local, wide) }),
     notify: (text, tone = "info") => {

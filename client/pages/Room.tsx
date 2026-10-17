@@ -19,7 +19,7 @@ import { QuietLoadNotice } from "./QuietLoadNotice.tsx";
 import { Loading } from "../components/Loading.tsx";
 import { ScrollStrip } from "../components/ScrollStrip.tsx";
 import { Sheet, paneBodyPadding, type SheetMode } from "../components/Sheet.tsx";
-import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, sheetMode, sideSheetWidth } from "../components/sheetCap.ts";
+import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, sheetCap, sheetMode, sideSheetWidth } from "../components/sheetCap.ts";
 import { SHORT_LANDSCAPE_MAX, useRecordOverflow, useTopBars, useTurnPlacement, type TurnPlacement } from "../features/encounter/band.ts";
 import { FightWatch, InitiativeStrip, useYourTurnNotice } from "../features/encounter/InitiativeStrip.tsx";
 import { panelById, panelSections, panelsFor, subpageBack, useSubpageFocus, type PanelDef, type PanelHeader } from "../features/panels.ts";
@@ -278,7 +278,7 @@ function RoomPage() {
   const ended = useRoomView((s) => s.ended);
   const roomId = useRoomView((s) => s.roomId);
   const gate = useRoomView(useShallow((s) => sceneGate({ view: s.view, sceneId: s.sceneId, role })));
-  const { selectedId, panel, tab, tool: toolId, actionBar, sidePanelHidden, sheetHidden, below, splitFits } = useRoomView(useShallow((s) => s.local));
+  const { selectedId, panel, tab, tool: toolId, actionBar, sidePanelHidden, sheetHidden, sheetExpanded, below, splitFits } = useRoomView(useShallow((s) => s.local));
   // The state this render draws, so a focus request waits for the render that draws the latest (placeFocus).
   const localNow = useRoomView((s) => s.local);
   const select = useCallback((id: string | null, add?: boolean) => ui.tap(id, add), [ui]);
@@ -559,9 +559,11 @@ function RoomPage() {
   const sideWidth = sideSheetWidth(width);
   const sideHeader = headerStacks({ width: sideWidth - safe.right - 2 * theme.line.border, buttons: mounted ? 3 : 1, actions: false }) ? SHEET_HEADER_STACKED : SHEET_HEADER;
   const sheetModeNow: SheetMode = !landscape ? "bottom" : sheetMode({ height, safeTop: safe.top, safeBottom: safe.bottom, topBars: topInset, header: sideHeader });
-  const full = sheetModeNow === "full" && sheetOpen;
+  // An upright sheet swiped up fills the screen in the very short mode's shape (docs/design-v1-sheet-swipe.md 4.7), so all that follows from that shape follows from either: the dock's buttons in the header, the fold, the notices inside.
+  const filled = sheetModeNow === "bottom" && sheetExpanded;
+  const full = (sheetModeNow === "full" || filled) && sheetOpen;
   // Less a 1 px border on each side, which the very short mode does not draw (Sheet.tsx).
-  const headerWidth = (sheetModeNow === "side" ? sideWidth - safe.right : width - safe.left - safe.right) - (sheetModeNow === "full" ? 0 : 2 * theme.line.border);
+  const headerWidth = (sheetModeNow === "side" ? sideWidth - safe.right : width - safe.left - safe.right) - (sheetModeNow === "full" || filled ? 0 : 2 * theme.line.border);
   const fullMode = sheetModeNow === "full";
   useLayoutEffect(() => {
     const now = dockStore.getState();
@@ -782,6 +784,10 @@ function RoomPage() {
   if (gate.kind === "blackout") return <PauseScreen />;
 
   const reserveTop = docked && !dockInHeader ? DOCK_PX + DOCK_GAP : undefined;
+  // The cap the sheet takes once it stands at its normal height again, with the dock back on its edge where it fits there, for a long swipe from full screen after a change of layout.
+  const normalReserve = docked && !landscape && dockFits({ height, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR }) ? DOCK_PX + DOCK_GAP : undefined;
+  const normalCap = sheetCap({ height, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR, reserveTop: normalReserve });
+  const expandSheet = (on: boolean) => ui.expandSheet(on);
   const headerActions = dockInHeader ? <DockHeaderActions summary={summary} actions={dockActions} showRef={showRef} summaryRef={summaryRef} /> : undefined;
   const headerActionCount = dockInHeader ? (hasBar ? 1 : 0) + (summary ? 1 : 0) : 0;
   const notices = full ? <ModalSlots /> : undefined;
@@ -864,6 +870,9 @@ function RoomPage() {
             headerWidth={headerWidth}
             notices={notices}
             riders={riders}
+            expanded={sheetExpanded}
+            onExpand={expandSheet}
+            cap={normalCap}
             backRef={backRef}
             closeRef={closeRef}
             titleRef={sheetTitleRef}
@@ -884,6 +893,9 @@ function RoomPage() {
             headerWidth={headerWidth}
             notices={notices}
             riders={riders}
+            expanded={sheetExpanded}
+            onExpand={expandSheet}
+            cap={normalCap}
             backRef={backRef}
             closeRef={closeRef}
           >

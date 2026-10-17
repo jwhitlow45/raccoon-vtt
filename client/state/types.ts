@@ -183,6 +183,14 @@ export type LocalUi = {
   splitFits: boolean | null;
   /** A request to open a panel that waits for the room to be measured before it is placed (5.1, `withSplitFits`). */
   pendingOpen: PendingOpen | null;
+  /**
+   * A phone's upright sheet fills the screen (docs/design-v1-sheet-swipe.md
+   * 4.7), by a swipe up or its Full screen button. Every open starts at the
+   * normal height, and only the sheet's closing or its replacement ends it:
+   * a subpage, Hide, a rotation and the crossing of 900 px keep it latent,
+   * shaping nothing until the sheet stands upright again. Never stored.
+   */
+  sheetExpanded: boolean;
 };
 
 /**
@@ -211,6 +219,7 @@ export const INITIAL_LOCAL: LocalUi = Object.freeze({
   below: null,
   splitFits: null,
   pendingOpen: null,
+  sheetExpanded: false,
 });
 
 /**
@@ -288,9 +297,11 @@ function placed(local: LocalUi, id: string, how: PanelHow | undefined): Pick<Loc
  */
 export function withPanel(local: LocalUi, id: string, how?: PanelHow, phoneOnly = false): LocalUi {
   const shown = { panelList: false, sidePanelHidden: false, sheetHidden: false } as const;
-  if (phoneOnly) return patched(local, { ...shown, panel: id, pendingOpen: null });
+  // Another panel opens at its normal height (docs/design-v1-sheet-swipe.md 4.7).
+  const sheetExpanded = local.panel === id && local.sheetExpanded;
+  if (phoneOnly) return patched(local, { ...shown, panel: id, pendingOpen: null, sheetExpanded });
   if (local.below !== null && local.splitFits === null) return patched(local, { ...shown, pendingOpen: how ? { id, how } : { id } });
-  return patched(local, { ...shown, ...placed(local, id, how), panel: id, pendingOpen: null });
+  return patched(local, { ...shown, ...placed(local, id, how), panel: id, pendingOpen: null, sheetExpanded });
 }
 
 /** The panel the bottom pane starts on (4.2): the role's stats, the DM's Token or a player's Characters, or Initiative when the stats are on top. */
@@ -317,7 +328,8 @@ export function withSplit(local: LocalUi, role: "dm" | "player", pair?: { top: s
  */
 export function withoutBelow(local: LocalUi): LocalUi {
   if (local.below === null) return local;
-  const closed = { ...local, below: null, panel: local.panel === local.below ? local.tab : local.panel, pendingOpen: null };
+  const replaced = local.panel === local.below;
+  const closed = { ...local, below: null, panel: replaced ? local.tab : local.panel, pendingOpen: null, sheetExpanded: !replaced && local.sheetExpanded };
   return local.pendingOpen ? withPanel(closed, local.pendingOpen.id, local.pendingOpen.how) : closed;
 }
 
@@ -345,20 +357,26 @@ export function withSplitFits(local: LocalUi, fits: boolean | null): LocalUi {
  * hidden, which would otherwise pop up.
  */
 export function withPanelList(local: LocalUi, open: boolean): LocalUi {
-  if (open && local.sheetHidden) return { ...local, panel: null, panelList: true, sheetHidden: false };
-  return local.panelList === open ? local : { ...local, panelList: open };
+  if (open && local.sheetHidden) return { ...local, panel: null, panelList: true, sheetHidden: false, sheetExpanded: false };
+  return local.panelList === open ? local : { ...local, panelList: open, sheetExpanded: false };
 }
 
 /** Closes the open panel for good. */
 export function withoutPanel(local: LocalUi): LocalUi {
   if (local.panel === null && !local.sheetHidden) return local;
-  return { ...local, panel: null, sheetHidden: false };
+  return { ...local, panel: null, sheetHidden: false, sheetExpanded: false };
 }
 
 /** Closes whatever sheet stands over a phone's map, hidden or not. */
 export function withoutSheets(local: LocalUi): LocalUi {
-  if (local.panel === null && !local.panelList && !local.sheetHidden) return local;
-  return { ...local, panel: null, panelList: false, sheetHidden: false };
+  if (local.panel === null && !local.panelList && !local.sheetHidden && !local.sheetExpanded) return local;
+  return { ...local, panel: null, panelList: false, sheetHidden: false, sheetExpanded: false };
+}
+
+/** Fills the screen with a phone's upright sheet, or brings it back to its normal height. With no sheet there is nothing to fill. */
+export function withSheetExpanded(local: LocalUi, on: boolean): LocalUi {
+  const next = on && (local.panel !== null || local.panelList);
+  return local.sheetExpanded === next ? local : { ...local, sheetExpanded: next };
 }
 
 /** Hides a phone's open panel, or shows it again. With no panel open there is nothing to hide. */
@@ -376,7 +394,8 @@ export function withSidePanelHidden(local: LocalUi, hidden: boolean): LocalUi {
  * side panel, which shows that panel's tab, shown or hidden by its own
  * state. Back below 900 px the side panel's tab opens as a sheet, as
  * `panel` holds it, hidden when the side panel was, so a panel the viewer
- * hid never pops up on a rotation.
+ * hid never pops up on a rotation. A sheet that fills the screen stays so,
+ * latent, until it closes (withSheetExpanded).
  */
 export function crossWide(local: LocalUi, wide: boolean): LocalUi {
   if (wide) return local.sheetHidden ? { ...local, sheetHidden: false } : local;

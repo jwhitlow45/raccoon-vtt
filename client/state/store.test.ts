@@ -10,7 +10,7 @@ import { turnOp } from "../features/encounter/logic.ts";
 import { DRAG_END_HOLD_MS, PREVIEW_IDLE_MS } from "./ephemeral.ts";
 import { createRoomStore, MAX_OP_AGE_MS, OP_ANSWER_MS, refusalText, type RoomStore } from "./store.ts";
 import { FakeClock, FakeOutbox } from "./testing.ts";
-import { INITIAL_LOCAL, panelView, sheetOpen, type LocalUi, type OpAnswer, type OpRefusal, type UnknownCause } from "./types.ts";
+import { INITIAL_LOCAL, panelView, sheetOpen, withoutBelow, withPanel, type LocalUi, type OpAnswer, type OpRefusal, type UnknownCause } from "./types.ts";
 
 type Snapshot = Extract<ServerMessage, { t: "snapshot" }>;
 type Ev = Extract<ServerMessage, { t: "ev" }>;
@@ -781,6 +781,64 @@ describe("phone sheets", () => {
     const before = t.state();
     t.room.ui.closeSheets();
     assert.equal(t.state(), before, "nothing open: no change, no render");
+  });
+});
+
+describe("a sheet that fills the screen (docs/design-v1-sheet-swipe.md 4.7)", () => {
+  test("every open starts at the normal height, and only the sheet's closing or its replacement ends it", () => {
+    const t = setup(room());
+    const expanded = () => t.state().local.sheetExpanded;
+    t.room.ui.expandSheet(true);
+    assert.equal(expanded(), false, "with no sheet there is nothing to fill");
+    t.room.ui.openPanel("log");
+    t.room.ui.expandSheet(true);
+    assert.equal(expanded(), true);
+    t.room.ui.openPanel("log");
+    assert.equal(expanded(), true, "the same panel asked for again is no new open");
+    t.room.ui.openPanel("journal");
+    assert.equal(expanded(), false, "another panel opens at its normal height");
+    t.room.ui.expandSheet(true);
+    t.room.ui.closePanel();
+    t.room.ui.openPanel("journal");
+    assert.equal(expanded(), false, "not remembered after a close");
+    t.room.ui.closeSheets();
+    t.room.ui.showPanelList(true);
+    t.room.ui.expandSheet(true);
+    t.room.ui.openPanel("party");
+    assert.equal(expanded(), false, "a full list, then a panel picked: the panel at its normal height");
+    t.room.ui.expandSheet(true);
+    t.room.ui.closeSheets();
+    assert.equal(expanded(), false);
+    t.room.ui.showPanelList(true);
+    t.room.ui.expandSheet(true);
+    t.room.ui.showPanelList(false);
+    assert.equal(expanded(), false, "the list closed");
+  });
+
+  test("with a split kept from a wider layout, the phone's sheet keeps or loses it by the same rule: its panel replaced or not", () => {
+    const kept: LocalUi = { ...INITIAL_LOCAL, panel: "log", tab: "log", below: "tracker", splitFits: false, sheetExpanded: true };
+    assert.equal(withPanel(kept, "log").sheetExpanded, true, "the same panel asked for again");
+    assert.equal(withPanel(kept, "journal").sheetExpanded, false, "another panel");
+    assert.equal(withPanel(kept, "party", undefined, true).sheetExpanded, false, "a phone-only panel");
+    assert.equal(withoutBelow(kept).sheetExpanded, true, "the bottom pane closed, the sheet's panel kept");
+    assert.equal(withoutBelow({ ...kept, panel: "tracker" }).sheetExpanded, false, "the bottom pane closed while the sheet named it: the sheet's panel replaced");
+  });
+
+  test("a change of layout keeps it latent: Hide, a rotation and the crossing of 900 px", () => {
+    const t = setup(room());
+    t.room.ui.openPanel("log");
+    t.room.ui.expandSheet(true);
+    t.room.ui.hideSheet(true);
+    t.room.ui.hideSheet(false);
+    assert.equal(t.state().local.sheetExpanded, true, "Hide, sideways");
+    t.room.ui.crossWide(true);
+    t.room.ui.crossWide(false);
+    assert.equal(t.state().local.sheetExpanded, true, "turned past 900 px and back");
+    t.room.ui.expandSheet(false);
+    assert.equal(t.state().local.sheetExpanded, false, "a step down");
+    const before = t.state();
+    t.room.ui.expandSheet(false);
+    assert.equal(t.state(), before, "no change, no render");
   });
 });
 

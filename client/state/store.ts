@@ -20,7 +20,7 @@ import { shareRecord, shareState } from "./share.ts";
 import { backoffDelay, realClock, Timer, type Clock } from "./timing.ts";
 import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
 import { panelById } from "../features/panels.ts";
-import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type Ended, type LocalUi, type OnAnswer, type OpAnswer, type OpRefusal, type PanelHow, type PendingOp, type RoomView, type Toast, type UnknownCause, type You } from "./types.ts";
+import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type Ended, type LocalUi, type OnAnswer, type OpAnswer, type OpRefusal, type PanelHow, type PendingOp, type RoomView, type Toast, type UnknownCause, type You } from "./types.ts";
 
 export type { PendingOp } from "./types.ts";
 
@@ -116,6 +116,8 @@ export type RoomUi = {
   closeSheets(): void;
   /** Hides a phone's open panel with its state kept, or shows it again (state/types.ts withSheetHidden). */
   hideSheet(hidden: boolean): void;
+  /** Fills the screen with a phone's upright sheet, or brings it back to its normal height (state/types.ts withSheetExpanded). */
+  expandSheet(on: boolean): void;
   /** Hides or shows the side panel from 900 px up. Storing the choice is the page's (pages/sidePanel.ts). */
   hideSidePanel(hidden: boolean): void;
   /** The layout crossed 900 px, wider or narrower (state/types.ts crossWide). */
@@ -480,6 +482,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     },
     hideSheet(hidden) {
       setLocal(withSheetHidden(get().local, hidden));
+    },
+    expandSheet(on) {
+      setLocal(withSheetExpanded(get().local, on));
     },
     hideSidePanel(hidden) {
       setLocal(withSidePanelHidden(get().local, hidden));

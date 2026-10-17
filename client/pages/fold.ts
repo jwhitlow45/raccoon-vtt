@@ -30,7 +30,8 @@ import { useRoomView } from "../state/view.ts";
  * panels open. In landscape the sheet docks on the right and leaves the
  * map beside it, so nothing folds there, unless the screen is so short
  * that the sheet opens over all of it (`full`, the very short mode of
- * docs/design-v1-layout-hierarchy.md 4.2), as the upright sheet folds, or
+ * docs/design-v1-layout-hierarchy.md 4.2, or an upright sheet swiped up to
+ * fill the screen, docs/design-v1-sheet-swipe.md 4.7), as the upright sheet folds, or
  * the room the sheet leaves beside it (`sideRoom`, sideSheetRoom) is too
  * narrow for a docked window's header in its one row, as on a phone 480 px
  * wide (docs/design-v1-token-window.md 7.1).
@@ -179,7 +180,7 @@ type DockState = {
   alerts: readonly ColumnAlert[];
   /** The fight alerts column, to find the alert a tap on the summary shows. */
   column: HTMLElement | null;
-  /** A sheet shows in the very short mode, over the whole screen (Room sets it): what floats over the map folds as under an upright sheet. */
+  /** A sheet shows over the whole screen, in the very short mode or filled by a swipe up (Room sets it): what floats over the map folds as under an upright sheet. */
   sheetFull: boolean;
   /**
    * A sheet opened now would take the very short mode, whether one shows or
