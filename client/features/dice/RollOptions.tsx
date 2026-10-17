@@ -436,7 +436,9 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
   const riders = useOption((s) => s.riders[rowKey]);
   const slotPicked = useOption((s) => s.slots[rowKey]);
   const holder = ctx.key;
-  const [used, setUsed] = useState(() => readUsed(roomId)[holder]?.includes(props.named.key) ?? false);
+  // Read on every render, since a recharge card may clear it while this row shows (6.4). The tick redraws after this row's own change.
+  const [, setTick] = useState(0);
+  const used = readUsed(roomId)[holder]?.includes(props.named.key) ?? false;
   const character = "characterId" in ctx.creature ? ctx.dice.view.characters[ctx.creature.characterId] : undefined;
   const slots = character && props.named.section === "spells" ? pcSlots(character, props.named.key) : null;
   const slot = slots ? Math.max(slots.from, Math.min(9, slotPicked ?? slots.from)) : null;
@@ -444,7 +446,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
   const on = useMemo(() => new Set(riders ?? []), [riders]);
   const markUsed = (value: boolean) => {
     writeUsed(roomId, withUsed(readUsed(roomId), holder, props.named.key, value));
-    setUsed(value);
+    setTick((n) => n + 1);
   };
   const toggleRider = (i: number) =>
     store.setState((s) => {

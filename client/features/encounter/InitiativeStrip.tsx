@@ -44,6 +44,31 @@ import {
 import { EndTurnPill, Portrait, TimerClock, TURN_PILL_PX } from "./parts.tsx";
 import { RollAlerts } from "../rolls/RollAlerts.tsx";
 import { CARD_MIN_WIDTH } from "../rolls/logic.ts";
+import { bonusFor } from "#shared/dice/bonus.ts";
+import { creatureRolls } from "../dice/creature.ts";
+import { readUsed } from "../dice/options.ts";
+import { presetFor } from "../dice/presets.ts";
+import { useDiceView } from "../dice/useDiceView.ts";
+import { useActOnce, useRollBlocked } from "../dice/useRollOption.ts";
+import { alertCard as card } from "./alertCard.ts";
+import { CardButtons, CardChips, rollTrouble, useCardRoll, useCardSend } from "./CardRoll.tsx";
+import { RechargeCard, RechargeWait, rechargeAlertId, useRechargePrompts } from "./RechargeCard.tsx";
+import { SaveEndsCard, saveAlertId, usePendingSaves } from "./SaveEndsCard.tsx";
+import {
+  cardRoll,
+  CONCENTRATION_TEST,
+  concentrationCard,
+  concentrationResistOp,
+  concentrationWords,
+  endConcentrationOps,
+  legendaryLeft,
+  rechargeTurn,
+  saveEndsWords,
+  turnStarted,
+  type CardChip,
+  type ConcentrationAction,
+  type RechargeTurn,
+} from "./saveCards.ts";
 
 /** How long "Your turn" flares when a player's turn arrives. */
 const TURN_NOTICE_MS = 4_000;
@@ -490,11 +515,23 @@ function FightAlerts() {
 
   useEffect(() => unlockAudioOnTap(), []);
 
-  const { prompts, dismissPrompt, notices, dismissNotice } = useLogAlerts();
+  const { prompts, dismissPrompt, notices, dismissNotice, notify, recharge, dismissRecharge } = useLogAlerts();
   const timeUp = useTimeUp();
   const view = useRowFacts().view;
+  const saves = usePendingSaves();
+  const recharges = useRechargePrompts(recharge.turn, recharge.dismissed);
+  const rechargeFor = recharge.turn;
   // Keyed on the names, not the view, which changes with every op: the dock and Room read what this publishes.
   const who = prompts.map((p) => entryName(view, p.target)).join("\n");
+  /*
+   * The dock's summary has no kind of its own for a save-ends or recharge
+   * card (pages/fold.ts ColumnAlert), so they go as notices, whose words
+   * are the card's own, keyed on their ids and words.
+   */
+  const cardLines = [
+    ...saves.map((p) => `${saveAlertId(p)}\t${saveEndsWords(entryName(view, p.target), p.effect).head}`),
+    ...recharges.prompts.map((p) => `${rechargeAlertId(p)}\t${p.text}`),
+  ].join("\n");
   const alerts = useMemo<ColumnAlert[]>(() => {
     const names = who.split("\n");
     const list: ColumnAlert[] = prompts.map((p, i) => {
@@ -502,9 +539,13 @@ function FightAlerts() {
       return { id: p.logId, kind: "concentration", who: name, says: `Concentration check for ${name}.` };
     });
     if (timeUp.text) list.push({ id: timeUp.key, kind: "timeUp", says: timeUp.text });
+    for (const line of cardLines ? cardLines.split("\n") : []) {
+      const [id = "", text = ""] = line.split("\t");
+      list.push({ id, kind: "notice", text, says: text });
+    }
     for (const n of notices) list.push({ id: n.id, kind: "notice", text: n.text, says: n.text });
     return list;
-  }, [prompts, notices, timeUp.text, timeUp.key, who]);
+  }, [prompts, notices, timeUp.text, timeUp.key, who, cardLines]);
   const publishColumn = usePublishAlerts(alerts);
   const top = useTopBars();
 
@@ -904,8 +945,13 @@ function FightAlerts() {
         }}
       >
         {prompts.map((p) => (
-          <ConcentrationCard key={p.logId} prompt={p} onDone={() => dismissPrompt(p.logId)} />
+          <ConcentrationCard key={p.logId} prompt={p} onDone={() => dismissPrompt(p.logId)} onResult={notify} />
         ))}
+        {saves.map((p) => (
+          <SaveEndsCard key={p.effect.due.id} pending={p} onResult={notify} />
+        ))}
+        {rechargeFor ? recharges.prompts.map((p) => <RechargeCard key={p.id} prompt={p} creature={rechargeFor.creature} holder={rechargeFor.holder} onDone={() => dismissRecharge(p.id)} />) : null}
+        {recharges.loading || recharges.failed ? <RechargeWait failed={recharges.failed} /> : null}
         {/* No box of its own, so the rolls' cards and chips stay items of the column. */}
         <div data-alert="rolls" style={{ display: "contents" }}>
           <RollAlerts />
@@ -966,16 +1012,6 @@ const OVERLAY_PAD = theme.space(2);
 /** Where the summary row stands against its usual place (FightAlerts `rowPlace`): how far it rose and moved left, and how far in from each edge it stops. */
 type RowPlace = { lift: number; shift: number; insetLeft: number; insetRight: number };
 const NOT_RAISED: RowPlace = { lift: 0, shift: 0, insetLeft: 0, insetRight: 0 };
-
-const card: CSSProperties = {
-  pointerEvents: "auto",
-  padding: `${theme.space(2)}px ${theme.space(3)}px`,
-  borderRadius: theme.radius.md,
-  background: theme.color.surfaceRaised,
-  border: `${theme.line.border}px solid ${theme.color.border}`,
-  color: theme.color.text,
-  boxShadow: theme.shadow.float,
-};
 
 /**
  * Fires "Your turn" once per turn for a player (no "Up next", logic.ts
@@ -1072,12 +1108,17 @@ function useTimeUp(): { text: string | null; key: string; dismiss(): void } {
 }
 
 /**
- * Concentration checks and expiry notices from the log (design 9.5 and
- * 9.6). Only entries that arrive while the page is open count: the log a
- * snapshot carries is history, and the Log panel shows it.
+ * Concentration checks, expiry notices and, for the DM, the recharge
+ * prompts of a turn that starts, from the log (design 9.5 and 9.6,
+ * docs/design-v1-roll-options.md 6.4). Only entries that arrive while the
+ * page is open count: the log a snapshot carries is history, and the Log
+ * panel shows it. Each turn start replaces the last one's recharge
+ * prompts, whose moment has passed.
  */
 function useLogAlerts() {
   const log = useRoomView((s) => s.view?.log);
+  const roomId = useRoomView((s) => s.roomId);
+  const store = useRoomStore();
   const confirmedSeq = useConfirmedSeq();
   const you = useYou();
   const facts = useRowFacts();
@@ -1086,6 +1127,8 @@ function useLogAlerts() {
   const seen = useRef<Set<string> | null>(null);
   const [prompts, setPrompts] = useState<ConcentrationPrompt[]>([]);
   const [notices, setNotices] = useState<Notice[]>([]);
+  const [recharge, setRecharge] = useState<{ turn: RechargeTurn | null; dismissed: ReadonlySet<string> }>(NO_RECHARGE);
+  const told = useRef(0);
 
   useEffect(() => {
     if (!log) return;
@@ -1101,7 +1144,14 @@ function useLogAlerts() {
     const view = factsRef.current.view;
     const newPrompts: ConcentrationPrompt[] = [];
     const newNotices: Notice[] = [];
+    let started: { turn: RechargeTurn | null } | null = null;
     for (const entry of fresh) {
+      const turnOf = you.role === "dm" ? turnStarted(entry) : null;
+      if (turnOf !== null) {
+        const state = store.getState().view;
+        // Used is read as the turn starts: an action marked Used later waits for its next turn (6.4).
+        started = { turn: state ? rechargeTurn(state, entry.id, turnOf, readUsed(roomId)) : null };
+      }
       const prompt = concentrationPrompt(entry);
       if (prompt && answersPrompt(view, you, prompt)) newPrompts.push(prompt);
       const expiry = expiryNotice(entry);
@@ -1113,7 +1163,8 @@ function useLogAlerts() {
     }
     if (newPrompts.length > 0) setPrompts((p) => [...p, ...newPrompts]);
     if (newNotices.length > 0) setNotices((n) => [...n, ...newNotices].slice(-MAX_NOTICES));
-  }, [log, confirmedSeq, you]);
+    if (started) setRecharge(started.turn ? { turn: started.turn, dismissed: new Set() } : NO_RECHARGE);
+  }, [log, confirmedSeq, you, store, roomId]);
 
   // A check is moot once the creature stops concentrating, whoever ended it.
   useEffect(() => {
@@ -1134,27 +1185,92 @@ function useLogAlerts() {
     dismissPrompt: (logId: string) => setPrompts((p) => p.filter((x) => x.logId !== logId)),
     notices,
     dismissNotice: (id: string) => setNotices((n) => n.filter((x) => x.id !== id)),
+    /** A card's roll that decided it, told as a notice since the card goes with it. */
+    notify: (text: string) => setNotices((n) => [...n, { id: `told:${++told.current}`, text }].slice(-MAX_NOTICES)),
+    recharge,
+    dismissRecharge: (id: string) => setRecharge((r) => ({ ...r, dismissed: new Set([...r.dismissed, id]) })),
   };
 }
+
+const NO_RECHARGE: { turn: RechargeTurn | null; dismissed: ReadonlySet<string> } = { turn: null, dismissed: new Set() };
 
 function seqOf(entry: LogEntry): number {
   const n = Number(entry.id.split(":")[0]);
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Pass does nothing. Fail ends the creature's concentration. */
-function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone(): void }) {
+/**
+ * A concentration check (design 9.5, docs/design-v1-roll-options.md 6.2):
+ * Passed dismisses it and Failed ends the creature's concentration, with
+ * Roll beside them for whoever answers it, by the creature's preset and
+ * the card's own Adv and Dis, so Bless, Bane and Exhaustion count and a
+ * feature such as War Caster takes Adv. With the DC on the card the roll
+ * decides it. A creature the DM runs with Legendary Resistance left waits
+ * on a fail, rolled or tapped, until the DM spends a use or accepts it.
+ * Without the DC the total shows and Passed or Failed decide.
+ */
+function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone(): void; onResult(text: string): void }) {
   const { prompt } = props;
+  const dm = useYou().role === "dm";
   const actions = useRoomActions();
+  const room = useRoomStore();
   const facts = useRowFacts();
+  const blocked = useRollBlocked();
   const name = entryName(facts.view, prompt.target);
-  const effects = entryActor(facts.view, prompt.target)?.effects ?? [];
+  const actor = entryActor(facts.view, prompt.target);
+  const effects = actor?.effects ?? [];
   const spell = effects.find((e) => e.key === "concentrating")?.spell;
-  const fail = () => {
-    for (const effect of effects) {
-      if (effect.key === "concentrating") actions.dispatch({ t: "actor.effect.remove", target: prompt.target, effectId: effect.id });
-    }
+  const creatures = useMemo(() => [prompt.target], [prompt.target]);
+  const { dice, failed } = useDiceView(creatures);
+  const rolls = dice ? creatureRolls(dice, prompt.target) : null;
+  const bonus = rolls?.numbers ? bonusFor(rolls.numbers, CONCENTRATION_TEST) : null;
+  const preset = dice && rolls ? presetFor(dice, prompt.target, CONCENTRATION_TEST, { rolls }) : null;
+  // Only the DM spends Legendary Resistance (actor.outcome is the DM's).
+  const left = dm ? legendaryLeft(actor) : 0;
+  const [chip, setChip] = useState<CardChip>(null);
+  const [failTapped, setFailTapped] = useState(false);
+  const own = useCardRoll(`concentration|${prompt.logId}`);
+  const send = useCardSend<ConcentrationAction>();
+
+  const end = () => {
+    // Its effects as they stand now: a second tap, or another device, may have ended it already.
+    const now = room.getState().view;
+    const current = now ? (entryActor(now, prompt.target)?.effects ?? []) : effects;
+    send.send("fail", endConcentrationOps(prompt.target, current));
     props.onDone();
+  };
+  useActOnce(own.tag, own.rolls, (landed) => {
+    const total = landed[0]?.total;
+    if (total === undefined || prompt.dc === undefined) return;
+    const decided = total >= prompt.dc ? "pass" : left === 0 ? "fail" : null;
+    if (decided === null) return;
+    // The card goes as the roll decides it, so its result stays a moment as a notice.
+    props.onResult(concentrationWords(name, total, decided));
+    if (decided === "pass") props.onDone();
+    else end();
+  });
+
+  const model = concentrationCard({ dc: prompt.dc, bonus, loading: !failed && rolls === null, preset, legendaryLeft: left, failTapped, rolled: own.rolls[0]?.total ?? null });
+  const trouble = rollTrouble(own.receipt, own.unsent);
+  const tap = (action: ConcentrationAction) => {
+    switch (action) {
+      case "roll":
+        if (bonus !== null && preset) own.roll([cardRoll(prompt.target, bonus, preset, CONCENTRATION_TEST, chip)], { to: dm ? "dm" : "all", ...(prompt.dc !== undefined ? { dc: prompt.dc } : {}) });
+        return;
+      case "pass":
+        props.onDone();
+        return;
+      case "fail":
+        if (left > 0) setFailTapped(true);
+        else end();
+        return;
+      case "resist":
+        if (send.send("resist", [concentrationResistOp(prompt.target, actions.newId())])) props.onDone();
+        return;
+      case "accept":
+        end();
+        return;
+    }
   };
   return (
     // Focusable from script, not by Tab, so the dock's summary can show it (pages/fold.ts focusAlert).
@@ -1174,14 +1290,15 @@ function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone(): void 
           {prompt.dc !== undefined ? ` Constitution save, DC ${prompt.dc}.` : " Constitution save."}
         </div>
       </div>
-      <div style={{ display: "flex", gap: theme.space(2) }}>
-        <Button size="sm" onClick={props.onDone} style={{ flex: 1 }}>
-          Passed
-        </Button>
-        <Button size="sm" variant="danger" onClick={fail} style={{ flex: 1 }}>
-          Failed
-        </Button>
-      </div>
+      {model.status || trouble ? (
+        <div role="status" style={{ display: "grid", gap: theme.space(1), fontSize: theme.font.body14 }}>
+          {model.status ? <span>{model.status}</span> : null}
+          {trouble ? <span style={{ color: own.receipt?.state === "refused" ? theme.color.dangerText : theme.color.textMuted }}>{trouble}</span> : null}
+        </div>
+      ) : null}
+      {model.rollNote ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{model.rollNote}</div> : null}
+      {model.buttons.some((b) => b.action === "roll") ? <CardChips chip={chip} onChange={setChip} name={name} /> : null}
+      <CardButtons buttons={model.buttons} busy={send.busy} rollBusy={own.waiting || model.rollLoading} blocked={blocked} onTap={tap} />
     </section>
   );
 }
