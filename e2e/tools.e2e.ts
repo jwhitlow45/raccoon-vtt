@@ -523,7 +523,8 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
   });
 
   test("10. the log exports as Markdown, the player's without the hidden monster", async () => {
-    await dm.getByRole("tab", { name: "Log" }).click();
+    // The Dice tab took the Log's place in the row, so the Log may stand behind More (docs/design-v1-dice.md 8.1).
+    await openSideTab(dm, "Log");
     await dm.getByRole("button", { name: "Export", exact: true }).click();
     const dmFile = await exportEverything(dm);
     assert.match(dmFile, new RegExp(`^# ${run.roomName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: log`));
