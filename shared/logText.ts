@@ -2,6 +2,7 @@ import { formatFormula, parseFormula } from "./dice/formula.ts";
 import { hitOf, rolledTerms } from "./dice/roll.ts";
 import { compareLogIds } from "./keys.ts";
 import { CONDITION_KEYS, type ConditionKey, type DiceResult, type DiceRoll, type LogEntry, type LogEvent, type Member, type RoomState, type Token } from "./model.ts";
+import { DAMAGE_TYPES } from "./rules/damage.ts";
 import { ABILITY_NAMES, testText } from "./rules/skills.ts";
 import { CONDITIONS } from "./srd/conditions.ts";
 import { STATUSES } from "./srd/statuses.ts";
@@ -159,19 +160,47 @@ function pluralLabel(label: string): string | null {
   return /(save|check|attack|roll|throw)$/i.test(label) ? `${label}s` : null;
 }
 
+const DAMAGE_WORDS = new Set<string>(DAMAGE_TYPES);
+
+/**
+ * One damage tap's rolls, one per type, as their sum and shared head
+ * ("Flame Tongue damage" of "Flame Tongue damage, slashing" and "…, fire"),
+ * or null when they are not one damage: a label without a type, two heads,
+ * a type twice or two creatures.
+ */
+function oneDamage(rolls: readonly DiceRoll[]): { head: string; total: number; roll: DiceRoll } | null {
+  const first = rolls[0];
+  if (rolls.length < 2 || !first) return null;
+  let head: string | null = null;
+  const types = new Set<string>();
+  for (const roll of rolls) {
+    const cut = roll.label?.lastIndexOf(", ") ?? -1;
+    if (roll.label === undefined || cut < 0) return null;
+    const type = roll.label.slice(cut + 2);
+    if (!DAMAGE_WORDS.has(type) || types.has(type) || (head !== null && roll.label.slice(0, cut) !== head)) return null;
+    if (roll.tokenId !== first.tokenId || roll.characterId !== first.characterId) return null;
+    head = roll.label.slice(0, cut);
+    types.add(type);
+  }
+  return head === null ? null : { head, total: rolls.reduce((sum, r) => sum + r.total, 0), roll: first };
+}
+
 /**
  * Someone else's rolls of one batch, as one toast (8.5): "Bree rolled 19
- * for Stealth.", "Mara rolled 6 Dexterity saves." for several with one
- * label, else "Mara rolled 6 times.".
+ * for Stealth.", a damage of several types as its sum, "Bree rolled 14 for
+ * Flame Tongue damage.", "Mara rolled 6 Dexterity saves." for several with
+ * one label, else "Mara rolled 6 times.".
  */
 export function rollToastText(lines: readonly DiceEvent[], names: LogNames): string {
   const rolls = lines.flatMap((l) => l.rolls);
   const who = memberName(names, lines[0]?.by);
   const only = rolls[0];
-  if (rolls.length === 1 && only) {
-    const creature = rollCreature(only, names);
-    const what = [creature, only.label].filter((part) => part !== undefined).join(", ");
-    return `${who} rolled ${count(only.total)}${what ? ` for ${what}` : ""}.`;
+  const damage = oneDamage(rolls);
+  const single = rolls.length === 1 && only ? { label: only.label, total: only.total, roll: only } : damage ? { label: damage.head, total: damage.total, roll: damage.roll } : null;
+  if (single) {
+    const creature = rollCreature(single.roll, names);
+    const what = [creature, single.label].filter((part) => part !== undefined).join(", ");
+    return `${who} rolled ${count(single.total)}${what ? ` for ${what}` : ""}.`;
   }
   const labels = new Set(rolls.map((r) => r.label));
   const label = labels.size === 1 ? only?.label : undefined;

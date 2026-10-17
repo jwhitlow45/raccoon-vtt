@@ -66,6 +66,14 @@ describe("dice wording (docs/design-v1-dice.md 5.5)", () => {
     assert.equal(rollToastText([line(Array.from({ length: 4 }, () => save), { by: "mara" }), line([save, save], { by: "mara" })], names), "Mara rolled 6 Dexterity saves.");
     assert.equal(rollToastText([line([LONGSWORD, LONGSWORD, LONGSWORD])], names), "Bree rolled Longsword 3 times.");
     assert.equal(rollToastText([line([LONGSWORD, save])], names), "Bree rolled 2 times.");
+    const slashing = { formula: "2d6+3", faces: [4, 3], total: 10, label: "Flame Tongue damage, slashing" };
+    const fire = { formula: "2d6", faces: [1, 3], total: 4, label: "Flame Tongue damage, fire" };
+    assert.equal(rollToastText([line([slashing, fire])], names), "Bree rolled 14 for Flame Tongue damage.", "one damage tap of two types is one roll");
+    assert.equal(rollToastText([line([{ ...slashing, tokenId: "thorn" }, { ...fire, tokenId: "thorn" }])], names), "Bree rolled 14 for Thorn, Flame Tongue damage.");
+    assert.equal(rollToastText([line([slashing, { ...fire, label: "Rend damage, fire" }])], names), "Bree rolled 2 times.", "two heads are two damages");
+    assert.equal(rollToastText([line([slashing, slashing])], names), "Bree rolled Flame Tongue damage, slashing 2 times.", "a type twice is the same roll again");
+    assert.equal(rollToastText([line([slashing, { ...fire, tokenId: "thorn" }])], names), "Bree rolled 2 times.", "two creatures are not one damage");
+    assert.equal(rollToastText([line([{ ...slashing, label: "Flame Tongue damage, sharp" }, fire])], names), "Bree rolled 2 times.", "a word that is no damage type");
   });
 });
 

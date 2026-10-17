@@ -349,7 +349,7 @@ type DicePanelApi = {
 
 ### 8.5 Others' rolls
 
-A `dice` line from someone else that arrives with its numbers, after the page's first snapshot, shows a toast, one per `batch`: "Bree rolled 19 for Stealth.", or "Mara rolled 6 Dexterity saves." for several with one label, else "Mara rolled 6 times." A bare line shows none, nor does a `roll` line, which the DM's live card shows. None shows while the Dice panel is on screen. Room mounts `useRollToasts(diceShown)` beside `useLogUnread` (`client/pages/Room.tsx:385`). This device gains "Show others' rolls as they happen", on by default (`rvtt.rollToasts`).
+A `dice` line from someone else that arrives with its numbers, after the page's first snapshot, shows a toast, one per `batch`: "Bree rolled 19 for Stealth.", a damage tap of several types as its sum, "Bree rolled 14 for Flame Tongue damage." (labels sharing the head before ", fire"), or "Mara rolled 6 Dexterity saves." for several with one label, else "Mara rolled 6 times." A bare line shows none, nor does a `roll` line, which the DM's live card shows. None shows while the Dice panel is on screen. Room mounts `useRollToasts(diceShown)` beside `useLogUnread` (`client/pages/Room.tsx:385`). This device gains "Show others' rolls as they happen", on by default (`rvtt.rollToasts`).
 
 ### 8.6 History and keys
 
