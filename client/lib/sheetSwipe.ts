@@ -613,6 +613,25 @@ export function normalFromHeld(held: Held | null, now: { scale: number; screen: 
   return { height: normalBottom - normalTop, normalTop, normalBottom, up: normalTop };
 }
 
+/** useUnsavedInput as an element, for an owner that holds its draft outside the surface it renders, as a dialog's own component does: placed in the surface's body. */
+export function UnsavedInput(props: { unsaved: boolean }): null {
+  useUnsavedInput(props.unsaved);
+  return null;
+}
+
+/**
+ * Reports a form's draft while it differs from where it started (4.6), so
+ * typing a change and then taking it back counts for nothing. `value` is
+ * what the form holds, compared as JSON with its value at the first render.
+ * `active` false reports nothing, as while a Done already sent holds the
+ * draft that the server will take.
+ */
+export function useUnsavedSince(value: unknown, active = true): void {
+  const now = JSON.stringify(value);
+  const [start] = useState(now);
+  useUnsavedInput(active && now !== start);
+}
+
 // ------------------------------------------------------------ the hook
 
 export type SheetSwipeOptions = {

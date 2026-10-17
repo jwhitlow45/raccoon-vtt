@@ -20,6 +20,7 @@ import { ImagePreview } from "../images/IconDisk.tsx";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
 import { displayName, footprint } from "../../lib/scene.ts";
 import { handFocusOn } from "../../lib/handFocus.ts";
+import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { initials } from "../../lib/tokenView.ts";
 import { useRoomScope } from "../../state/scope.ts";
@@ -174,6 +175,8 @@ export function CompanionForm(props: {
   const ui = useRoomUi();
   const scope = useRoomScope();
   const [draft, setDraft] = useState<CompanionDraft>(NEW_COMPANION);
+  // Only Add sends it, so a sheet's swipe springs back once anything in it changed (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedSince(draft);
   const [error, setError] = useState<string | null>(null);
   const [waiting, setWaiting] = useState(false);
   const [choosing, setChoosing] = useState(false);

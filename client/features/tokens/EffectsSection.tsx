@@ -12,6 +12,7 @@ import { Markdown } from "../../components/Markdown.tsx";
 import { dispatchGesture } from "../../state/actions.ts";
 import { fireOps, MAX_TRIGGER, reactionTarget } from "../encounter/ready.ts";
 import { effectChip, effectCount } from "../../lib/tokenView.ts";
+import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import {
@@ -267,6 +268,8 @@ function EffectDetail(props: {
   const [durationTouched, setDurationTouched] = useState(!existing);
   const [rulesOpen, setRulesOpen] = useState(!canEdit);
   const [error, setError] = useState<string | null>(null);
+  // Only its button sends the effect, so a sheet's swipe springs back once anything in the form changed (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedSince({ level, counter, spell, label, glyph, color, hidden, triggerShown, form });
 
   const shownLevel = key === "exhaustion" ? level : (counter ?? undefined);
   const chip = effectChip({ key, label: label || undefined, glyph: glyph || undefined, color, level: shownLevel, spell: spell || undefined });

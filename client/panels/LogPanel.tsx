@@ -23,6 +23,7 @@ import { ExportLog } from "../features/log/ExportLog.tsx";
 import { TakeBack } from "../features/encounter/HpLog.tsx";
 import type { PanelProps } from "../features/panels.ts";
 import { api, ApiError } from "../lib/api.ts";
+import { useUnsavedInput } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../state/view.ts";
 
@@ -251,6 +252,8 @@ function EntryRow(props: { entry: LogEntry; names: LogNames; me: string; canUndo
 
 function Composer(props: { names: LogNames; me: string; onSend(op: NonNullable<ReturnType<typeof messageOp>>): boolean }) {
   const [text, setText] = useState("");
+  // A half-typed message keeps the sheet from a swipe's close (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedInput(text.trim() !== "");
   const [targetId, setTargetId] = useState("all");
   const [error, setError] = useState<string | null>(null);
   const targets = useMemo(() => chatTargets(props.names.members, props.me), [props.names.members, props.me]);

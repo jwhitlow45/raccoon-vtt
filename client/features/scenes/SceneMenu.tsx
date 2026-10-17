@@ -6,6 +6,7 @@ import { IconButton } from "../../components/IconButton.tsx";
 import { Spinner } from "../../components/Loading.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { LIMITS } from "#shared/limits.ts";
+import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomStore } from "../../state/view.ts";
@@ -161,6 +162,8 @@ function FolderPicker(props: { scene: Scene; folders: readonly string[]; onDone(
   const actions = useRoomActions();
   const [draft, setDraft] = useState("");
   const [invalid, setInvalid] = useState(false);
+  // A new folder's name typed and not yet created keeps the menu from a swipe's close (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedInput(draft.trim() !== "");
   const fieldId = useId();
   const move = (folder: string | null) => {
     if (folder !== (scene.folder ?? null)) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { folder } });

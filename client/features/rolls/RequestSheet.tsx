@@ -9,6 +9,7 @@ import { Chip, ChipRow } from "../../components/Chip.tsx";
 import { Input, NUMBER_FIELD_WIDTH } from "../../components/Field.tsx";
 import { Help, Note, SectionLabel } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
+import { UnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { SheetDialog } from "../tokens/SheetDialog.tsx";
@@ -51,6 +52,9 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
   );
   const [sheet, setSheet] = useState<AskSheet>(() => ({ draft: emptyDraft(options.filter((o) => o.ticked).map((o) => o.ref)), sending: false, error: null }));
   const { draft, sending, error } = sheet;
+  // What the DM set up, as it was when the sheet opened: a swipe springs back once that has changed, until Send has it (docs/design-v1-sheet-swipe.md 4.5).
+  const [opened] = useState(() => JSON.stringify(sheet.draft));
+  const unsaved = !sending && JSON.stringify(draft) !== opened;
   const connected = useRoomView((s) => s.connection === "open");
   const mounted = useRef(true);
   useEffect(() => {
@@ -128,6 +132,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
         </>
       }
     >
+      <UnsavedInput unsaved={unsaved} />
       {/* Locked while the request waits for the server, so nothing set after Send is lost when the sheet closes on the answer. Closing stays, outside it. */}
       <fieldset disabled={sending} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
         <div style={{ display: "grid", gap: theme.space(4) }}>

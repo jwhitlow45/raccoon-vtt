@@ -5,6 +5,7 @@ import { Button } from "../../components/Button.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { Switch } from "../../components/Switch.tsx";
+import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions } from "../../state/view.ts";
 import { useSend, useSendAll } from "./hooks.ts";
@@ -26,6 +27,8 @@ export function ReadyControls(props: { answer: ReactionTarget; target: ActorTarg
   const fire = useSendAll();
   const drop = useSend();
   const [trigger, setTrigger] = useState("");
+  // A trigger typed and not yet readied keeps the sheet from a swipe's close (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedInput(trigger.trim() !== "");
   // "Drop it" takes two taps, like ending the fight: a player cannot undo it, and the marker is gone for good.
   const [confirmDrop, setConfirmDrop] = useState(false);
   useEffect(() => {

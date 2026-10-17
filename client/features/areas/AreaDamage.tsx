@@ -6,6 +6,7 @@ import { Empty } from "../../components/Empty.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
+import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
 import { useSendAnswered } from "../encounter/hooks.ts";
@@ -59,6 +60,8 @@ export function AreaDamage(props: { template: AreaTemplate; onDone(): void }) {
   const title = areaTitle(template);
   const tooMany = (op?.hits.length ?? 0) > MAX_ENTRIES_PER_OP;
   const busy = waiting || sent !== null;
+  // Damage typed or saves marked and not yet applied keep the sheet from a swipe's close. Once sent, the server has them (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedSince({ text, results }, !busy);
   usePanelHeader({ title: `Damage from ${title}`, parent: "Areas", onBack: props.onDone });
 
   // Only once the server has taken it does the DM hear that it landed, and the form goes back to the list. A refusal

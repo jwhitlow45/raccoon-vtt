@@ -8,6 +8,7 @@ import { Icon } from "../../components/Icon.tsx";
 import { Spinner, useDelayed } from "../../components/Loading.tsx";
 import { Section } from "../../components/Panel.tsx";
 import { Tag } from "../../components/Tag.tsx";
+import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useAssets, useRoomActions, useRoomView } from "../../state/view.ts";
 import { browserStorage, cleanFolderName, groupScenes, moveFolder, moveScene, readCollapsed, renameMergesInto, sendFolderRename, writeCollapsed, type SceneGroup } from "./folders.ts";
@@ -307,6 +308,8 @@ function FolderHeader(props: {
   const { folder, collapsed, count, arrange } = props;
   const [draft, setDraft] = useState<string | null>(null);
   const [invalid, setInvalid] = useState(false);
+  // A rename only Save sends keeps the sheet from a swipe's close (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedInput(draft !== null && draft !== folder);
 
   if (draft !== null) {
     const merge = renameMergesInto(props.folders, folder, draft);

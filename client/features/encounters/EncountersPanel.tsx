@@ -14,6 +14,7 @@ import { Loading } from "../../components/Loading.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
 import { Row } from "../../components/Row.tsx";
+import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
@@ -161,6 +162,8 @@ function Builder(props: { id: string | null; srd: SrdList; close(): void; onBack
   const xp = encounterXp(monsterXps(draft.monsters, resolve));
   const missingRoomMonster = draft.monsters.some((m) => "monsterId" in m && !monsters?.[m.monsterId]);
   const changed = saved ? encounterPatch(saved, draft) !== null : draft.monsters.length > 0 || draft.name.trim() !== "" || draft.party !== null;
+  // A sheet's swipe springs back while the editor holds changes, and its Back still asks (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedInput(changed);
   const named = draft.name.trim() !== "";
 
   const edit = (next: Draft) => {

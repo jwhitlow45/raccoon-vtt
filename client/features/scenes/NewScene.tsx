@@ -5,6 +5,7 @@ import { Input } from "../../components/Field.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { api, type AssetRow } from "../../lib/api.ts";
+import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { ColorInput, NumberInput } from "./controls.tsx";
@@ -39,6 +40,8 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
   const [status, setStatus] = useState<{ busy: boolean; waiting: boolean; error: string | null }>({ busy: false, waiting: false, error: null });
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
+  // Only Create sends it, so a sheet's swipe springs back once a name or a size is typed or a map picked (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedSince({ name, w, h, background, file: file?.name ?? null });
 
   const full = props.sceneCount >= MAX_SCENES;
 

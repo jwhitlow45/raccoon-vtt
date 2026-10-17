@@ -11,6 +11,7 @@ import { Tag } from "../../components/Tag.tsx";
 import { api, ApiError, type DmDevice, type DmInviteState } from "../../lib/api.ts";
 import { forgetRoom, setHomeNotice } from "../../lib/knownRooms.ts";
 import { navigate } from "../../lib/navigation.ts";
+import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { ConfirmAction, SecretLink } from "./controls.tsx";
@@ -490,6 +491,8 @@ export function DeleteRoom() {
   // differ from the name in the top bar after a rename.
   const [storedName, setStoredName] = useState<string | null>(null);
   const [typed, setTyped] = useState("");
+  // The name typed to delete the room keeps the sheet from a swipe's close (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedInput(typed.trim() !== "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {

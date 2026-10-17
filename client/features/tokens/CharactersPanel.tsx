@@ -11,6 +11,7 @@ import { Icon } from "../../components/Icon.tsx";
 import { Help, Note, Section } from "../../components/Panel.tsx";
 import { Row, RowList } from "../../components/Row.tsx";
 import { handFocusNow, pressedControl } from "../../lib/handFocus.ts";
+import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { hpDisplay, hpText, initials } from "../../lib/tokenView.ts";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
@@ -477,6 +478,8 @@ function NewCharacter(props: { onDone(id: string | null): void; close(): void; o
   const [pp, setPp] = useState(10);
   const [image, setImage] = useState<ImageRef | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Only Create sends the form, so a sheet's swipe springs back once anything in it changed (docs/design-v1-sheet-swipe.md 4.5).
+  useUnsavedSince({ name, owners, size, hpMax, ac, walk, initBonus, pp, image });
 
   const create = (placeAfter: boolean) => {
     if (!name.trim()) {
