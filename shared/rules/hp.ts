@@ -249,9 +249,22 @@ export function applyHeal(actor: Actor, amount: number, revivesDead = false): Hp
   return { actor: next, events };
 }
 
+/**
+ * The actor with a new temporary HP pool from a source other than its
+ * shape: a grant, a set that changes it, or a Long Rest. The pool is then no
+ * longer the one a shape gave, so ending the shape leaves it (W7-SOL-06).
+ * Damage only draws the pool down and keeps whose it is.
+ */
+export function withNewPool(actor: Actor, temp: number): Actor {
+  const next: Actor = { ...actor, hp: { ...actor.hp, temp } };
+  if (actor.unshaped?.shapeTemp === undefined) return next;
+  const { shapeTemp: _theShapes, ...unshaped } = actor.unshaped;
+  return { ...next, unshaped };
+}
+
 /** Temporary HP is set, not added: the rules say to keep one pool, and the player picks which. */
 export function applyTemp(actor: Actor, amount: number): HpResult {
-  const next: Actor = { ...actor, hp: { ...actor.hp, temp: amount } };
+  const next = withNewPool(actor, amount);
   return { actor: next, events: [{ type: "hp", change: "temp", amount, label: hpLabel(next) }] };
 }
 
@@ -274,7 +287,7 @@ export function applyHpSet(
   const requestedCur = values.cur ?? actor.hp.cur;
   const cur = Math.min(max, Math.max(0, requestedCur));
   const temp = values.temp ?? actor.hp.temp;
-  let next: Actor = { ...actor, hp: { cur, max, temp } };
+  let next: Actor = { ...(temp !== actor.hp.temp ? withNewPool(actor, temp) : actor), hp: { cur, max, temp } };
   const events: ActorEvent[] = [];
   if (actor.life !== "dead") {
     if (actor.hp.cur > 0 && cur === 0) {

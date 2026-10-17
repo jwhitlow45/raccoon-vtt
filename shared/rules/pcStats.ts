@@ -318,24 +318,32 @@ export function shapedInitiative(character: Pick<Character, "stats" | "level">, 
  * A shape's start and end on a character's own actor (W7B-P-9), after the
  * patch is applied. A patch that takes a shape from none keeps the
  * character's AC and speeds from before it, as the creature's take their
- * place, and the temporary HP it gave in a shape other than Wild Shape, such
- * as Polymorph's. The patch that ends the shape puts the AC and speeds back,
- * unless it sets them itself, and takes away that temporary HP if no more
- * than it remains, since a higher amount from elsewhere would have replaced
- * it. A change from one creature to another keeps what the first stored.
+ * place. A patch that also sets the temporary HP, in a shape other than Wild
+ * Shape such as Polymorph, marks that pool as the shape's (`shapeTemp`). A
+ * change from one creature to another keeps the first AC and speeds, and a
+ * pool it sets is the new shape's in the same way. The patch that ends the
+ * shape puts the AC and speeds back, unless it sets them itself, and empties
+ * the pool while the mark holds. Only damage keeps the mark: any other
+ * source that sets the pool takes it away (shared/rules/hp.ts), so the end
+ * never takes temporary HP that came from elsewhere (W7-SOL-06).
  */
-export function withUnshaped(before: Actor, after: Actor, patch: Pick<ActorPatch, "ac" | "speeds" | "hp">): Actor {
+export function withUnshaped(before: Actor, after: Actor, patch: Pick<ActorPatch, "ac" | "speeds" | "hp" | "srdId">): Actor {
   const was = before.srdId !== undefined;
   const is = after.srdId !== undefined;
-  if (!was && is) {
-    const gave = after.wildShape === undefined && patch.hp?.temp !== undefined && after.hp.temp > before.hp.temp;
-    return { ...after, unshaped: { ac: before.ac, speeds: before.speeds, ...(gave ? { temp: after.hp.temp } : {}) } };
+  const shapesPool = patch.hp?.temp !== undefined && after.wildShape === undefined && after.hp.temp > 0;
+  if (!was && is) return { ...after, unshaped: { ac: before.ac, speeds: before.speeds, ...(shapesPool ? { shapeTemp: true as const } : {}) } };
+  if (after.unshaped === undefined) return after;
+  if (was && is) {
+    // Only a change of creature gives a pool. Any other patch that sets it is another source, which hp.ts has already unmarked.
+    if (patch.srdId === undefined || patch.hp?.temp === undefined) return after;
+    const { shapeTemp: _first, ...kept } = after.unshaped;
+    return { ...after, unshaped: shapesPool ? { ...kept, shapeTemp: true } : kept };
   }
-  if (!was || is || after.unshaped === undefined) return after;
+  if (!was) return after;
   const { unshaped, ...out } = after;
   if (patch.ac === undefined) out.ac = unshaped.ac;
   if (patch.speeds === undefined) out.speeds = unshaped.speeds;
-  if (unshaped.temp !== undefined && patch.hp?.temp === undefined && out.hp.temp <= unshaped.temp) out.hp = { ...out.hp, temp: 0 };
+  if (unshaped.shapeTemp && patch.hp?.temp === undefined) out.hp = { ...out.hp, temp: 0 };
   return out;
 }
 

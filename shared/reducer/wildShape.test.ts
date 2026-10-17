@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { clientOpSchema, type ActorPatch, type Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
+import { hpUndoRestore } from "./hpUndo.ts";
 import { WILD_SHAPE_ALONE, withShapeRules } from "../rules/pcStats.ts";
 import { DM, actor, apply, character, env, refused, room, token } from "../testutil.ts";
 
@@ -61,7 +62,10 @@ describe("a shape's AC, speeds and temporary HP (W7B-P-9)", () => {
   const BEAR: ActorPatch = { srdId: "brown-bear", ac: 11, speeds: { walk: 40, climb: 30 } };
   const own = { ac: 14, speeds: { walk: 30 } };
   const bree = (s: ReturnType<typeof setup>) => s.characters.bree!.actor;
-  const hurt = (temp: number): Op => ({ t: "character.update", characterId: "bree", patch: { actor: { hp: { temp } } } });
+  const BREE = { characterId: "bree" };
+  const hit = (amount: number): Op => ({ t: "actor.hp", target: BREE, change: { kind: "damage", amount } });
+  const grant = (amount: number): Op => ({ t: "actor.hp", target: BREE, change: { kind: "temp", amount } });
+  const set = (values: { cur?: number; temp?: number }): Op => ({ t: "actor.hp", target: BREE, change: { kind: "set", ...values } });
 
   test("Wild Shape takes the creature's AC and speeds and keeps the character's, which End the shape puts back, and its temporary HP stay", () => {
     let s = apply(setup(), shape({ ...BEAR, wildShape: true, hp: { temp: 5 } }));
@@ -88,17 +92,60 @@ describe("a shape's AC, speeds and temporary HP (W7B-P-9)", () => {
     assert.deepEqual([bree(s).ac, bree(s).speeds], [16, { walk: 30 }]);
   });
 
-  test("Polymorph's temporary HP go when it ends, unless more came from elsewhere", () => {
+  test("Polymorph's temporary HP go when it ends, damage keeping them its, and Wild Shape's stay", () => {
     let s = apply(setup(), shape({ ...BEAR, hp: { temp: 22 } }));
-    assert.deepEqual(bree(s).unshaped, { ...own, temp: 22 });
-    s = apply(s, hurt(9));
+    assert.deepEqual(bree(s).unshaped, { ...own, shapeTemp: true });
+    s = apply(s, hit(13));
     assert.equal(bree(s).hp.temp, 9);
     assert.equal(apply(s, shape({ srdId: null })).characters.bree!.actor.hp.temp, 0, "the 9 left go");
-    assert.equal(apply(apply(s, hurt(30)), shape({ srdId: null })).characters.bree!.actor.hp.temp, 30, "a higher amount replaced them");
     const wild = apply(apply(setup(), shape({ ...BEAR, wildShape: true, hp: { temp: 5 } })), shape({ srdId: null }));
     assert.equal(wild.characters.bree!.actor.hp.temp, 5, "Wild Shape's stay");
-    const unticked = apply(apply(apply(setup(), hurt(4)), shape(BEAR)), shape({ srdId: null }));
+    const unticked = apply(apply(apply(setup(), grant(4)), shape(BEAR)), shape({ srdId: null }));
     assert.equal(unticked.characters.bree!.actor.hp.temp, 4, "a shape that gave none takes none");
+  });
+
+  /**
+   * Whose the pool is follows its source, never its size (W7-SOL-06,
+   * ASTRA-16). Each run goes live and as ops stored at version 7 replay, and
+   * both must end alike.
+   */
+  const runs: { name: string; ops: Op[]; temp: number; mark?: true }[] = [
+    { name: "a higher grant replaces the pool, then damage takes it under the shape's 22", ops: [shape({ ...BEAR, hp: { temp: 22 } }), grant(30), hit(10)], temp: 20 },
+    { name: "the shape's pool spent, then a grant under its 22", ops: [shape({ ...BEAR, hp: { temp: 22 } }), hit(17), grant(10)], temp: 10 },
+    { name: "the shape's pool gone, then a grant and damage", ops: [shape({ ...BEAR, hp: { temp: 22 } }), hit(22), grant(8), hit(3)], temp: 5 },
+    { name: "a set that changes the pool", ops: [shape({ ...BEAR, hp: { temp: 22 } }), set({ temp: 12 })], temp: 12 },
+    { name: "a patch that changes the pool", ops: [shape({ ...BEAR, hp: { temp: 22 } }), shape({ hp: { temp: 6 } })], temp: 6 },
+    { name: "a Long Rest, then a grant", ops: [shape({ ...BEAR, hp: { temp: 22 } }), hit(5), { t: "actor.rest", target: BREE, kind: "long" }, grant(7)], temp: 7 },
+    { name: "Wild Shape after Polymorph, setting its own pool", ops: [shape({ ...BEAR, hp: { temp: 22 } }), shape({ srdId: "wolf", wildShape: true, hp: { temp: 30 } })], temp: 30 },
+    { name: "a set of the current HP alone keeps the shape's pool", ops: [shape({ ...BEAR, hp: { temp: 22 } }), set({ cur: 15 }), hit(2)], temp: 0, mark: true },
+    { name: "another shape's pool is that shape's", ops: [shape({ ...BEAR, hp: { temp: 22 } }), hit(20), shape({ srdId: "giant-eagle", hp: { temp: 42 } })], temp: 0, mark: true },
+  ];
+  for (const run of runs) {
+    test(`End the shape: ${run.name}`, () => {
+      for (const opVersion of [undefined, 7]) {
+        let s = setup();
+        for (const [i, op] of run.ops.entries()) {
+          const r = applyOp(s, op, DM, { ...env(i + 1), ...(opVersion !== undefined ? { opVersion } : {}) });
+          assert.ok(r.ok, `${op.t} at ${opVersion ?? "live"}`);
+          s = r.state;
+        }
+        assert.equal(bree(s).unshaped?.shapeTemp, run.mark, `the mark at ${opVersion ?? "live"}`);
+        const ended = applyOp(s, shape({ srdId: null }), DM, { ...env(run.ops.length + 1), ...(opVersion !== undefined ? { opVersion } : {}) });
+        assert.ok(ended.ok);
+        assert.equal(ended.state.characters.bree!.actor.hp.temp, run.temp, `the temporary HP left at ${opVersion ?? "live"}`);
+      }
+    });
+  }
+
+  test("damage taken back from the log leaves the shape's pool its", () => {
+    let s = apply(setup(), shape({ ...BEAR, hp: { temp: 22 } }));
+    s = apply(s, hit(10));
+    const line = s.log.findLast((e) => e.data?.type === "hp")!;
+    const built = hpUndoRestore(s, line.id);
+    assert.ok(built.ok);
+    s = apply(s, { t: "sys.restore", entries: built.entries, from: "undo", deps: true, undid: line.id }, DM, 3);
+    assert.equal(bree(s).hp.temp, 22);
+    assert.equal(apply(s, shape({ srdId: null })).characters.bree!.actor.hp.temp, 0);
   });
 
   test("an op stored before version 7 neither keeps nor puts back, so it replays as it ran", () => {

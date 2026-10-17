@@ -750,11 +750,13 @@ export type Actor = {
    * On a character's own actor only, while it is in a shape: its own AC and
    * speeds from before the shape, which the creature's replace while it
    * lasts (W7B-P-9). The reducer keeps it: the patch that takes a shape
-   * stores it, and the one that ends the shape puts them back. `temp` is the
-   * temporary HP a shape other than Wild Shape gave, such as Polymorph's,
-   * which go when it ends if no more than that remain.
+   * stores it, and the one that ends the shape puts them back. `shapeTemp`
+   * marks the temporary HP pool as the one a shape other than Wild Shape
+   * gave, such as Polymorph's, which goes when the shape ends. Any other
+   * source that sets the pool takes the mark away, so End the shape never
+   * takes temporary HP that came from elsewhere (W7-SOL-06).
    */
-  unshaped?: { ac: number; speeds: Actor["speeds"]; temp?: number };
+  unshaped?: { ac: number; speeds: Actor["speeds"]; shapeTemp?: true };
   /** https only, at most 500 characters. */
   sheetUrl?: string;
   effects: Effect[];

@@ -1,5 +1,5 @@
 import type { Actor, Effect } from "../model.ts";
-import { effectEvent, hpLabel, type ActorEvent, type HpResult } from "./hp.ts";
+import { effectEvent, hpLabel, withNewPool, type ActorEvent, type HpResult } from "./hp.ts";
 
 /**
  * Short and long rests (features section 15), as SRD 5.2.1 states them in
@@ -47,7 +47,7 @@ export function applyRest(actor: Actor, kind: RestKind, heal = 0): RestResult {
     if (level >= 1) effects.push({ ...effect, level });
     else events.push(effectEvent(effect, "remove"));
   }
-  const next: Actor = { ...actor, hp: { cur: actor.hp.max, max: actor.hp.max, temp: 0 }, deathSaves: { ok: 0, fail: 0 }, effects };
+  const next: Actor = { ...withNewPool(actor, 0), hp: { cur: actor.hp.max, max: actor.hp.max, temp: 0 }, deathSaves: { ok: 0, fail: 0 }, effects };
   if (actor.legendary) next.legendary = { ...actor.legendary, actionsUsed: 0, resistUsed: 0 };
   events.unshift({ type: "rest", kind, left: { ...next.hp }, label: hpLabel(next) });
   return { actor: next, events };

@@ -1703,7 +1703,7 @@ export const effectInputSchema = effectInput;
  * op's actor carries it (W7B-P-9).
  */
 export const actorSchemaForImport = actorSchema.extend({
-  unshaped: z.strictObject({ ac: z.number().int().min(0).max(100), speeds, temp: hpValue.optional() }).optional(),
+  unshaped: z.strictObject({ ac: z.number().int().min(0).max(100), speeds, shapeTemp: z.literal(true).optional() }).optional(),
 });
 /** The stat block's fields, so the stored-state schema checks imported monsters by the same bounds. */
 export const statBlockFieldsForImport = statBlockFields;
