@@ -502,6 +502,8 @@ On E2E_PORT plus 12, the next free offset at `e4ec8696`. The e2e files run one a
 
 Browsers: the e2e runs in Chrome only. Safari does not focus a button on a click, so by tool options 7.1 a pointer open focuses More itself (`preventScroll`), never the menu, and a pick ends on More, as in Chrome. The build checks both by hand in Safari on a Mac and an iPad before it merges.
 
+Waived before merge by the project owner (2026-10-17): the build ships, and these hand checks in Safari on a Mac and an iPad follow after the deploy, as with the PDF handouts. A problem found then is fixed in a follow-up.
+
 ## 12. FEATURES.md
 
 In "Phones, tablets and connection":
