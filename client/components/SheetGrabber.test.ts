@@ -65,4 +65,14 @@ describe("the sheet grabber", () => {
     assert.match(styleOf(grabbers(on)[0] ?? ""), /top:5px/);
     assert.doesNotMatch(styleOf(/^<div[^>]*>/.exec(off)?.[0] ?? ""), /margin-top|padding-top/);
   });
+
+  test("a sticky pane header that is a grab area keeps the same room: 10 px above its buttons, the pill 5 px down", () => {
+    const markup = renderToStaticMarkup(createElement(PaneHeader, { title: "Label", onClose() {}, grab: true, sticky: true }));
+    assert.equal(grabbers(markup).length, 1);
+    // A sticky header already reaches over the frame's 4 px, so it grows 6 px of its own.
+    const row = styleOf(/^<div[^>]*>/.exec(markup)?.[0] ?? "");
+    assert.match(row, /padding:10px 12px 0/);
+    assert.match(row, /min-height:54px/);
+    assert.match(styleOf(grabbers(markup)[0] ?? ""), /top:5px/);
+  });
 });

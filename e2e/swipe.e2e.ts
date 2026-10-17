@@ -1572,8 +1572,8 @@ async function expectGrabbers(page: Page, names: readonly string[], where: strin
 }
 
 /**
- * The pill against the grab area it sits in (the surface itself where it
- * has none, as the X-card): its box, the top of the area's first line (its
+ * The pill against the grab area it sits in (the body it sits on where the
+ * surface has none, as the X-card): its box, the top of the area's first line (its
  * buttons, title and text), the area's parts with the pill and without it,
  * and what a touch at the pill's middle lands on.
  */
@@ -1584,7 +1584,7 @@ async function grabberFit(surface: Locator): Promise<{ pill: Rect; area: Rect; s
     const el = root as unknown as Node;
     const pill = el.querySelector("[data-sheet-grabber]") as Node | null;
     if (!pill) throw new Error("the surface has no grabber");
-    const area = (pill.closest("[data-sheet-grab]") as Node | null) ?? el;
+    const area = (pill.closest("[data-sheet-grab]") as Node | null) ?? (pill.closest("div") as Node | null) ?? el;
     const box = (n: El): Rect => {
       const r = n.getBoundingClientRect();
       return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
@@ -1611,20 +1611,19 @@ async function grabberFit(surface: Locator): Promise<{ pill: Rect; area: Rect; s
 }
 
 /**
- * The pill is about 36 x 4 at the interface size, centered, 5 to 8 px
- * under the surface's top edge (5 inside its 1 px border, or at the
- * screen's top in full screen, where the sheet has none), inside its grab
- * area and at least 1 px above its first line, moves nothing, and lets a
- * touch through to the header.
+ * The pill is about 36 x 4 at the interface size, centered, on a grab area
+ * that starts at the surface's top edge (inside its 1 px border, or at the
+ * screen's top in full screen, where the sheet has none), 5 px under that
+ * edge on every surface alike, at least 1 px above its first line, moves
+ * nothing, and lets a touch through to the header.
  */
 async function checkFit(surface: Locator, scale: number, where: string): Promise<Awaited<ReturnType<typeof grabberFit>>> {
   const fit = await grabberFit(surface);
   const say = `${where}: ${JSON.stringify(fit)}`;
   assert.ok(Math.abs(fit.pill.width - 36 * scale) < 0.6 && Math.abs(fit.pill.height - 4 * scale) < 0.6, `the pill's size, ${say}`);
   assert.ok(Math.abs((fit.pill.left + fit.pill.right) / 2 - (fit.surface.left + fit.surface.right) / 2) < 1, `the pill is off center, ${say}`);
-  assert.ok(fit.pill.top >= fit.area.top - 0.5, `the pill pokes out of its header, ${say}`);
-  const below = (fit.pill.top - fit.surface.top) / scale;
-  assert.ok(below >= 5 - 0.5 && below <= 8 + 0.5, `the pill is ${below} px under the surface's top edge, ${say}`);
+  assert.ok(fit.area.top >= fit.surface.top - 0.5 && fit.area.top <= fit.surface.top + 1.5 * scale, `the grab area does not start at the surface's top edge, ${say}`);
+  assert.ok(Math.abs(fit.pill.top - fit.area.top - 5 * scale) < 0.6, `the pill is not 5 px under the surface's top edge, ${say}`);
   assert.ok(fit.pill.bottom <= fit.firstLine - scale + 0.5, `the pill comes within 1 px of the header's buttons, title or text, ${say}`);
   assert.ok(fit.same, `the pill moves the header's title or buttons, ${say}`);
   assert.equal(fit.hit, "area", `a touch on the pill does not reach the header under it, ${say}`);
