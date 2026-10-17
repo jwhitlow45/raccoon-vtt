@@ -69,6 +69,8 @@ type DomEl = {
   ownerDocument: { activeElement: unknown; getElementById(id: string): DomEl | null };
   textContent: string | null;
   scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
   scrollLeft: number;
   getAttribute(name: string): string | null;
   getBoundingClientRect(): { top: number; left: number; right: number; bottom: number; width: number; height: number };
@@ -918,7 +920,29 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     assert.ok(Math.abs((await logSheet.evaluate((el) => (el as unknown as DomEl).scrollTop)) - 300) <= 1, "the Log's sheet opens where it was");
     await list("Party");
 
+    // A panel that replaces another in an open sheet has a body of its own (GR-P-2): after a reload, so nothing is remembered, the Log opens at its newest line, far down, then the turn strip's Initiative opens at its top.
+    await dm.reload();
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    await dm.locator(".konvajs-content").first().waitFor();
+    // Initiative's code loaded first, so it draws in the same commit that replaces the Log.
+    await list("Initiative");
+    await dm.getByRole("region", { name: "Initiative" }).getByRole("button", { name: /^Goblin 1/ }).first().waitFor();
+    await list("Log");
+    const logNow = dm.getByRole("region", { name: "Log" }).locator("[data-pane-body]");
+    await waitFor("the Log at its newest line", async () => ((await logNow.evaluate((el) => (el as unknown as DomEl).scrollTop)) > 100 ? true : null), 3_000);
+    await dm.getByRole("button", { name: /Open the tracker\.$/ }).first().click();
+    const trackerSheet = dm.getByRole("region", { name: "Initiative" }).locator("[data-pane-body]");
+    await trackerSheet.waitFor();
+    // A sheet sizes itself to what it holds, so its body is measured once the panel draws.
+    await waitFor("Initiative's sheet drawn", async () => ((await trackerSheet.evaluate((el) => (el as unknown as DomEl).clientHeight)) > 100 ? true : null), 3_000);
+    const sizes = await trackerSheet.evaluate((el) => [(el as unknown as DomEl).scrollHeight, (el as unknown as DomEl).clientHeight]);
+    assert.ok(sizes[0]! > sizes[1]! + 10, `Initiative's sheet could scroll: ${sizes.join(" in ")}`);
+    assert.equal(await trackerSheet.evaluate((el) => (el as unknown as DomEl).scrollTop), 0, "Initiative opens at its top, not at the Log's offset");
+    await dm.keyboard.press("Escape");
+
     await view(dm, dmCdp, { width: 1280, height: 800 });
+    // The reload read the side panel's stored choice, hidden since case 6.
+    await showSide(dm);
     await openSideTab(dm, "Initiative");
   });
 

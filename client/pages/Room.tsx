@@ -849,6 +849,8 @@ function RoomPage() {
         </div>
         {mounted ? (
           <Sheet
+            // Each panel gets a sheet of its own, so one that replaces another in place, as the turn strip's Initiative replaces Token, never opens at the other's scroll (features/panels.ts usePanelScroll).
+            key={mounted.id}
             ref={sheetElRef}
             title={mounted.title}
             scrollKey={mounted.id}
