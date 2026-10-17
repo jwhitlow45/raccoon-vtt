@@ -644,7 +644,13 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
   describe("with a roll waiting for the player (needs the rolls' side of the dock)", { skip: WITHOUT_ROLLS ? "FOLD_WITHOUT_ROLLS=1" : false }, () => {
     test("10. Escape, Back and each Show button with a token selected and a roll asked", async () => {
       await setUp(player, playerCdp, { width: 375, height: 667, scale: 1 });
+      // The card at the screen's foot stands taller with its roll row (docs/design-v1-roll-request.md 5.7) and covers Thorn's
+      // cell, so Later puts it aside while Thorn is tapped, and the summary brings it back.
+      await player.getByRole("dialog", { name: "The DM asks for a roll" }).getByRole("button", { name: "Later" }).click();
       await tapThorn(player);
+      await panelsButton(player).click();
+      await player.getByRole("button", { name: /^Roll asked/ }).click();
+      await player.getByRole("region", { name: "Panels" }).waitFor({ state: "detached" });
       const card = player.getByRole("dialog", { name: "The DM asks for a roll" });
       await card.waitFor();
 
@@ -696,10 +702,18 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
       await assertColumnReachable(dm, "DM at 844 x 390");
       await shots.take(dm, "fold-landscape-dm-column");
 
+      // Checks for a Thorn with a stat block: a save's card, or one with a bonus field, no longer fits the column on its side
+      // with its roll row and folds behind the Roll asked row (docs/design-v1-roll-request.md 5.7). This step is about a card
+      // over chips in one scrolling column.
+      await ops.send({
+        t: "character.update",
+        characterId: run.thorn.characterId,
+        patch: { level: 1, stats: { abilities: { str: 10, dex: 14, con: 12, int: 10, wis: 12, cha: 10 }, saves: [], skills: {}, adjust: {}, defenses: {}, rolls: [] } },
+      });
       for (const ability of ["str", "dex", "con"] as const) {
         await ops.send({
           t: "roll.ask",
-          request: { id: randomUUID(), test: { kind: "save", choices: [{ ability }] }, dcShown: true, resultShown: true, targets: [{ tokenId: run.thorn.id }] },
+          request: { id: randomUUID(), test: { kind: "check", choices: [{ ability }] }, dcShown: true, resultShown: true, targets: [{ tokenId: run.thorn.id }] },
         });
       }
       await setUp(player, playerCdp, { width: 844, height: 390, scale: 1 });

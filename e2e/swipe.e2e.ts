@@ -846,6 +846,10 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     const request = randomUUID();
     await ops.send({ t: "roll.ask", request: { id: request, test: { kind: "save", choices: [{ ability: "con" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
     const card = player.getByRole("dialog", { name: "The DM asks for a roll" });
+    // With its roll row the card no longer fits over Thorn's bar, so it starts folded behind Roll asked, whose tap brings it up on Multi-select's bar (docs/design-v1-roll-request.md 5.7).
+    const asked = player.getByRole("button", { name: /^Roll asked/ });
+    await asked.or(card).first().waitFor();
+    if (await card.isHidden()) await asked.tap();
     await card.waitFor();
     const total = card.getByRole("textbox").first();
     await total.fill("14");

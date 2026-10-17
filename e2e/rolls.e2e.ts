@@ -90,9 +90,12 @@ function actor() {
 }
 
 /** Asks Thorn for one roll, as the DM's sheet would, and waits until the player holds it. */
-async function ask(kind: "save" | "check", ability: Ability): Promise<string> {
+async function ask(kind: "save" | "check", ability: Ability, dc?: number): Promise<string> {
   const id = randomUUID();
-  await ops.send({ t: "roll.ask", request: { id, test: { kind, choices: [{ ability }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thornCharId }] } });
+  await ops.send({
+    t: "roll.ask",
+    request: { id, test: { kind, choices: [{ ability }] }, ...(dc !== undefined ? { dc } : {}), dcShown: true, resultShown: true, targets: [{ characterId: run.thornCharId }] },
+  });
   run.open.push(id);
   await waitFor(`request ${id} on the player's phone`, () => playerSocket.state?.rolls[id]);
   // Requests stack by when the server took them, so two asked in one millisecond would tie.
@@ -364,6 +367,10 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await player.reload();
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
     await ask("save", "wis");
+    // With its roll row the card's answer block no longer fits under the top bars here, so the card starts folded behind
+    // Roll asked, whose tap brings it up over the toolbar (docs/design-v1-roll-request.md 5.7).
+    await rollAsked(player).or(card(player)).first().waitFor();
+    if (await cardElement(player).isHidden()) await rollAsked(player).tap();
     await card(player).waitFor();
     await card(player).getByLabel("Total Thorn rolled").fill("7");
     await openLog(player);
@@ -524,7 +531,95 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await sheet.waitFor({ state: "detached" });
   });
 
-  test("12. nothing went wrong in the browsers", () => {
+  test("12. with no stat block the card rolls d20 with a typed bonus, keeps the result until Done, and the DM allows a Heroic Inspiration reroll", async () => {
+    // The DM's own card for this request, opened, since a phone's cards start folded.
+    const live = dm.getByRole("group", { name: "Roll request: Dex save, DC 10" });
+    const id = await ask("save", "dex", 10);
+    const c = card(player);
+    await c.getByText("The DM asks for a Dexterity saving throw, DC 10.").waitFor();
+    assert.equal(await c.getByRole("button", { name: "Roll d20 for Thorn" }).isDisabled(), true, "no bonus is known yet");
+    await c.getByText(/^Type your bonus first, such as \+5 or 0\./).waitFor();
+    await c.getByLabel("Your bonus for Thorn").fill("4");
+    await c.getByRole("button", { name: "Roll d20+4 for Thorn" }).tap();
+    await c.getByText(/^Rolled \d+ \(1d20\+4: \d+\)\./).waitFor();
+    const rolled = playerSocket.state!.rolls[id]!.targets[0]!;
+    assert.ok(rolled.dice && rolled.typedBonus, "rolled on the server with the bonus typed");
+    await shots.take(player, "rolls-card-rolled-in-place");
+    await c.getByRole("button", { name: "Done, fold it into a chip" }).tap();
+    await c.waitFor({ state: "detached" });
+    const chip = player.getByRole("button", { name: new RegExp(`^Dex save: rolled ${rolled.total} \\(1d20\\+4, your bonus: \\d+\\)\\. (Pass|Fail)\\. Final\\. Open to ask the DM to change it\\.$`) });
+    await chip.waitFor();
+
+    await live.getByRole("button", { expanded: false }).first().tap();
+    await live.getByText(new RegExp(`^rolled ${rolled.total} \\(1d20\\+4, your bonus: \\d+\\)`)).waitFor();
+
+    // Heroic Inspiration, asked from the chip's card and allowed in one tap.
+    await chip.tap();
+    await c.getByRole("button", { name: "Ask the DM to change Thorn's answer" }).tap();
+    await player.getByRole("menu", { name: "Ask the DM to change Thorn's answer" }).getByRole("menuitemradio", { name: "Reroll: Heroic Inspiration" }).tap();
+    await c.getByText("Asked the DM to reroll (Heroic Inspiration).").waitFor();
+    await shots.take(player, "rolls-card-asked");
+    await live.getByText("Asks to reroll (Heroic Inspiration)", { exact: true }).waitFor();
+    await shots.take(dm, "rolls-dm-ask");
+    await live.getByRole("button", { name: "Allow Thorn's ask" }).tap();
+    await live.getByText(/^rerolled \d+ \(Heroic Inspiration\), was \d+/).waitFor();
+    const changed = await waitFor("the allowed reroll on the player's phone", () => playerSocket.state?.rolls[id]?.targets[0]?.changed);
+    assert.equal(changed.reason, "heroic-inspiration");
+    await closeAll();
+  });
+
+  test("13. with a stat block the card rolls its bonus, reads Restrained and Adv, waits for a typed total to clear, offers Fail (Stunned) first, and the DM rolls a waiting creature", async () => {
+    await ops.send({
+      t: "character.update",
+      characterId: run.thornCharId,
+      patch: { level: 1, stats: { abilities: { str: 10, dex: 16, con: 12, int: 10, wis: 12, cha: 10 }, saves: ["dex"], skills: {}, adjust: {}, defenses: {}, rolls: [] } },
+    });
+    await ops.send({ t: "actor.effect.add", target: { characterId: run.thornCharId }, effect: { id: "fx-restrained", key: "restrained" } });
+    await waitFor("Thorn's stat block on the player's phone", () => playerSocket.state?.characters[run.thornCharId]?.stats);
+    await ask("save", "dex", 13);
+    const c = card(player);
+    // Dexterity 16 is +3, and a proficient save at level 1 adds 2.
+    const roll = c.getByRole("button", { name: "Roll +5 for Thorn" });
+    await roll.waitFor();
+    await c.getByText("Rolls 1d20+5 with disadvantage (Restrained).").waitFor();
+    await c.getByRole("button", { name: "Advantage", exact: true }).tap();
+    await c.getByText("Rolls 1d20+5: Advantage and Restrained cancel.").waitFor();
+    await shots.take(player, "rolls-card-restrained-adv");
+    await c.getByLabel("Total Thorn rolled").fill("9");
+    assert.equal(await roll.isDisabled(), true, "Clear the total to roll instead");
+    await c.getByText(/^Clear the total to roll instead\./).waitFor();
+    await c.getByLabel("Total Thorn rolled").fill("");
+
+    // Stunned fails a Dexterity save whatever the roll: its Fail comes first.
+    await ops.send({ t: "actor.effect.remove", target: { characterId: run.thornCharId }, effectId: "fx-restrained" });
+    await ops.send({ t: "actor.effect.add", target: { characterId: run.thornCharId }, effect: { id: "fx-stunned", key: "stunned" } });
+    await c.getByRole("button", { name: "Fail (Stunned)" }).waitFor();
+    await c.getByText(/Stunned: this save fails whatever the roll\./).waitFor();
+    await shots.take(player, "rolls-card-fail-stunned");
+
+    // The DM rolls the waiting creature from the live card: its Fail is recorded with the total.
+    const live = dm.getByRole("group", { name: "Roll request: Dex save, DC 13" });
+    await live.getByRole("button", { expanded: false }).first().tap();
+    await live.getByRole("button", { name: "Roll +5: fails (Stunned) for Thorn" }).tap();
+    await live.getByText(/^rolled \d+ \(1d20\+5: \d+\)(, natural (20|1))?, fails \(Stunned\)/).waitFor();
+    await c.getByText(/^Rolled \d+ \(1d20\+5: \d+\)\.( Natural (20|1)\.)? Fail \(Stunned\)\. Final\./).waitFor();
+    await shots.take(dm, "rolls-dm-rolled-for-thorn");
+    await closeAll();
+
+    // A typed answer takes the roll row away.
+    await ops.send({ t: "actor.effect.remove", target: { characterId: run.thornCharId }, effectId: "fx-stunned" });
+    await ask("check", "wis");
+    await c.getByLabel("Total Thorn rolled").fill("12");
+    await c.getByRole("button", { name: "Send", exact: true }).tap();
+    await c.waitFor({ state: "detached" });
+    await player.getByRole("button", { name: /^Wis check: sent 12\./ }).tap();
+    await c.getByLabel("Total Thorn rolled").waitFor();
+    assert.equal(await c.getByRole("button", { name: /^Roll .* for Thorn$/ }).count(), 0, "no roll after a typed answer");
+    await c.getByRole("button", { name: "Fold it into a chip, to answer later" }).or(c.getByRole("button", { name: "Done, fold it into a chip" })).tap();
+    await closeAll();
+  });
+
+  test("14. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });

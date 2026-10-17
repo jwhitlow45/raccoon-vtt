@@ -323,10 +323,24 @@ async function playerWayBack(): Promise<Locator | null> {
 
 async function expectRollCard(label: string): Promise<void> {
   const card = player.getByRole("dialog", { name: ROLL_CARD });
-  await expectReach(label, "what to roll", card.getByText(/^The DM asks for/).first());
-  await expectReach(label, "Later", card.getByRole("button", { name: "Later" }));
-  await expectReach(label, "the total", card.getByLabel(/^Total /).first());
-  await expectReach(label, "Send", card.getByRole("button", { name: "Send", exact: true }).first());
+  const parts = [
+    ["what to roll", card.getByText(/^The DM asks for/).first()],
+    ["Later", card.getByRole("button", { name: "Later" })],
+    ["the total", card.getByLabel(/^Total /).first()],
+    ["Send", card.getByRole("button", { name: "Send", exact: true }).first()],
+  ] as const;
+  // The last step of the card's fit (docs/design-v1-roll-request.md 5.7): where even the screen's top cannot hold the question,
+  // Later and the answer block with its roll row at once, the header stops sticking and the card scrolls, so each is reached in
+  // turn. Everywhere else they take a tap as they stand.
+  const scrolls = await card.evaluate((el) => {
+    // Only the card at the screen's foot, portaled to the body, has that step. The column's card is reached as it stands.
+    const node = el as unknown as { parentElement: unknown; firstElementChild: { style: { position: string } } | null };
+    return node.parentElement === (globalThis as unknown as { document: { body: unknown } }).document.body && node.firstElementChild?.style.position !== "sticky";
+  });
+  for (const [what, target] of parts) {
+    if (scrolls) await target.scrollIntoViewIfNeeded();
+    await expectReach(label, what, target);
+  }
 }
 
 async function playerStep(label: string, tool: Tool): Promise<void> {

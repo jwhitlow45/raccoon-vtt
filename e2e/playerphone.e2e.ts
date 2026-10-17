@@ -54,6 +54,8 @@ const PORTRAIT = { width: 390, height: 844 };
 const BAND_NAME_MIN_PX = 36;
 const LANDSCAPE = { width: 844, height: 390 };
 const CARD = "The DM asks for a roll";
+/** A plain stat block for Thorn, so a card knows its bonus and draws no bonus field (docs/design-v1-roll-request.md 5.2). */
+const THORN_STATS = { abilities: { str: 10, dex: 14, con: 12, int: 10, wis: 12, cha: 10 }, saves: [], skills: {}, adjust: {}, defenses: {}, rolls: [] };
 
 let server: Server;
 let browser: Browser;
@@ -232,15 +234,28 @@ async function cardInReach(label: string, shot: string): Promise<void> {
   const height = player.viewportSize()!.height;
   assert.ok(box.top >= -0.5 && box.bottom <= height + 0.5, `${label}: the roll card runs off the screen: ${JSON.stringify(box)}`);
   const title = card(player).getByText(/^The DM asks for/);
-  const t = await rectOf(title);
-  assert.ok(t.top >= box.top - 0.5 && t.bottom <= box.bottom + 0.5, `${label}: what to roll is cut off: ${JSON.stringify({ t, box })}`);
-  for (const [name, part] of [
+  const parts = [
     ["what to roll", title],
     ["Later", card(player).getByRole("button", { name: "Later" })],
     ["the total", card(player).getByLabel(/^Total /).first()],
     ["Send", card(player).getByRole("button", { name: "Send", exact: true }).first()],
-  ] as const) {
-    assert.ok(await wholeInReach(part), `${label}: ${name} is cut off or takes no tap`);
+  ] as const;
+  const t = await rectOf(title);
+  if (t.top >= box.top - 0.5 && t.bottom <= box.bottom + 0.5) {
+    for (const [name, part] of parts) assert.ok(await wholeInReach(part), `${label}: ${name} is cut off or takes no tap`);
+  } else {
+    // The last step (docs/design-v1-roll-request.md 5.7): where even the screen's top cannot hold the question, Later and the
+    // answer block with its roll row at once, the header stops sticking and the whole card scrolls, so each is read and tapped in turn.
+    const scrolls = await card(player).evaluate((el) => {
+      // Only the card at the screen's foot, portaled to the body, has that step.
+      const node = el as unknown as { parentElement: unknown; firstElementChild: { style: { position: string } } | null };
+      return node.parentElement === (globalThis as unknown as { document: { body: unknown } }).document.body && node.firstElementChild?.style.position !== "sticky";
+    });
+    assert.equal(scrolls, true, `${label}: what to roll is cut off, and the card is not at its last step: ${JSON.stringify({ t, box })}`);
+    for (const [name, part] of parts) {
+      await part.scrollIntoViewIfNeeded();
+      assert.ok(await wholeInReach(part), `${label}: ${name}, scrolled to, is cut off or takes no tap`);
+    }
   }
   await shots.take(player, shot);
 }
@@ -502,10 +517,19 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       await player.setViewportSize(view);
       // Across the screen's foot in portrait, portaled to the body, and in the alerts column in landscape: a card mounted afresh.
       const portaled = view === PORTRAIT;
+      const markup = player.locator(`[role="dialog"][aria-label="${CARD}"]`);
       await waitFor(`${label}: the card in its new place`, async () => {
-        const top = await card(player).evaluate((el) => (el as unknown as { parentElement: unknown }).parentElement === (globalThis as unknown as { document: { body: unknown } }).document.body);
+        const top = await markup.evaluate((el) => (el as unknown as { parentElement: unknown }).parentElement === (globalThis as unknown as { document: { body: unknown } }).document.body);
         return top === portaled;
       });
+      if (!portaled && !(await card(player).isVisible())) {
+        // With its roll row the card no longer fits the column on its side, so it folds behind the Roll asked row, mounted with
+        // what was typed (docs/design-v1-roll-request.md 5.7). The row's tap brings it up, and the field takes focus again.
+        assert.equal(await markup.locator('input[aria-label="Total Thorn rolled"]').inputValue(), "16", `${label}: the folded card lost the total`);
+        await player.getByRole("button", { name: /^Roll asked/ }).tap();
+        await card(player).waitFor();
+        await card(player).getByLabel("Total Thorn rolled").focus();
+      }
       assert.equal(await card(player).getByLabel("Total Thorn rolled").inputValue(), "16", `${label}: the typed total is gone`);
       assert.ok(await card(player).getByRole("radio", { name: "Strength" }).isChecked(), `${label}: the chosen roll is gone`);
       const focus = await player.evaluate(() => (globalThis as unknown as { document: { activeElement: El | null } }).document.activeElement?.getAttribute("aria-label") ?? null);
@@ -615,7 +639,12 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await player.getByRole("button", { name: "Close Panels" }).tap();
 
     const id = randomUUID();
-    await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+    // A check for a Thorn with a stat block: a card with its roll row, a typed bonus or Fail without rolling no longer fits the
+    // column on its side and folds behind the Roll asked row (docs/design-v1-roll-request.md 5.7), and this step is about the
+    // card beside the bar. Step 8 takes the block away again.
+    await ops.send({ t: "character.update", characterId: run.thorn.characterId, patch: { level: 1, stats: THORN_STATS } });
+    await waitFor("Thorn's stat block on the player's phone", () => playerSocket.state?.characters[run.thorn.characterId]?.stats);
+    await ops.send({ t: "roll.ask", request: { id, test: { kind: "check", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
     await card(player).waitFor();
     await player.waitForTimeout(200);
     assert.ok(!intersects(await rectOf(card(player)), await rectOf(bar)), "on its side, the roll card meets the bar");
@@ -638,7 +667,8 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
   test("8. by touch: a pan, a pinch and a held press leave the bar open, a quick tap off closes it, a token switches it, and the toolbar, the top bar and an alert card leave it", async () => {
     await setUp({ ...LANDSCAPE, scale: 1 });
     const id = randomUUID();
-    await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "con" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+    // A check, whose card fits the column on its side (step 7).
+    await ops.send({ t: "roll.ask", request: { id, test: { kind: "check", choices: [{ ability: "con" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
     await card(player).waitFor();
     const thorn = await cellPoint({ x: 8, y: 6 });
     await touch([thorn]);
@@ -661,7 +691,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
 
       await player.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Select" }).tap();
       await player.locator("header h1").tap();
-      await card(player).getByText(/asks for a Constitution saving throw/).tap();
+      await card(player).getByText(/asks for a Constitution check/).tap();
       await player.waitForTimeout(150);
       assert.ok(await bar.isVisible(), "a tap on the toolbar, the top bar or an alert card closed the bar");
 
@@ -678,6 +708,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       await barFrame(player).waitFor({ state: "detached" });
     } finally {
       await ops.send({ t: "roll.close", rollIds: [id] });
+      await ops.send({ t: "character.update", characterId: run.thorn.characterId, patch: { stats: null } });
     }
   });
 
@@ -877,7 +908,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
 
   for (const fight of [false, true]) {
     const label = `480 x 320 at 130% ${fight ? "in a fight, under the turn band" : "with no fight"}`;
-    test(`14. ${label}, a long roll question opened from the Roll asked row shows its question, Later, total and Send at once, each taking a tap, and is answered`, async () => {
+    test(`14. ${label}, a long roll question opened from the Roll asked row shows its question, Later, total and Send, at once or in turn as the card scrolls, each taking a tap, and is answered`, async () => {
       if (fight) {
         await ops.send({
           t: "encounter.start",
@@ -905,6 +936,8 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         const send = answer.getByRole("button", { name: "Send", exact: true });
         await answer.getByRole("radiogroup", { name: "Which one you rolled" }).locator("label").filter({ hasText: "Strength" }).tap();
         await total.fill("13");
+        // With its roll row the card may scroll here (docs/design-v1-roll-request.md 5.7), so Send is scrolled to first.
+        await send.scrollIntoViewIfNeeded();
         assert.ok(await wholeInReach(send), `${label}: Send is cut off or takes no tap once the total is in`);
         await send.tap();
         await waitFor(`Thorn's answer at the server, ${label}`, () => (dmSocket.state?.rolls[id]?.targets[0]?.total === 13 ? true : null));
