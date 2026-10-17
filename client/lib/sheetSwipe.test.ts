@@ -427,6 +427,41 @@ describe("8. cancel and replace", () => {
     assert.equal(page.placed, false);
   });
 
+  test("a press during the slide is held to its end, after the slide too, and one at rest or after a replacement is not", () => {
+    const page = new FakePage();
+    const session = new SwipeSession(page.host);
+    session.begin(sessionStart());
+    for (const [i, dy] of ramp(300).entries()) session.move({ dx: 0, dy, at: 10 * (i + 1), cancelable: true });
+    session.end(500);
+    assert.equal(session.sliding, true);
+    assert.equal(session.press(7), true, "a tap on a button mid-slide");
+    assert.equal(session.press(8), true, "a tap on a checkbox mid-slide");
+    assert.equal(page.guarding, true);
+    page.tick(SLIDE_MS);
+    assert.equal(page.closes, 1);
+    assert.equal(session.holds(7), true, "still held after the slide, to its end");
+    session.release(7);
+    session.release(8);
+    assert.equal(page.guarding, false);
+    assert.equal(session.press(9), false, "at rest");
+    session.release(9);
+    session.lifted();
+    // A replacement mid-slide ends the slide, so the next press reaches its control.
+    session.begin(sessionStart());
+    for (const [i, dy] of ramp(300).entries()) session.move({ dx: 0, dy, at: 10 * (i + 1), cancelable: true });
+    session.end(500);
+    session.stop();
+    assert.equal(session.press(10), false);
+    // Unmounted with a press held: nothing stays held.
+    session.lifted();
+    session.begin(sessionStart());
+    for (const [i, dy] of ramp(300).entries()) session.move({ dx: 0, dy, at: 10 * (i + 1), cancelable: true });
+    session.end(500);
+    assert.equal(session.press(11), true);
+    session.dispose();
+    assert.deepEqual([session.holding, page.guarding], [false, false]);
+  });
+
   test("a subpage's key: two pages with one title and different ids differ, one page renamed does not", () => {
     assert.notEqual(subpageKey({ parent: "Journal", title: "Notes", id: "a" }), subpageKey({ parent: "Journal", title: "Notes", id: "b" }));
     assert.equal(subpageKey({ parent: "Journal", title: "Notes", id: "a" }), subpageKey({ parent: "Journal", title: "Old notes", id: "a" }));
@@ -586,6 +621,8 @@ class FakePage {
   placed = false;
   risen = false;
   watching = false;
+  /** The window's listener for held presses' ends. */
+  guarding = false;
   /** Whether the surface's owner keeps it open after its close. */
   keepsOpen = false;
   shown = true;
@@ -607,6 +644,10 @@ class FakePage {
       rise: (on) => {
         assert.notEqual(this.risen, on, "a rise asked twice");
         this.risen = on;
+      },
+      guard: (on) => {
+        assert.notEqual(this.guarding, on, "a guard asked twice");
+        this.guarding = on;
       },
       watch: (on) => {
         assert.notEqual(this.watching, on, "a watch asked twice");
@@ -675,7 +716,8 @@ describe("12. randomized touches, from both stands", () => {
   test("the invariants hold after every event of many random sequences", () => {
     const RUNS = 1500;
     // What the sequences reached, so a generator that stopped reaching an end fails rather than passing on nothing.
-    const reached = { closes: 0, fills: 0, stepsDown: 0, claims: 0, taps: 0 };
+    const reached = { closes: 0, fills: 0, stepsDown: 0, claims: 0, taps: 0, heldPresses: 0, freePresses: 0, heldPastSlide: 0 };
+    let pointer = 100;
     for (let run = 1; run <= RUNS; run++) {
       const rnd = random(run);
       const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)]!;
@@ -752,9 +794,39 @@ describe("12. randomized touches, from both stands", () => {
         at += pick([1, 5, 40, 150]);
         const liftCancelled = session.end(at);
         if (liftCancelled) assert.notEqual(claimedAt, null, `${where}: a lift cancelled for an unclaimed touch`);
+        // Other presses on the surface or a rider while it slides or rests: one held is stopped to its end, after the slide too, and one at rest is never held.
+        const presses2 = new Map<number, boolean>();
+        const stopAt = rnd() < 0.3 ? Math.floor(rnd() * 6) : -1;
+        for (let k = 0; k < 6; k++) {
+          if (k === stopAt) session.stop();
+          const roll = rnd();
+          if (roll < 0.45) {
+            const id = pointer++;
+            const sliding = session.sliding;
+            const held = session.press(id);
+            assert.equal(held, sliding, `${where}: a press during a slide not held, or one at rest held`);
+            presses2.set(id, held);
+            if (held) reached.heldPresses++;
+            else reached.freePresses++;
+          } else if (roll < 0.75 && presses2.size > 0) {
+            const [id, held] = [...presses2.entries()][Math.floor(rnd() * presses2.size)]!;
+            assert.equal(session.holds(id), held, `${where}: a held press let go before its end, or a free one held`);
+            if (held && !session.sliding) reached.heldPastSlide++;
+            session.release(id);
+            presses2.delete(id);
+          } else page.tick(pick([0, 20, 60, 120, 250]));
+          assert.equal(page.guarding, session.holding, `${where}: the window's guard does not match the held presses`);
+        }
+        for (const [id, held] of presses2) {
+          assert.equal(session.holds(id), held);
+          session.release(id);
+        }
+        assert.equal(session.holding, false);
+        assert.equal(page.guarding, false, `${where}: the window's guard left on`);
         if (rnd() < 0.3) session.stop();
         session.lifted();
         page.settle();
+        assert.equal(session.press(pointer++), false, `${where}: a press at rest held`);
         for (const look of page.looks) assert.ok(look.position >= -up - 1e-9, `${where}: slid above full to ${look.position}`);
         page.looks = [];
         const presses = page.presses - pressesBefore;
@@ -789,8 +861,11 @@ describe("12. randomized touches, from both stands", () => {
         assert.equal(page.watching, false, `${where}: a document listener left`);
         assert.equal(session.sliding, false);
       }
+      // Unmounted with a press held mid-slide: nothing stays held or listened for.
       session.dispose();
       assert.equal(page.watching, false);
+      assert.equal(page.guarding, false);
+      assert.equal(session.holding, false);
     }
     for (const [what, count] of Object.entries(reached)) assert.ok(count > 20, `only ${count} ${what} in ${RUNS} runs`);
   });

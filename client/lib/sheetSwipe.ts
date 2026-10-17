@@ -280,6 +280,8 @@ export type SwipeHost = {
   rise(on: boolean): void;
   /** Listens on the document for new touches, and for the last finger's lift, while a touch is followed (4.5). */
   watch(on: boolean): void;
+  /** Listens on the window for the end of every held press, wherever it lifts, while any press is held (`SwipeSession.press`). */
+  guard(on: boolean): void;
   /** Cancels the press under the finger at the claim (4.3). */
   takePress(): void;
   /** Runs `fn` after `ms`, and returns its cancel. */
@@ -306,6 +308,8 @@ export class SwipeSession {
   private risen = false;
   private placed = false;
   private stopMotion: (() => void) | null = null;
+  /** The presses that went down on the surface or a rider during a slide, by pointer, held to their end. */
+  private readonly held = new Set<number>();
 
   constructor(host: SwipeHost) {
     this.host = host;
@@ -387,6 +391,38 @@ export class SwipeSession {
   dispose(): void {
     this.stop();
     this.lifted();
+    if (this.held.size === 0) return;
+    this.held.clear();
+    this.host.guard(false);
+  }
+
+  /**
+   * A new press on the surface or a rider, by its pointer. While a slide
+   * runs the surface takes no touches (4.5): the press is held, and none of
+   * its events reach a control until it ends, after the slide too, so
+   * nothing activates under a surface that is going and no choice lands in
+   * a draft its close would drop. Returns whether it is held.
+   */
+  press(id: number): boolean {
+    if (!this.stopMotion) return false;
+    if (this.held.size === 0) this.host.guard(true);
+    this.held.add(id);
+    return true;
+  }
+
+  /** Whether this pointer's events are stopped. */
+  holds(id: number): boolean {
+    return this.held.has(id);
+  }
+
+  /** Whether any held press is still down, for the events that name no pointer: a click and the mouse events a touch brings. */
+  get holding(): boolean {
+    return this.held.size > 0;
+  }
+
+  /** A held press ended, and the click that could follow it has passed. */
+  release(id: number): void {
+    if (this.held.delete(id) && this.held.size === 0) this.host.guard(false);
   }
 
   /** Slides to the end's place, then does what the end means. `back` is a spring back, which changes no stand. */
@@ -808,6 +844,15 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
           if (latest.current.options.full && !latest.current.options.full.on && geometry) holdNormal(geometry);
         } else if (geometry) geometry.wholeScreen = latest.current.options.full?.on === true;
       },
+      guard(on) {
+        if (on) {
+          window.addEventListener("pointerup", onHeldEnd, true);
+          window.addEventListener("pointercancel", onHeldEnd, true);
+        } else {
+          window.removeEventListener("pointerup", onHeldEnd, true);
+          window.removeEventListener("pointercancel", onHeldEnd, true);
+        }
+      },
       watch(on) {
         if (on) {
           document.addEventListener("touchstart", onDocStart, { capture: true, passive: true });
@@ -892,9 +937,46 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
     };
     const onFocusIn = (e: FocusEvent) => remember(e.target instanceof Element ? e.target : null);
 
+    /*
+     * A press during a slide reaches nothing (4.5): its pointer events and
+     * any click or mouse event stop on the surface, before every control's
+     * handler, and its touch's end is cancelled, so the browser makes no
+     * click of it. Released a task after its end, once a click would have
+     * come.
+     */
+    const heldTouches = new Set<number>();
+    const releases = new Set<ReturnType<typeof setTimeout>>();
+    const stopEvent = (e: Event) => {
+      e.stopImmediatePropagation();
+      if (e.cancelable) e.preventDefault();
+    };
+    const onGuardDown = (e: PointerEvent) => {
+      if (swipe.press(e.pointerId)) stopEvent(e);
+    };
+    const onGuardPointer = (e: PointerEvent) => {
+      if (swipe.holds(e.pointerId)) stopEvent(e);
+    };
+    const onGuardMouse = (e: Event) => {
+      if (swipe.holding) stopEvent(e);
+    };
+    const onHeldEnd = (e: PointerEvent) => {
+      if (!swipe.holds(e.pointerId)) return;
+      const timer = setTimeout(() => {
+        releases.delete(timer);
+        swipe.release(e.pointerId);
+      }, 0);
+      releases.add(timer);
+    };
+    const guardPointer = ["pointermove", "pointerup", "pointercancel"] as const;
+    const guardMouse = ["click", "dblclick", "mousedown", "mouseup", "contextmenu"] as const;
+
     const onStart = (e: TouchEvent) => {
       const t = e.changedTouches[0];
-      if (!t || followed || swipe.sliding) return;
+      if (t && (swipe.sliding || swipe.holding)) {
+        for (let i = 0; i < e.changedTouches.length; i++) heldTouches.add(e.changedTouches[i]!.identifier);
+        return;
+      }
+      if (!t || followed) return;
       const target = e.target instanceof Element ? (e.target as unknown as SwipeNode) : null;
       const node = el as unknown as SwipeNode;
       const on = startsOn(target, node, list as unknown as SwipeNode[], css);
@@ -911,6 +993,7 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
       if (started) followed = { id: t.identifier, x: t.clientX, y: t.clientY };
     };
     const onMove = (e: TouchEvent) => {
+      if (heldTouches.size > 0 && e.cancelable && anyTouch(e.changedTouches, heldTouches)) e.preventDefault();
       if (!followed) return;
       const t = touchOf(e.touches, followed.id);
       if (!t) return;
@@ -918,6 +1001,10 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
       if (cancel && e.cancelable) e.preventDefault();
     };
     const onEnd = (e: TouchEvent) => {
+      if (heldTouches.size > 0 && anyTouch(e.changedTouches, heldTouches)) {
+        if (e.cancelable) e.preventDefault();
+        for (let i = 0; i < e.changedTouches.length; i++) heldTouches.delete(e.changedTouches[i]!.identifier);
+      }
       if (!followed || !touchOf(e.changedTouches, followed.id)) return;
       followed = null;
       if (swipe.end(e.timeStamp) && e.cancelable) e.preventDefault();
@@ -929,6 +1016,7 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
       }, 0);
     };
     const onCancel = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i++) heldTouches.delete(e.changedTouches[i]!.identifier);
       if (!followed || !touchOf(e.changedTouches, followed.id)) return;
       followed = null;
       swipe.cancel();
@@ -942,6 +1030,10 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
     };
 
     for (const node of moving) {
+      // First, so a held press's pointerdown stops before the swipe's own listener and every control's.
+      node.addEventListener("pointerdown", onGuardDown, true);
+      for (const type of guardPointer) node.addEventListener(type, onGuardPointer, true);
+      for (const type of guardMouse) node.addEventListener(type, onGuardMouse, true);
       node.addEventListener("touchstart", onStart, { passive: true });
       node.addEventListener("touchmove", onMove, { passive: false });
       node.addEventListener("touchend", onEnd, { passive: false });
@@ -954,7 +1046,11 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
       inEffect.current = true;
       swipe.dispose();
       inEffect.current = false;
+      for (const timer of releases) clearTimeout(timer);
       for (const node of moving) {
+        node.removeEventListener("pointerdown", onGuardDown, true);
+        for (const type of guardPointer) node.removeEventListener(type, onGuardPointer, true);
+        for (const type of guardMouse) node.removeEventListener(type, onGuardMouse, true);
         node.removeEventListener("touchstart", onStart);
         node.removeEventListener("touchmove", onMove);
         node.removeEventListener("touchend", onEnd);
@@ -1036,6 +1132,11 @@ export function cancelPress(down: { id: number; target: PressTarget | null }, ca
 /** Whether the window stops this pointer event: one of the claimed touch's, after its cancel, so no control hears a move, an up or a click (4.3). */
 export function stopsClaimed(claimed: number | null, e: { pointerId?: number }): boolean {
   return claimed !== null && e.pointerId === claimed;
+}
+
+function anyTouch(list: TouchList, ids: ReadonlySet<number>): boolean {
+  for (let i = 0; i < list.length; i++) if (ids.has(list[i]!.identifier)) return true;
+  return false;
 }
 
 function touchOf(list: TouchList, id: number): Touch | null {

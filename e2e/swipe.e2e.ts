@@ -1160,6 +1160,75 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       await ops.send({ t: "encounter.end" });
     }
   });
+
+  test("13. a second touch during the slide reaches nothing: a checkbox does not flip, and Close and Export do nothing", async () => {
+    await setUp(dm, { width: 375, height: 667, scale: 1 });
+    const sheet = await openPanel(dm, "Log");
+    const rest = await steadyRect(sheet);
+    // Records, for each touch the page hears, the control it landed on and whether the sheet was moving.
+    await dm.evaluate(() => {
+      type Target = { closest(s: string): { getAttribute(n: string): string | null; tagName: string } | null };
+      const g = globalThis as unknown as { __touches: { on: string; moving: boolean }[]; __touchRecord?: boolean; document: Doc; addEventListener(t: string, fn: (e: { target: Target }) => void, o: unknown): void };
+      g.__touches = [];
+      if (g.__touchRecord) return;
+      g.__touchRecord = true;
+      g.addEventListener(
+        "touchstart",
+        (e) => {
+          const control = e.target.closest("button, input");
+          const dialog = g.document.querySelector('dialog[data-rvtt-sheet][aria-label="Log"]');
+          g.__touches.push({ on: control ? (control.getAttribute("aria-label") ?? control.getAttribute("type") ?? control.tagName) : "", moving: (dialog?.style.transform ?? "") !== "" });
+        },
+        { capture: true, passive: true },
+      );
+    });
+    // `on` is what the recorder names the control by: its aria-label, else its type.
+    const midSlide = async (control: Locator, on: string, what: string) => {
+      // In view, since the Log keeps its newest lines in view and may have scrolled its top controls away.
+      await control.scrollIntoViewIfNeeded();
+      for (let attempt = 1; attempt <= 4; attempt++) {
+        await dm.evaluate(() => ((globalThis as unknown as { __touches: unknown[] }).__touches = []));
+        await swipe(dmCdp, await headerPoint(sheet), 8 + 50);
+        // Where the control is now, as the sheet springs back.
+        await touchTap(dmCdp, dm, await middleOf(control));
+        assert.equal(await settled(sheet), "rest", `${what}: the sheet did not come back to rest`);
+        const touches = await dm.evaluate(() => (globalThis as unknown as { __touches: { on: string; moving: boolean }[] }).__touches);
+        if (touches[1]?.moving) {
+          assert.equal(touches[1].on, on, `${what}: the tap landed on something else`);
+          return;
+        }
+      }
+      assert.fail(`${what}: the tap never landed during the slide`);
+    };
+    const box = sheet.locator('input[type="checkbox"]').first();
+    const was = await box.isChecked();
+    // A control that acts on its press, as a stepper or a drag handle does, hears no pointerdown either.
+    await box.evaluate((el) => {
+      const g = globalThis as unknown as { __boxDowns: number };
+      g.__boxDowns = 0;
+      (el as unknown as { addEventListener(t: string, fn: () => void): void }).addEventListener("pointerdown", () => g.__boxDowns++);
+    });
+    const downs = () => dm.evaluate(() => (globalThis as unknown as { __boxDowns: number }).__boxDowns);
+    await midSlide(box, "checkbox", "the checkbox");
+    assert.equal(await box.isChecked(), was, "a checkbox flipped under a sheet in its slide");
+    assert.equal(await downs(), 0, "the checkbox heard a pointerdown during the slide");
+    const close = sheet.getByRole("button", { name: "Close Log" });
+    await midSlide(close, "Close Log", "Close");
+    assert.ok(await sheet.isVisible(), "Close acted during the slide");
+    assert.deepEqual(await rectOf(sheet), rest);
+    await midSlide(sheet.getByRole("button", { name: "Export" }), "button", "Export");
+    await sleep(300);
+    assert.equal(await dm.getByRole("dialog", { name: "Export the log" }).count(), 0, "Export opened during the slide");
+    // At rest the same taps act at once.
+    await box.scrollIntoViewIfNeeded();
+    await jitterTap(dmCdp, dm, await middleOf(box), []);
+    await waitFor("the checkbox to flip at rest", async () => (await box.isChecked()) !== was || null, 3_000);
+    assert.equal(await downs(), 1);
+    await jitterTap(dmCdp, dm, await middleOf(box), []);
+    await close.scrollIntoViewIfNeeded();
+    await jitterTap(dmCdp, dm, await middleOf(close), []);
+    assert.equal(await settled(sheet), "gone", "Close at rest did not close");
+  });
 });
 
 /** Opens the page called Notes that says `text`, of the two that share the title. */
