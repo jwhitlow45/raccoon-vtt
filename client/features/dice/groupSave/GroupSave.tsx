@@ -294,16 +294,18 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     </FieldRow>
   );
   const anyAsk = rows.some((r) => stateOf(shown, r).way === "ask");
+  // Open server rolls carry the DC only when players may see it (chain.ts diceEnvelope), so the switch shows for them too.
+  const openRolls = !page.secret && rows.some((r) => stateOf(shown, r).way === "server");
   const switches =
     page.phase === "setup" ? (
       <div style={{ display: "grid", gap: theme.space(1) }}>
         <Switch label="Hide the monsters' rolls from players" checked={page.secret} onChange={(secret) => update({ ...pageRef.current, secret })} />
         {page.test.kind === "save" ? <Switch label="Against a spell" help="A creature with Magic Resistance rolls with advantage, asked or not." checked={page.spell} onChange={(spell) => update({ ...pageRef.current, spell })} /> : null}
-        {anyAsk ? (
+        {anyAsk || (openRolls && page.dc !== null) ? (
           <details>
             <summary style={{ minHeight: theme.touch, display: "flex", alignItems: "center", cursor: "pointer" }}>What players see</summary>
             {page.dc !== null ? <Checkbox checked={page.switches.dcShown} onChange={(dcShown) => update({ ...pageRef.current, switches: { ...pageRef.current.switches, dcShown } })} label="Players see the DC" /> : null}
-            <Checkbox checked={page.switches.resultShown} onChange={(resultShown) => update({ ...pageRef.current, switches: { ...pageRef.current.switches, resultShown } })} label="Players see pass or fail" />
+            {anyAsk ? <Checkbox checked={page.switches.resultShown} onChange={(resultShown) => update({ ...pageRef.current, switches: { ...pageRef.current.switches, resultShown } })} label="Players see pass or fail" /> : null}
           </details>
         ) : null}
       </div>

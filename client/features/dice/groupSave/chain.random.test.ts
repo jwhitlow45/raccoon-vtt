@@ -413,3 +413,24 @@ test("Apply again resends the frozen plan only while it is younger than a pendin
   assert.equal(mayApplyAgain(page, made + 12 * 60 * 60 * 1000), false);
   assert.deepEqual(applyAgain(page, made + 13 * 60 * 60 * 1000).send, []);
 });
+
+test("the server rolls carry the DC in the open only while players see it, and always in secret, the page judging totals itself", () => {
+  const monsters = ROWS.filter((r) => ["m1", "m2", "m3"].some((id) => r.holder === `token:${id}`));
+  assert.equal(monsters.length, 3);
+  let n = 0;
+  const tag = "0192f0a8-6c1e-7a4b-9c3d-2e1f0a9b8c7d";
+  for (const secret of [true, false]) {
+    for (const dcShown of [true, false]) {
+      const page = newPage({ id: "p", sceneId: "s1", source: { kind: "selection", tokenIds: ["m1", "m2", "m3"] }, test: SAVE, dc: 14, secret, spell: false, switches: { dcShown, resultShown: true } });
+      const step = roll(page, { rows: monsters, server: serverRolls(monsters), tag, requestIds: () => `0192f0a8-6c1e-7a4b-9c3d-${String(++n).padStart(12, "0")}`, openRequests: 0, taken: [], at: "2026-10-17T20:00:00.000Z" });
+      const dice = step.send.find((c): c is Extract<Command, { kind: "dice" }> => c.kind === "dice");
+      assert.ok(dice, `${secret}/${dcShown}: the monsters roll`);
+      assert.equal(dice.to, secret ? "dm" : "all");
+      assert.equal(dice.dc, secret || dcShown ? 14 : undefined, `secret ${secret}, players see the DC ${dcShown}`);
+      const m1 = "token:m1";
+      const again = rollAgain({ ...step.page, states: { ...step.page.states, [m1]: { ...stateOf(step.page, monsters[0]!), status: "notRolled" } } }, { holders: [m1], server: serverRolls(monsters), tag });
+      const resent = again.send.find((c): c is Extract<Command, { kind: "dice" }> => c.kind === "dice");
+      assert.equal(resent?.dc, secret || dcShown ? 14 : undefined, "Roll again follows the same rule");
+    }
+  }
+});

@@ -1,15 +1,19 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import type { NamedRoll } from "#shared/dice/bonus.ts";
-import type { Effect, LogEntry, RollRequest, RoomState } from "#shared/model.ts";
+import { keys } from "#shared/keys.ts";
+import type { Effect, LogEntry, LogEvent, RollRequest, RoomState, Viewer } from "#shared/model.ts";
+import { projectEntity } from "#shared/project.ts";
+import type { ActorTarget, Op } from "#shared/protocol.ts";
 import { reminderPreset, type RollPreset } from "#shared/rules/rollReminders.ts";
 import { pendingSaves, type PendingSave } from "#shared/rules/saveEnds.ts";
-import { actor, AT, character, effect, entry, room, token } from "#shared/testutil.ts";
+import { actor, apply, AT, character, DM, effect, entry, P1, P2, room, token } from "#shared/testutil.ts";
 import {
   askSaveOp,
   cardRoll,
   concentrationCard,
   concentrationResistOp,
+  concentrationRollTo,
   concentrationWords,
   endConcentrationOps,
   failOp,
@@ -22,6 +26,7 @@ import {
   recharged,
   resistOp,
   saveCard,
+  saveEndsRollTo,
   saveEndsTest,
   saveFacts,
   settleOp,
@@ -345,5 +350,74 @@ describe("recharge prompts", () => {
     assert.equal(recharged(5, 5), true);
     assert.equal(recharged(6, 5), true);
     assert.equal(recharged(4, 5), false);
+  });
+});
+
+/**
+ * A card's own roll as the server writes it, and as each viewer then reads
+ * it (W7-SOL-01): a DC the players' view of the creature lacks never
+ * reaches them on the roll's line either.
+ */
+describe("a card's roll keeps a DC players may not see off its line", () => {
+  function rolled(state: RoomState, by: Viewer, target: ActorTarget, envelope: { to: "all" | "dm"; dc?: number }): { state: RoomState; id: string } {
+    const op: Op = { t: "sys.dice", asked: { t: "dice.roll", tag: "0192f0a8-6c1e-7a4b-9c3d-2e1f0a9b8c7d", rolls: [{ formula: "1d20+1", creature: target }], ...envelope }, batch: "AbCdEfGhIjKlMnOp", results: [{ formula: "1d20+1", faces: [16], total: 17 }] };
+    const next = apply(state, op, by, state.log.length + 1);
+    return { state: next, id: next.log.at(-1)!.id };
+  }
+  function line(state: RoomState, id: string, viewer: Viewer): Extract<LogEvent, { type: "dice" }> | null {
+    const seen = projectEntity(keys.log(id), state, viewer, { sceneId: "s1" }) as LogEntry | null;
+    return (seen?.data as Extract<LogEvent, { type: "dice" }> | undefined) ?? null;
+  }
+  /** Bree, p1's character, Frightened until a DC 17 Wisdom save, with her token on the players' scene. */
+  function breeRoom(): RoomState {
+    const fear = effect("e1", { key: "frightened", save: { ability: "wis", dc: 17 }, due: { id: "5:0", state: "pending" } });
+    return room({
+      characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"], actor: actor({ effects: [fear] }) }) },
+      tokens: { thorn: token("thorn", { kind: "pc", name: "Bree", ownerIds: ["p1"], actor: { ref: "bree" } }) },
+    });
+  }
+
+  test("save ends: a player's character rolls in the open with no DC, which only the DM's view holds", () => {
+    const state = breeRoom();
+    const pending = pendingSaves(state).find((p) => "characterId" in p.target);
+    assert.ok(pending);
+    const envelope = saveEndsRollTo(state, pending);
+    assert.deepEqual(envelope, { to: "all" });
+    const after = rolled(state, DM, pending.target, envelope);
+    for (const viewer of [P1, P2]) {
+      const bree = projectEntity(keys.character("bree"), after.state, viewer, { sceneId: "s1" }) as { actor: { effects: Effect[] } } | null;
+      assert.equal(bree?.actor.effects[0]?.save?.dc, undefined, `${viewer.memberId}: the effect hides its DC`);
+      const seen = line(after.state, after.id, viewer);
+      assert.equal(seen?.rolls.length, 1, `${viewer.memberId} reads the roll`);
+      assert.equal(seen && "dc" in seen, false, `${viewer.memberId}: the line hides the DC too`);
+    }
+  });
+
+  test("save ends: a monster's roll is hidden from players and keeps its DC for the DMs", () => {
+    const state = goblinRoom();
+    const pending = only(state);
+    const envelope = saveEndsRollTo(state, pending);
+    assert.deepEqual(envelope, { to: "dm", dc: 15 });
+    const after = rolled(state, DM, pending.target, envelope);
+    assert.equal(line(after.state, after.id, DM)?.dc, 15);
+    for (const viewer of [P1, P2]) assert.equal(line(after.state, after.id, viewer)?.dc, undefined);
+  });
+
+  test("concentration: the owner's roll carries no DC, which tells the damage to a player without exact HP", () => {
+    const state = breeRoom();
+    state.meta.settings.pcHpVisibleToParty = false;
+    state.log = [{ id: "4:0", at: AT, kind: "event", data: { type: "concentration", characterId: "bree", dc: 12 } }];
+    const seenBy = (viewer: Viewer) => projectEntity(keys.log("4:0"), state, viewer, { sceneId: "s1" }) as LogEntry | null;
+    assert.equal((seenBy(P1)?.data as { dc?: number } | undefined)?.dc, 12, "the owner sees the DC");
+    assert.equal((seenBy(P2)?.data as { dc?: number } | undefined)?.dc, undefined, "another player does not");
+    const prompt = { target: { characterId: "bree" }, dc: 12 };
+    const envelope = concentrationRollTo(state, false, prompt);
+    assert.deepEqual(envelope, { to: "all" });
+    const after = rolled(state, P1, prompt.target, envelope);
+    const seen = line(after.state, after.id, P2);
+    assert.equal(seen?.rolls.length, 1);
+    assert.equal(seen && "dc" in seen, false);
+    // A DM's monster rolls in secret, so its DC stays on the line for the DMs alone.
+    assert.deepEqual(concentrationRollTo(goblinRoom(), true, { target: { tokenId: "g2" }, dc: 11 }), { to: "dm", dc: 11 });
   });
 });

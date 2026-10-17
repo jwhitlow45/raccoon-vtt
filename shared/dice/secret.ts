@@ -29,3 +29,16 @@ export function playedCreature(state: Pick<RoomState, "members" | "characters" |
 export function startsSecret(state: Pick<RoomState, "members" | "characters" | "tokens">, dm: boolean, creatures: readonly ActorTarget[]): boolean {
   return dm && creatures.some((c) => !playedCreature(state, c));
 }
+
+/**
+ * The DC a dice line may carry (W7-SOL-01). A line open to everyone gives
+ * its DC to every player, so a DC they may not see stays off it: a
+ * save-ends effect's, which only the DM's view holds, a concentration
+ * check's, which tells the damage to whoever lacks the creature's exact HP,
+ * or a group save's the DM keeps from players. The device that rolled
+ * compares the total with the DC itself. A secret line reaches only the
+ * DMs and its roller, who had the DC to send.
+ */
+export function dcOnLine(to: "all" | "dm", dc: number | undefined, playersSee: boolean): number | undefined {
+  return dc !== undefined && (to === "dm" || playersSee) ? dc : undefined;
+}

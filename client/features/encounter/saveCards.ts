@@ -3,6 +3,7 @@ import { advantageFields, type AdvantageSource } from "#shared/dice/formula.ts";
 import type { Effect, LogEntry, RollChange, RollTarget, RoomState } from "#shared/model.ts";
 import { anyPlayer, playersToken } from "#shared/project.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
+import { dcOnLine, startsSecret } from "#shared/dice/secret.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { resultOf } from "#shared/rules/rolls.ts";
 import type { PendingSave } from "#shared/rules/saveEnds.ts";
@@ -236,6 +237,17 @@ function markOp(pending: PendingSave, result: "pass" | "fail", tag: string): Cli
 }
 
 /** Passed: the effect goes, which undo takes back. With a request, the DM's Pass mark, whose answer ends the effect on the server. */
+/**
+ * Where the card's own roll goes and the DC its line carries: hidden from
+ * players only for a monster, as every roll starts, and in the open
+ * without the DC, which only the DM's view holds (dcOnLine).
+ */
+export function saveEndsRollTo(view: Pick<RoomState, "members" | "characters" | "tokens">, pending: PendingSave): { to: "all" | "dm"; dc?: number } {
+  const to = startsSecret(view, true, [pending.target]) ? "dm" : "all";
+  const dc = dcOnLine(to, pending.effect.save.dc, false);
+  return dc === undefined ? { to } : { to, dc };
+}
+
 export function passOp(pending: PendingSave, tag: string): ClientOp {
   return markOp(pending, "pass", tag) ?? { t: "actor.effect.remove", target: pending.target, effectId: pending.effect.id };
 }
@@ -388,6 +400,17 @@ export function concentrationCard(input: ConcentrationInput): ConcentrationModel
 }
 
 /** A concentration roll that decided it, as a notice once the card goes: "Thorn rolled 14: concentration holds.". */
+/**
+ * Where a concentration roll goes and the DC its line carries: hidden from
+ * players only for a DM's monster, and in the open without the DC, which
+ * tells the damage to players without the creature's exact HP (dcOnLine).
+ */
+export function concentrationRollTo(view: Pick<RoomState, "members" | "characters" | "tokens">, dm: boolean, prompt: { target: ActorTarget; dc?: number }): { to: "all" | "dm"; dc?: number } {
+  const to = startsSecret(view, dm, [prompt.target]) ? "dm" : "all";
+  const dc = dcOnLine(to, prompt.dc, false);
+  return dc === undefined ? { to } : { to, dc };
+}
+
 export function concentrationWords(name: string, total: number, decided: "pass" | "fail"): string {
   return `${name} rolled ${total}: ${decided === "pass" ? "concentration holds" : "concentration ended"}.`;
 }

@@ -3,6 +3,7 @@ import { LIMITS } from "#shared/limits.ts";
 import type { DiceRoll, LogEntry, RollRequest, RollTest } from "#shared/model.ts";
 import type { ActorTarget, ClientOp, OpOf } from "#shared/protocol.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
+import { dcOnLine } from "#shared/dice/secret.ts";
 import { askOp } from "../../rolls/logic.ts";
 import { MAX_OP_AGE_MS } from "../../../state/store.ts";
 import { cutLabel, testLabel, withExtra } from "../options.ts";
@@ -175,7 +176,7 @@ export function roll(page: Page, input: { rows: RowBase[]; server: readonly Serv
     const d20 = d20Of(test, page.spell)!;
     const label = cutLabel(page.fill ? `${page.fill.name}, ${testLabel(d20)}` : testLabel(d20));
     const rolls = serverRows.map((s): PanelRoll => ({ formula: withExtra(d20Formula(s.bonus), s.extra), label, creature: s.target, sources: [...s.sources, ...input.taken] }));
-    send.push({ kind: "dice", tag: input.tag, rolls, to: page.secret ? "dm" : "all", ...(page.dc !== null ? { dc: page.dc } : {}) });
+    send.push({ kind: "dice", tag: input.tag, rolls, ...diceEnvelope(page) });
     next = { ...next, rolls: [...next.rolls, { tag: input.tag, holders: serverRows.map((s) => s.holder), state: "sending" }] };
     for (const s of serverRows) next = withState(next, s.holder, { batch: { tag: input.tag, part: 0 } }, rowOf(next, s.holder));
   }
@@ -272,6 +273,17 @@ export function rollSettled(page: Page, tag: string, settled: { state: "committe
   return next;
 }
 
+/**
+ * Where the page's server rolls go and the DC their line carries: in the
+ * open only with "Players see the DC" on, since the page itself judges each
+ * total against its DC (dcOnLine).
+ */
+function diceEnvelope(page: Page): { to: "all" | "dm"; dc?: number } {
+  const to = page.secret ? "dm" : "all";
+  const dc = dcOnLine(to, page.dc ?? undefined, page.switches.dcShown);
+  return dc === undefined ? { to } : { to, dc };
+}
+
 /** Roll them again (5.10): only the DM's own step, under a new tag, for rows whose roll was refused or never settled. */
 export function rollAgain(page: Page, input: { holders: readonly string[]; server: readonly ServerRoll[]; tag: string }): Step {
   if (page.phase !== "rolled" || page.test.kind === "none") return { page, send: [] };
@@ -285,7 +297,7 @@ export function rollAgain(page: Page, input: { holders: readonly string[]; serve
   let next: Page = { ...page, rolls: [...page.rolls, { tag: input.tag, holders: again.map((s) => s.holder), state: "sending" }] };
   for (const s of again) next = withState(next, s.holder, { status: undefined, says: undefined, batch: { tag: input.tag, part: 0 } });
   const rolls = again.map((s): PanelRoll => ({ formula: withExtra(d20Formula(s.bonus), s.extra), label, creature: s.target, sources: [...s.sources] }));
-  return { page: next, send: [{ kind: "dice", tag: input.tag, rolls, to: page.secret ? "dm" : "all", ...(page.dc !== null ? { dc: page.dc } : {}) }] };
+  return { page: next, send: [{ kind: "dice", tag: input.tag, rolls, ...diceEnvelope(page) }] };
 }
 
 /** The DM's one tap on a waiting asked row (5.2): `roll.dice` with `unanswered`, so an answer that came first stands. */

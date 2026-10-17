@@ -169,7 +169,7 @@ Each creature is one row, each holder once (`hpTargets`' rule), objects and the 
 
 - **Fails**: a `fails` preset (3.2), "Fails: Stunned", before Ask and Server, so nobody is asked to roll a save they fail. Not rolled, Fail until overridden.
 - **Ask**, the default for a creature a player plays (16), when doc 4's `askTarget` can ask it (on the players' scene). Asked rows go in `roll.ask` requests built by doc 4's `askOp`, with the test, the DC, the note set to the fill's name ("Fireball"), the page's "What players see" switches and the request's `spell` (5.7), 50 targets a request, all under the page. Before anything is sent, the page checks that the room's open requests leave room for all of them, else "Close 2 requests first." Each request is tracked on its own, since another DM's request can take the last place between the check and the send: a request refused leaves its rows unasked, "Not asked: 20 requests are open", with Retry and Type, while the requests and rolls that went stand. An unknown answer is settled by the request's id in the view. Each request gets doc 4's live card like any other.
-- **Server**: its bonus is known (`creatureBonus`), and no player plays it, or the DM switched it from Ask. Every server row goes in one `useDicePanel().roll(rolls, { dc, to })` call, `to` from the page's secret switch, batched by doc 1's splitter under one tag. Its sources are the page's starting choices and the row's `presetFor`, and its formula gains the preset's extra.
+- **Server**: its bonus is known (`creatureBonus`), and no player plays it, or the DM switched it from Ask. Every server row goes in one `useDicePanel().roll(rolls, { dc, to })` call, `to` from the page's secret switch, batched by doc 1's splitter under one tag. In the open, `dc` goes only while "Players see the DC" is on, a switch the page then shows for its open server rolls as for asks, and the page judges each total against its DC itself. Its sources are the page's starting choices and the row's `presetFor`, and its formula gains the preset's extra.
 - **The DM's one tap on an asked row**: once asked, a waiting row offers "Roll +5", which sends `roll.dice` for that target with doc 1's `unanswered`, the same roll as doc 4's live card, so the result lands in the request and an answer that came first stands: "Bree answered before your roll."
 - **Type**: no bonus is known, or an ask could not go (another scene, said on the row). The DM types the total in the row, or marks it.
 
@@ -224,7 +224,7 @@ At 375 x 667 the sheet's body shows about 344 px at 100% and about 248 at 130% (
 ### 5.9 What players see
 
 - **Their creature asked**: doc 4's card, "Dexterity save, DC 15" as the switches allow, with Roll and the typed total.
-- **The monsters' rolls**: hidden by default, so "Mara rolled in secret." once, and only when a rolled creature passes doc 1's rule (5.2). With the switch off, the totals and DC on creatures they can see.
+- **The monsters' rolls**: hidden by default, so "Mara rolled in secret." once, and only when a rolled creature passes doc 1's rule (5.2). With the switch off, the totals on creatures they can see, and the DC only with "Players see the DC" on.
 - **The damage roll**: as the switch says, a secret line or "Mara rolled Fireball damage: …".
 - **The outcome**: the HP and condition lines of creatures they can see, under each creature's HP visibility. Their card closes when Apply closes the request. Never the results list, a monster's DC unless shown, the overrides, or who resisted.
 
@@ -255,7 +255,7 @@ The concentration card gains Roll "+2" beside Passed and Failed, for whoever ans
 
 ### 6.3 How the cards roll
 
-Cards roll with `useDicePanel().roll(rolls, { to })`, which works with the Dice panel closed since its choices live in doc 1's room-wide `diceChoicesSlot`: the DM's to the DM, a player's in the open, and the panel's choices neither applied nor consumed. Each card shows busy, then its result in place, reads its own line by tag, and acts once on it.
+Cards roll with `useDicePanel().roll(rolls, { to })`, which works with the Dice panel closed since its choices live in doc 1's room-wide `diceChoicesSlot`: the DM's to the DM, a player's in the open, and the panel's choices neither applied nor consumed. Each card shows busy, then its result in place, reads its own line by tag, and acts once on it. A card's line in the open never carries a DC its players may not see (build round 1, W7-SOL-01): a save-ends DC is the DM's alone, and a concentration DC tells the damage to whoever lacks the creature's exact HP, so the line goes without `dc` and the card compares the total with its own DC (`dcOnLine`, `shared/dice/secret.ts`). A secret line keeps it, for the DMs and its roller.
 
 ### 6.4 Recharge
 
