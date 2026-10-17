@@ -9,6 +9,7 @@ import { Segmented } from "../../components/Segmented.tsx";
 import { dockSummaryButton, RETURN_RANK, sheetFocusSlot, useAlertsSummary, useSheetReturnFocus } from "../../components/sheetFocus.ts";
 import { useBackClose } from "../../lib/backClose.ts";
 import { displayName } from "../../lib/scene.ts";
+import { GRAB_ATTR, GRAB_STYLE, useSheetSwipe } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { revealAndFocus } from "../../lib/reveal.ts";
 import { useStore } from "zustand";
@@ -387,6 +388,8 @@ function RollCard(props: {
   const chrome = useStore(useScoped(barDockSlot), (s) => s.chrome);
   // Only while it shows, so a card folded under a sheet, or one that arrived there, never takes Back from the sheet.
   useBackClose(props.sheet && !props.hidden, props.onFold);
+  // At the screen's foot a swipe down puts it off as Later does, with what was typed kept, so unsaved input never holds it (docs/design-v1-sheet-swipe.md section 3).
+  useSheetSwipe(props.cardRef, { enabled: props.sheet && !props.hidden, onClose: props.onFold, item: props.request.id, clip: "screen", keeps: true });
   const sent = (key: string) => {
     // Folds once every creature it asked about has an answer, this one included.
     const rest = request.targets.filter((t) => targetKey(t) !== key);
@@ -440,10 +443,12 @@ function RollCard(props: {
     <>
       <div
         ref={headerRef}
+        {...(props.sheet ? { [GRAB_ATTR]: "" } : {})}
         style={{
           display: "flex",
           alignItems: "flex-start",
           gap: theme.space(2),
+          ...(props.sheet ? GRAB_STYLE : null),
           ...(sticks
             ? {
                 position: "sticky",
