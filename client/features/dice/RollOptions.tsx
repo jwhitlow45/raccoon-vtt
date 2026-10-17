@@ -469,6 +469,8 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
   useActOnce(rechargeTag, rechargeLanded, (landed) => {
     if ((landed[0]?.total ?? 0) >= (named.recharge ?? 7)) markUsed(false);
   });
+  // Only an attack roll scores a Critical Hit (SRD 5.2.1), so a save action's damage, such as Fire Breath's, never doubles (W7B-P-13).
+  const canCrit = named.attack !== undefined;
   const fixed = named.damage.filter((p) => !p.optional);
   const hasDamage = named.damage.length > 0;
   const formulaText = (fixed.length > 0 ? fixed : named.damage).map((p) => p.formula).join(" + ");
@@ -503,13 +505,13 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
         {hasDamage ? (
           <OptionCell
             text={`Damage ${formulaText}`}
-            sub={crit ? "Critical: dice doubled" : undefined}
+            sub={canCrit && crit ? "Critical: dice doubled" : undefined}
             name={`${named.name} damage`}
             row={damageRow}
             disabled={ctx.blocked}
             result={damageLanded.length > 0 ? resultWords(damageLanded, "damage") : null}
             onTap={() => {
-              const rolls = damageRolls(named, { on, critical: crit, creature: ctx.creature });
+              const rolls = damageRolls(named, { on, critical: canCrit && crit, creature: ctx.creature });
               if (option.rolls(rolls, damageRow) !== null) {
                 if (crit) setCrit(false);
                 if (named.recharge !== undefined) markUsed(true);
@@ -549,7 +551,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
           />
         ) : null}
       </div>
-      {hasDamage ? (
+      {hasDamage && (canCrit || named.damage.some((p) => p.optional)) ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
           {named.damage.map((part, i) =>
             part.optional ? (
@@ -558,9 +560,11 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
               </Chip>
             ) : null,
           )}
-          <Chip pressed={crit} onClick={() => setCrit(!crit)} aria-label={`Critical hit for ${named.name}'s next damage`}>
-            Critical
-          </Chip>
+          {canCrit ? (
+            <Chip pressed={crit} onClick={() => setCrit(!crit)} aria-label={`Critical hit for ${named.name}'s next damage`}>
+              Critical
+            </Chip>
+          ) : null}
         </div>
       ) : null}
     </div>
