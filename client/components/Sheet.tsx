@@ -1,8 +1,9 @@
 import { useCallback, useRef, type CSSProperties, type ReactNode, type Ref, type RefObject } from "react";
 import { chromeZoom, smallUi } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
-import { subpageBack, useSubpageFocus, type PanelHeader } from "../features/panels.ts";
+import { subpageBack, subpageKey, useSubpageFocus, type PanelHeader } from "../features/panels.ts";
 import { useSheetDialog } from "../lib/modalDialog.ts";
+import { DraftScope, useDraftRegistry, useSheetSwipe } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { headerStacks, sheetMaxHeight } from "./sheetCap.ts";
 import { SheetHeader, type HeaderBack } from "./SheetHeader.tsx";
@@ -45,6 +46,12 @@ export type SheetMode = "bottom" | "side" | "full";
  * the room's notices inside it, which the modal would otherwise leave out
  * of reach: `notices`, between the header and the body, which they push
  * down (pages/modalSlot.tsx).
+ *
+ * At the foot it swipes down to close (lib/sheetSwipe.ts,
+ * docs/design-v1-sheet-swipe.md): from its header at any time, from its
+ * body once that is at its top. `riders` ride its top edge and move with
+ * it, the dock's row (pages/RoomDock.tsx). It provides its panel the
+ * context that reports unsaved input, which makes a swipe spring back.
  */
 export function Sheet(props: {
   ref?: Ref<HTMLElement>;
@@ -75,6 +82,8 @@ export function Sheet(props: {
   headerWidth: number;
   /** Under the header, above the body, in the very short mode. */
   notices?: ReactNode;
+  /** What rides the sheet's top edge at the foot: the dock's row. */
+  riders?: readonly (HTMLElement | null)[];
   children: ReactNode;
 }) {
   const { mode, inset, subpage } = props;
@@ -96,7 +105,12 @@ export function Sheet(props: {
     [outer],
   );
   const onHide = mode === "bottom" ? undefined : props.onHide;
-  useSheetDialog(dialogRef, { shown: props.shown ?? true, modal: mode === "full", onCancel: props.onClose, hideFocus: props.hideFocus });
+  const shown = props.shown ?? true;
+  useSheetDialog(dialogRef, { shown, modal: mode === "full", onCancel: props.onClose, hideFocus: props.hideFocus });
+  const drafts = useDraftRegistry();
+  // What it shows: the panel by its name, and its subpage by the key focus follows, so a new page or subpage ends a drag and drops a slide's close.
+  const item = `${props.title}\n${subpage ? subpageKey(subpage) : ""}`;
+  useSheetSwipe(dialogRef, { enabled: mode === "bottom" && shown, onClose: props.onClose, scroller: bodyRef, riders: props.riders, item, clip: "foot", drafts });
   const back: HeaderBack | null = subpage ? subpageBack(subpage) : props.onBack ? { label: props.backLabel ?? "Back", onBack: props.onBack } : null;
   const actionCount = props.actions ? (props.actionCount ?? 0) : 0;
   const stacked = headerStacks({ width: props.headerWidth, buttons: (back ? 1 : 0) + (onHide ? 1 : 0) + 1 + actionCount, actions: actionCount > 0 });
@@ -181,6 +195,7 @@ export function Sheet(props: {
           backRef={props.backRef}
           closeRef={props.closeRef}
           titleRef={titleRef}
+          grab={mode === "bottom"}
         />
         {mode === "full" ? props.notices : null}
         {/* Every mode keeps this shape, so a change of mode never mounts the panel again. */}
@@ -192,7 +207,7 @@ export function Sheet(props: {
             data-pane-body=""
             style={{ ...paneBodyPadding(theme.space(1), theme.space(4)), flex: 1, minHeight: 0, overflowY: "auto", padding: `${theme.space(1)}px ${theme.space(4)}px ${theme.space(4)}px`, overscrollBehavior: "contain" }}
           >
-            {props.children}
+            <DraftScope value={drafts}>{props.children}</DraftScope>
           </div>
         </div>
       </section>

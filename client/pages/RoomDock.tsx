@@ -5,6 +5,7 @@ import { IconButton } from "../components/IconButton.tsx";
 import { useAlertsSummaryEntry } from "../components/sheetFocus.ts";
 import { chromeZoom, smallUi } from "../features/device/layout.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
+import { GRAB_STYLE, SWIPE_REST_EVENT, SWIPING_ATTR } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { useScoped } from "../state/scope.ts";
 import { alertsSummary, DOCK_PX, dockSlot, type AlertsSummary } from "./fold.ts";
@@ -51,9 +52,12 @@ export function useDockSummary(hides: "sheet" | "bar" | "room" = "sheet"): Alert
  *
  * It follows the open sheet's top edge (`sheetHeight`, in the chrome's own
  * pixels), and Room keeps the dock and the gap above it free when it caps
- * the sheet (Sheet `reserveTop`).
+ * the sheet (Sheet `reserveTop`). It rides the sheet's swipe (Sheet
+ * `riders`): it moves with the sheet, and a drag on it moves the sheet,
+ * while its buttons still take a tap.
  */
 export function DockRow(props: {
+  ref?: Ref<HTMLDivElement>;
   zoom: number;
   sheetHeight: number;
   summary: AlertsSummary | null;
@@ -65,10 +69,12 @@ export function DockRow(props: {
   const { summary, actions } = props;
   return (
     <div
+      ref={props.ref}
       data-rvtt-dock=""
       {...smallUi(props.zoom)}
       style={{
         ...chromeZoom(props.zoom),
+        ...GRAB_STYLE,
         position: "absolute",
         left: `calc(${theme.safe.left} + ${theme.space(2)}px)`,
         right: `calc(${theme.safe.right} + ${theme.space(2)}px)`,
@@ -295,6 +301,10 @@ export function FoldStatus(props: { folded: boolean }) {
  * chrome multiplies (features/device/layout.ts). Measured in a layout
  * effect, so what follows it, such as the dock on a sheet's edge, never
  * paints a frame in the wrong place.
+ *
+ * It holds still while a swipe moves the sheet (lib/sheetSwipe.ts), whose
+ * one box change for a drag above its normal top would otherwise render
+ * Room on the move, and measures again once the sheet is at rest.
  */
 export function useLayoutHeight(el: HTMLElement | null, zoom: number): number {
   const [height, setHeight] = useState(0);
@@ -303,11 +313,17 @@ export function useLayoutHeight(el: HTMLElement | null, zoom: number): number {
       setHeight(0);
       return;
     }
-    const measure = () => setHeight(el.getBoundingClientRect().height / zoom);
+    const measure = () => {
+      if (!el.hasAttribute(SWIPING_ATTR)) setHeight(el.getBoundingClientRect().height / zoom);
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
-    return () => observer.disconnect();
+    el.addEventListener(SWIPE_REST_EVENT, measure);
+    return () => {
+      observer.disconnect();
+      el.removeEventListener(SWIPE_REST_EVENT, measure);
+    };
   }, [el, zoom]);
   return height;
 }

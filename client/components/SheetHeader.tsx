@@ -1,5 +1,6 @@
 import { useId, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
+import { GRAB_ATTR, GRAB_STYLE } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { Icon } from "./Icon.tsx";
 import { IconButton } from "./IconButton.tsx";
@@ -93,8 +94,11 @@ export function SheetHeader(props: {
   detail?: ReactNode;
   /** The detail lines' id, for a dialog that names them as its description. */
   detailId?: string;
+  /** The header is the grab area of a sheet that swipes (lib/sheetSwipe.ts): a drag on it always moves the sheet. */
+  grab?: boolean;
 }) {
   const { back, level = 2 } = props;
+  const grab = grabProps(props.grab);
   const Heading = level === 2 ? "h2" : "h3";
   const asking = !!back?.armed;
   const actions = asking ? null : props.actions;
@@ -128,7 +132,7 @@ export function SheetHeader(props: {
   const divider = props.divider ? `${theme.line.border}px solid ${theme.color.border}` : undefined;
   if (props.stacked) {
     return (
-      <header style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, padding: `${STACKED_PAD}px ${padding}px`, borderBottom: divider }}>
+      <header {...grab.attrs} style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, padding: `${STACKED_PAD}px ${padding}px`, borderBottom: divider, ...grab.style }}>
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0, height: theme.touch }}>
           {backButton}
           <span style={{ flex: 1 }} />
@@ -149,7 +153,7 @@ export function SheetHeader(props: {
   const rowStyle: CSSProperties = { flex: "none", display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0, minHeight: 56, padding: `0 ${padding}px` };
   if (props.detail) {
     return (
-      <header style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, borderBottom: divider }}>
+      <header {...grab.attrs} style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, borderBottom: divider, ...grab.style }}>
         <div style={rowStyle}>{row}</div>
         <div id={props.detailId} style={{ minWidth: 0, padding: `0 ${padding + theme.space(2)}px ${theme.space(2)}px`, marginTop: -theme.space(2) }}>
           {props.detail}
@@ -157,7 +161,16 @@ export function SheetHeader(props: {
       </header>
     );
   }
-  return <header style={{ ...rowStyle, borderBottom: divider }}>{row}</header>;
+  return (
+    <header {...grab.attrs} style={{ ...rowStyle, borderBottom: divider, ...grab.style }}>
+      {row}
+    </header>
+  );
+}
+
+/** A grab area's mark and style, or nothing. */
+function grabProps(on: boolean | undefined): { attrs: Record<string, string>; style: CSSProperties | null } {
+  return on ? { attrs: { [GRAB_ATTR]: "" }, style: GRAB_STYLE } : { attrs: {}, style: null };
 }
 
 /** The stacked header's padding above and below, and its title's line: 6 + 44 + 22 + 6 = 78 px (sheetCap.ts SHEET_HEADER_STACKED). */

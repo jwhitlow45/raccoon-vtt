@@ -605,6 +605,9 @@ function RoomPage() {
   // Over the whole screen there is no edge to dock on, nor beside a sideways sheet that leaves a window too little room, so the dock's buttons join the header, as where the dock has no room.
   const dockInHeader = docked && (full || landscape || !dockFits({ height, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR }));
   const sheetHeight = useLayoutHeight(sheetEl, zoom);
+  // The dock's row rides the sheet's swipe (lib/sheetSwipe.ts).
+  const [dockEl, setDockEl] = useState<HTMLElement | null>(null);
+  const riders = useMemo(() => [dockEl], [dockEl]);
   const backRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const showRef = useRef<HTMLButtonElement>(null);
@@ -860,6 +863,7 @@ function RoomPage() {
             actionCount={headerActionCount}
             headerWidth={headerWidth}
             notices={notices}
+            riders={riders}
             backRef={backRef}
             closeRef={closeRef}
             titleRef={sheetTitleRef}
@@ -879,6 +883,7 @@ function RoomPage() {
             actionCount={headerActionCount}
             headerWidth={headerWidth}
             notices={notices}
+            riders={riders}
             backRef={backRef}
             closeRef={closeRef}
           >
@@ -896,7 +901,7 @@ function RoomPage() {
           </Sheet>
         ) : null}
         {/* After the sheet, so a test's or a screen reader's first "Close" in the page is still the sheet's (docs/design-v1-visual.md 5.4). */}
-        {docked && !dockInHeader ? <DockRow zoom={zoom} sheetHeight={sheetHeight} summary={summary} actions={dockActions} showRef={showRef} summaryRef={summaryRef} /> : null}
+        {docked && !dockInHeader ? <DockRow ref={setDockEl} zoom={zoom} sheetHeight={sheetHeight} summary={summary} actions={dockActions} showRef={showRef} summaryRef={summaryRef} /> : null}
         {/* One element in every arrangement, so a rotation never remounts the tool's options. */}
         {optionsDrawn ? (
           <ToolOptions

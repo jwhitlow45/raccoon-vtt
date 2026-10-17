@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { layoutWidth } from "../features/device/layout.ts";
 import { useBackClose } from "../lib/backClose.ts";
 import { useModalDialog } from "../lib/modalDialog.ts";
+import { DraftScope, useDraftRegistry, useSheetSwipe } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { SheetHeader, type HeaderBack } from "./SheetHeader.tsx";
 
@@ -123,16 +124,26 @@ export function dialogCard(layoutPx: number, props: Pick<DialogProps, "phone" | 
  * `zoom`, which multiplies viewport units too, and a card of `100dvh` ran
  * off a phone at 130% with its Save button out of reach
  * (features/device/layout.ts).
+ *
+ * The bottom card swipes down to close (lib/sheetSwipe.ts): from its
+ * header, or from anywhere once its body is at its top. It provides its
+ * body the context that reports unsaved input, which makes a swipe spring
+ * back instead.
  */
 export function Dialog(props: DialogProps) {
   const { onClose, header = true } = props;
   // On the server's render, with no window, the computer's card.
-  const { card, bottom } = dialogCard(typeof window === "undefined" ? DIALOG_PHONE_MAX : layoutWidth(), props);
+  const { card: cardStyle, bottom } = dialogCard(typeof window === "undefined" ? DIALOG_PHONE_MAX : layoutWidth(), props);
   const dialog = useRef<HTMLDialogElement>(null);
   const detailId = useId();
   useBackClose(props.backClose === true, onClose);
   useModalDialog(dialog, { onClose, ...(props.opener ? { returnFocus: props.opener } : null), ...(props.zoom === false ? { zoom: false } : null) });
   useStepFocus(dialog, props.title);
+  const card = useRef<HTMLElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const drafts = useDraftRegistry();
+  // Its title names its step, as the scene menu's do, so a new step ends a drag.
+  useSheetSwipe(card, { enabled: bottom, onClose, scroller: body, item: props.title, clip: "screen", drafts });
 
   // The dialog element is the dimmed layer over the whole screen, so a tap on it outside the card closes the card.
   return createPortal(
@@ -166,6 +177,7 @@ export function Dialog(props: DialogProps) {
       }}
     >
       <section
+        ref={card}
         style={{
           display: "flex",
           flexDirection: "column",
@@ -173,11 +185,13 @@ export function Dialog(props: DialogProps) {
           border: `${theme.line.border}px solid ${theme.color.border}`,
           boxShadow: theme.shadow.dialog,
           overflow: "hidden",
-          ...card,
+          ...cardStyle,
         }}
       >
-        {header ? <SheetHeader title={props.title} back={props.back} actions={props.headerActions} detail={props.headerDetail} detailId={detailId} onClose={onClose} divider /> : null}
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", padding: theme.space(4), ...props.bodyStyle }}>{props.children}</div>
+        {header ? <SheetHeader title={props.title} back={props.back} actions={props.headerActions} detail={props.headerDetail} detailId={detailId} onClose={onClose} divider grab={bottom} /> : null}
+        <div ref={body} style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", padding: theme.space(4), ...props.bodyStyle }}>
+          <DraftScope value={drafts}>{props.children}</DraftScope>
+        </div>
         {props.footer || props.status ? (
           <footer
             style={{
