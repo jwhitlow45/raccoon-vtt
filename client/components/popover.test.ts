@@ -313,6 +313,17 @@ describe("a press while a popover is open", () => {
     assert.deepEqual(run([down(1), { type: "cancel", pointerId: 1 }]).closes, []);
   });
 
+  /*
+   * A sheet's swipe cancels the press it takes and then stops that
+   * pointer's events at the window, after this room's listeners, which it
+   * cannot run before (lib/sheetSwipe.ts). The up still reaches the room,
+   * for a pointer it no longer tracks.
+   */
+  test("the up of a press a sheet's swipe cancelled does nothing", () => {
+    assert.deepEqual(run([down(1), { type: "cancel", pointerId: 1 }, up(1)]), { closes: [], suppressed: [true, true, false], state: null });
+    assert.deepEqual(run([down(1, { where: "inside" }), { type: "cancel", pointerId: 1 }, up(1)]).closes, [], "a press on the popover");
+  });
+
   test("a press elsewhere closes it at once, and one on it or its anchor does nothing here", () => {
     assert.deepEqual(run([down(1, { where: "elsewhere" }), up(1)]), { closes: ["now"], suppressed: [false, false], state: null });
     assert.deepEqual(run([down(1, { where: "inside" }), up(1)]).closes, []);

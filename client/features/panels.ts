@@ -176,6 +176,16 @@ export type PanelHeader = {
   id?: string;
 };
 
+/**
+ * Which subpage shows, not what it is called: a title typed or renamed in
+ * place is no change of page, and two pages with one title differ by their
+ * ids. Focus follows it (useSubpageFocus), and a sheet's swipe ends when it
+ * changes (lib/sheetSwipe.ts).
+ */
+export function subpageKey(subpage: Pick<PanelHeader, "parent" | "title" | "id">): string {
+  return `${subpage.parent}\n${subpage.id ?? subpage.title}`;
+}
+
 const PanelHeaderContext = createContext<((header: PanelHeader | null) => void) | null>(null);
 
 const PanelHereContext = createContext<string | null>(null);
@@ -353,8 +363,7 @@ export function useSubpageFocus(
     };
   }, [body]);
 
-  // Which subpage shows, not what it is called: a title typed or renamed in place is no change of page.
-  const key = subpage ? `${subpage.parent}\n${subpage.id ?? subpage.title}` : null;
+  const key = subpage ? subpageKey(subpage) : null;
   useLayoutEffect(() => {
     const was = shown.current;
     shown.current = key;
