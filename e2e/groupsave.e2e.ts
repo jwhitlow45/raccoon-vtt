@@ -380,7 +380,24 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     for (const g of run.goblins) await creatures.getByText(g.name, { exact: true }).waitFor();
     assert.equal(await creatures.getByText(run.dragon.name, { exact: true }).count(), 0, "the wyrmling is not its own target");
     await shots.take(dm, "groupsave-fire-breath-rows-130");
-    await sheet.getByRole("button", { name: "Discard", exact: true }).tap();
+
+    // As No save the page stays in setup until Apply, and one goblin's amount still opens its own field (ASTRA-13, round 2).
+    await sheet.getByRole("radiogroup", { name: "What they roll" }).getByRole("radio", { name: "No save" }).check({ force: true });
+    const damage = sheet.getByLabel("Damage", { exact: true });
+    await damage.fill("10");
+    await damage.blur();
+    const one = run.goblins[0]!;
+    await creatures.getByRole("button", { name: `${one.name}'s damage, 10. Change it` }).tap();
+    const own = creatures.getByLabel(`${one.name}'s damage`, { exact: true });
+    await own.fill("4");
+    await own.press("Enter");
+    await creatures.getByRole("button", { name: `${one.name}'s damage, 4, typed. Change it` }).waitFor();
+    await sheet.getByRole("button", { name: /^Apply: / }).tap();
+    await sheet.getByText("Applied to 3. Undo takes it all back.").waitFor();
+    await waitFor(`${one.name} at ${HP - 4}`, () => (goblinHp(one.id) === HP - 4 ? true : null));
+    for (const g of run.goblins.slice(1)) await waitFor(`${g.name} at ${HP - 10}`, () => (goblinHp(g.id) === HP - 10 ? true : null));
+    await shots.take(dm, "groupsave-no-save-own-amount-130");
+    await sheet.getByRole("button", { name: "Done", exact: true }).tap();
     await sheet.getByRole("button", { name: "Close Dice" }).tap();
   });
 

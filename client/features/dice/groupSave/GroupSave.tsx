@@ -753,7 +753,8 @@ function GroupRow(props: {
   const set = (patch: Partial<typeof s>) => props.onChange({ ...page, states: { ...page.states, [row.holder]: { ...s, ...patch } } });
   // The amount opens a field of its own (5.4): what the DM types there wins, and going back takes the worked-out amount again.
   const [editing, setEditing] = useState(false);
-  const takes = !setup && !frozen && !s.gone && (outcome.result === "fail" || outcome.result === "pass");
+  // A page with No save has no roll, so it is in setup until Apply: its rows' amounts open there too.
+  const takes = (!setup || page.test.kind === "none") && !frozen && !s.gone && (outcome.result === "fail" || outcome.result === "pass");
   return (
     <div style={{ display: "grid", gap: theme.space(1), padding: `${theme.space(1)}px 0`, borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1) }}>

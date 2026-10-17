@@ -60,6 +60,17 @@ describe("the DM's own amount and the outcome's size", () => {
     assert.equal(rowOutcome(setAmount(typed, holder, null), ROWS[0]!, DICE, [{ amount: 12 }]).amount, 12);
   });
 
+  test("a No save page, in setup until its Apply, takes the DM's own amount for one creature, the others the worked-out one (ASTRA-13, round 2)", () => {
+    const tokens = { g1: token("g1", { kind: "monster", name: "Goblin", actor: { inline: actor({ hp: { cur: 30, max: 30, temp: 0 } }) } }), g2: token("g2", { kind: "monster", name: "Hobgoblin", actor: { inline: actor({ hp: { cur: 30, max: 30, temp: 0 } }) } }) };
+    const dice: DiceView = { ...DICE, view: room({ tokens }) };
+    const rows = groupRows(dice, ["g1", "g2"], { kind: "none" }, false);
+    const setup: Page = { ...newPage({ id: "p", sceneId: "s", source: { kind: "selection", tokenIds: ["g1", "g2"] }, test: { kind: "none" }, dc: null, secret: true, spell: false, switches: { dcShown: true, resultShown: true }, outcome: { damage: "10" } }), rows };
+    assert.equal(setup.phase, "setup");
+    const typed = setAmount(setup, rows[0]!.holder, 4);
+    const plan = buildPlan(typed, dice, [{ amount: 10 }], { plan: "p", newId: () => "e" })!;
+    assert.deepEqual(plan.targets.map((t) => t.amount), [4, 10]);
+  });
+
   test("the bound counts each condition's end and save, so 100 creatures with three conditions that last and end on a save are refused before any roll (ASTRA-14)", () => {
     const hundred = Array.from({ length: 100 }, (_, i) => `0192f0a8-6c1e-7a4b-9c3d-${String(i).padStart(12, "0")}`);
     const tokens = Object.fromEntries(hundred.map((id) => [id, token(id, { kind: "monster", name: "Cultist", actor: { inline: actor() } })]));
