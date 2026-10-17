@@ -31,6 +31,7 @@ import {
   routeOf,
   scoreOf,
   signedText,
+  spendOnStart,
   testLabel,
   withUsed,
   writeUsed,
@@ -581,11 +582,8 @@ function GroupSaveButton(props: { ctx: Ctx; named: NamedRoll }) {
   const others = selected.filter((id) => id !== ctx.tokenId);
   const filled = actionFill(ctx.dice, named, { key: ctx.key, ...(ctx.tokenId ? { tokenId: ctx.tokenId } : {}) })!;
   const input = { source: { kind: "selection" as const, tokenIds: others }, ...filled, panel: "dice" as const };
-  const go = (replace: boolean) => {
-    // A recharge action is spent when its group save starts (6.4), as its Damage tap spends it.
-    if (named.recharge !== undefined) writeUsed(roomId, withUsed(readUsed(roomId), ctx.key, named.key, true));
-    return start(input, { replace });
-  };
+  // A recharge action is spent once its group save starts, as its Damage tap is once its roll goes.
+  const go = (replace: boolean) => spendOnStart(() => start(input, { replace }), named.recharge !== undefined ? () => writeUsed(roomId, withUsed(readUsed(roomId), ctx.key, named.key, true)) : null);
   return (
     <div style={{ display: "grid", gap: theme.space(1) }}>
       <SmallButton disabled={ctx.blocked !== null} onClick={() => !go(false) && setPending(true)}>

@@ -301,6 +301,17 @@ export function writeUsed(roomId: string, used: Record<string, string[]>): void 
   }
 }
 
+/**
+ * Starts what spends a recharge action and marks it Used only once that
+ * went (6.4, ASTRA-15): a group save the DM kept open in its place, or an
+ * outcome that sent nothing, spends nothing. True when it started.
+ */
+export function spendOnStart(start: () => boolean, spend: (() => void) | null): boolean {
+  const started = start();
+  if (started) spend?.();
+  return started;
+}
+
 // ------------------------------------------------------------ HP chips
 
 /** A damage or healing line's total offered in an HP entry (4.3): "Use 9 (Bree's Longsword damage)". */

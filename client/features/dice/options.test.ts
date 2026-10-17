@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { NamedRoll } from "#shared/dice/bonus.ts";
 import type { DiceRoll, RollRequest, RoomState } from "#shared/model.ts";
 import { actor, character, entry, room, token } from "#shared/testutil.ts";
-import { critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, presetLine, resultWords, routeOf, scoreOf, testLabel, withExtra, withUsed } from "./options.ts";
+import { critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, presetLine, resultWords, routeOf, scoreOf, spendOnStart, testLabel, withExtra, withUsed } from "./options.ts";
 
 /** The roll options' rules (docs/design-v1-roll-options.md 4.2 and 4.3). */
 
@@ -129,6 +129,17 @@ describe("damage, critical hits and results", () => {
     assert.deepEqual(used, { "t:gob": ["actions:fire-breath"] });
     used = withUsed(used, "t:gob", "actions:fire-breath", false);
     assert.deepEqual(used, {});
+  });
+
+  test("a recharge action is spent only once what spends it started: Keep it on the open group save spends nothing", () => {
+    let spent = 0;
+    const spend = () => spent++;
+    assert.equal(spendOnStart(() => false, spend), false, "another group save held rolls, and the DM kept it");
+    assert.equal(spent, 0);
+    assert.equal(spendOnStart(() => true, spend), true, "Discard started the new page");
+    assert.equal(spent, 1);
+    assert.equal(spendOnStart(() => true, null), true, "an action with no recharge spends nothing");
+    assert.equal(spent, 1);
   });
 });
 

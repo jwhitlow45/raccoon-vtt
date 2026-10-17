@@ -22,7 +22,7 @@ import { SaveEndsFields, saveEndsForm, type SaveEndsForm } from "../../tokens/Sa
 import { FieldRow, Note, NumberField, Select, Stepper } from "../../tokens/ui.tsx";
 import { creatureRolls } from "../creature.ts";
 import { rollsOf } from "../logic.ts";
-import { creatureKey, readUsed, signedText, withUsed, writeUsed } from "../options.ts";
+import { creatureKey, readUsed, signedText, spendOnStart, withUsed, writeUsed } from "../options.ts";
 import { presetFor } from "../presets.ts";
 import { useRollSender } from "../send.ts";
 import { useDicePanel } from "../useDicePanel.ts";
@@ -171,14 +171,16 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   const bound = worstCase(rows.map((r) => r.target), condList, page.fill?.name);
   const parsedParts = page.outcome.damage.trim() ? parseParts(page.outcome.damage, fillType) : null;
 
-  const run = (step: Step) => {
+  /** Takes a step of the page and sends its commands. True when something went. */
+  const run = (step: Step): boolean => {
     if (step.error) {
       setError(step.error);
-      return;
+      return false;
     }
     setError(null);
     update(step.page);
     send(step.send);
+    return step.send.length > 0;
   };
 
   const send = (commands: readonly Command[]) => {
@@ -269,10 +271,9 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       return;
     }
     const base = page.phase === "setup" ? { ...page, rows, phase: "rolled" as const } : page;
-    run(apply(base, plan));
-    // An action filled from a recharge is spent (6.4).
+    // An action filled from a recharge is spent (6.4), once its outcome goes.
     const recharge = page.fill?.recharge;
-    if (recharge) writeUsed(roomId, withUsed(readUsed(roomId), recharge.holder, recharge.key, true));
+    spendOnStart(() => run(apply(base, plan)), recharge ? () => writeUsed(roomId, withUsed(readUsed(roomId), recharge.holder, recharge.key, true)) : null);
   };
 
   const close = () => {
