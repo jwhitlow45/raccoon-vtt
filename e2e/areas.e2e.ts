@@ -415,7 +415,7 @@ describe("raccoon-vtt an area from your character", { timeout: 900_000 }, () => 
     await idle(pat);
   });
 
-  test("7. off, a shape change, on: from Thorn again, and off, a spell, on: the same", async () => {
+  test("7. off, a shape change, on: from Thorn again, and off, a spell, on: the same, Ice Knife's goblin included", async () => {
     // Spirit Guardians left the last shape an emanation, which a tap would not aim.
     await pickOption(pat, "Area", "Shape", "Cone");
     await tapCellOf(pat, { x: 3, y: 1 });
@@ -441,6 +441,20 @@ describe("raccoon-vtt an area from your character", { timeout: 900_000 }, () => 
     assert.equal(hands.spell, "Burning Hands");
     assert.equal(hands.casterId, run.thorn);
     assert.ok(onEdgeOf(run.thorn, hands.origin));
+    await idle(pat);
+    // Ice Knife on Goblin 1 with From off, then a cone: still off, never cast from the goblin it surrounded. On: from Thorn.
+    await spell(pat, "ice knife");
+    await tapCellOf(pat, AT.goblins[0]!);
+    await from(pat).click();
+    await fromIs(pat, "From Thorn", "off");
+    await pickOption(pat, "Area", "Shape", "Cone");
+    await fromIs(pat, "From Thorn", "off");
+    assert.match(await line(pat), /Tap the caster, or a point on the map\./, "the cone waits for a tap");
+    await from(pat).click();
+    await fromIs(pat, "From Thorn", "on");
+    const cone = await placeOnce(pat);
+    assert.equal(cone.casterId, run.thorn);
+    assert.ok(onEdgeOf(run.thorn, cone.origin));
     await idle(pat);
   });
 

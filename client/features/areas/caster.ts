@@ -219,11 +219,17 @@ function unnumbered(view: Pick<RoomState, "tokens">) {
  */
 export function castFrom(d: AreaDraft, casterId: string | null, tokens: AreaTokens, feetPerCell: number): AreaDraft {
   if (casterId === null) {
+    if (d.targetsOther) {
+      // Ice Knife stands on its target, which keeps it in place: only the caster goes.
+      const next: AreaDraft = { ...d };
+      delete next.casterId;
+      return next;
+    }
     const t = draftTemplate(d, tokens, feetPerCell);
     const next: AreaDraft = { ...d, point: d.point ?? (t ? freePointOf(t, feetPerCell) : null) };
     delete next.casterId;
-    if (!d.targetsOther) delete next.fromId;
-    const around = d.shape === "emanation" && !d.targetsOther && d.fromId !== undefined ? tokens[d.fromId] : undefined;
+    delete next.fromId;
+    const around = d.shape === "emanation" && d.fromId !== undefined ? tokens[d.fromId] : undefined;
     if (around) next.footprint = emanationFootprint(around, feetPerCell);
     return next;
   }

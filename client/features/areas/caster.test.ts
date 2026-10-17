@@ -452,6 +452,47 @@ describe("rebuilt drafts keep the caster (3.4)", () => {
     assert.equal(cone.casterId, "t");
   });
 
+  test("Ice Knife's target never becomes its caster: From off, or its caster deleted, then any other shape stays off", () => {
+    const knife = castFrom({ ...presetDraft(spell("Ice Knife"), draft("sphere"), undefined), fromId: "g1" }, "t", tokens, FPC);
+    const off = castFrom(knife, null, tokens, FPC);
+    const gone = withoutCreature(knife, "t");
+    for (const [label, d, last] of [["From off", off, "t"], ["its caster deleted", gone, undefined]] as const) {
+      // Ice Knife is an emanation already, so every other shape.
+      for (const shape of ["cone", "line", "cube", "sphere", "cylinder"] as const) {
+        const next = withShape(d, shape);
+        assert.equal(draftCaster(next), null, `${label}, to a ${shape}: still off`);
+        assert.equal(next.casterId, undefined, `${label}, to a ${shape}`);
+        assert.equal(next.fromId, undefined, `${label}, to a ${shape}: never cast from the goblin`);
+        assert.equal(next.lastCaster, last, `${label}, to a ${shape}: the one to turn on again`);
+        assert.equal(draftTemplate(next, tokens, FPC), null, `${label}, to a ${shape}: waits for a tap`);
+      }
+    }
+  });
+
+  test("Ice Knife placed with From off copies as a target with no caster, and its template names no caster", () => {
+    const off = castFrom(castFrom({ ...presetDraft(spell("Ice Knife"), draft("sphere"), undefined), fromId: "g1" }, "t", tokens, FPC), null, tokens, FPC);
+    const placed = draftTemplate(off, tokens, FPC)!;
+    assert.equal(placed.casterId, undefined);
+    assert.equal(placed.attachedTo, "g1");
+    const copy = draftFromTemplate(template("k", { shape: "emanation", size: 5, attachedTo: "g1", origin: placed.origin }), "c", tokens, FPC);
+    assert.equal(copy.targetsOther, true);
+    assert.equal(copy.fromId, "g1");
+    assert.equal(draftCaster(copy), null, "From off on the copy too");
+    assert.equal(fromShows({ draft: copy, saved: "t" }), null);
+    const withCaster = draftFromTemplate(template("k2", { shape: "emanation", size: 5, attachedTo: "g1", casterId: "t", origin: placed.origin }), "c2", tokens, FPC);
+    assert.equal(withCaster.targetsOther, true);
+    assert.equal(draftCaster(withCaster), "t");
+    const aura = draftFromTemplate(template("k3", { shape: "emanation", size: 10, attachedTo: "t", casterId: "t", origin: placed.origin }), "c3", tokens, FPC);
+    assert.equal(aura.targetsOther, false, "an aura around its own caster is no target");
+    assert.equal(draftCaster(aura), "t");
+  });
+
+  test("a target emanation that stays put still never names its target as caster", () => {
+    const knife = { ...presetDraft(spell("Ice Knife"), draft("sphere"), undefined), fromId: "g1", attached: false };
+    assert.equal(draftTemplate(knife, tokens, FPC)!.casterId, undefined);
+    assert.equal(draftTemplate({ ...knife, casterId: "t" }, tokens, FPC)!.casterId, "t");
+  });
+
   /**
    * Random runs of on, off, a shape change, a spell, a tap on a token and a
    * creature deleted, checking after each step what must always hold: the
@@ -487,7 +528,7 @@ describe("rebuilt drafts keep the caster (3.4)", () => {
         } else if (kind === 2) {
           d = withShape(d, shapes[rand(shapes.length)]!);
           assert.equal(d.lastCaster, before.lastCaster);
-          if (!before.targetsOther) assert.equal(draftCaster(d), draftCaster(before), "a shape change keeps the caster");
+          assert.equal(draftCaster(d), draftCaster(before), "a shape change keeps the caster, and never makes Ice Knife's target one");
         } else if (kind === 3) {
           d = presetDraft(spells[rand(spells.length)]!, d, draftCaster(d) ?? undefined);
           assert.equal(d.casterId ?? null, draftCaster(before), "a spell takes the area's caster, never another");

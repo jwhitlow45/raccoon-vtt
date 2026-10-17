@@ -167,18 +167,20 @@ export function newDraft(id: string, shape: AreaShape, color: string): AreaDraft
 /**
  * A shape change keeps the placement, the aim and the caster, and resets
  * what only made sense for the old shape. A new shape never surrounds a
- * target, so one leaving Ice Knife starts from its caster where it has
- * one, not from the goblin it surrounded.
+ * target, and Ice Knife's target is never its caster: one leaving Ice
+ * Knife starts from its caster where it has one, and with From off it
+ * stays off and waits for a tap, never cast from the goblin it surrounded.
  */
 export function withShape(d: AreaDraft, shape: AreaShape): AreaDraft {
   if (d.shape === shape) return d;
   const fresh = newDraft(d.id, shape, d.color);
-  const origin = d.targetsOther ? (d.casterId ?? d.fromId) : (d.fromId ?? d.casterId);
+  const caster = d.targetsOther ? d.casterId : (d.casterId ?? d.fromId);
+  const origin = d.targetsOther ? d.casterId : (d.fromId ?? d.casterId);
   const next: AreaDraft = {
     ...fresh,
     point: d.point,
     fromId: usesFrom(shape) ? origin : undefined,
-    casterId: d.casterId ?? d.fromId,
+    casterId: caster,
     yaw: d.yaw,
     pitch: canPitch(shape) ? d.pitch : 0,
     visibility: d.visibility,
@@ -358,15 +360,16 @@ export function draftTemplate(d: AreaDraft, tokens: AreaTokens, feetPerCell: num
     const placed = originFromToken(d, from, feetPerCell);
     base.origin = placed.origin;
     if (placed.faceOffset) base.faceOffset = placed.faceOffset;
+    // The token it starts from is its caster, but for Ice Knife, whose target it is.
+    const caster = d.targetsOther ? d.casterId : from.id;
     if (d.shape === "emanation" && d.attached) {
       base.attachedTo = from.id;
-      const caster = d.targetsOther ? d.casterId : from.id;
       if (caster) base.casterId = caster;
     } else {
       // A cone, line or cube leaves its caster out through casterId. An
       // emanation that stays put also keeps the footprint it was cast from,
       // so it holds its shape once the caster walks away.
-      base.casterId = from.id;
+      if (caster) base.casterId = caster;
       if (d.shape === "emanation") base.footprint = emanationFootprint(from, feetPerCell);
     }
     return base;
@@ -483,9 +486,12 @@ export function draftFromTemplate(t: AreaTemplate, id: string, tokens: AreaToken
   if (t.attachedTo && tokens[t.attachedTo]) {
     d.fromId = t.attachedTo;
     d.attached = true;
-    if (caster && caster !== t.attachedTo) {
-      d.casterId = caster;
+    // An aura around its caster records that token as its caster (draftTemplate). One around another token, or around a
+    // token with no caster recorded, surrounds a target: Ice Knife placed with From off, or cast by a creature this viewer
+    // cannot see. Its target is never read as its caster.
+    if (caster !== t.attachedTo) {
       d.targetsOther = true;
+      if (caster) d.casterId = caster;
     }
     return d;
   }
