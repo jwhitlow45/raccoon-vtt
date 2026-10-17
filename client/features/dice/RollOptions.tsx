@@ -388,7 +388,7 @@ function InitiativeCell(props: { ctx: Ctx }) {
         </SmallButton>
       ) : null}
       <OptionCell
-        text={scored ? "Roll instead" : entry ? `Initiative ${bonus}, sets its row` : `Initiative ${bonus}`}
+        text={scored ? "Roll instead" : entry ? (entry.value === null ? `Initiative ${bonus}, sets its row` : `Initiative ${bonus}, replaces ${entry.value}`) : `Initiative ${bonus}`}
         sub={[scored ? "replaces the score" : null, presetLine(preset) || null].filter(Boolean).join(". ") || undefined}
         name="Initiative"
         row={row}

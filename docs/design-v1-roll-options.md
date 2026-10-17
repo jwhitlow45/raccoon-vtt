@@ -146,7 +146,7 @@ Players get no group section. A player who multi-selects their own creatures get
 
 ### 4.5 Rolls where players already act
 
-- **The tracker row's value box** (`Row.tsx:489`) gains "Roll +2" for the row's owner and for the DM on rows the DM runs, the same roll and guarded set as 4.3.
+- **The tracker row's value box** (`Row.tsx:489`) gains "Roll +2" for the row's owner and for the DM on rows the DM runs, the same roll and guarded set as 4.3, while the row has no value. A set row's Roll waits in its options under "Roll again, replaces 17", so one stray tap mid-fight never rerolls it and reorders the fight (build round 1, W7B-P-6). The Dice panel's Initiative on a set row reads "Initiative +2, replaces 17".
 - **The death save row** (`HpSection.tsx:274-275`) gains Roll for whoever may change its counts, sending `actor.deathRoll`.
 - **The bars**: Roll on the DM's and owners' bars opens the Dice panel (section 8). On a creature a player plays, the DM's single bar keeps Roll, whose Ask is on there, and drops Request a roll (the project owner's decision, 16). The group bar keeps Request a roll.
 

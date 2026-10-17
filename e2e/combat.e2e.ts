@@ -697,9 +697,9 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const auto = lines().filter((l) => l.rolls.some((r) => r.label?.startsWith("Initiative")));
     assert.ok(auto.length > 0 && auto.every((l) => l.to === "dm"), "test 5's auto initiative left no secret dice line");
     const value = (entryId: string) => dmSocket.state?.encounter?.entries.find((e) => e.id === entryId)?.value;
-    // Roll sits beside the value box where the row has room, else in the row's options.
+    // Roll sits beside the value box where an unset row has room, else in the row's options, where a set row's replaces its value.
     const rollRow = async (page: Page, name: string, entryId: string) => {
-      const roll = page.getByRole("button", { name: new RegExp(`^Roll [+−-]\\d+ initiative for ${name}$`) }).first();
+      const roll = page.getByRole("button", { name: new RegExp(`^Roll [+−-]\\d+ initiative for ${name}(, replacing -?\\d+)?$`) }).first();
       if (!(await roll.isVisible())) await page.getByRole("button", { name: `${name} options` }).click();
       const before = lines().length;
       await roll.click();
@@ -709,7 +709,11 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     };
     await setUp(dm, dmCdp, { ...DESK, scale: 1 });
     await openTracker(dm);
+    // A set row offers Roll only in its options, as "Roll again", so a stray tap never reorders the fight (W7B-P-6).
+    const setRoll = dm.getByRole("button", { name: new RegExp(`^Roll [+−-]\\d+ initiative for ${goblinName(0)}, replacing -?\\d+$`) });
+    assert.equal(await setRoll.isVisible(), false, "a set row has no Roll beside its value");
     await rollRow(dm, goblinName(0), "e-g0");
+    await dm.locator("[data-round-section]").getByText(/^Roll again, replaces -?\d+$/).first().waitFor();
     await openTracker(ana);
     await rollRow(ana, "Bree", "e-bree");
     // Bree leads the order again, as the steps after this one expect.

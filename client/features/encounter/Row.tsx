@@ -124,7 +124,8 @@ export function EntryRow(props: {
   const lineRef = useRef<HTMLDivElement>(null);
   const linePx = useWidth(lineRef, rolls);
   const rollButton = rolls && creature ? <InitiativeRoll entry={entry} creature={creature} name={name} onRolled={setRollAt} /> : null;
-  const rollBeside = rollFitsBeside(linePx, slotted);
+  // Beside the box only while the row has no value: a set row's Roll waits in its options as "Roll again", so a stray tap mid-fight never reorders it (W7B-P-6).
+  const rollBeside = entry.value === null && rollFitsBeside(linePx, slotted);
 
   const rowStyle: CSSProperties = {
     position: "relative",
@@ -726,7 +727,7 @@ function InitiativeRoll(props: { entry: InitEntry; creature: ActorTarget; name: 
       busy={waiting || loading}
       disabled={reason !== null}
       title={reason ?? undefined}
-      aria-label={`${text} initiative for ${props.name}`}
+      aria-label={`${text} initiative for ${props.name}${entry.value === null ? "" : `, replacing ${entry.value}`}`}
       onClick={roll}
       style={{ flex: "none", width: ROLL_PX, padding: `0 ${theme.space(2)}px` }}
     >
@@ -781,7 +782,7 @@ function RowMenu(props: {
   statBlockTokenId: string | null;
   /** The row's creature is dead: the DM's Revive comes first, for a row whose token has no bar in this view (docs/design-v1-combat-flow.md 3.5). */
   revive: boolean;
-  /** The row's Roll, here when its line has no room for it beside the value box. */
+  /** The row's Roll, here when its line has no room for it beside the value box, or the row has a value it would replace. */
   roll?: ReactNode;
 }) {
   const { entry, role, drag } = props;
@@ -823,7 +824,7 @@ function RowMenu(props: {
       ) : null}
       {props.roll ? (
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-          <span style={{ flex: 1, minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>Initiative, sets its row</span>
+          <span style={{ flex: 1, minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>{entry.value === null ? "Initiative, sets its row" : `Roll again, replaces ${entry.value}`}</span>
           {props.roll}
         </div>
       ) : null}
