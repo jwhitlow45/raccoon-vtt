@@ -99,7 +99,8 @@ type Sample = { at: number; dy: number };
  * The first move past the slop decides once for the touch: it claims it,
  * or leaves it to the browser for good. The one exception is an upward
  * move in the grab area of a sheet that can fill the screen, which waits
- * until twice the slop (4.2).
+ * until twice the slop (4.2), or claims downward once the finger is past
+ * the slop below where it went down.
  */
 export class SheetSwipe {
   phase: Phase = "idle";
@@ -142,6 +143,8 @@ export class SheetSwipe {
       else return this.letGo();
     }
     if (this.phase === "upward") {
+      // A backswing before a swipe down: past the slop below where it went down, and more down than sideways, it claims downward as the slop does. A tap never travels up past the slop and back down past it.
+      if (m.dy > TAP_SLOP_PX && m.dy >= Math.abs(m.dx)) return m.cancelable ? this.claim(m, TAP_SLOP_PX, false) : this.letGo();
       if (-m.dy < UP_CLAIM_PX) return LEAVE;
       return -m.dy >= Math.abs(m.dx) && m.cancelable ? this.claim(m, -UP_CLAIM_PX, true) : this.letGo();
     }

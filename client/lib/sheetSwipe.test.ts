@@ -541,6 +541,20 @@ describe("11. three ends", () => {
     assert.equal(UP_CLAIM_PX, 2 * TAP_SLOP_PX);
   });
 
+  test("a header touch that drifts up past the slop first can still swipe down: past the slop below where it went down, it claims downward", () => {
+    const back = new SheetSwipe();
+    back.start(normal());
+    assert.deepEqual(drag(back, [-6, -12, -4, 4, 8]).map((step) => step.press), [false, false, false, false, false], "back down inside the slop below: nothing yet");
+    assert.deepEqual(back.move({ dx: 0, dy: 9, at: 200, cancelable: true }), { cancel: true, position: 1, press: true });
+    drag(back, ramp(120).filter((d) => d > 9), { from: 200 });
+    assert.equal(back.end(1000).end, "closed", "a backswing then a slow drag past the distance");
+    const across = new SheetSwipe();
+    across.start(normal());
+    drag(across, [-12, 4]);
+    assert.equal(across.move({ dx: 40, dy: 12, at: 90, cancelable: true }).press, false, "more sideways than down decides nothing");
+    assert.deepEqual(across.end(100), { end: "tap", cancel: false });
+  });
+
   test("from normal: up past a quarter of up fills the screen, short of it does not, and a flick up fills it above the normal top", () => {
     const end = (dys: readonly number[], every = 30) => {
       const swipe = new SheetSwipe();
@@ -716,7 +730,7 @@ describe("12. randomized touches, from both stands", () => {
   test("the invariants hold after every event of many random sequences", () => {
     const RUNS = 1500;
     // What the sequences reached, so a generator that stopped reaching an end fails rather than passing on nothing.
-    const reached = { closes: 0, fills: 0, stepsDown: 0, claims: 0, taps: 0, heldPresses: 0, freePresses: 0, heldPastSlide: 0 };
+    const reached = { closes: 0, fills: 0, stepsDown: 0, claims: 0, taps: 0, heldPresses: 0, freePresses: 0, heldPastSlide: 0, backswings: 0 };
     let pointer = 100;
     for (let run = 1; run <= RUNS; run++) {
       const rnd = random(run);
@@ -784,7 +798,8 @@ describe("12. randomized touches, from both stands", () => {
             if (cancel && claimedAt === null) assert.fail(`${where}: a move was cancelled before the claim`);
             if (cancel) cancelledMove = true;
             if (firstPast === null && Math.hypot(dx, dy) > TAP_SLOP_PX) firstPast = s.on === "grab" && s.stand === "normal" && up > 0 && dy < 0 && -dy >= Math.abs(dx) ? "up" : "other";
-            if (firstPast === "other" || (firstPast === "up" && -dy >= UP_CLAIM_PX)) passed = true;
+            if (firstPast === "other" || (firstPast === "up" && (-dy >= UP_CLAIM_PX || (dy > TAP_SLOP_PX && dy >= Math.abs(dx))))) passed = true;
+            if (firstPast === "up" && page.presses > presses && dy > 0) reached.backswings++;
             if (!followed) assert.equal(cancel, false, `${where}: a touch that may not swipe cancelled a move`);
           }
           // Never above full screen, and never above its place for a surface that cannot fill it.
