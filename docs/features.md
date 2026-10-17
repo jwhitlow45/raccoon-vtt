@@ -577,7 +577,7 @@ Built in v1 wave 7 (docs/design-v1-dice.md), at the project owner's request of 2
   - The DM hears of it (the project owner, 2026-10-16): a line only the DM's log holds, such as "Pat deleted Bree, with 2 tokens and its place in the fight." Its counts name everything that went, on every scene. Deleting stays allowed at any time, mid-fight included.
 - Short and long rest buttons, which restore HP, reset uses and remove one Exhaustion level, as SRD 5.2.1 describes each rest.
   - Either rest needs at least 1 HP.
-  - A short rest takes the HP the player's Hit Point Dice rolled. The app rolls no dice and keeps no count of them.
+  - A short rest takes the HP the player's Hit Point Dice rolled, as a typed total. It keeps no count of the dice.
   - A long rest restores all HP, ends temporary HP, removes one Exhaustion level and resets Legendary Resistance and legendary actions.
   - The DM rests anyone, and the whole party at once. A player rests their own character.
   - Rests stay allowed during a fight. The rest section then says that rolling Initiative stops a rest, so the table chooses.

@@ -10,10 +10,12 @@ import { resultOf } from "../rules/rolls.ts";
 import { Refuse, gone, invalid, type Tx } from "./tx.ts";
 
 /**
- * Roll requests (docs/design-v1-dm-tools.md 3.3). The DM asks for a saving
- * throw or an ability check, each target's player types the total they
- * rolled, and the reducer works out pass or fail from a DC. The app rolls
- * nothing. Closing a request removes it, and the log keeps the answers.
+ * Roll requests (docs/design-v1-dm-tools.md 3.3 and docs/design-v1-roll-request.md).
+ * The DM asks for a saving throw or an ability check, each target's player
+ * rolls it on the server (`roll.dice`, whose answer reducer/dice.ts writes
+ * with the helpers here) or types the total they rolled, and the reducer
+ * works out pass or fail from a DC. Closing a request removes it, and the
+ * log keeps the answers.
  */
 
 /** The refusal of a target no player plays: the request goes to players, so only their creatures can be asked. */

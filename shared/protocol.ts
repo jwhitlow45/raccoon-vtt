@@ -1297,8 +1297,8 @@ export const clientOps = [
   op("actor.life", { target: actorTarget, life: lifeState }),
   /**
    * A short or long rest (features section 15, SRD 5.2.1). `heal` is the HP
-   * the Hit Point Dice spent on a short rest gave back, as the player rolled
-   * them: the app rolls no dice.
+   * the Hit Point Dice spent on a short rest gave back, as the player typed
+   * the total: a rest takes it as given and keeps no count of the dice.
    */
   op("actor.rest", { target: actorTarget, kind: z.enum(["short", "long"]), heal: hpValue.optional() }),
   op("actor.effect.add", { target: actorTarget, effect: effectInput }),

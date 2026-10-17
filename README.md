@@ -25,8 +25,8 @@ through a private DM link. There are no accounts.
 - A journal with secrets, map pins, chat and whispers, handouts, an X-card,
   and a table display for a TV.
 
-There is no dice roller: players roll real dice and type in the total. The
-one exception is auto initiative, which rolls for the DM's monsters.
+Dice roll on the server, so everyone sees the same result. Anyone can still
+roll real dice and type the total.
 
 One Node 24 process serves the React app, the JSON API and the WebSocket.
 Postgres holds the rooms, and uploaded images live on a volume. In

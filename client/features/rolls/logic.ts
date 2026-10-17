@@ -14,8 +14,8 @@ import { displayName } from "../../lib/scene.ts";
 /**
  * Request a roll (docs/design-v1-dm-tools.md 3.3), as plain functions for
  * node --test: who the party is and which creatures a request starts with,
- * the op the DM's sheet sends, and the words of the cards and chips. The
- * app rolls nothing: each player types the total they rolled.
+ * the op the DM's sheet sends, and the words of the cards and chips. A
+ * player rolls the answer on the server or types the total they rolled.
  */
 
 type View = Pick<RoomState, "members" | "characters" | "tokens" | "meta">;

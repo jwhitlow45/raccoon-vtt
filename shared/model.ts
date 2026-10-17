@@ -1382,8 +1382,8 @@ export type RollTarget = { tokenId?: TokenId; characterId?: CharacterId } & Roll
 
 /**
  * A roll the DM asked players for (wave 5, docs/design-v1-dm-tools.md
- * 3.3): "Dex save, DC 15". The app rolls nothing: each player types the
- * total they rolled. A player's projection holds only their own targets,
+ * 3.3): "Dex save, DC 15". Each player rolls the answer on the server or
+ * types the total they rolled (docs/design-v1-roll-request.md). A player's projection holds only their own targets,
  * the DC only when shown, results only when shown, and `rev` 0.
  */
 export type RollRequest = {

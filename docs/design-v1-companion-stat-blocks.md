@@ -2,6 +2,8 @@
 
 Status: draft 2, for design review, with the project owner's answers of 2026-10-16 to draft 1's three questions (section 14). Code is cited from public main `e4ec8696`, where companions (docs/design-v1-combat-flow.md 3.6), full stat blocks on tokens (docs/design-v1-dm-tools.md 3.6) and the token panel's stat block and summary (docs/design-v1-token-panel.md 3.2 to 3.5) are built. This design ships after the PDF handouts build (docs/design-v1-pdf-handouts.md), which takes the snapshot to version 9, and builds on both without undoing either.
 
+2026-10-17: wave 7 rolls dice on the server (docs/design-v1-dice.md), and a companion's block gives its attacks, saves and damage to the Dice panel as named rolls through `blockActions` (docs/design-v1-roll-options.md section 8). Where sections 7 and 13 say the app rolls nothing, they describe the build before wave 7.
+
 The project owner asked on 2026-10-16: "Add support for full stat blocks for companions (with import)." The answers that followed:
 
 1. **Source.** Any SRD 5.2.1 stat block (an owl for Find Familiar, a wolf for a ranger), text from a book read by the existing "Paste a stat block" reader (`client/features/monsters/parse.ts`), or a block typed in the full editor (`client/features/monsters/MonsterEditor.tsx`). No file import.

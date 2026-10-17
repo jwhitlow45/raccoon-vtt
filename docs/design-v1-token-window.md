@@ -2,6 +2,8 @@
 
 Status: draft 3, with the project owner's answers of 2026-10-16 to design review round 1 and the fixes of rounds 1 and 2 (section 20 lists them). Code is cited from public main at `e4ec8696`. This design changes the docked token action bar of docs/design-v1-bar-dock.md, the bar's rows of docs/design-v1-token-panel.md 3.3, and how a token's size changes. Section 9 says, rule by rule, what of docs/design-v1-bar-dock.md and docs/design-v1-layout-hierarchy.md changes and what holds. Two designs built beside this one meet it: docs/design-v1-tool-options.md (tool options in one row) and docs/design-v1-companion-stat-blocks.md (companions' stat blocks). Section 12 lists where.
 
+2026-10-17: wave 7 puts Roll in the single bar's play row after Multi-select, for the DM and the token's owners, in place of Request a roll (docs/design-v1-roll-options.md section 8, on the dice of docs/design-v1-dice.md). Where sections 1, 3.2, 15 and 17 say "then Request a roll and Light", the row now reads "then Roll and Light". The fit rules are unchanged.
+
 The project owner's requests, 2026-10-16:
 
 > "in the floating token window, move bar and select several can be "multi-select" so that it stays inline with conditions/hidden. move bar/reset position buttons can be removed. the floating token window should also be resizable on desktop with scroll to make it easy to shrink if needed. the resized size should be the size assigned to all future token windows when opened by default"

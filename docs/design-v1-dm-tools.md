@@ -6,6 +6,8 @@ It was written against the deployed wave 3 and against wave 4 while wave 4 was b
 
 Status: built and deployed, as are waves 1 to 4. The design was revised after design review rounds 1 to 5 (section 11 lists every finding and what became of it) and after live play (the notes marked LP5). Where it says "today", it means the app before wave 5. The root [FEATURES.md](../FEATURES.md) lists what the app does now. Section 9 lists the questions for the project owner, who decided every one on 2026-10-14 as recommended: "All defaults good with me".
 
+2026-10-17: wave 7 ends this design's rule of no dice roller. Dice roll on the server (docs/design-v1-dice.md), a requested roll is rolled there or typed (docs/design-v1-roll-request.md), and auto initiative draws on the server too (docs/design-v1-roll-options.md section 7). "No dice roller except auto initiative" under Scope and "No dice" in section 8 describe wave 5 as built.
+
 ## Scope
 
 Every v1 item in features.md, read whole on 2026-10-14, and where each one stands:
