@@ -1,11 +1,11 @@
 import {
   createContext,
   createElement,
-  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
   useRef,
+  useState,
   type ComponentType,
   type ReactElement,
   type ReactNode,
@@ -186,7 +186,10 @@ export function subpageKey(subpage: Pick<PanelHeader, "parent" | "title" | "id">
   return `${subpage.parent}\n${subpage.id ?? subpage.title}`;
 }
 
-const PanelHeaderContext = createContext<((header: PanelHeader | null) => void) | null>(null);
+/** Publishes a panel's subpage to its host, and hands back what withdraws it. */
+type PublishHeader = (header: PanelHeader) => () => void;
+
+const PanelHeaderContext = createContext<PublishHeader | null>(null);
 
 const PanelHereContext = createContext<string | null>(null);
 
@@ -234,9 +237,25 @@ export function usePanelHeader(header: PanelHeader | null): void {
   const id = header?.id;
   useLayoutEffect(() => {
     if (!publish || title === null || parent === null) return;
-    publish({ title, parent, armed, onBack: () => onBack.current?.(), ...(id === undefined ? null : { id }) });
-    return () => publish(null);
+    return publish({ title, parent, armed, onBack: () => onBack.current?.(), ...(id === undefined ? null : { id }) });
   }, [publish, title, parent, armed, id]);
+}
+
+/**
+ * The host's side of usePanelHeader: a subpage goes to the host's latest
+ * `onHeader`, and its withdrawal goes back to the same one. A host reused
+ * for another panel, as the phone's sheet reuses its body when one panel
+ * replaces another, has already taken the incoming panel's `onHeader` when
+ * the outgoing panel's cleanup runs, so a withdrawal sent to the latest
+ * would clear the incoming panel's header and leave the outgoing one's
+ * behind, its Back doing nothing the next time that panel opens.
+ */
+export function headerSink(latest: { readonly current: (header: PanelHeader | null) => void }): PublishHeader {
+  return (header) => {
+    const target = latest.current;
+    target(header);
+    return () => target(null);
+  };
 }
 
 /**
@@ -248,7 +267,7 @@ export function usePanelHeader(header: PanelHeader | null): void {
 export function PanelHeaderHost(props: { onHeader(header: PanelHeader | null): void; children?: ReactNode }): ReactElement {
   const latest = useRef(props.onHeader);
   latest.current = props.onHeader;
-  const sink = useCallback((header: PanelHeader | null) => latest.current(header), []);
+  const [sink] = useState(() => headerSink(latest));
   return createElement(PanelHeaderContext.Provider, { value: sink }, props.children);
 }
 

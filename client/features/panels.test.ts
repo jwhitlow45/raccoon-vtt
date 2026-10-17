@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { panelSections, panelsFor, type PanelSection } from "./panels.ts";
+import { headerSink, panelSections, panelsFor, type PanelHeader, type PanelSection } from "./panels.ts";
 
 describe("the panels' order and groups (docs/design-v1-layout-hierarchy.md M3)", () => {
   const titles = (role: "dm" | "player", wide: boolean) => panelsFor(role, wide).map((p) => p.title);
@@ -84,5 +84,30 @@ describe("the panels in sections", () => {
       ["---", ["Menu"]],
     ]);
     assert.deepEqual(shape(panelSections(panelsFor("player", true), false)), [["", ["Token", "Initiative", "Log", "Journal", "Areas", "Characters", "Library", "Menu"]]]);
+  });
+});
+
+/*
+ * A host reused for another panel (W6-SOL-02): the phone's sheet keeps its
+ * body when Initiative replaces Menu, so the host has taken Initiative's
+ * listener before Menu's cleanup withdraws the Members subpage.
+ */
+describe("a panel's subpage and its host", () => {
+  test("a withdrawal goes back to the listener the subpage was published to, never the host's latest", () => {
+    const kept: Record<string, PanelHeader | null> = {};
+    const listener = (id: string) => (header: PanelHeader | null) => void (kept[id] = header);
+    const latest = { current: listener("menu") };
+    const publish = headerSink(latest);
+    const members: PanelHeader = { title: "Members", parent: "Menu", onBack: () => {} };
+    const withdraw = publish(members);
+    assert.equal(kept.menu, members);
+    latest.current = listener("tracker");
+    withdraw();
+    assert.equal(kept.menu, null, "Menu's subpage is withdrawn from Menu");
+    assert.equal("tracker" in kept, false, "and Initiative's entry is left alone");
+    const initiative: PanelHeader = { title: "Round 2", parent: "Initiative", onBack: () => {} };
+    publish(initiative);
+    assert.equal(kept.tracker, initiative);
+    assert.equal(kept.menu, null);
   });
 });

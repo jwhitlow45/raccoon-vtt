@@ -397,6 +397,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
 
   test("2. the tabs pick the top panel, its bottom one's tab swaps, a swap keeps scroll and focus, and the row never moves", async () => {
     await oneOnly(dm);
+
     const oneRow = await Promise.all([...(await tablist(dm).getByRole("tab").all()), hidePanels(dm)].map((t) => t.boundingBox()));
     await toggleSplit(dm);
     await tab(dm, "Log").click();
@@ -779,12 +780,28 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await bottomPane(dm, "Token").waitFor();
     await view(dm, dmCdp, { width: 800, height: 800 });
     await list("Party");
+
     await view(dm, dmCdp, { width: 1280, height: 800 });
     await topPane(dm, "Journal").waitFor();
     await bottomPane(dm, "Token").waitFor();
     const entry = (await stored(dm))?.dm;
     assert.deepEqual([entry?.top, entry?.below], ["journal", "token"]);
     assert.ok(!JSON.stringify(entry).includes("party"), "the stored entry has no Party");
+
+    await view(dm, dmCdp, { width: 800, height: 800 });
+    // One sheet's panel replaced by another keeps no subpage header behind (W6-SOL-02): Menu on Members, the turn strip opens Initiative in the same sheet, then Menu again shows its first page.
+    await list("Menu");
+    const menu = dm.getByRole("region", { name: "Menu" });
+    await menu.getByRole("button", { name: /^Members/ }).click();
+    await menu.getByRole("button", { name: "Back to Menu" }).waitFor();
+    await dm.getByRole("button", { name: /Open the tracker\.$/ }).first().click();
+    await dm.getByRole("region", { name: "Initiative" }).waitFor();
+    assert.equal(await dm.getByRole("button", { name: "Back to Menu" }).count(), 0, "Initiative shows no Back to Menu");
+    await list("Menu");
+    await menu.getByRole("button", { name: /^Members/ }).waitFor();
+    assert.equal(await menu.getByRole("button", { name: "Back to Menu" }).count(), 0, "Menu opens on its first page, under its own name, with no Members header left over");
+
+    await view(dm, dmCdp, { width: 1280, height: 800 });
     await openSideTab(dm, "Initiative");
   });
 
