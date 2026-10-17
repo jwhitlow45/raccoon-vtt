@@ -39,6 +39,32 @@ export function resizePatch(view: Pick<RoomState, "scenes" | "buildChunks">, tok
   return { patch, shifted: spot.shifted, growths: afterResize(growths, now, after, change === "grow", tookMemory ? memory.kept : null) };
 }
 
+/**
+ * A group's resize from its More (8.6): one resize patch for each token,
+ * so each keeps its own middle, read and written through the same growth
+ * memory a single token's resize uses, so a group's shrink returns each
+ * creature to the square it grew from, whichever control grew it. The ops
+ * go as one gesture, one undo step. A token whose resize is refused is
+ * left out, its memory as it was.
+ */
+export function resizeGroup(
+  view: Pick<RoomState, "scenes" | "buildChunks">,
+  tokens: readonly Token[],
+  next: NextSize,
+  role: "dm" | "player",
+  growths: Readonly<Record<string, readonly Growth[]>>,
+): { ops: { t: "token.update"; tokenId: string; patch: TokenPatch }[]; growths: Record<string, Growth[]> } {
+  const ops: { t: "token.update"; tokenId: string; patch: TokenPatch }[] = [];
+  const kept: Record<string, Growth[]> = {};
+  for (const t of tokens) {
+    const answer = resizePatch(view, t, next, role, growths[t.id] ?? []);
+    if ("refused" in answer) continue;
+    ops.push({ t: "token.update", tokenId: t.id, patch: answer.patch });
+    kept[t.id] = answer.growths;
+  }
+  return { ops, growths: kept };
+}
+
 /** One size up or down the six (8.9): Medium steps to Small, which is the same square. Null past Tiny or Gargantuan, and for Custom. */
 export function stepSize(size: CreatureSize, by: 1 | -1): Exclude<CreatureSize, "custom"> | null {
   if (size === "custom") return null;

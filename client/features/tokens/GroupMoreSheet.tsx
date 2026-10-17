@@ -6,10 +6,12 @@ import { RowDot } from "../../components/Row.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { theme } from "../../lib/theme.ts";
 import { dispatchGesture } from "../../state/actions.ts";
+import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { ImageField } from "../images/ImageField.tsx";
 import { ownerOps, ownersLit, shared, sharedImage, updateManyOps, type Lit } from "./groupEdit.ts";
-import { resizePatch } from "./resize.ts";
+import { resizeGroup } from "./resize.ts";
+import { growthsSlot } from "./resizeMemory.ts";
 import { SheetDialog } from "./SheetDialog.tsx";
 import { FieldRow, Note, Section, Select } from "./ui.tsx";
 
@@ -52,18 +54,19 @@ export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): voi
    * One resize patch for each token, sent as one gesture, one undo step:
    * each keeps its own middle (docs/design-v1-token-window.md 8.6), which
    * one patch for all of them could not. The DM's resizes are never
-   * checked against walls.
+   * checked against walls. Each goes through this page's growth memory, as
+   * a single token's does, so a shrink here or in a token's own window
+   * returns it to the square it grew from (resize.ts resizeGroup).
    */
   const store = useRoomStore();
+  const memory = useScoped(growthsSlot);
   const resizeAll = (size: Exclude<CreatureSize, "custom">) => {
     const view = store.getState().view;
     if (!view) return;
-    send(
-      tokens.flatMap((t) => {
-        const answer = resizePatch(view, t, { size }, "dm");
-        return "refused" in answer ? [] : [{ t: "token.update" as const, tokenId: t.id, patch: answer.patch }];
-      }),
-    );
+    const group = resizeGroup(view, tokens, { size }, "dm", memory.getState());
+    send(group.ops);
+    // A resize that never reached the room leaves the token where the list does not say it is, so the next shrink finds the list stale.
+    memory.setState(group.growths);
   };
 
   const disposition = shared(tokens, (t) => t.disposition);

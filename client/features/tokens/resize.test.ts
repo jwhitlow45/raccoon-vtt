@@ -6,7 +6,7 @@ import { CHUNK_CELLS, type BuildChunk, type EdgeFeature, type RoomState, type To
 import { NO_ROOM_TO_GROW } from "#shared/rules/resize.ts";
 import { DM, P1, character, room, token } from "#shared/testutil.ts";
 import { canResize } from "./access.ts";
-import { backTo, baseSize, customWords, resizePatch, stepSize, type ResizeAnswer } from "./resize.ts";
+import { backTo, baseSize, customWords, resizeGroup, resizePatch, stepSize, type ResizeAnswer } from "./resize.ts";
 import type { Growth } from "./resizeMemory.ts";
 
 const deps = { canUseAsset: () => true };
@@ -95,6 +95,50 @@ describe("resizePatch (docs/design-v1-token-window.md 8.6)", () => {
     thorn = { ...thorn, x: 10, y: 10 };
     step("medium");
     assert.deepEqual({ x: thorn.x, y: thorn.y }, { x: 11, y: 11 });
+  });
+});
+
+describe("a group's resize from More (W5-ASTRA-04)", () => {
+  /** A Tiny familiar on a quarter and a Medium wolf, the DM's group. */
+  function pair(): RoomState {
+    const state = walled({}, false);
+    state.tokens.owl = token("owl", { kind: "npc", name: "Owl", size: "tiny", x: 4.5, y: 4.5 });
+    state.tokens.wolf = token("wolf", { kind: "npc", name: "Wolf", x: 8, y: 4 });
+    return state;
+  }
+  const applied = (state: RoomState, ops: { tokenId: string; patch: object }[]) => {
+    const tokens = { ...state.tokens };
+    for (const op of ops) tokens[op.tokenId] = { ...tokens[op.tokenId]!, ...(op.patch as Partial<Token>) };
+    return { ...state, tokens };
+  };
+
+  test("a group's growth and then its shrink return each creature to the square it grew from, in one op each", () => {
+    let state = pair();
+    const grown = resizeGroup(state, [state.tokens.owl!, state.tokens.wolf!], { size: "medium" }, "dm", {});
+    assert.equal(grown.ops.length, 2);
+    state = applied(state, grown.ops);
+    assert.deepEqual([state.tokens.owl!.x, state.tokens.owl!.y], [4, 4]);
+    // Without the memory the base spot is the square's top-left quarter, not the one it grew from.
+    assert.deepEqual(resizeGroup(state, [state.tokens.owl!], { size: "tiny" }, "dm", {}).ops[0]!.patch, { size: "tiny" });
+    const shrunk = resizeGroup(state, [state.tokens.owl!, state.tokens.wolf!], { size: "tiny" }, "dm", grown.growths);
+    state = applied(state, shrunk.ops);
+    assert.deepEqual([state.tokens.owl!.x, state.tokens.owl!.y, state.tokens.owl!.size], [4.5, 4.5, "tiny"], "the owl back on its quarter");
+    assert.deepEqual(shrunk.growths, { owl: [], wolf: [] });
+  });
+
+  test("a group's growth and a single token's shrink share the memory, and the other way round", () => {
+    let state = pair();
+    const grown = resizeGroup(state, [state.tokens.owl!, state.tokens.wolf!], { size: "medium" }, "dm", {});
+    state = applied(state, grown.ops);
+    const single = sent(resizePatch(state, state.tokens.owl!, { size: "tiny" }, "dm", grown.growths.owl));
+    assert.deepEqual({ x: single.patch.x, y: single.patch.y }, { x: 4.5, y: 4.5 }, "the owl's own window takes it back");
+
+    state = pair();
+    const one = sent(resizePatch(state, state.tokens.owl!, { size: "medium" }, "dm", []));
+    state = applied(state, [{ tokenId: "owl", patch: one.patch }]);
+    const back = resizeGroup(state, [state.tokens.owl!, state.tokens.wolf!], { size: "tiny" }, "dm", { owl: one.growths });
+    state = applied(state, back.ops);
+    assert.deepEqual([state.tokens.owl!.x, state.tokens.owl!.y], [4.5, 4.5], "the group's More takes it back");
   });
 });
 
