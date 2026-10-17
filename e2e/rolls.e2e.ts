@@ -562,13 +562,17 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await live.getByText("Asks to reroll (Heroic Inspiration)", { exact: true }).waitFor();
     await shots.take(dm, "rolls-dm-ask");
     await live.getByRole("button", { name: "Allow Thorn's ask" }).tap();
-    await live.getByText(/^rerolled \d+ \(Heroic Inspiration\), was \d+/).waitFor();
+    // The redrawn d20 may show a 20 or a 1, which the DM's line names before what it was (logic.ts dmWords).
+    await live.getByText(/^rerolled \d+ \(Heroic Inspiration\)(, natural (20|1))?, was \d+/).waitFor();
     const changed = await waitFor("the allowed reroll on the player's phone", () => playerSocket.state?.rolls[id]?.targets[0]?.changed);
     assert.equal(changed.reason, "heroic-inspiration");
     await closeAll();
   });
 
   test("13. with a stat block the card rolls its bonus, reads Restrained and Adv, waits for a typed total to clear, offers Fail (Stunned) first, and the DM rolls a waiting creature", async () => {
+    // Clean whatever step 12 left if it stopped early: a menu still open, and its request with its card.
+    await player.keyboard.press("Escape");
+    await closeAll();
     await ops.send({
       t: "character.update",
       characterId: run.thornCharId,
