@@ -1,48 +1,33 @@
-import type { InitEntry } from "#shared/model.ts";
-import { randomIndex, type RandomSource } from "#shared/passphrase.ts";
+import { advantageFields, d20Formula, type AdvantageSource } from "#shared/dice/formula.ts";
+import { rolledTerms } from "#shared/dice/roll.ts";
+import type { DiceResult, DiceRoll, InitEntry, RoomState, TokenId } from "#shared/model.ts";
 import { MAX_ENTRIES_PER_OP, type ClientOp } from "#shared/protocol.ts";
-import { MAX_VALUE, MIN_VALUE, entryActor, rollReminder, type TrackerView } from "./logic.ts";
+import type { RollPreset } from "#shared/rules/rollReminders.ts";
+import { rollsOf } from "../dice/logic.ts";
+import { withExtra } from "../dice/options.ts";
+import type { PanelRoll } from "../dice/useDicePanel.ts";
+import type { ReceiptState } from "../dice/useReceipt.ts";
+import { MAX_VALUE, MIN_VALUE, entryActor } from "./logic.ts";
 
 /**
- * Auto initiative: the DM's device rolls monster initiative (features
- * section 10, design 9.4).
+ * Auto initiative: the DM rolls monster initiative in one press (features
+ * section 10, design 9.4, docs/design-v1-roll-options.md 7).
  *
- * The "no dice" rule has this one exception. The device rolls and sends the
- * totals with the same `encounter.setValues` a typed value uses, so the
- * shared reducer never sees a die and replay stays deterministic. Players
- * see each visible monster's total, as if the DM typed it, never the dice
- * or modifiers, which stay on the DM's device.
+ * The dice roll on the server, as one secret `dice.roll` from the DM, so
+ * they land in the DM's log and Recent rolls like any other roll. Once
+ * their lines land, the totals go with the same `encounter.setValues` a
+ * typed value uses, so players see each visible monster's total as if the
+ * DM typed it, never the dice or modifiers.
  *
  * It follows D&D Beyond's map combat tracker, which many DMs already know:
  * identical monsters are grouped and share one roll, one added mid-fight
  * takes its group's value, each other monster rolls its own, and a group
- * can be ungrouped. "One each" and "All at
- * once" are quick variants on top of that.
+ * can be ungrouped. "One each" and "All at once" are quick variants on top
+ * of that.
  *
- * Everything here is plain data in and out, with the random source passed
- * in, so the tests can fix the dice.
+ * Everything here is plain data in and out, so the tests can play the
+ * server's part.
  */
-
-/** A d20, uniform from 1 to 20, from the browser's cryptographic source unless a test passes its own. */
-export function rollD20(random?: RandomSource): number {
-  return randomIndex(20, random) + 1;
-}
-
-export type Advantage = "adv" | "dis" | "normal";
-
-/** The dice behind one result: one d20, or two with the one kept. */
-export type D20Roll = { dice: number[]; kept: number; advantage: Advantage };
-
-/** Advantage rolls two d20s and keeps the higher, disadvantage the lower (2024 rules, D20 Tests). */
-export function rollWith(advantage: Advantage, random?: RandomSource): D20Roll {
-  if (advantage === "normal") {
-    const die = rollD20(random);
-    return { dice: [die], kept: die, advantage };
-  }
-  const a = rollD20(random);
-  const b = rollD20(random);
-  return { dice: [a, b], kept: advantage === "adv" ? Math.max(a, b) : Math.min(a, b), advantage };
-}
 
 /** A total the op schema accepts. Only an absurd modifier could reach the bounds. */
 export function clampValue(n: number): number {
@@ -61,9 +46,11 @@ export function noBonusSet(actor: { initBonus?: number; cr?: string } | undefine
   return actor !== undefined && (actor.initBonus ?? 0) === 0 && actor.cr === undefined;
 }
 
-/** A monster row the DM's device can roll for, with what its roll needs. */
+/** A monster row the DM can roll for, with what its roll needs. */
 export type RollRow = {
   entryId: string;
+  /** The row's token, which its roll names as its creature. */
+  tokenId: TokenId;
   /** The DM's name for it, numbered ("Goblin 2"). */
   name: string;
   /** Identical monsters share it (the SRD id or the base name). Absent once ungrouped. */
@@ -74,8 +61,14 @@ export type RollRow = {
    * entered on a hand-made token.
    */
   modifier: number;
-  /** The row's reminder: the DM's own mark, else what its conditions say. */
-  advantage: Advantage;
+  /**
+   * The preset's advantage sources (presetFor): the DM's mark on the row in
+   * place of the tracker's hint, and Poisoned. Unresolved, so the roll
+   * combines them once (docs/design-v1-dice.md 3.3).
+   */
+  sources: AdvantageSource[];
+  /** The preset's extra terms, such as Exhaustion's "-2". */
+  extra: string[];
   value: number | null;
 };
 
@@ -94,8 +87,18 @@ export type Skipped = { entryId: string; reason: "elsewhere" | "dead" };
  * such row is reported as a creature elsewhere, a player character
  * included, rather than guessed at. Its group key cannot tell: Ungroup
  * clears it from monsters, and a player's familiar has one.
+ *
+ * `presetOf` is the initiative preset every d20 path reads
+ * (client/features/dice/presets.ts presetFor), passed in so this file stays
+ * free of the stat block readers the always-mounted strip would otherwise
+ * load through autoState.ts.
  */
-export function rollRows(view: TrackerView, entries: readonly InitEntry[], name: (entry: InitEntry) => string): { rows: RollRow[]; skipped: Skipped[] } {
+export function rollRows(
+  view: Pick<RoomState, "tokens" | "characters">,
+  entries: readonly InitEntry[],
+  name: (entry: InitEntry) => string,
+  presetOf: (creature: { tokenId: TokenId }) => Pick<RollPreset, "sources" | "extra">,
+): { rows: RollRow[]; skipped: Skipped[] } {
   const rows: RollRow[] = [];
   const skipped: Skipped[] = [];
   for (const entry of entries) {
@@ -111,13 +114,16 @@ export function rollRows(view: TrackerView, entries: readonly InitEntry[], name:
       skipped.push({ entryId: entry.id, reason: "dead" });
       continue;
     }
+    const preset = presetOf({ tokenId: entry.tokenId });
     rows.push({
       entryId: entry.id,
+      tokenId: entry.tokenId,
       name: name(entry),
       ...(entry.groupKey !== undefined ? { groupKey: entry.groupKey } : {}),
       // Every actor has an initiative bonus. Only a player's projection may leave it out, and players never get here.
       modifier: actor?.initBonus ?? 0,
-      advantage: rollReminder(entry, actor?.effects) ?? "normal",
+      sources: [...preset.sources],
+      extra: [...preset.extra],
       value: entry.value,
     });
   }
@@ -141,11 +147,15 @@ export const DEFAULT_ROLL_MODE: RollMode = "creature";
 export type RollGroup = {
   rows: RollRow[];
   modifier: number;
-  advantage: Advantage;
-  /** `all` only: the rows' reminders disagreed, so the shared d20 was rolled straight. */
+  /** The sources the shared d20 rolls with, unresolved. */
+  sources: AdvantageSource[];
+  extra: string[];
+  /** `all` only: the rows' advantage came out differently, so the shared d20 was rolled straight. */
   mixedAdvantage: boolean;
   /** `all` only: the rows' modifiers differed, and the group took the most common one. */
   mixedModifier: boolean;
+  /** `all` only: the rows' extra terms differed, and the group took the most common ones. */
+  mixedExtra: boolean;
 };
 
 /**
@@ -168,31 +178,65 @@ export function commonModifier(modifiers: readonly number[]): number {
   return best;
 }
 
-/** What By creature shares a roll by: one group key, modifier and reminder. Absent for a row that stands alone. */
+/**
+ * The extra terms a mixed crowd adds, for the same reason: the ones most of
+ * them have. Terms can be dice, which have no "higher", so a tie goes to
+ * the first in the tracker's order.
+ */
+function commonExtra(extras: readonly (readonly string[])[]): string[] {
+  const counts = new Map<string, { extra: readonly string[]; count: number }>();
+  for (const extra of extras) {
+    const key = extra.join("");
+    const seen = counts.get(key);
+    if (seen) seen.count++;
+    else counts.set(key, { extra, count: 1 });
+  }
+  let best: { extra: readonly string[]; count: number } | undefined;
+  for (const candidate of counts.values()) if (!best || candidate.count > best.count) best = candidate;
+  return [...(best?.extra ?? [])];
+}
+
+/**
+ * The sources as the roll will resolve them. Two rows whose sources differ
+ * but resolve alike roll the same d20, and the line records the same mode
+ * and the same `cancelled` for both.
+ */
+function advantageKey(sources: readonly AdvantageSource[]): string {
+  const fields = advantageFields(sources);
+  return fields.mode ?? (fields.cancelled ? "cancelled" : "none");
+}
+
+/**
+ * What By creature shares a roll by: one group key, modifier, resolved
+ * advantage and extra. Absent for a row that stands alone.
+ */
 function shareKey(row: RollRow): string | undefined {
-  return row.groupKey === undefined ? undefined : `${row.groupKey}|${row.modifier}|${row.advantage}`;
+  return row.groupKey === undefined ? undefined : JSON.stringify([row.groupKey, row.modifier, advantageKey(row.sources), row.extra]);
 }
 
 /**
  * Splits the rows into shared rolls, in the tracker's order of each
  * group's first row. Within `creature`, monsters of one kind share a roll
- * only when they also share a modifier and a reminder, so every total is
- * exactly its own d20 plus its own modifier: an invisible goblin among
- * goblins rolls on its own with advantage, as the rules give it.
+ * only when they also share a modifier, an advantage and an extra, so every
+ * total is exactly its own d20 plus its own numbers: an invisible goblin
+ * among goblins rolls on its own with advantage, as the rules give it, and
+ * an exhausted one with its penalty.
  */
 export function planRolls(rows: readonly RollRow[], mode: RollMode): RollGroup[] {
   if (rows.length === 0) return [];
   if (mode === "all") {
-    const advantages = new Set(rows.map((r) => r.advantage));
+    const advantages = new Set(rows.map((r) => advantageKey(r.sources)));
     const modifiers = new Set(rows.map((r) => r.modifier));
-    const advantage = advantages.size === 1 ? rows[0]!.advantage : "normal";
+    const extras = new Set(rows.map((r) => r.extra.join("")));
     return [
       {
         rows: [...rows],
         modifier: commonModifier(rows.map((r) => r.modifier)),
-        advantage,
+        sources: advantages.size === 1 ? [...rows[0]!.sources] : [],
+        extra: commonExtra(rows.map((r) => r.extra)),
         mixedAdvantage: advantages.size > 1,
         mixedModifier: modifiers.size > 1,
+        mixedExtra: extras.size > 1,
       },
     ];
   }
@@ -203,7 +247,7 @@ export function planRolls(rows: readonly RollRow[], mode: RollMode): RollGroup[]
     const key = share !== undefined ? `group:${share}` : `entry:${row.entryId}`;
     let group = groups.get(key);
     if (!group) {
-      group = { rows: [], modifier: row.modifier, advantage: row.advantage, mixedAdvantage: false, mixedModifier: false };
+      group = { rows: [], modifier: row.modifier, sources: [...row.sources], extra: [...row.extra], mixedAdvantage: false, mixedModifier: false, mixedExtra: false };
       groups.set(key, group);
       out.push(group);
     }
@@ -256,55 +300,151 @@ export function joinGroups(rows: readonly RollRow[], kept: readonly RollRow[]): 
   return { joined: [...joined.values()], rest };
 }
 
-// ---------------------------------------------------------------- rolling
+/**
+ * What one press rolls: the shared rolls by the mode, and, by creature, the
+ * waiting monsters that join their group's value instead (joinGroups).
+ * `kept` are the monsters that keep their values this time.
+ */
+export function planPress(rows: readonly RollRow[], mode: RollMode, kept: readonly RollRow[] = []): { groups: RollGroup[]; joined: JoinedGroup[] } {
+  const { joined, rest } = mode === "creature" ? joinGroups(rows, kept) : { joined: [], rest: [...rows] };
+  return { groups: planRolls(rest, mode), joined };
+}
 
-export type RolledGroup = RollGroup & { roll: D20Roll; total: number };
-
-/** What one press of the button rolled, and who joined a group's value instead, kept on the DM's device to show. */
-export type RollResult = { mode: RollMode; groups: RolledGroup[]; joined: JoinedGroup[] };
+// ---------------------------------------------------------------- rolling on the server
 
 /**
- * Rolls each group once and gives every row in it the group's total, for
- * `encounter.setValues`. The reducer places each value in turn by the
- * existing tie rule (design 9.4), and rows that tie on everything it
- * compares, such as a group of goblins, keep the tracker's order.
+ * One panel roll per shared roll, in the groups' order, for
+ * `useDicePanel().roll(rolls, { to: "dm" })`. Each names its first row's
+ * token, so the DM's log reads whose roll it was, and goes behind the
+ * screen, so a hidden group leaves players no trace of its creature.
  */
-export function rollGroups(groups: readonly RollGroup[], random?: RandomSource): { result: RolledGroup[]; values: { entryId: string; value: number }[] } {
-  const result: RolledGroup[] = [];
-  const values: { entryId: string; value: number }[] = [];
-  for (const group of groups) {
-    const roll = rollWith(group.advantage, random);
-    const total = clampValue(roll.kept + group.modifier);
-    result.push({ ...group, roll, total });
+export function initiativeRolls(groups: readonly RollGroup[]): PanelRoll[] {
+  return groups.map((group) => {
+    const n = group.rows.length;
+    const roll: PanelRoll = { formula: withExtra(d20Formula(group.modifier), group.extra), label: n === 1 ? "Initiative" : `Initiative, shared by ${n}`, sources: [...group.sources] };
+    const first = group.rows[0];
+    if (first) roll.creature = { tokenId: first.tokenId };
+    return roll;
+  });
+}
+
+export type RolledGroup = RollGroup & { roll: DiceRoll; total: number };
+
+export type RowValue = { entryId: string; value: number };
+
+/**
+ * Each group's total from its landed roll, in the order initiativeRolls
+ * sent them, and every row in it given that total, clamped. Null when the
+ * rolls do not answer the groups one to one, such as a line that lost a
+ * batch or names another creature, so a mismatch never sets a value.
+ */
+export function valuesFrom(groups: readonly RollGroup[], results: readonly DiceRoll[]): { rolled: RolledGroup[]; values: RowValue[] } | null {
+  if (results.length !== groups.length) return null;
+  const rolled: RolledGroup[] = [];
+  const values: RowValue[] = [];
+  for (const [i, group] of groups.entries()) {
+    const roll = results[i]!;
+    if (roll.tokenId !== undefined && roll.tokenId !== group.rows[0]?.tokenId) return null;
+    const total = clampValue(roll.total);
+    rolled.push({ ...group, roll, total });
     for (const row of group.rows) values.push({ entryId: row.entryId, value: total });
   }
-  return { result, values };
+  return { rolled, values };
 }
 
 /**
- * One press of a roll button: rolls the rows by the mode and builds the
- * `encounter.setValues` ops to send as one undo step, in batches the op
- * schema accepts. A total equal to the row's value is left out, so a
- * re-roll that lands on the same number does not disturb a tie the DM
- * already settled. By creature, `kept` (the monsters that keep their
- * values) lets a waiting monster join its group's value (joinGroups).
+ * The `encounter.setValues` ops for a press's totals, sent as one undo
+ * step, in batches the op schema accepts. The reducer places each value in
+ * turn by the existing tie rule (design 9.4), and rows that tie on
+ * everything it compares, such as a group of goblins, keep the tracker's
+ * order.
+ *
+ * A row is set only while it still holds the value it had at the tap
+ * (`rows`), since the dice land a moment later and a value typed or rolled
+ * meanwhile is newer: those rows are `changed`. A row that left the fight is
+ * left out. A total equal to the row's value is left out too, so a re-roll
+ * that lands on the same number does not disturb a tie the DM already
+ * settled.
  */
 export function rollOps(
-  rows: readonly RollRow[],
-  mode: RollMode,
-  random?: RandomSource,
-  kept: readonly RollRow[] = [],
-): { ops: ClientOp[]; result: RollResult } {
-  const { joined, rest } = mode === "creature" ? joinGroups(rows, kept) : { joined: [], rest: rows };
-  const { result, values } = rollGroups(planRolls(rest, mode), random);
-  for (const group of joined) for (const row of group.rows) values.push({ entryId: row.entryId, value: group.total });
-  const current = new Map(rows.map((r) => [r.entryId, r.value]));
-  const changed = values.filter((v) => current.get(v.entryId) !== v.value);
-  const ops: ClientOp[] = [];
-  for (let i = 0; i < changed.length; i += MAX_ENTRIES_PER_OP) {
-    ops.push({ t: "encounter.setValues", values: changed.slice(i, i + MAX_ENTRIES_PER_OP) });
+  values: readonly RowValue[],
+  rows: readonly Pick<RollRow, "entryId" | "value">[],
+  entries: readonly Pick<InitEntry, "id" | "value">[],
+): { ops: ClientOp[]; changed: string[] } {
+  const before = new Map(rows.map((r) => [r.entryId, r.value]));
+  const now = new Map(entries.map((e) => [e.id, e.value]));
+  const set: RowValue[] = [];
+  const changed: string[] = [];
+  for (const v of values) {
+    if (!now.has(v.entryId)) continue;
+    const current = now.get(v.entryId);
+    if (current === v.value) continue;
+    if (current !== before.get(v.entryId)) changed.push(v.entryId);
+    else set.push(v);
   }
-  return { ops, result: { mode, groups: result, joined } };
+  const ops: ClientOp[] = [];
+  for (let i = 0; i < set.length; i += MAX_ENTRIES_PER_OP) ops.push({ t: "encounter.setValues", values: set.slice(i, i + MAX_ENTRIES_PER_OP) });
+  return { ops, changed };
+}
+
+/** One press of a roll button as the DM's device keeps it, from the tap until its totals are set or it settles without them. */
+export type RollPress = {
+  mode: RollMode;
+  /** The server roll's tag. Null when nothing needed a die (every monster joined its group's value) or nothing went. */
+  tag: string | null;
+  groups: RollGroup[];
+  joined: JoinedGroup[];
+  /** The shared rolls with their dice and totals, once they landed. Null until then, and for good when nothing was set. */
+  rolled: RolledGroup[] | null;
+  /** Why nothing was set, in the card's words. */
+  error: string | null;
+  /** Rows left as they were: their value changed after the tap. */
+  changed: string[];
+  /** Settled: its totals were sent, or it ended without them. It never acts again. */
+  done: boolean;
+};
+
+/** An answer that never came back, which the receipt could not settle. Nothing is sent again on its own (docs/design-v1-dice.md 8.7). */
+export const MAY_HAVE_HAPPENED = "This may have happened. Check the log.";
+/** Lines that do not answer the press's rolls one to one (valuesFrom). */
+export const NOT_READ = "The dice landed, but their lines could not be read here. Nothing was set. Check the log.";
+
+/** The words of a refused roll: nothing was set, and the server's reason. */
+export function notSet(reason: string): string {
+  return reason ? `Nothing was set. ${reason}` : "Nothing was set.";
+}
+
+/**
+ * Settles a press against its tag's receipt (useReceipt.ts), as the DM's
+ * device does each time the receipt moves: null while the dice are on
+ * their way or once the press is done, else the press as it ends and the
+ * ops to send. Only committed lines for every batch set values. A refused
+ * batch, an unknown answer or lines that cannot be read set nothing, and
+ * the card says why.
+ */
+export function settleRoll(
+  press: RollPress,
+  receipt: ReceiptState | null,
+  entries: readonly Pick<InitEntry, "id" | "value">[],
+): { press: RollPress; ops: ClientOp[] } | null {
+  if (press.done) return null;
+  const stop = (error: string) => ({ press: { ...press, error, done: true }, ops: [] });
+  const joined = press.joined.flatMap((g) => g.rows.map((r) => ({ entryId: r.entryId, value: g.total })));
+  let rolled: RolledGroup[] = [];
+  let values: RowValue[] = joined;
+  if (press.tag !== null) {
+    if (!receipt || receipt.state === "sending" || receipt.state === "checking") return null;
+    if (receipt.state === "unknown") return stop(MAY_HAVE_HAPPENED);
+    if (receipt.state === "refused") return stop(notSet(receipt.text || receipt.message));
+    if (receipt.refused) return stop(notSet(receipt.refused.text || receipt.refused.message));
+    const landed = valuesFrom(press.groups, rollsOf(receipt.lines));
+    if (!landed) return stop(NOT_READ);
+    rolled = landed.rolled;
+    values = [...landed.values, ...joined];
+  }
+  const rows = [...press.groups, ...press.joined].flatMap((g) => g.rows);
+  const { ops, changed } = rollOps(values, rows, entries);
+  return { press: { ...press, rolled, changed, done: true }, ops };
 }
 
 /**
@@ -312,14 +452,16 @@ export function rollOps(
  * belongs to its fight: it holds while at least one of its rows is still
  * in the encounter with the total the roll gave it. Ending the fight,
  * starting another, or an undo that takes the roll back leaves none, and
- * then the card goes for good. `waiting` is true while the roll's ops are
- * unanswered: a DM's view that holds only one scene cannot predict them
- * (design 7.4) and shows the old values until the server answers.
+ * then the card goes for good. Until the totals are set, and when they
+ * never will be, it holds while any of its rows is still in the encounter:
+ * `waiting` is true while the dice or the ops they set are unanswered, and
+ * a DM's view that holds only one scene cannot predict them (design 7.4).
  */
-export function rollStillShown(result: RollResult, encounter: { entries: readonly Pick<InitEntry, "id" | "value">[] } | null, waiting: boolean): boolean {
+export function rollStillShown(press: Pick<RollPress, "groups" | "joined" | "rolled">, encounter: { entries: readonly Pick<InitEntry, "id" | "value">[] } | null, waiting: boolean): boolean {
   if (!encounter) return false;
   const values = new Map(encounter.entries.map((e) => [e.id, e.value]));
-  return [...result.groups, ...result.joined].some((g) => g.rows.some((r) => values.has(r.entryId) && (waiting || values.get(r.entryId) === g.total)));
+  if (waiting || press.rolled === null) return [...press.groups, ...press.joined].some((g) => g.rows.some((r) => values.has(r.entryId)));
+  return [...press.rolled, ...press.joined].some((g) => g.rows.some((r) => values.has(r.entryId) && values.get(r.entryId) === g.total));
 }
 
 // ---------------------------------------------------------------- what the DM reads
@@ -327,16 +469,36 @@ export function rollStillShown(result: RollResult, encounter: { entries: readonl
 const signed = (n: number) => (n < 0 ? `−${-n}` : `+${n}`);
 
 /**
- * One line per shared roll for the DM's result card, such as
- * "d20 (12) +2 = 14" or "2d20 with advantage (5, 17) keeps 17, +1 = 18".
- * The minus sign is typographic, as a stat block prints it.
+ * One line per shared roll for the DM's result card, from the faces the
+ * server drew, such as "d20 (12) +2 = 14", "d20 (12) +2 −2 = 12" with
+ * Exhaustion, or "2d20 with advantage (5, 17) keeps 17, +1 = 18". The minus
+ * sign is typographic, as a stat block prints it. A result whose text no
+ * longer parses reads as its formula and total.
  */
-export function describeRoll(group: Pick<RolledGroup, "roll" | "modifier" | "total">): string {
-  const { roll, modifier, total } = group;
-  const tail = `${signed(modifier)} = ${total}`;
-  if (roll.advantage === "normal") return `d20 (${roll.kept}) ${tail}`;
-  const how = roll.advantage === "adv" ? "with advantage" : "with disadvantage";
-  return `2d20 ${how} (${roll.dice.join(", ")}) keeps ${roll.kept}, ${tail}`;
+export function describeRoll(roll: Pick<DiceResult, "formula" | "faces" | "total">): string {
+  const terms = rolledTerms(roll);
+  if (!terms) return `${roll.formula} = ${roll.total}`;
+  let head: string | null = null;
+  let kept = false;
+  const tail: string[] = [];
+  for (const t of terms) {
+    if (!("kept" in t)) {
+      tail.push(signed(t.term.sign * t.term.value));
+      continue;
+    }
+    if (head === null && t.term.sides === 20 && t.term.sign === 1) {
+      if (t.term.keep) {
+        const how = t.term.keep.high ? "with advantage" : "with disadvantage";
+        const keeps = t.faces.filter((_, i) => t.kept[i]);
+        head = `${t.term.count}d20 ${how} (${t.faces.join(", ")}) keeps ${keeps.join(", ")}`;
+        kept = true;
+      } else head = `${t.term.count === 1 ? "" : t.term.count}d20 (${t.faces.join(", ")})`;
+      continue;
+    }
+    tail.push(`${t.term.sign < 0 ? "−" : "+"}${t.term.count}d${t.term.sides} (${t.faces.join(", ")})`);
+  }
+  const parts = [head === null ? null : `${head}${kept && tail.length > 0 ? "," : ""}`, ...tail].filter((p): p is string => p !== null);
+  return `${parts.join(" ")} = ${roll.total}`;
 }
 
 // ---------------------------------------------------------------- the DM's choices on this device

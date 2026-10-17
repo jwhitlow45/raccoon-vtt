@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import type { StoreApi } from "zustand/vanilla";
+import type { D20Test } from "#shared/dice/bonus.ts";
+import { FORMULA_ERRORS } from "#shared/dice/formula.ts";
 import type { InitEntry } from "#shared/model.ts";
-import type { ClientOp } from "#shared/protocol.ts";
+import type { ActorTarget } from "#shared/protocol.ts";
 import { groupKeyFor } from "#shared/rules/initiative.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -9,9 +10,14 @@ import { Help } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
-import { useRoomView } from "../../state/view.ts";
-import { describeRoll, noBonusSet, rollOps, rollRows, rowsToRoll, type RollMode, type RollRow } from "./autoRoll.ts";
-import { useAuto, useShownRoll, type AutoState } from "./autoState.ts";
+import { useRoomStore, useRoomView } from "../../state/view.ts";
+import { presetFor } from "../dice/presets.ts";
+import { NEEDS_CONNECTION } from "../dice/send.ts";
+import { useDicePanel } from "../dice/useDicePanel.ts";
+import { useDiceView } from "../dice/useDiceView.ts";
+import { useReceipt } from "../dice/useReceipt.ts";
+import { describeRoll, initiativeRolls, MAY_HAVE_HAPPENED, noBonusSet, planPress, rollRows, rowsToRoll, type RollMode, type RollRow } from "./autoRoll.ts";
+import { useAuto, useRollBusy, useShownRoll } from "./autoState.ts";
 import { useRowFacts, useSendAll, useSortedEntries } from "./hooks.ts";
 import { entryActor, entryName } from "./logic.ts";
 import { RollBadge } from "./parts.tsx";
@@ -19,29 +25,65 @@ import { RollBadge } from "./parts.tsx";
 /**
  * The DM's auto initiative (features section 10, design 9.4): the controls
  * in the tracker, the card that shows what was rolled, and the per-row
- * tools in a row's options. Players never get any of it, and the dice never
- * leave this device: the server receives the totals as typed values would
- * arrive (autoRoll.ts). The state behind it is in autoState.ts.
+ * tools in a row's options. Players never get any of it. The dice roll on
+ * the server behind the screen, and the totals reach players as typed
+ * values would (autoRoll.ts). The state behind it is in autoState.ts.
  */
 
-/** The monster rows auto initiative can roll, from the DM's view. */
-function useRollRows() {
-  const entries = useSortedEntries();
-  const facts = useRowFacts();
-  return useMemo(() => rollRows(facts.view, entries, (e) => entryName(facts.view, e)), [facts.view, entries]);
+const INITIATIVE: D20Test = { kind: "initiative" };
+// Initiative reads only a creature's effects and the tracker's mark, never its block, so no SRD chunk is loaded for it.
+const NO_CREATURES: ActorTarget[] = [];
+
+/** The monster rows auto initiative can roll, from the DM's view, each with the initiative preset every d20 path reads. */
+function useRollRows(entries: readonly InitEntry[]) {
+  const { dice } = useDiceView(NO_CREATURES);
+  return useMemo(() => {
+    if (!dice) return { rows: [], skipped: [] };
+    // Magic Resistance bears only on saves against spells, so initiative never waits for the block that says whether a creature has it.
+    return rollRows(dice.view, entries, (e) => entryName(dice.view, e), (creature) => presetFor(dice, creature, INITIATIVE, { rolls: null }));
+  }, [dice, entries]);
 }
 
-/** Rolls on this device, sends what changed (rollOps), and keeps the dice for the card. */
-function rollAndSend(
-  rows: readonly RollRow[],
-  mode: RollMode,
-  send: (ops: readonly ClientOp[]) => readonly number[],
-  store: StoreApi<AutoState>,
-  kept: readonly RollRow[] = [],
-): void {
-  const { ops, result } = rollOps(rows, mode, undefined, kept);
-  const sent = send(ops);
-  store.setState({ last: { ...result, sent } });
+/**
+ * One press: the shared rolls go to the server as one secret roll, and the
+ * press is kept with what each roll is for until its lines land, when
+ * autoState.ts sets the totals. With nothing to roll, every monster joined
+ * its group's value, and the totals go at once.
+ */
+function usePress(): (rows: readonly RollRow[], mode: RollMode, kept?: readonly RollRow[]) => void {
+  const { store } = useAuto();
+  const panel = useDicePanel();
+  const room = useRoomStore();
+  return (rows, mode, kept = []) => {
+    const plan = planPress(rows, mode, kept);
+    const base = { mode, ...plan, tag: null, rolled: null, error: null, changed: [], done: false, sent: [] };
+    if (plan.groups.length === 0) {
+      store.setState({ last: base });
+      return;
+    }
+    const connected = room.getState().connection === "open";
+    const tag = connected ? panel.roll(initiativeRolls(plan.groups), { to: "dm" }) : null;
+    // Connected, only the splitter refuses a group, when it is too big to roll at once.
+    if (tag === null) store.setState({ last: { ...base, error: connected ? FORMULA_ERRORS.tooMuch : NEEDS_CONNECTION, done: true } });
+    else store.setState({ last: { ...base, tag } });
+  };
+}
+
+/**
+ * The Dice panel's "Initiative for the 4 in the fight" for several selected
+ * creatures (docs/design-v1-roll-options.md 4.4): their monster rows, rolled
+ * by the tracker's mode as Auto initiative rolls them, their values
+ * replaced.
+ */
+export function useAutoInitiativeFor(tokenIds: readonly string[]): { count: number; busy: boolean; press(): void } {
+  const { mode } = useAuto();
+  const sorted = useSortedEntries();
+  const key = tokenIds.join(",");
+  const entries = useMemo(() => sorted.filter((e) => e.tokenId !== undefined && tokenIds.includes(e.tokenId)), [sorted, key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { rows } = useRollRows(entries);
+  const busy = useRollBusy();
+  const press = usePress();
+  return { count: rows.length, busy, press: () => !busy && rows.length > 0 && press(rows, mode, []) };
 }
 
 const MODES: { mode: RollMode; label: string; hint: string }[] = [
@@ -56,13 +98,15 @@ const MODES: { mode: RollMode; label: string; hint: string }[] = [
 
 /** The controls in the tracker's "Auto initiative" section. */
 export function AutoInitiativeControls() {
-  const { store, mode, setMode } = useAuto();
-  const { rows, skipped } = useRollRows();
+  const { mode, setMode } = useAuto();
+  const { rows, skipped } = useRollRows(useSortedEntries());
   const [reroll, setReroll] = useState(false);
   // Only Auto initiative reads the choice, so a sheet's swipe springs back once it is on. A roll leaves it on screen, and it counts from there (docs/design-v1-sheet-swipe.md 4.5).
   const restart = useUnsavedSince(reroll);
   const scores = useRoomView((s) => s.view?.meta.settings.monsterInitScore ?? false);
-  const { send, waiting } = useSendAll();
+  const online = useRoomView((s) => s.connection === "open");
+  const waiting = useRollBusy();
+  const press = usePress();
   const toRoll = rowsToRoll(rows, reroll);
   const elsewhere = skipped.filter((s) => s.reason === "elsewhere").length;
   const chosen = MODES.find((m) => m.mode === mode) ?? MODES[0]!;
@@ -83,17 +127,18 @@ export function AutoInitiativeControls() {
         <Button
           size="sm"
           busy={waiting}
-          disabled={!waiting && toRoll.length === 0}
+          disabled={!waiting && (toRoll.length === 0 || !online)}
           onClick={() => {
-            if (waiting) return;
+            if (waiting || !online) return;
             // Without re-roll, monsters with a value keep it, and a waiting one may join its group's.
-            rollAndSend(toRoll, mode, send, store, reroll ? [] : rows.filter((r) => r.value !== null));
+            press(toRoll, mode, reroll ? [] : rows.filter((r) => r.value !== null));
             restart();
           }}
         >
           {waiting ? "Rolling…" : `Auto initiative (${toRoll.length})`}
         </Button>
       </div>
+      {!online && !waiting && toRoll.length > 0 ? <Help>{NEEDS_CONNECTION}</Help> : null}
       {toRoll.length === 0 && !waiting ? (
         <Help>
           {rows.length === 0
@@ -125,26 +170,38 @@ const MODE_LABEL: Record<RollMode, string> = { creature: "by creature", each: "o
  */
 export function AutoInitiativeResult() {
   const { store, roll: last } = useShownRoll();
-  if (!last) return null;
+  // Watched from the tap, so a result this card shows is never told again in a toast.
+  useReceipt(last?.tag ?? null);
+  // While the dice are on their way, the button shows it.
+  if (!last || !last.done) return null;
+  const dismiss = (
+    <Button size="sm" onClick={() => store.setState({ last: null })}>
+      Dismiss
+    </Button>
+  );
+  if (last.rolled === null) {
+    return (
+      <section aria-label="Auto initiative results" style={CARD}>
+        <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+          <div role="status" style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere", color: last.error === MAY_HAVE_HAPPENED ? theme.color.warning : theme.color.dangerText }}>
+            {last.error}
+          </div>
+          {dismiss}
+        </div>
+      </section>
+    );
+  }
   // Highest first, as the order above lists them. A joined line has no dice of its own.
   const lines = [
-    ...last.groups.map((group) => ({ rows: group.rows, total: group.total, group })),
+    ...last.rolled.map((group) => ({ rows: group.rows, total: group.total, group })),
     ...last.joined.map((joined) => ({ rows: joined.rows, total: joined.total, group: null })),
   ].sort((a, b) => b.total - a.total);
   const count = lines.reduce((n, line) => n + line.rows.length, 0);
+  const changed = new Set(last.changed);
+  const kept = lines.flatMap((line) => line.rows.filter((r) => changed.has(r.entryId)).map((r) => r.name));
+  const note = { color: theme.color.textMuted, fontSize: theme.font.small } as const;
   return (
-    <section
-      aria-label="Auto initiative results"
-      style={{
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr)",
-        gap: theme.space(2),
-        padding: theme.space(3),
-        borderRadius: theme.radius.md,
-        border: `${theme.line.border}px solid ${theme.color.border}`,
-        background: theme.color.surfaceRaised,
-      }}
-    >
+    <section aria-label="Auto initiative results" style={CARD}>
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: theme.weight.bold, overflowWrap: "anywhere" }}>
@@ -152,9 +209,7 @@ export function AutoInitiativeResult() {
           </div>
           <Help>Players see each visible monster's total, as if you typed it, never the dice or modifiers.</Help>
         </div>
-        <Button size="sm" onClick={() => store.setState({ last: null })}>
-          Dismiss
-        </Button>
+        {dismiss}
       </div>
       <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
         {lines.map(({ rows, total, group }, i) => (
@@ -162,23 +217,17 @@ export function AutoInitiativeResult() {
             <span style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
               <span style={{ fontWeight: theme.weight.strong, overflowWrap: "anywhere" }}>{rows.map((r) => r.name).join(", ")}</span>
               {group ? (
-                <span
-                  style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), color: theme.color.textMuted, fontSize: theme.font.small, fontVariantNumeric: "tabular-nums" }}
-                >
-                  {group.roll.advantage !== "normal" ? <RollBadge kind={group.roll.advantage} /> : null}
-                  {describeRoll(group)}
+                <span style={{ ...note, display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), fontVariantNumeric: "tabular-nums" }}>
+                  {group.roll.mode ? <RollBadge kind={group.roll.mode} /> : null}
+                  {describeRoll(group.roll)}
                 </span>
               ) : (
-                <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>
-                  {rows.length === 1 ? "Takes its group's initiative" : "Take their group's initiative"}, as identical monsters do.
-                </span>
+                <span style={note}>{rows.length === 1 ? "Takes its group's initiative" : "Take their group's initiative"}, as identical monsters do.</span>
               )}
-              {group?.mixedModifier ? (
-                <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>Their modifiers differ: it adds the one most of them have.</span>
-              ) : null}
-              {group?.mixedAdvantage ? (
-                <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>Their advantage reminders differ, so one plain d20 was rolled.</span>
-              ) : null}
+              {group?.mixedModifier ? <span style={note}>Their modifiers differ: it adds the one most of them have.</span> : null}
+              {group?.mixedExtra ? <span style={note}>Their penalties differ: it adds the one most of them have.</span> : null}
+              {group?.mixedAdvantage ? <span style={note}>Their advantage reminders differ, so one plain d20 was rolled.</span> : null}
+              {group?.roll.cancelled && !group.mixedAdvantage ? <span style={note}>Advantage and disadvantage cancel, so one plain d20 was rolled.</span> : null}
             </span>
             <span aria-label={`Total ${total}`} style={{ flex: "none", minWidth: 36, textAlign: "right", fontSize: theme.font.title, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>
               {total}
@@ -186,9 +235,24 @@ export function AutoInitiativeResult() {
           </li>
         ))}
       </ul>
+      {kept.length > 0 ? (
+        <Help>
+          Not set for {kept.join(", ")}: {kept.length === 1 ? "its value" : "their values"} changed after you pressed.
+        </Help>
+      ) : null}
     </section>
   );
 }
+
+const CARD = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr)",
+  gap: theme.space(2),
+  padding: theme.space(3),
+  borderRadius: theme.radius.md,
+  border: `${theme.line.border}px solid ${theme.color.border}`,
+  background: theme.color.surfaceRaised,
+} as const;
 
 /**
  * A monster row's own auto initiative tools, in its options: roll just this
@@ -199,12 +263,13 @@ export function AutoInitiativeResult() {
  */
 export function RowRollTools(props: { entry: InitEntry }) {
   const { entry } = props;
-  const { store } = useAuto();
   const facts = useRowFacts();
   const entries = useSortedEntries();
-  const roll = useSendAll();
+  const busy = useRollBusy();
+  const online = useRoomView((s) => s.connection === "open");
+  const press = usePress();
   const regroup = useSendAll();
-  const row = useMemo(() => rollRows(facts.view, [entry], (e) => entryName(facts.view, e)).rows[0], [facts.view, entry]);
+  const row = useRollRows(useMemo(() => [entry], [entry])).rows[0];
   if (!row) return null;
 
   const ownKey = groupKeyFor(facts.view, entry);
@@ -222,10 +287,11 @@ export function RowRollTools(props: { entry: InitEntry }) {
           Initiative modifier {row.modifier < 0 ? `−${-row.modifier}` : `+${row.modifier}`}
           {noBonusSet(entryActor(facts.view, entry)) ? " (no initiative bonus set)" : ""}
         </span>
-        <Button size="sm" busy={roll.waiting} onClick={() => !roll.waiting && rollAndSend([row], "each", roll.send, store)}>
-          {roll.waiting ? "Rolling…" : "Roll initiative"}
+        <Button size="sm" busy={busy} disabled={!busy && !online} onClick={() => !busy && online && press([row], "each")}>
+          {busy ? "Rolling…" : "Roll initiative"}
         </Button>
       </div>
+      {!online && !busy ? <Help>{NEEDS_CONNECTION}</Help> : null}
       {grouped.length > 1 ? (
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(1) }}>
           <span style={small}>

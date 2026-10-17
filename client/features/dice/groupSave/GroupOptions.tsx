@@ -19,6 +19,7 @@ import { useDiceView } from "../useDiceView.ts";
 import { useReceipt } from "../useReceipt.ts";
 import { useRollBlocked } from "../useRollOption.ts";
 import { pageTitle } from "./GroupSave.tsx";
+import { useAutoInitiativeFor } from "../../encounter/AutoInitiative.tsx";
 import { useStartGroupSave, type StartInput } from "./start.ts";
 import { useGroupSave } from "./store.ts";
 import type { GroupTest } from "./rows.ts";
@@ -87,6 +88,7 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
           ))}
         </div>
       </Section>
+      <GroupInitiative tokenIds={props.tokenIds} blocked={blocked} />
       {dice ? <SharedAttacks tokenIds={props.tokenIds} blocked={blocked} /> : null}
       <Button onClick={() => go({ source: { kind: "selection", tokenIds: [...props.tokenIds] }, test: { kind: "save", ability: "dex" }, dc, panel: "dice" })}>Set up a group save</Button>
     </section>
@@ -191,5 +193,16 @@ function SharedAttack(props: { name: string; each: { creature: ActorTarget; name
       ) : null}
       {total !== null ? <Note>{`${total} damage. Every HP entry offers it as a chip.`}</Note> : null}
     </div>
+  );
+}
+
+/** "Initiative for the 4 in the fight" (4.4), by the tracker's auto initiative mode (section 7). Shown only for monsters in the fight. */
+function GroupInitiative(props: { tokenIds: readonly string[]; blocked: string | null }) {
+  const auto = useAutoInitiativeFor(props.tokenIds);
+  if (auto.count === 0) return null;
+  return (
+    <Button size="sm" busy={auto.busy} disabled={props.blocked !== null} title={props.blocked ?? undefined} onClick={auto.press}>
+      {`Initiative for the ${auto.count} in the fight`}
+    </Button>
   );
 }

@@ -30,8 +30,8 @@ export type ParsedValue = { ok: true; value: number | null } | { ok: false; erro
 
 /**
  * One typed initiative result: whatever the physical die or the D&D Beyond
- * app said. The app rolls only monster initiative, on the DM's device
- * (autoRoll.ts), and never through this box. An empty box clears the value.
+ * app said. The app's own rolls happen on the server (autoRoll.ts for
+ * monsters) and never pass through this parser. An empty box clears the value.
  * iOS keyboards and pasted text can carry a typographic minus sign, so it
  * counts as a plain one.
  */
