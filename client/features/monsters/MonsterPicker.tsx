@@ -122,6 +122,8 @@ export function CompanionPickerBody(props: {
           New stat block
         </Button>
       </div>
+      {/* Above every list it narrows, the character's own included, so typing never changes a list out of view above it. */}
+      <SearchField value={props.query} onChange={props.onQuery} placeholder="Search: owl, cr 0-1" />
       {lists.ownCount > 0 ? (
         <>
           <ListLabel>{`${whose(props.character.name)} stat blocks ${countLabel(lists.own.length, lists.ownCount)}`}</ListLabel>
@@ -134,7 +136,6 @@ export function CompanionPickerBody(props: {
           <MonsterList items={lists.sameName.map((r) => ({ ...r, key: `same:${r.key}` }))} onPick={(key) => pick(key.slice("same:".length))} />
         </>
       ) : null}
-      <SearchField value={props.query} onChange={props.onQuery} placeholder="Search: owl, cr 0-1" />
       <ListLabel>{monsters ? `SRD 5.2.1 ${countLabel(lists.srd.length, monsters.length)}` : "SRD 5.2.1"}</ListLabel>
       {failed ? <SrdLoadFailed what="The monster list" /> : null}
       {!monsters && !failed ? <Loading text="Loading the monsters…" /> : null}
