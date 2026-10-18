@@ -8,7 +8,7 @@ import { computerSweepTest, sweepFile } from "./bardockRoom.ts";
  */
 sweepFile("the computer's sweep at 1280 x 800 and 1920 x 1080", () =>
   computerSweepTest([
-  { width: 1280, height: 800 },
-  { width: 1920, height: 1080 },
+    { width: 1280, height: 800 },
+    { width: 1920, height: 1080 },
   ]),
 );
