@@ -640,6 +640,31 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     await ops.send({ t: "token.update", tokenId: owl.id, patch: { companion: { of: run.bree.characterId, turn: "shared" } } });
   });
 
+  test("7d. a companion Ana adds with its own turn while Bree fights joins the fight in a row of its own, its initiative still to roll", async () => {
+    await ops.send({ t: "encounter.start", entries: [{ id: "e-bree-7d", tokenId: run.bree.tokenId, value: 15 }] });
+    try {
+      await openCard(ana, run.bree.characterId);
+      await ana.locator(`[data-opener="companion:${run.bree.characterId}"]`).click();
+      await ana.getByRole("textbox", { name: "Name", exact: true }).fill("Kestrel");
+      await ana.getByRole("textbox", { name: "HP", exact: true }).fill("4");
+      await ana.getByRole("combobox", { name: "Turn" }).selectOption("own");
+      await ana.getByRole("button", { name: "Add and place" }).click();
+      const kestrel = await waitFor("Kestrel", () => companionOf("Kestrel"));
+      const row = await waitFor("Kestrel's row", () => dmSocket.state?.encounter?.entries.find((e) => e.tokenId === kestrel.id));
+      assert.equal(row.value, null, "its player rolls it");
+      await openSideTab(ana, "Initiative");
+      const tracker = ana.getByRole("tabpanel", { name: /^Initiative/ });
+      await tracker.getByText("Kestrel", { exact: true }).first().waitFor();
+      assert.equal(await tracker.getByRole("button", { name: "Add Kestrel" }).count(), 0, "nothing left to join");
+      await shots.take(ana, "companions-own-turn-joins");
+    } finally {
+      // The steps after this one start out of a fight and without Kestrel, whatever happened here.
+      await ops.send({ t: "encounter.end" });
+      const kestrel = companionOf("Kestrel");
+      if (kestrel) await ops.send({ t: "token.delete", tokenId: kestrel.id });
+    }
+  });
+
   test("8. a block deleted while linked leaves its companion reading so, with its numbers", async () => {
     const ac = inline("Hoot")!.ac;
     await ops.send({ t: "token.update", tokenId: companionOf("Hoot")!.id, patch: { actor: { blockId: Object.values(dmSocket.state!.companionBlocks).find((b) => b?.name === "Moth Spirit")!.id } } });

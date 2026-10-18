@@ -1,6 +1,7 @@
 import type { Actor, Character, CompanionTurn, CreatureSize, ImageRef, RoomState, Token } from "#shared/model.ts";
 import { companionLegBlocker, withinCompanionReach } from "#shared/permissions.ts";
-import type { TokenInput } from "#shared/protocol.ts";
+import type { ClientOp, TokenInput } from "#shared/protocol.ts";
+import { rowCharacter } from "#shared/rules/initiative.ts";
 import { fitLine, type StatBlockMonster } from "#shared/srd/monsters.ts";
 import type { BlockLink } from "../monsters/statBlockLink.ts";
 import { footprint } from "../../lib/scene.ts";
@@ -176,6 +177,22 @@ export function companionInput(
   };
   if (draft.image) input.image = draft.image;
   return input;
+}
+
+/**
+ * The row a new companion with its own turn takes in a running fight, so
+ * that it "joins the fight as a row of its own", as its turn's help says.
+ * It joins only a fight its character is in, with no value: its player
+ * rolls or types it, as for any row of theirs. Null for a companion that
+ * acts on its character's turn, with no fight, or while its character is
+ * out of the fight, when it waits in Join the fight as any creature of
+ * theirs does.
+ */
+export function joinFightOp(view: Pick<RoomState, "tokens" | "encounter">, input: Pick<TokenInput, "id" | "kind" | "companion">, entryId: string): ClientOp | null {
+  const of = input.companion?.of;
+  if (input.companion?.turn !== "own" || input.kind === "object" || of === undefined || !view.encounter) return null;
+  if (!view.encounter.entries.some((entry) => rowCharacter(view, entry) === of)) return null;
+  return { t: "encounter.add", entries: [{ id: entryId, tokenId: input.id }] };
 }
 
 type PlaceView = Pick<RoomState, "tokens" | "scenes" | "buildChunks" | "meta">;

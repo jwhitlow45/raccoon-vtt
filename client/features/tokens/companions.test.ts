@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { applyOp } from "#shared/reducer.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { monsterView } from "#shared/statBlock.ts";
-import { character, companionBlock, env, imageRef, room, token } from "#shared/testutil.ts";
+import { character, companionBlock, entry, env, imageRef, room, token } from "#shared/testutil.ts";
 import {
   NEW_COMPANION,
   blockHpHelp,
@@ -18,6 +18,7 @@ import {
   companionSpot,
   draftError,
   draftWith,
+  joinFightOp,
   lateCompanionText,
   linkPatch,
   makeCompanionPatch,
@@ -216,5 +217,50 @@ describe("adding a companion from a stat block (docs/design-v1-companion-stat-bl
   test("HP's help names the average and its dice", () => {
     assert.equal(blockHpHelp(owlView), "The block’s average, 1 (1d4 − 1). Type another for a higher-level casting.");
     assert.equal(blockHpHelp(monsterView(companionBlock("x", "bree", { hp: { average: 7, formula: "" } }))), "The block’s average, 7. Type another for a higher-level casting.");
+  });
+});
+
+describe("an own-turn companion made mid-fight joins it (docs/design-v1-combat-flow.md 3.6.2)", () => {
+  const owl: CompanionDraft = { ...NEW_COMPANION, name: "Hoot", hp: 1, ac: 11, turn: "own", turnPicked: true };
+  const p1 = { memberId: "p1", role: "player" as const };
+
+  /** Bree in a fight beside a goblin, Bree's row naming her token or, with `byCharacter`, only her character. */
+  function fight(byCharacter = false): RoomState {
+    const state = bree();
+    state.tokens.gob = token("gob", { x: 9, y: 9 });
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-gob", entries: [entry("e-gob", { tokenId: "gob", value: 15 }), byCharacter ? entry("e-bree", { characterId: "bree", value: 12 }) : entry("e-bree", { tokenId: "bt", value: 12 })] };
+    return state;
+  }
+
+  test("its row comes with it, with no value for its player to roll, and the server takes both from Bree's player", () => {
+    for (const byCharacter of [false, true]) {
+      let state = fight(byCharacter);
+      const input = companionInput(owl, at, state.characters.bree!);
+      const join = joinFightOp(state, input, "e-hoot");
+      assert.deepEqual(join, { t: "encounter.add", entries: [{ id: "e-hoot", tokenId: "ws" }] });
+      for (const op of [{ t: "token.create" as const, token: input }, join!]) {
+        assert.ok(clientOpSchema.safeParse(op).success, op.t);
+        const allowed = canApply(op, p1, state, { canUseAsset: () => true });
+        assert.ok(allowed.ok, allowed.ok ? "" : allowed.message);
+        const applied = applyOp(state, op, p1, env(1));
+        assert.ok(applied.ok, applied.ok ? "" : applied.message);
+        state = applied.state;
+      }
+      const row = state.encounter!.entries.find((e) => e.id === "e-hoot");
+      assert.ok(row, "Hoot has a row");
+      assert.equal(row.value, null);
+      assert.equal(row.hidden, false);
+    }
+  });
+
+  test("nothing joins for a companion on Bree's turn, an effect, no fight, or a fight Bree is not in", () => {
+    const state = fight();
+    const character = state.characters.bree!;
+    for (const turn of ["shared", "none"] as const) assert.equal(joinFightOp(state, companionInput({ ...owl, turn }, at, character), "e1"), null, turn);
+    assert.equal(joinFightOp(state, companionInput({ ...owl, what: "effect", hp: null }, at, character), "e1"), null, "an effect");
+    assert.equal(joinFightOp(bree(), companionInput(owl, at, character), "e1"), null, "no fight");
+    const without = fight();
+    without.encounter!.entries = without.encounter!.entries.filter((e) => e.id !== "e-bree");
+    assert.equal(joinFightOp(without, companionInput(owl, at, character), "e1"), null, "Bree is not in it");
   });
 });

@@ -39,6 +39,7 @@ import {
   dmPlacement,
   draftError,
   draftWith,
+  joinFightOp,
   lateCompanionText,
   linkPatch,
   makeCompanionPatch,
@@ -274,7 +275,13 @@ export function CompanionForm(props: {
       } else if (answer === "refused") setError(refusal?.message ? capitalized(refusal.message) : "The server refused it.");
       else setError("It may not have been added. Check the map before trying again.");
     };
-    if (actions.dispatch(op, { onAnswer, quiet: true }) !== null) setWaiting(true);
+    // An own-turn companion made mid-fight joins it in the same undo step. Its row's answer stays quiet: refused, as when the fight ended meanwhile, the companion waits in Join the fight.
+    const join = view ? joinFightOp(view, op.token, actions.newId()) : null;
+    const together = join ? { group: actions.newId() } : null;
+    if (actions.dispatch(op, { onAnswer, quiet: true, ...together }) !== null) {
+      setWaiting(true);
+      if (join) actions.dispatch(join, { quiet: true, ...together });
+    }
   };
 
   return (

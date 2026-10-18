@@ -687,7 +687,7 @@ A companion is a token that belongs to a character: a familiar, a summoned spiri
 
 - **On Bree's turn, listed under Bree**: it acts on its character's turn and shows under that row in the order, with its own Reaction and Ready. The default for a creature.
 - **On Bree's turn, not listed**: it acts on its character's turn and stays out of the order. The default for an effect.
-- **Its own turn**: a row of its own with its own initiative. Added during a fight, it doesn't join on its own, whatever the form's note says: its player adds it with **Add Hoot** under **Join the fight**, or you add it with **Add to the fight**. **Everyone here** takes it when you start a fight.
+- **Its own turn**: a row of its own with its own initiative. Added during a fight its character is in, it joins at once, with its initiative still to roll. Otherwise its player adds it with **Add Hoot** under **Join the fight**, or you add it with **Add to the fight**. **Everyone here** takes it when you start a fight.
 
 Other players see the companion's token, name and HP as "Players see the party's HP" allows. A creature companion lends the party its sight, an effect doesn't. A companion stays on its scene when the party moves on (see [the travel scenario](#the-party-travels-between-scenes)).
 
@@ -846,7 +846,7 @@ Bree casts Spirit Guardians and wades in. Ivo's owl familiar scouts on its own t
 **The familiar**
 
 1. Ivo's player opens **Characters**, Ivo's card, **Add a companion**: "Hoot", **A creature**, **Choose a stat block**, the SRD Owl. In 2024 a familiar rolls its own initiative, so **Turn**: **Its own turn**. **Add and place** puts it next to Ivo.
-2. In a running fight, the player adds it with **Add Hoot** under **Join the fight** and rolls its initiative. Its row reads "Companion of Ivo".
+2. With Ivo in a running fight, Hoot joins it at once in a row of its own that reads "Companion of Ivo". Its player rolls its initiative. Out of a fight, it joins with **Add Hoot** under **Join the fight**, or with **Everyone here** when you start one.
 3. The owl lends the party its sight under party vision, so it can scout a dark room ahead of everyone.
 4. Ivo's next familiar picks the SRD Owl again. A pasted or typed block is kept under **Stat blocks** on Ivo's card.
 
