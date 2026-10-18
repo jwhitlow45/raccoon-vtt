@@ -43,6 +43,7 @@ import {
 } from "./logic.ts";
 import { EndTurnPill, Portrait, TimerClock, TURN_PILL_PX } from "./parts.tsx";
 import { RollAlerts } from "../rolls/RollAlerts.tsx";
+import { knownOrTyped } from "../rolls/card.ts";
 import { CARD_MIN_WIDTH } from "../rolls/logic.ts";
 import { bonusFor } from "#shared/dice/bonus.ts";
 import { creatureRolls } from "../dice/creature.ts";
@@ -51,7 +52,7 @@ import { presetFor } from "../dice/presets.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useActOnce, useRollBlocked } from "../dice/useRollOption.ts";
 import { alertCard as card } from "./alertCard.ts";
-import { CardButtons, CardChips, rollTrouble, useCardRoll, useCardSend } from "./CardRoll.tsx";
+import { CardBonus, CardButtons, CardChips, rollTrouble, useCardRoll, useCardSend, useTypedRoll } from "./CardRoll.tsx";
 import { RechargeCard, RechargeWait, rechargeAlertId, useRechargePrompts } from "./RechargeCard.tsx";
 import { SaveEndsCard, saveAlertId, usePendingSaves } from "./SaveEndsCard.tsx";
 import {
@@ -1224,7 +1225,10 @@ function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone(): void;
   const creatures = useMemo(() => [prompt.target], [prompt.target]);
   const { dice, failed } = useDiceView(creatures);
   const rolls = dice ? creatureRolls(dice, prompt.target) : null;
-  const bonus = rolls?.numbers ? bonusFor(rolls.numbers, CONCENTRATION_TEST) : null;
+  const [bonusText, setBonusText] = useState("");
+  const typed = knownOrTyped(rolls?.numbers ? bonusFor(rolls.numbers, CONCENTRATION_TEST) : null, bonusText, rolls !== null);
+  const { bonus } = typed;
+  const typedRoll = useTypedRoll(typed.typing, typed.waits, blocked);
   const preset = dice && rolls ? presetFor(dice, prompt.target, CONCENTRATION_TEST, { rolls }) : null;
   // Only the DM spends Legendary Resistance (actor.outcome is the DM's).
   const left = dm ? legendaryLeft(actor) : 0;
@@ -1251,12 +1255,13 @@ function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone(): void;
     else end();
   });
 
-  const model = concentrationCard({ dc: prompt.dc, bonus, loading: !failed && rolls === null, preset, legendaryLeft: left, failTapped, rolled: own.rolls[0]?.total ?? null });
+  const model = concentrationCard({ dc: prompt.dc, bonus, typed: typed.typing, loading: !failed && rolls === null, preset, legendaryLeft: left, failTapped, rolled: own.rolls[0]?.total ?? null });
   const trouble = rollTrouble(own.receipt, own.unsent);
   const tap = (action: ConcentrationAction) => {
     switch (action) {
       case "roll":
-        if (bonus !== null && preset) {
+        if (typedRoll.closed) typedRoll.open();
+        else if (bonus !== null && preset) {
           const state = room.getState().view;
           if (state) own.roll([cardRoll(prompt.target, bonus, preset, CONCENTRATION_TEST, chip)], concentrationRollTo(state, dm, prompt));
         }
@@ -1301,8 +1306,10 @@ function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone(): void;
         </div>
       ) : null}
       {model.rollNote ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{model.rollNote}</div> : null}
-      {model.buttons.some((b) => b.action === "roll") ? <CardChips chip={chip} onChange={setChip} name={name} /> : null}
-      <CardButtons buttons={model.buttons} busy={send.busy} rollBusy={own.waiting || model.rollLoading} blocked={blocked} onTap={tap} />
+      {model.buttons.some((b) => b.action === "roll") && !typedRoll.closed ? (
+        <CardChips chip={chip} onChange={setChip} name={name} bonus={typed.typing ? <CardBonus name={name} value={bonusText} error={typed.error} onChange={setBonusText} /> : null} />
+      ) : null}
+      <CardButtons buttons={model.buttons} busy={send.busy} rollBusy={own.waiting || model.rollLoading} blocked={typedRoll.blocked} rollOpens={typedRoll.closed} onTap={tap} />
     </section>
   );
 }

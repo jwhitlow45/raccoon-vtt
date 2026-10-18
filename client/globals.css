@@ -281,6 +281,21 @@ summary::-webkit-details-marker {
   }
 }
 
+/* A card's Roll d20 for a creature with no stat block
+   (features/encounter/CardRoll.tsx) shares its row with Passed and Failed,
+   which need about 230 px with both its words. Narrower, as on a 320 px
+   phone at 130%, it shows "d20" alone with 8 px each side, so the card
+   keeps the height it has without it and a short phone still shows three
+   checks. Its name stays "Roll d20". */
+@container (width < 240px) {
+  .rvtt-roll-word {
+    display: none;
+  }
+  .rvtt-roll-opens {
+    padding-inline: 8px !important;
+  }
+}
+
 /* The token window's resize handle shows the accent under a hovering mouse
    and while focused (canvas/TokenActionBar.tsx). It shows at rest too, so
    nothing depends on hover. Its inline muted color would otherwise win. */

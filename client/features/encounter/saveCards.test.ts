@@ -8,6 +8,7 @@ import type { ActorTarget, Op } from "#shared/protocol.ts";
 import { reminderPreset, type RollPreset } from "#shared/rules/rollReminders.ts";
 import { pendingSaves, type PendingSave } from "#shared/rules/saveEnds.ts";
 import { logSeq, remembered, rowTag } from "../dice/optionState.ts";
+import { BONUS_WORDS, knownOrTyped, TYPE_BONUS } from "../rolls/card.ts";
 import { actor, apply, AT, character, DM, effect, entry, P1, P2, room, token } from "#shared/testutil.ts";
 import {
   askSaveOp,
@@ -166,6 +167,17 @@ describe("save-ends cards", () => {
     assert.equal(loading.rollLoading, true);
     assert.deepEqual(actionsOf(saveCard(input(view, { bonus: null, loading: false }))), ["Passed", "Failed", "Dismiss"]);
   });
+
+  test("a creature with no stat block keeps its Roll, with a bonus typed on the card, never a +0 no one gave (owner's no-numbers rule)", () => {
+    const view = goblinRoom();
+    assert.deepEqual(knownOrTyped(null, "", false), { bonus: null, typing: false, waits: null, error: false }, "nothing typed while the block loads");
+    assert.deepEqual(knownOrTyped(null, "", true), { bonus: null, typing: true, waits: TYPE_BONUS, error: false });
+    assert.deepEqual(knownOrTyped(null, "+3", true), { bonus: 3, typing: true, waits: null, error: false });
+    assert.deepEqual(knownOrTyped(null, "x", true), { bonus: null, typing: true, waits: BONUS_WORDS, error: true });
+    assert.deepEqual(knownOrTyped(4, "+3", true), { bonus: 4, typing: false, waits: null, error: false }, "a known bonus wins");
+    assert.deepEqual(actionsOf(saveCard(input(view, { bonus: null, typed: true }))), ["Roll d20", "Passed", "Failed", "Dismiss"]);
+    assert.deepEqual(actionsOf(saveCard(input(view, { bonus: 3, typed: true }))), ["Roll d20+3", "Passed", "Failed", "Dismiss"]);
+  });
 });
 
 describe("a save-ends card for a creature a player plays", () => {
@@ -223,6 +235,7 @@ describe("a save-ends card for a creature a player plays", () => {
     assert.deepEqual(actionsOf(card), ["Roll +1", "Passed", "Failed", "Dismiss"]);
     assert.equal(card.status, "Bree is not on the players' scene, so no request can go.");
     assert.deepEqual(actionsOf(saveCard(input(view, { bonus: null }))), ["Passed", "Failed", "Dismiss"]);
+    assert.deepEqual(actionsOf(saveCard(input(breeRoom(), { bonus: null, typed: true }))), ["Ask Bree", "Roll d20", "Passed", "Failed", "Dismiss"], "with no stat block, Ask and a Roll with a typed bonus");
   });
 
   test("once asked: a waiting Roll that sends roll.dice unanswered, marks on the request, and closes that settle", () => {
@@ -235,6 +248,7 @@ describe("a save-ends card for a creature a player plays", () => {
     const preset: RollPreset = { sources: [{ kind: "adv", from: "magic-resistance" }], extra: ["+1d4"], notes: [] };
     assert.deepEqual(waitingRollOp(pending, preset, "dis", "tag1"), { t: "roll.dice", tag: "tag1", rollId: "r1", target: { tokenId: "b1" }, cancelled: true, extra: "1d4", unanswered: true });
     assert.deepEqual(waitingRollOp(pending, preset, "adv", "tag1"), { t: "roll.dice", tag: "tag1", rollId: "r1", target: { tokenId: "b1" }, mode: "adv", extra: "1d4", unanswered: true });
+    assert.deepEqual(waitingRollOp(pending, preset, null, "tag1", 3), { t: "roll.dice", tag: "tag1", rollId: "r1", target: { tokenId: "b1" }, mode: "adv", extra: "1d4", bonus: 3, unanswered: true }, "a bonus typed for a creature with no stat block goes with it");
     assert.deepEqual(passOp(pending, "tag2"), { t: "roll.answer", rollId: "r1", target: { tokenId: "b1" }, result: "pass", tag: "tag2" });
     // A DM's Fail mark leaves the request open, whatever Legendary Resistance is left.
     assert.deepEqual(failOp(pending, 0, "tag3"), { t: "roll.answer", rollId: "r1", target: { tokenId: "b1" }, result: "fail", tag: "tag3" });
@@ -303,6 +317,12 @@ describe("the concentration card", () => {
       card.buttons.map((b) => b.text),
       ["Passed", "Failed"],
     );
+  });
+
+  test("a creature with no stat block keeps its Roll, with a bonus typed on the card (owner's no-numbers rule)", () => {
+    assert.deepEqual(concentrationCard({ ...base, bonus: null }).buttons.map((b) => b.text), ["Passed", "Failed"]);
+    assert.deepEqual(concentrationCard({ ...base, bonus: null, typed: true }).buttons.map((b) => b.text), ["Passed", "Failed", "Roll d20"], "after the marks, which keep their row on a short phone");
+    assert.deepEqual(concentrationCard({ ...base, bonus: -1, typed: true }).buttons.map((b) => b.text), ["Passed", "Failed", "Roll d20-1"]);
   });
 
   test("a fail ends every concentrating effect", () => {

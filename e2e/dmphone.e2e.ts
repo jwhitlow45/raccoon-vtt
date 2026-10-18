@@ -646,6 +646,52 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await check.getByRole("button", { name: "Passed", exact: true }).tap();
     await ops.send({ t: "encounter.end" });
   });
+
+  test("13. a check for a creature with no stat block: Roll d20 shares the row with Passed and Failed, and its tap opens a bonus field beside Adv and Dis that the roll then takes", async () => {
+    // At 320 px and 130% the row keeps "d20" alone, so the card keeps the height it has without it (globals.css, rvtt-roll-word).
+    for (const view of [
+      { width: 320, height: 480, scale: 1.3, words: "d20" },
+      { width: 390, height: 844, scale: 1, words: "Roll d20" },
+    ]) {
+      const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+      await setUp(view);
+      await hurtHag();
+      const check = dm.locator('[data-alert="concentration"]').first();
+      await check.waitFor();
+      const roll = check.getByRole("button", { name: "Roll d20", exact: true });
+      assert.equal((await roll.innerText()).trim(), view.words, `${label}: Roll d20's words`);
+      assert.equal(await roll.getAttribute("aria-expanded"), "false", `${label}: Roll d20 does not say it opens a field`);
+      const passed = await rectOf(check.getByRole("button", { name: "Passed", exact: true }));
+      assert.ok(Math.abs((await rectOf(roll)).top - passed.top) < 1, `${label}: Roll d20 wrapped under Passed`);
+      assert.equal(await check.getByRole("textbox").count(), 0, `${label}: the bonus field shows before Roll d20's tap`);
+      await shots.take(dm, `dmphone-check-roll-d20-${view.width}`);
+      if (view.width === 320) {
+        await check.getByRole("button", { name: "Passed", exact: true }).tap();
+        await check.waitFor({ state: "detached" });
+        continue;
+      }
+      await roll.tap();
+      const bonus = check.getByRole("textbox", { name: "Bonus for Hag", exact: true });
+      await bonus.waitFor();
+      assert.equal(await bonus.evaluate((el) => el === (el.ownerDocument as unknown as { activeElement: unknown }).activeElement), true, `${label}: the bonus field did not take focus`);
+      await check.getByRole("button", { name: "Advantage", exact: true }).waitFor();
+      const before = (dmSocket.state?.log ?? []).length;
+      await bonus.fill("3");
+      await shots.take(dm, "dmphone-check-bonus-typed");
+      await check.getByRole("button", { name: "Roll d20+3", exact: true }).tap();
+      const rolled = await waitFor(`${label}: the hag's roll`, () => {
+        for (const e of (dmSocket.state?.log ?? []).slice(before)) {
+          const data = e.data as { type?: string; rolls?: { faces: number[]; total: number }[] } | undefined;
+          const r = data?.type === "dice" ? data.rolls?.[0] : undefined;
+          if (r) return r;
+        }
+        return null;
+      });
+      assert.deepEqual([rolled.faces.length, rolled.total - rolled.faces[0]!], [1, 3], `${label}: the roll did not take the bonus typed: ${JSON.stringify(rolled)}`);
+      // The card goes as its roll decides it, leaving the notice that says how.
+      await dm.getByText(`Hag rolled ${rolled.total}:`).first().waitFor();
+    }
+  });
 });
 
 function goblin() {

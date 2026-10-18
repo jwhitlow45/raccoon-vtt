@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import type { ClientOp } from "#shared/protocol.ts";
 import { Button, type ButtonVariant } from "../../components/Button.tsx";
 import { Chip } from "../../components/Chip.tsx";
+import { Input } from "../../components/Field.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomStore } from "../../state/view.ts";
 import { logSeq, remembered, useOptionStore } from "../dice/optionState.ts";
@@ -56,8 +57,45 @@ export function rollTrouble(receipt: ReceiptState | null, unsent: boolean): stri
   return null;
 }
 
-/** The card's own Adv and Dis, one more source each for its roll, never the panel's. */
-export function CardChips(props: { chip: CardChip; onChange(chip: CardChip): void; name: string }) {
+/**
+ * The bonus a card's Roll takes for a creature with no stat block
+ * (client/features/rolls/card.ts knownOrTyped), beside Adv and Dis as on a
+ * request's card. It shows once the DM taps Roll d20 (useTypedRoll), and
+ * takes focus then, so a card that may never be rolled keeps its height.
+ */
+export function CardBonus(props: { name: string; value: string; error: boolean; onChange(text: string): void }) {
+  return (
+    <Input
+      // Mounted by the DM's tap on Roll d20, so the focus follows that tap.
+      autoFocus
+      aria-label={`Bonus for ${props.name}`}
+      value={props.value}
+      placeholder="+0"
+      enterKeyHint="done"
+      autoComplete="off"
+      maxLength={3}
+      error={props.error}
+      onChange={(e) => props.onChange(e.target.value)}
+      style={{ width: 64, flex: "none", textAlign: "center" }}
+    />
+  );
+}
+
+/**
+ * A card's Roll for a creature with no stat block (the project owner's
+ * no-numbers rule): Roll d20 first opens the bonus field beside Adv and Dis,
+ * and only then rolls, by the bonus typed. Until that tap the card holds
+ * the rows it has for a creature whose bonus is known, so three checks and
+ * a request still fit above a sheet on a short phone.
+ */
+export function useTypedRoll(typing: boolean, waits: string | null, blocked: string | null): { closed: boolean; open(): void; blocked: string | null } {
+  const [open, setOpen] = useState(false);
+  const closed = typing && !open;
+  return { closed, open: () => setOpen(true), blocked: closed ? blocked : (blocked ?? waits) };
+}
+
+/** The card's own Adv and Dis, one more source each for its roll, never the panel's, and the bonus field where one is typed. */
+export function CardChips(props: { chip: CardChip; onChange(chip: CardChip): void; name: string; bonus?: ReactNode }) {
   return (
     <div role="group" aria-label={`For ${props.name}'s roll`} style={{ display: "flex", gap: theme.space(1), flexWrap: "wrap" }}>
       <Chip pressed={props.chip === "adv"} aria-label="Advantage" onClick={() => props.onChange(pressChip(props.chip, "adv"))}>
@@ -66,6 +104,7 @@ export function CardChips(props: { chip: CardChip; onChange(chip: CardChip): voi
       <Chip pressed={props.chip === "dis"} aria-label="Disadvantage" onClick={() => props.onChange(pressChip(props.chip, "dis"))}>
         Dis
       </Chip>
+      {props.bonus}
     </div>
   );
 }
@@ -116,25 +155,40 @@ export function CardButtons<A extends string>(props: {
   busy: A | null;
   rollBusy: boolean;
   blocked: string | null;
+  /** Roll opens the bonus field first, as a disclosure (useTypedRoll). */
+  rollOpens?: boolean;
   onTap(action: A): void;
 }) {
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+    // The row is a size container, so a narrow one can shorten Roll d20's words (globals.css, rvtt-roll-word).
+    <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2), containerType: "inline-size" }}>
       {props.buttons.map((b, i): ReactNode => {
         const roll = b.action === "roll";
         const variant: ButtonVariant = i === 0 && PRIMARY.has(b.action) ? "primary" : DANGER.has(b.action) ? "danger" : "secondary";
+        const opens = roll && props.rollOpens === true;
         return (
           <Button
             key={b.action}
             size="sm"
             variant={variant}
             busy={roll ? props.rollBusy : props.busy === b.action}
+            expanded={opens ? false : undefined}
             disabled={roll && props.blocked !== null}
             title={roll && props.blocked !== null ? props.blocked : undefined}
+            aria-label={opens ? b.text : undefined}
+            className={opens ? "rvtt-roll-opens" : undefined}
             onClick={() => props.onTap(b.action)}
             style={{ flex: "1 1 auto" }}
           >
-            {b.text}
+            {opens && b.text.startsWith("Roll ") ? (
+              // One run of text, so the button's flex box never splits the words into two items.
+              <span>
+                <span className="rvtt-roll-word">Roll </span>
+                {b.text.slice("Roll ".length)}
+              </span>
+            ) : (
+              b.text
+            )}
           </Button>
         );
       })}

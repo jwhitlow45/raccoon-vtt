@@ -153,8 +153,8 @@ The Builder tool is the DM's. Its modes:
 - A token's action bar has a quick Conditions grid, each condition named under its icon.
 - A status can carry a counter, such as rounds or charges left, that a tap counts up or down.
 - Durations: a number of rounds, or until the start or end of a chosen creature's turn. They count down with initiative, and everyone is told when one ends.
-- A concentrating creature that takes damage gets a prompt with the DC (the higher of 10 and half the damage, at most 30). Its player reports pass or fail, or taps Roll.
-- A condition can end on a save at the end of each of its turns. The DM's reminder rolls it, or asks a player, whose passing answer ends it. A failed one stays open for a corrected total or an allowed reroll. Players see which save ends it, never its DC.
+- A concentrating creature that takes damage gets a prompt with the DC (the higher of 10 and half the damage, at most 30). Its player reports pass or fail, or taps Roll. For a creature with no stat block, Roll d20 opens a bonus field on the card, beside Adv and Dis, and rolls with the bonus typed there.
+- A condition can end on a save at the end of each of its turns. The DM's reminder rolls it, for a creature with no stat block by Roll d20 and a bonus typed on the card, or asks a player, whose passing answer ends it. A failed one stays open for a corrected total or an allowed reroll. Players see which save ends it, never its DC.
 - The DM can hide a condition from players, the creature's owner included. The log hides it too.
 
 ## Height and elevation

@@ -10,8 +10,9 @@ import { presetFor } from "../dice/presets.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useActOnce, useRollBlocked } from "../dice/useRollOption.ts";
 import { alertCard } from "./alertCard.ts";
-import { CardButtons, CardChips, rollTrouble, useCardRoll, useCardSend } from "./CardRoll.tsx";
+import { CardBonus, CardButtons, CardChips, rollTrouble, useCardRoll, useCardSend, useTypedRoll } from "./CardRoll.tsx";
 import { AskRow } from "../rolls/AskRow.tsx";
+import { knownOrTyped } from "../rolls/card.ts";
 import {
   askSaveOp,
   cardRoll,
@@ -70,7 +71,10 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
   const { dice, failed } = useDiceView(creatures);
   const rolls = dice ? creatureRolls(dice, pending.target) : null;
   const loading = !failed && rolls === null;
-  const bonus = rolls?.numbers ? bonusFor(rolls.numbers, test) : null;
+  const [bonusText, setBonusText] = useState("");
+  const typed = knownOrTyped(rolls?.numbers ? bonusFor(rolls.numbers, test) : null, bonusText, rolls !== null);
+  const { bonus } = typed;
+  const typedRoll = useTypedRoll(typed.typing, typed.waits, blocked);
   // Whether it has Magic Resistance comes with its block, so the preset waits for creatureRolls (presets.ts).
   const preset = dice && rolls ? presetFor(dice, pending.target, test, { rolls }) : null;
   const [chip, setChip] = useState<CardChip>(null);
@@ -101,7 +105,7 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
   if (!view) return null;
   const facts = saveFacts(view, pending.target);
   const rolled = !pending.request && card.rolls[0] ? card.rolls[0].total : null;
-  const model = saveCard({ pending, facts, bonus, loading, preset, failTapped, rolled });
+  const model = saveCard({ pending, facts, bonus, typed: typed.typing, loading, preset, failTapped, rolled });
   const trouble = error ?? rollTrouble(card.receipt, card.unsent);
   const rolling = model.buttons.some((b) => b.action === "roll");
 
@@ -115,9 +119,13 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
         return;
       }
       case "roll": {
+        if (typedRoll.closed) {
+          typedRoll.open();
+          return;
+        }
         if (bonus === null || !preset) return;
         if (pending.request) {
-          const op = waitingRollOp(pending, preset, chip, actions.newId());
+          const op = waitingRollOp(pending, preset, chip, actions.newId(), typed.typing ? bonus : undefined);
           if (op) card.send(op);
         } else card.roll([cardRoll(pending.target, bonus, preset, test, chip)], saveEndsRollTo(view, pending));
         return;
@@ -169,12 +177,20 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
       ) : null}
       {failed ? <SrdLoadFailed what="The save bonus" inline /> : null}
       {model.rollNote ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{model.rollNote}</div> : null}
-      {rolling ? <CardChips chip={chip} onChange={setChip} name={facts.name} /> : null}
+      {rolling && !typedRoll.closed ? (
+        <CardChips
+          chip={chip}
+          onChange={setChip}
+          name={facts.name}
+          bonus={typed.typing ? <CardBonus name={facts.name} value={bonusText} error={typed.error} onChange={setBonusText} /> : null}
+        />
+      ) : null}
       <CardButtons
         buttons={model.buttons}
         busy={send.busy}
         rollBusy={card.waiting || model.rollLoading}
-        blocked={blocked}
+        blocked={typedRoll.blocked}
+        rollOpens={typedRoll.closed}
         onTap={tap}
       />
     </section>

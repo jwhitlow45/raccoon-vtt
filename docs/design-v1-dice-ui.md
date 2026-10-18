@@ -177,6 +177,7 @@ The SRD's own Markdown, unchanged as stored. Every block, the SRD's 330 and the 
 - **The request card** (`p-request-save-player-01`) keeps its layout: the reminders, Roll with Adv and Dis, the typed total and Send. Its gaps take 3.1's steps.
 - **The DM's live card and the save-ends card**: while a save-ends card holds a request (its reroll asked of the player, or the player's reroll waiting for Allow or Keep), the request's live card folds to its one-line summary, and its fold opens it on a tap. Allow and Keep show once, on the save-ends card. Once the save-ends card lets go, the live card is drawn as it was. Decided in 12.3.
 - **Concentration and recharge cards**: their results stay in place (4.1). Their buttons keep their words (icons doc 3.1 rule 4).
+- **A creature with no stat block** (the project owner's no-numbers rule, `knownOrTyped` in `features/rolls/card.ts`): its concentration and save-ends cards keep Roll, as "Roll d20", on a concentration card after Passed and Failed. Its tap opens a bonus field beside Adv and Dis and puts focus there. The button then reads "Roll d20+3" for the bonus typed, and rolls by it. Until that tap the card has no row it lacked without Roll, so three checks and a request still dock above a 120 px sheet on a 320 px phone at 130%. Where its row is under 240 px wide, Roll d20 shows "d20" alone with 8 px each side, and keeps its name.
 - **Toasts and log lines of rolls** keep their words (`rollToastText`, `describeEvent`): they are read, not tapped.
 
 ## 8. Edge cases

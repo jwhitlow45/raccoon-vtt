@@ -48,9 +48,16 @@ export function cardRoll(creature: ActorTarget, bonus: number, preset: RollPrese
   return { ...roll, sources: [...(roll.sources ?? []), ...chipSources(chip)] };
 }
 
-/** "Roll +1", the words of every card's Roll. */
-export function rollText(bonus: number): string {
-  return `Roll ${signedText(bonus)}`;
+/** "Roll +1", the words of every card's Roll, and "Roll d20+1" for a bonus typed on the card. */
+export function rollText(bonus: number, typed = false): string {
+  return typed ? `Roll d20${signedText(bonus)}` : `Roll ${signedText(bonus)}`;
+}
+
+
+/** A card's Roll as it reads: "Roll +3", "Roll d20" until a bonus is typed, then "Roll d20+3", and "Roll" while its block loads. */
+function rollWords(input: { bonus: number | null; typed?: boolean }): string {
+  if (input.bonus !== null) return rollText(input.bonus, input.typed === true);
+  return input.typed ? "Roll d20" : "Roll";
 }
 
 /** "Use Legendary Resistance (2 left)". */
@@ -114,8 +121,10 @@ export type CardButton<A extends string> = { action: A; text: string };
 export type SaveCardInput = {
   pending: PendingSave;
   facts: SaveFacts;
-  /** The save's bonus, null where none is known. */
+  /** The save's bonus, null where none is known or typed. */
   bonus: number | null;
+  /** The bonus is typed on the card, since the creature has no stat block (client/features/rolls/card.ts knownOrTyped). */
+  typed?: boolean;
   /** The creature's block is still loading, so neither its bonus nor its Magic Resistance is known yet. */
   loading: boolean;
   preset: RollPreset | null;
@@ -194,8 +203,8 @@ export function saveCard(input: SaveCardInput): SaveCardModel {
     { action: "fail", text: "Failed" },
     { action: "dismiss", text: "Dismiss" },
   ];
-  const canRoll = !fails && (input.loading || (input.bonus !== null && preset !== null));
-  const roll: CardButton<SaveAction>[] = canRoll ? [{ action: "roll", text: input.bonus !== null ? rollText(input.bonus) : "Roll" }] : [];
+  const canRoll = !fails && (input.loading || ((input.bonus !== null || input.typed === true) && preset !== null));
+  const roll: CardButton<SaveAction>[] = canRoll ? [{ action: "roll", text: rollWords(input) }] : [];
   const rollNote = canRoll && preset ? presetLine(preset) || null : null;
   const base = { ...words, rollLoading: canRoll && input.loading };
 
@@ -298,7 +307,7 @@ export function askSaveOp(pending: PendingSave, id: string, open: number): AskCh
 }
 
 /** The DM's Roll on a creature the request still waits on: `roll.dice` with `unanswered`, so it never replaces an answer. */
-export function waitingRollOp(pending: PendingSave, preset: RollPreset, chip: CardChip, tag: string): Extract<ClientOp, { t: "roll.dice" }> | null {
+export function waitingRollOp(pending: PendingSave, preset: RollPreset, chip: CardChip, tag: string, typedBonus?: number): Extract<ClientOp, { t: "roll.dice" }> | null {
   const target = pending.request?.targets[0];
   if (!pending.request || !target) return null;
   const extra = preset.extra.join("").replace(/^\+/, "");
@@ -309,6 +318,7 @@ export function waitingRollOp(pending: PendingSave, preset: RollPreset, chip: Ca
     target: targetRef(target),
     ...advantageFields([...preset.sources, ...chipSources(chip)]),
     ...(extra ? { extra } : {}),
+    ...(typedBonus !== undefined ? { bonus: typedBonus } : {}),
     unanswered: true,
   };
 }
@@ -346,6 +356,8 @@ export type ConcentrationInput = {
   /** Missing when the viewer may not see the creature's exact HP. */
   dc: number | undefined;
   bonus: number | null;
+  /** The bonus is typed on the card, since the creature has no stat block (client/features/rolls/card.ts knownOrTyped). */
+  typed?: boolean;
   loading: boolean;
   preset: RollPreset | null;
   /** Legendary Resistance uses left, which only the DM spends. */
@@ -388,12 +400,13 @@ export function concentrationCard(input: ConcentrationInput): ConcentrationModel
     return { ...none, status: `Rolled ${input.rolled}: a fail.`, buttons: resist, decided: "fail" };
   }
   if (input.failTapped && input.legendaryLeft > 0) return { ...none, status: "Failed.", buttons: resist, decided: null };
-  const canRoll = input.loading || (input.bonus !== null && input.preset !== null);
-  const roll: CardButton<ConcentrationAction>[] = canRoll ? [{ action: "roll", text: input.bonus !== null ? rollText(input.bonus) : "Roll" }] : [];
+  const canRoll = input.loading || ((input.bonus !== null || input.typed === true) && input.preset !== null);
+  const roll: CardButton<ConcentrationAction>[] = canRoll ? [{ action: "roll", text: rollWords(input) }] : [];
   return {
     status: null,
     rollNote: canRoll && input.preset ? presetLine(input.preset) || null : null,
-    buttons: [...roll, ...marks],
+    // A typed bonus's Roll comes after Passed and Failed, which keep the row they had before it, so a short phone still reaches both at once.
+    buttons: input.typed ? [...marks, ...roll] : [...roll, ...marks],
     rollLoading: canRoll && input.loading,
     decided: null,
   };
