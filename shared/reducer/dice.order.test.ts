@@ -120,7 +120,7 @@ describe("initiative rolls under the order setting (docs/design-v1-combat-flow.m
       state = run(state, initiative([{ tokenId: "gob" }], to));
       assert.equal(diceFor(state, DM)!.rolls[0]!.hidden, true);
       // Its own player keeps it, as any roll the DM makes for their creature: in full, or as a secret one's bare line.
-      if (to === "all") assert.equal(diceFor(state, P2)!.rolls[0]!.total, 14);
+      if (to === "all") assert.deepEqual([diceFor(state, P2)!.rolls[0]!.total, diceFor(state, P2)!.rolls[0]!.hidden], [14, undefined], "the mark is the DM's");
       else assert.deepEqual(diceFor(state, P2), { type: "dice", by: "dm1", to: "dm", rolls: [] });
       assert.equal(diceFor(state, P1), null, `${to}: another player gets no total and no bare line`);
     }

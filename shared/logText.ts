@@ -219,8 +219,11 @@ export function diceLineText(data: DiceEvent, names: LogNames): string {
   if (data.rolls.length === 0) return `${who} rolled in secret.`;
   const secret = data.to === "dm" ? " (secret)" : "";
   const one = (roll: DiceRoll) => `${rollSubject(roll, names)}${diceText(roll)}${rollVerdict(roll, data)}`;
-  if (data.rolls.length === 1) return `${who} rolled ${one(data.rolls[0]!)}${secret}.`;
-  return [`${who} rolled ${data.rolls.length} times${secret}:`, ...data.rolls.map((roll) => `${one(roll)}.`)].join("\n");
+  // Only the DM's copy keeps the mark of an initiative roll kept from players (docs/design-v1-combat-flow.md 11.3).
+  const kept = (roll: DiceRoll) => (roll.hidden ? " (hidden from players)" : "");
+  const only = data.rolls.length === 1 ? data.rolls[0]! : null;
+  if (only) return `${who} rolled ${one(only)}${only.hidden ? ` (${data.to === "dm" ? "secret, " : ""}hidden from players)` : secret}.`;
+  return [`${who} rolled ${data.rolls.length} times${secret}:`, ...data.rolls.map((roll) => `${one(roll)}${kept(roll)}.`)].join("\n");
 }
 
 /** "Dexterity saves" for "Dexterity save": the labels doc 3 writes for a roll of one kind. Others read "Longsword 6 times". */

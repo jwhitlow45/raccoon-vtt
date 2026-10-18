@@ -139,3 +139,17 @@ describe("a rolled answer's line (5.5)", () => {
     assert.equal(describeEvent(owl({ total: 15, result: "pass", dice: { formula: "1d20+3+1d8", faces: [9, 3], total: 15 }, changed: change("bardic-inspiration", 8) }), names), "Owl added Bardic Inspiration's 1d8: 3, now 15 on a Dexterity saving throw against DC 13: pass.");
   });
 });
+
+describe("an initiative roll kept from players, in the DM's log (B7B-P-5, docs/design-v1-combat-flow.md 11.3)", () => {
+  const init = (total: number, extra: Partial<DiceRoll> = {}): DiceRoll => ({ formula: "1d20+2", faces: [total - 2], total, label: "Initiative", tokenId: "g1", initiative: true, ...extra });
+
+  test("says hidden from players on each roll kept from them, and nothing on the others", () => {
+    assert.equal(diceLineText(line([init(14, { hidden: true })], { by: "mara" }), names), "Mara rolled for Goblin 1, Initiative: 1d20+2 (12) = 14 (hidden from players).");
+    assert.equal(diceLineText(line([init(14, { hidden: true })], { by: "mara", to: "dm" }), names), "Mara rolled for Goblin 1, Initiative: 1d20+2 (12) = 14 (secret, hidden from players).");
+    assert.equal(
+      diceLineText(line([init(14, { tokenId: "thorn" }), init(9, { hidden: true })], { by: "mara" }), names),
+      ["Mara rolled 2 times:", "for Thorn, Initiative: 1d20+2 (12) = 14.", "for Goblin 1, Initiative: 1d20+2 (7) = 9 (hidden from players)."].join("\n"),
+    );
+    assert.equal(diceLineText(line([init(14)], { by: "mara" }), names), "Mara rolled for Goblin 1, Initiative: 1d20+2 (12) = 14.");
+  });
+});

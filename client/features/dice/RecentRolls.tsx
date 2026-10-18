@@ -102,6 +102,8 @@ function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; na
       {what ? <span style={{ fontSize: theme.font.body14, overflowWrap: "anywhere" }}>{what}</span> : null}
       <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{formula}</span>
       <DiceFaces result={roll} />
+      {/* Only the DM's copy keeps the mark of an initiative roll kept from players (docs/design-v1-combat-flow.md 11.3). */}
+      {roll.hidden ? <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>Hidden from players</span> : null}
       {verdict ? <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>{verdict}</span> : null}
       {props.end ? <span style={{ marginLeft: "auto", display: "inline-flex" }}>{props.end}</span> : null}
     </div>

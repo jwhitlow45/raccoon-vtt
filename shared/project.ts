@@ -1418,7 +1418,14 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
  */
 function projectDiceCtx(ctx: Ctx, data: Extract<LogEvent, { type: "dice" }>): LogEvent | null {
   if (!ctx.state.members[ctx.viewer.memberId]) return null;
-  const rolls = data.rolls.filter((roll) => (!roll.hidden || ownsRollCreature(ctx, roll)) && (roll.tokenId === undefined || holderOfEvent(ctx, roll) !== null));
+  const rolls = data.rolls
+    .filter((roll) => (!roll.hidden || ownsRollCreature(ctx, roll)) && (roll.tokenId === undefined || holderOfEvent(ctx, roll) !== null))
+    // The mark is the DM's, so the DM's log alone says the roll was kept from players.
+    .map((roll) => {
+      if (!roll.hidden) return roll;
+      const { hidden: _hidden, ...rest } = roll;
+      return rest;
+    });
   if (rolls.length === 0) return null;
   const mine = data.by === ctx.viewer.memberId;
   if (data.to === "dm" && !mine) return { type: "dice", by: data.by, to: "dm", rolls: [] };
