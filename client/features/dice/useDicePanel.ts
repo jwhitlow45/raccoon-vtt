@@ -41,6 +41,15 @@ export type LastRoll =
   /** A roll that never went: its formula did not split, or the socket was not open. */
   | { error: string; at: number };
 
+/**
+ * What Again sends for the newest roll, or null where it has none: a
+ * refusal before sending, and an answer or a death save, which cannot go
+ * again as it went (LP7-DICE-10).
+ */
+export function againOf(last: LastRoll | null): Extract<LastRoll, { rolls: DiceRollInput[] }> | null {
+  return last !== null && "rolls" in last ? last : null;
+}
+
 export type DiceState = {
   adv: boolean;
   dis: boolean;

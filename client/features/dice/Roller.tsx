@@ -13,7 +13,7 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { readHistory, readingOf, rollsOf, stepHistory, withHistory, writeHistory } from "./logic.ts";
 import { DiceFaces, rollVerdict } from "./RecentRolls.tsx";
-import { useDicePanel, useLastRoll } from "./useDicePanel.ts";
+import { againOf, useDicePanel, useLastRoll } from "./useDicePanel.ts";
 import { useRollBlocked } from "./useRollOption.ts";
 import { useReceipt } from "./useReceipt.ts";
 
@@ -94,8 +94,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
       </button>
     );
   }
-  // An answer or a death save cannot go again as it went, so its line has no Again (LP7-DICE-10).
-  const again = "rolls" in last && !waiting ? last : null;
+  const again = waiting ? null : againOf(last);
   return (
     <div
       data-dice-last=""

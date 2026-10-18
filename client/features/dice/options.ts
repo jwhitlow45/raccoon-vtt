@@ -500,6 +500,22 @@ export function presetTag(preset: RollPreset): string {
   return parts.join(" ");
 }
 
+/**
+ * The tag parts every preset of a group carries ("+1d4" for a Blessed
+ * creature's six saves), said once in the group's label and left off its
+ * buttons (docs/design-v1-dice-ui.md 4.3). One preset without a part keeps
+ * it on every button that has it.
+ */
+export function commonTags(presets: readonly RollPreset[]): string[] {
+  const parts = presets.map((p) => presetTag(p).split(" ").filter(Boolean));
+  return (parts[0] ?? []).filter((part) => parts.every((p) => p.includes(part)));
+}
+
+/** A group's label note: every effect that bears on its rolls, each said once ("Blessed: +1d4. Restrained: Dis"). */
+export function groupNote(presets: readonly RollPreset[]): string {
+  return [...new Set(presets.flatMap((p) => presetLine(p).split(". ")).filter(Boolean))].join(". ");
+}
+
 const SAVE_SHORT: Record<string, string> = { str: "Str", dex: "Dex", con: "Con", int: "Int", wis: "Wis", cha: "Cha" };
 
 /**

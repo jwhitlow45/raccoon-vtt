@@ -11,7 +11,7 @@ import type { ReceiptLookup } from "../../lib/api.ts";
 import { createRoomStore, OP_ANSWER_MS } from "../../state/store.ts";
 import { FakeClock } from "../../state/testing.ts";
 import type { RollSender } from "./send.ts";
-import { createDicePanel, type DiceState } from "./useDicePanel.ts";
+import { againOf, createDicePanel, type DiceState } from "./useDicePanel.ts";
 import { findRolls } from "./logic.ts";
 import { ReceiptTracker } from "./useReceipt.ts";
 
@@ -306,5 +306,32 @@ describe("a roll that cannot go (docs/design-v1-dice.md 4.5 and 11)", () => {
     assert.equal((sent[0] as OpOf<"dice.roll">).to, "all", "a DM's free formula starts in the open");
     assert.notEqual(panel.roll([{ formula: "1d20+4", creature: { tokenId: "goblin" } }]), null);
     assert.equal((sent[1] as OpOf<"dice.roll">).to, "dm", "a DM's roll for a monster starts secret");
+  });
+});
+
+describe("an answer or a death save in the header line (LP7-DICE-10, docs/design-v1-dice-ui.md 4.1)", () => {
+  function panel() {
+    const choices = createStore<DiceState>(() => ({ adv: false, dis: false, secret: null, version: 0, last: null }));
+    const sender: RollSender = { dispatch: () => 1, connected: () => true, receipts: new ReceiptTracker() };
+    return { choices, panel: createDicePanel({ store: choices, sender, secretStart: () => false }) };
+  }
+
+  test("noted sets the line with no Again, a later roll replaces it, and Again is never offered for it", () => {
+    const { choices, panel: p } = panel();
+    p.noted("tag-answer", "Dexterity save");
+    assert.deepEqual(choices.getState().last, { tag: "tag-answer", once: true, label: "Dexterity save" });
+    assert.equal(againOf(choices.getState().last), null, "an answer cannot go again as it went");
+    const tag = p.roll([{ formula: "1d20+3", label: "Longsword" }]);
+    assert.notEqual(tag, null);
+    const last = choices.getState().last;
+    assert.ok(last && "rolls" in last && last.tag === tag, "the free roll is the newest line");
+    assert.equal(againOf(last)?.rolls[0]?.formula, "1d20+3");
+    p.noted("tag-death", "Death save");
+    assert.equal(againOf(choices.getState().last), null, "a death save after it takes the line, with no Again");
+  });
+
+  test("a refusal before sending has no Again either", () => {
+    assert.equal(againOf({ error: "Rolling needs a connection.", at: 0 }), null);
+    assert.equal(againOf(null), null);
   });
 });

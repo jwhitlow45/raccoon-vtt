@@ -29,8 +29,10 @@ import {
   creatureKey,
   critical,
   CRIT_WORDS,
+  commonTags,
   cutLabel,
   damageRolls,
+  groupNote,
   initiativeRow,
   namedRoll,
   noNumbersNote,
@@ -161,7 +163,8 @@ type Ctx = {
   blocked: string | null;
 };
 
-function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creature: ActorTarget; tokenId: string | undefined; name: string }) {
+/** Exported for its render test. */
+export function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creature: ActorTarget; tokenId: string | undefined; name: string }) {
   const { dice, rolls, creature } = props;
   const state = dice.view;
   const dm = dice.you.role === "dm";
@@ -183,17 +186,12 @@ function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creature: Ac
 
   // The effects that bear on a group's rolls, named once in its label rather than under each of its buttons.
   const presetOf = (test: D20Test) => presetFor(dice, creature, test, { rolls });
-  const groupNote = (tests: readonly D20Test[]) => [...new Set(tests.flatMap((t) => presetLine(presetOf(t)).split(". ")).filter(Boolean))].join(". ");
-  // A tag every button of a group would wear is said once, in the group's label, and left off the buttons (docs/design-v1-dice-ui.md 4.3).
-  const common = (tests: readonly D20Test[]) => {
-    const parts = tests.map((t) => presetTag(presetOf(t)).split(" ").filter(Boolean));
-    return (parts[0] ?? []).filter((part) => parts.every((p) => p.includes(part)));
-  };
+  const noteOf = (tests: readonly D20Test[]) => groupNote(tests.map(presetOf));
   const asks = ctx.ask ? `asks ${props.name}` : "";
   const saveTests = ABILITY_KEYS.map((a): D20Test => ({ kind: "save", ability: a }));
   const checkTests = ABILITY_KEYS.map((a): D20Test => ({ kind: "check", ability: a }));
-  const saveCommon = common(saveTests);
-  const checkCommon = common(checkTests);
+  const saveCommon = commonTags(saveTests.map(presetOf));
+  const checkCommon = commonTags(checkTests.map(presetOf));
   const attackNote = presetLine(presetOf({ kind: "attack" }));
   const spellNote = presetLine(presetOf({ kind: "attack", spell: true }));
 
@@ -208,12 +206,12 @@ function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creature: Ac
       {actor?.life === "dying" ? <DeathSaveCell ctx={ctx} bonus={rolls.initBonus === null ? null : (numbers?.deathSave ?? 0)} /> : null}
       {numbers ? (
         <>
-          <Grid label="Saves" note={[asks, groupNote(saveTests)].filter(Boolean).join(". ")}>
+          <Grid label="Saves" note={[asks, noteOf(saveTests)].filter(Boolean).join(". ")}>
             {ABILITY_KEYS.map((a) => (
               <D20Cell key={a} ctx={ctx} test={{ kind: "save", ability: a }} bonus={numbers.abilities[a].save} text={`${ABILITY_SHORT[a]} ${signedText(numbers.abilities[a].save)}`} common={saveCommon} />
             ))}
           </Grid>
-          <Grid label="Checks" note={[asks, groupNote(checkTests)].filter(Boolean).join(". ")}>
+          <Grid label="Checks" note={[asks, noteOf(checkTests)].filter(Boolean).join(". ")}>
             {ABILITY_KEYS.map((a) => {
               const bonus = bonusFor(numbers, { kind: "check", ability: a }) ?? 0;
               return <D20Cell key={a} ctx={ctx} test={{ kind: "check", ability: a }} bonus={bonus} text={`${ABILITY_SHORT[a]} ${signedText(bonus)}`} common={checkCommon} />;

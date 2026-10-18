@@ -11,7 +11,7 @@ import { ReceiptTracker } from "./useReceipt.ts";
 import { watchInitiative, type InitiativeEnv } from "./useRollOption.ts";
 import { TYPE_BONUS, BONUS_WORDS, parseBonus } from "../rolls/card.ts";
 import { creatureRolls } from "./creature.ts";
-import { asInitiative, asSave, creatureKey, CRIT_WORDS, critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, noNumbersNote, playerCreatures, presetLine, resultWords, routedTest, routeOf, scoreOf, spendOnStart, testLabel, typedTap, typedText, withExtra, withUsed } from "./options.ts";
+import { asInitiative, asSave, commonTags, creatureKey, CRIT_WORDS, critical, cutLabel, d20Roll, damageRolls, groupNote, initiativeOp, initiativeRow, noNumbersNote, playerCreatures, presetLine, resultWords, routedTest, routeOf, scoreOf, spendOnStart, testLabel, typedTap, typedText, withExtra, withUsed } from "./options.ts";
 
 /** The roll options' rules (docs/design-v1-roll-options.md 4.2 and 4.3). */
 
@@ -303,5 +303,30 @@ describe("a player's creatures", () => {
     const picks = playerCreatures(view, "p1", view.tokens.breeTok!.sceneId, (t) => t.name);
     assert.deepEqual(picks.map((p) => [p.key, p.creature]), [["c:bree", { characterId: "bree" }], ["c:sage", { tokenId: "sageTok" }]]);
     assert.equal(picks[1]!.key, creatureKey(view, { tokenId: "sageTok" }), "the key a selection of it reads");
+  });
+});
+
+describe("a group's shared tags, said once in its label (docs/design-v1-dice-ui.md 4.3)", () => {
+  const blessed = { sources: [], extra: ["+1d4"], extraFrom: ["blessed"], notes: [] };
+  const restrainedDex = { sources: [{ kind: "dis" as const, from: "restrained" }], extra: ["+1d4"], extraFrom: ["blessed"], notes: [] };
+  const plain = { sources: [], extra: [], notes: [] };
+
+  test("Bless alone: every save carries +1d4, so the label says it and no button does", () => {
+    const six = Array.from({ length: 6 }, () => blessed);
+    assert.deepEqual(commonTags(six), ["+1d4"]);
+    assert.equal(groupNote(six), "+1d4: Blessed", "the effect named once, not six times");
+  });
+
+  test("Bless with Restrained: +1d4 is shared, Dex's Dis stays on its own button, and the label names both once", () => {
+    const saves = [blessed, restrainedDex, blessed, blessed, blessed, blessed];
+    assert.deepEqual(commonTags(saves), ["+1d4"]);
+    assert.equal(groupNote(saves), "+1d4: Blessed. Dis: Restrained");
+  });
+
+  test("none: nothing shared, an empty label note, and one plain save keeps a part on every button that has it", () => {
+    assert.deepEqual(commonTags([plain, plain]), []);
+    assert.equal(groupNote([plain, plain]), "");
+    assert.deepEqual(commonTags([blessed, plain]), [], "the plain save does not carry +1d4, so the Blessed ones keep their tag");
+    assert.deepEqual(commonTags([]), []);
   });
 });
