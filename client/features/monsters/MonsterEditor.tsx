@@ -526,7 +526,7 @@ function Basics(props: { draft: StatBlock; set(patch: Partial<StatBlock>): void 
       <Row min={110}>
         <Num label="HP" value={draft.hp.average} min={0} max={100_000} onChange={(n) => set({ hp: { ...draft.hp, average: n ?? 0 } })} />
         <Text
-          label="Hit dice"
+          label="Hit Point Dice"
           value={draft.hp.formula}
           placeholder="4d10 + 4"
           onChange={(formula) => set({ hp: { ...draft.hp, formula } })}

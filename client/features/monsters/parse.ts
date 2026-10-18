@@ -334,7 +334,7 @@ export function parseStatBlockText(input: string): ParsedStatBlock {
   const hp = (values.get("hp") ?? "").match(/^(\d+)?\s*(?:\(([^)]*)\))?/);
   const formula = normalizeFormula(hp?.[2] ?? "");
   const average = hp?.[1] !== undefined ? Number(hp[1]) : hpAverage(formula);
-  if (average !== null) block.hp = { average: clampInt(average, 0, 100_000), formula: truncate(formula, 40, "The hit dice", warnings) };
+  if (average !== null) block.hp = { average: clampInt(average, 0, 100_000), formula: truncate(formula, 40, "The Hit Point Dice", warnings) };
   else warnings.push("No Hit Points were found.");
 
   const speed = values.get("speed");

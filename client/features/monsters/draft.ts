@@ -138,7 +138,7 @@ function placeOf(path: PropertyKey[]): string {
   const parts = [FIELD_NAMES[String(field)] ?? "The stat block"];
   for (const part of rest) {
     if (typeof part === "number") parts.push(`entry ${part + 1}`);
-    else if (part === "formula") parts.push("hit dice");
+    else if (part === "formula") parts.push("Hit Point Dice");
     else if (part === "text" || part === "name" || part === "score" || part === "save") parts.push(part);
     else if (typeof part === "string") parts.push(Object.hasOwn(ABILITY_ABBR, part) ? ABILITY_ABBR[part as AbilityKey] : part);
   }
