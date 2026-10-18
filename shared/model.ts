@@ -179,9 +179,10 @@ export type RoomSettings = {
    * Players may type the totals of the rolls they are asked for. Off, every
    * answer of theirs is rolled on the server, and the server refuses a
    * typed one (shared/permissions.ts). The DM's own rolls and totals are
-   * unaffected. Rooms from before it lack the field, which reads as on.
+   * unaffected. Rooms from before it lack the field, which reads as on, so
+   * read it through `playersTypeTotals` (shared/permissions.ts).
    */
-  playersTypeTotals: boolean;
+  playersTypeTotals?: boolean;
   skipDefeated: boolean;
   monsterInitScore: boolean;
   revealHiddenOnTurn: boolean;
