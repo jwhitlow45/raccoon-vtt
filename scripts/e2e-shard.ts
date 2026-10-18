@@ -8,8 +8,9 @@ import pg from "pg";
  * One shard of the e2e run, for continuous integration and for a laptop
  * that runs several shards side by side (README, "Continuous integration"):
  *
- *   node scripts/e2e-shard.ts <index> <count>          run shard <index> of <count>, counted from 1
- *   node scripts/e2e-shard.ts <index> <count> --list   print every shard's files and run nothing
+ *   node scripts/e2e-shard.ts <index> <count>                run shard <index> of <count>, counted from 1
+ *   node scripts/e2e-shard.ts <index> <count> --list         print every shard's files and run nothing
+ *   node scripts/e2e-shard.ts <index> <count> --macos-only   shard only the files of e2e/macos-only.json
  *
  * It needs dist/ from `pnpm build`, and reads what the e2e files read:
  * E2E_PORT, DATABASE_URL and E2E_SCREENSHOT_DIR. Each run's output is also
@@ -25,16 +26,22 @@ import pg from "pg";
  * since they share the port range and the database. A file that fails runs
  * once more, and the shard fails only when that run fails too. Both results
  * are reported, so a file that passed only on its rerun still shows as flaky.
+ *
+ * The files in e2e/macos-only.json are left out anywhere but macOS, since
+ * they are known to fail elsewhere from font metrics alone. CI runs them
+ * in a macOS job of their own with --macos-only.
  */
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const USAGE = "Usage: node scripts/e2e-shard.ts <index> <count> [--list]   (index counted from 1)";
+const USAGE = "Usage: node scripts/e2e-shard.ts <index> <count> [--list] [--macos-only]   (index counted from 1)";
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
 const SHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? "test-results/e2e-screenshots";
 const LOG_DIR = path.join(ROOT, "test-results/e2e-logs");
 const ACTIONS = process.env.GITHUB_ACTIONS === "true";
 
 type Durations = { defaultSeconds: number; seconds: Record<string, number> };
+/** e2e/macos-only.json: each file's name, and why it runs only on macOS. */
+type MacosOnly = { rule: string; files: Record<string, string> };
 type Shard = { files: string[]; seconds: number };
 type Run = { ok: boolean; seconds: number; tests: number | null; passed: number | null; timedOut: boolean };
 type Result = { file: string; first: Run; rerun: Run | null };
@@ -194,7 +201,8 @@ function report(index: number, count: number, results: Result[]): void {
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const list = args.includes("--list");
-  const [indexText, countText, ...extra] = args.filter((a) => a !== "--list");
+  const macosOnly = args.includes("--macos-only");
+  const [indexText, countText, ...extra] = args.filter((a) => a !== "--list" && a !== "--macos-only");
   const index = Number(indexText);
   const count = Number(countText);
   if (extra.length > 0 || !Number.isInteger(count) || count < 1 || !Number.isInteger(index) || index < 1 || index > count) {
@@ -203,9 +211,22 @@ async function main(): Promise<number> {
   }
 
   const durations = JSON.parse(readFileSync(path.join(ROOT, "e2e/durations.json"), "utf8")) as Durations;
-  const files = readdirSync(path.join(ROOT, "e2e"))
+  const every = readdirSync(path.join(ROOT, "e2e"))
     .filter((f) => f.endsWith(".e2e.ts"))
     .map((f) => f.slice(0, -".e2e.ts".length));
+  const onMac = (JSON.parse(readFileSync(path.join(ROOT, "e2e/macos-only.json"), "utf8")) as MacosOnly).files;
+  const stale = Object.keys(onMac).filter((f) => !every.includes(f));
+  if (stale.length > 0) {
+    console.error(`e2e/macos-only.json names ${stale.join(", ")}, which ${stale.length === 1 ? "is not an e2e file" : "are not e2e files"}`);
+    return 2;
+  }
+  const isMacosOnly = (f: string) => Object.hasOwn(onMac, f);
+  let files = every;
+  if (macosOnly) files = every.filter(isMacosOnly);
+  else if (process.platform !== "darwin") {
+    files = every.filter((f) => !isMacosOnly(f));
+    for (const f of every.filter(isMacosOnly)) console.log(`${f} runs only on macOS (e2e/macos-only.json): ${onMac[f]}`);
+  }
   const shards = plan(files, durations, count);
   const cost = (f: string) => secondsFor(durations, f);
 

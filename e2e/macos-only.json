@@ -1,0 +1,4 @@
+{
+  "rule": "The e2e files that run only on macOS, in the CI's macOS job. Every other file runs on the Linux shards, where text is drawn in other fonts. A file belongs here only when it fails on Linux from font metrics alone and its test cannot be made tolerant without losing what it guards. Each entry is the file's name and why it is here.",
+  "files": {}
+}
