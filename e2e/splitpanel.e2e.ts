@@ -334,10 +334,10 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await openSideTab(dm, "Initiative");
     await toggleSplit(dm);
     await bottomPane(dm, "Token").waitFor();
-    // The room depends on the party bar's height, so the expected panes are worked out from it by the rule of 3.2: even, with Initiative given 193 own px as far as the other keeps 145.
+    // The room depends on the party bar's height, so the expected panes are worked out from it by the rule of 3.2: even, with Initiative given 193 own px as far as the other keeps 133 (docs/design-v1-side-headers.md 10).
     const at130 = await roomOf(dm);
-    const space = at130.room / 1.3 - 46;
-    const expected = Math.max(Math.floor(space / 2), Math.min(193, space - 145));
+    const space = at130.room / 1.3 - 45;
+    const expected = Math.max(Math.floor(space / 2), Math.min(193, space - 133));
     assert.ok(Math.abs(at130.top / 1.3 - expected) <= 1 && at130.top / 1.3 >= 192.5, `Initiative's pane at 130%: ${JSON.stringify(at130)}, expected ${expected} own px`);
     assert.equal(await topPane(dm, "Initiative").locator("[data-round-header]").getAttribute("data-form"), "full", "Initiative's round header is full and stuck");
     // A pane's panel draws after its first load, so a picture waits for it (W6B-P-7).
@@ -361,7 +361,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     assert.equal(await grip(dm).getAttribute("aria-valuenow"), "50", "the default's even split");
     assert.equal(await grip(dm).getAttribute("aria-valuetext"), "Initiative 50 percent");
     const split = await roomOf(dm);
-    assert.ok(split.top >= 145 && (split.below ?? 0) >= 145, `each pane at least 145 px: ${JSON.stringify(split)}`);
+    assert.ok(split.top >= 133 && (split.below ?? 0) >= 133, `each pane at least 133 px: ${JSON.stringify(split)}`);
     assert.equal(await described(tab(dm, "Token")), "Shown below");
     await bottomPane(dm, "Token").getByText("Tap a token to see it here.").waitFor();
     await shots.take(dm, "splitpanel-dm-initiative-over-token");
@@ -745,14 +745,14 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await dm.mouse.move(p.x, p.y - 1000, { steps: 6 });
     await dm.mouse.up();
     const high = await roomOf(dm);
-    assert.ok(Math.abs(high.top - 145) <= 1, `clamped at the top pane's minimum: ${high.top}`);
+    assert.ok(Math.abs(high.top - 133) <= 1, `clamped at the top pane's minimum: ${high.top}`);
     p = await gripNow();
     await dm.mouse.move(p.x, p.y);
     await dm.mouse.down();
     await dm.mouse.move(p.x, p.y + 1000, { steps: 6 });
     await dm.mouse.up();
     const low = await roomOf(dm);
-    assert.ok(Math.abs((low.below ?? 0) - 145) <= 1, `clamped at the bottom pane's minimum: ${low.below}`);
+    assert.ok(Math.abs((low.below ?? 0) - 133) <= 1, `clamped at the bottom pane's minimum: ${low.below}`);
 
     // Keys, with a goblin selected: the grip owns the arrows.
     await tapGoblin(dm);
@@ -813,7 +813,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await belowMenu(dm).getByRole("menuitemradio", { name: sideTabName("Monsters") }).click();
     await grip(dm).focus();
     for (let i = 0; i < 8; i++) await dm.keyboard.press("Shift+ArrowDown");
-    assert.ok(Math.abs(((await roomOf(dm)).below ?? 0) - 145) <= 1, "the bottom pane at its least height");
+    assert.ok(Math.abs(((await roomOf(dm)).below ?? 0) - 133) <= 1, "the bottom pane at its least height");
     const monsters = () => bottomPane(dm, "Monsters").locator("[data-pane-body]");
     await bottomPane(dm, "Monsters").getByText(/^SRD 5\.2\.1 \(\d+\)$/).waitFor();
     await monsters().evaluate((el) => ((el as unknown as DomEl).scrollTop = 800));
@@ -830,14 +830,22 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
   });
 
   test("6. a side panel too short for two: disabled where it never fits, the bottom pane hidden and kept, and a link placed once the room is known", async () => {
+    // A large phone held sideways holds two for the DM since the side panel's headers are one 45 px row each (docs/design-v1-side-headers.md): 319 own px of room, over 311.
     await view(dm, dmCdp, { width: 932, height: 430 }, { side: 59, bottom: 21 });
+    await reloadAt(dm, 1);
+    await oneOnly(dm);
+    await moreOpen(dm);
+    assert.equal(await twoPanels(dm).getAttribute("aria-disabled"), null, "Two panels at 932 x 430 for the DM");
+    await dm.keyboard.press("Escape");
+    // A window dragged shorter still leaves too little room.
+    await view(dm, dmCdp, { width: 1280, height: 380 });
     await reloadAt(dm, 1);
     await oneOnly(dm);
     await moreOpen(dm);
     assert.equal(await twoPanels(dm).getAttribute("aria-disabled"), "true");
     assert.equal(await described(twoPanels(dm)), "The side panel is too short for two panels.");
     assert.ok(((await twoPanels(dm).textContent()) ?? "").includes("too short"));
-    await shots.take(dm, "splitpanel-dm-932x430-too-short");
+    await shots.take(dm, "splitpanel-dm-1280x380-too-short");
     await twoPanels(dm).click({ force: true });
     await dm.waitForTimeout(150);
     assert.equal(await moreMenu(dm).count(), 1, "a disabled item picks nothing");
@@ -860,7 +868,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await bottomPane(dm, "Log").getByLabel("Message").fill("Half a thought");
     await belowName(dm, "Log").click();
     await belowMenu(dm).waitFor();
-    await view(dm, dmCdp, { width: 1280, height: 480 });
+    await view(dm, dmCdp, { width: 1280, height: 380 });
     await belowMenu(dm).waitFor({ state: "detached" });
     await bar(dm).waitFor({ state: "hidden" });
     assert.equal(await bottomPane(dm, "Log").count(), 0, "the bottom pane is hidden");
@@ -879,7 +887,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     // Details with the side panel hidden: placed once the room is measured.
     await hidePanels(dm).click();
     await sidePanel(dm).waitFor({ state: "hidden" });
-    await view(dm, dmCdp, { width: 1280, height: 480 });
+    await view(dm, dmCdp, { width: 1280, height: 380 });
     await tapGoblin(dm);
     await tokenBar(dm, "Goblin 1").getByRole("button", { name: "Details", exact: true }).click();
     await topPane(dm, "Token").waitFor();
@@ -1048,7 +1056,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await belowName(dm, "Journal").click();
     await belowMenu(dm).getByRole("menuitemradio", { name: sideTabName("Outliner") }).click();
     await bottomPane(dm, "Outliner").waitFor();
-    await view(dm, dmCdp, { width: 1280, height: 480 });
+    await view(dm, dmCdp, { width: 1280, height: 380 });
     await bar(dm).waitFor({ state: "hidden" });
     await js(dm, `document.activeElement?.blur(); return null;`);
     await dm.keyboard.press("/");
