@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { boardSizes, PIN_CELL_PX, TEXT_FLOOR_PX } from "./boardScale.ts";
 import {
   cutName,
+  focusLines,
+  focusStyle,
   labelStyle,
   MIN_CUT_LETTERS,
   overlaps,
@@ -12,8 +15,11 @@ import {
   type Box,
   type LabelInput,
   type LabelStyle,
+  type Measure,
   type Obstacle,
   type PlacedLabel,
+  type Room,
+  type Side,
 } from "./boardText.ts";
 
 /** Every character is half an em wide, so 12 px text is 6 px a character. */
@@ -310,5 +316,115 @@ describe("label placement", () => {
     const forward = place(40, specs).placed;
     const backward = place(40, [...specs].reverse()).placed;
     for (const id of ["a", "b", "c"]) assert.deepEqual(texts(forward.get(id)), texts(backward.get(id)));
+  });
+});
+
+describe("a smooth zoom", () => {
+  // A name's size scales with the map between these zooms, held at its floor below and its 16 px ceiling above (boardScale.ts).
+  const floorCell = (TEXT_FLOOR_PX / 12) * PIN_CELL_PX;
+  const ceilingCell = (16 / 12) * PIN_CELL_PX;
+  const step = (ceilingCell - floorCell) / 200;
+  // 200 steps between them, and 60 more past each, where the room keeps growing with the token while the text holds still.
+  const cells = Array.from({ length: 321 }, (_, i) => floorCell + (i - 60) * step);
+
+  /** A font `em` wide a character, and one whose advances snap to quarter pixels, as hinting does, so its widths do not scale exactly with the size. */
+  const fonts = (em: number): Measure[] => [(t, px) => [...t].length * px * em, (t, px) => [...t].length * (Math.ceil(px * em * 4) / 4)];
+
+  type Case = { what: string; cells: number; name: string; hp: string | null; edge: { text: string; room: (r: Room) => number } };
+
+  /** Font widths that put `edge.text` from 6% inside the room it is measured against at the pin to 6% past it. */
+  function emsAround(c: Case): number[] {
+    const room = c.edge.room(labelStyle(boardSizes(PIN_CELL_PX, 1), c.cells * PIN_CELL_PX, PIN_CELL_PX).room);
+    return Array.from({ length: 13 }, (_, i) => (room / [...c.edge.text].length) * (0.94 + i * 0.01));
+  }
+
+  function labelAt(cell: number, ui: number, c: Case, measure: Measure, previous: Map<string, Side>): string[] {
+    const sizes = boardSizes(cell, ui);
+    const w = c.cells * cell;
+    const box: Box = { x0: 0, y0: 0, x1: w, y1: w };
+    const input: LabelInput = { id: "t", box, belowY: w + sizes.gapPx, aboveY: -sizes.gapPx, name: c.name, hp: c.hp, alert: false, rank: 0, sides: false, nameOnly: false, style: labelStyle(sizes, w, cell) };
+    const p = placeLabels([input], [{ box, owner: "t", kind: "body" }], measure, previous).get("t")!;
+    previous.set("t", p.side);
+    return texts(p);
+  }
+
+  /**
+   * The shapes a sweep showed, zoom by zoom. Its line count changes once at
+   * most, and a shape it left never comes back: a label that flips back
+   * and forth fails both.
+   */
+  function assertSettles(shapes: readonly string[][], what: string) {
+    const changes = shapes.filter((s, i) => i > 0 && s.length !== shapes[i - 1]!.length).length;
+    const order = shapes.map((s) => s.join(" / ")).filter((s, i, all) => i === 0 || s !== all[i - 1]);
+    assert.ok(changes <= 1, `${what}: the line count changes ${changes} times: ${order.join(" | ")}`);
+    assert.equal(new Set(order).size, order.length, `${what}: a shape comes back: ${order.join(" | ")}`);
+  }
+
+  const cases: Case[] = [
+    { what: "a two-cell token's name at its wrap", cells: 2, name: "Kobold Scale Sorcerer", hp: null, edge: { text: "Kobold Scale Sorcerer", room: (r) => r.wrapEm } },
+    { what: "a one-cell token's name at its wrap", cells: 1, name: "Owlbear Matriarch", hp: null, edge: { text: "Owlbear Matriarch", room: (r) => r.wrapEm } },
+    { what: "a three-cell token's name and HP at the edge of one line", cells: 3, name: "Goblin Warrior", hp: "18/24", edge: { text: "Goblin Warrior · 18/24", room: (r) => r.ownEm } },
+  ];
+
+  for (const c of cases) {
+    test(`${c.what} wraps once at most, zooming in or out, and not at all while its size scales`, () => {
+      for (const ui of [1, 1.3]) {
+        for (const em of emsAround(c)) {
+          for (const [f, measure] of fonts(em).entries()) {
+            const what = `${c.what}, ${em.toFixed(4)} em a letter${f ? " snapped" : ""}, at ${ui * 100}%`;
+            const previous = new Map<string, Side>();
+            const zoomIn = cells.map((cell) => labelAt(cell, ui, c, measure, previous));
+            const zoomOut = [...cells].reverse().map((cell) => labelAt(cell, ui, c, measure, previous));
+            assertSettles(zoomIn, `${what}, zooming in`);
+            assertSettles(zoomOut, `${what}, zooming out`);
+            const scaling = zoomIn.filter((_, i) => cells[i]! >= floorCell && cells[i]! <= ceilingCell).map((s) => s.join(" / "));
+            assert.equal(new Set(scaling).size, 1, `${what}: the shape changes while the size scales: ${[...new Set(scaling)].join(" | ")}`);
+          }
+        }
+      }
+    });
+  }
+
+  test("a pack alike in size and name places in one order at every zoom, so the same goblin keeps its whole name", () => {
+    // Boxes of one size differ by float error with where they stand, which once reordered the pack at every frame of a zoom.
+    const pack = [7, 8, 9].map((x, i) => ({ id: `g${i + 1}`, x, y: 3 }));
+    const previous = new Map<string, Side>();
+    const whole = new Map<string, boolean[]>(pack.map((g) => [g.id, []]));
+    for (const cell of cells) {
+      const sizes = boardSizes(cell, 1);
+      const obstacles: Obstacle[] = [];
+      const inputs: LabelInput[] = [];
+      for (const g of pack) {
+        const box: Box = { x0: g.x * cell, y0: g.y * cell, x1: g.x * cell + cell, y1: g.y * cell + cell };
+        obstacles.push({ box, owner: g.id, kind: "body" });
+        inputs.push({ id: g.id, box, belowY: box.y1 + sizes.gapPx, aboveY: box.y0 - sizes.gapPx, name: "Goblin Warrior", hp: "7/7", alert: false, rank: 0, sides: false, nameOnly: false, style: labelStyle(sizes, cell, cell) });
+      }
+      const placed = placeLabels(inputs, obstacles, measure, previous);
+      previous.clear();
+      for (const [id, p] of placed) {
+        if (p.lines.length > 0) previous.set(id, p.side);
+        whole.get(id)!.push(p.nameShown && !p.cut);
+      }
+    }
+    for (const [id, seen] of whole) {
+      const changes = seen.filter((w, i) => i > 0 && w !== seen[i - 1]).length;
+      assert.ok(changes <= 1, `${id}'s name turns whole and cut ${changes} times`);
+    }
+    assert.ok(whole.get("g1")!.every(Boolean), "the first of the pack by id keeps its name whole");
+  });
+
+  test("the focus plate's name wraps once at most, zooming in or out", () => {
+    const name = "Owlbear Matriarch of the Thornwood";
+    const c: Case = { what: "the plate", cells: 1, name, hp: "18/24", edge: { text: name, room: () => focusStyle(boardSizes(PIN_CELL_PX, 1)).room.maxEm } };
+    for (const ui of [1, 1.3]) {
+      for (const em of emsAround(c)) {
+        for (const [f, measure] of fonts(em).entries()) {
+          const plate = (cell: number) => focusLines({ name, number: undefined, hp: "18/24", style: focusStyle(boardSizes(cell, ui)) }, measure).map((l) => l.text);
+          const what = `the plate, ${em.toFixed(4)} em a letter${f ? " snapped" : ""}, at ${ui * 100}%`;
+          assertSettles(cells.map(plate), `${what}, zooming in`);
+          assertSettles([...cells].reverse().map(plate), `${what}, zooming out`);
+        }
+      }
+    }
   });
 });
