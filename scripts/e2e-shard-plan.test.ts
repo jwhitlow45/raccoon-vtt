@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { anyRerun, filePassed, generousLimit, NO_TIME, outcome, passedOnRerun, plan, runLimit, secondsFor, SLOW, summaryCount, type Durations, type Result, type Run } from "./e2e-shard-plan.ts";
+import { anyRerun, attempt, CLEANUP_SECONDS, filePassed, generousLimit, NO_TIME, outcome, passedOnRerun, plan, runLimit, secondsFor, SLOW, summaryCount, withTimeout, type AttemptSteps, type Durations, type Result, type Run } from "./e2e-shard-plan.ts";
 
 const durations: Durations = { defaultSeconds: 60, seconds: { swipe: 284, reach: 179, bardock: 169, layout: 124, pdf: 69, dice: 12, kit: 4 } };
 const files = ["dice", "kit", "layout", "pdf", "reach", "swipe", "bardock", "brandnew"];
 
 function run(over: Partial<Run> = {}): Run {
-  return { ok: true, seconds: 30, tests: 10, passed: 10, todo: 0, timedOut: false, ...over };
+  return { ok: true, seconds: 30, tests: 10, passed: 10, todo: 0, timedOut: false, countsCleared: true, ...over };
 }
 
 describe("the shard plan", () => {
@@ -75,6 +75,7 @@ describe("the report's lines", () => {
     assert.equal(outcome(run({ seconds: 86, tests: 11, todo: 1 })), "passed (11 tests, 1 todo) in 86 s");
     assert.equal(outcome(run({ ok: false, tests: 11, passed: 9, todo: 1 })), "failed (9 of 11 tests passed, 1 todo) in 30 s");
     assert.equal(outcome(run({ ok: false, timedOut: true, tests: null, passed: null })), "timed out in 30 s");
+    assert.equal(outcome(run({ countsCleared: false })), "passed (10 tests) in 30 s, join counts not cleared");
     assert.equal(outcome(NO_TIME), "not run, too little of the job's time left");
   });
 });
@@ -146,5 +147,86 @@ describe("each run's time limit", () => {
       }
     }
     assert.ok(used <= deadline);
+  });
+});
+
+/**
+ * An attempt's steps on a clock of its own. A stalled cleanup or a stalled
+ * run takes all the time it is given, as the real ones do once their
+ * timeouts fire.
+ */
+function fakeSteps(opts: { cleanupStalls?: boolean; runStalls?: boolean; cleanupSeconds?: number; runSeconds?: number } = {}) {
+  const clock = { now: 1_000 };
+  const notes: string[] = [];
+  const runs: number[] = [];
+  const steps: AttemptSteps = {
+    now: () => clock.now,
+    async clear(seconds) {
+      clock.now += opts.cleanupStalls ? seconds : (opts.cleanupSeconds ?? 0.2);
+      return !opts.cleanupStalls;
+    },
+    async run(seconds) {
+      runs.push(seconds);
+      const took = opts.runStalls ? seconds : Math.min(seconds, opts.runSeconds ?? 30);
+      clock.now += took;
+      return { ok: !opts.runStalls, seconds: took, tests: 1, passed: opts.runStalls ? 0 : 1, todo: 0, timedOut: opts.runStalls === true };
+    },
+    note: (line) => notes.push(line),
+  };
+  return { clock, notes, runs, steps };
+}
+
+describe("an attempt and the cleanup before it", () => {
+  test("withTimeout gives the value, gives up on work that stalls, and passes a rejection through", async () => {
+    assert.deepEqual(await withTimeout(Promise.resolve(3), 1_000), { done: true, value: 3 });
+    assert.deepEqual(await withTimeout(new Promise(() => {}), 20), { done: false });
+    await assert.rejects(withTimeout(Promise.reject(new Error("refused")), 1_000), /refused/);
+  });
+
+  test("the run gets what the cleanup left of the attempt's deadline", async () => {
+    const f = fakeSteps({ cleanupSeconds: 2.5 });
+    const result = await attempt(100, f.steps);
+    assert.deepEqual(f.runs, [97]);
+    assert.deepEqual(f.notes, []);
+    assert.ok(result !== NO_TIME && result.countsCleared);
+  });
+
+  test("a stalled cleanup is cut off, noted, and the file still runs in the time left", async () => {
+    const f = fakeSteps({ cleanupStalls: true });
+    const result = await attempt(100, f.steps);
+    assert.deepEqual(f.runs, [100 - CLEANUP_SECONDS]);
+    assert.equal(f.notes.length, 1);
+    assert.match(f.notes[0]!, /join counts could not be cleared within 10 s/);
+    assert.ok(result !== NO_TIME && result.ok && !result.countsCleared);
+  });
+
+  test("a stalled cleanup and then a stalled run end at the attempt's deadline, not after it", async () => {
+    const f = fakeSteps({ cleanupStalls: true, runStalls: true });
+    const start = f.clock.now;
+    const result = await attempt(100, f.steps);
+    assert.equal(f.clock.now - start, 100);
+    assert.ok(result !== NO_TIME && result.timedOut && !result.countsCleared);
+  });
+
+  test("a stalled cleanup that uses up a short attempt starts no run", async () => {
+    const f = fakeSteps({ cleanupStalls: true });
+    assert.equal(await attempt(8, f.steps), NO_TIME);
+    assert.deepEqual(f.runs, []);
+    assert.equal(f.notes.length, 1);
+  });
+
+  test("a file whose cleanup and run stall on both attempts still leaves the rest of the shard its time", async () => {
+    const shard = [160, 40, 100, 120];
+    const deadline = 2_400;
+    const f = fakeSteps({ cleanupStalls: true, runStalls: true });
+    const start = f.clock.now;
+    const left = () => deadline - (f.clock.now - start);
+    const rest = shard.slice(1).reduce((a, b) => a + b, 0);
+    for (const rerunMayFollow of [true, false]) {
+      const limit = runLimit(shard[0]!, left(), rest, rerunMayFollow);
+      assert.notEqual(limit, null);
+      await attempt(limit!, f.steps);
+    }
+    assert.ok(left() >= SLOW * rest, `${left()} s left for ${SLOW * rest} s of files`);
   });
 });

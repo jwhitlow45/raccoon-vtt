@@ -1,13 +1,14 @@
 /**
  * The decisions of scripts/e2e-shard.ts, apart from its processes and
  * files, so unit tests can reach them: which shard runs which file, how
- * long each run may take, what the test runner's totals say and whether a
- * file passed.
+ * long each attempt at a file may take, what the test runner's totals say
+ * and whether a file passed.
  */
 
 export type Durations = { defaultSeconds: number; seconds: Record<string, number> };
 export type Shard = { files: string[]; seconds: number };
-export type Run = { ok: boolean; seconds: number; tests: number | null; passed: number | null; todo: number | null; timedOut: boolean };
+/** A run of a file. `countsCleared` is false when the join counts' cleanup before it timed out. */
+export type Run = { ok: boolean; seconds: number; tests: number | null; passed: number | null; todo: number | null; timedOut: boolean; countsCleared: boolean };
 /** A run the shard's time left could not hold, so it never started. */
 export const NO_TIME = "no time";
 /** A file's first run and its rerun. The rerun is null when none was called for. */
@@ -72,6 +73,52 @@ export function runLimit(seconds: number, left: number, rest: number, rerunMayFo
   return Math.min(generous, Math.floor(share));
 }
 
+/** The longest the join counts' cleanup before a run may take, in seconds. */
+export const CLEANUP_SECONDS = 10;
+
+/** What `work` gave, or `done: false` once `ms` pass first. A rejection passes through. */
+export async function withTimeout<T>(work: Promise<T>, ms: number): Promise<{ done: true; value: T } | { done: false }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<{ done: false }>((resolve) => {
+    timer = setTimeout(() => resolve({ done: false }), ms);
+  });
+  try {
+    return await Promise.race([work.then((value) => ({ done: true as const, value })), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** What an attempt does, given from outside so a test can stand in for the database, the run and the clock. */
+export type AttemptSteps = {
+  /** The time, in seconds. */
+  now(): number;
+  /** Clears the join counts within `seconds`, and says whether it finished. */
+  clear(seconds: number): Promise<boolean>;
+  /** Runs the file, stopping it after `seconds`. */
+  run(seconds: number): Promise<Omit<Run, "countsCleared">>;
+  /** A line for the shard's log. */
+  note(line: string): void;
+};
+
+/**
+ * One attempt at a file, its cleanup included, by an absolute deadline
+ * `limit` seconds from now. The cleanup gets CLEANUP_SECONDS at most, and
+ * the run gets what is left of the deadline once the cleanup is over, so a
+ * stalled cleanup cannot push the attempt past its share of the shard. A
+ * cleanup that times out is noted, and the file runs anyway if a second is
+ * left, since a stale count only risks the join limits.
+ */
+export async function attempt(limit: number, steps: AttemptSteps): Promise<Run | typeof NO_TIME> {
+  const deadline = steps.now() + limit;
+  const cleanup = Math.min(CLEANUP_SECONDS, limit);
+  const cleared = await steps.clear(cleanup);
+  if (!cleared) steps.note(`The join counts could not be cleared within ${cleanup} s, so the run starts without that and may meet the join limits`);
+  const left = Math.floor(deadline - steps.now());
+  if (left < 1) return NO_TIME;
+  return { ...(await steps.run(left)), countsCleared: cleared };
+}
+
 /** One of the totals the spec reporter ends with, read past any color codes a FORCE_COLOR adds. */
 export function summaryCount(text: string, label: string): number | null {
   const m = new RegExp(`^ℹ ${label} (\\d+)$`, "m").exec(text.replace(/\x1b\[[0-9;]*m/g, ""));
@@ -85,7 +132,8 @@ export function outcome(run: Run | typeof NO_TIME): string {
   const todo = run.todo ? `, ${run.todo} todo` : "";
   const counts = run.tests === null ? "" : run.ok ? ` (${run.tests} tests${todo})` : ` (${run.passed ?? "?"} of ${run.tests} tests passed${todo})`;
   const how = run.timedOut ? "timed out" : run.ok ? "passed" : "failed";
-  return `${how}${counts} in ${run.seconds} s`;
+  const stale = run.countsCleared ? "" : ", join counts not cleared";
+  return `${how}${counts} in ${run.seconds} s${stale}`;
 }
 
 /** A file passes when its first run passes, or its rerun does. */

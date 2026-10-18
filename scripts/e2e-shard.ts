@@ -3,7 +3,7 @@ import { appendFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { anyRerun, filePassed, NO_TIME, outcome, passedOnRerun, plan, runLimit, secondsFor, summaryCount, type Durations, type Result, type Run } from "./e2e-shard-plan.ts";
+import { anyRerun, attempt, filePassed, NO_TIME, outcome, passedOnRerun, plan, runLimit, secondsFor, summaryCount, withTimeout, type Durations, type Result, type Run } from "./e2e-shard-plan.ts";
 
 /**
  * One shard of the e2e run, for continuous integration, for a laptop that
@@ -55,16 +55,31 @@ type MacosOnly = { rule: string; files: Record<string, string> };
  * together can pass them, so the counts are cleared before each run, as the
  * full check on a laptop does. A fresh database has no table until the
  * first server applies the schema, and then there is nothing to clear.
+ *
+ * A database that stops answering would otherwise hold the shard, so the
+ * cleanup gets `seconds` in all and says whether it finished: pg gives up
+ * on the connection and on the statement at half that each, and a race
+ * ends the wait whatever pg does. pg's timeouts all say "timeout", and the
+ * server's statement timeout is 57014. Any other error, such as a wrong
+ * DATABASE_URL, stops the shard.
  */
-async function clearJoinCounts(): Promise<void> {
-  const client = new pg.Client({ connectionString: DATABASE_URL });
-  try {
+async function clearJoinCounts(seconds: number): Promise<boolean> {
+  const half = (seconds * 1000) / 2;
+  const client = new pg.Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: half, statement_timeout: half, query_timeout: half });
+  const work = (async () => {
     await client.connect();
     await client.query("delete from rate_events where key like 'ok:%' or key like 'create:%'");
+  })();
+  try {
+    return (await withTimeout(work, seconds * 1000)).done;
   } catch (err) {
-    if ((err as { code?: unknown }).code !== "42P01") throw new Error(`Could not clear the join counts in DATABASE_URL's database: ${(err as Error).message}`);
+    const { code, message } = err as { code?: unknown; message?: unknown };
+    if (code === "42P01") return true;
+    if (code === "57014" || /timeout/i.test(String(message))) return false;
+    throw new Error(`Could not clear the join counts in DATABASE_URL's database: ${String(message)}`);
   } finally {
-    await client.end().catch(() => {});
+    // A stalled connection's end is not waited on for long.
+    await withTimeout(client.end().catch(() => {}), 1000);
   }
 }
 
@@ -100,8 +115,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-async function runFile(file: string, label: string, limit: number): Promise<Run> {
-  await clearJoinCounts();
+async function runFile(file: string, label: string, limit: number): Promise<Omit<Run, "countsCleared">> {
   mkdirSync(LOG_DIR, { recursive: true });
   const log = createWriteStream(path.join(LOG_DIR, `${label}.log`));
   const env: NodeJS.ProcessEnv = { ...process.env, DATABASE_URL };
@@ -148,6 +162,16 @@ async function runFile(file: string, label: string, limit: number): Promise<Run>
     todo: summaryCount(tail, "todo"),
     timedOut,
   };
+}
+
+/** One attempt at a file, the join counts' cleanup and the run, within `limit` seconds (scripts/e2e-shard-plan.ts, attempt). */
+function attemptFile(file: string, label: string, limit: number): Promise<Run | typeof NO_TIME> {
+  return attempt(limit, {
+    now: () => Date.now() / 1000,
+    clear: clearJoinCounts,
+    run: (seconds) => runFile(file, label, seconds),
+    note: (line) => console.log(ACTIONS ? `::warning title=Join counts not cleared::${label}: ${line}` : `${label}: ${line}`),
+  });
 }
 
 function report(index: number, count: number, results: Result[]): void {
@@ -241,11 +265,11 @@ async function main(): Promise<number> {
       if (stopping) break;
       const rest = mine.files.slice(i + 1).reduce((sum, f) => sum + cost(f), 0);
       const firstLimit = runLimit(cost(file), left(), rest, true);
-      const first = firstLimit === null ? NO_TIME : await runFile(file, file, firstLimit);
+      const first = firstLimit === null ? NO_TIME : await attemptFile(file, file, firstLimit);
       let rerun: Result["rerun"] = null;
       if (first !== NO_TIME && !first.ok && !stopping) {
         const limit = runLimit(cost(file), left(), rest, false);
-        rerun = limit === null ? NO_TIME : await runFile(file, `${file}-rerun`, limit);
+        rerun = limit === null ? NO_TIME : await attemptFile(file, `${file}-rerun`, limit);
       }
       results.push({ file, first, rerun });
     }
