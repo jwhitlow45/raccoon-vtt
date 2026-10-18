@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
+import { startInputModality } from "./lib/inputModality.ts";
 import { captureLinkPassword } from "./lib/playerLink.ts";
 import "./globals.css";
 
@@ -13,6 +14,8 @@ const capture = () => captureLinkPassword(location, (url) => history.replaceStat
 capture();
 window.addEventListener("hashchange", capture);
 window.addEventListener("popstate", capture);
+
+startInputModality();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

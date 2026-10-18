@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type FocusEventHandler, type MouseEvent, type MouseEventHandler, type PointerEvent, type PointerEventHandler, type ReactNode } from "react";
+import { keyboardFocus } from "../lib/inputModality.ts";
 import { theme } from "../lib/theme.ts";
 
 /** Hover waits this long, so a pointer passing over a row of icons shows nothing (docs/design-v1-icons.md 3.2). */
@@ -300,7 +301,7 @@ export function useTooltip(text: string, opts: { describes?: boolean } = {}): { 
       },
       onFocus: (e: FocusEvent<HTMLElement>) => {
         own.onFocus?.(e);
-        arm(e.currentTarget, { t: "focus", visible: e.currentTarget.matches(":focus-visible") });
+        arm(e.currentTarget, { t: "focus", visible: keyboardFocus(e.currentTarget) });
       },
       onBlur: (e: FocusEvent<HTMLElement>) => {
         own.onBlur?.(e);

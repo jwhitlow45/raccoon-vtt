@@ -1,5 +1,6 @@
 import { useId, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
+import { keyboardFocus } from "../lib/inputModality.ts";
 import { GRAB_ATTR, GRAB_STYLE } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { Icon } from "./Icon.tsx";
@@ -208,16 +209,6 @@ function FullScreenButton(props: { pressed: boolean; onPress(): void; at: { left
   const [shown, setShown] = useState(false);
   const place: CSSProperties = shown ? { position: "absolute", left: props.at.left, top: props.at.top, zIndex: 1, ...(props.pressed ? null : { background: theme.color.surface }) } : { ...VISUALLY_HIDDEN, minWidth: 0, minHeight: 0, border: "none" };
   return <IconButton icon="expand" label="Full screen" pressed={props.pressed} onClick={props.onPress} onFocus={(e) => setShown(keyboardFocus(e.currentTarget))} onBlur={() => setShown(false)} style={place} />;
-}
-
-/** Whether focus on `el` came from the keyboard, as the browser judges `:focus-visible`. */
-function keyboardFocus(el: Element): boolean {
-  try {
-    return el.matches(":focus-visible");
-  } catch {
-    // A browser without the selector: every focus counts, as before it existed.
-    return true;
-  }
 }
 
 /** A grab area's mark and style, or nothing. */

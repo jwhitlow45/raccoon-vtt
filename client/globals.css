@@ -129,6 +129,22 @@ dialog[data-rvtt-sheet]:not([open]) {
   outline-offset: 2px;
 }
 
+/* While a pointer was last (lib/inputModality.ts), focus the app moves
+   itself draws no ring. iOS Safari draws one on most of it after a tap,
+   such as on a sheet's opener as the sheet closes. A text field keeps its
+   focus look, which shows where typing goes. A key press brings every ring
+   back at once. The choice and pill rings follow, each in a rule of its
+   own, so a browser that cannot read one of them still reads the rest. */
+[data-rvtt-input="pointer"] :focus-visible:not(textarea, select, [contenteditable]:not([contenteditable="false"]), input:not([type="button"], [type="checkbox"], [type="color"], [type="file"], [type="image"], [type="radio"], [type="range"], [type="reset"], [type="submit"])) {
+  outline: none;
+}
+[data-rvtt-input="pointer"] .rvtt-choice:has(> input:focus-visible) {
+  outline: none;
+}
+[data-rvtt-input="pointer"] [data-pill-focus]:focus-visible > [data-pill] {
+  outline: none;
+}
+
 /* The option draws its own chosen look, and a tap on a phone would flash
    Chrome's grey square over it as well, which on a round swatch reads as a
    glitch. */
@@ -336,9 +352,10 @@ summary::-webkit-details-marker {
 
 /* The token window's resize handle shows the accent under a hovering mouse
    and while focused (canvas/TokenActionBar.tsx). It shows at rest too, so
-   nothing depends on hover. Its inline muted color would otherwise win. */
+   nothing depends on hover. Its inline muted color would otherwise win.
+   Its focus look follows the rings, so not while a pointer was last. */
 [data-resize-handle]:hover,
-[data-resize-handle]:focus-visible {
+:root:not([data-rvtt-input="pointer"]) [data-resize-handle]:focus-visible {
   color: var(--rvtt-accent, #f7df00) !important;
 }
 
