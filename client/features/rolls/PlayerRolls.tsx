@@ -34,7 +34,7 @@ import { editsPcStats } from "../tokens/access.ts";
 import { announceTurn } from "../encounter/alerts.ts";
 import { chromeZoom, screenHeight, smallUi, useLayoutSize } from "../device/layout.ts";
 import { uiScale, useUiScale } from "../device/settings.ts";
-import { askedText, askItems, bestChoice, cardRoll, choiceLabel, KEPT, naturalText, parseBonus, rolledDice, rolledNews, verdictText, type AskItem, type RollInputs } from "./card.ts";
+import { askedText, askItems, askKept, bestChoice, cardRoll, choiceLabel, KEPT, naturalText, parseBonus, rolledDice, rolledNews, verdictText, type AskItem, type RollInputs } from "./card.ts";
 import {
   answered,
   answerFlow,
@@ -780,13 +780,13 @@ function CreatureAnswer(props: {
     );
     if (n === null) step({ t: "answer", tag, answer: "refused", text: "That could not be sent." });
   };
-  const lastAsk = useRef(target.change?.id);
+  const lastAsk = useRef(target.change);
   const [kept, setKept] = useState(false);
   useEffect(() => {
     const before = lastAsk.current;
-    lastAsk.current = target.change?.id;
+    lastAsk.current = target.change;
     if (target.change !== undefined) setKept(false);
-    else if (before !== undefined && withdrew.current !== before) setKept(true);
+    else if (askKept(before, target, withdrew.current)) setKept(true);
   }, [target.change?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = () => {

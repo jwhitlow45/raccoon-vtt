@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DiceResult, RollTarget } from "#shared/model.ts";
 import { reminderPreset } from "#shared/rules/rollReminders.ts";
-import { askedText, askItems, askRowText, bestChoice, cardRoll, dmRoll, choiceLabel, CLEAR_TOTAL, NO_INPUTS, parseBonus, rolledDice, rolledNews, rolledText, TYPE_BONUS, verdictText } from "./card.ts";
+import { askedText, askItems, askKept, askRowText, bestChoice, cardRoll, dmRoll, choiceLabel, CLEAR_TOTAL, NO_INPUTS, parseBonus, rolledDice, rolledNews, rolledText, TYPE_BONUS, verdictText } from "./card.ts";
 
 const DEX = { kind: "save", ability: "dex" } as const;
 const restrained = [{ key: "restrained" as const }];
@@ -125,5 +125,21 @@ describe("asking the DM to change an answer (5.5)", () => {
     assert.equal(askRowText({ reason: "lucky" }), "Asks for advantage (Lucky)");
     assert.equal(askRowText({ reason: "bardic-inspiration", die: 8 }), "Asks to add a d8 (Bardic Inspiration)");
     assert.equal(askRowText({ reason: "fix-total" }, "Thorn"), "Thorn asks to fix the total");
+  });
+});
+
+describe("an ask that went away (docs/design-v1-roll-request.md 5.5)", () => {
+  const ask = { id: "ask-1", on: "answer-1" };
+
+  test("reads as kept only while the answer it named still stands and this device did not withdraw it", () => {
+    assert.equal(askKept(ask, { tag: "answer-1" }, null), true, "the DM's Keep, or a close that settled it");
+    assert.equal(askKept(ask, { tag: "answer-1" }, "ask-1"), false, "this device's Withdraw");
+    assert.equal(askKept(ask, { tag: "answer-1", change: { id: "ask-2", on: "answer-1", reason: "lucky" } }, null), false, "still pending, or replaced");
+    assert.equal(askKept(undefined, { tag: "answer-1" }, null), false, "no ask went");
+  });
+
+  test("an Allow is never kept, even when the reroll lands on the same total (LP7-DICE-2)", () => {
+    assert.equal(askKept(ask, { tag: "answer-2" }, null), false, "the allowed change wrote a new answer");
+    assert.equal(askKept(ask, {}, null), false, "a Reopen, or an allowed Fix my total, cleared the answer");
   });
 });

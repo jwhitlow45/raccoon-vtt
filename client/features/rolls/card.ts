@@ -318,3 +318,14 @@ export function askRowText(change: Pick<RollChange, "reason" | "die">, name?: st
 
 /** The player's card once the DM kept the roll, or a close settled the ask as Keep (1.1). */
 export const KEPT = "The DM kept the roll.";
+
+/**
+ * Whether an ask that went away was kept by the DM (5.5): the answer it
+ * named still stands and this device did not withdraw it. An Allow writes
+ * a new answer with its own tag, and a Reopen or an allowed "Fix my total"
+ * clears the answer, so none of them reads as kept, even when an allowed
+ * reroll lands on the same total as before.
+ */
+export function askKept(gone: Pick<RollChange, "id" | "on"> | undefined, now: Pick<RollTarget, "change" | "tag">, withdrew: string | null): boolean {
+  return gone !== undefined && now.change === undefined && gone.id !== withdrew && now.tag !== undefined && now.tag === gone.on;
+}
