@@ -2484,13 +2484,13 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
 
     test("6. M8: Long rest for the party sits below the DM's list of characters", async () => {
       const panel = await sideTab(dm, "Characters");
-      const rest = panel.getByRole("button", { name: "Long rest for the party" });
+      const rest = panel.getByRole("button", { name: "Long Rest for the party" });
       await rest.waitFor();
       const restTop = (await box(rest)).y;
       for (const name of ["Bree", "Thorn"]) {
         const row = panel.getByRole("button", { name: new RegExp(`^${name}\\b`) });
         const b = await box(row);
-        assert.ok(b.y + b.height <= restTop, `${name}'s row ends at ${b.y + b.height}, under Long rest at ${restTop}`);
+        assert.ok(b.y + b.height <= restTop, `${name}'s row ends at ${b.y + b.height}, under Long Rest at ${restTop}`);
       }
       assert.ok((await box(panel.getByRole("button", { name: "New character" }))).y < restTop, "New character still leads");
       await shot(panel, "characters-long-rest-below");

@@ -251,7 +251,7 @@ function PartyLongRest(props: { characters: Character[] }) {
   if (!asking) {
     return (
       <Button size="sm" disabled={resting.length === 0} onClick={() => setAsking(true)}>
-        Long rest for the party
+        Long Rest for the party
       </Button>
     );
   }
@@ -280,7 +280,7 @@ function PartyLongRest(props: { characters: Character[] }) {
             setAsking(false);
           }}
         >
-          Finish the long rest
+          Finish the Long Rest
         </Button>
         <Button size="sm" onClick={() => setAsking(false)}>
           Cancel

@@ -11,8 +11,8 @@ import { FieldRow, Note, NumberField, Section, SmallButton } from "./ui.tsx";
 type Kind = "short" | "long";
 
 const KINDS: { value: Kind; label: string }[] = [
-  { value: "short", label: "Short rest" },
-  { value: "long", label: "Long rest" },
+  { value: "short", label: "Short Rest" },
+  { value: "long", label: "Long Rest" },
 ];
 
 /**
@@ -65,7 +65,7 @@ export function RestSection(props: { actor: Pick<Actor, "hp" | "life"> | undefin
       {canRest && kind ? (
         <div style={{ display: "flex", gap: theme.space(2) }}>
           <SmallButton tone="primary" grow onClick={finish}>
-            {kind === "short" ? "Finish the short rest" : "Finish the long rest"}
+            {kind === "short" ? "Finish the Short Rest" : "Finish the Long Rest"}
           </SmallButton>
           <SmallButton onClick={() => setKind(null)}>Cancel</SmallButton>
         </div>

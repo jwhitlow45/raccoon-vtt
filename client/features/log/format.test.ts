@@ -58,9 +58,9 @@ describe("event text", () => {
       "The DM took back 4 damage to Thorn, 7/7 now.",
     );
     assert.equal(describeEvent({ type: "hp", ...target, change: "heal", back: true, label: "Bloodied" }, state), "The DM took back healing on Thorn (Bloodied).");
-    assert.equal(describeEvent({ type: "rest", ...target, kind: "long", label: "Healthy", left: left(7) }, state), "Thorn finishes a long rest, 7/7 now.");
-    assert.equal(describeEvent({ type: "rest", ...target, kind: "short", amount: 3, label: "Healthy", left: left(6) }, state), "Thorn finishes a short rest and regains 3 HP, 6/7 now.");
-    assert.equal(describeEvent({ type: "rest", ...target, kind: "short", label: "Bloodied" }, state), "Thorn finishes a short rest (Bloodied).");
+    assert.equal(describeEvent({ type: "rest", ...target, kind: "long", label: "Healthy", left: left(7) }, state), "Thorn finishes a Long Rest, 7/7 now.");
+    assert.equal(describeEvent({ type: "rest", ...target, kind: "short", amount: 3, label: "Healthy", left: left(6) }, state), "Thorn finishes a Short Rest and regains 3 HP, 6/7 now.");
+    assert.equal(describeEvent({ type: "rest", ...target, kind: "short", label: "Bloodied" }, state), "Thorn finishes a Short Rest (Bloodied).");
     assert.equal(describeEvent({ type: "concentration", ...target, dc: 10, spell: "Bless" }, state), "Thorn makes a DC 10 Constitution save to keep concentrating on Bless.");
     assert.equal(describeEvent({ type: "concentration", ...target, spell: "Bless" }, state), "Thorn makes a Constitution save to keep concentrating on Bless.");
     assert.equal(describeEvent({ type: "concentration", ...target, ended: true }, state), "Thorn loses Concentration.");

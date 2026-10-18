@@ -102,7 +102,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     case "actor.life":
       return op.life === "dead" ? `marking ${target(op.target)} dead` : `reviving ${target(op.target)}`;
     case "actor.rest":
-      return `${op.kind === "long" ? "a long rest" : "a short rest"} for ${target(op.target)}`;
+      return `${op.kind === "long" ? "a Long Rest" : "a Short Rest"} for ${target(op.target)}`;
     case "actor.effect.add":
       return `adding ${effectName(op.effect.key, op.effect.label)} to ${target(op.target)}`;
     case "actor.effect.update":

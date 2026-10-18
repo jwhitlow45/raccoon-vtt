@@ -442,9 +442,9 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
     case "rest": {
       const who = creatureName(names, data);
       const numbers = data.left ? `, ${hpNow(data.left)} now` : data.label ? ` (${data.label})` : "";
-      if (data.kind === "long") return `${who} finishes a long rest${numbers}.`;
+      if (data.kind === "long") return `${who} finishes a Long Rest${numbers}.`;
       const regained = data.amount !== undefined && data.amount > 0 ? ` and regains ${data.amount} HP` : "";
-      return `${who} finishes a short rest${regained}${numbers}.`;
+      return `${who} finishes a Short Rest${regained}${numbers}.`;
     }
     case "deathSave": {
       const who = creatureName(names, data);
