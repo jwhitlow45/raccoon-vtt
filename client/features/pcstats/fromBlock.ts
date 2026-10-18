@@ -10,6 +10,7 @@ import { pcProficiency } from "#shared/rules/pcStats.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { fitLine } from "#shared/srd/monsters.ts";
 import { abilityMod, monsterView, speedsOf } from "#shared/statBlock.ts";
+import { NO_CHALLENGE_RATING, NO_SIZE_LINE } from "../monsters/parse.ts";
 
 /**
  * A stat block read into a player character's (docs/design-v1-pc-stats.md
@@ -207,4 +208,13 @@ export function statsFromBlock(block: StatBlock, level: number | undefined, newI
   if (block.speed.trim()) out.actor.speeds = speedsOf(block.speed);
   out.actor.senses = fitLine(block.senses.trim(), 80);
   return out;
+}
+
+/**
+ * The reader's warnings that speak to a character's block. A challenge
+ * rating and the size, type and alignment line are a monster's, and a fill
+ * sets neither (6.1), so the review never asks a player to check them.
+ */
+export function pcPasteWarnings(warnings: readonly string[]): string[] {
+  return warnings.filter((w) => w !== NO_CHALLENGE_RATING && w !== NO_SIZE_LINE);
 }

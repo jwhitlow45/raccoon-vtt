@@ -41,7 +41,7 @@ import { alsoAny, alsoLines, alsoPatch, readLine, type AlsoKey, type AlsoSet } f
 import { openFlow, stepFlow, type FlowEvent, type FlowState, type Review } from "./flow.ts";
 import { DDB_LINK_ERROR, ddbCharacterId, ddbCharacterUrl } from "#shared/ddb/link.ts";
 import { getDdbFill, importErrorText, readPastedJson } from "./ddb.ts";
-import { statsFromBlock } from "./fromBlock.ts";
+import { pcPasteWarnings, statsFromBlock } from "./fromBlock.ts";
 import { parseStatBlockText } from "../monsters/parse.ts";
 import { closePcStats, openPcStatsSlot } from "./open.ts";
 import { partsText, rollReading } from "./reading.ts";
@@ -202,7 +202,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     if (!character) return;
     const parsed = parseStatBlockText(pasted);
     const fill = statsFromBlock(parsed.block, draft.level, actions.newId);
-    fill.warnings.unshift(...parsed.warnings);
+    fill.warnings.unshift(...pcPasteWarnings(parsed.warnings));
     send({ t: "read", fill, lines: alsoLines(fill, character) });
   };
 

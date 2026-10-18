@@ -256,6 +256,10 @@ function truncate(text: string, max: number, what: string, warnings: string[]): 
   return text.slice(0, max);
 }
 
+/** Two warnings about what only a monster's block holds, which a character's fill leaves out (pcstats/fromBlock.ts). */
+export const NO_SIZE_LINE = "No size, type and alignment line was found.";
+export const NO_CHALLENGE_RATING = "No challenge rating was found.";
+
 export function parseStatBlockText(input: string): ParsedStatBlock {
   const warnings: string[] = [];
   const block = emptyStatBlock();
@@ -274,7 +278,7 @@ export function parseStatBlockText(input: string): ParsedStatBlock {
     else warnings.push("No name was found above the size line.");
     at++;
   } else {
-    warnings.push("No size, type and alignment line was found.");
+    warnings.push(NO_SIZE_LINE);
     block.name = truncate(nameCase(lines[0]!.text), 80, "The name", warnings);
     at = 1;
   }
@@ -369,7 +373,7 @@ export function parseStatBlockText(input: string): ParsedStatBlock {
     const lair = crText.match(/or\s*([\d,]+)\s*in lair/i);
     if (lair) block.xpInLair = clampInt(Number(lair[1]!.replace(/,/g, "")), 0, 1_000_000);
   } else {
-    warnings.push("No challenge rating was found.");
+    warnings.push(NO_CHALLENGE_RATING);
   }
 
   readBody(lines.slice(at), block, warnings);

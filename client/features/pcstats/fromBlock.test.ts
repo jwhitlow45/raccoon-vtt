@@ -4,9 +4,9 @@ import type { StatBlock } from "#shared/model.ts";
 import { loadMonsters } from "#shared/srd/monsters.ts";
 import { statBlockFromSrd } from "#shared/statBlock.ts";
 import { blockOf, customMonster } from "#shared/testutil.ts";
-import { parseStatBlockText } from "../monsters/parse.ts";
+import { NO_CHALLENGE_RATING, NO_SIZE_LINE, parseStatBlockText } from "../monsters/parse.ts";
 import { pdfText, text2014, webText } from "../monsters/testing.ts";
-import { statsFromBlock } from "./fromBlock.ts";
+import { pcPasteWarnings, statsFromBlock } from "./fromBlock.ts";
 
 /** Pasted text read into a character's stat block (docs/design-v1-pc-stats.md 6.2). */
 
@@ -129,6 +129,15 @@ describe("statsFromBlock", () => {
     assert.deepEqual(old.saves, web.saves);
     assert.deepEqual(old.skills, web.skills);
     assert.equal(old.spellAbility, "wis");
+  });
+
+  test("a character's text with no challenge rating or size line is not asked about either, and other warnings stay (LP7-PC-2)", () => {
+    const text = ["Bree", "AC 13", "HP 33 (5d8 + 10)", "Speed 30 ft.", "Str 10 +0 +0", "Dex 14 +2 +2", "Con 14 +2 +2", "Int 12 +1 +1", "Wis 16 +3 +6", "Cha 8 -1 -1", "Actions", "Quarterstaff. Melee Attack Roll: +3, reach 5 ft. Hit: 3 (1d6) Bludgeoning damage."].join("\n");
+    const parsed = parseStatBlockText(text);
+    assert.ok(parsed.warnings.includes(NO_CHALLENGE_RATING) && parsed.warnings.includes(NO_SIZE_LINE), "the monster reader still says so");
+    const warnings = pcPasteWarnings(parsed.warnings);
+    assert.equal(warnings.includes(NO_CHALLENGE_RATING) || warnings.includes(NO_SIZE_LINE), false);
+    assert.ok(warnings.includes("No Passive Perception was given, so it is 10 plus the Wisdom modifier."));
   });
 
   test("a 2014 attack, \"Melee Weapon Attack: +5 to hit\", reads as an attack", () => {
