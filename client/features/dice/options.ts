@@ -10,7 +10,7 @@ import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { ABILITY_ABBR, ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { critSums, effectName } from "#shared/logText.ts";
 import type { PanelRoll } from "./useDicePanel.ts";
-import { parseBonus, TYPE_BONUS } from "../rolls/card.ts";
+import { d20Text, parseBonus, TYPE_BONUS } from "../rolls/card.ts";
 
 /**
  * The rules of the Dice panel's roll options (docs/design-v1-roll-options.md
@@ -44,9 +44,9 @@ export function testLabel(test: D20Test): string {
   }
 }
 
-/** "+2", "-1", "+0". */
+/** "+2", "−1" with the SRD's true minus, "+0". */
 export function signedText(n: number): string {
-  return n < 0 ? `${n}` : `+${n}`;
+  return n < 0 ? `−${-n}` : `+${n}`;
 }
 
 const SOURCE_NAMES: Record<string, string> = { "magic-resistance": "Magic Resistance", tracker: "the tracker" };
@@ -217,7 +217,7 @@ export function typedTap(route: Route["kind"], typed: TypedBonus): { bonus: numb
 
 /** Such a creature's option as its button reads: "STR d20", then "STR d20+3" once a bonus is typed. */
 export function typedText(name: string, typed: TypedBonus): string {
-  return typed?.ok ? `${name} d20${signedText(typed.bonus)}` : `${name} d20`;
+  return typed?.ok ? `${name} ${d20Text(typed.bonus)}` : `${name} d20`;
 }
 
 /** The note over such a creature's options: why no bonus shows, and what a tap does. */
@@ -528,7 +528,7 @@ const SAVE_SHORT: Record<string, string> = ABILITY_ABBR;
  */
 export function rowSummary(named: Pick<NamedRoll, "attack" | "save" | "damage" | "heal" | "dice">): string {
   const parts: string[] = [];
-  if (named.attack !== undefined) parts.push(`${named.attack < 0 ? named.attack : `+${named.attack}`} to hit`);
+  if (named.attack !== undefined) parts.push(`${signedText(named.attack)} to hit`);
   const fixed = named.damage.filter((p) => !p.optional);
   // "Half on a pass" only where there is damage to halve: Hold Person has none.
   if (named.save) parts.push(`DC ${named.save.dc} ${SAVE_SHORT[named.save.ability] ?? named.save.ability}${named.save.onPass === "half" && fixed.length > 0 ? ", half on a pass" : ""}`);

@@ -18,7 +18,7 @@ describe("the compact rows' words (docs/design-v1-dice-ui.md 4)", () => {
     assert.equal(rowSummary({ save: { ability: "wis", dc: 14, onPass: "half" }, damage: [] }), "DC 14 WIS");
     assert.equal(rowSummary({ save: { ability: "con", dc: 15, onPass: "half" }, damage: [{ formula: "5d6", type: "thunder" }] }), "DC 15 CON, half on a pass, 5d6 Thunder");
     assert.equal(rowSummary({ damage: [], heal: { formula: "2d8+3" } }), "2d8+3 healing");
-    assert.equal(rowSummary({ attack: -1, damage: [] }), "-1 to hit");
+    assert.equal(rowSummary({ attack: -1, damage: [] }), "−1 to hit");
   });
 
   test("a rider's toggle is its short name, its dice being in the header", () => {

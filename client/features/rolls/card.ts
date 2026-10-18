@@ -24,9 +24,14 @@ export const TYPE_BONUS = "Type your bonus first, such as +5 or 0.";
 export const CLEAR_TOTAL = "Clear the total to roll instead.";
 export const BONUS_WORDS = "A bonus is a whole number from -20 to 30.";
 
-/** A bonus as written on a button: "+3", "-1", "+0". */
+/** A bonus as written on a button, with the SRD's true minus: "+3", "−1", "+0". */
 export function signed(n: number): string {
-  return n < 0 ? `-${-n}` : `+${n}`;
+  return n < 0 ? `−${-n}` : `+${n}`;
+}
+
+/** A typed bonus written into the d20 it rolls: "d20+3", "d20-1". A formula keeps the hyphen a keyboard types, so it reads as roll syntax. */
+export function d20Text(n: number): string {
+  return `d20${n < 0 ? `-${-n}` : `+${n}`}`;
 }
 
 /** A bonus the player types where the app knows none (5.2): a whole number from -20 to 30, a typographic minus allowed. Null while empty. */
@@ -122,7 +127,7 @@ export function cardRoll(input: { bonus: number | null; preset: RollPreset | nul
   const { preset, inputs } = input;
   const typed = input.bonus === null ? parseBonus(inputs.bonus) : null;
   const bonus = input.bonus ?? (typed?.ok ? typed.bonus : null);
-  const label = input.bonus !== null ? `Roll ${signed(input.bonus)}` : typed?.ok ? `Roll d20${signed(typed.bonus)}` : "Roll d20";
+  const label = input.bonus !== null ? `Roll ${signed(input.bonus)}` : typed?.ok ? `Roll ${d20Text(typed.bonus)}` : "Roll d20";
   const sources: AdvantageSource[] = [...(preset?.sources ?? []), ...(inputs.pressed ? [{ kind: inputs.pressed, from: "pressed" }] : [])];
   const presetExtra = (preset?.extra ?? []).join("");
   const own = signedExtra(inputs.extra);
@@ -258,7 +263,7 @@ export function dmRoll(input: { bonus: number | null; typed?: boolean; preset: R
   const sources = preset?.sources ?? [];
   const mode = advantageFields(sources);
   const extra = (preset?.extra ?? []).join("");
-  const how = bonus === null ? "d20" : input.typed ? `d20${signed(bonus)}` : signed(bonus);
+  const how = bonus === null ? "d20" : input.typed ? d20Text(bonus) : signed(bonus);
   let label = `Roll ${input.ability ? `${input.ability} ` : ""}${how}`;
   if (mode.mode) label += `, ${mode.mode === "adv" ? "Advantage" : "Disadvantage"} (${list(names(sources, mode.mode))})`;
   for (const term of preset?.extra ?? []) {

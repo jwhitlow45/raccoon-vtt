@@ -19,7 +19,7 @@ import { useRoomView } from "../../state/view.ts";
 import type { PanelProps } from "../panels.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { useOpenPcStats } from "../pcstats/open.ts";
-import { parseBonus } from "../rolls/card.ts";
+import { d20Text, parseBonus } from "../rolls/card.ts";
 import { editsPcStats } from "../tokens/access.ts";
 import { Note, Section, SmallButton } from "../tokens/ui.tsx";
 import { sectionLabelLook } from "../../components/Panel.tsx";
@@ -480,7 +480,7 @@ function UnknownNumbers(props: { ctx: Ctx; name: string; skillsOpen: boolean; on
       {init !== null ? (
         <InitiativeCell ctx={ctx} bonus={init} bonusText={signedText(init)} />
       ) : (
-        <InitiativeCell ctx={{ ...ctx, blocked: ctx.blocked ?? typedTap("roll", typed).waits }} bonus={typed?.ok ? typed.bonus : 0} bonusText={typed?.ok ? `d20${signedText(typed.bonus)}` : "d20"} />
+        <InitiativeCell ctx={{ ...ctx, blocked: ctx.blocked ?? typedTap("roll", typed).waits }} bonus={typed?.ok ? typed.bonus : 0} bonusText={typed?.ok ? d20Text(typed.bonus) : "d20"} />
       )}
     </>
   );

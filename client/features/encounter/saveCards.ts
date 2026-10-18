@@ -12,6 +12,7 @@ import { effectName } from "#shared/logText.ts";
 import { effectChip } from "../../lib/tokenView.ts";
 import { asSave, creatureKey, d20Roll, presetLine, signedText, testLabel } from "../dice/options.ts";
 import type { PanelRoll } from "../dice/useDicePanel.ts";
+import { d20Text } from "../rolls/card.ts";
 import { askOp, targetRef, type AskCheck } from "../rolls/logic.ts";
 import { entryName, playerOwnedEntry } from "./logic.ts";
 
@@ -50,7 +51,7 @@ export function cardRoll(creature: ActorTarget, bonus: number, preset: RollPrese
 
 /** "Roll +1", the words of every card's Roll, and "Roll d20+1" for a bonus typed on the card. */
 export function rollText(bonus: number, typed = false): string {
-  return typed ? `Roll d20${signedText(bonus)}` : `Roll ${signedText(bonus)}`;
+  return typed ? `Roll ${d20Text(bonus)}` : `Roll ${signedText(bonus)}`;
 }
 
 

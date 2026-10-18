@@ -53,7 +53,7 @@ export function QuickNumbers(props: { items: readonly VitalItem[]; actor: Partia
   }
   const init = props.actor?.initBonus;
   if (props.token.kind !== "object" && typeof init === "number") {
-    const text = init < 0 ? `${init}` : `+${init}`;
+    const text = init < 0 ? `−${-init}` : `+${init}`;
     units.push(
       <Unit key="init" name={`Initiative ${text}`}>
         <span style={{ color: theme.color.textMuted }}>Init</span>

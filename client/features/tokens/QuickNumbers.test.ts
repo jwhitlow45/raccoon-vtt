@@ -46,7 +46,7 @@ describe("the quick numbers under a token's name", () => {
   test("an owner reads their own creature's numbers, a negative initiative signed", () => {
     const t = token("w", { kind: "npc", ownerIds: ["p1"], actor: { inline: actor({ ac: 12, initBonus: -1 }) } });
     const { names } = numbersFor(P1, t);
-    assert.ok(names.includes("Initiative -1"));
+    assert.ok(names.includes("Initiative −1"));
     assert.ok(names.includes("Armor Class 12"));
   });
 

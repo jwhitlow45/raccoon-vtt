@@ -15,7 +15,7 @@ describe("the card's Roll (docs/design-v1-roll-request.md 5.2, 5.3)", () => {
     assert.equal(cardRoll({ bonus: 3, preset: null, inputs: NO_INPUTS, text: "12", typeTotals: false }).blocked, null);
     assert.equal(cardRoll({ bonus: null, preset: null, inputs: { ...NO_INPUTS, bonus: "2" }, text: "12", typeTotals: false }).blocked, null, "with a typed bonus too");
     assert.equal(cardRoll({ bonus: null, preset: null, inputs: NO_INPUTS, text: "12", typeTotals: false }).blocked, TYPE_BONUS, "only the bonus it still needs");
-    assert.equal(cardRoll({ bonus: -1, preset: null, inputs: NO_INPUTS, text: "" }).label, "Roll -1");
+    assert.equal(cardRoll({ bonus: -1, preset: null, inputs: NO_INPUTS, text: "" }).label, "Roll −1");
     assert.equal(cardRoll({ bonus: 0, preset: null, inputs: NO_INPUTS, text: "" }).label, "Roll +0");
     const none = cardRoll({ bonus: null, preset: null, inputs: NO_INPUTS, text: "" });
     assert.equal(none.label, "Roll d20");

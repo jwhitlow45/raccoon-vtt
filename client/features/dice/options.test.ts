@@ -88,7 +88,7 @@ describe("a creature with no numbers", () => {
     const answer = routeOf({ state: table({ r1: request() }), creature: { characterId: "bree" }, test: save, dm: false, played: false, ask: false }).kind;
     assert.equal(answer, "answer");
     assert.deepEqual(typedTap(answer, null), { bonus: null, waits: TYPE_BONUS }, "a player's answer rolls here too");
-    assert.deepEqual([typedText("Str", null), typedText("Athletics", parseBonus("-1"))], ["Str d20", "Athletics d20-1"]);
+    assert.deepEqual([typedText("STR", null), typedText("Athletics", parseBonus("-1"))], ["STR d20", "Athletics d20-1"]);
   });
 
   test("its note says why no bonus shows and what a tap does", () => {

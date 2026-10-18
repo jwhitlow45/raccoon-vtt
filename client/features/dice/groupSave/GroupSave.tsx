@@ -30,7 +30,7 @@ import { useDiceView } from "../useDiceView.ts";
 import { SrdLoadFailed } from "../../monsters/SrdLoadFailed.tsx";
 import { useReceipt, type ReceiptState } from "../useReceipt.ts";
 import { useRollBlocked } from "../useRollOption.ts";
-import { knownOrTyped, parseBonus } from "../../rolls/card.ts";
+import { d20Text, knownOrTyped, parseBonus } from "../../rolls/card.ts";
 import {
   apply,
   applyAgain,
@@ -82,7 +82,8 @@ const WAY_WORDS: Record<Way, string> = { fails: "Fails", ask: "Ask", server: "Se
 
 /** The bonus the DM types for a row with no stat block that rolls on the server (rows.ts rowBonus). */
 function RowBonusField(props: { name: string; value: number | undefined; onChange(bonus: number | undefined): void }) {
-  const [text, setText] = useState(props.value === undefined ? "" : signedText(props.value));
+  // The field starts as the DM would type it, with a keyboard's hyphen, as every typed bonus reads.
+  const [text, setText] = useState(props.value === undefined ? "" : props.value < 0 ? `${props.value}` : `+${props.value}`);
   const typed = parseBonus(text);
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
@@ -109,7 +110,7 @@ function RowBonusField(props: { name: string; value: number | undefined; onChang
 /** The server way's words: "Server +5", and for a creature with no stat block "Server d20", then "Server d20+3" once a bonus is typed. */
 function serverWords(row: RowBase, s: RowState): string {
   if (row.bonus !== null) return `Server ${signedText(row.bonus)}`;
-  return s.typedBonus !== undefined ? `Server d20${signedText(s.typedBonus)}` : "Server d20";
+  return s.typedBonus !== undefined ? `Server ${d20Text(s.typedBonus)}` : "Server d20";
 }
 const MARKS: readonly { value: Mark; label: string }[] = [
   { value: "fail", label: "Fail" },
@@ -890,7 +891,7 @@ function GroupRow(props: {
               busy={page.dmRolls.some((r) => r.holder === row.holder && r.state === "sending")}
               onClick={() => typed.bonus !== null && props.onDmRoll(typed.typing ? typed.bonus : undefined)}
             >
-              {row.bonus !== null ? `Roll ${signedText(row.bonus)}` : typed.bonus !== null ? `Roll d20${signedText(typed.bonus)}` : "Roll d20"}
+              {row.bonus !== null ? `Roll ${signedText(row.bonus)}` : typed.bonus !== null ? `Roll ${d20Text(typed.bonus)}` : "Roll d20"}
             </Button>
           ) : null}
           {s.status === "notRolled" || s.status === "unknown" ? (
