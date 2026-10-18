@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync, statSync } from "node:fs";
 import { describe, test } from "node:test";
-import { INTER_FAMILY, INTER_FILES, INTER_UNICODE_RANGE } from "./interFont.ts";
+import { CREDITS } from "#shared/credits.ts";
+import { INTER_FAMILY, INTER_FILES, INTER_UNICODE_RANGE, INTER_VERSION } from "./interFont.ts";
 import { theme } from "./theme.ts";
 
 const root = new URL("../../", import.meta.url);
@@ -50,6 +51,13 @@ describe("the interface font", () => {
     assert.match(preloads[0]!, /as="font"/);
     assert.match(preloads[0]!, /type="font\/woff2"/);
     assert.match(preloads[0]!, /\scrossorigin[\s/>]/);
+  });
+
+  test("the About page credits the release the files come from", () => {
+    const credit = CREDITS.find((group) => group.id === "font")?.credits[0];
+    assert.equal(credit?.title, `Inter ${INTER_VERSION}`);
+    assert.equal(credit?.license, "OFL-1.1");
+    for (const file of Object.values(INTER_FILES)) assert.ok(credit?.files.includes(`public${file}`), file);
   });
 
   test("the page and the theme name Inter first, with the system fonts after it for anything it lacks", () => {

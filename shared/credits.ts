@@ -2,8 +2,8 @@
  * Every third-party work the app ships or uses, for the About page.
  *
  * CREDITS.md carries the same list for people reading the repository, and
- * credits.test.ts fails when a file in public/textures, public/icons or
- * public/stamps is missing from either one. The condition and status icon
+ * credits.test.ts fails when a file in public/textures, public/icons,
+ * public/stamps or public/fonts is missing from either one. The condition and status icon
  * maps below also drive `node scripts/icons.ts effects`, so the icon a key
  * uses and the credit shown for it cannot drift apart. Likewise each shipped
  * stamp names its source in shared/stamps.ts, which scripts/stamps.ts writes,
@@ -39,7 +39,7 @@ export type Credit = {
 };
 
 export type CreditGroup = {
-  id: "icons" | "interface-icons" | "textures" | "stamps" | "app-icon" | "srd" | "safety" | "passwords";
+  id: "icons" | "interface-icons" | "font" | "textures" | "stamps" | "app-icon" | "srd" | "safety" | "passwords";
   heading: string;
   credits: Credit[];
 };
@@ -266,6 +266,22 @@ export const CREDITS: CreditGroup[] = [
         source: "https://github.com/lucide-icons/lucide",
         license: "ISC",
         changes: `The interface icons marked Lucide in client/components/Icon.tsx (${LUCIDE_ICONS.join(", ")}), their path data copied as written. ${LUCIDE_NOTICE} Of these, ${FEATHER_ICONS.join(", ")} are derived from Feather: ${FEATHER_NOTICE}`,
+      },
+    ],
+  },
+  {
+    id: "font",
+    heading: "Interface font",
+    credits: [
+      {
+        // The release client/lib/interFont.ts pins, whose test holds this title to it.
+        files: ["public/fonts/InterVariable.woff2", "public/fonts/InterVariable-Italic.woff2", "public/fonts/Inter-LICENSE.txt"],
+        title: "Inter 4.1",
+        author: "The Inter Project Authors",
+        authorUrl: "https://rsms.me/inter/",
+        source: "https://github.com/rsms/inter",
+        license: "OFL-1.1",
+        changes: "The variable roman and italic fonts, subset to Latin characters and converted to WOFF2 by scripts/inter.ts. Copyright (c) 2016 The Inter Project Authors. The license's full text ships beside the fonts in public/fonts/Inter-LICENSE.txt and is in CREDITS.md.",
       },
     ],
   },

@@ -39,6 +39,7 @@ function filesUnder(dir: string): string[] {
 const allCredits: Credit[] = CREDITS.flatMap((group) => group.credits);
 const creditFor = (file: string) => allCredits.find((credit) => credit.files.includes(file));
 const shippedArt = [...filesUnder("public/textures"), ...filesUnder("public/icons"), ...filesUnder("public/stamps")];
+const shippedFonts = filesUnder("public/fonts");
 
 /**
  * Which terrains have a texture file and which the builder draws in code.
@@ -72,6 +73,18 @@ describe("credits", () => {
       assert.ok(creditFor(file), `${file} has no entry in shared/credits.ts`);
       assert.ok(markdown.includes(`\`${file}\``), `${file} is not listed in CREDITS.md`);
     }
+  });
+
+  test("every shipped font file, its license included, is credited in shared/credits.ts and CREDITS.md", () => {
+    const markdown = read("CREDITS.md").toString("utf8");
+    assert.ok(shippedFonts.some((file) => file.endsWith(".woff2")));
+    for (const file of shippedFonts) {
+      assert.equal(creditFor(file)?.license, "OFL-1.1", `${file} has no font credit in shared/credits.ts`);
+      assert.ok(markdown.includes(`\`${file}\``), `${file} is not listed in CREDITS.md`);
+    }
+    // The license asks for its text with every copy, so CREDITS.md carries it whole, as the file beside the fonts does.
+    const license = read("public/fonts/Inter-LICENSE.txt").toString("utf8").trim();
+    assert.ok(markdown.includes(license), "CREDITS.md lacks Inter's license text");
   });
 
   test("every credited public file exists", () => {
