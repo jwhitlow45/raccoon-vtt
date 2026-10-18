@@ -779,7 +779,14 @@ function buildAreaSpells(spells: readonly Spell[]): AreaSpell[] {
 // ---------------------------------------------------------------------------
 // Save spells
 
-/** A save named in a spell's text. */
+/**
+ * A save named in a spell's text. The lowercase "saving throw" is what
+ * leaves out a summoned creature's own stat block (Summon Dragon, Giant
+ * Insect), whose saves read as a stat block's do, such as "Dexterity Saving
+ * Throw:": that damage is the creature's, not the spell's on a save.
+ * Matching in any case would add them to the table, with no SAVE_SKIP entry
+ * to flag it.
+ */
 const SAVE_RE = /\b(?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) saving throw/;
 /**
  * Damage named in a spell's text: dice or a number before "damage", with any

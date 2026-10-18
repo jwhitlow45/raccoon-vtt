@@ -12,7 +12,9 @@ import data from "./save-spells.json" with { type: "json" };
  * Left out, each with its reason in the script's SAVE_SKIP: spells whose
  * text names a save and damage but whose damage does not hang on a save,
  * such as Heat Metal and Searing Smite, and Storm of Vengeance, whose
- * rounds differ.
+ * rounds differ. A summoned creature's own stat-block saves, such as Summon
+ * Dragon's breath and Giant Insect's, are left out by the script's
+ * lowercase SAVE_RE instead, since their stat blocks write "Saving Throw".
  */
 export type SaveSpell = {
   srdId: string;
