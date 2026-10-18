@@ -1,12 +1,16 @@
-# Every check on a push to main or to a ci/ branch: the typecheck, unit and
-# integration tests on Linux, and the e2e files in five shards on macOS.
+# Every check on a push to main or to a ci/ branch, on Linux: the typecheck,
+# unit and integration tests, and the e2e files in eight shards.
 #
-# The e2e shards run on macOS because the layout tests measure pixels, and
-# Linux renders fonts differently from the Macs they were tuned on. A public
-# repository runs at most five macOS jobs at a time, hence five shards. The
-# client is built once, on Linux since the bundle is the same bytes on every
-# OS, and each shard downloads it. scripts/e2e-shard.ts decides which files
-# each shard runs, and README.md ("Continuous integration") has the rest.
+# The e2e shards run on Ubuntu, since macOS runners are far slower and a
+# public repository runs up to 20 Linux jobs at a time. The app's text is
+# in the system font, which Android draws in Roboto, so each shard installs
+# Roboto and e2e/fonts.conf makes it Chrome's system font. A file that fails
+# on Linux from font metrics alone goes in e2e/macos-only.json, and a macOS
+# job runs those files only while that list is not empty.
+#
+# The client is built once, since the bundle is the same bytes on every OS,
+# and each shard downloads it. scripts/e2e-shard.ts decides which files each
+# shard runs, and README.md ("Continuous integration") has the rest.
 #
 # It needs no secrets and deploys nothing.
 name: CI
@@ -33,10 +37,15 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    outputs:
+      macos-files: ${{ steps.macos.outputs.files }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Count the files that run only on macOS
+        id: macos
+        run: echo "files=$(jq '.files | length' e2e/macos-only.json)" >> "$GITHUB_OUTPUT"
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -99,16 +108,30 @@ jobs:
 
   e2e:
     needs: build
-    # Apple silicon, the newest macOS the runner images offer. Named rather
-    # than macos-latest, so the fonts change only when this line does.
-    runs-on: macos-26
-    # The longest shard is one file of about 16 minutes on a laptop, and a
-    # failing file runs twice.
-    timeout-minutes: 90
+    runs-on: ubuntu-24.04
+    # options.e2e.ts alone is the longest shard, about 16 minutes on a
+    # laptop. Eight shards keep every other one near half of that, so a
+    # rerun there still ends first, and they balance once options splits.
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    services:
+      # The same database as the checks job's, one per shard.
+      postgres:
+        image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        env:
+          POSTGRES_USER: raccoon
+          POSTGRES_PASSWORD: raccoon
+          POSTGRES_DB: raccoon
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U raccoon -d raccoon"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       DATABASE_URL: postgres://raccoon:raccoon@localhost:5434/raccoon
       E2E_SCREENSHOT_DIR: test-results/e2e-screenshots
@@ -122,19 +145,69 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
-      # Each runner installs for itself, since sharp and argon2 bring native
-      # binaries for the machine's own OS and CPU.
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+      # Ubuntu 24.04's Roboto, pinned to its version in the archive. The last
+      # line fails the step unless fontconfig now answers Roboto.
+      - name: Roboto as the system font
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends fonts-roboto=2:0~20170802-3 fonts-roboto-unhinted=2:0~20170802-3
+          mkdir -p ~/.config/fontconfig
+          cp e2e/fonts.conf ~/.config/fontconfig/fonts.conf
+          test "$(fc-match --format='%{family}' sans-serif)" = Roboto
+      # The harness launches Chrome with channel "chrome", which is the
+      # runner image's Google Chrome stable. The image sets its version.
+      - run: google-chrome --version
+      - name: e2e shard ${{ matrix.shard }}
+        id: shard
+        run: node scripts/e2e-shard.ts ${{ matrix.shard }} ${{ strategy.job-total }}
+      # A shard that failed, or passed only through a rerun, keeps its logs
+      # and screenshots for two weeks.
+      - name: Keep logs and screenshots
+        if: ${{ failure() || steps.shard.outputs.reran == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-shard-${{ matrix.shard }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # The files of e2e/macos-only.json, on a Mac. Skipped while the list is empty.
+  e2e-macos:
+    needs: build
+    if: ${{ needs.build.outputs.macos-files != '0' }}
+    # Apple silicon, named rather than macos-latest so the fonts change
+    # only when this line does.
+    runs-on: macos-26
+    timeout-minutes: 75
+    env:
+      DATABASE_URL: postgres://raccoon:raccoon@localhost:5434/raccoon
+      E2E_SCREENSHOT_DIR: test-results/e2e-screenshots
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: dist
           path: dist
       # The macOS images have no Docker and no PostgreSQL, so it comes from
-      # Homebrew, at the major version of docker-compose.yml's image. It is
-      # set up as that image sets itself up: user and password raccoon,
-      # passwords checked on TCP, and a database named raccoon. The database
-      # is created over TCP, the way the server connects, so a wrong password
-      # setup fails here rather than in the first e2e file.
+      # Homebrew, at the major version of the service container. It is set
+      # up as that image sets itself up: user and password raccoon, passwords
+      # checked on TCP, and a database named raccoon. The database is created
+      # over TCP, the way the server connects, so a wrong password setup
+      # fails here rather than in the first e2e file.
       - name: Start PostgreSQL 17
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
@@ -151,16 +224,14 @@ jobs:
             --auth-local=trust --auth-host=scram-sha-256 --encoding=UTF8 --locale=en_US.UTF-8
           "$bin/pg_ctl" --pgdata="$data" --log=test-results/postgres.log --options="-p 5434" --wait start
           "$bin/createdb" --host=localhost --port=5434 --username=raccoon raccoon
-      - name: e2e shard ${{ matrix.shard }}
+      - name: e2e on macOS
         id: shard
-        run: node scripts/e2e-shard.ts ${{ matrix.shard }} ${{ strategy.job-total }}
-      # A shard that failed, or passed only through a rerun, keeps its logs
-      # and screenshots for two weeks.
+        run: node scripts/e2e-shard.ts 1 1 --macos-only
       - name: Keep logs and screenshots
         if: ${{ failure() || steps.shard.outputs.reran == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: e2e-shard-${{ matrix.shard }}
+          name: e2e-macos
           path: test-results/
           if-no-files-found: ignore
           retention-days: 14
