@@ -634,7 +634,8 @@ function LevelRow(props: { draft: PcDraft; onLevel(level: number | undefined): v
         <label htmlFor={id} style={{ fontWeight: theme.weight.strong }}>
           Level
         </label>
-        <IntInput id={id} value={props.draft.level} min={1} max={20} nullable placeholder="Not set" onChange={(n) => props.onLevel(n ?? undefined)} />
+        {/* Wide enough for "Not set" whole at 16 px, which a two-digit field cuts to "Not se". */}
+        <IntInput id={id} value={props.draft.level} min={1} max={20} nullable placeholder="Not set" width={96} onChange={(n) => props.onLevel(n ?? undefined)} />
         <span style={{ color: theme.color.textMuted }}>Proficiency {signed(pb)}</span>
       </div>
       {props.draft.level === undefined ? <Help>Level not set: proficiency +2.</Help> : null}
