@@ -36,15 +36,15 @@ export type Formula = Term[];
 
 /** Appendix A: every refusal of a formula, the same words on the client and the server. */
 export const FORMULA_ERRORS = {
-  dice: "A roll needs 1 to 100 dice, as 1d20+5.",
+  dice: "Roll 1 to 100 dice, as 1d20+5.",
   sides: "Dice have 2 to 1,000 sides.",
   number: "Numbers go up to 1,000.",
-  keep: "Keep at least one die, and no more than you roll.",
+  keep: "Keep 1 to all of the dice.",
   terms: "At most 20 parts in one roll.",
-  sign: "Add dice or a number after the last sign.",
+  sign: "End with dice or a number.",
   long: "That roll is too long.",
   tooMuch: "That is too much to roll at once. Roll fewer at a time.",
-  label: "A label holds at most 60 characters.",
+  label: "Label: 60 characters at most.",
   mode: "Advantage and Disadvantage need one d20 in the roll.",
   other: "Try 1d20+5 or 2d6+3 fire.",
 } as const;

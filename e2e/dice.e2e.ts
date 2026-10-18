@@ -645,4 +645,75 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     assert.deepEqual(dmConsole.errors, []);
     assert.deepEqual(playerConsole.errors, []);
   });
+
+  test("18-readline. the line under the field is always held, so the quick dice never move as a reading, a refusal or nothing shows there, and no refusal is cut", async () => {
+    const refusals: Record<string, string> = {
+      dice: "101d6",
+      sides: "1d1001",
+      number: "d20+1001",
+      keep: "2d6kh3",
+      terms: Array.from({ length: 21 }, () => "1").join("+"),
+      sign: "1d20+",
+      long: `${Array.from({ length: 15 }, () => "100d1000").join("+")}`,
+      label: `1d20 ${"x".repeat(61)}`,
+      other: "xyz",
+    };
+    const blockedWords = ["Rolls are not sent from a preview.", "Rolling needs a connection."];
+    for (const [width, height, scale] of [[390, 844, 1], [390, 844, 1.3], [320, 568, 1.3], [320, 568, 1]] as const) {
+      const label = `${width} x ${height} at ${Math.round(scale * 100)}%`;
+      await player.setViewportSize({ width, height });
+      await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+      await reopenRoom(player);
+      await player.getByRole("status", { name: "Connected" }).first().waitFor();
+      await openDicePhone(player);
+      const d20 = player.locator('button[aria-label="Add a d20"]');
+      const top = async () => (await d20.boundingBox())!.y;
+      const empty = await top();
+      if (width === 390 && scale === 1) await shots.take(player, "dice-readline-empty");
+      await field(player).fill("4d20+2d4");
+      await player.getByText(/^4d20\+2d4: [\d,]+ to [\d,]+$/).waitFor();
+      assert.equal(await top(), empty, `${label}: a reading holds the quick dice`);
+      if (width === 390 && scale === 1) await shots.take(player, "dice-readline-reading");
+      await field(player).fill("1d20+");
+      await field(player).press("Enter");
+      await player.locator("[data-dice-note] [role=alert]").waitFor();
+      assert.equal(await top(), empty, `${label}: a refusal holds the quick dice`);
+      await field(player).fill("");
+      assert.equal(await top(), empty, `${label}: an empty field holds the quick dice`);
+      // Each refusal and each blocked note must fit its one line whole.
+      const cut: string[] = [];
+      for (const [name, text] of Object.entries(refusals)) {
+        await field(player).fill(text);
+        await field(player).press("Enter");
+        const alert = player.locator("[data-dice-note] [role=alert]");
+        await alert.waitFor();
+        const sizes = await player.locator("[data-dice-note]").evaluate((el) => ({ need: (el as unknown as { scrollWidth: number }).scrollWidth, have: (el as unknown as { clientWidth: number }).clientWidth, words: el.textContent ?? "" }));
+        if (sizes.need > sizes.have + 1) cut.push(`${name}: "${sizes.words}" needs ${sizes.need}, line is ${sizes.have}`);
+        assert.equal(await top(), empty, `${label}: the ${name} refusal holds the quick dice`);
+      }
+      const noteWidths = await player.locator("[data-dice-note]").evaluate((el, words) => {
+        type Box = { clientWidth: number; style: { fontSize: string; cssText: string }; textContent: string | null; getBoundingClientRect(): { width: number }; remove(): void };
+        type Doc = { createElement(tag: string): Box; body: { append(e: Box): void } };
+        const line = el as unknown as Box & { ownerDocument: Doc };
+        const doc = line.ownerDocument;
+        const probe = doc.createElement("span");
+        probe.style.cssText = `position:absolute;white-space:nowrap;font-size:${line.style.fontSize}`;
+        doc.body.append(probe);
+        const out = words.map((w) => {
+          probe.textContent = w;
+          return { w, need: probe.getBoundingClientRect().width, have: line.clientWidth };
+        });
+        probe.remove();
+        return out;
+      }, blockedWords);
+      for (const n of noteWidths) if (n.need > n.have + 1) cut.push(`note "${n.w}" needs ${Math.round(n.need)}, line is ${n.have}`);
+      assert.deepEqual(cut, [], `${label}: words cut`);
+      await field(player).fill("");
+    }
+    await player.setViewportSize({ width: 390, height: 844 });
+    await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await reopenRoom(player);
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+    assert.deepEqual(playerConsole.errors, []);
+  });
 });

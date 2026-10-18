@@ -30,6 +30,14 @@ const PAD_TOP = "var(--pane-pad-top, 0px)";
 export const LAST_LINE_PX = 40;
 
 // The d20 leads, as the die rolled most: at 130% on a phone the strip scrolls after d10, and at 100% after d12.
+/**
+ * The line under the field is always this tall, empty or not, so a reading,
+ * a refusal or the blocked note coming and going while someone types never
+ * moves the quick dice. The blocked note shares the line and wins: a blocked
+ * panel cannot roll, so its reading and refusals add nothing. Long text cuts
+ * with an ellipsis and the full words stay in the field's description.
+ */
+const NOTE_LINE = 1.3;
 const QUICK_DICE = [20, 4, 6, 8, 10, 12, 100] as const;
 
 /**
@@ -283,7 +291,7 @@ export function Roller() {
             ref={field}
             value={text}
             aria-label="Dice formula"
-            aria-describedby={[reading || error ? readingId : "", blocked === null ? "" : blockedId].filter(Boolean).join(" ") || undefined}
+            aria-describedby={blocked !== null ? blockedId : reading || error ? readingId : undefined}
             aria-invalid={error ? true : undefined}
             placeholder="1d20+5 or 2d6+3 fire"
             autoComplete="off"
@@ -312,20 +320,21 @@ export function Roller() {
           {busy ? "Rolling…" : "Roll"}
         </Button>
       </div>
-      {blocked !== null ? (
-        <span id={blockedId} style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
-          {blocked}
-        </span>
-      ) : null}
-      {error ? (
-        <span id={readingId} role="alert" style={{ fontSize: theme.font.small, color: theme.color.dangerText }}>
-          {error}
-        </span>
-      ) : reading?.ok ? (
-        <span id={readingId} style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
-          {reading.text}
-        </span>
-      ) : null}
+      <div data-dice-note style={{ height: `${NOTE_LINE}em`, lineHeight: `${NOTE_LINE}em`, fontSize: theme.font.small, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {blocked !== null ? (
+          <span id={blockedId} style={{ color: theme.color.textMuted }}>
+            {blocked}
+          </span>
+        ) : error ? (
+          <span id={readingId} role="alert" style={{ color: theme.color.dangerText }}>
+            {error}
+          </span>
+        ) : reading?.ok ? (
+          <span id={readingId} style={{ color: theme.color.textMuted }}>
+            {reading.text}
+          </span>
+        ) : null}
+      </div>
       <ScrollStrip aria-label="Quick dice" gap={theme.space(1)}>
         {QUICK_DICE.map((sides) => (
           <Button key={sides} size="sm" aria-label={`Add a d${sides}`} onClick={() => change(addDie(text, sides))} style={{ flex: "none", minWidth: theme.touch }}>

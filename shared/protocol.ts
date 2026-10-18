@@ -1563,7 +1563,7 @@ export const clientOps = [
     .superRefine((o, ctx) => {
       const checked = diceFormulas(o.rolls);
       if (!checked.ok) ctx.addIssue({ code: "custom", message: checked.message });
-      else if (checked.formulas.reduce((n, f) => n + diceCount(f), 0) > LIMITS.dicePerOp) ctx.addIssue({ code: "custom", message: "A roll needs 1 to 100 dice, as 1d20+5." });
+      else if (checked.formulas.reduce((n, f) => n + diceCount(f), 0) > LIMITS.dicePerOp) ctx.addIssue({ code: "custom", message: "Roll 1 to 100 dice, as 1d20+5." });
     })
     .refine((o) => serializedBytes(o) <= LIMITS.diceOpBytes, { message: "That is too much to roll at once. Roll fewer at a time." }),
   /** A request's answer rolled on the server (docs/design-v1-dice.md 7). The Allow of an ask carries nothing else that rolls. */

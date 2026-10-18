@@ -476,12 +476,12 @@ One builder, in this order, before docs 2 to 4 build on it:
 
 | Bound | Error |
 | --- | --- |
-| 1 to 100 dice: a term's count at least 1, and 100 in the whole op, advantage's second d20 included | "A roll needs 1 to 100 dice, as 1d20+5." |
+| 1 to 100 dice: a term's count at least 1, and 100 in the whole op, advantage's second d20 included | "Roll 1 to 100 dice, as 1d20+5." |
 | 2 to 1,000 sides | "Dice have 2 to 1,000 sides." |
 | numbers 0 to 1,000 | "Numbers go up to 1,000." |
-| keep 1 to all of them, drop 1 to all but one | "Keep at least one die, and no more than you roll." |
+| keep 1 to all of them, drop 1 to all but one | "Keep 1 to all of the dice." |
 | 20 terms | "At most 20 parts in one roll." |
-| a sign at the end | "Add dice or a number after the last sign." |
+| a sign at the end | "End with dice or a number." |
 | 100 characters of formula | "That roll is too long." |
 | 20 rolls or 3 KiB in one op | "That is too much to roll at once. Roll fewer at a time." |
 | anything else, a label first included | "Try 1d20+5 or 2d6+3 fire." |
