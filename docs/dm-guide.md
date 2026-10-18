@@ -420,7 +420,7 @@ A creature can carry up to 32 conditions and statuses.
 
 ## Initiative
 
-**Initiative** runs the fight: who is in it, the order, turns and rounds. Players see the order too, without hidden creatures, monsters' dice or anything they can't see.
+**Initiative** runs the fight: who is in it, the order, turns and rounds. Players see the order too, without hidden creatures, monsters' dice or anything they can't see. In a new room they see a monster's place in it only once its turn comes (see What players see of the order, below).
 
 ![The Initiative panel during a fight: the round header with Previous and Next, the order with HP and conditions, and Auto initiative below.](dm-guide/initiative.webp)
 
@@ -439,7 +439,7 @@ With two or more tokens selected on the map, their action bar has **Start a figh
 
 - A row's box reads **Set** until it has a value. Tap it, type the number, press Enter.
 - **Roll +2** on a row rolls its initiative on the server. Players roll for their own rows, and you for the rows no player plays. Where the row is narrow, the roll waits in the row's **⋯**. Once a row has a value, its **⋯** offers "Roll again, replaces 17", so a stray tap never reorders the fight.
-- **Auto initiative (N)** rolls for every monster still waiting. **How monsters share rolls** picks **By creature** (identical monsters share one roll, the default), **One each** or **All at once**. **Re-roll monsters that have a value** rolls them again. The dice show to you alone, and players see each visible monster's total.
+- **Auto initiative (N)** rolls for every monster still waiting. **How monsters share rolls** picks **By creature** (identical monsters share one roll, the default), **One each** or **All at once**. **Re-roll monsters that have a value** rolls them again. The dice show to you alone, and players see each visible monster's total once its place in the order is theirs to see.
 - **Type several values** opens one box per row for initiatives rolled at the table, Enter moving to the next.
 - **Monsters use initiative scores** gives monsters 10 + their Dexterity modifier instead of a roll.
 
@@ -470,6 +470,16 @@ Tap a row to select its token and open its action bar. A row's **⋯** holds, fo
 - **Remove from the fight**.
 
 **HP changes**, under the order, lists each HP change of the fight ("Goblin Warrior 2 takes 7 damage, 3/10 left."). **Undo** on a line takes that change back while the creature is still as it left it. **Several at once** turns on multi-select, so one HP entry hits every row you tap.
+
+### What players see of the order
+
+**Initiative order players see**, in Room settings under Combat, decides which rows players hold before those creatures act:
+
+- **Player characters, the rest on their turn**, the default in a new room. Players see the creatures players play from the start: their characters, their companions and any token you lend a player. Every other creature, your NPCs and allies included, joins their order when its first turn comes, in its place, and stays for the rest of the fight, whatever its value becomes. Before that nothing of it reaches them: no row, value or count, and no initiative roll for it, even one you roll with Secret off.
+- **Player characters and allies, the rest on their turn**: the same, and every creature with the Ally ring shows from the start.
+- **Everyone**: the whole order from the start, which rooms made before the setting keep.
+
+A creature added mid-fight waits for its own turn, and a dead one that "Skip defeated creatures" passes over never shows. **Previous** back past a creature's first turn takes it out of their order again. A row that is **Hidden from players** stays out whichever you pick. Your tracker tags each row players do not see yet **Secret until its turn**. **View as a player** in the DM panel shows the order as they see it. Players never see who comes next, so the strip gives no creature away.
 
 ### Ending it
 
@@ -717,7 +727,7 @@ Menu, **Room settings** (DM only). Switches apply at once.
 ![Room settings: the Players settings with their help lines, and Combat below.](dm-guide/room-settings.webp)
 
 - **Players**: **Who can move any token** (No one), **Who can draw** (Every player), **Players can create their own characters** (on), **Players can apply damage and healing** (off), **Players see the party's HP** (on), **Players see each other's areas** (on).
-- **Combat**: **Monsters die at 0 HP** (on), **Healing brings back the dead** (on), **Skip defeated creatures** (on), **Use initiative scores for monsters** (off), **Reveal hidden combatants on their turn** (on), **Turn timer** (Off).
+- **Combat**: **Monsters die at 0 HP** (on), **Healing brings back the dead** (on), **Skip defeated creatures** (on), **Use initiative scores for monsters** (off), **Reveal hidden combatants on their turn** (on), **Initiative order players see** (**Player characters, the rest on their turn** in a new room), **Turn timer** (Off).
 - **Grid and distance**: **Feet per square** (5) and **Diagonal moves**: **Every square is 5 ft** (the 2024 rule, the default), **Alternate 5 ft and 10 ft**, or **True distance**.
 - **Areas of effect**: **Which squares an area covers** (**At least half the square**, the 2024 rule) and **Which creatures an area catches** (**Any square the creature is in**).
 
