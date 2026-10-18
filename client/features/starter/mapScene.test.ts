@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DEFAULT_GRID, guessCellPx, mapScene } from "../scenes/create.ts";
+import { STARTER_PACKS } from "#shared/starterArt.ts";
 import { answeredGrid, retainedGrid, starterMapScene, type StarterGrid } from "./mapScene.ts";
 
 const ROW = { id: "asset-1", width: 4096, height: 3072 };
@@ -18,10 +19,12 @@ describe("a scene from a starter map", () => {
     assert.equal(made.feetPerCell, 10);
   });
 
-  test("takes the grid's origin by the rule a found grid's goes by: past a whole square it folds back, and a hair from the edge is the edge", () => {
+  test("takes the grid's origin by the rule a measured grid goes by: past a whole square it folds back, a line a few pixels in stays there, and only a hair under a square is the edge", () => {
     const far = starterMapScene({ id: "s1", name: "", asset: ROW, work: inked, grid: { cellPx: 70, originPx: { x: 90, y: 2 } } });
-    assert.deepEqual(far.scene.map?.originPx, { x: 20, y: 0 });
+    assert.deepEqual(far.scene.map?.originPx, { x: 20, y: 2 });
     assert.equal(far.aligned, true);
+    const hair = starterMapScene({ id: "s1", name: "", asset: ROW, work: inked, grid: { cellPx: 70, originPx: { x: 69.5, y: 3.5 } } });
+    assert.deepEqual(hair.scene.map?.originPx, { x: 0, y: 3.5 });
   });
 
   test("with a measured square and no origin starts at that size, still for the DM to line up", () => {
@@ -71,6 +74,20 @@ describe("a scene from a starter map", () => {
 });
 
 describe("the grid a starter map's scene starts on", () => {
+  // Dyson's DY-22 as shipped: its lines fall 4.58 px below the top, which a dragged box's 5% snap would move onto the edge.
+  const dy22 = STARTER_PACKS.flatMap((p) => p.works).find((w) => w.key === "dyson-logos/dy-22")!;
+  const dy22Row = { id: "asset-22", width: dy22.width, height: dy22.height };
+
+  test("keeps a small measured origin, for a fresh pick and for one the room holds", () => {
+    assert.deepEqual(dy22.grid, { cellPx: 121.76, originPx: { x: 111.99, y: 4.58 }, feetPerCell: 5 });
+    const fresh = starterMapScene({ id: "s1", name: "", asset: dy22Row, work: dy22, grid: answeredGrid({ cellPx: 121.76, originPx: { x: 111.99, y: 4.58 } }) });
+    assert.deepEqual(fresh.scene.map?.originPx, { x: 111.99, y: 4.58 });
+    assert.equal(fresh.scene.map?.cellPx, 121.76);
+    assert.equal(fresh.aligned, true);
+    const retained = starterMapScene({ id: "s1", name: "", asset: dy22Row, work: dy22, grid: retainedGrid({ width: dy22.width, sha256: dy22.sha256 }, dy22) });
+    assert.deepEqual(retained.scene.map, fresh.scene.map);
+  });
+
   test("for a fresh pick is the one the server answers from the file it copied, never this page's catalog", () => {
     // A tab holding an older catalog: it says 70 px, while the server copied a rebuilt file measured at 35.
     const answer = { cellPx: 35, originPx: { x: 10, y: 17.5 } };

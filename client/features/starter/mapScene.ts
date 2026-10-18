@@ -1,5 +1,5 @@
 import type { StarterWork } from "#shared/starter.ts";
-import { BOX_CELLS, calibrationFromBox, fitBounds, MAX_CELL_PX, MIN_CELL_PX } from "../grid/calibrate.ts";
+import { calibrationFromFind, fitBounds, MAX_CELL_PX, MIN_CELL_PX } from "../grid/calibrate.ts";
 import { DEFAULT_GRID, mapScene, type MapAsset, type SceneInput } from "../scenes/create.ts";
 
 /**
@@ -7,9 +7,11 @@ import { DEFAULT_GRID, mapScene, type MapAsset, type SceneInput } from "../scene
  * measured each map's drawn grid on the file as shipped, so the scene
  * starts on it and skips grid alignment, as a size in a file's name does:
  * the cell size goes in as that hint, and a measured origin goes through
- * calibrationFromBox, as a found grid's does, so it is rounded and snapped
- * to the image's edge by the same rule. A map with no measured grid starts
- * on the upload's guess, and the DM lines it up next.
+ * calibrationFromFind, as a grid Find the grid measured does: kept as
+ * measured, folded to the image's edge only when it falls a hair under a
+ * whole square. The wider snap of a box the DM drags would move a line
+ * found a few pixels in onto the edge, off the drawn lines. A map with no
+ * measured grid starts on the upload's guess, and the DM lines it up next.
  *
  * A few maps have a measured square but no origin: the build found how far
  * apart the lines are and not where they fall. Their scene starts at that
@@ -76,7 +78,7 @@ export function starterMapScene(input: {
   const aligned = origin !== undefined;
   const name = input.name.trim() || work.name;
   const { scene } = mapScene({ id: input.id, name, asset: sized ? { ...asset, cellPx } : { id: asset.id, width: asset.width, height: asset.height } });
-  const map = origin && scene.map ? { ...scene.map, ...calibrationFromBox({ x: origin.x, y: origin.y, size: BOX_CELLS * cellPx }) } : scene.map;
+  const map = origin && scene.map ? { ...scene.map, ...calibrationFromFind({ cellPx, originPx: origin }) } : scene.map;
   const color = work.gridColor && HEX_COLOR.test(work.gridColor) ? work.gridColor.toLowerCase() : null;
   return {
     scene: {
