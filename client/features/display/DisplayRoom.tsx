@@ -15,6 +15,7 @@ import { api, ApiError, displayAssetUrl, type AssetVariant } from "../../lib/api
 import { fitRect, NO_INSETS, type Camera, type Rect, type Size } from "../../lib/camera.ts";
 import { BANNER_DELAY_MS, type ConnectionState } from "../../lib/connection.ts";
 import { revealedMask } from "../../lib/fogTiles.ts";
+import { exitFullscreen, fullscreenSupported, toggleFullscreen, useFullscreen } from "../../lib/fullscreen.ts";
 import { navigate } from "../../lib/navigation.ts";
 import { sceneGate } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
@@ -112,8 +113,6 @@ function DisplayScreen(props: { roomId: string }) {
     </RoomScopeProvider>
   );
 }
-
-const fullscreenAvailable = () => typeof document !== "undefined" && document.fullscreenEnabled === true;
 
 function DisplayTable(props: { roomId: string }) {
   const view = useRoomView((s) => s.view);
@@ -834,12 +833,7 @@ function DisplayMenu(props: {
   const [armed, setArmed] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fullscreen, setFullscreen] = useState(() => document.fullscreenElement !== null);
-  useEffect(() => {
-    const onChange = () => setFullscreen(document.fullscreenElement !== null);
-    document.addEventListener("fullscreenchange", onChange);
-    return () => document.removeEventListener("fullscreenchange", onChange);
-  }, []);
+  const fullscreen = useFullscreen();
   const leave = async () => {
     if (leaving) return;
     setLeaving(true);
@@ -847,7 +841,7 @@ function DisplayMenu(props: {
     try {
       await api.leaveDisplay();
       forgetDisplayRoom(props.roomId);
-      if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+      void exitFullscreen();
       navigate("/", { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not sign this display out. Try again.");
@@ -888,12 +882,11 @@ function DisplayMenu(props: {
         Show whose turn it is: {props.showTurn ? "on" : "off"}
       </MenuButton>
       <TextSize onTouch={props.onTouch} />
-      {fullscreenAvailable() ? (
+      {fullscreenSupported() ? (
         <MenuButton
           role="menuitem"
           onClick={() => {
-            if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
-            else void document.documentElement.requestFullscreen().catch(() => {});
+            void toggleFullscreen();
             props.onTouch();
           }}
         >
