@@ -209,12 +209,6 @@ function rollVerdict(roll: DiceRoll, line: Pick<DiceEvent, "dc" | "ac">): string
 }
 
 /**
- * A `dice` line (5.5): "Bree rolled Longsword: 2d6+3 (4, 6) = 13.", for a
- * creature "Bree rolled for Thorn, Stealth: ...", several rolls one line
- * each under "Mara rolled 6 times:", and the bare line of someone else's
- * secret roll "Mara rolled in secret.". A secret line read in full says so.
- */
-/**
  * Who a roll kept from players is kept from, as the DM reads it: "other
  * players" when the creature has players of its own, such as the DM's
  * monster lent to one, since the projection still gives them the roll
@@ -228,6 +222,12 @@ export function keptFrom(roll: Pick<DiceRoll, "tokenId" | "characterId">, names:
   return owners.some((id) => names.members[id]?.kind === "player") ? "other players" : "players";
 }
 
+/**
+ * A `dice` line (5.5): "Bree rolled Longsword: 2d6+3 (4, 6) = 13.", for a
+ * creature "Bree rolled for Thorn, Stealth: ...", several rolls one line
+ * each under "Mara rolled 6 times:", and the bare line of someone else's
+ * secret roll "Mara rolled in secret.". A secret line read in full says so.
+ */
 export function diceLineText(data: DiceEvent, names: LogNames): string {
   const who = memberName(names, data.by);
   if (data.rolls.length === 0) return `${who} rolled in secret.`;
