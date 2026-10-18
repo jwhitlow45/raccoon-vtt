@@ -262,7 +262,7 @@ const DAMAGE_WORDS = new Set<string>(DAMAGE_TYPES);
 
 /**
  * One damage tap's rolls, one per type, as their sum and shared head
- * ("Flame Tongue damage" of "Flame Tongue damage, slashing" and "…, fire"),
+ * ("Flame Tongue damage" of "Flame Tongue damage, Slashing" and "…, Fire"),
  * or null when they are not one damage: a label without a type, two heads,
  * a type twice or two creatures.
  */
@@ -274,7 +274,8 @@ function oneDamage(rolls: readonly DiceRoll[]): { head: string; total: number; r
   for (const roll of rolls) {
     const cut = roll.label?.lastIndexOf(", ") ?? -1;
     if (roll.label === undefined || cut < 0) return null;
-    const type = roll.label.slice(cut + 2);
+    // Labels in rooms from before the SRD's capitals hold "slashing", and new ones "Slashing".
+    const type = roll.label.slice(cut + 2).toLowerCase();
     if (!DAMAGE_WORDS.has(type) || types.has(type) || (head !== null && roll.label.slice(0, cut) !== head)) return null;
     if (roll.tokenId !== first.tokenId || roll.characterId !== first.characterId) return null;
     head = roll.label.slice(0, cut);

@@ -31,7 +31,7 @@ describe("what one row takes", () => {
   test("Flame Strike on a fire elemental: the fire part 0, the radiant part dealt, named", () => {
     const fail = rowDamage(FLAME, "fail", { onPass: "half", dexSave: true, row: row([stat("immune", "fire")]) });
     assert.equal(fail.amount, 16);
-    assert.equal(damageWords(FLAME, fail), "Immune to fire: 16 radiant");
+    assert.equal(damageWords(FLAME, fail), "Immune to Fire: 16 Radiant");
     const pass = rowDamage(FLAME, "pass", { onPass: "half", dexSave: true, row: row([stat("immune", "fire")]) });
     assert.equal(pass.amount, 8);
   });

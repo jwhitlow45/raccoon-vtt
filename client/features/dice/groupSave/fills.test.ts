@@ -48,20 +48,20 @@ const dice = (): DiceView => ({ you: { memberId: "dm1", role: "dm" }, view: stat
 describe("an area's fill", () => {
   test("Fireball from a monster: the preset's save and damage, the caster's Spellcasting DC, and more dice for a higher slot", () => {
     const fill = areaFill(dice(), { spell: "Fireball", casterId: "cultist" })!;
-    assert.deepEqual([fill.test, fill.dc, fill.spell, fill.outcome.damage, fill.outcome.onPass, fill.outcome.slot], [{ kind: "save", ability: "dex" }, 14, true, "8d6 fire", "half", 3]);
-    assert.equal(fill.fill.from, "From Fireball: Dexterity save, DC 14 (Cultist's spell save DC), 8d6 fire, half on a pass.");
-    assert.equal(areaFill(dice(), { spell: "Fireball", casterId: "cultist" }, 5)!.outcome.damage, "10d6 fire");
+    assert.deepEqual([fill.test, fill.dc, fill.spell, fill.outcome.damage, fill.outcome.onPass, fill.outcome.slot], [{ kind: "save", ability: "dex" }, 14, true, "8d6 Fire", "half", 3]);
+    assert.equal(fill.fill.from, "From Fireball: Dexterity save, DC 14 (Cultist's spell save DC), 8d6 Fire, half on a pass.");
+    assert.equal(areaFill(dice(), { spell: "Fireball", casterId: "cultist" }, 5)!.outcome.damage, "10d6 Fire");
     // A slot below the spell's own reads as its own, which the page's stepper then shows (LP7-PC-8).
     const low = areaFill(dice(), { spell: "Fireball", casterId: "cultist" }, 1)!;
-    assert.deepEqual([low.outcome.slot, low.outcome.damage], [3, "8d6 fire"]);
+    assert.deepEqual([low.outcome.slot, low.outcome.damage], [3, "8d6 Fire"]);
   });
 
   test("a character's own spell gives its DC and dice, and a cantrip grows with its level", () => {
     const own = areaFill(dice(), { spell: "Fireball", casterId: "breeTok" })!;
     assert.equal(own.dc, 16, "8 + proficiency 4 + Intelligence 4");
-    assert.equal(own.outcome.damage, "8d6 fire");
-    assert.equal(areaFill(dice(), { spell: "Acid Splash", casterId: "breeTok" })!.outcome.damage, "3d6 acid", "level 11: three dice");
-    assert.equal(areaFill(dice(), { spell: "Flame Strike" })!.outcome.damage, "5d6 fire + 5d6 radiant");
+    assert.equal(own.outcome.damage, "8d6 Fire");
+    assert.equal(areaFill(dice(), { spell: "Acid Splash", casterId: "breeTok" })!.outcome.damage, "3d6 Acid", "level 11: three dice");
+    assert.equal(areaFill(dice(), { spell: "Flame Strike" })!.outcome.damage, "5d6 Fire + 5d6 Radiant");
   });
 
   test("a PC caster's own spell takes half or none as its stat block resolves it, one rule kept in pcNamedRolls, and a caster without it the preset's (W7B-P-2)", () => {
@@ -71,7 +71,7 @@ describe("an area's fill", () => {
     assert.equal(fill.outcome.onPass, resolved, "the stat block's resolution, never one of the fill's own");
     assert.equal(resolved, "half", "an unset Fireball takes the SRD's half");
     assert.match(fill.fill.from, new RegExp(`${resolved} on a pass`));
-    assert.equal(fill.outcome.damage, "8d6 fire", "its own dice still");
+    assert.equal(fill.outcome.damage, "8d6 Fire", "its own dice still");
     assert.equal(areaFill(d, { spell: "Fireball", casterId: "breeTok" })!.outcome.onPass, "half", "typed half");
     assert.equal(areaFill(d, { spell: "Fireball", casterId: "cultist" })!.outcome.onPass, "half", "a monster caster takes the preset's");
   });
@@ -120,8 +120,8 @@ describe("a save action's fill", () => {
       lasts: { at: "end", of: "target" },
     };
     const fill = actionFill(dice(), breath, { key: "t:cultist", tokenId: "cultist" })!;
-    assert.deepEqual([fill.test, fill.dc, fill.outcome.damage, fill.outcome.conditions, fill.outcome.lasts?.mode, fill.outcome.lasts?.anchor], [{ kind: "save", ability: "con" }, 17, "3d6 thunder", ["deafened"], "turnEnd", "own"]);
+    assert.deepEqual([fill.test, fill.dc, fill.outcome.damage, fill.outcome.conditions, fill.outcome.lasts?.mode, fill.outcome.lasts?.anchor], [{ kind: "save", ability: "con" }, 17, "3d6 Thunder", ["deafened"], "turnEnd", "own"]);
     assert.equal(fill.spell, false, "a breath is no spell");
-    assert.equal(fill.fill.from, "From Thunderclap: Constitution save, DC 17, 3d6 thunder, none on a pass, Deafened on a fail.");
+    assert.equal(fill.fill.from, "From Thunderclap: Constitution save, DC 17, 3d6 Thunder, none on a pass, Deafened on a fail.");
   });
 });

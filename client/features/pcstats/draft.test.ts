@@ -160,15 +160,15 @@ describe("rolls", () => {
 
   test("a roll's reading and title, as the view and the editor's rows show them", () => {
     const fighter = { ...DEX16, abilities: { ...DEX16.abilities, str: 16 } };
-    assert.equal(rollReading(fighter, 5, roll()), "+6 to hit, 1d8+3 slashing");
+    assert.equal(rollReading(fighter, 5, roll()), "+6 to hit, 1d8+3 Slashing");
     const caster = { ...DEX16, spellAbility: "wis" as const };
     const fireball = roll({ name: "Fireball", kind: "spell", ability: "spell", level: 3, attack: undefined, save: { ability: "dex", onPass: "half" }, dice: [{ formula: "8d6", type: "fire", upcast: "1d6" }] });
-    assert.equal(rollReading(caster, 5, fireball), "DC 13 Dexterity save, 8d6 fire, +1d6 for each slot level above 3");
+    assert.equal(rollReading(caster, 5, fireball), "DC 13 Dexterity save, 8d6 Fire, +1d6 for each slot level above 3");
     assert.equal(rollTitle(fireball), "Fireball (level 3)");
     assert.equal(rollTitle({ name: "Fire Bolt", kind: "spell", level: 0 }), "Fire Bolt (cantrip)");
     assert.equal(rollTitle(roll()), "Longsword");
     const rapier = roll({ name: "Rapier", ability: "dex", dice: [{ formula: "1d8", type: "piercing", mod: true }, { formula: "3d6", type: "piercing", optional: true, name: "Sneak Attack" }] });
-    assert.equal(rollReading(DEX16, 5, rapier), "+6 to hit, 1d8+3 piercing, +3d6 piercing Sneak Attack");
+    assert.equal(rollReading(DEX16, 5, rapier), "+6 to hit, 1d8+3 Piercing, +3d6 Piercing Sneak Attack");
     const cure = roll({ name: "Cure Wounds", kind: "spell", ability: "spell", level: 1, attack: undefined, dice: [{ formula: "2d8", type: "healing", mod: true, upcast: "2d8" }] });
     assert.equal(rollReading(caster, 5, cure), "2d8+2 healing, +2d8 healing for each slot level above 1");
     assert.equal(rollReading(DEX16, 5, roll({ name: "Odd", dice: [{ formula: "1d8+", type: "fire" }] })), "+3 to hit, 1d8+", "a formula that stopped reading shows as typed");

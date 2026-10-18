@@ -342,7 +342,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     // Enter in the damage field rolls the parts (the shortcut sheet's Dice row).
     await damage.press("Enter");
     const line = await waitFor("the damage line", () => diceLines(dmSocket.state?.log).slice(before).find((l) => l.rolls.length === 2) ?? null);
-    const byType = Object.fromEntries(line.rolls.map((r) => [(r.label ?? "").split(", ").at(-1), r]));
+    const byType = Object.fromEntries(line.rolls.map((r) => [(r.label ?? "").split(", ").at(-1)?.toLowerCase(), r]));
     assert.equal(byType.fire?.formula, "5d6");
     assert.equal(byType.radiant?.formula, "5d6");
     run.fire = byType.fire!.total;

@@ -33,6 +33,8 @@ describe("HP chips", () => {
       [log[2]!.id, log[3]!.id],
     );
     assert.equal(chips[1]!.amount, 4);
+    // A label sent since the SRD's capitals names its type "Slashing", and its chip reads the same.
+    assert.deepEqual(hpChips([line("p1", [roll("Longsword damage, Slashing", 9)])], "me", "damage", opts()).map((c) => c.text), ["Use 9 (Bree's Longsword damage)"]);
   });
 
   test("a plain roll is never a chip, nor a line without rolls or a chat line", () => {

@@ -4,7 +4,7 @@ import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import type { ConditionKey, DiceRoll, Effect } from "#shared/model.ts";
 import { hitOf } from "#shared/dice/roll.ts";
 import { OUTCOME_TOO_BIG, type ActorTarget, type DurationInput, type EffectInput, type OpOf } from "#shared/protocol.ts";
-import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
+import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { incapacitated } from "#shared/rules/rollReminders.ts";
 import { effectName } from "#shared/logText.ts";
 
@@ -61,9 +61,9 @@ export function parseParts(text: string, fillType?: DamageType): { ok: true; par
   return { ok: true, parts };
 }
 
-/** The field's text for parts, as the fill writes it: "8d6 fire + 5d6 radiant". */
+/** The field's text for parts, as the fill writes it: "8d6 Fire + 5d6 Radiant". */
 export function partsText(parts: readonly OutcomePart[]): string {
-  return parts.map((p) => `${"formula" in p ? p.formula : p.amount}${p.type ? ` ${p.type}` : ""}`).join(" + ");
+  return parts.map((p) => `${"formula" in p ? p.formula : p.amount}${p.type ? ` ${damageTypeName(p.type)}` : ""}`).join(" + ");
 }
 
 /** Whether every part is a number, so Apply needs no roll. */
@@ -120,16 +120,16 @@ export function rowDamage(parts: readonly PartAmount[], result: "pass" | "fail",
     const of = (d: Defense) => d.of === "all" || (part.type !== undefined && d.of === part.type);
     const active = opts.row.defenses.filter((d) => of(d) && applies(d, opts.row.qualifiedOn) && TYPE_OR_ALL(d.of));
     if (active.some((d) => d.kind === "immune")) {
-      note(notes, `Immune to ${part.type ?? "it"}`);
+      note(notes, `Immune to ${part.type ? damageTypeName(part.type) : "it"}`);
       return 0;
     }
     if (active.some((d) => d.kind === "resist")) {
       n = Math.floor(n / 2);
-      note(notes, `Resists ${active.find((d) => d.kind === "resist")!.of === "all" ? "all damage" : part.type}`);
+      note(notes, `Resists ${active.find((d) => d.kind === "resist")!.of === "all" ? "all damage" : damageTypeName(part.type ?? "")}`);
     }
     if (active.some((d) => d.kind === "vulnerable")) {
       n = n * 2;
-      note(notes, `Vulnerable to ${part.type}`);
+      note(notes, `Vulnerable to ${damageTypeName(part.type ?? "")}`);
     }
     return n;
   });
@@ -144,10 +144,10 @@ function note(notes: string[], text: string): void {
   if (!notes.includes(text)) notes.push(text);
 }
 
-/** A row's damage in words: "Immune to fire: 9 radiant", "17". */
+/** A row's damage in words: "Immune to Fire: 9 Radiant", "17". */
 export function damageWords(parts: readonly PartAmount[], dealt: { amount: number; notes: string[]; byPart: number[] }): string {
   if (dealt.notes.length === 0 || parts.length < 2) return dealt.notes.length > 0 ? `${dealt.notes.join(". ")}: ${dealt.amount}` : `${dealt.amount}`;
-  const kept = parts.map((p, i) => (dealt.byPart[i]! > 0 ? `${dealt.byPart[i]} ${p.type ?? ""}`.trim() : null)).filter(Boolean);
+  const kept = parts.map((p, i) => (dealt.byPart[i]! > 0 ? `${dealt.byPart[i]} ${p.type ? damageTypeName(p.type) : ""}`.trim() : null)).filter(Boolean);
   return `${dealt.notes.join(". ")}: ${kept.join(" + ") || "0"}`;
 }
 

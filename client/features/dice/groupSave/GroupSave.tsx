@@ -4,7 +4,7 @@ import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import { ABILITY_KEYS, CONDITION_KEYS, SKILL_KEYS, type AbilityKey, type ConditionKey, type Effect, type RoomState, type SkillKey } from "#shared/model.ts";
 import type { ActorTarget, OpOf } from "#shared/protocol.ts";
-import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
+import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { effectName } from "#shared/logText.ts";
 import { Button } from "../../../components/Button.tsx";
@@ -287,7 +287,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
 
   const rollDamage = () => {
     if (!parsedParts?.ok) return;
-    const rollsToSend = parsedParts.parts.flatMap((p) => ("formula" in p ? [{ formula: p.formula, label: `${page.fill?.name ?? "Group save"} damage${p.type ? `, ${p.type}` : ""}`.slice(0, 60) }] : []));
+    const rollsToSend = parsedParts.parts.flatMap((p) => ("formula" in p ? [{ formula: p.formula, label: `${page.fill?.name ?? "Group save"} damage${p.type ? `, ${damageTypeName(p.type)}` : ""}`.slice(0, 60) }] : []));
     if (rollsToSend.length === 0) return;
     const tag = uuidv7();
     if (panel.roll(rollsToSend, { to: damageTo(page, view), tag }) !== null) update(damageSent(pageRef.current, tag));
@@ -656,7 +656,7 @@ function OutcomePanel(props: {
   }
   const rolledText =
     damageState?.state === "committed" && damageState.amounts
-      ? `Rolled: ${damageState.amounts.flatMap((a, i) => (a === undefined ? [] : [`${a}${props.parsed?.ok && props.parsed.parts[i]?.type ? ` ${props.parsed.parts[i]!.type}` : ""}`])).join(" + ")}`
+      ? `Rolled: ${damageState.amounts.flatMap((a, i) => (a === undefined ? [] : [`${a}${props.parsed?.ok && props.parsed.parts[i]?.type ? ` ${damageTypeName(props.parsed.parts[i]!.type!)}` : ""}`])).join(" + ")}`
       : damageState?.state === "sending" ? "Rolling…" : damageState?.state === "refused" ? damageState.says : damageState?.state === "unknown" ? "This may have happened. Check the log." : null;
   const hasDice = props.parsed?.ok === true && props.parsed.parts.some((p) => "formula" in p);
   const fight = props.view.encounter?.entries ?? [];

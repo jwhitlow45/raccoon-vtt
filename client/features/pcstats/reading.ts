@@ -1,6 +1,6 @@
 import type { NamedRoll } from "#shared/dice/bonus.ts";
 import type { PcRoll, PcStats } from "#shared/model.ts";
-import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
+import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { namedRollOf, partFormula, pcDefenses, pcDerived, rollMod, type PcNumber, type PcPart } from "#shared/rules/pcStats.ts";
 import type { Defense } from "#shared/dice/defenses.ts";
 import { ABILITY_NAMES } from "#shared/rules/skills.ts";
@@ -29,7 +29,7 @@ function diceText(named: NamedRoll): string[] {
   const out: string[] = [];
   const above = named.section === "spells" && named.level !== undefined && named.level >= 1 ? ` for each slot level above ${named.level}` : null;
   for (const part of named.damage) {
-    const words = part.optional ? `+${part.formula} ${part.type ?? ""}${part.name ? ` ${part.name}` : ""}`.replace(/\s+/g, " ").trim() : `${part.formula}${part.type ? ` ${part.type}` : ""}`;
+    const words = part.optional ? `+${part.formula} ${part.type ? damageTypeName(part.type) : ""}${part.name ? ` ${part.name}` : ""}`.replace(/\s+/g, " ").trim() : `${part.formula}${part.type ? ` ${damageTypeName(part.type)}` : ""}`;
     out.push(words);
     if (part.upcast && above) out.push(`+${part.upcast}${above}`);
   }

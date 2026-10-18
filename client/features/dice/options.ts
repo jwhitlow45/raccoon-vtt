@@ -1,5 +1,6 @@
 import { testOf, type D20Test, type DamagePart, type NamedRoll } from "#shared/dice/bonus.ts";
 import { d20Formula, formatFormula, parseFormula } from "#shared/dice/formula.ts";
+import { damageTypeName } from "#shared/rules/damage.ts";
 import { keptD20 } from "#shared/dice/roll.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
@@ -311,7 +312,7 @@ export function damageRolls(named: NamedRoll, opts: { on: ReadonlySet<number>; c
   for (const [type, formulas] of byType) {
     const parsed = parseFormula(formulas.join("+"));
     if (!parsed.ok) continue;
-    const roll: PanelRoll = { formula: formatFormula(parsed.formula), label: cutLabel(type ? `${head}, ${type}` : head) };
+    const roll: PanelRoll = { formula: formatFormula(parsed.formula), label: cutLabel(type ? `${head}, ${damageTypeName(type)}` : head) };
     if (opts.creature) roll.creature = opts.creature;
     if (opts.critical) roll.critical = true;
     out.push(roll);
@@ -432,7 +433,7 @@ const HEAL_LABEL = /\bhealing\b/i;
 
 /** The words of a line's first label without its damage type: "Rapier damage and Sneak Attack". */
 function chipWhat(roll: DiceRoll): string {
-  return (roll.label ?? "").replace(/, [a-z]+$/, "");
+  return (roll.label ?? "").replace(/, [a-z]+$/i, "");
 }
 
 /**
@@ -520,7 +521,7 @@ const SAVE_SHORT: Record<string, string> = ABILITY_ABBR;
 
 /**
  * A named roll's line in its header, as a stat block reads: "+6 to hit,
- * 1d8+3 slashing, +2d8 Divine Smite", "DC 14 DEX, 2d8 radiant", "2d8+3
+ * 1d8+3 Slashing, +2d8 Divine Smite", "DC 14 DEX, 2d8 Radiant", "2d8+3
  * healing". A save stands where an attack's bonus stands (the project
  * owner, 2026-10-17). A rider's dice are said here, so its toggle needs
  * only its name and the controls share one line more often.
@@ -531,7 +532,7 @@ export function rowSummary(named: Pick<NamedRoll, "attack" | "save" | "damage" |
   const fixed = named.damage.filter((p) => !p.optional);
   // "Half on a pass" only where there is damage to halve: Hold Person has none.
   if (named.save) parts.push(`DC ${named.save.dc} ${SAVE_SHORT[named.save.ability] ?? named.save.ability}${named.save.onPass === "half" && fixed.length > 0 ? ", half on a pass" : ""}`);
-  if (fixed.length > 0) parts.push(fixed.map((p) => (p.type ? `${p.formula} ${p.type}` : p.formula)).join(" + "));
+  if (fixed.length > 0) parts.push(fixed.map((p) => (p.type ? `${p.formula} ${damageTypeName(p.type)}` : p.formula)).join(" + "));
   for (const rider of named.damage.filter((p) => p.optional)) parts.push(`+${rider.formula} ${shortRider(rider.name ?? "")}`.trim());
   if (named.heal) parts.push(`${named.heal.formula} healing`);
   if (named.dice) parts.push(named.dice);

@@ -101,6 +101,11 @@ describe("dice wording (docs/design-v1-dice.md 5.5)", () => {
     assert.equal(rollToastText([line([slashing, slashing])], names), "Bree rolled Flame Tongue damage, slashing 2 times.", "a type twice is the same roll again");
     assert.equal(rollToastText([line([slashing, { ...fire, tokenId: "thorn" }])], names), "Bree rolled 2 times.", "two creatures are not one damage");
     assert.equal(rollToastText([line([{ ...slashing, label: "Flame Tongue damage, sharp" }, fire])], names), "Bree rolled 2 times.", "a word that is no damage type");
+    // Labels sent since the SRD's capitals say "Slashing", and the lowercase in older rooms still reads.
+    const capital = (roll: DiceRoll): DiceRoll => ({ ...roll, label: roll.label!.replace(/, (\w)/, (_, c: string) => `, ${c.toUpperCase()}`) });
+    assert.equal(rollToastText([line([capital(slashing), capital(fire)])], names), "Bree rolled 14 for Flame Tongue damage.");
+    assert.equal(rollToastText([line([slashing, capital(fire)])], names), "Bree rolled 14 for Flame Tongue damage.", "an old label beside a new one");
+    assert.equal(rollToastText([line([slashing, capital(slashing)])], names), "Bree rolled 2 times.", "a type twice in either case is no one damage");
   });
 });
 

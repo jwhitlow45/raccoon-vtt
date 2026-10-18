@@ -20,3 +20,12 @@ export const DAMAGE_TYPES = [
   "thunder",
 ] as const;
 export type DamageType = (typeof DAMAGE_TYPES)[number];
+
+/**
+ * A damage type as the SRD prints it, capitalized: "8d6 Fire", "Vulnerable
+ * to Fire". The type keys stay lowercase, and every reader of a type word
+ * lowercases it first, since labels already in rooms hold the lowercase.
+ */
+export function damageTypeName(type: string): string {
+  return type.charAt(0).toUpperCase() + type.slice(1);
+}

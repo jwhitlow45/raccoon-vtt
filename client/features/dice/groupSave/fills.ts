@@ -2,7 +2,7 @@ import type { NamedRoll } from "#shared/dice/bonus.ts";
 import { formatFormula, parseFormula } from "#shared/dice/formula.ts";
 import type { AreaTemplate, Character } from "#shared/model.ts";
 import { cantripTier, pcNamedRolls, pcSlots } from "#shared/rules/pcStats.ts";
-import type { DamageType } from "#shared/rules/damage.ts";
+import { damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { ABILITY_NAMES } from "#shared/rules/skills.ts";
 import { AREA_SPELLS, type AreaSpell } from "#shared/srd/area-spells.ts";
 import { effectName } from "#shared/logText.ts";
@@ -46,7 +46,7 @@ function atSlot(part: Part, extra: number): string {
 }
 
 export function partsTextOf(parts: readonly Part[], slotExtra = 0): string {
-  return parts.map((p) => `${atSlot(p, slotExtra)}${p.type ? ` ${p.type}` : ""}`).join(" + ");
+  return parts.map((p) => `${atSlot(p, slotExtra)}${p.type ? ` ${damageTypeName(p.type)}` : ""}`).join(" + ");
 }
 
 function fromLine(name: string, test: GroupTest, dc: number | null, dcFrom: string | null, damage: string, onPass: "half" | "none", conditions: readonly string[]): string {

@@ -572,8 +572,8 @@ function DeathSaveCell(props: { ctx: Ctx; bonus: number | null }) {
 /**
  * One named roll (4.2), in two lines (docs/design-v1-dice-ui.md 4.3): its
  * header, the name with its uses and recharge, Used, and its numbers as a
- * stat block reads them ("+6 to hit, 1d8+3 slashing", "DC 14 DEX, 2d8
- * radiant"), then one line of controls that wraps only where the panel is
+ * stat block reads them ("+6 to hit, 1d8+3 Slashing", "DC 14 DEX, 2d8
+ * Radiant"), then one line of controls that wraps only where the panel is
  * too narrow: Attack, Damage, Critical, each rider, Heal, a plain roll, a
  * group save, Recharge and a spell's slot level.
  */

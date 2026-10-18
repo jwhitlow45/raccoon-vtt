@@ -505,7 +505,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     assert.ok(middles.every((m) => Math.abs(m - middles[0]!) < 1), `the row's controls take more than one line: ${middles.join(", ")}`);
     // The numbers stand in the row's header, after its name, as a stat block prints them (docs/design-v1-dice-ui.md 4.4).
     const header = (await namedRow(attack).locator("div").first().innerText()).replace(/\s+/g, " ");
-    assert.match(header, /^Longsword ?\+6 to hit, 1d8\+3 slashing/);
+    assert.match(header, /^Longsword ?\+6 to hit, 1d8\+3 Slashing/);
     await shots.take(player, "dice-weapon-row-390");
   });
 
@@ -534,7 +534,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       return (await header.innerText()).replace(/\s+/g, " ").trim();
     };
     assert.match(await headerOf("Hold Person"), /^Hold Person ?DC 14 WIS$/);
-    assert.match(await headerOf("Sacred Flame"), /^Sacred Flame ?DC 14 DEX, \dd8 radiant/);
+    assert.match(await headerOf("Sacred Flame"), /^Sacred Flame ?DC 14 DEX, \dd8 Radiant/);
     await rolls.getByText("Hold Person", { exact: true }).scrollIntoViewIfNeeded();
     await shots.take(player, "dice-save-spells-dc");
   });
