@@ -36,6 +36,7 @@ import { drawMap, drawPortrait } from "./placeholders.ts";
  * - `ask=save|check|two` opens a roll request for Thorn and Vex, Thorn Restrained and Blessed for a save, and `ask=saveends` a save-ends request of Thorn's with a rolled fail and a pending ask (docs/design-v1-roll-request.md 5, 1.1).
  * - `rolls=1` links the goblins to the SRD's Goblin Warrior, for the Dice panel's roll options (docs/design-v1-roll-options.md).
  * - `party=1` adds six players' characters with long names to the party, two of them off the scene (docs/design-v1-side-headers.md).
+ * - `diceui=1` adds to `rolls=1` and `pcstats=1` save spells, riders, a long weapon name, the SRD's Owlbear and an Adult Red Dragon, and rolls in the log (docs/design-v1-dice-ui.md).
  */
 function readOptions() {
   const q = new URLSearchParams(location.search);
@@ -61,6 +62,7 @@ function readOptions() {
       ...(q.get("ask") === "save" || q.get("ask") === "check" || q.get("ask") === "two" || q.get("ask") === "saveends" ? { ask: q.get("ask") as "save" | "check" | "two" | "saveends" } : {}),
       rolls: q.get("rolls") === "1",
       party: q.get("party") === "1",
+      diceui: q.get("diceui") === "1",
     } satisfies FixtureOptions,
   };
 }

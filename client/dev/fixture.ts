@@ -117,6 +117,7 @@ export type FixtureOptions = {
   ask?: "save" | "check" | "two" | "saveends";
   rolls?: boolean;
   party?: boolean;
+  diceui?: boolean;
 };
 
 export function createFixtureState(options: FixtureOptions): RoomState {
@@ -339,10 +340,11 @@ export function createFixtureState(options: FixtureOptions): RoomState {
   }
   if (options.text) textStress(state);
   if (options.melee) meleeGuardians(state);
-  if (options.pcstats) thornStats(state);
+  if (options.pcstats || options.diceui) thornStats(state);
   if (options.ask) askThorn(state, options.ask);
-  if (options.rolls) srdGoblins(state);
+  if (options.rolls || options.diceui) srdGoblins(state);
   if (options.party) bigParty(state);
+  if (options.diceui) diceUiStress(state);
   return state;
 }
 
@@ -469,6 +471,73 @@ function thornStats(state: RoomState): void {
       ],
     },
   });
+}
+
+/**
+ * The Dice panel and stat blocks at their fullest (`diceui=1`, docs/design-v1-dice-ui.md): Thorn's
+ * block with save spells, a long weapon name and three riders, the Owlbear linked to the SRD's, the
+ * Stone giant an Adult Red Dragon with recharge and legendary actions, and rolls in the log.
+ */
+function diceUiStress(state: RoomState): void {
+  const thorn = state.characters[FIXTURE_IDS.thornChar]!;
+  const stats = thorn.stats!;
+  state.characters[thorn.id] = withPcActorNumbers({
+    ...thorn,
+    stats: {
+      ...stats,
+      rolls: [
+        ...stats.rolls,
+        {
+          id: "r-dawn",
+          name: "Flame Tongue Greatsword of the Burning Dawn",
+          kind: "weapon",
+          ability: "str",
+          attack: { prof: true, bonus: 1 },
+          dice: [
+            { formula: "2d6", type: "slashing", mod: true },
+            { formula: "2d6", type: "fire", optional: true, name: "Flame Tongue" },
+            { formula: "2d8", type: "radiant", optional: true, name: "Divine Smite" },
+            { formula: "1d6", type: "force", optional: true, name: "Hunter's Mark" },
+          ],
+        },
+        { id: "r-flame", name: "Sacred Flame", kind: "spell", ability: "spell", level: 0, save: { ability: "dex" }, dice: [{ formula: "1d8", type: "radiant", grows: true }] },
+        { id: "r-hold", name: "Hold Person", kind: "spell", ability: "spell", level: 2, save: { ability: "wis" }, dice: [] },
+        { id: "r-wrath", name: "Destructive Wave", kind: "spell", ability: "spell", level: 5, save: { ability: "con", onPass: "half" }, dice: [{ formula: "5d6", type: "thunder" }, { formula: "5d6", type: "radiant" }] },
+        // Enough more for a block of twenty-odd rolls, the long list the pass lays out.
+        { id: "r-handaxe", name: "Handaxe", kind: "weapon", ability: "str", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d6", type: "slashing", mod: true }] },
+        { id: "r-dagger", name: "Dagger", kind: "weapon", ability: "dex", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d4", type: "piercing", mod: true }] },
+        { id: "r-crossbow", name: "Light Crossbow", kind: "weapon", ability: "dex", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d8", type: "piercing", mod: true }] },
+        { id: "r-faith", name: "Shield of Faith", kind: "spell", ability: "spell", level: 1, dice: [] },
+        { id: "r-searing", name: "Searing Smite", kind: "spell", ability: "spell", level: 1, dice: [{ formula: "1d6", type: "fire", upcast: "1d6" }] },
+        { id: "r-wrathful", name: "Wrathful Smite", kind: "spell", ability: "spell", level: 1, save: { ability: "wis" }, dice: [{ formula: "1d6", type: "psychic", upcast: "1d6" }] },
+        { id: "r-thunder", name: "Thunderous Smite", kind: "spell", ability: "spell", level: 1, save: { ability: "str" }, dice: [{ formula: "2d6", type: "thunder", upcast: "1d6" }] },
+        { id: "r-weapon", name: "Spiritual Weapon", kind: "spell", ability: "spell", level: 2, attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d8", type: "force", mod: true, upcast: "1d8" }] },
+        { id: "r-guardians", name: "Spirit Guardians", kind: "spell", ability: "spell", level: 3, save: { ability: "wis", onPass: "half" }, dice: [{ formula: "3d8", type: "radiant", upcast: "1d8" }] },
+        { id: "r-banish", name: "Banishment", kind: "spell", ability: "spell", level: 4, save: { ability: "cha" }, dice: [] },
+        { id: "r-blinding", name: "Blinding Smite", kind: "spell", ability: "spell", level: 3, save: { ability: "con" }, dice: [{ formula: "3d8", type: "radiant" }] },
+        { id: "r-hands", name: "Lay on Hands", kind: "other", dice: [{ formula: "25", type: "healing" }] },
+        { id: "r-channel", name: "Channel Divinity: Divine Sense", kind: "other", dice: [] },
+      ],
+    },
+  });
+  const link = (name: string, srdId: string) => {
+    const token = Object.values(state.tokens).find((t) => t.name === name);
+    if (token && "inline" in token.actor) state.tokens[token.id] = { ...token, actor: { inline: { ...token.actor.inline, srdId } } };
+  };
+  link("Owlbear", "owlbear");
+  link("Stone giant", "adult-red-dragon");
+  const dice = (n: number, by: string, label: string, formula: string, faces: number[], total: number) => ({
+    id: `${10 + n}:0`,
+    at: T0,
+    kind: "event" as const,
+    data: { type: "dice" as const, tag: `dev-roll-${n}`, by, to: "all" as const, rolls: [{ formula, faces, total, label }] },
+  });
+  state.log = [
+    ...state.log,
+    dice(1, FIXTURE_IDS.thorn, "Longsword", "1d20+6", [14], 20),
+    dice(2, FIXTURE_IDS.thorn, "Longsword damage", "1d8+3", [6], 9),
+    dice(3, FIXTURE_IDS.dm, "Stealth", "1d20+2", [3], 5),
+  ] as RoomState["log"];
 }
 
 /**
