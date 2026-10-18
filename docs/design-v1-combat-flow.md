@@ -733,3 +733,84 @@ The project owner answered on 2026-10-15. The design review's round 1 settled tw
 6. **The trail and area reminders for a companion on its character's turn.** Settled by default: not in this change. They stay with the character's token (3.6.8).
 7. **Revive's HP.** Settled by default: exactly 1, as Revivify gives. A larger heal follows it (3.5).
 8. **Where a player's companion goes** (D1, settled by default): only next to that character's token on the same scene, its footprint within 5 ft (one cell) of the character's token, with a clear line on scenes that block movement. With no token of the character on the scene, the button is disabled with a reason. The server enforces it, and a `companion` log line tells the DM (3.6.3).
+
+## 11. Addendum. Monsters' places in the initiative order stay secret until their turn (2026-10-17)
+
+The project owner asked on 2026-10-17: "the initiative order of monsters should not be revealed until it is their turn, this can be a room setting". Asked which rows: "this should also be a setting, default should be the player knows other pc initiative rolls but nothing else". Asked the default: on for new rooms, and rooms from before it keep today's behavior until the DM turns it on. This addendum adds one room setting. It changes design.md 7.3 (the encounter and dice lines for a player) and docs/design-v1-dice.md 5.2.
+
+### 11.1 The setting
+
+`RoomSettings.playersSeeOrder`, one of three, in Room settings' Combat group right after "Reveal hidden combatants on their turn". Its label is "Initiative order players see", its help "Which creatures players see in the order before those creatures act. A creature you hide stays out of their order either way." Each choice has one line:
+
+| `playersSeeOrder` | Its name | Its help |
+| --- | --- | --- |
+| `party` (new rooms) | Player characters, the rest on their turn | Players see the creatures players play from the start. Every other creature joins their order when its first turn comes, and stays for the fight. |
+| `allies` | Player characters and allies, the rest on their turn | As above, and creatures with the Ally ring show from the start too. |
+| `all` (rooms from before it) | Everyone | Players see the whole order from the start. |
+
+- **Absent reads `all`** (`orderRevealOf`, shared/rules/initiative.ts), so every room from before the setting keeps today's order until its DM picks another. `DEFAULT_SETTINGS` sets `party`, so a new room starts with it. The import schema defaults an old backup's to `all`, as it defaults `playersCreateCharacters` to off.
+- **`room.update`'s settings patch** gains it, one of the three. Only the DM sends `room.update`, and a settings change is `global` (shared/reducer/tx.ts), so every connection gets its encounter projected again.
+
+### 11.2 The rule
+
+A player's encounter holds a row when the existing rules hold it (not `hidden`, its creature in their projection, no blackout) and the order rule shows it (`orderShown`, shared/project.ts):
+
+1. the setting reads `all`, or
+2. a player plays the row's creature: its token is the players' (`playersToken`: a member of kind player owns it or its character, which covers lent tokens and companions), or, for a row with no token, a player owns its character, or
+3. the setting reads `allies` and the row's token has the Ally ring, or
+4. the row's turn has come in this fight: `InitEntry.hadTurn`, or the row is acting now.
+
+- **When its turn comes** the row joins in its place and stays: later rounds, a drag among tied rows, a new value (the table's way to delay a turn) and Ready keep `hadTurn`. A row added mid-fight starts without it. Ending the fight drops the encounter and every flag with it. A row removed and added again is a new row.
+- **The acting row always passes the order rule**, so the Hidden rules alone decide what players see of it on its turn, as today ("Another creature's turn" while it is hidden or out of sight).
+- **Previous takes the reveal back** along with the turn: it puts back the encounter as the step found it, as it hides again a creature that turn revealed. So does undo. A row Skip defeated passes over never had its turn and stays out.
+- **Changing the setting mid-fight** applies at once: rows that have had their turn stay, and every other row follows the new choice. A row that took its turns while ops ran before op version 8 has no flag (11.4), so it waits for its next turn after the DM turns the setting on.
+- **A ring or owner change** applies at once too: an owner change is `global`, and a token change re-projects the encounter (`dependents`).
+- **The DM** sees every row. "View as a player" projects the DM's state for that player through `projectState`, so the preview shows exactly this.
+- **The DM's tracker** tags each row the rule keeps from players "Secret until its turn" (`secretUntilItsTurn`, client/features/encounter/logic.ts), a muted tag whose tooltip says the row joins their order when its first turn comes. It shows only while the rule hides the row, beside Hidden when both do, and says nothing for a row whose token stands on another scene, which the DM's view cannot judge. The icon pass may give it an eye-off icon later.
+
+### 11.3 Every path the order reaches a player by
+
+The rule lives in one place, `entryShown` and its state-level twin `rowSeenByNonOwners`, so every reader of a player's encounter follows it:
+
+- **The encounter projection** (`projectEncounterCtx`): the row, its value and `tieOrder`. Numbering only the rows a player holds (design.md 7.3) already keeps a gap from counting hidden rows. `activeEntryId` and `started` are unchanged, since the acting row passes the rule. `round` counts every wrap, and a wrap starts the first row's turn, which shows it. `hadTurn` is the DM's: a player's copy drops it, so it never says which rows acted.
+- **Turn lines** reach a player only while their encounter holds the row (`projectEventCtx`, `turn`), and are projected again whenever the encounter changes. Each is written at a turn's start or take-back, when its row passes the rule, so its `seen` mark is unchanged.
+- **The turn's starting spot and the creature's path** reach a player only for the acting row their encounter holds.
+- **Permissions** read the player's projected encounter (`visibleEntry`), so a row they may not see answers `gone`, as a row that does not exist does, and a guarded End turn while it acts is taken quietly as today (`activeRowShownTo`, `pressChangesNothing`).
+- **Initiative rolls.** An initiative roll is a `dice.roll` the client marks with `initiative: true` on the roll: auto initiative and "Initiative for the 4 in the fight" (`initiativeRolls`), a row's Roll, and the Dice panel's Initiative (`d20` with the initiative test). When the reducer writes the line, a marked roll for a creature the order rule would keep from players now (`initiativeHidden`: no row of it has had its turn, and it is not shown from the start) gets `DiceRoll.hidden`. A player's dice line drops a hidden roll (`projectDiceCtx`), so an open roll sends no total and a secret one no bare line, and a line left with no roll is no line, hence no toast and nothing in Recent rolls. The mark is never rewritten, as `seen` is not: the roll stays out after the row is revealed, which by then shows its value anyway. A free formula the DM types is not an initiative roll. Auto initiative's shared roll names its first row's creature and always goes secret, so where players know that row's place and not another's in its group, they get the bare line alone, with no total and no count. The receipt goes to the roller alone, as before.
+- **Up next.** A player has none (`turnStatus`, `stripRows`, client/features/encounter/logic.ts): the strip shows only the acting row, and no "Your turn soon" exists to name or skip a hidden row.
+- **Snapshots and `ev`s** come from the same projection, and the fan-out sends a player nothing when only a hidden row changes, since their projected encounter (rev 0) is unchanged.
+- **No log line names a place in the order.** Reorders, values and delays write none. Ready and other effects are lines about the creature, under the token rules. Area reminders are written on the creature's own turn or move.
+- **Not the order.** A creature's token on the map follows Hidden and the fog, as the brief sets apart. An effect whose duration counts a row a player does not hold names "another creature" there (`anchorName`), as for a hidden row, and ticks only at that row's own turn boundaries, which come at or after its first turn. The one exception is a row Skip defeated passes over: its boundary still ticks, so a duration on it can end before it shows. Durations on a dead monster's turn are rare enough to leave.
+
+### 11.4 Data and versions
+
+```ts
+type OrderReveal = 'party' | 'allies' | 'all'   // ORDER_REVEALS (shared/model.ts)
+RoomSettings.playersSeeOrder?: OrderReveal      // absent reads 'all'. DEFAULT_SETTINGS sets 'party'
+InitEntry.hadTurn?: true                        // the row's turn has started in this fight. The DM's
+DiceRollInput.initiative?: true                 // the roll is a creature's initiative
+DiceRoll.hidden?: true                          // an initiative roll players may not have (11.3)
+```
+
+- **`hadTurn`** is set by `withTurn` (shared/reducer/encounter.ts) on the row whose turn starts, by Next and by a removal that passes the turn on. No op takes it as input. It rides in saved steps, so Previous and undo put it back with the encounter.
+- **`OP_VERSION` moves to 8.** Ops stored before it ran without writing `hadTurn`. Replayed under a rule that writes it, a Next would leave the encounter and its history holding a field they did not hold then, and a later restore's guard hash would no longer match. So the reducer writes it only for live ops and ops stored at version 8 or later (`marksHadTurn`), as `answerProvenance` gates wave 7's rule, and the migration step is the identity. The new `initiative` field also makes a stored `sys.dice` that an older build's strict schema refuses, which the version makes that build refuse cleanly instead.
+- **`SNAPSHOT_VERSION` moves to 12**, the identity step. Every new field is optional and reads as before when absent, so no snapshot changes. It moves so that an older build, which would ignore the setting and `DiceRoll.hidden` and send players every row and every hidden roll, refuses a snapshot from this build instead of publishing what the DM hid.
+- **Schemas**: the import schema's settings (`playersSeeOrder`, default `all`), its encounter entry (`hadTurn`) and its dice roll (`hidden`). `remap` copies an entry whole, so `hadTurn` survives an import.
+- **Deploy**: back up the database just before. The first op after it is stored at version 8, and the shutdown writes version 12 snapshots. **Rollback**: an older build refuses both, so going back restores that backup, losing the play since.
+
+### 11.5 Tests
+
+- **Projection** (`shared/project.order.test.ts`): each choice over a fight of a player character, a player's companion, a lent goblin, an Ally NPC, a hostile goblin, a DM NPC character row and a lair row. A player's encounter holds only what the choice shows, with no `hadTurn`, `tieOrder` 0 to n-1 and no total of a hidden row anywhere in their snapshot. The reveal on the row's turn, and its staying through a reorder, a new value, later rounds and a turn passed on by a removal. A row added mid-fight waiting for its turn. Previous taking the reveal back. Ending and starting a fight again. A ring change and a setting change mid-fight. The DM's projection and the preview's (`projectState` as the player) on the same state. Turn lines leaving and joining with their row.
+- **Dice lines** (`shared/reducer/dice.order.test.ts`): a marked initiative roll for a hidden-order goblin, open and secret, reaching neither player nor a table display, as no line and no bare line, while the DM gets it whole. The same roll after the goblin's turn, for a player character, under `all`, and an unmarked free roll, reaching players as before. A mixed line keeping its shown rolls.
+- **Randomized** (`shared/project.order.random.test.ts`): many random sequences of Next, Previous, reorders, new values, adds, removes, hides and unhides, ring changes, setting changes, initiative rolls, ending and starting the fight, applied through `applyOp`. The test keeps its own model of which rows had their turn. Invariants after every op: for each player and a table display, every row their encounter holds passes the model's rule, every row the rule shows and the older rules hold is there, `tieOrder` runs 0 to n-1, no `hadTurn` reaches them, no hidden roll's total or line reaches them, and the DM holds every row. The fan-out invariant (events applied to a snapshot equal the projection) keeps its own random test, whose ops gain the setting.
+- **Versions**: an op stored at version 7 replaying with no `hadTurn` and its restore's guard matching, a live op writing it. The import schema defaulting an old backup to `all`, and reading `hadTurn` and `hidden`.
+- **Client**: the settings field, its choices and its help. `initiativeRolls` and the d20 path marking initiative, and no other test.
+- **e2e**: `combat.e2e.ts` gains one step: in a new room, a player's tracker shows their character and not the goblin before its turn, and the goblin's row once the DM's Next reaches it. Run `combat`, every other file that reads the order as a player, and `reach`.
+
+### 11.6 Build
+
+1. `docs: monsters' places in the initiative order stay secret until their turn` (this addendum).
+2. `feat(settings): a room setting for which creatures players see in the initiative order`: the model, the protocol patch, the import schema, the form and their tests.
+3. `feat(encounter): a row's place in the order reaches players on its first turn`: `hadTurn`, `withTurn`, the versions, `orderShown` in the projection and `rowSeenByNonOwners`, the fixtures and their tests.
+4. `feat(dice): an initiative roll for a creature whose place is secret stays the dm's`: `initiative` on the roll, `DiceRoll.hidden`, the client's two marking paths and their tests.
+5. The e2e step, then `docs:` commits for FEATURES.md and the DM guide's tracker section.
