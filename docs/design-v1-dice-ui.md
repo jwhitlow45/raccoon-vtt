@@ -170,7 +170,7 @@ Its own document: docs/design-v1-token-panel-groups.md. In short: AC, speed, Pas
 
 ### 6.3 A monster's block
 
-The SRD's own Markdown, unchanged as stored. The block view reads its ability table (the six-column `| STR | DEX | ... |` table and its one row of scores) into 6.1's grid, three across: the abbreviation, then the score and modifier as the table writes them ("18 (+4)"). A save line in the block's own text stays where it is, so a monster's box has no "Save" line. A table that is not that shape (another column count, a second row) draws as the Markdown table, as today. Decided in 12.4.
+The SRD's own Markdown, unchanged as stored. Every block, the SRD's 330 and the room's own (`shared/statBlock.ts`), writes its abilities as one table, `| | Score | Mod | Save |` with a row for each ability in order. The block view reads that table (`features/monsters/abilityTable.ts`) into 6.1's grid, the same `AbilityGrid` a PC's block draws: the abbreviation, the score and modifier, and "Save +5", in bold where the save differs from the modifier, the block's proficient save. The text above and below the table draws as written. A table of any other shape draws as the Markdown table, as before. Decided in 12.4.
 
 ## 7. Cards, toasts and log lines
 
@@ -211,7 +211,9 @@ The SRD's own Markdown, unchanged as stored. The block view reads its ability ta
 - `RollOptions` render test (the house's `html()` pattern, `Button.test.ts`): no result text under any cell after a roll lands, the header line holds it.
 - `panelFolds.test.ts` and the token panel doc's tests.
 - `PcStatsView` render test: six boxes, the proficient save bold and named.
-- The drift scan (`styleDriftScan.test.ts`): no raw gap outside the scale in `features/dice/`, `features/pcstats/` and `panels/TokenPanel.tsx`.
+- A source scan (`lib/uiPassScan.test.ts`, the drift test's pattern): no gap outside the scale in `features/dice/`, `features/pcstats/`, `panels/TokenPanel.tsx` and `features/tokens/QuickNumbers.tsx`. It found four (a 2 px list, two 2 px label gaps and the PC editor's 20 px sections), now 4 and 16 px.
+- `features/monsters/abilityTable.test.ts`: the monster table read out of its text, a table of another shape left as Markdown, and every SRD block and a room monster's block drawn as six boxes.
+- `features/rolls/logic.test.ts`: a request its save-ends card holds is held while its occurrence waits and let go once it settles (12.3).
 - e2e, the touched files plus `reach`: `dice.e2e.ts` (new: a weapon row on one line at 390 px, the result in the header and none under the button, a save spell's DC, the header line inside its column, an answer's line with no Again), `pcstats.e2e.ts` (LP7-PC-12 at 375 x 667, 130%), `groupsave.e2e.ts` (the fold's words, the Damage label), `tokenpanel.e2e.ts`, `size.e2e.ts`.
 
 ## 11. Build plan

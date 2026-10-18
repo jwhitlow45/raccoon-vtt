@@ -110,7 +110,7 @@ Widths at 100%: a small button is 7.7 px a character at 14 px weight 600 plus 24
 | Token action bar | Clear (group) | "Clear" | `close` | 1 | 18 |
 | Token action bar | Size − and + | text glyphs | `minus`, `plus` | 1 | 0, one style |
 | Token panel | Speed, Passive Perception, Initiative | words in the stat block's header | `speed`, then "PP", "Init" (dice UI doc 5.1) | 3 | a line |
-| Token panel | Change image, Add another image, Crop, Remove | four buttons under the picture | the Image group, its buttons with `image`, Lucide `crop`, `delete` | 3 | about 100 px of height |
+| Token panel | Change image, Add another image, Crop, Remove | four buttons under the picture | the Image group, its buttons with `image`, Lucide `crop`, `delete` (4.1: the first two keep words alone) | 3 | about 100 px of height |
 | Token panel | Delete this token | words | `delete` and the words | 3 | 0 |
 | Dice panel | Again (newest roll) | redo arrow and "Again" | `again` and "Again" | 3 | 0, collision |
 | Dice panel | Roll again (Recent rolls) | redo arrow | `again` | 1 | 0, collision |
@@ -144,6 +144,18 @@ Widths at 100%: a small button is 7.7 px a character at 14 px weight 600 plus 24
 
 Stays words, by rule 4: Roll and every roll option, Apply, Send, Save, End turn, Ask the party, Next and Previous turn, Allow, Keep, Accept failure, Adv, Dis, Critical, Used, Short rest, Long rest, Ready, the X-card. The tools' labels under their icons stay: the toolbar is a row of icons already, and its words are what a new player reads first.
 
+### 4.1 What the build changed from the table
+
+- **Undo corner keeps its words** beside the undo arrow on every pointer (rule 3, not 2). While a polygon is drawn, Undo's arrow alone stands in the same row, and two bare arrows side by side would read as one control.
+- **A tool row's Delete keeps its words** beside the trash can (Stamps, and every confirm button in a slot). A slot holds its widest form so a row never moves (docs/design-v1-tool-options.md 6.2), and the armed words are its widest, so a trash can alone saves nothing there. The Area's Delete, which acts at once, is the trash can alone. The Light, Pin and Label panes' Delete is the trash can until armed (rules 1 and 6).
+- **The Monsters panel's Edit and Delete** keep their words beside their icons: the two share their row half and half.
+- **The Image group's Change image and Add another image** keep their words alone. With an icon each, the pair no longer fit beside the 48 px picture in the side panel or on a 390 px phone, and that compact row (docs/design-v1-token-panel.md) is worth more than the icons. Crop and Remove, on their own line, wear `crop` and `delete`.
+- **The side panel's More tab** is left to the compact side headers build (docs/design-v1-side-headers.md), which owns the tab row.
+- **The Menu's DM guide row** takes Lucide `book-open` (`guide`), so every row has its icon.
+- **Tags** take an icon before their words: the tracker's Hidden and "Secret until its turn" wear `hidden`.
+- **Try again** wherever a load failed takes `retry` (rule 3), and the outside links ("Open the sheet", D&D Beyond) take `external` after their words in place of "↗".
+- **Pass and fail** draw the app's own check and cross: they share those drawings on purpose, the one listed exception to 2.1 (`components/icons.test.ts`).
+
 ## 5. The app's own icons: kept or replaced
 
 - **Replaced**: `undo` and `redo` (filled arrows, the only filled shapes in a stroked set) by Lucide `undo-2` and `redo-2`, in Icon.tsx and in the top bar's own copy (RoomChrome.tsx), which then draws from Icon.tsx.
@@ -169,11 +181,11 @@ Under `screenshots/icons/`, `before/` from the stacked tip (with this pass's fix
 
 ## 8. Tests
 
-- `components/Button.test.ts` (extended): every `IconName` draws, hides itself, and draws a shape no other name draws (the meaning rule), except the listed pairs that share none.
-- `components/icons.test.ts` (new): the Lucide-sourced names match the list in CREDITS.md and in the credit's changes, so a new copied icon cannot ship uncredited.
-- `components/Tooltip.test.ts` (new, node:test with a fake timer and element): hover waits 500 ms and a quick pass shows nothing, focus by keyboard shows after 150 ms and a mouse focus never, Escape and scroll close, the placement stays above with room and flips below without, and never overlaps the anchor's box.
-- `shared/credits.test.ts` (extended): the ISC credit carries the full notice.
-- A source scan (the drift test's pattern, `lib/styleDriftScan.test.ts`): no `title=` on an `IconButton` caller, and no text glyph (← → ↑ ↓ ↗ × as a whole label) inside a button.
+- `components/Button.test.ts` (extended): every `IconName` draws and hides itself, an icon alone is named by its words and shows them in its tooltip, never a native `title`, and words beside an icon keep the native one.
+- `components/icons.test.ts` (new): every meaning draws a shape no other meaning draws, except the listed pair (pass and fail), and the Lucide-sourced names (`Icon.tsx` `LUCIDE`) match `shared/credits.ts` `LUCIDE_ICONS`, the credit's changes and CREDITS.md, so a new copied icon cannot ship uncredited.
+- `components/Tooltip.test.ts` (new, node:test with a fake clock): hover waits 500 ms and a quick pass shows nothing, focus by keyboard shows after 150 ms and a mouse focus never, a held touch shows after 500 ms and stays 1.5 s, Escape, scroll and a mouse press close, a randomized run of the timer's events, and the placement above with room, below without, never over the control.
+- `components/icons.test.ts` also checks that the ISC credit carries the license's whole notice.
+- A source scan (`lib/uiPassScan.test.ts`, the drift test's pattern): no text glyph (← → ↑ ↓ ↗ × as a whole label) inside a button. The native `title` cannot reach an icon alone: `Button`, `IconButton` and the top bar's buttons draw the tooltip in its place.
 - e2e: the touched files only. `e2e/size.e2e.ts` and `e2e/reach.e2e.ts` (every control still in reach at every size), and the action bar's names (`Hidden`, `Locked`, `Duplicate`, `Delete` stay its buttons' accessible names, so `getByRole("button", { name })` queries keep working).
 
 ## 9. Build plan

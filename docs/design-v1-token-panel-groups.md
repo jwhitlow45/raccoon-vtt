@@ -47,13 +47,13 @@ Why these groups:
 
 - **Picture**: 48 px at the left, the image field's preview (`ImagePreview`), ringed in the disposition's color, decoration (`aria-hidden`): the name is the heading.
 - **Name**: 18 px weight 700, wrapping, as today. Size and tags under it, as today.
-- **Quick numbers** (`QuickNumbers.tsx`): one wrapping line of unbreakable units, `space(3)` apart. Each is one image to a screen reader with its full words, and the same words are its tooltip (the prototype has all but the sheet link):
+- **Quick numbers** (`QuickNumbers.tsx`): one wrapping line of unbreakable units, `space(3)` apart. Each is one image to a screen reader with its full words, and the same words are its tooltip:
   - AC on its shield (`AcBadge`, "Armor Class 13").
   - Speed after the footprints (`speed`, docs/design-v1-icons.md 2.2): "30 ft", "30 ft, fly 60 ft" ("Speed 30 ft, fly 60 ft").
   - "PP 12" ("Passive Perception 12"). The word stays: an eye alone reads as vision or "shown to players" on a phone (icons doc 3.1 rule 2).
   - "Init +2" ("Initiative +2"), new here: the tracker's roll uses it, and the DM asked for it often in play.
   - The elevation when off the ground, "↑20 ft", as the token's badge on the map (`elevationBadge`).
-  - The sheet link, `external` icon and "Sheet", where the actor has one.
+  - The sheet link, "Sheet" and its `external` icon, 44 px tall, where the actor has one.
 - **Who sees what**: exactly what `vitals()` gives each viewer today (`statSummary.ts`): AC, speed and PP only where the viewer's copy holds them, so a player looking at a monster sees its elevation and nothing it hides. Init follows the same rule (`initBonus` on the viewer's copy).
 - **Room**: on a 390 px phone the line holds all five at 100% and wraps once at 130%.
 
@@ -70,7 +70,7 @@ Why these groups:
 ## 5. Remembered per device
 
 - The folds stay in `rvtt.tokenPanelFolds` (`panelFolds.ts`), one device's choice, never sent to the room. New keys: `combat`, `notes`, `position`, `image`. A key never tapped follows its default.
-- **By relation.** A player's tap on another creature's Notes must not fold their own character's. The build keys Combat, Notes and the stat block by relation: `own` (the DM, or an owner) and `other`, as `notes` and `other.notes`. The prototype keeps one set.
+- **By relation.** A player's tap on another creature's Notes must not fold their own character's. Combat, Notes and the stat block are keyed by relation (`panelRelation`, `relationKey`): `own` (the DM, or an owner) and `other`, as `notes` and `other.notes`. Another creature's Notes starts open: it shows only with the DM's note for everyone.
 - "View as a player" reads the folds and never writes them, as today.
 - A request that opens the stat block (docs/design-v1-token-panel.md 3.4) still opens it whatever the fold says.
 
@@ -96,9 +96,9 @@ Why these groups:
 
 ## 8. Tests
 
-- `panelOrder.test.ts`: a pure `panelGroups(input)` (the prototype computes it inline in TokenPanel.tsx) returns the groups and their sections per role, for the DM, an owner, another player, an object and a companion.
+- `panelOrder.test.ts`: the pure `panelGroups(input)` returns the groups and their sections per role, for the DM, an owner, another player, an object and a companion, and places every section exactly once.
 - `panelFolds.test.ts`: the new keys' defaults (Combat open everywhere, the rest folded), and the relation split.
-- `QuickNumbers` (new test file): the units per viewer, from `vitals()`'s items, and each unit's full name.
+- `QuickNumbers.test.ts`: the units per viewer, from `vitals()`'s items, each unit's full name, and the sheet link.
 - e2e (touched files only, plus `reach`): `tokenpanel.e2e.ts` (open a group, fold it, the summary's words, the quick numbers on a phone and a computer), `size.e2e.ts` (no sideways scroll at 320 px and 130%).
 
 ## 9. Build plan
