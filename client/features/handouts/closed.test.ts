@@ -187,11 +187,12 @@ describe("handout popups through random sequences", () => {
   /*
    * Random shows, shows again, the DM's closes, the player's closes, the
    * Library's opens, reconnects, reloads and new tabs, checked against
-   * what a player in the room should get. Invariants: a showing that was
-   * up when the page opened the room never pops up unless the Library
-   * opened it or the tab had it open before a reload; a showing the
-   * player closed never pops up unless the Library opened it again; and
-   * whenever some showing may pop up, one does.
+   * what a player in the room should get. Invariants:
+   * - A showing that was up when the page opened the room never pops up
+   *   unless the Library opened it or the tab had it open before a reload.
+   * - A showing the player closed never pops up unless the Library opened
+   *   it again.
+   * - Whenever some showing may pop up, one does.
    */
   test("only shows that came while the page was in the room pop up, and one always does when any may", () => {
     let seed = 20261017;
