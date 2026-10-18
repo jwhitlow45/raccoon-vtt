@@ -214,15 +214,29 @@ function rollVerdict(roll: DiceRoll, line: Pick<DiceEvent, "dc" | "ac">): string
  * each under "Mara rolled 6 times:", and the bare line of someone else's
  * secret roll "Mara rolled in secret.". A secret line read in full says so.
  */
+/**
+ * Who a roll kept from players is kept from, as the DM reads it: "other
+ * players" when the creature has players of its own, such as the DM's
+ * monster lent to one, since the projection still gives them the roll
+ * (`projectDiceCtx`), else "players".
+ */
+export function keptFrom(roll: Pick<DiceRoll, "tokenId" | "characterId">, names: LogNames): "players" | "other players" {
+  const token = roll.tokenId !== undefined ? names.tokens[roll.tokenId] : undefined;
+  const ref = token && "ref" in token.actor ? token.actor.ref : roll.characterId;
+  const character = ref !== undefined ? names.characters[ref] : undefined;
+  const owners = [...(token?.ownerIds ?? []), ...(character?.ownerIds ?? [])];
+  return owners.some((id) => names.members[id]?.kind === "player") ? "other players" : "players";
+}
+
 export function diceLineText(data: DiceEvent, names: LogNames): string {
   const who = memberName(names, data.by);
   if (data.rolls.length === 0) return `${who} rolled in secret.`;
   const secret = data.to === "dm" ? " (secret)" : "";
   const one = (roll: DiceRoll) => `${rollSubject(roll, names)}${diceText(roll)}${rollVerdict(roll, data)}`;
   // Only the DM's copy keeps the mark of an initiative roll kept from players (docs/design-v1-combat-flow.md 11.3).
-  const kept = (roll: DiceRoll) => (roll.hidden ? " (hidden from players)" : "");
+  const kept = (roll: DiceRoll) => (roll.hidden ? ` (hidden from ${keptFrom(roll, names)})` : "");
   const only = data.rolls.length === 1 ? data.rolls[0]! : null;
-  if (only) return `${who} rolled ${one(only)}${only.hidden ? ` (${data.to === "dm" ? "secret, " : ""}hidden from players)` : secret}.`;
+  if (only) return `${who} rolled ${one(only)}${only.hidden ? ` (${data.to === "dm" ? "secret, " : ""}hidden from ${keptFrom(only, names)})` : secret}.`;
   return [`${who} rolled ${data.rolls.length} times${secret}:`, ...data.rolls.map((roll) => `${one(roll)}${kept(roll)}.`)].join("\n");
 }
 

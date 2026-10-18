@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { critSumText, describeEvent, diceLineText, diceText, rollToastText, type LogNames } from "./logText.ts";
+import { critSumText, describeEvent, diceLineText, diceText, keptFrom, rollToastText, type LogNames } from "./logText.ts";
 import type { DiceRoll, LogEvent } from "./model.ts";
 import { member, room, token, character } from "./testutil.ts";
 
@@ -151,5 +151,26 @@ describe("an initiative roll kept from players, in the DM's log (B7B-P-5, docs/d
       ["Mara rolled 2 times:", "for Thorn, Initiative: 1d20+2 (12) = 14.", "for Goblin 1, Initiative: 1d20+2 (7) = 9 (hidden from players)."].join("\n"),
     );
     assert.equal(diceLineText(line([init(14)], { by: "mara" }), names), "Mara rolled for Goblin 1, Initiative: 1d20+2 (12) = 14.");
+  });
+
+  test("says hidden from other players on a creature lent to a player, whose own player still gets the roll (B7B-P-9)", () => {
+    const lent: LogNames = room({
+      members: { bree: { ...member("bree"), name: "Bree" }, mara: { ...member("mara", "dm"), name: "Mara" } },
+      tokens: {
+        wolf: token("wolf", { name: "Wolf", ownerIds: ["bree"] }),
+        sage: token("sage", { kind: "npc", name: "Sage", actor: { ref: "sage" } }),
+        kept: token("kept", { name: "Imp", ownerIds: ["mara"] }),
+      },
+      characters: { sage: character("sage", { name: "Sage", ownerIds: ["bree"] }) },
+    });
+    assert.equal(diceLineText(line([init(14, { tokenId: "wolf", hidden: true })], { by: "mara" }), lent), "Mara rolled for Wolf, Initiative: 1d20+2 (12) = 14 (hidden from other players).");
+    assert.equal(diceLineText(line([init(14, { tokenId: "sage", hidden: true })], { by: "mara", to: "dm" }), lent), "Mara rolled for Sage, Initiative: 1d20+2 (12) = 14 (secret, hidden from other players).", "owned through its character");
+    assert.equal(
+      diceLineText(line([init(14, { tokenId: "wolf", hidden: true }), init(9, { tokenId: "kept", hidden: true })], { by: "mara" }), lent),
+      ["Mara rolled 2 times:", "for Wolf, Initiative: 1d20+2 (12) = 14 (hidden from other players).", "for Imp, Initiative: 1d20+2 (7) = 9 (hidden from players)."].join("\n"),
+      "a DM's own ownership is no player's",
+    );
+    assert.equal(keptFrom({ tokenId: "wolf" }, lent), "other players");
+    assert.equal(keptFrom({ tokenId: "gone" }, lent), "players");
   });
 });

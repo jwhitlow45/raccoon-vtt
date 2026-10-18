@@ -1,6 +1,6 @@
 import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { hitOf, naturalOf, rolledTerms } from "#shared/dice/roll.ts";
-import { creatureName, describeEvent, diceText, memberName, rolledFormula, type LogNames } from "#shared/logText.ts";
+import { creatureName, describeEvent, diceText, keptFrom, memberName, rolledFormula, type LogNames } from "#shared/logText.ts";
 import type { DiceResult, DiceRoll, LogEntry } from "#shared/model.ts";
 import type { DiceRollInput } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
@@ -119,7 +119,7 @@ function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; na
         <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{formula}</span>
         <DiceFaces result={roll} />
         {/* Only the DM's copy keeps the mark of an initiative roll kept from players (docs/design-v1-combat-flow.md 11.3). */}
-        {roll.hidden ? <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>Hidden from players</span> : null}
+        {roll.hidden ? <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>Hidden from {keptFrom(roll, props.names)}</span> : null}
         {verdict ? <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>{verdict}</span> : null}
       </div>
       {props.end}
