@@ -6,7 +6,7 @@ import { retryableLazy } from "../../lib/retryableLazy.ts";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
 import type { ToolContext, ToolDef } from "../tools.ts";
 import { boxAtCell, boxCorner, boxFromDrag, canonicalToWorld, resizeBox, worldToCanonical, type CalBox, type Corner } from "./calibrate.ts";
-import { gridSlot, HANDLE_HIT_PX } from "./store.ts";
+import { endFinding, gridSlot, HANDLE_HIT_PX } from "./store.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /** A drag shorter than this, in screen pixels, is a tap. */
@@ -105,9 +105,12 @@ export const gridTool: ToolDef = {
       const map = ctx.scene.map;
       const { drag } = gridState.getState();
       if (!map || !drag) return;
+      // The box moves by hand from here, which ends a Find the grid still running (store.ts `endFinding`).
       if (drag.kind === "corner") {
+        endFinding(gridState, ctx.scene.id);
         gridState.setState({ box: resizeBox(map, drag.start, drag.corner, p.world) });
       } else if (drag.kind === "move") {
+        endFinding(gridState, ctx.scene.id);
         const a = worldToCanonical(map, drag.from);
         const b = worldToCanonical(map, p.world);
         gridState.setState({ box: { ...drag.start, x: drag.start.x + b.x - a.x, y: drag.start.y + b.y - a.y } });
@@ -115,6 +118,7 @@ export const gridTool: ToolDef = {
         const cam = ctx.camera();
         const moved = drag.moved || distance(worldToScreen(cam, drag.from), p.screen) > TAP_PX;
         if (!moved) return;
+        endFinding(gridState, ctx.scene.id);
         gridState.setState({ drag: { ...drag, moved }, box: boxFromDrag(map, drag.from, p.world) });
       }
     },
@@ -127,6 +131,7 @@ export const gridTool: ToolDef = {
         // A tap: the same box size, moved to the squares under the finger.
         const size = drag.start?.size ?? 3 * map.cellPx;
         const at = boxAtCell(map, Math.floor(p.world.x) - 1, Math.floor(p.world.y) - 1);
+        endFinding(gridState, ctx.scene.id);
         gridState.setState({ drag: null, box: { ...at, size } });
         return;
       }

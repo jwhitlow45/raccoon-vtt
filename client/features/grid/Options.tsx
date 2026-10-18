@@ -6,8 +6,8 @@ import { dispatchGesture } from "../../state/actions.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { OptButton, OptionsStrip, StripText, ValueChip } from "../measure/controls.tsx";
 import { fitBounds, nudgeBox, sameCalibration, type CalBox, type Calibration } from "./calibrate.ts";
-import { boxAround, gridOps, middleOf } from "./outcome.ts";
-import { boxCalibration, useGridStore } from "./store.ts";
+import { applyGrid, boxAround, gridOps, middleOf } from "./outcome.ts";
+import { boxCalibration, endFinding, useGridStore } from "./store.ts";
 import { useFindGrid } from "./useFindGrid.ts";
 
 /** One canonical pixel per nudge: on the largest maps a thirtieth of a square or less. */
@@ -45,15 +45,18 @@ export default function GridOptions() {
   const bounds = fitBounds({ ...map, ...cal });
   const changed = !sameCalibration(cal, map);
   const resize = fitScene && (bounds.w !== scene.bounds.w || bounds.h !== scene.bounds.h);
-  const set = (next: CalBox) => gridState.setState({ box: next });
+  // A nudge is a move by hand, so it ends a search as a drag does.
+  const set = (next: CalBox) => {
+    endFinding(gridState, sceneId);
+    gridState.setState({ box: next });
+  };
   const saved = applied === box && !changed && !resize;
   const searching = finding?.sceneId === sceneId;
   // A search's note stands while the box is where the search left it.
   const note = found?.sceneId === sceneId && found.box === box ? found : null;
 
   const apply = () => {
-    if (changed) actions.dispatch({ t: "scene.setGrid", sceneId, cellPx: cal.cellPx, originPx: cal.originPx });
-    if (resize) actions.dispatch({ t: "scene.update", sceneId, patch: { bounds } });
+    applyGrid({ actions, store: gridState, sceneId, cal: changed ? cal : null, bounds: resize ? bounds : null });
     setApplied(box);
   };
 

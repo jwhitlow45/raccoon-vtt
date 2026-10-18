@@ -60,6 +60,19 @@ export function boxCalibration(box: CalBox, found: FoundNote | null, sceneId: st
   return found?.sceneId === sceneId && found.box === box && found.cal ? found.cal : calibrationFromBox(box);
 }
 
+/**
+ * Ends a Find the grid still running for the scene. Apply and a move of
+ * the box by hand (a drag, a tap, a nudge) each call it: the DM has taken
+ * the grid into their own hands, and an answer that came later would put
+ * the search's grid and box over theirs.
+ */
+export function endFinding(store: StoreApi<GridToolState>, sceneId: string): void {
+  const { finding } = store.getState();
+  if (!finding || finding.sceneId !== sceneId) return;
+  finding.cancel();
+  store.setState({ finding: null });
+}
+
 /** How close, in screen pixels, a finger must land to grab a corner: half a 44 px target. */
 export const HANDLE_HIT_PX = 22;
 

@@ -4,8 +4,8 @@ import type { StoreApi } from "zustand/vanilla";
 import { dispatchGesture } from "../../state/actions.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { boxAtCell, canonicalToWorld, fitBounds, sameCalibration, type CalBox, type Calibration, type Point } from "./calibrate.ts";
-import { cameWithGrid, findFound, foundGrid, searchGrid, within, type FoundGrid, type SearchWorker } from "./findGrid.ts";
-import type { FoundNote, GridToolState } from "./store.ts";
+import { cameWithGrid, findFound, foundGrid, searchGrid, within, type FoundGrid, type SearchWorker, type Timers } from "./findGrid.ts";
+import { endFinding, type FoundNote, type GridToolState } from "./store.ts";
 
 /**
  * What a search for a map's drawn grid does to the scene and the grid
@@ -28,6 +28,27 @@ export function gridOps(scene: GridScene, cal: Calibration, fit: boolean): Clien
   const bounds = fitBounds({ ...scene.map, ...cal });
   if (fit && (bounds.w !== scene.bounds.w || bounds.h !== scene.bounds.h)) ops.push({ t: "scene.update", sceneId: scene.id, patch: { bounds } });
   return ops;
+}
+
+/**
+ * Apply: the box's grid and, when the scene should match the map, its
+ * size, each its own op as the DM sends them by hand. A Find the grid
+ * still running for the scene ends first, so its answer cannot overwrite
+ * them.
+ */
+export function applyGrid(input: {
+  actions: Pick<RoomActions, "dispatch">;
+  store: StoreApi<GridToolState>;
+  sceneId: string;
+  /** Null when the grid is already this. */
+  cal: Calibration | null;
+  /** Null when the size stays. */
+  bounds: { w: number; h: number } | null;
+}): void {
+  const { actions, sceneId, cal, bounds } = input;
+  endFinding(input.store, sceneId);
+  if (cal) actions.dispatch({ t: "scene.setGrid", sceneId, cellPx: cal.cellPx, originPx: cal.originPx });
+  if (bounds) actions.dispatch({ t: "scene.update", sceneId, patch: { bounds } });
 }
 
 /** The box over the 3 by 3 squares of `cal` nearest a point of the map, in canonical pixels. */
@@ -89,15 +110,23 @@ export function showOutcome(input: {
   return note;
 }
 
+/** Whether a scene shows the image it did at `start`, with the same grid and size. */
+function unchangedSince(start: GridScene, now: GridScene): boolean {
+  return now.map.assetId === start.map.assetId && sameCalibration(now.map, start.map) && now.bounds.w === start.bounds.w && now.bounds.h === start.bounds.h;
+}
+
 /** How long Find the grid waits for the map to download, decode and be searched, ms. Past it, no grid is found. */
 export const FIND_TIMEOUT_MS = 30_000;
 
 /**
  * Find the grid, on the scene's current map at any time: the phone-sized
  * copy first, which is at most the size the Worker decodes anyway. A
- * second press while one runs does nothing. When the answer comes, the
- * scene must still show the same image, or it is dropped. On a scene that
- * came with its own grid, a find is only offered.
+ * second press while one runs does nothing. Apply, a move of the box by
+ * hand and the tool closing each end the search (store.ts `endFinding`).
+ * An answer that still comes is dropped unless the scene shows the same
+ * image with the same grid and size as when the search began, so work
+ * done meanwhile, on this device or another, is never overwritten. On a
+ * scene that came with its own grid, a find is only offered.
  */
 export async function findOnScene(input: {
   actions: Gesture;
@@ -106,6 +135,7 @@ export async function findOnScene(input: {
   scene(): GridScene | null;
   urls: string[];
   makeWorker?: () => SearchWorker;
+  timers?: Timers;
 }): Promise<void> {
   const { store } = input;
   const start = input.scene();
@@ -113,11 +143,11 @@ export async function findOnScene(input: {
   const search = searchGrid({ urls: input.urls }, input.makeWorker);
   const finding = { sceneId: input.sceneId, cancel: search.cancel };
   store.setState({ finding, found: null });
-  const answer = await within(search, FIND_TIMEOUT_MS);
+  const answer = await within(search, FIND_TIMEOUT_MS, input.timers);
   if (store.getState().finding !== finding) return;
   store.setState({ finding: null });
   const scene = input.scene();
-  if (!scene || scene.map.assetId !== start.map.assetId) return;
+  if (!scene || !unchangedSince(start, scene)) return;
   const state = store.getState();
   const ownGrid = cameWithGrid(scene);
   showOutcome({

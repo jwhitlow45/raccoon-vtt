@@ -4,10 +4,11 @@ import { createStore } from "zustand/vanilla";
 import type { SceneMap } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { AxisFit, GridDetection } from "./detect.ts";
-import type { SearchAnswer, SearchRequest, SearchWorker } from "./findGrid.ts";
-import { boxAround, findOnScene, gridOps, middleOf, showOutcome } from "./outcome.ts";
-import { calibrationFromBox, nudgeBox } from "./calibrate.ts";
-import { boxCalibration, type GridToolState } from "./store.ts";
+import { calibrationFromBox, nudgeBox, sameCalibration } from "./calibrate.ts";
+import type { SearchAnswer, SearchRequest, SearchWorker, Timers } from "./findGrid.ts";
+import { applyGrid, boxAround, findOnScene, gridOps, middleOf, showOutcome } from "./outcome.ts";
+import { boxCalibration, endFinding, type GridToolState } from "./store.ts";
+import { rng } from "./synthetic.ts";
 
 // A 1400 x 1000 map made with today's first guess: 47 px squares from the corner.
 const MAP: SceneMap = { assetId: "a1", widthPx: 1400, heightPx: 1000, cellPx: 47, originPx: { x: 0, y: 0 } };
@@ -186,5 +187,266 @@ describe("Find the grid", () => {
     await running;
     assert.deepEqual(sent, []);
     assert.equal(store.getState().found, null);
+  });
+});
+
+/** A Worker that answers when told to, and counts how often it is ended. */
+class CountingWorker extends AnsweringWorker {
+  terminated = 0;
+  override terminate(): void {
+    this.terminated++;
+  }
+  fail(): void {
+    this.onerror?.(new Error("crashed"));
+  }
+}
+
+type LiveScene = typeof SCENE;
+
+/** A scene the ops sent change, as the room would, and the tool's store. */
+function liveRoom() {
+  let scene: LiveScene = SCENE;
+  const sent: { op: ClientOp; group: string | undefined }[] = [];
+  let ids = 0;
+  const actions = {
+    dispatch(op: ClientOp, opts?: { group?: string }) {
+      sent.push({ op, group: opts?.group });
+      if (op.t === "scene.setGrid") scene = { ...scene, map: { ...scene.map, cellPx: op.cellPx, originPx: op.originPx } };
+      else if (op.t === "scene.update" && op.patch.bounds) scene = { ...scene, bounds: op.patch.bounds };
+      return sent.length;
+    },
+    newId: () => `g${++ids}`,
+  };
+  const store = createStore<GridToolState>(() => ({ box: null, drag: null, fitScene: true, sceneId: null, found: null, finding: null }));
+  return {
+    sent,
+    actions,
+    store,
+    scene: () => scene,
+    /** A change made on another DM device, which reaches this one without any op of its own. */
+    elsewhere: (next: LiveScene) => (scene = next),
+  };
+}
+
+function fakeTimers(): Timers & { fire(): void; pending(): number } {
+  let next = 1;
+  const due = new Map<number, () => void>();
+  return {
+    set(fn) {
+      const handle = next++;
+      due.set(handle, fn);
+      return handle;
+    },
+    clear(handle) {
+      due.delete(handle as number);
+    },
+    fire() {
+      for (const [handle, fn] of [...due]) {
+        due.delete(handle);
+        fn();
+      }
+    },
+    pending: () => due.size,
+  };
+}
+
+const settled = () => new Promise((resolve) => setImmediate(resolve));
+const SURE: SearchAnswer = { t: "done", result: DETECTED, width: 700, height: 500 };
+const DOUBTFUL: SearchAnswer = { t: "done", result: { ...DETECTED, confidence: 0.45 }, width: 700, height: 500 };
+const NOTHING: SearchAnswer = { t: "done", result: { found: false, reason: "none" }, width: 700, height: 500 };
+
+describe("a search the DM works around", () => {
+  test("a 70 px answer that comes after an 80 px Apply changes nothing", async () => {
+    const live = liveRoom();
+    const worker = new CountingWorker();
+    const running = findOnScene({ actions: live.actions, store: live.store, sceneId: "s1", scene: live.scene, urls: ["/m"], makeWorker: () => worker });
+    const box = { x: 0, y: 0, size: 240 };
+    live.store.setState({ box });
+    applyGrid({ actions: live.actions, store: live.store, sceneId: "s1", cal: { cellPx: 80, originPx: { x: 0, y: 0 } }, bounds: null });
+    assert.equal(live.store.getState().finding, null, "Apply ended the search");
+    assert.equal(worker.terminated, 1);
+    worker.answer(SURE);
+    await running;
+    assert.deepEqual(
+      live.sent.map((s) => s.op),
+      [{ t: "scene.setGrid", sceneId: "s1", cellPx: 80, originPx: { x: 0, y: 0 } }],
+    );
+    assert.equal(live.scene().map.cellPx, 80);
+    assert.equal(live.store.getState().found, null);
+    assert.equal(live.store.getState().box, box, "the box stays where the DM put it");
+  });
+
+  test("a drag of the box ends the search, and its answer leaves the box where the DM put it", async () => {
+    const live = liveRoom();
+    const worker = new CountingWorker();
+    const running = findOnScene({ actions: live.actions, store: live.store, sceneId: "s1", scene: live.scene, urls: ["/m"], makeWorker: () => worker });
+    // What the tool's drag does.
+    endFinding(live.store, "s1");
+    const dragged = { x: 300, y: 300, size: 150 };
+    live.store.setState({ box: dragged });
+    worker.answer(SURE);
+    await running;
+    assert.deepEqual(live.sent, []);
+    assert.equal(live.store.getState().box, dragged);
+    assert.equal(worker.terminated, 1);
+  });
+
+  test("an answer that comes after the grid or the size changed on another device is dropped", async () => {
+    const changes: ((s: LiveScene) => LiveScene)[] = [
+      (s) => ({ ...s, map: { ...s.map, cellPx: 80 } }),
+      (s) => ({ ...s, map: { ...s.map, originPx: { x: 12, y: 0 } } }),
+      (s) => ({ ...s, bounds: { w: 40, h: 30 } }),
+    ];
+    for (const change of changes) {
+      const live = liveRoom();
+      const worker = new CountingWorker();
+      const running = findOnScene({ actions: live.actions, store: live.store, sceneId: "s1", scene: live.scene, urls: ["/m"], makeWorker: () => worker });
+      live.elsewhere(change(live.scene()));
+      const before = live.scene();
+      worker.answer(SURE);
+      await running;
+      assert.deepEqual(live.sent, []);
+      assert.equal(live.scene(), before);
+      assert.equal(live.store.getState().found, null);
+      assert.equal(live.store.getState().finding, null, "the search is over, so Find the grid can run again");
+    }
+  });
+
+  /**
+   * Random runs of what can happen around Find the grid: presses of Find,
+   * the Worker's answers (sure, doubtful, no grid) and failures, answers
+   * from searches already ended, Apply, drags of the box, the tool
+   * closing, the deadline, and the grid or the size changed on another
+   * device. Invariants, after every event of every run:
+   * - At most one search runs, and `finding` is set exactly while one does.
+   * - A search's answer changes the scene, the note or the box only when it
+   *   comes while that search still runs and the scene shows the image,
+   *   grid and size it began with. So never after Apply, a drag, a close,
+   *   the deadline or a change made elsewhere: what the DM did by hand is
+   *   replaced only by a search begun after it.
+   * - An answer that applies sends one undo group at most, and nothing but
+   *   Apply and such an answer sends an op.
+   * - A search's Worker is ended exactly once, when the search ends, and no
+   *   deadline timer outlives its search.
+   */
+  test("random searches, Applies, drags, closes, deadlines and late answers keep every invariant", async () => {
+    const next = rng(20261019);
+    const kinds = ["find", "sure", "doubtful", "nothing", "fail", "late", "apply", "drag", "close", "deadline", "elsewhere"] as const;
+    const pick = <T>(list: readonly T[]): T | undefined => list[Math.floor(next() * list.length)];
+    for (let run = 0; run < 400; run++) {
+      const live = liveRoom();
+      const timers = fakeTimers();
+      const workers: CountingWorker[] = [];
+      const ended: CountingWorker[] = [];
+      // The search the model expects to run, and whether the scene has changed elsewhere since it began.
+      let running: { worker: CountingWorker; stale: boolean } | null = null;
+      const end = () => {
+        if (running) ended.push(running.worker);
+        running = null;
+      };
+      const events: string[] = [];
+      const steps = 1 + Math.floor(next() * 12);
+      for (let step = 0; step < steps; step++) {
+        const kind = pick(kinds)!;
+        events.push(kind);
+        const label = `run ${run}: ${events.join(", ")}`;
+        const sentBefore = live.sent.length;
+        const before = live.store.getState();
+        /** What this event's answer may leave: a note of this outcome, or nothing. */
+        let lands: "applied" | "offered" | "none" | null = null;
+        let applied = false;
+        if (kind === "find") {
+          const made = workers.length;
+          void findOnScene({
+            actions: live.actions,
+            store: live.store,
+            sceneId: "s1",
+            scene: live.scene,
+            urls: ["/m"],
+            makeWorker: () => {
+              const w = new CountingWorker();
+              workers.push(w);
+              return w;
+            },
+            timers,
+          });
+          if (running) assert.equal(workers.length, made, `${label}: a second press started nothing`);
+          else {
+            assert.equal(workers.length, made + 1, label);
+            running = { worker: workers[made]!, stale: false };
+          }
+        } else if (kind === "sure" || kind === "doubtful" || kind === "nothing" || kind === "fail" || kind === "deadline") {
+          if (running) {
+            if (kind === "fail") running.worker.fail();
+            else if (kind === "deadline") timers.fire();
+            else running.worker.answer(kind === "sure" ? SURE : kind === "doubtful" ? DOUBTFUL : NOTHING);
+            if (!running.stale) lands = kind === "sure" ? "applied" : kind === "doubtful" ? "offered" : "none";
+            end();
+          }
+        } else if (kind === "late") {
+          pick(ended)?.answer(SURE);
+        } else if (kind === "apply") {
+          const cal = { cellPx: 80 + Math.floor(next() * 4), originPx: { x: 0, y: 0 } };
+          const change = !sameCalibration(cal, live.scene().map);
+          applyGrid({ actions: live.actions, store: live.store, sceneId: "s1", cal: change ? cal : null, bounds: null });
+          applied = change;
+          end();
+        } else if (kind === "drag") {
+          endFinding(live.store, "s1");
+          live.store.setState({ box: { x: Math.floor(next() * 500), y: 10, size: 240 } });
+          end();
+        } else if (kind === "close") {
+          // What the tool's deactivate does.
+          const { finding } = live.store.getState();
+          finding?.cancel();
+          live.store.setState({ finding: null });
+          end();
+        } else {
+          // Each change moves on from the last, so the scene never comes back to how a search found it.
+          const s = live.scene();
+          const which = Math.floor(next() * 3);
+          live.elsewhere(
+            which === 0
+              ? { ...s, map: { ...s.map, cellPx: s.map.cellPx + 3 } }
+              : which === 1
+                ? { ...s, bounds: { w: s.bounds.w + 1, h: s.bounds.h } }
+                : { ...s, map: { ...s.map, assetId: `${s.map.assetId}+` } },
+          );
+          if (running) running.stale = true;
+        }
+        await settled();
+
+        const after = live.store.getState();
+        assert.equal(after.finding !== null, running !== null, `${label}: finding is set exactly while a search runs`);
+        assert.equal(workers.filter((w) => w.terminated === 0).length, running ? 1 : 0, `${label}: only the running search's Worker is alive`);
+        assert.ok(
+          workers.every((w) => w.terminated <= 1),
+          `${label}: no Worker is ended twice`,
+        );
+        assert.equal(timers.pending(), running ? 1 : 0, `${label}: only the running search has a deadline`);
+        const sent = live.sent.slice(sentBefore);
+        if (lands) {
+          assert.equal(after.found?.outcome, lands, label);
+          assert.ok(sent.length <= 2 && sent.every((s) => s.group !== undefined && s.group === sent[0]!.group), `${label}: one undo group`);
+          if (lands === "applied") assert.ok(sameCalibration(live.scene().map, { cellPx: 70, originPx: { x: 20, y: 35 } }), `${label}: the found grid is on`);
+          else assert.equal(sent.length, 0, label);
+        } else {
+          assert.equal(sent.length, applied ? 1 : 0, `${label}: only Apply sent anything`);
+          if (kind === "find") assert.equal(after.found, running ? null : before.found, label);
+          else assert.equal(after.found, before.found, `${label}: the note is the one before`);
+          if (kind !== "drag") assert.equal(after.box, before.box, `${label}: the box is the one before`);
+        }
+      }
+      if (running) {
+        endFinding(live.store, "s1");
+        end();
+        await settled();
+      }
+      assert.equal(timers.pending(), 0, `run ${run}: no timer left`);
+      assert.ok(
+        workers.every((w) => w.terminated === 1),
+        `run ${run}: every Worker ended once`,
+      );
+    }
   });
 });
