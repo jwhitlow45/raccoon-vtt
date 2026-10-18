@@ -75,3 +75,36 @@ test("with storage working, closing a display gives back the stored size, a choi
   s.restoreUiScale();
   assert.equal(s.uiScale(), 1);
 });
+
+/*
+ * The shortcut sheet's moved keys (state/keyBindings.ts), kept beside the
+ * other settings: only the changes, with the stored form's version.
+ */
+
+test("moved keys are kept with their version, and a new page reads them back", async () => {
+  reset({ writes: true, reads: true });
+  const first = await loadPage();
+  assert.deepEqual(first.keyChanges(), {}, "nothing moved yet");
+  first.setKeyChanges({ "tool:fog": "x" });
+  assert.equal(stored.get("rvtt.keys"), '{"v":1,"keys":{"tool:fog":"x"}}');
+  const second = await loadPage();
+  assert.deepEqual(second.keyChanges(), { "tool:fog": "x" });
+  second.setKeyChanges({});
+  assert.deepEqual((await loadPage()).keyChanges(), {}, "Reset all keys");
+});
+
+test("moved keys of another version, or a store that is not JSON, read as none", async () => {
+  for (const raw of ['{"v":2,"keys":{"tool:fog":"x"}}', "{", '"x"', '{"v":1,"keys":{"tool:fog":"ArrowUp"}}']) {
+    reset({ writes: true, reads: true });
+    stored.set("rvtt.keys", raw);
+    assert.deepEqual((await loadPage()).keyChanges(), {}, raw);
+  }
+});
+
+test("with storage blocked, moved keys last until the page closes", async () => {
+  reset({ writes: false, reads: false });
+  const s = await loadPage();
+  s.setKeyChanges({ "tool:fog": "x" });
+  assert.deepEqual(s.keyChanges(), { "tool:fog": "x" });
+  assert.equal(stored.has("rvtt.keys"), false);
+});

@@ -458,7 +458,8 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await key(dm, "r");
     await key(dm, "v");
     await view(dm, dmCdp, SIZES[2]!);
-    assert.deepEqual(await tools(dm).locator("button[data-active]").evaluateAll((bs) => bs.map((b) => b.getAttribute("title"))), ["Select", "Ruler", "Panels"]);
+    // A tool's tooltip names its key as this device has it, so the pair reads Select (V) and Ruler (R).
+    assert.deepEqual(await tools(dm).locator("button[data-active]").evaluateAll((bs) => bs.map((b) => b.getAttribute("title"))), ["Select (V)", "Ruler (R)", "Panels"]);
     const ruler = tools(dm).getByRole("button", { name: "Ruler" });
     // Its caret shows before its tool is active, and once active its description says it is in use, in place of a pressed state.
     const described = (b: Locator) => b.evaluate((el) => {

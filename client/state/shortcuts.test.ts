@@ -4,13 +4,17 @@ import { describe, test } from "node:test";
 import type { ClientOp } from "#shared/protocol.ts";
 import { RoomScope } from "./scope.ts";
 import { toolbarSlot } from "./toolbar.ts";
+import { keyLabel, sameKey, type KeyMap } from "./keyBindings.ts";
 import {
   BEHAVIORS,
+  DEFAULT_KEYS,
   deletedText,
   isTextField,
+  keyText,
   sheetSections,
   SHORTCUTS,
   shortcutFor,
+  shortcutKeys,
   shortcutSheetSlot,
   shortcutsFor,
   sidePanelKeysSlot,
@@ -124,6 +128,60 @@ describe("the shortcut table", () => {
     s?.run(e, p);
     return s?.id ?? null;
   };
+  /** The shortcut a press finds with some keys moved, as the sheet moves them on a device. */
+  const moved = (changes: Record<string, string>) => {
+    const keys: KeyMap = { ...DEFAULT_KEYS, ...changes };
+    return (e: ShortcutEnv, p: KeyPress) => shortcutFor(p, e, open, keys)?.id ?? null;
+  };
+
+  describe("keys this device moved", () => {
+    test("a moved letter matches as the room's letters do, and its old key picks nothing", () => {
+      const { env: e } = env();
+      const find = moved({ "tool:fog": "x" });
+      assert.equal(find(e, press({ key: "x", code: "KeyX" })), "tool:fog");
+      assert.equal(find(e, press({ key: "X", code: "KeyX", shiftKey: true })), "tool:fog", "with Shift");
+      // Russian: the key at X types ч.
+      assert.equal(find(e, press({ key: "ч", code: "KeyX" })), "tool:fog", "by its place on a Cyrillic layout");
+      assert.equal(find(e, press({ key: "f", code: "KeyF" })), null, "F is free now");
+      assert.equal(find(e, press({ key: "а", code: "KeyF" })), null, "and so is its place");
+      assert.equal(find(e, press({ key: "x", code: "KeyX", target: { tagName: "INPUT", type: "text" } })), null, "typing in a field");
+      assert.equal(find(e, press({ key: "x", code: "KeyX", ctrlKey: true })), null, "Ctrl+X stays the browser's");
+      assert.equal(find(env({ role: "player" }).env, press({ key: "x", code: "KeyX" })), null, "Fog is still the DM's");
+    });
+
+    test("a moved symbol and a moved digit match by key, with Shift allowed", () => {
+      const { env: e } = env();
+      const find = moved({ "tool:fog": ",", "tool:ruler": "1" });
+      assert.equal(find(e, press({ key: ",", code: "Comma" })), "tool:fog");
+      // AZERTY: the key where QWERTY has M types a comma, which is Fog's now, ahead of the M of its place.
+      assert.equal(find(e, press({ key: ",", code: "KeyM" })), "tool:fog", "the character typed wins over the letter of its place");
+      // Greek: the key at G types γ.
+      assert.equal(find(e, press({ key: "γ", code: "KeyG" })), "tool:grid", "a letter of another script still finds its place");
+      assert.equal(find(e, press({ key: "1", code: "Digit1" })), "tool:ruler");
+      // AZERTY: 1 takes Shift.
+      assert.equal(find(e, press({ key: "1", code: "Digit1", shiftKey: true })), "tool:ruler");
+      assert.equal(find(e, press({ key: "&", code: "Digit1" })), null, "the key's other character is not 1");
+      assert.equal(find(e, press({ key: "r", code: "KeyR" })), null);
+    });
+
+    test("Zoom in's + takes = until it moves, and then neither picks it", () => {
+      const { env: e, scope } = env();
+      scope.get(stageKeysSlot).zoom = () => {};
+      assert.equal(moved({})(e, press({ key: "=", code: "Equal" })), "zoomIn");
+      const find = moved({ zoomIn: "z" });
+      assert.equal(find(e, press({ key: "z", code: "KeyZ" })), "zoomIn");
+      assert.equal(find(e, press({ key: "+", code: "Equal", shiftKey: true })), null);
+      assert.equal(find(e, press({ key: "=", code: "Equal" })), null);
+      assert.equal(find(e, press({ key: "z", code: "KeyZ", ctrlKey: true })), "undo", "Ctrl+Z is undo's whatever Z picks");
+    });
+
+    test("a press finds the device's own keys, and a change that clashes is ignored", () => {
+      assert.equal(shortcutKeys({ "tool:fog": "x" })["tool:fog"], "x");
+      assert.equal(shortcutKeys({ "tool:fog": "v" })["tool:fog"], "f", "V is Select's");
+      assert.equal(shortcutKeys({ "tool:fog": "v", "tool:select": "f" })["tool:fog"], "v", "a swap holds");
+      assert.equal(shortcutKeys({})["tool:fog"], "f");
+    });
+  });
 
   test("a key picks a setup tool and a tool the pair hides, and the key of the tool in use shows its tucked options and never tucks (docs/design-v1-tool-options.md 5.5)", () => {
     const dm = env({ tool: "ruler" });
@@ -386,6 +444,64 @@ describe("the shortcut table", () => {
     const { env: e } = env({ selected: ["t1"] });
     const grip = { tagName: "DIV", closest: (selector: string) => (selector.includes('[role="separator"]') ? {} : null) };
     for (const key of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown"]) assert.equal(run(e, press({ key, code: key, target: grip })), null, key);
+  });
+
+  test("every single key can move, and the defaults are written as the sheet writes them, one shortcut to a key", () => {
+    assert.deepEqual(Object.keys(DEFAULT_KEYS).sort(), [
+      "fit",
+      "fullscreen",
+      "hide",
+      "lock",
+      "otherPanel",
+      "outliner",
+      "sheet",
+      "sidePanel",
+      "tool:add-token",
+      "tool:area",
+      "tool:build",
+      "tool:draw",
+      "tool:fog",
+      "tool:grid",
+      "tool:pin",
+      "tool:ping",
+      "tool:ruler",
+      "tool:select",
+      "turn",
+      "zoomIn",
+      "zoomOut",
+    ]);
+    for (const s of SHORTCUTS) {
+      if (s.key === undefined) {
+        assert.equal(typeof s.match, "function", `${s.id} matches by its own rule`);
+        continue;
+      }
+      assert.equal(s.match, undefined, `${s.id} matches by its key`);
+      assert.equal(s.keys, keyLabel(s.key), `${s.id}'s keys`);
+      assert.ok(s.name.trim(), `${s.id} has a name`);
+      assert.ok(!s.modifier, `${s.id} is one key`);
+    }
+    // The rows that stay: Ctrl or Cmd, the arrow and Page keys, Delete and Backspace.
+    assert.deepEqual(SHORTCUTS.filter((s) => s.key === undefined).map((s) => s.id), ["undo", "redo", "nudge", "elevation", "delete"]);
+    const defaults = Object.entries(DEFAULT_KEYS);
+    for (const [id, key] of defaults) {
+      const others = defaults.filter(([other, k]) => other !== id && sameKey(k, key)).map(([other]) => other);
+      assert.deepEqual(others, [], `${id}'s ${key}, for the DM and players alike`);
+    }
+  });
+
+  test("the sheet writes the key in effect, marks a moved one, and keyText says the same", () => {
+    const keys: KeyMap = { ...DEFAULT_KEYS, "tool:fog": "x" };
+    const rows = sheetSections("dm", { mouse: true, android: false }, keys)[0]!.rows;
+    const row = (id: string) => rows.find((r) => r.id === id);
+    assert.equal(row("tool:fog")?.input, "X");
+    assert.deepEqual(row("tool:fog")?.rebind, { name: "Fog", changed: true });
+    assert.deepEqual(row("tool:select")?.rebind, { name: "Select", changed: false });
+    assert.equal(row("undo")?.rebind, undefined, "undo stays Ctrl+Z");
+    assert.equal(row("escape")?.rebind, undefined);
+    assert.equal(keyText("tool:fog", keys), "X");
+    assert.equal(keyText("tool:fog", DEFAULT_KEYS), "F");
+    assert.equal(keyText("undo", keys), "Ctrl+Z");
+    assert.equal(sheetSections("dm", { mouse: true, android: false }, DEFAULT_KEYS)[0]!.rows.find((r) => r.id === "tool:fog")?.input, "F");
   });
 
   test("the sheet lists each role's keys from the table itself", () => {

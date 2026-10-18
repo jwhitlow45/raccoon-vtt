@@ -13,7 +13,9 @@ import { ConsoleWatch, openSideTab, reopenRoom, Shots, SocketWatch, startServer,
  * viewer's role. The DM opens it with `?` on a computer, and a player from
  * Menu, This device, on a phone. Full screen (lib/fullscreen.ts) rides
  * along: the top bar's button, its key and its Menu switch on a computer,
- * and the switch alone on a phone.
+ * and the switch alone on a phone. On the computer, the DM moves Fog's
+ * key from the sheet, swaps it with Ruler's and resets them all
+ * (state/keyBindings.ts).
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus fourteen.
  * The other environment variables are the smoke run's (smoke.e2e.ts).
@@ -283,6 +285,118 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await phoneToggle.tap();
     await fullscreenIs(player, false, "the phone out of full screen");
     await player.keyboard.press("Escape");
+  });
+
+  test("kb-a. on a computer, the DM moves Fog's key from the sheet: the old key stops, the new one picks Fog, the tooltip and the sheet say so, a reload keeps it, a swap with Ruler works, and Reset all keys gives the defaults back", async () => {
+    const tools = dm.getByRole("navigation", { name: "Tools" });
+    const fog = tools.getByRole("button", { name: "Fog", exact: true });
+    const ruler = tools.getByRole("button", { name: "Ruler", exact: true });
+    const toolIs = async (button: Locator, what: string) => waitFor(what, async () => ((await button.getAttribute("aria-pressed")) === "true" ? true : null));
+    const openSheet = async () => {
+      await dm.keyboard.press("?");
+      const sheet = dm.getByRole("dialog", { name: "Shortcuts" });
+      await sheet.waitFor();
+      return sheet;
+    };
+    const closeSheet = async (sheet: Locator) => {
+      await dm.keyboard.press("Escape");
+      await sheet.waitFor({ state: "detached" });
+    };
+    /** The key a row of the sheet shows, by the shortcut's name. */
+    const keyOf = (sheet: Locator, name: string) => sheet.locator("tr", { has: dm.getByRole("button", { name: `Change the key for ${name}`, exact: true }) }).locator("th").textContent();
+    const stored = () => dm.evaluate(() => localStorage.getItem("rvtt.keys"));
+
+    await dm.keyboard.press("v");
+    assert.equal(await fog.getAttribute("title"), "Fog (F)", "the tooltip names the default key");
+    let sheet = await openSheet();
+    const change = sheet.getByRole("button", { name: "Change the key for Fog", exact: true });
+    // Escape while the row waits cancels the wait and leaves the sheet open.
+    await change.click();
+    await sheet.locator("table").getByText("Press a key, or Escape to cancel.").waitFor();
+    await dm.keyboard.press("Escape");
+    await sheet.locator("table").getByText("Press a key, or Escape to cancel.").waitFor({ state: "detached" });
+    assert.equal(await sheet.isVisible(), true, "Escape cancelled the wait, not the sheet");
+    // A key that stays as it is is refused with its reason, and the row still waits.
+    await change.click();
+    await dm.keyboard.press("ArrowUp");
+    await sheet.locator("table").getByText("The arrow and Page keys stay for moving and raising tokens. Press another key, or Escape to cancel.").waitFor();
+    await dm.keyboard.press("k");
+    await waitFor("Fog's row to show K", async () => ((await keyOf(sheet, "Fog")) === "K" ? true : null));
+    await sheet.getByRole("button", { name: "Reset the key for Fog", exact: true }).waitFor();
+    assert.equal(await stored(), '{"v":1,"keys":{"tool:fog":"k"}}', "only the change is kept");
+    await shots.take(dm, "kb-a-dm-fog-on-k");
+    await closeSheet(sheet);
+
+    assert.equal(await fog.getAttribute("title"), "Fog (K)", "the tooltip names the new key at once");
+    await dm.keyboard.press("f");
+    await dm.waitForTimeout(150);
+    assert.equal(await fog.getAttribute("aria-pressed"), "false", "F no longer picks Fog");
+    await dm.keyboard.press("k");
+    await toolIs(fog, "K to pick Fog");
+    await dm.keyboard.press("v");
+
+    // A reload keeps it, on this device.
+    await dm.reload();
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    assert.equal(await fog.getAttribute("title"), "Fog (K)", "the tooltip after a reload");
+    await dm.keyboard.press("k");
+    await toolIs(fog, "K to pick Fog after a reload");
+    await dm.keyboard.press("v");
+
+    // Ruler's R: already taken, so the sheet offers to swap.
+    sheet = await openSheet();
+    assert.equal(await keyOf(sheet, "Fog"), "K", "the sheet after a reload");
+    const fogChange = sheet.getByRole("button", { name: "Change the key for Fog", exact: true });
+    await fogChange.click();
+    await dm.keyboard.press("r");
+    await sheet.locator("table").getByText("Already Ruler.").waitFor();
+    // Escape there is Cancel, and the sheet stays.
+    await dm.keyboard.press("Escape");
+    await sheet.locator("table").getByText("Already Ruler.").waitFor({ state: "detached" });
+    assert.equal(await keyOf(sheet, "Fog"), "K", "nothing changed");
+    await fogChange.click();
+    await dm.keyboard.press("r");
+    await sheet.locator("table").getByText("Already Ruler.").waitFor();
+    const swap = sheet.getByRole("button", { name: "Swap", exact: true });
+    await waitFor("focus on Swap", () => swap.evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement));
+    await shots.take(dm, "kb-a-dm-already-ruler");
+    await swap.click();
+    await waitFor("Fog on R and Ruler on K", async () => ((await keyOf(sheet, "Fog")) === "R" && (await keyOf(sheet, "Ruler")) === "K" ? true : null));
+    await closeSheet(sheet);
+    assert.equal(await fog.getAttribute("title"), "Fog (R)");
+    assert.equal(await ruler.getAttribute("title"), "Ruler (K)");
+    await dm.keyboard.press("r");
+    await toolIs(fog, "R to pick Fog");
+    await dm.keyboard.press("k");
+    await toolIs(ruler, "K to pick Ruler");
+    await dm.keyboard.press("v");
+
+    // Reset all keys asks for a second tap, then every key is its default again.
+    sheet = await openSheet();
+    await sheet.locator("footer").getByRole("button", { name: "Reset all keys", exact: true }).click();
+    await sheet.locator("footer").getByRole("button", { name: "Tap again to reset all keys", exact: true }).click();
+    await waitFor("the defaults", async () => ((await keyOf(sheet, "Fog")) === "F" && (await keyOf(sheet, "Ruler")) === "R" ? true : null));
+    assert.equal(await sheet.getByRole("button", { name: /^Reset the key for/ }).count(), 0, "nothing left to reset");
+    assert.equal(await stored(), '{"v":1,"keys":{}}');
+    await closeSheet(sheet);
+    assert.equal(await fog.getAttribute("title"), "Fog (F)");
+    await dm.keyboard.press("f");
+    await toolIs(fog, "F to pick Fog again");
+    await dm.keyboard.press("v");
+
+    // A touch phone with no keyboard keeps the plain list. The reload forgets the keys pressed on it in the steps before, which a page takes for a keyboard's.
+    await player.reload();
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+    await player.locator('button[title="Panels"]').click();
+    await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
+    await player.getByRole("button", { name: /^This device/ }).click();
+    await player.getByRole("button", { name: "Show the shortcuts" }).click();
+    const phoneSheet = player.getByRole("dialog", { name: "Shortcuts" });
+    await phoneSheet.waitFor();
+    assert.equal(await phoneSheet.getByRole("button", { name: /^Change the key for/ }).count(), 0, "no Change on a touch phone");
+    assert.equal(await phoneSheet.getByRole("button", { name: "Reset all keys" }).count(), 0);
+    await phoneSheet.getByRole("button", { name: /^Close/ }).first().tap();
+    await phoneSheet.waitFor({ state: "detached" });
   });
 
   test("4. neither page logged an error", () => {
