@@ -50,7 +50,8 @@ export default function DicePanel(props: PanelProps) {
     );
   }
   return (
-    <section aria-label="Dice" style={{ display: "grid", gap: theme.space(2) }}>
+    // One column no wider than the pane: an auto column grows to its widest row's content, so one long roll would widen the whole panel past the screen.
+    <section aria-label="Dice" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
       <LastResult onOpen={show} />
       <Roller />
       {group && role === "dm" ? (

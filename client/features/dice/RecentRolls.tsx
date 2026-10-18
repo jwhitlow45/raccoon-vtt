@@ -22,8 +22,13 @@ const EMPTY_LOG: LogEntry[] = [];
 /** Rolls a row lists before "Show all". */
 const FOLDED = 5;
 
-/** The faces of one roll as chips: a dropped die struck through, a natural 20 or 1 marked. Text for a screen reader beside them. */
-export function DiceFaces(props: { result: Pick<DiceResult, "formula" | "faces" | "total" | "mode"> }) {
+/**
+ * The faces of one roll as chips: a dropped die struck through, a natural
+ * 20 or 1 marked. Text for a screen reader beside them. `oneLine` keeps
+ * them on one line for the sticky line, which clips what does not fit
+ * rather than growing over the panel (docs/design-v1-dice.md 8.2).
+ */
+export function DiceFaces(props: { result: Pick<DiceResult, "formula" | "faces" | "total" | "mode">; oneLine?: boolean }) {
   const terms = rolledTerms(props.result);
   const natural = naturalOf(props.result);
   if (!terms) return <span style={{ color: theme.color.textMuted }}>{props.result.formula}</span>;
@@ -56,7 +61,7 @@ export function DiceFaces(props: { result: Pick<DiceResult, "formula" | "faces" 
       : [],
   );
   return (
-    <span style={{ display: "inline-flex", flexWrap: "wrap", gap: theme.space(1), alignItems: "center" }}>
+    <span style={{ display: "inline-flex", flexWrap: props.oneLine ? "nowrap" : "wrap", gap: theme.space(1), alignItems: "center" }}>
       <span aria-hidden="true" style={{ display: "contents" }}>
         {chips}
       </span>

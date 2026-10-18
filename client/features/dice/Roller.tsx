@@ -78,7 +78,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         <span style={{ fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>{first.total.toLocaleString("en-US")}</span>
         {first.label ? <span style={{ fontSize: theme.font.body14, overflow: "hidden", textOverflow: "ellipsis" }}>{first.label}</span> : null}
         <span style={{ overflow: "hidden" }}>
-          <DiceFaces result={first} />
+          <DiceFaces result={first} oneLine />
         </span>
         {verdict ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{verdict}</span> : null}
         {rolls.length > 1 ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>and {rolls.length - 1} more</span> : null}

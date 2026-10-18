@@ -15,8 +15,9 @@ import { ConsoleWatch, openSideTab, Shots, sideTabName, SocketWatch, startServer
  * "rolled in secret" for the player, a roll
  * survives a reload, Enter and Up in the field, Advantage taken by one tap
  * and pressed again before it lands, at 375 x 667 at 100% and 130% the
- * sticky line, the field and the choices in view, and Dice in the bottom
- * one of two panels, rolling there and counting as on screen.
+ * sticky line, the field and the choices in view, Dice in the bottom
+ * one of two panels, rolling there and counting as on screen, and a roll
+ * of 100 dice keeping the sticky line to one line on a phone.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twenty, one file after
  * another as the others. The other environment variables are the smoke
@@ -270,5 +271,23 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     await dm.getByText(`Pat rolled ${loud.rolls[0]!.total} for Loud.`).waitFor();
     assert.deepEqual(dmConsole.errors, []);
     assert.deepEqual(playerConsole.errors, []);
+  });
+
+  test("8. a roll of 100 dice with a long label keeps the sticky line to one line with Again in reach, and the panel never scrolls sideways (LP7-DICE-1)", async () => {
+    await openDicePhone(player);
+    await rollWithEnter(player, playerSocket, `100d1000 ${"z".repeat(60)}`);
+    const sticky = player.locator("[data-dice-last]");
+    await sticky.getByRole("button", { name: "Again" }).waitFor();
+    const fit = await sticky.evaluate((el) => {
+      type Box = { getBoundingClientRect(): { height: number }; parentElement: Box | null; scrollWidth: number; clientWidth: number };
+      const g = globalThis as unknown as { getComputedStyle(el: Box): { overflowY: string } };
+      let scroller = (el as unknown as Box).parentElement;
+      while (scroller && g.getComputedStyle(scroller).overflowY !== "auto") scroller = scroller.parentElement;
+      return { height: (el as unknown as Box).getBoundingClientRect().height, sideways: scroller ? scroller.scrollWidth - scroller.clientWidth : -1 };
+    });
+    assert.ok(fit.height <= 60, `the sticky line is ${fit.height} px tall`);
+    assert.equal(fit.sideways, 0, "the Dice sheet scrolls sideways");
+    assert.ok(await inView(player, '[data-dice-last] button:has-text("Again")'), "Again is on screen");
+    await shots.take(player, "dice-hundred-dice-sticky");
   });
 });
