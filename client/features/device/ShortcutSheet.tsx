@@ -279,7 +279,7 @@ function KeyRows(props: { row: SheetRow; controls: boolean; editing: Editing | n
         {props.controls ? (
           <td style={CONTROLS_CELL}>
             {row.rebind ? (
-              <div style={{ display: "grid", justifyItems: "end", gap: theme.space(1) }}>
+              <div style={CONTROLS}>
                 <Button
                   ref={(el) => actions.ref(row.id, el)}
                   size="sm"
@@ -397,6 +397,15 @@ const KEY_NOTE: CSSProperties = { display: "block", whiteSpace: "normal", color:
 
 /** Change and Reset, at the row's end, as narrow as their words. */
 const CONTROLS_CELL: CSSProperties = { padding: `${theme.space(1)}px 0 ${theme.space(1)}px ${theme.space(2)}px`, verticalAlign: "top", width: "1%", whiteSpace: "nowrap" };
+
+/**
+ * Change above Reset, at the right. The column is the buttons' own width.
+ * The table sizes this cell at its narrowest, and a grid's auto column
+ * there stops at its buttons' 44 px minimum, so Change, wider than that,
+ * ran left over the row's words. A max-content column holds the widest
+ * button whole at any interface size, and the words wrap beside it.
+ */
+const CONTROLS: CSSProperties = { display: "grid", gridTemplateColumns: "max-content", justifyItems: "end", gap: theme.space(1) };
 
 /** The condition beyond the role, under what the row does: "With the Select tool". */
 const WHEN: CSSProperties = { display: "block", color: theme.color.textMuted, fontSize: theme.font.small };

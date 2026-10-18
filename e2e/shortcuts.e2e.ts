@@ -15,7 +15,8 @@ import { ConsoleWatch, openSideTab, reopenRoom, Shots, SocketWatch, startServer,
  * along: the top bar's button, its key and its Menu switch on a computer,
  * and the switch alone on a phone. On the computer, the DM moves Fog's
  * key from the sheet, swaps it with Ruler's and resets them all
- * (state/keyBindings.ts).
+ * (state/keyBindings.ts). In a 390 px window at 130%, Change and Reset
+ * keep clear of every row's words.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus fourteen.
  * The other environment variables are the smoke run's (smoke.e2e.ts).
@@ -401,6 +402,78 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     assert.equal(await phoneSheet.getByRole("button", { name: "Reset all keys" }).count(), 0);
     await phoneSheet.getByRole("button", { name: /^Close/ }).first().tap();
     await phoneSheet.waitFor({ state: "detached" });
+  });
+
+  test("gs-a. in a 390 px window at 130%, no Change or Reset in the shortcut list covers a row's words, the longest row wraps beside its Change, and nothing runs off to the side", async () => {
+    await dm.setViewportSize({ width: 390, height: 844 });
+    await dm.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", "1.3"));
+    await reopenRoom(dm);
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    await dm.keyboard.press("?");
+    const sheet = dm.getByRole("dialog", { name: "Shortcuts" });
+    await sheet.waitFor();
+    // Draw on K, so one row has Reset under its Change.
+    await sheet.getByRole("button", { name: "Change the key for Draw", exact: true }).click();
+    await dm.keyboard.press("k");
+    await sheet.getByRole("button", { name: "Reset the key for Draw", exact: true }).waitFor();
+
+    const layout = await sheet.evaluate((root) => {
+      type Rect = { left: number; right: number; top: number; bottom: number };
+      type Node = { nodeType: number; textContent: string | null; childNodes: ArrayLike<Node> };
+      type El = Node & { tagName: string; querySelector(s: string): El | null; querySelectorAll(s: string): ArrayLike<El>; getBoundingClientRect(): Rect; getAttribute(n: string): string | null; scrollWidth: number; clientWidth: number };
+      const doc = (globalThis as unknown as { document: { createRange(): { selectNodeContents(n: Node): void; getClientRects(): ArrayLike<Rect> } } }).document;
+      const overlaps = (a: Rect, b: Rect) => a.right > b.left + 0.5 && a.left < b.right - 0.5 && a.bottom > b.top + 0.5 && a.top < b.bottom - 0.5;
+      // A cell's words as the boxes of their lines, so a word under a button is found however the cell wraps.
+      const lines = (cell: Node): Rect[] => {
+        const out: Rect[] = [];
+        const walk = (n: Node) => {
+          if (n.nodeType === 3 && (n.textContent ?? "").trim()) {
+            const range = doc.createRange();
+            range.selectNodeContents(n);
+            out.push(...Array.from(range.getClientRects()));
+          }
+          Array.from(n.childNodes).forEach(walk);
+        };
+        walk(cell);
+        return out;
+      };
+      const el = root as unknown as El;
+      const covered: string[] = [];
+      let longest = { words: "", lines: 0 };
+      let rows = 0;
+      for (const row of Array.from(el.querySelectorAll("tr"))) {
+        const key = row.querySelector("th");
+        const words = row.querySelector("td");
+        const buttons = Array.from(row.querySelectorAll("button"));
+        if (!key || !words || buttons.length === 0) continue;
+        rows++;
+        const boxes = [...lines(key), ...lines(words)];
+        for (const button of buttons) {
+          for (const box of boxes) if (overlaps(button.getBoundingClientRect(), box)) covered.push(`${button.getAttribute("aria-label")} over "${(words.textContent ?? "").trim()}"`);
+        }
+        const text = (words.textContent ?? "").trim();
+        if (text.length > longest.words.length) longest = { words: text, lines: new Set(lines(words).map((r) => Math.round(r.top))).size };
+      }
+      const wide = [el, ...Array.from(el.querySelectorAll("*"))].filter((e) => e.clientWidth > 1 && e.scrollWidth > e.clientWidth + 1).map((e) => `${e.tagName} ${e.scrollWidth} > ${e.clientWidth}`);
+      return { rows, covered, longest, wide };
+    });
+    assert.ok(layout.rows >= 20, `only ${layout.rows} rows with Change`);
+    assert.deepEqual(layout.covered, [], "a button over a row's words at 390 px and 130%");
+    assert.ok(layout.longest.lines >= 2, `the longest row, "${layout.longest.words}", is on ${layout.longest.lines} line beside its Change`);
+    assert.deepEqual(layout.wide, [], "content wider than its box at 390 px and 130%");
+    await shots.take(dm, "gs-a-dm-390-130-top");
+    await sheet.getByText(layout.longest.words, { exact: true }).scrollIntoViewIfNeeded();
+    await shots.take(dm, "gs-a-dm-390-130-longest");
+
+    await sheet.locator("footer").getByRole("button", { name: "Reset all keys", exact: true }).click();
+    await sheet.locator("footer").getByRole("button", { name: "Tap again to reset all keys", exact: true }).click();
+    await sheet.getByRole("button", { name: "Reset the key for Draw", exact: true }).waitFor({ state: "detached" });
+    await dm.keyboard.press("Escape");
+    await sheet.waitFor({ state: "detached" });
+    await dm.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", "1"));
+    await dm.setViewportSize({ width: 1280, height: 800 });
+    await reopenRoom(dm);
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
   });
 
   test("4. neither page logged an error", () => {
