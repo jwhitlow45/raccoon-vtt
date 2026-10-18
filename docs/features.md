@@ -173,10 +173,12 @@ Tiers:
 - Permanent ruler (double-tap to keep it on the map).
 - Range rings around a token, for example 30/60/120 ft.
 
-**Later**
+**v1**
 
-- Ruler counts difficult terrain from the map builder.
-- True walking distance around walls.
+- Ruler counts difficult terrain from the map builder (moved up from Later on 2026-10-18 at the project owner's request).
+  - Designed in docs/design-v1-movement.md, not built yet.
+- True walking distance around walls (moved up from Later on 2026-10-18 at the project owner's request).
+  - Designed in docs/design-v1-movement.md, not built yet.
 
 ## 5. Tokens
 
