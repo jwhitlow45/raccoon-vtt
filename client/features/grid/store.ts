@@ -20,9 +20,9 @@ export type GridDrag =
  */
 export type FoundNote = {
   sceneId: string;
-  /** A grid applied, one only offered by the box, or none found. */
-  outcome: "applied" | "offered" | "none";
-  /** The found squares' size, px. */
+  /** A grid applied, one only offered by the box, none found, or one found and dropped because the scene changed while the search ran. */
+  outcome: "applied" | "offered" | "none" | "changed";
+  /** The found squares' size, px. 0 when none was found or the scene changed. */
   cellPx: number;
   box: CalBox | null;
   /** The grid found, as measured, which the box stands for while it is the one the search left. None when no grid was found. */

@@ -160,8 +160,9 @@ export async function findOnScene(input: {
  * `deactivate`), and so does a newer search, which takes its place. An
  * answer that still comes is dropped unless the scene shows the same
  * image with the same grid and size as at `start`, so work done meanwhile,
- * on this device or another, is never overwritten. On a scene that came
- * with its own grid, a find is only offered.
+ * on this device or another, is never overwritten. A grid found and
+ * dropped so leaves a note that says the scene changed. On a scene that
+ * came with its own grid, a find is only offered.
  */
 export async function landSearch(input: {
   actions: Gesture;
@@ -189,8 +190,14 @@ export async function landSearch(input: {
   if (store.getState().finding !== finding) return;
   store.setState({ finding: null });
   const scene = input.scene();
-  if (!scene || !unchangedSince(input.start, scene)) return;
+  if (!scene) return;
   const state = store.getState();
+  if (!unchangedSince(input.start, scene)) {
+    // Said, or the DM would see "Looking for a grid…" give way to nothing. A search that found no grid on the
+    // image before says nothing of this one, so it leaves the line as it was.
+    if (answer && foundGrid(answer.result, answer, input.start.map)) store.setState({ found: { sceneId: scene.id, outcome: "changed", cellPx: 0, box: state.box } });
+    return;
+  }
   const ownGrid = input.ownGrid ?? cameWithGrid(scene);
   showOutcome({
     actions: input.actions,

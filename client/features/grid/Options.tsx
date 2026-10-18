@@ -79,9 +79,11 @@ export default function GridOptions() {
           }
         : note?.outcome === "none"
           ? { tone: "status" as const, content: "No grid found. Drag a box over 3 by 3 squares instead." }
-          : saved
-            ? { tone: "status" as const, content: `Grid saved at ${formatPx(cal.cellPx)} px per square.` }
-            : { tone: "hint" as const, content: "Drag a box over 3 by 3 squares of the art, then fit it by its corners." };
+          : note?.outcome === "changed"
+            ? { tone: "status" as const, content: "The scene changed, so the grid found was not applied." }
+            : saved
+              ? { tone: "status" as const, content: `Grid saved at ${formatPx(cal.cellPx)} px per square.` }
+              : { tone: "hint" as const, content: "Drag a box over 3 by 3 squares of the art, then fit it by its corners." };
   const fallback = note?.outcome === "applied" ? note.fallback : undefined;
 
   return (

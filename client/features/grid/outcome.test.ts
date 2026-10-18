@@ -186,16 +186,33 @@ describe("Find the grid", () => {
     assert.equal(store.getState().found?.outcome, "none");
   });
 
-  test("an answer for a map the scene no longer shows is dropped", async () => {
+  test("an answer for a map the scene no longer shows is dropped, and the line says the scene changed", async () => {
     const { sent, actions, store } = room();
     const worker = new AnsweringWorker();
     let scene = SCENE;
+    const box = { x: 0, y: 0, size: 141 };
+    store.setState({ box });
     const running = findOnScene({ actions, store, sceneId: "s1", scene: () => scene, urls: ["/m"], makeWorker: () => worker });
     scene = { ...SCENE, map: { ...MAP, assetId: "a2" } };
     worker.answer({ t: "done", result: DETECTED, width: 700, height: 500 });
     await running;
     assert.deepEqual(sent, []);
-    assert.equal(store.getState().found, null);
+    assert.deepEqual(store.getState().found, { sceneId: "s1", outcome: "changed", cellPx: 0, box });
+    assert.equal(store.getState().box, box, "the box stays where it was");
+  });
+
+  test("a search that found no grid on the image before says nothing of the new one", async () => {
+    for (const answer of [{ t: "done", result: { found: false, reason: "none" }, width: 700, height: 500 }, { t: "error" }] as const) {
+      const { sent, actions, store } = room();
+      const worker = new AnsweringWorker();
+      let scene = SCENE;
+      const running = findOnScene({ actions, store, sceneId: "s1", scene: () => scene, urls: ["/m"], makeWorker: () => worker });
+      scene = { ...SCENE, map: { ...MAP, assetId: "a2" } };
+      worker.answer(answer);
+      await running;
+      assert.deepEqual(sent, []);
+      assert.equal(store.getState().found, null, answer.t);
+    }
   });
 
   test("a search the tool cancelled applies nothing when it answers", async () => {
@@ -313,7 +330,7 @@ describe("a search the DM works around", () => {
     assert.equal(worker.terminated, 1);
   });
 
-  test("an answer that comes after the grid or the size changed on another device is dropped", async () => {
+  test("an answer that comes after the grid or the size changed on another device is dropped, which the line says", async () => {
     const changes: ((s: LiveScene) => LiveScene)[] = [
       (s) => ({ ...s, map: { ...s.map, cellPx: 80 } }),
       (s) => ({ ...s, map: { ...s.map, originPx: { x: 12, y: 0 } } }),
@@ -329,7 +346,7 @@ describe("a search the DM works around", () => {
       await running;
       assert.deepEqual(live.sent, []);
       assert.equal(live.scene(), before);
-      assert.equal(live.store.getState().found, null);
+      assert.equal(live.store.getState().found?.outcome, "changed");
       assert.equal(live.store.getState().finding, null, "the search is over, so Find the grid can run again");
     }
   });
@@ -345,7 +362,9 @@ describe("a search the DM works around", () => {
    *   comes while that search still runs and the scene shows the image,
    *   grid and size it began with. So never after Apply, a drag, a close,
    *   the deadline or a change made elsewhere: what the DM did by hand is
-   *   replaced only by a search begun after it.
+   *   replaced only by a search begun after it. The one exception is the
+   *   note: a grid found while the search still runs, on a scene changed
+   *   elsewhere, leaves the note that says so, and changes nothing else.
    * - An answer that applies sends one undo group at most, and nothing but
    *   Apply and such an answer sends an op.
    * - A search's Worker is ended exactly once, when the search ends, and no
@@ -375,7 +394,7 @@ describe("a search the DM works around", () => {
         const sentBefore = live.sent.length;
         const before = live.store.getState();
         /** What this event's answer may leave: a note of this outcome, or nothing. */
-        let lands: "applied" | "offered" | "none" | null = null;
+        let lands: "applied" | "offered" | "none" | "changed" | null = null;
         let applied = false;
         if (kind === "find") {
           const made = workers.length;
@@ -403,6 +422,7 @@ describe("a search the DM works around", () => {
             else if (kind === "deadline") timers.fire();
             else running.worker.answer(kind === "sure" ? SURE : kind === "doubtful" ? DOUBTFUL : NOTHING);
             if (!running.stale) lands = kind === "sure" ? "applied" : kind === "doubtful" ? "offered" : "none";
+            else if (kind === "sure" || kind === "doubtful") lands = "changed";
             end();
           }
         } else if (kind === "late") {
@@ -452,6 +472,7 @@ describe("a search the DM works around", () => {
           assert.ok(sent.length <= 2 && sent.every((s) => s.group !== undefined && s.group === sent[0]!.group), `${label}: one undo group`);
           if (lands === "applied") assert.ok(sameCalibration(live.scene().map, { cellPx: 70, originPx: { x: 20, y: 35 } }), `${label}: the found grid is on`);
           else assert.equal(sent.length, 0, label);
+          if (lands === "changed") assert.equal(after.box, before.box, `${label}: the box is the one before`);
         } else {
           assert.equal(sent.length, applied ? 1 : 0, `${label}: only Apply sent anything`);
           if (kind === "find") assert.equal(after.found, running ? null : before.found, label);
@@ -609,7 +630,9 @@ describe("an import's search, and the phone copy's that lands after the scene op
    *   lands only when it answers while it still runs and the scene is as
    *   it was when it opened: a sure find as one undo step with the note
    *   and Use default, a doubtful one offered, none said. After a close,
-   *   Apply, a drag, its deadline or a change elsewhere it changes nothing.
+   *   Apply, a drag or its deadline it changes nothing. After a change
+   *   elsewhere, a grid it still finds leaves only the note that says the
+   *   scene changed.
    * - Nothing but Apply and such a landing sends an op.
    * - Exactly the running search's Worker is alive, each Worker is ended
    *   once by the run's end, and only a running wait or landing has a
@@ -675,7 +698,7 @@ describe("an import's search, and the phone copy's that lands after the scene op
         const label = `run ${run} (${device}, ${size ? `${size.width} x ${size.height}` : "no size"}): ${events.join(", ")}`;
         const sentBefore = live.sent.length;
         const before = live.store.getState();
-        let lands: "applied" | "offered" | "none" | null = null;
+        let lands: "applied" | "offered" | "none" | "changed" | null = null;
         let applied = false;
         const landingRuns = m.landing !== null && !m.landing.over;
         if (kind === "header") {
@@ -701,6 +724,7 @@ describe("an import's search, and the phone copy's that lands after the scene op
             m.settled = value as SearchDone | null;
             if (landingRuns) {
               if (!m.landing!.stale) lands = kind === "sure" ? "applied" : kind === "doubtful" ? "offered" : "none";
+              else if (kind === "sure" || kind === "doubtful") lands = "changed";
               m.landing!.over = true;
             }
           }
@@ -780,6 +804,7 @@ describe("an import's search, and the phone copy's that lands after the scene op
             assert.ok(sameCalibration(live.scene().map, { cellPx: 70, originPx: { x: 20, y: 35 } }), `${label}: the found grid is on`);
             assert.deepEqual(after.found?.fallback && { cellPx: after.found.fallback.cellPx, originPx: after.found.fallback.originPx }, guess, `${label}: Use default`);
           } else assert.equal(sent.length, 0, label);
+          if (lands === "changed") assert.equal(after.box, before.box, `${label}: the box is the one before`);
         } else {
           assert.equal(sent.length, applied ? 1 : 0, `${label}: only Apply sent anything`);
           // A landing that begins clears the last note. Nothing else touches it.
