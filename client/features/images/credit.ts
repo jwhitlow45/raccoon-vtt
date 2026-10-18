@@ -14,6 +14,13 @@ import { cropSourceRect } from "../../lib/tokenView.ts";
  * original's, since the pipeline never enlarges and a small image keeps its
  * size. "Cropped." is added only where a token's crop shows less than the
  * whole image, so the credit names only changes actually made.
+ *
+ * A starter pick (docs/design-v1-starter-art.md 9) says what its build
+ * changed in its own words, which replace the guess. When the room's copy
+ * differs in size from the shipped file, as a token's 512 px copy of a
+ * 1024 px portrait does, the new size follows ("Resized to 512 x 512 for
+ * this room."), since a bare "Resized." after the build's own resize
+ * reads as the same change said twice. Then "Cropped." as for any image.
  */
 
 /** Openverse's license codes, as Creative Commons writes their names. */
@@ -28,7 +35,12 @@ const LICENSE_NAMES: Record<string, string> = {
   pdm: "Public Domain Mark",
   "sampling+": "CC Sampling+",
   "nc-sampling+": "CC NC-Sampling+",
+  // A rights holder's own dedication, not a Creative Commons tool, so it has no license page to link (shared/starter.ts CREDIT_LICENSE).
+  "public-domain": "Public domain dedication",
 };
+
+/** Codes named here that have no license page of their own. */
+const NO_PAGE = new Set(["public-domain"]);
 
 const VERSION = /^\d+\.\d+$/;
 
@@ -42,7 +54,7 @@ export function licenseUrl(code: string, version?: string): string | null {
   if (version !== undefined && !VERSION.test(version)) return null;
   if (code === "cc0") return `https://creativecommons.org/publicdomain/zero/${version ?? "1.0"}/`;
   if (code === "pdm") return `https://creativecommons.org/publicdomain/mark/${version ?? "1.0"}/`;
-  if (!(code in LICENSE_NAMES) || !version) return null;
+  if (!(code in LICENSE_NAMES) || NO_PAGE.has(code) || !version) return null;
   return `https://creativecommons.org/licenses/${code}/${version}/`;
 }
 
@@ -62,13 +74,22 @@ export function workName(credit: Pick<ImageCredit, "title" | "creator">): string
  * where the crop is part of the image as the token shows it.
  */
 export function changesText(
-  credit: Pick<AssetCredit, "originalWidth" | "originalHeight">,
+  credit: Pick<AssetCredit, "originalWidth" | "originalHeight" | "changes">,
   stored: { width: number; height: number },
   crop?: { crop: { cx: number; cy: number; zoom: number }; aspect: number },
 ): string {
   const resized = stored.width !== credit.originalWidth || stored.height !== credit.originalHeight;
-  const sentence = resized ? "Resized and converted to WebP." : "Converted to WebP.";
-  return crop && cropsImage(stored, crop.crop, crop.aspect) ? `${sentence} Cropped.` : sentence;
+  const own = credit.changes?.trim();
+  const sentences = own
+    ? [sentence(own), ...(resized ? [`Resized to ${stored.width} x ${stored.height} for this room.`] : [])]
+    : [resized ? "Resized and converted to WebP." : "Converted to WebP."];
+  if (crop && cropsImage(stored, crop.crop, crop.aspect)) sentences.push("Cropped.");
+  return sentences.join(" ");
+}
+
+/** Text that ends as a sentence does, so what follows it reads as the next one. */
+function sentence(text: string): string {
+  return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
 /** Whether a crop shows less than the whole image: a region smaller than it on either side, by more than rounding. */

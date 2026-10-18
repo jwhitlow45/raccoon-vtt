@@ -2,6 +2,7 @@ import { unlink } from "node:fs/promises";
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
+import { STARTER_KEY, STARTER_KINDS } from "#shared/starter.ts";
 import { MAX_FETCH_BYTES, fetchPublicImage, type Fetched } from "../assets/fetchPublic.ts";
 import { withInUse } from "../assets/cleanup.ts";
 import { AssetError, isAssetError } from "../assets/errors.ts";
@@ -25,6 +26,7 @@ import { isThumbnailUrl } from "#shared/searchThumbnails.ts";
  * - `PUT /api/rooms/:id/assets?kind=` upload a raw image body
  * - `GET /api/rooms/:id/assets` list what the caller may see
  * - `POST /api/rooms/:id/assets/import` import an image from a URL
+ * - `POST /api/rooms/:id/assets/starter` copy a starter work into the room
  * - `GET /api/assets/:assetId/:variant` read one image
  *
  * plus image search, registered from search.ts. `app.assets` is the service
@@ -52,6 +54,12 @@ const ImportBody = z.object({
   url: z.string().min(1).max(4096),
   fallback: z.string().min(1).max(4096).optional(),
   kind: z.enum(ASSET_KINDS),
+});
+
+// Strict, so a client that sends a credit or a file learns at once that neither is ever read.
+const StarterBody = z.strictObject({
+  work: z.string().regex(STARTER_KEY),
+  kind: z.enum(STARTER_KINDS),
 });
 
 export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRouteOptions = {}): Promise<void> {
@@ -243,6 +251,41 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
         releaseFetch();
         reservation?.release();
         await Promise.all(paths.map((p) => unlink(p).catch(() => undefined)));
+      }
+    });
+
+    /*
+     * A starter pick (docs/design-v1-starter-art.md 5) is an upload whose
+     * bytes come from the server's own build: the same role rule, room
+     * checks, hourly budgets and intake slot as an upload of its kind, and
+     * the work looked up in the shipped catalog, which names the file and
+     * the credit. It takes no quota reservation, since the row never counts
+     * toward the room's storage.
+     */
+    scope.post<{ Params: { id: string } }>("/api/rooms/:id/assets/starter", async (req, reply) => {
+      const roomId = req.params.id;
+      const grant = await requireGrant(req, reply, roomId);
+      const body = StarterBody.safeParse(req.body);
+      if (!body.success) throw new AssetError(400, "bad_request");
+      const { work, kind } = body.data;
+      const found = service.starter.works.get(work);
+      if (!found) throw new AssetError(404, "not_found");
+      // A stamp-only work has no asset kind among its uses, so it lands here too.
+      if (!(found.work.uses as readonly string[]).includes(kind)) throw new AssetError(400, "bad_request");
+      if (KINDS[kind].dmOnly && grant.role !== "dm") throw new AssetError(403, "forbidden");
+
+      const room = await writableRoom(roomId);
+      await service.assertFreeDisk();
+      const ip = ipKey(clientIp(req, trustCf));
+      const checks = service.hourlyChecks(grant.sessionId, ip, roomId, kind);
+      service.assertHourly(checks);
+      const releaseSlot = service.slots.acquire({ kind: "upload", roomId, ip, sessionId: grant.sessionId, pinned: room.pinned });
+      try {
+        service.hourly.record(checks);
+        const result = await service.ingestStarter({ roomId, uploaderIds: [grant.memberId], found, kind });
+        return reply.code(200).send(result);
+      } finally {
+        releaseSlot();
       }
     });
 

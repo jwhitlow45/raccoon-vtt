@@ -4,6 +4,7 @@ import yazl from "yazl";
 import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import { assetCreditSchema, type AssetCredit } from "#shared/protocol.ts";
+import { STARTER_KEY } from "#shared/starter.ts";
 import { isAssetKind, isVariant, type AssetKind, type Variant } from "../assets/kinds.ts";
 import { variantPath } from "../assets/store.ts";
 
@@ -15,7 +16,13 @@ import { variantPath } from "../assets/store.ts";
  */
 export const EXPORT_FORMAT = "raccoon-vtt-room";
 export const EXPORT_FORMAT_VERSION = 1;
-export const MANIFEST_VERSION = 1;
+/**
+ * 2 adds `starter` to an asset (docs/design-v1-starter-art.md 12.10). Import
+ * reads 1 and 2 alike, a version 1 asset being an upload. A server from
+ * before 2 ignores the field it does not know, and drops only the credit
+ * of a pick, whose `changes` its strict credit schema refuses.
+ */
+export const MANIFEST_VERSION = 2;
 
 export type ManifestAsset = {
   id: string;
@@ -25,8 +32,10 @@ export type ManifestAsset = {
   height: number;
   variants: Variant[];
   uploaders: string[];
-  /** An Openverse image's credit (docs/design-v1-dm-tools.md 3.13), which the import keeps after checking it. */
+  /** An Openverse image's or a starter pick's credit (docs/design-v1-dm-tools.md 3.13), which the import keeps after checking it. */
   credit?: AssetCredit;
+  /** A starter pick's work key. The import keeps it only where its own catalog has that work with these bytes. */
+  starter?: string;
 };
 
 export type ExportManifest = { formatVersion: number; assets: ManifestAsset[] };
@@ -58,11 +67,22 @@ export function exportableState(state: RoomState, dm: Viewer): RoomState {
   return { ...state, log };
 }
 
-type AssetRow = { id: string; sha256: Buffer; kind: string; pipeline: number; width: number; height: number; variants: string[]; uploaders: string[] | null; credit: unknown };
+type AssetRow = {
+  id: string;
+  sha256: Buffer;
+  kind: string;
+  pipeline: number;
+  width: number;
+  height: number;
+  variants: string[];
+  uploaders: string[] | null;
+  credit: unknown;
+  starter: string | null;
+};
 
 export async function roomManifest(pool: pg.Pool, roomId: string): Promise<{ manifest: ExportManifest; rows: AssetRow[] }> {
   const { rows } = await pool.query<AssetRow>(
-    `select a.id, a.sha256, a.kind, a.pipeline, a.width, a.height, a.variants, a.credit,
+    `select a.id, a.sha256, a.kind, a.pipeline, a.width, a.height, a.variants, a.credit, a.starter,
        array(select u.member_id from asset_uploaders u where u.asset_id = a.id order by u.member_id) as uploaders
      from assets a where a.room_id = $1 order by a.created_at, a.id`,
     [roomId],
@@ -82,6 +102,7 @@ export async function roomManifest(pool: pg.Pool, roomId: string): Promise<{ man
       // The row's credit as stored, which only the server wrote. One that does not parse stays behind rather than travel unchecked.
       const credit = assetCreditSchema.safeParse(r.credit);
       if (r.credit !== null && credit.success) asset.credit = credit.data;
+      if (r.starter !== null && STARTER_KEY.test(r.starter)) asset.starter = r.starter;
       return asset;
     });
   return { manifest: { formatVersion: MANIFEST_VERSION, assets }, rows };

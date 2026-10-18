@@ -17,7 +17,8 @@ import { useAssets, useRoomView } from "../state/view.ts";
  * only, so each role sees what the picker offers it (design 11.2): a
  * player their own uploads and the token images in their view, the DM
  * every one. Images are added and used from the picker, which the empty
- * library says. For a player the panel also lists the handouts the DM is
+ * library says. Starter picks fold apart after the room's own images
+ * (docs/design-v1-starter-art.md 5). For a player the panel also lists the handouts the DM is
  * showing them, so one closed by mistake can be opened again (features
  * section 16).
  */

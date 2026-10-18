@@ -10,7 +10,7 @@ import type { PasswordHasher } from "./auth/passwords.ts";
 import { setupAuth } from "./auth/plugin.ts";
 import type { Config } from "./config.ts";
 import { registerAdminRoutes } from "./http/admin.ts";
-import { registerAssetRoutes } from "./http/assets.ts";
+import { registerAssetRoutes, type AssetRouteOptions } from "./http/assets.ts";
 import { registerDisplayRoutes } from "./http/display.ts";
 import { registerDmRoutes } from "./http/dm.ts";
 import { registerExportRoutes, type ExportOptions } from "./http/export.ts";
@@ -43,6 +43,8 @@ export type AppDeps = {
   cleanup?: CleanupOptions;
   /** The D&D Beyond import's limits and way out, for tests (docs/design-v1-pc-stats.md 6.3). */
   ddb?: Partial<DdbImportOptions>;
+  /** The asset service's options, for tests: a starter catalog of their own (docs/design-v1-starter-art.md 5). */
+  assets?: AssetRouteOptions;
 };
 
 /**
@@ -53,7 +55,7 @@ export type AppDeps = {
  * server/rooms/*). Add the registration here, one line per module, after
  * setupAuth: the rate limiter only covers routes registered after it.
  */
-export async function buildApp({ config, pool, gateway, hasher, rooms, ws, export: exportOptions, cleanup, ddb }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ config, pool, gateway, hasher, rooms, ws, export: exportOptions, cleanup, ddb, assets }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: config.NODE_ENV === "test" ? false : { level: config.production ? "info" : "debug" },
     // cloudflared keeps idle origin connections for 90 s. A shorter Node
@@ -102,7 +104,7 @@ export async function buildApp({ config, pool, gateway, hasher, rooms, ws, expor
   await registerJoinRoutes(app, kit);
   await registerDmRoutes(app, kit);
   await registerMemberRoutes(app, kit);
-  await registerAssetRoutes(app);
+  await registerAssetRoutes(app, assets);
   // A player's visible assets come from the room's projection (design 11.2), plus their own uploads.
   app.assets.setVisibleAssets(async (roomId, memberId) => {
     const ids = await uploadedAssetIds(pool, roomId, memberId);

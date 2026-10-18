@@ -6,7 +6,7 @@ import type { Handout, HandoutDoc } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Empty } from "../../components/Empty.tsx";
 import { Loading } from "../../components/Loading.tsx";
-import { Help, SectionLabel } from "../../components/Panel.tsx";
+import { Help, Section, SectionLabel } from "../../components/Panel.tsx";
 import { TAG_TONES } from "../../components/tones.ts";
 import type { AssetKind, AssetRow, AssetVariant } from "../../lib/api.ts";
 import { theme } from "../../lib/theme.ts";
@@ -18,7 +18,21 @@ import { formatBytes } from "../settings/backup.ts";
 import { CreditLine } from "./CreditLine.tsx";
 import { deleteRunning, docDeleteNote, docDeleteSlot, retryDocDelete, startDocDelete, type DocDelete } from "./docDelete.ts";
 import { imageErrorMessage } from "./errors.ts";
-import { deleteImages, docAssetIds, docBytes, docShowing, docsNewestFirst, looseHandouts, notInUse, totalBytes, uploadingSlot, useLibrary, type LibraryState } from "./library.ts";
+import {
+  apartFromStarter,
+  deleteImages,
+  docAssetIds,
+  docBytes,
+  docShowing,
+  docsNewestFirst,
+  looseHandouts,
+  notInUse,
+  starterFoldLabel,
+  totalBytes,
+  uploadingSlot,
+  useLibrary,
+  type LibraryState,
+} from "./library.ts";
 
 export const tileStyle = {
   display: "block",
@@ -49,6 +63,10 @@ export const tileImage = { width: "100%", height: "100%", objectFit: "cover", di
  * deletes an image nothing uses from the viewer's header, or every one at
  * once under Clean up (docs/design-v1-dm-tools.md 3.19), since only the
  * DM can tell a handout kept for later from one nobody needs.
+ *
+ * Starter picks list after the room's own images, in a fold of their own,
+ * closed at first (docs/design-v1-starter-art.md 5), and work there as
+ * anywhere else in the library.
  */
 export function LibraryGrid(props: {
   roomId: string;
@@ -76,25 +94,31 @@ export function LibraryGrid(props: {
     }
     return [...seen];
   }, [library.rows, tokens, characters]);
+  const rowsById = useMemo(() => new Map((library.rows ?? []).map((r) => [r.id, r])), [library.rows]);
 
   const listed = library.rows !== null;
   const emptyText = props.empty ?? "No token images yet.";
 
   if (props.onPick) {
     const { onPick } = props;
+    const { own, starter } = apartFromStarter(ids, (id) => rowsById.get(id));
+    const tile = (id: string) => (
+      <li key={id}>
+        <button type="button" disabled={props.disabled} onClick={() => onPick(id)} aria-label="Use this image" style={tileStyle}>
+          <Thumb id={id} />
+        </button>
+      </li>
+    );
     return (
       <div style={{ display: "grid", gap: theme.space(3) }}>
         <LibraryStatus library={library} />
         {ids.length === 0 && (listed || library.failed) ? <Empty>{emptyText}</Empty> : null}
-        <Tiles label="Token images in this room">
-          {ids.map((id) => (
-            <li key={id}>
-              <button type="button" disabled={props.disabled} onClick={() => onPick(id)} aria-label="Use this image" style={tileStyle}>
-                <Thumb id={id} />
-              </button>
-            </li>
-          ))}
-        </Tiles>
+        {own.length > 0 || starter.length === 0 ? <Tiles label="Token images in this room">{own.map(tile)}</Tiles> : null}
+        {starter.length > 0 ? (
+          <StarterFold count={starter.length}>
+            <Tiles label="Token images from starter packs">{starter.map(tile)}</Tiles>
+          </StarterFold>
+        ) : null}
       </div>
     );
   }
@@ -108,7 +132,7 @@ function PlayerLibrary(props: { library: LibraryState; ids: readonly string[]; e
   const handouts = useRoomView((s) => s.view?.handouts);
   const rows = useMemo(() => new Map((props.library.rows ?? []).map((r) => [r.id, r])), [props.library.rows]);
   const shown = Object.values(handouts ?? {});
-  const tiles = props.ids.map((id): Tile => {
+  const tileOf = (id: string): Tile => {
     const row = rows.get(id);
     return {
       key: `image:${id}`,
@@ -117,7 +141,8 @@ function PlayerLibrary(props: { library: LibraryState; ids: readonly string[]; e
       ...imageTile(row, { dm: false }),
       view: () => ({ ...imageView(id, row, shown, assets), details: <ImageDetails row={row} status={null} /> }),
     };
-  });
+  };
+  const { own, starter } = apartFromStarter(props.ids, (id) => rows.get(id));
   return (
     <TileLibrary
       gap={theme.space(3)}
@@ -127,7 +152,10 @@ function PlayerLibrary(props: { library: LibraryState; ids: readonly string[]; e
           {props.empty ? <Empty>{props.empty}</Empty> : null}
         </>
       }
-      sections={[{ id: "tokens", label: "Token images in this room", tiles }]}
+      sections={[
+        { id: "tokens", label: "Token images in this room", tiles: own.map(tileOf) },
+        { id: "starter-tokens", label: "Token images from starter packs", tiles: starter.map(tileOf), starter: true },
+      ]}
       after={props.ids.length > 0 && props.hint ? <Help>{props.hint}</Help> : null}
     />
   );
@@ -172,6 +200,7 @@ function ManagedLibrary(props: { roomId: string; library: LibraryState; unlisted
   const going = useMemo(() => new Set(Object.values(deletes.flows).flatMap((f) => (deleteRunning(f) ? f.pages : []))), [deletes.flows]);
   const held = useMemo(() => new Set([...docs.flatMap(docAssetIds), ...uploading, ...going]), [docs, uploading, going]);
   const byId = useMemo(() => (rows ? new Map(rows.map((r) => [r.id, r])) : null), [rows]);
+  const apart = useMemo(() => (rows ? apartFromStarter(rows, (r) => r) : null), [rows]);
   const unused = rows ? notInUse(rows, held) : [];
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
@@ -245,24 +274,43 @@ function ManagedLibrary(props: { roomId: string; library: LibraryState; unlisted
   };
 
   const flows = Object.values(deletes.flows);
+  // A document shows with the room's own handouts even when a starter pack gave one of its pages.
   const sections: LibrarySection[] = [
     {
       id: "handouts",
       heading: "Handouts",
       label: "Handouts in this room",
-      tiles: [...docs.map(docTileOf), ...(rows ? looseHandouts(rows, docs, going) : []).map((row) => imageTileOf(row.id, row))],
+      tiles: [...docs.map(docTileOf), ...(apart ? looseHandouts(apart.own, docs, going) : []).map((row) => imageTileOf(row.id, row))],
       // Kept while a note says what a document delete came to.
       keep: flows.length > 0,
       after: flows.map((flow) => <DeleteNote key={flow.docId} flow={flow} onRetry={() => deletes.retry(flow.docId)} />),
     },
-    ...(rows
+    ...(apart
       ? SECTIONS.map((section) => ({
           id: section.kind,
           heading: section.heading,
           label: `${section.heading} in this room`,
-          tiles: rows.filter((r) => r.kind === section.kind).map((row) => imageTileOf(row.id, row)),
+          tiles: apart.own.filter((r) => r.kind === section.kind).map((row) => imageTileOf(row.id, row)),
         }))
       : [{ id: "unlisted", label: "Token images in this room", tiles: props.unlisted.map((id) => imageTileOf(id, undefined)) }]),
+    ...(apart
+      ? [
+          {
+            id: "starter-handouts",
+            heading: "Handouts",
+            label: "Handouts from starter packs",
+            tiles: looseHandouts(apart.starter, docs, going).map((row) => imageTileOf(row.id, row)),
+            starter: true,
+          },
+          ...SECTIONS.map((section) => ({
+            id: `starter-${section.kind}`,
+            heading: section.heading,
+            label: `${section.heading} from starter packs`,
+            tiles: apart.starter.filter((r) => r.kind === section.kind).map((row) => imageTileOf(row.id, row)),
+            starter: true,
+          })),
+        ]
+      : []),
   ];
 
   const bytes = totalBytes(unused);
@@ -325,7 +373,8 @@ type TileView = { title: string; pages: ViewerPage[]; details?: ReactNode; actio
  */
 type Tile = { key: string; thumbId: string; label: string; tag: string | null; status: string | null; view(close: () => void): TileView };
 
-type LibrarySection = { id: string; heading?: string; label: string; tiles: readonly Tile[]; after?: ReactNode; keep?: boolean };
+/** `starter` puts a section in the starter picks' fold, after the room's own (docs/design-v1-starter-art.md 5). */
+type LibrarySection = { id: string; heading?: string; label: string; tiles: readonly Tile[]; after?: ReactNode; keep?: boolean; starter?: boolean };
 
 /** A section's tiles by key, in order, as the focus rule after a delete reads them. */
 export type SectionTiles = { id: string; heading: boolean; keys: readonly string[] };
@@ -383,48 +432,57 @@ function TileLibrary(props: { sections: readonly LibrarySection[]; before?: Reac
 
   const close = (key: string) => () => setOpen((current) => (current === key ? null : current));
   const view = openTile?.view(close(openTile.key));
+  const starterSections = shownSections.filter((s) => s.starter);
+  const starterCount = starterSections.reduce((n, s) => n + s.tiles.length, 0);
+  // Inside the fold a section's label is one level down, under the fold's own heading.
+  const sectionEl = (section: LibrarySection, level?: 4) => (
+    <section
+      key={section.id}
+      ref={(el) => {
+        if (!el) return;
+        sectionEls.current.set(section.id, el);
+        return () => void sectionEls.current.delete(section.id);
+      }}
+      style={{ display: "grid", gap: theme.space(2) }}
+    >
+      {section.heading ? <SectionLabel level={level}>{section.heading}</SectionLabel> : null}
+      {section.tiles.length > 0 ? (
+        <Tiles label={section.label}>
+          {section.tiles.map((tile) => (
+            <li key={tile.key} style={{ position: "relative" }}>
+              <button
+                type="button"
+                ref={(el) => {
+                  if (!el) return;
+                  tiles.current.set(tile.key, el);
+                  return () => void tiles.current.delete(tile.key);
+                }}
+                aria-label={tile.label}
+                onClick={(e) => {
+                  opener.current = e.currentTarget;
+                  setOpen(tile.key);
+                }}
+                style={tileStyle}
+              >
+                <Thumb id={tile.thumbId} />
+              </button>
+              <TileMarks tag={tile.tag} status={tile.status} />
+            </li>
+          ))}
+        </Tiles>
+      ) : null}
+      {section.after}
+    </section>
+  );
   return (
     <div ref={rootRef} style={{ display: "grid", gap: props.gap }}>
       {props.before}
-      {shownSections.map((section) => (
-        <section
-          key={section.id}
-          ref={(el) => {
-            if (!el) return;
-            sectionEls.current.set(section.id, el);
-            return () => void sectionEls.current.delete(section.id);
-          }}
-          style={{ display: "grid", gap: theme.space(2) }}
-        >
-          {section.heading ? <SectionLabel>{section.heading}</SectionLabel> : null}
-          {section.tiles.length > 0 ? (
-            <Tiles label={section.label}>
-              {section.tiles.map((tile) => (
-                <li key={tile.key} style={{ position: "relative" }}>
-                  <button
-                    type="button"
-                    ref={(el) => {
-                      if (!el) return;
-                      tiles.current.set(tile.key, el);
-                      return () => void tiles.current.delete(tile.key);
-                    }}
-                    aria-label={tile.label}
-                    onClick={(e) => {
-                      opener.current = e.currentTarget;
-                      setOpen(tile.key);
-                    }}
-                    style={tileStyle}
-                  >
-                    <Thumb id={tile.thumbId} />
-                  </button>
-                  <TileMarks tag={tile.tag} status={tile.status} />
-                </li>
-              ))}
-            </Tiles>
-          ) : null}
-          {section.after}
-        </section>
-      ))}
+      {shownSections.filter((s) => !s.starter).map((section) => sectionEl(section))}
+      {starterSections.length > 0 ? (
+        <StarterFold count={starterCount}>
+          <div style={{ display: "grid", gap: props.gap }}>{starterSections.map((section) => sectionEl(section, 4))}</div>
+        </StarterFold>
+      ) : null}
       {props.after}
       {openTile && view ? (
         <HandoutViewer
@@ -439,6 +497,20 @@ function TileLibrary(props: { sections: readonly LibrarySection[]; before?: Reac
         />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The starter picks' fold (docs/design-v1-starter-art.md 5), closed until
+ * the DM opens it, so the room's own images stay what the library shows.
+ * The panels' own fold, the section label as a disclosure (Panel.tsx).
+ */
+function StarterFold(props: { count: number; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Section label={starterFoldLabel(props.count)} fold={{ open, onToggle: () => setOpen((o) => !o) }}>
+      {props.children}
+    </Section>
   );
 }
 

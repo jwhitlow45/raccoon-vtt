@@ -222,3 +222,7 @@ create table if not exists roll_receipts (
   primary key (room_id, member_id, tag, part)
 );
 create index if not exists roll_receipts_room_at on roll_receipts (room_id, at);
+-- A starter pick's work key, `<pack>/<work>` (docs/design-v1-starter-art.md
+-- 5), set by the server from its own catalog. Such a row stays out of the
+-- room's storage quota. Null for every upload.
+alter table assets add column if not exists starter text;

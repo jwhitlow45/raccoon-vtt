@@ -11,10 +11,12 @@ import { checkLimits, exploredReserve, LIMITS, NO_ROOM_TO_EXPLORE, serializedByt
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import { migrateSnapshot } from "#shared/migrate.ts";
 import { assetCreditSchema } from "#shared/protocol.ts";
+import { STARTER_KEY, type FoundWork, type StarterKind } from "#shared/starter.ts";
 import type { Member, RoomState } from "#shared/model.ts";
 import { splitCheck } from "#shared/rules/walls.ts";
-import { KINDS, isAssetKind } from "../assets/kinds.ts";
+import { KINDS, isAssetKind, type AssetKind } from "../assets/kinds.ts";
 import type { AssetService } from "../assets/service.ts";
+import { StarterWorkError, isStarterKind, workForKind, type StarterCatalog } from "../assets/starter.ts";
 import { deleteUnreferencedFiles, roomFileKeys } from "../assets/store.ts";
 import { tempFile } from "../assets/upload.ts";
 import { markDmMembers } from "../auth/grants.ts";
@@ -39,7 +41,9 @@ import { parseRoomState } from "./stateSchema.ts";
  *   the room limits before anything is written;
  * - `assets.json` only says which file belongs to which old asset id. Each
  *   image is re-processed by the asset pipeline, which decides its kind's
- *   dimensions and variants and refuses anything that is not an image;
+ *   dimensions and variants and refuses anything that is not an image. A
+ *   starter mark counts only where this server's own catalog has that work
+ *   with the same bytes, and then the image comes from the shipped file;
  * - every id is remapped, uploaders included.
  *
  * The room row is written first so asset rows have something to reference,
@@ -93,6 +97,8 @@ const manifestSchema = z.object({
         uploaders: z.array(z.string().max(64)).max(50).optional(),
         // Checked on its own below, so a credit this server cannot read costs only the credit, never the image.
         credit: z.unknown().optional(),
+        // Manifest version 2. Checked on its own below too, against this server's catalog.
+        starter: z.unknown().optional(),
       }),
     )
     .max(IMPORT_LIMITS.assets),
@@ -301,6 +307,11 @@ export function assertWithinLimits(state: RoomState): void {
  * reserved and the free-disk guard checked before each one. Returns old
  * asset id to the new asset and its kind for everything that went through,
  * so the remap can hold each reference to the kind it takes.
+ *
+ * A starter pick whose work this server ships with the same bytes comes
+ * from the shipped file instead, as a pick here would
+ * (docs/design-v1-starter-art.md 12.10). Every other image is an upload,
+ * whatever its manifest says.
  */
 async function importImages(
   deps: ImportDeps,
@@ -314,54 +325,102 @@ async function importImages(
   const out = new Map<string, ImportedAsset>();
   for (const asset of manifest.assets) {
     if (out.has(asset.id) || !isAssetKind(asset.kind)) continue;
+    const kind = asset.kind;
     const sha = asset.sha256.toLowerCase();
-    const entry = entries.get(assetFileName(sha, asset.kind, "full"));
-    if (!entry) continue;
-    const cap = KINDS[asset.kind].maxUploadBytes;
-    await deps.assets.assertFreeDisk();
-    const reservation = await deps.assets.quota.reserve(roomId, cap);
-    const path = tempFile(deps.assets.tmpDir, "intake");
+    // Uploaders are old member ids from the manifest: only members the room knows are kept, under their new ids.
+    // Every imported member is a player here, and a player can upload no DM-only kind, so such an asset keeps
+    // none: an uploader row is a player's read access (uploadedAssetIds), whatever the projection says.
+    const uploaders = KINDS[kind].dmOnly
+      ? []
+      : (asset.uploaders ?? []).flatMap((m) => {
+          const mapped = memberIds.get(m);
+          return mapped === undefined ? [] : [mapped];
+        });
+    const entry = entries.get(assetFileName(sha, kind, "full"));
     try {
-      const digest = await entryToFile(zip, entry, path, cap, counter);
-      // Uploaders are old member ids from the manifest: only members the room knows are kept, under their new ids.
-      // Every imported member is a player here, and a player can upload no DM-only kind, so such an asset keeps
-      // none: an uploader row is a player's read access (uploadedAssetIds), whatever the projection says.
-      const uploaders = KINDS[asset.kind].dmOnly
-        ? []
-        : (asset.uploaders ?? []).flatMap((m) => {
-            const mapped = memberIds.get(m);
-            return mapped === undefined ? [] : [mapped];
-          });
-      const result = await deps.assets.ingest({
-        roomId,
-        uploaderIds: uploaders,
-        kind: asset.kind,
-        tempPath: path,
-        sha256: digest,
-        reservation,
-        background: true,
-      });
-      out.set(asset.id, { id: result.id, kind: result.kind });
-      // An Openverse image keeps its credit (docs/design-v1-dm-tools.md 2.5), checked as bounded text like any of the
-      // file's text, since the file is untrusted. A credit that does not parse is left behind with a warning.
-      if (asset.credit !== undefined) {
-        const credit = assetCreditSchema.safeParse(asset.credit);
-        if (credit.success) await deps.pool.query("update assets set credit = $2 where id = $1", [result.id, JSON.stringify(credit.data)]);
-        else deps.log.warn({ roomId, entry: entry.fileName }, "import left out an image's credit it could not read");
-      }
+      const shipped = shippedWork(deps.assets.starter, asset.starter, sha, kind);
+      const imported =
+        (shipped ? await importShipped(deps, roomId, shipped, uploaders) : null) ??
+        (entry ? await importFromZip(deps, zip, entry, roomId, counter, { kind, uploaders, credit: asset.credit }) : null);
+      if (imported) out.set(asset.id, imported);
     } catch (err) {
       // One bad image does not sink the room: the manifest is untrusted, so a refusal is expected input.
       if (err instanceof Error && "status" in err && typeof (err as { status: unknown }).status === "number" && (err as { status: number }).status < 500) {
-        deps.log.warn({ roomId, entry: entry.fileName, err: err.message }, "import skipped an image");
+        deps.log.warn({ roomId, entry: entry?.fileName ?? asset.id, err: err.message }, "import skipped an image");
         continue;
       }
       throw err;
-    } finally {
-      reservation.release();
-      await unlink(path).catch(() => undefined);
     }
   }
   return out;
+}
+
+/**
+ * The catalog's work for a manifest's starter mark, when this server ships
+ * that work with the bytes the export had, as a kind among its uses. The
+ * mark itself is untrusted text, so anything else is no work at all.
+ */
+function shippedWork(catalog: StarterCatalog, mark: unknown, sha: string, kind: AssetKind): { found: FoundWork; kind: StarterKind } | null {
+  if (typeof mark !== "string" || !STARTER_KEY.test(mark) || !isStarterKind(kind)) return null;
+  const found = workForKind(catalog, mark, kind);
+  return found && found.work.sha256.toLowerCase() === sha ? { found, kind } : null;
+}
+
+/**
+ * A starter pick copied from this server's own shipped file, with the
+ * catalog's credit and its mark, outside the room's quota. A shipped work
+ * that cannot be copied as the catalog describes it is logged, and the
+ * image comes from the zip as an upload instead (null).
+ */
+async function importShipped(deps: ImportDeps, roomId: string, shipped: { found: FoundWork; kind: StarterKind }, uploaders: readonly string[]): Promise<ImportedAsset | null> {
+  await deps.assets.assertFreeDisk();
+  try {
+    const result = await deps.assets.ingestStarter({ roomId, uploaderIds: uploaders, found: shipped.found, kind: shipped.kind, background: true });
+    return { id: result.id, kind: result.kind };
+  } catch (err) {
+    if (!(err instanceof StarterWorkError)) throw err;
+    deps.log.error({ err, roomId, work: shipped.found.work.key }, "import took a starter image from the zip, since its shipped work could not be copied");
+    return null;
+  }
+}
+
+/** An image from the zip, as an upload of the room's, counted in its quota. */
+async function importFromZip(
+  deps: ImportDeps,
+  zip: yauzl.ZipFile,
+  entry: yauzl.Entry,
+  roomId: string,
+  counter: InflatedCounter,
+  asset: { kind: AssetKind; uploaders: readonly string[]; credit: unknown },
+): Promise<ImportedAsset> {
+  const cap = KINDS[asset.kind].maxUploadBytes;
+  await deps.assets.assertFreeDisk();
+  const reservation = await deps.assets.quota.reserve(roomId, cap);
+  const path = tempFile(deps.assets.tmpDir, "intake");
+  try {
+    const digest = await entryToFile(zip, entry, path, cap, counter);
+    const result = await deps.assets.ingest({
+      roomId,
+      uploaderIds: asset.uploaders,
+      kind: asset.kind,
+      tempPath: path,
+      sha256: digest,
+      reservation,
+      background: true,
+    });
+    // An Openverse image keeps its credit (docs/design-v1-dm-tools.md 2.5), and so does a starter pick imported as an
+    // upload, checked as bounded text like any of the file's text, since the file is untrusted. A credit that does not
+    // parse is left behind with a warning.
+    if (asset.credit !== undefined) {
+      const credit = assetCreditSchema.safeParse(asset.credit);
+      if (credit.success) await deps.pool.query("update assets set credit = $2 where id = $1", [result.id, JSON.stringify(credit.data)]);
+      else deps.log.warn({ roomId, entry: entry.fileName }, "import left out an image's credit it could not read");
+    }
+    return { id: result.id, kind: result.kind };
+  } finally {
+    reservation.release();
+    await unlink(path).catch(() => undefined);
+  }
 }
 
 /**

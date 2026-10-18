@@ -3,6 +3,7 @@ import { afterEach, describe, test } from "node:test";
 import { ApiError, api, type AssetRow } from "../../lib/api.ts";
 import type { Handout, HandoutDoc } from "#shared/model.ts";
 import {
+  apartFromStarter,
   deleteBatches,
   deleteImages,
   docAssetIds,
@@ -13,6 +14,7 @@ import {
   notInUse,
   refreshLibrary,
   resetLibraryForTest,
+  starterFoldLabel,
   totalBytes,
   uploadingSlot,
 } from "./library.ts";
@@ -173,5 +175,32 @@ describe("documents in the DM's library", () => {
     assert.equal(docBytes(repeated, null), null, "the list not loaded yet");
     assert.equal(docBytes(doc("more", ["a", "missing"]), rows), null, "a page the list does not hold");
     assert.equal(docBytes(doc("nosize", ["a"]), new Map([["a", row("a", { kind: "handout" })]])), null, "a row without its size");
+  });
+});
+
+describe("starter picks apart from the room's own images (docs/design-v1-starter-art.md 5)", () => {
+  test("rows with a starter mark go apart, each side keeping the listing's order", () => {
+    const rows = [row("a"), row("b", { starter: "bestiary/owlbear" }), row("c", { kind: "map" }), row("d", { kind: "map", starter: "dyson/inn" })];
+    const { own, starter } = apartFromStarter(rows, (r) => r);
+    assert.deepEqual(own.map((r) => r.id), ["a", "c"]);
+    assert.deepEqual(starter.map((r) => r.id), ["b", "d"]);
+  });
+
+  test("an id the listing does not hold yet is the room's own, as the images on tokens are before the list loads", () => {
+    const rows = new Map([["b", row("b", { starter: "bestiary/owlbear" })]]);
+    const { own, starter } = apartFromStarter(["a", "b", "c"], (id) => rows.get(id));
+    assert.deepEqual(own, ["a", "c"]);
+    assert.deepEqual(starter, ["b"]);
+  });
+
+  test("with no starter picks nothing goes apart", () => {
+    const { own, starter } = apartFromStarter([row("a"), row("b")], (r) => r);
+    assert.deepEqual(own.map((r) => r.id), ["a", "b"]);
+    assert.deepEqual(starter, []);
+  });
+
+  test("the fold's heading counts what it holds", () => {
+    assert.equal(starterFoldLabel(1), "From starter packs (1)");
+    assert.equal(starterFoldLabel(12), "From starter packs (12)");
   });
 });

@@ -20,6 +20,9 @@ describe("the built SPA", () => {
     await mkdir(join(dist, "fonts"));
     await writeFile(join(dist, "fonts", "InterVariable-8a540aa8.woff2"), "wOF2");
     await writeFile(join(dist, "fonts", "Inter-LICENSE.txt"), "SIL Open Font License");
+    await mkdir(join(dist, "starter", "test-pack", "thumbs"), { recursive: true });
+    await writeFile(join(dist, "starter", "test-pack", "knight.webp"), "RIFF knight");
+    await writeFile(join(dist, "starter", "test-pack", "thumbs", "knight.webp"), "RIFF thumb");
     app = Fastify();
     await registerStatic(app, dist);
   });
@@ -72,6 +75,23 @@ describe("the built SPA", () => {
     const listing = await app.inject({ method: "GET", url: "/game-icons/82d94881/" });
     assert.equal(listing.statusCode, 404);
     assert.doesNotMatch(listing.body, /wolf-head/);
+  });
+
+  test("a starter work and its thumbnail are served from one route, revalidated, since a rebuilt file keeps its name", async () => {
+    for (const [url, body] of [["/starter/test-pack/knight.webp", "RIFF knight"], ["/starter/test-pack/thumbs/knight.webp", "RIFF thumb"]] as const) {
+      const res = await app.inject({ method: "GET", url });
+      assert.equal(res.statusCode, 200, url);
+      assert.equal(res.body, body, url);
+      assert.notEqual(res.headers["cache-control"], IMMUTABLE, url);
+    }
+  });
+
+  test("a starter file the build does not have is a 404, never the page, and the route lists nothing", async () => {
+    for (const url of ["/starter/test-pack/owlbear.webp", "/starter/test-pack/", "/starter/"]) {
+      const res = await app.inject({ method: "GET", url });
+      assert.equal(res.statusCode, 404, url);
+      assert.doesNotMatch(res.body, /RaccoonVTT|knight/, url);
+    }
   });
 
   test("client routes still load the page", async () => {

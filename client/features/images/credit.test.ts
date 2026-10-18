@@ -68,3 +68,42 @@ describe("an Openverse image's credit", () => {
     assert.equal(licenseUrl("odd", "1.0"), null);
   });
 });
+
+describe("a starter pick's credit (docs/design-v1-starter-art.md 9)", () => {
+  const picked: AssetCredit = {
+    title: "Ruined keep",
+    creator: "A. Cartographer",
+    license: "public-domain",
+    landingUrl: "https://example.com/ruined-keep",
+    attribution: "Ruined keep by A. Cartographer",
+    changes: "Scaled to 4096 px on the long side and saved as 4-level gray PNG.",
+    originalWidth: 4096,
+    originalHeight: 3072,
+  };
+
+  test("a public domain dedication is named plainly, with no license link", () => {
+    assert.equal(licenseName("public-domain"), "Public domain dedication");
+    assert.equal(licenseUrl("public-domain"), null);
+    assert.equal(licenseUrl("public-domain", "1.0"), null);
+    const parts = creditParts(picked, { width: 4096, height: 3072 });
+    assert.equal(parts.licenseUrl, null);
+    assert.equal(parts.text, "Ruined keep by A. Cartographer, Public domain dedication. Scaled to 4096 px on the long side and saved as 4-level gray PNG.");
+  });
+
+  test("its own changes replace the guess, with the room's size only when its copy differs from the shipped file", () => {
+    assert.equal(changesText(picked, { width: 4096, height: 3072 }), picked.changes);
+    assert.equal(changesText(picked, { width: 2048, height: 1536 }), `${picked.changes} Resized to 2048 x 1536 for this room.`);
+  });
+
+  test("Cropped follows, as for any image", () => {
+    const square = { ...picked, originalWidth: 400, originalHeight: 400 };
+    const crop = { crop: { cx: 0.5, cy: 0.5, zoom: 2 }, aspect: 1 };
+    assert.equal(changesText(square, { width: 400, height: 400 }, crop), `${picked.changes} Cropped.`);
+    assert.equal(changesText(square, { width: 200, height: 200 }, crop), `${picked.changes} Resized to 200 x 200 for this room. Cropped.`);
+  });
+
+  test("changes without a full stop still read as a sentence, and blank changes fall back to the guess", () => {
+    assert.equal(changesText({ ...picked, changes: "Upscaled 8 times" }, { width: 4096, height: 3072 }), "Upscaled 8 times.");
+    assert.equal(changesText({ ...picked, changes: "  " }, { width: 4096, height: 3072 }), "Converted to WebP.");
+  });
+});

@@ -9,11 +9,16 @@ import { KeyedMutex } from "./locks.ts";
  * rows and roll receipts (docs/design-v1-dice.md 1.2). Row sizes come from
  * pg_column_size, which is what the room actually costs on disk after TOAST
  * compression.
+ *
+ * A starter pick's row is left out (docs/design-v1-starter-art.md 5): its
+ * files are shared by every room that picked the work, and the catalog
+ * bounds how many a room can hold, so it is nothing a room can grow
+ * without end.
  */
 export async function roomStoredBytes(db: pg.Pool | pg.PoolClient, roomId: string): Promise<number> {
   const { rows } = await db.query<{ bytes: string }>(
     `select
-       coalesce((select sum(bytes) from assets where room_id = $1), 0)
+       coalesce((select sum(bytes) from assets where room_id = $1 and starter is null), 0)
      + coalesce((select sum(pg_column_size(s.*)) from room_snapshots s where room_id = $1), 0)
      + coalesce((select sum(pg_column_size(o.*)) from room_ops o where room_id = $1), 0)
      + coalesce((select sum(pg_column_size(l.*)) from room_log l where room_id = $1), 0)

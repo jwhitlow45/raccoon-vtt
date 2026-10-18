@@ -103,11 +103,13 @@ export type AssetView = {
   width: number;
   height: number;
   variants: Variant[];
-  /** An Openverse image's credit (docs/design-v1-dm-tools.md 3.13). */
+  /** An Openverse image's or a starter pick's credit (docs/design-v1-dm-tools.md 3.13). */
   credit?: AssetCredit;
+  /** A starter pick's work key, `<pack>/<work>` (docs/design-v1-starter-art.md 5). Absent for the room's own uploads. */
+  starter?: string;
   /** A DM's library only: whether the room's committed state names it (section 3.19). Absent when that cannot be known. */
   inUse?: boolean;
-  /** A DM's library only: the stored size of all its variants, which deleting it frees from the room's quota. */
+  /** A DM's library only: the stored size of all its variants, which deleting it frees from the room's quota, unless it is a starter pick, which never counted. */
   bytes?: number;
 };
 

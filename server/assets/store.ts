@@ -150,24 +150,28 @@ export async function addUploaders(db: pg.Pool | pg.PoolClient, assetId: string,
 
 /**
  * Every asset of the room, or only those in `ids`. Newest first. An
- * Openverse image carries its credit, which everyone who may see the image
- * may read (docs/design-v1-dm-tools.md 3.13).
+ * Openverse image or a starter pick carries its credit, which everyone who
+ * may see the image may read (docs/design-v1-dm-tools.md 3.13). A starter
+ * pick carries its work's key too, for players as for the DM: it names
+ * only a work every server ships (docs/design-v1-starter-art.md 5).
  */
 export async function listRoomAssets(pool: pg.Pool, roomId: string, ids?: ReadonlySet<string>): Promise<AssetView[]> {
   if (ids && ids.size === 0) return [];
-  type Listed = AssetRow & { credit: unknown };
+  type Listed = AssetRow & { credit: unknown; starter: string | null };
   const { rows } = ids
     ? await pool.query<Listed>(
-        `select ${ROW_COLUMNS}, credit from assets where room_id = $1 and id = any($2::uuid[]) order by created_at desc, id`,
+        `select ${ROW_COLUMNS}, credit, starter from assets where room_id = $1 and id = any($2::uuid[]) order by created_at desc, id`,
         [roomId, [...ids]],
       )
-    : await pool.query<Listed>(`select ${ROW_COLUMNS}, credit from assets where room_id = $1 order by created_at desc, id`, [
+    : await pool.query<Listed>(`select ${ROW_COLUMNS}, credit, starter from assets where room_id = $1 order by created_at desc, id`, [
         roomId,
       ]);
   return rows.map((row) => {
-    const view = toView(row);
+    const view: AssetView = toView(row);
     const credit = row.credit === null ? undefined : assetCreditSchema.safeParse(row.credit);
-    return credit?.success ? { ...view, credit: credit.data } : view;
+    if (credit?.success) view.credit = credit.data;
+    if (row.starter !== null) view.starter = row.starter;
+    return view;
   });
 }
 
@@ -201,8 +205,10 @@ export type NewAsset = {
   kind: AssetKind;
   uploaderIds: readonly string[];
   variants: ProcessedVariant[];
-  /** An Openverse image's credit, found by the server (docs/design-v1-dm-tools.md 3.13). */
+  /** An Openverse image's or a starter pick's credit, found by the server (docs/design-v1-dm-tools.md 3.13). */
   credit?: AssetCredit;
+  /** A starter pick's work key, which keeps the row out of the room's quota (docs/design-v1-starter-art.md 5). */
+  starter?: string;
 };
 
 /**
@@ -256,8 +262,8 @@ async function insertRow(pool: pg.Pool, asset: NewAsset, pipeline: number): Prom
   try {
     await client.query("begin");
     const inserted = await client.query<AssetRow>(
-      `insert into assets (id, room_id, sha256, kind, pipeline, width, height, bytes, variants, credit)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `insert into assets (id, room_id, sha256, kind, pipeline, width, height, bytes, variants, credit, starter)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        on conflict (room_id, sha256, kind) do nothing
        returning ${ROW_COLUMNS}`,
       [
@@ -271,6 +277,7 @@ async function insertRow(pool: pg.Pool, asset: NewAsset, pipeline: number): Prom
         bytes,
         asset.variants.map((v) => v.name),
         asset.credit ? JSON.stringify(asset.credit) : null,
+        asset.starter ?? null,
       ],
     );
     let row = inserted.rows[0];

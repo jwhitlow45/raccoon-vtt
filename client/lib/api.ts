@@ -47,6 +47,8 @@ export type AssetRow = {
   bytes?: number;
   /** A handout upload's answer only: whether this upload made the image, rather than reusing one the room had (docs/design-v1-pdf-handouts.md 3.9). */
   created?: boolean;
+  /** A starter pick's work key, `<pack>/<work>` (docs/design-v1-starter-art.md 5). Absent for the room's own uploads. */
+  starter?: string;
 };
 /** The server's own shape, which sends the original's size only when the search service gave it. */
 export type { SearchResult, SearchSource };
@@ -509,6 +511,17 @@ export const api = {
   importAsset: (roomId: string, input: { url: string; fallback?: string; kind: AssetKind }, options: RetryOptions = {}) =>
     retryOn503(
       () => request<AssetRow>("POST", `${room(roomId)}/assets/import`, { json: input, signal: options.signal }),
+      options,
+    ),
+
+  /**
+   * Copies a starter work into the room as an image of this kind
+   * (docs/design-v1-starter-art.md 5). The server reads the work from its
+   * own catalog and keeps the catalog's credit, so only the key is sent.
+   */
+  pickStarter: (roomId: string, input: { work: string; kind: "map" | "token" | "handout" }, options: RetryOptions = {}) =>
+    retryOn503(
+      () => request<AssetRow>("POST", `${room(roomId)}/assets/starter`, { json: input, signal: options.signal }),
       options,
     ),
 

@@ -134,6 +134,25 @@ export function notInUse(rows: readonly AssetRow[], held: ReadonlySet<string> = 
   return rows.filter((r) => r.inUse === false && r.kind !== "thumb" && !held.has(r.id));
 }
 
+/**
+ * The library's images as it lists them (docs/design-v1-starter-art.md 5):
+ * the room's own first, then apart the starter picks, those whose row
+ * carries a starter mark, so a DM managing their own maps never wades
+ * through starter art. `rowOf` finds an item's row. An item the listing
+ * lacks, such as an image only seen on a token, counts as the room's own.
+ */
+export function apartFromStarter<T>(items: readonly T[], rowOf: (item: T) => Pick<AssetRow, "starter"> | undefined): { own: T[]; starter: T[] } {
+  const own: T[] = [];
+  const starter: T[] = [];
+  for (const item of items) (rowOf(item)?.starter === undefined ? own : starter).push(item);
+  return { own, starter };
+}
+
+/** The starter picks' fold, its count in the heading so a closed fold still says what it holds. */
+export function starterFoldLabel(count: number): string {
+  return `From starter packs (${count})`;
+}
+
 /** The server takes at most this many ids a request. */
 export const DELETE_BATCH = 500;
 

@@ -28,6 +28,7 @@ export type EngineOptions = {
   rooms?: AppDeps["rooms"];
   ws?: AppDeps["ws"];
   export?: AppDeps["export"];
+  assets?: AppDeps["assets"];
 };
 
 export type Engine = {
@@ -66,6 +67,7 @@ export async function startEngine(opts: EngineOptions = {}): Promise<Engine> {
       rooms: { idleUnloadMs: 200, ...opts.rooms },
       ws: opts.ws,
       export: opts.export,
+      assets: opts.assets,
     });
     await app.listen({ port: 0, host: "127.0.0.1" });
     return app;

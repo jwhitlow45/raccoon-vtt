@@ -70,8 +70,9 @@ export type AdminStorage = {
 
 /**
  * Every room with what the admin page shows of it, newest activity first.
- * The size is the quota's own sum (roomStoredBytes), so the page, the CLI's
- * list-rooms and the quota agree.
+ * The size is the quota's own sum (roomStoredBytes), starter picks left out
+ * as there, so the page, the CLI's list-rooms and the quota agree. The
+ * image count counts them, since they are the room's images all the same.
  */
 export async function listRoomsForAdmin(pool: pg.Pool): Promise<Array<Omit<AdminRoom, "loaded" | "sockets">>> {
   const { rows } = await pool.query<{
@@ -86,7 +87,7 @@ export async function listRoomsForAdmin(pool: pg.Pool): Promise<Array<Omit<Admin
   }>(
     `select r.id, r.name, r.created_at, r.last_active_at, r.pinned, r.read_only,
        (select count(*)::int from assets a where a.room_id = r.id) as images,
-       coalesce((select sum(a.bytes) from assets a where a.room_id = r.id), 0)
+       coalesce((select sum(a.bytes) from assets a where a.room_id = r.id and a.starter is null), 0)
        + coalesce((select sum(pg_column_size(s.*)) from room_snapshots s where s.room_id = r.id), 0)
        + coalesce((select sum(pg_column_size(o.*)) from room_ops o where o.room_id = r.id), 0)
        + coalesce((select sum(pg_column_size(l.*)) from room_log l where l.room_id = r.id), 0)
