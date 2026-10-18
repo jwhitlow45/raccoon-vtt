@@ -4,7 +4,7 @@ RaccoonVTT is a self-hosted virtual tabletop for D&D groups playing the 2024 rul
 
 This page lists what RaccoonVTT does today, grouped by area. "The DM" means anyone who holds DM in the room, co-DMs included. [docs/features.md](docs/features.md) is the planning list: what is planned next, and what was skipped and why.
 
-To learn the tools as a DM, read the [DM guide](docs/dm-guide.md): a quick start, how to build maps and run fights, and worked scenarios.
+The app's Docs page (/docs) lists every written doc. To learn the tools as a DM, read the [DM guide](docs/dm-guide.md): a quick start, how to build maps and run fights, and worked scenarios.
 
 <!-- Keep this page current: update it in the same change that adds, changes or removes a feature. -->
 
@@ -330,6 +330,7 @@ The DM asks players for a saving throw or an ability check, and each player roll
 - "Follow me" makes players' maps follow the DM's as they pan and zoom. "Bring everyone here" moves them once. A ping with "Look here" on moves every player's view to that spot.
 - "Black out players' screens" for a break or a reveal. Players see only a black screen that says "The DM has paused the game." Meanwhile their devices receive nothing from the game but the X-card. When the game resumes, each player's selected token, its action bar and any HP typed into it and not applied come back as they were.
 - Undo and Redo for the DM's changes, each saying what it took back. They sit in the top bar.
+- **Docs page**: the app lists every written doc at /docs, each with its title and a line on what it covers, for anyone, signed in or not. Home has a quiet "Docs" button after its cards, and the DM guide has an "All docs" button beside Home. For now the list holds the DM guide.
 - **DM guide**: the app serves the [DM guide](docs/dm-guide.md) at /docs/dm-guide, for anyone, signed in or not, with its screenshots and a contents list that jumps to each section. A link such as /docs/dm-guide#areas opens on that section. Menu, DM guide opens it in a new tab for the DM and the players. For the DM, the panels it covers (Token, Initiative, Dice, Areas, DM, Scenes, Monsters, Encounters, Characters and Outliner) end in a small Guide link to their section, and the empty Token and Initiative panels link to its quick start.
 - The DM panel leads with Handouts, then Players' screens (Follow me, Bring everyone here and Black out), then Check their view (View as a player and Party sight), then the player link and the table display.
 - **Outliner**: a panel listing everything on the scene in view, in groups that fold: Creatures and objects, Map (stamps, labels, pins and lights), Areas, Drawings, and Doors. Each row says what players get, such as Hidden, Under fog, Out of the party's sight, DM only, or a secret door hidden or found. The search filters as you type. A tap frames the item on the map and picks it: a token opens its action bar, a label or pin its pane, an area the Area tool, and a stamp or light the builder in its mode. A drawing, door or window flashes.

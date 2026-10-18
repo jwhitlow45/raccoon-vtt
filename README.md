@@ -46,6 +46,7 @@ is the planning list behind it, with what comes next and what was skipped.
 Update FEATURES.md in the same change that adds, changes or removes a
 feature.
 
+The app lists its written docs on a Docs page at `/docs`, linked from Home.
 The [DM guide](docs/dm-guide.md) teaches the DM tools step by step, from a
 quick start to building maps, running fights and worked scenarios. Update it
 too when a change alters a step it describes.
