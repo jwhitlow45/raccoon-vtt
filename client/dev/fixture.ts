@@ -116,6 +116,7 @@ export type FixtureOptions = {
   pcstats?: boolean;
   ask?: "save" | "check" | "two" | "saveends";
   rolls?: boolean;
+  party?: boolean;
 };
 
 export function createFixtureState(options: FixtureOptions): RoomState {
@@ -341,7 +342,34 @@ export function createFixtureState(options: FixtureOptions): RoomState {
   if (options.pcstats) thornStats(state);
   if (options.ask) askThorn(state, options.ask);
   if (options.rolls) srdGoblins(state);
+  if (options.party) bigParty(state);
   return state;
+}
+
+/**
+ * Six more players with characters (`party=1`), for the party bar's widths:
+ * long names, one far longer than a pill, temporary HP, a dying character
+ * and two with no token on the scene in view.
+ */
+function bigParty(state: RoomState): void {
+  const more: [string, string, [number, number, number?], Partial<Actor>, boolean][] = [
+    ["Seraphina Nightbloom", "#a855f7", [31, 38, 6], {}, true],
+    ["Bartholomew Underhill of the Long Barrow", "#e5484d", [0, 27], { life: "dying" }, true],
+    ["Ash", "#f5a524", [12, 12], {}, false],
+    ["Kael", "#0ea5e9", [22, 40], {}, true],
+    ["Wren Thistledown", "#14b8a6", [5, 19], {}, false],
+    ["Ostrava", "#ec4899", [44, 44], {}, true],
+  ];
+  more.forEach(([name, color, hp, patch, placed], i) => {
+    const memberId = `m-p${i}`;
+    const charId = `c-p${i}`;
+    state.members[memberId] = member(memberId, name.split(" ")[0]!, color, "player");
+    state.characters[charId] = { id: charId, rev: 1, ownerIds: [memberId], name, size: "medium", actor: actor(hp, [], patch) };
+    if (placed) {
+      const t = token({ name, kind: "pc", x: 4 + i, y: 13, disposition: "ally", ownerIds: [memberId], hpVisibility: "exact", actor: { ref: charId } });
+      state.tokens[t.id] = t;
+    }
+  });
 }
 
 /**
