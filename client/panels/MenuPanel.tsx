@@ -4,6 +4,7 @@ import { Icon } from "../components/Icon.tsx";
 import { Row } from "../components/Row.tsx";
 import ThisDevice from "../features/device/ThisDevice.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
+import { GUIDE_PATH } from "../features/guide/guide.ts";
 import { useJobActive } from "../features/handouts/pdf/live.ts";
 import { joinLinkToShare } from "../features/dm/shareLink.ts";
 import { XCardButton } from "../features/xcard/XCardButton.tsx";
@@ -83,6 +84,16 @@ export default function MenuPanel(props: PanelProps) {
       <MenuItem title="Members" detail={role === "dm" ? "Who is here, kicking, the player password and DM devices." : "Who is here and who is online."} page="members" onClick={() => setPage("members")} />
       {role === "dm" ? <MenuItem title="Room settings" detail="Movement, HP, combat, distance and backups." page="settings" onClick={() => setPage("settings")} /> : null}
       <MenuItem title="This device" detail="Interface size, low power, map detail, sounds and shortcuts." page="device" onClick={() => setPage("device")} />
+      <MenuItem
+        title="DM guide"
+        detail={
+          role === "dm"
+            ? "How to build maps and run fights, step by step, with examples. Opens in a new tab."
+            : "How the DM builds maps and runs fights, and what each tool does. Opens in a new tab."
+        }
+        // A new tab, so the room stays connected and where it was.
+        onClick={() => window.open(GUIDE_PATH, "_blank", "noopener")}
+      />
       <MenuItem title="About" detail="Credits, licenses and the SRD notice." page="about" onClick={() => setPage("about")} />
       <MenuItem
         title="Leave room"

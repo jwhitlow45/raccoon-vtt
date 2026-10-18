@@ -41,6 +41,10 @@ COPY vite.config.ts ./
 COPY client ./client
 COPY shared ./shared
 COPY public ./public
+# The DM guide and its screenshots, which the build bundles into the app's
+# /docs/dm-guide page (client/pages/DmGuide.tsx).
+COPY docs/dm-guide.md ./docs/dm-guide.md
+COPY docs/dm-guide ./docs/dm-guide
 RUN pnpm build
 
 # ----------------------------------------------------------- prod-deps

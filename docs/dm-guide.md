@@ -1,6 +1,6 @@
 # DM guide
 
-This guide is for the DM who runs RaccoonVTT for their table. It shows how to build maps and run fights, which tools do what, and how they fit together in real sessions. It covers the parts of the app a DM uses for maps and combat. [FEATURES.md](../FEATURES.md) is the complete list of what the app does, and the in-app shortcut list (`?`) has every key.
+This guide is for the DM who runs RaccoonVTT for their table. It shows how to build maps and run fights, which tools do what, and how they fit together in real sessions. It covers the parts of the app a DM uses for maps and combat. [FEATURES.md](../FEATURES.md) is the complete list of what the app does, and the in-app shortcut list (`?`) has every key. The app shows this guide too: **Menu**, **DM guide** opens it in a new tab, and each panel it covers ends in a small **Guide** link to its section.
 
 The app does a lot, and you don't need most of it on day one. Read the [Quick start](#quick-start), run a session with it, and come back for the rest as you need it.
 
@@ -66,7 +66,7 @@ The toolbar holds ten tools. On a computer each has a key:
 
 A tool's options show in one row above the toolbar. What doesn't fit waits behind **⋯** (More options). Tap the active tool again to hide its options, and again to bring them back.
 
-The top bar holds **Undo** and **Redo** (`Ctrl+Z` and `Ctrl+Shift+Z`, or Cmd on a Mac), which take back your own changes one at a time, and **Fit the map to the screen** (`0`). The **Menu** panel holds the X-card, **Copy player link**, **Members**, **Room settings**, **This device**, **About** and **Leave room**.
+The top bar holds **Undo** and **Redo** (`Ctrl+Z` and `Ctrl+Shift+Z`, or Cmd on a Mac), which take back your own changes one at a time, and **Fit the map to the screen** (`0`). The **Menu** panel holds the X-card, **Copy player link**, **Members**, **Room settings**, **This device**, **DM guide**, **About** and **Leave room**.
 
 The panels a DM uses most for maps and fights:
 

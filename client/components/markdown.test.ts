@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { RULES_TEXT } from "#shared/srd/rules-text.ts";
-import { inlineText, parseInline, parseMarkdown, safeLinkHref, type Block } from "./markdown.ts";
+import { headingSlug, inlineText, parseInline, parseMarkdown, safeLinkHref, type Block } from "./markdown.ts";
 
 const MONSTERS = JSON.parse(readFileSync(new URL("../../shared/srd/monsters.json", import.meta.url), "utf8")) as SrdMonster[];
 
@@ -81,7 +81,7 @@ describe("block Markdown", () => {
             ? [...b.header, ...b.rows.flat()].map(inlineText)
             : b.kind === "list"
               ? b.items.map(inlineText)
-              : b.kind === "quote"
+              : b.kind === "quote" || b.kind === "image"
                 ? []
                 : [inlineText(b.content)],
         )
@@ -168,5 +168,82 @@ describe("journal Markdown", () => {
     assert.deepEqual(parseInline("\\[not](https://example.com/)", journal), [{ kind: "text", text: "[not](https://example.com/)" }]);
     assert.deepEqual(parseInline("\\[not\\](https://example.com/)", journal), [{ kind: "text", text: "[not](https://example.com/)" }]);
     assert.deepEqual(parseMarkdown("\\# not a heading", journal).map((b) => b.kind === "paragraph" && inlineText(b.content)), ["# not a heading"]);
+  });
+});
+
+describe("the DM guide's Markdown (docs/dm-guide.md)", () => {
+  const guide = { guide: true };
+
+  test("headings get GitHub's ids, numbered when one repeats", () => {
+    const blocks = parseMarkdown("# Running fights\n## HP, damage and conditions\n### Ping, Look here and pins\n## Areas\n## Areas", guide);
+    assert.deepEqual(
+      blocks.map((b) => b.kind === "heading" && b.id),
+      ["running-fights", "hp-damage-and-conditions", "ping-look-here-and-pins", "areas", "areas-1"],
+    );
+    assert.equal(headingSlug("What you can ignore at first", new Map()), "what-you-can-ignore-at-first");
+    assert.equal(headingSlug("Map phases, imports and exports", new Map()), "map-phases-imports-and-exports");
+  });
+
+  test("the journal and the stat blocks keep headings without ids", () => {
+    const [journalHeading] = parseMarkdown("## Areas", { journal: true });
+    const [srdHeading] = parseMarkdown("## Areas");
+    assert.deepEqual(journalHeading, { kind: "heading", level: 2, content: [{ kind: "text", text: "Areas" }] });
+    assert.deepEqual(srdHeading, { kind: "heading", level: 2, content: [{ kind: "text", text: "Areas" }] });
+  });
+
+  test("code spans keep what they hold, and a lone backtick stays", () => {
+    assert.deepEqual(parseInline("Press `Ctrl+Shift+Z` or `?`.", guide), [
+      { kind: "text", text: "Press " },
+      { kind: "code", text: "Ctrl+Shift+Z" },
+      { kind: "text", text: " or " },
+      { kind: "code", text: "?" },
+      { kind: "text", text: "." },
+    ]);
+    assert.deepEqual(parseInline("`8d6 *fire*`", guide), [{ kind: "code", text: "8d6 *fire*" }]);
+    assert.deepEqual(parseInline("a ` b", guide), [{ kind: "text", text: "a ` b" }]);
+    assert.deepEqual(parseInline("``", guide), [{ kind: "text", text: "``" }]);
+    // Outside the guide a backtick is text, as before.
+    assert.deepEqual(parseInline("`x`", { journal: true }), [{ kind: "text", text: "`x`" }]);
+  });
+
+  test("a link to a heading stays a link, and a link to a file keeps only its text", () => {
+    assert.deepEqual(parseInline("See [Areas](#areas) and [FEATURES.md](../FEATURES.md).", guide), [
+      { kind: "text", text: "See " },
+      { kind: "link", href: "#areas", children: [{ kind: "text", text: "Areas" }] },
+      { kind: "text", text: " and FEATURES.md." },
+    ]);
+    assert.deepEqual(parseInline("[the SRD](https://example.com/srd)", guide), [{ kind: "link", href: "https://example.com/srd", children: [{ kind: "text", text: "the SRD" }] }]);
+    assert.ok(!JSON.stringify(parseInline("[click](javascript:alert(1))", guide)).includes('"link"'));
+    // The journal still takes only https.
+    assert.deepEqual(parseInline("[Areas](#areas)", { journal: true }), [{ kind: "text", text: "[Areas](#areas)" }]);
+  });
+
+  test("an image alone on its line is an image, with its path as written", () => {
+    assert.deepEqual(parseMarkdown("Text.\n![The fog tool.](dm-guide/fog.webp)\nMore.", guide), [
+      { kind: "paragraph", content: [{ kind: "text", text: "Text." }] },
+      { kind: "image", src: "dm-guide/fog.webp", alt: "The fog tool." },
+      { kind: "paragraph", content: [{ kind: "text", text: "More." }] },
+    ]);
+    // A scheme, a query or text around it leave the line as text.
+    for (const line of ["![x](https://example.com/a.webp)", "![x](dm-guide/a.webp?v=1)", "see ![x](dm-guide/a.webp)"]) {
+      assert.equal(parseMarkdown(line, guide)[0]!.kind, "paragraph", line);
+    }
+    assert.equal(parseMarkdown("![x](dm-guide/a.webp)", { journal: true })[0]!.kind, "paragraph");
+  });
+
+  test("bullets indented under an item belong to it", () => {
+    assert.deepEqual(parseMarkdown("- [Quick start](#quick-start)\n- Making maps\n  - [Scenes](#scenes)\n  - [Fog](#fog)\n- Last", guide), [
+      {
+        kind: "list",
+        items: [
+          [{ kind: "link", href: "#quick-start", children: [{ kind: "text", text: "Quick start" }] }],
+          [{ kind: "text", text: "Making maps" }],
+          [{ kind: "text", text: "Last" }],
+        ],
+        sub: [[], [[{ kind: "link", href: "#scenes", children: [{ kind: "text", text: "Scenes" }] }], [{ kind: "link", href: "#fog", children: [{ kind: "text", text: "Fog" }] }]], []],
+      },
+    ]);
+    // A list with none has no `sub`, as the journal's lists have none.
+    assert.deepEqual(parseMarkdown("- a\n- b", guide), [{ kind: "list", items: [[{ kind: "text", text: "a" }], [{ kind: "text", text: "b" }]] }]);
   });
 });

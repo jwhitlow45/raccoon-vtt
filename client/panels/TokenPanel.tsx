@@ -7,6 +7,7 @@ import { isCompanion } from "../canvas/barButtons.ts";
 import { Button } from "../components/Button.tsx";
 import { Checkbox } from "../components/Checkbox.tsx";
 import { Empty } from "../components/Empty.tsx";
+import { QuickStartLink } from "../features/guide/GuideLink.tsx";
 import { Section as PanelSection } from "../components/Panel.tsx";
 import { RowDot } from "../components/Row.tsx";
 import { Switch } from "../components/Switch.tsx";
@@ -107,7 +108,7 @@ function TokenDetails(props: PanelProps) {
     [token, you, character, playersApplyDamage],
   );
 
-  if (!token || !access) return <Empty>Tap a token to see it here.</Empty>;
+  if (!token || !access) return <Empty action={you?.role === "dm" ? <QuickStartLink /> : undefined}>Tap a token to see it here.</Empty>;
 
   const actor: Partial<Actor> | undefined = "inline" in token.actor ? token.actor.inline : character?.actor;
   const fp = footprint(token);

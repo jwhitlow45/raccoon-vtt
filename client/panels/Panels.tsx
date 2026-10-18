@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { LoadBoundary, LoadFailureNotice, type FallbackProps } from "../components/LoadBoundary.tsx";
 import { Loading } from "../components/Loading.tsx";
+import { PanelGuideLink } from "../features/guide/GuideLink.tsx";
 import { PanelHeaderHost, PanelHere, panelById, type PanelHeader } from "../features/panels.ts";
 import { rememberReopen, type Reopen } from "../lib/reopen.ts";
 import { useRoomView } from "../state/view.ts";
@@ -14,8 +15,11 @@ import { useRoomView } from "../state/view.ts";
  * `onHeader` hears the subpage the panel names (usePanelHeader), such as
  * Members inside Menu, so the sheet or side panel around it can title its
  * header with it and put "Back to Menu" there.
+ *
+ * A panel the DM guide covers ends, for the DM, in a link to its section.
  */
 export function PanelBody(props: { id: string; shown: boolean; selectedTokenId: string | null; close(): void; onHeader?(header: PanelHeader | null): void }) {
+  const dm = useRoomView((s) => s.you?.role === "dm");
   const def = panelById(props.id);
   if (!def) return null;
   const Component = def.Component;
@@ -25,6 +29,7 @@ export function PanelBody(props: { id: string; shown: boolean; selectedTokenId: 
       <Suspense fallback={<Loading text="Loading…" />}>
         <PanelHere id={props.id}>
           <Component selectedTokenId={props.selectedTokenId} close={props.close} shown={props.shown} />
+          {dm && def.guide ? <PanelGuideLink section={def.guide} panel={def.title} /> : null}
         </PanelHere>
       </Suspense>
     </LoadBoundary>

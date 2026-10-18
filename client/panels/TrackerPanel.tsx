@@ -3,6 +3,7 @@ import type { Token } from "#shared/model.ts";
 import { MAX_ENTRIES_PER_OP } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
 import { Empty } from "../components/Empty.tsx";
+import { QuickStartLink } from "../features/guide/GuideLink.tsx";
 import { Help, Section } from "../components/Panel.tsx";
 import { Segmented } from "../components/Segmented.tsx";
 import { Switch } from "../components/Switch.tsx";
@@ -69,7 +70,7 @@ export default function TrackerPanel(props: PanelProps) {
   if (!running) {
     return (
       <Stack>
-        <Empty>No fight is running.</Empty>
+        <Empty action={dm ? <QuickStartLink /> : undefined}>No fight is running.</Empty>
         {dm ? <StartFight selectedTokenId={props.selectedTokenId} /> : null}
         <SoundSwitch />
       </Stack>

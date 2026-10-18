@@ -2,6 +2,7 @@ import { Suspense, useState, useSyncExternalStore } from "react";
 import { Button } from "./components/Button.tsx";
 import { Card, Page } from "./components/Field.tsx";
 import { LoadBoundary, LoadFailureNotice } from "./components/LoadBoundary.tsx";
+import { Loading } from "./components/Loading.tsx";
 import { parseFragment, type FragmentSecret } from "./lib/links.ts";
 import { navigate, useLocation } from "./lib/navigation.ts";
 import { linkState, subscribeLinkState } from "./lib/playerLink.ts";
@@ -20,6 +21,8 @@ const Kit = import.meta.env.DEV ? retryableLazy(() => import("./dev/Kit.tsx")) :
 const DisplayPages = retryableLazy(() => import("./features/display/DisplayPages.tsx"));
 // A chunk of its own, which no room ever loads (docs/design-v1-dm-tools.md 3.18).
 const Admin = retryableLazy(() => import("./pages/Admin.tsx"));
+// The guide and its screenshots load only for a reader who opens it.
+const DmGuide = retryableLazy(() => import("./pages/DmGuide.tsx"));
 
 type ClaimTarget = { roomId: string; fragment: FragmentSecret };
 
@@ -96,6 +99,14 @@ export function App() {
         <LoadBoundary fallback={(f) => <LoadFailureNotice {...f} subject="The admin page" verb="load" />}>
           <Suspense fallback={null}>
             <Admin />
+          </Suspense>
+        </LoadBoundary>
+      );
+    case "guide":
+      return (
+        <LoadBoundary fallback={(f) => <LoadFailureNotice {...f} subject="The DM guide" verb="load" />}>
+          <Suspense fallback={<Loading text="Loading the DM guide…" />}>
+            <DmGuide />
           </Suspense>
         </LoadBoundary>
       );

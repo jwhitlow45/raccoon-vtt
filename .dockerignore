@@ -40,7 +40,10 @@ playwright-report
 
 # Not part of the application. docker/ holds the egress proxy's config, which
 # is bind mounted into the squid container and has no business in this image.
+# The DM guide is the exception: the build bundles it into the app.
 docs
+!docs/dm-guide.md
+!docs/dm-guide
 screenshots
 docker
 Dockerfile
