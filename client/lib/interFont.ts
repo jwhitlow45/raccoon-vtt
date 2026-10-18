@@ -20,8 +20,9 @@ export const INTER_VERSION = "4.1";
 /**
  * The characters the files keep: Basic Latin, Latin-1 Supplement, Latin
  * Extended-A, General Punctuation, the arrows and the minus sign, which
- * covers every string the app prints. Anything else (an emoji, a name in
- * another script) falls back to the next font in the stack.
+ * cover nearly every string the app prints. Anything else falls back to
+ * the next font in the stack: an emoji, a name in another script, or a
+ * rare symbol such as the midline ellipsis (U+22EF) in the DM guide.
  */
 export const INTER_UNICODE_RANGE = ["U+0020-007E", "U+00A0-017F", "U+2000-206F", "U+2190-2199", "U+2212"] as const;
 

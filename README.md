@@ -126,17 +126,16 @@ These jobs run on Ubuntu:
   gets a postgres service container of its own and runs its share of
   `e2e/*.e2e.ts`, one file at a time, in Google Chrome.
 
-The app's text is in the system font, which Android draws in Roboto and
-Ubuntu in DejaVu Sans. So each shard installs Roboto and makes it the
-system font with `e2e/fonts.conf`, so pages lay out close to an Android
-phone. A file that fails on Linux from font metrics alone, and cannot be
-made tolerant without losing what it guards, goes in `e2e/macos-only.json`
-with the reason. The Linux shards leave those files out, and an
-**e2e-macos** job runs them on a Mac. The list is empty, and the macOS job
-runs only when it is not. A single test that fails on Linux from font
-metrics alone is marked with `linuxFontTodo` (`e2e/harness.ts`) instead:
-on Linux it still runs and shows as a todo, but does not fail its file.
-The marks stay until the app has one font on every OS.
+The app draws its text in Inter, which it serves itself from
+`public/fonts/`, so a page lays out the same on the Linux shards as on a
+phone or a Mac. Each shard still installs Roboto and makes it the system
+font with `e2e/fonts.conf`, as the fallback font. It draws only before
+Inter loads and for the few characters Inter's subset lacks, as on an
+Android phone. A file that still fails on Linux from font metrics alone,
+and cannot be made tolerant without losing what it guards, goes in
+`e2e/macos-only.json` with the reason. The Linux shards leave those files
+out, and an **e2e-macos** job runs them on a Mac. The list is empty, and
+the macOS job runs only when it is not.
 
 A newer push to a `ci/` branch cancels that branch's run in progress. Every
 push to `main` runs to the end, so each commit there is tested. A failing

@@ -94,6 +94,7 @@ The project owner's other idea, one organized dropdown for every panel, was weig
 
 | Font | Token, Initiative and Log, with their gaps | More's room beside them at 295 | More's reserve, capped | Spare | Names More cuts there |
 |---|---|---|---|---|---|
+| Inter, the app's font since 2026-10-17 (measured 2026-10-18) | 175 | 118 | 92 (widest name 109) | 26 | none |
 | macOS's system font | 174 | 119 | 92 (widest name 109) | 27 | none |
 | Segoe UI | 172 | 121 | 92 (widest 103) | 29 | none |
 | DejaVu Sans | 193 | 100 | 92 (widest 121) | 8 | Monsters, Encounters, Characters, each by a few letters |

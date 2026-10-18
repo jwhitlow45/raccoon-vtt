@@ -2,11 +2,13 @@
 # unit and integration tests, and the e2e files in eight shards.
 #
 # The e2e shards run on Ubuntu, since macOS runners are far slower and a
-# public repository runs up to 20 Linux jobs at a time. The app's text is
-# in the system font, which Android draws in Roboto, so each shard installs
-# Roboto and e2e/fonts.conf makes it Chrome's system font. A file that fails
-# on Linux from font metrics alone goes in e2e/macos-only.json, and a macOS
-# job runs those files only while that list is not empty.
+# public repository runs up to 20 Linux jobs at a time. The app draws its
+# text in Inter, which it serves itself, so a page lays out on Linux as on
+# any device. Each shard still installs Roboto, and e2e/fonts.conf makes it
+# Chrome's system font: the fallback font, as on Android, for the moment
+# before Inter loads and for the characters its subset lacks. A file that
+# fails on Linux from font metrics alone goes in e2e/macos-only.json, and a
+# macOS job runs those files only while that list is not empty.
 #
 # The client is built once, since the bundle is the same bytes on every OS,
 # and each shard downloads it. scripts/e2e-shard.ts decides which files each
@@ -158,8 +160,9 @@ jobs:
         with:
           name: dist
           path: dist
-      # Ubuntu 24.04's Roboto, pinned to its version in the archive. The last
-      # line fails the step unless fontconfig now answers Roboto.
+      # The fallback font behind Inter: Ubuntu 24.04's Roboto, pinned to its
+      # version in the archive. The last line fails the step unless
+      # fontconfig now answers Roboto.
       - name: Roboto as the system font
         run: |
           sudo apt-get update -qq

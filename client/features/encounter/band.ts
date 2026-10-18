@@ -63,8 +63,10 @@ export const BAND_NAME_MIN_PX = 36;
 export const BAND_MAX_DISKS = 4;
 
 /**
- * What the band's row holds, in layout px, as Chrome draws it in the
- * system font, rounded up. Estimates rather than measurements, so the
+ * What the band's row holds, in layout px, as Chrome draws it, rounded
+ * up. They were set from the system font. Inter draws each a little
+ * narrower (the round's digits, the clock and "Time's up" were checked),
+ * so they still hold. Estimates rather than measurements, so the
  * band's layout follows its width and what it shows (the round's digits,
  * the clock's text), never its own drawing, and never flickers between two
  * layouts while it measures itself. `slack` covers a font a little wider.

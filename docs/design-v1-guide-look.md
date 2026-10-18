@@ -59,7 +59,7 @@ The breakpoint uses `useLayoutSize` (features/device/layout.ts), so a device's i
 | Body | 16 | 400 | 0, 16 after | line height 1.6, measure 34 em |
 | Caption | 13 | 400 | 8 | muted |
 
-Every heading's 1 px rule goes: space and size carry the ladder, and the rules made every level look alike. The type is `theme.font.body`, so Inter applies when the font lane lands. The sizes above the interface's (40, 32) are named in one place each: `DOC_TITLE_SIZE` in features/guide/look.ts and `GUIDE_HEADING` in Markdown.tsx.
+Every heading's 1 px rule goes: space and size carry the ladder, and the rules made every level look alike. The type is `theme.font.body`, which is Inter. The sizes above the interface's (40, 32) are named in one place each: `DOC_TITLE_SIZE` in features/guide/look.ts and `GUIDE_HEADING` in Markdown.tsx.
 
 The measure was checked in Chrome on a Mac over every full line of the guide's paragraphs: at 34 em the median line holds 73 characters (67 to 77 for the middle 80%). At 36 em the median was 77 (71 to 82).
 
