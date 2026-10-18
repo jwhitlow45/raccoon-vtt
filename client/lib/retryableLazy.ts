@@ -70,6 +70,14 @@ export function roleMayLoad(roles: readonly Role[], role: unknown): boolean {
 /** Loads a room preloads in the background, with the roles that may use each. */
 const preloadable: { load: () => Promise<unknown>; roles: readonly Role[]; started: boolean }[] = [];
 
+/** What preloadLazies asks of the device's connection, a parameter so a test can stand in for the browser's. */
+export type Network = { online(): boolean; onceOnline(go: () => void): void };
+
+const browserNetwork: Network = {
+  online: () => navigator.onLine !== false,
+  onceOnline: (go) => window.addEventListener("online", go, { once: true }),
+};
+
 /**
  * Starts loading, without showing, every lazy module this role may open.
  * The Room page calls it once its connection is up, so the first load of
@@ -77,8 +85,18 @@ const preloadable: { load: () => Promise<unknown>; roles: readonly Role[]; start
  * offline or after a redeploy removed the old chunks, is already here. A
  * DM-only module never loads for a player. Failures are left for the
  * panel's own load to report.
+ *
+ * A device that is offline when it is called waits to be back online. The
+ * room's socket can still read as open then, for up to ten seconds until
+ * its heartbeat gives up (state/socket.ts), but every load started offline
+ * fails, and Chrome keeps each failure for the life of the page (above),
+ * so none of those panels could open until a reload.
  */
-export function preloadLazies(role: Role): void {
+export function preloadLazies(role: Role, network: Network = browserNetwork): void {
+  if (!network.online()) {
+    network.onceOnline(() => preloadLazies(role, network));
+    return;
+  }
   for (const entry of preloadable) {
     if (entry.started || !entry.roles.includes(role)) continue;
     entry.started = true;
