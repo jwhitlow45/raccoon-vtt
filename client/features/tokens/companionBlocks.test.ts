@@ -25,7 +25,7 @@ import {
   type AttachPhase,
   type HpChoice,
 } from "./companionBlocks.ts";
-import { NEW_COMPANION, withBlock } from "./companions.ts";
+import { draftWith, NEW_COMPANION, withBlock, type ChosenBlock } from "./companions.ts";
 import { shippedImage } from "../monsters/images.ts";
 
 const SRD = JSON.parse(readFileSync(new URL("../../../shared/srd/monsters.json", import.meta.url), "utf8")) as SrdMonster[];
@@ -401,6 +401,25 @@ describe("the companion picker's lists (docs/design-v1-companion-stat-blocks.md 
     for (const row of lists.srd) assert.deepEqual(row.picture, shippedImage({ srdId: (row.link as { srdId: string }).srdId }), row.key);
     // A new companion with no picture of its own takes it, as a token placed from the monster does.
     assert.deepEqual(withBlock(NEW_COMPANION, { link: wolf!.link, view: wolf!.view, source: "srd", picture: wolf!.picture! }).image, { icon: "lorc/wolf-head", color: "#ad7f58" });
+  });
+
+  test("a second pick swaps the first pick's picture for its own, and keeps one the user chose", () => {
+    const lists = pickerLists({ name: "", query: "", blocks: [], characterName: "Bree", srd: SRD });
+    const pick = (srdId: string): ChosenBlock => {
+      const row = lists.srd.find((r) => "srdId" in r.link && r.link.srdId === srdId)!;
+      return { link: row.link, view: row.view, source: "srd", picture: row.picture! };
+    };
+    const wolf = withBlock(NEW_COMPANION, pick("wolf"));
+    assert.deepEqual(wolf.image, { icon: "lorc/wolf-head", color: "#ad7f58" });
+    const owl = withBlock(wolf, pick("owl"));
+    assert.deepEqual([owl.size, owl.ac, owl.image], ["tiny", 11, { icon: "caro-asercion/barn-owl", color: "#ad7f58" }]);
+    // The name fills only while it is empty (design 5.6), so it stays the wolf's.
+    assert.equal(owl.name, "Wolf");
+    const mine = { icon: "lorc/fox-head", color: "#336699" };
+    assert.deepEqual(withBlock(draftWith(wolf, { image: mine }), pick("owl")).image, mine);
+    // A stored block with no picture leaves none, rather than the wolf's.
+    const plain = companionBlock("plain", "bree");
+    assert.equal(withBlock(wolf, { link: { blockId: "plain" }, view: monsterView(plain), source: "block" }).image, null);
   });
 
   test("before the SRD loads, the character's blocks list at once", () => {

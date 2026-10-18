@@ -21,7 +21,8 @@ export type CompanionWhat = "creature" | "effect";
 /**
  * A stat block chosen in the add form (docs/design-v1-companion-stat-blocks.md
  * 5.6): what it links, the block in the SRD monsters' shape, and a stored
- * block's picture, which a new companion starts with.
+ * block's picture, or an SRD monster's shipped icon, which a new companion
+ * starts with.
  */
 export type ChosenBlock = { link: BlockLink; view: StatBlockMonster; source: "srd" | "block"; picture?: ImageRef };
 
@@ -44,9 +45,11 @@ export type CompanionDraft = {
   block: ChosenBlock | null;
   /** The fields the user changed, which a block chosen later leaves as they are. */
   edited: readonly FilledField[];
+  /** The fields a chosen block filled, so a block chosen later can tell its picture from one the user chose. */
+  filled: readonly FilledField[];
 };
 
-export const NEW_COMPANION: CompanionDraft = { name: "", what: "creature", turn: "shared", size: "small", hp: null, ac: null, image: null, turnPicked: false, block: null, edited: [] };
+export const NEW_COMPANION: CompanionDraft = { name: "", what: "creature", turn: "shared", size: "small", hp: null, ac: null, image: null, turnPicked: false, block: null, edited: [], filled: [] };
 
 /**
  * The toast for a creation answer that comes once its form is gone or out
@@ -64,17 +67,32 @@ export function lateCompanionText(name: string, answer: OpAnswer, refusal?: Pick
  * The draft with a stat block chosen (5.6), or none for Remove. A block
  * fills each field the user has left alone: the name while it is empty,
  * the size, HP with the block's average, AC, and the picture with a stored
- * block's when none is chosen. What it filled stays when it is removed.
+ * block's picture, or an SRD monster's shipped icon, when none is chosen.
+ * A picture an earlier block filled is not chosen, so the block picked
+ * now replaces it with its own, or with none when it has none: a wolf's
+ * icon never stays on an owl. What it filled stays when it is removed.
  */
 export function withBlock(draft: CompanionDraft, chosen: ChosenBlock | null): CompanionDraft {
   if (!chosen) return { ...draft, block: null };
   const left = (field: FilledField) => !draft.edited.includes(field);
+  const filled = new Set(draft.filled);
   const next: CompanionDraft = { ...draft, block: chosen };
-  if (draft.name.trim() === "") next.name = chosen.view.name;
-  if (left("size")) next.size = chosen.view.size;
-  if (left("hp") && chosen.view.hp.average >= 1) next.hp = chosen.view.hp.average;
-  if (left("ac")) next.ac = chosen.view.ac;
-  if (left("image") && draft.image === null && chosen.picture) next.image = chosen.picture;
+  const fill = <F extends FilledField>(field: F, value: CompanionDraft[F]) => {
+    next[field] = value;
+    filled.add(field);
+  };
+  if (draft.name.trim() === "") fill("name", chosen.view.name);
+  if (left("size")) fill("size", chosen.view.size);
+  if (left("hp") && chosen.view.hp.average >= 1) fill("hp", chosen.view.hp.average);
+  if (left("ac")) fill("ac", chosen.view.ac);
+  if (left("image") && (draft.image === null || draft.filled.includes("image"))) {
+    if (chosen.picture) fill("image", chosen.picture);
+    else {
+      next.image = null;
+      filled.delete("image");
+    }
+  }
+  next.filled = [...filled];
   return next;
 }
 
@@ -96,7 +114,7 @@ export function defaultTurn(what: CompanionWhat): CompanionTurn {
  * an effect takes no turn of its own, which then goes to the effect's
  * default.
  */
-export function draftWith(draft: CompanionDraft, patch: Partial<Omit<CompanionDraft, "turnPicked" | "edited" | "block">>): CompanionDraft {
+export function draftWith(draft: CompanionDraft, patch: Partial<Omit<CompanionDraft, "turnPicked" | "edited" | "filled" | "block">>): CompanionDraft {
   const edited = new Set(draft.edited);
   for (const field of ["name", "size", "hp", "ac", "image"] as const) if (field in patch) edited.add(field);
   const next: CompanionDraft = { ...draft, ...patch, turnPicked: draft.turnPicked || patch.turn !== undefined, edited: [...edited] };
