@@ -387,6 +387,17 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await cy.getByRole("status", { name: "Connected" }).first().waitFor();
   });
 
+  test("1b. the new room keeps every goblin's place out of Ana's order and frames before its turn, and Everyone shows her the whole order (docs/design-v1-combat-flow.md 11)", async () => {
+    await waitFor("Ana's order of the party alone", () => (anaSocket.state?.encounter?.entries.length === 2 ? true : null));
+    assert.deepEqual(anaSocket.state!.encounter!.entries.map((e) => e.id), ["e-bree", "e-cy"]);
+    assert.equal(anaSocket.state!.encounter!.activeEntryId, "e-bree");
+    for (const i of run.goblins.keys()) assert.equal(anaSocket.everSaw(`"e-g${i}"`), false, `goblin ${i + 1}'s row reached Ana`);
+    // The rest of this file reads the whole order, as a room from before the setting does.
+    await ops.send({ t: "room.update", settings: { playersSeeOrder: "all" } });
+    await waitFor("Ana's whole order", () => (anaSocket.state?.encounter?.entries.length === 14 ? true : null));
+    await waitFor("Cy's whole order", () => (cySocket.state?.encounter?.entries.length === 14 ? true : null));
+  });
+
   test("2. the round header sticks while the order scrolls under it, one whole row always shows under it, and it leaves with the order's end", async () => {
     const sizes = [
       { width: 390, height: 844, scale: 1 },
@@ -1350,6 +1361,33 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await waitFor("Ana loses that row alone", () => (!anaSees(pair[0]!) && anaSees(pair[1]!) ? true : null));
     assert.equal(dmSocket.state?.tokens[pair[0]!]?.visibility, "all");
     await ops.send({ t: "encounter.update", entryId: rowOf(pair[0]!)!.id, patch: { hidden: false } });
+  });
+
+  test("13i. back on the party alone, an ogre added mid-fight stays out of Ana's order and frames until its turn comes, then joins her tracker in its place (docs/design-v1-combat-flow.md 11)", async () => {
+    await ops.send({ t: "room.update", settings: { playersSeeOrder: "party" } });
+    const ogre = randomUUID();
+    await ops.send({ t: "token.create", token: { id: ogre, sceneId: run.sceneId, size: "large", visibility: "all", kind: "monster", name: "Ogre", x: 20, y: 12, disposition: "hostile", actor: { inline: actor(59, 11) } } });
+    await ops.send({ t: "encounter.add", entries: [{ id: "e-ogre", tokenId: ogre, value: -5 }] });
+    await waitFor("the ogre's row for the DM", () => (dmSocket.state?.encounter?.entries.some((e) => e.id === "e-ogre") ? true : null));
+    assert.equal(anaSocket.everSaw('"e-ogre"'), false, "the ogre's row reached Ana before its turn");
+    const tracker = await openTracker(ana);
+    assert.equal(await tracker.getByRole("button", { name: /^Ogre[.,]/ }).count(), 0);
+    for (let step = 0; step < 20 && dmSocket.state?.encounter?.activeEntryId !== "e-ogre"; step++) {
+      const was = dmSocket.state!.encounter!;
+      await ops.send({ t: "encounter.next" });
+      await waitFor("the DM's next turn", () => (dmSocket.state?.encounter?.activeEntryId !== was.activeEntryId || dmSocket.state?.encounter?.round !== was.round ? true : null));
+      if (dmSocket.state?.encounter?.activeEntryId !== "e-ogre") assert.equal(anaSocket.everSaw('"e-ogre"'), false, "the ogre's row reached Ana before its turn");
+    }
+    assert.equal(dmSocket.state?.encounter?.activeEntryId, "e-ogre");
+    await waitFor("the ogre in Ana's order on its turn", () => (anaSocket.state?.encounter?.activeEntryId === "e-ogre" ? true : null));
+    const entries = anaSocket.state!.encounter!.entries;
+    assert.equal(entries.at(-1)?.id, "e-ogre", "last, in its place");
+    await rowButton(ana, "Ogre");
+    // Its next turn keeps it there.
+    await ops.send({ t: "encounter.next" });
+    await waitFor("the ogre's turn over", () => (anaSocket.state?.encounter?.activeEntryId !== "e-ogre" ? true : null));
+    assert.ok(anaSocket.state!.encounter!.entries.some((e) => e.id === "e-ogre"));
+    await ops.send({ t: "room.update", settings: { playersSeeOrder: "all" } });
   });
 
   test("14. no page logged an error", () => {

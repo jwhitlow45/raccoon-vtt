@@ -311,7 +311,8 @@ describe("raccoon-vtt smoke run", { timeout: 300_000 }, () => {
     await player.getByRole("button", { name: "Close Initiative" }).click();
     await waitFor("every value in", () => dmSocket.state?.encounter?.entries.every((e) => e.value !== null) || null);
     const playerEntries = playerSocket.state?.encounter?.entries ?? [];
-    assert.equal(playerEntries.length, 2, "the entry of the monster under fog is not the player's to see");
+    // A new room keeps a monster's place in the order from players until its turn (docs/design-v1-combat-flow.md 11), and the Boss is under the fog besides.
+    assert.equal(playerEntries.length, 1, "only Thorn's entry is the player's to see before the monsters act");
     assert.ok(!playerEntries.some((e) => e.tokenId === run.bossId));
 
     const dmStrip = dm.getByRole("button", { name: /^Initiative, round 1\./ });
@@ -323,6 +324,7 @@ describe("raccoon-vtt smoke run", { timeout: 300_000 }, () => {
     await dm.getByRole("button", { name: "Next", exact: true }).click();
     await dmStrip.and(dm.getByRole("button", { name: /Goblin Warrior( \d+)?'s turn/ })).waitFor();
     await playerStrip.and(player.getByRole("button", { name: /Goblin Warrior( \d+)?'s turn/ })).waitFor();
+    await waitFor("the Warrior's entry in the player's order once its turn came", () => (playerSocket.state?.encounter?.entries.length === 2 ? true : null));
 
     // The Boss is under the fog, so the player only learns that someone else acts.
     await dm.getByRole("button", { name: "Next", exact: true }).click();
