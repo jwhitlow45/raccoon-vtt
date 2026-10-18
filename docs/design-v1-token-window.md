@@ -182,7 +182,7 @@ The window resizes only while it docks on a computer. The compact overlay, a spa
 
 ### 5.5 The handle as a control
 
-The handle is a `<button>`, "Resize window", described (a visually hidden `aria-describedby`) by "Drag to resize the window. With this focused, the arrow keys resize it, and Shift resizes it faster. Reset, beside Close, puts it back." The grip's description is the same with "move". Enter and Space do nothing on either, as a tap does nothing, by the project owner's answer.
+The handle is a `<button>`, "Resize window", described (a visually hidden `aria-describedby`) by "Drag to resize the window. With this focused, the arrow keys resize it, and Shift resizes it faster. Reset, beside Close, puts it back." It is an icon alone, so its name shows in the shared tooltip on hover and keyboard focus (docs/design-v1-icons.md 3.2), never in a native title. The grip's description is the same with "move". Enter and Space do nothing on either, as a tap does nothing, by the project owner's answer.
 
 - **Arrow keys** move the handle's corner 8 px, or 64 with Shift, so the window grows or shrinks with the same sense as a drag of the handle: for the top-left handle, Left widens and Up heightens. Each press is stored at once by the release rules, with no snapping: a width exactly at the default stores none, and a height at the most it may take stores none. A press against a limit changes nothing. The handler calls `preventDefault`, as the grip's does.
 - **The status** speaks after the keys rest: "Window 316 by 400 pixels", with ", narrowest", ", widest", ", shortest" or ", tallest it can be here" when a press meets that limit.
