@@ -60,6 +60,23 @@ describe("replaying stored ops", () => {
     assert.equal(loaded?.state.members.p1?.name, "Sam");
   });
 
+  test("a room stored with the dragon turtle's old id loads with the new one, its older image change and undo replayed", async () => {
+    const OLD = "dragon-tur-t-le";
+    const old = room({ tokens: { t1: token("t1", { name: "Dragon Turtle", actor: { inline: actor({ srdId: OLD }) } }) } });
+    const rename: Op = { t: "token.update", tokenId: "t1", patch: { name: "Old Shelly" } };
+    const renamed = applyOp(old, rename, DM, env(1));
+    assert.ok(renamed.ok && renamed.inverse);
+    const ops = [rename, { t: "monster.setSrdImage", srdId: OLD, image: { icon: "lorc/turtle", color: "#ff6b4a" } }, { t: "sys.restore", entries: renamed.inverse, from: "undo", deps: true }];
+    const rows = ops.map((op, i) => ({ seq: String(i + 1), at: new Date(env(i + 1).at), actor_member_id: "dm1", actor_role: "dm", op, op_version: 9 }));
+    const query = (sql: string) => Promise.resolve({ rows: sql.includes("room_snapshots") ? [{ seq: "0", state: JSON.parse(JSON.stringify(old)), schema_version: 13 }] : rows });
+    const reasons: string[] = [];
+    const loaded = await loadRoom({ query, connect: () => Promise.reject(new Error("not used")) } as unknown as Pool, "R", (_seq, reason) => reasons.push(reason));
+    assert.deepEqual(reasons, []);
+    assert.equal(loaded?.seq, 3);
+    assert.deepEqual(loaded?.state.tokens.t1, token("t1", { rev: 2, name: "Dragon Turtle", actor: { inline: actor({ srdId: "dragon-turtle" }) } }));
+    assert.deepEqual(Object.keys(loaded?.state.srdImages ?? {}), ["dragon-turtle"]);
+  });
+
   test("a room from before who may move any token loads with the switch's answer, and its older settings changes and their undo replay", async () => {
     // The snapshot and the ops as an older build stored them, with the switch.
     const { playersMoveAny: _new, ...settings } = room().meta.settings;

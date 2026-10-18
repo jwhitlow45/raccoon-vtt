@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 13;
-export const OP_VERSION = 9;
+export const SNAPSHOT_VERSION = 14;
+export const OP_VERSION = 10;
 
 export type MigrationStep = {
   from: number;
@@ -106,6 +106,10 @@ export const snapshotMigrations: MigrationStep[] = [
   // whose absence reads as before, so a v12 room is a v13 room as it is. The number moves so that an older build, whose
   // strict state schema refuses the field, refuses a v13 snapshot instead of failing on the scene.
   { from: 12, to: 13, apply: (state) => state },
+  // The dragon turtle's SRD id was `dragon-tur-t-le` until the SRD import took the name from the stat block instead of
+  // the index's kerning gaps. Rooms and backups from before name it that way wherever they name an SRD monster, so each
+  // of those spots takes today's id (renameSrdIdsInState).
+  { from: 13, to: 14, apply: (state) => renameSrdIdsInState(state) },
 ];
 
 /**
@@ -320,7 +324,162 @@ export const opMigrations: MigrationStep[] = [
     to: 9,
     apply: (op) => op,
   },
+  {
+    // The dragon turtle's SRD id, as in snapshot step 13 to 14: a v9 op
+    // names it `dragon-tur-t-le` wherever it names an SRD monster, and
+    // takes today's id there (renameSrdIdsInOp). A stored restore keeps its
+    // guards, though a hash guard may have hashed a value that held the old
+    // id, which no migrated room holds. Replay hands the reducer the stored
+    // version instead, as in step 3 to 4, and a v9 guard also matches the
+    // entity spelled the old way (`oldSrdIdGuards`, `withOldSrdIds`). So a
+    // guard still refuses a change that really happened since.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 10, and the shutdown writes version 14 snapshots.
+    // Rollback: an older build refuses to migrate either down
+    // (runMigrations), and it would not know the new id anyway, so going
+    // back restores that backup, losing the play since.
+    from: 9,
+    to: 10,
+    apply: (op) => renameSrdIdsInOp(op),
+  },
 ];
+
+/**
+ * SRD ids an earlier import spelled wrong, each with the id the SRD data
+ * has now (snapshot step 13 to 14, op step 9 to 10). The import took the
+ * dragon turtle's name from the SRD's index of stat blocks, whose kerning
+ * gaps split it ("Dragon Tur t le").
+ */
+const RENAMED_SRD_IDS: ReadonlyMap<string, string> = new Map([["dragon-tur-t-le", "dragon-turtle"]]);
+/** The other way round, for guards hashed before the rename. Today's ids were no SRD id then. */
+const OLD_SRD_IDS: ReadonlyMap<string, string> = new Map([...RENAMED_SRD_IDS].map(([old, now]) => [now, old]));
+
+/**
+ * The fields that hold an SRD id (shared/model.ts): an actor's `srdId`, a
+ * saved encounter monster's and `monster.setSrdImage`'s `srdId`, a
+ * companion block's `fromSrd`, and an initiative row's `groupKey`, which is
+ * the SRD id that identical monsters share, or else a base name. An HP log
+ * line's `shapeTemp` names shapes by SRD id too, in `before` and `after`.
+ * An SRD image is keyed by its SRD id, and names it as its `id`.
+ */
+const SRD_ID_FIELDS: ReadonlySet<string> = new Set(["srdId", "fromSrd", "groupKey"]);
+
+/** The parts of a room that can name an SRD monster, besides `srdImages`. */
+const SRD_NAMING_FIELDS = ["tokens", "characters", "savedEncounters", "companionBlocks", "encounter", "encounterHistory", "log"] as const;
+
+const SRD_IMAGE_KEY = "srdImage:";
+
+type IdMap = ReadonlyMap<string, string>;
+
+function mappedId(id: unknown, ids: IdMap): unknown {
+  return typeof id === "string" ? (ids.get(id) ?? id) : id;
+}
+
+/**
+ * The value with every SRD id field at any depth mapped, and the very same
+ * value where it names none of the ids, so a room or op without one is
+ * left as it was.
+ */
+function withMappedSrdIds(value: unknown, ids: IdMap): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    let out: unknown[] | undefined;
+    value.forEach((item, i) => {
+      const next = withMappedSrdIds(item, ids);
+      if (next !== item) (out ??= [...value])[i] = next;
+    });
+    return out ?? value;
+  }
+  let out: Record<string, unknown> | undefined;
+  for (const [field, item] of Object.entries(value)) {
+    const next = SRD_ID_FIELDS.has(field) ? mappedId(item, ids) : field === "shapeTemp" ? mappedShapes(item, ids) : withMappedSrdIds(item, ids);
+    if (next !== item) (out ??= { ...value })[field] = next;
+  }
+  return out ?? value;
+}
+
+/** An HP log line's `shapeTemp`, which names the shapes before and after by SRD id. An actor's own is `true`. */
+function mappedShapes(pool: unknown, ids: IdMap): unknown {
+  if (pool === null || typeof pool !== "object" || Array.isArray(pool)) return pool;
+  let out: Record<string, unknown> | undefined;
+  for (const side of ["before", "after"]) {
+    const id = (pool as Record<string, unknown>)[side];
+    const next = mappedId(id, ids);
+    if (next !== id) (out ??= { ...pool })[side] = next;
+  }
+  return out ?? pool;
+}
+
+function srdImageWithId(image: unknown, id: string): unknown {
+  return image !== null && typeof image === "object" && !Array.isArray(image) ? { ...image, id } : image;
+}
+
+/**
+ * A room's `srdImages` keyed and identified by today's ids. Where a room
+ * holds both spellings, the old one's choice wins: the monster browser
+ * offered only that one, so the other came from no DM's pick.
+ */
+function renamedSrdImages(images: unknown): unknown {
+  if (images === null || typeof images !== "object" || Array.isArray(images)) return images;
+  const entries = Object.entries(images);
+  if (!entries.some(([id]) => RENAMED_SRD_IDS.has(id))) return images;
+  const out: Record<string, unknown> = {};
+  for (const [id, image] of entries) if (!RENAMED_SRD_IDS.has(id)) out[id] = image;
+  for (const [id, image] of entries) {
+    const to = RENAMED_SRD_IDS.get(id);
+    if (to !== undefined) out[to] = srdImageWithId(image, to);
+  }
+  return out;
+}
+
+function renameSrdIdsInState(state: unknown): unknown {
+  if (state === null || typeof state !== "object") return state;
+  const room = state as Record<string, unknown>;
+  let out: Record<string, unknown> | undefined;
+  for (const field of SRD_NAMING_FIELDS) {
+    const next = withMappedSrdIds(room[field], RENAMED_SRD_IDS);
+    if (next !== room[field]) (out ??= { ...room })[field] = next;
+  }
+  const images = renamedSrdImages(room.srdImages);
+  if (images !== room.srdImages) (out ??= { ...room }).srdImages = images;
+  return out ?? state;
+}
+
+/** An op with its SRD ids renamed. A restore's entry for an SRD image is keyed and identified by the new id too. */
+function renameSrdIdsInOp(op: unknown): unknown {
+  const renamed = withMappedSrdIds(op, RENAMED_SRD_IDS);
+  if (renamed === null || typeof renamed !== "object" || !("t" in renamed)) return renamed;
+  const o = renamed as { t: unknown; entries?: unknown };
+  if (o.t !== "sys.restore" || !Array.isArray(o.entries)) return renamed;
+  const stored: unknown[] = o.entries;
+  const entries = stored.map((entry) => {
+    if (entry === null || typeof entry !== "object") return entry;
+    const e = entry as { key?: unknown; value?: unknown };
+    const to = typeof e.key === "string" && e.key.startsWith(SRD_IMAGE_KEY) ? RENAMED_SRD_IDS.get(e.key.slice(SRD_IMAGE_KEY.length)) : undefined;
+    return to === undefined ? entry : { ...e, key: `${SRD_IMAGE_KEY}${to}`, value: srdImageWithId(e.value, to) };
+  });
+  return entries.some((entry, i) => entry !== stored[i]) ? { ...o, entries } : renamed;
+}
+
+/**
+ * Whether a stored restore's hash guards were taken over values that named
+ * SRD monsters by their ids before op step 9 to 10, so the reducer also
+ * matches them against `withOldSrdIds` of what the room holds now. Live ops
+ * carry no stored version and take today's rule.
+ */
+export function oldSrdIdGuards(opVersion: number | undefined): boolean {
+  return opVersion !== undefined && opVersion < 10;
+}
+
+/** An entity of the room as a build from before op version 10 held it, its SRD ids spelled the old way. */
+export function withOldSrdIds(key: string, value: unknown): unknown {
+  if (key.startsWith(SRD_IMAGE_KEY)) {
+    const old = OLD_SRD_IDS.get(key.slice(SRD_IMAGE_KEY.length));
+    return old === undefined ? value : srdImageWithId(value, old);
+  }
+  return withMappedSrdIds(value, OLD_SRD_IDS);
+}
 
 /**
  * Whether an op marks a creature revealed on its turn as seen wherever it

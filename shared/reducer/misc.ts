@@ -1,4 +1,5 @@
 import { keys, parseKey, revOf, type EntityKey, type ParsedKey } from "../keys.ts";
+import { oldSrdIdGuards, withOldSrdIds } from "../migrate.ts";
 import type { AreaTemplate, CompanionBlock, Encounter, Handout, HandoutDoc, Pin, Scene, Token } from "../model.ts";
 import type { OpOf, RestoreEntry } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
@@ -78,7 +79,9 @@ export const CHANGED_SINCE = "it was changed since";
  *
  * New entries are guarded by value (Tx.inverse). A rev guard is still
  * honored, because stored restores from before value guards replay with
- * the rev they were made with.
+ * the rev they were made with. A restore stored before the dragon turtle's
+ * SRD id was renamed hashed its values with the old id, so its guard also
+ * matches the entity spelled that way (shared/migrate.ts, op step 9 to 10).
  */
 export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
   const removed: ParsedKey[] = [];
@@ -89,7 +92,8 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
     if (entry.key.startsWith("log:")) throw invalid("log entries are never restored");
     const current = tx.read(entry.key);
     before.set(entry.key, current);
-    if (!guardMatches(entry, current)) throw invalid(CHANGED_SINCE);
+    const matches = guardMatches(entry, current) || (oldSrdIdGuards(tx.env.opVersion) && guardMatches(entry, withOldSrdIds(entry.key, current)));
+    if (!matches) throw invalid(CHANGED_SINCE);
     if (entry.key === keys.meta && (entry.value === null || entry.value === undefined)) throw invalid("the room meta cannot be removed");
     if (current !== null && (entry.value === null || entry.value === undefined)) removed.push(parsed);
   }

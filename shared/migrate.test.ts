@@ -8,12 +8,14 @@ import {
   marksHadTurn,
   migrateOp,
   migrateSnapshot,
+  oldSrdIdGuards,
   opMigrations,
   oneLinkPerActor,
   resizeStop,
   reviveToOne,
   runMigrations,
   snapshotMigrations,
+  withOldSrdIds,
   type MigrationStep,
 } from "./migrate.ts";
 import type { Encounter, RoomState } from "./model.ts";
@@ -21,7 +23,7 @@ import { opSchema, type Op, type RestoreEntry } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { CHANGED_SINCE, guardMatches } from "./reducer/misc.ts";
 import { guardHash } from "./reducer/tx.ts";
-import { DM, character, companionBlock, comparable, env, room, token } from "./testutil.ts";
+import { AT, DM, actor, blockOf, character, companionBlock, comparable, entry, env, room, srdImage, token } from "./testutil.ts";
 
 /** What the v1 reducer left: today's state without the spot each turn began on. */
 function v1Shape(state: RoomState): RoomState {
@@ -521,9 +523,9 @@ describe("the order setting's bump: op version 8 and snapshot version 12 (docs/d
 });
 
 describe("the Universal VTT mark's bump: op version 9 and snapshot version 13 (docs/design-v1-grid-detect.md section 6)", () => {
-  test("is the version now, and both steps return what they are given", () => {
-    assert.equal(OP_VERSION, 9);
-    assert.equal(SNAPSHOT_VERSION, 13);
+  test("is reached, and both steps return what they are given", () => {
+    assert.ok(OP_VERSION >= 9);
+    assert.ok(SNAPSHOT_VERSION >= 13);
     const ops: unknown[] = [
       { t: "scene.create", scene: { id: "s3", name: "Crypt", bounds: { w: 10, h: 10 }, autoWalls: "off" } },
       { t: "encounter.next" },
@@ -537,5 +539,176 @@ describe("the Universal VTT mark's bump: op version 9 and snapshot version 13 (d
   test("a version 9 op and a version 13 snapshot never migrate down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 9, 8, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 13, 12, snapshotMigrations), /down/);
+  });
+});
+
+describe("the dragon turtle's id: op version 10 and snapshot version 14", () => {
+  const OLD = "dragon-tur-t-le";
+  const NEW = "dragon-turtle";
+  const renamed = <T>(value: T): T => JSON.parse(JSON.stringify(value).replaceAll(OLD, NEW)) as T;
+
+  /**
+   * A room that names the dragon turtle by its old id in every place a room
+   * names an SRD monster: its image, a token, a character in its shape, a
+   * saved encounter, a companion block, the fight and its history, and an
+   * HP line's shapes. A chat line and a token's name mention the old id as
+   * text, which stays.
+   */
+  function oldRoom(): RoomState {
+    const turtleRow = entry("e1", { tokenId: "t1", groupKey: OLD });
+    const encounter: Encounter = { rev: 2, round: 1, activeEntryId: "e1", entries: [turtleRow, entry("e2", { tokenId: "t2", groupKey: "goblin-warrior" })] };
+    const shaped = actor({ srdId: OLD, wildShape: true, hp: { cur: 20, max: 20, temp: 5 }, unshaped: { ac: 12, speeds: { walk: 30 }, shapeTemp: true } });
+    return room({
+      srdImages: { [OLD]: srdImage(OLD, "img-turtle", { rev: 3 }), "goblin-warrior": srdImage("goblin-warrior", "img-goblin") },
+      tokens: {
+        t1: token("t1", { name: "Dragon Turtle", actor: { inline: actor({ srdId: OLD }) } }),
+        t2: token("t2", { name: `not ${OLD}`, actor: { inline: actor({ srdId: "goblin-warrior" }) } }),
+      },
+      characters: { c1: character("c1", { actor: shaped }) },
+      savedEncounters: { se1: { id: "se1", rev: 1, name: "Shell game", monsters: [{ srdId: OLD, count: 1, inLair: true }, { srdId: "goblin-warrior", count: 3 }] } },
+      companionBlocks: { cb1: companionBlock("cb1", "c1", { fromSrd: OLD }) },
+      encounter,
+      encounterHistory: [{ encounter: { ...encounter, activeEntryId: "e2" }, effects: {}, revealed: [], at: AT }],
+      log: [
+        { id: "1:0", at: AT, kind: "event", data: { type: "hp", characterId: "c1", change: "temp", amount: 5, revert: { before: { hp: { cur: 20, max: 20, temp: 0 }, life: "alive", deathSaves: { ok: 0, fail: 0 } }, after: { hp: { cur: 20, max: 20, temp: 5 }, life: "alive", deathSaves: { ok: 0, fail: 0 } }, shapeTemp: { before: OLD, after: OLD } } } },
+        { id: "2:0", at: AT, kind: "chat", from: "dm1", text: `${OLD} is how the old build spelled it` },
+      ],
+    } as Partial<RoomState>);
+  }
+
+  test("is the version now", () => {
+    assert.equal(OP_VERSION, 10);
+    assert.equal(SNAPSHOT_VERSION, 14);
+  });
+
+  test("a room that used the old id in every place names the dragon turtle by its new id there, and nothing else changes", () => {
+    const old = oldRoom();
+    const before = JSON.stringify(old);
+    const migrated = migrateSnapshot(JSON.parse(before), 13);
+    assert.equal(JSON.stringify(old), before, "the stored value is not changed in place");
+    const expected = renamed(old);
+    // Text that mentions the old id is text, not an id.
+    expected.tokens.t2!.name = `not ${OLD}`;
+    expected.log[1]!.text = `${OLD} is how the old build spelled it`;
+    assert.deepEqual(migrated, expected);
+    assert.deepEqual(Object.keys(migrated.srdImages).sort(), ["dragon-turtle", "goblin-warrior"]);
+    assert.deepEqual(migrated.srdImages[NEW], { id: NEW, rev: 3, image: srdImage(NEW, "img-turtle").image });
+    assert.equal(migrated.characters.c1!.actor.unshaped?.shapeTemp, true);
+  });
+
+  test("a room that never named the dragon turtle is the very same room", () => {
+    const state = room({ tokens: { t1: token("t1", { actor: { inline: actor({ srdId: "goblin-warrior" }) } }) }, srdImages: { owlbear: srdImage("owlbear", "img-owl") } });
+    assert.equal(runMigrations(state, 13, 14, snapshotMigrations), state);
+  });
+
+  test("a room holding both spellings of the image keeps the one the DM picked under the old id", () => {
+    const state = room({ srdImages: { [NEW]: srdImage(NEW, "img-crafted"), [OLD]: srdImage(OLD, "img-picked") } });
+    const migrated = migrateSnapshot(state, 13);
+    assert.deepEqual(migrated.srdImages, { [NEW]: srdImage(NEW, "img-picked") });
+  });
+
+  test("every op that names an SRD monster by the old id takes the new one, and still validates", () => {
+    const ops = [
+      { t: "token.create", token: { id: "t9", sceneId: "s1", kind: "monster", name: "Dragon Turtle", size: "gargantuan", x: 1, y: 1, actor: { inline: actor({ srdId: OLD }) } } },
+      { t: "token.update", tokenId: "t1", patch: { actor: { srdId: OLD } } },
+      { t: "character.update", characterId: "c1", patch: { actor: { srdId: OLD, wildShape: true } } },
+      { t: "character.create", character: { id: "c2", ownerIds: ["p1"], name: "Shelly", size: "medium", actor: actor({ srdId: OLD }) } },
+      { t: "monster.setSrdImage", srdId: OLD, image: { icon: "lorc/turtle", color: "#ff6b4a" } },
+      { t: "savedEncounter.create", encounter: { id: "se2", name: "Shell game", monsters: [{ srdId: OLD, count: 2 }] } },
+      { t: "savedEncounter.update", encounterId: "se1", patch: { monsters: [{ srdId: "goblin-warrior", count: 1 }, { srdId: OLD, count: 1, inLair: true }] } },
+      { t: "companionBlock.create", block: { ...blockOf(companionBlock("cb2", "c1")), id: "cb2", characterId: "c1", fromSrd: OLD } },
+      { t: "encounter.start", entries: [{ id: "e1", tokenId: "t1", groupKey: OLD }] },
+      { t: "encounter.add", entries: [{ id: "e3", tokenId: "t9", groupKey: OLD }] },
+      { t: "encounter.update", entryId: "e1", patch: { groupKey: OLD } },
+    ];
+    for (const op of ops) {
+      const migrated = migrateOp(JSON.parse(JSON.stringify(op)), 9);
+      assert.deepEqual(migrated, renamed(op), op.t);
+      assert.ok(opSchema.safeParse(migrated).success, `${op.t} validates`);
+    }
+  });
+
+  test("an op that names no SRD monster by the old id is the very same op, text that mentions it included", () => {
+    const ops: unknown[] = [
+      { t: "log.chat", text: `the ${OLD} returns` },
+      { t: "token.update", tokenId: "t1", patch: { name: OLD, actor: { srdId: "goblin-warrior" } } },
+      { t: "encounter.next" },
+      { t: "monster.setSrdImage", srdId: "owlbear", image: null },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 9, 10, opMigrations), op);
+  });
+
+  test("a stored restore takes the new id in its values and in an SRD image's key, and keeps every guard", () => {
+    const turtle = token("t1", { actor: { inline: actor({ srdId: OLD }) } });
+    const entries = [
+      { key: "token:t1", value: turtle, expectHash: "a".repeat(32) },
+      { key: "token:t9", value: null, expectRev: 4 },
+      { key: `srdImage:${OLD}`, value: srdImage(OLD, "img-turtle"), expectHash: "b".repeat(32) },
+      { key: `srdImage:${OLD}`, value: null, expectRev: null },
+      { key: "srdImage:owlbear", value: null, expectHash: "c".repeat(32) },
+      { key: "encounter", value: { rev: 1, round: 1, activeEntryId: null, entries: [entry("e1", { groupKey: OLD })] }, expectHash: "d".repeat(32) },
+      { key: "drawing:d1", value: null, expectHash: "e".repeat(32) },
+    ];
+    const restore = { t: "sys.restore", entries, from: "undo", deps: true };
+    const migrated = migrateOp(JSON.parse(JSON.stringify(restore)), 9);
+    assert.deepEqual(migrated, renamed(restore));
+    assert.deepEqual(
+      (migrated as { entries: RestoreEntry[] }).entries.map((e) => e.key),
+      ["token:t1", "token:t9", `srdImage:${NEW}`, `srdImage:${NEW}`, "srdImage:owlbear", "encounter", "drawing:d1"],
+    );
+    const untouched = { t: "sys.restore", entries: [entries[4], entries[6]], from: "redo" };
+    assert.equal(runMigrations(untouched, 9, 10, opMigrations), untouched);
+  });
+
+  test("a guard stored before op version 10 also matches the entity spelled the old way, and today's guards do not", () => {
+    assert.equal(oldSrdIdGuards(9), true);
+    assert.equal(oldSrdIdGuards(1), true);
+    assert.equal(oldSrdIdGuards(10), false);
+    assert.equal(oldSrdIdGuards(undefined), false);
+    const turtle = token("t1", { actor: { inline: actor({ srdId: NEW }) } });
+    assert.deepEqual(withOldSrdIds("token:t1", turtle), token("t1", { actor: { inline: actor({ srdId: OLD }) } }));
+    assert.deepEqual(withOldSrdIds(`srdImage:${NEW}`, srdImage(NEW, "img-turtle")), srdImage(OLD, "img-turtle"));
+    const goblin = token("t2", { actor: { inline: actor({ srdId: "goblin-warrior" }) } });
+    assert.equal(withOldSrdIds("token:t2", goblin), goblin);
+    assert.equal(withOldSrdIds("srdImage:owlbear", null), null);
+  });
+
+  test("a room's v13 snapshot and the v9 ops after it load as one room that names the dragon turtle by its new id, its guards still refusing a real change", () => {
+    // What the older build stored: a room with the dragon turtle, then the DM renamed its token, set its image, and undid the rename.
+    const live = oldRoom();
+    const rename: Op = { t: "token.update", tokenId: "t1", patch: { name: "Old Shelly" } };
+    const renamedToken = applyOp(live, rename, DM, env(1));
+    assert.ok(renamedToken.ok && renamedToken.inverse);
+    const setImage: Op = { t: "monster.setSrdImage", srdId: OLD, image: { icon: "lorc/turtle", color: "#30a46c" } };
+    const undo = { t: "sys.restore", entries: renamedToken.inverse, from: "undo", deps: true } as Op;
+    const load = (stored: Op[], opVersion: number | undefined): Replayed => {
+      let state = migrateSnapshot(JSON.parse(JSON.stringify(live)), 13);
+      for (const [i, op] of (JSON.parse(JSON.stringify(stored)) as Op[]).entries()) {
+        const result = applyOp(state, opSchema.parse(migrateOp(op, 9)) as Op, DM, { ...env(i + 1), ...(opVersion === undefined ? {} : { opVersion }) });
+        if (!result.ok) return { ok: false, at: i, message: result.message, state };
+        state = result.state;
+      }
+      return { ok: true, state };
+    };
+    const loaded = load([rename, setImage, undo], 9);
+    assert.ok(loaded.ok, loaded.ok ? "" : `op ${loaded.at}: ${loaded.message}`);
+    const turtle = loaded.state.tokens.t1!;
+    assert.equal(turtle.name, "Dragon Turtle");
+    assert.deepEqual(turtle.actor, { inline: actor({ srdId: NEW }) });
+    assert.deepEqual(loaded.state.srdImages[NEW]?.image, { icon: "lorc/turtle", color: "#30a46c" });
+    assert.equal(JSON.stringify(loaded.state).includes(`"${OLD}"`), false);
+    // By today's rule the undo's guard hashed a token that named the old id, which the migrated room no longer holds.
+    const live10 = load([rename, setImage, undo], undefined);
+    assert.ok(!live10.ok);
+    assert.deepEqual([live10.at, live10.message], [2, CHANGED_SINCE]);
+    // And a guard spelled the old way still refuses when the token really changed since.
+    const changed = load([rename, { t: "token.update", tokenId: "t1", patch: { name: "Shelly the Third" } }, undo], 9);
+    assert.ok(!changed.ok);
+    assert.deepEqual([changed.at, changed.message], [2, CHANGED_SINCE]);
+  });
+
+  test("a version 10 op and a version 14 snapshot never migrate down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 10, 9, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 14, 13, snapshotMigrations), /down/);
   });
 });
