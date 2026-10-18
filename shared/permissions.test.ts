@@ -556,18 +556,23 @@ describe("encounter", () => {
   test("with typed totals off a player sets their initiative only to the total of their own roll for that creature (owner's setting)", () => {
     const state = combat();
     state.meta.settings.playersTypeTotals = false;
-    const line = (by: string, tag: string, total: number, tokenId = "pc1") => ({
+    const line = (by: string, tag: string, total: number, tokenId = "pc1", initiative = true) => ({
       id: `${state.log.length + 1}:0`,
       at: "2026-10-17T20:00:00.000Z",
       kind: "event" as const,
-      data: { type: "dice" as const, tag, by, to: "all" as const, rolls: [{ formula: "1d20+2", faces: [total - 2], total, label: "Initiative", tokenId }] },
+      data: { type: "dice" as const, tag, by, to: "all" as const, rolls: [{ formula: "1d20+2", faces: [total - 2], total, label: initiative ? "Initiative" : "Longsword", tokenId, ...(initiative ? { initiative: true as const } : {}) }] },
     });
-    state.log.push(line(P1.memberId, "t-mine", 14), line(P2.memberId, "t-theirs", 18), line(P1.memberId, "t-other", 16, "own"));
+    // An initiative from an earlier fight, then this fight's start, then this fight's lines.
+    state.log.push(line(P1.memberId, "t-old", 17));
+    state.log.push({ id: `${state.log.length + 1}:0`, at: "2026-10-17T20:00:00.000Z", kind: "event", data: { type: "encounter", action: "start" } });
+    state.log.push(line(P1.memberId, "t-mine", 14), line(P2.memberId, "t-theirs", 18), line(P1.memberId, "t-other", 16, "own"), line(P1.memberId, "t-atk", 25, "pc1", false));
     assert.equal(code({ t: "encounter.setValue", entryId: "n1", value: 14 }, P1, state), "forbidden", "a typed value");
     assert.equal(code({ t: "encounter.setValue", entryId: "n1", value: 14, roll: "t-mine" }, P1, state), "ok", "the roll's own total");
     assert.equal(code({ t: "encounter.setValue", entryId: "n1", value: 19, roll: "t-mine" }, P1, state), "forbidden", "another number than it rolled");
     assert.equal(code({ t: "encounter.setValue", entryId: "n1", value: 18, roll: "t-theirs" }, P1, state), "forbidden", "someone else's roll");
     assert.equal(code({ t: "encounter.setValue", entryId: "n1", value: 16, roll: "t-other" }, P1, state), "forbidden", "a roll for another creature");
+    assert.equal(code({ t: "encounter.setValue", entryId: "n1", value: 25, roll: "t-atk" }, P1, state), "forbidden", "an attack's total is no initiative (B7B-P-2)");
+    assert.equal(code({ t: "encounter.setValue", entryId: "n1", value: 17, roll: "t-old" }, P1, state), "forbidden", "an initiative from an earlier fight (B7B-P-2)");
     assert.equal(code({ t: "encounter.setValue", entryId: "n1", value: null }, P1, state), "ok", "clearing types no number");
     assert.equal(code({ t: "encounter.setValues", values: [{ entryId: "n1", value: 3 }] }, DM, state), "ok", "the DM's values are unaffected");
     state.meta.settings.playersTypeTotals = true;
@@ -578,7 +583,7 @@ describe("encounter", () => {
     const state = combat();
     state.meta.settings.playersTypeTotals = false;
     state.tokens.wolf = token("wolf", { kind: "npc", name: "Wolf", ownerIds: ["p1"], x: 2, y: 1, companion: { of: "c1", turn: "own" }, actor: { inline: actor() } });
-    state.log.push({ id: "1:0", at: "2026-10-17T20:00:00.000Z", kind: "event", data: { type: "dice", tag: "t-own", by: P1.memberId, to: "all", rolls: [{ formula: "1d20+1", faces: [11], total: 12, label: "Initiative", tokenId: "own" }] } });
+    state.log.push({ id: "1:0", at: "2026-10-17T20:00:00.000Z", kind: "event", data: { type: "dice", tag: "t-own", by: P1.memberId, to: "all", rolls: [{ formula: "1d20+1", faces: [11], total: 12, label: "Initiative", tokenId: "own", initiative: true }] } });
     const add = (entries: OpOf<"encounter.add">["entries"]) => code({ t: "encounter.add", entries }, P1, state);
     assert.equal(add([{ id: "x", tokenId: "own", value: 100 }]), "forbidden", "a typed value on joining");
     assert.equal(add([{ id: "x", tokenId: "own" }]), "ok", "no value");

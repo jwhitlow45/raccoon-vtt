@@ -810,20 +810,24 @@ function typedInitiative(c: Check, row: InitEntry, value: number | null, roll: s
 }
 
 /**
- * Whether a player's initiative value is the total of their own roll for
- * that row's creature: a `dice` line of theirs under the tag the value
- * names, with a roll for the row's creature (its token or its character)
- * whose total, kept within the row's -50 to 100, is the value. The line is
- * in the log every viewer of it reads, so its formula stays in plain view.
+ * Whether a player's initiative value is the total of their own initiative
+ * roll for that row's creature in this fight: a `dice` line of theirs under
+ * the tag the value names, newer than the fight's start, with a roll marked
+ * `initiative` for the row's creature (its token or its character) whose
+ * total, kept within the row's -50 to 100, is the value. So an attack's
+ * total, or an initiative from an earlier fight, never sets a row. The line
+ * is in the log every viewer of it reads, so its formula stays in plain view.
  */
 function rolledInitiative(state: RoomState, memberId: string, row: InitEntry, value: number, roll: string | undefined): boolean {
   if (roll === undefined) return false;
+  // Newest first, so the fight's start line ends the search: anything older is another fight's. A start the log no longer holds is older than every line it holds.
   for (let i = state.log.length - 1; i >= 0; i--) {
     const data = state.log[i]!.data;
+    if (data?.type === "encounter" && data.action === "start") return false;
     if (data?.type !== "dice" || data.tag !== roll || data.by !== memberId) continue;
     const ok = data.rolls.some((r) => {
       const creature = r.tokenId !== undefined ? { tokenId: r.tokenId } : r.characterId !== undefined ? { characterId: r.characterId } : null;
-      return creature !== null && entryMatchesAnchor(state, row, creature) && Math.max(-50, Math.min(100, r.total)) === value;
+      return r.initiative === true && creature !== null && entryMatchesAnchor(state, row, creature) && Math.max(-50, Math.min(100, r.total)) === value;
     });
     if (ok) return true;
   }
