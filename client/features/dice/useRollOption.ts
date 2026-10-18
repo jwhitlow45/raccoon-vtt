@@ -112,6 +112,7 @@ export function useRollOption() {
             taken.restore();
             return null;
           }
+          panel.noted(tag, input.label);
           return remember(input.row, tag);
         }
         return remember(input.row, panel.roll([asInitiative(asSave(d20Roll(input.creature, input.bonus, input.preset, input.label, input.critOn), input.test), input.test)]));
@@ -130,6 +131,7 @@ export function useRollOption() {
           taken.restore();
           return null;
         }
+        panel.noted(tag, "Death save");
         return remember(row, tag);
       },
       /** A monster's initiative score set on its row without a roll (4.2), as a typed value goes. */

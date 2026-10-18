@@ -32,6 +32,12 @@ export type PanelRoll = Omit<DiceRollInput, "mode" | "cancelled"> & {
 /** A panel roll, as the sticky line shows it and Again sends it again. */
 export type LastRoll =
   | { tag: string; rolls: DiceRollInput[]; to: "all" | "dm"; dc?: number; ac?: number }
+  /**
+   * A roll the panel cannot send again as it went: a request's answer or a
+   * death save (LP7-DICE-10, docs/design-v1-dice-ui.md 4.1). The sticky
+   * line shows it with no Again, named by `label` where its line has none.
+   */
+  | { tag: string; once: true; label: string }
   /** A roll that never went: its formula did not split, or the socket was not open. */
   | { error: string; at: number };
 
@@ -89,6 +95,8 @@ export type DicePanelApi = {
   press(choice: "adv" | "dis" | "secret"): void;
   /** Again: rolls exactly what was rolled, under its own visibility, taking no choice. */
   again(rolls: readonly DiceRollInput[], to: "all" | "dm"): string | null;
+  /** An answer or a death save the panel sent with its own op becomes the sticky line, with no Again. */
+  noted(tag: string, label: string): void;
 };
 
 function take(store: StoreApi<DiceState>, start: boolean, key: string): Taken {
@@ -191,6 +199,9 @@ export function createDicePanel(deps: { store: StoreApi<DiceState>; sender: Roll
       }
       if (panel) store.setState({ last: { tag: sent.tag, rolls: inputs, ...envelope } });
       return sent.tag;
+    },
+    noted(tag, label) {
+      store.setState({ last: { tag, once: true, label } });
     },
     again(rolls, to) {
       const sent = send(sender, [...rolls], { to }, () => undefined);

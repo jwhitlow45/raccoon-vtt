@@ -481,3 +481,61 @@ export function hpChips(log: readonly LogEntry[], me: string, kind: "damage" | "
   }
   return [mine, theirs].filter((c): c is HpChip => c !== undefined && c !== null);
 }
+
+// ------------------------------------------------------------ the compact rows (docs/design-v1-dice-ui.md 4)
+
+/**
+ * A preset in a button's few characters, beside its bonus on one line:
+ * "Dis", "Adv", "+1d4", "Fails". The effects' names go once in the
+ * group's label (presetLine), so twelve cells never repeat "Blessed".
+ */
+export function presetTag(preset: RollPreset): string {
+  if (preset.fails) return "Fails";
+  const adv = preset.sources.some((s) => s.kind === "adv");
+  const dis = preset.sources.some((s) => s.kind === "dis");
+  const parts: string[] = [];
+  if (adv) parts.push("Adv");
+  if (dis) parts.push("Dis");
+  parts.push(...preset.extra.map((t) => (/^[+-]/.test(t) ? t : `+${t}`)));
+  return parts.join(" ");
+}
+
+const SAVE_SHORT: Record<string, string> = { str: "Str", dex: "Dex", con: "Con", int: "Int", wis: "Wis", cha: "Cha" };
+
+/**
+ * A named roll's line in its header, as a stat block reads: "+6 to hit,
+ * 1d8+3 slashing, +2d8 Divine Smite", "DC 14 Dex, 2d8 radiant", "2d8+3
+ * healing". A save stands where an attack's bonus stands (the project
+ * owner, 2026-10-17). A rider's dice are said here, so its toggle needs
+ * only its name and the controls share one line more often.
+ */
+export function rowSummary(named: Pick<NamedRoll, "attack" | "save" | "damage" | "heal" | "dice">): string {
+  const parts: string[] = [];
+  if (named.attack !== undefined) parts.push(`${named.attack < 0 ? named.attack : `+${named.attack}`} to hit`);
+  const fixed = named.damage.filter((p) => !p.optional);
+  // "Half on a pass" only where there is damage to halve: Hold Person has none.
+  if (named.save) parts.push(`DC ${named.save.dc} ${SAVE_SHORT[named.save.ability] ?? named.save.ability}${named.save.onPass === "half" && fixed.length > 0 ? ", half on a pass" : ""}`);
+  if (fixed.length > 0) parts.push(fixed.map((p) => (p.type ? `${p.formula} ${p.type}` : p.formula)).join(" + "));
+  for (const rider of named.damage.filter((p) => p.optional)) parts.push(`+${rider.formula} ${shortRider(rider.name ?? "")}`.trim());
+  if (named.heal) parts.push(`${named.heal.formula} healing`);
+  if (named.dice) parts.push(named.dice);
+  return parts.join(", ");
+}
+
+/**
+ * A rider's toggle in a few words, its dice being in the row's header: its
+ * own name ("Divine Smite"), a block's condition cut short ("With
+ * Advantage"), or its dice where it has neither. The whole clause stays in
+ * the toggle's name for a screen reader.
+ */
+export function riderText(part: DamagePart): string {
+  const short = shortRider(part.name ?? "");
+  if (short === "") return `+${part.formula}`;
+  return short.charAt(0).toUpperCase() + short.slice(1);
+}
+
+/** A rider's name, or a block's clause cut short: "Divine Smite", "with Advantage". */
+function shortRider(name: string): string {
+  if (/^if the attack roll (had|has) advantage$/i.test(name)) return "with Advantage";
+  return name.length > 22 ? `${name.slice(0, 21).trimEnd()}…` : name;
+}

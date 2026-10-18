@@ -4,6 +4,7 @@ import { critSums, critSumText } from "#shared/logText.ts";
 import { Button } from "../../components/Button.tsx";
 import { Chip } from "../../components/Chip.tsx";
 import { Input } from "../../components/Field.tsx";
+import { Icon } from "../../components/Icon.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
 import { Spinner, useDelayed } from "../../components/Loading.tsx";
 import { ScrollStrip } from "../../components/ScrollStrip.tsx";
@@ -22,9 +23,8 @@ import { useReceipt } from "./useReceipt.ts";
  * reading, the quick dice and the one-roll choices.
  */
 
-/** The scrolling pane's padding, which its body publishes (components/Sheet.tsx paneBodyPadding). 0 outside a pane. */
+/** The scrolling pane's top padding, which its body publishes (components/Sheet.tsx paneBodyPadding). 0 outside a pane. */
 const PAD_TOP = "var(--pane-pad-top, 0px)";
-const PAD_X = "var(--pane-pad-x, 0px)";
 /** The sticky line's height (Appendix C). */
 export const LAST_LINE_PX = 40;
 
@@ -70,6 +70,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   else {
     const verdict = rollVerdict(first, (committed?.lines[0]?.data?.type === "dice" ? committed.lines[0].data : {}) as { dc?: number; ac?: number });
     const sum = critSumText(first);
+    const label = first.label ?? ("once" in last ? last.label : undefined);
     body = (
       <button
         type="button"
@@ -79,10 +80,10 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
       >
         <span style={{ fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>{first.total.toLocaleString("en-US")}</span>
         {/* A table crit rule's sum leads the label, so a long label's ellipsis never takes it. */}
-        {sum || first.label ? (
+        {sum || label ? (
           <span style={{ fontSize: theme.font.body14, overflow: "hidden", textOverflow: "ellipsis" }}>
-            {sum ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{`(${sum})${first.label ? " " : ""}`}</span> : null}
-            {first.label}
+            {sum ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{`(${sum})${label ? " " : ""}`}</span> : null}
+            {label}
           </span>
         ) : null}
         <span style={{ overflow: "hidden" }}>
@@ -93,7 +94,8 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
       </button>
     );
   }
-  const again = "tag" in last && !waiting ? last : null;
+  // An answer or a death save cannot go again as it went, so its line has no Again (LP7-DICE-10).
+  const again = "rolls" in last && !waiting ? last : null;
   return (
     <div
       data-dice-last=""
@@ -101,8 +103,9 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         position: "sticky",
         top: `calc(-1 * ${PAD_TOP})`,
         zIndex: theme.z.stickyHeader,
-        margin: `calc(-1 * ${PAD_TOP}) calc(-1 * ${PAD_X}) 0`,
-        padding: `${PAD_TOP} ${PAD_X} 0`,
+        // Only the top takes the pane's padding back, so nothing scrolls past above the line. Sideways it keeps to the column, as every row does (docs/design-v1-dice-ui.md 3.1).
+        margin: `calc(-1 * ${PAD_TOP}) 0 0`,
+        padding: `${PAD_TOP} 0 0`,
         background: theme.color.surface,
         borderBottom: `${theme.line.border}px solid ${theme.color.border}`,
         // A grid item's floor is its content's width, and one line of a long label would widen the whole panel sideways. This lets it ellipsize instead.
@@ -112,7 +115,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), minHeight: LAST_LINE_PX, fontSize: theme.font.body14 }}>
         <div style={{ display: "flex", alignItems: "center", flex: 1, minWidth: 0 }}>{body}</div>
         {again ? (
-          <Button size="sm" variant="quiet" icon="redo" style={{ minHeight: LAST_LINE_PX }} onClick={() => panel.again(again.rolls, again.to)}>
+          <Button size="sm" variant="quiet" icon="again" style={{ minHeight: LAST_LINE_PX }} onClick={() => panel.again(again.rolls, again.to)}>
             Again
           </Button>
         ) : null}
@@ -253,7 +256,10 @@ export function Roller() {
           Dis
         </Chip>
         <Chip pressed={panel.secret} aria-label={dm ? "Hide from players" : "Only the DM sees it"} onClick={() => panel.press("secret")}>
-          Secret
+          <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1) }}>
+            <Icon name="hidden" size="sm" />
+            Secret
+          </span>
         </Chip>
       </div>
     </div>

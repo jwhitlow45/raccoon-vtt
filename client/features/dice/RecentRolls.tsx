@@ -89,23 +89,27 @@ export function rollVerdict(roll: DiceRoll, row: { dc?: number; ac?: number }): 
  * at the line's far end, the row's Again, so a row of one roll takes one or
  * two lines rather than three.
  */
-function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; names: LogNames; lead?: ReactNode; end?: ReactNode }) {
+function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; names: LogNames; by?: string; lead?: ReactNode; end?: ReactNode }) {
   const { roll } = props;
   const creature = roll.tokenId !== undefined || roll.characterId !== undefined ? creatureName(props.names, roll) : null;
-  const what = [creature, roll.label].filter(Boolean).join(", ");
+  // "Thorn 9 Thorn, Longsword damage" said the name twice where a player rolls for the character of the same name.
+  const what = [creature !== null && creature === props.by ? null : creature, roll.label].filter(Boolean).join(", ");
   const verdict = rollVerdict(roll, props.row);
   const formula = rolledFormula(roll);
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1) }}>
-      {props.lead}
-      <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, minWidth: 28 }}>{roll.total.toLocaleString("en-US")}</span>
-      {what ? <span style={{ fontSize: theme.font.body14, overflowWrap: "anywhere" }}>{what}</span> : null}
-      <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{formula}</span>
-      <DiceFaces result={roll} />
-      {/* Only the DM's copy keeps the mark of an initiative roll kept from players (docs/design-v1-combat-flow.md 11.3). */}
-      {roll.hidden ? <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>Hidden from players</span> : null}
-      {verdict ? <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>{verdict}</span> : null}
-      {props.end ? <span style={{ marginLeft: "auto", display: "inline-flex" }}>{props.end}</span> : null}
+    // Again holds the line's top right corner, so the words wrap beside it and it never takes a line of its own (docs/design-v1-dice-ui.md 4.5).
+    <div style={{ display: "flex", alignItems: "flex-start", gap: theme.space(2) }}>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1), minHeight: props.end ? theme.touch : undefined }}>
+        {props.lead}
+        <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, minWidth: 28 }}>{roll.total.toLocaleString("en-US")}</span>
+        {what ? <span style={{ fontSize: theme.font.body14, overflowWrap: "anywhere" }}>{what}</span> : null}
+        <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{formula}</span>
+        <DiceFaces result={roll} />
+        {/* Only the DM's copy keeps the mark of an initiative roll kept from players (docs/design-v1-combat-flow.md 11.3). */}
+        {roll.hidden ? <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>Hidden from players</span> : null}
+        {verdict ? <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>{verdict}</span> : null}
+      </div>
+      {props.end}
     </div>
   );
 }
@@ -148,9 +152,9 @@ function Row(props: { row: RecentRow; names: LogNames; me: string; dm: boolean; 
   const again =
     canAgain && first ? (
       <IconButton
-        icon="redo"
+        icon="again"
         label={`Roll again: ${[askedRoll(first)?.formula, first.label].filter(Boolean).join(" ")}${single ? "" : ` and ${row.rolls.length - 1} more`}`}
-        title="Again"
+        title="Roll again"
         onClick={() => props.again(inputs as DiceRollInput[], row.to)}
       />
     ) : null;
@@ -158,7 +162,7 @@ function Row(props: { row: RecentRow; names: LogNames; me: string; dm: boolean; 
     <li data-roll-row={row.ids.join(" ")} style={base}>
       {single ? null : who}
       {shown.map((roll, i) => (
-        <RollLine key={i} roll={roll} row={row} names={names} lead={single ? who : undefined} end={i === shown.length - 1 ? again : undefined} />
+        <RollLine key={i} roll={roll} row={row} names={names} by={memberName(names, row.by)} lead={single ? who : undefined} end={i === shown.length - 1 ? again : undefined} />
       ))}
       {row.rolls.length > FOLDED && !all ? (
         <div>
