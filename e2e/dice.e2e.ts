@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
 import { ConsoleWatch, openSideTab, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
@@ -17,7 +17,8 @@ import { ConsoleWatch, openSideTab, Shots, sideTabName, SocketWatch, startServer
  * and pressed again before it lands, at 375 x 667 at 100% and 130% the
  * sticky line, the field and the choices in view, Dice in the bottom
  * one of two panels, rolling there and counting as on screen, and a roll
- * of 100 dice keeping the sticky line to one line on a phone.
+ * of 100 dice keeping the sticky line to one line on a phone, and Roll
+ * waiting in the DM's view as a player.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twenty, one file after
  * another as the others. The other environment variables are the smoke
@@ -62,7 +63,7 @@ async function openDicePhone(page: Page): Promise<void> {
   await sheet.waitFor();
 }
 
-function field(page: Page) {
+function field(page: Page | Locator) {
   return page.getByLabel("Dice formula", { exact: true });
 }
 
@@ -302,5 +303,30 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       return line && head && head.y >= line.y + line.height - 1 && head.y < line.y + line.height + 40 ? true : null;
     });
     await shots.take(player, "dice-sticky-opens-row");
+  });
+
+  test("10. viewing as Pat, Roll waits and says a preview sends no rolls, as the options do, not that it needs a connection (LP7-DICE-7)", async () => {
+    await openSideTab(dm, "DM");
+    const panel = dm.getByRole("tabpanel", { name: sideTabName("DM") });
+    await panel.getByRole("combobox", { name: "View as a player" }).selectOption({ label: "Pat" });
+    await panel.getByRole("button", { name: "View", exact: true }).click();
+    const preview = dm.getByRole("dialog", { name: "Viewing as Pat" });
+    await preview.waitFor();
+    // At 1280 px the preview's row holds Token, Initiative and Dice once it has measured itself. Until then Dice sits in More, so wait for its tab.
+    const diceTab = preview.getByRole("tablist", { name: "Panels" }).getByRole("tab", { name: sideTabName("Dice") });
+    await diceTab.waitFor();
+    await diceTab.click();
+    await preview.getByRole("tabpanel", { name: sideTabName("Dice") }).waitFor();
+    const before = diceLines(dmSocket.state?.log).length;
+    await field(preview).fill("1d20 Preview");
+    const roll = preview.getByRole("button", { name: "Roll", exact: true });
+    assert.equal(await roll.isDisabled(), true, "Roll waits in a preview");
+    await preview.getByText("Rolls are not sent from a preview.", { exact: true }).first().waitFor();
+    await field(preview).press("Enter");
+    await dm.waitForTimeout(500);
+    assert.equal(diceLines(dmSocket.state?.log).length, before, "nothing rolled");
+    await shots.take(dm, "dice-preview-waits");
+    await preview.getByRole("button", { name: "Exit", exact: true }).click();
+    await preview.waitFor({ state: "detached" });
   });
 });

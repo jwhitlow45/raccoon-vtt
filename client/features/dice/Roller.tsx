@@ -11,8 +11,8 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { readHistory, readingOf, rollsOf, stepHistory, withHistory, writeHistory } from "./logic.ts";
 import { DiceFaces, rollVerdict } from "./RecentRolls.tsx";
-import { NEEDS_CONNECTION } from "./send.ts";
 import { useDicePanel, useLastRoll } from "./useDicePanel.ts";
+import { useRollBlocked } from "./useRollOption.ts";
 import { useReceipt } from "./useReceipt.ts";
 
 /**
@@ -118,7 +118,8 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
 export function Roller() {
   const roomId = useRoomView((s) => s.roomId);
   const dm = useRoomView((s) => s.you?.role === "dm");
-  const connected = useRoomView((s) => s.connection === "open");
+  // Offline, or a preview as a player, which refuses every op: Roll waits and says why, as every option does.
+  const blocked = useRollBlocked();
   const panel = useDicePanel();
   const [text, setText] = useState("");
   // A formula only Roll sends keeps the sheet from a swipe's close, and the field clears once it goes (docs/design-v1-sheet-swipe.md 4.6).
@@ -133,7 +134,7 @@ export function Roller() {
   const busy = receipt !== null && (receipt.state === "sending" || receipt.state === "checking");
   const reading = useMemo(() => readingOf(text), [text]);
   const readingId = useId();
-  const offlineId = useId();
+  const blockedId = useId();
   const field = useRef<HTMLInputElement>(null);
 
   const change = (next: string) => {
@@ -143,7 +144,7 @@ export function Roller() {
   };
 
   const roll = () => {
-    if (busy || !connected || text.trim() === "") return;
+    if (busy || blocked !== null || text.trim() === "") return;
     const parsed = parseRollText(text);
     if (!parsed.ok) {
       setError(parsed.error);
@@ -184,7 +185,7 @@ export function Roller() {
             ref={field}
             value={text}
             aria-label="Dice formula"
-            aria-describedby={[reading || error ? readingId : "", connected ? "" : offlineId].filter(Boolean).join(" ") || undefined}
+            aria-describedby={[reading || error ? readingId : "", blocked === null ? "" : blockedId].filter(Boolean).join(" ") || undefined}
             aria-invalid={error ? true : undefined}
             placeholder="1d20+5 or 2d6+3 fire"
             autoComplete="off"
@@ -209,13 +210,13 @@ export function Roller() {
             />
           ) : null}
         </div>
-        <Button variant="primary" size="sm" busy={busy} disabled={!connected || text.trim() === ""} onClick={roll}>
+        <Button variant="primary" size="sm" busy={busy} disabled={blocked !== null || text.trim() === ""} onClick={roll}>
           {busy ? "Rolling…" : "Roll"}
         </Button>
       </div>
-      {!connected ? (
-        <span id={offlineId} style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
-          {NEEDS_CONNECTION}
+      {blocked !== null ? (
+        <span id={blockedId} style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
+          {blocked}
         </span>
       ) : null}
       {error ? (
