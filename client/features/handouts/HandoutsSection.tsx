@@ -169,8 +169,9 @@ export function HandoutsSection() {
                 title={h.title}
                 detail={`To ${audienceText(h.to, members ?? {})}${pages.length > 1 ? `, ${pageCountText(pages.length)}` : ""}`}
                 trailing={
-                  <Button variant="danger" size="sm" onClick={() => actions.dispatch({ t: "handout.close", handoutId: h.id })}>
-                    Close
+                  // Hide, not Close: it stops showing the handout to players, and Close is the app's word for closing a pane (docs/design-v1-icons.md 2.3).
+                  <Button variant="danger" size="sm" icon="hidden" onClick={() => actions.dispatch({ t: "handout.close", handoutId: h.id })}>
+                    Hide
                   </Button>
                 }
               />
@@ -456,7 +457,7 @@ function ShowHandout(props: {
       ) : null}
       <ErrorText>{error}</ErrorText>
       <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
-        <Button variant="primary" size="sm" onClick={show} disabled={!pick || status !== null}>
+        <Button variant="primary" size="sm" icon="shown" onClick={show} disabled={!pick || status !== null}>
           Show
         </Button>
         {/* Cancel only closes the form and keeps its draft. A PDF upload goes on in its own block. */}

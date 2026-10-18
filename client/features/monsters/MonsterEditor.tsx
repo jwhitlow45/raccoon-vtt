@@ -709,13 +709,9 @@ function EntryEditor(props: {
         style={{ width: "100%" }}
       />
       <div style={{ display: "flex", gap: theme.space(2), justifyContent: "flex-end" }}>
-        <Button size="sm" aria-label={`Move ${where} up`} title={`Move ${where} up`} onClick={props.onUp} disabled={!props.onUp}>
-          ↑
-        </Button>
-        <Button size="sm" aria-label={`Move ${where} down`} title={`Move ${where} down`} onClick={props.onDown} disabled={!props.onDown}>
-          ↓
-        </Button>
-        <Button variant="danger" size="sm" aria-label={`Remove ${where}`} title={`Remove ${where}`} onClick={props.onRemove}>
+        <Button size="sm" icon="arrowUp" iconOnly="always" aria-label={`Move ${where} up`} onClick={props.onUp} disabled={!props.onUp} />
+        <Button size="sm" icon="arrowDown" iconOnly="always" aria-label={`Move ${where} down`} onClick={props.onDown} disabled={!props.onDown} />
+        <Button variant="danger" size="sm" icon="delete" iconOnly="always" aria-label={`Remove ${where}`} onClick={props.onRemove}>
           Remove
         </Button>
       </div>

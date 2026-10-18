@@ -267,7 +267,7 @@ function Builder(props: { id: string | null; srd: SrdList; close(): void; onBack
 
       {saved ? (
         <Section label="Remove">
-          <ConfirmButton confirm="Tap again to delete" onConfirm={() => actions.dispatch({ t: "savedEncounter.delete", encounterId: saved.id }) !== null && props.onBack()}>
+          <ConfirmButton icon="delete" confirm="Tap again to delete" onConfirm={() => actions.dispatch({ t: "savedEncounter.delete", encounterId: saved.id }) !== null && props.onBack()}>
             Delete encounter
           </ConfirmButton>
         </Section>

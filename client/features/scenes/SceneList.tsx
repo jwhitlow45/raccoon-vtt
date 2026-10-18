@@ -143,8 +143,8 @@ export function SceneList(props: { scenes: Scene[]; viewingId: string | null; pl
             </button>
             {arranging ? (
               <>
-                <ArrowButton label={`Move ${scene.name} up`} glyph="↑" disabled={i === 0} onClick={() => reorder(moveScene(groups, scene.id, -1))} />
-                <ArrowButton label={`Move ${scene.name} down`} glyph="↓" disabled={i === group.scenes.length - 1} onClick={() => reorder(moveScene(groups, scene.id, 1))} />
+                <ArrowButton label={`Move ${scene.name} up`} icon="arrowUp" disabled={i === 0} onClick={() => reorder(moveScene(groups, scene.id, -1))} />
+                <ArrowButton label={`Move ${scene.name} down`} icon="arrowDown" disabled={i === group.scenes.length - 1} onClick={() => reorder(moveScene(groups, scene.id, 1))} />
               </>
             ) : (
               <SceneMenuButton scene={scene} viewing={viewing} sceneCount={scenes.length} folders={folders} />
@@ -235,12 +235,8 @@ export function SceneList(props: { scenes: Scene[]; viewingId: string | null; pl
 }
 
 /** An arrow that moves a scene or a folder while arranging. The arrow says nothing to a screen reader, so the label is its name. */
-function ArrowButton(props: { label: string; glyph: string; disabled: boolean; onClick(): void }) {
-  return (
-    <Button size="sm" aria-label={props.label} title={props.label} disabled={props.disabled} onClick={props.onClick}>
-      {props.glyph}
-    </Button>
-  );
+function ArrowButton(props: { label: string; icon: "arrowUp" | "arrowDown"; disabled: boolean; onClick(): void }) {
+  return <Button size="sm" icon={props.icon} iconOnly="always" aria-label={props.label} disabled={props.disabled} onClick={props.onClick} />;
 }
 
 const oneLine = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } as const;
@@ -395,8 +391,8 @@ function FolderHeader(props: {
       </button>
       {arrange ? (
         <>
-          <ArrowButton label={`Move the folder ${folder} up`} glyph="↑" disabled={!arrange.up} onClick={() => arrange.up?.()} />
-          <ArrowButton label={`Move the folder ${folder} down`} glyph="↓" disabled={!arrange.down} onClick={() => arrange.down?.()} />
+          <ArrowButton label={`Move the folder ${folder} up`} icon="arrowUp" disabled={!arrange.up} onClick={() => arrange.up?.()} />
+          <ArrowButton label={`Move the folder ${folder} down`} icon="arrowDown" disabled={!arrange.down} onClick={() => arrange.down?.()} />
         </>
       ) : (
         <Button size="sm" aria-label={`Rename the folder ${folder}`} title={`Rename the folder ${folder}`} onClick={() => setDraft(folder)}>

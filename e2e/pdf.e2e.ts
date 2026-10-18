@@ -715,7 +715,8 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     const showing = dm.getByRole("list", { name: "Handouts showing" }).getByRole("listitem").filter({ hasText: "Long book" });
     await showing.waitFor();
     await shots.take(dm, "pdf-job-beside-a-showing");
-    await showing.getByRole("button", { name: "Close", exact: true }).click();
+    // Hide stops showing it to players (docs/design-v1-icons.md 2.3).
+    await showing.getByRole("button", { name: "Hide", exact: true }).click();
     await showing.waitFor({ state: "detached" });
 
     // An image uploaded in the form meanwhile goes before the job's next page.

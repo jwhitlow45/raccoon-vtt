@@ -153,6 +153,8 @@ export default function LogPanel(_props: PanelProps) {
         <div style={{ flex: 1 }} />
         <Button
           size="sm"
+          icon="download"
+          iconOnly="fine"
           disabled={preview !== null}
           title={preview ? "Not available while viewing as a player." : "Save the log as a Markdown file."}
           onClick={() => setExporting(true)}

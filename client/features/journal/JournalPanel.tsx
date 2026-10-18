@@ -223,13 +223,13 @@ function PageView(props: { page: JournalPage; dm: boolean; shown: boolean; onBac
       ) : null}
       {dm ? (
         <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
-          <Button size="sm" onClick={props.onEdit}>
+          <Button size="sm" icon="edit" iconOnly="fine" title="Edit this page" onClick={props.onEdit}>
             Edit
           </Button>
           <Button size="sm" disabled={!sceneShown} onClick={pinToMap}>
             Pin to the map
           </Button>
-          <ConfirmButton label="Delete page" confirm="Delete the page?" onConfirm={remove}>
+          <ConfirmButton icon="delete" iconOnly label="Delete page" confirm="Delete the page?" onConfirm={remove}>
             Delete
           </ConfirmButton>
         </div>
@@ -272,7 +272,7 @@ function SecretBlock(props: { revealed: boolean; onReveal(revealed: boolean): vo
         <span style={{ flex: 1, fontSize: theme.font.small, fontWeight: theme.weight.bold, color: props.revealed ? theme.color.textMuted : theme.color.warning }}>
           {props.revealed ? "Revealed" : "Players don't see this"}
         </span>
-        <Button size="sm" onClick={() => props.onReveal(!props.revealed)}>
+        <Button size="sm" icon={props.revealed ? "hidden" : "shown"} iconOnly="fine" title={props.revealed ? "Hide it from players" : "Show it to players"} onClick={() => props.onReveal(!props.revealed)}>
           {props.revealed ? "Hide" : "Reveal"}
         </Button>
       </div>

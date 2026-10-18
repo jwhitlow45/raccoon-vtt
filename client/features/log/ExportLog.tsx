@@ -110,6 +110,7 @@ export function ExportLog(props: { onClose(): void }) {
             aria-labelledby={`${buttonId} ${labelId}`}
             size="sm"
             busy={mine && job.kind === "busy"}
+            icon="download"
             disabled={busy && !mine}
             onClick={() => void run(key, range)}
           >

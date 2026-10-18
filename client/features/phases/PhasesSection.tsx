@@ -177,12 +177,8 @@ function PhaseRow(props: {
       {props.editing ? (
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap", padding: `${theme.space(2)}px 0 0` }}>
           <PhaseName name={phase.name} onSave={props.onRename} />
-          <Button size="sm" aria-label={`Move ${phase.name} up`} title={`Move ${phase.name} up`} disabled={props.first} onClick={() => props.onMove(-1)}>
-            ↑
-          </Button>
-          <Button size="sm" aria-label={`Move ${phase.name} down`} title={`Move ${phase.name} down`} disabled={props.last} onClick={() => props.onMove(1)}>
-            ↓
-          </Button>
+          <Button size="sm" icon="arrowUp" iconOnly="always" aria-label={`Move ${phase.name} up`} disabled={props.first} onClick={() => props.onMove(-1)} />
+          <Button size="sm" icon="arrowDown" iconOnly="always" aria-label={`Move ${phase.name} down`} disabled={props.last} onClick={() => props.onMove(1)} />
           {props.canRemove ? (
             <ConfirmButton
               label="Remove"

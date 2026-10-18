@@ -94,6 +94,8 @@ export default function MembersPanel(_props: PanelProps) {
                       {manages ? (
                         <Button
                           size="sm"
+                          icon="more"
+                          iconOnly="always"
                           aria-label={`Manage ${m.name}`}
                           aria-expanded={managed}
                           aria-controls={managed ? actionsId : undefined}

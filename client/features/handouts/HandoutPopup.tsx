@@ -257,6 +257,7 @@ export function HandoutPopup() {
     press();
   };
   const label = several ? (pdfBusy ? "Preparing…" : pdfMine?.t === "ready" ? "Share" : "Download") : busy ? "Downloading…" : mine?.state === "share" ? "Share" : "Download";
+  const working = several ? pdfBusy : busy;
 
   // Android's Back closes the handout before it leaves the room, one Back for each handout shown in turn.
   useBackClose(key, close);
@@ -278,7 +279,15 @@ export function HandoutPopup() {
       showing={key}
       headerActions={
         // A busy button says so in its own words at once, and takes no second tap (components/Loading.tsx).
-        <Button ref={downloadRef} size="sm" busy={several ? pdfBusy : busy} onClick={press}>
+        <Button
+          ref={downloadRef}
+          size="sm"
+          busy={working}
+          icon={label === "Share" ? "share" : "download"}
+          // Busy, its words say what it is doing (components/Loading.tsx), so only the resting button is its icon alone.
+          iconOnly={working ? undefined : "fine"}
+          onClick={press}
+        >
           {label}
         </Button>
       }

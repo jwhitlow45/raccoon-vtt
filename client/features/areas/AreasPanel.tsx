@@ -101,6 +101,7 @@ export default function AreasPanel(props: PanelProps) {
             <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2), marginTop: theme.space(1) }}>
               <Button
                 size="sm"
+                icon={editable ? "edit" : "focus"}
                 onClick={() => {
                   pickTemplate(scope, t.id, actions);
                   ui.setTool("area");
@@ -117,7 +118,7 @@ export default function AreasPanel(props: PanelProps) {
                 </Button>
               ) : null}
               {editable ? (
-                <Button size="sm" variant="danger" onClick={() => deleteTemplate(env, t.id)}>
+                <Button size="sm" variant="danger" icon="delete" iconOnly="always" title={`Delete ${areaTitle(t)}`} onClick={() => deleteTemplate(env, t.id)}>
                   Delete
                 </Button>
               ) : null}

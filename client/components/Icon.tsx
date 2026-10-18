@@ -78,7 +78,10 @@ export type IconName =
   | "arrowLeft"
   | "arrowRight"
   | "zoomIn"
-  | "zoomOut";
+  | "zoomOut"
+  | "focus"
+  | "download"
+  | "share";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -110,6 +113,9 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   arrowRight: "arrow-right",
   zoomIn: "zoom-in",
   zoomOut: "zoom-out",
+  focus: "focus",
+  download: "download",
+  share: "share",
 };
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -325,6 +331,17 @@ const SHAPES: Record<IconName, ReactNode> = {
       <circle cx="11" cy="11" r="8" />
     </g>
   ),
+  // Lucide focus: look at a thing on the map, such as an area's Show. Never Shown, which says players see it.
+  focus: (
+    <g {...STROKE}>
+      <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+      <circle cx="12" cy="12" r="3" />
+    </g>
+  ),
+  // Lucide download: save a file to the device, a handout or the log.
+  download: <path {...STROKE} d="M12 15V3M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5" />,
+  // Lucide share: hand a file to the device's share sheet.
+  share: <path {...STROKE} d="M12 2v13M16 6l-4-4-4 4M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />,
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];

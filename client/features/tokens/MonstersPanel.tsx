@@ -219,11 +219,12 @@ function MonsterDetail(props: {
       {listed.source === "room" ? (
         <>
           <div style={{ display: "flex", gap: theme.space(2) }}>
-            <Button size="sm" style={{ flex: 1 }} onClick={() => props.onEdit(listed.monster)}>
+            <Button size="sm" icon="edit" style={{ flex: 1 }} onClick={() => props.onEdit(listed.monster)}>
               Edit
             </Button>
             <ConfirmButton
               grow
+              icon="delete"
               confirm="Tap again to delete"
               onConfirm={() => {
                 if (actions.dispatch({ t: "monster.delete", monsterId: listed.monster.id }) !== null) props.onDeleted();

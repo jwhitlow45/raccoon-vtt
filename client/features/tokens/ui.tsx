@@ -338,7 +338,19 @@ export function Stepper(props: {
  * long label, such as a character's name, wrap inside the button and
  * break inside a long word, where a line is narrower than it.
  */
-export function ConfirmButton(props: { onConfirm(): void; children: ReactNode; confirm: string; label?: string; grow?: boolean; busy?: boolean; describedBy?: string; wrap?: boolean; icon?: IconName }) {
+export function ConfirmButton(props: {
+  onConfirm(): void;
+  children: ReactNode;
+  confirm: string;
+  label?: string;
+  grow?: boolean;
+  busy?: boolean;
+  describedBy?: string;
+  wrap?: boolean;
+  icon?: IconName;
+  /** The icon alone until armed, then the icon and the confirm words (docs/design-v1-icons.md 3.1 rule 6). */
+  iconOnly?: boolean;
+}) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
@@ -353,6 +365,7 @@ export function ConfirmButton(props: { onConfirm(): void; children: ReactNode; c
       armed={armed}
       busy={props.busy}
       icon={props.icon}
+      iconOnly={props.iconOnly && !armed ? "always" : undefined}
       aria-label={label}
       aria-describedby={props.describedBy}
       title={label}

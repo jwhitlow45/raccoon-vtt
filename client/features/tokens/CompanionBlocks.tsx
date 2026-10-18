@@ -380,10 +380,10 @@ function BlockRow(props: { block: CompanionBlock; open: boolean; onToggle(): voi
         <div style={{ display: "grid", gap: theme.space(2), padding: `0 ${theme.space(1)}px ${theme.space(2)}px` }}>
           <StatBlockView view={viewOf(block)} source={block.fromSrd ? "srd" : "room"} credit={block.fromSrd !== undefined} />
           <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-            <Button size="sm" onClick={props.onEdit}>
+            <Button size="sm" icon="edit" onClick={props.onEdit}>
               Edit
             </Button>
-            <ConfirmButton confirm="Tap again to delete" busy={remove.waiting} onConfirm={() => remove.send({ t: "companionBlock.delete", blockId: block.id })}>
+            <ConfirmButton icon="delete" confirm="Tap again to delete" busy={remove.waiting} onConfirm={() => remove.send({ t: "companionBlock.delete", blockId: block.id })}>
               Delete
             </ConfirmButton>
           </div>

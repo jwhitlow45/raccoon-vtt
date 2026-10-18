@@ -302,13 +302,9 @@ function BlockEditor(props: {
         <div style={{ flex: "1 1 120px" }}>
           <Checkbox checked={props.secret} onChange={props.onSecret} label="Secret" />
         </div>
-        <Button size="sm" aria-label={`Move block ${n} up`} title={`Move block ${n} up`} disabled={props.index === 0} onClick={() => props.onMove(-1)}>
-          ↑
-        </Button>
-        <Button size="sm" aria-label={`Move block ${n} down`} title={`Move block ${n} down`} disabled={props.index === props.count - 1} onClick={() => props.onMove(1)}>
-          ↓
-        </Button>
-        <ConfirmButton label={`Delete block ${n}`} confirm="Delete it?" onConfirm={props.onDelete}>
+        <Button size="sm" icon="arrowUp" iconOnly="always" aria-label={`Move block ${n} up`} disabled={props.index === 0} onClick={() => props.onMove(-1)} />
+        <Button size="sm" icon="arrowDown" iconOnly="always" aria-label={`Move block ${n} down`} disabled={props.index === props.count - 1} onClick={() => props.onMove(1)} />
+        <ConfirmButton icon="delete" iconOnly label={`Delete block ${n}`} confirm="Delete it?" onConfirm={props.onDelete}>
           Delete
         </ConfirmButton>
       </div>
