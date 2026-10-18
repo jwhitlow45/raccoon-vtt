@@ -45,6 +45,14 @@ describe("dice.roll's bounds", () => {
     assert.equal(firstIssue(op({ rolls: big })), FORMULA_ERRORS.tooMuch);
   });
 
+  test("a roll marks itself as initiative with true alone, and a stored one parses as replay parses it (docs/design-v1-combat-flow.md 11.4)", () => {
+    const marked = op({ rolls: [{ formula: "1d20+2", label: "Initiative", creature: { tokenId: "g1" }, initiative: true }] });
+    assert.equal(firstIssue(marked), null);
+    assert.notEqual(firstIssue(op({ rolls: [{ formula: "1d20+2", initiative: false }] })), null);
+    const sys = { t: "sys.dice", asked: marked, batch: "AbCdEfGhIjKlMnOp", results: [{ formula: "1d20+2", faces: [12], total: 14 }] };
+    assert.ok(opSchema.safeParse(sys).success);
+  });
+
   test("a critical hit's damage counts its dice twice under any rule, and is no d20 roll (the critical hit rules addendum)", () => {
     assert.equal(firstIssue(op({ rolls: [{ formula: "2d6+3", label: "Scimitar critical damage, slashing", critical: true }] })), null);
     assert.equal(firstIssue(op({ rolls: [{ formula: "50d6", critical: true }] })), null);

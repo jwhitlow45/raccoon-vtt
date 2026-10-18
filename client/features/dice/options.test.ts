@@ -9,7 +9,7 @@ import { reminderPreset } from "#shared/rules/rollReminders.ts";
 import type { OptionState } from "./optionState.ts";
 import { ReceiptTracker } from "./useReceipt.ts";
 import { watchInitiative, type InitiativeEnv } from "./useRollOption.ts";
-import { asSave, creatureKey, CRIT_WORDS, critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, playerCreatures, presetLine, resultWords, routedTest, routeOf, scoreOf, spendOnStart, testLabel, withExtra, withUsed } from "./options.ts";
+import { asInitiative, asSave, creatureKey, CRIT_WORDS, critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, playerCreatures, presetLine, resultWords, routedTest, routeOf, scoreOf, spendOnStart, testLabel, withExtra, withUsed } from "./options.ts";
 
 /** The roll options' rules (docs/design-v1-roll-options.md 4.2 and 4.3). */
 
@@ -154,6 +154,14 @@ describe("damage, critical hits and results", () => {
     const roll = d20Roll({ tokenId: "gob" }, 2, { sources: [], extra: [], notes: [] }, "Dexterity save");
     assert.equal(asSave(roll, { kind: "save", ability: "dex" }).save, "dex");
     assert.equal(asSave(roll, { kind: "check", ability: "dex" }).save, undefined);
+  });
+
+  test("initiative goes marked as initiative, so the server keeps a hidden-order creature's roll from players, and no other test does (docs/design-v1-combat-flow.md 11.3)", () => {
+    const roll = d20Roll({ tokenId: "gob" }, 2, { sources: [], extra: [], notes: [] }, "Initiative");
+    assert.equal(asInitiative(roll, { kind: "initiative" }).initiative, true);
+    for (const test of [{ kind: "save", ability: "dex" }, { kind: "check", ability: "dex" }, { kind: "deathSave" }, { kind: "attack" }] as const) {
+      assert.equal(asInitiative(roll, test).initiative, undefined, test.kind);
+    }
   });
 
   test("Used is kept per creature and action", () => {

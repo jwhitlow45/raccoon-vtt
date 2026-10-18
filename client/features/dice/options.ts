@@ -91,6 +91,15 @@ export function asSave(roll: PanelRoll, test: D20Test): PanelRoll {
   return test.kind === "save" ? { ...roll, save: test.ability } : roll;
 }
 
+/**
+ * A roll marked as its creature's initiative, so the server keeps it from
+ * players while they may not know the creature's place in the order
+ * (docs/design-v1-combat-flow.md 11.3). Any other test leaves it as it is.
+ */
+export function asInitiative(roll: PanelRoll, test: D20Test): PanelRoll {
+  return test.kind === "initiative" ? { ...roll, initiative: true } : roll;
+}
+
 // ------------------------------------------------------------ routing
 
 /** Where a save or check tap goes (4.2, 4.3). */

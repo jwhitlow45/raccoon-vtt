@@ -3,7 +3,7 @@ import { startsSecret } from "../dice/secret.ts";
 import { healRevivesDead } from "../migrate.ts";
 import type { DiceRoll, LogEvent } from "../model.ts";
 import { ANSWERED_MEANWHILE, SETTLED_MEANWHILE } from "../permissions.ts";
-import { seenByNonOwners } from "../project.ts";
+import { initiativeHidden, seenByNonOwners } from "../project.ts";
 import type { ActorTarget, OpOf } from "../protocol.ts";
 import { applyDeathSaves, applyHeal } from "../rules/hp.ts";
 import { resultOf } from "../rules/rolls.ts";
@@ -41,7 +41,11 @@ function rollCreature(tx: Tx, creature: ActorTarget): Pick<DiceRoll, "tokenId" |
   return seenByNonOwners(tx.state, token, tx.env) ? { tokenId: token.id, seen: true } : { tokenId: token.id };
 }
 
-/** A free roll: one `dice` line with each roll's result, its label, its creature and its critical range. */
+/**
+ * A free roll: one `dice` line with each roll's result, its label, its
+ * creature and its critical range, and a creature's initiative marked as
+ * the DM's while players may not know its place in the order.
+ */
 function diceLine(tx: Tx, op: Sys, asked: Asked<"dice.roll">): void {
   if (op.results.length !== asked.rolls.length) throw invalid("each roll has one result");
   const rolls = asked.rolls.map((roll, i): DiceRoll => {
@@ -49,6 +53,7 @@ function diceLine(tx: Tx, op: Sys, asked: Asked<"dice.roll">): void {
     if (roll.label !== undefined) out.label = roll.label;
     if (roll.creature) Object.assign(out, rollCreature(tx, roll.creature));
     if (roll.critOn !== undefined) out.critOn = roll.critOn;
+    if (roll.initiative && roll.creature && initiativeHidden(tx.state, roll.creature)) out.hidden = true;
     return out;
   });
   const line: Extract<LogEvent, { type: "dice" }> = { type: "dice", tag: asked.tag, batch: op.batch, by: tx.actor.memberId, to: asked.to, rolls };

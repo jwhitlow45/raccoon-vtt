@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { ORDER_REVEALS, type OrderReveal, type RoomState, type Viewer } from "./model.ts";
-import type { EntryInput, Op } from "./protocol.ts";
+import type { ActorTarget, EntryInput, Op, OpOf } from "./protocol.ts";
 import { projectState } from "./project.ts";
 import { applyOp } from "./reducer.ts";
 import { DM, P1, P2, chance, character, env, int, pick, rng, room, token } from "./testutil.ts";
@@ -9,7 +9,8 @@ import { DM, P1, P2, chance, character, env, int, pick, rng, room, token } from 
 /**
  * Many random fights under the order setting (docs/design-v1-combat-flow.md
  * 11): Next, Previous, drags, new values, adds, removes, hides, ring and
- * setting changes, and fights ended and started again. The test keeps its
+ * setting changes, the DM's initiative rolls, open and secret, and fights
+ * ended and started again. The test keeps its
  * own record of which rows have had their turn, from the acting row after
  * each op, with Previous taking back what its step showed, and checks after
  * every op:
@@ -18,7 +19,9 @@ import { DM, P1, P2, chance, character, env, int, pick, rng, room, token } from 
  *   rules give them (the same state under "Everyone") that the setting
  *   shows by that record, in turn order, numbered 0 to n-1;
  * - no other row's id, and no `hadTurn`, is anywhere in their snapshot;
- * - the DM holds every row, and the stored marks agree with the record.
+ * - the DM holds every row, and the stored marks agree with the record;
+ * - no initiative roll made while the record kept its creature's place from
+ *   players ever reaches one, as a total or as a bare line.
  */
 
 const DISPLAY: Viewer = { memberId: "display:abcdefghijkl", role: "player" };
@@ -38,7 +41,7 @@ function table(): RoomState {
   return state;
 }
 
-const CREATURES: ({ tokenId: string } | { characterId: string })[] = [
+const CREATURES: ActorTarget[] = [
   ...["pc1", "comp", "lent", "ally", "g1", "g2", "g3", "g4", "hid"].map((tokenId) => ({ tokenId })),
   { characterId: "npc" },
 ];
@@ -81,7 +84,12 @@ function randomOp(r: () => number, state: RoomState, n: number): Op {
   if (roll < 0.72) return rows.length > 1 ? { t: "encounter.remove", entryIds: [anyRow()] } : { t: "encounter.next" };
   if (roll < 0.78) return { t: "encounter.update", entryId: anyRow(), patch: { hidden: chance(r, 0.4) } };
   if (roll < 0.84) return { t: "token.update", tokenId: pick(r, ["ally", "g1", "g2", "lent"]), patch: { disposition: pick(r, ["ally", "neutral", "hostile"] as const) } };
-  if (roll < 0.92) return { t: "room.update", settings: { playersSeeOrder: pick(r, ORDER_REVEALS) } };
+  if (roll < 0.88) return { t: "room.update", settings: { playersSeeOrder: pick(r, ORDER_REVEALS) } };
+  if (roll < 0.92) {
+    const creature = pick(r, CREATURES);
+    const asked: OpOf<"dice.roll"> = { t: "dice.roll", tag: `0192f0a8-6c1e-7a4b-9c3d-${String(n).padStart(12, "0")}`, to: pick(r, ["all", "dm"] as const), rolls: [{ formula: "1d20+2", label: "Initiative", creature, initiative: true }] };
+    return { t: "sys.dice", asked, batch: "AbCdEfGhIjKlMnOp", results: [{ formula: "1d20+2", faces: [int(r, 1, 20)], total: 0 }] };
+  }
   if (roll < 0.96) return { t: "token.update", tokenId: "hid", patch: { visibility: pick(r, ["all", "dm"] as const) } };
   return { t: "encounter.end" };
 }
@@ -106,7 +114,30 @@ function follow(record: Record_, after: RoomState, op: Op): Record_ {
 /** How often the setting kept a row out, and how often a row showed only because its turn had come, so the run is known to reach both. */
 const seen = { withheld: 0, revealed: 0 };
 
+/** Whether the record keeps a creature's place from players now: what the DM's initiative roll for it must not tell them. */
+function placeSecret(state: RoomState, record: Record_, creature: ActorTarget): boolean {
+  const reveal = state.meta.settings.playersSeeOrder ?? "all";
+  if (reveal === "all") return false;
+  if ("characterId" in creature) {
+    if (creature.characterId === "c1") return false;
+  } else {
+    if (["pc1", "comp", "lent"].includes(creature.tokenId)) return false;
+    if (reveal === "allies" && state.tokens[creature.tokenId]!.disposition === "ally") return false;
+  }
+  const rows = state.encounter?.entries ?? [];
+  const its = rows.filter((e) => ("tokenId" in creature ? e.tokenId === creature.tokenId : e.characterId === creature.characterId));
+  return !its.some((e) => record.turned.has(e.id) || state.encounter!.activeEntryId === e.id);
+}
+
+/** The ids of this run's initiative lines written while their creature's place was secret, and how many all runs wrote. */
+const secretLines = new Set<string>();
+let secretRolls = 0;
+
 function check(state: RoomState, record: Record_, label: string): void {
+  for (const viewer of PLAYERS) {
+    const leaked = projectState(state, viewer, { sceneId: "s1" }).log.filter((l) => secretLines.has(l.id));
+    assert.deepEqual(leaked, [], `${label}: a secret initiative roll reaches ${viewer.memberId}`);
+  }
   const encounter = state.encounter;
   const dm = projectState(state, DM, { sceneId: "s1" }).encounter;
   assert.deepEqual(dm?.entries.map((e) => e.id) ?? [], encounter?.entries.map((e) => e.id) ?? [], `${label}: the DM holds every row`);
@@ -139,15 +170,21 @@ describe("the order setting over random fights (docs/design-v1-combat-flow.md 11
       state.meta.settings.revealHiddenOnTurn = chance(r, 0.6);
       state.meta.settings.skipDefeated = chance(r, 0.5);
       let record: Record_ = { turned: new Set(), steps: [] };
+      secretLines.clear();
       for (let n = 1; n <= 60; n++) {
         const op = randomOp(r, state, n);
         const result = applyOp(state, op, DM, env(n));
         if (!result.ok) continue;
+        if (op.t === "sys.dice" && op.asked.t === "dice.roll" && placeSecret(state, record, op.asked.rolls[0]!.creature!)) {
+          secretLines.add(result.state.log.at(-1)!.id);
+          secretRolls++;
+        }
         record = follow(record, result.state, op);
         state = result.state;
         check(state, record, `seed ${s}, op ${n} (${op.t})`);
       }
     }
     assert.ok(seen.withheld > 1000 && seen.revealed > 1000, `withheld ${seen.withheld}, revealed ${seen.revealed}`);
+    assert.ok(secretRolls > 50, `${secretRolls} secret rolls`);
   });
 });

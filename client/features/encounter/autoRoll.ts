@@ -316,12 +316,15 @@ export function planPress(rows: readonly RollRow[], mode: RollMode, kept: readon
  * One panel roll per shared roll, in the groups' order, for
  * `useDicePanel().roll(rolls, { to: "dm" })`. Each names its first row's
  * token, so the DM's log reads whose roll it was, and goes behind the
- * screen, so a hidden group leaves players no trace of its creature.
+ * screen, so a hidden group leaves players no trace of its creature. Each
+ * is marked as initiative, so a creature whose place in the order players
+ * may not know yet leaves them no bare line either
+ * (docs/design-v1-combat-flow.md 11.3).
  */
 export function initiativeRolls(groups: readonly RollGroup[]): PanelRoll[] {
   return groups.map((group) => {
     const n = group.rows.length;
-    const roll: PanelRoll = { formula: withExtra(d20Formula(group.modifier), group.extra), label: n === 1 ? "Initiative" : `Initiative, shared by ${n}`, sources: [...group.sources] };
+    const roll: PanelRoll = { formula: withExtra(d20Formula(group.modifier), group.extra), label: n === 1 ? "Initiative" : `Initiative, shared by ${n}`, sources: [...group.sources], initiative: true };
     const first = group.rows[0];
     if (first) roll.creature = { tokenId: first.tokenId };
     return roll;

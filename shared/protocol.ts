@@ -1076,6 +1076,12 @@ const diceRollInput = z.strictObject({
    * (the critical hit rules addendum), so no client computes a crit.
    */
   critical: z.literal(true).optional(),
+  /**
+   * The creature's initiative, so the line keeps it from players while the
+   * order setting keeps the creature's place from them
+   * (docs/design-v1-combat-flow.md 11.3). Ignored without `creature`.
+   */
+  initiative: z.literal(true).optional(),
 });
 const diceRollFields = {
   /** The receipt's key (1.2): one tag for a whole group, and `part` 0 to 19 for each batch of it. */

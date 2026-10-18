@@ -1741,8 +1741,11 @@ export type LogEvent =
  * One roll of a `dice` line: its result, the label and creature asked, and
  * an attack roll's critical range. `seen` marks a roll for a token whose
  * non-owners could see it when it was written, as other token events are.
+ * `hidden` marks the initiative of a creature whose place in the order
+ * players did not know then (docs/design-v1-combat-flow.md 11.3): only the
+ * DM gets that roll.
  */
-export type DiceRoll = DiceResult & { label?: string; tokenId?: TokenId; characterId?: CharacterId; seen?: true; critOn?: 18 | 19 | 20 };
+export type DiceRoll = DiceResult & { label?: string; tokenId?: TokenId; characterId?: CharacterId; seen?: true; critOn?: 18 | 19 | 20; hidden?: true };
 
 export type LogEntry = {
   /** `"<seq>:<index>"`, so a replay can never insert the same entry twice. */

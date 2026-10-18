@@ -51,7 +51,7 @@ import { visionRules, type PartySight } from "./ruleHooks.ts";
 import { decodeTile, encodeTile, getBit, isAboveFog, isRangeFullyFogged, labelCells, tilesAcross, TILE_CELLS } from "./rules/fog.ts";
 import { footprintRect, occupiedCells, occupiedRange, type CellRange } from "./rules/footprint.ts";
 import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
-import { compareEntries, orderRevealOf } from "./rules/initiative.ts";
+import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
 import { pathThisTurn, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
 import { sightRect } from "./rules/vision.ts";
 
@@ -1115,6 +1115,21 @@ export function orderShown(state: RoomState, entry: InitEntry): boolean {
   return shownFromTheStart(state, entry, reveal === "allies");
 }
 
+/**
+ * Whether a creature's initiative roll is the DM's alone, written so on its
+ * dice line (`DiceRoll.hidden`): the order setting keeps its place from
+ * players now, since no row of it has had its turn and it is not shown from
+ * the start. A creature with no row yet counts too, so a roll made before
+ * it joins the fight tells players nothing either.
+ */
+export function initiativeHidden(state: RoomState, creature: { tokenId: string } | { characterId: string }): boolean {
+  const reveal = orderRevealOf(state.meta.settings);
+  if (reveal === "all" || shownFromTheStart(state, creature, reveal === "allies")) return false;
+  const characterId = "characterId" in creature ? creature.characterId : rowCharacter(state, creature);
+  const itsRow = (e: InitEntry) => ("tokenId" in creature && e.tokenId === creature.tokenId) || (characterId !== undefined && rowCharacter(state, e) === characterId);
+  return !(state.encounter?.entries.some((e) => itsRow(e) && orderShown(state, e)) ?? false);
+}
+
 /** A creature whose place players see from the fight's start: one a player plays, or with `allies` one with the Ally ring. */
 function shownFromTheStart(state: RoomState, creature: { tokenId?: string; characterId?: string }, allies: boolean): boolean {
   const token = creature.tokenId !== undefined ? state.tokens[creature.tokenId] : undefined;
@@ -1371,7 +1386,10 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
  * kept when it names no creature, a character, or a token the player may
  * have the events of (holderOfEvent: in sight now, and seen then or
  * owned), so a token's roll follows that token's events and none passes a
- * blackout. With none kept there is no line. Open to everyone, or the
+ * blackout. An initiative roll marked `hidden`, for a creature whose place
+ * in the order players did not know then, is never kept
+ * (docs/design-v1-combat-flow.md 11.3). With none kept there is no line.
+ * Open to everyone, or the
  * player's own, it reads in full, the tag only for its roller. A secret
  * roll of someone else's reads as the bare line, and only when the same
  * roll made public would have reached the player, so a roll for a creature
@@ -1380,7 +1398,7 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
  */
 function projectDiceCtx(ctx: Ctx, data: Extract<LogEvent, { type: "dice" }>): LogEvent | null {
   if (!ctx.state.members[ctx.viewer.memberId]) return null;
-  const rolls = data.rolls.filter((roll) => roll.tokenId === undefined || holderOfEvent(ctx, roll) !== null);
+  const rolls = data.rolls.filter((roll) => !roll.hidden && (roll.tokenId === undefined || holderOfEvent(ctx, roll) !== null));
   if (rolls.length === 0) return null;
   const mine = data.by === ctx.viewer.memberId;
   if (data.to === "dm" && !mine) return { type: "dice", by: data.by, to: "dm", rolls: [] };

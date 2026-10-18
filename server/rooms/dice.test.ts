@@ -149,6 +149,12 @@ describe("dice lines in a room's export (5.3)", () => {
     const otherRule = JSON.parse(JSON.stringify(withLines()));
     otherRule.log[0].data.rolls[2].crit = "tripleDice";
     assert.equal(parseRoomState(otherRule).ok, false, "a crit's rule is one of the four");
+    // An initiative roll the DM kept from players (docs/design-v1-combat-flow.md 11.3).
+    const kept = JSON.parse(JSON.stringify(withLines()));
+    kept.log[0].data.rolls[0].hidden = true;
+    assert.ok(parseRoomState(kept).ok);
+    kept.log[0].data.rolls[0].hidden = false;
+    assert.equal(parseRoomState(kept).ok, false);
   });
 
   test("remap moves the roller and every roll's creature to their new ids", () => {

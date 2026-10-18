@@ -568,6 +568,7 @@ const logEvent = z.discriminatedUnion("type", [
           characterId: id.optional(),
           seen: z.literal(true).optional(),
           critOn: diceSchemas.critOn.optional(),
+          hidden: z.literal(true).optional(),
         }),
       )
       .max(LIMITS.diceRollsPerOp),
