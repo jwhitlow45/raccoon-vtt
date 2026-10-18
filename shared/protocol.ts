@@ -905,6 +905,8 @@ const entryInput = z
     characterId: id.optional(),
     label: shortText.optional(),
     value: z.number().int().min(-50).max(100).nullable().optional(),
+    /** The tag of the dice line `value` came from, as `encounter.setValue` names it (shared/permissions.ts rolledInitiative). The reducer ignores it. */
+    roll: id.optional(),
     hidden: z.boolean().optional(),
     inLair: z.boolean().optional(),
     groupKey: shortText.optional(),

@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { MoveAnyToken, RoomState } from "./model.ts";
 import { canApply, movesAnyToken, PLAYED_WITH_OTHERS, WALL_IN_THE_WAY, type AssetKind, type PermissionDeps } from "./permissions.ts";
 import { projectState } from "./project.ts";
-import { isPoseOp, isResizeOp, onPlayerUndoStack, type Op, type RestoreEntry } from "./protocol.ts";
+import { isPoseOp, isResizeOp, onPlayerUndoStack, type Op, type OpOf, type RestoreEntry } from "./protocol.ts";
 import { NO_ROOM_TO_GROW, OWNER_SIZES, RESIZE_KEEPS_PLACE, resizeSpot } from "./rules/resize.ts";
 import { DM, P1, P2, actor, apply, blockOf, character, customMonster, drawing, entry, imageRef, reveal, room, template, token } from "./testutil.ts";
 
@@ -572,6 +572,27 @@ describe("encounter", () => {
     assert.equal(code({ t: "encounter.setValues", values: [{ entryId: "n1", value: 3 }] }, DM, state), "ok", "the DM's values are unaffected");
     state.meta.settings.playersTypeTotals = true;
     assert.equal(code({ t: "encounter.setValue", entryId: "n1", value: 3 }, P1, state), "ok", "on, a typed value goes");
+  });
+
+  test("with typed totals off a player's row joins the fight with no value, or with their own roll's total, by every way it joins (B7B-ASTRA-02)", () => {
+    const state = combat();
+    state.meta.settings.playersTypeTotals = false;
+    state.tokens.wolf = token("wolf", { kind: "npc", name: "Wolf", ownerIds: ["p1"], x: 2, y: 1, companion: { of: "c1", turn: "own" }, actor: { inline: actor() } });
+    state.log.push({ id: "1:0", at: "2026-10-17T20:00:00.000Z", kind: "event", data: { type: "dice", tag: "t-own", by: P1.memberId, to: "all", rolls: [{ formula: "1d20+1", faces: [11], total: 12, label: "Initiative", tokenId: "own" }] } });
+    const add = (entries: OpOf<"encounter.add">["entries"]) => code({ t: "encounter.add", entries }, P1, state);
+    assert.equal(add([{ id: "x", tokenId: "own", value: 100 }]), "forbidden", "a typed value on joining");
+    assert.equal(add([{ id: "x", tokenId: "own" }]), "ok", "no value");
+    assert.equal(add([{ id: "x", tokenId: "own", value: null }]), "ok", "an empty value");
+    assert.equal(add([{ id: "x", tokenId: "own", value: 12, roll: "t-own" }]), "ok", "its own roll's total");
+    assert.equal(add([{ id: "x", tokenId: "own", value: 13, roll: "t-own" }]), "forbidden", "another number than it rolled");
+    assert.equal(add([{ id: "x", tokenId: "own" }, { id: "y", characterId: "c1", value: 18 }]), "forbidden", "a group join with one typed value");
+    assert.equal(add([{ id: "x", tokenId: "wolf", value: 15 }]), "forbidden", "a companion's own row");
+    const readd = apply(state, { t: "encounter.remove", entryIds: ["n1"] }, P1);
+    assert.equal(code({ t: "encounter.add", entries: [{ id: "n9", tokenId: "pc1", value: 20 }] }, P1, readd), "forbidden", "a re-add after removing the row");
+    assert.equal(code({ t: "encounter.add", entries: [{ id: "x", tokenId: "gob", value: 9 }] }, DM, state), "ok", "the DM's values are unaffected");
+    assert.equal(code({ t: "encounter.start", entries: [{ id: "x", tokenId: "own", value: 9 }] }, P1, state), "forbidden", "a fight is the DM's to start");
+    state.meta.settings.playersTypeTotals = true;
+    assert.equal(add([{ id: "x", tokenId: "own", value: 100 }]), "ok", "on, a typed value goes");
   });
 
   test("players mark their own row's reaction spent, and every other row flag stays the DM's", () => {

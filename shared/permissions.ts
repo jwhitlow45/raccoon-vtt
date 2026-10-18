@@ -641,6 +641,9 @@ function forPlayer(op: Op, c: Check): Decision {
         } else {
           return refuse("forbidden", "players add only their own characters");
         }
+        // A row joins with a value only as a roll's total while the room has typed totals off, as encounter.setValue does.
+        const row: InitEntry = { id: entry.id, value: null, tieOrder: 0, hidden: false, reactionUsed: false, inLair: false, ...(entry.tokenId !== undefined ? { tokenId: entry.tokenId } : {}), ...(entry.characterId !== undefined ? { characterId: entry.characterId } : {}) };
+        if (typedInitiative(c, row, entry.value ?? null, entry.roll)) return refuse("forbidden", NO_TYPED_INITIATIVE);
       }
       return OK;
     }
@@ -656,8 +659,7 @@ function forPlayer(op: Op, c: Check): Decision {
       const entry = c.visibleEntry(op.entryId);
       if (!entry) return GONE;
       if (!c.ownsEntry(entry)) return NOT_YOURS;
-      // Clearing the value types no number, so it goes either way.
-      if (op.value !== null && !playersTypeTotals(c.state.meta.settings) && !rolledInitiative(c.state, c.actor.memberId, entry, op)) return refuse("forbidden", NO_TYPED_INITIATIVE);
+      if (typedInitiative(c, entry, op.value, op.roll)) return refuse("forbidden", NO_TYPED_INITIATIVE);
       return OK;
     }
     case "encounter.update": {
@@ -796,20 +798,32 @@ export const NO_TYPED_TOTALS = "The DM has turned off typed totals in this room.
 export const NO_TYPED_INITIATIVE = "The DM has turned off typed totals in this room. Roll your initiative instead.";
 
 /**
+ * Whether a player's initiative value for a row is a typed one the room
+ * refuses: every op that sets one, `encounter.setValue` and the value a row
+ * joins with in `encounter.add`, asks this. While typed totals are off, a
+ * value goes only as the total of the player's own roll (rolledInitiative).
+ * No value types no number, so clearing one, or joining without one, goes.
+ */
+function typedInitiative(c: Check, row: InitEntry, value: number | null, roll: string | undefined): boolean {
+  if (value === null || playersTypeTotals(c.state.meta.settings)) return false;
+  return !rolledInitiative(c.state, c.actor.memberId, row, value, roll);
+}
+
+/**
  * Whether a player's initiative value is the total of their own roll for
  * that row's creature: a `dice` line of theirs under the tag the value
  * names, with a roll for the row's creature (its token or its character)
  * whose total, kept within the row's -50 to 100, is the value. The line is
  * in the log every viewer of it reads, so its formula stays in plain view.
  */
-function rolledInitiative(state: RoomState, memberId: string, entry: InitEntry, op: OpOf<"encounter.setValue">): boolean {
-  if (op.roll === undefined) return false;
+function rolledInitiative(state: RoomState, memberId: string, row: InitEntry, value: number, roll: string | undefined): boolean {
+  if (roll === undefined) return false;
   for (let i = state.log.length - 1; i >= 0; i--) {
     const data = state.log[i]!.data;
-    if (data?.type !== "dice" || data.tag !== op.roll || data.by !== memberId) continue;
+    if (data?.type !== "dice" || data.tag !== roll || data.by !== memberId) continue;
     const ok = data.rolls.some((r) => {
       const creature = r.tokenId !== undefined ? { tokenId: r.tokenId } : r.characterId !== undefined ? { characterId: r.characterId } : null;
-      return creature !== null && entryMatchesAnchor(state, entry, creature) && Math.max(-50, Math.min(100, r.total)) === op.value;
+      return creature !== null && entryMatchesAnchor(state, row, creature) && Math.max(-50, Math.min(100, r.total)) === value;
     });
     if (ok) return true;
   }
