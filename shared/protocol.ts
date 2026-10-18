@@ -16,6 +16,7 @@ import {
   MAX_HEIGHT_FT,
   MAX_LIGHT_FT,
   MIN_HEIGHT_FT,
+  ORDER_REVEALS,
   SKILL_KEYS,
   STAMP_MAX_CELLS,
   STAMP_MIN_CELLS,
@@ -319,6 +320,8 @@ const settingsPatch = z.strictObject({
   healRevives: z.boolean().optional(),
   /** How a critical hit rolls its damage (docs/design-v1-dice.md, critical hit rules). */
   critRule: z.enum(CRIT_RULES).optional(),
+  /** Which creatures players see in the initiative order before their turn (docs/design-v1-combat-flow.md 11). */
+  playersSeeOrder: z.enum(ORDER_REVEALS).optional(),
 });
 
 const fogShape = z.discriminatedUnion("kind", [

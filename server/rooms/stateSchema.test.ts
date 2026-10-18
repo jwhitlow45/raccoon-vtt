@@ -40,6 +40,21 @@ describe("roomStateSchema", () => {
     assert.equal(parseRoomState(bad).ok, false);
   });
 
+  test("a new room keeps monsters' places from players, and a backup from before the setting shows players the whole order", () => {
+    const fresh = createInitialState({ roomName: "R", dm: { id: "m1", rev: 1, name: "DM", color: "#f38400", kind: "dm", createdAt: new Date().toISOString() } });
+    assert.equal(fresh.meta.settings.playersSeeOrder, "party");
+    const older = JSON.parse(JSON.stringify(fresh));
+    delete older.meta.settings.playersSeeOrder;
+    const parsed = parseRoomState(older);
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.equal(parsed.ok && parsed.state.meta.settings.playersSeeOrder, "all");
+    const picked = parseRoomState(JSON.parse(JSON.stringify({ ...fresh, meta: { ...fresh.meta, settings: { ...fresh.meta.settings, playersSeeOrder: "allies" } } })));
+    assert.equal(picked.ok && picked.state.meta.settings.playersSeeOrder, "allies");
+    const bad = JSON.parse(JSON.stringify(fresh));
+    bad.meta.settings.playersSeeOrder = "monsters";
+    assert.equal(parseRoomState(bad).ok, false);
+  });
+
   test("a fresh room and random rooms parse after a JSON round trip", () => {
     const fresh = createInitialState({ roomName: "R", dm: { id: "m1", rev: 1, name: "DM", color: "#f38400", kind: "dm", createdAt: new Date().toISOString() } });
     assert.ok(parseRoomState(JSON.parse(JSON.stringify(fresh))).ok);

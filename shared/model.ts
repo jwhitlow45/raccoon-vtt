@@ -150,6 +150,15 @@ export type MoveAnyToken = WhichPlayers;
 export const CRIT_RULES = ["rollTwice", "maxPlusRoll", "doubleDice", "doubleTotal"] as const;
 export type CritRule = (typeof CRIT_RULES)[number];
 
+/**
+ * Which creatures players see in the initiative order before each one's
+ * first turn of the fight (docs/design-v1-combat-flow.md 11): only those
+ * players play, those and the ones with the Ally ring, or every one. A
+ * creature joins their order when its turn comes and stays for the fight.
+ */
+export const ORDER_REVEALS = ["party", "allies", "all"] as const;
+export type OrderReveal = (typeof ORDER_REVEALS)[number];
+
 export type RoomSettings = {
   feetPerCell: number;
   diagonal: DiagonalRule;
@@ -197,6 +206,12 @@ export type RoomSettings = {
    * Read it through `critRuleOf` (shared/dice/crit.ts).
    */
   critRule?: CritRule;
+  /**
+   * Which creatures players see in the initiative order before their turn.
+   * Absent reads as "all", so every room from before it keeps showing the
+   * whole order. Read it through `orderRevealOf` (shared/rules/initiative.ts).
+   */
+  playersSeeOrder?: OrderReveal;
 };
 
 /** The 2024 defaults. See design section 6 for what each one means. */
@@ -217,6 +232,7 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   turnTimerSec: 0,
   healRevives: true,
   critRule: "rollTwice",
+  playersSeeOrder: "party",
 };
 
 /**

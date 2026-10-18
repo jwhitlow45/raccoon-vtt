@@ -69,6 +69,35 @@ describe("settings form", () => {
     assert.deepEqual(settingsOp(older as RoomSettings, { critRule: "maxPlusRoll" }), { t: "room.update", settings: { critRule: "maxPlusRoll" } });
   });
 
+  test("the initiative order players see sits after Reveal hidden combatants, starts new rooms on the party, and reads an older room as everyone (docs/design-v1-combat-flow.md 11.1)", () => {
+    const combat = allFields().map((f) => f.key);
+    assert.equal(combat.indexOf("playersSeeOrder"), combat.indexOf("revealHiddenOnTurn") + 1);
+    const field = allFields().find((f) => f.key === "playersSeeOrder");
+    assert.equal(field?.kind, "choice");
+    if (field?.kind !== "choice") return;
+    assert.equal(field.label, "Initiative order players see");
+    assert.equal(SETTING_GROUPS.find((g) => g.fields.includes(field))?.heading, "Combat");
+    assert.deepEqual(
+      field.options.map((o) => [o.value, o.label]),
+      [
+        ["party", "Player characters, the rest on their turn"],
+        ["allies", "Player characters and allies, the rest on their turn"],
+        ["all", "Everyone"],
+      ],
+    );
+    assert.match(field.help, /hide stays out/);
+    assert.match(field.options[0]!.help, /first turn comes, and stays/);
+    assert.match(field.options[1]!.help, /Ally ring/);
+    assert.equal(DEFAULT_SETTINGS.playersSeeOrder, "party");
+    const { playersSeeOrder: _absent, ...older } = DEFAULT_SETTINGS;
+    assert.equal(choiceOf(older as RoomSettings, "playersSeeOrder"), "all", "a room from before the setting");
+    assert.equal(choiceOf({ ...DEFAULT_SETTINGS, playersSeeOrder: "allies" }, "playersSeeOrder"), "allies");
+    const op = settingsOp(older as RoomSettings, { playersSeeOrder: "party" });
+    assert.deepEqual(op, { t: "room.update", settings: { playersSeeOrder: "party" } });
+    assert.ok(clientOpSchema.safeParse(op).success);
+    assert.equal(clientOpSchema.safeParse({ t: "room.update", settings: { playersSeeOrder: "monsters" } }).success, false);
+  });
+
   test("Skip defeated says what Next passes over: any dead creature, a player character's row included", () => {
     const field = allFields().find((f) => f.key === "skipDefeated")!;
     assert.equal(field.label, "Skip defeated creatures");

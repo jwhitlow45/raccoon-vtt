@@ -1,4 +1,4 @@
-import type { Actor, Effect, Encounter, EntryId, InitEntry, RoomSettings, RoomState } from "../model.ts";
+import type { Actor, Effect, Encounter, EntryId, InitEntry, OrderReveal, RoomSettings, RoomState } from "../model.ts";
 import { INCAPACITATING_KEYS } from "./hp.ts";
 
 /**
@@ -119,6 +119,11 @@ export function advantageHint(effects: Effect[]): "adv" | "dis" | undefined {
 export function scoredValue(actor: Actor | undefined, settings: RoomSettings): number | null {
   if (!settings.monsterInitScore || !actor || actor.initScore === undefined) return null;
   return actor.initScore;
+}
+
+/** Which creatures players see in the order before their turn. Absent, in rooms from before the setting, is the whole order they always saw. */
+export function orderRevealOf(settings: Pick<RoomSettings, "playersSeeOrder">): OrderReveal {
+  return settings.playersSeeOrder ?? "all";
 }
 
 export function isDefeated(state: RoomState, entry: InitEntry): boolean {

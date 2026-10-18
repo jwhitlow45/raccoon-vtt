@@ -1,7 +1,8 @@
 import { critRuleOf } from "#shared/dice/crit.ts";
-import type { AoeCoverage, AoeInclusion, CritRule, DiagonalRule, MemberId, MoveAnyToken, RoomSettings, WhichPlayers } from "#shared/model.ts";
+import type { AoeCoverage, AoeInclusion, CritRule, DiagonalRule, MemberId, MoveAnyToken, OrderReveal, RoomSettings, WhichPlayers } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { healRevivesDead } from "#shared/migrate.ts";
+import { orderRevealOf } from "#shared/rules/initiative.ts";
 import { MAX_NAME, type ClientOp } from "#shared/protocol.ts";
 import { TIMER_CHOICES } from "../encounter/timer.ts";
 
@@ -14,7 +15,7 @@ import { TIMER_CHOICES } from "../encounter/timer.ts";
  */
 
 type BoolKey = { [K in keyof RoomSettings]-?: NonNullable<RoomSettings[K]> extends boolean ? K : never }[keyof RoomSettings];
-type ChoiceKey = "diagonal" | "aoeCoverage" | "aoeInclusion" | "critRule";
+type ChoiceKey = "diagonal" | "aoeCoverage" | "aoeInclusion" | "critRule" | "playersSeeOrder";
 
 export type Choice<V extends string> = { value: V; label: string; help: string };
 
@@ -24,6 +25,7 @@ export type SettingField =
   | { kind: "choice"; key: "aoeCoverage"; label: string; help: string; options: Choice<AoeCoverage>[] }
   | { kind: "choice"; key: "aoeInclusion"; label: string; help: string; options: Choice<AoeInclusion>[] }
   | { kind: "choice"; key: "critRule"; label: string; help: string; options: Choice<CritRule>[] }
+  | { kind: "choice"; key: "playersSeeOrder"; label: string; help: string; options: Choice<OrderReveal>[] }
   | { kind: "number"; key: "feetPerCell"; label: string; help: string; min: number; max: number }
   | { kind: "seconds"; key: "turnTimerSec"; label: string; help: string; options: { value: number; label: string }[] }
   | { kind: "movers"; key: "playersMoveAny"; label: string; help: string; options: Choice<MoveAnyMode>[] }
@@ -117,6 +119,21 @@ export const SETTING_GROUPS: SettingGroup[] = [
         key: "revealHiddenOnTurn",
         label: "Reveal hidden combatants on their turn",
         help: "A hidden creature is revealed when its first turn comes. Players then see it as they see any creature: out of the fog, and in the party's sight when the scene has party vision.",
+      },
+      {
+        kind: "choice",
+        key: "playersSeeOrder",
+        label: "Initiative order players see",
+        help: "Which creatures players see in the order before those creatures act. A creature you hide stays out of their order either way.",
+        options: [
+          {
+            value: "party",
+            label: "Player characters, the rest on their turn",
+            help: "Players see the creatures players play from the start. Every other creature joins their order when its first turn comes, and stays for the fight. The default for new rooms.",
+          },
+          { value: "allies", label: "Player characters and allies, the rest on their turn", help: "As above, and creatures with the Ally ring show from the start too." },
+          { value: "all", label: "Everyone", help: "Players see the whole order from the start." },
+        ],
       },
       {
         kind: "choice",
@@ -214,9 +231,14 @@ export function toggleOn(settings: RoomSettings, key: BoolKey): boolean {
   return settings[key] === true;
 }
 
-/** Which choice shows picked. The critical hit rule a room may lack reads as the 2024 rule it rolls by. */
+/**
+ * Which choice shows picked. A choice a room may lack reads as its rule
+ * reads it: the 2024 critical hit rule, and the whole order for players.
+ */
 export function choiceOf(settings: RoomSettings, key: ChoiceKey): string {
-  return key === "critRule" ? critRuleOf(settings) : settings[key];
+  if (key === "critRule") return critRuleOf(settings);
+  if (key === "playersSeeOrder") return orderRevealOf(settings);
+  return settings[key];
 }
 
 export function moveAnyMode(value: MoveAnyToken): MoveAnyMode {
