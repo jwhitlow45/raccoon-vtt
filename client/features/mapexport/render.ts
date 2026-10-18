@@ -2,7 +2,7 @@ import type { Scene } from "#shared/model.ts";
 import { assetUrl } from "../../lib/api.ts";
 import { mapWorldRect } from "../../lib/scene.ts";
 import type { AssetSource } from "../../state/view.ts";
-import { buildPaths, drawBuild } from "../builder/draw.ts";
+import { buildPaths, drawBuild, labelFontReady } from "../builder/draw.ts";
 import { drawStamps, loadStampImages, stampUrl } from "../builder/stamps/draw.ts";
 import type { TexturedTerrain } from "../builder/geometry.ts";
 import { loadTexture } from "../builder/textures.ts";
@@ -95,6 +95,8 @@ export async function renderMapPng(input: RenderInput): Promise<Blob> {
   const stampUrlOf = (art: Parameters<typeof stampUrl>[0]) => stampUrl(art, assets);
   // The drawing cannot wait for a redraw, so every stamp's image is in first. One that fails draws as a dashed box.
   await loadStampImages(content.stamps.map((s) => stampUrlOf(s.art)));
+  // And the labels' font, or a page that never drew Inter yet would write them in the fallback.
+  if (content.labels.length > 0) await labelFontReady();
   const canvas = document.createElement("canvas");
   canvas.width = size.width;
   canvas.height = size.height;

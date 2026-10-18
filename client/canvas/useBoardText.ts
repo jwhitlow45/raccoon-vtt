@@ -78,10 +78,12 @@ export function useBoardText(input: {
   mapLabels: readonly Box[];
   /** Whether a token's padlock shows (Stage.tsx), which shares the bottom left corner with the AC shield. */
   lockShown: (t: ViewToken) => boolean;
+  /** Moves on when the interface font arrives (boardFont.ts), so labels measured in the fallback are placed again. */
+  fontEpoch: number;
 }): Map<string, TokenText> {
   // The last layout's sides, read and written inside the layout on purpose: they steer the next one, never trigger one.
   const previous = useRef<Map<string, Side>>(new Map());
-  const { tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, mapLabels, lockShown } = input;
+  const { tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, mapLabels, lockShown, fontEpoch } = input;
   const layout = useMemo(() => {
     const sizes = boardSizes(scale);
     const out = new Map<string, TokenText>();
@@ -161,7 +163,7 @@ export function useBoardText(input: {
     for (const [id, m] of meta) if (!placed.has(id)) out.get(id)!.numberBadge = showsNumberBadge(m, undefined);
     previous.current = sides;
     return { out, meta, sizes };
-  }, [tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown]);
+  }, [tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch]);
 
   return useMemo(() => {
     if (plateIds.size === 0) return layout.out;

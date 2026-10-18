@@ -347,6 +347,20 @@ export function measureLabel(text: string): number {
   return measureContext.measureText(text).width / 100;
 }
 
+/**
+ * Resolves once the labels' font is in. The board draws again when it
+ * arrives (canvas/boardFont.ts), but a drawing made once, such as the map
+ * export, would keep the fallback font, so it waits for this first.
+ */
+export function labelFontReady(): Promise<void> {
+  if (typeof document === "undefined" || !("fonts" in document)) return Promise.resolve();
+  // A font that fails to load leaves the fallback, which still draws.
+  return document.fonts.load(LABEL_FONT).then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
 export function drawLabel(g: CanvasRenderingContext2D, label: Pick<Label, "x" | "y" | "text" | "size">): void {
   // Canvas text is laid out at 100 px and scaled down to the label's size
   // in cells, since a font a fraction of a pixel tall renders badly.

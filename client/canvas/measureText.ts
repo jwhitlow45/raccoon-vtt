@@ -3,18 +3,27 @@
  * them in. Placement runs on every zoom step of a pinch, for every token, so
  * widths are cached. The key is the exact font size: boardScale.ts rounds
  * every board text size to half a pixel and the canvas draws that same size,
- * so a cached width is always the width drawn.
+ * so a cached width is always the width drawn. Widths measured before
+ * Inter loaded are the fallback font's, so the cache empties when it
+ * arrives (boardFont.ts).
  */
+import { theme } from "../lib/theme.ts";
+import { boardFontEpoch } from "./boardFont.ts";
 
-/** Konva's default family, which token labels use. */
-export const LABEL_FAMILY = "Arial";
+/** The family every text on the board draws in: the interface font, as TokenNode.tsx passes it to Konva. */
+export const LABEL_FAMILY = theme.font.body;
 const LABEL_WEIGHT = 600;
 const CACHE_LIMIT = 4000;
 
 let context: CanvasRenderingContext2D | null | undefined;
 const cache = new Map<string, number>();
+let cachedEpoch = boardFontEpoch();
 
 function measureWith(font: string, text: string, fallbackEm: number, px: number): number {
+  if (cachedEpoch !== boardFontEpoch()) {
+    cache.clear();
+    cachedEpoch = boardFontEpoch();
+  }
   const key = `${font}|${text}`;
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
@@ -32,7 +41,7 @@ function measureWith(font: string, text: string, fallbackEm: number, px: number)
   return width;
 }
 
-/** A token label's width: weight 600 Arial at `px`. */
+/** A token label's width: weight 600 in the interface font at `px`. */
 export function measureLabel(text: string, px: number): number {
   return measureWith(`${LABEL_WEIGHT} ${px}px ${LABEL_FAMILY}`, text, 0.58, px);
 }

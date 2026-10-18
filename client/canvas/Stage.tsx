@@ -46,6 +46,7 @@ import { groupFollowers, tokensInBox } from "../lib/group.ts";
 import { displayName, drawsAboveFog, footprint, snapPosition, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { BoardViewContext, useBoardPills } from "./boardView.ts";
+import { useBoardFontEpoch } from "./boardFont.ts";
 import { useBoardText, type TokenText } from "./useBoardText.ts";
 import { ownsToken as memberOwns } from "../features/tokens/access.ts";
 import { followOps, lastMoveSlot } from "../features/tokens/undoMove.ts";
@@ -468,14 +469,16 @@ export function MapStage(props: {
   const allMapLabels = useRoomView((s) => s.view?.labels ?? EMPTY_MAP_LABELS);
   // The board's text and marks follow the interface size (lib/boardScale.ts), so a new size lays the labels out again.
   const zoom = useUiScale();
+  // So does the interface font arriving, since widths measured before it are the fallback's (boardFont.ts).
+  const fontEpoch = useBoardFontEpoch();
   const mapLabels = useMemo(
     () => Object.values(allMapLabels).flatMap((l) => (l && l.sceneId === scene.id ? [labelBox(l, measureMapLabel)] : [])),
-    [allMapLabels, scene.id, zoom],
+    [allMapLabels, scene.id, zoom, fontEpoch],
   );
   const movesAny = useCallback((t: ViewToken) => movesOthers(t, settings, youId), [settings, youId]);
   // The lock shows where it is the only thing in the way of a drag.
   const lockShown = useCallback((t: ViewToken) => t.locked && (role === "dm" || ownsToken(t) || movesAny(t)), [role, ownsToken, movesAny]);
-  const boardText = useBoardText({ tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, mapLabels, lockShown });
+  const boardText = useBoardText({ tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, mapLabels, lockShown, fontEpoch });
   const canDrag = useCallback(
     (t: ViewToken) => canDragToken({ token: t, role, memberId: youId, characters, settings }),
     [role, youId, characters, settings],
@@ -682,10 +685,13 @@ export function MapStage(props: {
    * Konva makes each layer's canvas at the pixel ratio set when it mounts,
    * so a change of low power remounts the stage at the new one. A change of
    * the interface size does too, since every board renderer reads its marks'
-   * sizes as it draws (lib/boardScale.ts). The camera is this component's
-   * state and stays.
+   * sizes as it draws (lib/boardScale.ts). So does the interface font
+   * arriving after the board first drew (boardFont.ts): Konva measures a
+   * text only when it is made or changed, and layers place their pills from
+   * widths measured as they mount. The camera is this component's state and
+   * stays.
    */
-  const stageKey = stageMountKey(lowPower, zoom);
+  const stageKey = `${stageMountKey(lowPower, zoom)}:${fontEpoch}`;
   applyPixelRatio(lowPower);
   useEffect(() => {
     const stage = stageRef.current;

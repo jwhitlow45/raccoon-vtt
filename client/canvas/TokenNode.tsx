@@ -13,6 +13,7 @@ import { useAccent } from "../state/accent.ts";
 import { addsToSelection } from "../state/selection.ts";
 import { useAssets, useRoomView } from "../state/view.ts";
 import { useChipIcon } from "./chipIcons.ts";
+import { LABEL_FAMILY } from "./measureText.ts";
 import { PLATE_STROKE, plateRect } from "./textBoxes.ts";
 import { TokenShadow } from "./TokenShadow.tsx";
 import { numberBadgeWidth, type Notch, type TokenMarks } from "./tokenMarks.ts";
@@ -201,7 +202,7 @@ function AcMark(props: { ac: NonNullable<TokenMarks["ac"]> }) {
         }}
       />
       {/* In the top 85%, where the shield is widest, so the number never reaches its point. */}
-      <Text text={ac.text} width={ac.width} height={ac.height * 0.85} align="center" verticalAlign="middle" fontSize={ac.textPx} fontStyle="700" fill={theme.color.text} />
+      <Text text={ac.text} width={ac.width} height={ac.height * 0.85} align="center" verticalAlign="middle" fontSize={ac.textPx} fontFamily={LABEL_FAMILY} fontStyle="700" fill={theme.color.text} />
     </Group>
   );
 }
@@ -227,7 +228,7 @@ function NumberBadge(props: { widthPx: number; heightPx: number; number: number;
   return (
     <Group x={x} y={y}>
       <Rect width={width} height={d} cornerRadius={d / 2} fill={theme.color.surfaceRaised} stroke={theme.color.text} strokeWidth={1} />
-      <Text text={text} width={width} height={d} align="center" verticalAlign="middle" fontSize={props.px} fontStyle="700" fill={theme.color.text} />
+      <Text text={text} width={width} height={d} align="center" verticalAlign="middle" fontSize={props.px} fontFamily={LABEL_FAMILY} fontStyle="700" fill={theme.color.text} />
     </Group>
   );
 }
@@ -323,6 +324,7 @@ function TokenBody(props: {
             align="center"
             verticalAlign="middle"
             fontSize={Math.max(9, Math.min(w, h) * scale * 0.38)}
+            fontFamily={LABEL_FAMILY}
             fontStyle="600"
             fill={icon ? glyphColor(icon.color) : theme.color.text}
           />
@@ -469,12 +471,12 @@ function ChipView(props: { x: number; marks: TokenMarks; chip: Chip; iconKey: st
       {showIcon ? (
         <KImage image={icon} x={inset} y={inset} width={side - 2 * inset} height={side - 2 * inset} />
       ) : (
-        <Text text={chip.glyph} width={side} height={side} align="center" verticalAlign="middle" fontSize={marks.glyphPx} fontStyle="700" fill="#ffffff" wrap="none" />
+        <Text text={chip.glyph} width={side} height={side} align="center" verticalAlign="middle" fontSize={marks.glyphPx} fontFamily={LABEL_FAMILY} fontStyle="700" fill="#ffffff" wrap="none" />
       )}
       {showLevel ? (
         <Group x={side - levelWidth + 2} y={side - levelHeight + 3}>
           <Rect width={levelWidth} height={levelHeight} cornerRadius={levelHeight / 2} fill={theme.color.textHalo} />
-          <Text text={levelText} width={levelWidth} height={levelHeight} align="center" verticalAlign="middle" fontSize={marks.counterPx} fontStyle="700" fill="#ffffff" />
+          <Text text={levelText} width={levelWidth} height={levelHeight} align="center" verticalAlign="middle" fontSize={marks.counterPx} fontFamily={LABEL_FAMILY} fontStyle="700" fill="#ffffff" />
         </Group>
       ) : null}
     </Group>
@@ -486,7 +488,7 @@ function Badge(props: { badge: NonNullable<TokenMarks["badge"]> }) {
   return (
     <Group x={badge.x} y={badge.y}>
       <Rect width={badge.width} height={badge.height} cornerRadius={badge.height / 2} fill={theme.color.surfaceRaised} stroke={theme.color.accentSoft} strokeWidth={1} />
-      <Text text={badge.text} width={badge.width} height={badge.height} align="center" verticalAlign="middle" fontSize={badge.textPx} fontStyle="700" fill={theme.color.accentSoft} />
+      <Text text={badge.text} width={badge.width} height={badge.height} align="center" verticalAlign="middle" fontSize={badge.textPx} fontFamily={LABEL_FAMILY} fontStyle="700" fill={theme.color.accentSoft} />
     </Group>
   );
 }
@@ -531,6 +533,7 @@ function Lines(props: { block: PlacedLines; plate?: boolean }) {
             align="center"
             wrap="none"
             fontSize={line.px}
+            fontFamily={LABEL_FAMILY}
             fontStyle="600"
             fill={lineColor(line)}
             stroke={props.plate ? undefined : theme.color.textHalo}
