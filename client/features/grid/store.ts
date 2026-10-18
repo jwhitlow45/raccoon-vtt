@@ -27,11 +27,14 @@ export type FoundNote = {
   box: CalBox | null;
   /** The grid found, as measured, which the box stands for while it is the one the search left. None when no grid was found. */
   cal?: Calibration;
-  /** The grid before an applied one, which Use default puts back. Only an import has one: after Find the grid, Undo does. */
-  fallback?: Calibration;
+  /** The grid and the scene's size before an applied one, which Use default puts back. Only an import has one: after Find the grid, Undo does. */
+  fallback?: Fallback;
   /** An offer on a scene that came with its own grid, from a Universal VTT file. */
   ownGrid?: true;
 };
+
+/** What Use default puts back: the grid an import started with, and the size the scene had then. */
+export type Fallback = Calibration & { bounds: { w: number; h: number } };
 
 export type GridToolState = {
   /** In canonical pixels of the map. Null when the scene has no map. */

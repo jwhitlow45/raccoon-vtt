@@ -9,7 +9,7 @@ import { importScene, placeMap } from "../uvtt/batch.ts";
 import type { AxisFit, GridDetection } from "./detect.ts";
 import { calibrationFromBox, nudgeBox, sameCalibration } from "./calibrate.ts";
 import { cameWithGrid, type SearchAnswer, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
-import { applyGrid, boxAround, findOnScene, gridOps, middleOf, showOutcome } from "./outcome.ts";
+import { applyGrid, boxAround, fallbackOps, findOnScene, gridOps, middleOf, showOutcome } from "./outcome.ts";
 import { boxCalibration, endFinding, type GridToolState } from "./store.ts";
 import { rng } from "./synthetic.ts";
 
@@ -49,7 +49,24 @@ describe("what a search does to the scene", () => {
     const { found, box } = store.getState();
     assert.deepEqual(box, boxAround(FOUND, { x: 700, y: 500 }));
     assert.deepEqual(box, { x: 580, y: 385, size: 210 });
-    assert.deepEqual(found, { sceneId: "s1", outcome: "applied", cellPx: 70, box, cal: FOUND, fallback: { cellPx: 47, originPx: { x: 0, y: 0 } } });
+    assert.deepEqual(found, { sceneId: "s1", outcome: "applied", cellPx: 70, box, cal: FOUND, fallback: { cellPx: 47, originPx: { x: 0, y: 0 }, bounds: { w: 29, h: 21 } } });
+  });
+
+  test("Use default puts back the grid and the size the scene had before the find, as one undo step", () => {
+    // A 60 by 40 battle mat takes its first image, and a grid is found on it.
+    const live = liveRoom();
+    const mat = { ...SCENE, bounds: { w: 60, h: 40 } };
+    live.elsewhere(mat);
+    showOutcome({ actions: live.actions, store: live.store, scene: mat, found: { tier: "high", cal: FOUND }, fit: true, at: { x: 700, y: 500 }, fallback: { cellPx: 47, originPx: { x: 0, y: 0 } } });
+    assert.deepEqual(live.scene().bounds, { w: 19, h: 13 }, "the find fits the scene to its squares");
+    const fallback = live.store.getState().found?.fallback;
+    assert.deepEqual(fallback, { cellPx: 47, originPx: { x: 0, y: 0 }, bounds: { w: 60, h: 40 } });
+    const ops = fallbackOps(live.scene(), fallback!);
+    assert.deepEqual(ops, [
+      { t: "scene.setGrid", sceneId: "s1", cellPx: 47, originPx: { x: 0, y: 0 } },
+      { t: "scene.update", sceneId: "s1", patch: { bounds: { w: 60, h: 40 } } },
+    ]);
+    assert.deepEqual(fallbackOps(mat, fallback!), [], "nothing to send when the scene is so already");
   });
 
   test("a doubtful grid only places the box, for the DM to check and Apply", () => {

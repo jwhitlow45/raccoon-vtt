@@ -5,7 +5,7 @@ import { dispatchGesture } from "../../state/actions.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { boxAtCell, canonicalToWorld, fitBounds, sameCalibration, type CalBox, type Calibration, type Point } from "./calibrate.ts";
 import { cameWithGrid, findFound, foundGrid, searchGrid, within, type FoundGrid, type SearchWorker, type Timers } from "./findGrid.ts";
-import { endFinding, type FoundNote, type GridToolState } from "./store.ts";
+import { endFinding, type Fallback, type FoundNote, type GridToolState } from "./store.ts";
 
 /**
  * What a search for a map's drawn grid does to the scene and the grid
@@ -51,6 +51,19 @@ export function applyGrid(input: {
   if (bounds) actions.dispatch({ t: "scene.update", sceneId, patch: { bounds } });
 }
 
+/**
+ * The ops Use default sends, as one undo step: the grid the import started
+ * with, and the size the scene had then. The size is put back as it was,
+ * not fitted to that grid: a battle mat that took its first image, or a
+ * scene that took new art, had a size of its own.
+ */
+export function fallbackOps(scene: GridScene, fallback: Fallback): ClientOp[] {
+  const ops = gridOps(scene, fallback, false);
+  const { bounds } = fallback;
+  if (bounds.w !== scene.bounds.w || bounds.h !== scene.bounds.h) ops.push({ t: "scene.update", sceneId: scene.id, patch: { bounds } });
+  return ops;
+}
+
 /** The box over the 3 by 3 squares of `cal` nearest a point of the map, in canonical pixels. */
 export function boxAround(cal: Calibration, at: Point): CalBox {
   const cell = canonicalToWorld(cal, at);
@@ -83,7 +96,7 @@ export function showOutcome(input: {
   fit: boolean;
   /** Where the box goes, in canonical pixels. */
   at: Point;
-  /** The grid Use default puts back, after an import. */
+  /** The grid Use default puts back, after an import, with the scene's size as `scene` gives it. */
   fallback?: Calibration;
   /** The scene came with its own grid (findGrid.ts `cameWithGrid`), which an offer says. */
   ownGrid?: boolean;
@@ -103,7 +116,7 @@ export function showOutcome(input: {
     cellPx: found.cal.cellPx,
     box,
     cal: found.cal,
-    ...(found.tier === "high" && input.fallback ? { fallback: input.fallback } : {}),
+    ...(found.tier === "high" && input.fallback ? { fallback: { ...input.fallback, bounds: scene.bounds } } : {}),
     ...(found.tier !== "high" && input.ownGrid ? { ownGrid: true as const } : {}),
   };
   input.store.setState({ found: note, box });

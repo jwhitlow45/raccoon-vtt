@@ -5,9 +5,9 @@ import { theme } from "../../lib/theme.ts";
 import { dispatchGesture } from "../../state/actions.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { OptButton, OptionsStrip, StripText, ValueChip } from "../measure/controls.tsx";
-import { fitBounds, nudgeBox, sameCalibration, type CalBox, type Calibration } from "./calibrate.ts";
-import { applyGrid, boxAround, gridOps, middleOf } from "./outcome.ts";
-import { boxCalibration, endFinding, useGridStore } from "./store.ts";
+import { fitBounds, nudgeBox, sameCalibration, type CalBox } from "./calibrate.ts";
+import { applyGrid, boxAround, fallbackOps, middleOf } from "./outcome.ts";
+import { boxCalibration, endFinding, useGridStore, type Fallback } from "./store.ts";
 import { useFindGrid } from "./useFindGrid.ts";
 
 /** One canonical pixel per nudge: on the largest maps a thirtieth of a square or less. */
@@ -60,9 +60,9 @@ export default function GridOptions() {
     setApplied(box);
   };
 
-  /** Back to the grid the scene had before an import applied a found one, as one undo step. */
-  const putBack = (fallback: Calibration) => {
-    dispatchGesture(actions, gridOps({ id: sceneId, bounds: scene.bounds, map }, fallback, true));
+  /** Back to the grid and the size the scene had before an import applied a found grid, as one undo step. */
+  const putBack = (fallback: Fallback) => {
+    dispatchGesture(actions, fallbackOps({ id: sceneId, bounds: scene.bounds, map }, fallback));
     gridState.setState({ found: null, box: boxAround(fallback, middleOf(box, map)) });
   };
 
