@@ -6,6 +6,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import sharp from "sharp";
 import type { BuildChunk, RoomState, Scene, Stamp } from "#shared/model.ts";
+import { drawMap } from "../client/features/grid/synthetic.ts";
 import { ConsoleWatch, dragWorld, openSideTab, pickOption, pressOption, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
@@ -405,6 +406,86 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     assert.equal(playerSocket.everSaw(thumb), false, "a thumbnail reached the player");
     assertNoDmFields(sceneOf(playerSocket.state, run.sceneId));
     assert.deepEqual(Object.keys(playerSocket.state?.scenes ?? {}), [run.sceneId]);
+  });
+
+  test("gd-a. a drawn grid is found on upload, Use default and Undo take it back, Find the grid finds it again, a map without one keeps the guess, and a Universal VTT scene is only offered the box", async () => {
+    // Both maps are drawn here by code (client/features/grid/synthetic.ts), never art: noise, and on one
+    // of them 70 px squares whose lines cross at (20, 35). Neither name gives a size.
+    const DRAWN = { cellPx: 70, originPx: { x: 20, y: 35 }, bounds: { w: 19, h: 13 } };
+    // initialMap's first guess for a 1400 x 1000 image: about 30 squares on the long side.
+    const GUESS = { cellPx: 47, originPx: { x: 0, y: 0 }, bounds: { w: 29, h: 21 } };
+    const write = async (file: string, grid: boolean) => {
+      const px = drawMap({ width: 1400, height: 1000, seed: grid ? 3 : 4, art: [{ kind: "noise", scale: 60, amp: 70 }], noise: 4, ...(grid ? { grid: { cellPx: 70, origin: { x: 20, y: 35 }, opacity: 0.5, width: 2 } } : {}) });
+      await sharp(Buffer.from(px.data), { raw: { width: px.width, height: px.height, channels: 1 } }).png().toFile(file);
+    };
+    const upload = async (file: string) => {
+      const known = new Set(Object.keys(dmSocket.state?.scenes ?? {}));
+      await openSideTab(dm, "Scenes");
+      await dm.getByRole("radio", { name: "Map image" }).click();
+      await dm.getByRole("button", { name: "Choose a map image" }).setInputFiles(file);
+      await dm.getByRole("button", { name: "Upload and create" }).click();
+      const scene = await waitFor("the new map scene", () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s?.map && !known.has(s.id)), 30_000);
+      await waitFor("the DM on it", () => dmSocket.you?.sceneId === scene.id || null);
+      return scene.id;
+    };
+    /** Whether the scene's grid is `want`: the size to a twentieth of a pixel, the lines to half a pixel. */
+    const gridIs = (id: string, want: { cellPx: number; originPx: { x: number; y: number }; bounds: { w: number; h: number } }) => {
+      const scene = sceneOf(dmSocket.state, id);
+      const map = scene?.map;
+      return (
+        !!map &&
+        Math.abs(map.cellPx - want.cellPx) < 0.05 &&
+        Math.abs(map.originPx.x - want.originPx.x) < 0.5 &&
+        Math.abs(map.originPx.y - want.originPx.y) < 0.5 &&
+        scene.bounds.w === want.bounds.w &&
+        scene.bounds.h === want.bounds.h
+      );
+    };
+    const gridOptions = dm.getByRole("toolbar", { name: "Line up grid options" });
+    const drawn = path.join(work, "Drawn keep.png");
+    const plain = path.join(work, "Plain field.png");
+    await write(drawn, true);
+    await write(plain, false);
+
+    // On upload: the found grid is on the scene, sized to its squares, and Line up grid says so.
+    const keep = await upload(drawn);
+    await waitFor("the found grid on the scene", () => gridIs(keep, DRAWN) || null, 15_000);
+    await dm.getByText("Found a grid of 70 px squares.").first().waitFor();
+    await shots.take(dm, "maps-gd-found-on-upload");
+
+    // Use default puts the first guess back.
+    await gridOptions.getByRole("button", { name: "Use default", exact: true }).click();
+    await waitFor("the guess back", () => gridIs(keep, GUESS) || null);
+
+    // Find the grid, on a scene whose grid is wrong, finds it again. Undo takes it back in one step.
+    await gridOptions.getByRole("button", { name: "Find the grid", exact: true }).click();
+    await waitFor("the found grid again", () => gridIs(keep, DRAWN) || null, 15_000);
+    await dm.getByText("Found a grid of 70 px squares.").first().waitFor();
+    await dm.getByRole("button", { name: "Undo", exact: true }).click();
+    await waitFor("one undo back to the guess", () => gridIs(keep, GUESS) || null);
+
+    // A map without a grid keeps the guess, and Line up grid asks for a box as before. The Scenes
+    // panel's Find the grid, in its Grid settings, answers in Line up grid too.
+    const field = await upload(plain);
+    await dm.getByText("Drag a box over 3 by 3 squares of the art").first().waitFor();
+    assert.ok(gridIs(field, GUESS), "a map without a grid keeps the first guess");
+    await openSideTab(dm, "Scenes");
+    await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: "Find the grid", exact: true }).click();
+    await dm.getByText("No grid found.", { exact: false }).first().waitFor({ timeout: 15_000 });
+    assert.ok(gridIs(field, GUESS), "finding no grid changes nothing");
+    await shots.take(dm, "maps-gd-no-grid");
+
+    // On the scene from the Universal VTT file, Find the grid only places the box, however sure, and says
+    // the scene came with its own grid. Its art's grout runs from the image's corner, half a square off the file's grid.
+    const fileGrid = sceneOf(dmSocket.state, run.sceneId)!.map!;
+    await openSideTab(dm, "Scenes");
+    const scenes = dm.getByRole("tabpanel", { name: "Scenes" });
+    await scenes.getByRole("button", { name: new RegExp(`^${UVTT.name}(?! \\(copy\\))`) }).click();
+    await waitFor("the DM on the imported scene", () => dmSocket.you?.sceneId === run.sceneId || null, 30_000);
+    await scenes.getByRole("button", { name: "Find the grid", exact: true }).click();
+    await dm.getByText("This scene came with its own grid.", { exact: false }).first().waitFor({ timeout: 15_000 });
+    assert.deepEqual(sceneOf(dmSocket.state, run.sceneId)?.map, fileGrid, "the file's grid stays");
+    await shots.take(dm, "maps-gd-own-grid");
   });
 
   test("8. no page logged an error or a warning", () => {

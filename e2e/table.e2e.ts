@@ -150,13 +150,20 @@ describe("raccoon-vtt table basics", { timeout: 120_000 }, () => {
     const created = await waitFor("the map scene", () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s?.map !== undefined), 30_000);
     run.mapSceneId = created.id;
     await waitFor("the DM on the map scene", () => dmSocket.you?.sceneId === created.id || null);
-    // A name without a scale brings up the grid tool.
+    // The crypt's grout is a drawn grid, found and applied on upload. Use
+    // default puts back the first guess, so the squares are lined up by hand.
+    await dm.getByText("Found a grid of 70 px squares.").waitFor();
+    await dm.getByRole("toolbar", { name: "Line up grid options" }).getByRole("button", { name: "Use default", exact: true }).tap();
     await dm.getByText("Drag a box over 3 by 3 squares of the art").waitFor();
-    const guess = created.map!;
+    const guessed = await waitFor("the first guess back", () => {
+      const s = dmSocket.state?.scenes[created.id];
+      return s?.map && s.map.cellPx !== CRYPT.cellPx ? s : null;
+    });
+    const guess = guessed.map!;
     const world = (px: number, py: number) => ({ x: (px - guess.originPx.x) / guess.cellPx, y: (py - guess.originPx.y) / guess.cellPx });
     // A box over the art's squares (2, 2) to (5, 5), clear of the box the tool starts with in the middle.
     const corner = (n: number) => world(CRYPT.origin.x + n * CRYPT.cellPx, CRYPT.origin.y + n * CRYPT.cellPx);
-    await dragWorld(dm, created.bounds, corner(2), corner(5));
+    await dragWorld(dm, guessed.bounds, corner(2), corner(5));
     await dm.getByRole("button", { name: "Apply", exact: true }).tap();
     const map = await waitFor("the lined-up grid", () => {
       const m = dmSocket.state?.scenes[created.id]?.map;
