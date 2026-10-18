@@ -11,6 +11,7 @@ import { XCardButton } from "../features/xcard/XCardButton.tsx";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { accentVars } from "../lib/accent.ts";
 import { escapeTarget } from "../lib/escape.ts";
+import { toggleFullscreen, useFullscreen } from "../lib/fullscreen.ts";
 import { takeReopen } from "../lib/reopen.ts";
 import { preloadLazies } from "../lib/retryableLazy.ts";
 import { theme } from "../lib/theme.ts";
@@ -233,8 +234,9 @@ export function UndoButtons() {
 /**
  * A 44 px square icon button for the top bar, in the shape of
  * components/IconButton.tsx. Its own, since Fit and Find draw shapes of
- * their own beside Undo and Redo from Icon.tsx, and all four keep the text
- * color: they are the bar's actions, not a header's close.
+ * their own beside Undo, Redo and Full screen from Icon.tsx, and all of
+ * them keep the text color: they are the bar's actions, not a header's
+ * close.
  */
 function IconButton(props: { label: string; title: string; draw: IconName | { path: string }; onClick(): void }) {
   // The name on hover, keyboard focus and a long press, never the native title (docs/design-v1-icons.md 3.2).
@@ -288,6 +290,22 @@ export function FitButton() {
         draw={{ path: "M4 4h6v2H6v4H4zm10 0h6v6h-2V6h-4zM4 14h2v4h4v2H4zm14 0h2v6h-6v-2h4z" }}
         onClick={() => slot.fit?.()}
       />
+    </span>
+  );
+}
+
+/**
+ * The whole page in full screen and back (lib/fullscreen.ts), last in the
+ * top bar on a computer, for the DM and players. The Room page leaves it
+ * out where the browser cannot go full screen. Named for what a press
+ * does, with an icon for each.
+ */
+export function FullscreenButton() {
+  const on = useFullscreen();
+  const label = on ? "Leave full screen" : "Full screen";
+  return (
+    <span style={{ flex: "none", display: "flex", marginRight: -theme.space(2) }}>
+      <IconButton label={label} title={label} draw={on ? "leaveFullScreen" : "fullScreen"} onClick={() => void toggleFullscreen()} />
     </span>
   );
 }

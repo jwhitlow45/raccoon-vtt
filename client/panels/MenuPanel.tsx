@@ -10,6 +10,7 @@ import { joinLinkToShare } from "../features/dm/shareLink.ts";
 import { XCardButton } from "../features/xcard/XCardButton.tsx";
 import { usePanelHeader, type PanelProps } from "../features/panels.ts";
 import { api } from "../lib/api.ts";
+import { fullscreenSupported } from "../lib/fullscreen.ts";
 import { navigate } from "../lib/navigation.ts";
 import { formatRoomId } from "../lib/roomId.ts";
 import { theme } from "../lib/theme.ts";
@@ -83,7 +84,13 @@ export default function MenuPanel(props: PanelProps) {
       </div>
       <MenuItem icon="group" title="Members" detail={role === "dm" ? "Who is here, kicking, the player password and DM devices." : "Who is here and who is online."} page="members" onClick={() => setPage("members")} />
       {role === "dm" ? <MenuItem icon="settings" title="Room settings" detail="Movement, HP, combat, distance and backups." page="settings" onClick={() => setPage("settings")} /> : null}
-      <MenuItem icon="device" title="This device" detail="Interface size, low power, map detail, sounds and shortcuts." page="device" onClick={() => setPage("device")} />
+      <MenuItem
+        icon="device"
+        title="This device"
+        detail={fullscreenSupported() ? "Interface size, full screen, low power, map detail, sounds and shortcuts." : "Interface size, low power, map detail, sounds and shortcuts."}
+        page="device"
+        onClick={() => setPage("device")}
+      />
       <MenuItem
         icon="guide"
         title="DM guide"

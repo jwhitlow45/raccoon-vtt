@@ -7,6 +7,7 @@ import { ownsEntry, sortedEntries, turnOp, turnStatus } from "../features/encoun
 import { tokenAccess } from "../features/tokens/access.ts";
 import { shownRowOps } from "../features/tokens/groupEdit.ts";
 import { PLACE_TOOL_ID } from "../features/tokens/placement.ts";
+import { fullscreenSupported, toggleFullscreen } from "../lib/fullscreen.ts";
 import { displayName } from "../lib/scene.ts";
 import { scopeSlot, type RoomScope } from "./scope.ts";
 import { tuckEvent } from "./toolbar.ts";
@@ -408,6 +409,16 @@ export const SHORTCUTS: readonly Shortcut[] = [
     match: letter("o"),
     when: (env) => env.scope.get(splitKeysSlot).other !== null,
     run: (env) => env.scope.get(splitKeysSlot).other?.(),
+  },
+  {
+    // F is the DM's Fog, and Shift+F too, since a letter matches with Shift, so the letter is one no role has. A keydown is a user gesture, which the browser asks of a request.
+    id: "fullscreen",
+    keys: "W",
+    does: "Enter or leave full screen, where the browser can",
+    roles: ["dm", "player"],
+    match: letter("w"),
+    when: () => fullscreenSupported(),
+    run: () => void toggleFullscreen(),
   },
   {
     id: "sheet",

@@ -50,6 +50,7 @@ import { useBackClose } from "../lib/backClose.ts";
 import { useWakeLock } from "../lib/wakeLock.ts";
 import type { Insets } from "../lib/camera.ts";
 import { isCoarsePointer } from "../lib/device.ts";
+import { fullscreenSupported } from "../lib/fullscreen.ts";
 import { sheetStepping } from "../lib/modalDialog.ts";
 import { roomPath } from "../lib/roomId.ts";
 import { sceneGate, selectionScene } from "../lib/scene.ts";
@@ -91,7 +92,7 @@ import {
 } from "./optionsLayout.ts";
 import { OptionsFrameContext, type OptionsFrame } from "../features/measure/controls.tsx";
 import type { Rect } from "../components/popoverPlace.ts";
-import { Badge, FindButton, FitButton, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle } from "./RoomChrome.tsx";
+import { Badge, FindButton, FitButton, FullscreenButton, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle } from "./RoomChrome.tsx";
 import { DockHeaderActions, DockRow, FoldStatus, SAFE_PROBE_STYLE, useDockSummary, useLayoutHeight, useSafeAreas, type DockActions } from "./RoomDock.tsx";
 
 /** What the DM panel's count says while a PDF upload waits on the DM. */
@@ -1152,7 +1153,8 @@ function MapArea(props: {
 
 /**
  * The top bar: the room name beside the DM's or the player's chip, a DM's
- * Undo and Redo, Find my token and Fit map. The initiative strip sits in
+ * Undo and Redo, Find my token, Fit map, and from 900 px up Full screen
+ * where the browser can go full screen. The initiative strip sits in
  * its row or in a band of its own under it (`placement`,
  * features/encounter/band.ts). `compact` keeps only the tight gaps, the
  * name's way of giving way first, and the phase menu's absence, which a
@@ -1166,9 +1168,13 @@ function MapArea(props: {
  * 130% the whole chip pushed Fit off the screen. A DM's row from 900 px up
  * checks too, since Undo and Redo sit in it on every layout
  * (docs/design-v1-layout-hierarchy.md M2): there the strip stays, the chip
- * gives way to its dot first, then the Phase menu leaves the bar, each
- * until the layout is wider, and a scene's "Show a phase" chips still
- * switch phases. The row's own box keeps its size when its content grows,
+ * gives way to its dot first, then Full screen leaves the bar, then the
+ * Phase menu, each until the layout is wider. The Menu and a key still
+ * reach full screen, and a scene's "Show a phase" chips still switch
+ * phases. A player's row from 900 px up checks while it holds Full screen,
+ * which is the only thing in it that gives way: at 900 px with the strip,
+ * "Your turn" and End turn beside the side panel, there was no room for it.
+ * The row's own box keeps its size when its content grows,
  * so the check runs when the row's size changes (the window), when the
  * strip's size changes (whose turn, "Your turn" and End turn, the timer),
  * and when the bar's other content changes (the room name, the blackout
@@ -1203,11 +1209,14 @@ function TopBar(props: {
   // From 900 px up, the width at which the row still overflowed with the chip's dot: up to it, the Phase menu leaves the bar.
   const [phaseOffUpTo, setPhaseOffUpTo] = useState(0);
   const phaseMenu = !props.compact && width > phaseOffUpTo;
+  // From 900 px up, where the browser can go full screen, the width at which the row still overflowed once a DM's chip was its dot, or a player's row did at all: up to it, Full screen leaves the bar.
+  const [fullscreenOffUpTo, setFullscreenOffUpTo] = useState(0);
+  const fullscreen = !props.compact && fullscreenSupported() && width > fullscreenOffUpTo;
   const phases = useRoomView((s) => (s.sceneId ? (s.view?.scenes[s.sceneId]?.phases?.length ?? 0) : 0));
   // From 900 px up the strip sits in the bar whatever it holds, so only a phone's bar records it.
   const measured = props.placement === "bar" && props.compact;
-  // A phone's row, and a DM's row from 900 px up, which holds Undo, Redo and the Phase menu.
-  const checks = props.compact || role === "dm";
+  // A phone's row, a DM's row from 900 px up, which holds Undo, Redo and the Phase menu, and any row that holds Full screen.
+  const checks = props.compact || role === "dm" || fullscreen;
   const check = useCallback(() => {
     const row = rowRef.current;
     if (!checks || !row) return;
@@ -1216,11 +1225,12 @@ function TopBar(props: {
     const tuck = last ? Math.max(0, -parseFloat(getComputedStyle(last).marginRight) || 0) : 0;
     const overflow = row.scrollWidth - row.clientWidth - tuck;
     if (overflow <= 0) return;
-    // The strip leaves first. Once it is in the band, this runs again with the row it left. Then the chip's name, then the Phase menu.
+    // The strip leaves first. Once it is in the band, this runs again with the row it left. Then the chip's name, then Full screen, which the Menu and a key still reach, then the Phase menu.
     if (measured) recordOverflow(layoutWidth(), overflow);
     else if (role === "dm" && !dmDot) setDmDotUpTo(layoutWidth());
+    else if (fullscreen) setFullscreenOffUpTo(layoutWidth());
     else if (phaseMenu) setPhaseOffUpTo(layoutWidth());
-  }, [checks, measured, recordOverflow, role, dmDot, phaseMenu]);
+  }, [checks, measured, recordOverflow, role, dmDot, fullscreen, phaseMenu]);
   useLayoutEffect(() => {
     const row = rowRef.current;
     if (!checks || !row) return;
@@ -1289,6 +1299,7 @@ function TopBar(props: {
         {props.placement === "bar" ? <InitiativeStrip placement="bar" notice={notice} stripRef={setStrip} /> : null}
         {props.canFit && role === "player" ? <FindButton openSheet={props.openSheet} /> : null}
         {props.canFit ? <FitButton /> : null}
+        {fullscreen ? <FullscreenButton /> : null}
       </div>
       {props.placement === "band" ? <InitiativeStrip placement="band" notice={notice} /> : null}
       <FightWatch />

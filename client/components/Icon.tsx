@@ -33,6 +33,8 @@ export type IconName =
   | "copy"
   | "filter"
   | "expand"
+  | "fullScreen"
+  | "leaveFullScreen"
   | "collapsePanel"
   | "splitPanel"
   | "swapPanels"
@@ -128,6 +130,8 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   leave: "log-out",
   guide: "book-open",
   external: "external-link",
+  fullScreen: "maximize-2",
+  leaveFullScreen: "minimize-2",
 };
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -162,6 +166,23 @@ const SHAPES: Record<IconName, ReactNode> = {
   ),
   filter: <path {...STROKE} d="M4 5h16l-6 7.5V19l-4 2v-8.5z" />,
   expand: <path {...STROKE} d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" />,
+  // Lucide maximize-2 and minimize-2: the whole page in the browser's full screen, and back (lib/fullscreen.ts). Arrows rather than `expand`'s corners, which the top bar's Fit beside them already draws.
+  fullScreen: (
+    <g {...STROKE}>
+      <path d="M15 3h6v6" />
+      <path d="m21 3-7 7" />
+      <path d="m3 21 7-7" />
+      <path d="M9 21H3v-6" />
+    </g>
+  ),
+  leaveFullScreen: (
+    <g {...STROKE}>
+      <path d="m14 10 7-7" />
+      <path d="M20 10h-6V4" />
+      <path d="m3 21 7-7" />
+      <path d="M4 14h6v6" />
+    </g>
+  ),
   // A framed panel with its right edge and an arrow toward it, for Hide: a bare chevron read as a scrolling row's arrow, or as forward beside Back.
   collapsePanel: (
     <g {...STROKE}>

@@ -2,6 +2,7 @@ import { Button } from "../../components/Button.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { Switch } from "../../components/Switch.tsx";
+import { enterFullscreen, exitFullscreen, fullscreenSupported, useFullscreen } from "../../lib/fullscreen.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { setShortcutSheet } from "../../state/shortcuts.ts";
 import { RadioGroup } from "../dm/controls.tsx";
@@ -22,12 +23,24 @@ export default function ThisDevice() {
   const turnSound = useSoundOn();
   const pingSound = usePingSound();
   const rollToasts = useRollToastsOn();
+  const fullscreen = useFullscreen();
   return (
     <div style={{ display: "grid" }}>
       <Section label="Interface size" divider={false}>
         <Help>The bars, panels and the names and marks on tokens. The map keeps its own zoom: pinch or use the wheel.</Help>
         <Segmented<UiScale> label="Interface size" grow value={scale} options={UI_SCALES.map((s) => ({ value: s, label: uiScaleLabel(s) }))} onChange={setUiScale} />
       </Section>
+      {/* Where the browser can, so not on iPhone Safari (lib/fullscreen.ts). Here too, since a phone's top bar has no room for the button and a touch screen may have no keyboard. */}
+      {fullscreenSupported() ? (
+        <Section label="Screen">
+          <Switch
+            label="Full screen"
+            help="The room fills the whole screen, without the browser's bars. With a keyboard, W turns it on and off."
+            checked={fullscreen}
+            onChange={(on) => void (on ? enterFullscreen() : exitFullscreen())}
+          />
+        </Section>
+      ) : null}
       <Section label="Battery">
         <Switch
           label="Low power"

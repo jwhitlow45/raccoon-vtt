@@ -48,7 +48,7 @@ Changes to every icon: the black background square was removed and the fill set 
 
 The interface icons marked Lucide in `client/components/Icon.tsx` are path data copied from [Lucide](https://github.com/lucide-icons/lucide) ([lucide.dev](https://lucide.dev)), version 0.525.0, used under the ISC License. The app does not ship the Lucide package. The other icons in that file were drawn for this project. The icons copied, by Lucide's names:
 
-`arrow-down`, `arrow-left`, `arrow-right`, `arrow-up`, `book-open`, `copy-plus`, `crop`, `download`, `eraser`, `external-link`, `eye`, `eye-off`, `focus`, `footprints`, `info`, `lock`, `log-out`, `menu`, `pencil`, `radar`, `redo-2`, `refresh-cw`, `repeat`, `settings`, `share`, `smartphone`, `trash-2`, `undo-2`, `user-minus`, `users`, `zoom-in`, `zoom-out`.
+`arrow-down`, `arrow-left`, `arrow-right`, `arrow-up`, `book-open`, `copy-plus`, `crop`, `download`, `eraser`, `external-link`, `eye`, `eye-off`, `focus`, `footprints`, `info`, `lock`, `log-out`, `maximize-2`, `menu`, `minimize-2`, `pencil`, `radar`, `redo-2`, `refresh-cw`, `repeat`, `settings`, `share`, `smartphone`, `trash-2`, `undo-2`, `user-minus`, `users`, `zoom-in`, `zoom-out`.
 
 ```
 ISC License
@@ -68,7 +68,7 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
-Lucide's license credits the icons it derived from Feather to Feather's own MIT License. Of the icons copied here, these are derived from Feather: `arrow-down`, `arrow-left`, `arrow-right`, `arrow-up`, `download`, `external-link`, `info`, `lock`, `log-out`, `share`, `smartphone`, `trash-2`, `zoom-in`, `zoom-out`.
+Lucide's license credits the icons it derived from Feather to Feather's own MIT License. Of the icons copied here, these are derived from Feather: `arrow-down`, `arrow-left`, `arrow-right`, `arrow-up`, `download`, `external-link`, `info`, `lock`, `log-out`, `minimize-2`, `share`, `smartphone`, `trash-2`, `zoom-in`, `zoom-out`.
 
 ```
 The MIT License (MIT)

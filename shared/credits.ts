@@ -104,7 +104,7 @@ export const LUCIDE_NOTICE =
  * (its LUCIDE table), and a test holds the two lists and CREDITS.md to
  * the same names, so a newly copied icon cannot ship uncredited.
  */
-export const LUCIDE_ICONS = ["arrow-down", "arrow-left", "arrow-right", "arrow-up", "book-open", "copy-plus", "crop", "download", "eraser", "external-link", "eye", "eye-off", "focus", "footprints", "info", "lock", "log-out", "menu", "pencil", "radar", "redo-2", "refresh-cw", "repeat", "settings", "share", "smartphone", "trash-2", "undo-2", "user-minus", "users", "zoom-in", "zoom-out"] as const;
+export const LUCIDE_ICONS = ["arrow-down", "arrow-left", "arrow-right", "arrow-up", "book-open", "copy-plus", "crop", "download", "eraser", "external-link", "eye", "eye-off", "focus", "footprints", "info", "lock", "log-out", "maximize-2", "menu", "minimize-2", "pencil", "radar", "redo-2", "refresh-cw", "repeat", "settings", "share", "smartphone", "trash-2", "undo-2", "user-minus", "users", "zoom-in", "zoom-out"] as const;
 
 export type LucideIcon = (typeof LUCIDE_ICONS)[number];
 
@@ -113,7 +113,7 @@ export type LucideIcon = (typeof LUCIDE_ICONS)[number];
  * to Feather under MIT. MIT asks for its notice in every copy, so the
  * About page shows it whole beside the ISC one, as CREDITS.md does.
  */
-export const FEATHER_ICONS = ["arrow-down", "arrow-left", "arrow-right", "arrow-up", "download", "external-link", "info", "lock", "log-out", "share", "smartphone", "trash-2", "zoom-in", "zoom-out"] as const satisfies readonly LucideIcon[];
+export const FEATHER_ICONS = ["arrow-down", "arrow-left", "arrow-right", "arrow-up", "download", "external-link", "info", "lock", "log-out", "minimize-2", "share", "smartphone", "trash-2", "zoom-in", "zoom-out"] as const satisfies readonly LucideIcon[];
 
 export const FEATHER_NOTICE =
   "The MIT License (MIT). Copyright (c) 2013-present Cole Bemis. Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.";
