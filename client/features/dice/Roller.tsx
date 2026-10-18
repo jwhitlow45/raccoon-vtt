@@ -105,6 +105,8 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         padding: `${PAD_TOP} ${PAD_X} 0`,
         background: theme.color.surface,
         borderBottom: `${theme.line.border}px solid ${theme.color.border}`,
+        // A grid item's floor is its content's width, and one line of a long label would widen the whole panel sideways. This lets it ellipsize instead.
+        minWidth: 0,
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), minHeight: LAST_LINE_PX, fontSize: theme.font.body14 }}>
