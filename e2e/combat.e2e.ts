@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import type { LogEvent } from "#shared/model.ts";
-import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The combat flow (docs/design-v1-combat-flow.md section 8) on the real
@@ -1291,6 +1291,65 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await press(dm, dm.getByRole("button", { name: "Wildfire Spirit options" }));
     await press(dm, dm.locator("[data-round-section]").getByRole("button", { name: "Revive" }));
     await lands(dm, /^button Wildfire Spirit, acts on Bree's turn/, "Revive in the sub-row's options");
+  });
+
+  test("13h. turning a token's Hidden off shows its row to players, by its bar, the H key, the token panel and a group's bar, and the tracker still hides a row on its own", async () => {
+    await setUp(dm, dmCdp, { ...DESK, scale: 1 });
+    const pair = [run.goblins[2]!, run.goblins[3]!];
+    const rowOf = (tokenId: string) => dmSocket.state?.encounter?.entries.find((e) => e.tokenId === tokenId);
+    const anaSees = (tokenId: string) => anaSocket.state?.encounter?.entries.some((e) => e.tokenId === tokenId) ?? false;
+    const missing = pair.filter((id) => !rowOf(id));
+    if (missing.length > 0) await ops.send({ t: "encounter.add", entries: missing.map((tokenId) => ({ id: randomUUID(), tokenId, value: 5 })) });
+    const hide = async () => {
+      await dm.keyboard.press("Escape");
+      await ops.send({ t: "token.updateMany", tokenIds: pair, patch: { visibility: "dm" } });
+      for (const id of pair) await ops.send({ t: "encounter.update", entryId: rowOf(id)!.id, patch: { hidden: true } });
+      await waitFor("both hidden, rows too", () => (pair.every((id) => dmSocket.state?.tokens[id]?.visibility === "dm" && rowOf(id)?.hidden === true) ? true : null));
+      await waitFor("Ana sees neither row", () => (pair.some(anaSees) ? null : true));
+    };
+    const shown = async (tokenIds: string[], how: string) => {
+      await waitFor(`${how}: the tokens and their rows shown`, () => (tokenIds.every((id) => dmSocket.state?.tokens[id]?.visibility === "all" && rowOf(id)?.hidden === false) ? true : null));
+      await waitFor(`${how}: Ana sees the rows`, () => (tokenIds.every(anaSees) ? true : null));
+    };
+    const pick = async () => {
+      await openTracker(dm);
+      await (await rowButton(dm, "Goblin 3")).click();
+      await bar(dm, "Goblin 3").waitFor();
+    };
+
+    await hide();
+    await pick();
+    await bar(dm, "Goblin 3").getByRole("button", { name: "Hidden", exact: true }).click();
+    await shown([pair[0]!], "the bar");
+
+    await hide();
+    await pick();
+    await dm.keyboard.press("h");
+    await shown([pair[0]!], "the H key");
+
+    await hide();
+    await pick();
+    await openSideTab(dm, "Token");
+    const panel = dm.getByRole("tabpanel", { name: /^Token/ });
+    await openFold(panel, "Token settings");
+    await panel.getByRole("switch", { name: /^Hidden from players/ }).click();
+    await shown([pair[0]!], "the panel's switch");
+
+    await hide();
+    await pick();
+    await bar(dm, "Goblin 3").getByRole("button", { name: "Multi-select", exact: true }).click();
+    await tapCell(dm, run.bounds, { x: 15, y: 2 });
+    const group = dm.getByRole("dialog", { name: "2 selected tokens" });
+    await group.getByRole("button", { name: "Hidden", exact: true }).click();
+    await shown(pair, "a group's bar");
+    await shots.take(dm, "combat-hidden-off-rows-shown");
+    await dm.keyboard.press("Escape");
+
+    // A row the tracker hides stays hidden while its token shows.
+    await ops.send({ t: "encounter.update", entryId: rowOf(pair[0]!)!.id, patch: { hidden: true } });
+    await waitFor("Ana loses that row alone", () => (!anaSees(pair[0]!) && anaSees(pair[1]!) ? true : null));
+    assert.equal(dmSocket.state?.tokens[pair[0]!]?.visibility, "all");
+    await ops.send({ t: "encounter.update", entryId: rowOf(pair[0]!)!.id, patch: { hidden: false } });
   });
 
   test("14. no page logged an error", () => {

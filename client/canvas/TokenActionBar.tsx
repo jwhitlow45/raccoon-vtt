@@ -44,6 +44,7 @@ import {
   groupCreatures,
   groupOffers,
   sharedElevation,
+  shownRowOps,
   updateManyOps,
   type Lit,
 } from "../features/tokens/groupEdit.ts";
@@ -269,7 +270,11 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
           <BarButton
             key={id}
             pressed={token.visibility === "dm"}
-            onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { visibility: token.visibility === "dm" ? "all" : "dm" } })}
+            onClick={() => {
+              const showing = token.visibility === "dm";
+              const change: ClientOp = { t: "token.update", tokenId: token.id, patch: { visibility: showing ? "all" : "dm" } };
+              dispatchGesture(actions, showing ? [change, ...shownRowOps(encounter, [token.id])] : [change]);
+            }}
           >
             Hidden
           </BarButton>
@@ -519,7 +524,14 @@ export function GroupActionBar(props: {
           </BarButton>
         ) : null}
         {offers.dm ? (
-          <BarButton pressed={hidden === "all"} half={hidden === "some"} onClick={() => send(updateManyOps(ids, flagPatch(tokens, "hidden")))}>
+          <BarButton
+            pressed={hidden === "all"}
+            half={hidden === "some"}
+            onClick={() => {
+              const patch = flagPatch(tokens, "hidden");
+              send([...updateManyOps(ids, patch), ...(patch.visibility === "all" ? shownRowOps(encounter, ids) : [])]);
+            }}
+          >
             Hidden
           </BarButton>
         ) : null}

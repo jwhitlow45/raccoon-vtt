@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react";
 import type { Actor, CreatureSize, HpVisibility, Token, TokenKind } from "#shared/model.ts";
-import type { ActorPatch, TokenPatch } from "#shared/protocol.ts";
+import type { ActorPatch, ClientOp, TokenPatch } from "#shared/protocol.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import type { NextSize } from "#shared/rules/resize.ts";
 import { isCompanion } from "../canvas/barButtons.ts";
@@ -22,6 +22,7 @@ import { tokenAccess, type TokenAccess } from "../features/tokens/access.ts";
 import { useAltImages } from "../features/tokens/AltImages.tsx";
 import { CompanionOwners, CompanionSection, MakeCompanion, followsPartyHp } from "../features/tokens/CompanionsSection.tsx";
 import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
+import { shownRowOps } from "../features/tokens/groupEdit.ts";
 import { HpSection } from "../features/tokens/HpSection.tsx";
 import { usePanelFolds, type FoldKey } from "../features/tokens/panelFolds.ts";
 import { offersMakeCompanion, panelSections, type PanelSectionId } from "../features/tokens/panelOrder.ts";
@@ -38,6 +39,7 @@ import { ConfirmButton, FieldRow, Note, NumberField, Section, Select, Stepper, T
 import { displayName, footprint } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { elevationBadge, initials } from "../lib/tokenView.ts";
+import { dispatchGesture } from "../state/actions.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../state/view.ts";
 
 const SIZE_OPTIONS: { value: CreatureSize; label: string }[] = [
@@ -311,6 +313,8 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
   const autoHeight = Math.max(fp.w, fp.h) * props.feetPerCell;
   // A creature companion a player plays is the party's, so its HP follows the party's setting (docs/design-v1-combat-flow.md 3.6.5).
   const followsParty = useRoomView((s) => followsPartyHp(s.view, token));
+  const actions = useRoomActions();
+  const encounter = useRoomView((s) => s.view?.encounter);
   return (
     <>
       <FieldRow label="Name">
@@ -363,7 +367,10 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
       </FieldRow>
       <Switch
         checked={token.visibility === "dm"}
-        onChange={(hidden) => update({ visibility: hidden ? "dm" : "all" })}
+        onChange={(hidden) => {
+          const change: ClientOp = { t: "token.update", tokenId: token.id, patch: { visibility: hidden ? "dm" : "all" } };
+          dispatchGesture(actions, hidden ? [change] : [change, ...shownRowOps(encounter, [token.id])]);
+        }}
         label="Hidden from players"
         help="Never sent to players while hidden."
       />

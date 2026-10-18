@@ -5,6 +5,7 @@ import type { ClientOp } from "#shared/protocol.ts";
 import { fitSlot } from "../canvas/fitSlot.ts";
 import { ownsEntry, sortedEntries, turnOp, turnStatus } from "../features/encounter/logic.ts";
 import { tokenAccess } from "../features/tokens/access.ts";
+import { shownRowOps } from "../features/tokens/groupEdit.ts";
 import { PLACE_TOOL_ID } from "../features/tokens/placement.ts";
 import { displayName } from "../lib/scene.ts";
 import { scopeSlot, type RoomScope } from "./scope.ts";
@@ -303,7 +304,9 @@ export const SHORTCUTS: readonly Shortcut[] = [
     run: (env) => {
       const tokens = selectedTokens(env);
       const visibility = tokens.every((t) => t.visibility === "dm") ? "all" : "dm";
-      dispatchAll(env, batches(tokens.map((t) => t.id)).map((tokenIds) => ({ t: "token.updateMany", tokenIds, patch: { visibility } })));
+      const ids = tokens.map((t) => t.id);
+      const rows = visibility === "all" ? shownRowOps(env.getState().view?.encounter, ids) : [];
+      dispatchAll(env, [...batches(ids).map((tokenIds): ClientOp => ({ t: "token.updateMany", tokenIds, patch: { visibility } })), ...rows]);
     },
   },
   {

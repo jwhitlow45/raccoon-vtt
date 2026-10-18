@@ -3,8 +3,9 @@ import { describe, test } from "node:test";
 import type { RoomState } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
+import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { actor, character, DM, env, P1, room, token } from "#shared/testutil.ts";
+import { actor, character, DM, entry, env, P1, room, token } from "#shared/testutil.ts";
 import {
   conditionLit,
   conditionOps,
@@ -21,6 +22,7 @@ import {
   ownersLit,
   sharedElevation,
   sharedImage,
+  shownRowOps,
   updateManyOps,
 } from "./groupEdit.ts";
 
@@ -144,6 +146,38 @@ describe("the group's other edits", () => {
     assert.equal(flagLit([hidden.tokens.g1!, hidden.tokens.g2!], "hidden"), "all");
     assert.deepEqual(flagPatch([hidden.tokens.g1!, hidden.tokens.g2!], "hidden"), { visibility: "all" });
     assert.deepEqual(flagPatch(tokens, "locked"), { locked: true });
+  });
+
+  test("Hidden turned off shows the tokens' hidden rows to players too, and leaves other rows and a fight-less room alone", () => {
+    const state = setup();
+    for (const id of ["g1", "g2"]) state.tokens[id] = { ...state.tokens[id]!, visibility: "dm" };
+    state.encounter = {
+      rev: 0,
+      round: 1,
+      activeEntryId: null,
+      entries: [entry("r1", { tokenId: "g1", value: 15, hidden: true }), entry("r2", { tokenId: "g2", value: 12, hidden: true }), entry("r3", { tokenId: "wolf", value: 10, hidden: true }), entry("r4", { tokenId: "pc", value: 8 })],
+    };
+    const rowsFor = (s: RoomState) => projectState(s, P1, { sceneId: "s1" }).encounter?.entries.map((e) => e.id) ?? [];
+    assert.deepEqual(rowsFor(state), ["r4"], "Ayla's player sees only Ayla's row");
+    assert.deepEqual(shownRowOps(state.encounter, ["g1", "g2"]), [
+      { t: "encounter.update", entryId: "r1", patch: { hidden: false } },
+      { t: "encounter.update", entryId: "r2", patch: { hidden: false } },
+    ]);
+    assert.deepEqual(shownRowOps(null, ["g1"]), []);
+    // The group's bar: the tokens' change and their rows, as the server takes them.
+    const tokens = [state.tokens.g1!, state.tokens.g2!];
+    const patch = flagPatch(tokens, "hidden");
+    assert.deepEqual(patch, { visibility: "all" });
+    const shown = applyAll(state, [...updateManyOps(["g1", "g2"], patch), ...shownRowOps(state.encounter, ["g1", "g2"])]);
+    assert.deepEqual(rowsFor(shown), ["r1", "r2", "r4"]);
+    assert.equal(shown.encounter!.entries.find((e) => e.id === "r3")!.hidden, true, "another token's hidden row stays hidden");
+    // A token alone, as its bar and the panel's switch send it.
+    const one = applyAll(state, [{ t: "token.update", tokenId: "g1", patch: { visibility: "all" } }, ...shownRowOps(state.encounter, ["g1"])]);
+    assert.deepEqual(rowsFor(one), ["r1", "r4"]);
+    // The tracker can still hide a shown token's row on its own.
+    const rehidden = applyAll(shown, [{ t: "encounter.update", entryId: "r1", patch: { hidden: true } }]);
+    assert.equal(rehidden.tokens.g1!.visibility, "all");
+    assert.deepEqual(rowsFor(rehidden), ["r2", "r4"]);
   });
 
   test("a group of 230 goes out in batches of 100", () => {

@@ -123,6 +123,24 @@ export function flagPatch(tokens: readonly GroupToken[], flag: "hidden" | "locke
   return flag === "hidden" ? { visibility: off ? "all" : "dm" } : { locked: !off };
 }
 
+/**
+ * What turning Hidden off sends besides the tokens' own change, each way
+ * the DM turns it off: a token's action bar, a group's, the H key and the
+ * token panel's switch. Their rows in the fight that players cannot see
+ * show too (the project owner, 2026-10-17), so a creature revealed on the
+ * map is revealed in the order at once, not only at its first turn. A row
+ * can still be hidden on its own from the tracker, and hiding a token
+ * leaves its rows as they are. The caller sends these with the tokens'
+ * change as one gesture, so one undo takes both back.
+ */
+export function shownRowOps(encounter: Pick<Encounter, "entries"> | null | undefined, tokenIds: readonly string[]): ClientOp[] {
+  if (!encounter) return [];
+  const shown = new Set(tokenIds);
+  return encounter.entries
+    .filter((entry) => entry.hidden && entry.tokenId !== undefined && shown.has(entry.tokenId))
+    .map((entry): ClientOp => ({ t: "encounter.update", entryId: entry.id, patch: { hidden: false } }));
+}
+
 /** One patch for every token: one `token.updateMany` per 100. */
 export function updateManyOps(tokenIds: readonly string[], patch: TokenGroupPatch): ClientOp[] {
   return chunks(tokenIds, LIMITS.tokensPerManyOp).map((part): ClientOp => ({ t: "token.updateMany", tokenIds: part, patch }));
