@@ -11,6 +11,7 @@ import { useScoped } from "../../state/scope.ts";
 import { useRoomStore, useRoomView } from "../../state/view.ts";
 import { blockLines, viewOf } from "../monsters/draft.ts";
 import { useOpenEditor } from "../monsters/EditorHost.tsx";
+import { monsterImage } from "../monsters/images.ts";
 import { MonsterPicker } from "../monsters/MonsterPicker.tsx";
 import { StatBlockView, useSrdMonsters } from "../monsters/StatBlockView.tsx";
 import { attachPatch, DETACH_PATCH, OWNER_DETACH_PATCH, statBlockFoldable, statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
@@ -128,8 +129,8 @@ export function StatBlockSection(props: {
       openEditor({ monster: null, initial: statBlockFromSrd(monster), block: { character: keeper, existing: null, fromSrd: monster.srdId }, onSaved: attach });
       return;
     }
-    // A room monster's copy starts with the image the DM chose for that SRD monster, as the Monsters panel's copy starts.
-    const image = store.getState().view?.srdImages?.[monster.srdId]?.image;
+    // A room monster's copy starts with the image that SRD monster's tokens get, the DM's choice or its shipped icon, as the Monsters panel's copy starts.
+    const image = monsterImage(store.getState().view ?? {}, { srdId: monster.srdId });
     openEditor({ monster: null, initial: { ...statBlockFromSrd(monster), ...(image ? { defaultImage: image } : {}) }, onSaved: attach });
   };
   // A companion's players detach what they may link. The DM's Detach clears a room monster's link too.

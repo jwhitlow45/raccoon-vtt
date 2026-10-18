@@ -1,6 +1,7 @@
-import type { ImageRef, RoomState, Token } from "#shared/model.ts";
+import type { IconImage, ImageRef, RoomState, Token } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { StatBlockMonster } from "#shared/srd/monsters.ts";
+import { SRD_TOKEN_ICONS } from "#shared/srd/tokenIcons.ts";
 import { sameImage as sameImageRef } from "#shared/imageRef.ts";
 
 /**
@@ -11,7 +12,11 @@ import { sameImage as sameImageRef } from "#shared/imageRef.ts";
  * under plain Node.
  *
  * An SRD monster's image lives in the room's `srdImages`, keyed by its SRD
- * id. A room's own monster carries its image in its stat block record.
+ * id. Until the DM sets one it is the monster's shipped icon
+ * (shared/srd/tokenIcons.ts, docs/design-v1-starter-art.md section 6),
+ * read here and never stored: the DM's choice always wins, and a room made
+ * before the defaults gets them with no migration. A room's own monster
+ * carries its image in its stat block record and has no default.
  */
 
 /** Which monster: an SRD one by its slug, or one of the room's own by its id. */
@@ -19,10 +24,27 @@ export type MonsterRef = { srdId: string } | { monsterId: string };
 
 type Images = Pick<RoomState, "monsters" | "srdImages">;
 
-/** The monster's default image, or undefined when the DM has not set one. A view from before images reads as none. */
+/**
+ * The image the monster's tokens start with: the DM's choice, else an SRD
+ * monster's shipped icon, or undefined for a room monster without one and
+ * an id the SRD does not have. A view from before images reads as no
+ * choice.
+ */
 export function monsterImage(state: Partial<Images>, ref: MonsterRef): ImageRef | undefined {
-  if ("srdId" in ref) return state.srdImages?.[ref.srdId]?.image;
+  if ("srdId" in ref) return state.srdImages?.[ref.srdId]?.image ?? shippedImage(ref);
   return state.monsters?.[ref.monsterId]?.defaultImage;
+}
+
+/**
+ * The image a monster shows when the room has none of its own for it: an
+ * SRD monster's shipped icon, as a copy so no caller can change the table,
+ * and nothing for the room's own. The table is a plain object, so an id
+ * such as "constructor" must not find what every object inherits.
+ */
+export function shippedImage(ref: MonsterRef): IconImage | undefined {
+  if (!("srdId" in ref) || !Object.hasOwn(SRD_TOKEN_ICONS, ref.srdId)) return undefined;
+  const { icon, color } = SRD_TOKEN_ICONS[ref.srdId]!;
+  return { icon, color };
 }
 
 /**
@@ -73,15 +95,17 @@ export function isTokenOf(token: Pick<Token, "kind" | "name" | "actor">, ref: Mo
  * What putting a monster's image on its tokens on one scene would change.
  * Tokens keep no record of who chose their image, so one counts as set by
  * hand when it wears a picture the monster never gave it: not this image,
- * and none of the images this monster had while its page was open on
- * this device.
+ * not an SRD monster's shipped icon, and none of the images this monster
+ * had while its page was open on this device. The shipped icon stays the
+ * monster's after the DM picks another, since tokens placed before that
+ * pick wear it.
  *
  * A token a player plays, owned by one or a player character, is never
  * repainted unless the DM asks, whatever it wears: it may be a druid's
  * Wild Shape placed from the SRD, and its look is the player's.
  */
 export type ApplyPlan = {
-  /** No image, or this monster's own: an image it had before, or this picture under another crop. */
+  /** No image, or this monster's own: its shipped icon, an image it had before, or this picture under another crop. */
   plain: string[];
   /** An image of its own, chosen for that token. Replaced only when the DM asks. */
   own: string[];
@@ -101,7 +125,8 @@ export function planApply(input: {
   previous?: readonly ImageRef[];
 }): ApplyPlan {
   const plan: ApplyPlan = { plain: [], own: [], played: [], done: 0 };
-  const ours = new Set([pictureOf(input.image), ...(input.previous ?? []).map(pictureOf)]);
+  const shipped = shippedImage(input.ref);
+  const ours = new Set([pictureOf(input.image), ...(shipped ? [pictureOf(shipped)] : []), ...(input.previous ?? []).map(pictureOf)]);
   for (const token of input.tokens) {
     if (!token || token.sceneId !== input.sceneId || !isTokenOf(token, input.ref, input.monsters)) continue;
     if (sameImage(token.image, input.image)) plan.done++;

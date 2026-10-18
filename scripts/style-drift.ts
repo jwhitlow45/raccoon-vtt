@@ -392,12 +392,8 @@ export const ALLOWLIST: readonly AllowEntry[] = [
     why: "art drawn on the board or into an export",
     exempt: { colors: true },
   },
-  {
-    match: (f) => f === "client/features/images/icons.ts",
-    why: "the icon disk's neutrals and glyph inks",
-    exempt: { colors: true },
-    declarations: ["ICON_NEUTRALS", "DEFAULT_ICON_COLOR", "NEAR_BLACK", "WHITE"],
-  },
+  { match: (f) => f === "client/features/images/icons.ts", why: "the icon glyph's inks", exempt: { colors: true }, declarations: ["NEAR_BLACK", "WHITE"] },
+  { match: (f) => f === "client/features/images/iconColors.ts", why: "the icon disk's neutrals", exempt: { colors: true }, declarations: ["ICON_NEUTRALS", "DEFAULT_ICON_COLOR"] },
   { match: (f) => f === "client/features/images/IconsTab.tsx", why: "the names of the icon disk's colors", exempt: { colors: true }, declarations: ["COLOR_NAMES"] },
   { match: (f) => f.startsWith("client/features/display/"), why: "the table display's TV sizes and stacking", exempt: { colors: true, sizes: true, stacking: true } },
 ];

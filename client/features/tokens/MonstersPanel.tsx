@@ -14,7 +14,7 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { viewOf } from "../monsters/draft.ts";
-import type { MonsterRef } from "../monsters/images.ts";
+import { monsterImage, shippedImage, type MonsterRef } from "../monsters/images.ts";
 import { MonsterEditor } from "../monsters/MonsterEditor.tsx";
 import { MonsterImageSection } from "../monsters/MonsterImage.tsx";
 import { MonsterList, RoomBadge, type Listed } from "../monsters/MonsterList.tsx";
@@ -85,8 +85,8 @@ export default function MonstersPanel(props: PanelProps) {
           close={props.close}
           onEdit={(monster) => setEditing({ monster, initial: statBlockOf(monster), paste: false })}
           onCopy={(m) => {
-            // The copy starts with the image the DM chose for the SRD monster, if any.
-            const image = srdImages?.[m.srdId]?.image;
+            // The copy starts with the image the SRD monster's tokens get: the DM's choice, else its shipped icon.
+            const image = monsterImage({ srdImages }, { srdId: m.srdId });
             setEditing({ monster: null, initial: { ...statBlockFromSrd(m), ...(image ? { defaultImage: image } : {}) }, paste: false });
           }}
           onDeleted={() => setChosen(null)}
@@ -164,6 +164,7 @@ function MonsterDetail(props: {
   const srdImage = useRoomView((s) => (listed.source === "srd" ? s.view?.srdImages?.[listed.srd.srdId]?.image : undefined));
   const image = listed.source === "room" ? listed.monster.defaultImage : srdImage;
   const target = useMemo<MonsterRef>(() => (listed.source === "room" ? { monsterId: listed.monster.id } : { srdId: listed.srd.srdId }), [listed]);
+  const fallback = useMemo(() => shippedImage(target), [target]);
   const setImage = (next: ImageRef | null) => {
     if ("srdId" in target) actions.dispatch({ t: "monster.setSrdImage", srdId: target.srdId, image: next });
     else actions.dispatch({ t: "monster.update", monsterId: target.monsterId, patch: { defaultImage: next } });
@@ -215,7 +216,7 @@ function MonsterDetail(props: {
         </Button>
         <Help>Then tap the map where {count === 1 ? "it goes" : "they go"}.</Help>
       </div>
-      <MonsterImageSection target={target} name={m.name} image={image} onChange={setImage} />
+      <MonsterImageSection target={target} name={m.name} image={image} fallback={fallback} onChange={setImage} />
       {listed.source === "room" ? (
         <>
           <div style={{ display: "flex", gap: theme.space(2) }}>

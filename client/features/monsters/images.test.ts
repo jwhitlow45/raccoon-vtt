@@ -8,7 +8,7 @@ import { monsterView } from "#shared/statBlock.ts";
 import { DM, actor, apply, character, customMonster, imageRef, room, srdImage, token } from "#shared/testutil.ts";
 import { dispatchGesture } from "../../state/actions.ts";
 import { monsterToken } from "../tokens/factory.ts";
-import { applyOps, isTokenOf, monsterImage, optInCount, optInLabel, planApply, refOf } from "./images.ts";
+import { applyOps, isTokenOf, monsterImage, optInCount, optInLabel, planApply, refOf, shippedImage } from "./images.ts";
 
 const MONSTERS = JSON.parse(readFileSync(new URL("../../../shared/srd/monsters.json", import.meta.url), "utf8")) as SrdMonster[];
 const goblin = MONSTERS.find((m) => m.srdId === "goblin-warrior")!;
@@ -31,10 +31,38 @@ describe("a monster's default image", () => {
     assert.equal(refOf(monsterView(state.monsters.lurker!)), undefined);
     assert.deepEqual(monsterImage(state, { srdId: "goblin-warrior" }), imageRef("goblin-pic"));
     assert.deepEqual(monsterImage(state, { monsterId: "lurker" }), imageRef("lurker-pic", 1.4));
-    assert.equal(monsterImage(state, { srdId: "owlbear" }), undefined);
     assert.equal(monsterImage(state, { monsterId: "plain" }), undefined);
     assert.equal(monsterImage(state, { monsterId: "gone" }), undefined);
-    assert.equal(monsterImage({}, { srdId: "goblin-warrior" }), undefined);
+  });
+
+  test("an SRD monster falls back to its shipped icon, and the room's own choice wins over it", () => {
+    const state = setup();
+    const icon = { icon: "delapouite/goblin-head", color: "#e93d82" };
+    assert.deepEqual(shippedImage({ srdId: "goblin-warrior" }), icon);
+    assert.deepEqual(monsterImage(state, { srdId: "goblin-warrior" }), imageRef("goblin-pic"), "the DM's choice");
+    assert.deepEqual(monsterImage({ ...state, srdImages: {} }, { srdId: "goblin-warrior" }), icon, "no choice in this room");
+    assert.deepEqual(monsterImage({}, { srdId: "goblin-warrior" }), icon, "a view from before images");
+    assert.deepEqual(monsterImage(state, { srdId: "owlbear" }), { icon: "lorc/owl", color: "#12a594" });
+    // Keyed as the SRD data spells it, until that slip is fixed on its own.
+    assert.deepEqual(monsterImage(state, { srdId: "dragon-tur-t-le" }), { icon: "lorc/turtle", color: "#ff6b4a" });
+  });
+
+  test("an id the SRD lacks has no image, nor has a room monster without one, even one sharing an SRD id's spelling", () => {
+    const state = setup();
+    for (const srdId of ["not-a-monster", "", "constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      assert.equal(monsterImage(state, { srdId }), undefined, srdId);
+      assert.equal(shippedImage({ srdId }), undefined, srdId);
+    }
+    state.monsters["goblin-warrior"] = customMonster("goblin-warrior", { name: "Goblin Warrior" });
+    assert.equal(monsterImage(state, { monsterId: "goblin-warrior" }), undefined);
+    assert.equal(shippedImage({ monsterId: "goblin-warrior" }), undefined);
+  });
+
+  test("hands out a copy, so a token that changes its image never changes the table", () => {
+    const first = shippedImage({ srdId: "wolf" })!;
+    first.color = "#000000";
+    assert.deepEqual(shippedImage({ srdId: "wolf" }), { icon: "lorc/wolf-head", color: "#ad7f58" });
+    assert.notEqual(monsterImage({}, { srdId: "wolf" }), monsterImage({}, { srdId: "wolf" }));
   });
 
   test("goes on every token placed from the monster, SRD or the room's own, as a copy", () => {
@@ -53,7 +81,19 @@ describe("a monster's default image", () => {
     assert.deepEqual(apply(state, { t: "token.create", token: l }, DM).tokens.l1!.image, imageRef("lurker-pic", 1.4));
   });
 
-  test("a monster without one places tokens without an image, as before", () => {
+  test("an SRD monster with no image set in the room places its shipped icon, the DM's choice once there is one", () => {
+    const state = room();
+    const place = (id: string) => {
+      const image = monsterImage(state, refOf(goblin)!);
+      return apply(state, { t: "token.create", token: monsterToken(goblin, drop, { id, sceneId: "s1", at: { x: 1, y: 1 }, ...(image ? { image } : {}) }) }, DM).tokens[id]!;
+    };
+    assert.deepEqual(place("g1").image, { icon: "delapouite/goblin-head", color: "#e93d82" });
+    assert.deepEqual(state.srdImages, {}, "placing stores nothing for the monster");
+    state.srdImages["goblin-warrior"] = srdImage("goblin-warrior", "goblin-pic");
+    assert.deepEqual(place("g2").image, imageRef("goblin-pic"));
+  });
+
+  test("a room monster without one places tokens without an image, as before", () => {
     const state = setup();
     const hag = monsterView(state.monsters.plain!);
     const image = monsterImage(state, refOf(hag, "plain")!);
@@ -174,6 +214,28 @@ describe("applying a new image to a monster's tokens", () => {
     const { image: _a, rev: _ra, ...was } = state.tokens.old!;
     const { image: _b, rev: _rb, ...now } = after.tokens.old!;
     assert.deepEqual(now, was);
+  });
+
+  test("a token wearing the SRD monster's shipped icon is the monster's, whatever the DM picked since", () => {
+    const state = setup();
+    const shipped = shippedImage({ srdId: "goblin-warrior" })!;
+    state.tokens = {
+      bare: goblinToken("bare"),
+      shipped: goblinToken("shipped", { image: shipped }),
+      recolored: goblinToken("recolored", { image: { ...shipped, color: "#30a46c" } }),
+      disguise: goblinToken("disguise", { image: imageRef("hooded-figure") }),
+      wildShape: goblinToken("wildShape", { ownerIds: ["p1"], image: shipped }),
+      // Another monster's tokens wear the same icon and are never this one's.
+      wolf: token("wolf", { name: "Wolf", actor: { inline: actor({ srdId: "wolf" }) }, image: shipped }),
+    };
+    const input = { tokens: Object.values(state.tokens), sceneId: "s1", ref: { srdId: "goblin-warrior" }, monsters: {} };
+    // The DM's new picture replaces the shipped icon with no opt-in, as it replaces an earlier picture of the monster's.
+    assert.deepEqual(planApply({ ...input, image: imageRef("goblin-pic") }), { plain: ["bare", "recolored", "shipped"], own: ["disguise"], played: ["wildShape"], done: 0 });
+    // With no choice made, the page offers the shipped icon to tokens placed before it existed.
+    assert.deepEqual(planApply({ ...input, image: shipped }), { plain: ["bare", "recolored"], own: ["disguise"], played: [], done: 2 });
+    // A room monster has no shipped icon, so a token wearing one is set by hand.
+    const lurker = { ...input, ref: { monsterId: "lurker" }, monsters: state.monsters, tokens: [token("l1", { name: "Cave Lurker", image: shipped })] };
+    assert.deepEqual(planApply({ ...lurker, image: imageRef("lurker-pic", 1.4) }), { plain: [], own: ["l1"], played: [], done: 0 });
   });
 
   test("the room's own monster's tokens are planned by name, and nothing is left once applied", () => {

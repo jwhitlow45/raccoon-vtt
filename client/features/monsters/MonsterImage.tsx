@@ -12,6 +12,7 @@ import { DEFAULT_CROP, type Crop } from "../images/crop.ts";
 import { CropEditor } from "../images/CropEditor.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import { ImagePicker } from "../images/ImagePicker.tsx";
+import { iconCredit } from "../images/icons.ts";
 import { applyOps, optInCount, optInLabel, planApply, sameImage, type MonsterRef } from "./images.ts";
 import { isAssetImage } from "#shared/imageRef.ts";
 
@@ -31,11 +32,23 @@ type Step = { kind: "pick" } | { kind: "crop"; assetId: string; initial: Crop };
  * crop editor, both as dialogs. `onOpen` reports while one is open, so a
  * dialog underneath can leave Escape to it. With no image the disk shows
  * the monster's initials as its tokens do on the map.
+ *
+ * `fallback` is what shows while `value` is unset: an SRD monster's
+ * shipped icon (docs/design-v1-starter-art.md section 6). It is never
+ * stored, so it cannot be removed, and removing the DM's own image goes
+ * back to it.
  */
-export function MonsterImageField(props: { value: ImageRef | undefined; onChange(next: ImageRef | null): void; name: string; onOpen?(open: boolean): void }) {
+export function MonsterImageField(props: {
+  value: ImageRef | undefined;
+  fallback?: ImageRef | undefined;
+  onChange(next: ImageRef | null): void;
+  name: string;
+  onOpen?(open: boolean): void;
+}) {
   const [step, setStepState] = useState<Step | null>(null);
+  const shown = props.value ?? props.fallback;
   // A shipped icon has no crop (docs/design-v1-dm-tools.md 3.12).
-  const value = props.value && isAssetImage(props.value) ? props.value : undefined;
+  const value = shown && isAssetImage(shown) ? shown : undefined;
   const set = props.value !== undefined;
   const setStep = (next: Step | null) => {
     setStepState(next);
@@ -44,17 +57,21 @@ export function MonsterImageField(props: { value: ImageRef | undefined; onChange
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: theme.space(3) }}>
-      <ImagePreview image={props.value} shape="circle" aspect={1} width={64} ring={theme.color.hostile} initials={initials(props.name)} />
+      <ImagePreview image={shown} shape="circle" aspect={1} width={64} ring={theme.color.hostile} initials={initials(props.name)} />
       <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
         <Button size="sm" onClick={() => setStep({ kind: "pick" })}>
-          {set ? "Change image" : "Set image"}
+          {shown ? "Change image" : "Set image"}
         </Button>
         {value ? (
           <Button size="sm" onClick={() => setStep({ kind: "crop", assetId: value.assetId, initial: value.crop })}>
             Crop
           </Button>
         ) : null}
-        {set ? (
+        {set && props.fallback ? (
+          <Button size="sm" onClick={() => props.onChange(null)}>
+            Use the default icon
+          </Button>
+        ) : set ? (
           <Button variant="danger" size="sm" onClick={() => props.onChange(null)}>
             Remove image
           </Button>
@@ -62,7 +79,7 @@ export function MonsterImageField(props: { value: ImageRef | undefined; onChange
       </div>
       {step?.kind === "pick" ? (
         <ImagePicker
-          current={props.value}
+          current={shown}
           onClose={() => setStep(null)}
           onPick={(image) => setStep({ kind: "crop", assetId: image.id, initial: DEFAULT_CROP })}
           onPickIcon={(icon) => {
@@ -94,13 +111,26 @@ export function MonsterImageField(props: { value: ImageRef | undefined; onChange
  * views. Only that scene: a DM's view holds the tokens of the scene it
  * shows and no other (design 7.3), so the DM applies it on another scene by
  * opening the monster there.
+ *
+ * An SRD monster always has an image, its shipped icon until the DM picks
+ * one (`fallback`), so the offer also puts that icon on tokens placed
+ * before the defaults existed. It is the DM's tap that stores it on them.
  */
-export function MonsterImageSection(props: { target: MonsterRef; name: string; image: ImageRef | undefined; onChange(next: ImageRef | null): void }) {
+export function MonsterImageSection(props: {
+  target: MonsterRef;
+  name: string;
+  /** The room's own image for the monster. */
+  image: ImageRef | undefined;
+  fallback?: ImageRef | undefined;
+  onChange(next: ImageRef | null): void;
+}) {
   const actions = useRoomActions();
   const tokens = useRoomView((s) => s.view?.tokens);
   const monsters = useRoomView((s) => s.view?.monsters);
   const sceneId = useRoomView((s) => s.sceneId);
-  const { image, target } = props;
+  const { target } = props;
+  const image = props.image ?? props.fallback;
+  const credit = !props.image && image && "icon" in image ? iconCredit(image.icon) : null;
 
   // Every image the monster had while this was open, so tokens still wearing one count as the monster's, not as set by hand.
   const [shown, setShown] = useState(image);
@@ -140,11 +170,13 @@ export function MonsterImageSection(props: { target: MonsterRef; name: string; i
       }}
     >
       <SectionLabel>Token image</SectionLabel>
-      <MonsterImageField value={image} onChange={props.onChange} name={props.name} />
+      <MonsterImageField value={props.image} fallback={props.fallback} onChange={props.onChange} name={props.name} />
       <Help>
-        {image
+        {props.image
           ? `Every ${props.name} placed from now on starts with this image. Players see it only on those tokens.`
-          : `Set an image, and every ${props.name} placed from now on starts with it.`}
+          : image
+            ? `Every ${props.name} placed from now on starts with this icon${credit ? ` (${credit.text})` : ""}. Change it to pick another for this room.`
+            : `Set an image, and every ${props.name} placed from now on starts with it.`}
       </Help>
       {plan && waiting > 0 ? (
         <div style={{ display: "grid", gap: theme.space(2), paddingTop: theme.space(2), borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
@@ -154,7 +186,7 @@ export function MonsterImageSection(props: { target: MonsterRef; name: string; i
               checked={includeOwn}
               onChange={setIncludeOwn}
               label={optInLabel(plan)}
-              help="Off keeps an image chosen for one token, such as a disguise, and the look of a token a player plays. A token wearing an image this monster had before you opened it here counts as set by hand."
+              help="Off keeps an image chosen for one token, such as a disguise, and the look of a token a player plays. A token wearing an image this monster had before you opened it here counts as set by hand, unless it is an SRD monster’s default icon."
             />
           ) : null}
           <Button variant="primary" size="sm" onClick={apply} disabled={count === 0}>

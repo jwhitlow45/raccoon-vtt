@@ -63,7 +63,8 @@ export type MonsterDrop = {
 /**
  * A token for one monster, SRD or the room's own: average or typed HP, its
  * stats, hostile, hidden when the DM asks, and the monster's default image
- * when the DM set one (client/features/monsters/images.ts).
+ * when it has one: the DM's, or an SRD monster's shipped icon
+ * (client/features/monsters/images.ts).
  *
  * `monsterId` links a room monster's token to the stat block it came from,
  * as an SRD monster's keeps its `srdId`, so the DM reads the full block on

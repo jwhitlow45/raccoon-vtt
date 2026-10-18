@@ -76,8 +76,8 @@ describe("placing a saved encounter", () => {
     assert.equal(inline(tokens[1]!).monsterId, "mon1");
     assert.equal(inline(tokens[2]!).srdId, "goblin-warrior");
     assert.equal("monsterId" in inline(tokens[2]!), false);
-    // Each wears its monster's default image, and the dragon, with none set, wears none.
-    assert.equal(tokens[0]!.image, undefined);
+    // Each wears its monster's default image: the DM's where one is set, and the dragon, with none, its shipped icon.
+    assert.deepEqual(tokens[0]!.image, { icon: "lorc/dragon-head", color: "#ff6b4a" });
     assert.deepEqual(tokens[1]!.image, imageRef("lurker-pic"));
     assert.deepEqual(tokens[2]!.image, imageRef("goblin-pic"));
     // In its lair, the dragon takes the lair's XP and legendary uses from its stat block.

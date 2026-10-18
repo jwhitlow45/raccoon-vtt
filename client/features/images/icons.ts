@@ -4,7 +4,6 @@ import { GAME_ICON_AUTHORS, GAME_ICONS_DIR, type GameIconAuthor } from "#shared/
 import { ICON_KEY_RE } from "#shared/imageRef.ts";
 import type { ImageRef } from "#shared/model.ts";
 import { preloadInBackground } from "../../lib/retryableLazy.ts";
-import { MEMBER_COLORS } from "../../lib/theme.ts";
 
 /**
  * Shipped game-icons.net tokens (docs/design-v1-dm-tools.md 3.12). An icon
@@ -305,15 +304,8 @@ export function iconPath2D(key: string, d: string): Path2D {
 
 // ---------------------------------------------------------------- the disk
 
-/**
- * The disk colors on offer: the member palette, then four neutrals from
- * light gray to black. Any color passes the protocol, so a later palette
- * never breaks an icon already placed.
- */
-export const ICON_NEUTRALS = ["#8b8a93", "#55545c", "#2a2a32", "#0b0b0e"] as const;
-export const ICON_COLORS: readonly string[] = [...MEMBER_COLORS, ...ICON_NEUTRALS];
-/** A dark neutral, so a new icon reads as a token whatever the disposition ring around it says. */
-export const DEFAULT_ICON_COLOR = "#2a2a32";
+// The swatches live in a module of their own, which a Node script can read without this file's browser code.
+export { DEFAULT_ICON_COLOR, ICON_COLORS, ICON_NEUTRALS } from "./iconColors.ts";
 
 const NEAR_BLACK = "#16161a";
 const WHITE = "#ffffff";

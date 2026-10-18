@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { loadMonsters } from "#shared/srd/monsters.ts";
 import { monsterView } from "#shared/statBlock.ts";
-import { customMonster, imageRef, room } from "#shared/testutil.ts";
+import { customMonster, imageRef, room, srdImage } from "#shared/testutil.ts";
 import { pendingTokens } from "./placeInputs.ts";
 
 describe("what one tap of Add token places", () => {
@@ -21,6 +22,22 @@ describe("what one tap of Add token places", () => {
       assert.deepEqual(t.image, imageRef("lurker-pic"));
     }
     assert.notDeepEqual([tokens[0]!.x, tokens[0]!.y], [tokens[1]!.x, tokens[1]!.y], "never stacked");
+  });
+
+  test("SRD monsters wear their shipped icon, or the room's image for them once the DM sets one", async () => {
+    const wolf = (await loadMonsters()).find((m) => m.srdId === "wolf")!;
+    const state = room();
+    const place = () =>
+      pendingTokens(
+        { kind: "monster", monster: wolf, count: 2, hp: null, hidden: false, inLair: false },
+        { view: state, scene: state.scenes.s1!, world: { x: 5, y: 5 }, newId: () => "w" },
+      ).map((t) => t.image);
+    assert.deepEqual(place(), [
+      { icon: "lorc/wolf-head", color: "#ad7f58" },
+      { icon: "lorc/wolf-head", color: "#ad7f58" },
+    ]);
+    state.srdImages.wolf = srdImage("wolf", "wolf-pic");
+    assert.deepEqual(place(), [imageRef("wolf-pic"), imageRef("wolf-pic")]);
   });
 
   test("a blank token and a character's token carry no monster link", () => {
