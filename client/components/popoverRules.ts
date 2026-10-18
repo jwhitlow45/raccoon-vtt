@@ -133,6 +133,19 @@ export function tabOut(input: { kind: "dialog" | "menu"; shift: boolean; index: 
   return input.count === 0 || input.index === input.count - 1 ? "onward" : null;
 }
 
+/**
+ * Whether the popover a Tab left "onward" closes once the browser has
+ * moved focus: only where focus is neither inside it nor on its anchor
+ * (past the page's last control it lands nowhere, and nothing else closes
+ * it), and only while that same opening is still open. The check waits a
+ * task, and on a busy device that task can run after the popover closed
+ * and opened again, a key on its anchor in between: the new opening is not
+ * that Tab's to close.
+ */
+export function closesAfterTab(input: { sameOpening: boolean; at: FocusAt }): boolean {
+  return input.sameOpening && input.at !== "inside" && input.at !== "anchor";
+}
+
 /** Which stop a key open focuses in a dialog popover: its chosen option, else its first control. -1 with none. */
 export function openingStop(checked: readonly boolean[]): number {
   const chosen = checked.indexOf(true);

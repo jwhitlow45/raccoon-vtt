@@ -4,6 +4,7 @@ import { mousePans } from "../lib/gestures.ts";
 import { RoomScope } from "../state/scope.ts";
 import { chromeRect, needsPlace, popoverPlace, type PlaceInput, type Rect } from "./popoverPlace.ts";
 import {
+  closesAfterTab,
   dismissedBy,
   escapeCloses,
   focusAfterLeave,
@@ -223,6 +224,16 @@ describe("focus", () => {
     assert.equal(tabOut({ kind: "menu", shift: false, index: 4, count: 9 }), "onward");
     assert.equal(focusOnClose("tab", "outside"), null, "focus stays where Tab moved it");
     assert.equal(focusOnClose("tab", "page"), null);
+  });
+
+  test("after Tab moved focus on, the popover closes unless focus stayed with it, and never an opening made since", () => {
+    assert.equal(closesAfterTab({ sameOpening: true, at: "page" }), true, "past the page's last control, focus landed nowhere");
+    assert.equal(closesAfterTab({ sameOpening: true, at: "outside" }), true);
+    assert.equal(closesAfterTab({ sameOpening: true, at: "inside" }), false);
+    assert.equal(closesAfterTab({ sameOpening: true, at: "anchor" }), false);
+    // Tab closed More's menu, then a key on More opened it again before the check ran (paneltabs.e2e.ts 3 on a busy laptop).
+    assert.equal(closesAfterTab({ sameOpening: false, at: "page" }), false);
+    assert.equal(closesAfterTab({ sameOpening: false, at: "outside" }), false);
   });
 
   test("Shift+Tab before a popover's first control, or at once in a menu, closes it with focus on the anchor", () => {

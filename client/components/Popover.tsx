@@ -23,6 +23,7 @@ import { isTextField } from "../state/shortcuts.ts";
 import { sectionLabelLook } from "./Panel.tsx";
 import { chromeRect, needsPlace, popoverPlace, type PlaceFrame, type PopoverSide, type Rect } from "./popoverPlace.ts";
 import {
+  closesAfterTab,
   escapeCloses,
   focusAfterLeave,
   focusMoveCloses,
@@ -415,10 +416,15 @@ function OpenPopover(props: PopoverProps) {
       e.preventDefault();
       handle.close("shiftTab");
     } else if (out === "onward") {
-      // The browser moves focus on, as Tab from the anchor would, and focus arriving outside closes the popover. Past the page's last control focus lands nowhere, so the popover closes here.
+      /*
+       * The browser moves focus on, as Tab from the anchor would, and focus
+       * arriving outside closes the popover. Past the page's last control
+       * focus lands nowhere, so the popover closes here. This opening's box
+       * leaves the page as it closes, and an opening after it draws a box
+       * of its own, so the check tells the two apart (closesAfterTab).
+       */
       setTimeout(() => {
-        const at = focusAt(document.activeElement, box, handle.anchor.current);
-        if (at !== "inside" && at !== "anchor") handle.close("tab");
+        if (closesAfterTab({ sameOpening: box.isConnected, at: focusAt(document.activeElement, box, handle.anchor.current) })) handle.close("tab");
       }, 0);
     }
   };
