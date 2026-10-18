@@ -6,7 +6,7 @@ import { measureLabel, measurePill } from "../../../canvas/measureText.ts";
 import { placedTextBoxes } from "../../../canvas/textBoxes.ts";
 import type { TokenText } from "../../../canvas/useBoardText.ts";
 import { boardSizes } from "../../../lib/boardScale.ts";
-import { overlaps, placeLabels, type Box, type LabelInput, type Obstacle } from "../../../lib/boardText.ts";
+import { labelStyle, overlaps, placeLabels, type Box, type LabelInput, type Obstacle } from "../../../lib/boardText.ts";
 import type { ViewToken } from "../../../lib/scene.ts";
 import { DECOR_MIN_PX } from "../../../lib/tokenView.ts";
 import { theme } from "../../../lib/theme.ts";
@@ -59,7 +59,7 @@ function labelBoxes(goblins: readonly Goblin[], cellPx: number, plated?: string)
   for (const t of goblins) {
     const box = { x0: t.x * cellPx, y0: t.y * cellPx, x1: (t.x + 1) * cellPx, y1: (t.y + 1) * cellPx };
     obstacles.push({ box, owner: t.id, kind: "body" });
-    const style = { namePx: sizes.namePx, hpPx: sizes.hpPx, leading: 1.17, wrapWidth: Math.max(2 * cellPx, 10 * sizes.namePx), maxWidth: 15 * sizes.namePx, padX: 2, gapPx: sizes.gapPx };
+    const style = labelStyle(sizes, cellPx, cellPx);
     inputs.push({ id: t.id, box, belowY: box.y1 + sizes.gapPx, aboveY: box.y0 - sizes.gapPx, name: t.name, hp: "7/7", alert: false, rank: 0, sides: false, nameOnly: false, style });
   }
   const placed = placeLabels(inputs, obstacles, measureLabel);

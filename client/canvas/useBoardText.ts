@@ -2,7 +2,7 @@ import { useMemo, useRef } from "react";
 import type { Actor, Character } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import { boardSizes } from "../lib/boardScale.ts";
-import { focusLines, linesSize, placeLabels, showsNumberBadge, type Box, type LabelInput, type LabelLine, type LabelStyle, type Obstacle, type Side } from "../lib/boardText.ts";
+import { focusLines, focusStyle, labelStyle, linesSize, placeLabels, showsNumberBadge, type Box, type LabelInput, type LabelLine, type Obstacle, type Side } from "../lib/boardText.ts";
 import { footprint, type ViewToken } from "../lib/scene.ts";
 import { DECOR_MIN_PX, healthState, hpDisplay, type HpDisplay } from "../lib/tokenView.ts";
 import { pillPlace } from "../features/measure/Pill.tsx";
@@ -29,20 +29,6 @@ export type TokenText = {
   /** The creature is Bloodied and this viewer may know it: a notch on its ring, at every zoom (tokenMarks.ts). */
   notch: Notch | null;
 };
-
-const LEADING = 1.17;
-
-export function labelStyle(namePx: number, hpPx: number, gapPx: number, tokenPx: number, cellPx: number): LabelStyle {
-  return {
-    namePx,
-    hpPx,
-    leading: LEADING,
-    wrapWidth: Math.max(tokenPx + cellPx, 10 * namePx),
-    maxWidth: 15 * namePx,
-    padX: Math.ceil(namePx / 8),
-    gapPx,
-  };
-}
 
 /**
  * Every token's marks, label and plate for the zoom, laid out at once
@@ -93,7 +79,7 @@ export function useBoardText(input: {
       return { box: { x0: p.x0 * scale, y0: p.y0 * scale, x1: p.x1 * scale, y1: p.y1 * scale }, kind: "pill" };
     });
     for (const b of mapLabels) obstacles.push({ box: { x0: b.x0 * scale, y0: b.y0 * scale, x1: b.x1 * scale, y1: b.y1 * scale }, kind: "map" });
-    const meta = new Map<string, { widthPx: number; ox: number; oy: number; hpLine: string | null; image: boolean; number: number | undefined; style: LabelStyle }>();
+    const meta = new Map<string, { widthPx: number; ox: number; oy: number; hpLine: string | null; image: boolean; number: number | undefined }>();
     for (const t of tokens) {
       const fp = footprint(t);
       const widthPx = fp.w * scale;
@@ -128,8 +114,7 @@ export function useBoardText(input: {
       const own = t.kind === "pc" || ownsToken(t);
       const rank = t.id === selectedId ? 3 : t.id === activeTokenId ? 2 : own ? 1 : 0;
       const hpLine = hp.kind === "label" ? hp.label : hp.kind === "bar" ? (hp.text ?? null) : null;
-      const style = labelStyle(sizes.namePx, sizes.hpPx, sizes.gapPx, widthPx, scale);
-      meta.set(t.id, { widthPx, ox, oy, hpLine, image: !!t.image, number: t.number, style });
+      meta.set(t.id, { widthPx, ox, oy, hpLine, image: !!t.image, number: t.number });
       out.set(t.id, { widthPx, heightPx, hp, marks, label: null, plate: null, numberBadge: false, notch: bloodiedNotch(state, widthPx, heightPx, sizes.ringPx) });
       // Under the marks' size only the acting creature and the viewer's own tokens try for a name.
       if (!big && rank < 2 && !ownsToken(t)) continue;
@@ -146,7 +131,7 @@ export function useBoardText(input: {
         rank,
         sides: rank >= 2,
         nameOnly: !big,
-        style,
+        style: labelStyle(sizes, widthPx, scale),
       });
     }
     const placed = placeLabels(labelInputs, obstacles, measureLabel, previous.current);
@@ -168,13 +153,13 @@ export function useBoardText(input: {
   return useMemo(() => {
     if (plateIds.size === 0) return layout.out;
     const { meta, sizes } = layout;
+    const style = focusStyle(sizes);
     const out = new Map(layout.out);
     for (const id of plateIds) {
       const m = meta.get(id);
       const text = out.get(id);
       const t = tokens.find((x) => x.id === id);
       if (!m || !text || !t) continue;
-      const style: LabelStyle = { ...m.style, namePx: sizes.focusNamePx, hpPx: sizes.focusHpPx, maxWidth: 16 * sizes.focusNamePx, wrapWidth: 16 * sizes.focusNamePx, padX: 6 };
       const lines = focusLines({ name: t.name, number: t.number, hp: m.hpLine, style }, measureLabel);
       const size = linesSize(lines, style, measureLabel);
       const top = text.marks ? text.marks.belowY : text.heightPx + sizes.gapPx;

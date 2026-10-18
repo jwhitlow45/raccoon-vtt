@@ -43,7 +43,7 @@ import { OpSocket, ROOT, SocketWatch, startServer, waitFor } from "../e2e/harnes
 import { heightTextSizes, placeHeightPills } from "../client/features/builder/heights/boardText.ts";
 import { heightRegions, type HeightRegion } from "../client/features/builder/heights/regions.ts";
 import { boardSizes } from "../client/lib/boardScale.ts";
-import { placeLabels, type Box, type LabelInput, type Obstacle } from "../client/lib/boardText.ts";
+import { labelStyle, placeLabels, type Box, type LabelInput, type Obstacle } from "../client/lib/boardText.ts";
 import { DECOR_MIN_PX } from "../client/lib/tokenView.ts";
 
 export const BOUNDS = { w: 100, h: 88 };
@@ -113,8 +113,7 @@ function labelBoxes(goblins: readonly Goblin[], cellPx: number): Box[] {
   for (const [i, t] of goblins.entries()) {
     const box = { x0: t.x * cellPx, y0: t.y * cellPx, x1: (t.x + 1) * cellPx, y1: (t.y + 1) * cellPx };
     obstacles.push({ box, owner: String(i), kind: "body" });
-    const style = { namePx: sizes.namePx, hpPx: sizes.hpPx, leading: 1.17, wrapWidth: Math.max(2 * cellPx, 10 * sizes.namePx), maxWidth: 15 * sizes.namePx, padX: Math.ceil(sizes.namePx / 8), gapPx: sizes.gapPx };
-    inputs.push({ id: String(i), box, belowY: box.y1 + sizes.gapPx, aboveY: box.y0 - sizes.gapPx, name: t.name, hp: "7/7", alert: false, rank: 0, sides: false, nameOnly: false, style });
+    inputs.push({ id: String(i), box, belowY: box.y1 + sizes.gapPx, aboveY: box.y0 - sizes.gapPx, name: t.name, hp: "7/7", alert: false, rank: 0, sides: false, nameOnly: false, style: labelStyle(sizes, cellPx, cellPx) });
   }
   return [...placeLabels(inputs, obstacles, measureLabel).values()].filter((p) => p.lines.length > 0).map((p) => p.box);
 }

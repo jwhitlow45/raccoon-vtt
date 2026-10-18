@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
   cutName,
+  labelStyle,
   MIN_CUT_LETTERS,
   overlaps,
   placeLabels,
@@ -20,7 +21,7 @@ const measure = (text: string, px: number) => [...text].length * px * 0.5;
 
 function style(cell: number): LabelStyle {
   const namePx = Math.max(11, Math.min(16, (12 * cell) / 40));
-  return { namePx, hpPx: Math.max(11, Math.min(15, (11 * cell) / 40)), leading: 1.17, wrapWidth: Math.max(2 * cell, 10 * namePx), maxWidth: 15 * namePx, padX: 2, gapPx: 3 };
+  return labelStyle({ namePx, hpPx: Math.max(11, Math.min(15, (11 * cell) / 40)), gapPx: 3, unrounded: { namePx, gapPx: 3 } }, cell, cell);
 }
 
 type Spec = { id: string; x: number; y: number; size?: number; name: string; number?: number; hp?: string | null; alert?: boolean; rank?: number; label?: boolean };

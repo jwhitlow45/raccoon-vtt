@@ -16,7 +16,10 @@
  * pixels, since fingers do not zoom.
  *
  * Font sizes are rounded to half pixels, and the measure caches by the size
- * it is given, so what placement measures is exactly what Konva draws.
+ * it is given, so what placement measures is exactly what Konva draws. The
+ * rounding makes text grow in steps while the map grows smoothly, so a
+ * label's shape (where its name wraps) is decided from the sizes before
+ * rounding instead (`unrounded`, lib/boardText.ts).
  */
 
 /** The zoom at which every scaled mark is its old fixed size: about ten cells across a phone. */
@@ -29,7 +32,11 @@ const half = (v: number) => Math.round(v * 2) / 2;
 
 /** A text size: its design size at the pin, scaled with the zoom, clamped to the floor and its ceiling. */
 export function textPx(designPx: number, cellPx: number, ceilingPx: number): number {
-  return half(clamp((designPx * cellPx) / PIN_CELL_PX, TEXT_FLOOR_PX, ceilingPx));
+  return half(unroundedTextPx(designPx, cellPx, ceilingPx));
+}
+
+function unroundedTextPx(designPx: number, cellPx: number, ceilingPx: number): number {
+  return clamp((designPx * cellPx) / PIN_CELL_PX, TEXT_FLOOR_PX, ceilingPx);
 }
 
 export type BoardSizes = {
@@ -58,6 +65,12 @@ export type BoardSizes = {
   barPx: number;
   /** Clearance between a label and what it keeps off. */
   gapPx: number;
+  /**
+   * The label sizes before rounding to half pixels, which follow the zoom
+   * smoothly between the floor and the ceiling. Labels decide their shape
+   * from these and draw at the rounded ones.
+   */
+  unrounded: { namePx: number; focusNamePx: number; gapPx: number };
 };
 
 /**
@@ -76,8 +89,10 @@ export function setBoardInterfaceScale(scale: number): void {
 
 export function boardSizes(cellPx: number, ui: number = interfaceScale): BoardSizes {
   const f = cellPx / PIN_CELL_PX;
-  const namePx = textPx(12, cellPx, 16);
+  const nameUnrounded = unroundedTextPx(12, cellPx, 16);
+  const namePx = half(nameUnrounded);
   const hpPx = textPx(11, cellPx, 15);
+  const gapUnrounded = clamp(3 * f, 2, 4);
   // Every screen size but the ring scales: the ring is the token's own edge, which belongs to the map.
   const k = (px: number) => half(px * ui);
   return {
@@ -94,7 +109,8 @@ export function boardSizes(cellPx: number, ui: number = interfaceScale): BoardSi
     numberPx: k(textPx(10, cellPx, 14)),
     ringPx: half(clamp(3 * f, 1.5, 5)),
     barPx: k(clamp(5 * f, 3, 8)),
-    gapPx: k(clamp(3 * f, 2, 4)),
+    gapPx: k(gapUnrounded),
+    unrounded: { namePx: nameUnrounded * ui, focusNamePx: Math.max(14, nameUnrounded) * ui, gapPx: gapUnrounded * ui },
   };
 }
 

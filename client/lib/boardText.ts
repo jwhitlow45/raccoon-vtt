@@ -1,3 +1,5 @@
+import type { BoardSizes } from "./boardScale.ts";
+
 /**
  * Where each token's name and HP go on the board, and what gives way when
  * the board is crowded (option C of the 2026-10-14 review). Pure, so it
@@ -21,7 +23,9 @@
  *   word a table reads in a fight outlasts the name, which the token's
  *   initials or number badge and a tap still give.
  * - A label keeps the side it had on the last layout while that side is
- *   still free, so a pinch does not make labels jump between frames.
+ *   still free, so a pinch does not make labels jump between frames. Its
+ *   shape (where the name wraps, whether the HP shares its line) is decided
+ *   at one fixed size (SHAPE_PX), so a pinch does not wrap it back and forth.
  */
 
 /** Width in screen pixels of `text` at font size `px`. */
@@ -36,15 +40,91 @@ export type LabelStyle = {
   hpPx: number;
   /** Line advance as a multiple of the font size. */
   leading: number;
-  /** Lines wrap at this width when the whole name fits that way, so a label stays close to its token. */
-  wrapWidth: number;
-  /** The widest a line gets before the name is cut instead. */
+  /** On screen, the widest a cut name grows into free room. */
   maxWidth: number;
   /** The halo's reach on each side, outside the measured text. */
   padX: number;
   /** Clearance kept between a label and anything it keeps off. */
   gapPx: number;
+  room: Room;
 };
+
+/**
+ * The room a label's text has, in ems of the name's size before rounding
+ * (boardScale.ts), the halo left out. Its shape is decided against this at
+ * SHAPE_PX.
+ */
+export type Room = {
+  /** Lines wrap at this width when the whole name fits that way, so a label stays close to its token. */
+  wrapEm: number;
+  /** The widest a line gets before the name is cut instead. */
+  maxEm: number;
+  /** The token's width and a gap each side: the name shares a line with its HP ("Thorn · 18/24") while that line fits. */
+  ownEm: number;
+};
+
+/**
+ * The size every label's shape is decided at. Drawn text sizes are rounded
+ * to half pixels, so text grows in steps of about 4% while a token and its
+ * gaps grow smoothly with the zoom. A name measured at its drawn size
+ * against those widths could cross its wrap back and forth at every step of
+ * one smooth zoom. Measured here instead, against room given in ems of the
+ * unrounded size, the shape depends only on that room. The room holds still
+ * while the text scales with the zoom, and only grows with the zoom while
+ * the text is held at its floor or ceiling, so a zoom one way crosses each
+ * wrap once. One fixed size also keeps the choice clear of a font's hinting,
+ * whose widths do not scale exactly with the size, and measures each string
+ * once instead of at every half-pixel step. The chosen lines are then drawn,
+ * measured and placed at the drawn size.
+ */
+export const SHAPE_PX = 100;
+/** The halo's reach as a share of the font size, before rounding up to whole pixels. */
+const HALO_EM = 1 / 8;
+const LEADING = 1.17;
+
+/**
+ * Room is kept to 1/1024 em, so float error in a ratio that holds still
+ * while the zoom scales cannot flip a name sitting exactly on its wrap, and
+ * the shape cache keeps hitting there.
+ */
+const ems = (v: number) => Math.round(v * 1024) / 1024;
+
+/** A token's label style at a zoom, for a token `tokenPx` wide on screen. */
+export function labelStyle(
+  sizes: Pick<BoardSizes, "namePx" | "hpPx" | "gapPx"> & { unrounded: Pick<BoardSizes["unrounded"], "namePx" | "gapPx"> },
+  tokenPx: number,
+  cellPx: number,
+): LabelStyle {
+  const u = sizes.unrounded;
+  return {
+    namePx: sizes.namePx,
+    hpPx: sizes.hpPx,
+    leading: LEADING,
+    maxWidth: 15 * sizes.namePx,
+    padX: Math.ceil(sizes.namePx * HALO_EM),
+    gapPx: sizes.gapPx,
+    room: {
+      wrapEm: ems(Math.max((tokenPx + cellPx) / u.namePx, 10) - 2 * HALO_EM),
+      maxEm: 15 - 2 * HALO_EM,
+      ownEm: ems((tokenPx + 2 * u.gapPx) / u.namePx - 2 * HALO_EM),
+    },
+  };
+}
+
+/** The focus plate's style: the focus sizes, up to 16 ems a line, on a plate padded 6 px each side, the HP always on its own line. */
+export function focusStyle(sizes: Pick<BoardSizes, "focusNamePx" | "focusHpPx" | "gapPx" | "unrounded">): LabelStyle {
+  const padX = 6;
+  const maxEm = ems(16 - (2 * padX) / sizes.unrounded.focusNamePx);
+  return {
+    namePx: sizes.focusNamePx,
+    hpPx: sizes.focusHpPx,
+    leading: LEADING,
+    maxWidth: 16 * sizes.focusNamePx,
+    padX,
+    gapPx: sizes.gapPx,
+    room: { wrapEm: maxEm, maxEm, ownEm: 0 },
+  };
+}
 
 export type Side = "below" | "above" | "right" | "left";
 
@@ -230,9 +310,9 @@ export type Template = { kind: "lines"; content: Content } | { kind: "cut"; hp: 
  */
 export function templates(input: LabelInput, measure: Measure): Template[][] {
   // A pinch lays every label out on every frame, mostly with the same text at the same sizes, so the shapes are kept.
-  const own = input.box.x1 - input.box.x0;
   const s0 = input.style;
-  const key = [input.name, input.number, input.nameOnly ? null : input.hp, input.alert, own, s0.namePx, s0.hpPx, s0.wrapWidth, s0.maxWidth, s0.padX, s0.gapPx].join("\u0000");
+  const r0 = s0.room;
+  const key = [input.name, input.number, input.nameOnly ? null : input.hp, input.alert, s0.namePx, s0.hpPx, r0.wrapEm, r0.maxEm, r0.ownEm].join("\u0000");
   let byMeasure = templateCache.get(measure);
   if (!byMeasure) templateCache.set(measure, (byMeasure = new Map()));
   const hit = byMeasure.get(key);
@@ -247,18 +327,18 @@ const templateCache = new WeakMap<Measure, Map<string, Template[][]>>();
 
 function makeTemplates(input: LabelInput, measure: Measure): Template[][] {
   const s = input.style;
-  const inner = (w: number) => Math.max(0, w - 2 * s.padX);
+  const room = s.room;
   const name = (text: string): LabelLine => ({ text, px: s.namePx, kind: "name" });
   const full = fullName(input.name, input.number);
   const wholeForms: string[][] = [];
   const seen = new Set<string>();
-  for (const [width, maxLines] of [
-    [s.wrapWidth, 1],
-    [s.wrapWidth, 2],
-    [s.maxWidth, 1],
-    [s.maxWidth, 2],
+  for (const [em, maxLines] of [
+    [room.wrapEm, 1],
+    [room.wrapEm, 2],
+    [room.maxEm, 1],
+    [room.maxEm, 2],
   ] as const) {
-    const lines = wrapWhole(input.name, input.number, inner(width), maxLines, s.namePx, measure);
+    const lines = wrapWhole(input.name, input.number, Math.max(0, em) * SHAPE_PX, maxLines, SHAPE_PX, measure);
     const key = lines?.join("\n");
     if (lines && key !== undefined && !seen.has(key)) {
       seen.add(key);
@@ -273,12 +353,11 @@ function makeTemplates(input: LabelInput, measure: Measure): Template[][] {
   if (hpLine) {
     // "Thorn · 18/24" on one line while it stays over its own token, else the HP under the name, which takes less from neighbors.
     const one = `${full} · ${hpLine.text}`;
-    const oneWidth = measure(one, s.namePx) + 2 * s.padX;
-    const own = input.box.x1 - input.box.x0 + 2 * s.gapPx;
+    const oneEm = measure(one, SHAPE_PX) / SHAPE_PX;
     const whole: Template[] = [];
-    if (oneWidth <= own) whole.push(shape([name(one)], true, true));
+    if (oneEm <= room.ownEm) whole.push(shape([name(one)], true, true));
     for (const lines of wholeForms) whole.push(shape([...lines.map(name), hpLine], true, true));
-    if (oneWidth > own && oneWidth <= s.maxWidth) whole.push(shape([name(one)], true, true));
+    if (oneEm > room.ownEm && oneEm <= room.maxEm) whole.push(shape([name(one)], true, true));
     out.push(whole);
     if (input.alert) {
       out.push([{ kind: "cut", hp: hpLine }]);
@@ -333,8 +412,12 @@ export type Obstacle = { box: Box; owner?: string; kind: "body" | "mark" | "pill
 
 /**
  * Places every label, most important first: rank, then a Bloodied or Dying
- * creature, then the bigger creature, then the shorter label, then the id,
- * so the order never depends on how the tokens happen to be listed.
+ * creature, then the bigger creature, then the shorter name, then the id,
+ * so the order never depends on how the tokens happen to be listed or on
+ * the zoom. Sizes compare to the square pixel, since boxes of one size
+ * differ by float error with where they stand, and that error reordered a
+ * pack at every frame of a zoom. Names compare at SHAPE_PX, which a
+ * font's hinting does not reorder.
  *
  * `obstacles` holds every visible token's body (tiny ones too, which have
  * no label of their own) and marks, and the other layers' pills. A label
@@ -348,12 +431,12 @@ export function placeLabels(
   measure: Measure,
   previous?: ReadonlyMap<string, Side>,
 ): Map<string, PlacedLabel> {
-  const natural = new Map(inputs.map((input) => [input.id, measure(fullName(input.name, input.number), input.style.namePx)]));
+  const natural = new Map(inputs.map((input) => [input.id, measure(fullName(input.name, input.number), SHAPE_PX)]));
   const order = [...inputs].sort(
     (a, b) =>
       b.rank - a.rank ||
       Number(b.alert) - Number(a.alert) ||
-      area(b.box) - area(a.box) ||
+      Math.round(area(b.box) - area(a.box)) ||
       natural.get(a.id)! - natural.get(b.id)! ||
       (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
   );
@@ -452,19 +535,19 @@ function area(b: Box): number {
  * The selected or hovered token's whole label for its focus plate: the
  * name wrapped onto up to three lines (cut on the last only if it still
  * does not fit, since the action bar's header is the full reveal), then its
- * HP.
+ * HP. Shaped at SHAPE_PX like a label.
  */
 export function focusLines(input: Pick<LabelInput, "name" | "number" | "hp" | "style">, measure: Measure): LabelLine[] {
   const s = input.style;
-  const width = s.maxWidth - 2 * s.padX;
+  const width = s.room.maxEm * SHAPE_PX;
   const name = (text: string): LabelLine => ({ text, px: s.namePx, kind: "name" });
-  let lines = wrapWhole(input.name, input.number, width, 3, s.namePx, measure);
+  let lines = wrapWhole(input.name, input.number, width, 3, SHAPE_PX, measure);
   if (!lines) {
-    const all = wrapWhole(input.name, input.number, width, Number.MAX_SAFE_INTEGER, s.namePx, measure) ?? [fullName(input.name, input.number)];
+    const all = wrapWhole(input.name, input.number, width, Number.MAX_SAFE_INTEGER, SHAPE_PX, measure) ?? [fullName(input.name, input.number)];
     const suffix = input.number === undefined ? "" : ` ${input.number}`;
     const rest = all.slice(2).join(" ");
     const base = suffix && rest.endsWith(suffix) ? rest.slice(0, -suffix.length) : rest;
-    const last = cutName(base, input.number, width, s.namePx, measure) ?? `${[...base].slice(0, MIN_CUT_LETTERS).join("")}${ELLIPSIS}${suffix}`;
+    const last = cutName(base, input.number, width, SHAPE_PX, measure) ?? `${[...base].slice(0, MIN_CUT_LETTERS).join("")}${ELLIPSIS}${suffix}`;
     lines = [...all.slice(0, 2), last];
   }
   const out = lines.map(name);
