@@ -65,7 +65,7 @@ function HpLogLine(props: { line: HpLine; names: LogNames; dm: boolean; canUndo:
 export function TakeBack(props: { logId: string }) {
   const { send, waiting } = useSend();
   return (
-    <Button size="sm" aria-label="Undo this change" busy={waiting} onClick={() => send({ t: "undo", log: props.logId })} style={{ flex: "none" }}>
+    <Button size="sm" icon="undo" iconOnly="always" aria-label="Undo this change" busy={waiting} onClick={() => send({ t: "undo", log: props.logId })} style={{ flex: "none" }}>
       Undo
     </Button>
   );

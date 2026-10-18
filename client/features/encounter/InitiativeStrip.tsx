@@ -904,7 +904,7 @@ function FightAlerts() {
           <h2 id={overlayTitle} style={{ flex: 1, margin: 0, fontSize: theme.font.input, fontWeight: theme.weight.bold }}>
             Alerts
           </h2>
-          <Button size="sm" onClick={closeOverlay}>
+          <Button size="sm" icon="close" iconOnly="always" onClick={closeOverlay}>
             Close
           </Button>
         </div>

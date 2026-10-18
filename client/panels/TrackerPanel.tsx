@@ -479,7 +479,7 @@ function SelectedCreatures() {
           </span>
           <GroupHpEntry tokens={picked} place="panel" />
           <Wrap>
-            <Button size="sm" onClick={() => ui.select(null)}>
+            <Button size="sm" icon="close" iconOnly="always" title="Clear the selection" onClick={() => ui.select(null)}>
               Clear
             </Button>
           </Wrap>

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { theme } from "../lib/theme.ts";
+import { Icon, type IconName } from "./Icon.tsx";
 import { TAG_TONES, type TagTone } from "./tones.ts";
 
 export type { TagTone } from "./tones.ts";
@@ -25,6 +26,8 @@ export function Tag(props: {
    * the text itself unless `title` says otherwise.
    */
   cut?: number | "100%";
+  /** Before the words, at the text's size, such as `hidden` on a row players do not see (docs/design-v1-icons.md 3.1 rule 3). */
+  icon?: IconName;
   children: ReactNode;
 }) {
   const tone = TAG_TONES[props.tone ?? "muted"];
@@ -46,8 +49,10 @@ export function Tag(props: {
         fontWeight: theme.weight.strong,
         lineHeight: theme.leading.tight,
         whiteSpace: "nowrap",
+        ...(props.icon ? { gap: theme.space(1) } : null),
       }}
     >
+      {props.icon ? <Icon name={props.icon} size={props.dense ? theme.font.tiny : theme.font.small} /> : null}
       {cut !== undefined ? <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{props.children}</span> : props.children}
     </span>
   );

@@ -201,12 +201,12 @@ export function EntryRow(props: {
                   hp.kind !== "none" ? <DescribedHp hp={hp} /> : null,
                   reminder ? <RollBadge kind={reminder} /> : null,
                   dm && entry.hidden ? (
-                    <Tag tone="muted" dense>
+                    <Tag tone="muted" dense icon="hidden">
                       Hidden
                     </Tag>
                   ) : null,
                   secret ? (
-                    <Tag tone="muted" dense title={SECRET_ROW.help}>
+                    <Tag tone="muted" dense icon="hidden" title={SECRET_ROW.help}>
                       {SECRET_ROW.label}
                     </Tag>
                   ) : null,
@@ -898,10 +898,10 @@ function RowMenu(props: {
           {drag && (drag.canMoveUp || drag.canMoveDown) ? (
             <div style={{ display: "flex", gap: theme.space(1), alignItems: "center" }}>
               <span style={{ flex: 1, fontSize: theme.font.small, color: theme.color.textMuted }}>Tied: you decide who goes first</span>
-              <Button size="sm" disabled={!drag.canMoveUp} onClick={() => drag.moveBy(-1)}>
+              <Button size="sm" icon="arrowUp" iconOnly="fine" disabled={!drag.canMoveUp} onClick={() => drag.moveBy(-1)}>
                 Move up
               </Button>
-              <Button size="sm" disabled={!drag.canMoveDown} onClick={() => drag.moveBy(1)}>
+              <Button size="sm" icon="arrowDown" iconOnly="fine" disabled={!drag.canMoveDown} onClick={() => drag.moveBy(1)}>
                 Move down
               </Button>
             </div>
@@ -927,8 +927,8 @@ function RowMenu(props: {
         </>
       )}
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <Button size="sm" variant="danger" busy={remove.waiting} onClick={() => remove.send({ t: "encounter.remove", entryIds: [entry.id] })}>
-          Remove from the fight
+        <Button size="sm" variant="danger" icon="removeFromFight" aria-label="Remove from the fight" busy={remove.waiting} onClick={() => remove.send({ t: "encounter.remove", entryIds: [entry.id] })}>
+          Remove
         </Button>
       </div>
     </div>
