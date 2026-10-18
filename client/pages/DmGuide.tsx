@@ -68,6 +68,8 @@ export default function DmGuide() {
   const wide = useLayoutSize().width >= OUTLINE_MIN_WIDTH;
   const current = useCurrentSection(IDS);
   const [sheet, setSheet] = useState(false);
+  const contentsButton = useRef<HTMLButtonElement>(null);
+  /** Where focus goes as the sheet closes: back to the Contents button, or to the heading a pick chose. */
   const chosen = useRef<HTMLElement | null>(null);
 
   const article = (
@@ -76,7 +78,7 @@ export default function DmGuide() {
       <GuideLead blocks={OUTLINE.intro} image={image} />
       <GuideContents outline={OUTLINE} />
       {OUTLINE.opening.map((section) => (
-        <GuideSectionView key={section.id} section={section} image={image} />
+        <GuideSectionView key={section.id} section={section} image={image} opening />
       ))}
       {OUTLINE.parts.map((part, i) => (
         <GuidePartView key={part.id} part={part} next={OUTLINE.parts[i + 1] ?? null} image={image} />
@@ -145,7 +147,12 @@ export default function DmGuide() {
         // The way around a long page stays one tap away from anywhere in it.
         <button
           type="button"
-          onClick={() => setSheet(true)}
+          ref={contentsButton}
+          onClick={() => {
+            // Set on each opening, so a sheet dismissed after an earlier pick gives focus back here, not to that pick's heading. A tap on a phone may not focus the button, so the dialog's own fallback can't be relied on.
+            chosen.current = contentsButton.current;
+            setSheet(true);
+          }}
           aria-haspopup="dialog"
           style={{
             position: "fixed",

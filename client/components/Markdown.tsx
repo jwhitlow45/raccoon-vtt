@@ -33,12 +33,20 @@ export function Markdown(props: { text: string; style?: CSSProperties; journal?:
   );
 }
 
-/** Blocks already parsed, for a page that lays out the parts of a document itself, as the DM guide's page does. */
-export function MarkdownBlocks(props: { blocks: Block[]; guide?: boolean; image?(src: string): MarkdownImage | null }) {
+/**
+ * Blocks already parsed, for a page that lays out the parts of a document
+ * itself, as the DM guide's page does. `subheading` is the element a
+ * guide's `###` takes: one level under the heading the page drew for the
+ * blocks' section, so a screen reader's outline nests them under it.
+ */
+export function MarkdownBlocks(props: { blocks: Block[]; guide?: boolean; image?(src: string): MarkdownImage | null; subheading?: SubheadingTag }) {
   const image = props.image ?? noImage;
   const guide = props.guide === true;
-  return props.blocks.map((block, i) => <BlockView key={i} block={block} image={image} guide={guide} boxed={false} />);
+  const subheading = props.subheading ?? "h4";
+  return props.blocks.map((block, i) => <BlockView key={i} block={block} image={image} guide={guide} boxed={false} subheading={subheading} />);
 }
+
+export type SubheadingTag = "h3" | "h4";
 
 function noImage(): null {
   return null;
@@ -77,7 +85,7 @@ const PORTRAIT_MAX = 300;
  * `guide` draws the guide's look. `boxed` is a block inside a callout,
  * which spaces its blocks itself, so they take no margins of their own.
  */
-function BlockView(props: { block: Block; image(src: string): MarkdownImage | null; guide: boolean; boxed: boolean }) {
+function BlockView(props: { block: Block; image(src: string): MarkdownImage | null; guide: boolean; boxed: boolean; subheading: SubheadingTag }) {
   const { block } = props;
   if (props.guide) {
     const view = guideBlock(props);
@@ -162,7 +170,7 @@ function BlockView(props: { block: Block; image(src: string): MarkdownImage | nu
       return (
         <blockquote style={{ margin: `${theme.space(2)}px 0`, padding: `0 ${theme.space(3)}px`, borderLeft: `${theme.line.stripe}px solid ${theme.color.border}`, color: theme.color.textMuted }}>
           {block.blocks.map((inner, i) => (
-            <BlockView key={i} block={inner} image={props.image} guide={props.guide} boxed={false} />
+            <BlockView key={i} block={inner} image={props.image} guide={props.guide} boxed={false} subheading={props.subheading} />
           ))}
         </blockquote>
       );
@@ -197,14 +205,14 @@ function BlockView(props: { block: Block; image(src: string): MarkdownImage | nu
 }
 
 /** The guide's own drawing of a block, or undefined for one it draws as the journal does (tables). */
-function guideBlock(props: { block: Block; image(src: string): MarkdownImage | null; boxed: boolean }): ReactNode | undefined {
+function guideBlock(props: { block: Block; image(src: string): MarkdownImage | null; boxed: boolean; subheading: SubheadingTag }): ReactNode | undefined {
   const { block, boxed } = props;
   const flow = (bottom: number): CSSProperties => ({ margin: boxed ? 0 : `0 0 ${theme.space(bottom)}px`, maxWidth: MEASURE });
   switch (block.kind) {
     case "heading": {
       // The page draws the parts and sections itself (features/guide), so what reaches here is mostly a section's own subheadings.
       const size = block.level === 1 ? GUIDE_HEADING.part : block.level === 2 ? GUIDE_HEADING.section : GUIDE_HEADING.sub;
-      const Tag = block.level === 1 ? "h2" : block.level === 2 ? "h3" : "h4";
+      const Tag = block.level === 1 ? "h2" : block.level === 2 ? "h3" : props.subheading;
       return (
         <Tag
           id={block.id}
@@ -301,11 +309,11 @@ function guideBlock(props: { block: Block; image(src: string): MarkdownImage | n
       );
     }
     case "quote":
-      if (block.alert) return <Callout alert={block.alert} blocks={block.blocks} image={props.image} style={flow(5)} />;
+      if (block.alert) return <Callout alert={block.alert} blocks={block.blocks} image={props.image} style={flow(5)} subheading={props.subheading} />;
       return (
         <blockquote style={{ ...flow(4), padding: `0 ${theme.space(4)}px`, borderLeft: `${theme.line.stripe}px solid ${theme.color.border}`, color: theme.color.textMuted }}>
           {block.blocks.map((inner, i) => (
-            <BlockView key={i} block={inner} image={props.image} guide boxed={false} />
+            <BlockView key={i} block={inner} image={props.image} guide boxed={false} subheading={props.subheading} />
           ))}
         </blockquote>
       );
@@ -326,7 +334,7 @@ const ALERT_LOOK: Record<GuideAlert, { label: string; color: string }> = {
 };
 
 /** An alert: a tinted box with its kind as a label, as GitHub draws the same quote. */
-function Callout(props: { alert: GuideAlert; blocks: Block[]; image(src: string): MarkdownImage | null; style: CSSProperties }) {
+function Callout(props: { alert: GuideAlert; blocks: Block[]; image(src: string): MarkdownImage | null; style: CSSProperties; subheading: SubheadingTag }) {
   const look = ALERT_LOOK[props.alert];
   return (
     <div
@@ -344,7 +352,7 @@ function Callout(props: { alert: GuideAlert; blocks: Block[]; image(src: string)
     >
       <p style={{ margin: 0, fontSize: theme.font.small, fontWeight: theme.weight.bold, letterSpacing: "0.08em", textTransform: "uppercase", color: look.color }}>{look.label}</p>
       {props.blocks.map((inner, i) => (
-        <BlockView key={i} block={inner} image={props.image} guide boxed />
+        <BlockView key={i} block={inner} image={props.image} guide boxed subheading={props.subheading} />
       ))}
     </div>
   );

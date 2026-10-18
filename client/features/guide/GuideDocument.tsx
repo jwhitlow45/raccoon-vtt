@@ -28,12 +28,17 @@ export function GuideLead(props: { blocks: Block[]; image: ImageOf }) {
 
 const LEAD = theme.font.heading;
 
-/** A section under its numbered heading, or an opening one, which has no number. */
-export function GuideSectionView(props: { section: GuideSection; image: ImageOf }) {
+/**
+ * A section under its numbered heading, or an opening one, which has no
+ * number. An opening section stands beside the parts rather than inside
+ * one, so its heading is a level higher, with the same look.
+ */
+export function GuideSectionView(props: { section: GuideSection; image: ImageOf; opening?: boolean }) {
+  const opening = props.opening === true;
   return (
     <section>
-      <SectionHeading section={props.section} />
-      <MarkdownBlocks blocks={props.section.body} guide image={props.image} />
+      <SectionHeading section={props.section} tag={opening ? "h2" : "h3"} />
+      <MarkdownBlocks blocks={props.section.body} guide image={props.image} subheading={opening ? "h3" : "h4"} />
     </section>
   );
 }
@@ -62,10 +67,11 @@ export function GuidePartView(props: { part: GuidePart; next: GuidePart | null; 
   );
 }
 
-function SectionHeading(props: { section: GuideSection }) {
+function SectionHeading(props: { section: GuideSection; tag: "h2" | "h3" }) {
   const { section } = props;
+  const Tag = props.tag;
   return (
-    <h3
+    <Tag
       id={section.id}
       tabIndex={-1}
       style={{
@@ -87,7 +93,7 @@ function SectionHeading(props: { section: GuideSection }) {
       <span>
         <Inlines content={section.title} />
       </span>
-    </h3>
+    </Tag>
   );
 }
 

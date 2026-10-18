@@ -36,7 +36,7 @@ type Win = {
   document: {
     getElementById(id: string): { getBoundingClientRect(): { top: number }; scrollIntoView(): void } | null;
     documentElement: { scrollWidth: number };
-    activeElement: { id: string } | null;
+    activeElement: { id: string; tagName: string; textContent: string | null } | null;
     querySelector(selector: string): { textContent: string | null } | null;
   };
   innerWidth: number;
@@ -136,6 +136,22 @@ describe("raccoon-vtt DM guide page", { timeout: 90_000 }, () => {
           // The sheet's jump is an entry in the history, as a link's is, so Back returns to where the reader was.
           await page.goBack();
           await page.waitForFunction((hash) => (globalThis as unknown as Win).location.hash === hash, `#${device.section}`);
+
+          // guidelook-d: a sheet dismissed after an earlier pick, by Escape or by its close button, gives focus back to the Contents button, not to that pick's heading.
+          const button = page.getByRole("button", { name: "Contents", exact: true });
+          const sheet = page.getByRole("dialog", { name: "Contents" });
+          for (const dismiss of ["Escape", "close button"]) {
+            await button.click();
+            await sheet.waitFor();
+            if (dismiss === "Escape") await page.keyboard.press("Escape");
+            else await sheet.getByRole("button", { name: /^Close/ }).click();
+            await sheet.waitFor({ state: "detached" });
+            const focused = await page.evaluate(() => {
+              const el = (globalThis as unknown as Win).document.activeElement;
+              return el ? `${el.tagName} ${el.textContent}` : null;
+            });
+            assert.equal(focused, "BUTTON Contents", `after ${dismiss}`);
+          }
         }
 
         assert.equal(await page.evaluate(() => (globalThis as unknown as Win).document.documentElement.scrollWidth - (globalThis as unknown as Win).innerWidth), 0, "no sideways scroll");
@@ -170,6 +186,13 @@ describe("raccoon-vtt DM guide page", { timeout: 90_000 }, () => {
       assert.equal(await section.textContent(), "2.5Initiative");
       const example = page.getByRole("heading", { level: 3, name: "A forest road ambush", exact: true });
       assert.equal(await example.textContent(), "Example 4.1A forest road ambush");
+
+      // guidelook-e: the headings nest as the page reads. The opening sections stand beside the parts, and their subsections sit under them.
+      const level = (n: number, name: string) => page.getByRole("heading", { level: n, name, exact: true }).count();
+      for (const name of ["Contents", "Where things are", "Quick start", "What you can ignore at first", "Making maps", "Reference"]) assert.equal(await level(2, name), 1, `${name} is a level 2 heading`);
+      assert.equal(await level(3, "Before the session"), 1, "a subsection of the Quick start is level 3");
+      assert.equal(await level(3, "Lining up the grid"), 1, "a part's section is level 3");
+      assert.equal(await level(4, "Running turns"), 1, "a section's subsection is level 4");
 
       // Steps keep their list role, keys are keycaps, and the guide's asides are callouts with their label.
       assert.ok((await page.locator('article ol[role="list"]').count()) >= 10, "the procedures are steps");

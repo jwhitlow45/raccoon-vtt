@@ -4,10 +4,11 @@ import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { RULES_TEXT } from "#shared/srd/rules-text.ts";
+import { parseMarkdown } from "./markdown.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { Markdown } = await import("./Markdown.tsx");
+const { Markdown, MarkdownBlocks } = await import("./Markdown.tsx");
 
 const MONSTERS = JSON.parse(readFileSync(new URL("../../shared/srd/monsters.json", import.meta.url), "utf8")) as SrdMonster[];
 
@@ -63,6 +64,13 @@ describe("the Markdown renderer", () => {
     assert.match(markup, /<img src="\/assets\/fog-1.webp" alt="The Fog tool." width="1280" height="800" loading="lazy"/);
     assert.match(markup, /<figcaption aria-hidden="true"[^>]*>The Fog tool.<\/figcaption>/);
     assert.ok(!markup.includes("Unknown."), "an image the page does not know is left out");
+  });
+
+  test("a guide's subsection takes the level the page asks for, inside a callout too", () => {
+    const blocks = parseMarkdown("### Before the session\n\n> [!NOTE]\n> ### Inside\n> Text.", { guide: true });
+    const tags = (markup: string) => [...markup.matchAll(/<(h\d) /g)].map((m) => m[1]);
+    assert.deepEqual(tags(renderToStaticMarkup(createElement(MarkdownBlocks, { blocks, guide: true }))), ["h4", "h4"]);
+    assert.deepEqual(tags(renderToStaticMarkup(createElement(MarkdownBlocks, { blocks, guide: true, subheading: "h3" }))), ["h3", "h3"]);
   });
 
   test("the guide draws an alert as a labelled note, and a bold line alone as a label", () => {
