@@ -1573,12 +1573,12 @@ function ToolOptions(props: {
   }, [dockStore, raised]);
   useLayoutEffect(() => () => dockStore.setState({ toolPopover: false }), [dockStore]);
   const [description, setDescription] = useState<string | null>(null);
-  // A state with no row (6.6) draws only its line, 6 px above the toolbar, unless the row stacks, where the map keeps its 53 px.
+  // A state with no row (6.6) draws only its line, 6 px above the toolbar, in every arrangement. Stacked, the map keeps its 53 px inset, so nothing moves, but no empty band is drawn there (LP7-CHROME-4, docs/design-v1-dice-ui.md 3.1).
   const [rowless, setRowless] = useState(false);
   const descriptionId = useId();
   const { arrangement, room } = props.place;
   const inRow = inToolbarRow(arrangement);
-  const boxless = props.tucked || (rowless && arrangement !== "stacked");
+  const boxless = props.tucked || rowless;
   // On a computer the toolbar has no fill, so a row in its row takes the floating row's box (4.2), 3 px in from the toolbar's edges.
   const boxed = inRow && props.wide;
   const lineMax = props.mapWidth - props.safe.left - props.safe.right - 2 * theme.space(2);
