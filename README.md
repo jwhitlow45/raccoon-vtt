@@ -582,6 +582,19 @@ every page left open across the update, table displays included. Until it
 reloads, an old page has no Dice panel and shows each roll as an empty line
 in the Log.
 
+The update that fixes the dragon turtle's SRD id (`dragon-tur-t-le` became
+`dragon-turtle`) saves rooms at snapshot version 14 and stores changes at op
+version 10, which the builds before it cannot read: they answer "Something
+went wrong" for every room. Rooms, backups and stored changes from before it
+take the new id as they load. Going back is the same restore: check out the
+commit you ran before (`git log` lists it), rebuild with
+`docker compose -f docker-compose.server.yml up -d --build`, then follow
+Restore under Backups with the backup taken just before the update. Every
+room loses what changed after that backup. Reload every page left open
+across the update, table displays included. Until it reloads, an old page
+finds no stat block for a dragon turtle, and an old DM page places new ones
+under the old id.
+
 Compose rebuilds the image and replaces only the containers that changed. On
 the way down the app closes every WebSocket with code 1012, finishes each
 room's current write and saves a snapshot, so phones reconnect on their own

@@ -100,7 +100,7 @@ Unchanged from draft 1. `shared/srd/tokenIcons.ts`, written by a script from the
 - 330 monsters: 113 exact icons, 214 close, 3 generic (Ettin, Weasel, Giant Weasel). 265 distinct icons by 10 authors, all CC BY 3.0 and already credited by author.
 - The disk is colored by creature type from the 14 swatches (Aberration purple, Beast brown, Celestial yellow, Construct gray, Elemental orange, Fey pink, Fiend coral, Giant dark gray, Humanoid blue, Monstrosity teal, Ooze light gray, Plant green, Undead black). Dragons take their own color where the palette has one.
 - The Bestiary pictures about 60 SRD monsters in color. A later step could offer "Use the Bestiary's picture" on those monsters' pages. The default stays the icon, since it covers all 330.
-- The dragon turtle's SRD id is `dragon-tur-t-le` and its name "Dragon Tur t le" (`shared/srd/monsters.json`, `rolls.json`), a parsing slip. Rooms key `srdImages` by that id, so the fix needs a small migration of its own (decided in section 12).
+- The dragon turtle's SRD id was `dragon-tur-t-le` and its name "Dragon Tur t le", a parsing slip: the SRD import took names from the index of stat blocks, whose kerning gaps split that one. It takes them from the stat blocks now, so the monster is `dragon-turtle`, "Dragon Turtle". Rooms key `srdImages` by the id, so the fix came with a migration of its own, schema version 14 and op version 10 (docs/design.md, Versioning).
 - A token wearing the shipped icon on another color was marked by hand, so Apply to N tokens leaves it for the DM's say.
 
 ## 7. Maps in the app
@@ -186,7 +186,7 @@ The questions of draft 2 are settled as follows, and the build follows them.
 6. **Kenney sample maps.** Left out.
 7. **Historical art.** In, as its own pack of 47.
 8. **The Bestiary's size.** 1024 px, so a monster can be shown as a handout.
-9. **SRD tokens.** Every one of the 330 monsters gets a default token, a disk colored by creature type (section 6). The dragon turtle's id is fixed separately, later.
+9. **SRD tokens.** Every one of the 330 monsters gets a default token, a disk colored by creature type (section 6). The dragon turtle's id was fixed separately, with schema version 14 and op version 10.
 10. **A starter pick in a room export.** It keeps its starter mark on import only when the importing server's catalog has that work with the same SHA-256. Otherwise it imports as an ordinary upload and counts toward the room's storage.
 11. **Removing an SRD monster's image.** "Use the default icon" takes the place of "Remove image", so an SRD monster's tokens never start as initials only. A DM's own image or icon still wins.
 12. **The picks' rate.** Picks have an hourly budget of their own, apart from uploads, as handouts and thumbnails have, and a pick the room already holds costs nothing.
