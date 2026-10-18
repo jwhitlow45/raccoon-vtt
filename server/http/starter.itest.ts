@@ -668,15 +668,22 @@ describe("a starter pick in a room export and import (docs/design-v1-starter-art
       // stands here as a reservation of one byte against a quota of 1,000: admission passes, and the variants'
       // real total then meets the quota's second look at commit (quota.ts commitReservation).
       const quota = new RoomQuota(1000, (roomId) => roomStoredBytes(small.pool, roomId));
+      // The room each reservation names, which is the one the import made, since the refusal removes the room before its id could be read anywhere else.
+      const reservedFor = new Set<string>();
       const reserve = quota.reserve.bind(quota);
-      quota.reserve = (roomId: string) => reserve(roomId, 1);
+      quota.reserve = (roomId: string) => {
+        reservedFor.add(roomId);
+        return reserve(roomId, 1);
+      };
       (small.app.assets as unknown as { quota: RoomQuota }).quota = quota;
       const before = await roomsNamed(small);
       const res = await importAllFromZip(small);
       assert.equal(res.statusCode, 413, res.body);
       assert.deepEqual(res.json(), { error: "quota_exceeded" });
       assert.equal(await roomsNamed(small), before);
-      assert.equal(quota.reservedBytes("any"), 0);
+      const [roomId, ...others] = reservedFor;
+      assert.ok(roomId !== undefined && others.length === 0, `every image reserved for the one room the import made: ${[...reservedFor].join(", ")}`);
+      assert.equal(quota.reservedBytes(roomId), 0, "the refused import left nothing reserved");
     } finally {
       await small.close();
     }
