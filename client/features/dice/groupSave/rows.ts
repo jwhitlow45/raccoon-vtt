@@ -30,7 +30,11 @@ export type RowBase = {
   /** The creature a request names: its character for a party character's token, else its token (rolls/logic.ts askTarget). */
   askRef?: ActorTarget;
   name: string;
-  /** Its ways in setup, the first the default: a creature a player plays offers Ask, else Server where its bonus is known, else Type. */
+  /**
+   * Its ways in setup, the first the default: a creature a player plays
+   * offers Ask, else Server where its bonus is known, else Type. One with no
+   * stat block offers Server after Type, with a bonus the DM types (rowBonus).
+   */
   ways: Way[];
   bonus: number | null;
   fails?: ConditionKey;
@@ -78,6 +82,7 @@ export function groupRows(dice: DiceView, tokenIds: readonly string[], test: Gro
     if (ask && !ask.blocked) ways.push("ask");
     if (bonus !== null) ways.push("server");
     ways.push("type");
+    if (bonus === null && d20 && token.kind !== "object") ways.push("server");
     out.push({
       holder,
       target,
@@ -93,6 +98,11 @@ export function groupRows(dice: DiceView, tokenIds: readonly string[], test: Gro
   }
   const last = (r: RowBase) => Number(r.skip);
   return out.sort((a, b) => last(a) - last(b) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+}
+
+/** A row's bonus for its server roll: its creature's, else the one the DM typed for a creature with no stat block, else none. */
+export function rowBonus(row: Pick<RowBase, "bonus">, state: Pick<RowState, "typedBonus">): number | null {
+  return row.bonus ?? state.typedBonus ?? null;
 }
 
 /** What a row holds once rolled, copied as it lands so a request closed elsewhere leaves it as it was. */
@@ -113,6 +123,8 @@ export type RowState = {
   says?: string;
   /** The DM's typed amount, which wins over the outcome's. */
   amount?: number;
+  /** The bonus the DM typed for a row with no stat block, which its server roll takes (rowBonus). */
+  typedBonus?: number;
   legendary?: boolean;
   evasion?: boolean;
   qualifiedOn?: string[];

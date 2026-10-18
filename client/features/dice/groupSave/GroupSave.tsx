@@ -29,7 +29,7 @@ import { useDiceView } from "../useDiceView.ts";
 import { SrdLoadFailed } from "../../monsters/SrdLoadFailed.tsx";
 import { useReceipt, type ReceiptState } from "../useReceipt.ts";
 import { useRollBlocked } from "../useRollOption.ts";
-import { knownOrTyped } from "../../rolls/card.ts";
+import { knownOrTyped, parseBonus } from "../../rolls/card.ts";
 import {
   apply,
   applyAgain,
@@ -64,7 +64,7 @@ import {
 } from "./chain.ts";
 import { parseParts } from "./outcome.ts";
 import { amountsOf, applyWaits, applyWords, buildPlan, damageTo, openSaveState, pageBound, rowOutcome, rowWords } from "./plan.ts";
-import { countWords, creatureCount, d20Of, groupRows, type GroupTest, type Mark, type RowBase, type Way } from "./rows.ts";
+import { countWords, creatureCount, d20Of, groupRows, rowBonus, type GroupTest, type Mark, type RowBase, type RowState, type Way } from "./rows.ts";
 import { useGroupSave, useGroupSaveStore } from "./store.ts";
 import { actionFill, areaFill, casterActions } from "./fills.ts";
 
@@ -78,6 +78,38 @@ import { actionFill, areaFill, casterActions } from "./fills.ts";
  */
 
 const WAY_WORDS: Record<Way, string> = { fails: "Fails", ask: "Ask", server: "Server", type: "Type" };
+
+/** The bonus the DM types for a row with no stat block that rolls on the server (rows.ts rowBonus). */
+function RowBonusField(props: { name: string; value: number | undefined; onChange(bonus: number | undefined): void }) {
+  const [text, setText] = useState(props.value === undefined ? "" : signedText(props.value));
+  const typed = parseBonus(text);
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
+      <Input
+        aria-label={`Bonus for ${props.name}`}
+        value={text}
+        placeholder="+0"
+        enterKeyHint="done"
+        autoComplete="off"
+        maxLength={3}
+        error={typed?.ok === false}
+        onChange={(e) => {
+          setText(e.target.value);
+          const next = parseBonus(e.target.value);
+          props.onChange(next?.ok ? next.bonus : undefined);
+        }}
+        style={{ width: 64, flex: "none", textAlign: "center" }}
+      />
+      <span style={{ fontSize: theme.font.small, color: typed?.ok === false ? theme.color.dangerText : theme.color.textMuted }}>{typed?.ok === false ? typed.error : "No stat block: type its bonus."}</span>
+    </div>
+  );
+}
+
+/** The server way's words: "Server +5", and for a creature with no stat block "Server d20", then "Server d20+3" once a bonus is typed. */
+function serverWords(row: RowBase, s: RowState): string {
+  if (row.bonus !== null) return `Server ${signedText(row.bonus)}`;
+  return s.typedBonus !== undefined ? `Server d20${signedText(s.typedBonus)}` : "Server d20";
+}
 const MARKS: readonly { value: Mark; label: string }[] = [
   { value: "fail", label: "Fail" },
   { value: "pass", label: "Pass" },
@@ -223,7 +255,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     if (!d20) return [];
     return holders.flatMap((r) => {
       const rolls = creatureRolls(dice, r.target);
-      const bonus = rolls?.numbers ? bonusFor(rolls.numbers, d20) : null;
+      const bonus = (rolls?.numbers ? bonusFor(rolls.numbers, d20) : null) ?? stateOf(pageRef.current, r).typedBonus ?? null;
       if (bonus === null) return [];
       const preset = presetFor(dice, r.target, d20, { rolls });
       return [{ holder: r.holder, target: r.target, bonus, sources: preset.sources, extra: preset.extra }];
@@ -799,15 +831,18 @@ function GroupRow(props: {
       {setup && props.loading ? (
         <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>Loading</span>
       ) : setup && row.ways.length > 1 ? (
-        <Segmented<Way>
-          label={`How ${row.name} rolls`}
-          value={s.way}
-          options={row.ways.map((w) => ({ value: w, label: w === "server" && row.bonus !== null ? `Server ${signedText(row.bonus)}` : WAY_WORDS[w] }))}
-          onChange={(way) => set({ way })}
-        />
+        <>
+          <Segmented<Way>
+            label={`How ${row.name} rolls`}
+            value={s.way}
+            options={row.ways.map((w) => ({ value: w, label: w === "server" ? serverWords(row, s) : WAY_WORDS[w] }))}
+            onChange={(way) => set({ way })}
+          />
+          {s.way === "server" && row.bonus === null ? <RowBonusField name={row.name} value={s.typedBonus} onChange={(typedBonus) => set({ typedBonus })} /> : null}
+        </>
       ) : (
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
-          <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{words.how ?? (s.way === "server" && row.bonus !== null ? `Server ${signedText(row.bonus)}` : WAY_WORDS[s.way])}</span>
+          <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{words.how ?? (s.way === "server" ? serverWords(row, s) : WAY_WORDS[s.way])}</span>
           {words.verdict ? (
             <span data-verdict="" style={{ fontSize: theme.font.small, color: theme.color.text, border: `${theme.line.border}px solid ${theme.color.controlBorder}`, borderRadius: theme.radius.sm, padding: `0 ${theme.space(1)}px` }}>
               {words.verdict}
@@ -843,7 +878,7 @@ function GroupRow(props: {
             </Button>
           ) : null}
           {s.status === "notRolled" || s.status === "unknown" ? (
-            <Button size="sm" disabled={props.blocked !== null || row.bonus === null} onClick={props.onRollAgain}>
+            <Button size="sm" disabled={props.blocked !== null || rowBonus(row, s) === null} onClick={props.onRollAgain}>
               {s.status === "unknown" ? "Roll again" : "Roll them"}
             </Button>
           ) : null}

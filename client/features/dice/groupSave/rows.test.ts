@@ -6,7 +6,8 @@ import { loadMonsters, type SrdMonster } from "#shared/srd/monsters.ts";
 import { loadSrdRolls } from "#shared/srd/rolls.ts";
 import { actor, character, effect, room, token } from "#shared/testutil.ts";
 import type { DiceView } from "../creature.ts";
-import { countWords, creatureCount, groupRows, rowResult, type RowState } from "./rows.ts";
+import { newPage, roll, type ServerRoll } from "./chain.ts";
+import { countWords, creatureCount, groupRows, rowBonus, rowResult, type RowState } from "./rows.ts";
 
 /** A group save's rows and their results (docs/design-v1-roll-options.md 5.2 and 5.3). */
 
@@ -41,10 +42,10 @@ describe("who rolls how", () => {
     assert.deepEqual(
       rows.map((r) => [r.name, r.ways, r.skip]),
       [
-        ["Bree", ["ask", "type"], false],
+        ["Bree", ["ask", "type", "server"], false],
         ["Goblin 1", ["server", "type"], false],
         ["Goblin 2", ["fails", "server", "type"], false],
-        ["Owl", ["type"], false],
+        ["Owl", ["type", "server"], false],
         ["Cart", ["type"], true],
         ["Goblin 3", ["server", "type"], true],
       ],
@@ -53,6 +54,22 @@ describe("who rolls how", () => {
     assert.equal(rows[1]!.bonus, 2);
     assert.equal(rows[2]!.fails, "stunned");
     assert.match(rows[3]!.why ?? "", /players/, "off the players' scene it cannot be asked");
+  });
+
+  test("a row the DM runs for a creature with no stat block rolls on the server with the bonus the DM types, and waits for it (owner's no-numbers rule)", () => {
+    const rows = groupRows(dice(), ["owl"], { kind: "save", ability: "dex" }, false);
+    const owl = rows[0]!;
+    assert.equal(owl.bonus, null);
+    assert.equal(rowBonus(owl, {}), null);
+    assert.equal(rowBonus(owl, { typedBonus: 3 }), 3);
+    assert.equal(rowBonus({ bonus: 2 }, { typedBonus: 3 }), 2, "a known bonus wins");
+    const page = { ...newPage({ id: "p", sceneId: "s1", source: { kind: "selection", tokenIds: ["owl"] }, test: { kind: "save", ability: "dex" }, dc: 12, secret: true, spell: false, switches: { dcShown: true, resultShown: true } }), states: { [owl.holder]: { way: "server" as const } } };
+    const input = (server: ServerRoll[]) => ({ rows, server, tag: "t1", requestIds: () => "r1", openRequests: 0, taken: [], at: "2026-10-17T20:00:00.000Z" });
+    assert.equal(roll(page, input([])).error, "Type Owl's bonus, or pick Type.");
+    const step = roll(page, input([{ holder: owl.holder, target: owl.target, bonus: 3, sources: [], extra: [] }]));
+    assert.equal(step.error, undefined);
+    const sent = step.send[0];
+    assert.equal(sent?.kind === "dice" ? sent.rolls[0]?.formula : null, "1d20+3");
   });
 });
 

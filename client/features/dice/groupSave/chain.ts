@@ -199,6 +199,9 @@ export function roll(page: Page, input: { rows: RowBase[]; server: readonly Serv
   const requestsNeeded = Math.ceil(asked.length / LIMITS.rollTargets);
   const room = LIMITS.openRollsPerRoom - input.openRequests;
   if (requestsNeeded > room) return { page, send: [], error: `Close ${requestsNeeded - room} request${requestsNeeded - room === 1 ? "" : "s"} first.` };
+  // A server row with no stat block rolls only once its bonus is typed, never with a +0 no one gave.
+  const untyped = live.find((r) => stateOf(next, r).way === "server" && !input.server.some((s) => s.holder === r.holder));
+  if (untyped) return { page, send: [], error: `Type ${untyped.name}'s bonus, or pick Type.` };
   const send: Command[] = [];
   const serverRows = input.server.filter((s) => live.some((r) => r.holder === s.holder && stateOf(next, r).way === "server"));
   if (serverRows.length > 0) {
