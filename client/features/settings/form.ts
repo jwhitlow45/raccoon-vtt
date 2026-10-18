@@ -1,4 +1,5 @@
-import type { AoeCoverage, AoeInclusion, DiagonalRule, MemberId, MoveAnyToken, RoomSettings, WhichPlayers } from "#shared/model.ts";
+import { critRuleOf } from "#shared/dice/crit.ts";
+import type { AoeCoverage, AoeInclusion, CritRule, DiagonalRule, MemberId, MoveAnyToken, RoomSettings, WhichPlayers } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { healRevivesDead } from "#shared/migrate.ts";
 import { MAX_NAME, type ClientOp } from "#shared/protocol.ts";
@@ -13,7 +14,7 @@ import { TIMER_CHOICES } from "../encounter/timer.ts";
  */
 
 type BoolKey = { [K in keyof RoomSettings]-?: NonNullable<RoomSettings[K]> extends boolean ? K : never }[keyof RoomSettings];
-type ChoiceKey = "diagonal" | "aoeCoverage" | "aoeInclusion";
+type ChoiceKey = "diagonal" | "aoeCoverage" | "aoeInclusion" | "critRule";
 
 export type Choice<V extends string> = { value: V; label: string; help: string };
 
@@ -22,6 +23,7 @@ export type SettingField =
   | { kind: "choice"; key: "diagonal"; label: string; help: string; options: Choice<DiagonalRule>[] }
   | { kind: "choice"; key: "aoeCoverage"; label: string; help: string; options: Choice<AoeCoverage>[] }
   | { kind: "choice"; key: "aoeInclusion"; label: string; help: string; options: Choice<AoeInclusion>[] }
+  | { kind: "choice"; key: "critRule"; label: string; help: string; options: Choice<CritRule>[] }
   | { kind: "number"; key: "feetPerCell"; label: string; help: string; min: number; max: number }
   | { kind: "seconds"; key: "turnTimerSec"; label: string; help: string; options: { value: number; label: string }[] }
   | { kind: "movers"; key: "playersMoveAny"; label: string; help: string; options: Choice<MoveAnyMode>[] }
@@ -117,6 +119,18 @@ export const SETTING_GROUPS: SettingGroup[] = [
         help: "A hidden creature is revealed when its first turn comes. Players then see it as they see any creature: out of the fog, and in the party's sight when the scene has party vision.",
       },
       {
+        kind: "choice",
+        key: "critRule",
+        label: "Critical hit damage",
+        help: "How a critical hit rolls its damage, riders included, for every attack in this room.",
+        options: [
+          { value: "rollTwice", label: "Roll the dice twice", help: "2d6+3 crits as 4d6+3. The 2024 rule." },
+          { value: "maxPlusRoll", label: "Max plus a roll", help: "The dice at their highest, plus a roll: 12 + 2d6 + 3." },
+          { value: "doubleDice", label: "Double the dice rolled", help: "The dice roll once and count twice: (2d6 × 2) + 3." },
+          { value: "doubleTotal", label: "Double the total", help: "The whole damage counts twice: (2d6 + 3) × 2." },
+        ],
+      },
+      {
         kind: "seconds",
         key: "turnTimerSec",
         label: "Turn timer",
@@ -198,6 +212,11 @@ export function drawersOf(settings: Pick<RoomSettings, "playersDraw">): WhichPla
 export function toggleOn(settings: RoomSettings, key: BoolKey): boolean {
   if (key === "healRevives") return healRevivesDead(settings);
   return settings[key] === true;
+}
+
+/** Which choice shows picked. The critical hit rule a room may lack reads as the 2024 rule it rolls by. */
+export function choiceOf(settings: RoomSettings, key: ChoiceKey): string {
+  return key === "critRule" ? critRuleOf(settings) : settings[key];
 }
 
 export function moveAnyMode(value: MoveAnyToken): MoveAnyMode {

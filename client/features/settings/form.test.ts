@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DEFAULT_SETTINGS, type RoomSettings } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
-import { allFields, drawersOf, moveAnyFor, moveAnyMode, parseFeetPerCell, parseRoomName, settingsOp, settingsPatch, toggleOn, withMover } from "./form.ts";
+import { allFields, choiceOf, drawersOf, moveAnyFor, moveAnyMode, parseFeetPerCell, parseRoomName, SETTING_GROUPS, settingsOp, settingsPatch, toggleOn, withMover } from "./form.ts";
 
 describe("settings form", () => {
   test("lists every room setting exactly once", () => {
@@ -42,6 +42,31 @@ describe("settings form", () => {
     const off = settingsOp(older as RoomSettings, { healRevives: false });
     assert.deepEqual(off, { t: "room.update", settings: { healRevives: false } });
     assert.ok(clientOpSchema.safeParse(off).success);
+  });
+
+  test("critical hit damage offers the four rules in a line each, marks the 2024 one, and shows it picked in a room from before the setting", () => {
+    const field = allFields().find((f) => f.key === "critRule");
+    assert.equal(field?.kind, "choice");
+    if (field?.kind !== "choice") return;
+    assert.equal(field.label, "Critical hit damage");
+    assert.equal(SETTING_GROUPS.find((g) => g.fields.includes(field))?.heading, "Combat");
+    assert.deepEqual(
+      field.options.map((o) => [o.value, o.label]),
+      [
+        ["rollTwice", "Roll the dice twice"],
+        ["maxPlusRoll", "Max plus a roll"],
+        ["doubleDice", "Double the dice rolled"],
+        ["doubleTotal", "Double the total"],
+      ],
+    );
+    assert.deepEqual(field.options.map((o) => /2024/.test(o.help)), [true, false, false, false]);
+    for (const text of [field.help, ...field.options.map((o) => o.help)]) assert.doesNotMatch(text, /\n/);
+    assert.equal(DEFAULT_SETTINGS.critRule, "rollTwice");
+    const { critRule: _absent, ...older } = DEFAULT_SETTINGS;
+    assert.equal(choiceOf(older as RoomSettings, "critRule"), "rollTwice");
+    assert.equal(choiceOf({ ...DEFAULT_SETTINGS, critRule: "maxPlusRoll" }, "critRule"), "maxPlusRoll");
+    assert.equal(choiceOf(DEFAULT_SETTINGS, "diagonal"), "five");
+    assert.deepEqual(settingsOp(older as RoomSettings, { critRule: "maxPlusRoll" }), { t: "room.update", settings: { critRule: "maxPlusRoll" } });
   });
 
   test("Skip defeated says what Next passes over: any dead creature, a player character's row included", () => {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ABILITY_KEYS, CONDITION_KEYS, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, STAIRS_CHARS, STATUS_KEYS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
+import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, STAIRS_CHARS, STATUS_KEYS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
 import {
@@ -75,6 +75,8 @@ const settings = z.strictObject({
   playersDraw: dmToolSchemas.whichPlayers.optional(),
   // Backups from before it have none, which reads as on (docs/design-v1-combat-flow.md 3.4).
   healRevives: z.boolean().optional(),
+  // Backups from before it rolled every crit by the 2024 rule, which is what they keep.
+  critRule: z.enum(CRIT_RULES).default("rollTwice"),
 });
 
 const meta = z.strictObject({

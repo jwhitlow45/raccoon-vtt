@@ -8,6 +8,7 @@ import {
   CHUNK_CELLS,
   CONDITION_KEYS,
   CR_VALUES,
+  CRIT_RULES,
   FREE_WALL_ID_LENGTH,
   FREE_WALL_LATTICE,
   MAX_FREE_WALL_CELLS,
@@ -315,6 +316,8 @@ const settingsPatch = z.strictObject({
   playersDraw: moveAnyToken.optional(),
   /** Healing brings back the dead (docs/design-v1-combat-flow.md 3.4). */
   healRevives: z.boolean().optional(),
+  /** How a critical hit rolls its damage (docs/design-v1-dice.md, critical hit rules). */
+  critRule: z.enum(CRIT_RULES).optional(),
 });
 
 const fogShape = z.discriminatedUnion("kind", [

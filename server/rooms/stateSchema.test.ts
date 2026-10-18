@@ -26,6 +26,20 @@ describe("roomStateSchema", () => {
     assert.equal(parsed.ok && canApply(create, player, parsed.state, deps).ok, false);
   });
 
+  test("a backup from before the critical hit rule rolls crits by the 2024 rule, and a picked rule parses", () => {
+    const state = room();
+    const older = JSON.parse(JSON.stringify(state));
+    delete older.meta.settings.critRule;
+    const parsed = parseRoomState(older);
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.equal(parsed.ok && parsed.state.meta.settings.critRule, "rollTwice");
+    const picked = parseRoomState(JSON.parse(JSON.stringify({ ...state, meta: { ...state.meta, settings: { ...state.meta.settings, critRule: "maxPlusRoll" } } })));
+    assert.equal(picked.ok && picked.state.meta.settings.critRule, "maxPlusRoll");
+    const bad = JSON.parse(JSON.stringify(state));
+    bad.meta.settings.critRule = "tripleDice";
+    assert.equal(parseRoomState(bad).ok, false);
+  });
+
   test("a fresh room and random rooms parse after a JSON round trip", () => {
     const fresh = createInitialState({ roomName: "R", dm: { id: "m1", rev: 1, name: "DM", color: "#f38400", kind: "dm", createdAt: new Date().toISOString() } });
     assert.ok(parseRoomState(JSON.parse(JSON.stringify(fresh))).ok);

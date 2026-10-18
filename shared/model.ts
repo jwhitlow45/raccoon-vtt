@@ -141,6 +141,15 @@ export type WhichPlayers = "none" | "all" | MemberId[];
  */
 export type MoveAnyToken = WhichPlayers;
 
+/**
+ * How a critical hit rolls its damage (docs/design-v1-dice.md, the critical
+ * hit rules addendum), for every attack in the room: the dice rolled twice,
+ * the 2024 rule, or one of the common table rules. The server applies it
+ * when it rolls, so every result records the rule it was rolled under.
+ */
+export const CRIT_RULES = ["rollTwice", "maxPlusRoll", "doubleDice", "doubleTotal"] as const;
+export type CritRule = (typeof CRIT_RULES)[number];
+
 export type RoomSettings = {
   feetPerCell: number;
   diagonal: DiagonalRule;
@@ -182,6 +191,12 @@ export type RoomSettings = {
    * version 5 on the rule they were applied under.
    */
   healRevives?: boolean;
+  /**
+   * How a critical hit rolls its damage. Absent reads as "rollTwice", the
+   * 2024 rule, so every room from before it keeps rolling crits as it did.
+   * Read it through `critRuleOf` (shared/dice/crit.ts).
+   */
+  critRule?: CritRule;
 };
 
 /** The 2024 defaults. See design section 6 for what each one means. */
@@ -201,6 +216,7 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   revealHiddenOnTurn: true,
   turnTimerSec: 0,
   healRevives: true,
+  critRule: "rollTwice",
 };
 
 /**

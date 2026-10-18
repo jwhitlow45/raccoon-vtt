@@ -12,7 +12,7 @@ import { RadioGroup } from "../features/dm/controls.tsx";
 import type { PanelProps } from "../features/panels.ts";
 import { timerChoices } from "../features/encounter/timer.ts";
 import { ExportSection } from "../features/settings/ExportSection.tsx";
-import { drawersOf, moveAnyFor, moveAnyMode, parseFeetPerCell, parseRoomName, SETTING_GROUPS, settingsOp, toggleOn, withMover, type MoveAnyMode, type SettingField } from "../features/settings/form.ts";
+import { choiceOf, drawersOf, moveAnyFor, moveAnyMode, parseFeetPerCell, parseRoomName, SETTING_GROUPS, settingsOp, toggleOn, withMover, type MoveAnyMode, type SettingField } from "../features/settings/form.ts";
 import { useUnsavedInput } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../state/view.ts";
@@ -87,7 +87,7 @@ function SettingControl(props: { field: SettingField; settings: RoomSettings; on
           <RadioGroup<string>
             legend={field.label}
             help={field.help}
-            value={settings[field.key]}
+            value={choiceOf(settings, field.key)}
             options={field.options}
             onChange={(v) => onChange({ [field.key]: v } as Partial<RoomSettings>)}
           />
