@@ -58,7 +58,7 @@ import { theme } from "../lib/theme.ts";
 import { PanelBody, RoomLoadNotice } from "../panels/Panels.tsx";
 import { RoomScope, RoomScopeProvider, useRoomScope, useScoped } from "../state/scope.ts";
 import { TOAST_MS } from "../state/store.ts";
-import { sidePanelKeysSlot, splitKeysSlot, useShortcuts } from "../state/shortcuts.ts";
+import { keyText, sidePanelKeysSlot, splitKeysSlot, useShortcutKeys, useShortcuts } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
 import type { Ended, Toast } from "../state/types.ts";
@@ -1848,6 +1848,9 @@ function Toolbar(props: {
   const size: ButtonSize = inRow ? { fixed: props.named ? TOOL_BUTTON_NAMED : TOOL_BUTTON_ICON } : wide ? "floating" : "shared";
   const line = (key: keyof typeof TOOLBAR_LINES) => `${ids}-${key}`;
   const frame = useMemo(() => toolbarPopoverFrame(props.popover, props.toolbar), [props.popover, props.toolbar]);
+  // Each tool's key in its tooltip, as this device has it (the shortcut sheet may have changed it).
+  const keys = useShortcutKeys();
+  const hint = (t: ToolDef) => (keys[`tool:${t.id}`] === undefined ? undefined : keyText(`tool:${t.id}`, keys));
 
   const tile = (t: ToolDef): MenuItem => ({
     id: t.id,
@@ -1870,6 +1873,7 @@ function Toolbar(props: {
         {i === divider ? <ToolbarDivider wide={wide && !inRow} /> : null}
         <ToolButton
           label={t.label}
+          hint={hint(t)}
           active={active}
           onClick={() => props.onPress(t.id)}
           popup={opensMenu ? all : undefined}
@@ -2087,6 +2091,8 @@ function sizeStyle(size: ButtonSize | undefined): CSSProperties {
 function ToolButton(props: {
   ref?: Ref<HTMLButtonElement>;
   label: string;
+  /** Its key, which the tooltip adds to its name: "Fog (F)". */
+  hint?: string;
   active: boolean;
   onClick(): void;
   floating?: boolean;
@@ -2127,7 +2133,7 @@ function ToolButton(props: {
       aria-controls={popup?.open ? popup.anchorProps["aria-controls"] : props.controls}
       aria-describedby={props.describedBy}
       aria-label={props.iconOnly ? props.label : undefined}
-      title={props.label}
+      title={props.hint ? `${props.label} (${props.hint})` : props.label}
       onClick={popup ? popup.anchorProps.onClick : props.onClick}
       onKeyDown={popup?.anchorProps.onKeyDown}
       style={{

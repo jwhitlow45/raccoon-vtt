@@ -4,7 +4,7 @@ import { Segmented } from "../../components/Segmented.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { enterFullscreen, exitFullscreen, fullscreenSupported, useFullscreen } from "../../lib/fullscreen.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { setShortcutSheet } from "../../state/shortcuts.ts";
+import { keyText, setShortcutSheet, useShortcutKeys } from "../../state/shortcuts.ts";
 import { RadioGroup } from "../dm/controls.tsx";
 import { setSoundOn, useSoundOn } from "../encounter/alerts.ts";
 import { setSoundEnabled, usePingSound } from "../pings/feedback.ts";
@@ -24,6 +24,8 @@ export default function ThisDevice() {
   const pingSound = usePingSound();
   const rollToasts = useRollToastsOn();
   const fullscreen = useFullscreen();
+  // The keys the help below names, as this device has them.
+  const keys = useShortcutKeys();
   return (
     <div style={{ display: "grid" }}>
       <Section label="Interface size" divider={false}>
@@ -35,7 +37,7 @@ export default function ThisDevice() {
         <Section label="Screen">
           <Switch
             label="Full screen"
-            help="The room fills the whole screen, without the browser's bars. With a keyboard, W turns it on and off."
+            help={`The room fills the whole screen, without the browser's bars. With a keyboard, ${keyText("fullscreen", keys)} turns it on and off.`}
             checked={fullscreen}
             onChange={(on) => void (on ? enterFullscreen() : exitFullscreen())}
           />
@@ -75,7 +77,9 @@ export default function ThisDevice() {
         <Switch label="Show others' rolls as they happen" help="A short note for each roll someone else makes, while the Dice panel is not on screen." checked={rollToasts} onChange={setRollToasts} />
       </Section>
       <Section label="Shortcuts">
-        <Help>With a keyboard, letters pick tools, arrow keys move the selected tokens, and N moves the turn on. The list also says what Shift, Ctrl or Space do with the mouse.</Help>
+        <Help>
+          With a keyboard, letters pick tools, arrow keys move the selected tokens, and {keyText("turn", keys)} moves the turn on. The list also says what Shift, Ctrl or Space do with the mouse, and with a keyboard its Change moves a key, on this device only.
+        </Help>
         <Button size="sm" onClick={() => setShortcutSheet(scope, true)} style={{ justifySelf: "start" }}>
           Show the shortcuts
         </Button>
