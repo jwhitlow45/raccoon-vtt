@@ -406,7 +406,7 @@ The files under CC BY-SA licenses (the Illustrated Bestiary and Flare Portrait P
 
 ### Scarlet Heroes maps, by Dyson Logos, released by Kevin Crawford (Sine Nomine Publishing)
 
-Public domain dedication. Source: https://www.drivethrurpg.com/product/114894/Scarlet-Heroes-Art-Pack. Snapshot of the license: https://web.archive.org/web/20140328035847/http://rpg.drivethrustuff.com:80/product/114894/Scarlet-Heroes-Art-Pack. Credit the author asks for: Not required. Sine Nomine Publishing asks, as a courtesy, that the artist, Dyson Logos, is credited.. Changes: Converted from TIFF, reduced to four gray levels and saved as PNG.
+Public domain dedication. Source: https://www.drivethrurpg.com/product/114894/Scarlet-Heroes-Art-Pack. Snapshot of the license: https://web.archive.org/web/20140328035847/http://rpg.drivethrustuff.com:80/product/114894/Scarlet-Heroes-Art-Pack. On credit: Not required. Sine Nomine Publishing asks, as a courtesy, that the artist, Dyson Logos, is credited. Changes: Converted from TIFF, reduced to four gray levels and saved as PNG.
 
 | Files | Work | Source | License | Changes |
 | --- | --- | --- | --- | --- |
@@ -581,7 +581,7 @@ Public domain dedication. Source: https://www.drivethrurpg.com/product/114894/Sc
 
 ### Dungeon Crawl Stone Soup monsters, by The Dungeon Crawl Stone Soup developers and artists
 
-[CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). Source: https://github.com/crawl/tiles. Snapshot of the license: https://web.archive.org/web/20220309024431/https://github.com/crawl/tiles. Credit the author asks for: Not required. The tiles' readme asks, as a courtesy, that the developers and artists are credited and the source named.. Changes: Upscaled 8 times from 32 x 32 px with nearest neighbor and converted to lossless WebP.
+[CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). Source: https://github.com/crawl/tiles. Snapshot of the license: https://web.archive.org/web/20220309024431/https://github.com/crawl/tiles. On credit: Not required. The tiles' readme asks, as a courtesy, that the developers and artists are credited and the source named. Changes: Upscaled 8 times from 32 x 32 px with nearest neighbor and converted to lossless WebP.
 
 | Files | Work | Source | License | Changes |
 | --- | --- | --- | --- | --- |
@@ -858,7 +858,7 @@ Public domain dedication. Source: https://www.drivethrurpg.com/product/114894/Sc
 
 ### Flat greyscale props, by Mark Gosbell
 
-[CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). Source: https://markgosbell.itch.io/70-free-flat-greyscale-dungeon-assets, and each work's own page below. Snapshot of the license: https://web.archive.org/web/20210422204341/https://markgosbell.itch.io/70-free-flat-greyscale-dungeon-assets. Credit the author asks for: Optional: created by Mark Gosbell. Changes: Converted to WebP.
+[CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). Source: https://markgosbell.itch.io/70-free-flat-greyscale-dungeon-assets, and each work's own page below. Snapshot of the license: https://web.archive.org/web/20210422204341/https://markgosbell.itch.io/70-free-flat-greyscale-dungeon-assets. On credit: Optional: created by Mark Gosbell. Changes: Converted to WebP.
 
 | File | Work | Source | License | Changes |
 | --- | --- | --- | --- | --- |

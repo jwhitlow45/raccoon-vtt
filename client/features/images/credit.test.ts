@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { AssetCredit } from "#shared/protocol.ts";
-import { changesText, creditParts, cropsImage, licenseName, licenseUrl, workName } from "./credit.ts";
+import { askedLine, changesText, creditParts, cropsImage, licenseName, licenseUrl, workName } from "./credit.ts";
 
 const credit: AssetCredit = {
   title: "Goblins and a Troll",
@@ -100,6 +100,21 @@ describe("a starter pick's credit (docs/design-v1-starter-art.md 9)", () => {
     const crop = { crop: { cx: 0.5, cy: 0.5, zoom: 2 }, aspect: 1 };
     assert.equal(changesText(square, { width: 400, height: 400 }, crop), `${picked.changes} Cropped.`);
     assert.equal(changesText(square, { width: 200, height: 200 }, crop), `${picked.changes} Resized to 200 x 200 for this room. Cropped.`);
+  });
+
+  test("shows the credit line the author asks for, and none where it only restates the work", () => {
+    const asked = { ...picked, attribution: "Cartography by A. Cartographer" };
+    assert.equal(askedLine(asked), "Cartography by A. Cartographer");
+    const parts = creditParts(asked, { width: 4096, height: 3072 });
+    assert.equal(parts.asked, "Cartography by A. Cartographer.");
+    assert.equal(parts.text, `Ruined keep by A. Cartographer, Public domain dedication. Cartography by A. Cartographer. ${picked.changes}`);
+    assert.equal(askedLine(picked), null, "the title and author are shown already");
+    assert.equal(creditParts(picked, { width: 4096, height: 3072 }).asked, null);
+  });
+
+  test("an Openverse import's attribution is never shown again as an asked line", () => {
+    const openverse = { ...picked, changes: undefined, attribution: '"Ruined keep" by A. Cartographer is licensed under CC BY 2.0.' };
+    assert.equal(askedLine(openverse), null);
   });
 
   test("changes without a full stop still read as a sentence, and blank changes fall back to the guess", () => {

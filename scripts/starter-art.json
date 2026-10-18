@@ -1010,7 +1010,7 @@
       ],
       "licenseAsStated": "Publisher Kevin Crawford (Sine Nomine Publishing), on the Scarlet Heroes Art Pack page at DriveThruRPG (Wayback 2014-03-28): \"As part of the terms for the successful Kickstarter for Scarlet Heroes, I am releasing all the art from that book into the public domain. I have purchased the full rights to each piece from the original artist, and it is with their knowledge and blessing that you may use the art for any purpose you wish, personal or commercial.\" The pack readme, quoted on the OpenGameArt mirror (Wayback 2015-03-05): \"The art contained in this art pack has been placed in the public domain. I have purchased full rights to each piece from the original artists and with their knowledge and blessing release these rights into the public domain, for you to use as you see fit in personal or commercial endeavors. ... Kevin Crawford Sine Nomine Publishing March 23, 2014\".",
       "aiCheck": "Hand-drawn ink maps, three signed 'DL14' with 2014 dates; released 2014-03-23. Looked at all five: hatching, lettering and symbols consistent, no AI signs.",
-      "attribution": "Not required. Sine Nomine Publishing asks, as a courtesy, that the artist, Dyson Logos, is credited.",
+      "attributionNote": "Not required. Sine Nomine Publishing asks, as a courtesy, that the artist, Dyson Logos, is credited.",
       "encoding": "line-map",
       "works": [
         {
@@ -4490,7 +4490,7 @@
       ],
       "licenseAsStated": "crawl/tiles README.md: \"Many of those artist making these changes have signed off their copyright, returning these tiles to a license similar to \\\"public domain\\\", CC Zero (http://creativecommons.org/publicdomain/zero/1.0/). ... While every care possible has been taken to separate those tiles released into CC Zero from those who have not or can not be contacted, if you happen to see a tile incorrectly included in this export, please contact the maintainer.\" ARTISTS.md: \"The following is the list of artists that gave approval in 2010 for their artwork to be released under CC:0. It is asserted that this covers any new art submitted to Crawl.\" followed by a second list: \"The following artists have given explicit approval that past and future artwork submitted to crawl is under CC:0.\" DCSS's own LICENSE (github.com/crawl/crawl): \"The majority of Crawl's tiles and artwork are released under the CC0 license ..., and new submissions are under this license unless otherwise specified. However, the licensing situation may be complex, especially for older pieces. For information regarding the licenses of our tiles and artwork, see https://github.com/crawl/tiles\"",
       "aiCheck": "Hand-made pixel art from 2006 to 2015, before generative image tools. One consistent roguelike style. Nothing to flag.",
-      "attribution": "Not required. The tiles' readme asks, as a courtesy, that the developers and artists are credited and the source named.",
+      "attributionNote": "Not required. The tiles' readme asks, as a courtesy, that the developers and artists are credited and the source named.",
       "encoding": "pixel",
       "works": [
         {
@@ -11841,7 +11841,7 @@
       ],
       "licenseAsStated": "Each itch.io page (fetched 2026-10-18), stated by the artist: \"All these assets are under CC0 https://creativecommons.org/publicdomain/zero/1.0/ Feel free to attribute these as created by Mark Gosbell if you want to.\" The pages' metadata says \"Asset license: Creative Commons Zero v1.0 Universal\". All three are free downloads (no price).",
       "aiCheck": "Each page's itch.io disclosure says \"No generative AI was used\". Files dated 2021 and 2022. Looked at all 118 props: one consistent hand-inked line style, labeled with their square size, no warped or melted detail.",
-      "attribution": "Optional: created by Mark Gosbell",
+      "attributionNote": "Optional: created by Mark Gosbell.",
       "encoding": "stamp-whole",
       "works": [
         {

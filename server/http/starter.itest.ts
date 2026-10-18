@@ -286,7 +286,7 @@ describe("a starter pick", () => {
     const credit = starterAssetCredit(found("test-pack/knight"));
     assert.deepEqual(body.credit, credit);
     assert.equal(credit.attribution, "Art by An Artist");
-    assert.equal(credit.changes, "Resized to half its size.");
+    assert.equal(credit.changes, "Resized to half its size. Converted to WebP for this room.");
 
     const [row] = await rowsOf(roomId);
     assert.ok(row);
@@ -319,9 +319,10 @@ describe("a starter pick", () => {
     assert.equal(res.json().created, true);
     const [row] = await rowsOf(roomId);
     assert.deepEqual(row?.credit, starterAssetCredit(found("test-pack/scroll")));
-    const stored = row?.credit as { license: string; licenseVersion?: string };
+    const stored = row?.credit as { license: string; licenseVersion?: string; landingUrl: string };
     assert.equal(stored.license, "public-domain");
     assert.equal(stored.licenseVersion, undefined);
+    assert.equal(stored.landingUrl, "https://web.archive.org/web/2020/https://example.com/pack", "the snapshot where the dedication can be read");
   });
 
   test("a map answers the catalog's grid, origin and all, and is made with every map variant", async () => {
@@ -411,6 +412,8 @@ describe("a starter pick", () => {
     assert.equal(res.json().starter, "test-pack/knight");
     const [row] = await rowsOf(roomId);
     assert.equal(row?.starter, null);
+    // The same bytes are that work under that license, so the row gains the catalog's credit, as an Openverse pick's reuse does.
+    assert.deepEqual(row?.credit, starterAssetCredit(found("test-pack/knight")));
     assert.equal(await roomStoredBytes(pool, roomId), stored);
     const listed = (await app.inject({ url: `/api/rooms/${roomId}/assets`, headers: player.headers })).json().assets;
     assert.deepEqual([listed[0].starter, listed[0].sha256], [undefined, undefined], "an upload lists no mark and no hash");

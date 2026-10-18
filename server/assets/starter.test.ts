@@ -62,6 +62,31 @@ describe("a work for a kind", () => {
   });
 });
 
+describe("a pick's credit", () => {
+  const pack: StarterPack = { id: "test-pack", title: "Test", author: "An Artist", page: "https://example.com", wayback: "https://web.archive.org/web/2014/https://example.com", licenses: ["CC-BY-4.0"], changes: "", works: [] };
+
+  test("says the room's copy is WebP only when the shipped file is not", () => {
+    assert.equal(starterAssetCredit({ pack, work: work() }).changes, "Resized to 512 px.");
+    const ink = work({ file: "/starter/test-pack/inn.png", credit: { ...work().credit, changes: "Reduced to four gray levels and saved as PNG." } });
+    assert.equal(starterAssetCredit({ pack, work: ink }).changes, "Reduced to four gray levels and saved as PNG. Converted to WebP for this room.");
+  });
+
+  test("links a public domain dedication's snapshot, where the statement can be read, and any other work's own page", () => {
+    assert.equal(starterAssetCredit({ pack, work: work() }).landingUrl, "https://example.com/knight");
+    const dedicated = work({ credit: { ...work().credit, license: "public-domain-dedication" } });
+    assert.equal(starterAssetCredit({ pack, work: dedicated }).landingUrl, pack.wayback);
+  });
+
+  test("carries the line the author asks for, the work's before the pack's, else the title and author, never a note about credit", () => {
+    assert.equal(starterAssetCredit({ pack, work: work() }).attribution, "Knight by An Artist");
+    assert.equal(starterAssetCredit({ pack: { ...pack, attribution: "Cartography by An Artist" }, work: work() }).attribution, "Cartography by An Artist");
+    const own = work({ credit: { ...work().credit, attribution: "Knight, by An Artist, for the museum" } });
+    assert.equal(starterAssetCredit({ pack: { ...pack, attribution: "Cartography by An Artist" }, work: own }).attribution, "Knight, by An Artist, for the museum");
+    const noted = { ...pack, attributionNote: "Not required. The artist asks, as a courtesy, to be credited." };
+    assert.equal(starterAssetCredit({ pack: noted, work: work() }).attribution, "Knight by An Artist");
+  });
+});
+
 describe("a map pick's grid", () => {
   test("is the catalog's on a stored copy of the shipped size, and scales with a smaller copy, origin and all", () => {
     assert.deepEqual(starterGrid({ width: 4096, grid: { cellPx: 70.4, originPx: { x: 12, y: 0.5 } } }, 4096), { cellPx: 70.4, originPx: { x: 12, y: 0.5 } });

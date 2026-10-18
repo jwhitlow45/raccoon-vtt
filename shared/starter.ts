@@ -95,6 +95,12 @@ export type StarterPack = {
   changes: string;
   /** The credit line the author asks for, in the author's words, when they ask for one. */
   attribution?: string;
+  /**
+   * What the author says about credit when it is a note rather than a line
+   * to print ("Not required. ... asks, as a courtesy, that the artist is
+   * credited."). CREDITS.md gives it. A pick's credit line never carries it.
+   */
+  attributionNote?: string;
   works: readonly StarterWork[];
 };
 
@@ -173,17 +179,25 @@ export const CREDIT_LICENSE: Record<LicenseId, { license: string; licenseVersion
  * shipped catalog, never from a request. The size is the file's as shipped,
  * the image as the room received it, so the credit says "Resized" only when
  * the room's copy differs from it, as an import's does.
+ *
+ * The room keeps every image as WebP, so a work shipped as PNG, such as an
+ * ink map in four gray levels, says that change too. A public domain
+ * dedication links the snapshot of the page that makes it, since the live
+ * page may no longer show the statement. The attribution is the line the
+ * author asks for, else "<title> by <author>", never a pack's note about
+ * credit.
  */
 export function starterAssetCredit({ pack, work }: FoundWork): AssetCredit {
   const license = CREDIT_LICENSE[work.credit.license];
   const attribution = work.credit.attribution ?? pack.attribution;
+  const reencoded = work.file.endsWith(".webp") ? "" : " Converted to WebP for this room.";
   return {
     title: work.credit.title,
     creator: work.credit.author,
     ...license,
-    landingUrl: work.credit.source,
+    landingUrl: work.credit.license === "public-domain-dedication" ? pack.wayback : work.credit.source,
     attribution: attribution ?? `${work.credit.title} by ${work.credit.author}`,
-    changes: work.credit.changes,
+    changes: `${work.credit.changes}${reencoded}`,
     originalWidth: work.width,
     originalHeight: work.height,
   };

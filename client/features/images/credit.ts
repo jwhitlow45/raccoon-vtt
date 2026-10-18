@@ -98,12 +98,28 @@ export function cropsImage(image: { width: number; height: number }, crop: { cx:
   return shown.width < image.width - 0.5 || shown.height < image.height - 0.5;
 }
 
+/**
+ * The credit line a starter pick's author asks for, such as "Cartography by
+ * Dyson Logos", to show with its credit. Only a starter pick's credit says
+ * what was changed in its own words (`changes`), and only its attribution
+ * is a line its author asked for. An Openverse import's attribution restates
+ * the work and license already shown, and a pick whose author asks for no
+ * line carries its title and author, already shown too. Null for those.
+ */
+export function askedLine(credit: Pick<AssetCredit, "attribution" | "changes" | "title" | "creator">): string | null {
+  const line = credit.attribution?.trim();
+  if (!credit.changes?.trim() || !line) return null;
+  return line === workName(credit) || line === `${credit.title?.trim()} by ${credit.creator?.trim()}` ? null : line;
+}
+
 export type CreditParts = {
   work: string;
   /** The image's own page. Openverse gives http or https. */
   workUrl: string;
   license: string;
   licenseUrl: string | null;
+  /** The line the author asks for, as a sentence, or null (askedLine). */
+  asked: string | null;
   changes: string;
   /** The whole line as plain text. */
   text: string;
@@ -113,12 +129,15 @@ export function creditParts(credit: AssetCredit, stored: { width: number; height
   const work = workName(credit);
   const license = licenseName(credit.license, credit.licenseVersion);
   const changes = changesText(credit, stored, crop);
+  const line = askedLine(credit);
+  const asked = line ? sentence(line) : null;
   return {
     work,
     workUrl: credit.landingUrl,
     license,
     licenseUrl: licenseUrl(credit.license, credit.licenseVersion),
+    asked,
     changes,
-    text: `${work}, ${license}. ${changes}`,
+    text: `${work}, ${license}. ${asked ? `${asked} ` : ""}${changes}`,
   };
 }

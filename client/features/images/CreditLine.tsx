@@ -5,8 +5,9 @@ import { creditParts } from "./credit.ts";
 
 /**
  * An openly licensed image's credit (docs/design-v1-dm-tools.md 3.13): the
- * work linked to its page, the license linked to its text, and what the app
- * changed. Shown to everyone who may see the image.
+ * work linked to its page, the license linked to its text, the credit line
+ * a starter pick's author asks for, and what the app changed. Shown to
+ * everyone who may see the image.
  */
 export function CreditLine(props: {
   credit: AssetCredit;
@@ -28,7 +29,8 @@ export function CreditLine(props: {
       ) : (
         parts.license
       )}
-      . {parts.changes}
+      . {parts.asked ? `${parts.asked} ` : null}
+      {parts.changes}
     </p>
   );
 }

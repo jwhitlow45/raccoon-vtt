@@ -170,6 +170,7 @@ const packSchema = z.strictObject({
   licenseAsStated: z.string().min(1),
   aiCheck: z.string().min(1),
   attribution: z.string().max(400).optional(),
+  attributionNote: z.string().max(400).optional(),
   encoding: z.enum(ENCODINGS),
   maxSide: z.number().int().positive().optional(),
   works: z.array(workSchema).min(1),
@@ -887,6 +888,7 @@ async function buildPack(pack: InputPack, sources: Sources, renderer: () => Prom
     licenses: pack.licenses as LicenseId[],
     changes: changes.size === 1 ? [...changes][0]! : PACK_CHANGES[pack.encoding](pack),
     ...(pack.attribution ? { attribution: pack.attribution } : {}),
+    ...(pack.attributionNote ? { attributionNote: pack.attributionNote } : {}),
     works,
   };
   return { pack: built, stamps, bytes };
@@ -970,6 +972,9 @@ const MD_END = "<!-- end of starter-packs -->";
 
 const md = (text: string) => text.replace(/\|/g, "\\|");
 
+/** Text ending as a sentence does, without doubling a full stop it already has. */
+const fullStop = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`);
+
 function licenseLink(id: LicenseId): string {
   const license = LICENSES[id];
   return license.url ? `[${license.name}](${license.url})` : license.name;
@@ -990,7 +995,9 @@ function creditsSection(packs: StarterPack[]): string {
     const licenses = pack.licenses.map(licenseLink).join(" and ");
     const pages = [...new Set(pack.works.map((w) => w.credit.source))];
     const where = pages.length === 1 ? `Source: ${pages[0]}.` : `Source: ${pack.page}, and each work's own page below.`;
-    out.push(`${licenses}. ${where} Snapshot of the license: ${pack.wayback}.${pack.attribution ? ` Credit the author asks for: ${pack.attribution}.` : ""} Changes: ${pack.changes}`, "");
+    const asked = pack.attribution ? ` Credit the author asks for: ${fullStop(pack.attribution)}` : "";
+    const note = pack.attributionNote ? ` On credit: ${fullStop(pack.attributionNote)}` : "";
+    out.push(`${licenses}. ${where} Snapshot of the license: ${pack.wayback}.${asked}${note} Changes: ${pack.changes}`, "");
     const stamps = pack.works.some((w) => w.stamp);
     out.push(stamps ? "| File | Work | Source | License | Changes |" : "| Files | Work | Source | License | Changes |", "| --- | --- | --- | --- | --- |");
     for (const work of pack.works) {
