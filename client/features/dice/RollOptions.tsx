@@ -9,6 +9,7 @@ import { ABILITY_NAMES as ABILITY_SHORT } from "#shared/statBlock.ts";
 import { Chip, ChipRow } from "../../components/Chip.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Switch } from "../../components/Switch.tsx";
+import { startInScrollBox } from "../../lib/reveal.ts";
 import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -48,6 +49,9 @@ import { ReplaceConfirm } from "./groupSave/ReplaceConfirm.tsx";
 import { actionFill } from "./groupSave/fills.ts";
 import { useActOnce, useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "./useRollOption.ts";
 
+/** Room above the options when the panel opens on them: the sticky line's height and a little. */
+const OPTIONS_MARGIN = 48;
+
 /**
  * A creature's roll options, between the roller and Recent rolls
  * (docs/design-v1-roll-options.md 4): the DM's selected token, or the
@@ -63,12 +67,13 @@ export function RollOptions(_props: PanelProps) {
   const options = useOptionStore();
   const ref = useRef<HTMLDivElement>(null);
   // A bar's Roll opens the panel on its tokens and scrolls to here (4.1), after the render that lists them, once per tap.
+  // Only the panel's own scroller moves, just under the sticky line: scrollIntoView also scrolled the sheet's frame and hid its header (LP7-DICE-6).
   useEffect(() => {
     if (focus === 0 || options.getState().focused === focus) return;
     options.setState({ focused: focus });
     requestAnimationFrame(() => {
       const still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-      ref.current?.scrollIntoView({ block: "start", behavior: still ? "auto" : "smooth" });
+      if (ref.current) startInScrollBox(ref.current, OPTIONS_MARGIN, !still);
     });
   }, [focus, options]);
   if (!view || !role) return null;
@@ -82,7 +87,7 @@ export function RollOptions(_props: PanelProps) {
     else body = <CreatureOptions key={token.id} creature={{ tokenId: token.id }} tokenId={token.id} name={displayName(token)} />;
   } else body = <PlayerOptions view={view} selected={selected} />;
   return (
-    <div ref={ref} data-roll-options="" style={{ display: "grid", gap: theme.space(2), scrollMarginTop: 48 }}>
+    <div ref={ref} data-roll-options="" style={{ display: "grid", gap: theme.space(2), scrollMarginTop: OPTIONS_MARGIN }}>
       {body}
     </div>
   );

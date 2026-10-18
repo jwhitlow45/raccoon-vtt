@@ -24,6 +24,7 @@ type Node = {
   scrollHeight: number;
   clientHeight: number;
   getBoundingClientRect(): { top: number; bottom: number; left: number; right: number };
+  scrollTo?(options: { top: number; behavior: "smooth" | "auto" }): void;
 };
 
 type StyleOf = (el: Node) => { overflowY: string; scrollPaddingTop: string; scrollPaddingBottom: string };
@@ -68,6 +69,27 @@ export function revealInScrollBox(el: Node, style: StyleOf = styleOf): void {
   const bottom = top + el.offsetHeight;
   if (top < viewTop || bottom - top > viewBottom - viewTop) box.scrollTop = top - padTop;
   else if (bottom > viewBottom) box.scrollTop = bottom - box.clientHeight + padBottom;
+}
+
+/**
+ * Scrolls `el`'s scroll box so that `el` starts `margin` px below the box's
+ * head, as far as the box goes, and moves nothing else: a panel opened on
+ * one of its sections. scrollIntoView would also scroll the sheet's own
+ * frame when the box cannot go that far, taking the sheet's header out of
+ * sight. The box need not be on `el`'s offset chain, so the distance comes
+ * from the screen, divided by the interface size's zoom, which the box's
+ * drawn height over its own gives.
+ */
+export function startInScrollBox(target: HTMLElement | Node, margin: number, smooth = false, style: StyleOf = styleOf): void {
+  const el = target as Node;
+  const box = scrollBox(el, style);
+  if (!box) return;
+  const b = box.getBoundingClientRect();
+  const zoom = box.offsetHeight > 0 ? (b.bottom - b.top) / box.offsetHeight : 1;
+  const wanted = box.scrollTop + (el.getBoundingClientRect().top - b.top) / zoom - margin;
+  const top = Math.max(0, Math.min(wanted, box.scrollHeight - box.clientHeight));
+  if (box.scrollTo) box.scrollTo({ top, behavior: smooth ? "smooth" : "auto" });
+  else box.scrollTop = top;
 }
 
 /** Whether some of `el` shows inside its scroll box, or it has none. */

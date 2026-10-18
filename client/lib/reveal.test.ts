@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { revealInScrollBox, scrollBox, visibleInScrollBox } from "./reveal.ts";
+import { revealInScrollBox, scrollBox, startInScrollBox, visibleInScrollBox } from "./reveal.ts";
 
 /**
  * A column 200 px tall that holds cards 100 px tall, 8 px apart, laid out
@@ -69,5 +69,26 @@ describe("bringing a card into view inside the column that scrolls it", () => {
     const { items } = column(1);
     assert.equal(scrollBox(items[0]!, style), null, "a column with room for all it holds does not scroll");
     assert.equal(visibleInScrollBox(items[0]!, style), true);
+  });
+});
+
+describe("opening a panel on one of its sections (LP7-DICE-6)", () => {
+  test("the section starts its margin below the box's head, the box stopping at its end", () => {
+    const { col, items } = column(4);
+    startInScrollBox(items[2]!, 48, false, style);
+    assert.equal(col.scrollTop, 8 + 2 * 108 - 48);
+    startInScrollBox(items[3]!, 48, false, style);
+    assert.equal(col.scrollTop, col.scrollHeight - col.clientHeight, "as far as the box goes, and no further");
+  });
+
+  test("under the interface size's zoom the distance on screen is read back in the box's own pixels", () => {
+    const { col, items } = column(4);
+    // Drawn at 130%: the column 260 px tall on screen for its 200, each card where 1.3 times its offset puts it.
+    col.getBoundingClientRect = () => ({ top: 60, bottom: 320, left: 0, right: 390 });
+    const card = items[2]!;
+    card.getBoundingClientRect = () => ({ top: 60 + (card.offsetTop - col.scrollTop) * 1.3, bottom: 190 + (card.offsetTop - col.scrollTop) * 1.3, left: 0, right: 390 });
+    col.scrollTop = 20;
+    startInScrollBox(card, 48, false, style);
+    assert.equal(Math.round(col.scrollTop), 8 + 2 * 108 - 48);
   });
 });
