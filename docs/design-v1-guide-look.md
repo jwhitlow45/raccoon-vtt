@@ -1,6 +1,6 @@
 # raccoon-vtt v1: the DM guide looks like a printed guide
 
-Status: built for review. The screenshots go to the project owner before tests and review. Section 10 lists the owner's choices with a recommended answer for each. This design builds on the DM guide's page (`client/pages/DmGuide.tsx`), the Docs page (`client/pages/Docs.tsx`) and the shared Markdown renderer (`client/components/markdown.ts`, `Markdown.tsx`), and keeps the visual design's tokens (docs/design-v1-visual.md).
+Status: decided and built, in review. The project owner approved the look as shown on 2026-10-18, with headings in the app's font (section 10). Section 12 lists the tests. This design builds on the DM guide's page (`client/pages/DmGuide.tsx`), the Docs page (`client/pages/Docs.tsx`) and the shared Markdown renderer (`client/components/markdown.ts`, `Markdown.tsx`), and keeps the visual design's tokens (docs/design-v1-visual.md).
 
 The project owner asked on 2026-10-18: "could the formatting of the dm guide be "spruced" up a little bit? I feel text hierarchies could be made a bit more clear and the TOC could be a bit more "official" looking/be a bit more bespoke instead of just being a basic list. open to ideas here i just want the guide to look more "professional"".
 
@@ -53,7 +53,8 @@ The breakpoint uses `useLayoutSize` (features/device/layout.ts), so a device's i
 | Lead (introductions) | 18 | 400 | 24 | line height 1.55 |
 | Part (h2) | 32 | 700 | 96, then a rule and 32 | "Part n" label in accent small capitals, a 40 x 3 accent bar under it |
 | Section (h3) | 24 | 700 | 56 | its number in the accent before it |
-| Subsection (h4) | 18 | 700 | 32 | no rule |
+| Opening section (h2) | 24 | 700 | 56 | a section's look, a level higher, since it stands beside the parts |
+| Subsection (h4, or h3 in an opening section) | 18 | 700 | 32 | no rule |
 | Label paragraph | 13 | 700 | 32 | a paragraph that is only bold text, in accent small capitals |
 | Body | 16 | 400 | 0, 16 after | line height 1.6, measure 34 em |
 | Caption | 13 | 400 | 8 | muted |
@@ -84,7 +85,7 @@ Behind `guide` only, at the top level only: a quote whose first line is `[!TIP]`
 - **The outline** (`GuideOutlineNav`, a `nav` named "Guide outline"): the opening sections, then each part with its number. Beside the text it opens only the part being read, so it fits the window, and it scrolls itself, never the page, to keep the current row in view. In the phone's sheet every part is open.
 - **Where you are** (`useCurrentSection`): the last heading whose top has passed a line a third of the way down the window (at most 240 px), or the last one in view at the page's foot. It reads on scroll at most once a frame and renders only when the answer changes. The current row gets `aria-current="location"`, a 2 px accent bar and the raised surface.
 - **Row height**: 44 px for a finger and in the sheet, 32 px with a mouse beside the text, where 44 px rows would push a part's eleven sections past an 800 px window. It follows `isFinePointer`, as the token window's handle does.
-- **The phone's sheet** is the shared `Dialog` in its sheet shape, named "Contents". A row closes it, scrolls the page to the heading, pushes the hash so Back returns, and focuses the heading (each part and section heading has `tabIndex={-1}`). Escape and a swipe close it as any sheet.
+- **The phone's sheet** is the shared `Dialog` in its sheet shape, named "Contents". A row closes it, scrolls the page to the heading, pushes the hash so Back returns, and focuses the heading (each part and section heading has `tabIndex={-1}`). Escape, its close button and a swipe close it as any sheet, and focus goes back to the Contents button. The button sets that target each time it opens the sheet, so a dismissal after an earlier pick never sends focus to the old heading, and a phone's tap, which may not focus the button, still gets it back.
 - **Part ends**: two cards, "Back to contents" and "Next: part n" with the next part's name, each at least 44 px.
 - **Unchanged**: the hash scroll on load, in-page links, and the Guide links from panels.
 - No smooth scrolling and no new animation, so reduced motion needs nothing.
@@ -104,16 +105,18 @@ Two more, which the guide mostly does already:
 4. A key goes in backticks (`` `N` ``, `` `Ctrl+Z` ``), so it becomes a keycap. A word in backticks that is not a key stays code.
 5. A label over steps, such as a scenario's "**Building it**", is a paragraph of bold text alone.
 
-**Asked of the writer**: put `# Reference` and a one-sentence introduction before `## Shortcuts`. Today Shortcuts sits under `# Scenarios`, on GitHub too, so the page numbers it 4.8 and draws it as a worked example. The screenshots use a fixture copy with that heading. The `shortcuts` id does not change.
+**Added with this work**: `# Reference` and a one-sentence introduction before `## Shortcuts`. Shortcuts sat under `# Scenarios`, on GitHub too, so the page numbered it 4.8 and drew it as a worked example. It is now section 5.1, and the `shortcuts` id did not change.
 
-## 10. For the project owner
+## 10. Decided
 
-| Question | Recommendation |
+The project owner reviewed the screenshots on 2026-10-18 and approved the look as shown.
+
+| Question | Decision |
 |---|---|
-| Serif headings? A screenshot shows Source Serif 4 (OFL) for the title, parts, sections and the contents' titles, loaded for the shot only. | Keep the one sans font. Inter alone reads clean beside the app, and a second face means a second file to bundle and credit. |
-| Captions under screenshots (the alt text, shown) | Keep. They read like a printed guide's figures. The cost is length. |
-| "Start here" cards for the three opening sections | Keep. They point a new DM at the Quick start first. |
-| Light mode | The app has one dark theme (a light theme is a Later item in docs/features.md), so the page has one too. Every color is a token, so it follows a light theme when one comes. |
+| Serif headings? A screenshot showed Source Serif 4 (OFL) for the title, parts, sections and the contents' titles, loaded for the shot only. | No. Headings stay in the app's font, so Inter applies to the whole page when it lands, and no second face is bundled or credited. |
+| Captions under screenshots (the alt text, shown) | Kept, as shown. They read like a printed guide's figures. |
+| "Start here" cards for the three opening sections | Kept, as shown. They point a new DM at the Quick start first. |
+| Light mode | Not part of this work. The app has one dark theme (a light theme is a Later item in docs/features.md), so the page has one too. Every color is a token, so it follows a light theme when one comes. |
 
 ## 11. What must not change
 
@@ -122,15 +125,16 @@ Two more, which the guide mostly does already:
 - The parser stays a tree builder that emits no HTML. Journal pages and stat blocks render as before.
 - Theme tokens only (style drift check), no new dependency, no sideways scroll at 390 px.
 
-## 12. Tests (the next stage)
+## 12. Tests
 
 - **Unit** (markdown.test.ts): alerts parse behind `guide` only, at the top level only, need a body, and other kinds stay quotes. `keyChord` takes single characters, named keys and chords, and leaves `-7`, `goblin`, `Ctrl++` and `cr 1-3` as code.
-- **Unit** (new outline.test.ts, on the real guide): every part and section has an id and a number, the contents is dropped, the scenarios part is the examples part, every heading the Guide links open is in the outline, `firstSentence` cuts where it should, and `currentOf` picks the right heading above the first, mid-page and at the foot.
-- **e2e** (`e2e/guide.e2e.ts`): the phone's Contents is now a button that opens a sheet, so its step changes. New steps (labelled `guidelook-`): on a computer the outline marks the section after a jump and a scroll, on a phone a row in the sheet closes it, lands on its heading and Back returns, rows meet 44 px on touch, and the Docs page still links the guide.
+- **Unit** (markdownView.test.ts): a stat block and a journal page that use every block and inline kind render byte for byte as the renderer drew them before this work (markdown.golden.json), and no SRD text draws any of the guide's look. The guide's steps, keycaps, figures, callouts and labels render as section 6 says, and a `###` takes the level its section asks for.
+- **Unit** (outline.test.ts, on the real guide): the five parts and their numbered sections, the opening sections, the contents list dropped and every other block kept, every heading the Guide links open still drawn, the asides parsed as alerts, `firstSentence`, and `currentOf` above the first heading, mid-page and at the foot.
+- **e2e** (`e2e/guide.e2e.ts`, steps labelled `guidelook-`): on a computer the outline marks the section after a jump and a scroll and folds the other parts. On a phone the sheet marks the place, its rows are at least 44 px, a row closes it and lands on its heading with focus, Back returns, and Escape or the close button after an earlier pick gives focus back to the Contents button. The parts and sections carry their numbers, heading names leave them out, the heading levels nest (opening sections at level 2 with their subsections at 3), and steps, keycaps and both kinds of callout are drawn.
 
 ## 13. FEATURES.md
 
-A line under the DM guide's entry: the contents, the outline that follows your place, steps, keycaps and callouts. It goes in the lane's last commit.
+The DM guide's entry names the numbered parts and sections, the Start here cards, the outline that marks your place, the phone's Contents sheet, steps, keycaps and callouts.
 
 ## 14. Files
 
@@ -148,4 +152,4 @@ A line under the DM guide's entry: the contents, the outline that follows your p
 
 ## Appendix: screenshots
 
-In the project owner's screenshot folder under `raccoon-vtt/guide-look/`: `before-*` from the Docs page commits (main's guide text), `after-*` from this build with the revised text and the `# Reference` heading, `after-realtext-*` with the revised text as committed, and `serif-*` for the serif option.
+In the project owner's screenshot folder under `raccoon-vtt/guide-look/`: `before-*` from the Docs page commits (main's guide text), `after-*` from this build with the revised text and the `# Reference` heading (then a fixture copy, since added to the guide), `after-realtext-*` with the revised text as committed, and `serif-*` for the serif option.
