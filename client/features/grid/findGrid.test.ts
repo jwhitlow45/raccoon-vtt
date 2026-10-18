@@ -25,10 +25,21 @@ describe("what a found grid becomes", () => {
     assert.equal(foundGrid({ found: false, reason: "none" }, decoded, map), null);
   });
 
-  test("a grid found on the smaller decoded copy is scaled to the map's own pixels, its origin snapped as Apply snaps it", () => {
+  test("a grid found on the smaller decoded copy is scaled to the map's own pixels, its origin kept where the lines are", () => {
     // Decoded at 4096 of an 8192 px map: everything doubles.
     const found = foundGrid(detection(35.2, { x: 12.3, y: 0.4 }, 0.9), { width: 4096, height: 2048 }, { widthPx: 8192, heightPx: 4096 });
-    assert.deepEqual(found?.cal, { cellPx: 70.4, originPx: { x: 24.6, y: 0 } });
+    assert.deepEqual(found?.cal, { cellPx: 70.4, originPx: { x: 24.6, y: 0.8 } });
+  });
+
+  test("a sure find on 140 px squares keeps a small offset, which the box's snap would have moved to the edge", () => {
+    const decoded = { width: 2000, height: 1600 };
+    const map = { widthPx: 2000, heightPx: 1600 };
+    const origin = (o: number) => foundGrid(detection(140, { x: o, y: o }, 0.99), decoded, map)?.cal.originPx;
+    assert.deepEqual(origin(1), { x: 1, y: 1 });
+    assert.deepEqual(origin(6.0006), { x: 6, y: 6 });
+    assert.deepEqual(origin(7.5), { x: 7.5, y: 7.5 });
+    assert.deepEqual(origin(133), { x: 133, y: 133 });
+    assert.deepEqual(origin(139), { x: 0, y: 0 }, "a line a pixel before the edge starts the first square there");
   });
 
   test("a copy whose shape differs from the map's, read in another orientation, offers nothing", () => {

@@ -7,6 +7,7 @@ import {
   boxFromDrag,
   calibrationFromBox,
   calibrationFromCounts,
+  calibrationFromFind,
   canonicalToWorld,
   fitBounds,
   imageSquares,
@@ -151,6 +152,21 @@ describe("grid calibration", () => {
     const cal = calibrationFromBox({ x: 147, y: 140 + 63, size: 210 });
     assert.deepEqual(cal.originPx, { x: 7, y: 63 });
     assert.deepEqual(fitBounds({ widthPx: 1400, heightPx: 980, ...cal }), { w: 19, h: 13 });
+  });
+
+  test("a found grid keeps its measured origin, and only one just under a whole square folds to the edge", () => {
+    // 140 px squares on a 2000 x 1600 map, found at each of these origins.
+    const map = { widthPx: 2000, heightPx: 1600 };
+    const kept = (o: number) => calibrationFromFind({ cellPx: 140, originPx: { x: o, y: o } }).originPx;
+    for (const o of [1, 6, 7.5, 133]) assert.deepEqual(kept(o), { x: o, y: o }, `an origin of ${o} stays on its lines`);
+    assert.deepEqual(kept(6.0006), { x: 6, y: 6 }, "rounded as the app stores it");
+    // 1.4 px is 1% of a square here. A line that close before the edge starts the first square at the edge.
+    for (const o of [139, 139.9, -0.5]) assert.deepEqual(kept(o), { x: 0, y: 0 }, `an origin of ${o} is on the edge`);
+    assert.deepEqual(fitBounds({ ...map, ...calibrationFromFind({ cellPx: 140, originPx: { x: 139.9, y: 139.9 } }) }), { w: 14, h: 11 }, "the first column and row stay in the scene");
+    // A small square still folds a whole pixel: 1% of 40 px is less.
+    assert.deepEqual(calibrationFromFind({ cellPx: 40, originPx: { x: 39.2, y: 38.9 } }).originPx, { x: 0, y: 38.9 });
+    // Where a box the DM drew snaps, a find does not.
+    assert.deepEqual(calibrationFromBox({ x: 6, y: 133, size: 420 }).originPx, { x: 0, y: 0 });
   });
 
   test("a calibration from a box stays inside the schema", () => {

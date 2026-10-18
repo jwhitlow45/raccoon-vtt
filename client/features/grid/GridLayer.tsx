@@ -3,8 +3,8 @@ import { useStore } from "zustand";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
-import { boxCorner, calibrationFromBox, canonicalToWorld } from "./calibrate.ts";
-import { HANDLE_HIT_PX, useGridStore } from "./store.ts";
+import { boxCorner, canonicalToWorld } from "./calibrate.ts";
+import { boxCalibration, HANDLE_HIT_PX, useGridStore } from "./store.ts";
 
 const CORNERS = ["nw", "ne", "sw", "se"] as const;
 
@@ -16,11 +16,13 @@ const CORNERS = ["nw", "ne", "sw", "se"] as const;
 export function GridLayer(props: LayerProps) {
   const { scene, role, scale } = props;
   const active = useRoomView((s) => s.local.tool === "grid");
-  const box = useStore(useGridStore(), (s) => s.box);
+  const gridState = useGridStore();
+  const box = useStore(gridState, (s) => s.box);
+  const found = useStore(gridState, (s) => s.found);
   const map = scene.map;
   if (role !== "dm" || !active || !box || !map) return null;
 
-  const cal = calibrationFromBox(box);
+  const cal = boxCalibration(box, found, scene.id);
   const topLeft = canonicalToWorld(map, { x: box.x, y: box.y });
   const side = box.size / map.cellPx;
   const imageW = map.widthPx / map.cellPx;

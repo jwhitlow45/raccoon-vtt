@@ -81,6 +81,7 @@ export function showOutcome(input: {
     outcome: found.tier === "high" ? "applied" : "offered",
     cellPx: found.cal.cellPx,
     box,
+    cal: found.cal,
     ...(found.tier === "high" && input.fallback ? { fallback: input.fallback } : {}),
     ...(found.tier !== "high" && input.ownGrid ? { ownGrid: true as const } : {}),
   };

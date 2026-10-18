@@ -5,9 +5,9 @@ import { theme } from "../../lib/theme.ts";
 import { dispatchGesture } from "../../state/actions.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { OptButton, OptionsStrip, StripText, ValueChip } from "../measure/controls.tsx";
-import { calibrationFromBox, fitBounds, nudgeBox, sameCalibration, type CalBox, type Calibration } from "./calibrate.ts";
+import { fitBounds, nudgeBox, sameCalibration, type CalBox, type Calibration } from "./calibrate.ts";
 import { boxAround, gridOps, middleOf } from "./outcome.ts";
-import { useGridStore } from "./store.ts";
+import { boxCalibration, useGridStore } from "./store.ts";
 import { useFindGrid } from "./useFindGrid.ts";
 
 /** One canonical pixel per nudge: on the largest maps a thirtieth of a square or less. */
@@ -41,7 +41,7 @@ export default function GridOptions() {
   if (!map) return <OptionsStrip tool="Line up grid" line={{ tone: "hint", content: "This scene has no map image. Add one in the Scenes panel." }} slots={[]} />;
   if (!box) return <OptionsStrip tool="Line up grid" line={{ tone: "hint", content: "Drag a box over three by three squares of the map." }} slots={[]} />;
 
-  const cal = calibrationFromBox(box);
+  const cal = boxCalibration(box, found, sceneId);
   const bounds = fitBounds({ ...map, ...cal });
   const changed = !sameCalibration(cal, map);
   const resize = fitScene && (bounds.w !== scene.bounds.w || bounds.h !== scene.bounds.h);

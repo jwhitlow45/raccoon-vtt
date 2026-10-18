@@ -6,7 +6,8 @@ import type { ClientOp } from "#shared/protocol.ts";
 import type { AxisFit, GridDetection } from "./detect.ts";
 import type { SearchAnswer, SearchRequest, SearchWorker } from "./findGrid.ts";
 import { boxAround, findOnScene, gridOps, middleOf, showOutcome } from "./outcome.ts";
-import type { GridToolState } from "./store.ts";
+import { calibrationFromBox, nudgeBox } from "./calibrate.ts";
+import { boxCalibration, type GridToolState } from "./store.ts";
 
 // A 1400 x 1000 map made with today's first guess: 47 px squares from the corner.
 const MAP: SceneMap = { assetId: "a1", widthPx: 1400, heightPx: 1000, cellPx: 47, originPx: { x: 0, y: 0 } };
@@ -42,7 +43,7 @@ describe("what a search does to the scene", () => {
     const { found, box } = store.getState();
     assert.deepEqual(box, boxAround(FOUND, { x: 700, y: 500 }));
     assert.deepEqual(box, { x: 580, y: 385, size: 210 });
-    assert.deepEqual(found, { sceneId: "s1", outcome: "applied", cellPx: 70, box, fallback: { cellPx: 47, originPx: { x: 0, y: 0 } } });
+    assert.deepEqual(found, { sceneId: "s1", outcome: "applied", cellPx: 70, box, cal: FOUND, fallback: { cellPx: 47, originPx: { x: 0, y: 0 } } });
   });
 
   test("a doubtful grid only places the box, for the DM to check and Apply", () => {
@@ -51,6 +52,20 @@ describe("what a search does to the scene", () => {
     assert.deepEqual(sent, []);
     assert.equal(store.getState().found?.outcome, "offered");
     assert.deepEqual(store.getState().box, { x: 580, y: 385, size: 210 });
+  });
+
+  test("the box a search left stands for the grid it measured, until it moves", () => {
+    const { actions, store } = room();
+    // 6 px in: a box the DM drew there would snap to the edge.
+    const measured = { cellPx: 140, originPx: { x: 6, y: 6 } };
+    showOutcome({ actions, store, scene: SCENE, found: { tier: "medium", cal: measured }, fit: true, at: { x: 700, y: 500 } });
+    const { found, box } = store.getState();
+    assert.ok(box);
+    assert.deepEqual(boxCalibration(box, found, "s1"), measured, "Apply and the drawn lines take the find as measured");
+    assert.deepEqual(calibrationFromBox(box).originPx, { x: 0, y: 0 }, "the hand-drawn box's snap would have moved it");
+    assert.deepEqual(boxCalibration(box, found, "s2"), calibrationFromBox(box), "another scene's note says nothing");
+    const moved = nudgeBox(box, 1, 0);
+    assert.deepEqual(boxCalibration(moved, found, "s1"), calibrationFromBox(moved), "a box the DM moved is theirs");
   });
 
   test("a found box goes to the middle of the box there is, or of the map when that is off the image", () => {
@@ -122,7 +137,7 @@ describe("Find the grid", () => {
     assert.deepEqual(sent, [], "nothing applied");
     const { found, box } = store.getState();
     assert.deepEqual(box, { x: 580, y: 385, size: 210 }, "the box on the found squares in the middle");
-    assert.deepEqual(found, { sceneId: "s1", outcome: "offered", cellPx: 70, box, ownGrid: true });
+    assert.deepEqual(found, { sceneId: "s1", outcome: "offered", cellPx: 70, box, cal: { cellPx: 70, originPx: { x: 20, y: 35 } }, ownGrid: true });
   });
 
   test("the found origin stays where its lines are, at or inside the image's corner", async () => {

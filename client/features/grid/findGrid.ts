@@ -1,6 +1,6 @@
 import type { AutoWalls } from "#shared/model.ts";
 import type { GridDetection } from "./detect.ts";
-import { calibrationFromBox, type Calibration, type Point } from "./calibrate.ts";
+import { calibrationFromFind, type Calibration, type Point } from "./calibrate.ts";
 
 /**
  * Finding a map's drawn grid from the page (docs/design-v1-grid-detect.md
@@ -23,16 +23,15 @@ export type FoundGrid = { tier: "high" | "medium"; cal: Calibration };
  * by the canonical size over the decoded one. If the two shapes differ,
  * the browser read the file's orientation differently from the server,
  * and the lines would land elsewhere, so nothing is offered. The
- * calibration goes through `calibrationFromBox`, so it is rounded and its
- * origin snapped exactly as a box the DM applied would be.
+ * calibration goes through `calibrationFromFind`, which keeps the
+ * measured origin where a hand-drawn box's would be snapped.
  */
 export function foundGrid(result: GridDetection, decoded: { width: number; height: number }, canonical: { widthPx: number; heightPx: number }): FoundGrid | null {
   if (!result.found) return null;
   const kx = canonical.widthPx / decoded.width;
   const ky = canonical.heightPx / decoded.height;
   if (!(kx > 0 && ky > 0) || Math.abs(kx - ky) / kx > 0.01) return null;
-  const cellPx = result.cellPx * kx;
-  const cal = calibrationFromBox({ x: result.originPx.x * kx, y: result.originPx.y * ky, size: 3 * cellPx });
+  const cal = calibrationFromFind({ cellPx: result.cellPx * kx, originPx: { x: result.originPx.x * kx, y: result.originPx.y * ky } });
   return { tier: result.confidence >= HIGH_CONFIDENCE ? "high" : "medium", cal };
 }
 

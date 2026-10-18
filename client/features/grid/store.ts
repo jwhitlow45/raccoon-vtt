@@ -1,6 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
-import type { CalBox, Calibration, Corner, Point } from "./calibrate.ts";
+import { calibrationFromBox, type CalBox, type Calibration, type Corner, type Point } from "./calibrate.ts";
 
 /**
  * The alignment box while the grid tool is active. It lives outside the
@@ -25,6 +25,8 @@ export type FoundNote = {
   /** The found squares' size, px. */
   cellPx: number;
   box: CalBox | null;
+  /** The grid found, as measured, which the box stands for while it is the one the search left. None when no grid was found. */
+  cal?: Calibration;
   /** The grid before an applied one, which Use default puts back. Only an import has one: after Find the grid, Undo does. */
   fallback?: Calibration;
   /** An offer on a scene that came with its own grid, from a Universal VTT file. */
@@ -47,6 +49,16 @@ export type GridToolState = {
   /** The scene a Find the grid search runs for, and how to stop it. */
   finding: { sceneId: string; cancel(): void } | null;
 };
+
+/**
+ * The grid the box stands for. A box a search left on this scene stands for
+ * the grid it measured, so Apply, the drawn lines and the size read that,
+ * not `calibrationFromBox`, whose snap for a hand-drawn box would move a
+ * measured origin off its lines. Once the box moves, it is the DM's own.
+ */
+export function boxCalibration(box: CalBox, found: FoundNote | null, sceneId: string): Calibration {
+  return found?.sceneId === sceneId && found.box === box && found.cal ? found.cal : calibrationFromBox(box);
+}
 
 /** How close, in screen pixels, a finger must land to grab a corner: half a 44 px target. */
 export const HANDLE_HIT_PX = 22;

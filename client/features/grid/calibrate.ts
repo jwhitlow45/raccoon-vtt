@@ -127,6 +127,33 @@ function snappedOrigin(v: number, cellPx: number): number {
   return origin <= slack || origin >= cellPx - slack ? 0 : origin;
 }
 
+/** A measured origin this close under a whole cell, as a fraction of a cell or at least FOUND_SNAP_PX, is taken as on the image's edge. */
+export const FOUND_SNAP = 0.01;
+export const FOUND_SNAP_PX = 1;
+
+/**
+ * The calibration a grid found in the map's pixels describes
+ * (docs/design-v1-grid-detect.md section 6). The detector places the lines
+ * to a fraction of a pixel, so its origin is kept as measured. The wide
+ * snap of a hand-drawn box (ORIGIN_SNAP) would move a line found 6 px in
+ * onto the image's edge, off the drawn lines.
+ *
+ * Only an origin just under a whole cell folds to 0. That is a line found
+ * a hair before the image's edge, which would otherwise start cell (0, 0)
+ * one square in, and the art's first row or column would fall outside the
+ * scene (the LP5-OPS-4 case). An origin just past 0 keeps that square
+ * already.
+ */
+export function calibrationFromFind(found: { cellPx: number; originPx: Point }): Calibration {
+  const cellPx = round(Math.min(MAX_CELL_PX, Math.max(MIN_CELL_PX, found.cellPx)), 4);
+  const slack = Math.max(FOUND_SNAP_PX, cellPx * FOUND_SNAP);
+  const origin = (v: number) => {
+    const o = round(mod(v, cellPx), 2);
+    return o >= cellPx - slack ? 0 : o;
+  };
+  return { cellPx, originPx: { x: origin(found.originPx.x), y: origin(found.originPx.y) } };
+}
+
 /**
  * "Cells across by cells down": the art is that many squares edge to edge,
  * so the origin is its corner. Squares are square, so the two sizes are
