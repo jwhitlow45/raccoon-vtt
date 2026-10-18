@@ -425,7 +425,7 @@ export function concentrationRollTo(view: Pick<RoomState, "members" | "character
 }
 
 export function concentrationWords(name: string, total: number, decided: "pass" | "fail"): string {
-  return `${name} rolled ${total}: ${decided === "pass" ? "concentration holds" : "concentration ended"}.`;
+  return `${name} rolled ${total}: ${decided === "pass" ? "Concentration holds" : "Concentration ended"}.`;
 }
 
 /** Ends a creature's concentration, as Failed always has: every concentrating effect goes. */

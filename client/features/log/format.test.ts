@@ -63,10 +63,10 @@ describe("event text", () => {
     assert.equal(describeEvent({ type: "rest", ...target, kind: "short", label: "Bloodied" }, state), "Thorn finishes a short rest (Bloodied).");
     assert.equal(describeEvent({ type: "concentration", ...target, dc: 10, spell: "Bless" }, state), "Thorn makes a DC 10 Constitution save to keep concentrating on Bless.");
     assert.equal(describeEvent({ type: "concentration", ...target, spell: "Bless" }, state), "Thorn makes a Constitution save to keep concentrating on Bless.");
-    assert.equal(describeEvent({ type: "concentration", ...target, ended: true }, state), "Thorn loses concentration.");
+    assert.equal(describeEvent({ type: "concentration", ...target, ended: true }, state), "Thorn loses Concentration.");
     // Only the DM's log holds lines about a condition hidden from players, and it says so.
     assert.equal(describeEvent({ type: "effect", ...target, key: "poisoned", action: "add", hidden: true }, state), "Thorn gains Poisoned (hidden from players).");
-    assert.equal(describeEvent({ type: "concentration", ...target, ended: true, hidden: true }, state), "Thorn loses concentration (hidden from players).");
+    assert.equal(describeEvent({ type: "concentration", ...target, ended: true, hidden: true }, state), "Thorn loses Concentration (hidden from players).");
   });
 
   test("life, effects and death saves", () => {

@@ -414,9 +414,9 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
           case "remove":
             return `${who} stops concentrating${on}.`;
           case "expire":
-            return `${who}'s concentration${on} ran out.`;
+            return `${who}'s Concentration${on} ran out.`;
           case "pause":
-            return `${who}'s concentration${on} is paused outside combat.`;
+            return `${who}'s Concentration${on} is paused outside combat.`;
         }
       }
       const effect = effectName(data.key);
@@ -435,7 +435,7 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
     case "concentration": {
       const who = creatureName(names, data);
       const on = data.spell ? ` on ${data.spell}` : "";
-      if (data.ended) return `${who} loses concentration${on}.`;
+      if (data.ended) return `${who} loses Concentration${on}.`;
       if (data.dc !== undefined) return `${who} makes a DC ${data.dc} Constitution save to keep concentrating${on}.`;
       return `${who} makes a Constitution save to keep concentrating${on}.`;
     }

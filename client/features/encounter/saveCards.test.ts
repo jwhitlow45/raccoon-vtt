@@ -294,8 +294,8 @@ describe("the concentration card", () => {
       concentrationCard({ ...base, rolled: 9 }).buttons.map((b) => b.text),
       ["Accept failure"],
     );
-    assert.equal(concentrationWords("Thorn", 10, "pass"), "Thorn rolled 10: concentration holds.");
-    assert.equal(concentrationWords("Thorn", 9, "fail"), "Thorn rolled 9: concentration ended.");
+    assert.equal(concentrationWords("Thorn", 10, "pass"), "Thorn rolled 10: Concentration holds.");
+    assert.equal(concentrationWords("Thorn", 9, "fail"), "Thorn rolled 9: Concentration ended.");
   });
 
   test("Legendary Resistance left: a fail waits on Use Legendary Resistance or Accept failure", () => {
