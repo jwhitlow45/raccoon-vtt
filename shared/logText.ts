@@ -34,15 +34,28 @@ function displayName(token: Pick<Token, "name" | "number">): string {
 
 export type AreaEvent = Extract<LogEvent, { type: "area" }>;
 
+const UNNAMED_AREA = /^(\d+ ft )(cone|sphere|cylinder|cube|line|emanation)$/;
+
+/**
+ * An area's name as its reminder stores it, with the shape of one that has
+ * no name in the SRD's capitals: "20 ft Sphere". The reducer still writes
+ * the lowercase it always has, so a replayed op makes the very log it made
+ * then, and old lines and new read alike.
+ */
+function areaShown(area: string): string {
+  return area.replace(UNNAMED_AREA, (_, size: string, shape: string) => `${size}${shape.charAt(0).toUpperCase()}${shape.slice(1)}`);
+}
+
 /** "Goblin 2 ended its turn in Spirit Guardians." */
 export function areaReminderText(data: AreaEvent, who: string): string {
+  const area = areaShown(data.area);
   switch (data.trigger) {
     case "enter":
-      return data.moved ? `${data.area} moved onto ${who}.` : `${who} entered ${data.area}.`;
+      return data.moved ? `${area} moved onto ${who}.` : `${who} entered ${area}.`;
     case "turnStart":
-      return `${who} started its turn in ${data.area}.`;
+      return `${who} started its turn in ${area}.`;
     case "turnEnd":
-      return `${who} ended its turn in ${data.area}.`;
+      return `${who} ended its turn in ${area}.`;
   }
 }
 

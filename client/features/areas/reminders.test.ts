@@ -14,6 +14,9 @@ describe("area reminders on this device", () => {
     assert.equal(areaReminderText(event({ trigger: "turnStart", area: "Stinking Cloud" }), "Ayla"), "Ayla started its turn in Stinking Cloud.");
     assert.equal(areaReminderText(event({ trigger: "enter" }), "Goblin 2"), "Goblin 2 entered Spirit Guardians.");
     assert.equal(areaReminderText(event({ trigger: "enter", moved: true }), "Goblin 2"), "Spirit Guardians moved onto Goblin 2.");
+    // An area with no name is stored in lowercase, as the reducer has always written it, and reads with the SRD's capitals.
+    assert.equal(areaReminderText(event({ trigger: "enter", area: "20 ft sphere" }), "Goblin 2"), "Goblin 2 entered 20 ft Sphere.");
+    assert.equal(areaReminderText(event({ trigger: "turnStart", area: "15 ft emanation" }), "Ayla"), "Ayla started its turn in 15 ft Emanation.");
     // The log names the creature as this viewer's view does.
     const s = room({ tokens: { g2: token("g2", { name: "Goblin", number: 2 }) } });
     assert.equal(describeEvent(event(), s), "Goblin 2 ended its turn in Spirit Guardians.");

@@ -239,7 +239,7 @@ function SpellResults(props: { query: string; onPick(name: string): void }) {
           {s.name}
           <span style={{ fontWeight: theme.weight.regular, color: theme.color.textMuted }}>
             {" "}
-            {s.size} ft {shapeName(s.shape).toLowerCase()}
+            {s.size} ft {shapeName(s.shape)}
           </span>
         </OptButton>
       ))}
@@ -429,7 +429,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
     );
   }
   const note = d.note ? <span style={{ color: theme.color.textMuted }}> · {d.note}</span> : null;
-  const title = (d.spell ?? `${d.size} ft ${shapeName(d.shape).toLowerCase()}`) + (canPitch(d.shape) ? aimSuffix(clampPitch(d.pitch)) : "");
+  const title = (d.spell ?? `${d.size} ft ${shapeName(d.shape)}`) + (canPitch(d.shape) ? aimSuffix(clampPitch(d.pitch)) : "");
   const line: StripLine = t
     ? inAreaLine({ env, t, moving: st.moving, title, extra: <>{range}{note}</> })
     : {

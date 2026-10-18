@@ -13,7 +13,7 @@ export function shapeName(shape: AreaShape): string {
   return SHAPES.find((s) => s.value === shape)?.label ?? shape;
 }
 
-/** "Fireball", or "20 ft sphere" for an area with no spell. */
+/** "Fireball", or "20 ft Sphere" for an area with no spell. */
 export function areaTitle(t: Pick<AreaTemplate, "shape" | "size"> & { spell?: string | null; label?: string | null }): string {
-  return t.spell || t.label || `${t.size} ft ${shapeName(t.shape).toLowerCase()}`;
+  return t.spell || t.label || `${t.size} ft ${shapeName(t.shape)}`;
 }
