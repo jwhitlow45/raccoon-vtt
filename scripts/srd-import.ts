@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { CONDITION_KEYS, STATUS_KEYS, type AbilityKey, type AreaShape, type AreaTrigger, type ConditionKey, type StatusKey } from "../shared/model.ts";
 import type { DamageType } from "../shared/rules/damage.ts";
 import type { AreaSpell } from "../shared/srd/area-spells.ts";
+import type { SaveSpell } from "../shared/srd/save-spells.ts";
 import type { SrdMonster } from "../shared/srd/monsters.ts";
 import { srdRollsOf } from "../shared/srd/rolls.ts";
 import type { RulesText, RulesTextEntry } from "../shared/srd/rules-text.ts";
@@ -11,7 +12,8 @@ import type { XpBudgetRow } from "../shared/srd/xp-budget.ts";
 /**
  * Regenerates the SRD 5.2.1 data in shared/srd/ from the text of the SRD PDF:
  * monsters.json (every stat block), area-spells.json (spell presets for area
- * templates), rules-text.json (the conditions and the statuses the SRD
+ * templates), save-spells.json (what a pass takes for each spell that deals
+ * damage on a save), rules-text.json (the conditions and the statuses the SRD
  * defines) and xp-budget.json (the encounter XP budget per character). The hand-written parts, such as summaries and colors, live in
  * conditions.ts and statuses.ts and are never touched here. rolls.json (each
  * creature's saves, skills and spell numbers) is read from the stat blocks,
@@ -775,6 +777,63 @@ function buildAreaSpells(spells: readonly Spell[]): AreaSpell[] {
 }
 
 // ---------------------------------------------------------------------------
+// Save spells
+
+/** A save named in a spell's text. */
+const SAVE_RE = /\b(?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) saving throw/;
+/**
+ * Damage named in a spell's text: dice or a number before "damage", with any
+ * types between ("5d8 Acid, Cold, Fire, Lightning, or Thunder damage"), or
+ * damage of a chosen type ("8d8 damage of the spirit's type").
+ */
+const DAMAGE_RE = /\b\d+(?:d\d+)?(?: \+ \d+)?(?:,? (?:or )?[A-Z][a-z]+)* damage\b|\bdamage of\b/;
+/** What a save that halves damage says, in both of the SRD's phrasings ("half the initial damage" is Vitriolic Sphere's). */
+const HALF_RE = /\bhalf (?:as much|the initial) damage\b/i;
+
+/**
+ * The spells whose text names a save and damage, but whose damage does not
+ * hang on a save, each left out with the reason. Every other such spell
+ * takes its rule from its own text, and a skip that no longer names such a
+ * spell fails the run, so a new SRD revision is read again in full.
+ */
+const SAVE_SKIP: Record<string, string> = {
+  "Arcane Hand": "the hand's damage comes from a spell attack and a grapple, and its saves only push or grab",
+  "Bestow Curse": "the save is against the curse, whose extra damage comes with the caster's attacks",
+  "Enlarge/Reduce": "the save is an unwilling target's, and the extra damage comes with its attacks",
+  Geas: "the save is against the charm, and the damage comes when the target acts against the command",
+  "Heat Metal": "the damage takes no save, which only decides whether the object is dropped",
+  "Searing Smite": "the hit's damage takes no save, which only ends the burning",
+  "Storm of Vengeance": "its rounds deal damage differently, with and without a save",
+  Web: "the damage from burning webs takes no save",
+};
+
+/**
+ * Every SRD spell that deals damage on a save, and what a pass takes, read
+ * from its text: half where it says "half as much damage" or "half the
+ * initial damage", none where it does not. A character's spell of the same
+ * name with no "On a pass" set takes this rule, area spell or not.
+ */
+function buildSaveSpells(spells: readonly Spell[]): SaveSpell[] {
+  const out: SaveSpell[] = [];
+  const problems: string[] = [];
+  const skipped = new Set<string>();
+  for (const spell of spells) {
+    const flat = spell.text.replace(/\s+/g, " ");
+    if (!SAVE_RE.test(flat) || !(DAMAGE_RE.test(flat) || HALF_RE.test(flat))) continue;
+    if (spell.name in SAVE_SKIP) {
+      skipped.add(spell.name);
+      continue;
+    }
+    out.push({ srdId: slug(spell.name), name: spell.name, level: spell.level, onPass: HALF_RE.test(flat) ? "half" : "none" });
+  }
+  for (const name of Object.keys(SAVE_SKIP)) {
+    if (!skipped.has(name)) problems.push(`${name}: in SAVE_SKIP, but not an SRD spell whose text names a save and damage`);
+  }
+  if (problems.length > 0) throw new Error(`save spell problems:\n${problems.join("\n")}`);
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// ---------------------------------------------------------------------------
 // Monsters
 
 const SIZE_WORDS = "Tiny|Small|Medium|Large|Huge|Gargantuan";
@@ -1283,6 +1342,8 @@ function main(): void {
   console.log(`spells: ${spells.length}`);
   const areaSpells = buildAreaSpells(spells);
   console.log(`area spells: ${areaSpells.length}`);
+  const saveSpells = buildSaveSpells(spells);
+  console.log(`save spells: ${saveSpells.length}`);
 
   const index = statBlockIndex(lines);
   const problems: MonsterProblem[] = [];
@@ -1311,6 +1372,7 @@ function main(): void {
   writeFileSync(new URL("monsters.json", OUT_DIR), jsonLines(monsters.sort((a, b) => a.name.localeCompare(b.name))));
   writeRolls(monsters);
   writeFileSync(new URL("area-spells.json", OUT_DIR), jsonLines(areaSpells));
+  writeFileSync(new URL("save-spells.json", OUT_DIR), jsonLines(saveSpells));
   writeFileSync(new URL("rules-text.json", OUT_DIR), `${JSON.stringify(rulesText, null, 2)}\n`);
   writeFileSync(new URL("xp-budget.json", OUT_DIR), jsonLines(xpBudget));
 }
