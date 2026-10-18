@@ -199,9 +199,43 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     const view = panel.locator("[data-pc-stats]");
     await view.getByText("Stealth +9 (expertise)").waitFor();
     await view.getByText("Initiative").waitFor();
-    assert.match((await view.textContent()) ?? "", /Dex16\+3\+6/);
+    // The Dex box of the six across: its score, its modifier, and its save named as proficient (docs/design-v1-dice-ui.md 6.1).
+    assert.match((await view.textContent()) ?? "", /Dex16 \+3Save \+6, proficient/);
     assert.match(await savesLine(ana), /Dex \+6/);
     await shots.take(ana, "pcstats-panel");
+  });
+
+  test("1b. at 375 x 667 at 130% each save's word and its total share a line in the editor (LP7-PC-12)", async () => {
+    await ana.setViewportSize({ width: 375, height: 667 });
+    await ana.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+    await ana.reload();
+    await ana.getByRole("status", { name: "Connected" }).first().waitFor();
+    await ana.locator(".konvajs-content").first().waitFor();
+    await tapCell(ana, BOUNDS, { x: 5, y: 5 });
+    // Stat block opens the Token sheet with the block open, which a phone starts folded.
+    await bar(ana).getByRole("button", { name: "Stat block", exact: true }).click();
+    const sheetPanel = ana.getByRole("region", { name: "Token", exact: true });
+    await sheetPanel.locator("[data-pc-stats]").waitFor();
+    await sheetPanel.getByRole("button", { name: "Edit", exact: true }).click();
+    const sheet = editor(ana);
+    await sheet.waitFor();
+    for (const ability of ["Strength", "Dexterity", "Wisdom", "Charisma"]) {
+      const total = sheet.getByRole("textbox", { name: `${ability} save`, exact: true });
+      await total.scrollIntoViewIfNeeded();
+      const box = (await total.boundingBox())!;
+      const word = (await total.locator("xpath=preceding-sibling::span[1]").boundingBox())!;
+      const middle = word.y + word.height / 2;
+      assert.ok(middle > box.y && middle < box.y + box.height, `${ability}: "Save" and its total on two lines: ${JSON.stringify({ word, box })}`);
+    }
+    await sheet.getByRole("textbox", { name: "Dexterity save", exact: true }).scrollIntoViewIfNeeded();
+    await shots.take(ana, "pcstats-editor-375-130");
+    await ana.keyboard.press("Escape");
+    await sheet.waitFor({ state: "detached" });
+    await ana.setViewportSize({ width: 1280, height: 800 });
+    await ana.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await ana.reload();
+    await ana.getByRole("status", { name: "Connected" }).first().waitFor();
+    await ana.locator(".konvajs-content").first().waitFor();
   });
 
   test("2. the DM's device shows the totals, and Cy's has none of the block", async () => {
