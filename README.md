@@ -98,7 +98,7 @@ follows `PORT`.
 | `pnpm typecheck` | `tsc --noEmit` for the server and the client |
 | `pnpm test` | unit tests (`*.test.ts`) |
 | `pnpm test:int` | integration tests against the dev postgres (`*.itest.ts`). Run `pnpm db:up` first |
-| `pnpm test:e2e` | builds the client, then runs the browser tests (`e2e/*.e2e.ts`) against a server on port 3100 (`E2E_PORT`) and the dev postgres. Needs Google Chrome installed. Screenshots go to `test-results/e2e-screenshots` (gitignored), or to the folder in `E2E_SCREENSHOT_DIR`, and `E2E_SCREENSHOT_DIR=0` takes none. Run it alone, not beside `pnpm test:int`, since both use the same database |
+| `pnpm test:e2e` | builds the client, then runs the browser tests (`e2e/*.e2e.ts`) against a server on port 3100 (`E2E_PORT`) and the dev postgres, one file at a time as a single shard of [continuous integration](#continuous-integration): the join limits' counts are cleared before each file, and a failing file runs once more. Needs Google Chrome installed. Screenshots go to `test-results/e2e-screenshots` (gitignored), or to the folder in `E2E_SCREENSHOT_DIR`, and `E2E_SCREENSHOT_DIR=0` takes none. Run it alone, not beside `pnpm test:int`, since both use the same database |
 | `pnpm test:e2e:shard <index> <count>` | one shard of the browser tests, as [continuous integration](#continuous-integration) runs them. Run `pnpm build` first |
 | `pnpm build` | the client into `dist/` |
 | `pnpm db:psql` | a psql shell in the dev postgres |

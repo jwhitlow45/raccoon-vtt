@@ -19,7 +19,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.client.json",
     "test": "node --test \"shared/**/*.test.ts\" \"server/**/*.test.ts\" \"client/**/*.test.ts\" \"scripts/**/*.test.ts\"",
     "test:int": "node --test --test-concurrency=1 \"server/**/*.itest.ts\"",
-    "test:e2e": "pnpm build && node --test --test-concurrency=1 \"e2e/**/*.e2e.ts\"",
+    "test:e2e": "pnpm build && node scripts/e2e-shard.ts 1 1",
     "test:e2e:shard": "node scripts/e2e-shard.ts",
     "test:backup": "node scripts/backup-check.ts",
     "db:up": "docker compose up -d postgres",

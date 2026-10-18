@@ -6,8 +6,9 @@ import pg from "pg";
 import { anyRerun, filePassed, NO_TIME, outcome, passedOnRerun, plan, runLimit, secondsFor, summaryCount, type Durations, type Result, type Run } from "./e2e-shard-plan.ts";
 
 /**
- * One shard of the e2e run, for continuous integration and for a laptop
- * that runs several shards side by side (README, "Continuous integration"):
+ * One shard of the e2e run, for continuous integration, for a laptop that
+ * runs several shards side by side, and as one shard for `pnpm test:e2e`
+ * (README, "Continuous integration"):
  *
  *   node scripts/e2e-shard.ts <index> <count>                run shard <index> of <count>, counted from 1
  *   node scripts/e2e-shard.ts <index> <count> --list         print every shard's files and run nothing
@@ -22,10 +23,10 @@ import { anyRerun, filePassed, NO_TIME, outcome, passedOnRerun, plan, runLimit, 
  * (scripts/e2e-shard-plan.ts). A file missing from the list counts as its
  * defaultSeconds until its time is recorded.
  *
- * A shard runs its files one after another, as `pnpm test:e2e` does,
- * since they share the port range and the database. A file that fails runs
- * once more, and the shard fails only when that run fails too. Both results
- * are reported, so a file that passed only on its rerun still shows as flaky.
+ * A shard runs its files one after another, since they share the port
+ * range and the database. A file that fails runs once more, and the shard
+ * fails only when that run fails too. Both results are reported, so a file
+ * that passed only on its rerun still shows as flaky.
  *
  * With a deadline, each run's limit leaves time for its rerun and for the
  * files after it, and a run the time left cannot hold is not started. So a
