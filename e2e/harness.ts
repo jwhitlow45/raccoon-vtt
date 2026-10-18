@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { BrowserContext, CDPSession, Locator, Page } from "playwright-core";
+import type { BrowserContext, CDPSession, Locator, Page, Request } from "playwright-core";
 import WebSocket from "ws";
 import type { RoomState } from "#shared/model.ts";
 import { applyChanges, type ProjectedState } from "#shared/project.ts";
@@ -314,6 +314,47 @@ export class ConsoleWatch {
     // Some page errors arrive with an empty stack, which `??` keeps, and the
     // log read "uncaught: " with nothing after it.
     page.on("pageerror", (err) => this.errors.push(`uncaught: ${err.stack || err.message || String(err)}`));
+  }
+}
+
+/**
+ * A page's requests for the build's own files, to wait out the room's
+ * background loads. Two seconds after it connects, the room loads the
+ * code of every panel and tool option its role may open
+ * (client/lib/retryableLazy.ts, preloadLazies). A load the network cuts
+ * off fails, and Chrome keeps that failure for the life of the page, so a
+ * test that takes the page offline in those moments leaves a panel that
+ * never opens. On a CI runner notes.e2e.ts went offline just then, and
+ * its Journal never opened.
+ */
+export class LoadWatch {
+  readonly #open = new Set<Request>();
+  #journalAsked = false;
+  #quietSince = Date.now();
+
+  attach(page: Page): void {
+    page.on("request", (req) => {
+      const at = new URL(req.url()).pathname;
+      if (!at.startsWith("/assets/")) return;
+      this.#open.add(req);
+      if (at.startsWith("/assets/JournalPanel-")) this.#journalAsked = true;
+    });
+    const done = (req: Request) => {
+      if (this.#open.delete(req)) this.#quietSince = Date.now();
+    };
+    page.on("requestfinished", done);
+    page.on("requestfailed", done);
+  }
+
+  /**
+   * Waits until the background loads have run: the Journal's code, which
+   * every role's loads ask for, has been asked for, and no request for the
+   * build's files has been open for 300 ms. A page that opened the Journal
+   * before its background loads began passes too early, so call it before
+   * the Journal is first opened.
+   */
+  async preloaded(timeoutMs = 15_000): Promise<void> {
+    await waitFor("the room's background loads", () => (this.#journalAsked && this.#open.size === 0 && Date.now() - this.#quietSince >= 300) || null, timeoutMs);
   }
 }
 

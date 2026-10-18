@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, LoadWatch, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Notes and map pins on a wave 5 build that the live play review after
@@ -37,6 +37,7 @@ const dmSocket = new SocketWatch("dm");
 const playerSocket = new SocketWatch("player");
 const dmConsole = new ConsoleWatch("dm");
 const playerConsole = new ConsoleWatch("player");
+const dmLoads = new LoadWatch();
 
 const run = {
   roomId: "",
@@ -50,8 +51,13 @@ const run = {
 /** What closing the pin pane says while its Done is still pending, online or not (journal/pendingSave.ts). */
 const PENDING_NOTICE = /^The pin (is still saving|will save when the connection is back)\.$/;
 
-/** Takes the DM's browser off the network, so a Done stays pending until it comes back. */
+/**
+ * Takes the DM's browser off the network, so a Done stays pending until it
+ * comes back. Only once the room's background loads are done, since one
+ * cut off would leave its panel unable to open (harness.ts LoadWatch).
+ */
 async function dmOffline(offline: boolean): Promise<void> {
+  if (offline) await dmLoads.preloaded();
   dmConsole.expectSocketFailures = offline || dmConsole.expectSocketFailures;
   await dmContext.setOffline(offline);
 }
@@ -108,6 +114,7 @@ describe("raccoon-vtt notes and pins on a wave 5 build", { timeout: 180_000 }, (
     dm = await dmContext.newPage();
     player = await playerContext.newPage();
     dmConsole.attach(dm);
+    dmLoads.attach(dm);
     playerConsole.attach(player);
     await dmSocket.attach(dmContext, dm);
     await playerSocket.attach(playerContext, player);
