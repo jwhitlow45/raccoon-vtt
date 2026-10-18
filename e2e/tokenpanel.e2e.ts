@@ -653,14 +653,17 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await goblin.getByRole("img", { name: "Armor Class 15" }).waitFor();
   });
 
-  test("1z. at 130% on a desk, an icon's name shows beside it and inside the window: Duplicate in the action bar near the bottom, and Hide panels at the right edge (docs/design-v1-icons.md 3.2)", async () => {
+  test("1z. at 130% on a desk, an icon's name shows beside it and inside the window: Duplicate in the action bar near the bottom, the window's resize handle, and Hide panels at the right edge (docs/design-v1-icons.md 3.2)", async () => {
     await setUp(dm, dmCdp, { ...DESK, scale: 1.3 }, null);
     await tapToken(dm, run.goblin.at);
     const goblin = bar(dm, "Goblin 4");
     await goblin.waitFor();
     const view = dm.viewportSize()!;
     const zoom = 1.3;
-    for (const control of [goblin.getByRole("button", { name: "Duplicate", exact: true }), dm.getByRole("button", { name: "Hide panels", exact: true })]) {
+    // The resize handle takes the shared tooltip too, never a native title (LP8-UI-9).
+    const handle = goblin.getByRole("button", { name: "Resize window", exact: true });
+    assert.equal(await handle.getAttribute("title"), null, "the resize handle keeps a native title");
+    for (const control of [goblin.getByRole("button", { name: "Duplicate", exact: true }), handle, dm.getByRole("button", { name: "Hide panels", exact: true })]) {
       await dm.mouse.move(1, 1);
       await control.hover();
       const tip = dm.locator('[role="tooltip"]:popover-open');

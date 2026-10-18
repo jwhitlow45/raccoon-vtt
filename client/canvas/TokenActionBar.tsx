@@ -10,6 +10,7 @@ import { Button, ButtonGhost } from "../components/Button.tsx";
 import { RETURN_RANK, useSheetReturnFocus } from "../components/sheetFocus.ts";
 import { Icon, type IconName } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
+import { useTooltip } from "../components/Tooltip.tsx";
 import { GRIP_ATTR, PaneHeader, STICKY_HEADER_ATTR, type PaneHandle } from "../components/SheetHeader.tsx";
 import { useLayoutSize } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
@@ -782,6 +783,8 @@ function BarFrame(props: {
   const [status, setStatus] = useState("");
   const statusSeq = useRef(0);
   const handleDescription = useId();
+  // The handle is an icon alone on a computer, so it names itself in the shared tooltip, on hover and on keyboard focus (docs/design-v1-icons.md 3.2).
+  const handleTip = useTooltip("Resize window");
   /*
    * What the window's status says after its keys or Reset. It is cleared,
    * then set on the next frame, so the same words twice are spoken again
@@ -1087,6 +1090,7 @@ function BarFrame(props: {
     onPointerUp: dragUp,
     onPointerCancel: dragCancel,
   });
+  const corner = resizeHandlers("corner");
   return (
     <div
       ref={barRef}
@@ -1149,15 +1153,16 @@ function BarFrame(props: {
           <button
             type="button"
             aria-label="Resize window"
-            title="Resize window"
-            aria-describedby={handleDescription}
             data-resize-handle=""
-            {...resizeHandlers("corner")}
+            // A press that starts a drag closes the tooltip, as any mouse press on a control does.
+            {...handleTip.anchor({ onPointerDown: corner.onPointerDown, onPointerUp: corner.onPointerUp, onPointerCancel: corner.onPointerCancel, "aria-describedby": handleDescription })}
+            onPointerMove={corner.onPointerMove}
             onKeyDown={resizeByKeys}
             style={handleStyle(handleAt, dragBox !== null)}
           >
             <Icon name="resize" size={16} style={handleAt === "tr" || handleAt === "bl" ? { transform: "rotate(90deg)" } : undefined} />
           </button>
+          {handleTip.tip}
           <span id={handleDescription} style={VISUALLY_HIDDEN}>
             Drag to resize the window. With this focused, the arrow keys resize it, and Shift resizes it faster. Reset, beside Close, puts it back.
           </span>
