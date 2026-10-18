@@ -1036,7 +1036,7 @@ This part is for quick lookups during play, starting with the keys that save a D
 
 Press `?` (or open the Menu, then **This device**, then **Show the shortcuts**) for the full list of shortcuts for your role.
 
-![The shortcut list the ? key opens: Change beside each key, Reset beside Draw after its move to K, and Swap for Ruler, since Full screen already has W.](dm-guide/shortcuts.webp)
+![The shortcut list the ? key opens, down to W for full screen: Change beside each key, Reset under the other panel's key after its move to K, and Swap for the side panel's key, since Full screen already has W.](dm-guide/shortcuts.webp)
 
 These are the keys a DM uses most:
 
