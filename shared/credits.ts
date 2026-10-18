@@ -39,7 +39,7 @@ export type Credit = {
 };
 
 export type CreditGroup = {
-  id: "icons" | "textures" | "stamps" | "app-icon" | "srd" | "safety" | "passwords";
+  id: "icons" | "interface-icons" | "textures" | "stamps" | "app-icon" | "srd" | "safety" | "passwords";
   heading: string;
   credits: Credit[];
 };
@@ -90,6 +90,13 @@ export const STATUS_ICONS: Record<StatusKey, GameIcon> = {
   marked: { slug: "delapouite/human-target", title: "Human target", author: "Delapouite" },
   readied: { slug: "lorc/hourglass", title: "Hourglass", author: "Lorc" },
 };
+
+/**
+ * The ISC license asks for its copyright and permission notice in every
+ * copy, so the About page shows it whole, as CREDITS.md does.
+ */
+export const LUCIDE_NOTICE =
+  "ISC License. Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2022. Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies. THE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.";
 
 export const GAME_ICON_CHANGES = "Black background square removed, fill set to currentColor so the app can tint it.";
 
@@ -224,6 +231,22 @@ export const CREDITS: CreditGroup[] = [
     credits: [
       ...Object.entries(CONDITION_ICONS).map(([key, icon]) => gameIconCredit("conditions", key, icon)),
       ...Object.entries(STATUS_ICONS).map(([key, icon]) => gameIconCredit("statuses", key, icon)),
+    ],
+  },
+  {
+    id: "interface-icons",
+    heading: "Interface icons",
+    credits: [
+      {
+        // Path data copied into the app's own icon component, never the package (docs/design-v1-icons.md 6).
+        files: ["client/components/Icon.tsx"],
+        title: "Lucide",
+        author: "Lucide Contributors, with portions by Cole Bemis as part of Feather (MIT)",
+        authorUrl: "https://lucide.dev",
+        source: "https://github.com/lucide-icons/lucide",
+        license: "ISC",
+        changes: `The interface icons marked Lucide in client/components/Icon.tsx, their path data copied as written. ${LUCIDE_NOTICE}`,
+      },
     ],
   },
   {

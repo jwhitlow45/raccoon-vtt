@@ -7,6 +7,12 @@ import { theme } from "../lib/theme.ts";
  * used as icons, which drew at a different size and weight in every font
  * and on every phone. Glyphs inside text ("30 × 20", "↑10 ft") stay text.
  *
+ * Each name is a meaning, not a picture, so one icon means one thing
+ * everywhere (docs/design-v1-icons.md 2). Most are drawn for the app. Those
+ * marked Lucide copy that set's path data (lucide.dev, ISC license, credited
+ * in shared/credits.ts and CREDITS.md), on the same 24 unit grid and 2 px
+ * round stroke, so the two sets read as one.
+ *
  * An icon is decoration: the control around it carries the name
  * (`aria-label`, or its visible text), so the SVG is hidden from screen
  * readers.
@@ -49,7 +55,18 @@ export type IconName =
   | "areaEmanation"
   | "fogBrush"
   | "fogRoom"
-  | "noCaster";
+  | "noCaster"
+  | "again"
+  | "hidden"
+  | "shown"
+  | "speed"
+  | "group"
+  | "delete"
+  | "edit"
+  | "image"
+  | "retry"
+  | "locked"
+  | "duplicate";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -130,9 +147,9 @@ const SHAPES: Record<IconName, ReactNode> = {
       <circle cx="8" cy="18" r="2" />
     </g>
   ),
-  // The top bar's undo and redo arrows (pages/RoomChrome.tsx), for a tool's own Undo and Redo.
-  undo: <path fill="currentColor" d="M12.5 8c-2.65 0-5.05 1-6.9 2.6L2 7v9h9l-3.62-3.62A7.95 7.95 0 0 1 12.5 10.5c3.54 0 6.55 2.31 7.6 5.5l2.37-.78A10.5 10.5 0 0 0 12.5 8" />,
-  redo: <path fill="currentColor" d="M18.4 10.6A10.4 10.4 0 0 0 11.5 8 10.5 10.5 0 0 0 1.53 15.22l2.36.78A8 8 0 0 1 11.5 10.5c1.95 0 3.73.72 5.12 1.88L13 16h9V7z" />,
+  // Undo and Redo, in the top bar and a tool's own row. Lucide's undo-2 and redo-2: the filled arrows they replace were the only filled shapes in a stroked set.
+  undo: <path {...STROKE} d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11" />,
+  redo: <path {...STROKE} d="m15 14 5-5-5-5M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13" />,
   // The plain glyphs of a tool's choices (docs/design-v1-tool-options.md 17.2): each draws the thing itself.
   shapeLine: <path {...STROKE} d="M5 19L19 5" />,
   shapeArrow: <path {...STROKE} d="M5 19L19 5M10 5h9v9" />,
@@ -164,6 +181,64 @@ const SHAPES: Record<IconName, ReactNode> = {
   fogRoom: <path {...STROKE} d="M4 4h16v16H4zM4 13h7M14 4v9h6" />,
   // A plain circle crossed by a slash, where the area tool's From control names no creature: No caster, or "From you" (docs/design-v1-area-from-character.md 3.2).
   noCaster: <path {...STROKE} d="M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16zM6.3 17.7L17.7 6.3" />,
+  // Lucide repeat: a roll sent again as it went. Never Redo, which takes back an undo.
+  again: <path {...STROKE} d="m17 2 4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3" />,
+  // Lucide eye-off: hidden from players (a secret roll, a hidden token, a DM-only note). Never the side panel's Hide.
+  hidden: (
+    <path
+      {...STROKE}
+      d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49M14.084 14.158a3 3 0 0 1-4.242-4.242M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143M2 2l20 20"
+    />
+  ),
+  // Lucide eye: players see it.
+  shown: (
+    <g {...STROKE}>
+      <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+      <circle cx="12" cy="12" r="3" />
+    </g>
+  ),
+  // Lucide footprints: a creature's speed.
+  speed: (
+    <path
+      {...STROKE}
+      d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0ZM20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0ZM16 17h4M4 13h4"
+    />
+  ),
+  // Lucide users: several creatures at once, such as a group save.
+  group: (
+    <g {...STROKE}>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3.128a4 4 0 0 1 0 7.744M22 21v-2a4 4 0 0 0-3-3.87" />
+      <circle cx="9" cy="7" r="4" />
+    </g>
+  ),
+  // Lucide trash-2: delete or remove a thing for good.
+  delete: <path {...STROKE} d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6" />,
+  // Lucide pencil: edit.
+  edit: <path {...STROKE} d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497zM15 5l4 4" />,
+  // Lucide image: a token's or a page's picture.
+  image: (
+    <g {...STROKE}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="9" cy="9" r="2" />
+      <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+    </g>
+  ),
+  // Lucide refresh-cw: try a failed load again.
+  retry: <path {...STROKE} d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5" />,
+  // Lucide lock: a token that cannot be moved.
+  locked: (
+    <g {...STROKE}>
+      <rect x="3" y="11" width="18" height="11" rx="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </g>
+  ),
+  // Lucide copy-plus: a second one of this thing. Never Copy, which puts text on the clipboard.
+  duplicate: (
+    <g {...STROKE}>
+      <path d="M15 12v6M12 15h6M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+      <rect x="8" y="8" width="14" height="14" rx="2" />
+    </g>
+  ),
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];

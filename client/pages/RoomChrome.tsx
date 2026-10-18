@@ -222,8 +222,8 @@ export function UndoButtons() {
   const actions = useRoomActions();
   return (
     <span style={{ flex: "none", display: "flex", marginRight: -theme.space(2) }}>
-      <IconButton label="Undo" title="Undo your last change" path="M12.5 8c-2.65 0-5.05 1-6.9 2.6L2 7v9h9l-3.62-3.62A7.95 7.95 0 0 1 12.5 10.5c3.54 0 6.55 2.31 7.6 5.5l2.37-.78A10.5 10.5 0 0 0 12.5 8" onClick={() => actions.undo()} />
-      <IconButton label="Redo" title="Redo what you undid" path="M18.4 10.6A10.4 10.4 0 0 0 11.5 8 10.5 10.5 0 0 0 1.53 15.22l2.36.78A8 8 0 0 1 11.5 10.5c1.95 0 3.73.72 5.12 1.88L13 16h9V7z" onClick={() => actions.redo()} />
+      <IconButton label="Undo" title="Undo your last change" path="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11" stroke onClick={() => actions.undo()} />
+      <IconButton label="Redo" title="Redo what you undid" path="m15 14 5-5-5-5M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13" stroke onClick={() => actions.redo()} />
     </span>
   );
 }
@@ -234,7 +234,7 @@ export function UndoButtons() {
  * icons that the shared set does not have. They keep the text color: they
  * are the bar's actions, not a header's close.
  */
-function IconButton(props: { label: string; title: string; path: string; onClick(): void }) {
+function IconButton(props: { label: string; title: string; path: string; stroke?: boolean; onClick(): void }) {
   return (
     <button
       type="button"
@@ -256,7 +256,11 @@ function IconButton(props: { label: string; title: string; path: string; onClick
       }}
     >
       <svg aria-hidden viewBox="0 0 24 24" width={theme.icon.md} height={theme.icon.md} style={{ display: "block" }}>
-        <path d={props.path} fill="currentColor" />
+        {props.stroke ? (
+          <path d={props.path} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+        ) : (
+          <path d={props.path} fill="currentColor" />
+        )}
       </svg>
     </button>
   );
