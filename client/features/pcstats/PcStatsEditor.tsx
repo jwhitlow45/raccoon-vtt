@@ -669,10 +669,13 @@ function Abilities(props: StatsProps) {
                   checked={proficient}
                   onChange={(on) => setStats((s) => ({ ...s, saves: on ? ABILITY_KEYS.filter((k) => k === a || s.saves.includes(k)) : s.saves.filter((k) => k !== a) }))}
                 />
-                <span aria-hidden style={{ color: theme.color.textMuted }}>
-                  Save
+                {/* "Save" and its total wrap as one, so a narrow row never leaves the total alone under its word (LP7-PC-12). */}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(2), flex: "none" }}>
+                  <span aria-hidden style={{ color: theme.color.textMuted }}>
+                    Save
+                  </span>
+                  <TotalInput label={`${ABILITY_NAMES[a]} save`} number={d.saves[a]} onTotal={(t) => setStats((s) => withTotal(s, level, { kind: "save", ability: a }, t))} />
                 </span>
-                <TotalInput label={`${ABILITY_NAMES[a]} save`} number={d.saves[a]} onTotal={(t) => setStats((s) => withTotal(s, level, { kind: "save", ability: a }, t))} />
               </>
             }
           />
