@@ -54,7 +54,6 @@ describe("the DM guide's page", () => {
     assert.equal(GUIDE_PATH, "/docs/dm-guide");
     assert.deepEqual(parseRoute("/docs/dm-guide", { dev: false }), { name: "guide" });
     assert.deepEqual(parseRoute("/docs/dm-guide/", { dev: false }), { name: "guide" });
-    assert.deepEqual(parseRoute("/docs", { dev: false }), { name: "notFound" });
     assert.deepEqual(parseRoute("/docs/features", { dev: false }), { name: "notFound" });
     assert.equal(guideHref(), "/docs/dm-guide");
     assert.equal(guideHref("areas"), "/docs/dm-guide#areas");

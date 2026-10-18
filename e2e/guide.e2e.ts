@@ -108,4 +108,42 @@ describe("raccoon-vtt DM guide page", { timeout: 90_000 }, () => {
       await context.close();
     }
   });
+
+  test("docs-a: Home links to the Docs page, which links the DM guide, and a reload of /docs stays", async () => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await context.newPage();
+    const watch = new ConsoleWatch("docs-a");
+    watch.attach(page);
+    try {
+      await page.goto(server.origin);
+      const docs = page.getByRole("button", { name: "Docs", exact: true });
+      await docs.waitFor();
+      const box = await docs.boundingBox();
+      assert.ok(box && box.height >= 44, `Docs button is ${box?.height} px tall`);
+      await docs.click();
+      await page.getByRole("heading", { name: "Docs", exact: true }).waitFor();
+      assert.equal(new URL(page.url()).pathname, "/docs");
+      assert.equal(await page.title(), "RaccoonVTT · Docs");
+      await shots.take(page, "docs-phone");
+
+      // A hard reload and the trailing-slash form are answered with the app.
+      for (const path of ["/docs", "/docs/"]) {
+        const res = await page.goto(`${server.origin}${path}`);
+        assert.equal(res?.status(), 200);
+        await page.getByRole("heading", { name: "Docs", exact: true }).waitFor();
+      }
+
+      await page.getByRole("link", { name: /DM guide/ }).click();
+      await page.locator("#contents").waitFor();
+      assert.equal(new URL(page.url()).pathname, "/docs/dm-guide");
+      await page.getByRole("button", { name: "All docs", exact: true }).click();
+      await page.getByRole("heading", { name: "Docs", exact: true }).waitFor();
+      await page.getByRole("button", { name: "Home", exact: true }).click();
+      await page.getByRole("button", { name: "Join" }).waitFor();
+      assert.equal(await page.evaluate(() => (globalThis as unknown as Win).document.documentElement.scrollWidth - (globalThis as unknown as Win).innerWidth), 0, "no sideways scroll");
+      assert.deepEqual(watch.errors, []);
+    } finally {
+      await context.close();
+    }
+  });
 });

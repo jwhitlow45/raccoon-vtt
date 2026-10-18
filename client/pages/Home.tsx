@@ -10,6 +10,7 @@ import { QrCode } from "../components/QrCode.tsx";
 import { useTurnstile } from "../components/Turnstile.tsx";
 import { weakPasswordText } from "../features/dm/invite.ts";
 import { PlayerLinkShare } from "../features/dm/PlayerLinkShare.tsx";
+import { DOCS_PATH } from "../features/guide/docs.ts";
 import { ImportRoomCard } from "../features/settings/ImportRoomCard.tsx";
 import { api, ApiError } from "../lib/api.ts";
 import { rememberedName, rememberName } from "../lib/device.ts";
@@ -50,6 +51,10 @@ export function Home() {
           </Help>
         }
       />
+      {/* Last and quiet: the written docs are for reading before or after a game, not part of joining or creating a room. */}
+      <Button variant="quiet" block onClick={() => navigate(DOCS_PATH)}>
+        Docs
+      </Button>
     </Page>
   );
 }

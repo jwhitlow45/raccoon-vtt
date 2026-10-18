@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect } from "react";
 import GUIDE from "../../docs/dm-guide.md?raw";
 import { Button } from "../components/Button.tsx";
 import { Markdown, type MarkdownImage } from "../components/Markdown.tsx";
+import { DOCS_PATH } from "../features/guide/docs.ts";
 import { guideBody, guideImageName, guideImageSize } from "../features/guide/guide.ts";
 import { navigate } from "../lib/navigation.ts";
 import { theme } from "../lib/theme.ts";
@@ -59,9 +60,14 @@ export default function DmGuide() {
           title="DM guide"
           tagline="Building maps and running fights, step by step."
           actions={
-            <Button size="sm" onClick={() => navigate("/")}>
-              Home
-            </Button>
+            <>
+              <Button size="sm" onClick={() => navigate(DOCS_PATH)}>
+                All docs
+              </Button>
+              <Button size="sm" onClick={() => navigate("/")}>
+                Home
+              </Button>
+            </>
           }
         />
         <Markdown text={BODY} guide image={image} style={{ fontSize: theme.font.input, lineHeight: 1.55 }} />

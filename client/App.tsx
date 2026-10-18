@@ -24,6 +24,9 @@ const Admin = retryableLazy(() => import("./pages/Admin.tsx"));
 // The guide and its screenshots load only for a reader who opens it.
 const DmGuide = retryableLazy(() => import("./pages/DmGuide.tsx"));
 
+// The Docs page is a short list, but it sits beside the guide it links to.
+const Docs = retryableLazy(() => import("./pages/Docs.tsx"));
+
 type ClaimTarget = { roomId: string; fragment: FragmentSecret };
 
 /**
@@ -107,6 +110,14 @@ export function App() {
         <LoadBoundary fallback={(f) => <LoadFailureNotice {...f} subject="The DM guide" verb="load" />}>
           <Suspense fallback={<Loading text="Loading the DM guide…" />}>
             <DmGuide />
+          </Suspense>
+        </LoadBoundary>
+      );
+    case "docs":
+      return (
+        <LoadBoundary fallback={(f) => <LoadFailureNotice {...f} subject="The Docs page" verb="load" />}>
+          <Suspense fallback={<Loading text="Loading the docs…" />}>
+            <Docs />
           </Suspense>
         </LoadBoundary>
       );

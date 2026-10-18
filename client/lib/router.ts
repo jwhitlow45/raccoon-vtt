@@ -4,8 +4,8 @@ import { parseRoomId } from "./roomId.ts";
  * The app has two routes (design section 14.1), so a regular expression does
  * the job React Router would. `/dev/room` shows the Room page with fixture
  * data and `/dev/kit` every shared component (client/dev/Kit.tsx). Both
- * exist only in development builds. `/docs/dm-guide` is the DM guide
- * (features/guide).
+ * exist only in development builds. `/docs` lists the written docs and
+ * `/docs/dm-guide` is the DM guide (features/guide).
  */
 export type Route =
   | { name: "home" }
@@ -18,6 +18,8 @@ export type Route =
   /** The server admin page (docs/design-v1-dm-tools.md 3.18), the not-found page when the server has no admin password. */
   | { name: "admin" }
   | { name: "guide" }
+  /** The list of every written doc (features/guide/docs.ts). */
+  | { name: "docs" }
   | { name: "notFound" };
 
 function displayRoute(segment: string): Route {
@@ -47,5 +49,6 @@ export function parseRoute(pathname: string, options: { dev: boolean }): Route {
   if (display) return display[1] === undefined ? { name: "display", roomId: null } : displayRoute(display[1]);
   if (/^\/admin\/?$/.test(pathname)) return { name: "admin" };
   if (/^\/docs\/dm-guide\/?$/.test(pathname)) return { name: "guide" };
+  if (/^\/docs\/?$/.test(pathname)) return { name: "docs" };
   return { name: "notFound" };
 }
