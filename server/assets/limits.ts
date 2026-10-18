@@ -95,9 +95,11 @@ export const HANDOUT_HOURLY = { session: 250, room: 250 } as const;
  * Starter picks (docs/design-v1-starter-art.md 5) have a budget of their
  * own too. A pick runs the image pipeline as an upload does, which is the
  * cost this guards, but it never grows the room's storage, and a DM trying
- * works while preparing picks more often than they upload. A pick of a
- * work the room already holds as that kind makes no new image and spends
- * nothing (the pick route checks). Per IP and per room as well as per
+ * works while preparing picks more often than they upload. A DM's pick of
+ * a work the room already holds as that kind makes no new image and spends
+ * nothing (the pick route checks). A player's spends one either way, so a
+ * spent budget never tells a held work from a fresh one. Per IP and per
+ * room as well as per
  * session, since a player may pick a portrait and anyone with the
  * password can mint new sessions.
  */

@@ -13,7 +13,7 @@ import { RoomQuota, assertFreeDisk, roomStoredBytes, type Reservation } from "./
 import { OpenverseSearch, openverseHttp, type OpenverseHttp } from "./openverse.ts";
 import { ImageSearch, httpJson, type HttpJson } from "./serpapi.ts";
 import { IntakeSlots, Semaphore, type SlotLimits } from "./slots.ts";
-import { StarterWorkError, copyHashing, starterCatalog, starterFilePath, starterGrid, type StarterCatalog, type StarterOptions } from "./starter.ts";
+import { REAL_FLOOR_CLOCK, StarterWorkError, copyHashing, starterCatalog, starterFilePath, starterGrid, type FloorClock, type StarterCatalog, type StarterOptions } from "./starter.ts";
 import { addCredit, addUploaders, findRoomAsset, placeAndInsert, toView, uploadedAssetIds, type AssetRow } from "./store.ts";
 import { tempFile } from "./upload.ts";
 
@@ -54,6 +54,8 @@ export type AssetServiceOptions = {
   bodyTiming?: { minBytesPerSec?: number; graceMs?: number; checkEveryMs?: number; deadlineMs?: number };
   /** The starter catalog and the folder its files are read from, for tests. Defaults to the shipped ones (starter.ts). */
   starter?: StarterOptions;
+  /** The clock a player's starter pick waits out its floor on (starter.ts PLAYER_PICK_FLOOR_MS), for tests. */
+  pickClock?: FloorClock;
   now?: () => number;
 };
 
@@ -97,6 +99,7 @@ export class AssetService {
   readonly openverse: OpenverseSearch;
   readonly bodyTiming: AssetServiceOptions["bodyTiming"];
   readonly starter: StarterCatalog;
+  readonly pickClock: FloorClock;
   #visibleAssets: VisibleAssetsFn;
 
   constructor(opts: AssetServiceOptions) {
@@ -113,6 +116,7 @@ export class AssetService {
     this.egress = opts.egress ?? createEgress(opts.config);
     this.bodyTiming = opts.bodyTiming;
     this.starter = starterCatalog(opts.starter, opts.config.production);
+    this.pickClock = opts.pickClock ?? REAL_FLOOR_CLOCK;
     const key = opts.config.SERPAPI_KEY;
     this.search = key
       ? new ImageSearch({ pool: opts.pool, apiKey: key, http: opts.serpApiHttp ?? httpJson(this.egress.strict), now: opts.now })

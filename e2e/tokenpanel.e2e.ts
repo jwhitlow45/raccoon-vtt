@@ -1755,6 +1755,12 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await chooseStarterWork(picker, found, "search", false);
     await shots.take(player, "sa-a-5-player-starter-tab");
     await picker.getByRole("button", { name: "Use", exact: true }).click();
+    // A player's pick answers no sooner than 400 ms (server/assets/starter.ts PLAYER_PICK_FLOOR_MS), which the picker shows as under way, never hung.
+    const adding = picker.getByRole("button", { name: "Adding…", exact: true });
+    await adding.waitFor();
+    assert.equal(await adding.getAttribute("aria-busy"), "true", "Use is not busy while the pick waits");
+    await picker.getByRole("status").filter({ hasText: "Adding to the room…" }).waitFor();
+    await shots.take(player, "sa-a-5-player-pick-adding");
     const crop = player.getByRole("dialog", { name: "Crop the image" });
     await crop.waitFor();
     await crop.getByRole("button", { name: "Save", exact: true }).click();

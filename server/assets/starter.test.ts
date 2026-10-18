@@ -4,7 +4,7 @@ import { describe, test } from "node:test";
 import { assetCreditSchema } from "#shared/protocol.ts";
 import { STARTER_KEY, STARTER_KINDS, indexWorks, starterAssetCredit, type StarterPack, type StarterWork } from "#shared/starter.ts";
 import { STARTER_PACKS } from "#shared/starterArt.ts";
-import { StarterWorkError, shippedRoot, starterFilePath, starterGrid, workForKind } from "./starter.ts";
+import { PLAYER_PICK_FLOOR_MS, StarterWorkError, noSoonerThan, shippedRoot, starterFilePath, starterGrid, workForKind, type FloorClock } from "./starter.ts";
 
 const root = join("/srv", "app", "dist");
 
@@ -127,6 +127,55 @@ describe("the shipped catalog", () => {
       assert.match(w.sha256, /^[0-9a-f]{64}$/, w.key);
       const credit = assetCreditSchema.safeParse(starterAssetCredit(found));
       assert.ok(credit.success, `${w.key}: ${credit.error?.issues[0]?.message ?? ""}`);
+    }
+  });
+});
+
+describe("a player's pick floor", () => {
+  /** A clock that moves only when told to, or by what is waited on it. */
+  function fakeClock(start: number): FloorClock & { at: number; waits: number[] } {
+    const clock = {
+      at: start,
+      waits: [] as number[],
+      now: () => clock.at,
+      wait: async (ms: number) => {
+        clock.waits.push(ms);
+        clock.at += ms;
+      },
+    };
+    return clock;
+  }
+
+  test("a held work's quick answer waits out the rest of the floor, so it lands when a fresh copy's would", async () => {
+    const clock = fakeClock(1000);
+    clock.at += 4;
+    await noSoonerThan(1000, PLAYER_PICK_FLOOR_MS, clock);
+    assert.deepEqual(clock.waits, [PLAYER_PICK_FLOOR_MS - 4]);
+    assert.equal(clock.at, 1000 + PLAYER_PICK_FLOOR_MS);
+  });
+
+  test("an answer at or past the floor waits nothing more", async () => {
+    for (const took of [PLAYER_PICK_FLOOR_MS, PLAYER_PICK_FLOOR_MS + 0.5, 900]) {
+      const clock = fakeClock(1000 + took);
+      await noSoonerThan(1000, PLAYER_PICK_FLOOR_MS, clock);
+      assert.deepEqual(clock.waits, [], `after ${took} ms`);
+    }
+  });
+
+  test("sits well above the slowest fresh copy measured, 105 ms, so a server three times slower still answers under it", () => {
+    assert.ok(PLAYER_PICK_FLOOR_MS > 3 * 105, String(PLAYER_PICK_FLOOR_MS));
+  });
+
+  test("a held work's pick done in 3 ms and a fresh copy's done in 380 both answer at the floor", async () => {
+    for (const [took, waited] of [
+      [3, PLAYER_PICK_FLOOR_MS - 3],
+      [380, PLAYER_PICK_FLOOR_MS - 380],
+    ] as const) {
+      const clock = fakeClock(0);
+      clock.at = took;
+      await noSoonerThan(0, PLAYER_PICK_FLOOR_MS, clock);
+      assert.deepEqual(clock.waits, [waited], `after ${took} ms`);
+      assert.equal(clock.at, PLAYER_PICK_FLOOR_MS);
     }
   });
 });

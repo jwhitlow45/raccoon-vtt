@@ -20,6 +20,31 @@ export type StarterCatalog = { works: ReadonlyMap<string, FoundWork>; root: stri
 export type StarterOptions = { packs: readonly StarterPack[]; root: string };
 
 /**
+ * The soonest a player's starter pick answers, in ms. A pick of a work the
+ * room already holds copies and encodes nothing, so it answered in a few
+ * ms where a fresh copy took 13 to 105 (each shipped token and portrait
+ * work, measured on a laptop), and a player who timed picks of the token
+ * packs could learn which art the DM had picked, such as the image on a
+ * hidden token. Both paths wait out this floor, nearly four times the
+ * slowest fresh copy measured, so a slower server still hides it. The
+ * picker shows Use busy and "Adding to the room…" from the tap, so the
+ * wait never looks hung. The DM's picks keep the fast path, since the
+ * DM's library lists every image the room holds.
+ */
+export const PLAYER_PICK_FLOOR_MS = 400;
+
+/** The clock a floor waits on. Tests pass a fake one. */
+export type FloorClock = { now(): number; wait(ms: number): Promise<void> };
+
+export const REAL_FLOOR_CLOCK: FloorClock = { now: () => performance.now(), wait: (ms) => new Promise((done) => setTimeout(done, ms)) };
+
+/** Resolves once `floorMs` have passed since `started` on `clock`, at once when they already have. */
+export async function noSoonerThan(started: number, floorMs: number, clock: FloorClock): Promise<void> {
+  const left = started + floorMs - clock.now();
+  if (left > 0) await clock.wait(left);
+}
+
+/**
  * The folder the Starter tab's files come from, so a pick copies the very
  * file the tab showed. In production that is the build's dist/, which
  * server/app.ts serves. Anywhere else it is public/: in development Vite

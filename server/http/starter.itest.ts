@@ -11,6 +11,7 @@ import type { LicenseId } from "#shared/licenses.ts";
 import { STARTER_KINDS, indexWorks, starterAssetCredit, type StarterPack, type StarterUse, type StarterWork } from "#shared/starter.ts";
 import { STARTER_PACKS } from "#shared/starterArt.ts";
 import { STARTER_HOURLY } from "../assets/limits.ts";
+import { PLAYER_PICK_FLOOR_MS, type FloorClock } from "../assets/starter.ts";
 import { RoomQuota, roomStoredBytes } from "../assets/quota.ts";
 import { FakeAuth, buildAssetApp, dropRooms, makeRoom, testConfig, testPool } from "../assets/testApp.ts";
 import { solid, tempDir } from "../assets/testImages.ts";
@@ -250,7 +251,30 @@ describe("a starter pick's refusals", () => {
     assert.equal(app.assets.hourly.retryAfter(app.assets.starterHourlyChecks(player.sessionId, "x", roomId).slice(0, 1)), 0);
   });
 
-  test("a pick of a work the room already holds as that kind spends nothing, even with the pick budget spent", async () => {
+  test("a player's pick spends the budget held work or fresh, so a player at the budget is refused alike for both", async () => {
+    const roomId = await room();
+    const dm = auth.allow(roomId, "dm");
+    assert.equal((await pick(app, roomId, dm, { work: "test-pack/knight", kind: "token" })).statusCode, 200, "the DM picks the knight, so the room holds it");
+    const player = auth.allow(roomId, "player");
+    const checks = app.assets.starterHourlyChecks(player.sessionId, "x", roomId).slice(0, 1);
+    for (let i = 1; i < STARTER_HOURLY.session; i++) app.assets.hourly.record(checks);
+    // One left: the held knight takes it, as a fresh copy would.
+    assert.equal((await pick(app, roomId, player, { work: "test-pack/knight", kind: "token" })).statusCode, 200);
+    // At the budget, the held knight and a work the room never held ("changed", which a pick would otherwise copy) answer alike.
+    const refusal = async (work: string) => {
+      const res = await pick(app, roomId, player, { work, kind: "token" });
+      return { status: res.statusCode, body: res.json() as unknown, connection: res.headers.connection, retryAfter: Number(res.headers["retry-after"]) };
+    };
+    const held = await refusal("test-pack/knight");
+    const fresh = await refusal("test-pack/changed");
+    assert.equal(held.status, 429);
+    assert.deepEqual({ ...fresh, retryAfter: 0 }, { ...held, retryAfter: 0 });
+    // The same budget's wait, read a few ms apart, which may cross a second.
+    assert.ok(held.retryAfter > 0 && Math.abs(fresh.retryAfter - held.retryAfter) <= 1, JSON.stringify({ held, fresh }));
+    assert.equal((await rowsOf(roomId)).length, 1);
+  });
+
+  test("a DM's pick of a work the room already holds as that kind spends nothing, even with the pick budget spent", async () => {
     const roomId = await room();
     const dm = auth.allow(roomId, "dm");
     assert.equal((await pick(app, roomId, dm, { work: "test-pack/knight", kind: "token" })).statusCode, 200);
@@ -294,6 +318,73 @@ describe("a starter pick's refusals", () => {
       assert.deepEqual(res.json(), { error: "bad_request" });
     }
     assert.deepEqual(await rowsOf(roomId), []);
+  });
+});
+
+describe("a player's pick waits out a floor, so its timing never tells what the room holds", () => {
+  /** A clock that stands still unless `step` moves it on each reading, and records what the route waits. */
+  function stillClock(step = 0): FloorClock & { waits: number[] } {
+    let at = 0;
+    const waits: number[] = [];
+    return {
+      waits,
+      now: () => (at += step),
+      wait: async (ms) => {
+        waits.push(ms);
+      },
+    };
+  }
+
+  async function timedApp(clock: FloorClock): Promise<FastifyInstance> {
+    return buildAssetApp({ pool, config: testConfig(dir), auth, options: { starter: { packs: fixture.packs, root: fixture.root }, pickClock: clock } });
+  }
+
+  test("a player's fresh pick and a pick of the same work once held both wait the floor, and the DM's waits nothing", async () => {
+    const clock = stillClock();
+    const timed = await timedApp(clock);
+    try {
+      const roomId = await room();
+      const dm = auth.allow(roomId, "dm");
+      for (const who of [auth.allow(roomId, "player"), auth.allow(roomId, "player")]) {
+        const res = await pick(timed, roomId, who, { work: "test-pack/knight", kind: "token" });
+        assert.equal(res.statusCode, 200, res.body);
+      }
+      assert.deepEqual(clock.waits, [PLAYER_PICK_FLOOR_MS, PLAYER_PICK_FLOOR_MS], "the fresh copy, then the held work");
+      for (const work of ["test-pack/knight", "test-pack/scroll"]) {
+        const res = await pick(timed, roomId, dm, { work, kind: work === "test-pack/knight" ? "token" : "handout" });
+        assert.equal(res.statusCode, 200, res.body);
+      }
+      assert.equal(clock.waits.length, 2, "the DM's held and fresh picks keep the fast path");
+      assert.equal((await rowsOf(roomId)).length, 2);
+    } finally {
+      await timed.close();
+    }
+  });
+
+  test("a pick that already took the floor answers at once", async () => {
+    const clock = stillClock(PLAYER_PICK_FLOOR_MS);
+    const timed = await timedApp(clock);
+    try {
+      const roomId = await room();
+      const res = await pick(timed, roomId, auth.allow(roomId, "player"), { work: "test-pack/knight", kind: "token" });
+      assert.equal(res.statusCode, 200, res.body);
+      assert.deepEqual(clock.waits, []);
+    } finally {
+      await timed.close();
+    }
+  });
+
+  test("a refused pick answers without the wait", async () => {
+    const clock = stillClock();
+    const timed = await timedApp(clock);
+    try {
+      const roomId = await room();
+      const res = await pick(timed, roomId, auth.allow(roomId, "player"), { work: "test-pack/inn", kind: "map" });
+      assert.equal(res.statusCode, 403);
+      assert.deepEqual(clock.waits, []);
+    } finally {
+      await timed.close();
+    }
   });
 });
 
