@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type FocusEventHandler, type MouseEvent, type MouseEventHandler, type PointerEvent, type PointerEventHandler, type ReactNode } from "react";
+import { effectiveZoom } from "../features/device/layout.ts";
 import { keyboardFocus } from "../lib/inputModality.ts";
 import { theme } from "../lib/theme.ts";
 
@@ -177,13 +178,6 @@ export function placeTipZoomed(anchor: Box, tip: { width: number; height: number
 export function tipMaxWidth(view: { width: number }, zoom: number): number {
   const z = zoom > 0 ? zoom : 1;
   return Math.min(MAX_WIDTH, view.width / z - 2 * MARGIN);
-}
-
-/** The zoom an element is drawn at: the browser's own figure where it gives one, else its drawn width over its laid-out width. */
-export function effectiveZoom(el: HTMLElement): number {
-  const own = (el as HTMLElement & { currentCSSZoom?: number }).currentCSSZoom;
-  if (typeof own === "number" && own > 0) return own;
-  return el.offsetWidth > 0 ? el.getBoundingClientRect().width / el.offsetWidth : 1;
 }
 
 /**

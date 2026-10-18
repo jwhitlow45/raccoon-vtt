@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type ReactNode, type WheelEvent } from "react";
+import { effectiveZoom } from "../features/device/layout.ts";
 import { theme } from "../lib/theme.ts";
 import { Icon } from "./Icon.tsx";
 
@@ -80,7 +81,7 @@ export function ScrollStrip(props: {
       if (!el || !target) return;
       const strip = el.getBoundingClientRect();
       const button = target.getBoundingClientRect();
-      const zoom = zoomOf(el, strip.width);
+      const zoom = effectiveZoom(el, strip.width);
       const width = strip.width / zoom;
       const start = (button.left - strip.left) / zoom + el.scrollLeft - FADE_PX;
       const end = (button.right - strip.left) / zoom + el.scrollLeft + FADE_PX;
@@ -176,19 +177,6 @@ function Chevron(props: { side: "left" | "right"; onPress(): void }) {
       <Icon name={props.side === "left" ? "back" : "chevronRight"} />
     </button>
   );
-}
-
-/**
- * How many of the page's px each of the element's own px draws as, the
- * zoom of every piece of chrome around it (features/device/layout.ts
- * chromeZoom). currentCSSZoom says so exactly. A browser without it gets
- * the drawn width over offsetWidth instead, which offsetWidth's rounding
- * to whole pixels leaves off by half a pixel in the strip's width at most.
- */
-function zoomOf(el: HTMLElement, drawnWidth: number): number {
-  const exact = (el as { currentCSSZoom?: number }).currentCSSZoom;
-  if (typeof exact === "number" && exact > 0) return exact;
-  return el.offsetWidth > 0 && drawnWidth > 0 ? drawnWidth / el.offsetWidth : 1;
 }
 
 /** A mask reads only alpha, so any opaque color shows the strip. */

@@ -79,6 +79,25 @@ export function smallUi(scale: number): { "data-rvtt-small-ui"?: "" } {
   return scale < 1 ? { "data-rvtt-small-ui": "" } : {};
 }
 
+/** The parts of an element `effectiveZoom` reads, so its rule runs under node --test. */
+export type ZoomedElement = { readonly currentCSSZoom?: number; readonly offsetWidth: number; getBoundingClientRect(): { readonly width: number } };
+
+/**
+ * How many of the page's px each of an element's own px draws as: every
+ * `zoom` around it multiplied together, the interface size's (chromeZoom)
+ * among them. currentCSSZoom says so exactly. A browser without it gets
+ * the drawn width over offsetWidth instead, which offsetWidth's rounding to
+ * whole pixels leaves off by half a pixel in the element's width at most.
+ * A caller that has just measured the drawn width passes it as `drawn`, so
+ * the box is not read twice. With nothing to go by, the zoom is 1.
+ */
+export function effectiveZoom(el: ZoomedElement, drawn?: number): number {
+  const exact = el.currentCSSZoom;
+  if (typeof exact === "number" && exact > 0) return exact;
+  const width = drawn ?? el.getBoundingClientRect().width;
+  return el.offsetWidth > 0 && width > 0 ? width / el.offsetWidth : 1;
+}
+
 /*
  * These hand back what they were given at 100%, so a layer that is not
  * zoomed sees the very objects it saw before, and memos keyed on them hold.

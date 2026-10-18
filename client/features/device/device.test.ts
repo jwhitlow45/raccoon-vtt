@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { cameraForView, worldToScreen } from "../../lib/camera.ts";
 import { EPH_PER_SECOND } from "../../state/socket.ts";
-import { barInset, cameraInZoomed, chromeZoom, insetsInZoomed, inZoomed, layoutSize, sizeInZoomed, smallUi } from "./layout.ts";
+import { barInset, cameraInZoomed, chromeZoom, effectiveZoom, insetsInZoomed, inZoomed, layoutSize, sizeInZoomed, smallUi, type ZoomedElement } from "./layout.ts";
 import { ephRate, mapVariantFor, parseLowPower, parseUiScale, pixelRatioFor, stageMountKey, UI_SCALES, uiScaleLabel } from "./settings.ts";
 
 describe("this device's settings", () => {
@@ -61,6 +61,28 @@ describe("interface size", () => {
     assert.deepEqual(smallUi(1), {});
     assert.deepEqual(smallUi(1.15), {});
     assert.deepEqual(smallUi(0.85), { "data-rvtt-small-ui": "" });
+  });
+
+  test("an element's zoom is the browser's own figure where it gives one, else its drawn width over its laid-out width", () => {
+    /** A 100 px element drawn `drawn` px wide, whose box may only be read when `boxRead` allows. */
+    const el = (drawn: number, extra: Partial<ZoomedElement> = {}, boxRead = true): ZoomedElement => ({
+      offsetWidth: 100,
+      getBoundingClientRect: () => {
+        if (!boxRead) throw new Error("the box was read again");
+        return { width: drawn };
+      },
+      ...extra,
+    });
+    for (const scale of UI_SCALES) {
+      assert.equal(effectiveZoom(el(999, { currentCSSZoom: scale })), scale, `currentCSSZoom wins at ${uiScaleLabel(scale)}`);
+      assert.equal(effectiveZoom(el(100 * scale)), scale, `measured at ${uiScaleLabel(scale)}`);
+      assert.equal(effectiveZoom(el(0, {}, false), 100 * scale), scale, `a width the caller measured is not read again at ${uiScaleLabel(scale)}`);
+    }
+    // Two zoomed layers, one inside the other, multiply.
+    assert.equal(effectiveZoom(el(0, { currentCSSZoom: 1.3 * 0.85 })), 1.3 * 0.85);
+    assert.equal(effectiveZoom(el(130, { currentCSSZoom: 0 })), 1.3, "a zero from the browser is no figure");
+    assert.equal(effectiveZoom(el(130, { offsetWidth: 0 })), 1, "an element laid out at no width");
+    assert.equal(effectiveZoom(el(0)), 1, "an element drawn at no width");
   });
 
   test("a bar's inset is its drawn height, which grows with the scale", () => {
