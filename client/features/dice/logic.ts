@@ -1,5 +1,6 @@
 import { askedCritical } from "#shared/dice/crit.ts";
 import { applyMode, formatFormula, formulaRange, parseFormula, parseRollText, type AdvantageMode } from "#shared/dice/formula.ts";
+import { naturalOf } from "#shared/dice/roll.ts";
 import { critSumText, oneDamage } from "#shared/logText.ts";
 import type { DiceResult, DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
 import type { DiceRollInput } from "#shared/protocol.ts";
@@ -123,6 +124,18 @@ export function headerRoll(rolls: readonly DiceRoll[]): HeaderRoll | null {
     dice: [...parts],
     more: rolls.length - parts.length,
   };
+}
+
+/**
+ * An answer's verdict on the header line: its natural 20 or 1, then the
+ * pass or fail its viewer reads, which the projection leaves out when the
+ * DM hides it. A dice line's comes from its DC or AC instead (rollVerdict).
+ */
+export function answerVerdict(roll: Pick<DiceResult, "formula" | "faces">, result: "pass" | "fail" | undefined): string | null {
+  const natural = naturalOf(roll);
+  const nat = natural === 20 ? "Natural 20" : natural === 1 ? "Natural 1" : null;
+  const verdict = result === "pass" ? "Pass" : result === "fail" ? "Fail" : null;
+  return [nat, verdict].filter(Boolean).join(", ") || null;
 }
 
 /**

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
-import { askedFormula, askedRoll, collapseBare, findRolls, headerRoll, readingOf, recentRolls, stepHistory, withHistory, type RecentRow } from "./logic.ts";
+import { answerVerdict, askedFormula, askedRoll, collapseBare, findRolls, headerRoll, readingOf, recentRolls, stepHistory, withHistory, type RecentRow } from "./logic.ts";
 import type { ReceiptLookup } from "../../lib/api.ts";
 import { ReceiptTracker, refusalWords } from "./useReceipt.ts";
 
@@ -283,5 +283,19 @@ describe("the header line's roll (docs/design-v1-dice-ui.md 4.1)", () => {
     const crit: DiceRoll = { formula: "2d6+3", faces: [4, 6], total: 25, label: "Scimitar critical damage, slashing", crit: "maxPlusRoll" };
     assert.deepEqual(headerRoll([crit]), { total: 25, label: "Scimitar critical damage, slashing", sums: "12 max + 13", dice: [crit], more: 0 });
     assert.equal(headerRoll([]), null);
+  });
+});
+
+describe("an answer's verdict on the header line (docs/design-v1-dice-ui.md 4.1)", () => {
+  test("the pass or fail the viewer reads, after a natural 20 or 1 (LP8-COMBAT-3)", () => {
+    assert.equal(answerVerdict({ formula: "1d20+1", faces: [12] }, "fail"), "Fail");
+    assert.equal(answerVerdict({ formula: "1d20+7", faces: [10] }, "pass"), "Pass");
+    assert.equal(answerVerdict({ formula: "1d20+2", faces: [20] }, "pass"), "Natural 20, Pass");
+    assert.equal(answerVerdict({ formula: "2d20kh1+2", faces: [1, 1] }, "fail"), "Natural 1, Fail");
+  });
+
+  test("with pass or fail hidden from the player, only a natural 20 or 1", () => {
+    assert.equal(answerVerdict({ formula: "1d20+1", faces: [12] }, undefined), null);
+    assert.equal(answerVerdict({ formula: "1d20+1", faces: [20] }, undefined), "Natural 20");
   });
 });

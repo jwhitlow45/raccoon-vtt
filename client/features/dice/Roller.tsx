@@ -12,7 +12,7 @@ import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
-import { headerRoll, readHistory, readingOf, rollsOf, stepHistory, withHistory, writeHistory } from "./logic.ts";
+import { answerVerdict, headerRoll, readHistory, readingOf, rollsOf, stepHistory, withHistory, writeHistory } from "./logic.ts";
 import { FACE_CHIP, faceChips, rollVerdict } from "./RecentRolls.tsx";
 import { againOf, useDicePanel, useLastRoll } from "./useDicePanel.ts";
 import { useRollBlocked } from "./useRollOption.ts";
@@ -70,7 +70,8 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   else if (receipt.state === "unknown") body = <span style={{ color: theme.color.textMuted }}>This may have happened. Check the log.</span>;
   else if (!first || !head) body = <span style={{ color: theme.color.textMuted }}>Rolled. Its result is no longer in the log.</span>;
   else {
-    const verdict = rollVerdict(first, (committed?.lines[0]?.data?.type === "dice" ? committed.lines[0].data : {}) as { dc?: number; ac?: number });
+    const data = committed?.lines[0]?.data;
+    const verdict = data?.type === "roll" ? answerVerdict(first, data.result) : rollVerdict(first, data?.type === "dice" ? data : {});
     const label = head.label !== undefined ? labelText(head.label) : "once" in last ? last.label : undefined;
     body = (
       <button
