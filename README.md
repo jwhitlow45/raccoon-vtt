@@ -135,7 +135,8 @@ with the reason. The Linux shards leave those files out, and an
 **e2e-macos** job runs them on a Mac. The list is empty, and the macOS job
 runs only when it is not.
 
-A newer push to a branch cancels that branch's run in progress. A failing
+A newer push to a `ci/` branch cancels that branch's run in progress. Every
+push to `main` runs to the end, so each commit there is tested. A failing
 e2e file runs once more, and its shard fails only if the rerun fails too. A
 file that passed only on its rerun shows as a warning on the run. A shard
 that failed or reran keeps its logs and screenshots as an artifact for two

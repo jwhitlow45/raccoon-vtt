@@ -23,10 +23,13 @@ on:
 permissions:
   contents: read
 
-# A newer push to a branch replaces that branch's run in progress.
+# A newer push to a ci/ branch replaces that branch's run in progress. On
+# main every push is tested: each run there has a group of its own, since a
+# shared group, even without cancel-in-progress, still cancels a run that
+# waits in it when a third push arrives.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   # The Node of the production image (the Dockerfile's NODE_IMAGE). pnpm
