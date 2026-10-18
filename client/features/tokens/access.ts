@@ -132,6 +132,9 @@ export function tokenAccess(input: {
   const actorVia = "ref" in token.actor ? "character" : "token";
   // A companion is to its player what their character is (docs/design-v1-combat-flow.md 3.6.4).
   const companionOwner = owner && token.companion !== undefined;
+  // A character's card is its own players' to edit, as the server's character.update holds. A player who owns only a token of it, one lent to them, owns the token and none of the card.
+  const character = characterOf(view, token);
+  const playsCharacter = character !== undefined && ownsCharacter(memberId, character);
   return {
     dm,
     owner,
@@ -146,7 +149,7 @@ export function tokenAccess(input: {
     canEditActor(field) {
       if (dm) return true;
       if (companionOwner) return COMPANION_OWNER_ACTOR_FIELDS.has(field);
-      return owner && actorVia === "character" && CHARACTER_OWNER_ACTOR_FIELDS.has(field);
+      return owner && playsCharacter && CHARACTER_OWNER_ACTOR_FIELDS.has(field);
     },
     hp: full ? "all" : view?.meta?.settings?.playersApplyDamage ? "relative" : "none",
     effects: full,

@@ -125,14 +125,16 @@ function TokenDetails(props: PanelProps) {
   const companion = isCompanion(token);
   const summaryItems = vitals({ actor, token, fullAccess: access.full, place: "panel" });
   const summary = summaryItems.length > 0 ? <VitalsLine items={summaryItems} /> : null;
+  // A player lent only a token of a character holds none of its card (docs/design-v1-pc-stats.md 4.2), so it has no stat card to show or edit there.
+  const playsCharacter = character !== undefined && ownsCharacter(you?.memberId, character);
   const sections = panelSections({
     dm: access.dm,
     owner: access.owner,
     kind: token.kind,
     companion,
-    statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion, character: "ref" in token.actor, ownsCharacter: character ? ownsCharacter(you?.memberId, character) : undefined }),
+    statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion, character: "ref" in token.actor, ownsCharacter: character ? playsCharacter : undefined }),
     summary: summary !== null,
-    actor: actor !== undefined,
+    actor: actor !== undefined && (character === undefined || access.dm || playsCharacter),
     ownerRenames: !access.dm && access.canEditToken("name"),
   });
   const cardNotes =

@@ -161,6 +161,18 @@ describe("token access mirrors the server's permissions", () => {
     }
   });
 
+  test("a player who owns only a token of a character, as one lent to them, edits none of its card, as the server refuses (LP7-PC-6)", () => {
+    const state = fixture();
+    state.tokens.lent = token("lent", { kind: "pc", name: "Hero", actor: { ref: "hero" }, ownerIds: ["p2"] });
+    const access = tokenAccess({ role: P2.role, memberId: P2.memberId, view: state, token: state.tokens.lent });
+    assert.equal(access.owner, true, "the token stays theirs");
+    for (const field of Object.keys(ACTOR_SAMPLES) as (keyof ActorPatch)[]) {
+      const allowed = canApply({ t: "character.update", characterId: "hero", patch: { actor: { [field]: ACTOR_SAMPLES[field] } as ActorPatch } }, P2, state, deps).ok;
+      assert.equal(allowed, false, `the server refuses ${field}`);
+      assert.equal(access.canEditActor(field), false, field);
+    }
+  });
+
   test("HP: owners and the DM do everything, others only damage and heal when the room allows it", () => {
     const state = fixture();
     const goblin = state.tokens.goblin!;
