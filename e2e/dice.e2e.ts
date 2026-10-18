@@ -3,9 +3,10 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { after, before, describe, test } from "node:test";
+import { after, before, describe, test, type TestContext } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import { FORMULA_ERRORS } from "#shared/dice/formula.ts";
+import { keptD20 } from "#shared/dice/roll.ts";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
 import { ConsoleWatch, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
@@ -30,6 +31,14 @@ import { ConsoleWatch, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, So
  * die (a long critical damage with three riders), each at 390 x 844 at
  * 100% and 130%, and the header line at 320 x 568 at 130% as well.
  *
+ * Then the roll animation (docs/design-v1-roll-animation.md 10), its steps
+ * labeled `ra-`: Pat's own roll throws dice that land on the result, and
+ * reduced motion, no WebGL, Low power, the switch, a tap during a throw,
+ * the tracker's Roll, a secret roll, the DM's toast of Pat's attack and a
+ * small phone each do as the design says. The browser draws WebGL in
+ * software (SwiftShader), as CI has no GPU, and the steps that measure the
+ * header line do so once the dice have gone.
+ *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twenty, one file after
  * another as the others. The other environment variables are the smoke
  * run's (smoke.e2e.ts).
@@ -44,6 +53,9 @@ const assetDir = path.join(work, "assets");
 const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 
 const PHONE = { width: 375, height: 667 };
+
+/** WebGL drawn in software, so the dice throw on a CI runner, which has no GPU. */
+const WEBGL_ARGS = ["--enable-unsafe-swiftshader", "--use-angle=swiftshader-webgl"];
 
 let server: Server;
 let browser: Browser;
@@ -237,10 +249,153 @@ async function inView(page: Page, selector: string): Promise<boolean> {
   return box !== null && viewport !== null && box.y >= 0 && box.x >= 0 && box.y + box.height <= viewport.height && box.x + box.width <= viewport.width;
 }
 
+/** Runs code in the page and hands back what it returns. */
+function js<T>(page: Page, body: string): Promise<T> {
+  return page.evaluate(`(() => { ${body} })()`) as Promise<T>;
+}
+
+/** Rolls with Enter, as `rollWithEnter`, and hands back the new line with its log id. */
+async function rollLine(page: Page, watch: SocketWatch, text: string): Promise<{ id: string; data: DiceLine }> {
+  const before = diceLines(watch.state?.log).length;
+  await field(page).fill(text);
+  await field(page).press("Enter");
+  return waitFor(`the line of ${text}`, () => diceLines(watch.state?.log).slice(before).at(-1) ?? null);
+}
+
+/**
+ * Whether this browser can draw the dice, with the stage's own demand of a
+ * context that is not a slow fallback. A step that needs the dice fails
+ * without them when CI is set, as CI launches with WEBGL_ARGS, and skips
+ * on a machine that cannot.
+ */
+async function needsWebGL(page: Page, t: TestContext): Promise<boolean> {
+  const ok = await js<boolean>(page, `return document.createElement("canvas").getContext("webgl2", { failIfMajorPerformanceCaveat: true }) !== null;`);
+  if (ok) return true;
+  assert.ok(!process.env.CI, "no WebGL2 on the CI runner, so the dice cannot be tested");
+  t.skip("this browser has no WebGL2 to draw the dice");
+  return false;
+}
+
+/** What `watchThrow` saw, in the page's milliseconds. */
+type Watched = { canvasAt: number | null; totalAtCanvas: boolean | null; totalAt: number | null; downAt: number | null; newRowAt: number | null };
+
+/**
+ * Watches the page from now on, at every change to its DOM: when the
+ * stage's canvas first shows and whether the header line held a total
+ * then, when the header line shows a total again after the tap cleared it,
+ * when the last pointer went down, and when a Recent rolls row first
+ * appears that was not there before.
+ */
+function watchThrow(page: Page): Promise<void> {
+  return js(
+    page,
+    `
+    const rows = () => [...document.querySelectorAll("[data-roll-row]")].map((r) => r.getAttribute("data-roll-row"));
+    const known = new Set(rows());
+    const w = { canvasAt: null, totalAtCanvas: null, totalAt: null, downAt: null, newRowAt: null, cleared: false };
+    globalThis.__raWatch?.stop();
+    const total = () => document.querySelector('[data-dice-last] [aria-label="Show this roll in Recent rolls"]') !== null;
+    const look = () => {
+      const now = performance.now();
+      const t = total();
+      if (!t) w.cleared = true;
+      if (w.canvasAt === null && [...document.querySelectorAll("[data-dice-stage]")].some((c) => c.style.display === "block")) {
+        w.canvasAt = now;
+        w.totalAtCanvas = t;
+      }
+      if (w.cleared && t && w.totalAt === null) w.totalAt = now;
+      if (w.newRowAt === null && rows().some((r) => !known.has(r))) w.newRowAt = now;
+    };
+    const observer = new MutationObserver(look);
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+    const down = () => { w.downAt = performance.now(); };
+    document.addEventListener("pointerdown", down, true);
+    globalThis.__raWatch = { w, stop: () => { observer.disconnect(); document.removeEventListener("pointerdown", down, true); } };
+    `,
+  );
+}
+
+function watched(page: Page): Promise<Watched> {
+  return js<Watched>(page, `return globalThis.__raWatch.w;`);
+}
+
+/** Waits until `watchThrow` has seen what `ready` asks for, and hands back all it saw. */
+function seen(page: Page, what: string, ready: (w: Watched) => boolean): Promise<Watched> {
+  return waitFor(what, async () => {
+    const w = await watched(page);
+    return ready(w) ? w : null;
+  });
+}
+
+/** The stage's canvas as its test hook reads it: whether it shows, its frames drawn, the faces it landed on, and its sizes. */
+type StageHook = { shown: boolean; frames: string | null; landed: string | null; width: number; cssWidth: number; zoom: number; ratio: number };
+
+function stageHook(page: Page): Promise<StageHook | null> {
+  return js<StageHook | null>(
+    page,
+    `
+    const c = document.querySelector("[data-dice-stage]");
+    if (!c) return null;
+    return { shown: c.style.display === "block", frames: c.dataset.frames ?? null, landed: c.dataset.landed ?? null, width: c.width, cssWidth: parseFloat(c.style.width) || 0, zoom: c.currentCSSZoom ?? 1, ratio: Math.min(devicePixelRatio || 1, 2) };
+    `,
+  );
+}
+
+/**
+ * Waits out a throw: its total in the header line, and the dice and their
+ * scrim gone, so the header line is measured or pictured as it stays.
+ */
+async function settled(page: Page): Promise<void> {
+  await waitFor("the throw to end", () =>
+    js<boolean>(
+      page,
+      `
+      const lines = [...document.querySelectorAll("[data-dice-last]")];
+      const landed = lines.every((l) => l.querySelector('[aria-label="Show this roll in Recent rolls"]') !== null);
+      const gone = [...document.querySelectorAll("[data-dice-tray]")].every((t) => t.childElementCount === 1) && [...document.querySelectorAll("[data-dice-stage]")].every((c) => c.style.display !== "block");
+      return (landed && gone) || null;
+      `,
+    ),
+  );
+}
+
+/**
+ * Waits for the dice on a room just opened. Their chunk loads in the
+ * background and warms up in a quiet moment, and a roll before then shows
+ * its total at once, so this rolls a d20 until one throws.
+ */
+async function diceReady(page: Page, socket: SocketWatch): Promise<void> {
+  await waitFor(
+    "the dice ready",
+    async () => {
+      await watchThrow(page);
+      await rollWithEnter(page, socket, "1d20 warm-up");
+      const w = await seen(page, "the warm-up's total", (w) => w.totalAt !== null);
+      await settled(page);
+      if (w.canvasAt !== null) return true;
+      await page.waitForTimeout(500);
+      return null;
+    },
+    30_000,
+  );
+}
+
+/** How far the nearest scroller around `selector` scrolls sideways: 0 when it never does. */
+function sideways(page: Page, selector: string): Promise<number> {
+  return js<number>(
+    page,
+    `
+    let el = document.querySelector(${JSON.stringify(selector)});
+    while (el && !/(auto|scroll)/.test(getComputedStyle(el).overflowY)) el = el.parentElement;
+    return el ? el.scrollWidth - el.clientWidth : -1;
+    `,
+  );
+}
+
 describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
-    browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
+    browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1", args: WEBGL_ARGS });
     dmContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     playerContext = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
     dm = await dmContext.newPage();
@@ -390,6 +545,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       await player.getByRole("status", { name: "Connected" }).first().waitFor();
       await openDicePhone(player);
       await rollWithEnter(player, playerSocket, "1d20+3");
+      await settled(player);
       for (const selector of ["[data-dice-last]", 'input[aria-label="Dice formula"]', 'button:has-text("Roll")', '[aria-label="Quick dice"]', 'button[aria-label="Add a d20"]', '[role="group"][aria-label="For the next roll"]']) {
         assert.ok(await inView(player, selector), `${selector} in view at ${Math.round(scale * 100)}%`);
       }
@@ -433,6 +589,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
   test("8. a roll of 100 dice with a long label keeps the sticky line to one line with Again in reach, and the panel never scrolls sideways (LP7-DICE-1)", async () => {
     await openDicePhone(player);
     await rollWithEnter(player, playerSocket, `100d1000 ${"z".repeat(60)}`);
+    await settled(player);
     const sticky = player.locator("[data-dice-last]");
     await sticky.getByRole("button", { name: "Again" }).waitFor();
     const fit = await sticky.evaluate((el) => {
@@ -548,6 +705,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
         await player.getByRole("status", { name: "Connected" }).first().waitFor();
         await openDicePhone(player);
         await rollWithEnter(player, playerSocket, "1d20+3");
+        await settled(player);
       }
       const sheet = player.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
       const line = (await sheet.locator("[data-dice-last]").boundingBox())!;
@@ -632,6 +790,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       const line = await waitFor("the critical damage's line", () => diceLines(playerSocket.state?.log).slice(count).find((l) => l.data.rolls[0]?.crit !== undefined)?.data ?? null);
       const sticky = player.locator("[data-dice-last]");
       await sticky.getByText(String(line.rolls[0]!.total), { exact: true }).waitFor();
+      await settled(player);
       const sum = (await sticky.getByText(/^\(\d+ max \+ \d+\)$/).textContent())!;
       const keep = [String(line.rolls[0]!.total), "Again", ...(width === 390 ? [sum] : [])];
       assert.deepEqual(await headerFaults(sticky, keep), [], `${label}: the header line`);
@@ -715,6 +874,280 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
     await reopenRoom(player);
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
+    assert.deepEqual(playerConsole.errors, []);
+  });
+
+  test("ra-1. Pat rolls 1d20 at 390 x 844: the dice fly with no total in the header line, land on the chip's face within 1,100 ms, and no loop runs by 2.5 s", async (t) => {
+    if (!(await needsWebGL(player, t))) return;
+    await openDicePhone(player);
+    await diceReady(player, playerSocket);
+    await watchThrow(player);
+    const line = await rollWithEnter(player, playerSocket, "1d20 ra-1");
+    const w = await seen(player, "the total after the throw", (w) => w.totalAt !== null);
+    assert.ok(w.canvasAt !== null, "the dice canvas showed");
+    assert.equal(w.totalAtCanvas, false, "the header line held no total as the dice flew");
+    const land = w.totalAt! - w.canvasAt!;
+    assert.ok(land >= 900 && land <= 1_100, `the total showed ${Math.round(land)} ms after the dice`);
+    const chip = await player.locator("[data-dice-last] [data-face]").first().textContent();
+    assert.equal(chip, String(line.rolls[0]!.faces[0]));
+    assert.equal((await stageHook(player))?.landed, chip, "the die landed on the face its chip shows");
+    // By 2.5 s the dice are gone, and the frame count stands still: no loop runs.
+    await waitFor("2.5 s after the throw", () => js<boolean>(player, `return performance.now() - ${w.canvasAt} > 2_500 || null;`));
+    const rest = (await stageHook(player))!;
+    await player.waitForTimeout(400);
+    const later = (await stageHook(player))!;
+    assert.equal(rest.shown, false, "the canvas is hidden");
+    assert.equal(later.frames, rest.frames, "frames were drawn after the throw ended");
+
+    // A throw pictured as it lands: four d6 with their scrim.
+    await watchThrow(player);
+    await rollWithEnter(player, playerSocket, "4d6 ra-1");
+    const four = await seen(player, "the four dice", (w) => w.canvasAt !== null);
+    await waitFor("the landing", () => js<boolean>(player, `return performance.now() - ${four.canvasAt} > 1_150 || null;`));
+    // The scrim stands until the dice fade at 1.8 s, whatever React drew in between.
+    const scrim = await js<number>(player, `return Number(getComputedStyle(document.querySelector("[data-dice-tray]").firstElementChild).opacity);`);
+    assert.ok(scrim > 0.9, `the scrim is at ${scrim} as the dice land`);
+    await shots.take(player, "ra-landed-phone");
+    await settled(player);
+  });
+
+  test("ra-2. under reduced motion the total shows at once and the canvas shows the landed dice, drawn once", async (t) => {
+    if (!(await needsWebGL(player, t))) return;
+    await player.emulateMedia({ reducedMotion: "reduce" });
+    try {
+      await watchThrow(player);
+      const line = await rollWithEnter(player, playerSocket, "1d20 ra-2");
+      const w = await seen(player, "the total", (w) => w.totalAt !== null);
+      assert.ok(w.canvasAt !== null, "the landed dice showed");
+      assert.ok(Math.abs(w.totalAt! - w.canvasAt!) < 100, `the total showed ${Math.round(w.totalAt! - w.canvasAt!)} ms after the dice`);
+      await player.waitForTimeout(600);
+      const hook = (await stageHook(player))!;
+      assert.equal(hook.frames, "1", "one frame, at rest");
+      assert.equal(hook.landed, String(line.rolls[0]!.faces[0]));
+      await shots.take(player, "ra-reduced-motion");
+      await settled(player);
+    } finally {
+      await player.emulateMedia({ reducedMotion: null });
+    }
+  });
+
+  test("ra-3. with no WebGL, with Low power and with the switch off, the total shows at once, no canvas is made and nothing is logged", async () => {
+    // No WebGL: every WebGL context refused, in a page of Pat's own.
+    const page = await playerContext.newPage();
+    const quiet = new ConsoleWatch("pat-no-webgl");
+    quiet.attach(page);
+    try {
+      await page.addInitScript(() => {
+        const proto = (globalThis as unknown as { HTMLCanvasElement: { prototype: { getContext(type: string, ...rest: unknown[]): unknown } } }).HTMLCanvasElement.prototype;
+        const real = proto.getContext;
+        proto.getContext = function (this: unknown, type: string, ...rest: unknown[]) {
+          return /webgl/.test(type) ? null : real.call(this, type, ...rest);
+        };
+      });
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      await openDicePhone(page);
+      // The dice's chunk loads in the background some seconds after the room does, so a roll after that is the real test.
+      await page.waitForTimeout(3_000);
+      await watchThrow(page);
+      const before = diceLines(playerSocket.state?.log).length;
+      await field(page).fill("1d20 ra-3 no webgl");
+      await field(page).press("Enter");
+      await waitFor("the no WebGL line", () => diceLines(playerSocket.state?.log).length > before || null);
+      const w = await seen(page, "the total", (w) => w.totalAt !== null);
+      assert.equal(w.canvasAt, null);
+      assert.equal(await page.locator("[data-dice-stage]").count(), 0, "no canvas without WebGL");
+      assert.deepEqual([...quiet.errors, ...quiet.warnings], [], "no console message without WebGL");
+    } finally {
+      await page.close();
+    }
+
+    // Low power, then the switch off: each read as the room loads, so the dice never load.
+    for (const [key, value] of [["rvtt.lowPower", "on"], ["rvtt.rollAnimation", "off"]] as const) {
+      await player.evaluate((kv) => localStorage.setItem(kv.key, kv.value), { key, value });
+      await reopenRoom(player);
+      await player.getByRole("status", { name: "Connected" }).first().waitFor();
+      await openDicePhone(player);
+      await player.waitForTimeout(3_000);
+      const messages = playerConsole.errors.length + playerConsole.warnings.length;
+      await watchThrow(player);
+      await rollWithEnter(player, playerSocket, `1d20 ra-3 ${key}`);
+      const w = await seen(player, "the total", (w) => w.totalAt !== null);
+      assert.equal(w.canvasAt, null, `${key} ${value}: no throw`);
+      assert.equal(await player.locator("[data-dice-stage]").count(), 0, `${key} ${value}: no canvas`);
+      assert.equal(playerConsole.errors.length + playerConsole.warnings.length, messages, `${key} ${value}: no console message`);
+      await player.evaluate((k) => localStorage.removeItem(k), key);
+    }
+    await reopenRoom(player);
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+  });
+
+  test("ra-4. a tap during a throw: Again shows the first result at once and rolls again, Recent rolls' second row sends its own roll, and the formula field takes focus", async (t) => {
+    if (!(await needsWebGL(player, t))) return;
+    await openDicePhone(player);
+    const sticky = player.locator("[data-dice-last]");
+    const again = sticky.getByRole("button", { name: "Again" });
+    await diceReady(player, playerSocket);
+
+    // The header line's Again during a throw.
+    await watchThrow(player);
+    const first = await rollLine(player, playerSocket, "1d20 ra-4 first");
+    await seen(player, "the throw", (w) => w.canvasAt !== null);
+    assert.equal(await player.locator(`[data-roll-row~="${first.id}"]`).count(), 0, "the row waits for the dice");
+    const count = diceLines(playerSocket.state?.log).length;
+    await again.tap();
+    const a = await seen(player, "the first result", (w) => w.newRowAt !== null && w.downAt !== null);
+    assert.ok(a.downAt! - a.canvasAt! < 1_000, "the tap came while the dice flew");
+    assert.ok(a.newRowAt! - a.downAt! < 400, `the first result showed ${Math.round(a.newRowAt! - a.downAt!)} ms after the tap`);
+    assert.ok(a.newRowAt! < a.canvasAt! + 1_000, "before the dice would have landed");
+    await player.locator(`[data-roll-row~="${first.id}"]`).waitFor({ state: "attached" });
+    const rerolled = await waitFor("the roll again", () => diceLines(playerSocket.state?.log).slice(count).at(-1) ?? null);
+    assert.equal(rerolled.data.rolls[0]?.label, "ra-4 first");
+    await settled(player);
+
+    // Recent rolls' second row during a throw sends that row's roll.
+    await rollWithEnter(player, playerSocket, "1d6+2 ra-4 older");
+    await settled(player);
+    await rollWithEnter(player, playerSocket, "1d8+1 ra-4 newer");
+    await settled(player);
+    const rows = player.getByRole("region", { name: "Dice" }).locator("[data-roll-row]");
+    await rows.nth(1).scrollIntoViewIfNeeded();
+    await watchThrow(player);
+    await again.tap();
+    await seen(player, "the throw of the newer roll", (w) => w.canvasAt !== null);
+    const second = rows.nth(1).getByRole("button", { name: /^Roll again: / });
+    assert.equal(await second.getAttribute("aria-label"), "Roll again: 1d6+2 ra-4 older", "the second row is the older roll while the newer one flies");
+    const before = diceLines(playerSocket.state?.log).length;
+    await second.tap();
+    const b = await watched(player);
+    assert.ok(b.downAt! - b.canvasAt! < 1_000, "the tap came while the dice flew");
+    const sent = await waitFor("the second row's roll", () => diceLines(playerSocket.state?.log).slice(before).at(-1)?.data ?? null);
+    assert.equal(sent.rolls[0]?.formula, "1d6+2");
+    assert.equal(sent.rolls[0]?.label, "ra-4 older");
+    await settled(player);
+
+    // The formula field during a throw.
+    await watchThrow(player);
+    await again.tap();
+    await seen(player, "the throw", (w) => w.canvasAt !== null);
+    await field(player).tap();
+    const c = await seen(player, "the result", (w) => w.totalAt !== null && w.downAt !== null);
+    assert.ok(c.downAt! - c.canvasAt! < 1_000, "the tap came while the dice flew");
+    assert.ok(c.totalAt! - c.downAt! < 400, "the result showed at once");
+    assert.equal((await stageHook(player))?.shown, false, "the dice are gone");
+    assert.equal(await js<string | null>(player, `return document.activeElement?.getAttribute("aria-label") ?? null;`), "Dice formula", "the field took focus");
+    await field(player).blur();
+  });
+
+  test("ra-5. the tracker's Roll throws nothing, with Dice open in the pane above it", async (t) => {
+    if (!(await needsWebGL(dm, t))) return;
+    await openSideTab(dm, "Dice");
+    await dm.getByRole("tablist", { name: "Panels" }).locator('[role="tab"][aria-haspopup="menu"]').click();
+    await dm.getByRole("menu", { name: "More panels" }).getByRole("menuitemcheckbox", { name: "Two panels" }).click();
+    const bar = dm.locator("[data-pane-bar]");
+    await bar.getByRole("button", { name: / below$/ }).click();
+    await dm.getByRole("menu", { name: "Panel below" }).getByRole("menuitemradio", { name: sideTabName("Initiative") }).click();
+    const aboleth = Object.values(dmSocket.state!.tokens).find((tk) => tk.name === "Aboleth")!;
+    await ops!.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: aboleth.id }] });
+    // Dice above throws a roll of its own, so the pane can hold the dice.
+    await diceReady(dm, dmSocket);
+    await watchThrow(dm);
+    const before = diceLines(dmSocket.state?.log).length;
+    // Roll sits beside the value box where the row has room, else in its options (combat.e2e.ts 5b).
+    const roll = dm.getByRole("button", { name: /^Roll [+−-]\d+ Initiative for Aboleth$/ }).first();
+    await dm.getByRole("button", { name: "Aboleth options" }).waitFor();
+    if (!(await roll.isVisible())) await dm.getByRole("button", { name: "Aboleth options" }).click();
+    await roll.click();
+    const line = await waitFor("the initiative line", () => diceLines(dmSocket.state?.log).slice(before).find((l) => l.data.rolls[0]?.label === "Initiative")?.data ?? null);
+    assert.ok(line.rolls[0]!.total > 0);
+    await dm.waitForTimeout(1_500);
+    assert.equal((await watched(dm)).canvasAt, null, "the tracker's Roll threw dice");
+    await shots.take(dm, "ra-tracker-roll-no-dice");
+    await ops!.send({ t: "encounter.end" });
+    await bar.getByRole("button", { name: "Close Initiative", exact: true }).click();
+    await bar.waitFor({ state: "detached" });
+  });
+
+  test("ra-6. the DM's secret roll throws on the DM's computer, and Pat's phone makes no dice", async (t) => {
+    if (!(await needsWebGL(dm, t))) return;
+    await openSideTab(dm, "Dice");
+    await openDicePhone(player);
+    await watchThrow(dm);
+    await watchThrow(player);
+    const before = diceLines(playerSocket.state?.log).length;
+    await dm.getByRole("button", { name: "Hide from players" }).click();
+    const line = await rollWithEnter(dm, dmSocket, "1d20+4 ra-6 secret");
+    assert.equal(line.to, "dm");
+    await seen(dm, "the DM's throw", (w) => w.canvasAt !== null);
+    await waitFor("the bare line on Pat's phone", () => diceLines(playerSocket.state?.log).slice(before).find((l) => l.data.by === run.dmId) ?? null);
+    await player.waitForTimeout(1_500);
+    assert.equal((await watched(player)).canvasAt, null, "Pat's phone threw the DM's secret roll");
+    await settled(dm);
+  });
+
+  test("ra-7. Pat's attack makes the DM's toast lead with a d20 showing Pat's face", async () => {
+    // The DM's Dice panel off screen, so Pat's roll toasts.
+    await openSideTab(dm, "DM");
+    await openDicePhone(player);
+    const attack = thornRolls(player).getByRole("button", { name: "Longsword", exact: true });
+    await attack.scrollIntoViewIfNeeded();
+    const count = diceLines(playerSocket.state?.log).length;
+    await attack.tap();
+    const line = await waitFor("Longsword's roll", () => diceLines(playerSocket.state?.log).slice(count).find((l) => l.data.rolls[0]?.label === "Longsword")?.data ?? null);
+    const face = String(keptD20(line.rolls[0]!)!.face);
+    const toast = dm.locator('button[role="status"]').filter({ hasText: `Pat rolled ${line.rolls[0]!.total} for` }).filter({ hasText: "Longsword" });
+    await toast.waitFor();
+    const die = toast.locator("[data-toast-die]");
+    assert.equal(await die.getAttribute("data-toast-die"), face);
+    assert.equal(await die.locator("svg text").textContent(), face, "the icon shows Pat's face");
+    assert.equal(await die.locator("svg").getAttribute("aria-hidden"), "true");
+    await shots.take(dm, "ra-toast-d20");
+    await settled(player);
+  });
+
+  test("ra-8. at 320 x 568 at 100% and 130%, a 20d6 throw and the dice set picker never scroll sideways, the tiles are 44 px, and the canvas is drawn at its screen size", async (t) => {
+    if (!(await needsWebGL(player, t))) return;
+    await player.setViewportSize({ width: 320, height: 568 });
+    for (const scale of [1, 1.3]) {
+      const label = `320 x 568 at ${Math.round(scale * 100)}%`;
+      await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+      await reopenRoom(player);
+      await player.getByRole("status", { name: "Connected" }).first().waitFor();
+      await openDicePhone(player);
+      await diceReady(player, playerSocket);
+      await watchThrow(player);
+      await rollWithEnter(player, playerSocket, "20d6 ra-8");
+      await seen(player, "the throw", (w) => w.canvasAt !== null);
+      const hook = (await stageHook(player))!;
+      assert.equal(await sideways(player, "[data-dice-last]"), 0, `${label}: the pane scrolls sideways during the throw`);
+      const backing = hook.cssWidth * hook.ratio * hook.zoom;
+      assert.ok(Math.abs(hook.width - backing) <= 1, `${label}: the canvas is ${hook.width} px wide, not ${backing} (${hook.cssWidth} CSS px, ratio ${hook.ratio}, zoom ${hook.zoom})`);
+      await shots.take(player, `ra-20d6-${Math.round(scale * 100)}`);
+      await settled(player);
+      const sheet = player.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+      await sheet.getByRole("button", { name: "Close Dice" }).tap();
+      await sheet.waitFor({ state: "detached" });
+      // The closed sheet steps back off its Back entry a moment later (harness.ts openPage), which would close the next sheet too.
+      await player.waitForTimeout(500);
+
+      await player.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).tap();
+      await player.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).tap();
+      await player.getByRole("button", { name: /^This device/ }).tap();
+      const tiles = player.locator("[data-dice-set]");
+      await tiles.first().scrollIntoViewIfNeeded();
+      assert.equal(await tiles.count(), 8);
+      for (const box of await Promise.all((await tiles.all()).map((tile) => tile.boundingBox()))) {
+        assert.ok(box && box.width >= 44 && box.height >= 44, `${label}: a tile is ${box?.width} x ${box?.height}`);
+      }
+      assert.equal(await sideways(player, "[data-dice-set]"), 0, `${label}: This device scrolls sideways`);
+      await shots.take(player, `ra-dice-picker-${Math.round(scale * 100)}`);
+      await player.keyboard.press("Escape");
+    }
+    await player.setViewportSize({ width: 390, height: 844 });
+    await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await reopenRoom(player);
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+    assert.deepEqual(dmConsole.errors, []);
     assert.deepEqual(playerConsole.errors, []);
   });
 });
