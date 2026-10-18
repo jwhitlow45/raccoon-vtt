@@ -7,6 +7,7 @@ import { LIMITS, serializedBytes } from "../limits.ts";
 import { ABILITY_NAMES, abilityMod } from "../statBlock.ts";
 import { DAMAGE_TYPES } from "./damage.ts";
 import { SKILLS } from "./skills.ts";
+import { AREA_SPELLS } from "../srd/area-spells.ts";
 import { SAVE_SPELLS } from "../srd/save-spells.ts";
 
 /**
@@ -447,12 +448,22 @@ function spellKey(name: string): string {
   return name.trim().toLowerCase().replace(/[’']/g, "'");
 }
 
-const SRD_ON_PASS = new Map(SAVE_SPELLS.map((s) => [spellKey(s.name), s.onPass] as const));
+/**
+ * The save table comes last, so it wins where both name a spell. The area
+ * presets stay for the area spells that deal no damage, which the save
+ * table leaves out: Sleep and Web take none on a pass, not a leveled
+ * spell's half.
+ */
+const SRD_ON_PASS = new Map([
+  ...AREA_SPELLS.filter((s) => s.onPass !== undefined).map((s) => [spellKey(s.name), s.onPass!] as const),
+  ...SAVE_SPELLS.map((s) => [spellKey(s.name), s.onPass] as const),
+]);
 
 /**
  * What the SRD 5.2.1 says a pass takes for a spell of this name, from the
  * table of every spell that deals damage on a save, area spell or single
- * target, read from each spell's text (W7B-R2-3), or undefined.
+ * target, read from each spell's text (W7B-R2-3), else from the area
+ * presets' hand-reviewed table, or undefined.
  */
 export function srdOnPass(roll: Pick<PcRoll, "name" | "kind">): "half" | "none" | undefined {
   return roll.kind === "spell" ? SRD_ON_PASS.get(spellKey(roll.name)) : undefined;

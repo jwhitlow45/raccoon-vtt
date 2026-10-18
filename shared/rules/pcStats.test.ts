@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Character, PcRoll, PcStats } from "../model.ts";
+import { AREA_SPELLS } from "../srd/area-spells.ts";
 import { actor, character } from "../testutil.ts";
 import {
   EMPTY_PC_STATS,
@@ -293,6 +294,16 @@ describe("named rolls (docs/design-v1-pc-stats.md 3.4)", () => {
     assert.equal(srdOnPass({ name: "Ember Burst", kind: "spell" }), undefined);
     assert.equal(unknownOnPass({ name: "Ember Burst", kind: "spell", level: 2 }), "half");
     assert.equal(unknownOnPass({ name: "Frost Sting", kind: "spell", level: 0 }), "none", "a cantrip the SRD's tables do not hold");
+  });
+
+  test("an area spell that deals no damage takes the area presets' none, and the save table wins where both name a spell", () => {
+    for (const [name, level] of [["Sleep", 1], ["Web", 2], ["Hypnotic Pattern", 3]] as const) {
+      assert.equal(srdOnPass({ name, kind: "spell" }), "none", name);
+      assert.equal(unknownOnPass({ name, kind: "spell", level }), "none", name);
+    }
+    // The presets' table reads none for Earthquake, whose text halves a collapsing structure's damage on a pass.
+    assert.equal(AREA_SPELLS.find((s) => s.name === "Earthquake")?.onPass, "none");
+    assert.equal(srdOnPass({ name: "Earthquake", kind: "spell" }), "half");
   });
 
   test("a spell's `spell` ability without a spellcasting ability adds 0", () => {
