@@ -16,9 +16,11 @@
  * top of the journal's: `` `code` ``, an image alone on its line
  * (`![alt](dm-guide/x.webp)`, a relative path the page maps to a bundled
  * file), links to the page's own headings (`[Areas](#areas)`), headings
- * with ids spelled the way GitHub spells them, and bullets one level under
- * a list item. A link to any other relative address keeps only its text,
- * since the files it names are not part of the app.
+ * with ids spelled the way GitHub spells them, bullets one level under a
+ * list item, and GitHub's alerts: a quote whose first line is `[!TIP]` or
+ * `[!NOTE]` alone, which GitHub draws as a callout and so does the app. A
+ * link to any other relative address keeps only its text, since the files
+ * it names are not part of the app.
  *
  * It produces a tree, never HTML, so Markdown.tsx renders it as React
  * elements and nothing in the text can become markup. Anything outside the
@@ -49,8 +51,11 @@ export type Block =
   /** An image on a line of its own (guide only). `src` is the relative path as written, for the page to map. */
   | { kind: "image"; src: string; alt: string }
   | { kind: "table"; header: Inline[][]; rows: Inline[][][] }
-  /** Lines that start with `>` (journal only), parsed again as blocks of their own. */
-  | { kind: "quote"; blocks: Block[] };
+  /** Lines that start with `>` (journal only), parsed again as blocks of their own. `alert` marks GitHub's alert syntax (guide only). */
+  | { kind: "quote"; blocks: Block[]; alert?: GuideAlert };
+
+/** The kinds of GitHub alert the guide uses: a tip that saves the reader time, and a note of something easy to miss. */
+export type GuideAlert = "tip" | "note";
 
 export type MarkdownOptions = {
   /** The journal's additions (see above). */
@@ -81,6 +86,13 @@ const ANCHOR = /^#[\p{L}\p{M}\p{N}_-]{1,200}$/u;
 
 /** An image on its own line. The path is relative, with no scheme and no query, so it can only name a file the page bundles. */
 const IMAGE = /^!\[([^[\]\n]{0,300})\]\(([A-Za-z0-9_./-]{1,300})\)$/;
+
+/**
+ * The first line of a quote that makes it an alert, as GitHub reads it:
+ * the marker alone, in any case. GitHub has three more kinds, which the
+ * guide does not use, so they stay plain quotes that show the marker.
+ */
+const ALERT = /^\[!(TIP|NOTE)\]$/i;
 
 /** A bullet under a list item, indented two spaces or more (guide only). */
 const NESTED = /^ {2,}- (.*)$/;
@@ -264,7 +276,7 @@ function parseBlocks(text: string, options: MarkdownOptions, depth: number, slug
       blocks.push(list.start === undefined ? { kind: "list", items: list.items, ...sub } : { kind: "list", items: list.items, start: list.start, ...sub });
     }
     if (table) blocks.push({ kind: "table", header: table.header, rows: table.rows });
-    if (quote) blocks.push({ kind: "quote", blocks: parseBlocks(quote.join("\n"), options, depth + 1, slugs) });
+    if (quote) blocks.push(quoteBlock(quote, options, depth, slugs));
     paragraph = null;
     list = null;
     table = null;
@@ -326,6 +338,37 @@ function parseBlocks(text: string, options: MarkdownOptions, depth: number, slug
   }
   flush();
   return blocks;
+}
+
+/** A quote, or a guide's alert when its first line is the marker and more follows. GitHub reads no alert inside another quote, so neither does this. */
+function quoteBlock(lines: string[], options: MarkdownOptions, depth: number, slugs: Map<string, number>): Block {
+  const alert = options.guide === true && depth === 0 ? ALERT.exec(lines[0]!.trim()) : null;
+  const body = lines.slice(1);
+  if (alert && body.some((line) => line.trim() !== "")) {
+    return { kind: "quote", blocks: parseBlocks(body.join("\n"), options, depth + 1, slugs), alert: alert[1]!.toLowerCase() as GuideAlert };
+  }
+  return { kind: "quote", blocks: parseBlocks(lines.join("\n"), options, depth + 1, slugs) };
+}
+
+const MODIFIER_KEYS = new Set(["Ctrl", "Cmd", "Shift", "Alt", "Option"]);
+const NAMED_KEYS = new Set([...MODIFIER_KEYS, "Esc", "Escape", "Enter", "Return", "Tab", "Space", "Delete", "Backspace", "Home", "End", "Page Up", "Page Down"]);
+
+/**
+ * The keys a guide's code span names, drawn as keycaps: a single character
+ * (`N`, `?`, `0`), a key's name (`Escape`), or a chord of modifiers and a
+ * key (`Ctrl+Shift+Z`). Null for anything else, which stays code: a search
+ * (`goblin`), a formula (`8d6 fire`), an entry (`-7`), a file name. The
+ * guide writes keys this way already, so it needs no markup of its own.
+ */
+export function keyChord(text: string): string[] | null {
+  if (isKey(text)) return [text];
+  const parts = text.split("+");
+  const key = parts.pop()!;
+  return parts.length > 0 && parts.every((p) => MODIFIER_KEYS.has(p)) && isKey(key) ? [...parts, key] : null;
+}
+
+function isKey(s: string): boolean {
+  return ([...s].length === 1 && s.trim() !== "") || NAMED_KEYS.has(s);
 }
 
 /** The plain text of inline content, for labels and tests. A break reads as a space. */
