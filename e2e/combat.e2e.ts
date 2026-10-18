@@ -580,45 +580,59 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       assert.equal(during.form, rest.form, `${label}: the round header changed form while the notice showed`);
       assert.ok(Math.abs(during.body - rest.body) <= 1, `${label}: the notice took ${rest.body - during.body} px more than was counted`);
     };
-    // Cyra's turn, with Ana's order scrolled, then Bree's again: "Your turn" takes its place over the body for a few seconds.
-    await ops.send({ t: "encounter.next" });
-    await waitFor("Cyra's turn", () => (dmSocket.state?.encounter?.activeEntryId === "e-cy" ? true : null));
     const anaCdp = await anaContext.newCDPSession(ana);
-    await setUp(ana, anaCdp, view);
-    await openTracker(ana);
-    await modal(ana).waitFor();
-    await scrollPane(ana, 220);
-    await ops.send({ t: "encounter.prev" });
-    await modal(ana).locator('[data-rvtt-modal-slot="turn"] [role="status"]', { hasText: "Your turn" }).waitFor();
-    const anaDuring = await stuck(ana, "End turn", "Ana, as Your turn shows");
-    await shots.take(ana, "combat-header-480-130-your-turn-scrolled");
-    // Her turn brings End turn into the header, so its form is compared with the one it settles in once the notice goes.
-    await modal(ana).locator('[data-rvtt-modal-slot="turn"]:empty').waitFor({ state: "attached", timeout: 15_000 });
-    keeps(anaDuring, await settled(ana, "Ana, once Your turn has gone", false), "Ana, as Your turn shows");
-    await ana.keyboard.press("Escape");
-    await modal(ana).waitFor({ state: "detached" });
-    await setUp(ana, anaCdp, { ...DESK, scale: 1 });
-    await anaCdp.detach();
-
-    // The DM's order scrolled, and a whisper from Ana comes as a toast.
-    await setUp(dm, dmCdp, view);
-    await openTracker(dm);
-    await modal(dm).waitFor();
-    await scrollPane(dm, 220);
-    const dmRest = await settled(dm, "the DM, before the toast", false);
-    const anaCookie = (await anaContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
-    const anaOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie: anaCookie });
+    let cyraActs = false;
     try {
-      const dmId = Object.values(dmSocket.state!.members).find((m) => m?.kind === "dm")!.id;
-      await anaOps.send({ t: "log.whisper", to: [dmId], text: "Behind you!" });
+      // Cyra's turn, with Ana's order scrolled, then Bree's again: "Your turn" takes its place over the body for a few seconds.
+      await ops.send({ t: "encounter.next" });
+      cyraActs = true;
+      await waitFor("Cyra's turn", () => (dmSocket.state?.encounter?.activeEntryId === "e-cy" ? true : null));
+      await setUp(ana, anaCdp, view);
+      await openTracker(ana);
+      await modal(ana).waitFor();
+      await scrollPane(ana, 220);
+      await ops.send({ t: "encounter.prev" });
+      cyraActs = false;
+      await modal(ana).locator('[data-rvtt-modal-slot="turn"] [role="status"]', { hasText: "Your turn" }).waitFor();
+      const anaDuring = await stuck(ana, "End turn", "Ana, as Your turn shows");
+      await shots.take(ana, "combat-header-480-130-your-turn-scrolled");
+      // Her turn brings End turn into the header, so its form is compared with the one it settles in once the notice goes.
+      await modal(ana).locator('[data-rvtt-modal-slot="turn"]:empty').waitFor({ state: "attached", timeout: 15_000 });
+      keeps(anaDuring, await settled(ana, "Ana, once Your turn has gone", false), "Ana, as Your turn shows");
+      await ana.keyboard.press("Escape");
+      await modal(ana).waitFor({ state: "detached" });
+
+      // The DM's order scrolled, and a whisper from Ana comes as a toast.
+      await setUp(dm, dmCdp, view);
+      await openTracker(dm);
+      await modal(dm).waitFor();
+      await scrollPane(dm, 220);
+      const dmRest = await settled(dm, "the DM, before the toast", false);
+      const anaCookie = (await anaContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+      const anaOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie: anaCookie });
+      try {
+        const dmId = Object.values(dmSocket.state!.members).find((m) => m?.kind === "dm")!.id;
+        await anaOps.send({ t: "log.whisper", to: [dmId], text: "Behind you!" });
+      } finally {
+        anaOps.close();
+      }
+      await modal(dm).locator('[data-rvtt-modal-slot="toasts"] [role="status"]').first().waitFor();
+      keeps(await stuck(dm, "Next", "the DM, as a toast shows"), dmRest, "the DM, as a toast shows");
+      await shots.take(dm, "combat-header-480-130-toast-scrolled");
+      await dm.keyboard.press("Escape");
+      await modal(dm).waitFor({ state: "detached" });
     } finally {
-      anaOps.close();
+      /*
+       * Whatever failed above, Bree acts again and Ana's page is back at
+       * the desk with no sheet, as the steps after this one find it. They
+       * use her page without loading it again, and a very short sheet left
+       * open is modal, so it would take every tap they make. The next
+       * step loads the DM's page again first.
+       */
+      if (cyraActs) await ops.send({ t: "encounter.prev" });
+      await setUp(ana, anaCdp, { ...DESK, scale: 1 });
+      await anaCdp.detach();
     }
-    await modal(dm).locator('[data-rvtt-modal-slot="toasts"] [role="status"]').first().waitFor();
-    keeps(await stuck(dm, "Next", "the DM, as a toast shows"), dmRest, "the DM, as a toast shows");
-    await shots.take(dm, "combat-header-480-130-toast-scrolled");
-    await dm.keyboard.press("Escape");
-    await modal(dm).waitFor({ state: "detached" });
   });
 
   test("3. a sheet just tall enough for the compact header and two rows sticks it as one 44 px row, a whole row showing at every offset, and 2 px less scrolls it with the order", async () => {
