@@ -76,8 +76,7 @@ describe("the SRD token table", () => {
       MONSTERS.map((m) => m.srdId),
     );
     assert.equal(new Set(rows.map((r) => r.srdId)).size, rows.length);
-    // The parsing slip stays as the data has it until its own fix, since rooms key their images by it.
-    assert.equal(rowOf("dragon-tur-t-le").icon, "lorc/turtle");
+    assert.equal(rowOf("dragon-turtle").icon, "lorc/turtle");
   });
 
   test("names only icons the app ships, as keys the app accepts", () => {
@@ -132,7 +131,7 @@ describe("the SRD token table", () => {
       ["copper-dragon-wyrmling", "Brown"],
       ["young-gold-dragon", "Yellow"],
       ["young-silver-dragon", "Gray"],
-      ["dragon-tur-t-le", "Coral"],
+      ["dragon-turtle", "Coral"],
       ["pseudodragon", "Coral"],
       ["kobold-warrior", "Coral"],
       ["wyvern", "Coral"],

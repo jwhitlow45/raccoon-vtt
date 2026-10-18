@@ -848,7 +848,7 @@ function parseSpeeds(text: string, where: string): SrdMonster["speeds"] {
 
 type MonsterProblem = { monster: string; text: string };
 
-function parseMonsters(lines: readonly Line[], indexNames: ReadonlyMap<string, string>, problems: MonsterProblem[]): SrdMonster[] {
+function parseMonsters(lines: readonly Line[], problems: MonsterProblem[]): SrdMonster[] {
   const start = findLine(lines, 0, (l) => l.text === "Monsters A–Z" && l.page >= 250, "Monsters A–Z");
   const section = lines.slice(start + 1);
   const starts: number[] = [];
@@ -861,14 +861,13 @@ function parseMonsters(lines: readonly Line[], indexNames: ReadonlyMap<string, s
     let block = section.slice(s, starts[k + 1] ?? section.length);
     // Group headings that precede the next stat block belong to no block.
     while (block.length > 1 && isGroupHeading(block[block.length - 1]!, block[block.length - 2])) block = block.slice(0, -1);
-    monsters.push(parseStatBlock(block, indexNames, problems));
+    monsters.push(parseStatBlock(block, problems));
   });
   return monsters;
 }
 
-function parseStatBlock(block: readonly Line[], indexNames: ReadonlyMap<string, string>, problems: MonsterProblem[]): SrdMonster {
-  const rawName = block[0]!.text;
-  const name = indexNames.get(rawName.replace(/\s+/g, "").toLowerCase()) ?? rawName;
+function parseStatBlock(block: readonly Line[], problems: MonsterProblem[]): SrdMonster {
+  const name = block[0]!.text;
   const problem = (text: string) => problems.push({ monster: name, text });
 
   const sizeLine = block[1]!.text;
@@ -1064,7 +1063,9 @@ function checkMonster(m: SrdMonster): string[] {
 /**
  * The "Index of Stat Blocks" in the table of contents, keyed without spaces,
  * because the index has kerning gaps ("Dragon Tur t le") and the stat blocks
- * do not. It is the check that no stat block was missed or invented.
+ * do not. It is the check that no stat block was missed or invented, and
+ * never the source of a name: a spelling taken from it would put the gaps in
+ * the monster's name and its srdId.
  */
 function statBlockIndex(lines: readonly Line[]): Map<string, string> {
   const start = findLine(lines, 0, (l) => l.text === "Blocks" && l.page === 2, "Index of Stat Blocks");
@@ -1285,7 +1286,7 @@ function main(): void {
 
   const index = statBlockIndex(lines);
   const problems: MonsterProblem[] = [];
-  const monsters = parseMonsters(lines, index, problems);
+  const monsters = parseMonsters(lines, problems);
   console.log(`monsters: ${monsters.length}`);
   const failures = problems.map((p) => `${p.monster}: ${p.text}`);
   const parsed = new Set(monsters.map((m) => m.name.replace(/\s+/g, "").toLowerCase()));

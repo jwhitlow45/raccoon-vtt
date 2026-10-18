@@ -97,7 +97,7 @@ export const SRD_TOKEN_ICONS: Readonly<Record<SrdId, Readonly<IconImage>>> = {
   "djinni": { icon: "delapouite/djinn", color: "#f38400" },
   "doppelganger": { icon: "lorc/body-swapping", color: "#12a594" },
   "draft-horse": { icon: "lorc/horse-head", color: "#ad7f58" },
-  "dragon-tur-t-le": { icon: "lorc/turtle", color: "#ff6b4a" },
+  "dragon-turtle": { icon: "lorc/turtle", color: "#ff6b4a" },
   "dretch": { icon: "lorc/evil-minion", color: "#ff6b4a" },
   "drider": { icon: "lorc/masked-spider", color: "#12a594" },
   "druid": { icon: "cathelineau/holy-oak", color: "#3e8ef7" },

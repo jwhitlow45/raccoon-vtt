@@ -86,7 +86,7 @@
 "djinni":{"abilities":{"str":{"mod":5,"save":5},"dex":{"mod":2,"save":6},"con":{"mod":6,"save":6},"int":{"mod":2,"save":2},"wis":{"mod":3,"save":7},"cha":{"mod":5,"save":5}},"skills":{},"spellDc":17},
 "doppelganger":{"abilities":{"str":{"mod":0,"save":0},"dex":{"mod":4,"save":4},"con":{"mod":2,"save":2},"int":{"mod":0,"save":0},"wis":{"mod":1,"save":1},"cha":{"mod":2,"save":2}},"skills":{"deception":6,"insight":3}},
 "draft-horse":{"abilities":{"str":{"mod":4,"save":4},"dex":{"mod":0,"save":0},"con":{"mod":2,"save":2},"int":{"mod":-4,"save":-4},"wis":{"mod":0,"save":0},"cha":{"mod":-2,"save":-2}},"skills":{}},
-"dragon-tur-t-le":{"abilities":{"str":{"mod":7,"save":7},"dex":{"mod":0,"save":0},"con":{"mod":5,"save":11},"int":{"mod":0,"save":0},"wis":{"mod":1,"save":7},"cha":{"mod":1,"save":1}},"skills":{}},
+"dragon-turtle":{"abilities":{"str":{"mod":7,"save":7},"dex":{"mod":0,"save":0},"con":{"mod":5,"save":11},"int":{"mod":0,"save":0},"wis":{"mod":1,"save":7},"cha":{"mod":1,"save":1}},"skills":{}},
 "dretch":{"abilities":{"str":{"mod":1,"save":1},"dex":{"mod":0,"save":0},"con":{"mod":1,"save":1},"int":{"mod":-3,"save":-3},"wis":{"mod":-1,"save":-1},"cha":{"mod":-4,"save":-4}},"skills":{}},
 "drider":{"abilities":{"str":{"mod":3,"save":3},"dex":{"mod":4,"save":4},"con":{"mod":4,"save":4},"int":{"mod":1,"save":1},"wis":{"mod":3,"save":3},"cha":{"mod":1,"save":1}},"skills":{"perception":6,"stealth":10}},
 "druid":{"abilities":{"str":{"mod":0,"save":0},"dex":{"mod":1,"save":1},"con":{"mod":1,"save":1},"int":{"mod":1,"save":1},"wis":{"mod":3,"save":3},"cha":{"mod":0,"save":0}},"skills":{"medicine":5,"nature":3,"perception":5},"spellDc":13},

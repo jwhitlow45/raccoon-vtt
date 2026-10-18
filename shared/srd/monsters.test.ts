@@ -49,6 +49,16 @@ describe("monsters.json", () => {
     for (const id of ids) assert.match(id, /^[a-z0-9]+(?:-[a-z0-9]+)*$/);
   });
 
+  test("names keep their words whole, as the stat blocks print them", () => {
+    // The SRD's index of stat blocks has kerning gaps ("Dragon Tur t le"), and a
+    // name read from it splits into stray letters, in the name and the id.
+    for (const m of monsters) {
+      if (m.srdId === "will-o-wisp") continue;
+      assert.doesNotMatch(m.srdId, /(?:^|-)[a-z](?:-|$)/, m.name);
+      assert.doesNotMatch(m.name.replace(/ (?:of|or) /g, " "), /(?:^| )[a-z]{1,2}(?= |$)/, m.name);
+    }
+  });
+
   test("every monster has the required fields in sane ranges", () => {
     for (const m of monsters) {
       const at = m.name;
@@ -138,6 +148,7 @@ describe("monsters.json", () => {
     assert.equal(byName("Bat").cr, "0");
     assert.equal(byName("Bat").size, "tiny");
     assert.equal(byName("Will-o’-Wisp").srdId, "will-o-wisp");
+    assert.equal(byName("Dragon Turtle").srdId, "dragon-turtle");
     // "Medium or Small" blocks take the first size.
     assert.equal(byName("Werebear").size, "medium");
     // Speeds of other forms stay in the stat block only.

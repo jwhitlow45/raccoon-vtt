@@ -43,8 +43,7 @@ describe("a monster's default image", () => {
     assert.deepEqual(monsterImage({ ...state, srdImages: {} }, { srdId: "goblin-warrior" }), icon, "no choice in this room");
     assert.deepEqual(monsterImage({}, { srdId: "goblin-warrior" }), icon, "a view from before images");
     assert.deepEqual(monsterImage(state, { srdId: "owlbear" }), { icon: "lorc/owl", color: "#12a594" });
-    // Keyed as the SRD data spells it, until that slip is fixed on its own.
-    assert.deepEqual(monsterImage(state, { srdId: "dragon-tur-t-le" }), { icon: "lorc/turtle", color: "#ff6b4a" });
+    assert.deepEqual(monsterImage(state, { srdId: "dragon-turtle" }), { icon: "lorc/turtle", color: "#ff6b4a" });
   });
 
   test("an id the SRD lacks has no image, nor has a room monster without one, even one sharing an SRD id's spelling", () => {

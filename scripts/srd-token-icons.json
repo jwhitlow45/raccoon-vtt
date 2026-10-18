@@ -86,7 +86,7 @@
 {"srdId":"djinni","icon":"delapouite/djinn","color":"#f38400","match":"exact","why":"djinn"},
 {"srdId":"doppelganger","icon":"lorc/body-swapping","color":"#12a594","match":"close","why":"two alike figures"},
 {"srdId":"draft-horse","icon":"lorc/horse-head","color":"#ad7f58","match":"exact","why":"horse"},
-{"srdId":"dragon-tur-t-le","icon":"lorc/turtle","color":"#ff6b4a","match":"close","why":"turtle"},
+{"srdId":"dragon-turtle","icon":"lorc/turtle","color":"#ff6b4a","match":"close","why":"turtle"},
 {"srdId":"dretch","icon":"lorc/evil-minion","color":"#ff6b4a","match":"close","why":"small horned demon"},
 {"srdId":"drider","icon":"lorc/masked-spider","color":"#12a594","match":"close","why":"spider with a face"},
 {"srdId":"druid","icon":"cathelineau/holy-oak","color":"#3e8ef7","match":"close","why":"sacred oak"},
