@@ -2,7 +2,9 @@ import { useMemo, useState, type CSSProperties } from "react";
 import { AcBadge } from "../../components/AcBadge.tsx";
 import { Button } from "../../components/Button.tsx";
 import { Empty } from "../../components/Empty.tsx";
+import { Pill, PILL_FOCUS, PILL_HOST, PillButton } from "../../components/HeaderRow.tsx";
 import { Icon } from "../../components/Icon.tsx";
+import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { footprint } from "../../lib/scene.ts";
@@ -56,8 +58,10 @@ function storeFolded(folded: boolean): void {
  * opens Request a roll for the same party.
  *
  * `dock` is its place at the top of the side panel from 900 px up, where
- * it folds to one line of names and HP. On a phone it is the Party panel,
- * and `onLeave` closes that sheet before the map moves.
+ * it folds to one line (docs/design-v1-side-headers.md): Party, the names
+ * and HP in a strip that scrolls sideways, and Ask, so the folded bar
+ * takes one header row. On a phone it is the Party panel, and `onLeave`
+ * closes that sheet before the map moves.
  */
 export function PartyBar(props: { dock?: boolean; short?: boolean; onLeave?(): void }) {
   const ui = useRoomUi();
@@ -100,61 +104,91 @@ export function PartyBar(props: { dock?: boolean; short?: boolean; onLeave?(): v
     return props.dock ? null : <Empty>No player plays a character yet. Characters that players own show here.</Empty>;
   }
 
+  const heading = props.dock ? (
+    <button type="button" onClick={toggle} aria-expanded={!folded} style={{ ...headingButton, flex: folded ? "none" : 1 }}>
+      Party
+      <Icon name={folded ? "chevronRight" : "chevronDown"} size="sm" />
+    </button>
+  ) : null;
+
+  // Folded, one line: the names scroll sideways between Party and Ask, which is "Ask" there for the room, its name still whole.
+  if (props.dock && folded) {
+    return (
+      <section aria-label="Party" style={{ display: "flex", alignItems: "center", gap: theme.space(1), minHeight: theme.touch }}>
+        {heading}
+        <ScrollStrip style={{ flex: 1 }}>
+          <FoldedParty entries={entries} onFrame={frame} />
+        </ScrollStrip>
+        <PillButton aria-label="Ask the party" title="Ask the party" onClick={ask}>
+          Ask
+        </PillButton>
+      </section>
+    );
+  }
+
   return (
     <section aria-label="Party" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
-      <div style={{ display: "flex", alignItems: "center", gap: theme.space(1) }}>
+      <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), minHeight: theme.touch }}>
+        {heading ?? <span style={{ flex: 1 }} />}
         {props.dock ? (
-          <button type="button" onClick={toggle} aria-expanded={!folded} style={headingButton}>
-            Party
-            <Icon name={folded ? "chevronRight" : "chevronDown"} size="sm" />
-          </button>
+          <PillButton onClick={ask}>Ask the party</PillButton>
         ) : (
-          <span style={{ flex: 1 }} />
+          <Button size="sm" onClick={ask}>
+            Ask the party
+          </Button>
         )}
-        <Button size="sm" onClick={ask}>
-          Ask the party
-        </Button>
       </div>
-      {folded ? (
-        <FoldedParty entries={entries} onFrame={frame} />
-      ) : (
-        // One column no wider than the bar, so a long name ends in an ellipsis rather than pushing every row's HP past the edge.
-        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(0.5), maxHeight: props.dock ? screenHeight(40) : undefined, overflowY: props.dock ? "auto" : undefined }}>
-          {entries.map((e) => (
-            <li key={e.character.id}>
-              <Entry entry={e} onFrame={() => frame(e)} />
-            </li>
-          ))}
-        </ul>
-      )}
+      {/* One column no wider than the bar, so a long name ends in an ellipsis rather than pushing every row's HP past the edge. */}
+      <ul style={{ listStyle: "none", margin: 0, padding: props.dock ? `0 0 ${theme.space(2)}px` : 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(0.5), maxHeight: props.dock ? screenHeight(40) : undefined, overflowY: props.dock ? "auto" : undefined }}>
+        {entries.map((e) => (
+          <li key={e.character.id}>
+            <Entry entry={e} onFrame={() => frame(e)} />
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
 
 /**
- * The folded bar: one line of names and HP. Each pill is a button in a
+ * The folded bar: one line of names and HP, which the party line scrolls
+ * sideways (components/ScrollStrip.tsx). Each pill is a button in a
  * `listitem` of its own. With `role="listitem"` on the button itself, a
  * screen reader heard a list item and never a button to press.
+ *
+ * A character with no token on this scene keeps a button that does
+ * nothing (`aria-disabled`), not a disabled one, so Tab still reaches it
+ * and the strip scrolls it into view: every name in the line can be read
+ * by keyboard. A long name ends in an ellipsis, whole in its name.
  */
 export function FoldedParty(props: { entries: readonly PartyEntry[]; onFrame(entry: PartyEntry): void }) {
   return (
-    <div role="list" style={{ display: "flex", gap: theme.space(1), overflowX: "auto", scrollbarWidth: "thin", whiteSpace: "nowrap" }}>
+    <div role="list" style={{ flex: "none", display: "flex", gap: theme.space(1), whiteSpace: "nowrap" }}>
       {props.entries.map((e) => (
         <div key={e.character.id} role="listitem" style={{ flex: "none", display: "flex" }}>
           <button
             type="button"
-            disabled={!e.tokenId}
-            onClick={() => props.onFrame(e)}
-            aria-label={`${e.character.name}, HP ${hpLine(e.hp)}${e.tokenId ? ". Show it on the map" : ""}`}
+            aria-disabled={e.tokenId ? undefined : true}
+            onClick={() => {
+              if (e.tokenId) props.onFrame(e);
+            }}
+            aria-label={`${e.character.name}, HP ${hpLine(e.hp)}${e.tokenId ? ". Show it on the map" : ", not on this scene"}`}
+            title={e.character.name}
+            {...PILL_FOCUS}
             style={{ ...pill, cursor: e.tokenId ? "pointer" : "default" }}
           >
-            <strong>{e.character.name}</strong> <span style={{ color: LABEL_COLOR[e.label] }}>{lifeWord(e.life) ?? hpLine(e.hp)}</span>
+            <strong style={{ maxWidth: CHIP_NAME_MAX, overflow: "hidden", textOverflow: "ellipsis", color: e.tokenId ? theme.color.text : theme.color.textMuted }}>{e.character.name}</strong>
+            <span style={{ color: LABEL_COLOR[e.label] }}>{lifeWord(e.life) ?? hpLine(e.hp)}</span>
+            <Pill look={{ background: theme.color.surfaceRaised, border: `${theme.line.border}px solid ${theme.color.border}` }} />
           </button>
         </div>
       ))}
     </div>
   );
 }
+
+/** A chip's name past this many px ends in an ellipsis: "Seraphina Nig…", room for two or three chips in the line. */
+const CHIP_NAME_MAX = 96;
 
 export function Entry(props: { entry: PartyEntry; onFrame(): void }) {
   const { entry } = props;
@@ -264,13 +298,17 @@ const headingButton: CSSProperties = {
   cursor: "pointer",
 };
 
+/** A party chip: a 44 px target with its shape on a pill (components/HeaderRow.tsx). */
 const pill: CSSProperties = {
+  ...PILL_HOST,
   flex: "none",
+  display: "inline-flex",
+  alignItems: "center",
+  gap: theme.space(1),
   minHeight: theme.touch,
   padding: `0 ${theme.space(2)}px`,
-  borderRadius: theme.radius.sm,
-  border: `${theme.line.border}px solid ${theme.color.border}`,
-  background: theme.color.surfaceRaised,
+  border: "none",
+  background: "transparent",
   color: theme.color.text,
   fontSize: theme.font.small,
   fontFamily: theme.font.body,

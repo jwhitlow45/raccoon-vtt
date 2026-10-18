@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type WheelEvent } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type ReactNode, type WheelEvent } from "react";
 import { theme } from "../lib/theme.ts";
 import { Icon } from "./Icon.tsx";
 
@@ -16,7 +16,8 @@ const FADE_PX = 32;
  * mouse wheel scrolls the row sideways, so a narrow desktop window can
  * reach everything too. Whenever `active` changes, the button marked
  * `data-active` scrolls into view, so a tool picked from a panel never
- * hides off the edge.
+ * hides off the edge, and a button that Tab reaches scrolls clear of the
+ * fade, so the keyboard reads every one.
  */
 export function ScrollStrip(props: {
   children: ReactNode;
@@ -51,17 +52,27 @@ export function ScrollStrip(props: {
     return () => observer.disconnect();
   }, [measure, props.children]);
 
+  // Clear of the fade on either side, so the button reads fully.
+  const reveal = useCallback(
+    (target: HTMLElement | null) => {
+      const el = ref.current;
+      if (!el || !target) return;
+      const start = target.offsetLeft - FADE_PX;
+      const end = target.offsetLeft + target.offsetWidth + FADE_PX;
+      if (start < el.scrollLeft) el.scrollLeft = start;
+      else if (end > el.scrollLeft + el.clientWidth) el.scrollLeft = end - el.clientWidth;
+      measure();
+    },
+    [measure],
+  );
+
   useLayoutEffect(() => {
-    const el = ref.current;
-    const target = el?.querySelector<HTMLElement>('[data-active="true"]');
-    if (!el || !target) return;
-    // Clear of the fade on either side, so the active button reads fully.
-    const start = target.offsetLeft - FADE_PX;
-    const end = target.offsetLeft + target.offsetWidth + FADE_PX;
-    if (start < el.scrollLeft) el.scrollLeft = start;
-    else if (end > el.scrollLeft + el.clientWidth) el.scrollLeft = end - el.clientWidth;
-    measure();
-  }, [props.active, measure]);
+    reveal(ref.current?.querySelector<HTMLElement>('[data-active="true"]') ?? null);
+  }, [props.active, reveal]);
+
+  const onFocus = (e: FocusEvent<HTMLDivElement>) => {
+    if (e.target instanceof HTMLElement && e.target !== e.currentTarget) reveal(e.target);
+  };
 
   const onWheel = (e: WheelEvent<HTMLDivElement>) => {
     const el = ref.current;
@@ -76,14 +87,15 @@ export function ScrollStrip(props: {
 
   const mask = fadeMask(edges);
   return (
-    <div style={{ position: "relative", display: "flex", minWidth: 0, ...props.style }}>
+    // The wheel listens on the whole strip, so it scrolls over a chevron too, which lies over the strip's edge.
+    <div onWheel={onWheel} style={{ position: "relative", display: "flex", minWidth: 0, ...props.style }}>
       <div
         ref={ref}
         role={props.role}
         aria-label={props["aria-label"]}
         onKeyDown={props.onKeyDown}
+        onFocus={onFocus}
         onScroll={measure}
-        onWheel={onWheel}
         style={{
           // The offset parent of the buttons, so their offsetLeft is in the strip's scroll space.
           position: "relative",
@@ -97,7 +109,7 @@ export function ScrollStrip(props: {
           overscrollBehaviorX: "contain",
           scrollbarWidth: "none",
           // Room for the focus ring of the first and last button.
-          paddingInline: 3,
+          paddingInline: 4,
           maskImage: mask,
           WebkitMaskImage: mask,
         }}

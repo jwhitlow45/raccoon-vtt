@@ -17,7 +17,8 @@ export function PartyDock(props: { short?: boolean }) {
   const any = useRoomView((s) => Object.keys(s.view?.characters ?? {}).length > 0);
   if (!dm || !any) return null;
   return (
-    <div style={{ padding: `${theme.space(1)}px ${theme.space(2)}px ${theme.space(2)}px`, borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>
+    // A header row's padding (components/HeaderRow.tsx): none above or below, so the folded bar is one 44 px line.
+    <div style={{ padding: `0 ${theme.space(2)}px`, borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>
       <Bar dock short={props.short} />
     </div>
   );
