@@ -112,7 +112,7 @@ If you make a mistake along the way, **Undo** takes back any of your changes, ev
 None of these is needed to run a good session. Each one is there for when you want it.
 
 - **The map builder.** A map image is all you need. Build a map when you want walls, doors and heights that the app knows about, so they can block movement and sight.
-- **Party vision and light.** Fog that you reveal by hand works perfectly well on its own. Party vision goes a step further and shows each player what their character can see, by its senses and the light. It needs walls to block that sight, so it pairs with a built or imported map.
+- **Party vision and light.** Fog that you reveal by hand works perfectly well on its own. Party vision goes a step further: the app works out everything the party's creatures can see, by their senses and the light, and shows that shared view to every player. It needs walls to block that sight, so it pairs with a built or imported map.
 - **Encounters.** Placing monsters straight from the Monsters panel works fine. Encounters let you prepare fights ahead of time and check them against the XP budget.
 - **Roll requests, the group save and roll options.** Your players can roll their own dice and tell you the total.
 - **Areas.** Areas earn their place the first time someone casts Fireball, but you can leave reminders, height and the group save until you need them.
@@ -174,7 +174,7 @@ Many map images come with a grid already drawn on them. Lining up the grid makes
 3. For the last pixel of accuracy, use **Nudge**. It moves the box, or makes its squares smaller or larger, one pixel at a time.
 4. Press **Apply**. The app saves the grid and confirms it with a message such as "Grid saved at 70 px per square."
 
-**Apply** only becomes available once the box differs from the grid the scene already has. A new scene starts with the app's guess already saved, so if that guess lines up with the art, there is nothing to apply: just pick another tool and carry on.
+**Apply** only becomes available when there is something to save: either the box differs from the grid the scene already has, or **Resize scene** (below) would change the scene's size. A new scene starts with the app's guess already saved and sized to fit, so if that guess lines up with the art, there is nothing to apply: just pick another tool and carry on.
 
 Two more options wait under **⋯**. **Resize scene** (on by default) makes Apply also resize the scene to the squares the map covers. **Grid lines** turns the app's own grid lines on or off. Turn them off for art that has a grid of its own. Tokens and rulers still follow the squares either way.
 
@@ -260,9 +260,9 @@ You can paint heights over a map image too, so the cliff drawn in the art can be
 
 ## Light and party vision
 
-There are two ways to decide what your players see. With fog alone, you reveal the map by hand, and players see whatever you uncover. **Party vision** instead shows players what their characters can actually see, worked out from their senses, the walls and the light. You turn it on in the scene's **Vision** settings, which hold three things:
+There are two ways to decide what your players see. With fog alone, you reveal the map by hand, and players see whatever you uncover. **Party vision** instead works out what the party can actually see, from each creature's senses, the walls and the light. The party shares that sight: every player sees everything any of the party's creatures can see, so when the rogue scouts ahead, the whole table sees what she finds. You turn it on in the scene's **Vision** settings, which hold three things:
 
-- **Party vision**: when it is on, players see only what their characters see. Ground the party has explored stays on the players' map, dimmed and without creatures, and ground nobody has seen stays fogged. Turning party vision on turns fog on too.
+- **Party vision**: when it is on, players see only what the party can see together. Ground the party has explored stays on the players' map, dimmed and without creatures, and ground nobody has seen stays fogged. Turning party vision on turns fog on too.
 - **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. The light level matters only while party vision is on.
 - **Who lends the party sight**: the party's creatures on the scene, with their senses and lights. To add an allied NPC, so the party sees what it sees, turn on **Shares sight with the party** in the **Sight** section of its token's panel.
 
@@ -294,7 +294,7 @@ The draft lets you set up a reveal, check it, and show it all at once. If you wo
 
 **Builder room** fills everything joined to the room you tap, and only walls, windows and closed doors stop it. Close the doors between rooms first, or the reveal spills into the next room.
 
-**With party vision on**, the players' fog also remembers what the party has explored, and **Add fog** can't hide explored ground again. Only **Fog all** makes the players forget it. If you undo a Fog all, your own fog comes back but the party's explored ground does not, so you would have to reveal that again by hand.
+**With party vision on**, the players' fog also remembers what the party has explored, and **Add fog** can't hide explored ground again. Only **Fog all** makes the players forget it. If you undo a Fog all, the ground you had revealed is revealed again, but the party's memory of what it explored doesn't come back, so anything the party had only explored stays fogged until you reveal it by hand.
 
 ## Map phases, imports and exports
 
@@ -473,7 +473,7 @@ Each creature needs an initiative value before the fight can sort them. There ar
 
 Each roll is a d20 plus the creature's modifier, with advantage or disadvantage from its conditions (Invisible, Surprised or Incapacitated). The row shows an **Adv** or **Dis** badge as a reminder, which helps most when someone types in a roll made at the table. If a creature has advantage from something the app doesn't track, such as a barbarian's Feral Instinct, set it by hand in the row's **⋯**, and the app's own rolls for that row follow it too.
 
-The order runs from high to low. When a row's value ties with others, the app slots it in with player characters ahead of monsters, then the higher initiative bonus first, and leaves alone any order you have already set. Tied rows show a drag handle, and their **⋯** has **Move up** and **Move down**, so you can settle a tie however your table likes without changing anyone's value.
+The order runs from high to low. When a row's value ties with others, the app slots it in with player characters ahead of everyone else (monsters, NPCs and companions alike), then the higher initiative bonus first, and leaves alone any order you have already set. Tied rows show a drag handle, and their **⋯** has **Move up** and **Move down**, so you can settle a tie however your table likes without changing anyone's value.
 
 ### Running turns
 
@@ -926,7 +926,7 @@ The party faces an adult red dragon in its lair. It has Multiattack, Fire Breath
 **Between turns**
 
 - To spend a legendary action, open the dragon's row's **⋯** and tap a pip under **Legendary actions used**. They refill at the start of its turn.
-- When the dragon fails a save in a group save, its row offers **Use Legendary Resistance (3 left)**, and a save-ends or concentration card offers the same. For a save you roll yourself from its roll options, tap a pip under **Legendary resistances used today** in its row's **⋯**.
+- When the dragon fails a save in a group save, its row offers **Use Legendary Resistance (4 left)** the first time, since the label counts the uses it still has, and a save-ends or concentration card offers the same. For a save you roll yourself from its roll options, tap a pip under **Legendary resistances used today** in its row's **⋯**.
 
 ![The dragon's turn: its roll options with Rend, Fire Breath's Recharge and Used, and the tracker row with its LA and LR tags.](dm-guide/boss.webp)
 
