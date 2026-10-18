@@ -132,10 +132,12 @@ dialog[data-rvtt-sheet]:not([open]) {
 /* While a pointer was last (lib/inputModality.ts), focus the app moves
    itself draws no ring. iOS Safari draws one on most of it after a tap,
    such as on a sheet's opener as the sheet closes. A text field keeps its
-   focus look, which shows where typing goes. A key press brings every ring
-   back at once. The choice and pill rings follow, each in a rule of its
-   own, so a browser that cannot read one of them still reads the rest. */
-[data-rvtt-input="pointer"] :focus-visible:not(textarea, select, [contenteditable]:not([contenteditable="false"]), input:not([type="button"], [type="checkbox"], [type="color"], [type="file"], [type="image"], [type="radio"], [type="range"], [type="reset"], [type="submit"])) {
+   focus look, which shows where typing goes. A select box follows the
+   other controls: iOS keeps focus on one after its picker closes, and its
+   ring would stay on the page. A key press brings every ring back at
+   once. The choice and pill rings follow, each in a rule of its own, so a
+   browser that cannot read one of them still reads the rest. */
+[data-rvtt-input="pointer"] :focus-visible:not(textarea, [contenteditable]:not([contenteditable="false"]), input:not([type="button"], [type="checkbox"], [type="color"], [type="file"], [type="image"], [type="radio"], [type="range"], [type="reset"], [type="submit"])) {
   outline: none;
 }
 [data-rvtt-input="pointer"] .rvtt-choice:has(> input:focus-visible) {

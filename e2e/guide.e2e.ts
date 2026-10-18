@@ -233,6 +233,31 @@ describe("raccoon-vtt DM guide page", { timeout: 90_000 }, () => {
       const name = await focusedName(page);
       assert.match(name ?? "", /^(A|BUTTON) /, `Shift+Tab lands on a control, not ${name}`);
       assert.deepEqual(await outlineOf(page.locator(":focus")), { style: "solid", width: "2px" }, `the ring on ${name}`);
+
+      // After a tap, a select box follows the other controls, as iOS keeps focus on one once its picker closes. A text
+      // field keeps its focus look, which shows where typing goes.
+      await page.evaluate(() => {
+        type Made = { id: string; type?: string; append(...nodes: unknown[]): void };
+        const doc = (globalThis as unknown as { document: { createElement(tag: string): Made; body: Made } }).document;
+        const select = doc.createElement("select");
+        select.id = "fr-select";
+        const option = doc.createElement("option");
+        select.append(option);
+        const field = doc.createElement("input");
+        field.id = "fr-field";
+        field.type = "text";
+        doc.body.append(select, field);
+      });
+      await page.locator("#initiative").tap();
+      for (const [id, style] of [
+        ["fr-select", "none"],
+        ["fr-field", "solid"],
+      ] as const) {
+        await page.locator(`#${id}`).evaluate((el) => (el as unknown as { focus(): void }).focus());
+        assert.equal((await outlineOf(page.locator(`#${id}`))).style, style, `${id} after a tap`);
+      }
+      await page.keyboard.press("Shift+Tab");
+      assert.deepEqual(await outlineOf(page.locator("#fr-select")), { style: "solid", width: "2px" }, "a key press brings the select's ring back");
       assert.deepEqual(watch.errors, []);
     } finally {
       await phone.close();
