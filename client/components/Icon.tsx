@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import type { LucideIcon } from "#shared/credits.ts";
 import { theme } from "../lib/theme.ts";
 
 /**
@@ -67,6 +68,27 @@ export type IconName =
   | "retry"
   | "locked"
   | "duplicate";
+
+/**
+ * The meanings drawn with Lucide's path data, by the Lucide icon each
+ * copies. The credit (shared/credits.ts LUCIDE_ICONS, CREDITS.md) lists
+ * the same icons, which a test holds it to.
+ */
+export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
+  undo: "undo-2",
+  redo: "redo-2",
+  again: "repeat",
+  hidden: "eye-off",
+  shown: "eye",
+  speed: "footprints",
+  group: "users",
+  delete: "trash-2",
+  edit: "pencil",
+  image: "image",
+  retry: "refresh-cw",
+  locked: "lock",
+  duplicate: "copy-plus",
+};
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 

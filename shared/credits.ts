@@ -98,6 +98,16 @@ export const STATUS_ICONS: Record<StatusKey, GameIcon> = {
 export const LUCIDE_NOTICE =
   "ISC License. Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2022. Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies. THE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.";
 
+/**
+ * The Lucide icons the app copies, by Lucide's own names, as the credit
+ * lists them. client/components/Icon.tsx says which meaning draws each
+ * (its LUCIDE table), and a test holds the two lists and CREDITS.md to
+ * the same names, so a newly copied icon cannot ship uncredited.
+ */
+export const LUCIDE_ICONS = ["copy-plus", "eye", "eye-off", "footprints", "image", "lock", "pencil", "redo-2", "refresh-cw", "repeat", "trash-2", "undo-2", "users"] as const;
+
+export type LucideIcon = (typeof LUCIDE_ICONS)[number];
+
 export const GAME_ICON_CHANGES = "Black background square removed, fill set to currentColor so the app can tint it.";
 
 /**
@@ -245,7 +255,7 @@ export const CREDITS: CreditGroup[] = [
         authorUrl: "https://lucide.dev",
         source: "https://github.com/lucide-icons/lucide",
         license: "ISC",
-        changes: `The interface icons marked Lucide in client/components/Icon.tsx, their path data copied as written. ${LUCIDE_NOTICE}`,
+        changes: `The interface icons marked Lucide in client/components/Icon.tsx (${LUCIDE_ICONS.join(", ")}), their path data copied as written. ${LUCIDE_NOTICE}`,
       },
     ],
   },
