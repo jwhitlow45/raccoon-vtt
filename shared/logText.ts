@@ -204,11 +204,21 @@ function rollCreature(roll: DiceRoll, names: LogNames): string | undefined {
   return name === A_CREATURE ? "a creature" : name;
 }
 
+/**
+ * A roll's label as a reader sees it. A death save rolled on the server is
+ * labelled "Death save" in the log (shared/reducer/dice.ts), as it was before
+ * the SRD's capitals, so a replayed op still makes the very log it made then.
+ * It reads "Death Save", as the button that rolls it does.
+ */
+export function labelText(label: string): string {
+  return label === "Death save" ? "Death Save" : label;
+}
+
 /** "Longsword: ", "for Thorn, Stealth: " or "for Thorn: ", which a roll's text starts with. The label never names the creature (5.5). */
 function rollSubject(roll: DiceRoll, names: LogNames): string {
   const creature = rollCreature(roll, names);
-  if (creature !== undefined) return roll.label !== undefined ? `for ${creature}, ${roll.label}: ` : `for ${creature}: `;
-  return roll.label !== undefined ? `${roll.label}: ` : "";
+  if (creature !== undefined) return roll.label !== undefined ? `for ${creature}, ${labelText(roll.label)}: ` : `for ${creature}: `;
+  return roll.label !== undefined ? `${labelText(roll.label)}: ` : "";
 }
 
 /** " against DC 15: fail", " against AC 15: critical hit", or nothing. */
@@ -299,11 +309,11 @@ export function rollToastText(lines: readonly DiceEvent[], names: LogNames): str
   const single = rolls.length === 1 && only ? { label: only.label, total: only.total, roll: only } : damage ? { label: damage.head, total: damage.total, roll: damage.roll } : null;
   if (single) {
     const creature = rollCreature(single.roll, names);
-    const what = [creature, single.label].filter((part) => part !== undefined).join(", ");
+    const what = [creature, single.label === undefined ? undefined : labelText(single.label)].filter((part) => part !== undefined).join(", ");
     return `${who} rolled ${count(single.total)}${critSums(rolls)}${what ? ` for ${what}` : ""}.`;
   }
   const labels = new Set(rolls.map((r) => r.label));
-  const label = labels.size === 1 ? only?.label : undefined;
+  const label = labels.size === 1 && only?.label !== undefined ? labelText(only.label) : undefined;
   if (label !== undefined) {
     const plural = pluralLabel(label);
     return plural ? `${who} rolled ${rolls.length} ${plural}.` : `${who} rolled ${label} ${rolls.length} times.`;
@@ -462,8 +472,8 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
     }
     case "deathSave": {
       const who = creatureName(names, data);
-      if (data.ok === undefined || data.fail === undefined) return `${who}'s death saves changed.`;
-      return `${who}'s death saves: ${plural(data.ok, "success", "successes")}, ${plural(data.fail, "failure", "failures")}.`;
+      if (data.ok === undefined || data.fail === undefined) return `${who}'s Death Saving Throws changed.`;
+      return `${who}'s Death Saving Throws: ${plural(data.ok, "success", "successes")}, ${plural(data.fail, "failure", "failures")}.`;
     }
     case "turn": {
       const who = entryName(names, data.entryId);

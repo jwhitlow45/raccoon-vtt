@@ -98,7 +98,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return op.hits.length === 1 && first ? `damaging ${target(first.target)}` : `damaging ${op.hits.length} creatures`;
     }
     case "actor.deathSave":
-      return `marking death saves for ${target(op.target)}`;
+      return `marking Death Saves for ${target(op.target)}`;
     case "actor.life":
       return op.life === "dead" ? `marking ${target(op.target)} dead` : `reviving ${target(op.target)}`;
     case "actor.rest":
@@ -277,7 +277,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     case "roll.dice":
       return `rolling for ${target(op.target)}`;
     case "actor.deathRoll":
-      return `rolling a death save for ${target(op.target)}`;
+      return `rolling a Death Save for ${target(op.target)}`;
     case "undo":
     case "redo":
       return op.t;

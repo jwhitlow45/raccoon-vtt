@@ -1,6 +1,6 @@
 import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { hitOf, naturalOf, rolledTerms } from "#shared/dice/roll.ts";
-import { creatureName, describeEvent, diceText, keptFrom, memberName, rolledFormula, type LogNames } from "#shared/logText.ts";
+import { creatureName, describeEvent, diceText, keptFrom, labelText, memberName, rolledFormula, type LogNames } from "#shared/logText.ts";
 import type { DiceResult, DiceRoll, LogEntry } from "#shared/model.ts";
 import type { DiceRollInput } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
@@ -106,7 +106,7 @@ function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; na
   const { roll } = props;
   const creature = roll.tokenId !== undefined || roll.characterId !== undefined ? creatureName(props.names, roll) : null;
   // "Thorn 9 Thorn, Longsword damage" said the name twice where a player rolls for the character of the same name.
-  const what = [creature !== null && creature === props.by ? null : creature, roll.label].filter(Boolean).join(", ");
+  const what = [creature !== null && creature === props.by ? null : creature, roll.label === undefined ? undefined : labelText(roll.label)].filter(Boolean).join(", ");
   const verdict = rollVerdict(roll, props.row);
   const formula = rolledFormula(roll);
   return (

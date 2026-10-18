@@ -326,7 +326,7 @@ describe("an answer or a death save in the header line (LP7-DICE-10, docs/design
     const last = choices.getState().last;
     assert.ok(last && "rolls" in last && last.tag === tag, "the free roll is the newest line");
     assert.equal(againOf(last)?.rolls[0]?.formula, "1d20+3");
-    p.noted("tag-death", "Death save");
+    p.noted("tag-death", "Death Save");
     assert.equal(againOf(choices.getState().last), null, "a death save after it takes the line, with no Again");
   });
 

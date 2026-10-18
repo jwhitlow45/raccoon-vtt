@@ -106,6 +106,11 @@ describe("dice wording (docs/design-v1-dice.md 5.5)", () => {
     assert.equal(rollToastText([line([capital(slashing), capital(fire)])], names), "Bree rolled 14 for Flame Tongue damage.");
     assert.equal(rollToastText([line([slashing, capital(fire)])], names), "Bree rolled 14 for Flame Tongue damage.", "an old label beside a new one");
     assert.equal(rollToastText([line([slashing, capital(slashing)])], names), "Bree rolled 2 times.", "a type twice in either case is no one damage");
+    // The server's death save keeps the label its replayed ops have always written, and reads as its button does.
+    const death: DiceRoll = { formula: "1d20", faces: [12], total: 12, label: "Death save" };
+    assert.equal(rollToastText([line([death])], names), "Bree rolled 12 for Death Save.");
+    assert.equal(rollToastText([line([death, death])], names), "Bree rolled 2 Death Saves.");
+    assert.equal(diceLineText(line([death]), names), "Bree rolled Death Save: 1d20 (12) = 12.");
   });
 });
 

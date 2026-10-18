@@ -125,7 +125,7 @@ describe("a roll's words", () => {
   test("labels name the roll, never the creature, cut to 60", () => {
     assert.equal(testLabel({ kind: "save", ability: "dex" }), "Dexterity save");
     assert.equal(testLabel({ kind: "check", ability: "dex", skill: "stealth" }), "Stealth check");
-    assert.equal(testLabel({ kind: "deathSave" }), "Death save");
+    assert.equal(testLabel({ kind: "deathSave" }), "Death Save");
     assert.equal(cutLabel("x".repeat(80)).length, 60);
   });
 

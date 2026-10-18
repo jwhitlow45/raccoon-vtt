@@ -762,7 +762,7 @@ function OtherNumbers(props: StatsProps) {
       />
       <NumberRow
         name="All saves"
-        hint="Added to every saving throw, a death save included"
+        hint="Added to every saving throw, a Death Saving Throw included"
         controls={<IntInput label="All saves" value={d.allSaves} min={-20} max={20} nullable sign onChange={(n) => setStats((s) => withAllBonus(s, "allSaves", n))} />}
       />
       <NumberRow

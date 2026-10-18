@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { addDie, formatFormula, parseRollText } from "#shared/dice/formula.ts";
-import { critSums, critSumText } from "#shared/logText.ts";
+import { critSums, critSumText, labelText } from "#shared/logText.ts";
 import { Button } from "../../components/Button.tsx";
 import { Chip } from "../../components/Chip.tsx";
 import { Input } from "../../components/Field.tsx";
@@ -52,7 +52,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   const firstLine = committed?.lines[0]?.id ?? null;
   // A polite live region says each result once: "Rolled 13: Longsword."
   useEffect(() => {
-    if (first) setSaid(`Rolled ${first.total}${critSums([first])}${first.label ? `: ${first.label}` : ""}.`);
+    if (first) setSaid(`Rolled ${first.total}${critSums([first])}${first.label ? `: ${labelText(first.label)}` : ""}.`);
   }, [first]);
   if (!last) return null;
   let body;
@@ -70,7 +70,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   else {
     const verdict = rollVerdict(first, (committed?.lines[0]?.data?.type === "dice" ? committed.lines[0].data : {}) as { dc?: number; ac?: number });
     const sum = critSumText(first);
-    const label = first.label ?? ("once" in last ? last.label : undefined);
+    const label = first.label !== undefined ? labelText(first.label) : "once" in last ? last.label : undefined;
     body = (
       <button
         type="button"

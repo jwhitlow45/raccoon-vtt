@@ -28,7 +28,7 @@ export function cutLabel(text: string): string {
   return `${(space > 40 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
-/** A d20 test as a roll's label names it: "Dexterity save", "Stealth check", "Initiative", "Death save" (4.2). */
+/** A d20 test as a roll's label names it: "Dexterity save", "Stealth check", "Initiative", "Death Save" (4.2). */
 export function testLabel(test: D20Test): string {
   switch (test.kind) {
     case "save":
@@ -38,7 +38,7 @@ export function testLabel(test: D20Test): string {
     case "initiative":
       return "Initiative";
     case "deathSave":
-      return "Death save";
+      return "Death Save";
     case "attack":
       return "Attack";
   }

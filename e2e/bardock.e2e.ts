@@ -547,7 +547,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await dm.getByRole("tab", { name: "Initiative" }).click();
     await dm.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Select" }).click();
     await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
-    await dm.locator('[data-alert="concentration"]').first().getByText("Concentration check").click();
+    await dm.locator('[data-alert="concentration"]').first().getByText("Concentration save").click();
     assert.ok(await open.isVisible(), "a tab, the tool, Fit or an alert card closed the bar");
 
     const at = await cellPoint(dm, EMPTY);
@@ -834,7 +834,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await outliner.getByLabel("Search the scene").fill("Thorn");
     await outliner.getByRole("button", { name: /^Thorn/ }).first().click();
     await dm.getByRole("dialog", { name: "Thorn actions" }).waitFor();
-    const row = dm.getByRole("button", { name: /^Concentration check/ });
+    const row = dm.getByRole("button", { name: /^Concentration save/ });
     await row.waitFor();
     const below = async (label: string) => {
       await dm.waitForTimeout(300);

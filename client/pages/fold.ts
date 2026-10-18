@@ -141,7 +141,7 @@ export function alertsSummary(rolls: RollsLine | null, alerts: readonly ColumnAl
   const items: Item[] = [];
   if (rolls?.waiting) items.push({ kind: "rolls", id: "rolls", text: rolls.text, phrase: rolls.name });
   for (const a of alerts) {
-    if (a.kind === "concentration") items.push({ kind: a.kind, id: a.id, text: "Concentration check", phrase: `${a.who} checks concentration` });
+    if (a.kind === "concentration") items.push({ kind: a.kind, id: a.id, text: "Concentration save", phrase: `${a.who} makes a Concentration save` });
   }
   for (const a of alerts) {
     if (a.kind === "timeUp") items.push({ kind: a.kind, id: a.id, text: "Time is up", phrase: "time is up" });

@@ -557,9 +557,9 @@ function DeathSaveCell(props: { ctx: Ctx; bonus: number | null }) {
     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: theme.space(1) }}>
       <div style={{ gridColumn: "span 2", minWidth: 0 }}>
         <OptionCell
-          text={props.bonus === null ? "Death save" : `Death save ${signedText(props.bonus)}`}
+          text={props.bonus === null ? "Death Save" : `Death Save ${signedText(props.bonus)}`}
           tag={presetTag(preset) || undefined}
-          name={["Death save", presetLine(preset)].filter(Boolean).join(", ")}
+          name={["Death Save", presetLine(preset)].filter(Boolean).join(", ")}
           row={row}
           disabled={ctx.blocked}
           onTap={() => option.deathSave(ctx.creature, preset, row)}

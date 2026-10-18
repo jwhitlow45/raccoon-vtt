@@ -78,7 +78,7 @@ describe("event text", () => {
     assert.equal(describeEvent({ type: "effect", ...target, key: "hunters-mark", action: "expire" }, state), "Hunter’s Mark ends on Thorn.");
     assert.equal(describeEvent({ type: "effect", ...target, key: "concentrating", spell: "Bless", action: "add" }, state), "Thorn is concentrating on Bless.");
     assert.equal(describeEvent({ type: "effect", ...target, key: "custom", action: "remove" }, state), "Thorn loses a custom effect.");
-    assert.equal(describeEvent({ type: "deathSave", ...target, ok: 1, fail: 2 }, state), "Thorn's death saves: 1 success, 2 failures.");
+    assert.equal(describeEvent({ type: "deathSave", ...target, ok: 1, fail: 2 }, state), "Thorn's Death Saving Throws: 1 success, 2 failures.");
   });
 
   test("turns, encounters, handouts and members", () => {

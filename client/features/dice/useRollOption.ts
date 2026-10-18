@@ -131,7 +131,7 @@ export function useRollOption() {
           taken.restore();
           return null;
         }
-        panel.noted(tag, "Death save");
+        panel.noted(tag, "Death Save");
         return remember(row, tag);
       },
       /** A monster's initiative score set on its row without a roll (4.2), as a typed value goes. */

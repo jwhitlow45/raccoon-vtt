@@ -434,7 +434,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       }
       // The check, or the summary row that stands for it, is in sight with the bar open.
       const check = dm.locator('[data-alert="concentration"]').first();
-      const row = dm.getByRole("button", { name: /^Concentration check/ });
+      const row = dm.getByRole("button", { name: /^Concentration save/ });
       assert.ok((await check.isVisible()) || (await row.isVisible()), `${label}: neither the check nor the summary row shows`);
       // The column's box never reaches past the window (LPD-DMPHONE-4).
       if (col.box) assert.ok(col.box.right <= col.width + 0.5 && col.box.left >= -0.5, `${label}: the column runs past the window: ${JSON.stringify(col.box)}`);
@@ -545,7 +545,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await dm.locator('[data-alert="concentration"]').nth(1).waitFor({ state: "attached" });
     await dm.waitForTimeout(400);
     // The notice leaves the column no room for the check, and paints over the column, so the row must find a spot of its own.
-    const row = dm.getByRole("button", { name: /^Concentration check/ });
+    const row = dm.getByRole("button", { name: /^Concentration save/ });
     await shots.take(dm, "dmphone-row-under-notice-480x320");
     assert.ok(await wholeInReach(row), `${label}: the summary row is hidden or cut off`);
     const r = await rectOf(row);
@@ -558,7 +558,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     for (let i = 0; i < (await bars.count()); i++) {
       const b = bars.nth(i);
       const name = (await b.getAttribute("aria-label")) ?? (await b.textContent()) ?? "?";
-      if (name.startsWith("Concentration check")) continue;
+      if (name.startsWith("Concentration save")) continue;
       assert.ok(!intersects(r, await rectOf(b)), `${label}: the row covers ${name} in the top bar`);
     }
     // The notice leaves the column no room for a whole check either, so the row's tap opens the alerts over the screen.
@@ -589,7 +589,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     assert.equal(await fit.evaluate((el) => el.closest("[inert]") !== null), true, `${label}: Fit behind the alerts is not inert`);
     await alerts.getByRole("button", { name: "Close", exact: true }).tap();
     await alerts.waitFor({ state: "detached" });
-    await waitFor(`focus back on the row, ${label}`, async () => ((await focused(dm)).name.startsWith("Concentration check") ? true : null));
+    await waitFor(`focus back on the row, ${label}`, async () => ((await focused(dm)).name.startsWith("Concentration save") ? true : null));
     // The last check answered over the screen takes the alerts and the row with it: focus goes to the map, not to the page.
     await row.tap();
     await alerts.waitFor();
@@ -607,7 +607,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await hurtHag();
     await dm.locator('[data-alert="concentration"]').first().waitFor({ state: "attached" });
     await dm.waitForTimeout(400);
-    const row = dm.getByRole("button", { name: /^Concentration check/ });
+    const row = dm.getByRole("button", { name: /^Concentration save/ });
     assert.ok(await wholeInReach(row), `${label}: the summary row is hidden or cut off`);
     await row.tap();
     const check = dm.locator('[data-alert="concentration"]').first();
@@ -629,7 +629,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await hurtHag();
     await dm.locator('[data-alert="concentration"]').first().waitFor({ state: "attached" });
     await dm.waitForTimeout(400);
-    await dm.getByRole("button", { name: /^Concentration check/ }).tap();
+    await dm.getByRole("button", { name: /^Concentration save/ }).tap();
     const check = dm.locator('[data-alert="concentration"]').first();
     await check.waitFor();
     await dm.waitForTimeout(300);

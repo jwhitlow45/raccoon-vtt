@@ -52,7 +52,7 @@ describe("foldsUnderSheet", () => {
   });
 });
 
-const prompt = (id: string, who: string): ColumnAlert => ({ id, kind: "concentration", who, says: `Concentration check for ${who}.` });
+const prompt = (id: string, who: string): ColumnAlert => ({ id, kind: "concentration", who, says: `Concentration save for ${who}.` });
 const timeUp: ColumnAlert = { id: "t", kind: "timeUp", says: "Time is up for your turn." };
 const notice = (id: string, text: string): ColumnAlert => ({ id, kind: "notice", text, says: text });
 
@@ -66,7 +66,7 @@ describe("alertsSummary", () => {
     assert.deepEqual(s, {
       text: "Roll asked",
       more: "+2",
-      name: "Roll asked +2: the DM asks for a Wisdom check, Thorn checks concentration, time is up. Close the sheet to answer.",
+      name: "Roll asked +2: the DM asks for a Wisdom check, Thorn makes a Concentration save, time is up. Close the sheet to answer.",
       first: { kind: "rolls", id: "rolls" },
     });
   });
@@ -79,11 +79,11 @@ describe("alertsSummary", () => {
       notice("n2", "Hex ended on Goblin."),
       prompt("p2", "Goblin"),
     ]);
-    assert.equal(s?.text, "Concentration check");
+    assert.equal(s?.text, "Concentration save");
     assert.equal(s?.more, "+5");
     assert.equal(
       s?.name,
-      "Concentration check +5: Thorn checks concentration, Goblin checks concentration, time is up, rolls 1 of 3 answered, Hex ended on Goblin, Bless ended on Thorn. Close the sheet to see them.",
+      "Concentration save +5: Thorn makes a Concentration save, Goblin makes a Concentration save, time is up, rolls 1 of 3 answered, Hex ended on Goblin, Bless ended on Thorn. Close the sheet to see them.",
     );
     assert.deepEqual(s?.first, { kind: "concentration", id: "p1" });
   });
@@ -111,7 +111,7 @@ describe("alertsSummary", () => {
     const answer = alertsSummary({ text: "Roll asked", name: "the DM asks for a Wisdom check", waiting: true, requests: 1 }, [], "bar");
     assert.equal(answer?.name, "Roll asked: the DM asks for a Wisdom check. Hide the bar to answer.");
     const them = alertsSummary(null, [prompt("p1", "Thorn"), timeUp], "bar");
-    assert.equal(them?.name, "Concentration check +1: Thorn checks concentration, time is up. Hide the bar to see them.");
+    assert.equal(them?.name, "Concentration save +1: Thorn makes a Concentration save, time is up. Hide the bar to see them.");
     const it = alertsSummary(null, [notice("n1", "Bless ended on Thorn.")], "bar");
     assert.equal(it?.name, "Bless ended on Thorn: Bless ended on Thorn. Hide the bar to see it.");
     // The sheet's three wordings stay as they were.
@@ -124,7 +124,7 @@ describe("alertsSummary", () => {
     const answer = alertsSummary({ text: "Roll asked", name: "the DM asks for a Wisdom check", waiting: true, requests: 1 }, [], "room");
     assert.equal(answer?.name, "Roll asked: the DM asks for a Wisdom check. Tap to answer.");
     const them = alertsSummary(null, [prompt("p1", "Thorn"), timeUp], "room");
-    assert.equal(them?.name, "Concentration check +1: Thorn checks concentration, time is up. Tap to see them.");
+    assert.equal(them?.name, "Concentration save +1: Thorn makes a Concentration save, time is up. Tap to see them.");
     const it = alertsSummary(null, [notice("n1", "Bless ended on Thorn.")], "room");
     assert.equal(it?.name, "Bless ended on Thorn: Bless ended on Thorn. Tap to see it.");
   });

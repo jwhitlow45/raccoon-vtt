@@ -196,7 +196,7 @@ export function HpEntry(props: {
         </ChipRow>
       ) : null}
       {showCrit ? (
-        <Checkbox checked={crit} onChange={setCrit} label="Critical Hit (two failed death saves)" />
+        <Checkbox checked={crit} onChange={setCrit} label="Critical Hit (two failed Death Saves)" />
       ) : null}
       {error || refusal ? (
         <Note tone="error">{error ?? refusal}</Note>
@@ -335,7 +335,7 @@ export function HpSection(props: {
           onChange={(ok, fail) => actions.dispatch({ t: "actor.deathSave", target, ok, fail })}
         />
       ) : null}
-      {life === "stable" ? <Note>Stable: Unconscious, but no more death saves.</Note> : null}
+      {life === "stable" ? <Note>Stable: Unconscious, but no more Death Saving Throws.</Note> : null}
 
       {/* No HP rule kills an object, so its life controls would only ever mark one dead by hand (3.6.6). */}
       {access.life && props.token?.kind !== "object" ? <LifeControls life={life} onLife={(next) => actions.dispatch({ t: "actor.life", target, life: next })} /> : null}
@@ -412,7 +412,7 @@ export function DeathSaves(props: { saves: { ok: number; fail: number }; canEdit
       </button>
     );
   };
-  const note = <Note>Death saves{props.canEdit ? ": tap to fill" : ""}</Note>;
+  const note = <Note>Death Saves{props.canEdit ? ": tap to fill" : ""}</Note>;
   return (
     <div style={{ display: "grid", gap: theme.space(0.5) }}>
       {props.canEdit && props.target ? <DeathRoll target={props.target}>{note}</DeathRoll> : note}
@@ -466,7 +466,7 @@ function DeathRoll(props: { target: ActorTarget; children: ReactNode }) {
           size="sm"
           busy={waiting}
           disabled={blocked !== null || !dice}
-          aria-label={waiting ? "Rolling a death save" : "Roll a death save"}
+          aria-label={waiting ? "Rolling a Death Save" : "Roll a Death Save"}
           aria-describedby={blocked ? blockedId : undefined}
           onClick={roll}
           style={{ flex: "none", whiteSpace: "nowrap" }}

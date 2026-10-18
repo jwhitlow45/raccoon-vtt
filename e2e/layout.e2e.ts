@@ -546,7 +546,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
       const cards = phone.locator('[data-alert="concentration"]');
       await cards.first().waitFor({ state: "attached" });
       await phone.waitForTimeout(400);
-      const row = phone.getByRole("button", { name: /^Concentration check/ });
+      const row = phone.getByRole("button", { name: /^Concentration save/ });
       const label = `${size.width} x ${size.height} at 130%`;
       const controls = options(phone, "Area").locator("[data-options-row] > [data-rvtt-slot] button, [data-rvtt-more] button");
       const checkColumn = async (when: string) => {
@@ -921,7 +921,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     assert.equal(await dialog.getAttribute("aria-label"), "Initiative");
     assert.equal(await bar.isHidden(), true, "the token bar folds while the sheet is over the screen");
     const show = dialog.getByRole("button", { name: "Show Goblin 1 actions" });
-    const summary = dialog.getByRole("button", { name: /^Concentration check/ });
+    const summary = dialog.getByRole("button", { name: /^Concentration save/ });
     await show.waitFor();
     await summary.waitFor();
     const heading = await rect(dialog.locator(":scope > section > header h2"));
@@ -935,8 +935,8 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await status.waitFor({ state: "attached" });
     assert.equal(await status.textContent(), "", "the region starts empty in its new place");
     await ops.send({ t: "actor.hp", target: { tokenId: run.hag.id }, change: { kind: "damage", amount: 1 } });
-    await waitFor("the new check spoken inside the sheet", async () => (/Concentration check for Hag/.test((await status.textContent()) ?? "") ? true : null));
-    assert.equal(await phone.getByRole("status").filter({ hasText: "Concentration check for Hag" }).count(), 1, "in the accessibility tree");
+    await waitFor("the new check spoken inside the sheet", async () => (/Concentration save for Hag/.test((await status.textContent()) ?? "") ? true : null));
+    assert.equal(await phone.getByRole("status").filter({ hasText: "Concentration save for Hag" }).count(), 1, "in the accessibility tree");
     // Escape closes it, and opened again, twice with no tap between: closed in the room's state with no modal left behind.
     await phone.keyboard.press("Escape");
     await dialog.waitFor({ state: "detached" });
@@ -1318,7 +1318,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await pickTool(player, "Ruler");
     await ops.send({ t: "actor.effect.add", target: { tokenId: run.thorn.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Bless" } });
     await ops.send({ t: "actor.hp", target: { tokenId: run.thorn.id }, change: { kind: "damage", amount: 1 } });
-    const row = player.getByRole("button", { name: /^Concentration check/ });
+    const row = player.getByRole("button", { name: /^Concentration save/ });
     await row.waitFor();
     await row.tap();
     const alerts = player.getByRole("dialog", { name: "Alerts" });

@@ -538,7 +538,7 @@ function FightAlerts() {
     const names = who.split("\n");
     const list: ColumnAlert[] = prompts.map((p, i) => {
       const name = names[i] ?? "";
-      return { id: p.logId, kind: "concentration", who: name, says: `Concentration check for ${name}.` };
+      return { id: p.logId, kind: "concentration", who: name, says: `Concentration save for ${name}.` };
     });
     if (timeUp.text) list.push({ id: timeUp.key, kind: "timeUp", says: timeUp.text });
     for (const line of cardLines ? cardLines.split("\n") : []) {
@@ -1285,14 +1285,14 @@ function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone(): void;
     // Focusable from script, not by Tab, so the dock's summary can show it (pages/fold.ts focusAlert).
     <section
       role="group"
-      aria-label={`Concentration check for ${name}`}
+      aria-label={`Concentration save for ${name}`}
       tabIndex={-1}
       data-alert="concentration"
       data-alert-id={prompt.logId}
       style={{ ...card, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}
     >
       <div>
-        <div style={{ fontWeight: theme.weight.bold }}>Concentration check</div>
+        <div style={{ fontWeight: theme.weight.bold }}>Concentration save</div>
         <div style={{ fontSize: theme.font.body14, color: theme.color.textMuted }}>
           {name}
           {spell ? ` (${spell})` : ""} took damage.

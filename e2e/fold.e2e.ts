@@ -572,10 +572,10 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     await selectThornAsDm();
     await panelsButton(dm).click();
     await assertDocked(dm, 1.3, "320 x 480 at 130%, alerts and a token");
-    const summary = dm.getByRole("button", { name: /^Concentration check \+\d/ });
+    const summary = dm.getByRole("button", { name: /^Concentration save \+\d/ });
     await summary.waitFor();
     const name = (await summary.getAttribute("aria-label")) ?? "";
-    assert.match(name, /Goblin 1 checks concentration, Goblin 2 checks concentration, Goblin 3 checks concentration/);
+    assert.match(name, /Goblin 1 makes a Concentration save, Goblin 2 makes a Concentration save, Goblin 3 makes a Concentration save/);
     if (!WITHOUT_ROLLS) assert.match(name, /rolls? /i, "the summary leaves out the open roll request");
     await shots.take(dm, "fold-dock-alerts-320-130");
   });
@@ -593,7 +593,7 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     assert.equal(await dm.locator("[data-rvtt-dock]").count(), 0, "the dock was drawn where it does not fit");
     const header = sheet.locator("header").first();
     const show = header.getByRole("button", { name: "Show Thorn actions" });
-    const summary = header.getByRole("button", { name: /^Concentration check/ });
+    const summary = header.getByRole("button", { name: /^Concentration save/ });
     await show.waitFor();
     await summary.waitFor();
     const b = await boxes(dm);
@@ -616,7 +616,7 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     const menu = dm.getByRole("region", { name: "Menu" });
     await menu.getByRole("button", { name: /^Members/ }).click();
     await menu.getByRole("button", { name: "Back to Menu" }).waitFor();
-    await menu.locator("header").first().getByRole("button", { name: /^Concentration check/ }).waitFor();
+    await menu.locator("header").first().getByRole("button", { name: /^Concentration save/ }).waitFor();
     await assertHeaderFits(menu, 1.3, "Members, with Back and the dock's buttons");
     await shots.take(dm, "fold-header-forced-subpage");
 
@@ -631,11 +631,11 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     const ask = encounters.getByRole("button", { name: "Discard changes?" });
     await ask.waitFor();
     await assertHeaderFits(encounters, 1.3, "the encounter editor asking");
-    assert.equal(await encounters.locator("header").first().getByRole("button", { name: /^Concentration check/ }).count(), 0, "the dock's buttons stayed beside the question");
+    assert.equal(await encounters.locator("header").first().getByRole("button", { name: /^Concentration save/ }).count(), 0, "the dock's buttons stayed beside the question");
     await shots.take(dm, "fold-header-forced-asking");
     await ask.click();
     await encounters.getByRole("button", { name: "New encounter" }).waitFor();
-    await encounters.locator("header").first().getByRole("button", { name: /^Concentration check/ }).waitFor();
+    await encounters.locator("header").first().getByRole("button", { name: /^Concentration save/ }).waitFor();
     await encounters.getByRole("button", { name: "Close Encounters" }).click();
     await dm.keyboard.press("Escape");
     await dmCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
@@ -743,7 +743,7 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
       await panelsButton(dm).click();
       const sheet = dm.getByRole("region", { name: "Panels" });
       await sheet.waitFor();
-      await dm.getByRole("button", { name: /^Concentration check/ }).click();
+      await dm.getByRole("button", { name: /^Concentration save/ }).click();
       await sheet.waitFor({ state: "detached" });
 
       const shown = await dm.evaluate(() => {

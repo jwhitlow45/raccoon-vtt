@@ -392,7 +392,7 @@ export async function dmStep(label: string, tool: Tool): Promise<void> {
   const passed = check.getByRole("button", { name: "Passed", exact: true });
   if (!(await wholeInReach(passed))) {
     // Not whole where it is: the row stands for it, and its tap shows it.
-    const row = dm.getByRole("button", { name: /^Concentration check/ });
+    const row = dm.getByRole("button", { name: /^Concentration save/ });
     if ((await row.count()) === 0 || !(await row.first().isVisible())) {
       await miss(`${label}: the check is cut off and no row stands for it`);
       return;

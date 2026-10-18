@@ -320,7 +320,7 @@ describe("a death save rolled on the server", () => {
     const after = deathRoll(alive, P1, [3]);
     assert.deepEqual(saves(after), saves(alive));
     const line = after.log.at(-1)!.data as Extract<LogEvent, { type: "dice" }>;
-    assert.equal(line.rolls[0]?.label, "Death save");
+    assert.equal(line.rolls[0]?.label, "Death save", "the label replayed ops have always written");
     assert.equal(line.to, "all");
   });
 
