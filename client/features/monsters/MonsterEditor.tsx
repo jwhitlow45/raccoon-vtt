@@ -55,9 +55,9 @@ const SIZE_OPTIONS = (Object.keys(SIZE_WORDS) as MonsterSize[]).map((value) => (
 const ADD_LABELS: Record<SectionKey, string> = {
   traits: "Add a trait",
   actions: "Add an action",
-  bonusActions: "Add a bonus action",
-  reactions: "Add a reaction",
-  legendaryActions: "Add a legendary action",
+  bonusActions: "Add a Bonus Action",
+  reactions: "Add a Reaction",
+  legendaryActions: "Add a Legendary Action",
 };
 
 export function MonsterEditor(props: {
@@ -638,7 +638,7 @@ function SectionHint(props: { section: SectionKey; draft: StatBlock; companion: 
   if (props.section === "legendaryActions") {
     return uses.legendaryActions ? (
       <Notice>
-        Tokens get {lair(uses.legendaryActions)} legendary actions a round.{cap(uses.legendaryActions)}
+        Tokens get {lair(uses.legendaryActions)} Legendary Actions a round.{cap(uses.legendaryActions)}
       </Notice>
     ) : (
       <Help>Start with an entry named “Legendary Action Uses: 3”, or “Legendary Action Uses: 3 (4 in Lair)”, so tokens get their uses.</Help>

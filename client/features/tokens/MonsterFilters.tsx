@@ -185,7 +185,7 @@ function FilterSheet(props: {
       </Group>
       <Group title="Legendary and lair">
         <div>
-          <Checkbox checked={filters.legendary} onChange={(legendary) => set({ legendary })} label="Legendary" help="Has legendary actions." />
+          <Checkbox checked={filters.legendary} onChange={(legendary) => set({ legendary })} label="Legendary" help="Has Legendary Actions." />
           <Checkbox checked={filters.lair} onChange={(lair) => set({ lair })} label="Has a lair" help="More XP or legendary uses in its lair." />
         </div>
       </Group>

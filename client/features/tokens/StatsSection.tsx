@@ -236,12 +236,12 @@ function LegendaryFields(props: { actor: Partial<Actor>; onPatch(patch: ActorPat
   };
   return (
     <>
-      <FieldRow label="Legendary actions" hint={legendary.actionsMax > 0 ? `${legendary.actionsUsed} of ${legendary.actionsMax} used` : undefined}>
-        <Stepper label="Legendary actions per round" value={legendary.actionsMax} step={1} min={0} max={10} onChange={(n) => set({ actionsMax: n })} />
+      <FieldRow label="Legendary Actions" hint={legendary.actionsMax > 0 ? `${legendary.actionsUsed} of ${legendary.actionsMax} used` : undefined}>
+        <Stepper label="Legendary Actions per round" value={legendary.actionsMax} step={1} min={0} max={10} onChange={(n) => set({ actionsMax: n })} />
       </FieldRow>
       {legendary.actionsMax > 0 ? (
         <FieldRow label="Actions used">
-          <Stepper label="Legendary actions used" value={legendary.actionsUsed} step={1} min={0} max={legendary.actionsMax} onChange={(n) => set({ actionsUsed: n })} />
+          <Stepper label="Legendary Actions used" value={legendary.actionsUsed} step={1} min={0} max={legendary.actionsMax} onChange={(n) => set({ actionsUsed: n })} />
         </FieldRow>
       ) : null}
       <FieldRow label="Legendary Resistance" hint={legendary.resistMax > 0 ? `${legendary.resistUsed} of ${legendary.resistMax} used today` : undefined}>

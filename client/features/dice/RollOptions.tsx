@@ -278,9 +278,9 @@ export function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creat
 const ACTION_SECTIONS: readonly (readonly [Exclude<NamedRoll["section"], "spells">, string])[] = [
   ["traits", "Traits"],
   ["actions", "Actions"],
-  ["bonusActions", "Bonus actions"],
+  ["bonusActions", "Bonus Actions"],
   ["reactions", "Reactions"],
-  ["legendaryActions", "Legendary actions"],
+  ["legendaryActions", "Legendary Actions"],
 ];
 
 /**

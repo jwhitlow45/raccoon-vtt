@@ -881,7 +881,7 @@ function RowMenu(props: {
           ) : null}
           {legendary && legendary.actionsMax > 0 ? (
             <Pips
-              label="Legendary actions used"
+              label="Legendary Actions used"
               max={legendary.actionsMax}
               used={legendary.actionsUsed}
               onChange={(actionsUsed) => setLegendary({ ...legendary, actionsUsed })}
@@ -889,7 +889,7 @@ function RowMenu(props: {
           ) : null}
           {legendary && legendary.resistMax > 0 ? (
             <Pips
-              label="Legendary resistances used today"
+              label="Legendary Resistances used today"
               max={legendary.resistMax}
               used={legendary.resistUsed}
               onChange={(resistUsed) => setLegendary({ ...legendary, resistUsed })}
