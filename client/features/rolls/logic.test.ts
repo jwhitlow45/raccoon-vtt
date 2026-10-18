@@ -8,7 +8,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { ABILITY_KEYS, SKILL_KEYS } from "#shared/model.ts";
 import { SKILLS } from "#shared/rules/skills.ts";
 import { NO_INPUTS } from "./card.ts";
-import { actor, chance, character, DM, env, int, P1, pick as pickOne, rng, room, token } from "#shared/testutil.ts";
+import { actor, AT, chance, character, DM, effect, env, int, P1, pick as pickOne, rng, room, token } from "#shared/testutil.ts";
 import { sheetOpen } from "../../state/types.ts";
 import {
   allAnsweredIds,
@@ -35,6 +35,7 @@ import {
   chipsStayShown,
   foldedChips,
   forgetStaleDrafts,
+  heldBySaveEnds,
   keepFocusFor,
   lookAtRequests,
   newestFirst,
@@ -1133,5 +1134,37 @@ describe("the DM's live card (docs/design-v1-roll-request.md 6)", () => {
     const request = { targets: [{ characterId: "a", total: 17, result: "pass" as const }, { characterId: "b", total: 9, result: "fail" as const, change: { id: "k", on: "t", reason: "lucky" as const } }, { characterId: "c" }] };
     assert.deepEqual(tallyText(request), { answered: "2 of 3 answered: 1 pass, 1 fail", asks: "1 asks to change a roll" });
     assert.deepEqual(tallyText({ targets: [{ characterId: "a", total: 9 }, { characterId: "c" }] }), { answered: "1 of 2 answered", asks: null });
+  });
+});
+
+describe("a live card its save-ends card holds (docs/design-v1-dice-ui.md 7 and 12.3)", () => {
+  function table(state: "pending" | "resolved", linked = true): RoomState {
+    const frightened = effect("e1", { key: "frightened", save: { ability: "wis", dc: 15 }, due: { id: "7:0", state } });
+    return room({
+      tokens: { b1: token("b1", { kind: "pc", name: "Bree", ownerIds: ["p1"], actor: { inline: actor({ effects: [frightened] }) } }) },
+      rolls: {
+        r1: {
+          id: "r1",
+          rev: 0,
+          test: { kind: "save", choices: [{ ability: "wis" }] },
+          dc: 15,
+          dcShown: false,
+          resultShown: true,
+          cause: "saveEnds",
+          ...(linked ? { ends: { effect: "e1", occurrence: "7:0" } } : {}),
+          at: AT,
+          targets: [{ tokenId: "b1" }],
+        },
+      },
+    });
+  }
+
+  test("is held while its occurrence waits, so it folds, and let go once that settles", () => {
+    assert.deepEqual([...heldBySaveEnds(table("pending"))], ["r1"]);
+    assert.deepEqual([...heldBySaveEnds(table("resolved"))], [], "settled: the live card is drawn as it was");
+  });
+
+  test("a request no save-ends card asked is never held", () => {
+    assert.deepEqual([...heldBySaveEnds(table("pending", false))], []);
   });
 });

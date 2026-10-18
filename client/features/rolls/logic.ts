@@ -8,6 +8,7 @@ import { ABILITY_NAMES, choiceText, SKILLS, testShortText, testText, TYPICAL_DCS
 import { answerDice } from "#shared/logText.ts";
 import { naturalOf } from "#shared/dice/roll.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
+import { pendingSaves } from "#shared/rules/saveEnds.ts";
 import { NO_INPUTS, type RollInputs } from "./card.ts";
 import { displayName } from "../../lib/scene.ts";
 
@@ -953,6 +954,17 @@ export function lookAtRequests(
 ): { seen: ReadonlyMap<string, boolean> | null; unfold: string[]; chime: boolean } {
   if (!loaded) return { seen: before, unfold: [], chime: false };
   return { seen: new Map(needs), ...cameUp(before, needs) };
+}
+
+/**
+ * The requests a save-ends card holds (docs/design-v1-dice-ui.md 7 and
+ * 12.3): its reroll asked of a player, or the player's ask waiting for
+ * Allow or Keep. The card settles them there, so their live cards fold to
+ * one line and Allow and Keep show once. A request is held while its
+ * occurrence is still pending, and let go once that settles.
+ */
+export function heldBySaveEnds(state: Pick<RoomState, "tokens" | "characters" | "rolls">): ReadonlySet<string> {
+  return new Set(pendingSaves(state).flatMap((p) => (p.request ? [p.request.id] : [])));
 }
 
 /**

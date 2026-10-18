@@ -33,6 +33,7 @@ import {
   dcText,
   dmAnswerText,
   foldedChips,
+  heldBySaveEnds,
   newestFirst,
   PHONE_CHIPS,
   tallyText,
@@ -67,6 +68,9 @@ export function DmDesk() {
   const asking = useStore(useScoped(askSlot), (s) => s.asking);
   const rolls = useRoomView((s) => s.view?.rolls ?? NO_ROLLS);
   const cards = useMemo(() => newestFirst(rolls), [rolls]);
+  const tokens = useRoomView((s) => s.view?.tokens);
+  const characters = useRoomView((s) => s.view?.characters);
+  const held = useMemo(() => (tokens && characters ? heldBySaveEnds({ tokens, characters, rolls }) : new Set<string>()), [tokens, characters, rolls]);
   const done = useMemo(() => allAnsweredIds(rolls), [rolls]);
   const actions = useRoomActions();
   const ui = useRoomUi();
@@ -147,7 +151,8 @@ export function DmDesk() {
 
   // A card with an ask unfolds on a computer, since it waits for the DM. A phone's folded line names the ask instead.
   const phone = size.width < theme.layout.wideMinWidth;
-  const opensAt = (request: RollRequest, i: number) => layout.startsOpen(i) || (!phone && request.targets.some((t) => t.change !== undefined));
+  // One its save-ends card holds stays folded: Allow and Keep show once, on that card.
+  const opensAt = (request: RollRequest, i: number) => !held.has(request.id) && (layout.startsOpen(i) || (!phone && request.targets.some((t) => t.change !== undefined)));
   const summary = stack.button === "sheet" ? foldedChips(cards, "sheet") : stack.button ? foldedChips(cards.slice(PHONE_CHIPS), stack.button) : null;
   const summaryButton = summary ? (
     <Button
