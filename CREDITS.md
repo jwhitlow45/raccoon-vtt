@@ -100,8 +100,8 @@ The app draws its text in [Inter](https://rsms.me/inter/) by The Inter Project A
 
 | File | Original |
 | --- | --- |
-| `public/fonts/InterVariable.woff2` | `InterVariable.ttf` from `Inter-4.1.zip` |
-| `public/fonts/InterVariable-Italic.woff2` | `InterVariable-Italic.ttf` from `Inter-4.1.zip` |
+| `public/fonts/InterVariable-8a540aa8.woff2` | `InterVariable.ttf` from `Inter-4.1.zip` |
+| `public/fonts/InterVariable-Italic-7e4680fd.woff2` | `InterVariable-Italic.ttf` from `Inter-4.1.zip` |
 | `public/fonts/Inter-LICENSE.txt` | `LICENSE.txt` from `Inter-4.1.zip`, unchanged |
 
 Changes: `node scripts/inter.ts` checks the release's zip against a pinned SHA-256, then subsets each variable font to Latin characters (Basic Latin, Latin-1 Supplement, Latin Extended-A, General Punctuation, the arrows and the minus sign) and converts it to WOFF2 with fonttools. Both variation axes, weight and optical size, are kept. The license ships beside the fonts:

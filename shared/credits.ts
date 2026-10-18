@@ -275,7 +275,7 @@ export const CREDITS: CreditGroup[] = [
     credits: [
       {
         // The release client/lib/interFont.ts pins, whose test holds this title to it.
-        files: ["public/fonts/InterVariable.woff2", "public/fonts/InterVariable-Italic.woff2", "public/fonts/Inter-LICENSE.txt"],
+        files: ["public/fonts/InterVariable-8a540aa8.woff2", "public/fonts/InterVariable-Italic-7e4680fd.woff2", "public/fonts/Inter-LICENSE.txt"],
         title: "Inter 4.1",
         author: "The Inter Project Authors",
         authorUrl: "https://rsms.me/inter/",

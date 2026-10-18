@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { describe, test } from "node:test";
 import { CREDITS } from "#shared/credits.ts";
 import { INTER_FAMILY, INTER_FILES, INTER_UNICODE_RANGE, INTER_VERSION } from "./interFont.ts";
@@ -34,6 +35,15 @@ describe("the interface font", () => {
       assert.equal(face.src, `url("${file}") format("woff2")`);
       assert.equal(face["unicode-range"], INTER_UNICODE_RANGE.join(", "));
     }
+  });
+
+  test("each file is named for its hash, since browsers keep it for good, and no other font ships", () => {
+    for (const file of Object.values(INTER_FILES)) {
+      const hash = createHash("sha256").update(readFileSync(new URL(`public${file}`, root))).digest("hex");
+      assert.ok(file.endsWith(`-${hash.slice(0, 8)}.woff2`), `${file} holds ${hash.slice(0, 8)}: run node scripts/inter.ts and take the names it prints`);
+    }
+    const shipped = readdirSync(new URL("public/fonts/", root)).filter((name) => name.endsWith(".woff2"));
+    assert.deepEqual(shipped.map((name) => `/fonts/${name}`).sort(), Object.values(INTER_FILES).sort());
   });
 
   test("both files ship in public/, the roman within its 120 KB budget, with Inter's license beside them", () => {

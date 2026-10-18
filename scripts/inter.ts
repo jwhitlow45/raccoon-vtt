@@ -17,7 +17,13 @@
  *   python -I -m fontTools.subset InterVariable.ttf \
  *     --unicodes=U+0020-007E,U+00A0-017F,U+2000-206F,U+2190-2199,U+2212 \
  *     --layout-features+=tnum --flavor=woff2 \
- *     --output-file=public/fonts/InterVariable.woff2
+ *     --output-file=<a work folder>/InterVariable.woff2
+ *
+ * and the result is named for the first 8 hex digits of its SHA-256
+ * (InterVariable-8a540aa8.woff2), since the server lets browsers keep the
+ * files for good (server/http/static.ts). The script prints the names,
+ * which INTER_FILES, globals.css and index.html then take, and
+ * interFont.test.ts checks that each name matches its file.
  *
  * Both axes stay (weight 100 to 900 and optical size 14 to 32), so every
  * weight the theme uses comes from one file. `tnum` joins fonttools'
@@ -27,7 +33,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import yauzl from "yauzl";
@@ -41,10 +47,10 @@ const RELEASE = {
 /** Exact versions, at least two weeks old when pinned. brotli writes the WOFF2 compression. */
 const PIP_PINS = ["fonttools==4.66.1", "brotli==1.2.0"];
 
-/** Zip entry, and the file it becomes in public/fonts/. */
+/** Zip entry, and the name it takes in public/fonts/ before its hash. */
 const FONTS: [entry: string, out: string][] = [
-  ["InterVariable.ttf", "InterVariable.woff2"],
-  ["InterVariable-Italic.ttf", "InterVariable-Italic.woff2"],
+  ["InterVariable.ttf", "InterVariable"],
+  ["InterVariable-Italic.ttf", "InterVariable-Italic"],
 ];
 const LICENSE: [entry: string, out: string] = ["LICENSE.txt", "Inter-LICENSE.txt"];
 
@@ -97,6 +103,8 @@ if (import.meta.main) {
     throw new Error(`${RELEASE.url} changed upstream (sha256 ${got}). Re-check its license before re-pinning.`);
   }
   mkdirSync(OUT_DIR, { recursive: true });
+  // The last run's files, whose names a new subset would not reuse.
+  for (const name of readdirSync(OUT_DIR)) if (name.endsWith(".woff2")) rmSync(join(OUT_DIR, name));
   const work = mkdtempSync(join(tmpdir(), "raccoon-inter-"));
   try {
     const entries = await readZipEntries(zip, [...FONTS.map(([entry]) => entry), LICENSE[0]]);
@@ -108,7 +116,7 @@ if (import.meta.main) {
     execFileSync(python, ["-I", "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--only-binary=:all:", ...PIP_PINS], { stdio: "inherit" });
 
     for (const [entry, out] of FONTS) {
-      const target = join(OUT_DIR, out);
+      const subset = join(work, `${out}.woff2`);
       execFileSync(
         python,
         [
@@ -119,12 +127,17 @@ if (import.meta.main) {
           `--unicodes=${INTER_UNICODE_RANGE.join(",")}`,
           "--layout-features+=tnum",
           "--flavor=woff2",
-          `--output-file=${target}`,
+          `--output-file=${subset}`,
         ],
         { stdio: "inherit" },
       );
-      console.log(`${out}  ${statSync(target).size} bytes  sha256 ${sha256(readFileSync(target))}`);
+      const data = readFileSync(subset);
+      const hash = sha256(data);
+      const name = `${out}-${hash.slice(0, 8)}.woff2`;
+      writeFileSync(join(OUT_DIR, name), data);
+      console.log(`/fonts/${name}  ${data.length} bytes  sha256 ${hash}`);
     }
+    console.log("Give these names to INTER_FILES (client/lib/interFont.ts), the @font-face rules (client/globals.css) and the preload (client/index.html).");
     writeFileSync(join(OUT_DIR, LICENSE[1]), entries.get(LICENSE[0])!);
     console.log(`${LICENSE[1]}  copied from the release`);
   } finally {

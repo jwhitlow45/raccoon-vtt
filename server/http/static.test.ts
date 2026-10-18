@@ -17,6 +17,9 @@ describe("the built SPA", () => {
     await writeFile(join(dist, "app.js"), "export {};");
     await writeFile(join(dist, "game-icons", "82d94881", "lorc", "wolf-head.svg"), '<svg xmlns="http://www.w3.org/2000/svg"/>');
     await writeFile(join(dist, "game-icons", "82d94881", "index.json"), "{}");
+    await mkdir(join(dist, "fonts"));
+    await writeFile(join(dist, "fonts", "InterVariable-8a540aa8.woff2"), "wOF2");
+    await writeFile(join(dist, "fonts", "Inter-LICENSE.txt"), "SIL Open Font License");
     app = Fastify();
     await registerStatic(app, dist);
   });
@@ -34,10 +37,18 @@ describe("the built SPA", () => {
     }
   });
 
-  test("other files keep the default revalidation", async () => {
-    const res = await app.inject({ method: "GET", url: "/app.js" });
+  test("the interface font, named for its hash, is cached for good, so a reload's preload of it is used", async () => {
+    const res = await app.inject({ method: "GET", url: "/fonts/InterVariable-8a540aa8.woff2" });
     assert.equal(res.statusCode, 200);
-    assert.notEqual(res.headers["cache-control"], IMMUTABLE);
+    assert.equal(res.headers["cache-control"], IMMUTABLE);
+  });
+
+  test("other files keep the default revalidation", async () => {
+    for (const url of ["/app.js", "/fonts/Inter-LICENSE.txt"]) {
+      const res = await app.inject({ method: "GET", url });
+      assert.equal(res.statusCode, 200, url);
+      assert.notEqual(res.headers["cache-control"], IMMUTABLE, url);
+    }
   });
 
   test("an icon the build does not have is a 404, never the page", async () => {

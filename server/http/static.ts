@@ -12,6 +12,9 @@ import type { ApiErrorCode } from "#shared/apiErrors.ts";
  */
 export const IMMUTABLE = "public, max-age=31536000, immutable";
 
+/** A font file named for its hash, such as fonts/InterVariable-8a540aa8.woff2, by its path on disk. */
+const FONT_FILE = /[/\\]fonts[/\\][^/\\]+-[0-9a-f]{8}\.woff2$/;
+
 /**
  * The built SPA from `dist`. Client-side routes such as /r/K7QH-2MXA all
  * load the same page, except under /api/, /ws and /game-icons/: an icon key
@@ -22,9 +25,21 @@ export const IMMUTABLE = "public, max-age=31536000, immutable";
  * 4,180 icons get one wildcard route of their own instead: a route each
  * made boot about 0.4 s slower and held about 50 MB more heap for routes
  * nothing else needs.
+ *
+ * The interface font's files are cached for good too: each name holds its
+ * content's hash (client/lib/interFont.ts). Revalidated, a reload's preload
+ * of the font asked the server again while the page drew from the copy the
+ * browser held, and Chrome warned that the preload went unused.
  */
 export async function registerStatic(app: FastifyInstance, dist: string): Promise<void> {
-  await app.register(fastifyStatic, { root: dist, wildcard: false, globIgnore: ["game-icons/**"] });
+  await app.register(fastifyStatic, {
+    root: dist,
+    wildcard: false,
+    globIgnore: ["game-icons/**"],
+    setHeaders(reply, path) {
+      if (FONT_FILE.test(path)) reply.header("cache-control", IMMUTABLE);
+    },
+  });
   await app.register(fastifyStatic, {
     root: join(dist, "game-icons"),
     prefix: "/game-icons/",

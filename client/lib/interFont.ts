@@ -25,8 +25,15 @@ export const INTER_VERSION = "4.1";
  */
 export const INTER_UNICODE_RANGE = ["U+0020-007E", "U+00A0-017F", "U+2000-206F", "U+2190-2199", "U+2212"] as const;
 
-/** Where the app serves each file. The roman one is preloaded by index.html. */
+/**
+ * Where the app serves each file. The roman one is preloaded by index.html.
+ * Each name ends in the first 8 hex digits of its file's SHA-256, so a new
+ * subset is a new URL and browsers may keep a file for good
+ * (server/http/static.ts). That also lets a reload's preload find the font
+ * in the browser's cache, where the page's own request finds it, rather
+ * than ask the server again for a copy that then goes unused.
+ */
 export const INTER_FILES = {
-  roman: "/fonts/InterVariable.woff2",
-  italic: "/fonts/InterVariable-Italic.woff2",
+  roman: "/fonts/InterVariable-8a540aa8.woff2",
+  italic: "/fonts/InterVariable-Italic-7e4680fd.woff2",
 } as const;
