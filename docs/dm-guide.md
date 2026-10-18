@@ -48,7 +48,8 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
   - [Spirit Guardians and a summoned companion](#spirit-guardians-and-a-summoned-companion)
   - [The party travels between scenes](#the-party-travels-between-scenes)
   - [A secret door and a reveal](#a-secret-door-and-a-reveal)
-- [Shortcuts](#shortcuts)
+- Reference
+  - [Shortcuts](#shortcuts)
 
 ## Where things are
 
@@ -976,6 +977,10 @@ The party finds a hidden vault, and you want the reveal to land with a bit of dr
 6. Turn **Black out players' screens** off. The players see the room and the handout together.
 
 ![A player's phone during the blackout: "The DM has paused the game." and the X-card.](dm-guide/reveal-blackout.webp)
+
+# Reference
+
+This part is for quick lookups during play, starting with the keys that save a DM the most time.
 
 ## Shortcuts
 
