@@ -304,10 +304,10 @@ function TargetRow(props: { request: RollRequest; target: RollTarget }) {
         ) : null}
         {target.change ? <AskRow request={request} target={target} change={target.change} name={name} /> : null}
       </div>
-      <Button size="sm" pressed={target.result === "pass"} aria-label={`Mark ${name} passed`} title={`Mark ${name} passed`} onClick={() => mark("pass")} style={markStyle}>
+      <Button size="sm" icon="pass" pressed={target.result === "pass"} aria-label={`Mark ${name} passed`} title={`Mark ${name} passed`} onClick={() => mark("pass")} style={markStyle}>
         Pass
       </Button>
-      <Button size="sm" pressed={target.result === "fail"} aria-label={`Mark ${name} failed`} title={`Mark ${name} failed`} onClick={() => mark("fail")} style={markStyle}>
+      <Button size="sm" icon="fail" pressed={target.result === "fail"} aria-label={`Mark ${name} failed`} title={`Mark ${name} failed`} onClick={() => mark("fail")} style={markStyle}>
         Fail
       </Button>
     </li>

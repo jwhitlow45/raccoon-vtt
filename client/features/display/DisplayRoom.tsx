@@ -6,9 +6,11 @@ import { MapStage } from "../../canvas/Stage.tsx";
 import { SceneLoadingOverlay } from "../../canvas/SceneLoading.tsx";
 import { Button, destructiveStyle } from "../../components/Button.tsx";
 import { ConnectionDot } from "../../components/ConnectionStatus.tsx";
+import { Icon, type IconName } from "../../components/Icon.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { choiceLook } from "../../components/looks.ts";
 import { Notice } from "../../components/Notice.tsx";
+import { useTooltip } from "../../components/Tooltip.tsx";
 import { api, ApiError, displayAssetUrl, type AssetVariant } from "../../lib/api.ts";
 import { fitRect, NO_INSETS, type Camera, type Rect, type Size } from "../../lib/camera.ts";
 import { BANNER_DELAY_MS, type ConnectionState } from "../../lib/connection.ts";
@@ -729,13 +731,13 @@ function HandoutBar(props: {
           cursor: "default",
         }}
       >
-        <MenuButton grow disabled={props.page <= 0} onClick={() => props.onStep(-1)}>
+        <MenuButton grow icon="back" disabled={props.page <= 0} onClick={() => props.onStep(-1)}>
           Previous page
         </MenuButton>
-        <MenuButton grow disabled={props.page >= props.pages - 1} onClick={() => props.onStep(1)}>
+        <MenuButton grow icon="chevronRight" disabled={props.page >= props.pages - 1} onClick={() => props.onStep(1)}>
           Next page
         </MenuButton>
-        <MenuButton grow onClick={props.onClose}>
+        <MenuButton grow icon="close" onClick={props.onClose}>
           Close
         </MenuButton>
       </div>
@@ -960,15 +962,21 @@ function MenuButton(props: {
   compact?: boolean;
   /** Grows to fill its row in a wrapping bar. */
   grow?: boolean;
+  /** The icon alone, at the TV's size, its words (`children`) its name and tooltip (docs/design-v1-icons.md 3.1 rule 1). */
+  icon?: IconName;
   onClick(): void;
   children: ReactNode;
 }) {
   const on = props.checked === true;
-  return (
+  const words = typeof props.children === "string" ? props.children : "";
+  const tooltip = useTooltip(words);
+  const button = (
     <button
       type="button"
       role={props.role}
       aria-checked={props.role === undefined || props.role === "menuitem" ? undefined : on}
+      aria-label={props.icon ? words : undefined}
+      {...(props.icon ? tooltip.anchor() : null)}
       disabled={props.disabled}
       onClick={props.onClick}
       style={{
@@ -984,12 +992,23 @@ function MenuButton(props: {
         fontFamily: theme.font.body,
         cursor: props.disabled ? "default" : "pointer",
         ...(props.danger ? destructiveStyle(props.armed === true) : null),
+        ...(props.icon ? { display: "inline-grid", placeItems: "center", minWidth: TV_BUTTON_HEIGHT } : null),
       }}
     >
-      {props.children}
+      {props.icon ? <Icon name={props.icon} size={TV_ICON} /> : props.children}
     </button>
   );
+  if (!props.icon) return button;
+  return (
+    <>
+      {button}
+      {tooltip.tip}
+    </>
+  );
 }
+
+/** An icon in a TV button, a little larger than its 18 px words, so it reads across a room. */
+const TV_ICON = 28;
 
 /** A terminal close: signed out (Leave elsewhere, the DM's Sign out, a new player password, or pairing with another room), refused, or the room deleted. */
 function DisplayEnded(props: { ended: Ended; roomId: string }) {

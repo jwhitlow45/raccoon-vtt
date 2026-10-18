@@ -48,7 +48,7 @@ export function IconsTab(props: { disabled: boolean; initial?: IconImage; onUse(
       {index.status === "failed" ? (
         <div role="alert" style={{ display: "flex", alignItems: "center", gap: theme.space(2), color: theme.color.textMuted }}>
           <span style={{ flex: 1 }}>The icon list did not load. Check the connection and try again.</span>
-          <Button size="sm" onClick={index.retry}>
+          <Button icon="retry" size="sm" onClick={index.retry}>
             Try again
           </Button>
         </div>

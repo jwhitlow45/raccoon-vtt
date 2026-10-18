@@ -75,7 +75,7 @@ function pcSummary(character: Character): LinkedBlock | null {
   return { kind: "numbers", saves: savesOf(numbers), defenses: pcDefenseLines(character) };
 }
 
-/** "Open the sheet ↗": the owner's D&D Beyond sheet in a new tab, with no referrer and no opener. 44 px tall. */
+/** "Open the sheet" and its new tab's icon: the owner's D&D Beyond sheet in a new tab, with no referrer and no opener. 44 px tall. */
 export function SheetAnchor(props: { url: string }) {
   return (
     <a
@@ -86,13 +86,15 @@ export function SheetAnchor(props: { url: string }) {
       style={{
         display: "inline-flex",
         alignItems: "center",
+        gap: theme.space(1),
         minHeight: theme.touch,
         color: theme.color.accent,
         fontWeight: theme.weight.strong,
         whiteSpace: "nowrap",
       }}
     >
-      Open the sheet ↗
+      Open the sheet
+      <Icon name="external" size="sm" />
     </a>
   );
 }

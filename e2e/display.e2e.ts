@@ -450,7 +450,12 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     const dialog = tv.getByRole("dialog", { name: "Ship's log" });
     const bar = dialog.getByRole("toolbar", { name: "Handout pages" });
     const button = (name: string) => bar.getByRole("button", { name, exact: true });
-    const focused = () => tv.evaluate(() => (globalThis as unknown as { document: { activeElement: { textContent: string | null } | null } }).document.activeElement?.textContent ?? null);
+    // The bar's buttons are icons named by aria-label (docs/design-v1-icons.md 4), so the name is read as a screen reader reads it.
+    const focused = () =>
+      tv.evaluate(() => {
+        const el = (globalThis as unknown as { document: { activeElement: { textContent: string | null; getAttribute(name: string): string | null } | null } }).document.activeElement;
+        return el?.getAttribute("aria-label") ?? el?.textContent ?? null;
+      });
     const loaded = (img: Locator) =>
       img.evaluate((el) => {
         const picture = el as unknown as { complete: boolean; naturalWidth: number };
@@ -558,11 +563,12 @@ describe("raccoon-vtt table display run", { timeout: 180_000 }, () => {
     await tv.keyboard.press("Escape");
     await bar.waitFor({ state: "detached" });
 
-    // A phone used as a display wraps the bar onto two rows over the page. Turned sideways, and on a TV at
-    // 130% as Chrome lays a 1920 x 1080 screen out at that zoom, it keeps one row. Nothing overlaps.
+    // The bar keeps one row over the page on a phone used as a display, now that its buttons are icons
+    // (docs/design-v1-icons.md 4), turned sideways, and on a TV at 130% as Chrome lays a 1920 x 1080 screen
+    // out at that zoom. Nothing overlaps.
     try {
       for (const [size, rows] of [
-        [{ width: 390, height: 844 }, 2],
+        [{ width: 390, height: 844 }, 1],
         [{ width: 844, height: 390 }, 1],
         [{ width: 1477, height: 831 }, 1],
       ] as const) {

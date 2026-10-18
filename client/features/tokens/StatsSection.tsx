@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { hpLess } from "#shared/rules/hp.ts";
 import type { Actor } from "#shared/model.ts";
 import type { ActorPatch } from "#shared/protocol.ts";
+import { Icon } from "../../components/Icon.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { theme } from "../../lib/theme.ts";
 import { validSheetUrl } from "./statSummary.ts";
@@ -270,13 +271,15 @@ function SheetLink(props: { actor: Partial<Actor>; editable: boolean; onPatch(pa
           style={{
             display: "inline-flex",
             alignItems: "center",
+            gap: theme.space(1),
             minHeight: theme.touch,
             color: theme.color.accent,
             fontWeight: theme.weight.strong,
             overflowWrap: "anywhere",
           }}
         >
-          Open the sheet ↗
+          Open the sheet
+          <Icon name="external" size="sm" />
         </a>
       ) : null}
       {props.editable ? <SheetUrlField value={props.actor.sheetUrl ?? ""} onPatch={props.onPatch} /> : null}
@@ -284,7 +287,7 @@ function SheetLink(props: { actor: Partial<Actor>; editable: boolean; onPatch(pa
   );
 }
 
-/** The sheet link as a field, for setup. The link itself is "Open the sheet ↗". */
+/** The sheet link as a field, for setup. The link itself is "Open the sheet" and its new tab's icon. */
 export function SheetUrlField(props: { value: string; onPatch(patch: ActorPatch): void }) {
   const [error, setError] = useState(false);
   return (

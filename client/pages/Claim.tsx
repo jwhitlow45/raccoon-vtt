@@ -103,7 +103,7 @@ export function Claim(props: { roomId: string; fragment: FragmentSecret; onDone(
           <ErrorText>{phase.message}</ErrorText>
           <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
             {phase.retry ? (
-              <Button variant="primary" onClick={start}>
+              <Button icon="retry" variant="primary" onClick={start}>
                 Try again
               </Button>
             ) : (

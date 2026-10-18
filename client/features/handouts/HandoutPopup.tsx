@@ -308,7 +308,7 @@ export function HandoutPopup() {
           {failure ? (
             <div role="alert" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), fontSize: theme.font.body14, color: theme.color.dangerText }}>
               <span style={{ flex: "1 1 200px" }}>{failure === "share" ? "The handout could not be shared." : "The handout could not be downloaded. Check your connection."}</span>
-              <Button size="sm" onClick={retry}>
+              <Button icon="retry" size="sm" onClick={retry}>
                 Try again
               </Button>
             </div>

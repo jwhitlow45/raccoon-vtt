@@ -98,10 +98,10 @@ export default function Admin() {
         actions={
           phase.name === "ready" ? (
             <>
-              <Button busy={refreshing} onClick={() => void load("refresh")}>
+              <Button busy={refreshing} icon="retry" onClick={() => void load("refresh")}>
                 {refreshing ? "Refreshing…" : "Refresh"}
               </Button>
-              <Button variant="danger" busy={signingOut} onClick={() => void signOut()}>
+              <Button variant="danger" busy={signingOut} icon="leave" onClick={() => void signOut()}>
                 {signingOut ? "Signing out…" : "Sign out"}
               </Button>
             </>
@@ -112,7 +112,7 @@ export default function Admin() {
       {phase.name === "failed" ? (
         <Card title="The admin page did not load">
           <ErrorText>{phase.message}</ErrorText>
-          <Button variant="primary" block onClick={() => void load("first")}>
+          <Button variant="primary" block icon="retry" onClick={() => void load("first")}>
             Try again
           </Button>
         </Card>

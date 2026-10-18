@@ -10,6 +10,7 @@ import { ABILITY_NAMES as ABILITY_SHORT, signed } from "#shared/statBlock.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Dialog, DiscardQuestion } from "../../components/Dialog.tsx";
+import { Icon } from "../../components/Icon.tsx";
 import { Input, Select, TextArea } from "../../components/Field.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { Help, SectionLabel } from "../../components/Panel.tsx";
@@ -455,8 +456,9 @@ function DdbStep(props: {
         </Notice>
       ) : null}
       {id ? (
-        <a href={ddbCharacterUrl(id)} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" style={{ display: "inline-flex", alignItems: "center", minHeight: theme.touch, color: theme.color.accent, fontWeight: theme.weight.strong }}>
-          Open its data in D&amp;D Beyond ↗
+        <a href={ddbCharacterUrl(id)} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1), minHeight: theme.touch, color: theme.color.accent, fontWeight: theme.weight.strong }}>
+          Open its data in D&amp;D Beyond
+          <Icon name="external" size="sm" />
         </a>
       ) : null}
       <Button size="sm" expanded={pasting} onClick={() => setPasting((p) => !p)} style={{ justifySelf: "start" }}>

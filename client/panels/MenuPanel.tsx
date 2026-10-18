@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "../components/Button.tsx";
-import { Icon } from "../components/Icon.tsx";
+import { Icon, type IconName } from "../components/Icon.tsx";
 import { Row } from "../components/Row.tsx";
 import ThisDevice from "../features/device/ThisDevice.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
@@ -81,10 +81,11 @@ export default function MenuPanel(props: PanelProps) {
           {copied ? (share.withPassword ? "Copied, with the password" : "Copied") : share.label}
         </Button>
       </div>
-      <MenuItem title="Members" detail={role === "dm" ? "Who is here, kicking, the player password and DM devices." : "Who is here and who is online."} page="members" onClick={() => setPage("members")} />
-      {role === "dm" ? <MenuItem title="Room settings" detail="Movement, HP, combat, distance and backups." page="settings" onClick={() => setPage("settings")} /> : null}
-      <MenuItem title="This device" detail="Interface size, low power, map detail, sounds and shortcuts." page="device" onClick={() => setPage("device")} />
+      <MenuItem icon="group" title="Members" detail={role === "dm" ? "Who is here, kicking, the player password and DM devices." : "Who is here and who is online."} page="members" onClick={() => setPage("members")} />
+      {role === "dm" ? <MenuItem icon="settings" title="Room settings" detail="Movement, HP, combat, distance and backups." page="settings" onClick={() => setPage("settings")} /> : null}
+      <MenuItem icon="device" title="This device" detail="Interface size, low power, map detail, sounds and shortcuts." page="device" onClick={() => setPage("device")} />
       <MenuItem
+        icon="guide"
         title="DM guide"
         detail={
           role === "dm"
@@ -94,8 +95,9 @@ export default function MenuPanel(props: PanelProps) {
         // A new tab, so the room stays connected and where it was.
         onClick={() => window.open(GUIDE_PATH, "_blank", "noopener")}
       />
-      <MenuItem title="About" detail="Credits, licenses and the SRD notice." page="about" onClick={() => setPage("about")} />
+      <MenuItem icon="about" title="About" detail="Credits, licenses and the SRD notice." page="about" onClick={() => setPage("about")} />
       <MenuItem
+        icon="leave"
         title="Leave room"
         detail={
           preview
@@ -171,9 +173,11 @@ function useDmPlayerLink(roomId: string, dm: boolean, shown: boolean): string | 
  * (features/panels.ts useSubpageFocus), and Leave room, which leaves, does
  * neither.
  */
-function MenuItem(props: { title: string; detail: string; page?: Page; opener?: string; disabled?: boolean; onClick(): void }) {
+function MenuItem(props: { icon: IconName; title: string; detail: string; page?: Page; opener?: string; disabled?: boolean; onClick(): void }) {
   return (
     <Row
+      // Before the words, so a list read by scanning is found by its icons (docs/design-v1-icons.md 10.2).
+      leading={<Icon name={props.icon} style={{ color: props.disabled ? theme.color.textDisabled : theme.color.textMuted }} />}
       title={props.title}
       detail={<span style={{ whiteSpace: "normal" }}>{props.detail}</span>}
       trailing={props.page ? <Icon name="chevronRight" style={{ color: theme.color.textMuted }} /> : undefined}

@@ -64,7 +64,6 @@ export type IconName =
   | "group"
   | "delete"
   | "edit"
-  | "image"
   | "retry"
   | "locked"
   | "duplicate"
@@ -81,7 +80,15 @@ export type IconName =
   | "zoomOut"
   | "focus"
   | "download"
-  | "share";
+  | "share"
+  | "settings"
+  | "device"
+  | "about"
+  | "leave"
+  | "guide"
+  | "external"
+  | "pass"
+  | "fail";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -98,7 +105,6 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   group: "users",
   delete: "trash-2",
   edit: "pencil",
-  image: "image",
   retry: "refresh-cw",
   locked: "lock",
   duplicate: "copy-plus",
@@ -116,13 +122,22 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   focus: "focus",
   download: "download",
   share: "share",
+  settings: "settings",
+  device: "smartphone",
+  about: "info",
+  leave: "log-out",
+  guide: "book-open",
+  external: "external-link",
 };
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
+const CHECK = <path {...STROKE} d="M5 12.5l4.5 4.5L19 7.5" />;
+const CROSS = <path {...STROKE} d="M6 6l12 12M18 6L6 18" />;
+
 /** Each icon on a 24 unit square, so every one sits on the same grid at any size. */
 const SHAPES: Record<IconName, ReactNode> = {
-  close: <path {...STROKE} d="M6 6l12 12M18 6L6 18" />,
+  close: CROSS,
   back: <path {...STROKE} d="M15 5l-7 7 7 7" />,
   more: (
     <g fill="currentColor">
@@ -138,7 +153,7 @@ const SHAPES: Record<IconName, ReactNode> = {
   caret: <path {...STROKE} d="M8 10l4 4 4-4" />,
   plus: <path {...STROKE} d="M12 5v14M5 12h14" />,
   minus: <path {...STROKE} d="M5 12h14" />,
-  check: <path {...STROKE} d="M5 12.5l4.5 4.5L19 7.5" />,
+  check: CHECK,
   copy: (
     <g {...STROKE}>
       <rect x="9" y="9" width="11" height="11" rx="2" />
@@ -265,14 +280,6 @@ const SHAPES: Record<IconName, ReactNode> = {
   delete: <path {...STROKE} d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6" />,
   // Lucide pencil: edit.
   edit: <path {...STROKE} d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497zM15 5l4 4" />,
-  // Lucide image: a token's or a page's picture.
-  image: (
-    <g {...STROKE}>
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <circle cx="9" cy="9" r="2" />
-      <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-    </g>
-  ),
   // Lucide refresh-cw: try a failed load again.
   retry: <path {...STROKE} d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5" />,
   // Lucide lock: a token that cannot be moved.
@@ -342,6 +349,36 @@ const SHAPES: Record<IconName, ReactNode> = {
   download: <path {...STROKE} d="M12 15V3M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5" />,
   // Lucide share: hand a file to the device's share sheet.
   share: <path {...STROKE} d="M12 2v13M16 6l-4-4-4 4M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />,
+  // Lucide settings: a room's settings. Settings only.
+  settings: (
+    <g {...STROKE}>
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
+    </g>
+  ),
+  // Lucide smartphone: this device's own settings.
+  device: (
+    <g {...STROKE}>
+      <path d="M12 18h.01" />
+      <rect width="14" height="20" x="5" y="2" rx="2" ry="2" />
+    </g>
+  ),
+  // Lucide info: about the app, its credits and licenses.
+  about: (
+    <g {...STROKE}>
+      <path d="M12 16v-4M12 8h.01" />
+      <circle cx="12" cy="12" r="10" />
+    </g>
+  ),
+  // Lucide log-out: leave a room, or sign out.
+  leave: <path {...STROKE} d="M16 17l5-5-5-5M21 12H9M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />,
+  // Lucide book-open: the DM guide.
+  guide: <path {...STROKE} d="M12 7v14M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" />,
+  // Lucide external-link: a link that opens another site in a new tab.
+  external: <path {...STROKE} d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />,
+  // The DM desk's Pass and Fail, beside their words: a check and a cross, the one place they mean a save's outcome.
+  pass: CHECK,
+  fail: CROSS,
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];

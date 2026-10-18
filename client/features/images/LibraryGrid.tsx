@@ -599,7 +599,7 @@ function DeleteNote(props: { flow: DocDelete; onRetry(): void }) {
     <div ref={focus.target} tabIndex={-1} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), outline: "none" }}>
       <NoteLine error={note.error}>{note.text}</NoteLine>
       {note.retry ? (
-        <Button ref={focus.leaving} size="sm" onClick={props.onRetry}>
+        <Button icon="retry" ref={focus.leaving} size="sm" onClick={props.onRetry}>
           Try again
         </Button>
       ) : null}

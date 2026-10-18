@@ -261,7 +261,7 @@ function Body(props: {
           {title}
           <Buttons>
             {phase.k === "paused" && canTryAgain(phase.stop) ? (
-              <Button size="sm" onClick={leaving(() => runner?.tryAgain())}>
+              <Button icon="retry" size="sm" onClick={leaving(() => runner?.tryAgain())}>
                 Try again
               </Button>
             ) : null}
@@ -298,7 +298,7 @@ function Body(props: {
           <ErrorText>{phase.words}</ErrorText>
           {title}
           <Buttons>
-            <Button size="sm" disabled={titleProblem(job.title) !== null} onClick={leaving(() => runner?.tryAgain())}>
+            <Button icon="retry" size="sm" disabled={titleProblem(job.title) !== null} onClick={leaving(() => runner?.tryAgain())}>
               Try again
             </Button>
             {cancel()}
@@ -351,7 +351,7 @@ function Body(props: {
         <>
           <Line strong>No pages were uploaded.</Line>
           <Buttons>
-            <Button size="sm" onClick={leaving(() => runner?.tryAgain())}>
+            <Button icon="retry" size="sm" onClick={leaving(() => runner?.tryAgain())}>
               Try again
             </Button>
             <Button size="sm" onClick={end}>
