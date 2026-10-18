@@ -1,8 +1,10 @@
 # DM guide
 
-This guide is for the DM who runs RaccoonVTT for their table. It shows how to build maps and run fights, which tools do what, and how they fit together in real sessions. It covers the parts of the app a DM uses for maps and combat. [FEATURES.md](../FEATURES.md) is the complete list of what the app does, and the in-app shortcut list (`?`) has every key. The app shows this guide too: **Menu**, **DM guide** opens it in a new tab, and each panel it covers ends in a small **Guide** link to its section.
+This guide is for the DM who runs RaccoonVTT for their table. It walks you through building maps and running fights: what each tool does, when you would reach for it, and how the tools work together in a real session. It covers the parts of the app a DM uses for maps and combat. For a complete list of everything the app can do, see [FEATURES.md](../FEATURES.md), and for every keyboard shortcut, press `?` in the app.
 
-The app does a lot, and you don't need most of it on day one. Read the [Quick start](#quick-start), run a session with it, and come back for the rest as you need it.
+You can read this guide inside the app as well. Open the **Menu** and choose **DM guide** to open it in a new tab. Each panel the guide covers also ends with a small **Guide** link that takes you straight to the section about that panel.
+
+The app does a lot, and you don't need most of it on day one. Read the [Quick start](#quick-start), run a session with just those tools, and come back for the rest when you want it.
 
 ## Contents
 
@@ -50,489 +52,541 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
 
 ## Where things are
 
-The app has three parts: the **map** in the middle, the **toolbar** under it, and the **panels**.
+The screen has three main parts: the **map** in the middle, the **toolbar** under it, and the **panels**, where most of the app's controls live. Where the panels appear depends on the size of your screen.
 
 ![The DM's screen on a computer: the map, the toolbar under it, and the side panel on the right with the party bar above the tabs.](dm-guide/screen-computer.webp)
 
-- **On a computer** (a window 900 px wide or more), panels are tabs in the side panel on the right. The most used tabs come first, as many as fit, and **More** lists the rest under **In play** and **Prepare**. **Hide panels** at the end of the tabs, or the `S` key, hides the side panel, and **Panels** in the toolbar brings it back. **Two panels**, at the top of More, shows two panels at once, such as Initiative above a token's stats. Above the tabs, the party bar folds to one line with **Party**: your players' characters with their HP, which scroll sideways when they don't all fit, and **Ask**.
-- **On a phone**, **Panels** in the toolbar opens the list of panels, and each one opens as a sheet from the bottom. Swipe a sheet down to close it. Your setup tools (Add token, Pin, Map builder and Line up grid) sit behind **Setup** in the toolbar.
+**On a computer** (a window 900 px wide or more), the panels are tabs in a side panel on the right. The tabs you use most come first, as many as fit, and **More** lists the rest, grouped under **In play** and **Prepare**. When you want more room for the map, press **Hide panels** at the end of the tabs (or the `S` key), and bring the side panel back with **Panels** in the toolbar. **Two panels**, at the top of the More list, splits the side panel so you can see two panels at once, which is handy for keeping Initiative open above a token's stats.
+
+Above the tabs sits the party bar, which shows your players' characters with their HP. Press **Party** to fold it down to a single line: the characters' names and HP in a strip that scrolls sideways when they don't all fit, followed by **Ask** for [asking the party for a roll](#asking-for-rolls).
+
+**On a phone**, press **Panels** in the toolbar to see the list of panels. Each one opens as a sheet that slides up from the bottom, and you swipe the sheet down to close it. To save room, your setup tools (Add token, Pin, Map builder and Line up grid) are tucked behind **Setup** in the toolbar.
 
 ![The DM's panel list on a phone, grouped under In play and Prepare.](dm-guide/screen-phone.webp)
 
-The toolbar holds ten tools. On a computer each has a key:
+**The toolbar** holds ten tools. On a computer, each one has a key:
 
 - **Select** (`V`), **Ruler** (`R`), **Area** (`A`), **Fog** (`F`), **Draw** (`D`) and **Ping** (`P`).
 - Your setup tools: **Add token** (`T`), **Pin** (`M`), **Map builder** (`B`) and **Line up grid** (`G`).
 
-A tool's options show in one row above the toolbar. What doesn't fit waits behind **⋯** (More options). Tap the active tool again to hide its options, and again to bring them back.
+When you pick a tool, its options appear in a row just above the toolbar, and anything that doesn't fit in the row waits behind **⋯** (More options). If the row is in your way, tap the tool you are using again to hide its options. The tool stays in use, and another tap brings the options back.
 
-The top bar holds **Undo** and **Redo** (`Ctrl+Z` and `Ctrl+Shift+Z`, or Cmd on a Mac), which take back your own changes one at a time, and **Fit the map to the screen** (`0`). The **Menu** panel holds the X-card, **Copy player link**, **Members**, **Room settings**, **This device**, **DM guide**, **About** and **Leave room**.
+**The top bar** holds **Undo** and **Redo** (`Ctrl+Z` and `Ctrl+Shift+Z`, or Cmd on a Mac), which take back your own changes one at a time and put them back again. Beside them is **Fit the map to the screen** (`0`), for when you have panned or zoomed the map out of sight.
 
-The panels a DM uses most for maps and fights:
+**The Menu** panel holds the X-card, **Copy player link**, **Members**, **Room settings**, **This device**, **DM guide**, **About** and **Leave room**.
 
-- In play: **Token**, **Initiative**, **Dice**, **Log**, **Journal**, **Areas**, **DM** and **Scenes**. On a phone, **Party** is here too.
-- Prepare: **Monsters**, **Encounters**, **Characters**, **Outliner** and **Library**.
+These are the panels a DM uses most for maps and fights:
+
+- Under **In play**: **Token**, **Initiative**, **Dice**, **Log**, **Journal**, **Areas**, **DM** and **Scenes**. On a phone, **Party** is here too.
+- Under **Prepare**: **Monsters**, **Encounters**, **Characters**, **Outliner** and **Library**.
 
 ## Quick start
 
-This gets you through a first session with a handful of tools: one map, a few monsters and one fight.
+This section gets you through a first session with only a handful of tools: one map, a few monsters and one fight.
 
 ### Before the session
 
 ![The Home page's form for a new room: Room name, Your name and the suggested Player password.](dm-guide/home-create.webp)
 
-1. On the Home page, fill in **Room name** and **Your name**. Keep the suggested **Player password** or type your own (8 characters or more). Press **Create room**.
-2. Save the DM link it shows. It is your way back in as DM on a new device. Tick **I saved my DM link** and press **Continue to the room**.
-3. Open **Scenes**. Under **New scene**, pick **Map image**, then **Choose a map image** and **Upload and create**. If the file name holds the size, such as `crypt_30x20.jpg`, the scene is ready. Otherwise the app opens **Line up grid**: see [Lining up the grid](#lining-up-the-grid).
-4. Open **Monsters**, search for a monster (`goblin`), tap it, set **How many**, tick **Hidden from players** if they lurk, and press **Place on the map**. Tap the map where they go.
-5. Send the players the link: Menu, then **Copy player link**. It carries the password, so they join without typing it. Players make their own characters in the **Characters** panel (new rooms allow it), or you make them with **New character** there.
+1. On the Home page, fill in **Room name** and **Your name**. The app suggests a **Player password**, which you can keep or replace with your own (8 characters or more). Then press **Create room**.
+2. The app now shows your DM link. Save it somewhere safe, because it is your way back into the room as the DM from a new device. Tick **I saved my DM link** and press **Continue to the room**.
+3. Open **Scenes** to add your map. Under **New scene**, pick **Map image**, then **Choose a map image**, then **Upload and create**. If the file name includes the map's size in squares, such as `crypt_30x20.jpg`, the scene is ready to use. If it doesn't, the app opens the **Line up grid** tool so you can match its grid to the one on the map (see [Lining up the grid](#lining-up-the-grid)).
+4. Open **Monsters** and search for a monster, such as `goblin`. Tap it, set **How many**, and tick **Hidden from players** if the monsters are lying in wait. Press **Place on the map**, then tap the map where they go.
+5. Send your players the link: open the **Menu** and choose **Copy player link**. The link carries the password, so players join without typing it. Players can make their own characters in the **Characters** panel (new rooms allow this), or you can make them yourself with **New character** there.
 
 ### At the table
 
-1. Put the party on the map: in **Characters**, open a character and press **Place a token**, then tap the map. Players can place their own on the scene they are on.
-2. On a map image, fog starts on, so players see nothing yet. Pick the **Fog** tool and reveal what the party can see (see [Fog](#fog)).
-3. In **Scenes**, press **Move players** on your scene if they aren't there already. The scene the players are on is marked **Players here**.
-4. Start the fight: in **Initiative**, under **Start a fight with**, press **Everyone here**. Players set their own initiative. Press **Auto initiative** to roll for the monsters, then **Start**.
-5. Run turns with **Next** (or the `N` key). Tap a token to open its action bar, type damage such as `-7` in its HP entry and apply it. **Conditions** in the same bar adds Prone, Frightened and the rest.
-6. Reveal a hidden monster with **Hidden** in its action bar, or let it appear on its own turn (the room setting "Reveal hidden combatants on their turn" is on by default).
-7. When it's over, press **End the fight** in Initiative, and tap again to confirm.
+1. Put the party on the map. In **Characters**, open a character, press **Place a token**, and tap the map. Players can also place their own tokens on the scene they are on.
+2. A map image starts covered in fog, so at first your players see nothing. Pick the **Fog** tool and reveal what the party can see (see [Fog](#fog)).
+3. In **Scenes**, press **Move players** on your scene if the players aren't there already. The scene the players are on is marked **Players here**.
+4. When the fight begins, open **Initiative** and, under **Start a fight with**, press **Everyone here**. Players set their own initiative. Press **Auto initiative** to roll for the monsters, then press **Start**.
+5. Press **Next** (or the `N` key) at the end of each turn. When a creature takes damage, tap its token to open its action bar, type the damage with a minus sign, such as `-7`, in its HP entry, and press **Apply**. **Conditions**, in the same bar, adds Prone, Frightened and the rest.
+6. You can reveal a hidden monster yourself with **Hidden** in its action bar. Or you can leave it to the app: the room setting "Reveal hidden combatants on their turn", which is on by default, makes a hidden monster appear on its own when its turn comes.
+7. When the fight is over, press **End the fight** in Initiative, and tap it again to confirm.
 
-Undo takes back any of your changes, a whole encounter dropped on the map included.
+If you make a mistake along the way, **Undo** takes back any of your changes, even a whole encounter you dropped on the map.
 
 ## What you can ignore at first
 
-None of these is needed to run a good session. Each is there when you want it.
+None of these is needed to run a good session. Each one is there for when you want it.
 
-- **The map builder.** A map image is enough. Build when you want walls, doors and heights the app understands.
-- **Party vision and light.** Fog you reveal by hand works on its own. Party vision adds what characters see by their senses and the light, and it wants walls.
-- **Encounters.** Placing monsters from the Monsters panel is fine. Encounters let you prepare fights ahead and check the XP budget.
-- **Roll requests, the group save and roll options.** Players can roll their own dice and tell you the total.
-- **Areas.** Useful as soon as someone casts Fireball, but you can skip reminders, height and the group save until you need them.
-- **Map phases, Universal VTT imports, the Outliner, the table display, pins, handouts and companions.**
+- **The map builder.** A map image is all you need. Build a map when you want walls, doors and heights that the app knows about, so they can block movement and sight.
+- **Party vision and light.** Fog that you reveal by hand works perfectly well on its own. Party vision goes a step further and shows each player what their character can see, by its senses and the light. It needs walls to block that sight, so it pairs with a built or imported map.
+- **Encounters.** Placing monsters straight from the Monsters panel works fine. Encounters let you prepare fights ahead of time and check them against the XP budget.
+- **Roll requests, the group save and roll options.** Your players can roll their own dice and tell you the total.
+- **Areas.** Areas earn their place the first time someone casts Fireball, but you can leave reminders, height and the group save until you need them.
+- **Map phases, Universal VTT imports, the Outliner, the table display, pins, handouts and companions.** Each is worth learning, and each is easy to pick up once the basics feel familiar.
 
 # Making maps
 
+This part covers everything you do to get a map ready before the players see it: scenes, the grid, the map builder, walls, heights, light and fog. Read it while you prepare a session, and come back to a section when you want a map to do something new.
+
 ## Scenes
 
-A scene is one map: its image or build, its grid, its fog, and the tokens on it. A room holds up to 50 scenes. **Scenes** (DM only) lists them, makes new ones, and holds the settings of the scene you are viewing.
+A scene is one map, together with its image or build, its grid, its fog and the tokens on it. A room can hold up to 50 scenes. The **Scenes** panel (DM only) lists them, makes new ones, and holds the settings of the scene you are viewing.
 
 ![The Scenes panel: the scene list with Players here and Move players, then New scene.](dm-guide/scenes-panel.webp)
 
-**Viewing and moving.** Tapping a scene's row shows it to you alone. Players stay where they are, so you can prepare the next scene while they play this one. **Move players** under a row sends every player there, and that row then reads **Players here**. Moving players moves their view, not their tokens: place the party's tokens on the new scene with **Place a token** in Characters, or let players place their own. Before the move, the app warns when players would see the whole map (fog off) or nothing (party vision with no character who can see).
+**Viewing a scene and moving the players.** Tapping a scene's row shows that scene to you alone. The players stay where they are, so you can prepare the next scene while they play this one. When you are ready to bring them along, press **Move players** under the scene's row. Every player is sent there, and that row is then marked **Players here**.
+
+Moving the players moves their view, not their tokens. Once they arrive, place the party's tokens on the new scene with **Place a token** in Characters, or let the players place their own. Before the move goes through, the app warns you if the players would see the whole map (because fog is off) or nothing at all (because party vision is on and no character there can see).
 
 ### Making a scene
 
-Under **New scene**, pick one:
+Under **New scene**, pick the kind of scene you want:
 
-- **Battle mat**: a blank grid. Set **Squares across** and **Squares down** (30 × 20 by default, up to 200 each) and a background color. Fog starts off.
-- **Map image**: pick an image (JPEG, PNG, WebP, GIF or AVIF, up to 32 MB) and press **Upload and create**. Leave the name blank to take it from the file. Fog starts on, and the scene fits the image's whole squares. **Or use a map already uploaded** reuses an image from the room.
-- **Builder**: an empty 40 × 30 scene that opens the map builder at once. Fog starts on.
+- **Battle mat**: a blank grid with a background color. Set **Squares across** and **Squares down** (30 × 20 by default, up to 200 each). Fog starts off.
+- **Map image**: pick an image (JPEG, PNG, WebP, GIF or AVIF, up to 32 MB) and press **Upload and create**. If you leave the name blank, the scene takes its name from the file. Fog starts on, and the scene is sized to the whole squares the image covers. To reuse an image already in the room, choose **Or use a map already uploaded** instead.
+- **Builder**: an empty 40 × 30 scene that opens the map builder straight away. Fog starts on.
 - **From a Universal VTT file**: see [Map phases, imports and exports](#map-phases-imports-and-exports).
 
-A map's file name can set its scale: `crypt_30x20.jpg` makes it 30 by 20 squares. Without that, the app guesses about 30 squares along the long side and opens **Line up grid** so you can fix it.
+A map's file name can tell the app its scale. Name the file `crypt_30x20.jpg`, for example, and the scene comes out 30 by 20 squares. Without a size in the name, the app guesses about 30 squares along the image's long side and opens **Line up grid** so you can correct the guess.
 
 ![A new Map image scene with its file picked, before Upload and create.](dm-guide/scenes-new-map.webp)
 
 ### This scene
 
-The settings under **All scenes** and **New scene** belong to the scene on your screen:
+Below the scene list (**All scenes**) and **New scene**, the panel shows the settings of the scene on your screen, in these sections:
 
-- **This scene**: **Scene name** (players see it), **Map image** (**Add a map image**, **Replace map image**, **Remove map image**), the **Fog** switch, **Starting view** (**Save current view** saves your current framing as where the scene opens for everyone), **Size in squares** and **Background**.
+- **This scene**: the **Scene name** (players see it), the **Map image** (**Add a map image**, **Replace map image** and **Remove map image**), the **Fog** switch, the **Starting view**, **Size in squares** and the **Background**. **Save current view**, under Starting view, saves the way the map is framed on your screen right now as the view the scene opens with for everyone.
 - **Map phases**: other images of the same map. See [Map phases, imports and exports](#map-phases-imports-and-exports).
 - **Vision**: **Party vision** and **Light**. See [Light and party vision](#light-and-party-vision).
-- **Grid**: **Grid lines**, **Grid color**, **Opacity**, **Line width**, and on a map image **Line up the grid** and **Or count the squares**.
-- **Movement**: **Walls and ledges block players' moves**, on for new scenes. A player's drag then stops at walls, closed doors and ledges. Your own moves are never stopped.
+- **Grid**: **Grid lines**, **Grid color**, **Opacity** and **Line width**, plus, on a map image, **Line up the grid** and **Or count the squares**.
+- **Movement**: **Walls and ledges block players' moves**, which is on for new scenes. While it is on, a player dragging a token is stopped at walls, closed doors and ledges. Your own moves are never stopped.
 - **Map builder**: **Open the builder**, **Clear the build** and **Automatic walls**.
-- **Export as image**, and **Delete scene**.
+- At the end, **Export as image** and **Delete scene**.
 
-Players see a scene's name, so don't name it after a surprise. Replacing the map image of the scene players are on shows them the new image as soon as it uploads, so the app asks first.
+Players can see a scene's name, so don't name a scene after a surprise. And if you replace the map image of the scene the players are on, they see the new image as soon as it uploads, so the app asks you to confirm first.
 
-Each scene's **⋯** (More for the scene) holds **Duplicate…**, **Move to folder…** and **Update thumbnail**. Duplicate always copies the map, its phases and the build, and lets you choose **Monsters, NPCs and objects** (on), **Player characters**, **Fog** and **Drawings and placed areas**. Folders fold with a tap, and players never see folders or thumbnails. **Reorder** at the top of the list moves scenes and folders up and down.
+**Copying and organizing scenes.** Each scene's **⋯** menu (More for the scene) holds **Duplicate…**, **Move to folder…** and **Update thumbnail**. A duplicate always copies the map, its phases and the build, and lets you choose what else comes along: **Monsters, NPCs and objects** (on to begin with), **Player characters**, **Fog**, and **Drawings and placed areas**. Folders fold away with a tap, and players never see your folders or thumbnails. To change the order of the list, press **Reorder** at the top and move scenes and folders up or down.
 
-Feet per square and the diagonal rule are room settings, not scene settings: Menu, **Room settings**, **Grid and distance**.
+Feet per square and the rule for diagonals aren't scene settings: they apply to the whole room. You'll find them under **Menu**, **Room settings**, **Grid and distance**.
 
 ## Lining up the grid
 
-Use this when a map image has a grid drawn on it, so tokens, rulers and areas match the drawn squares.
+Many map images come with a grid already drawn on them. Lining up the grid makes the app's squares match the drawn ones, so that tokens, rulers and areas land where the art says they should.
 
 ![Line up grid: a box over 3 by 3 squares with its corner handles, the proposed grid drawn over the whole map, and Apply, Nudge and the pixels per square in the options row.](dm-guide/grid-line-up.webp)
 
-1. Pick **Line up grid** in the toolbar (behind **Setup** on a phone), or **Line up the grid** in the scene's **Grid** settings. A new map scene without a size in its file name opens it for you.
-2. Drag a box over 3 by 3 squares of the art. Drag inside the box to move it, or a corner to resize it. A tap moves the box to the squares you tapped. The proposed grid draws over the whole map as you go.
-3. Fine-tune with **Nudge**: it moves the box, or makes the squares smaller or larger, a pixel at a time.
-4. Press **Apply**. "Grid saved at 70 px per square" confirms it. **Apply** stays off until you change something, so when the first guess is already right, just pick another tool.
+1. Pick **Line up grid** in the toolbar (behind **Setup** on a phone), or press **Line up the grid** in the scene's **Grid** settings. When you create a map scene whose file name doesn't give its size, the tool opens on its own.
+2. Drag a box over 3 by 3 squares of the art. To adjust it, drag inside the box to move it, or drag a corner to resize it. You can also tap elsewhere on the map to move the box to the squares you tapped. As you work, the app draws the grid the box would make across the whole map, so you can check that it lines up everywhere, not just inside the box.
+3. For the last pixel of accuracy, use **Nudge**. It moves the box, or makes its squares smaller or larger, one pixel at a time.
+4. Press **Apply**. The app saves the grid and confirms it with a message such as "Grid saved at 70 px per square."
 
-Under **⋯**, **Resize scene** (on by default) also sizes the scene to the squares the map covers, and **Grid lines** turns the app's own lines on or off. Turn them off for art that has its own grid. Tokens and rulers still follow the squares.
+**Apply** only becomes available once the box differs from the grid the scene already has. A new scene starts with the app's guess already saved, so if that guess lines up with the art, there is nothing to apply: just pick another tool and carry on.
 
-For art whose squares run edge to edge, you can type the count instead: in the scene's **Grid** settings, **Or count the squares**, enter the squares across and down the image, and press **Apply**.
+Two more options wait under **⋯**. **Resize scene** (on by default) makes Apply also resize the scene to the squares the map covers. **Grid lines** turns the app's own grid lines on or off. Turn them off for art that has a grid of its own. Tokens and rulers still follow the squares either way.
 
-Apply and the resize are two undo steps.
+**Counting the squares instead.** If the art's squares run all the way to the edges of the image, you can skip the box and simply type the count. In the scene's **Grid** settings, under **Or count the squares**, enter how many squares the image has across and down, then press **Apply**.
+
+> [!NOTE]
+> When applying a grid also changes the scene's size, the app saves the two changes as separate undo steps. The first **Undo** takes back the resize, and a second one takes back the grid.
 
 ## The map builder
 
-The **Map builder** tool (`B`, behind **Setup** on a phone) paints a map square by square: floors, walls and doors, heights, labels, lights and stamps. The app understands what you build. Walls block movement, sight and areas, doors open and lock, and raised ground counts for movement, sight and areas. You can build a whole map, or build over a map image to give its walls and cliffs to the app.
+The **Map builder** tool (`B`, behind **Setup** on a phone) lets you paint a map square by square: floors, walls and doors, heights, labels, lights and stamps. What sets a built map apart from a picture is that the app knows what each part of it is. Walls block movement, sight and areas, doors can be opened, closed and locked, and raised ground counts for movement, sight and areas. You can build a whole map from scratch, or build over a map image to show the app where the walls and cliffs in the art are.
 
 ![The map builder: a crypt of stone rooms with automatic walls, doors, pillars, lights and stamps, with the Builder mode chip in the options row.](dm-guide/builder.webp)
 
-Open it from the toolbar, or with **Open the builder** in the scene's settings. **Builder mode** picks what a tap or drag does:
+Open the builder from the toolbar, or with **Open the builder** in the scene's settings. Then use **Builder mode** to choose what a tap or a drag does:
 
-- **Brush**: drag to paint. **Terrain** picks the floor (Stone, Wood, Grass, Dirt, Cave) or terrain (Water, Difficult, Rubble, Pit, Pillar, Stairs). **Brush size** is 1, 2 or 3 squares.
-- **Rectangle room**: drag from corner to corner.
-- **Shape room**: tap corners, then tap the first one (or **Close room**) to close it. **Undo corner** takes the last one back.
-- **Erase**: drag to clear squares and everything on them: floor, walls, doors, windows, heights, stairs, labels, stamps and lights. **Erase area** clears a rectangle.
+- **Brush**: drag to paint. **Terrain** picks a floor (Stone, Wood, Grass, Dirt or Cave) or a terrain (Water, Difficult, Rubble, Pit, Pillar or Stairs), and **Brush size** sets the brush to 1, 2 or 3 squares.
+- **Rectangle room**: drag from one corner of the room to the opposite one.
+- **Shape room**: tap each corner in turn, then tap the first corner again (or press **Close room**) to finish the room. **Undo corner** takes back the last corner you placed.
+- **Erase**: drag across squares to clear them completely, along with any floor, walls, doors, windows, heights, stairs, labels, stamps and lights on them. **Erase area** clears a whole rectangle at once.
 - **Walls and doors**: see [Walls and doors](#walls-and-doors).
 - **Heights and stairs**: see [Heights and stairs](#heights-and-stairs).
-- **Label**: type the text, then tap the map. **Label size** is S, M or L. Tap a label in this mode to edit or delete it, or drag it to move it. With the Select tool, a tap on a label opens it too.
+- **Label**: type the text, then tap the map to place it. **Label size** is S, M or L. To change a label later, tap it in this mode to edit or delete it, or drag it to move it. Tapping a label with the Select tool opens it too.
 - **Lights**: see [Light and party vision](#light-and-party-vision).
-- **Stamp**: **Choose a stamp** picks one of 46 shipped pictures (trees, bushes, rocks, campfires, furniture, barrels) or any token image in the room's library, then tap the map. A placed stamp drags to move, and its handles turn and resize it. With it picked, the row has **Tint**, **Flip**, **Bring to front**, **Duplicate**, **DM only** (hide it from players), **Delete** and **Done**. **Snap** turns in 15° steps and moves in half squares.
+- **Stamp**: press **Choose a stamp** to pick one of the 46 pictures that come with the app (trees, bushes, rocks, campfires, furniture, barrels and more) or any token image in the room's library, then tap the map to place it. Drag a placed stamp to move it, and use its handles to turn and resize it. While a stamp is picked, the row offers **Tint**, **Flip**, **Bring to front**, **Duplicate**, **DM only** (to hide it from players), **Delete** and **Done**. With **Snap** on, a stamp turns in 15° steps and moves in half squares, and with it off, it follows your finger freely.
 
-**Undo** and **Redo** in the builder's row are the same undo as everywhere else, one step per stroke or room. **Clear build**, under **⋯**, removes the whole build, imported walls and lights included.
+The **Undo** and **Redo** buttons in the builder's row are the same undo as everywhere else, with one step for each stroke or room. **Clear build**, under **⋯**, removes the whole build, including any walls and lights that came from an import.
 
-Limits per scene: 100 lights, 500 stamps and 500 labels. A scene is at most 200 by 200 squares.
+**Rooms that touch merge** into one floor, with no wall between them. To keep two rooms apart, leave a gap between them and join them with a corridor, or draw a wall or a door along the edge they share.
 
-**Rooms that touch merge** into one floor, with no wall between them. To split two rooms, leave a gap and join them with a corridor, or draw a wall or a door on the shared edge.
+A scene can hold up to 100 lights, 500 stamps and 500 labels, and it can be at most 200 by 200 squares.
 
 ## Walls and doors
 
-**Automatic walls.** Walls go up on their own around what you paint. The scene's **Automatic walls** setting (in **Scenes**, under **Map builder**) picks:
+**Automatic walls.** As you paint, walls go up on their own around what you have painted, so you rarely need to draw walls by hand. The scene's **Automatic walls** setting (in **Scenes**, under **Map builder**) decides where they go:
 
-- **Around every painted cell**: a wall wherever painted ground meets unpainted ground. The default for battle mats and builder scenes.
-- **Around floor only**: only stone, wood, grass, dirt and cave get walls. Use it to paint water, rubble or pits over a map image without walling them in. The default for map image scenes.
-- **Off**: only the walls and doors you draw. The default for a Universal VTT import, which brings its own.
+- **Around every painted cell**: a wall wherever painted ground meets unpainted ground. This is the default for battle mats and builder scenes.
+- **Around floor only**: only floors (stone, wood, grass, dirt and cave) get walls. Use it when you paint water, rubble or pits over a map image and don't want them walled in. This is the default for map image scenes.
+- **Off**: no automatic walls, only the walls and doors you draw yourself. This is the default for a Universal VTT import, which brings its own walls.
 
-**Drawing walls, doors and windows.** Pick **Walls and doors**, then an **Edge**:
+**Drawing walls, doors and windows.** Pick **Walls and doors**, then choose what to draw under **Edge**:
 
-- **Wall**, **Window**: tap a square's edge, or drag along a grid line for a run. Tap again to take it off. Windows block movement and areas, not sight.
-- **Door**: tap an edge for a closed door, or drag for a wide one. Tap a door to step it through closed, open and locked.
+- **Wall** or **Window**: tap the edge of a square, or drag along a grid line to draw a run of them. Tap one again to take it off. Windows block movement and areas but not sight, so creatures can see through them.
+- **Door**: tap an edge for a closed door, or drag along several edges for a wide one. Tapping a door steps it through closed, open and locked.
 - **Secret door**: pick **Hidden** (players see a wall) or **Found** (players see a door), then tap an edge.
-- **No wall**: tap or drag along an automatic wall to take it away, for an opening.
-- **Remove**: takes off walls, doors, windows and No wall marks. Automatic walls come back.
+- **No wall**: tap or drag along an automatic wall to take it away and leave an opening.
+- **Remove**: takes off the walls, doors, windows and No wall marks you drew. Where an automatic wall belongs, it comes back once you remove what you drew there.
 
-**During play**, with the **Select** tool, tap a door. Its pill names it ("Locked door", "Closed secret door, hidden") and offers **Open** or **Close**, **Lock** or **Unlock**, and on a secret door **Mark found** or **Hide**.
+**During play**, you open and lock doors with the **Select** tool. Tap a door, and a small pill names it ("Locked door", "Closed secret door, hidden") and offers **Open** or **Close**, **Lock** or **Unlock**, and on a secret door, **Mark found** or **Hide**.
 
 ![A tap on a secret door with the Select tool: "Closed secret door, hidden" with Open, Lock and Mark found.](dm-guide/doors.webp)
 
-Players open and close unlocked doors their token can reach (5 ft, with a clear line to the door), by tapping it or with **Open door** in their token's action bar. A locked door answers "It's locked."
+Players can open and close unlocked doors themselves, as long as their token can reach the door: within 5 ft, with a clear line to it. They tap the door, or press **Open door** in their token's action bar. A locked door answers "It's locked."
 
-What blocks what:
+Here is what blocks what:
 
-- Walls and closed or locked doors block movement, sight and areas.
-- Windows block movement and areas, not sight.
-- Pillars block movement and sight, not areas.
-- A secret door not yet found is a wall to players, even when open.
+- Walls, and closed or locked doors, block movement, sight and areas.
+- Windows block movement and areas, but not sight.
+- Pillars block movement and sight, but not areas.
+- A secret door that hasn't been found is a wall to players, even when it stands open.
 
-Movement is blocked only for players, and only with **Walls and ledges block players' moves** on. A player whose drag is stopped can choose **Teleport here** for Misty Step and the like. You get a notice and a log line when they do.
+When it comes to movement, walls stop only the players' tokens, never yours, and only while the scene's **Walls and ledges block players' moves** setting is on. When a player's drag is stopped, they can choose **Teleport here** for Misty Step and the like. You get a notice and a log line when they do.
 
 ## Heights and stairs
 
-Pick **Heights and stairs** in the builder. **Paint** chooses **Height** or **Stairs**, and **Brush** is 1, 2 or 3 squares, or **Area** for a rectangle.
+Heights let you raise or lower the ground, for a hill, a watchtower or a pit, and stairs are how walking creatures get from one level to another. To paint them, pick **Heights and stairs** in the builder. **Paint** chooses between **Height** and **Stairs**, and **Brush** paints 1, 2 or 3 squares at a time, or a rectangle with **Area**.
 
-- **Height**: set it with **5 ft lower** and **5 ft higher** (hold to step quickly), from 20 ft down to 100 ft up. Drag to paint. **Ground (clears)** paints it back to 0. Tokens standing there rise or sink with the ground.
-- **Stairs**: **Stairs point** picks **Auto** (each stair points toward its one higher neighbor) or an arrow. Where Auto can't tell, a "?" shows when you zoom in: pick an arrow and paint it again. The Stairs terrain from the Brush is a stair too.
+- **Height**: set the height with **5 ft lower** and **5 ft higher** (hold a button to step quickly), anywhere from 20 ft down to 100 ft up, then drag to paint it. **Ground (clears)** paints the ground back to 0. Tokens standing on ground you repaint rise or sink with it.
+- **Stairs**: **Stairs point** sets which way the stairs climb. **Auto** points each stair toward its one higher neighbor, or you can pick an arrow yourself. Where Auto can't tell which way is up, a "?" shows when you zoom in: pick an arrow and paint over that stair again. The Stairs terrain from the Brush counts as a stair too.
 
-While this mode is open, each raised or lowered area shows its height in a pill ("↑10 ft"). In play, tap ground with **Select** to read its height for a few seconds ("↑10 ft", "Stairs · ↑5 ft"). Raised ground looks lighter and casts a shadow.
+While this mode is open, each raised or lowered area shows its height in a pill, such as "↑10 ft". During play, tap the ground with **Select** to see its height for a few seconds ("↑10 ft", or "Stairs · ↑5 ft" on a stair). Raised ground is also drawn lighter and casts a shadow, so the shape of the land shows at a glance.
 
 ![Heights and stairs: a watchtower raised 20 ft above a field with stairs up its side, each height in a pill.](dm-guide/heights.webp)
 
-What heights do:
+Heights change play in several ways:
 
-- A walking token crosses a ledge only by a stair, with **Walls and ledges block players' moves** on. A flier above the ledge passes.
-- A creature sees over a ledge no higher than its eyes. One in a pit can't see out.
-- A token placed, dropped or duplicated on raised ground stands on it.
-- Rulers, distances and areas count the height.
+- With **Walls and ledges block players' moves** on, a walking token can cross a ledge only by a stair. A flying token above the ledge passes over it.
+- A creature can see over a ledge that is no higher than its eyes. A creature in a pit can't see out.
+- A token you place, drop or duplicate on raised ground stands on top of it.
+- Rulers, distances and areas all count the height.
 
-Heights go over a map image too, so you can raise the cliff drawn in the art.
+You can paint heights over a map image too, so the cliff drawn in the art can become a real cliff.
 
 ## Light and party vision
 
-Fog you reveal by hand shows players whatever you uncover. **Party vision** instead shows players what their characters see, by their senses, the walls and the light. Turn it on in the scene's **Vision** settings.
+There are two ways to decide what your players see. With fog alone, you reveal the map by hand, and players see whatever you uncover. **Party vision** instead shows players what their characters can actually see, worked out from their senses, the walls and the light. You turn it on in the scene's **Vision** settings, which hold three things:
 
-- **Party vision** on: players see only what their characters see, and remember ground they explored, drawn dimmed and without creatures. Ground never seen stays fogged. It turns fog on too.
-- **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. Light matters only with Party vision on.
-- **Who lends the party sight** lists the party's creatures on the scene, with their senses and light. Mark an allied NPC with **Shares sight with the party** in its token's **Sight** section to add it.
+- **Party vision**: when it is on, players see only what their characters see. Ground the party has explored stays on the players' map, dimmed and without creatures, and ground nobody has seen stays fogged. Turning party vision on turns fog on too.
+- **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. The light level matters only while party vision is on.
+- **Who lends the party sight**: the party's creatures on the scene, with their senses and lights. To add an allied NPC, so the party sees what it sees, turn on **Shares sight with the party** in the **Sight** section of its token's panel.
 
-Darkvision, blindsight and truesight come from each creature's senses (its stat block, or **Senses** in its Stats). Darkvision shows darkness in gray.
+Darkvision, blindsight and truesight come from each creature's senses (from its stat block, or from **Senses** in its Stats). Darkvision shows darkness in shades of gray.
 
-**Lights** come from the builder and from tokens:
+**Lights** come from two places, the builder and tokens:
 
-- In the builder's **Lights** mode, pick a light in **Light to place** and tap the map: Candle (5 ft bright, dim to 10 ft), Torch (20, dim to 40), Lamp (15, dim to 45), Hooded Lantern (30, dim to 60), Light (20, dim to 40) or Daylight (60, dim to 120). Tap a light to change its reach, turn it **Lit** or **Out**, choose whether **Walls cast shadows**, name it, or delete it. Drag it to move it. Players see the light it gives, never the light itself.
-- A token carries a light from **Light** in its action bar, or **Sight** in its panel: Candle, Torch, Lamp, Hooded Lantern, Light or Custom. A scene lights up to 20 token lights.
+- In the builder's **Lights** mode, pick a light under **Light to place** and tap the map. Each light gives bright light out to one distance and dim light beyond it: a Candle is bright for 5 ft and dim to 10 ft, a Torch 20 ft and dim to 40, a Lamp 15 and 45, a Hooded Lantern 30 and 60, the Light cantrip 20 and 40, and the Daylight spell 60 and 120. Tap a placed light to change its reach, turn it **Lit** or **Out**, choose whether **Walls cast shadows**, give it a name, or delete it. Drag it to move it. Players see the light it gives, but never the light itself.
+- A token can carry a light, which you set with **Light** in its action bar or **Sight** in its panel: a Candle, Torch, Lamp, Hooded Lantern, Light, or a Custom one. A scene lights up to 20 token lights.
 
-To check what players see, use **View as a player** or **Party sight** in the [DM panel](#dm-panel). Your own map stays fully lit.
+To check what your players see, use **View as a player** or **Party sight** in the [DM panel](#dm-panel). Your own map always stays fully lit, so you never lose track of anything in the dark.
 
 ![The Vision settings of the crypt: Party vision on, Light set to Dark, and the party creatures who lend their sight.](dm-guide/vision-settings.webp)
 
 ## Fog
 
-A map image or builder scene starts fully fogged. You see the fog as a translucent layer. Players see nothing under it, and tokens, labels and stamps under the fog never reach them.
+A map image or builder scene starts fully covered in fog. You see the fog as a translucent layer over the map, but players see nothing under it. Tokens, labels and stamps that stand fully under the fog never even reach their devices. The party's own characters are the exception: players always see those.
 
 ![The Fog tool with a draft: dashed outlines of the squares about to be revealed, and Reveal to players in the options row.](dm-guide/fog.webp)
 
+To reveal part of the map, or to cover it again:
+
 1. Pick the **Fog** tool (`F`).
-2. **Clear or add fog**: **Clear fog** to reveal, **Add fog** to hide.
-3. **Shape**: **Rectangle** (drag), **Polygon** (tap corners, tap the first to close), **Brush** (drag, 5, 10 or 20 ft wide) or **Builder room** (tap a room made with the map builder to reveal it whole).
-4. Your edits are a private draft, drawn as dashed outlines. Press **Reveal to players** (or **Show players the changes**) to publish them. **Undo** takes back the last draft edit, **Discard** throws the draft away.
+2. Under **Clear or add fog**, choose **Clear fog** to reveal or **Add fog** to hide.
+3. Choose a **Shape**: **Rectangle** (drag), **Polygon** (tap the corners, then tap the first one to close it), **Brush** (drag, 5, 10 or 20 ft wide) or **Builder room** (tap a room made with the map builder to reveal all of it).
+4. Your edits start as a private draft, drawn as dashed outlines that only you see. When you are ready, publish them with the button in the row: **Reveal to players**, **Fog for players** or **Show players the changes**, depending on whether the draft clears fog, adds it, or does both. Until then, **Undo** takes back your last edit to the draft, and **Discard** throws the whole draft away.
 
-**When players see edits**: **Draft** (the default) or **Live**, where each edit shows at once. Under **⋯**, **Fog all** and **Reveal all** cover or clear the whole scene for players (tap twice).
+The draft lets you set up a reveal, check it, and show it all at once. If you would rather players see each edit as you make it, switch **When players see edits** from **Draft** (the default) to **Live**. Under **⋯**, **Fog all** and **Reveal all** cover or clear the whole scene for the players at once (tap twice to confirm).
 
-With party vision on, players' fog also keeps what the party explored. **Add fog** can't hide explored ground again. Only **Fog all** makes players forget it, and undo doesn't bring that memory back.
+**Builder room** fills everything joined to the room you tap, and only walls, windows and closed doors stop it. Close the doors between rooms first, or the reveal spills into the next room.
 
-Builder room fills everything joined to the room you tap. Only walls, windows and closed doors stop it, so close the doors between rooms first.
+**With party vision on**, the players' fog also remembers what the party has explored, and **Add fog** can't hide explored ground again. Only **Fog all** makes the players forget it. If you undo a Fog all, your own fog comes back but the party's explored ground does not, so you would have to reveal that again by hand.
 
 ## Map phases, imports and exports
 
-**Map phases** are other images of the same map, such as night, or the village on fire. Tokens, fog and the build stay put when the image changes, and players get only the phase showing. A map scene has up to 8.
+**Map phases** are other images of the same map, such as the village at night, or the same village on fire. When you switch phases, the tokens, fog and build stay exactly where they are, and only the picture changes. Players only ever receive the phase that is showing. A map scene can have up to 8 phases, its first image included.
 
-1. In the scene's **Map phases** section, press **Add a phase** and pick an image the same shape as the map. The current image is the first phase, "Day".
-2. With two or more, a row of chips switches the phase with one tap. On a computer, the **Phase** menu in the top bar does the same.
-3. **Edit** renames a phase, moves it, or removes it.
+1. In the scene's **Map phases** section, press **Add a phase** and pick an image with the same shape as the map. The current image becomes the first phase, named "Day".
+2. Once there are two or more phases, a row of chips switches between them with one tap. On a computer, the **Phase** menu in the top bar does the same.
+3. **Edit** lets you rename a phase, move it in the list, or remove it.
 
-A phase can set the scene's light: under **Vision**, **Light with each map phase** picks Bright, Dim, Dark or **Leave the light** for each. Switching to Night can then make the scene dark. It doesn't turn party vision on by itself.
+A phase can also set the scene's light. Under **Vision**, **Light with each map phase** picks Bright, Dim, Dark or **Leave the light** for each phase, so switching to Night can make the scene dark. It won't turn party vision on by itself, though, and light matters only while party vision is on.
 
-**Universal VTT files.** **From a Universal VTT file** under New scene takes a `.dd2vtt`, `.uvtt` or `.df2vtt` file from Dungeondraft, Dungeon Alchemist or DungeonFog. It reads the file, then shows what it found ("412 walls (380 on the grid, 32 free), 14 doors, 3 windows, 9 lights") before anything is made. Choose:
+**Universal VTT files.** If you make maps in Dungeondraft, Dungeon Alchemist or DungeonFog, you can bring in a whole map, walls, doors and lights included. Choose **From a Universal VTT file** under New scene and pick a `.dd2vtt`, `.uvtt` or `.df2vtt` file. The app reads the file and shows you what it found ("412 walls (380 on the grid, 32 free), 14 doors, 3 windows, 9 lights") before it makes anything. Then choose:
 
-- **Objects block sight and movement** (when the file has objects).
+- **Objects block sight and movement** (offered when the file has objects).
 - **Portals that don't block light import as** **Windows** or **Open doors**.
 - **Start under fog**.
-- **Light, for party vision**: the app suggests Bright, Dim or Dark from the file. Party vision stays off until you turn it on.
+- **Light, for party vision**: the app suggests Bright, Dim or Dark from the file. Party vision itself stays off until you turn it on.
 
-**Create scene** makes it. Keep the page open until the walls are added. One undo takes the whole import back. A phone takes files up to 40 MB, so import large maps on a computer. An imported scene has **Automatic walls** off, since the file brings its own walls.
+Press **Create scene** to make it, and keep the page open until the walls have been added. One undo takes the whole import back. An imported scene has **Automatic walls** off, since the file brings its own walls. A phone can only take files up to 40 MB, so import large maps on a computer.
 
 ![Export as image in the scene's settings: Pixels per square, Player view or DM view, and Grid.](dm-guide/export.webp)
 
-**Export as image** (in the scene's settings) saves the map image and the build as a PNG, without tokens, drawings or fog. Pick **Pixels per square** (50, 70 or 100), **Player view** or **DM view** (the player view draws undiscovered secret doors as walls and leaves out DM-only stamps and lock marks), and **Grid**. Press **Make image**, then **Download**. The file name carries the grid size, such as `crypt-30x20-70px.png`, so other VTTs and this one set the scale on import.
+**Exporting a map.** **Export as image**, in the scene's settings, saves the map image and the build as a PNG file, without tokens, drawings or fog. Pick the **Pixels per square** (50, 70 or 100), the **Player view** or the **DM view**, and whether to include the **Grid**. The player view draws secret doors that haven't been found as plain walls, and leaves out DM-only stamps and lock marks. Press **Make image**, then **Download**. The file name carries the grid size, such as `crypt-30x20-70px.png`, so this app and other VTTs can set the scale when you import the image later.
 
 # Running fights
 
+This part covers what you use once the dice come out: monsters and encounters, tokens and their HP, initiative, rolls, areas of effect and movement. Read the sections for the tools you plan to use before a session, and keep the guide open during play for the details.
+
 ## Monsters
 
-**Monsters** (DM only) holds the 330 monsters of the SRD 5.2.1 and the room's own. Use it to find a stat block and put monsters on the map.
+The **Monsters** panel (DM only) holds the 330 monsters of the SRD 5.2.1, along with any your room has added. Use it to look up a stat block or to put monsters on the map.
 
 ![The Monsters panel with a search and filters, and a monster's page with its place card.](dm-guide/monsters.webp)
 
-**Finding one.** Type in **Search** (`goblin`, `undead`, `huge`). Words match the name, type or size. Add a challenge rating in the search: `cr 5`, `cr 1-5`, `cr 1/2-3`, `cr 10-`. **Filters** adds challenge rating, creature type, **Legendary**, **Has a lair**, size, immunities, resistances, vulnerabilities, movement, senses and alignment. Filters stay on for this room on this device, and the encounter builder shares them, so clear them when a list looks short. The SRD names are the 2024 ones: "Goblin Warrior", "Goblin Boss", "Bandit", "Wolf".
+**Finding a monster.** Type in **Search** (`goblin`, `undead`, `huge`), and your words are matched against each monster's name, type and size. You can add a challenge rating to the search as well: `cr 5` for one rating, `cr 1-5` or `cr 1/2-3` for a range, or `cr 10-` for 10 and up. **Filters** narrows the list further by challenge rating, creature type, **Legendary**, **Has a lair**, size, immunities, resistances, vulnerabilities, movement, senses and alignment.
 
-**Placing it.** Tap a monster to open its page, then on its place card:
+Filters stay on for this room on this device, and the encounter builder shares them, so if a list looks shorter than it should, check whether a filter is still on. The SRD uses the 2024 names, so look for "Goblin Warrior", "Goblin Boss", "Bandit" or "Wolf".
+
+**Placing monsters.** Tap a monster to open its page, then fill in its place card:
 
 1. Set **How many** (1 to 20).
-2. Keep **Average HP** or untick it and type **HP for each**. The app doesn't roll HP.
-3. Tick **Hidden from players** for an ambush. Players never receive hidden tokens.
-4. For a monster with a lair, tick **In its lair** to give it its lair's legendary uses and XP.
-5. Press **Place on the map** (or **Place 4 on the map**), then tap the map. The copies spread to the nearest free squares around your tap.
+2. Keep **Average HP**, or untick it and type the **HP for each**. The app doesn't roll hit points for you.
+3. Tick **Hidden from players** for an ambush. Players' devices never receive hidden tokens, so nobody can find them early.
+4. For a monster with a lair, tick **In its lair** to give it the extra legendary uses and XP it has in its lair.
+5. Press **Place on the map** (or **Place 4 on the map**), then tap the map. The copies spread out to the nearest free squares around your tap.
 
-Copies are numbered: "Goblin Warrior 1", "Goblin Warrior 2". Each placed token is its own undo step.
+The copies are numbered for you: "Goblin Warrior 1", "Goblin Warrior 2" and so on. Each token placed is its own undo step.
 
-**The room's own monsters.** **New monster** opens the editor, and **Paste a stat block** opens it with a box for text copied from a book the group owns. **Read the stat block** fills the fields from it. It reads the 2024 and 2014 layouts, and lists what it guessed ("No initiative was given, so it is the Dexterity modifier."). Check the fields, then **Save**. Room monsters stay in this room and its backups, and players never see their stat blocks. An SRD monster's page offers **Copy to this room's monsters and edit** to start from it.
+**Your room's own monsters.** **New monster** opens the editor for a monster of your own. If the monster is in a book your group owns, **Paste a stat block** opens the editor with a box to paste its text into, and **Read the stat block** fills in the fields from it. It reads both the 2024 and 2014 layouts, and lists anything it had to guess ("No initiative was given, so it is the Dexterity modifier."). Check the fields, then press **Save**. Room monsters stay in this room and its backups, and players never see their stat blocks. To start from an SRD monster instead, open its page and press **Copy to this room's monsters and edit**.
 
-For legendary monsters, the editor reads two names: a trait named "Legendary Resistance (3/Day, or 4/Day in Lair)" and a first legendary action named "Legendary Action Uses: 3 (4 in Lair)". Tokens then get those uses. There is no separate lair actions section.
+For a legendary monster, the editor looks for two names in particular. A trait named "Legendary Resistance (3/Day, or 4/Day in Lair)" sets its Legendary Resistance, and a first legendary action named "Legendary Action Uses: 3 (4 in Lair)" sets its legendary actions, so its tokens get the right number of uses. There is no separate section for lair actions.
 
-**Token image.** On a monster's page, **Token image** sets the picture every new token of that monster starts with. **Apply to N tokens on this scene** puts it on the ones already there.
+**Token image.** On a monster's page, **Token image** sets the picture that every new token of that monster starts with. To give the picture to the tokens already on the map too, press **Apply to N tokens on this scene**.
 
 ## Encounters
 
-**Encounters** (DM only) prepares fights ahead: which monsters, how many, and how hard they are for the party. Players never see encounters, only the tokens you place.
+The **Encounters** panel (DM only) lets you prepare fights ahead of time: which monsters, how many, and how hard the fight will be for your party. Players never see your encounters, only the tokens you place from them.
 
 ![The encounter editor: the monsters with their counts, Place on the map, and the XP budget for the party.](dm-guide/encounters.webp)
 
-1. Press **New encounter** and type a name ("Ambush at the ford").
-2. Search under **Add** (`goblin`, `cr 1-3`) and tap a monster's **+** once for each copy. Each line has a count to change and **Remove**.
-3. Read the **XP budget**: **Low**, **Moderate** and **High** for the party, with the row the encounter fits outlined and "This encounter: 1,250 XP · Moderate, 250 XP left". The party is the room's characters, by their levels. **Edit the party** budgets for a different group (rows of "Characters" at "Their level").
+1. Press **New encounter** and give it a name ("Ambush at the ford").
+2. Search under **Add** (`goblin`, `cr 1-3`) and tap a monster's **+** once for each copy you want. Each line has a count you can change, and **Remove**.
+3. Read the **XP budget**. It shows the **Low**, **Moderate** and **High** budgets for your party, outlines the one your encounter falls into, and sums it up: "This encounter: 1,250 XP · Moderate, 250 XP left". The party is the room's characters at their levels. To budget for a different group, such as a party with a guest, press **Edit the party** and set rows of "Characters" at "Their level".
 4. Press **Save encounter**.
 
-**Placing it.** Open the encounter, then in **Place on the map**:
+If you leave the editor with changes you haven't saved, it asks "Discard changes?" first.
 
-- Tick **Hidden from players** to place them unseen.
-- While a fight runs, **Add them to the fight** (on) gives them rows in the tracker, identical monsters grouped for one initiative.
-- **Place where I tap**, then tap the map, or **Place in the middle of the view**.
+**Placing an encounter.** Open the encounter, then use **Place on the map**:
 
-They go on the scene you are viewing, with average HP and their monsters' images, the biggest nearest the tap. One undo takes them all back off the map. An encounter can hold up to 50 creatures of 20 kinds.
+- Tick **Hidden from players** to place the monsters unseen.
+- If a fight is already running, **Add them to the fight** (on to begin with) gives them rows in the initiative tracker, with identical monsters grouped to share one initiative.
+- Press **Place where I tap** and tap the map, or press **Place in the middle of the view**.
 
-Leaving the editor with unsaved changes asks "Discard changes?" first.
+The monsters go on the scene you are viewing, with average HP and their monsters' images, the biggest closest to where you tapped. One undo takes them all off the map again. An encounter can hold up to 50 creatures of up to 20 kinds.
 
 ## Tokens
 
-Tap a token with the **Select** tool to open its **action bar**: under the token on a phone held upright, or as a window at the bottom right of the map on a wider screen (drag its header to move it). The **Token** panel shows everything about the selected token.
+Tap a token with the **Select** tool to open its **action bar**. On a phone held upright, the bar opens under the token. On a wider screen, it opens as a window at the bottom right of the map, which you can drag by its header to move it. For everything about the selected token, open the **Token** panel.
 
 ![A goblin's action bar: AC, HP, speed and passive Perception, the HP entry, its saves and defenses, then Conditions, Hidden, Multi-select, Roll, Size, Locked, Duplicate and Delete.](dm-guide/action-bar.webp)
 
-The action bar, top to bottom:
+The action bar holds, from top to bottom:
 
-- AC, HP, speed and passive Perception, then the **HP entry**. For a monster or NPC you also see its six saves and its resistances, immunities and vulnerabilities. On a short bar, **More stats** holds the rest.
-- **Stat block** opens the full block in the Token panel. **Details** opens the Token panel.
-- **Elevation** (**−5** and **+5**, or Page Down and Page Up).
-- **Conditions**, **Hidden** (hide it from players), **Multi-select**, **Roll** (its roll options in the Dice panel) and **Light**.
-- **Size** steps it a size smaller or larger, for Enlarge, Wild Shape or a polymorph.
+- The token's AC, HP, speed and passive Perception, then its **HP entry**. For a monster or NPC, you also see its six saving throws and its resistances, immunities and vulnerabilities. Where the bar is short, **More stats** holds the rest.
+- **Stat block**, which opens the creature's full stat block in the Token panel, and **Details**, which opens the Token panel.
+- **Elevation**, with **−5** and **+5** (or Page Down and Page Up).
+- **Conditions**, **Hidden** (to hide the token from players), **Multi-select**, **Roll** (the creature's roll options in the Dice panel) and **Light**.
+- **Size**, which steps the creature one size smaller or larger, for Enlarge, Wild Shape or a polymorph.
 - **Locked** (nobody can drag it, you included), **Duplicate** and **Delete**.
 
-`H` hides or shows the selected tokens, `L` locks them, and Delete removes them (Ctrl+Z brings them back). Arrow keys move the selection one square.
+A few keys work on the selected tokens: `H` hides or shows them, `L` locks them, and Delete removes them (Ctrl+Z brings them back). The arrow keys move the selection one square at a time.
 
-The **Token** panel, top to bottom: the name and image, the stat block for a monster or NPC, **Hit points**, **Conditions**, **Position** (elevation and facing), **Range rings** (up to 4, such as 30 and 120 ft), **Notes**, **Rest** and **Sight**. Folded at the foot: **Stats** (size, AC, speeds, initiative bonus, passive Perception, senses), **Token settings** and **Owners**.
+**The Token panel** holds, from top to bottom: the token's name and image, the stat block of a monster or NPC, **Hit points**, **Conditions**, **Position** (elevation and facing), **Range rings** (up to 4 circles, such as 30 and 120 ft, for checking reach and range at a glance), **Notes**, **Rest** and **Sight**. Folded at the foot are **Stats** (size, AC, speeds, initiative bonus, passive Perception and senses), **Token settings** and **Owners**.
 
-**Token settings** (yours alone):
+**Token settings** holds the options only you can set:
 
-- **Name**, and **Hide the name from players** with a **Name players see** ("Unknown creature").
-- **Kind**: Player character, NPC, Monster, or Object or marker. **Ring**: ally, neutral or hostile.
-- **Layer**: Creatures, or Objects, under creatures.
-- **Players see HP as**: **Nothing**, **Healthy, Bloodied, Dying, Dead**, **A bar** or **Exact numbers**. Monsters start with the labels.
-- **Hidden from players**, **Locked**, **Always visible, even under fog**, and **Height** for a creature taller or shorter than its size.
+- **Name**, and **Hide the name from players**, with a **Name players see** in its place ("Unknown creature").
+- **Kind**: Player character, NPC, Monster, or Object or marker. **Ring**: ally, neutral or hostile, shown as the color of the ring around the token.
+- **Layer**: Creatures, or Objects, which sit under creatures.
+- **Players see HP as**: **Nothing**, **Healthy, Bloodied, Dying, Dead**, **A bar** or **Exact numbers**. Monsters start with the labels, so players get a feel for how a fight is going without seeing the numbers.
+- **Hidden from players**, **Locked**, **Always visible, even under fog**, and **Height**, for a creature taller or shorter than its size suggests.
 - **Make a companion**: see [Companions](#companions).
 
-**Notes** has three fields: **For everyone** (every player who can see the token), **On the card** (you and the token's owners) and **For DMs only**.
+**Notes** has three fields, each for a different audience: **For everyone** (read by every player who can see the token), **On the card** (for you and the token's owners) and **For DMs only**.
 
 ### Several tokens at once
 
-Select several tokens to act on all of them:
+When you want to move, damage or hide a whole group, select them all first. There are two ways:
 
-- **Multi-select** in a token's action bar, then tap more tokens, or drag a box on empty map.
-- With a mouse, Shift or Ctrl and a click adds a token (Cmd on a Mac), and Shift or Ctrl and a drag on empty map draws a box.
+- Press **Multi-select** in a token's action bar, then tap more tokens, or drag a box across empty map.
+- With a mouse, hold Shift or Ctrl (Cmd on a Mac) and click to add a token, or hold Shift or Ctrl and drag across empty map to draw a box.
 
-Drag any of them to move them all. The group's action bar has one **HP entry** for all of them, **Conditions**, elevation, and for you **Roll**, **Request a roll**, **Hidden**, **Locked**, **Start a fight** or **Add to the fight**, **Delete** and **More** (ring, size, layer, image, what players see, owners). Each change to the group is one undo step. **Done** in the Multi-select bar ends it.
+Drag any one of the selected tokens to move them all. The group gets an action bar of its own with one **HP entry** for all of them, **Conditions** and elevation, and for you, **Roll**, **Request a roll**, **Hidden**, **Locked**, **Start a fight** or **Add to the fight**, **Delete**, and **More** (ring, size, layer, image, what players see, and owners). Each change to the group is one undo step. Press **Done** in the Multi-select bar when you are finished.
 
 ## HP, damage and conditions
 
-**HP.** Type in the HP entry and press **Apply**:
+**Changing HP.** Type into a creature's HP entry and press **Apply**:
 
-- `-7` deals 7 damage (temporary HP go first), `+5` heals 5, `=20` sets HP to 20, `t5` gives 5 temporary HP. Terms add up: `-7-3` is 10 damage.
-- Or pick **Damage**, **Heal**, **Set** or **Temp** and type a plain number.
-- After a roll, chips such as **Use 9 (Longsword damage)** fill the entry with the newest damage, yours or a player's.
+- `-7` deals 7 damage (temporary HP are used up first), `+5` heals 5, `=20` sets HP to 20, and `t5` gives 5 temporary HP. You can chain terms together, so `-7-3` deals 10 damage.
+- If you'd rather not type the sign, pick **Damage**, **Heal**, **Set** or **Temp** and type a plain number.
+- After someone rolls damage, chips such as **Use 9 (Longsword damage)** appear by the entry. Tap one to fill in the newest damage roll, whether it was yours or a player's.
 - With several tokens selected, one entry applies to each of them.
 
-At 0 HP a monster dies ("Monsters die at 0 HP", on by default), and a character starts death saves. Damage that leaves at least the creature's max HP over kills outright. **Critical hit (two failed death saves)** shows in the entry for a creature at 0 HP. A dead creature's bar offers **Revive**, which brings it back with 1 HP, and healing brings the dead back too while "Healing brings back the dead" is on. The Token panel's **Hit points** section has **Revive**, **Stabilize** and **Mark dead**, and the death save pips.
+**Dropping to 0 HP.** When a monster or NPC reaches 0 HP, it dies, as long as the room setting "Monsters die at 0 HP" is on (it is by default). A player character at 0 HP falls unconscious and starts making death saves instead, and so do monsters and NPCs while that setting is off. If the damage left over after a creature drops to 0 is at least its maximum HP, it dies outright.
 
-Every HP change goes into the fight's **HP changes** list, where you can take one back. See [Initiative](#initiative).
+Damage to a creature already at 0 HP counts as a failed death save. For a critical hit, tick **Critical hit (two failed death saves)**, which appears in the HP entry of a creature at 0 HP. A dead creature's action bar offers **Revive**, which brings it back with 1 HP, and while "Healing brings back the dead" is on, healing brings back the dead too. The Token panel's **Hit points** section has **Revive**, **Stabilize** and **Mark dead**, along with the death save pips.
 
-**Conditions.** **Conditions** in the action bar opens a grid: the 15 conditions of the 2024 rules and other statuses (Concentrating, Hidden, Flying, Dodging, Raging, Blessed, Baned, Hasted, Hunter's Mark, Hexed, Heroic Inspiration, Surprised, Marked, Readied action). One tap adds or removes. Exhaustion goes on at level 1. Don't confuse the **Hidden** status (the creature took the Hide action) with **Hidden** in the bar, which hides the token from players.
+Every HP change during a fight goes into the fight's **HP changes** list, where you can take back any single change. See [Initiative](#initiative).
+
+**Conditions.** **Conditions**, in the action bar, opens a grid of the 15 conditions of the 2024 rules and other common statuses: Concentrating, Hidden, Flying, Dodging, Raging, Blessed, Baned, Hasted, Hunter's Mark, Hexed, Heroic Inspiration, Surprised, Marked and Readied action. One tap adds a condition or removes it. Exhaustion goes on at level 1.
+
+> [!NOTE]
+> The **Hidden** status in this grid means the creature took the Hide action. It is not the same as **Hidden** in the action bar, which hides the token from players.
 
 ![The Conditions grid in the action bar of four selected characters: the 15 conditions, then the other statuses.](dm-guide/conditions.webp)
 
-For more, use **Add** in the Token panel's **Conditions** section. Pick a condition to see its rules text, then set:
+For more control over a condition, use **Add** in the **Conditions** section of the Token panel. Pick a condition to read its rules text, then set any of these:
 
-- **Exhaustion level** (1 to 6) or a **Counter** (rounds or charges left, shown on the icon).
-- **Spell** for Concentrating ("Concentrating: Bless").
-- **Duration**: a number of rounds, or until the start or end of a chosen creature's next turn. Durations count down with initiative, and everyone is told when one ends.
-- **A Wisdom save at the end of each of its turns ends it**, with the save and its DC. See [Alerts during a fight](#alerts-during-a-fight).
-- **Hidden from players**: nobody but you sees it, the creature's owner included, and the log keeps it to you.
-- **Custom status**: a label, up to 2 characters or an emoji for the icon, and a color.
+- **Exhaustion level** (1 to 6), or a **Counter** for rounds or charges left, shown on the condition's icon.
+- **Spell**, for Concentrating ("Concentrating: Bless").
+- **Duration**: a number of rounds, or until the start or end of a chosen creature's next turn. Durations count down as initiative moves, and everyone is told when one ends.
+- **A Wisdom save at the end of each of its turns ends it**, with the save and its DC, for conditions such as Hold Person's. See [Alerts during a fight](#alerts-during-a-fight).
+- **Hidden from players**: nobody but you sees the condition, not even the creature's owner, and the log shows it to you alone.
+- **Custom status**: your own label, an icon of up to 2 characters or an emoji, and a color.
 
-A creature can carry up to 32 conditions and statuses.
+A creature can carry up to 32 conditions and statuses at once.
 
-**Concentration.** A concentrating creature that takes damage gets a Constitution save prompt with its DC (the higher of 10 and half the damage, at most 30). The prompt goes to whoever answers for the creature: its player, or you for a creature no player plays.
+**Concentration.** When a concentrating creature takes damage, the app prompts a Constitution save with its DC (10 or half the damage, whichever is higher, up to 30). The prompt goes to whoever answers for the creature: its player, or you for a creature no player plays.
 
 ## Initiative
 
-**Initiative** runs the fight: who is in it, the order, turns and rounds. Players see the order too, without hidden creatures, monsters' dice or anything they can't see. In a new room they see a monster's place in it only once its turn comes (see What players see of the order, below).
+The **Initiative** panel runs the fight: who is in it, the order they act in, and the turns and rounds. Players see the order too, but never hidden creatures, monsters' dice or anything else they can't see. In a new room, they don't even see a monster's place in the order until its turn comes (see [What players see of the order](#what-players-see-of-the-order), below).
 
 ![The Initiative panel during a fight: the round header with Previous and Next, the order with HP and conditions, and Auto initiative below.](dm-guide/initiative.webp)
 
 ### Starting a fight
 
-With no fight running, **Start a fight with** offers:
+With no fight running, **Start a fight with** offers you a choice of who is in it:
 
 - The selected token's name: just that token.
-- **Everyone here (N)**: every creature on the scene, hidden ones included (their rows start hidden). Objects, the dead and companions that act on their character's turn stay out. Companions with their own turn come in.
-- **Visible to players (N)**: the same, without hidden tokens and anything under fog or out of the party's sight.
-- **Nobody yet**: an empty fight to fill later.
+- **Everyone here (N)**: every creature on the scene, hidden ones included (their rows start hidden). Objects, the dead, and companions that act on their character's turn stay out. Companions that take their own turn come in.
+- **Visible to players (N)**: the same, but without hidden tokens or anything under fog or out of the party's sight.
+- **Nobody yet**: an empty fight to fill in later.
 
-With two or more tokens selected on the map, their action bar has **Start a fight**, or **Add to the fight** once one is running. While a fight runs, the panel's **Add to the fight** section has the same three choices. Players add their own creatures with **Join the fight**.
+If you have two or more tokens selected on the map, their action bar also has **Start a fight**, or **Add to the fight** once a fight is running. While a fight runs, the panel's **Add to the fight** section offers the same three choices, so latecomers can join. Players add their own creatures with **Join the fight**.
 
 ### Initiative values
 
-- A row's box reads **Set** until it has a value. Tap it, type the number, press Enter.
-- **Roll +2** on a row rolls its initiative on the server. Players roll for their own rows, and you for the rows no player plays. Where the row is narrow, the roll waits in the row's **⋯**. Once a row has a value, its **⋯** offers "Roll again, replaces 17", so a stray tap never reorders the fight.
-- **Auto initiative (N)** rolls for every monster still waiting. **How monsters share rolls** picks **By creature** (identical monsters share one roll, the default), **One each** or **All at once**. **Re-roll monsters that have a value** rolls them again. The dice show to you alone, and players see each visible monster's total once its place in the order is theirs to see.
-- **Type several values** opens one box per row for initiatives rolled at the table, Enter moving to the next.
-- **Monsters use initiative scores** gives monsters 10 + their Dexterity modifier instead of a roll.
+Each creature needs an initiative value before the fight can sort them. There are several ways to fill them in:
 
-Each roll is a d20 plus the creature's modifier, with advantage or disadvantage from its conditions (Invisible, Surprised, Incapacitated). The row shows an **Adv** or **Dis** badge, and its **⋯** sets the reminder by hand.
+- **Type it.** A row's box reads **Set** until it has a value. Tap it, type the number, and press Enter.
+- **Roll one row.** **Roll +2** on a row rolls that creature's initiative on the server. Players roll for their own rows, and you roll for the rows no player plays. Where a row is too narrow for the button, the roll waits in the row's **⋯** instead. Once a row has a value, its **⋯** offers "Roll again, replaces 17", so a stray tap can never reorder the fight.
+- **Roll all the monsters.** **Auto initiative (N)** rolls for every monster that still has no value. **How monsters share rolls** picks **By creature** (identical monsters share one roll, which is the default), **One each** or **All at once**. **Re-roll monsters that have a value** rolls them all again. The dice show to you alone, and players see each visible monster's total once its place in the order is theirs to see.
+- **Type a batch.** **Type several values** opens one box per row, for initiatives rolled at the table. Enter moves you to the next box.
+- **Skip the rolls.** **Monsters use initiative scores** gives monsters 10 plus their Dexterity modifier instead of a roll.
 
-The order runs high to low. New rows put characters before monsters on a tie. Tied rows show a drag handle, and their **⋯** has **Move up** and **Move down**, so you settle ties without changing values.
+Each roll is a d20 plus the creature's modifier, with advantage or disadvantage from its conditions (Invisible, Surprised or Incapacitated). The row shows an **Adv** or **Dis** badge as a reminder, which helps most when someone types in a roll made at the table. If a creature has advantage from something the app doesn't track, such as a barbarian's Feral Instinct, set it by hand in the row's **⋯**, and the app's own rolls for that row follow it too.
+
+The order runs from high to low. When a row's value ties with others, the app slots it in with player characters ahead of monsters, then the higher initiative bonus first, and leaves alone any order you have already set. Tied rows show a drag handle, and their **⋯** has **Move up** and **Move down**, so you can settle a tie however your table likes without changing anyone's value.
 
 ### Running turns
 
-1. Press **Start**. The first creature's row is tinted and its token gets a turn marker.
-2. Press **Next** (or `N`) at the end of each turn. **Previous** steps back up to 20 turns, restoring what the turn changed.
-3. The round counts up when the order wraps.
+1. Press **Start**. The first creature's row is tinted, and its token gets a turn marker.
+2. Press **Next** (or `N`) at the end of each turn. If you move on too soon, **Previous** steps back, up to 20 turns, and restores what each turn changed.
+3. The round count goes up each time the order wraps around to the top.
 
-On each **Next** the app clears the new creature's **Reaction used**, refills its legendary actions, counts down durations, reveals it if it was hidden (with the room setting on), and raises save-ends reminders for the creature whose turn ended. With "Skip defeated creatures" on, the dead are passed over.
+Each **Next** does a little bookkeeping for you. It clears **Reaction used** for the creature whose turn begins, refills its legendary actions, counts down durations, reveals it if it was hidden (while the room setting for that is on), and raises save-ends reminders for the creature whose turn just ended. With "Skip defeated creatures" on, the dead are passed over.
 
-On their own turn a player gets "Your turn" and an **End turn** button. Under the top bar, or as a chip in it on a wide screen, a strip shows whose turn it is, and to you alone who comes next. Tap it to open the tracker. **Camera follows the turn**, under **This device**, pans your map to whoever acts.
+When a player's turn comes, they get "Your turn" and an **End turn** button. A strip under the top bar (or a chip in the top bar on a wide screen) shows everyone whose turn it is, and shows you alone who comes next. Tap it to open the tracker. If you'd like your map to pan to whoever is acting, turn on **Camera follows the turn**, in the Initiative panel's **This device** section.
 
-**Hidden rows.** Turning a token's **Hidden** off, in its action bar, a group's bar, its panel or with `H`, shows its row to players too. Otherwise a hidden creature's row shows at its first turn (with "Reveal hidden combatants on their turn" on). A row also has its own **Hidden from players** in its **⋯**, which hides the row alone while its token shows. The row then still follows **Initiative order players see** (below): in a new room a monster's row reaches players only from its first turn, so turning **Hidden** off before then shows its token at once and its row on its turn. Pick **Everyone** there for the row to show with the token.
+**Hidden creatures in the order.** A hidden monster, such as one waiting in ambush, can be part of the fight from the start without giving itself away: its token and its row both stay hidden from the players. When the time comes, there are two ways to reveal it.
+
+- **Let it reveal itself.** With "Reveal hidden combatants on their turn" on (the default), a hidden creature appears when its first turn comes, as long as the players could see it where it stands. That means it must be on revealed ground, and on a scene with party vision, in the party's sight. If it acts out of their view, players see "Another creature's turn" instead.
+- **Reveal it yourself.** Turn off its **Hidden**, in its action bar, a group's bar or its Token panel, or with `H`. That shows its token and its row together, in one undo step.
+
+Revealing a token early doesn't always reveal its row, though. The row still follows the room's **Initiative order players see** setting (described below), and in a new room, players see a monster's row only from its first turn on. So a monster you reveal early shows its token at once, but it joins the players' order on its turn. If you want the row to appear along with the token, set **Initiative order players see** to **Everyone**.
+
+Sometimes you want the opposite: the token in plain sight, but its row kept out of the players' order. For that, turn on **Hidden from players** in the row's **⋯**, which hides the row alone.
 
 ### Rows and what they hold
 
-Tap a row to select its token and open its action bar. A row's **⋯** holds, for you:
+Tap a row to select its token and open its action bar. Each row's **⋯** holds a few more controls for you:
 
-- **Hidden from players**, **Reaction used** (clears at the start of its turn) and **In lair** (a "Lair" tag on the row that players see too).
-- The Ready controls: type a trigger ("if the door opens") and press **Ready**. The row and token show "Readied" until its next turn. Players see the trigger only for a creature a player plays, or when you turn on **Show the trigger to players**. **It fired: Reaction used** ends it and marks the reaction.
-- For a legendary monster, **Legendary actions used** and **Legendary resistances used today** as pips you tap. The row's "LA 3/3" and "LR 2/3" tags show what is left, to you alone.
-- **Revive** for a dead creature, which brings it back with 1 HP.
+- **Hidden from players**, **Reaction used** (which clears at the start of the creature's turn) and **In lair** (a "Lair" tag on the row, which players see too).
+- The Ready controls, for a creature that readies an action. Type its trigger ("if the door opens") and press **Ready**. The row and token show "Readied" until its next turn. Players see the trigger only for a creature a player plays, or when you turn on **Show the trigger to players**. When the trigger happens, **It fired: Reaction used** ends the readied action and marks the creature's reaction as spent.
+- For a legendary monster, **Legendary actions used** and **Legendary resistances used today**, as pips you tap. The row's "LA 3/3" and "LR 2/3" tags show what is left, to you alone.
+- **Revive**, for a dead creature, which brings it back with 1 HP.
 - **Remove from the fight**.
 
-**HP changes**, under the order, lists each HP change of the fight ("Goblin Warrior 2 takes 7 damage, 3/10 left."). **Undo** on a line takes that change back while the creature is still as it left it. **Several at once** turns on multi-select, so one HP entry hits every row you tap.
+**HP changes**, under the order, lists every HP change of the fight ("Goblin Warrior 2 takes 7 damage, 3/10 left."). **Undo** on a line takes back that one change, as long as the creature is still as that change left it. To damage or heal several creatures from the tracker, turn on **Multi-select** in the **Several at once** section and tap their rows (or their tokens). One HP entry then applies to all of them.
 
 ### What players see of the order
 
-**Initiative order players see**, in Room settings under Combat, decides which rows players hold before those creatures act:
+The room setting **Initiative order players see** (in Room settings, under Combat) decides which rows the players see before those creatures have acted. It is a way to keep the players from counting the monsters in the order before they know what they're facing. It has three choices:
 
-- **Player characters, the rest on their turn**, the default in a new room. Players see the creatures players play from the start: their characters and their companions. A monster or NPC you lend a player shows from the start to that player alone, and to the others on its first turn. Every other creature, your NPCs and allies included, joins their order when its first turn comes, in its place, and stays for the rest of the fight, whatever its value becomes. Before that nothing of it reaches them: no row, value or count, and no initiative roll for it, even one you roll with Secret off.
-- **Player characters and allies, the rest on their turn**: the same, and every creature with the Ally ring shows from the start.
-- **Everyone**: the whole order from the start, which rooms made before the setting keep.
+- **Player characters, the rest on their turn**, the default in a new room. Players see the creatures players play from the start: their characters and their companions. A monster or NPC you lend a player shows from the start to that player alone, and to the others on its first turn. Every other creature, your NPCs and allies included, joins their order when its first turn comes, in its place, and stays there for the rest of the fight, whatever its value becomes. Until then, nothing of it reaches them: no row, no value, no count, and no initiative roll, not even one you rolled with Secret off.
+- **Player characters and allies, the rest on their turn**: the same, except that every creature with the Ally ring shows from the start.
+- **Everyone**: the whole order from the start. Rooms made before the setting existed keep this one.
 
-A creature added mid-fight waits for its own turn, and a dead one that "Skip defeated creatures" passes over never shows. **Previous** back past a creature's first turn takes it out of their order again. A row that is **Hidden from players** stays out whichever you pick. Your tracker tags each row players do not see yet **Secret until its turn**. **View as a player** in the DM panel shows the order as they see it. Players never see who comes next, so the strip gives no creature away.
+A few more details follow from this. A creature added mid-fight waits for its own turn, and a dead one that "Skip defeated creatures" passes over never shows at all. If you press **Previous** back past a creature's first turn, it leaves the players' order again. A row that is **Hidden from players** stays out whichever choice you pick. In your own tracker, each row the players don't see yet is tagged **Secret until its turn**, and **View as a player** in the DM panel shows you the order as they see it. Players never see who comes next, so the turn strip can't give a creature away.
 
 ### Ending it
 
-**Turn timer** (Off, or 30 seconds to 10 minutes) counts each turn down for everyone and nudges whoever acts. It never ends a turn. **End the fight**, tapped twice, ends the fight. Undo brings it back.
+**Turn timer** (Off, or from 30 seconds to 10 minutes) counts each turn down for everyone and nudges whoever is acting. It never ends a turn on its own. To end the fight, press **End the fight** and tap it a second time to confirm. If you end it by mistake, Undo brings it back.
 
 ## Dice
 
-Every roll in the app happens on the server, so everyone sees the same result. Players can still roll real dice and type totals where the app asks for one, unless you turn off **Players may type their roll totals** in Room settings. The **Dice** panel is for everyone.
+Every roll in the app happens on the server, so everyone sees the same result and nobody can fake one. Players who prefer real dice can still roll at the table and type their totals wherever the app asks for one, unless you turn off **Players may type their roll totals** in Room settings. The **Dice** panel is open to everyone.
 
 ![The Dice panel with a goblin selected: the formula field, quick dice, Adv, Dis and Secret, and the goblin's roll options with its saves, checks and Scimitar attack.](dm-guide/dice.webp)
 
-**Typing a roll.** Type a formula in the field and press **Roll** or Enter: `1d20+5`, `2d6+3 fire` (words after the formula are its label), `4d6kh3` (keep the three highest), `4d6dl1` (drop the lowest), `d%`, `1d20+5 Stealth adv`. The line under the field reads the roll and its range before you roll it ("2d6+3, fire: 5 to 15"). The quick dice add a die to the field. Up and Down step through the formulas you rolled.
+**Typing a roll.** Type a formula in the field and press **Roll** or Enter. A few examples of what it understands:
 
-**Adv**, **Dis** and **Secret** apply to the next roll only, then turn off. A secret roll shows to the DMs in full, and other players read only "Dana rolled in secret." Your rolls for a monster start secret: with a monster selected, a typed formula starts secret too. With nothing selected, or a character, it starts in the open.
+- `1d20+5`, a plain roll.
+- `2d6+3 fire`: any words after the formula become its label.
+- `4d6kh3` keeps the three highest dice, and `4d6dl1` drops the lowest.
+- `d%` rolls percentile dice.
+- `1d20+5 Stealth adv` rolls with advantage.
 
-The newest roll stays at the top with its dice, and **Again** rolls it once more. **Recent rolls** lists the rolls in the log, newest first. Others' rolls show as short notices while your Dice panel is not on screen (Menu, **This device**, **Show others' rolls as they happen** turns them off).
+The line under the field reads back the roll and its range before you roll it ("2d6+3, fire: 5 to 15"), so you can catch a typo. The quick dice add a die to the field, and the Up and Down keys step back through the formulas you have rolled.
+
+**Adv**, **Dis** and **Secret** apply to the next roll only, then turn themselves off. A secret roll shows in full to the DMs, while the other players read only "Dana rolled in secret." Your rolls for monsters start secret: with a monster selected, even a formula you type starts secret. With nothing selected, or a character selected, it starts in the open.
+
+The newest roll stays at the top of the panel with its dice, and **Again** rolls it once more. **Recent rolls** lists the rolls in the log, newest first. Other people's rolls pop up as short notices while your Dice panel isn't on screen. To turn those off, open the Menu, then **This device**, and turn off **Show others' rolls as they happen**.
 
 ### Roll options
 
-Select one token, or press **Roll** in its action bar, and the Dice panel lists its rolls from its stat block, under **Rolls for Goblin Warrior 1**:
+Rather than typing a monster's bonuses, let the app read them from its stat block. Select one token, or press **Roll** in its action bar, and the Dice panel lists its rolls under **Rolls for Goblin Warrior 1**:
 
-- **Saves**, **Checks** and **Skills**, each with its bonus. Conditions apply on their own and say so ("Dis: Restrained", "+1d4: Blessed", "Fails: Stunned").
-- **Initiative**, which sets its row in a running fight ("Initiative +2, sets its row", or "replaces 14").
-- **Death save** while it is dying.
-- Its traits, actions, bonus actions, reactions and legendary actions. An attack has **Attack +5** and **Damage 1d6+3**: a natural 20 turns on **Critical** for the damage that follows, which rolls by the room's **Critical hit damage** rule (see [Room settings](#room-settings-for-fights-and-maps)), and riders such as **+3d6 Sneak Attack** are chips to add. A save action has **Group save, DC 13 Dex**, which opens the [group save](#the-group-save). Multiattack is a note at the head of the actions: roll each attack it names.
+- **Saves**, **Checks** and **Skills**, each with its bonus. Conditions apply on their own, and the roll says so ("Dis: Restrained", "+1d4: Blessed", "Fails: Stunned").
+- **Initiative**, which sets the creature's row in a running fight ("Initiative +2, sets its row", or "replaces 14").
+- **Death save**, while the creature is dying.
+- Its traits, actions, bonus actions, reactions and legendary actions. An attack has **Attack +5** and **Damage 1d6+3**. A natural 20 on the attack turns on **Critical** for the damage that follows, which then rolls by the room's **Critical hit damage** rule (see [Room settings](#room-settings-for-fights-and-maps)). Riders such as **+3d6 Sneak Attack** are chips you can add. An action that calls for a saving throw has **Group save, DC 13 Dex**, which opens the [group save](#the-group-save). Multiattack appears as a note at the head of the actions: roll each attack it names in turn.
 - An action that recharges shows **Recharge 5–6** and a **Used** switch. Rolling its damage or its group save marks it used. **Recharge 1d6** rolls the recharge, and the app reminds you at the start of the monster's turn. See [Alerts during a fight](#alerts-during-a-fight).
 - For a character with a stat block: its weapons and spells, **Spell save DC**, **Spell attack**, and a slot level for spells that scale.
 
-A damage roll offers its total in every HP entry as **Use 9**, so you apply it with one tap.
+Whenever someone rolls damage, its total appears in every HP entry as **Use 9**, so you can apply it with one tap.
 
-For a creature a player plays, **Ask Thorn to roll** (on by default) makes a save or check tap open [Request a roll](#asking-for-rolls) for that player instead of rolling it yourself. Turn it off to roll for them.
+For a creature a player plays, **Ask Thorn to roll** (on by default) changes what a tap on a save or check does: instead of rolling it yourself, it opens [Request a roll](#asking-for-rolls) for that player. Turn it off when you would rather roll for them.
 
 ### Several creatures
 
-With several tokens selected, the Dice panel offers group rolls: one save or check for all of them against an optional **DC** ("Dex save for 4"), **Initiative for the 4 in the fight**, and **Shared attacks**, an attack every selected monster has ("Scimitar for 4") against a **Target's AC**, then **Roll damage for 2 hits**. A group save or check opens the [group save](#the-group-save) page, where monsters roll on the server and players are asked.
+With several tokens selected, the Dice panel offers rolls for the whole group:
+
+- One save or check for all of them, against an optional **DC** ("Dex save for 4").
+- **Initiative for the 4 in the fight**.
+- **Shared attacks**: an attack every selected monster has ("Scimitar for 4"), rolled against a **Target's AC**, followed by **Roll damage for 2 hits** for the ones that hit.
+
+A group save or check opens the [group save](#the-group-save) page, where monsters roll on the server and players are asked to roll.
 
 ## Asking for rolls
 
-**Request a roll** asks players for a saving throw or an ability check. Each player rolls it in the app or types the total they rolled at the table, while **Players may type their roll totals** is on.
+**Request a roll** asks players for a saving throw or an ability check. Each player rolls it in the app, or types the total they rolled at the table while **Players may type their roll totals** is on.
 
 ![Request a roll: Dexterity save picked, DC 15, the party's characters as chips under Who rolls, and Send.](dm-guide/request.webp)
 
-Open it with **Ask the party** in the party bar (above the side panel's tabs on a computer, where it reads **Ask** while the bar is folded, or the **Party** panel on a phone), with **Request a roll** in the action bar of several selected creatures, or from one creature's roll options with **Ask Thorn to roll** on.
+There are three ways to open it:
 
-1. Pick what to roll: **Save** or **Check** by ability, or a **Skill** (it starts at its usual ability, and **with** changes it). **Or a second choice** lets the creature pick, such as Athletics or Acrobatics.
-2. Type the **DC**, or pick a typical one for a check (5 Very easy to 30 Nearly impossible), or leave it empty.
+- **Ask the party**, in the party bar. On a computer, the bar sits above the side panel's tabs, where the button reads **Ask** while the bar is folded. On a phone, the bar is the **Party** panel.
+- **Request a roll**, in the action bar of several selected creatures.
+- A save or check in one creature's roll options, while **Ask Thorn to roll** is on.
+
+Then set up the request:
+
+1. Pick what to roll: a **Save** or **Check** by ability, or a **Skill**. A skill starts at its usual ability, and **with** changes it. **Or a second choice** lets the creature pick between two, such as Athletics or Acrobatics to escape a grapple.
+2. Type the **DC**, or pick a typical one for a check (from 5, Very easy, to 30, Nearly impossible), or leave it empty.
 3. Check **Who rolls**. **Ask the party** starts with the characters on the players' scene.
-4. Under **What players see**: **Players see the DC**, **Players see pass or fail**, **Against a spell** (for Magic Resistance), and a note ("against the poison").
-5. Press **Send**. **Recent** keeps your last three requests, one tap each.
+4. Under **What players see**, choose whether **Players see the DC** and **Players see pass or fail**, turn on **Against a spell** (for Magic Resistance) if it applies, and add a note if you like ("against the poison").
+5. Press **Send**. **Recent** keeps your last three requests, so you can send one again with one tap.
 
-Players get a card with the question, roll with their bonus (conditions and Bless included), or type a total where typed totals are allowed. Your live card, at the right of the map, counts the answers ("2 of 4 answered: 1 pass, 1 fail") and shows each roll. On it you can:
+Each player gets a card with the question and rolls it with their bonus (conditions and Bless included), or types a total where typed totals are allowed. Your own live card, at the right of the map, counts the answers as they come in ("2 of 4 answered: 1 pass, 1 fail") and shows each roll. From it you can:
 
-- **Roll +5** for a player who is waiting, such as one who stepped away. It never replaces an answer that came first.
+- **Roll +5** for a player who is still waiting, such as one who stepped away from the table. Your roll never replaces an answer that arrived first.
 - Mark **Pass** or **Fail** yourself, for a roll with no DC or to overrule one.
 - Answer a player's ask, such as "Asks to reroll (Heroic Inspiration)", with **Allow** or **Keep**.
 - **Reopen for one more answer**, **Close**, or **Close all answered**.
@@ -543,371 +597,401 @@ Only you and the creature's player see an answer. Up to 20 requests can be open 
 
 ## Areas
 
-The **Area** tool (`A`) draws areas of effect: spells, breath weapons, auras. The **Areas** panel lists the ones placed on the scene. An area counts who is in it, in three dimensions, and stops at walls.
+The **Area** tool (`A`) draws areas of effect: spells, breath weapons and auras. The **Areas** panel lists the ones placed on the scene. An area works out who is inside it, in three dimensions, and stops at walls, so you don't have to count squares by hand.
 
 ![A Fireball preview: the shaded squares and "In area (3)" naming who it catches, with Place in the options row.](dm-guide/areas.webp)
 
 ### Placing an area
 
-1. Pick the **Area** tool. Type a spell in **Spell** (`fireball`) and pick it from the list: it sets the shape and size (a 20 ft sphere), and turns on the reminders the spell needs. Or pick a **Shape** (Cone, Sphere, Cylinder, Cube, Line, Emanation) and set **Size** in feet.
-2. Tap where it goes. A cone, line, cube or emanation tapped on a token casts from that token: a cone starts at the caster's edge, an emanation surrounds it. A sphere or cylinder tapped on a token sits on that token.
-3. Aim a cone, line or cube by dragging anywhere on the map, or by its handle. **Rotation snap** under **⋯** picks 15°, 45° or **Free**. **Aim up or down** tilts a cone or line.
-4. Read the line above the options: "Fireball · In area (3): Goblin Warrior 1, Goblin Warrior 2, Thorn (ally)". This preview is yours alone, unless you turn on **Shared**.
+1. Pick the **Area** tool. Type a spell in **Spell** (`fireball`) and pick it from the list. The spell sets the shape and size (a 20 ft sphere for Fireball) and turns on any reminders it needs. For anything that isn't a spell, pick a **Shape** (Cone, Sphere, Cylinder, Cube, Line or Emanation) and set its **Size** in feet.
+2. Tap where the area goes. Tapping on a token matters: a cone, line, cube or emanation tapped on a token is cast from that token, so a cone starts at the caster's edge and an emanation surrounds it. A sphere or cylinder tapped on a token is placed on that token.
+3. Aim a cone, line or cube by dragging anywhere on the map, or by its handle. **Rotation snap**, under **⋯**, picks 15°, 45° or **Free**, and **Aim up or down** tilts a cone or line.
+4. Read the line above the options: "Fireball · In area (3): Goblin Warrior 1, Goblin Warrior 2, Thorn (ally)". This preview is yours alone unless you turn on **Shared**, so you can check who a spell would catch without showing your hand.
 5. Press **Place**.
 
-Under **⋯** (More area options) you also find **Elevation** for an area at a free point, **Includes caster** for a cone, cube, line or emanation (a sphere or cylinder always catches a caster inside it), **Moves with token** for an emanation, **Set caster**, **Reminders**, **Color** and **DM only**.
+Under **⋯** (More area options) you will also find:
 
-**A caster matters for the group save.** It fills the save's DC from the caster's spell save DC, and the damage from the caster's own spell. A DM's area starts with no caster. To give one, cast a cone, line, cube or emanation from the token. For a sphere, press **Set caster** under **⋯**, then tap the caster's token: the first tap only closes the **⋯** pop-up if it is still open, so tap the token again if the hint still reads "Tap the caster." The hint then reads "Cast by Ivo.", and the row shows **From Ivo**, which drops or restores the caster.
+- **Elevation**, for an area placed at a free point.
+- **Includes caster**, for a cone, cube, line or emanation. A sphere or cylinder always catches a caster inside it.
+- **Moves with token**, for an emanation.
+- **Set caster**, **Reminders**, **Color** and **DM only**.
+
+**Why the caster matters.** An area with a caster fills in the group save for you: the save's DC comes from the caster's spell save DC, and the damage from the caster's own spell. Your areas start with no caster. The easiest way to give one a caster is to cast a cone, line, cube or emanation from the caster's token. For a sphere, press **Set caster** under **⋯**, then tap the caster's token. The hint then reads "Cast by Ivo.", and the row shows **From Ivo**, which you can tap to drop the caster or restore it.
+
+> [!TIP]
+> If the hint still reads "Tap the caster." after your tap, the tap only closed the **⋯** pop-up. Tap the token again.
 
 ### Placed areas
 
-Placed areas stay until removed. Tap one with the Area tool to pick it, then:
+Placed areas stay on the map until you remove them. To change one, tap it with the Area tool, then:
 
-- Drag it to move it. A cone, line or cube cast from a creature turns around it instead.
-- Change **Size**, or **Hidden** to hide it from players.
-- **Save and damage** opens the [group save](#the-group-save) for everyone in it.
-- **Copy** makes a new draft from it. **Delete** removes it. **Done** lets it go.
+- Drag it to move it. A cone, line or cube cast from a creature turns around that creature instead.
+- Change its **Size**, or turn on **Hidden** to hide it from players.
+- Press **Save and damage** to open the [group save](#the-group-save) for everyone inside it.
+- Press **Copy** to start a new draft from it, **Delete** to remove it, or **Done** to let it go.
 
-A placed area can't gain a caster, change its elevation or become DM only. Copy it, fix the copy, place it, and delete the old one.
+Under **⋯**, you can still change settings such as its aim, reminders and color. A placed area can't gain a caster or change its elevation, though. To change those, press **Copy**, fix the copy, place it, and delete the old one.
 
-The **Areas** panel lists every area with who is in it, live, and **Edit**, **Save and damage** and **Delete** on each row. Only you and an area's owner change it. Players see each other's areas unless the room setting "Players see each other's areas" is off.
+The **Areas** panel lists every area along with who is in it, kept up to date as creatures move, and offers **Edit**, **Save and damage** and **Delete** on each row. Only you and an area's owner can change it. Players see each other's areas, unless you turn off the room setting "Players see each other's areas".
 
 ### Auras
 
-An emanation cast from a token with **Moves with token** on (the default) is attached: it follows the token, and its "In area" list updates as creatures move. Spirit Guardians, a Paladin's aura and the like work this way. An attached area can't be dragged, so move its token.
+An emanation cast from a token with **Moves with token** on (the default) is attached to that token. It follows the token around, and its "In area" list updates as creatures move in and out. Spirit Guardians, a Paladin's aura and the like work this way. You can't drag an attached area, so move its token instead.
 
 ### Height
 
-Every area is a shape in three dimensions, and each creature has a height from its size. A 20 ft Fireball on the ground misses a Medium creature flying 25 ft up. The squares under the flier are still shaded, so trust the "In area" list, not the shading. To reach a flier, put the sphere on its token, raise **Elevation** before placing, or aim a cone or line up. An area put down on a platform starts at the platform's height.
+Every area is a shape in three dimensions, and every creature has a height that comes from its size. That means a 20 ft Fireball centered on the ground misses a Medium creature flying 25 ft up. The squares under the flier are still shaded, so trust the "In area" list, not the shading. To reach a flier, put the sphere on its token, raise the **Elevation** before placing, or aim a cone or line upward. An area put down on a platform starts at the platform's height.
 
 ### Reminders
 
-An area can remind you when a creature enters it, starts its turn in it, or ends its turn in it: **Enters**, **Starts turn** and **Ends turn** under **⋯**, **Reminders**, with **Once a turn** for spells that affect a creature once a turn. Spirit Guardians, Moonbeam, Web, Spike Growth and other presets turn them on as the spell says.
+An area can remind you when a creature enters it, starts its turn in it, or ends its turn in it. Turn these on with **Enters**, **Starts turn** and **Ends turn** under **⋯**, **Reminders**, and add **Once a turn** for spells that affect a creature only once per turn. Spirit Guardians, Moonbeam, Web, Spike Growth and other spell presets turn on the right reminders for you.
 
-Reminders fire only while a fight's turn is running. Each one is a log line ("Goblin Warrior 1 entered Spirit Guardians.", "Spirit Guardians moved onto Goblin Warrior 1.") and a notice on your screen. The area's owner and the creature's owner get the notice too. Players read the line only for what they could see. A reminder doesn't roll anything: use **Save and damage** or the Dice panel for that.
+Reminders fire only while a fight's turns are running. Each one adds a line to the log ("Goblin Warrior 1 entered Spirit Guardians.", "Spirit Guardians moved onto Goblin Warrior 1.") and shows a notice on your screen. The area's owner and the creature's owner get the notice too, and players read the line only for what they could see. A reminder doesn't roll anything on its own: use **Save and damage** or the Dice panel for that.
 
 ## The group save
 
-The group save rolls one saving throw for many creatures and applies the damage and conditions to all of them in one step, with one undo. Start it from a placed area's **Save and damage**, or from a save action in the Dice panel's roll options.
+The group save rolls one saving throw for many creatures at once and applies the damage and conditions to all of them in a single step, with a single undo. Start it from a placed area's **Save and damage**, or from a save action in the Dice panel's roll options.
 
 ![The group save for a Fireball: the fill line, the damage, each creature's row with its roll and damage, and Apply.](dm-guide/group-save.webp)
 
-From an area, the page fills itself: "From Fireball: Dexterity save, DC 15 (Ivo's spell save DC), 8d6 fire, half on a pass." Then:
+When you start it from an area, the page fills itself in from the spell and its caster: "From Fireball: Dexterity save, DC 15 (Ivo's spell save DC), 8d6 fire, half on a pass." Then work down the page:
 
-1. Check **What they roll** (**Save**, **Check** or **No save**), **Ability** and **DC**. **Hide the monsters' rolls from players** is on by default. **Against a spell** gives creatures with Magic Resistance their advantage.
-2. Check the damage (`8d6 fire`). **On a pass** is **Half** or **None**. **On a fail** adds up to three conditions, with how long they last and an optional save at the end of each turn.
-3. Check the rows. Each creature in the area has a row. Monsters roll on the server. Players' creatures are asked, and the player rolls on their own device, or you press **Roll +3** for them. **Fails**, **Ask**, **Server** and **Type** change how one row rolls, and **Fail**, **Pass** and **Skip** decide a row yourself.
-4. Press the roll button ("Roll 4 saves", or "Roll 2 saves and ask 2 players"). Each row shows its roll and its result ("Fail vs DC 15"), and its defenses: resistances and immunities from the stat block, **Evasion**, and **Use Legendary Resistance (2 left)** for a legendary monster that failed.
-5. Roll the damage: **Roll** beside it, or type a number, or take a player's roll from **Rolled by someone else**. Once the saves are rolled, the damage folds into one line, and **Edit** opens it again. Each row then shows its amount, half on a pass. Tap a row's amount to type another.
-6. Press **Apply** ("Apply: 4 take damage"). Temporary HP and concentration checks follow. "Applied to 4. Undo takes it all back."
+1. Check **What they roll** (**Save**, **Check** or **No save**), the **Ability** and the **DC**. **Hide the monsters' rolls from players** is on by default. **Against a spell** gives creatures with Magic Resistance their advantage.
+2. Check the damage (`8d6 fire`). **On a pass** is **Half** or **None**. **On a fail** can add up to three conditions, with how long they last and an optional save at the end of each turn.
+3. Check the rows. Each creature in the area has one. Monsters roll on the server. Players' creatures are asked, so the player rolls on their own device, or you can press **Roll +3** for them. To change how a single row rolls, pick **Ask**, **Server** or **Type** (you type the total), or **Fails**, which is offered when a condition such as Stunned fails the roll outright. To decide a row yourself, pick **Fail**, **Pass** or **Skip**.
+4. Press the roll button ("Roll 4 saves", or "Roll 2 saves and ask 2 players"). Each row shows its roll and result ("Fail vs DC 15"), along with its defenses: resistances and immunities from its stat block, **Evasion**, and **Use Legendary Resistance (2 left)** for a legendary monster that failed.
+5. Roll the damage: press **Roll** beside it, type a number, or take a player's roll from **Rolled by someone else**. Once the saves are rolled, the damage folds into one line, and **Edit** opens it again. Each row then shows the damage it takes, halved on a pass. Tap a row's amount to type a different one.
+6. Press **Apply** ("Apply: 4 take damage"). Temporary HP and concentration checks are handled for you, and the app confirms: "Applied to 4. Undo takes it all back."
 
-With **No save** ("No save: everyone takes it"), **Apply** shows at once. The open group save stays on your device through a reload, and the Dice panel's **Open** brings you back to it.
+With **No save** ("No save: everyone takes it"), **Apply** shows at once, for damage that everyone in the area simply takes. An open group save stays on your device through a reload, and the Dice panel's **Open** brings you back to it.
 
 ## Alerts during a fight
 
-Cards that need an answer stack at the right of the map, under the top bar: roll requests, concentration checks, save-ends reminders and recharge rolls. Where the screen is short they fold into one row that names the most pressing one.
+Some moments in a fight need an answer from you, and the app shows them as cards stacked at the right of the map, under the top bar: roll requests, concentration checks, save-ends reminders and recharge rolls. Where the screen is short, they fold into one row that names the most pressing one.
 
 ![A recharge card at the start of the dragon's turn, "Fire Breath can recharge (5–6)." with Roll and Dismiss, beside its tracker row's legendary pips.](dm-guide/alerts.webp)
 
-- **Concentration check**: "Bree (Spirit Guardians) took damage. Constitution save, DC 11." with **Roll +5**, **Passed** and **Failed**. A roll decides it ("concentration holds" or "concentration ended"). It goes to the creature's player, or to you for a creature no player plays.
-- **Save-ends**: at the end of a creature's turn, for a condition with **A Wisdom save at the end of each of its turns ends it**: "Goblin Warrior 2 ended its turn Frightened. Wisdom save, DC 15, ends it." with **Roll +0**, **Passed**, **Failed** and **Dismiss**, and **Ask Thorn** for a player's creature on the players' scene. A pass ends the condition. Players see which save ends it, never its DC.
-- **Recharge**: at the start of a monster's turn, for an action marked **Used** in the Dice panel: "Fire Breath can recharge (5–6)." with **Roll** and **Dismiss**. A success clears Used. The Used mark lives in that browser tab, so roll the breath from the same tab.
-- **Legendary Resistance**: on a concentration or save-ends card, a failed roll of a monster with uses left offers **Use Legendary Resistance (2 left)** or **Accept failure**.
-- **Time is up**: with a turn timer, the device of whoever acts gets a nudge. It never ends the turn.
+- **Concentration check**: "Bree (Spirit Guardians) took damage. Constitution save, DC 11." with **Roll +5**, **Passed** and **Failed**. The result settles it ("concentration holds" or "concentration ended"). The card goes to the creature's player, or to you for a creature no player plays.
+- **Save-ends**: at the end of a creature's turn, for a condition set to end with **A Wisdom save at the end of each of its turns ends it**: "Goblin Warrior 2 ended its turn Frightened. Wisdom save, DC 15, ends it." with **Roll +0**, **Passed**, **Failed** and **Dismiss**. For a player's creature on the players' scene, **Ask Thorn** asks its player to roll. A pass ends the condition. Players see which save ends it, but never its DC.
+- **Recharge**: at the start of a monster's turn, for an action marked **Used** in the Dice panel: "Fire Breath can recharge (5–6)." with **Roll** and **Dismiss**. A success clears Used. The Used mark is kept in the browser tab where you set it, so roll the breath weapon from the same tab you run the fight in.
+- **Legendary Resistance**: when a monster with uses left fails a roll on a concentration or save-ends card, the card offers **Use Legendary Resistance (2 left)** or **Accept failure**.
+- **Time is up**: with a turn timer running, the device of whoever is acting gets a nudge. It never ends the turn.
 
 ## Measuring and movement
 
-**Ruler** (`R`): drag to measure, tap to add waypoints. It reads the total and each leg ("35 ft (15 ft + 20 ft)"). A double tap, or **Keep**, keeps a ruler on the map, and **Kept rulers** lists them to remove. Your ruler is private until you turn on **Shared** (it starts off each time you pick the Ruler). Players' rulers show to everyone in their color. A point on raised ground stands on it, so the distance counts the height.
+**The Ruler** (`R`): drag to measure, and tap to add waypoints along the way. It shows the total and each leg ("35 ft (15 ft + 20 ft)"). Double-tap, or press **Keep**, to leave a ruler on the map, and remove kept rulers from the **Kept rulers** list. Your ruler is private until you turn on **Shared**, and Shared turns itself off each time you pick the Ruler again, so measuring to a hidden monster never gives it away. Players' rulers show to everyone, in each player's color. A point on raised ground stands on that ground, so the distance counts the height.
 
-**Moving a token** measures as you drag: green within its speed, yellow within a Dash, red beyond. A raised flier counts its fly speed. During a fight only the creature whose turn it is gets the colors and its path:
+**Moving a token** measures as you drag: the path is green within the creature's speed, yellow within a Dash, and red beyond that. A flier above the ground is measured against its fly speed. During a fight, only the creature whose turn it is gets the colors, and the app tracks its path through the turn.
 
 ![Thorn dragged down the corridor: a yellow path and "35 ft · 15 ft left with Dash".](dm-guide/movement.webp)
 
+Here is how the turn's path works, and how to correct it:
 
-- Each drop adds a leg to the turn's path, drawn with a ring where the turn began. "Moved 20 ft" totals the whole path, which helps the table judge opportunity attacks. Nothing detects them for you.
-- **Doesn't count** in the action bar leaves the last leg out of the total, for a shove or a teleport.
-- Players get **Undo move** for their own newest move. Yours go through Undo in the top bar.
+- Each drop adds a leg to the turn's path, which is drawn on the map with a ring where the turn began. "Moved 20 ft" totals the whole path, which helps the table judge opportunity attacks. The app doesn't detect those for you.
+- **Doesn't count**, in the action bar, leaves the last leg out of the total, for a shove or a teleport.
+- Players get **Undo move** for their own newest move. Your own moves are undone with Undo in the top bar.
 
-Distances between tokens count from edge to edge and include height. The room's **Diagonal moves** setting decides the diagonals: every square 5 ft is the 2024 rule and the default.
+Distances between tokens are measured from edge to edge and include height. The room's **Diagonal moves** setting decides how diagonals count. The default, every square 5 ft, is the 2024 rule.
 
 # Deeper tools
 
+This part covers the tools that help a long campaign run smoothly: the Outliner, the DM panel, characters' stat blocks, companions, pins, the table display and the room's settings. Read a section when you want what it offers. None of it is needed for a first session.
+
 ## Outliner
 
-The **Outliner** (DM only) lists everything on the scene you are viewing, and what players get of each. Use it to find a token in a crowd, check what is hidden, and find things you lost. The `/` key opens it with the search ready.
+The **Outliner** (DM only) lists everything on the scene you are viewing, along with what the players get of each thing. It is the place to find one token in a crowd, check what is still hidden, and track down things you have lost. The `/` key opens it with the search ready to type in.
 
 ![The Outliner: groups that fold, each row with what players get, such as Hidden, Under fog or Secret door, hidden.](dm-guide/outliner.webp)
 
-- Groups, each folding: **Creatures and objects**, **Map** (stamps, labels, pins and lights), **Areas**, **Drawings** and **Doors** (windows too). The chips at the top show one group.
-- Each row says what players get: **Hidden**, **Under fog**, **Out of the party's sight**, **DM only**, **Only Pat**, **Secret door, hidden** or **Secret door, found**. A scene you are preparing reads as it will once players move there.
-- **Search the scene** filters as you type. Every word must match the name or the line under it, so `companion` finds every companion and `secret` finds secret doors. The marks themselves aren't searched, so use the chips and scan for them.
-- Tap a row to show it on the map. A token is selected with its action bar open. A label, pin, stamp or light opens in its tool. A drawing, door or window flashes.
+- Everything is sorted into groups that fold: **Creatures and objects**, **Map** (stamps, labels, pins and lights), **Areas**, **Drawings** and **Doors** (windows too). The chips at the top show one group at a time.
+- Each row says what the players get of it: **Hidden**, **Under fog**, **Out of the party's sight**, **DM only**, **Only Pat** (only that one player gets it, such as a pin linked to a page only Pat can read), **Secret door, hidden** or **Secret door, found**. On a scene you are preparing, the rows read as they will once the players move there, so you can check a scene before anyone arrives.
+- **Search the scene** filters the list as you type. Every word must match a row's name or the line under it, so `companion` finds every companion and `secret` finds secret doors. The marks themselves aren't searched, so use the chips and scan the marks to find, say, everything under fog.
+- Tap a row to find it on the map. A token is selected, with its action bar open. A label, pin, stamp or light opens in its tool. A drawing, door or window flashes so you can spot it.
 
-A companion whose character has no token on this scene reads **Away from Bree**. See [The party travels between scenes](#the-party-travels-between-scenes).
+A companion whose character has no token on this scene reads **Away from Bree**, which is how you find companions left behind when the party moves on. See [The party travels between scenes](#the-party-travels-between-scenes).
 
 ## DM panel
 
-The **DM** panel holds the tools that act on the players' screens.
+The **DM** panel holds the tools that act on your players' screens.
 
 ![The DM panel: Handouts, Players' screens, Check their view, Player link and Table display.](dm-guide/dm-panel.webp)
 
-- **Handouts**: **Show a handout** shows an image or a PDF to **Everyone** or **Chosen players** as a popup. Pick **From the library** or **Upload a file**, give it a **Title**, then **Show**. A PDF asks which pages (up to 100). **Showing now** lists what is up, with **Close** to take it down for everyone.
-- **Players' screens** work only while you view the players' scene, and the panel says so when you don't.
-  - **Follow me**: players' maps follow yours as you pan and zoom, until you turn it off.
-  - **Bring everyone here**: moves every player's map to what you see now, once.
-  - **Black out players' screens**: players see only black and "The DM has paused the game." Use it for a break or before a reveal. Your top bar shows "Players see black" while it's on.
-- **Check their view**: pick a player and press **View** to see exactly what they see, fog and party vision included, without hidden things. Nothing you do there is saved. **Exit** or Escape leaves. On a scene with party vision, **Party sight** shades what the party can't see on your own map.
-- **Player link**: **Show the player link** shows the link and its QR code to scan at the table.
+- **Handouts**: **Show a handout** shows an image or a PDF as a popup, to **Everyone** or to **Chosen players**. Pick **From the library** or **Upload a file**, give it a **Title**, then press **Show**. For a PDF, the app asks which pages to include (up to 100). **Showing now** lists what is up, with **Close** to take a handout down for everyone.
+- **Players' screens**:
+  - **Follow me**: the players' maps follow yours as you pan and zoom, until you turn it off.
+  - **Bring everyone here**: moves every player's map to what you see right now, once.
+  - **Black out players' screens**: players see only black and "The DM has paused the game." Use it for a break, or to set up a reveal out of sight. While it is on, your top bar reads "Players see black".
+- **Check their view**: pick a player under **View as a player** and press **View** to see exactly what they see, fog and party vision included, without anything hidden. If you are on another scene, this also takes you to the players' scene. Nothing you do there is saved, and **Exit** or Escape brings you back. On a scene with party vision, **Party sight** shades what the party can't see on your own map instead.
+- **Player link**: **Show the player link** shows the link and its QR code, for players at the table to scan.
 - **Table display**: see [The table display](#the-table-display).
+
+Follow me and Bring everyone here move the players only while you are looking at the players' scene, and the panel tells you when you aren't.
 
 ## Characters and their stat blocks
 
-The **Characters** panel lists the party. A character belongs to the room, so its HP and conditions follow its tokens to every scene, unlike a monster token, which is its own copy.
+The **Characters** panel lists the party. A character belongs to the room rather than to one map, so its HP and conditions follow its tokens to every scene. A monster token is different: each one is its own copy.
 
-- **New character** takes a name, size, max HP, AC, speed, initiative bonus, passive Perception and who plays it (**Played by**). Players make up to 3 of their own while "Players can create their own characters" is on.
-- Open a character and press **Place a token**, then tap the map, to put it on the scene you are viewing.
-- Its card shows its numbers, its companions and its stat block.
+- **New character** takes a name, size, max HP, AC, speed, initiative bonus, passive Perception, and who plays it (**Played by**). While "Players can create their own characters" is on, each player can also make up to 3 of their own.
+- To put a character on the scene you are viewing, open it, press **Place a token**, and tap the map.
+- A character's card shows its numbers, its companions and its stat block.
 
 ![Thorn's card in the Characters panel: Place a token, his companions, and his stat block with its scores, skills and weapons.](dm-guide/pc-stats.webp)
 
-**Stat blocks.** A character can have a stat block: level, ability scores, save and skill proficiencies, spellcasting, defenses, and its weapons, spells and other rolls with riders such as Sneak Attack. The Dice panel then offers its rolls, roll requests know its bonuses, and the group save knows its resistances and Evasion. Only you and the character's own players see the block and get **Add a stat block**, **Edit**, **Take a shape** and **End the shape**. Other players and the table display never see it.
+**Stat blocks.** A character can have a stat block of its own: its level, ability scores, save and skill proficiencies, spellcasting, defenses, and its weapons, spells and other rolls, with riders such as Sneak Attack. A stat block makes the rest of the app smarter about that character. The Dice panel offers its rolls, roll requests know its bonuses, and the group save knows its resistances and Evasion. The block stays between you and the character's own players: only you and those players see it, and only you and they get **Add a stat block**, **Edit**, **Take a shape** and **End the shape**. Other players and the table display never see it.
 
-Fill it with **Add a stat block** on the character's card or its token's panel, then in **Fill from**:
+To fill one in, press **Add a stat block** on the character's card or in its token's panel, then choose where it comes from under **Fill from**:
 
-- **Paste text**: a stat block copied as text, read on the device. Set the level first.
-- **D&D Beyond**: a public character's share link or number (**Get it**), or its JSON pasted (**Paste its JSON instead**). It reads numbers, proficiencies, weapons and spells, never their text.
+- **Paste text**: a stat block copied as text, read on your device. Set the level first.
+- **D&D Beyond**: a public character's share link or number (press **Get it**), or its JSON pasted in (**Paste its JSON instead**). It reads numbers, proficiencies, weapons and spells, but never their descriptions.
 
-**Check what was read** lists what to check ("AC 15 was worked out from the armor. Check it.") and what else to set (level, AC, max HP, speed, senses, sheet link, name). **Use it** fills the editor, and **Save** keeps it. Importing again replaces what the last import read and keeps the rolls you added. It is best effort, since D&D Beyond can change its format.
+**Check what was read** then lists anything to double-check ("AC 15 was worked out from the armor. Check it.") and anything else to set (level, AC, max HP, speed, senses, sheet link, name). **Use it** fills in the editor, and **Save** keeps the result. Importing again later replaces what the last import read and keeps any rolls you added by hand. The D&D Beyond import is best effort, since D&D Beyond can change its format at any time.
 
-**Take a shape** turns a character into an SRD creature: **Wild Shape** (the druid keeps Intelligence, Wisdom, Charisma and proficiencies) or **Polymorph or another shape** (all of the creature's numbers). The token takes the creature's AC and speeds, HP stay the character's, and the 2024 temporary HP are offered. **End the shape** goes back.
+**Take a shape** turns a character into an SRD creature. **Wild Shape** keeps the druid's Intelligence, Wisdom, Charisma and proficiencies, while **Polymorph or another shape** takes all of the creature's numbers. Either way, the token takes the creature's AC and speeds, the HP stay the character's own, and the app offers the temporary HP the 2024 rules give. **End the shape** turns the character back.
 
-**Rests.** The Token panel's **Rest** section has **Short rest** (add the HP rolled on Hit Point Dice) and **Long rest** (all HP back, temporary HP gone, one less Exhaustion level, Legendary Resistance reset). **Long rest for the party** in Characters rests everyone at once. Spell slots and features stay on the players' sheets.
+**Rests.** The Token panel's **Rest** section has **Short rest**, where you add the HP the player rolled on their Hit Point Dice, and **Long rest**, which restores all HP, ends temporary HP, removes one Exhaustion level and resets Legendary Resistance. **Long rest for the party**, in Characters, rests everyone at once. Spell slots and class features are tracked on the players' own sheets, not here.
 
 ## Companions
 
-A companion is a token that belongs to a character: a familiar, a summoned spirit, an animal companion, or an effect with no HP such as Spiritual Weapon. Whoever plays the character moves it and changes its HP and conditions.
+A companion is a token that belongs to a character: a familiar, a summoned spirit, an animal companion, or an effect with no HP such as Spiritual Weapon. Whoever plays the character controls the companion too, moving it and changing its HP and conditions.
 
-**Adding one.** On a character's card in **Characters**, **Add a companion** takes a **Name**, **It is** (**A creature** or **An effect**), an optional stat block (**Choose a stat block**: an SRD creature such as an owl or a wolf, one of the character's own blocks, or one you paste), a **Turn**, a **Size**, **HP** and **AC**. A stat block fills in the numbers it knows ("From the block: speed 5 ft, fly 60 ft. Darkvision 120 ft."). **Add and place** puts it next to the character's token. Players add their own the same way. To turn a token already on the map into a companion, use **Make a companion** in its **Token settings**.
+**Adding one.** On a character's card in **Characters**, press **Add a companion** and fill in:
+
+- A **Name**, and what **It is**: **A creature** or **An effect**.
+- An optional stat block, from **Choose a stat block**: an SRD creature such as an owl or a wolf, one of the character's own saved blocks, or one you paste. A stat block fills in the numbers it knows ("From the block: speed 5 ft, fly 60 ft. Darkvision 120 ft.").
+- Its **Turn** (see below), **Size**, **HP** and **AC**.
+
+**Add and place** puts the companion next to the character's token. Players add their own companions the same way. To turn a token that is already on the map into a companion, use **Make a companion** in its **Token settings**.
 
 ![Add a companion for Ivo: Hoot, a creature with the SRD Owl's stat block, taking its own turn.](dm-guide/companion.webp)
 
-**Stat blocks (N)** on the card keeps the character's own companion blocks, pasted or typed, up to 100, so a summon cast again starts from the same block. An SRD creature needs no keeping: pick it again.
+**Stat blocks (N)**, on the character's card, keeps the character's own companion stat blocks, pasted or typed, up to 100 of them. That way a creature summoned again starts from the same block. An SRD creature doesn't need keeping, since you can simply pick it again.
 
-**Its turn** is one of:
+**Its turn** decides where the companion acts in a fight:
 
-- **On Bree's turn, listed under Bree**: it acts on its character's turn and shows under that row in the order, with its own Reaction and Ready. The default for a creature.
-- **On Bree's turn, not listed**: it acts on its character's turn and stays out of the order. The default for an effect.
-- **Its own turn**: a row of its own with its own initiative. Added during a fight its character is in, it joins at once, with its initiative still to roll. Otherwise its player adds it with **Add Hoot** under **Join the fight**, or you add it with **Add to the fight**. **Everyone here** takes it when you start a fight.
+- **On Bree's turn, listed under Bree**: it acts on its character's turn and is listed under that character's row in the order, with its own Reaction and Ready. This is the default for a creature.
+- **On Bree's turn, not listed**: it acts on its character's turn and stays out of the order entirely. This is the default for an effect.
+- **Its own turn**: it gets a row of its own, with its own initiative. If you add it during a fight its character is in, it joins straight away, with its initiative still to roll. Otherwise its player adds it with **Add Hoot** under **Join the fight**, or you add it with **Add to the fight**. **Everyone here** also includes it when you start a fight.
 
-Other players see the companion's token, name and HP as "Players see the party's HP" allows. A creature companion lends the party its sight, an effect doesn't. A companion stays on its scene when the party moves on (see [the travel scenario](#the-party-travels-between-scenes)).
+Other players see a companion's token and name, and see its HP as far as "Players see the party's HP" allows. A creature companion lends the party its sight, but an effect doesn't. A companion stays on its scene when the party moves on (see [the travel scenario](#the-party-travels-between-scenes)).
 
 ## Ping, Look here and pins
 
-**Ping** (`P`): tap a spot to ping it, with a sound and the pinger's color. Drag for a laser stroke that fades. With the Select tool, a press held still on empty map pings too. For you, **Look here** in the Ping tool's options moves every player's view to the spot you tap. They can pan away after. It turns off on reload.
+**Ping** (`P`): tap a spot to ping it, with a sound and your color, so everyone looks where you mean. Drag instead for a laser stroke that fades away on its own. With the Select tool, holding a finger still on empty map pings that spot too.
 
-**Pins** (`M`, behind **Setup** on a phone): tap the map to place a pin. Its pane sets a **Pin label**, a **Linked page** from the Journal, a **Pin color** and **DM only**, and says who will see it. New pins start DM only. Players see a pin only on their scene, out of the fog, when they can read its linked page. In the Journal, a page's **Pin to the map** places a pin linked to it. With the Select tool, a tap on a pin opens its page.
+**Look here** is for when pointing isn't enough. Turn it on in the Ping tool's options, and every tap you make also moves every player's view to that spot. They can still pan away afterward. Look here turns itself off when you reload the page.
+
+**Pins** (`M`, behind **Setup** on a phone) mark places on the map. Tap the map to place a pin, and its pane opens. There you set a **Pin label**, a **Linked page** from the Journal, a **Pin color** and **DM only**, and the pane tells you who will see the pin. New pins start DM only, so you can mark your secrets freely. Players see a pin only on their own scene, only where it is out of the fog, and only if they can read its linked page. From the Journal side, a page's **Pin to the map** places a pin linked to that page. With the Select tool, tapping a pin opens its page.
 
 ![A new pin in the crypt's hidden room, its pane open with the label, No page, DM only, and "Who will see it: Only the DM".](dm-guide/pin.webp)
 
 ## The table display
 
-A TV at the table can show the players' view of the map, with nothing else on screen. Set it up in the **DM** panel's **Table display** section:
+If your group plays around a table, a TV can show the players' view of the map, with nothing else on screen. Set it up in the **Table display** section of the **DM** panel:
 
-- **Add a TV** shows a code (such as `K7QH 2MXA 4F`), a link and a QR code, good once for 10 minutes. On the TV's browser, **Set up a table display** on the Home page takes the code.
-- **Open on this device** opens the display in a new window, for a laptop wired to the TV.
+- **Add a TV** shows a code (such as `K7QH 2MXA 4F`), a link and a QR code. The code works once, for 10 minutes. On the TV's browser, open the Home page, choose **Set up a table display**, and enter the code.
+- **Open on this device** opens the display in a new window instead, for a laptop wired to the TV.
 
 ![Add a TV in the DM panel: the code to type on the TV, how long it lasts, and its QR code.](dm-guide/table-display.webp)
 
-The display shows the players' scene as players see it: fog, party vision, tokens, shared areas, drawings, pings and rulers, and handouts shown to everyone. It shows no panels, chat or initiative strip, unless you tap it and turn on **Show whose turn it is**. Turn on **Show my view on the table display** in the DM panel, and pick **Follow the DM** on the display, to have it show what your screen shows. A room has up to 4 displays.
+The display shows the players' scene the way the players see it: fog, party vision, tokens, shared areas, drawings, pings and rulers, and handouts shown to everyone. It shows no panels, chat or initiative strip, unless you tap the display and turn on **Show whose turn it is**. To have the display show what your own screen shows, turn on **Show my view on the table display** in the DM panel, then tap the display and pick **Follow the DM**. A room can have up to 4 displays.
 
 ## Room settings for fights and maps
 
-Menu, **Room settings** (DM only). Switches apply at once.
+Open the Menu, then **Room settings** (DM only). Each switch takes effect at once. These are the settings that shape maps and fights, each with its default in parentheses:
 
 ![Room settings: the Players settings with their help lines, and Combat below.](dm-guide/room-settings.webp)
 
-- **Players**: **Who can move any token** (No one), **Who can draw** (Every player), **Players can create their own characters** (on), **Players can apply damage and healing** (off), **Players may type their roll totals** (on), **Players see the party's HP** (on), **Players see each other's areas** (on).
-- **Combat**: **Monsters die at 0 HP** (on), **Healing brings back the dead** (on), **Skip defeated creatures** (on), **Use initiative scores for monsters** (off), **Reveal hidden combatants on their turn** (on), **Initiative order players see** (**Player characters, the rest on their turn** in a new room), **Critical hit damage** (**Roll the dice twice**), **Turn timer** (Off).
-- **Grid and distance**: **Feet per square** (5) and **Diagonal moves**: **Every square is 5 ft** (the 2024 rule, the default), **Alternate 5 ft and 10 ft**, or **True distance**.
+- **Players**: **Who can move any token** (No one), **Who can draw** (Every player), **Players can create their own characters** (on), **Players can apply damage and healing** (off), **Players may type their roll totals** (on), **Players see the party's HP** (on) and **Players see each other's areas** (on).
+- **Combat**: **Monsters die at 0 HP** (on), **Healing brings back the dead** (on), **Skip defeated creatures** (on), **Use initiative scores for monsters** (off), **Reveal hidden combatants on their turn** (on), **Initiative order players see** (**Player characters, the rest on their turn** in a new room), **Critical hit damage** (**Roll the dice twice**) and **Turn timer** (Off).
+- **Grid and distance**: **Feet per square** (5) and **Diagonal moves**, which can be **Every square is 5 ft** (the 2024 rule, and the default), **Alternate 5 ft and 10 ft**, or **True distance**.
 - **Areas of effect**: **Which squares an area covers** (**At least half the square**, the 2024 rule) and **Which creatures an area catches** (**Any square the creature is in**).
 
-**Players may type their roll totals** is on by default. Turn it off and players answer every roll you ask for with **Roll**, and the app rolls for them. They can still fail a save without rolling. Totals they already typed stand.
+A few of these deserve a closer look.
 
-**Critical hit damage** picks how every critical hit rolls its damage, riders such as Sneak Attack included: **Roll the dice twice** (the 2024 rule and the default), **Max plus a roll**, **Double the dice rolled**, or **Double the total**. The server rolls by the rule standing at the roll, and each roll shows how it reached its total, such as "12 max + 2d6+3 (4, 6) = 25".
+**Players may type their roll totals** is on by default, so players can roll real dice and type what they got. If you turn it off, players answer every roll you ask for with **Roll**, and the app rolls for them. A save still offers **Fail without rolling**, for a player who chooses to fail. Totals players typed before you changed the setting still stand.
 
-**Initiative order players see** is separate from **Hidden**: turning a token's **Hidden** off shows its row only where this setting shows it, so in a new room a monster's row still waits for its first turn. See [What players see of the order](#what-players-see-of-the-order).
+**Critical hit damage** picks how every critical hit rolls its damage, riders such as Sneak Attack included:
+
+- **Roll the dice twice**: 2d6+3 becomes 4d6+3. This is the 2024 rule, and the default.
+- **Max plus a roll**: the dice's maximum plus a normal roll, so 12 + 2d6 + 3.
+- **Double the dice rolled**: (2d6 × 2) + 3.
+- **Double the total**: (2d6 + 3) × 2, modifier included.
+
+The server uses whichever rule is set at the moment of the roll, and each roll shows how it reached its total, such as "12 max + 2d6+3 (4, 6) = 25".
+
+**Initiative order players see** works separately from **Hidden**. Turning a token's **Hidden** off shows its row only where this setting allows, so in a new room a monster's row still waits for its first turn even after you reveal the monster. See [What players see of the order](#what-players-see-of-the-order).
 
 # Scenarios
 
-Each scenario walks from building to running, naming the tools at each step. The screenshots come from a test room with a party of four level 5 characters: Thorn (fighter), Bree (cleric), Mara (rogue) and Ivo (wizard).
+These scenarios follow situations from real sessions, from building the map to running the scene, and name the tools you use at each step. Read one when you are about to run something like it, or skim them all to see how the tools fit together. The screenshots come from a test room with a party of four level 5 characters: Thorn (fighter), Bree (cleric), Mara (rogue) and Ivo (wizard).
 
 ## A forest road ambush
 
-Goblins and wolves wait in the trees beside a road. The party walks into them.
+Goblins and wolves wait in the trees beside a road, and the party is about to walk right into them.
 
 **Building it**
 
-1. **Scenes**, **New scene**, **Map image**: pick the forest road image and press **Upload and create**. If its file name has no size, **Line up grid** opens: fit the box over 3 by 3 squares and press **Apply**.
-2. **Encounters**, **New encounter**, "Road ambush": add Goblin Warrior ×4, Goblin Boss ×1 and Wolf ×2. The XP budget shows where it sits for the party. **Save encounter**.
-3. In **Place on the map**, tick **Hidden from players**, press **Place where I tap**, and tap the trees north of the road. Drag the wolves to the south side. Hidden tokens show translucent to you and never reach the players.
-4. **Characters**: **Place a token** for each character at the west end of the road.
-5. **Fog** tool, **Clear fog**, **Rectangle**: drag over the road, the party and the trees where the goblins wait, then **Reveal to players**. Hidden tokens stay hidden in the open. Once revealed, a token under fog still can't be seen, so clear the ground they stand on.
-6. **Scenes**: **Move players** on the forest road.
+1. In **Scenes**, under **New scene**, pick **Map image**, choose the forest road image, and press **Upload and create**. If its file name has no size in it, **Line up grid** opens: fit the box over 3 by 3 squares and press **Apply**.
+2. In **Encounters**, press **New encounter** and name it "Road ambush". Add Goblin Warrior ×4, Goblin Boss ×1 and Wolf ×2. The XP budget shows how hard the fight is for the party. Press **Save encounter**.
+3. In **Place on the map**, tick **Hidden from players**, press **Place where I tap**, and tap the trees north of the road. Then drag the wolves to the south side. Hidden tokens look translucent to you, and they never reach the players.
+4. In **Characters**, use **Place a token** to put each character at the west end of the road.
+5. Pick the **Fog** tool with **Clear fog** and **Rectangle**, drag over the road, the party and the trees where the goblins wait, and press **Reveal to players**. Clearing the fog doesn't reveal the goblins, because hidden tokens stay hidden even on open ground. You clear their ground now because a token that is revealed later still can't be seen while it stands under fog.
+6. In **Scenes**, press **Move players** on the forest road.
 
 ![The ambush in round 1: the four goblin warriors and the boss selected, with Hidden lit in the group's bar and their tracker rows tagged Hidden, just before the reveal.](dm-guide/ambush-reveal.webp)
 
 **Running it**
 
-1. If the party is surprised, select the four characters (**Multi-select**), open **Conditions** in the group's bar and tap **Surprised**. Their initiative rolls then have disadvantage, and their rows show **Dis**.
-2. **Initiative**, **Start a fight with**, **Everyone here**. Use this, not "Visible to players", which leaves the hidden goblins out. Their rows start hidden.
-3. Players roll their own initiative. Press **Auto initiative**: the four goblin warriors share one roll ("By creature"), and so do the wolves. Press **Start**.
-4. The hidden goblins appear on their first turn ("Reveal hidden combatants on their turn"). To reveal them all at once instead, select them and press **Hidden** in the group's bar: their tokens show together. Their rows join the players' order on each goblin's first turn, as **Initiative order players see** has it in a new room. For the rows to show with the tokens, set it to **Everyone** in Room settings first.
-5. On a goblin's turn, tap it and press **Roll** for its roll options: **Attack +4** with the scimitar against Thorn's AC, then **Damage**. Tap Thorn and use the **Use 5** chip in his HP entry, then **Apply**.
+1. If the party is surprised, select the four characters (with **Multi-select**), open **Conditions** in the group's bar, and tap **Surprised**. Their initiative rolls then have disadvantage, and their rows show **Dis**.
+2. In **Initiative**, under **Start a fight with**, press **Everyone here**. Use this rather than "Visible to players", which would leave the hidden goblins out. Their rows start hidden.
+3. The players roll their own initiative. Press **Auto initiative**: the four goblin warriors share one roll ("By creature"), and so do the two wolves. Then press **Start**.
+4. The hidden goblins appear on their first turn, thanks to "Reveal hidden combatants on their turn". If you would rather spring them all at once, select them and press **Hidden** in the group's bar, and their tokens appear together. Their rows still join the players' order one by one, on each goblin's first turn, because that is how **Initiative order players see** works in a new room. If you want the rows to appear along with the tokens, set that option to **Everyone** in Room settings before the fight.
+5. On a goblin's turn, tap it and press **Roll** to see its roll options. Roll **Attack +4** with its scimitar against Thorn's AC, then **Damage**. Tap Thorn, use the **Use 5** chip in his HP entry, and press **Apply**.
 6. A wolf hits Mara and knocks her down: open **Conditions** on her token and tap **Prone**.
-7. Ivo casts Fireball. His player picks the **Area** tool, searches "fireball", and places the 20 ft sphere among the goblins. Your screen shows the area and "In area (4): …".
-8. Press **Save and damage** on the area. The group save fills from Ivo's stat block: "Dexterity save, DC 15 (Ivo's spell save DC), 8d6 fire, half on a pass." Press the roll button: the goblins roll on the server. Use Ivo's damage roll ("Use Ivo's 28") or **Roll** it, check the rows, and press **Apply**. One undo takes it all back.
-9. **Next** through the turns. When it ends, **End the fight**, twice.
+7. Ivo casts Fireball. His player picks the **Area** tool, searches "fireball", and places the 20 ft sphere among the goblins. Your screen shows the area, with "In area (4): …" naming who it catches.
+8. Press **Save and damage** on the area. The group save fills itself in from Ivo's stat block: "Dexterity save, DC 15 (Ivo's spell save DC), 8d6 fire, half on a pass." Press the roll button, and the goblins roll on the server. Take Ivo's own damage roll ("Use Ivo's 28") or press **Roll**, check the rows, and press **Apply**. A single undo would take all of it back.
+9. Press **Next** through the turns. When the fight ends, press **End the fight** and tap it again to confirm.
 
 ![Ivo's Fireball over the goblins: the group save with each goblin's save, its damage, and Apply.](dm-guide/ambush-fireball.webp)
 
 ## A dungeon crawl in the dark
 
-The party explores a crypt by torchlight. Players should see only what their characters can see.
+The party explores a crypt by torchlight, and the players should see only what their characters can see.
 
 **Building it**
 
-1. **Scenes**, **New scene**, **Builder**, "Crypt", **Create**. The builder opens.
-2. **Rectangle room**, Stone: drag an entry hall, a narrow corridor one square wide, and a large crypt chamber. Walls go up around them on their own.
-3. **Brush**, Pillar: four pillars in the chamber. **Brush**, Rubble: a fallen corner in the hall.
-4. **Walls and doors**, **Door**: tap the edge where the corridor meets the hall. Tap the edge into the chamber, then tap that door twice more to lock it (closed, open, locked).
-5. **Secret door**, **Hidden**: tap an edge of the chamber's east wall, and build a small room behind it.
-6. **Lights**, **Torch**: tap the hall. Place two braziers in the chamber, then tap each, rename it "Brazier" and set it **Out**. **Candle** in the hidden room.
-7. **Stamp**: a table, barrels and a chest. Set the chest to **DM only** until it's found.
-8. In the scene's settings, **Vision**: turn on **Party vision** and set **Light** to **Dark**.
-9. Place the party in the hall. Thorn has darkvision 60 ft from his senses. Give Mara a torch: tap her token, **Light**, **Torch**.
-10. Place skeletons in the chamber. Under party vision they appear to players only when a character sees them, so they don't need to be hidden.
+1. In **Scenes**, under **New scene**, pick **Builder**, name it "Crypt", and press **Create**. The builder opens.
+2. With **Rectangle room** and Stone, drag out an entry hall, a narrow corridor one square wide, and a large crypt chamber. Walls go up around them on their own.
+3. With the **Brush**, paint four Pillar squares in the chamber, then some Rubble for a fallen corner of the hall.
+4. Pick **Walls and doors**, then **Door**, and tap the edge where the corridor meets the hall. Tap the edge into the chamber for a second door, then tap that door twice more to lock it (it goes closed, open, locked).
+5. Pick **Secret door** and **Hidden**, tap an edge of the chamber's east wall, and build a small room behind it.
+6. In **Lights**, pick **Torch** and tap the hall. Place two more torches in the chamber to serve as braziers, then tap each one, rename it "Brazier" and set it **Out**. Put a **Candle** in the hidden room.
+7. With **Stamp**, place a table, barrels and a chest. Set the chest to **DM only** until the party finds it.
+8. In the scene's **Vision** settings, turn on **Party vision** and set **Light** to **Dark**.
+9. Place the party in the hall. Thorn has darkvision out to 60 ft from his senses. To give Mara a torch, tap her token, press **Light**, and pick **Torch**.
+10. Place skeletons in the chamber. Under party vision they appear to players only when a character can see them, so they don't need to be hidden.
 
 ![The crypt from the DM's side: rooms, corridor, doors, pillars, the secret door marked S, and the lights as suns.](dm-guide/crypt-build.webp)
 
 **Running it**
 
-1. **Move players** to the crypt. Use **View as a player** in the DM panel, or **Party sight**, to check what they see: the hall by torchlight, the rest dark.
-2. Players move and see as they go. Ground they explored stays drawn, dimmed. Players open the closed door themselves, by tapping it or with **Open door** in their token's action bar.
+1. **Move players** to the crypt. Use **View as a player** in the DM panel, or **Party sight**, to check what they see: the hall by torchlight, and darkness everywhere else.
+2. The players move and see more as they go, and ground they have explored stays on their map, dimmed. They can open the closed door themselves, by tapping it or with **Open door** in their token's action bar.
 3. The chamber door is locked. When Mara picks the lock, use **Select**, tap the door, and press **Unlock**, then **Open**.
-4. A character lights a brazier: in the builder's **Lights** mode, tap the brazier and set it **Lit**. The chamber lights up for everyone who can see it.
-5. Someone searches the east wall and finds the secret door: tap it with **Select** and press **Mark found**. Players now see a door.
-6. Turn the chest's **DM only** off once they're in the room.
+4. When a character lights a brazier, go to the builder's **Lights** mode, tap the brazier, and set it **Lit**. The chamber lights up for everyone who can see it.
+5. Someone searches the east wall and finds the secret door. Tap it with **Select** and press **Mark found**, and the players now see a door.
+6. Once they are in the room with the chest, turn the chest's **DM only** off.
 
 ![The same crypt as a player sees it: the torchlit hall, the corridor, and darkness beyond.](dm-guide/crypt-player.webp)
 
 ## A fight across heights
 
-A watchtower stands on a rise above a field. Harpies circle overhead.
+A watchtower stands on a rise above a field, and harpies circle overhead.
 
 **Building it**
 
-1. **Scenes**, **New scene**, **Builder**: paint Grass over the field with **Rectangle room**. Set **Automatic walls** to **Around floor only**, or **Off**, so the field isn't walled in.
-2. **Heights and stairs**, **Height**, 10 ft up, **Area**: drag a rise. Then 30 ft up: drag the tower's top on the rise.
-3. **Stairs**, **Auto**: paint a stair run up the rise and another up the tower. Each stair points uphill. Where a "?" shows, pick an arrow and paint it again.
-4. Place an archer on the tower: a token placed on raised ground stands on it.
-5. Place the harpies and raise them with **+5** in the action bar, or Page Up, to 40 ft. Each shows "↑40" and a shadow on the ground under it.
+1. In **Scenes**, under **New scene**, pick **Builder**, and paint Grass over the field with **Rectangle room**. Set **Automatic walls** to **Around floor only** or **Off**, so the field isn't walled in.
+2. Pick **Heights and stairs**, then **Height**, set it to 10 ft up, choose **Area**, and drag out the rise. Then set 30 ft up and drag the tower's top onto the rise.
+3. Pick **Stairs** with **Auto**, and paint a run of stairs up the rise and another up the tower. Each stair points uphill. Where a "?" shows, pick an arrow and paint that stair again.
+4. Place an archer on the tower. A token placed on raised ground stands on top of it.
+5. Place the harpies and raise them to 40 ft with **+5** in the action bar, or Page Up. Each shows "↑40", with a shadow on the ground under it.
 
 ![The watchtower: the rise and the tower with their heights in pills, the stairs, an archer on top, and harpies flying with their shadows.](dm-guide/heights-build.webp)
 
 **Running it**
 
 - With **Walls and ledges block players' moves** on, a character walking to the tower stops at the ledge ("Ledge in the way. Take the stairs.") and goes up by the stairs. A flier passes over.
-- Tap the ground with **Select** to read a height. The Ruler and token distances count height like one more diagonal. Under the default rule (every square 5 ft), the Ruler from the archer 30 ft up to a goblin 10 squares away on the ground reads 50 ft, since the larger of the two counts.
-- Ivo casts Fireball on the ground under a harpy at 40 ft: the shaded squares include its square, but "In area" leaves it out, since the sphere reaches only 20 ft up. To catch the harpy, drop the sphere on its token, or raise **Elevation** under **⋯** before placing.
-- A harpy knocked out of the air: lower its elevation to the ground, or let the fall damage go through its HP entry. The **Flying** status is a reminder only, separate from elevation.
+- Tap the ground with **Select** to read a height. The Ruler and token distances count height as if it were one more diagonal. Under the default rule (every square 5 ft), the larger of the two distances is what counts. So the Ruler from the archer, 30 ft up, to a goblin on the ground 10 squares (50 ft) away reads 50 ft.
+- Ivo casts Fireball on the ground under a harpy flying at 40 ft. The shaded squares include the harpy's square, but "In area" leaves it out, since the sphere reaches only 20 ft up. To catch the harpy, center the sphere on its token, or raise **Elevation** under **⋯** before placing it.
+- When a harpy is knocked out of the air, lower its elevation to the ground, and apply any falling damage through its HP entry. The **Flying** status is only a reminder for you, and it is separate from the token's elevation.
 
 ![A Fireball under a flying harpy: the squares under it shaded, but "In area" leaves it out.](dm-guide/heights-fireball.webp)
 
 ## A boss with legendary actions
 
-An adult red dragon in its lair. It has Multiattack, Fire Breath (Recharge 5–6), Legendary Resistance and legendary actions.
+The party faces an adult red dragon in its lair. It has Multiattack, Fire Breath (Recharge 5–6), Legendary Resistance and legendary actions.
 
 **Setting it up**
 
-1. **Monsters**, search "red dragon", tap **Adult Red Dragon**. On its place card tick **In its lair**: it gets its lair's 4 legendary actions and 4 Legendary Resistances, and its lair XP. This only happens at placement. **Place on the map** and tap its spot.
-2. Add it to the fight with the party. Its tracker row shows "LA 4/4" and "LR 4/4" to you alone. **In lair** in the row's **⋯** adds a "Lair" tag the players see too. It changes nothing else.
+1. In **Monsters**, search for "red dragon" and tap **Adult Red Dragon**. On its place card, tick **In its lair**: in its lair it gets 4 legendary actions, 4 Legendary Resistances and its lair XP. This only happens when you place it, so tick it before you press **Place on the map** and tap its spot.
+2. Add the dragon to the fight along with the party. Its tracker row shows "LA 4/4" and "LR 4/4", to you alone. **In lair**, in the row's **⋯**, adds a "Lair" tag that the players see too, and changes nothing else.
 
 **Its turn**
 
-1. Tap the dragon, then **Roll** in its bar. **Rolls for Adult Red Dragon** lists its actions. Multiattack is a note at the head of the actions: roll each attack it names with **Attack** and **Damage**, and apply each with the **Use** chip on the target's HP entry.
-2. Fire Breath: press **Group save, DC 21 Dex**. The group save opens with "17d6 fire, half on a pass." Its rows follow your selection, so select the characters in the cone first, or place a cone **Area** from the dragon and use its **Save and damage**. The players are asked to roll. Roll the damage, then **Apply**. Fire Breath is now marked **Used**.
-3. At the start of the dragon's next turn, a card says "Fire Breath can recharge (5–6)." Press **Roll**. On a 5 or 6 Used clears.
+1. Tap the dragon, then press **Roll** in its bar. **Rolls for Adult Red Dragon** lists its actions. Multiattack is a note at the head of the actions: roll each attack it names with **Attack** and **Damage**, and apply each hit with the **Use** chip in the target's HP entry.
+2. For Fire Breath, press **Group save, DC 21 Dex**. The group save opens with "17d6 fire, half on a pass." Its rows follow what you have selected, so select the characters in the cone first. Or place a cone **Area** from the dragon and use its **Save and damage**, which picks them for you. The players are asked to roll. Roll the damage, then press **Apply**. Fire Breath is now marked **Used**.
+3. At the start of the dragon's next turn, a card says "Fire Breath can recharge (5–6)." Press **Roll**, and on a 5 or 6, Used clears.
 
 **Between turns**
 
-- Spend a legendary action: in the dragon's row's **⋯**, tap a pip under **Legendary actions used**. They refill at the start of its turn.
-- Legendary Resistance: when the dragon fails a save in a group save, its row offers **Use Legendary Resistance (3 left)**. A save-ends or concentration card offers the same. For a save you roll yourself from its options, tap a pip under **Legendary resistances used today** in its row's **⋯**.
+- To spend a legendary action, open the dragon's row's **⋯** and tap a pip under **Legendary actions used**. They refill at the start of its turn.
+- When the dragon fails a save in a group save, its row offers **Use Legendary Resistance (3 left)**, and a save-ends or concentration card offers the same. For a save you roll yourself from its roll options, tap a pip under **Legendary resistances used today** in its row's **⋯**.
 
 ![The dragon's turn: its roll options with Rend, Fire Breath's Recharge and Used, and the tracker row with its LA and LR tags.](dm-guide/boss.webp)
 
 ## Spirit Guardians and a summoned companion
 
-Bree casts Spirit Guardians and wades in. Ivo's owl familiar scouts on its own turn.
+Bree casts Spirit Guardians and wades into the goblins, while Ivo's owl familiar scouts ahead on its own turn.
 
 **Spirit Guardians**
 
-1. Bree's player picks the **Area** tool. With Bree on the scene it reads "From Bree". They search "spirit guardians": a 15 ft emanation that surrounds Bree, attached so it moves with her, with **Enters**, **Ends turn** and **Once a turn** reminders on. **Place**.
-2. Give Bree **Concentrating** with the spell "Spirit Guardians" from her **Conditions**.
-3. When a goblin moves into the aura, or Bree walks up to it, the log says "Goblin Warrior 1 entered Spirit Guardians." and you get a notice. When one ends its turn inside, the same.
-4. Resolve it: for one goblin, select it and roll its Wisdom save from its roll options, then apply Bree's 3d8 radiant (half on a pass) with the **Use** chip. For several at once, press **Save and damage** on the aura and **Skip** the rows that didn't trigger.
-5. When Bree takes damage, her player gets the concentration check. If it fails, delete the aura from the **Areas** panel. Areas don't end with concentration on their own.
+1. Bree's player picks the **Area** tool. With Bree on the scene, it reads "From Bree". They search for "spirit guardians", which gives a 15 ft emanation around Bree, attached so it moves with her, with the **Enters**, **Ends turn** and **Once a turn** reminders on. They press **Place**.
+2. From Bree's **Conditions**, give her **Concentrating** with the spell "Spirit Guardians".
+3. When a goblin moves into the aura, or Bree walks up to one, the log says "Goblin Warrior 1 entered Spirit Guardians." and you get a notice. The same happens when a goblin ends its turn inside.
+4. Resolve it. For one goblin, select it, roll its Wisdom save from its roll options, and apply Bree's 3d8 radiant damage (half on a pass) with the **Use** chip. For several at once, press **Save and damage** on the aura and **Skip** the rows that weren't affected this time.
+5. When Bree takes damage, her player gets the concentration check. If it fails, delete the aura from the **Areas** panel, because areas don't end on their own when concentration does.
 
 ![Spirit Guardians around Bree: the attached aura, the goblins inside it in the Areas panel, and the reminder in the log.](dm-guide/guardians.webp)
 
 **The familiar**
 
-1. Ivo's player opens **Characters**, Ivo's card, **Add a companion**: "Hoot", **A creature**, **Choose a stat block**, the SRD Owl. In 2024 a familiar rolls its own initiative, so **Turn**: **Its own turn**. **Add and place** puts it next to Ivo.
-2. With Ivo in a running fight, Hoot joins it at once in a row of its own that reads "Companion of Ivo". Its player rolls its initiative. Out of a fight, it joins with **Add Hoot** under **Join the fight**, or with **Everyone here** when you start one.
-3. The owl lends the party its sight under party vision, so it can scout a dark room ahead of everyone.
-4. Ivo's next familiar picks the SRD Owl again. A pasted or typed block is kept under **Stat blocks** on Ivo's card.
+1. Ivo's player opens **Characters**, then Ivo's card, and presses **Add a companion**. They name it "Hoot", pick **A creature**, and under **Choose a stat block** pick the SRD Owl. Under the 2024 rules a familiar rolls its own initiative, so they set **Turn** to **Its own turn**. **Add and place** puts the owl next to Ivo.
+2. Since Ivo is in a running fight, Hoot joins it at once, in a row of its own that reads "Companion of Ivo", and its player rolls its initiative. Outside a fight, it joins with **Add Hoot** under **Join the fight**, or with **Everyone here** when you start one.
+3. Under party vision, the owl lends the party its sight, so it can scout a dark room ahead of everyone else.
+4. The next time Ivo summons a familiar, his player simply picks the SRD Owl again. A pasted or typed stat block would be kept under **Stat blocks** on Ivo's card instead.
 
-A companion that acts on its character's turn (a summoned spirit, a steed) is listed under the character's row with its own Reaction. An effect such as Spiritual Weapon takes **On Bree's turn, not listed**.
+A companion that acts on its character's turn, such as a summoned spirit or a steed, is listed under its character's row with its own Reaction. An effect such as Spiritual Weapon takes **On Bree's turn, not listed**.
 
 ## The party travels between scenes
 
 The fight on the road is over, and the party heads for the crypt.
 
-1. **Prepare ahead.** In **Scenes**, tap the crypt's row. You see it, and the players stay on the road. Build, place monsters and set the fog while they play. The Outliner on that scene reads as players will see it once they arrive.
-2. **Move the players.** Press **Move players** on the crypt. Every player's view switches. Their tokens don't move: they stay on the road. Place each character on the crypt with **Characters**, **Place a token**, or let players place their own. Their HP and conditions came along, since characters belong to the room. Delete the old tokens on the road when you're done there.
-3. **Bring them to the start.** **Save current view** in the crypt's **This scene** settings sets where it opens. Or use **Bring everyone here** in the DM panel once you're framed.
-4. **Companions left behind.** Ivo's owl stayed on the road. Open the road scene, press `/`, and type "companion". Once Ivo's token is gone from the road, the owl's row reads "Away from Ivo". Delete its token there, and Ivo's player adds it again on the crypt with **Add a companion**, the Owl.
-5. **Monsters left behind** are their own copies and stay where they were. Duplicate a scene (its **⋯**, **Duplicate…**) to keep a clean copy before a fight changes it.
+1. **Prepare ahead.** In **Scenes**, tap the crypt's row. You see the crypt, while the players stay on the road. Build it, place monsters and set the fog while they play. The Outliner on the crypt reads as the players will see it once they arrive.
+2. **Move the players.** Press **Move players** on the crypt, and every player's view switches to it. Their tokens don't come along, though: they stay on the road. Place each character on the crypt with **Characters**, **Place a token**, or let the players place their own. Their HP and conditions come with them, since characters belong to the room. Delete the old tokens on the road when you're done there.
+3. **Bring them to the start.** **Save current view**, in the crypt's **This scene** settings, sets where the scene opens. Or frame the map yourself and use **Bring everyone here** in the DM panel.
+4. **Companions left behind.** Ivo's owl stayed on the road. Open the road scene, press `/`, and type "companion". Once Ivo's token is gone from the road, the owl's row reads "Away from Ivo". Delete its token there, and Ivo's player adds it again on the crypt with **Add a companion** and the Owl.
+5. **Monsters left behind** are their own copies, and they stay where they were. If you want a clean copy of a scene to come back to, duplicate it (from its **⋯**, **Duplicate…**) before a fight changes it.
 
 ![The Outliner on the road after the party left: searching "companion" finds the owl, marked Away from Ivo.](dm-guide/travel-outliner.webp)
 
 ## A secret door and a reveal
 
-The party finds a hidden vault, and you want a dramatic reveal.
+The party finds a hidden vault, and you want the reveal to land with a bit of drama.
 
-1. Build the vault behind a **Secret door** (**Hidden**) and keep it under fog.
-2. When they find the door, tap it with **Select** and press **Mark found**.
-3. Before they open it, **DM** panel, **Black out players' screens**. Players see "The DM has paused the game."
-4. Reveal the vault with the **Fog** tool, place or unhide the guardian, and switch to a night phase if the map has one.
-5. In **Handouts**, **Show a handout** with the vault's inscription to **Everyone**.
+1. Build the vault behind a **Secret door** set to **Hidden**, and keep it under fog.
+2. When the party finds the door, tap it with **Select** and press **Mark found**.
+3. Before they open it, go to the **DM** panel and turn on **Black out players' screens**. The players now see "The DM has paused the game."
+4. While the screens are dark, reveal the vault with the **Fog** tool, place or unhide its guardian, and switch to a night phase if the map has one.
+5. In **Handouts**, use **Show a handout** to show the vault's inscription to **Everyone**.
 6. Turn **Black out players' screens** off. The players see the room and the handout together.
 
 ![A player's phone during the blackout: "The DM has paused the game." and the X-card.](dm-guide/reveal-blackout.webp)
 
 ## Shortcuts
 
-Press `?` (or Menu, **This device**, **Show the shortcuts**) for the full list for your role.
+Press `?` (or open the Menu, then **This device**, then **Show the shortcuts**) for the full list of shortcuts for your role.
 
 ![The shortcut list the ? key opens.](dm-guide/shortcuts.webp)
 
-The keys a DM uses most:
+These are the keys a DM uses most:
 
-- `V`, `R`, `A`, `F`, `D`, `P`: Select, Ruler, Area, Fog, Draw, Ping. `T`, `M`, `B`, `G`: Add token, Pin, Map builder, Line up grid.
-- `N`: Next turn (and Start).
-- `H`: hide or show the selected tokens. `L`: lock them. Delete: delete them.
-- Arrow keys: move the selection a square. Page Up and Page Down: raise or lower it 5 ft.
-- `/`: search the scene in the Outliner.
-- `Ctrl+Z` and `Ctrl+Shift+Z`: Undo and Redo (Cmd on a Mac).
-- `0`: fit the map. `+` and `-`: zoom. `S`: hide or show the side panel. `O`: go to the other of two panels.
+- `V`, `R`, `A`, `F`, `D` and `P` pick Select, Ruler, Area, Fog, Draw and Ping. `T`, `M`, `B` and `G` pick Add token, Pin, Map builder and Line up grid.
+- `N` moves to the next turn, and starts the fight if it hasn't started yet.
+- `H` hides or shows the selected tokens, `L` locks them, and Delete deletes them.
+- The arrow keys move the selection a square. Page Up and Page Down raise or lower it 5 ft.
+- `/` searches the scene in the Outliner.
+- `Ctrl+Z` and `Ctrl+Shift+Z` are Undo and Redo (Cmd on a Mac).
+- `0` fits the map to the screen, and `+` and `-` zoom. `S` hides or shows the side panel, and `O` switches to the other of two panels.
 - Escape closes the newest pop-up, sheet or action bar.
 
-On a computer, Shift or Ctrl and a click adds a token to the selection, and Shift or Ctrl and a drag on empty map draws a selection box. Drag with the right or middle button, or Space and a drag, to move the map.
+With a mouse, Shift or Ctrl and a click adds a token to the selection, and Shift or Ctrl and a drag on empty map draws a selection box. To move the map, drag with the right or middle button, or hold Space and drag.
