@@ -18,6 +18,24 @@ export const IMPORT_WAIT_MS = 2000;
 export type FoundGrid = { tier: "high" | "medium"; cal: Calibration };
 
 /**
+ * The size the Worker asks the browser to decode a file at, or null to
+ * decode it as it is: the picture upright, drawn down to DECODE_MAX_SIDE
+ * on its long side. The browser turns a JPEG by its EXIF orientation
+ * before it resizes (createImageBitmap's default), as the server turns its
+ * copy, so for a quarter turn (5 to 8) the header's sides swap. Asked for
+ * the unturned size, it would squash the upright picture into it, and the
+ * squares would no longer be square.
+ */
+export function decodeSize(header: { width: number; height: number } | null, orientation: number): { width: number; height: number } | null {
+  if (!header) return null;
+  const turned = orientation >= 5 && orientation <= 8;
+  const width = turned ? header.height : header.width;
+  const height = turned ? header.width : header.height;
+  const k = Math.min(1, DECODE_MAX_SIDE / Math.max(width, height));
+  return k < 1 ? { width: Math.max(1, Math.round(width * k)), height: Math.max(1, Math.round(height * k)) } : null;
+}
+
+/**
  * A detection in the map's canonical pixels, or null. The Worker measures
  * an image decoded at most DECODE_MAX_SIDE wide, so its sizes are scaled
  * by the canonical size over the decoded one. If the two shapes differ,

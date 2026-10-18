@@ -152,6 +152,58 @@ export function sniffImage(bytes: Uint8Array): ImageInfo | null {
   return info;
 }
 
+/**
+ * The EXIF orientation in a JPEG's header, 1 to 8, or 1 when it has none
+ * or the bytes are not a JPEG. A phone stores a photo as its sensor read
+ * it, with this tag saying how to turn it upright. 5 to 8 are quarter
+ * turns, so the upright picture has the frame's sides swapped. The size
+ * `sniffImage` reads is the frame's, unturned.
+ */
+export function jpegOrientation(b: Uint8Array): number {
+  if (b.length < 4 || b[0] !== 0xff || b[1] !== 0xd8) return 1;
+  let i = 2;
+  while (i + 4 <= b.length) {
+    if (b[i] !== 0xff) return 1;
+    const marker = b[i + 1]!;
+    if (marker === 0xff) {
+      i += 1;
+      continue;
+    }
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      i += 2;
+      continue;
+    }
+    // The picture's data follows its start of scan, and the EXIF block always comes before.
+    if (marker === 0xda) return 1;
+    const length = u16be(b, i + 2);
+    if (marker === 0xe1 && ascii(b, i + 4, "Exif\0\0")) return tiffOrientation(b, i + 10, Math.min(b.length, i + 2 + length));
+    i += 2 + length;
+  }
+  return 1;
+}
+
+/** The Orientation entry (tag 0x0112) of the first directory of a TIFF block that runs from `start` to `end`, else 1. */
+function tiffOrientation(b: Uint8Array, start: number, end: number): number {
+  if (start + 8 > end) return 1;
+  const little = ascii(b, start, "II");
+  if (!little && !ascii(b, start, "MM")) return 1;
+  const u16 = (k: number) => (little ? u16le(b, k) : u16be(b, k));
+  const u32 = (k: number) => (little ? u16le(b, k) + u16le(b, k + 2) * 0x10000 : u32be(b, k));
+  if (u16(start + 2) !== 42) return 1;
+  const dir = start + u32(start + 4);
+  if (dir + 2 > end) return 1;
+  for (let n = 0, count = u16(dir); n < count; n++) {
+    const entry = dir + 2 + n * 12;
+    if (entry + 12 > end) return 1;
+    // A SHORT value sits in the first two bytes of the entry's value field, in the block's byte order.
+    if (u16(entry) === 0x0112) {
+      const value = u16(entry + 8);
+      return value >= 1 && value <= 8 ? value : 1;
+    }
+  }
+  return 1;
+}
+
 export type ImagePlan =
   | { kind: "as-is" }
   | { kind: "resize"; width: number; height: number }

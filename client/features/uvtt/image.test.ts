@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { decodeBase64, decodeImageBase64, planImage, sniffImage } from "./image.ts";
+import { ORIENTED_JPEG } from "../images/orientation.ts";
+import { decodeBase64, decodeImageBase64, jpegOrientation, planImage, sniffImage } from "./image.ts";
 import { base64, pngHeader } from "./synthetic.ts";
 
 const MiB = 1024 * 1024;
@@ -61,6 +62,31 @@ describe("the image's type and size from its header", () => {
     const app0 = [0xff, 0xe0, 0x00, 0x10, ...new Array<number>(14).fill(0)];
     const sof = [0xff, 0xc2, 0x00, 0x11, 0x08, 0x03, 0xd4, 0x05, 0x78, 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1];
     assert.deepEqual(sniffImage(bytesOf([0xff, 0xd8], app0, sof)), { type: "image/jpeg", width: 1400, height: 980 });
+  });
+
+  test("a JPEG's EXIF orientation, in either byte order, past the segments before it", () => {
+    assert.equal(jpegOrientation(ORIENTED_JPEG), 6, "big-endian, right after the start");
+    const app0 = [0xff, 0xe0, 0x00, 0x10, ...new Array<number>(14).fill(0)];
+    // Little-endian TIFF with two entries, the second the orientation: 8.
+    const tiff = [0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00, 0x02, 0x00, ...[0x0f, 0x01, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], ...[0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00], 0, 0, 0, 0];
+    const exif = [...[0x45, 0x78, 0x69, 0x66, 0x00, 0x00], ...tiff];
+    const app1 = [0xff, 0xe1, (exif.length + 2) >> 8, (exif.length + 2) & 0xff, ...exif];
+    const sof = [0xff, 0xc0, 0x00, 0x11, 0x08, 0x09, 0x60, 0x12, 0xc0, 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1];
+    const file = bytesOf([0xff, 0xd8], app0, app1, sof);
+    assert.equal(jpegOrientation(file), 8);
+    assert.deepEqual(sniffImage(file), { type: "image/jpeg", width: 4800, height: 2400 }, "the frame's size, unturned");
+  });
+
+  test("a JPEG without EXIF, a broken block and anything else read as upright", () => {
+    const app0 = [0xff, 0xe0, 0x00, 0x10, ...new Array<number>(14).fill(0)];
+    const sof = [0xff, 0xc2, 0x00, 0x11, 0x08, 0x03, 0xd4, 0x05, 0x78, 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1];
+    assert.equal(jpegOrientation(bytesOf([0xff, 0xd8], app0, sof)), 1);
+    // A directory that points past the block's end.
+    const short = [0xff, 0xe1, 0x00, 0x10, ...[0x45, 0x78, 0x69, 0x66, 0x00, 0x00], 0x4d, 0x4d, 0x00, 0x2a, 0x00, 0x00, 0x40, 0x00];
+    assert.equal(jpegOrientation(bytesOf([0xff, 0xd8], short, sof)), 1);
+    assert.equal(jpegOrientation(ORIENTED_JPEG.subarray(0, 20)), 1, "cut off inside the block");
+    assert.equal(jpegOrientation(pngHeader(1400, 980)), 1);
+    assert.equal(jpegOrientation(new Uint8Array()), 1);
   });
 
   test("anything else is not an image the import takes", () => {

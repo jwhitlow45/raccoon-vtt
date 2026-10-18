@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { AxisFit, GridDetection } from "./detect.ts";
-import { cameWithGrid, findFound, foundGrid, importFound, nameGivesSize, searchGrid, searchOnImport, within, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
+import sharp from "sharp";
+import { jpegOrientation, sniffImage } from "../uvtt/image.ts";
+import { detectGrid, type AxisFit, type GridDetection } from "./detect.ts";
+import { cameWithGrid, decodeSize, findFound, foundGrid, importFound, nameGivesSize, searchGrid, searchOnImport, within, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
 import { rng } from "./synthetic.ts";
 
 const AXIS = { found: 20, expected: 20, from: 0, to: 0, snr: 50, between: 0, parity: 1, rms: 0.1, continuity: 1, restart: 0, coverage: 1, drift: 0 } as const;
@@ -14,6 +16,58 @@ function detection(cellPx: number, origin: { x: number; y: number }, confidence:
 function done(result: GridDetection, width: number, height: number): SearchDone {
   return { t: "done", result, width, height };
 }
+
+/**
+ * A grid map 4800 x 2400 as its frame is stored, tagged to be turned a
+ * quarter clockwise (EXIF orientation 6), as a phone stores a photo taken
+ * on its side: upright it is 2400 x 4800, with 100 px squares.
+ */
+async function turnedJpeg(): Promise<Buffer> {
+  const width = 4800;
+  const height = 2400;
+  const data = Buffer.alloc(width * height, 200);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) if (x % 100 < 2 || y % 100 < 2) data[y * width + x] = 40;
+  }
+  return sharp(data, { raw: { width, height, channels: 1 } }).jpeg({ quality: 90 }).withMetadata({ orientation: 6 }).toBuffer();
+}
+
+/** What the browser's createImageBitmap does with the file at a size: turn it upright, then resize to exactly that size. */
+async function decodeAt(file: Buffer, size: { width: number; height: number }) {
+  const { data, info } = await sharp(file).rotate().resize(size.width, size.height, { fit: "fill" }).greyscale().raw().toBuffer({ resolveWithObject: true });
+  return { width: info.width, height: info.height, data: new Uint8Array(data), channels: 1 as const };
+}
+
+describe("the size a picked file decodes at", () => {
+  test("a large picture is drawn down to the decode's longest side, and a small one decodes as it is", () => {
+    assert.deepEqual(decodeSize({ width: 8192, height: 4096 }, 1), { width: 4096, height: 2048 });
+    assert.deepEqual(decodeSize({ width: 3000, height: 2000 }, 1), null);
+    assert.deepEqual(decodeSize(null, 6), null, "a header the sniff does not know decodes as it is, then is drawn down");
+  });
+
+  test("a quarter turn swaps the sides, since the browser turns the picture before it resizes", () => {
+    for (const orientation of [5, 6, 7, 8]) assert.deepEqual(decodeSize({ width: 4800, height: 2400 }, orientation), { width: 2048, height: 4096 }, `orientation ${orientation}`);
+    for (const orientation of [1, 2, 3, 4]) assert.deepEqual(decodeSize({ width: 4800, height: 2400 }, orientation), { width: 4096, height: 2048 }, `orientation ${orientation}`);
+  });
+
+  test("a turned JPEG over 4096 px has its grid found, where the unturned size squashed it", async () => {
+    const file = await turnedJpeg();
+    const header = new Uint8Array(file.subarray(0, 1 << 20));
+    const sniffed = sniffImage(header);
+    assert.deepEqual(sniffed && { width: sniffed.width, height: sniffed.height }, { width: 4800, height: 2400 }, "the header gives the frame unturned");
+    assert.equal(jpegOrientation(header), 6);
+    const size = decodeSize(sniffed, jpegOrientation(header));
+    assert.deepEqual(size, { width: 2048, height: 4096 });
+    // The server turns its copy upright too (server/assets/process.ts).
+    const canonical = { widthPx: 2400, heightPx: 4800 };
+    const px = await decodeAt(file, size!);
+    const found = foundGrid(detectGrid(px), px, canonical);
+    assert.ok(found, "a grid is found");
+    assert.ok(Math.abs(found.cal.cellPx - 100) < 0.5, `squares of ${found.cal.cellPx} px`);
+    const squashed = await decodeAt(file, { width: 4096, height: 2048 });
+    assert.equal(foundGrid(detectGrid(squashed), squashed, canonical), null, "the frame's own size squashes the upright picture");
+  });
+});
 
 describe("what a found grid becomes", () => {
   test("high confidence applies, lower only offers", () => {
