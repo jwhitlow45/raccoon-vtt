@@ -3,6 +3,7 @@ import { appendFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { anyRerun, filePassed, outcome, passedOnRerun, plan, secondsFor, summaryCount, type Durations, type Result, type Run } from "./e2e-shard-plan.ts";
 
 /**
  * One shard of the e2e run, for continuous integration and for a laptop
@@ -16,10 +17,8 @@ import pg from "pg";
  * E2E_PORT, DATABASE_URL and E2E_SCREENSHOT_DIR. Each run's output is also
  * kept in test-results/e2e-logs.
  *
- * Every shard works out the same plan from the same files, so the shards
- * never need to talk to each other. The files are placed by the time each
- * took in e2e/durations.json, the longest first, each onto the shard with
- * the least time so far. A file missing from the list counts as its
+ * The files are placed by the time each took in e2e/durations.json
+ * (scripts/e2e-shard-plan.ts). A file missing from the list counts as its
  * defaultSeconds until its time is recorded.
  *
  * A shard runs its files one after another, as `pnpm test:e2e` does,
@@ -39,30 +38,8 @@ const SHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? "test-results/e2e-screenshots
 const LOG_DIR = path.join(ROOT, "test-results/e2e-logs");
 const ACTIONS = process.env.GITHUB_ACTIONS === "true";
 
-type Durations = { defaultSeconds: number; seconds: Record<string, number> };
 /** e2e/macos-only.json: each file's name, and why it runs only on macOS. */
 type MacosOnly = { rule: string; files: Record<string, string> };
-type Shard = { files: string[]; seconds: number };
-type Run = { ok: boolean; seconds: number; tests: number | null; passed: number | null; todo: number | null; timedOut: boolean };
-type Result = { file: string; first: Run; rerun: Run | null };
-
-/** A file's recorded time, or the default for a file not recorded yet. */
-function secondsFor(durations: Durations, file: string): number {
-  return Object.hasOwn(durations.seconds, file) ? durations.seconds[file]! : durations.defaultSeconds;
-}
-
-function plan(files: string[], durations: Durations, count: number): Shard[] {
-  const shards: Shard[] = Array.from({ length: count }, () => ({ files: [], seconds: 0 }));
-  const cost = (f: string) => secondsFor(durations, f);
-  const longestFirst = [...files].sort((a, b) => cost(b) - cost(a) || a.localeCompare(b));
-  for (const file of longestFirst) {
-    const lightest = shards.reduce((best, s) => (s.seconds < best.seconds ? s : best));
-    lightest.files.push(file);
-    lightest.seconds += cost(file);
-  }
-  for (const s of shards) s.files.sort();
-  return shards;
-}
 
 /**
  * The server counts successful joins and room creations per address in
@@ -119,12 +96,6 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-/** One of the totals the spec reporter ends with, read past any color codes a FORCE_COLOR adds. */
-function summaryCount(text: string, label: string): number | null {
-  const m = new RegExp(`^ℹ ${label} (\\d+)$`, "m").exec(text.replace(/\x1b\[[0-9;]*m/g, ""));
-  return m ? Number(m[1]) : null;
-}
-
 async function runFile(file: string, label: string, seconds: number): Promise<Run> {
   await clearJoinCounts();
   mkdirSync(LOG_DIR, { recursive: true });
@@ -173,22 +144,14 @@ async function runFile(file: string, label: string, seconds: number): Promise<Ru
   };
 }
 
-function outcome(run: Run): string {
-  // A failed hook cancels its tests rather than failing them, so the count that means something is the passes.
-  const todo = run.todo ? `, ${run.todo} todo` : "";
-  const counts = run.tests === null ? "" : run.ok ? ` (${run.tests} tests${todo})` : ` (${run.passed ?? "?"} of ${run.tests} tests passed${todo})`;
-  const how = run.timedOut ? "timed out" : run.ok ? "passed" : "failed";
-  return `${how}${counts} in ${run.seconds} s`;
-}
-
 function report(index: number, count: number, results: Result[]): void {
   const width = Math.max(...results.map((r) => r.file.length));
   console.log(`\nshard ${index} of ${count}`);
   for (const r of results) {
     const rerun = r.rerun ? `, then its rerun ${outcome(r.rerun)}` : "";
     console.log(`  ${r.file.padEnd(width)}  ${outcome(r.first)}${rerun}`);
-    if (ACTIONS && r.rerun?.ok) console.log(`::warning title=Flaky e2e file::${r.file} failed, then passed on its rerun. Its logs and screenshots are in this shard's artifact.`);
-    if (ACTIONS && r.rerun && !r.rerun.ok) console.log(`::error title=Failed e2e file::${r.file} failed twice. Its logs and screenshots are in this shard's artifact.`);
+    if (ACTIONS && passedOnRerun(r)) console.log(`::warning title=Flaky e2e file::${r.file} failed, then passed on its rerun. Its logs and screenshots are in this shard's artifact.`);
+    if (ACTIONS && !filePassed(r)) console.log(`::error title=Failed e2e file::${r.file} ${r.rerun ? "failed twice" : "failed"}. Its logs and screenshots are in this shard's artifact.`);
   }
   const summaryFile = process.env.GITHUB_STEP_SUMMARY;
   if (summaryFile) {
@@ -197,7 +160,7 @@ function report(index: number, count: number, results: Result[]): void {
   }
   // The workflow keeps the logs and screenshots of a shard that failed, and of one that passed only through a rerun.
   const outputFile = process.env.GITHUB_OUTPUT;
-  if (outputFile) appendFileSync(outputFile, `reran=${results.some((r) => r.rerun !== null)}\n`);
+  if (outputFile) appendFileSync(outputFile, `reran=${anyRerun(results)}\n`);
 }
 
 async function main(): Promise<number> {
@@ -257,7 +220,7 @@ async function main(): Promise<number> {
   }
   report(index, count, results);
   if (stopping) return stopping === "SIGINT" ? 130 : 143;
-  return results.every((r) => r.first.ok || r.rerun?.ok) ? 0 : 1;
+  return results.every(filePassed) ? 0 : 1;
 }
 
 process.exitCode = await main();
