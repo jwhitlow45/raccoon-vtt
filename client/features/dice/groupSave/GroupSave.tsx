@@ -866,7 +866,7 @@ function GroupRow(props: {
           ) : null}
         </div>
       )}
-      {details.length > 0 ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted, display: "grid", gap: 2 }}>{details.map((d, i) => <span key={i}>{d}</span>)}</div> : null}
+      {details.length > 0 ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted, display: "grid", gap: theme.space(1) }}>{details.map((d, i) => <span key={i}>{d}</span>)}</div> : null}
       {!setup && !frozen ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), alignItems: "center" }}>
           {waitingAsk && typed.typing ? (

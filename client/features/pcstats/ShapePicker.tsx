@@ -119,7 +119,7 @@ function ShapeChoice(props: { name: string; creature: string; wild: string; valu
       {options.map((o) => (
         <label key={o.value} style={{ display: "flex", alignItems: "flex-start", gap: theme.space(3), minHeight: theme.touch, padding: `${theme.space(2)}px 0`, cursor: "pointer" }}>
           <input type="radio" name={group} value={o.value} checked={props.value === o.value} onChange={() => props.onChange(o.value)} style={{ width: 22, height: 22, margin: 0, flex: "none", accentColor: theme.color.accent }} />
-          <span style={{ display: "grid", gap: theme.space(0.5) }}>
+          <span style={{ display: "grid", gap: theme.space(1) }}>
             <strong>{o.label}</strong>
             <span style={{ color: theme.color.textMuted }}>{o.detail}</span>
           </span>

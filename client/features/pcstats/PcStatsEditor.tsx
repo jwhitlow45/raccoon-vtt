@@ -350,7 +350,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
   return (
     <Dialog title={`${whose(name.current)} stat block`} onClose={close} footer={footer} status={status} phone="fill" width="lg">
       {/* While a save waits, the draft it sent is the draft: the fields hold still until its answer. */}
-      <fieldset disabled={held} style={{ display: "grid", gap: theme.space(5), fontSize: theme.font.body14, border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+      <fieldset disabled={held} style={{ display: "grid", gap: theme.space(4), fontSize: theme.font.body14, border: 0, margin: 0, padding: 0, minWidth: 0 }}>
         {gone ? (
           <Notice tone="warning" role="alert">
             This stat block was deleted or is no longer yours, so it cannot be saved.
@@ -614,7 +614,7 @@ function TotalInput(props: { label: string; number: PcNumber; onTotal(total: num
  */
 function NumberRow(props: { name: ReactNode; aside?: ReactNode; controls: ReactNode; hint?: string }) {
   return (
-    <div style={{ display: "grid", gap: theme.space(0.5), padding: `${theme.space(1)}px 0`, borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>
+    <div style={{ display: "grid", gap: theme.space(1), padding: `${theme.space(1)}px 0`, borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", columnGap: theme.space(3), rowGap: theme.space(1) }}>
         <span style={{ display: "inline-flex", alignItems: "baseline", gap: theme.space(2), minWidth: 0, flex: "1 1 auto" }}>
           <strong style={{ overflowWrap: "anywhere" }}>{props.name}</strong>
