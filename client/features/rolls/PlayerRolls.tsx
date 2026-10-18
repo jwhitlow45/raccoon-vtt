@@ -704,9 +704,9 @@ function CreatureAnswer(props: {
   const test = testOf(request, picked);
   const bonus = bonuses[picked] ?? null;
   const preset = dice ? presetFor(dice, ref, test, { rolls }) : null;
-  const roll = cardRoll({ bonus, preset, inputs, text });
-  const typedBonus = parseBonus(inputs.bonus);
   const typeTotals = useRoomView((s) => playersTypeTotals(s.view?.meta.settings ?? {}));
+  const roll = cardRoll({ bonus, preset, inputs, text, typeTotals });
+  const typedBonus = parseBonus(inputs.bonus);
   const offers = answerOffers({ holds: true, request, target, text, connected, bonusReady: bonus !== null || typedBonus?.ok === true, typeTotals });
   const waiting = !answered(target) && target.retype !== true;
   const failsFirst = waiting && preset?.fails !== undefined && request.test.kind === "save" && !final;
@@ -728,7 +728,7 @@ function CreatureAnswer(props: {
   };
 
   const tapRoll = () => {
-    const now = cardRoll({ bonus, preset: dice ? presetFor(dice, ref, test, { rolls }) : null, inputs, text });
+    const now = cardRoll({ bonus, preset: dice ? presetFor(dice, ref, test, { rolls }) : null, inputs, text, typeTotals });
     if (!now.fields.ok) {
       step({ t: "check", error: now.fields.error });
       return;
@@ -805,6 +805,8 @@ function CreatureAnswer(props: {
   }, [target.change?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = () => {
+    // The Total field is hidden while typed totals are off, so no draft of it is ever sent.
+    if (!typeTotals) return;
     const parsed = parseTotal(text);
     if (!parsed.ok) step({ t: "check", error: parsed.error });
     else send({ total: parsed.total });
@@ -900,7 +902,7 @@ function CreatureAnswer(props: {
                   <Button
                     type="submit"
                     size="sm"
-                    variant={failsFirst || text.trim() !== "" ? "secondary" : "primary"}
+                    variant={failsFirst || (typeTotals && text.trim() !== "") ? "secondary" : "primary"}
                     aria-label={`${roll.label} for ${name}`}
                     aria-describedby={[waitsFor ? whyId : null, roll.reading ? readingId : null].filter((d) => d !== null).join(" ") || undefined}
                     busy={busy === "roll"}

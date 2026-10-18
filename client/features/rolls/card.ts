@@ -113,9 +113,12 @@ export type CardRoll = {
  * the creature's as this device knows it, `preset` doc 3's for the test, read
  * at the tap, and `inputs` the player's own. The preset's sources and the
  * pressed chip resolve once by the cancel rule (docs/design-v1-dice.md 3.3),
- * and the preset's extra comes before the player's.
+ * and the preset's extra comes before the player's. `text` is the Total
+ * field's draft, which holds Roll back only while the room lets players type
+ * totals (`typeTotals`, absent reads as on): off, the field is hidden with
+ * whatever it held, so that draft is no reason to wait.
  */
-export function cardRoll(input: { bonus: number | null; preset: RollPreset | null; inputs: RollInputs; text: string }): CardRoll {
+export function cardRoll(input: { bonus: number | null; preset: RollPreset | null; inputs: RollInputs; text: string; typeTotals?: boolean }): CardRoll {
   const { preset, inputs } = input;
   const typed = input.bonus === null ? parseBonus(inputs.bonus) : null;
   const bonus = input.bonus ?? (typed?.ok ? typed.bonus : null);
@@ -149,7 +152,7 @@ export function cardRoll(input: { bonus: number | null; preset: RollPreset | nul
   }
 
   let blocked: string | null = null;
-  if (input.text.trim() !== "") blocked = CLEAR_TOTAL;
+  if (input.typeTotals !== false && input.text.trim() !== "") blocked = CLEAR_TOTAL;
   else if (bonus === null) blocked = TYPE_BONUS;
 
   let fields: CardRoll["fields"];

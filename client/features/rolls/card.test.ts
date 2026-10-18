@@ -10,6 +10,11 @@ const restrained = [{ key: "restrained" as const }];
 describe("the card's Roll (docs/design-v1-roll-request.md 5.2, 5.3)", () => {
   test("with a known bonus it reads Roll +3, and with none it waits for a typed one", () => {
     assert.equal(cardRoll({ bonus: 3, preset: null, inputs: NO_INPUTS, text: "" }).label, "Roll +3");
+    // A draft total hidden by typed totals off never holds Roll back, nor says to clear it (B7B-ASTRA-03).
+    assert.equal(cardRoll({ bonus: 3, preset: null, inputs: NO_INPUTS, text: "12" }).blocked, CLEAR_TOTAL);
+    assert.equal(cardRoll({ bonus: 3, preset: null, inputs: NO_INPUTS, text: "12", typeTotals: false }).blocked, null);
+    assert.equal(cardRoll({ bonus: null, preset: null, inputs: { ...NO_INPUTS, bonus: "2" }, text: "12", typeTotals: false }).blocked, null, "with a typed bonus too");
+    assert.equal(cardRoll({ bonus: null, preset: null, inputs: NO_INPUTS, text: "12", typeTotals: false }).blocked, TYPE_BONUS, "only the bonus it still needs");
     assert.equal(cardRoll({ bonus: -1, preset: null, inputs: NO_INPUTS, text: "" }).label, "Roll -1");
     assert.equal(cardRoll({ bonus: 0, preset: null, inputs: NO_INPUTS, text: "" }).label, "Roll +0");
     const none = cardRoll({ bonus: null, preset: null, inputs: NO_INPUTS, text: "" });

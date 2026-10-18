@@ -1021,6 +1021,23 @@ describe("the card's one answer path (docs/design-v1-roll-request.md 5.2, 5.6)",
     assert.equal(off(rolled).ask, true, "a rolled answer keeps its rerolls");
   });
 
+  test("turning typed totals off with a total typed and not sent leaves Roll to take, on every card with a Total (B7B-ASTRA-03)", () => {
+    // Every player card with a Total is a request's: a save, a check, a save that ends an effect, and one with two choices.
+    const cards = [
+      request,
+      { ...request, test: { kind: "check" as const, choices: [{ ability: "wis" as const, skill: "perception" as const }] } },
+      { ...request, cause: "saveEnds" as const, spell: true as const },
+      { ...request, test: { kind: "save" as const, choices: [{ ability: "str" as const }, { ability: "dex" as const }] } },
+    ];
+    for (const card of cards) {
+      const target = { characterId: "ayla" };
+      const of = (typeTotals: boolean) => answerOffers({ holds: true, request: card, target, text: "12", connected: true, bonusReady: true, typeTotals });
+      assert.equal(of(true).roll, false, "on, the draft waits to be cleared or sent");
+      assert.equal(of(true).send, true);
+      assert.deepEqual(of(false), { roll: true, send: false, fail: card.test.kind === "save", ask: false, withdraw: false }, "off, the hidden draft holds nothing back");
+    }
+  });
+
   test("a rolled answer is final: no Send, no Fail, and an ask instead", () => {
     assert.equal(finalForPlayer(request, rolled), true);
     assert.deepEqual(offers(rolled, "12"), { roll: false, send: false, fail: false, ask: true, withdraw: false });

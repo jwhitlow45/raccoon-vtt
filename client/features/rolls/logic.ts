@@ -1140,7 +1140,8 @@ export function answerOffers(input: {
   const { request, target } = input;
   if (!input.holds) return { roll: false, send: false, fail: false, ask: false, withdraw: false };
   const final = finalForPlayer(request, target);
-  const typed = input.text.trim() !== "";
+  // A total typed before the room turned typed totals off is hidden with its field, so it holds nothing back.
+  const typed = input.typeTotals && input.text.trim() !== "";
   return {
     roll: !answered(target) && target.retype !== true && !typed && input.connected && input.bonusReady,
     send: !final && typed && input.typeTotals,
