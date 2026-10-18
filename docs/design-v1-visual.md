@@ -135,7 +135,7 @@ export const theme = {
   line: { border: 1, strong: 2, stripe: 3 },
   space: (n: number) => n * 4,
   font: {
-    body: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+    body: 'Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
     mono: 'ui-monospace, "SF Mono", Menlo, monospace',
     /** Tags in dense rows, counters and badges only. Never a sentence. */
     tiny: 11,
@@ -203,6 +203,7 @@ How the raw values map:
 
 - Font sizes: 9 and 10 go to `tiny` (they are chip text). 12 goes to `small`, except pill counters, which go to `tiny`. 15 goes to `input` for the name of a thing and to `body14` for anything else. 17, 18 and 19 go to `heading`. 21 and 22 go to `title`. 24 goes to `display`. A close or back glyph's 20 to 24 px becomes an `Icon` at `icon.md`. The table display keeps its 28 and 36 px as named constants in `features/display/`, since a TV across the room is its own scale. Text drawn on the board keeps its sizes from `lib/boardScale.ts`, outside this scale.
 - Weights: 500 becomes 400 or 600 by role, 800 becomes 700.
+- The typeface (the project owner's decision of 2026-10-17, after this pass): Inter 4.1, bundled, for every OS alike. The system stack drew San Francisco on Apple devices, Roboto on Android, Segoe UI on Windows and another font on Linux, so a row tuned on one could wrap on another. `client/lib/interFont.ts` holds the release, the files and the characters kept. `scripts/inter.ts` subsets Inter's own variable fonts to Latin (Basic Latin, Latin-1 Supplement, Latin Extended-A, General Punctuation, the arrows and the minus sign) as WOFF2: 76,360 bytes for the roman, 83,848 for the italic. `globals.css` declares both faces with `font-display: swap` and that `unicode-range`, `index.html` preloads the roman, and `theme.font.body` names Inter first with the old stack after it, which draws until Inter loads and any character it lacks. The board's canvas draws its names, numbers and badges in the same stack and lays them out again once Inter arrives (`canvas/boardFont.ts`). Digits that line up or change in place (HP, initiative, rounds, dice totals, counts, timers, the ruler's reading) take `font-variant-numeric: tabular-nums`, since Inter's default digits are proportional. The canvas cannot ask for tabular digits, so the board's numbers stay proportional. Sizes, weights and line heights are unchanged.
 - The scale has no 15. The names of things (row titles, setting names, pane titles) take 16 px at weight 600, as Room settings' switch rows already do (`features/dm/controls.tsx` Toggle). In the Token panel a 15 px setting name, a 14 px field label and a 16 px input sit together and do not read as three steps. With 15 gone, each size has one job: 13 explains, 14 is body and small controls, 16 names and takes input, 18 and up title.
 - Radii: 2, 3 and 4 become `xs` (bars). 7 and 8 become `sm`. 12 becomes `md`. `"50%"` becomes `round`.
 - Spacing: `gap: 2` becomes `space(0.5)` and `gap: 4` becomes `space(1)`. Other raw values snap to the 4 px grid, and the close-button nudges (`margin: "-4px -10px -4px 0"` x4) go away with the shared pane header.

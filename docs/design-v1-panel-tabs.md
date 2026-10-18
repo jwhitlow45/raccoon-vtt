@@ -75,7 +75,7 @@ The project owner's other idea, one organized dropdown for every panel, was weig
 
 ### 3.2 What fits
 
-**Measured, not a set per role.** The tab font is `system-ui`, so a title's width differs by system (San Francisco, Segoe UI, Roboto, a Linux font). A browser's minimum font size can widen every tab. The side panel holds the right safe area inside its 360 px (`Room.tsx:1808` `paddingRight: theme.safe.right`), so a large phone held sideways has 59 px less. A set chosen for one of these would overflow or waste the row on another.
+**Measured, not a set per role.** The tab font is `system-ui`, so a title's width differs by system (San Francisco, Segoe UI, Roboto, a Linux font). (Since 2026-10-17 the app ships Inter for every system, docs/design-v1-visual.md 2.1, but the system font still draws until Inter loads.) A browser's minimum font size can widen every tab. The side panel holds the right safe area inside its 360 px (`Room.tsx:1808` `paddingRight: theme.safe.right`), so a large phone held sideways has 59 px less. A set chosen for one of these would overflow or waste the row on another.
 
 **The rule**, `fitTabs` in a new `client/pages/tabFit.ts`:
 

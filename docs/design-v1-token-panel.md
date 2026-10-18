@@ -86,7 +86,7 @@ So: what a DM reads on every turn goes in the bar's summary with the HP entry ri
 
 One component, `StatSummary` (`client/features/tokens/StatSummary.tsx`), with its rules in a pure `client/features/tokens/statSummary.ts`. It has three parts.
 
-**Vitals.** One line of items at 14 px, label muted and value at weight 600, which wraps onto more lines where it must. Each item is made of units that never break inside, and a line may break only between units, so no unit is wider than about 140 px and nothing overflows even the narrowest place it shows (3.12):
+**Vitals.** One line of items at 14 px, label muted and value at weight 600, which wraps onto more lines where it must. Each item is made of units that never break inside, and a line may break only between units, so no unit is wider than about 140 px (about 150 in Inter, which the app has drawn in since 2026-10-17) and nothing overflows even the narrowest place it shows (3.12):
 
 - AC: the shield badge (`AcBadge`, 3.9) holding the number, one unit. Its accessible name is "Armor Class 15". It is left out on a dead creature, for an AC of 0, and while `hpLess` holds (below), as on the map and in the tracker.
 - HP, in the bar only, since the panel has its own section: the same text and life tag the bar's HP line shows today (`TokenActionBar.tsx:125-126`). Its units are "HP 22/30", the temporary HP "+5", and the tag, so "HP 100000/100000" (the largest, `MAX_HP_AMOUNT`, `features/tokens/hpInput.ts:33`) is one unit of about 130 px. A player who sees labels gets "Bloodied". On a dead creature the DM's Revive follows the Dead tag as one more unit, with its line "Revive brings it back with 1 HP." under the vitals, and a player who may heal it gets the combat doc's healing line there instead (docs/design-v1-combat-flow.md 3.5). While `hpLess` holds there is no HP item, so no life tag and no Revive either, whatever HP and life the actor still stores.
@@ -642,7 +642,7 @@ docs/design-v1-visual.md 3.3's Token row gains "Order and folds: docs/design-v1-
 
 - New `client/features/tokens/statSummary.test.ts`:
   - Vitals by viewer: the DM on a monster (AC, HP, speed, Passive Perception), an owner on a character (the same and the sheet link), a player who owns a character's token but not the character (HP only), a player on another's monster (HP as allowed only, none when hidden), an object (HP only), an HP-less companion (nothing), a living and a dead creature companion turned into an effect (nothing: no HP, life tag, Revive or AC), an actor missing each field in turn.
-  - The units: the speed text split per mode (walk only, walk and fly with hover, walk 0 with fly, an Adult White Dragon's four, all five at 1000 ft), HP and temporary HP as separate units, no unit over 140 px by the measure the canvas uses.
+  - The units: the speed text split per mode (walk only, walk and fly with hover, walk 0 with fly, an Adult White Dragon's four, all five at 1000 ft), HP and temporary HP as separate units, no unit over 140 px by the measure the canvas uses (since Inter, no unit wider than the narrowest box's 234 px, by Inter's widths).
   - AC: left out at 0 and on the dead, shown at 9, 99 and 100.
   - The short layout's split: AC and HP in the vitals, speed and Passive Perception with saves and defenses in "More stats", and no disclosure when all four are empty.
   - Saves from a room monster (`statBlockOf`) and from an SRD monster (`statBlockFromSrd` of a real entry), with the SRD minus sign.
