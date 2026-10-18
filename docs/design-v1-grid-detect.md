@@ -102,6 +102,15 @@ Every one of these lands in Line up grid (section 6), where the DM sees the box 
 
 **A Universal VTT import never runs it.** The file states its grid exactly.
 
+### 6.1 What the build changed
+
+The project owner answered section 9: a grid found with high confidence goes on the scene at once, with Line up grid open on it and Use default one tap away, and a size in the file name wins.
+
+- **The name wins by not searching.** A file whose name gives a size is not searched at all, and a name whose counts the server refuses is searched once the upload says so. The "name's size borne out" path is gone.
+- **The guess first, then the found grid.** The scene is made with today's first guess, and a found grid follows at once as one undo step: `scene.setGrid` and the scene's size together (`dispatchGesture`). One undo, or Use default, puts the guess back. `create.ts` makes scenes as before.
+- **Find the grid**, asked for after this note, sits in Line up grid's options and beside Line up the grid in the scene's Grid settings, for any scene with a map, at any time. It fetches the scene's phone-sized copy (at most 4096 px, the full image if that fails) into the same Worker, gives it 30 s, and says "Looking for a grid…" meanwhile. High confidence applies as one undo step, medium places the box, and none says "No grid found. Drag a box over 3 by 3 squares instead." It runs whatever the file's name or kind, but on a scene that came with its own grid from a Universal VTT file it never applies: at any confidence it places the box and says "This scene came with its own grid.", since that grid is exact and the walls stand in its squares. A scene keeps no record of its source, so the marks the import leaves stand for it: automatic walls off, or a first line before the image (`cameWithGrid`).
+- **Replacing a map image** searches the new file while it uploads, and keeps the result only when the image is not the old art at another size (`sameArt` in `create.ts`). A grid found there opens Line up grid, as on a first image. With none found, the replacement keeps today's behavior.
+
 ## 7. Building it
 
 The prototype's method stays. The build is the plumbing and the strip.

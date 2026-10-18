@@ -183,6 +183,8 @@ Two more options wait under **⋯**. **Resize scene** (on by default) makes Appl
 > [!NOTE]
 > When applying a grid also changes the scene's size, the app saves the two changes as separate undo steps. The first **Undo** takes back the resize, and a second one takes back the grid.
 
+Often you won't need the box at all. When a map's file name gives no size, the app looks for a grid drawn on the map while it uploads: if it's sure of what it found, the scene starts lined up, with **Use default** to go back to the first guess, and if it's less sure, it only places the box on those squares for you to check and **Apply**. **Find the grid**, in the tool's options or the scene's **Grid** settings, looks again whenever you like, and one undo takes back a grid it applied. On a scene from a Universal VTT file, which came with an exact grid of its own, it only places the box, so you can compare the two before you **Apply**.
+
 ## The map builder
 
 The **Map builder** tool (`B`, behind **Setup** on a phone) lets you paint a map square by square: floors, walls and doors, heights, labels, lights and stamps. What sets a built map apart from a picture is that the app knows what each part of it is. Walls block movement, sight and areas, doors can be opened, closed and locked, and raised ground counts for movement, sight and areas. You can build a whole map from scratch, or build over a map image to show the app where the walls and cliffs in the art are.
