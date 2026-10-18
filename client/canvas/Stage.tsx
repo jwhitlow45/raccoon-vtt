@@ -242,20 +242,30 @@ export function MapStage(props: {
     };
   }, [scope]);
 
-  // A new scene starts at its saved view, or fitted to the screen.
+  /*
+   * A new scene starts at its saved view, or fitted to the screen. The
+   * camera is seen at once, as the refit's is: the active tool activates
+   * again for the new scene in this same commit, before the render that
+   * would hand camRef the new camera, and Line up grid centers its box on
+   * the view. Read later, the last scene's view put the box off this
+   * scene's image.
+   */
   const insetsRef = useRef(insets);
   insetsRef.current = insets;
   useLayoutEffect(() => {
     if (!size || cameraSceneRef.current === scene.id) return;
     cameraSceneRef.current = scene.id;
     pendingCamRef.current = null;
+    let next: Camera;
     if (scene.defaultView) {
       fittedRef.current = null;
-      setCam(cameraForView(size, scene.defaultView));
+      next = cameraForView(size, scene.defaultView);
     } else {
       fittedRef.current = fitScene(size, scene, insetsRef.current);
-      setCam(fittedRef.current.cam);
+      next = fittedRef.current.cam;
     }
+    camRef.current = next;
+    setCam(next);
   }, [size, scene]);
 
   /*

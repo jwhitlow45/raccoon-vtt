@@ -137,6 +137,24 @@ function stampsOf(state: RoomState | null, sceneId: string): Stamp[] {
   return Object.values(state?.stamps ?? {}).filter((s): s is Stamp => !!s && s.sceneId === sceneId);
 }
 
+/**
+ * Line up grid's box as the map draws it (features/grid/GridLayer.tsx, the
+ * rectangle with the faint yellow fill), in world squares, with the
+ * camera of its stage and the canvas's size, or null while none is drawn.
+ */
+function gridBox(page: Page) {
+  return page.evaluate(() => {
+    type Node = { x(): number; y(): number; width(): number; fill(): unknown };
+    type KStage = { x(): number; y(): number; scaleX(): number; width(): number; height(): number; find(selector: string): Node[] };
+    const konva = (globalThis as unknown as { Konva?: { stages: KStage[] } }).Konva;
+    for (const stage of konva?.stages ?? []) {
+      const box = stage.find("Rect").find((r) => r.fill() === "rgba(247, 223, 0, 0.08)");
+      if (box) return { x: box.x(), y: box.y(), size: box.width(), stageX: stage.x(), stageY: stage.y(), scale: stage.scaleX(), width: stage.width(), height: stage.height() };
+    }
+    return null;
+  });
+}
+
 /** A scene's edges and free walls in a form two scenes can be compared by. */
 function wallsOf(state: RoomState | null, sceneId: string): { edges: Record<string, unknown>; free: unknown[] } {
   const edges: Record<string, unknown> = {};
@@ -490,6 +508,39 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await dm.getByText("This scene came with its own grid.", { exact: false }).first().waitFor({ timeout: 15_000 });
     assert.deepEqual(sceneOf(dmSocket.state, run.sceneId)?.map, fileGrid, "the file's grid stays");
     await shots.take(dm, "maps-gd-own-grid");
+  });
+
+  test("uip3-a. Line up grid's box starts on the image of the scene the DM switches to, in the middle of its view, never where the last scene's view was", async () => {
+    // gd-a left Line up grid open on the Universal VTT scene, 10 by 8 squares. The drawn keep is 29 by 21, so
+    // the middle of its view lies past the small scene's image, where a box placed by the old view would land.
+    const keep = Object.values(dmSocket.state?.scenes ?? {}).find((s) => s?.name === "Drawn keep");
+    assert.ok(keep?.map, "gd-a's drawn keep");
+    const gridOptions = dm.getByRole("toolbar", { name: "Line up grid options" });
+    const scenes = dm.getByRole("tabpanel", { name: "Scenes" });
+    for (const [id, card] of [
+      [keep.id, /^Drawn keep/],
+      [run.sceneId, new RegExp(`^${UVTT.name}(?! \\(copy\\))`)],
+    ] as const) {
+      await openSideTab(dm, "Scenes");
+      await scenes.getByRole("button", { name: card }).click();
+      await waitFor("the DM on the scene", () => dmSocket.you?.sceneId === id || null, 30_000);
+      await gridOptions.waitFor();
+      const map = sceneOf(dmSocket.state, id)!.map!;
+      const image = { left: -map.originPx.x / map.cellPx, top: -map.originPx.y / map.cellPx, right: (map.widthPx - map.originPx.x) / map.cellPx, bottom: (map.heightPx - map.originPx.y) / map.cellPx };
+      const box = await waitFor("Line up grid's box on this scene's image and in view", async () => {
+        const b = await gridBox(dm);
+        if (!b) return null;
+        const mid = { x: b.x + b.size / 2, y: b.y + b.size / 2 };
+        const onImage = mid.x > image.left && mid.x < image.right && mid.y > image.top && mid.y < image.bottom;
+        const screen = { x: b.stageX + mid.x * b.scale, y: b.stageY + mid.y * b.scale };
+        const inView = screen.x > 0 && screen.x < b.width && screen.y > 0 && screen.y < b.height;
+        return onImage && inView ? { ...b, mid } : null;
+      }, 5_000).catch(async (err: unknown) => {
+        throw new Error(`${(err as Error).message}: the box is ${JSON.stringify(await gridBox(dm))} on an image of ${JSON.stringify(image)}`);
+      });
+      assert.ok(box.size > 0);
+    }
+    await shots.take(dm, "maps-uip3-box-after-switch");
   });
 
   test("sa-a-2. new scene from a starter map: the map is copied in, and the scene starts on its measured grid in its grid color, with no alignment", async () => {
