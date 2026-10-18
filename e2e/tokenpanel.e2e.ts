@@ -825,12 +825,12 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.deepEqual(await focused(dm).then((f) => [f.name, f.expanded]), ["Token settings", "false"]);
     assert.equal(JSON.parse((await storedFolds(dm)) ?? "{}").settings, false);
 
-    // A character: no stat block, the summary line alone under the image, with the sheet link.
+    // A character with no stat block: the summary line under the image with the sheet link, and a Stat block fold that holds the buttons to add one.
     await tapToken(dm, run.thorn.at);
     await bar(dm, "Thorn").getByRole("button", { name: "Details", exact: true }).click();
     const thorn = tokenPanel(dm);
     await thorn.getByRole("heading", { name: "Thorn" }).first().waitFor();
-    assert.equal(await thorn.getByRole("button", { name: "Stat block", exact: true }).count(), 0);
+    assert.equal(await thorn.getByRole("button", { name: "Stat block", exact: true }).count(), 1);
     const summary = thorn.locator("[data-quick-numbers]").first();
     await summary.getByRole("img", { name: "Armor Class 16" }).waitFor();
     assert.equal(await summary.getByRole("link", { name: "Open the sheet" }).getAttribute("href"), SHEET);

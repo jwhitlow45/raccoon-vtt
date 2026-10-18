@@ -177,6 +177,53 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await dm.locator(".konvajs-content").first().waitFor();
   });
 
+  test("1a. a character with no block has a fold like Combat's: None yet folded, the help and both buttons opened, and the label lines up at 390 x 844", async () => {
+    const panel = await showBree(ana);
+    const fold = panel.getByRole("button", { name: "Stat block", exact: true });
+    // Open from 900 x 600 up, as the groups design says.
+    assert.equal(await fold.getAttribute("aria-expanded"), "true");
+    await panel.getByText("Add this character’s stat block, or take a shape such as Wild Shape.").waitFor();
+    await fold.click();
+    await panel.getByText("None yet").first().waitFor();
+    assert.equal(await panel.getByRole("button", { name: "Add a stat block" }).count(), 0, "folded, no buttons");
+    assert.equal(await fold.getAttribute("aria-describedby") !== null, true, "the summary describes the fold");
+    await fold.click();
+    await panel.getByRole("button", { name: "Add a stat block" }).waitFor();
+    await panel.getByRole("button", { name: "Take a shape" }).waitFor();
+    await shots.take(ana, "pcstats-empty-fold");
+    await panel.getByRole("button", { name: "Take a shape" }).click();
+    const picker = ana.getByRole("dialog", { name: "Take a shape" });
+    await picker.waitFor();
+    await ana.keyboard.press("Escape");
+    await picker.waitFor({ state: "detached" });
+    await panel.getByRole("button", { name: "Add a stat block" }).click();
+    const sheet = editor(ana);
+    await sheet.waitFor();
+    await ana.keyboard.press("Escape");
+    await sheet.waitFor({ state: "detached" });
+
+    await ana.setViewportSize({ width: 390, height: 844 });
+    await reopenRoom(ana);
+    await ana.getByRole("status", { name: "Connected" }).first().waitFor();
+    await ana.locator(".konvajs-content").first().waitFor();
+    await tapCell(ana, BOUNDS, { x: 5, y: 5 });
+    // The bar has no Stat block button until there is a block, so the sheet comes from Panels. A phone starts the fold folded.
+    await ana.getByRole("button", { name: "Panels" }).click();
+    await ana.getByRole("button", { name: "Token", exact: true }).click();
+    const sheetPanel = ana.getByRole("region", { name: "Token", exact: true });
+    const phoneFold = sheetPanel.getByRole("button", { name: "Stat block", exact: true });
+    await phoneFold.waitFor();
+    if ((await phoneFold.getAttribute("aria-expanded")) !== "true") await phoneFold.click();
+    await sheetPanel.getByRole("button", { name: "Add a stat block" }).waitFor();
+    const labelX = async (name: string) => (await sheetPanel.locator("[data-panel-group] h3 span[id]", { hasText: new RegExp(`^${name}$`) }).boundingBox())!.x;
+    assert.ok(Math.abs((await labelX("Stat block")) - (await labelX("Combat"))) <= 1, "the label lines up with Combat's");
+    await shots.take(ana, "pcstats-empty-fold-390");
+    await ana.setViewportSize({ width: 1280, height: 800 });
+    await reopenRoom(ana);
+    await ana.getByRole("status", { name: "Connected" }).first().waitFor();
+    await ana.locator(".konvajs-content").first().waitFor();
+  });
+
   test("1. Ana adds Bree's stat block: level 5, Dex 16 with its save, Stealth with expertise, and Save waits for the server", async () => {
     const panel = await showBree(ana);
     await panel.getByRole("button", { name: "Add a stat block" }).click();

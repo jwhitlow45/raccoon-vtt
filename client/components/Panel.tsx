@@ -205,7 +205,7 @@ export const GROUP_FOLD = "[data-group-fold]";
  */
 export function Group(props: {
   label: string;
-  /** Absent for a group that never folds, such as a stat block with nothing to fold: the same row, with no chevron. */
+  /** Absent for a group that never folds, such as a stat block whose character is not in view: the same row, with no chevron. */
   open?: boolean;
   onToggle?(): void;
   summary?: ReactNode;

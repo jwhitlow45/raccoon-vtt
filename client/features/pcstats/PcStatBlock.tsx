@@ -4,7 +4,7 @@ import { ABILITY_KEYS, type AbilityKey, type Character } from "#shared/model.ts"
 import { pcShape } from "#shared/rules/pcStats.ts";
 import { signed } from "#shared/statBlock.ts";
 import { Loading } from "../../components/Loading.tsx";
-import { Group } from "../../components/Panel.tsx";
+import { Group, Help } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { editsPcStats } from "../tokens/access.ts";
@@ -22,13 +22,13 @@ import { ShapePicker } from "./ShapePicker.tsx";
 /**
  * A player character's "Stat block" section (docs/design-v1-pc-stats.md
  * 7.1 and 7.3), for the DM and the character's players, in its token's
- * panel under the image and on its card. Without a block or a shape it is
- * its heading alone, with "Add a stat block" and "Take a shape" on its
- * row. With either it is the disclosure "Stat block", "Take a shape"
- * still on its row. A
- * shape shows what it does, the numbers the character rolls with in it,
- * the creature's block and "End the shape". Without one, the block's view
- * and Edit.
+ * panel under the image and on its card. It is always the fold "Stat block",
+ * on the panel's one remembered state. Without a block or a shape the fold
+ * reads "None yet" and opens on a line of help with "Add a stat block" and
+ * "Take a shape". With a block or a shape, "Take a shape" sits on the fold's
+ * row. A shape shows what it does, the numbers the character rolls with in
+ * it, the creature's block and "End the shape". Without one, the block's
+ * view and Edit.
  */
 export function PcStatBlock(props: {
   character: Character;
@@ -46,9 +46,9 @@ export function PcStatBlock(props: {
       Take a shape
     </SmallButton>
   );
-  const add = (ref?: Ref<HTMLButtonElement>) =>
+  const add = () =>
     edits ? (
-      <SmallButton ref={ref} wrap onClick={() => openStats(character.id)}>
+      <SmallButton wrap onClick={() => openStats(character.id)}>
         Add a stat block
       </SmallButton>
     ) : null;
@@ -56,15 +56,17 @@ export function PcStatBlock(props: {
   if (!character.stats && !shaped) {
     return (
       <>
-        <Group
-          label="Stat block"
-          action={
-            <span style={{ display: "inline-flex", flexWrap: "wrap", justifyContent: "flex-end", gap: theme.space(2) }}>
-              {add(fold.foldRef)}
-              {take}
-            </span>
-          }
-        />
+        <Group label="Stat block" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary="None yet">
+          {edits ? (
+            <>
+              <Help>Add this character’s stat block, or take a shape such as Wild Shape.</Help>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+                {add()}
+                {take}
+              </div>
+            </>
+          ) : null}
+        </Group>
         {picker}
       </>
     );

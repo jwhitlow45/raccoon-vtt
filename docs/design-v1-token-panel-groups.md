@@ -22,7 +22,7 @@ The panel is a header, then groups by use, then setup. The order inside a group 
 | Part | Holds | Folded summary | DM | A player, own creature | A player, another creature |
 |---|---|---|---|---|---|
 | Header | Picture, name, size and tags, quick numbers | never folds | shown | shown | shown |
-| Stat block | The block, or "Add a stat block" and "Take a shape" | none: the quick numbers moved up | open from 900 x 600 up, as today | as today | as today (it shows only where `statBlockShown` allows) |
+| Stat block | The block, or with none "None yet" folded and, opened, a line of help with "Add a stat block" and "Take a shape" | none: the quick numbers moved up | open from 900 x 600 up, as today | as today | as today (it shows only where `statBlockShown` allows) |
 | Combat | Hit points, Conditions, Range rings, Rest | "HP 3/7 · 2 conditions · rings 30 ft" | open | open | open |
 | Notes | For everyone, On the card, For DMs only | "2 notes", "None yet" | folded | folded | open, when a note for everyone exists |
 | Position | Elevation and facing, Sight | "Elevation ↑30 ft, facing 90°", "On the ground" | folded | folded | not drawn: its elevation is a quick number |
