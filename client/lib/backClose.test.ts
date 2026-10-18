@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { BackCloser, isOverlayEntry, type HistoryLike } from "./backClose.ts";
+import { BackCloser, isOverlayEntry, sameEntryBehind, withoutMark, type HistoryLike } from "./backClose.ts";
 
 /** A session history: entries with a state, and Back that reports popstate later, as browsers do. */
 class FakeHistory implements HistoryLike {
@@ -15,6 +15,14 @@ class FakeHistory implements HistoryLike {
   pushState(data: unknown): void {
     this.entries = [...this.entries.slice(0, this.index + 1), data];
     this.index += 1;
+  }
+  replaceState(data: unknown): void {
+    this.entries[this.index] = data;
+  }
+  /** What the Navigation API shows: the entry behind is the same page. */
+  sameBehind(): boolean {
+    const page = (state: unknown) => (state as { page?: string } | null)?.page;
+    return this.index > 0 && page(this.entries[this.index - 1]) === page(this.state);
   }
   /** What a router's navigate() does: a new page on top. */
   navigate(state: unknown): void {
@@ -173,12 +181,12 @@ describe("Back closes what floats over the room", () => {
     assert.equal(isOverlayEntry(history.state), false, "so the next Back leaves it");
   });
 
-  test("a reload with a sheet open drops the entry the sheet left, so the first Back leaves the room", () => {
+  test("a reload with a sheet open steps off the entry the sheet left where the browser shows the room's own entry behind it, so the first Back leaves the room", () => {
     // Home, then the room, then the entry of a sheet that was open when the page reloaded.
     const history = new FakeHistory();
     history.entries = [{ page: "home" }, { page: "room" }, { page: "room", rvttOverlay: true }];
     history.index = 2;
-    const closer = new BackCloser(history);
+    const closer = new BackCloser(history, () => history.sameBehind());
     history.onPop = (state) => closer.popped(state);
     history.flush();
     assert.equal(history.index, 1, "back on the room's own entry");
@@ -201,13 +209,71 @@ describe("Back closes what floats over the room", () => {
     const history = new FakeHistory();
     history.entries = [{ page: "room" }, { page: "room", rvttOverlay: true }];
     history.index = 1;
-    const closer = new BackCloser(history);
+    const closer = new BackCloser(history, () => history.sameBehind());
     history.onPop = (state) => closer.popped(state);
     closer.open(() => {});
     history.flush();
     assert.equal(history.index, 1);
     assert.equal(history.entries.length, 2);
     assert.ok(isOverlayEntry(history.state), "the sheet has an entry of its own");
+  });
+
+  test("a reload whose sheet mark sits on the room's own entry, with Home behind it, stays in the room: the mark comes off in place", () => {
+    // A sheet's entry pushed as a reload began, written over the room's own entry (Chrome, after a phone's resize).
+    const history = new FakeHistory();
+    history.entries = [{ page: "home" }, { page: "room", rvttOverlay: true }];
+    history.index = 1;
+    const closer = new BackCloser(history, () => history.sameBehind());
+    history.onPop = (state) => closer.popped(state);
+    assert.equal(history.queued.length, 0, "no Back was asked for");
+    history.flush();
+    assert.equal(history.index, 1, "still on the room");
+    assert.deepEqual(history.state, { page: "room" }, "the mark is off and the page's own state kept");
+    // Sheets work as usual from here, and Back after them leaves for Home.
+    let closed = 0;
+    const unregister = closer.open(() => (closed += 1));
+    history.userBack();
+    history.flush();
+    assert.equal(closed, 1);
+    unregister();
+    history.flush();
+    history.userBack();
+    history.flush();
+    assert.equal((history.state as { page: string }).page, "home");
+  });
+
+  test("where the browser cannot show the entry behind, a reload with a sheet's entry also takes the mark off in place, so one more Back is needed", () => {
+    const history = new FakeHistory();
+    history.entries = [{ page: "home" }, { page: "room" }, { page: "room", rvttOverlay: true }];
+    history.index = 2;
+    const closer = new BackCloser(history);
+    history.onPop = (state) => closer.popped(state);
+    history.flush();
+    assert.equal(history.index, 2, "the room stays where it loaded");
+    assert.equal(isOverlayEntry(history.state), false);
+    history.userBack();
+    history.flush();
+    assert.equal((history.state as { page: string }).page, "room", "the extra Back");
+    history.userBack();
+    history.flush();
+    assert.equal((history.state as { page: string }).page, "home");
+  });
+
+  test("the mark comes off an entry with the page's own state kept, and an entry of the mark alone becomes null", () => {
+    assert.deepEqual(withoutMark({ page: "room", rvttOverlay: true }), { page: "room" });
+    assert.equal(withoutMark({ rvttOverlay: true }), null);
+    assert.deepEqual(withoutMark({ page: "room" }), { page: "room" });
+    assert.equal(withoutMark(null), null);
+  });
+
+  test("the entry behind counts as the same page only when the Navigation API shows its URL is this one", () => {
+    const at = (urls: (string | null)[], index: number) => ({ currentEntry: { index, url: urls[index]! }, entries: () => urls.map((url) => ({ url })) });
+    assert.equal(sameEntryBehind(at(["/r/A", "/r/A"], 1)), true);
+    assert.equal(sameEntryBehind(at(["/", "/r/A"], 1)), false, "Home behind");
+    assert.equal(sameEntryBehind(at([null, "/r/A"], 1)), false, "another site behind");
+    assert.equal(sameEntryBehind(at(["/r/A"], 0)), false, "nothing behind");
+    assert.equal(sameEntryBehind(undefined), false, "no Navigation API");
+    assert.equal(sameEntryBehind({ currentEntry: null, entries: () => [] }), false);
   });
 
   test("leaving the room from a sheet does not bounce back to it", () => {

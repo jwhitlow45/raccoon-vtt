@@ -20,12 +20,34 @@ const MARK = "rvttOverlay";
 export type HistoryLike = {
   readonly state: unknown;
   pushState(data: unknown, unused: string): void;
+  replaceState(data: unknown, unused: string): void;
   back(): void;
 };
 
 /** Whether a history entry is the one this module put on top of the page. */
 export function isOverlayEntry(state: unknown): boolean {
   return typeof state === "object" && state !== null && (state as Record<string, unknown>)[MARK] === true;
+}
+
+/** An entry's state with this module's mark taken off, and the page's own state kept. */
+export function withoutMark(state: unknown): unknown {
+  if (!isOverlayEntry(state)) return state;
+  const { [MARK]: _mark, ...rest } = state as Record<string, unknown>;
+  return Object.keys(rest).length === 0 ? null : rest;
+}
+
+/** The Navigation API's view of the session history, where the browser has it. */
+type NavigationLike = { currentEntry: { index: number; url: string | null } | null; entries(): { url: string | null }[] };
+
+/**
+ * Whether the entry behind the current one is this same page (its URL),
+ * read from the Navigation API. False where the browser lacks it or the
+ * entry behind is another page, since history alone cannot see it.
+ */
+export function sameEntryBehind(navigation: NavigationLike | undefined): boolean {
+  const current = navigation?.currentEntry;
+  if (!navigation || !current || current.url === null || current.index < 1) return false;
+  return navigation.entries()[current.index - 1]?.url === current.url;
 }
 
 type Entry = { close(): void };
@@ -38,14 +60,29 @@ export class BackCloser {
   /** We called history.back() and its popstate has not arrived yet. */
   #leaving = false;
 
-  constructor(history: HistoryLike) {
+  /**
+   * `sameBehind` says whether the entry behind the current one is this same
+   * page, as far as the browser can show (`sameEntryBehind`). False when it
+   * cannot tell.
+   */
+  constructor(history: HistoryLike, sameBehind: () => boolean = () => false) {
     this.#history = history;
     // A page reloaded with a sheet open still has the sheet's entry on top,
     // though nothing is open after the reload. Left there, the first Back
-    // would only step off it and seem to do nothing, so it goes now.
+    // would only step off it and seem to do nothing, so it goes now, but
+    // only onto an entry shown to be this page. A sheet's entry pushed just
+    // as a reload began can land on the room's own entry instead (Chrome,
+    // seen after a phone's resize), and stepping back from there leaves the
+    // room. Where the entry behind is another page, or the browser cannot
+    // show it, the mark is taken off this entry in place, and the room
+    // stays. Without the Navigation API that costs one more Back after a
+    // reload with a sheet open: it lands on the room's own entry, and only
+    // the next leaves.
     if (isOverlayEntry(history.state)) {
-      this.#leaving = true;
-      history.back();
+      if (sameBehind()) {
+        this.#leaving = true;
+        history.back();
+      } else history.replaceState(withoutMark(history.state), "");
     }
   }
 
@@ -102,7 +139,7 @@ let shared: BackCloser | null = null;
 
 function closer(): BackCloser {
   if (!shared) {
-    const instance = new BackCloser(window.history);
+    const instance = new BackCloser(window.history, () => sameEntryBehind((window as unknown as { navigation?: NavigationLike }).navigation));
     window.addEventListener("popstate", (e) => instance.popped(e.state));
     shared = instance;
   }

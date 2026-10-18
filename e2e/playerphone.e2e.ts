@@ -1195,6 +1195,28 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     });
   }
 
+  test("bc-a1. a reload whose sheet mark sits on the room's own history entry, with Home behind it, keeps the room and shows Connected, and the mark is gone (lib/backClose.ts)", async () => {
+    // The race on purpose: a sheet's Back entry written over the room's own entry as a reload begins.
+    const room = `${server.origin}/r/${run.roomId}`;
+    await player.goto(`${server.origin}/`);
+    await player.goto(room);
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+    await player.evaluate(() => {
+      const h = (globalThis as unknown as { history: { state: unknown; replaceState(data: unknown, unused: string): void } }).history;
+      h.replaceState({ ...((h.state as object | null) ?? {}), rvttOverlay: true }, "");
+    });
+    await player.reload();
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+    assert.equal(new URL(player.url()).pathname.replace("-", ""), `/r/${run.roomId}`, "the reload left the room");
+    const mark = await player.evaluate(() => ((globalThis as unknown as { history: { state: Record<string, unknown> | null } }).history.state ?? {}).rvttOverlay ?? null);
+    assert.equal(mark, null, "the mark stayed");
+    // With the mark gone, Back leaves the room at once, for Home.
+    await player.goBack();
+    await player.getByRole("button", { name: "Create room" }).waitFor();
+    await player.goto(room);
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+  });
+
   test("20. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
