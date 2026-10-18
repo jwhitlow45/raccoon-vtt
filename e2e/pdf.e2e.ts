@@ -1442,7 +1442,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await ops.send({ t: "handout.close", handoutId: shownA });
   });
 
-  test("13. view as a player: the popup with every page", async () => {
+  test("13. view as a player: the popup with every page, once the DM shows it with the player in the room", async () => {
     const doc = await documentOf("Second letter", [await paper(1584, 2048, 1), await paper(1584, 2048, 2), await paper(1584, 2048, 3)]);
     const shown = await show(doc);
     await openSideTab(dm, "DM");
@@ -1451,6 +1451,13 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     const preview = dm.getByRole("dialog", { name: "Viewing as Pip" });
     await preview.waitFor();
     const popup = viewer(dm, "Second letter");
+    // Showing before the preview opened, it waits in the Library, as for a player who joins. The preview's view is the DM's own, so two frames settle it.
+    await dm.evaluate(() => {
+      const w = globalThis as unknown as { requestAnimationFrame(callback: () => void): number };
+      return new Promise<void>((done) => w.requestAnimationFrame(() => w.requestAnimationFrame(done)));
+    });
+    assert.equal(await popup.count(), 0, "a handout already showing popped up as the preview opened");
+    await ops.send({ t: "handout.show", handout: { id: shown, pages: doc.pages, title: doc.title, to: "all" } });
     await popup.waitFor();
     await indicatorIs(popup, "1 of 3", "the preview's popup");
     for (const n of [1, 2, 3]) assert.equal(await popup.getByRole("img", { name: `Second letter, page ${n} of 3`, exact: true }).count(), 1, `page ${n} in the preview`);

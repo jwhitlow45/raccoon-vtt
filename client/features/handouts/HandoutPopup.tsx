@@ -7,7 +7,8 @@ import { useBackClose } from "../../lib/backClose.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useAssets, useRoomView } from "../../state/view.ts";
-import { closedSlot, closedStorageKey, closeHandout, loadClosed } from "./closed.ts";
+import { closedSlot, closedStorageKey, closeHandout, loadClosed, markSeen, openStorageKey, rememberOpen } from "./closed.ts";
+import { usePreview } from "../dm/previewContext.ts";
 import { useXCard } from "../xcard/XCardHost.tsx";
 import { prefersShare, shareFile } from "../mapexport/save.ts";
 import {
@@ -33,10 +34,12 @@ import { PDF_READY, PdfSpoken, PREPARING_PDF, useSpoken } from "./PdfSpoken.tsx"
 
 /**
  * A handout the DM shows pops up over the map for the players it was shown
- * to (features section 16). Closing it hides it on this device only, and
- * it stays closed across a reload (closed.ts). The Library panel opens it
- * again. The DM closes a handout for everyone from the DM panel, and then
- * it simply leaves this view. Mounted once by the Room page.
+ * to (features section 16), when the show comes while the player is in the
+ * room. One already showing when the page opens the room waits in the
+ * Library (handouts.ts seenOnLoad). Closing it hides it on this device
+ * only, and it stays closed across a reload (closed.ts). The Library panel
+ * opens it again. The DM closes a handout for everyone from the DM panel,
+ * and then it simply leaves this view. Mounted once by the Room page.
  *
  * DMs get no popup: the DM chose the handout, and the DM panel lists what
  * is showing.
@@ -57,10 +60,14 @@ export function HandoutPopup() {
   const handouts = useRoomView((s) => s.view?.handouts);
   const assets = useAssets();
   const closedStore = useScoped(closedSlot);
-  const { storageKey, closed, preferId } = useStore(closedStore);
+  const { storageKey, closed, preferId, seen } = useStore(closedStore);
   const wantKey = memberId ? closedStorageKey(roomId, memberId) : null;
-  // Nothing pops up until this device's closed list is read, or a reload would flash every handout.
-  const next = role === "player" && handouts && storageKey === wantKey && wantKey ? nextPopup(handouts, closed, preferId) : null;
+  const preview = usePreview();
+  // A preview keeps nothing for the tab, or the DM's next look as this player would open what the last one had open.
+  const openKey = memberId && !preview ? openStorageKey(roomId, memberId) : null;
+  // Nothing pops up until this device's closed list is read and what was showing is counted, or a reload would flash every handout.
+  const loaded = handouts && storageKey === wantKey && wantKey ? handouts : null;
+  const next = role === "player" && loaded && seen ? nextPopup(loaded, closed, preferId, seen) : null;
   // Whether the dialog was open after the last render, so a handout that would open under the X-card waits for it (handouts.ts popupShows).
   const openRef = useRef(false);
   const xcard = useXCard();
@@ -74,6 +81,13 @@ export function HandoutPopup() {
   useEffect(() => {
     if (wantKey) loadClosed(closedStore, wantKey);
   }, [closedStore, wantKey]);
+  useEffect(() => {
+    if (loaded) markSeen(closedStore, loaded, openKey);
+  }, [closedStore, loaded, openKey]);
+  // Written only after markSeen has read the one the tab had open, or the first renders, with nothing open yet, would erase it.
+  useEffect(() => {
+    if (seen) rememberOpen(openKey, key);
+  }, [seen, openKey, key]);
 
   const close = () => {
     if (key && handouts) closeHandout(closedStore, key, handouts);

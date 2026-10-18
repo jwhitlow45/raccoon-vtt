@@ -20,18 +20,42 @@ export function showingKey(h: Pick<Handout, "id" | "shownAt">): string {
 
 /**
  * The handout to pop up now: the most recently shown one this device has
- * not closed. `preferId` is one the player asked to see again from the
- * Library, which goes first while it stays open.
+ * not closed, and this page did not find showing when it opened the room
+ * (`seen`, seenOnLoad). `preferId` is one the player asked to see again
+ * from the Library, which goes first while it stays open.
  */
-export function nextPopup(handouts: Record<string, Handout | undefined>, dismissed: ReadonlySet<string>, preferId: string | null = null): Handout | null {
+export function nextPopup(
+  handouts: Record<string, Handout | undefined>,
+  dismissed: ReadonlySet<string>,
+  preferId: string | null = null,
+  seen: ReadonlySet<string> = new Set(),
+): Handout | null {
+  const skipped = (h: Handout) => dismissed.has(showingKey(h)) || seen.has(showingKey(h));
   const preferred = preferId ? handouts[preferId] : undefined;
-  if (preferred && !dismissed.has(showingKey(preferred))) return preferred;
+  if (preferred && !skipped(preferred)) return preferred;
   let best: Handout | null = null;
   for (const h of Object.values(handouts)) {
-    if (!h || dismissed.has(showingKey(h))) continue;
+    if (!h || skipped(h)) continue;
     if (!best || h.shownAt > best.shownAt || (h.shownAt === best.shownAt && h.id > best.id)) best = h;
   }
   return best;
+}
+
+/**
+ * The handouts that do not pop up on this page load: every one already
+ * showing when the page first has the room's view. A handout pops up only
+ * for a player in the room when the DM shows it (the project owner,
+ * 2026-10-17), so a player who joins, opens a new tab or clears the
+ * browser finds the earlier ones in the Library rather than in a popup
+ * after popup. A show that comes later pops up, also one that reaches the
+ * page as it reconnects, since the player was still at the table.
+ *
+ * `open` is the handout this tab had open when it reloaded, which opens
+ * again: iPhone Safari reloads a tab it put in the background, and the
+ * player comes back to the handout they were reading.
+ */
+export function seenOnLoad(handouts: Record<string, Handout | undefined>, open: string | null): Set<string> {
+  return new Set(Object.values(handouts).flatMap((h) => (h && showingKey(h) !== open ? [showingKey(h)] : [])));
 }
 
 /**

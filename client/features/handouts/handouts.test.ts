@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Handout, Member } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
-import { audienceText, decodeDismissed, encodeDismissed, keepShowing, nextPopup, pageCountText, pageName, popupShows, showHandoutOp, showingKey, TITLE_FIELD_MAX, titleFromFileName, titleProblem } from "./handouts.ts";
+import { audienceText, decodeDismissed, encodeDismissed, keepShowing, nextPopup, pageCountText, pageName, popupShows, seenOnLoad, showHandoutOp, showingKey, TITLE_FIELD_MAX, titleFromFileName, titleProblem } from "./handouts.ts";
 
 const handout = (id: string, shownAt: string, to: Handout["to"] = "all"): Handout => ({ id, rev: 0, assetId: "a", title: id, to, shownAt });
 
@@ -24,6 +24,15 @@ describe("handout popups", () => {
     const b = handout("b", "2026-10-12T19:05:00.000Z");
     assert.equal(nextPopup({ a, b }, new Set([showingKey(b)]))?.id, "a");
     assert.equal(nextPopup({ a, b }, new Set([showingKey(a), showingKey(b)])), null);
+  });
+
+  test("one that was showing when the page opened the room waits in the Library, unless it was this tab's open one", () => {
+    const a = handout("a", "2026-10-12T19:00:00.000Z");
+    const b = handout("b", "2026-10-12T19:05:00.000Z");
+    assert.equal(nextPopup({ a, b }, new Set(), null, seenOnLoad({ a, b }, null)), null);
+    assert.equal(nextPopup({ a, b }, new Set(), null, seenOnLoad({ a, b }, showingKey(a)))?.id, "a");
+    const later = handout("c", "2026-10-12T19:10:00.000Z");
+    assert.equal(nextPopup({ a, b, c: later }, new Set(), null, seenOnLoad({ a, b }, null))?.id, "c", "a show after the page opened pops up");
   });
 
   test("showing a handout again pops it up again", () => {
