@@ -296,7 +296,7 @@ export function secretUntilItsTurn(view: RoomState, entry: InitEntry): boolean {
 /** The tag's words, and its tooltip. */
 export const SECRET_ROW = {
   label: "Secret until its turn",
-  help: "Players do not see this row yet. It joins their order when its first turn comes (Room settings, Initiative order players see).",
+  help: "Players do not see this row yet, except a player it is lent to. It joins their order when its first turn comes (Room settings, Initiative order players see).",
 } as const;
 
 /**

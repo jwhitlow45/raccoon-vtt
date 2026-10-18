@@ -756,9 +756,10 @@ The project owner asked on 2026-10-17: "the initiative order of monsters should 
 A player's encounter holds a row when the existing rules hold it (not `hidden`, its creature in their projection, no blackout) and the order rule shows it (`orderShown`, shared/project.ts):
 
 1. the setting reads `all`, or
-2. a player plays the row's creature: its token is the players' (`playersToken`: a member of kind player owns it or its character, which covers lent tokens and companions), or, for a row with no token, a player owns its character, or
-3. the setting reads `allies` and the row's token has the Ally ring, or
-4. the row's turn has come in this fight: `InitEntry.hadTurn`, or the row is acting now.
+2. the party plays the row's creature: its token is a player's (`playersToken`: a member of kind player owns it or its character) and is a player character (kind `pc`, or a character a player owns) or a companion (`partysOwn`), or, for a row with no token, a player owns its character, or
+3. the viewer owns the row's token: a monster or NPC lent to a player shows from the start to that player alone, and to the others on its first turn (the project owner, 2026-10-17). Without a viewer, as for the turn line marks, the DM's tag and `initiativeHidden`, the rule is the one for players who own no part of the row. A hidden roll of such a creature still reaches its own players (`projectDiceCtx`), or
+4. the setting reads `allies` and the row's token has the Ally ring, or
+5. the row's turn has come in this fight: `InitEntry.hadTurn`, or the row is acting now.
 
 - **When its turn comes** the row joins in its place and stays: later rounds, a drag among tied rows, a new value (the table's way to delay a turn) and Ready keep `hadTurn`. A row added mid-fight starts without it. Ending the fight drops the encounter and every flag with it. A row removed and added again is a new row.
 - **The acting row always passes the order rule**, so the Hidden rules alone decide what players see of it on its turn, as today ("Another creature's turn" while it is hidden or out of sight).

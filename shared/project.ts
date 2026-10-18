@@ -1104,23 +1104,26 @@ function playerRollTarget(target: RollTarget, resultShown: boolean): RollTarget 
 
 /**
  * Whether the room's order setting lets players see the row now
- * (docs/design-v1-combat-flow.md 11.2): the whole order, a creature a
- * player plays, an ally where allies show, or a row whose turn has come.
- * The acting row always passes, so the Hidden rules alone decide what
- * players see of it on its turn.
+ * (docs/design-v1-combat-flow.md 11.2): the whole order, the party's own
+ * creature, an ally where allies show, or a row whose turn has come. The
+ * acting row always passes, so the Hidden rules alone decide what players
+ * see of it on its turn. With a `viewer`, a monster or NPC lent to that
+ * player shows from the start too. Without one, the answer is for players
+ * who own no part of the row.
  */
-export function orderShown(state: RoomState, entry: InitEntry): boolean {
+export function orderShown(state: RoomState, entry: InitEntry, viewer?: Viewer): boolean {
   const reveal = orderRevealOf(state.meta.settings);
   if (reveal === "all" || entry.hadTurn || state.encounter?.activeEntryId === entry.id) return true;
-  return shownFromTheStart(state, entry, reveal === "allies");
+  return shownFromTheStart(state, entry, reveal === "allies", viewer);
 }
 
 /**
- * Whether a creature's initiative roll is the DM's alone, written so on its
- * dice line (`DiceRoll.hidden`): the order setting keeps its place from
- * players now, since no row of it has had its turn and it is not shown from
- * the start. A creature with no row yet counts too, so a roll made before
- * it joins the fight tells players nothing either.
+ * Whether a creature's initiative roll is the DM's and its own players'
+ * alone, written so on its dice line (`DiceRoll.hidden`): the order setting
+ * keeps its place from players who own no part of it now, since no row of
+ * it has had its turn and it is not shown from the start. A creature with
+ * no row yet counts too, so a roll made before it joins the fight tells
+ * players nothing either.
  */
 export function initiativeHidden(state: RoomState, creature: { tokenId: string } | { characterId: string }): boolean {
   const reveal = orderRevealOf(state.meta.settings);
@@ -1130,17 +1133,33 @@ export function initiativeHidden(state: RoomState, creature: { tokenId: string }
   return !(state.encounter?.entries.some((e) => itsRow(e) && orderShown(state, e)) ?? false);
 }
 
-/** A creature whose place players see from the fight's start: one a player plays, or with `allies` one with the Ally ring. */
-function shownFromTheStart(state: RoomState, creature: { tokenId?: string; characterId?: string }, allies: boolean): boolean {
+/**
+ * A creature whose place players see from the fight's start: a player
+ * character or a companion of one, which every player sees, a monster or
+ * NPC lent to the `viewer`, which only that player sees (the project owner,
+ * 2026-10-17), or with `allies` one with the Ally ring.
+ */
+function shownFromTheStart(state: RoomState, creature: { tokenId?: string; characterId?: string }, allies: boolean, viewer?: Viewer): boolean {
   const token = creature.tokenId !== undefined ? state.tokens[creature.tokenId] : undefined;
-  if (token) return playersToken(state, token) || (allies && token.disposition === "ally");
+  if (token) return partysOwn(state, token) || (viewer !== undefined && ownsToken(state, viewer, token)) || (allies && token.disposition === "ally");
   const character = creature.characterId !== undefined ? state.characters[creature.characterId] : undefined;
+  return character !== undefined && anyPlayer(state, character.ownerIds);
+}
+
+/**
+ * A token the party plays as its own: a player character, or a companion,
+ * a player's. A monster or NPC lent to a player is that player's alone.
+ */
+function partysOwn(state: RoomState, token: Token): boolean {
+  if (!playersToken(state, token)) return false;
+  if (token.kind === "pc" || token.companion !== undefined) return true;
+  const character = characterOf(state, token);
   return character !== undefined && anyPlayer(state, character.ownerIds);
 }
 
 /** Whether a player's encounter holds the row: not hidden, in the order players see, and its creature in their sight. */
 function entryShown(ctx: Ctx, entry: InitEntry, revealedSeen = false): boolean {
-  if (entry.hidden || !orderShown(ctx.state, entry)) return false;
+  if (entry.hidden || !orderShown(ctx.state, entry, ctx.viewer)) return false;
   if (entry.tokenId !== undefined && !tokenVisibleById(ctx, entry.tokenId, revealedSeen)) return false;
   return entry.characterId === undefined || ctx.state.characters[entry.characterId] !== undefined;
 }
@@ -1387,8 +1406,9 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
  * have the events of (holderOfEvent: in sight now, and seen then or
  * owned), so a token's roll follows that token's events and none passes a
  * blackout. An initiative roll marked `hidden`, for a creature whose place
- * in the order players did not know then, is never kept
- * (docs/design-v1-combat-flow.md 11.3). With none kept there is no line.
+ * in the order players did not know then, is kept only for the creature's
+ * own players, such as a monster's lent to one (docs/design-v1-combat-flow.md
+ * 11.3). With none kept there is no line.
  * Open to everyone, or the
  * player's own, it reads in full, the tag only for its roller. A secret
  * roll of someone else's reads as the bare line, and only when the same
@@ -1398,7 +1418,7 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
  */
 function projectDiceCtx(ctx: Ctx, data: Extract<LogEvent, { type: "dice" }>): LogEvent | null {
   if (!ctx.state.members[ctx.viewer.memberId]) return null;
-  const rolls = data.rolls.filter((roll) => !roll.hidden && (roll.tokenId === undefined || holderOfEvent(ctx, roll) !== null));
+  const rolls = data.rolls.filter((roll) => (!roll.hidden || ownsRollCreature(ctx, roll)) && (roll.tokenId === undefined || holderOfEvent(ctx, roll) !== null));
   if (rolls.length === 0) return null;
   const mine = data.by === ctx.viewer.memberId;
   if (data.to === "dm" && !mine) return { type: "dice", by: data.by, to: "dm", rolls: [] };

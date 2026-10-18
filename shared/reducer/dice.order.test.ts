@@ -113,6 +113,19 @@ describe("initiative rolls under the order setting (docs/design-v1-combat-flow.m
     assert.equal(diceFor(run(fight("party"), initiative([{ tokenId: "gob" }], "all", false)), DM)!.rolls[0]!.initiative, undefined);
   });
 
+  test("a monster lent to a player has its roll reach that player alone before its turn, as its row does (the project owner, 2026-10-17)", () => {
+    for (const to of ["all", "dm"] as const) {
+      let state = fight("party");
+      state = run(state, { t: "token.update", tokenId: "gob", patch: { ownerIds: ["p2"] } });
+      state = run(state, initiative([{ tokenId: "gob" }], to));
+      assert.equal(diceFor(state, DM)!.rolls[0]!.hidden, true);
+      // Its own player keeps it, as any roll the DM makes for their creature: in full, or as a secret one's bare line.
+      if (to === "all") assert.equal(diceFor(state, P2)!.rolls[0]!.total, 14);
+      else assert.deepEqual(diceFor(state, P2), { type: "dice", by: "dm1", to: "dm", rolls: [] });
+      assert.equal(diceFor(state, P1), null, `${to}: another player gets no total and no bare line`);
+    }
+  });
+
   test("a stored marked roll parses as replay parses it, and replays to the same line", () => {
     const op = initiative([{ tokenId: "gob" }], "all");
     const stored = opSchema.parse(JSON.parse(JSON.stringify(op))) as Op;

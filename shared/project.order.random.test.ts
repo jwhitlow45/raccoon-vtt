@@ -49,13 +49,15 @@ const CREATURES: ActorTarget[] = [
 /** What the test itself knows: the rows whose turn came, and what each Next found, for Previous. */
 type Record_ = { turned: Set<string>; steps: Set<string>[] };
 
-function shownByRecord(state: RoomState, record: Record_, id: string): boolean {
+function shownByRecord(state: RoomState, record: Record_, id: string, viewer: Viewer): boolean {
   const reveal: OrderReveal = state.meta.settings.playersSeeOrder ?? "all";
   if (reveal === "all" || record.turned.has(id) || state.encounter?.activeEntryId === id) return true;
   const row = state.encounter!.entries.find((e) => e.id === id)!;
   if (row.characterId === "npc" || row.label !== undefined) return false;
   const t = state.tokens[row.tokenId!]!;
-  if (t.id === "pc1" || t.id === "comp" || t.id === "lent") return true;
+  if (t.id === "pc1" || t.id === "comp") return true;
+  // The wolf is lent to p2, who alone sees it from the start (the project owner, 2026-10-17).
+  if (t.id === "lent" && viewer.memberId === "p2") return true;
   return reveal === "allies" && t.disposition === "ally";
 }
 
@@ -121,7 +123,7 @@ function placeSecret(state: RoomState, record: Record_, creature: ActorTarget): 
   if ("characterId" in creature) {
     if (creature.characterId === "c1") return false;
   } else {
-    if (["pc1", "comp", "lent"].includes(creature.tokenId)) return false;
+    if (["pc1", "comp"].includes(creature.tokenId)) return false;
     if (reveal === "allies" && state.tokens[creature.tokenId]!.disposition === "ally") return false;
   }
   const rows = state.encounter?.entries ?? [];
@@ -129,13 +131,13 @@ function placeSecret(state: RoomState, record: Record_, creature: ActorTarget): 
   return !its.some((e) => record.turned.has(e.id) || state.encounter!.activeEntryId === e.id);
 }
 
-/** The ids of this run's initiative lines written while their creature's place was secret, and how many all runs wrote. */
-const secretLines = new Set<string>();
+/** This run's initiative lines written while their creature's place was secret, each with the players who own it, and how many all runs wrote. */
+const secretLines = new Map<string, string[]>();
 let secretRolls = 0;
 
 function check(state: RoomState, record: Record_, label: string): void {
   for (const viewer of PLAYERS) {
-    const leaked = projectState(state, viewer, { sceneId: "s1" }).log.filter((l) => secretLines.has(l.id));
+    const leaked = projectState(state, viewer, { sceneId: "s1" }).log.filter((l) => secretLines.has(l.id) && !secretLines.get(l.id)!.includes(viewer.memberId));
     assert.deepEqual(leaked, [], `${label}: a secret initiative roll reaches ${viewer.memberId}`);
   }
   const encounter = state.encounter;
@@ -147,9 +149,9 @@ function check(state: RoomState, record: Record_, label: string): void {
   for (const viewer of PLAYERS) {
     const snapshot = projectState(state, viewer, { sceneId: "s1" });
     const older = projectState(everyone, viewer, { sceneId: "s1" }).encounter!.entries.map((e) => e.id);
-    const want = older.filter((id) => shownByRecord(state, record, id));
+    const want = older.filter((id) => shownByRecord(state, record, id, viewer));
     if (want.length < older.length) seen.withheld++;
-    if (state.meta.settings.playersSeeOrder !== "all" && want.some((id) => record.turned.has(id) && id !== encounter.activeEntryId && !shownByRecord({ ...state, encounter: { ...encounter, activeEntryId: null } }, { turned: new Set(), steps: [] }, id))) seen.revealed++;
+    if (state.meta.settings.playersSeeOrder !== "all" && want.some((id) => record.turned.has(id) && id !== encounter.activeEntryId && !shownByRecord({ ...state, encounter: { ...encounter, activeEntryId: null } }, { turned: new Set(), steps: [] }, id, viewer))) seen.revealed++;
     const got = snapshot.encounter!.entries;
     assert.deepEqual(got.map((e) => e.id), want, `${label}: ${viewer.memberId}'s order`);
     assert.deepEqual(got.map((e) => e.tieOrder), want.map((_, i) => i), `${label}: numbered without gaps`);
@@ -176,7 +178,8 @@ describe("the order setting over random fights (docs/design-v1-combat-flow.md 11
         const result = applyOp(state, op, DM, env(n));
         if (!result.ok) continue;
         if (op.t === "sys.dice" && op.asked.t === "dice.roll" && placeSecret(state, record, op.asked.rolls[0]!.creature!)) {
-          secretLines.add(result.state.log.at(-1)!.id);
+          const creature = op.asked.rolls[0]!.creature!;
+          secretLines.set(result.state.log.at(-1)!.id, "tokenId" in creature && creature.tokenId === "lent" ? ["p2"] : []);
           secretRolls++;
         }
         record = follow(record, result.state, op);

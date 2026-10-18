@@ -1752,7 +1752,8 @@ export type LogEvent =
  * `initiative` marks a creature's initiative, so a roll made again from it
  * is one too and meets the order rule as it stands then. `hidden` marks the
  * initiative of a creature whose place in the order players did not know
- * then (docs/design-v1-combat-flow.md 11.3): only the DM gets that roll.
+ * then (docs/design-v1-combat-flow.md 11.3): only the DM and the creature's
+ * own players get that roll.
  */
 export type DiceRoll = DiceResult & { label?: string; tokenId?: TokenId; characterId?: CharacterId; seen?: true; critOn?: 18 | 19 | 20; initiative?: true; hidden?: true };
 
