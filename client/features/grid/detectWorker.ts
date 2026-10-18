@@ -1,6 +1,7 @@
 import { jpegOrientation, sniffImage } from "../uvtt/image.ts";
-import { detectGrid, type Pixels } from "./detect.ts";
+import type { Pixels } from "./detect.ts";
 import { DECODE_MAX_SIDE, decodeSize, HEADER_BYTES, type SearchAnswer, type SearchRequest } from "./findGrid.ts";
+import { runSearch } from "./searchRun.ts";
 
 /**
  * The grid finder's Worker (docs/design-v1-grid-detect.md section 6). It
@@ -8,7 +9,9 @@ import { DECODE_MAX_SIDE, decodeSize, HEADER_BYTES, type SearchAnswer, type Sear
  * costs a phone tens of megabytes rather than hundreds, and runs the
  * detector away from the page, which never pauses for it. Any failure,
  * such as an image the browser cannot decode or a device out of memory,
- * answers as an error: the page goes on as if no grid were drawn.
+ * answers as an error: the page goes on as if no grid were drawn. The
+ * search itself is searchRun.ts's, and this file gives it the browser's
+ * fetch and canvas.
  */
 
 const scope = self as unknown as {
@@ -43,21 +46,6 @@ async function pixelsOf(blob: Blob): Promise<Pixels> {
   }
 }
 
-/** The first of the addresses that answers: the phone-sized copy, else the full image. */
-async function fetchFirst(urls: readonly string[]): Promise<Blob> {
-  for (const url of urls) {
-    const res = await fetch(url, { credentials: "same-origin" });
-    if (res.ok) return res.blob();
-  }
-  throw new Error("no image");
-}
-
 scope.addEventListener("message", (e) => {
-  const request = e.data;
-  const run = async () => {
-    const blob = "file" in request ? request.file : await fetchFirst(request.urls);
-    const px = await pixelsOf(blob);
-    scope.postMessage({ t: "done", result: detectGrid(px), width: px.width, height: px.height });
-  };
-  run().catch(() => scope.postMessage({ t: "error" }));
+  void runSearch(e.data, { fetch: (url) => fetch(url, { credentials: "same-origin" }), pixels: pixelsOf }).then((answer) => scope.postMessage(answer));
 });

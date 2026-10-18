@@ -8,7 +8,7 @@ import { api, type AssetRow } from "../../lib/api.ts";
 import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
-import { importFound, importSearch, IMPORT_WAIT_MS, nameGivesSize, searchOnImport, type ImportSearch, type SearchDone } from "../grid/findGrid.ts";
+import { copyUrls, importFound, importSearch, IMPORT_WAIT_MS, nameGivesSize, searchOnImport, type ImportSearch, type SearchDone } from "../grid/findGrid.ts";
 import { showOutcome } from "../grid/outcome.ts";
 import { useGridStore } from "../grid/store.ts";
 import { thisDevice } from "../uvtt/limits.ts";
@@ -160,7 +160,7 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
       else {
         if (searchRef.current?.file !== file) searchRef.current = { file, search: importSearch(file, thisDevice()) };
         setStatus({ busy: true, waiting: false, finding: true, error: null });
-        answer = await searchRef.current.search.afterUpload([assets.url(asset.id, "mobile"), assets.url(asset.id, "full")], IMPORT_WAIT_MS);
+        answer = await searchRef.current.search.afterUpload(copyUrls(thisDevice(), (variant) => assets.url(asset.id, variant)), IMPORT_WAIT_MS);
         if (abort.signal.aborted) return;
         searchRef.current = null;
       }

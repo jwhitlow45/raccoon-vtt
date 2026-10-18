@@ -206,6 +206,17 @@ export function importSearchFrom(input: { device: Device; size: { width: number;
   return size && size.width <= DECODE_MAX_SIDE && size.height <= DECODE_MAX_SIDE ? "file" : "copy";
 }
 
+/**
+ * The addresses a search of a map already uploaded fetches, the first
+ * that answers taken (searchRun.ts `fetchFirst`). A computer falls back to
+ * the full image when the phone-sized copy fails. A phone or an iPad never
+ * does: the full image, up to 8192 px, is the very decode the copy is
+ * there to spare it, so there a copy that fails is no grid found.
+ */
+export function copyUrls(device: Device, url: (variant: "mobile" | "full") => string): string[] {
+  return device === "computer" ? [url("mobile"), url("full")] : [url("mobile")];
+}
+
 /** The size a file's header gives, or null when it gives none or cannot be read. Only its first bytes are read. */
 export async function headerSize(file: Blob): Promise<{ width: number; height: number } | null> {
   try {

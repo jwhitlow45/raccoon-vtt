@@ -15,7 +15,7 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { calibrationFromCounts, fitBounds, imageSquares, sameCalibration } from "../grid/calibrate.ts";
-import { importFound, importSearch, IMPORT_WAIT_MS, nameGivesSize, searchOnImport, type SearchDone } from "../grid/findGrid.ts";
+import { copyUrls, importFound, importSearch, IMPORT_WAIT_MS, nameGivesSize, searchOnImport, type SearchDone } from "../grid/findGrid.ts";
 import { showOutcome } from "../grid/outcome.ts";
 import { useGridStore } from "../grid/store.ts";
 import { useFindGrid } from "../grid/useFindGrid.ts";
@@ -386,7 +386,7 @@ function MapImageRow(props: { scene: Scene; close(): void }) {
       if ((!map || !sameArt(map, asset)) && asset.cellPx === undefined) {
         search ??= importSearch(file, device);
         setUpload({ busy: true, waiting: false, finding: true, error: null });
-        answer = await search.afterUpload([assets.url(asset.id, "mobile"), assets.url(asset.id, "full")], IMPORT_WAIT_MS);
+        answer = await search.afterUpload(copyUrls(device, (variant) => assets.url(asset.id, variant)), IMPORT_WAIT_MS);
       } else search?.cancel();
       if (abort.signal.aborted) return;
       setUpload({ busy: false, waiting: false, error: null });
