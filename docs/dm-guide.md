@@ -183,7 +183,7 @@ Two more options wait under **⋯**. **Resize scene** (on by default) makes Appl
 > [!NOTE]
 > When applying a grid also changes the scene's size, the app saves the two changes as separate undo steps. The first **Undo** takes back the resize, and a second one takes back the grid.
 
-Often you won't need the box at all. When a map's file name gives no size, the app looks for a grid drawn on the map while it uploads: if it's sure of what it found, the scene starts lined up, with **Use default** to go back to the first guess, and if it's less sure, it only places the box on those squares for you to check and **Apply**. **Find the grid**, in the tool's options or the scene's **Grid** settings, looks again whenever you like, and one undo takes back a grid it applied. On a scene from a Universal VTT file, which came with an exact grid of its own, it only places the box, so you can compare the two before you **Apply**.
+Often you won't need the box at all. When a map's file name gives no size, the app looks for a grid drawn on the map while it uploads: if it's sure of what it found, the scene starts lined up, with **Use default** to go back to the first guess and the scene's earlier size, and if it's less sure, it only places the box on those squares for you to check and **Apply**. **Find the grid**, in the tool's options or the scene's **Grid** settings, looks again whenever you like, and one undo takes back a grid it applied. If you'd rather not wait for it, just carry on: pressing **Apply** or moving the box stops the search, so it never overwrites what you've done. On a scene from a Universal VTT file, which came with an exact grid of its own, it only places the box, so you can compare the two before you **Apply**.
 
 ## The map builder
 

@@ -1,6 +1,6 @@
 # raccoon-vtt design: finding a map's drawn grid on import
 
-Status: design and prototype, for the project owner's decision. Nothing here ships yet. The prototype is `client/features/grid/detect.ts` with its tests, and the numbers below come from it.
+Status: shipped. Section 6.1 is what the build and its review changed. Sections 6 to 9 are the proposal and its questions as they went to the project owner, kept as history: the answers are in 6.1. The detector is `client/features/grid/detect.ts` with its tests, and the numbers below come from it.
 
 The project owner asked: "it would also be sick to have a feature that detects pre-drawn lines on import and then aligns the grid to them automatically (adjustable after the fact of course). Please let me know if this is a feasible feature or very difficult/computationally expensive."
 
@@ -84,7 +84,7 @@ On this Mac, one core, maps of the given side, JPEG at quality 85. "Detect" is t
 
 Every one of these lands in Line up grid (section 6), where the DM sees the box on the art.
 
-## 6. The product
+## 6. The product, as proposed
 
 **Where it runs: in a Worker on the DM's device, while the map uploads.** The upload is bound by the network and the detection by the processor, so they overlap and the DM waits for neither. The repo already decodes large maps in a Worker for the Universal VTT import (`client/features/uvtt/worker.ts`), with the same limits. On the server it would cost the shared box 0.1 to 0.3 s of JavaScript per map on the thread that serves every room, unless a worker thread were added, and the upload answer would change. The client costs the server nothing and changes no data, protocol or API.
 
@@ -108,10 +108,15 @@ The project owner answered section 9: a grid found with high confidence goes on 
 
 - **The name wins by not searching.** A file whose name gives a size is not searched at all, and a name whose counts the server refuses is searched once the upload says so. The "name's size borne out" path is gone.
 - **The guess first, then the found grid.** The scene is made with today's first guess, and a found grid follows at once as one undo step: `scene.setGrid` and the scene's size together (`dispatchGesture`). One undo, or Use default, puts the guess back. `create.ts` makes scenes as before.
-- **Find the grid**, asked for after this note, sits in Line up grid's options and beside Line up the grid in the scene's Grid settings, for any scene with a map, at any time. It fetches the scene's phone-sized copy (at most 4096 px, the full image if that fails) into the same Worker, gives it 30 s, and says "Looking for a grid…" meanwhile. High confidence applies as one undo step, medium places the box, and none says "No grid found. Drag a box over 3 by 3 squares instead." It runs whatever the file's name or kind, but on a scene that came with its own grid from a Universal VTT file it never applies: at any confidence it places the box and says "This scene came with its own grid.", since that grid is exact and the walls stand in its squares. A scene keeps no record of its source, so the marks the import leaves stand for it: automatic walls off, or a first line before the image (`cameWithGrid`).
+- **Find the grid**, asked for after this note, sits in Line up grid's options and beside Line up the grid in the scene's Grid settings, for any scene with a map, at any time. It fetches the scene's phone-sized copy (at most 4096 px, the full image if that fails) into the same Worker, gives it 30 s, and says "Looking for a grid…" meanwhile. High confidence applies as one undo step, medium places the box, and none says "No grid found. Drag a box over 3 by 3 squares instead." It runs whatever the file's name or kind, but on a scene that came with its own grid from a Universal VTT file it never applies: at any confidence it places the box and says "This scene came with its own grid.", since that grid is exact and the walls stand in its squares. The import marks its scene (`Scene.gridFromFile`, op version 9 and snapshot version 13), so the protection holds whatever the DM changes later, Automatic walls included, and an ordinary map with automatic walls off is searched and applied as any other. A scene imported before the mark counts by the one sign only the import leaves, a first grid line before the image (`cameWithGrid`).
+- **Apply and a move of the box end a running Find the grid**, as closing the tool does (`endFinding`): a drag, a tap or a nudge. An answer that still comes is dropped unless the scene shows the same image with the same grid and size as when the search began, so a grid applied meanwhile, on this device or another, is never overwritten.
+- **A found grid keeps its measured origin** (`calibrationFromFind`). The 5% snap a hand-drawn box gets (LP5-OPS-4) moved a line found 6 px in onto the image's edge, off the drawn lines. Only an origin within 1 px or 1% of a square under a whole square, whichever is larger, folds to the edge, so a line found just before the edge keeps the art's first row and column in the scene. The box a search left stands for that grid, in Apply and the drawn lines, until it moves.
+- **The decode is sized by the upright picture.** The browser turns a JPEG by its EXIF orientation before it resizes, as the server turns its copy, so for orientations 5 to 8 the header's sides swap (`decodeSize`). Asked for the unturned size, it squashed the picture and no grid was found.
+- **A phone or an iPad decodes a picked file only up to 4096 px a side.** WebKit decodes the whole picture before it resizes it, and an 8192 px map's full decode in the middle of its upload could end the tab. So a file larger on either side, or one whose header gives no size, is searched on the server's phone-sized copy once the upload answers, as Find the grid searches (`importSearchFrom`). The 2 s wait after the upload holds. A computer, and a small file anywhere, keep the search from the pick.
+- **Use default puts back the grid and the scene's size** from before the find, not a size fitted to the old grid. A battle mat that took its first image, or a scene that took new art, had a size of its own.
 - **Replacing a map image** searches the new file while it uploads, and keeps the result only when the image is not the old art at another size (`sameArt` in `create.ts`). A grid found there opens Line up grid, as on a first image. With none found, the replacement keeps today's behavior.
 
-## 7. Building it
+## 7. Building it, as planned
 
 The prototype's method stays. The build is the plumbing and the strip.
 
@@ -132,7 +137,7 @@ About 500 lines of new code and tests beyond the detector: one build lane and on
 - `client/features/grid/detect.test.ts` (18 tests, about 2 s): fractional squares off the image's edge, RGBA as a canvas gives it, light lines on dark art, a faint grid under busy art, a grid on the floor of rooms only, a grid inside a margin, dashed lines, a grid over tiles half its size. No grid on noise, JPEG-like blocks, staggered bricks, staggered planks, a hex grid, a turned grid, or squares taller than wide. A file name's size borne out, and one the image does not bear out. Every image is drawn by code (`synthetic.ts`).
 - The evaluation of section 3 and the timing of section 4 ran from scripts outside the repository, with the downloaded maps. The build keeps the unit tests and adds one e2e step (section 7).
 
-## 9. Questions for the project owner
+## 9. Questions for the project owner, answered in 6.1
 
 1. With high confidence, should the found grid go on the scene at once, with Line up grid open to check it (recommended, as asked), or only fill the box until the DM taps Apply?
 2. When the file name's size and the drawn lines disagree, which wins? Recommended: the name, since someone typed it, with Line up grid open and the strip offering the drawn lines' size.
