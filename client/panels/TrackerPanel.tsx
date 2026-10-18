@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import type { Token } from "#shared/model.ts";
 import { MAX_ENTRIES_PER_OP } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
@@ -163,7 +164,8 @@ function RoundSection(props: { children: ReactNode }) {
       setForm(next);
       setHeaderPx(header.offsetHeight);
     };
-    const observer = new ResizeObserver(measure);
+    // Committed in the observer's callback, before the frame paints, so no frame shows the form the old size picked (W7-FC-1).
+    const observer = new ResizeObserver(() => flushSync(measure));
     observer.observe(scroller);
     observer.observe(header);
     // The order's own size changes as rows come, go, open their options or gain companions.

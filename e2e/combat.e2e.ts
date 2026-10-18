@@ -686,6 +686,41 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     assert.equal((await measure(dm)).sticky, false);
   });
 
+  test("3-dp3. a resize that changes the round header's form draws the new form in the frame it resized, never a frame of the old one (W7-FC-1)", async () => {
+    await setUp(dm, dmCdp, { width: 844, height: 390, scale: 1 });
+    await openTracker(dm);
+    /*
+     * A second observer of the scroller, made after the header's own, runs
+     * after it in the same frame's resize step, just before that frame
+     * paints, so the form it reads is the form that frame shows. A form
+     * the header picked but React drew a task later reads as the old one.
+     */
+    await dm.evaluate(() => {
+      type El = { dataset: Record<string, string | undefined>; closest(s: string): El | null };
+      const g = globalThis as unknown as { document: { querySelector(s: string): El | null }; ResizeObserver: new (cb: () => void) => { observe(e: El): void }; rvttPainted: string[] };
+      const header = g.document.querySelector("[data-round-header]")!;
+      g.rvttPainted = [];
+      new g.ResizeObserver(() => g.rvttPainted.push(header.dataset.form ?? "")).observe(header.closest("[data-pane-body]")!);
+    });
+    const painted = () => dm.evaluate(() => (globalThis as unknown as { rvttPainted: string[] }).rvttPainted.at(-1) ?? "");
+    const resized = async (scroller: number, form: string) => {
+      const before = await headerRoom(dm);
+      await dm.setViewportSize({ width: 844, height: dm.viewportSize()!.height + scroller - before.scroller });
+      const after = await waitFor(`a ${scroller} px scroller in its ${form} form`, async () => {
+        const now = await headerRoom(dm);
+        return now.form === form ? now : null;
+      });
+      assert.equal(await painted(), after.form, `at ${after.scroller} px the frame that resized it showed the old form`);
+    };
+    const rest = await headerRoom(dm);
+    assert.equal(rest.form, "full", "the sideways phone's sheet starts with a full header");
+    const compactNeed = rest.compactHeader + 2 * rest.row;
+    await resized(compactNeed + 4, "compact");
+    await resized(compactNeed - 4, "static");
+    await resized(compactNeed + 4, "compact");
+    await resized(rest.scroller, "full");
+  });
+
   test("4. scrolling to Auto initiative takes the header away, and focus moving through the rows never lands under it", async () => {
     await setUp(dm, dmCdp, { width: 390, height: 844, scale: 1 });
     const section = await openTracker(dm);
