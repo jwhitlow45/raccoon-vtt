@@ -69,3 +69,60 @@ export function panelSections(input: PanelOrderInput): PanelSectionId[] {
 export function offersMakeCompanion(input: Pick<PanelOrderInput, "dm" | "kind" | "companion">): boolean {
   return input.dm && input.kind !== "pc" && !input.companion;
 }
+
+/** The panel's groups by use (docs/design-v1-token-panel-groups.md 2). Each folds as one. */
+export type PanelGroupId = "combat" | "notes" | "position" | "image";
+
+/** One part of the panel, top to bottom: a section on its own, or a group of sections under one fold. */
+export type PanelPart = { group: null; id: PanelSectionId } | { group: PanelGroupId; sections: PanelSectionId[] };
+
+export type PanelGroupsInput = PanelOrderInput & {
+  /** The viewer has a note here to read or write: one for everyone, the card's, the DM's, or the right to write one. */
+  notes: boolean;
+  /** The viewer may change the token's picture. */
+  image: boolean;
+};
+
+const COMBAT: readonly PanelSectionId[] = ["hp", "conditions", "rangeRings", "rest"];
+const PLACE: readonly PanelSectionId[] = ["position", "sight"];
+const SETUP: readonly PanelSectionId[] = ["stats", "settings", "companion", "owners", "remove"];
+
+/**
+ * The panel grouped by use, as the project owner asked (2026-10-17): the
+ * name with its picture and quick numbers, the stat block, then Combat
+ * (what a fight changes), Notes, Position and Image, then setup. Each
+ * group holds panelSections' sections in its order, so nothing moves
+ * against its neighbors, and a group with nothing in it is not drawn.
+ *
+ * The summary line is the quick numbers in the name's header now, so it
+ * is no part of its own, and the picture stands there too, with its
+ * buttons in Image. Position is the DM's and the owners': a player
+ * looking at another creature reads its elevation in the quick numbers,
+ * and Sight shows them nothing. Notes shows only with a note to read or
+ * write.
+ */
+export function panelGroups(input: PanelGroupsInput): PanelPart[] {
+  const sections = panelSections(input);
+  const has = (id: PanelSectionId) => sections.includes(id);
+  const out: PanelPart[] = [];
+  const alone = (ids: readonly PanelSectionId[]) => {
+    for (const id of ids) if (has(id)) out.push({ group: null, id });
+  };
+  const group = (id: PanelGroupId, ids: readonly PanelSectionId[]) => {
+    const held = ids.filter(has);
+    if (held.length > 0) out.push({ group: id, sections: held });
+  };
+  alone(["name", "statBlock"]);
+  group("combat", COMBAT);
+  if (input.notes) group("notes", ["notes"]);
+  if (input.dm || input.owner) group("position", PLACE);
+  if (input.image) group("image", ["image"]);
+  alone(SETUP);
+  return out;
+}
+
+/** Whose folds a viewer's taps keep: their own creatures' (the DM's, an owner's) or other creatures'. */
+export function panelRelation(input: Pick<PanelOrderInput, "dm" | "owner">): "own" | "other" {
+  return input.dm || input.owner ? "own" : "other";
+}
+

@@ -18,7 +18,8 @@ import { ownsCharacter, type TokenAccess } from "./access.ts";
 import { AttachBlockDialog } from "./CompanionBlocks.tsx";
 import { whose } from "./companionBlocks.ts";
 import { usePreview } from "../dm/previewContext.ts";
-import { statBlockOpen, statBlockOpenedSlot, usePanelFolds } from "./panelFolds.ts";
+import { relationKey, statBlockOpen, statBlockOpenedSlot, usePanelFolds } from "./panelFolds.ts";
+import { panelRelation } from "./panelOrder.ts";
 import { statBlockRequest } from "./statBlockOpen.ts";
 import { Note, Section, SmallButton } from "./ui.tsx";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
@@ -79,7 +80,8 @@ export function StatBlockSection(props: {
   const override = useStore(openedStore);
   const request = useScoped(statBlockRequest);
   const asked = useStore(request, (s) => (s.tokenId === token.id ? s : null));
-  const open = statBlockOpen(folds, override, token.id);
+  const relation = panelRelation(access);
+  const open = statBlockOpen(folds, override, token.id, relation);
   const openEditor = useOpenEditor();
   const store = useRoomStore();
   const [picking, setPicking] = useState(false);
@@ -104,7 +106,7 @@ export function StatBlockSection(props: {
   const toggle = () => {
     // A tap is the viewer's own choice: the request's override gives way to it, and it is what this device remembers.
     openedStore.setState({ tokenId: null });
-    slot.tap("statBlock", !open, !preview);
+    slot.tap(relationKey("statBlock", relation), !open, !preview);
   };
   if ("ref" in token.actor) {
     return (

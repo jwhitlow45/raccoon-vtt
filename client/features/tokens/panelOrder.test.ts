@@ -5,7 +5,7 @@ import { projectState } from "#shared/project.ts";
 import { DM, P1, actor, character, room, token } from "#shared/testutil.ts";
 import { statBlockShown } from "../monsters/statBlockLink.ts";
 import { tokenAccess } from "./access.ts";
-import { offersMakeCompanion, panelSections, type PanelSectionId } from "./panelOrder.ts";
+import { offersMakeCompanion, panelGroups, panelRelation, panelSections, type PanelPart, type PanelSectionId } from "./panelOrder.ts";
 import { vitals } from "./statSummary.ts";
 
 /**
@@ -29,6 +29,28 @@ function sectionsFor(state: ReturnType<typeof room>, viewer: typeof DM, tokenId:
     actor: a !== undefined,
     ownerRenames: !access.dm && access.canEditToken("name"),
   });
+}
+
+/** The panel's parts as the panel draws them, in one line each: "name", "combat: hp conditions". */
+function groupsFor(state: ReturnType<typeof room>, viewer: typeof DM, tokenId: string, companion = false): string[] {
+  const view = projectState(state, viewer, { sceneId: "s1" });
+  const t = view.tokens[tokenId] as Token;
+  const character = ("ref" in t.actor ? view.characters[t.actor.ref] : undefined) as Character | undefined;
+  const access = tokenAccess({ role: viewer.role, memberId: viewer.memberId, view: { characters: character ? { [character.id]: character } : {} }, token: t });
+  const a = ("inline" in t.actor ? t.actor.inline : character?.actor) as Partial<Actor> | undefined;
+  const parts = panelGroups({
+    dm: access.dm,
+    owner: access.owner,
+    kind: t.kind,
+    companion,
+    statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: t.kind, actor: a, companion }),
+    summary: vitals({ actor: a, token: t, fullAccess: access.full, place: "panel" }).length > 0,
+    actor: a !== undefined,
+    ownerRenames: !access.dm && access.canEditToken("name"),
+    notes: access.canEditToken("notes") || !!t.notes || access.dm,
+    image: access.canEditToken("image"),
+  });
+  return parts.map((p: PanelPart) => (p.group === null ? p.id : `${p.group}: ${p.sections.join(" ")}`));
 }
 
 const PLAY: PanelSectionId[] = ["hp", "conditions", "position", "rangeRings", "notes"];
@@ -125,5 +147,54 @@ describe("the token panel's order", () => {
     assert.equal(offersMakeCompanion({ dm: true, kind: "pc", companion: false }), false);
     assert.equal(offersMakeCompanion({ dm: true, kind: "npc", companion: true }), false);
     assert.equal(offersMakeCompanion({ dm: false, kind: "npc", companion: false }), false);
+  });
+});
+
+describe("the token panel grouped by use (docs/design-v1-token-panel-groups.md 2)", () => {
+  test("the DM on a monster: the name, the block, Combat, Notes, Position, Image, then setup", () => {
+    const state = room();
+    state.tokens.g = token("g", { actor: { inline: actor({ srdId: "goblin-warrior" }) } });
+    assert.deepEqual(groupsFor(state, DM, "g"), ["name", "statBlock", "combat: hp conditions rangeRings rest", "notes: notes", "position: position sight", "image: image", "stats", "settings", "owners", "remove"]);
+  });
+
+  test("an owner of a character: the same groups, and setup without Owners or Remove", () => {
+    const state = room();
+    state.characters.c = character("c", { ownerIds: ["p1"] });
+    state.tokens.t = token("t", { kind: "pc", actor: { ref: "c" } });
+    assert.deepEqual(groupsFor(state, P1, "t"), ["name", "combat: hp conditions rangeRings rest", "notes: notes", "position: position sight", "image: image", "stats", "settings"]);
+  });
+
+  test("another player on a monster: Combat, and Notes only with the DM's note for everyone. No Position, Image or setup", () => {
+    const state = room();
+    state.tokens.g = token("g", { actor: { inline: actor({ srdId: "goblin-warrior" }) } });
+    assert.deepEqual(groupsFor(state, P1, "g"), ["name", "combat: hp conditions rangeRings"]);
+    state.tokens.g.notes = "Wears the blue sash.";
+    assert.deepEqual(groupsFor(state, P1, "g"), ["name", "combat: hp conditions rangeRings", "notes: notes"]);
+  });
+
+  test("the DM on an object: Combat without Rest", () => {
+    const state = room();
+    state.tokens.o = token("o", { kind: "object", actor: { inline: actor() } });
+    assert.equal(groupsFor(state, DM, "o")[1], "combat: hp conditions rangeRings");
+  });
+
+  test("a companion: its section in the setup beside Owners, for the DM and for its player", () => {
+    const state = room();
+    state.tokens.w = token("w", { kind: "npc", ownerIds: ["p1"], actor: { inline: actor() } });
+    assert.deepEqual(groupsFor(state, DM, "w", true).slice(-4), ["settings", "companion", "owners", "remove"]);
+    assert.ok(groupsFor(state, P1, "w", true).includes("companion"));
+  });
+
+  test("every section panelSections gives the DM lands in exactly one part", () => {
+    const state = room();
+    state.tokens.g = token("g", { actor: { inline: actor({ srdId: "goblin-warrior" }) } });
+    const placed = groupsFor(state, DM, "g").flatMap((p) => (p.includes(": ") ? p.split(": ")[1]!.split(" ") : [p]));
+    assert.deepEqual(placed.sort(), sectionsFor(state, DM, "g").sort());
+  });
+
+  test("whose folds a tap keeps: the DM's and an owner's own, everyone else's other", () => {
+    assert.equal(panelRelation({ dm: true, owner: false }), "own");
+    assert.equal(panelRelation({ dm: false, owner: true }), "own");
+    assert.equal(panelRelation({ dm: false, owner: false }), "other");
   });
 });

@@ -25,8 +25,8 @@ import { CompanionOwners, CompanionSection, MakeCompanion, followsPartyHp } from
 import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
 import { shownRowOps } from "../features/tokens/groupEdit.ts";
 import { HpSection } from "../features/tokens/HpSection.tsx";
-import { usePanelFolds, type FoldKey } from "../features/tokens/panelFolds.ts";
-import { offersMakeCompanion, panelSections, type PanelSectionId } from "../features/tokens/panelOrder.ts";
+import { relationKey, usePanelFolds, type FoldKey } from "../features/tokens/panelFolds.ts";
+import { offersMakeCompanion, panelGroups, panelRelation, type PanelGroupId, type PanelSectionId } from "../features/tokens/panelOrder.ts";
 import { backTo, baseSize, customWords, SIZE_WORDS } from "../features/tokens/resize.ts";
 import { RestSection } from "../features/tokens/RestSection.tsx";
 import { StatBlockSection } from "../features/tokens/StatBlockSection.tsx";
@@ -131,7 +131,11 @@ function TokenDetails(props: PanelProps) {
   const summary = null;
   // A player lent only a token of a character holds none of its card (docs/design-v1-pc-stats.md 4.2), so it has no stat card to show or edit there.
   const playsCharacter = character !== undefined && ownsCharacter(you?.memberId, character);
-  const sections = panelSections({
+  const cardNotes =
+    access.full && actor && (access.canEditActor("notes") || actor.notes !== undefined) ? (
+      <CardNotesField actor={actor} editable={access.canEditActor("notes")} onPatch={patchActor} label="Card notes" rows={2} />
+    ) : null;
+  const parts = panelGroups({
     dm: access.dm,
     owner: access.owner,
     kind: token.kind,
@@ -140,18 +144,17 @@ function TokenDetails(props: PanelProps) {
     summary: summaryItems.length > 0,
     actor: actor !== undefined && (character === undefined || access.dm || playsCharacter),
     ownerRenames: !access.dm && access.canEditToken("name"),
+    notes: access.canEditToken("notes") || !!token.notes || access.dm || cardNotes !== null,
+    image: access.canEditToken("image"),
   });
-  const cardNotes =
-    access.full && actor && (access.canEditActor("notes") || actor.notes !== undefined) ? (
-      <CardNotesField actor={actor} editable={access.canEditActor("notes")} onPatch={patchActor} label="Card notes" rows={2} />
-    ) : null;
+  const relation = panelRelation(access);
 
   const section = (id: PanelSectionId): ReactNode => {
     switch (id) {
       case "name":
         return (
           <NameBlock key={id} token={token} name={name} feetPerCell={feetPerCell}>
-            <QuickNumbers items={summaryItems} actor={actor} token={token} full={access.full} />
+            <QuickNumbers items={summaryItems} actor={actor} token={token} />
           </NameBlock>
         );
       case "image":
@@ -211,43 +214,29 @@ function TokenDetails(props: PanelProps) {
     }
   };
 
-  // Grouped by use (the project owner, 2026-10-17): what a fight changes, the notes, and where the token stands. Setup stays folded at the foot.
-  const has = (id: PanelSectionId) => sections.includes(id);
-  const combat = (["hp", "conditions", "rangeRings", "rest"] as const).filter(has);
-  const place = access.full ? (["position", "sight"] as const).filter(has) : [];
-  const notesShown = has("notes") && (access.canEditToken("notes") || !!token.notes || access.dm || cardNotes !== null);
+  // A group's one-line summary, shown while it is folded.
   const effects = actor?.effects?.length ?? 0;
   const hpWords = hpUnits({ actor: actor as Parameters<typeof hpUnits>[0]["actor"], hpVisibility: token.hpVisibility, fullAccess: access.full }).map(unitText).join(" ");
   const rings = token.rangeRings ?? [];
-  const combatSummary = [hpWords, effects > 0 ? `${effects} ${effects === 1 ? "condition" : "conditions"}` : "", rings.length > 0 ? `rings ${rings.join(", ")} ft` : ""].filter(Boolean).join(" · ");
   const height = elevationBadge(token.elevation);
   const noteCount = [token.notes, actor?.notes, access.dm ? actor?.dmNotes : undefined].filter((n) => typeof n === "string" && n.trim() !== "").length;
-  const before = sections.filter((id) => id === "name" || id === "statBlock");
-  const after = sections.filter((id) => ["stats", "settings", "companion", "owners", "remove"].includes(id));
+  const groups: Record<PanelGroupId, { label: string; key: FoldKey; summary?: string }> = {
+    combat: { label: "Combat", key: relationKey("combat", relation), summary: [hpWords, effects > 0 ? `${effects} ${effects === 1 ? "condition" : "conditions"}` : "", rings.length > 0 ? `rings ${rings.join(", ")} ft` : ""].filter(Boolean).join(" · ") },
+    notes: { label: "Notes", key: relationKey("notes", relation), summary: noteCount === 0 ? "None yet" : `${noteCount} ${noteCount === 1 ? "note" : "notes"}` },
+    position: { label: "Position", key: "position", summary: [height ? `Elevation ${height} ft` : "On the ground", token.rotation ? `facing ${token.rotation}°` : ""].filter(Boolean).join(", ") },
+    image: { label: "Image", key: "image" },
+  };
   return (
     <div style={{ fontSize: theme.font.body14 }}>
-      {before.map(section)}
-      {combat.length > 0 ? (
-        <Group label="Combat" {...groupFold("combat")} summary={combatSummary}>
-          {combat.map(section)}
-        </Group>
-      ) : null}
-      {notesShown ? (
-        <Group label="Notes" {...groupFold("notes")} summary={noteCount === 0 ? "None yet" : `${noteCount} ${noteCount === 1 ? "note" : "notes"}`}>
-          {section("notes")}
-        </Group>
-      ) : null}
-      {place.length > 0 ? (
-        <Group label="Position" {...groupFold("position")} summary={[height ? `Elevation ${height} ft` : "On the ground", token.rotation ? `facing ${token.rotation}°` : ""].filter(Boolean).join(", ")}>
-          {place.map(section)}
-        </Group>
-      ) : null}
-      {access.canEditToken("image") ? (
-        <Group label="Image" {...groupFold("image")}>
-          {section("image")}
-        </Group>
-      ) : null}
-      {after.map(section)}
+      {parts.map((part) => {
+        if (part.group === null) return section(part.id);
+        const g = groups[part.group];
+        return (
+          <Group key={part.group} label={g.label} {...groupFold(g.key)} summary={g.summary}>
+            {part.sections.map(section)}
+          </Group>
+        );
+      })}
     </div>
   );
 }

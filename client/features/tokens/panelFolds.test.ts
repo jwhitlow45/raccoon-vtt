@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { RoomScope } from "../../state/scope.ts";
-import { createPanelFolds, FOLDS_KEY, foldDefaults, overrideAfterSelect, resolveFolds, statBlockOpen, statBlockOpenedSlot, writeFold, type Folds } from "./panelFolds.ts";
+import { createPanelFolds, FOLDS_KEY, foldDefaults, overrideAfterSelect, relationKey, resolveFolds, statBlockOpen, statBlockOpenedSlot, writeFold, type Folds } from "./panelFolds.ts";
 import { openStatBlock } from "./statBlockOpen.ts";
 
 /** A device's localStorage, or one that throws as a private window's or blocked site data's does. */
@@ -26,7 +26,7 @@ function storage(initial: string | null = null, throws = false) {
 
 const NARROW = { width: 899, height: 844 };
 const WIDE = { width: 900, height: 800 };
-const FOLDED: Folds = { statBlock: false, stats: false, settings: false, companion: false, owners: false, combat: true, notes: false, position: false, image: false };
+const FOLDED: Folds = { statBlock: false, stats: false, settings: false, companion: false, owners: false, combat: true, notes: false, position: false, image: false, "other.statBlock": false, "other.combat": true, "other.notes": true };
 
 describe("the folds' defaults", () => {
   test("the stat block opens at 900 px wide and 600 tall, and folds below either", () => {
@@ -36,10 +36,13 @@ describe("the folds' defaults", () => {
     assert.equal(foldDefaults({ width: 932, height: 430 }).statBlock, false, "a large phone held sideways in the wide layout");
   });
 
-  test("Combat starts open and every other section folded, everywhere", () => {
+  test("Combat starts open and every other section folded, everywhere, and another creature's Notes open", () => {
     for (const layout of [NARROW, WIDE]) {
-      const { statBlock: _, combat, ...rest } = foldDefaults(layout);
+      const { statBlock, combat, "other.statBlock": otherBlock, "other.combat": otherCombat, "other.notes": otherNotes, ...rest } = foldDefaults(layout);
       assert.equal(combat, true);
+      assert.equal(otherCombat, true);
+      assert.equal(otherNotes, true, "it shows only with the DM's note for everyone, the reason to open it");
+      assert.equal(otherBlock, statBlock, "a block folds by the same layout rule for any creature");
       assert.ok(Object.values(rest).every((open) => !open));
     }
   });
@@ -49,17 +52,17 @@ describe("reading the folds", () => {
   test("a valid value, at 899 and 900", () => {
     const value = JSON.stringify({ statBlock: false, stats: true, settings: true, companion: false, owners: true });
     for (const layout of [NARROW, WIDE]) {
-      assert.deepEqual(resolveFolds(storage(value), layout), { statBlock: false, stats: true, settings: true, companion: false, owners: true, combat: true, notes: false, position: false, image: false });
+      assert.deepEqual(resolveFolds(storage(value), layout), { statBlock: false, stats: true, settings: true, companion: false, owners: true, combat: true, notes: false, position: false, image: false, "other.statBlock": layout === WIDE, "other.combat": true, "other.notes": true });
     }
   });
 
   test("a missing key, bad JSON, a non-boolean and storage that throws read as each section's default, at 899 and 900", () => {
     for (const s of [storage(), storage("{not json"), storage(JSON.stringify({ statBlock: "yes", stats: 1 })), storage(JSON.stringify([true])), storage(null, true)]) {
       assert.deepEqual(resolveFolds(s, NARROW), FOLDED);
-      assert.deepEqual(resolveFolds(s, WIDE), { ...FOLDED, statBlock: true });
+      assert.deepEqual(resolveFolds(s, WIDE), { ...FOLDED, statBlock: true, "other.statBlock": true });
     }
-    assert.deepEqual(resolveFolds(storage(JSON.stringify({ stats: true })), WIDE), { ...FOLDED, statBlock: true, stats: true }, "one stored value, the rest by default");
-    assert.deepEqual(resolveFolds(null, WIDE), { ...FOLDED, statBlock: true });
+    assert.deepEqual(resolveFolds(storage(JSON.stringify({ stats: true })), WIDE), { ...FOLDED, statBlock: true, "other.statBlock": true, stats: true }, "one stored value, the rest by default");
+    assert.deepEqual(resolveFolds(null, WIDE), { ...FOLDED, statBlock: true, "other.statBlock": true });
   });
 });
 
@@ -82,7 +85,7 @@ describe("the Room's folds", () => {
     let heard = 0;
     folds.subscribe(() => heard++);
     folds.tap("settings", true, true);
-    assert.deepEqual(folds.get(WIDE), { statBlock: true, stats: false, settings: true, companion: false, owners: true, combat: true, notes: false, position: false, image: false });
+    assert.deepEqual(folds.get(WIDE), { statBlock: true, stats: false, settings: true, companion: false, owners: true, combat: true, notes: false, position: false, image: false, "other.statBlock": true, "other.combat": true, "other.notes": true });
     assert.deepEqual(JSON.parse(s.items.get(FOLDS_KEY)!), { owners: true, settings: true });
     assert.equal(heard, 1);
     folds.tap("statBlock", false, true);
@@ -155,5 +158,33 @@ describe("the request's override", () => {
     assert.equal(statBlockOpen(folds.get(NARROW), { tokenId: null }, "g1"), false);
     assert.equal(s.writes(), 1);
     assert.equal(statBlockOpen(folds.get(NARROW), { tokenId: null }, "g2"), false, "another monster shows its block folded");
+  });
+});
+
+describe("the folds by relation (docs/design-v1-token-panel-groups.md 5)", () => {
+  test("a tap on another creature's Notes, Combat or block never folds the viewer's own, and the other way round", () => {
+    const s = storage();
+    const folds = createPanelFolds(s);
+    folds.get(WIDE);
+    for (const key of ["notes", "combat", "statBlock"] as const) {
+      const own = relationKey(key, "own");
+      const other = relationKey(key, "other");
+      assert.equal(own, key);
+      assert.equal(other, `other.${key}`);
+      const before = folds.get(WIDE)[own];
+      folds.tap(other, !folds.get(WIDE)[other], true);
+      assert.equal(folds.get(WIDE)[own], before, `${key}: the viewer's own stays as it was`);
+      const otherNow = folds.get(WIDE)[other];
+      folds.tap(own, !folds.get(WIDE)[own], true);
+      assert.equal(folds.get(WIDE)[other], otherNow, `${key}: and the others' stay as they were`);
+    }
+    assert.deepEqual(Object.keys(JSON.parse(s.items.get(FOLDS_KEY)!)).sort(), ["combat", "notes", "other.combat", "other.notes", "other.statBlock", "statBlock"]);
+  });
+
+  test("the stat block reads the fold of the viewer's relation, and a request opens either", () => {
+    const folds = { ...FOLDED, statBlock: true, "other.statBlock": false };
+    assert.equal(statBlockOpen(folds, { tokenId: null }, "g1", "own"), true);
+    assert.equal(statBlockOpen(folds, { tokenId: null }, "g1", "other"), false);
+    assert.equal(statBlockOpen(folds, { tokenId: "g1" }, "g1", "other"), true);
   });
 });

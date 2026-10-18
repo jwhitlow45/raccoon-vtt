@@ -7,15 +7,24 @@ import { layoutSize } from "../device/layout.ts";
 import { uiScale } from "../device/settings.ts";
 
 /*
- * The token panel's folds (docs/design-v1-token-panel.md 3.5): which of
- * its five foldable sections show open, as this device last left them,
+ * The token panel's folds (docs/design-v1-token-panel.md 3.5 and
+ * docs/design-v1-token-panel-groups.md 5): which of its sections and
+ * groups show open, as this device last left them,
  * kept for the Room so a crossing of 900 px, which remounts the panel in
  * the other tree, never refolds anything. Plain functions and slots, for
  * node --test.
  */
 
-export const FOLD_KEYS = ["statBlock", "stats", "settings", "companion", "owners", "combat", "notes", "position", "image"] as const;
+export const FOLD_KEYS = ["statBlock", "stats", "settings", "companion", "owners", "combat", "notes", "position", "image", "other.statBlock", "other.combat", "other.notes"] as const;
 export type FoldKey = (typeof FOLD_KEYS)[number];
+
+/** The folds kept apart by relation (docs/design-v1-token-panel-groups.md 5), so a tap on another creature's Notes never folds the viewer's own. */
+export type RelationFold = "statBlock" | "combat" | "notes";
+
+/** A relation fold's key: the plain key for the viewer's own creatures, `other.` and the key for the rest. */
+export function relationKey(key: RelationFold, relation: "own" | "other"): FoldKey {
+  return relation === "own" ? key : `other.${key}`;
+}
 export type Folds = Readonly<Record<FoldKey, boolean>>;
 
 export const FOLDS_KEY = "rvtt.tokenPanelFolds";
@@ -32,8 +41,22 @@ type WriteStorage = Pick<Storage, "getItem" | "setItem">;
  */
 export function foldDefaults(layout: Size): Folds {
   const wide = layout.width >= theme.layout.wideMinWidth && layout.height >= 600;
-  // Combat holds what a fight changes (docs/design-v1-dice-ui.md 5.2), so it starts open on every layout.
-  return { statBlock: wide, stats: false, settings: false, companion: false, owners: false, combat: true, notes: false, position: false, image: false };
+  // Combat holds what a fight changes (docs/design-v1-token-panel-groups.md 2), so it starts open on every layout.
+  // Another creature's Notes shows only when it holds the DM's note for everyone, which is why a player opens it, so it starts open.
+  return {
+    statBlock: wide,
+    stats: false,
+    settings: false,
+    companion: false,
+    owners: false,
+    combat: true,
+    notes: false,
+    position: false,
+    image: false,
+    "other.statBlock": wide,
+    "other.combat": true,
+    "other.notes": true,
+  };
 }
 
 /** What storage holds, as an object, or nothing for a missing key, bad JSON, something not an object, or storage that throws. */
@@ -48,7 +71,7 @@ function stored(storage: ReadStorage | null): Record<string, unknown> {
   }
 }
 
-/** The five folds: each stored boolean, and the default at this layout for anything else. */
+/** The folds: each stored boolean, and the default at this layout for anything else. */
 export function resolveFolds(storage: ReadStorage | null, layout: Size): Folds {
   const from = stored(storage);
   const defaults = foldDefaults(layout);
@@ -128,9 +151,9 @@ export function overrideAfterSelect(override: { tokenId: string | null }, select
   return override.tokenId !== null && override.tokenId !== selectedId ? { tokenId: null } : override;
 }
 
-/** Whether a token's stat block shows open: the request's override, else the folds. */
-export function statBlockOpen(folds: Folds, override: { tokenId: string | null }, tokenId: string): boolean {
-  return override.tokenId === tokenId || folds.statBlock;
+/** Whether a token's stat block shows open: the request's override, else the folds of the viewer's relation to it. */
+export function statBlockOpen(folds: Folds, override: { tokenId: string | null }, tokenId: string, relation: "own" | "other" = "own"): boolean {
+  return override.tokenId === tokenId || folds[relationKey("statBlock", relation)];
 }
 
 /** The folds for this Room, kept up to date with every tap. */
