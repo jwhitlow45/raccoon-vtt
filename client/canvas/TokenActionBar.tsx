@@ -8,10 +8,11 @@ import { reshapeLeg } from "#shared/rules/path.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
 import { RETURN_RANK, useSheetReturnFocus } from "../components/sheetFocus.ts";
-import { Icon } from "../components/Icon.tsx";
+import { Icon, type IconName } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
 import { GRIP_ATTR, PaneHeader, STICKY_HEADER_ATTR, type PaneHandle } from "../components/SheetHeader.tsx";
 import { useLayoutSize } from "../features/device/layout.ts";
+import { isCoarsePointer } from "../lib/device.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { useOptionStore } from "../features/dice/optionState.ts";
 import { useGroupSaveStore } from "../features/dice/groupSave/store.ts";
@@ -269,6 +270,8 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
         return (
           <BarButton
             key={id}
+            icon="hidden"
+            iconOnly
             pressed={token.visibility === "dm"}
             onClick={() => {
               const showing = token.visibility === "dm";
@@ -289,13 +292,13 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
         );
       case "locked":
         return (
-          <BarButton key={id} pressed={token.locked} onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { locked: !token.locked } })}>
+          <BarButton key={id} icon="locked" iconOnly pressed={token.locked} onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { locked: !token.locked } })}>
             Locked
           </BarButton>
         );
       case "duplicate":
         return (
-          <BarButton key={id} onClick={duplicate}>
+          <BarButton key={id} icon="duplicate" iconOnly onClick={duplicate}>
             Duplicate
           </BarButton>
         );
@@ -1344,6 +1347,10 @@ function DeleteButton(props: { onDelete(): void; armedText?: string }) {
     <BarButton
       danger
       armed={armed}
+      icon="delete"
+      // A trash can is read at once on any screen (docs/design-v1-icons.md 2), so Delete is its icon alone until armed, when "Sure?" shows beside it.
+      iconOnly={!armed}
+      always={!armed}
       label={words.label}
       onClick={() => {
         if (armed) props.onDelete();
@@ -1435,7 +1442,15 @@ function BarButton(props: {
   armed?: boolean;
   grow?: boolean;
   disabled?: boolean;
+  /** Drawn before the words (docs/design-v1-icons.md 4). */
+  icon?: IconName;
+  /** The icon alone, its words its name and tooltip, where a mouse can hover. A touch screen keeps the words. */
+  iconOnly?: boolean;
+  /** The icon alone on every screen: only for an icon read at once without hover, such as the trash can. */
+  always?: boolean;
 }) {
+  const bare = props.icon !== undefined && props.iconOnly === true && (props.always === true || !isCoarsePointer());
+  const words = typeof props.children === "string" ? props.children : undefined;
   return (
     <Button
       ref={props.ref}
@@ -1445,15 +1460,17 @@ function BarButton(props: {
       armed={props.armed}
       pressed={props.half ? undefined : props.pressed}
       aria-pressed={props.half ? "mixed" : props.pressed}
-      aria-label={props.label}
-      title={props.label}
+      aria-label={props.label ?? (bare ? words : undefined)}
+      title={props.label ?? (bare ? words : undefined)}
+      icon={bare ? undefined : props.icon}
       onClick={props.onClick}
       style={{
         flex: props.grow ? "1 0 auto" : "none",
+        ...(bare ? { minWidth: theme.touch, padding: 0 } : null),
         ...(props.half ? { background: theme.color.surfaceRaised, border: `${theme.line.border}px dashed ${theme.color.accent}`, color: theme.color.text } : null),
       }}
     >
-      {props.children}
+      {bare ? <Icon name={props.icon!} size="md" /> : props.children}
     </Button>
   );
 }
