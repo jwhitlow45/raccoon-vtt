@@ -13,6 +13,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
 - [What you can ignore at first](#what-you-can-ignore-at-first)
 - Making maps
   - [Scenes](#scenes)
+  - [Starter art](#starter-art)
   - [Lining up the grid](#lining-up-the-grid)
   - [The map builder](#the-map-builder)
   - [Walls and doors](#walls-and-doors)
@@ -91,7 +92,7 @@ This section gets you through a first session with only a handful of tools: one 
 
 1. On the Home page, fill in **Room name** and **Your name**. The app suggests a **Player password**, which you can keep or replace with your own (8 characters or more). Then press **Create room**.
 2. The app now shows your DM link. Save it somewhere safe, because it is your way back into the room as the DM from a new device. Tick **I saved my DM link** and press **Continue to the room**.
-3. Open **Scenes** to add your map. Under **New scene**, pick **Map image**, then **Choose a map image**, then **Upload and create**. If the file name includes the map's size in squares, such as `crypt_30x20.jpg`, the scene is ready to use. If it doesn't, the app opens the **Line up grid** tool so you can match its grid to the one on the map (see [Lining up the grid](#lining-up-the-grid)).
+3. Open **Scenes** to add your map. Under **New scene**, pick **Map image**, then **Choose a map image**, then **Upload and create**. If the file name includes the map's size in squares, such as `crypt_30x20.jpg`, the scene is ready to use. If it doesn't, the app opens the **Line up grid** tool so you can match its grid to the one on the map (see [Lining up the grid](#lining-up-the-grid)). No map of your own yet? Press **From starter packs** instead and pick one of the maps that come with the app (see [Starter art](#starter-art)).
 4. Open **Monsters** and search for a monster, such as `goblin`. Tap it, set **How many**, and tick **Hidden from players** if the monsters are lying in wait. Press **Place on the map**, then tap the map where they go.
 5. Send your players the link: open the **Menu** and choose **Copy player link**. The link carries the password, so players join without typing it. Players can make their own characters in the **Characters** panel (new rooms allow this), or you can make them yourself with **New character** there.
 
@@ -120,7 +121,7 @@ None of these is needed to run a good session. Each one is there for when you wa
 
 # Making maps
 
-This part covers everything you do to get a map ready before the players see it: scenes, the grid, the map builder, walls, heights, light and fog. Read it while you prepare a session, and come back to a section when you want a map to do something new.
+This part covers everything you do to get a map ready before the players see it: scenes, the starter art that comes with the app, the grid, the map builder, walls, heights, light and fog. Read it while you prepare a session, and come back to a section when you want a map to do something new.
 
 ## Scenes
 
@@ -137,7 +138,7 @@ Moving the players moves their view, not their tokens. Once they arrive, place t
 Under **New scene**, pick the kind of scene you want:
 
 - **Battle mat**: a blank grid with a background color. Set **Squares across** and **Squares down** (30 × 20 by default, up to 200 each). Fog starts off.
-- **Map image**: pick an image (JPEG, PNG, WebP, GIF or AVIF, up to 32 MB) and press **Upload and create**. If you leave the name blank, the scene takes its name from the file. Fog starts on, and the scene is sized to the whole squares the image covers. To reuse an image already in the room, choose **Or use a map already uploaded** instead.
+- **Map image**: pick an image (JPEG, PNG, WebP, GIF or AVIF, up to 32 MB) and press **Upload and create**. If you leave the name blank, the scene takes its name from the file. Fog starts on, and the scene is sized to the whole squares the image covers. To reuse an image already in the room, choose **Or use a map already uploaded** instead, or press **From starter packs** to start from one of the maps that come with the app (see [Starter art](#starter-art)).
 - **Builder**: an empty 40 × 30 scene that opens the map builder straight away. Fog starts on.
 - **From a Universal VTT file**: see [Map phases, imports and exports](#map-phases-imports-and-exports).
 
@@ -162,6 +163,38 @@ Players can see a scene's name, so don't name a scene after a surprise. And if y
 **Copying and organizing scenes.** Each scene's **⋯** menu (More for the scene) holds **Duplicate…**, **Move to folder…** and **Update thumbnail**. A duplicate always copies the map, its phases and the build, and lets you choose what else comes along: **Monsters, NPCs and objects** (on to begin with), **Player characters**, **Fog**, and **Drawings and placed areas**. Folders fold away with a tap, and players never see your folders or thumbnails. To change the order of the list, press **Reorder** at the top and move scenes and folders up or down.
 
 Feet per square and the rule for diagonals aren't scene settings: they apply to the whole room. You'll find them under **Menu**, **Room settings**, **Grid and distance**.
+
+## Starter art
+
+You don't need any art of your own to get started. The app comes with **starter packs**: sets of openly licensed art, each made by one artist or project in one style, with maps to play on, tokens and portraits for monsters and characters, pictures to show as handouts, and props for the map builder. Every work in them was released by its author under a license that lets your table use it, and the app keeps each work's credit with it.
+
+| For | Packs |
+| --- | --- |
+| Maps | Dyson Logos maps (29 hand-inked maps of inns, caves, dungeons, temples, castles, towns and more), Scarlet Heroes maps (5), Index Card Dungeons (10 small dungeons, each drawn on an index card) and a painted Cavern Battlemap |
+| Tokens and portraits | Illustrated Bestiary (60 monsters in color), Cute Heroes and Monsters (64), Dungeon Crawl Stone Soup monsters (61, in pixel art), Lemurs Fantasy Portraits (58), Fantasy RPG Portraits (25), Flare Hero Portraits (10), and Historical art's people and creatures |
+| Handouts | The Illustrated Bestiary, the three portrait packs, and Historical art (47 museum pictures of people, creatures, places, items and documents) |
+| Map builder stamps | Warlock's Gauntlet (40 ruins, wrecks, bones and trees), Poly Haven props (41 pieces of furniture and gear seen from above) and Flat greyscale props (50) |
+
+**Where to find it.** Starter art has a place of its own wherever you choose art, so it never gets mixed up with the images you have uploaded yourself:
+
+- In the image picker, for a token, a character's portrait or a monster's token image, open the **Starter** tab.
+- In the **Scenes** panel, under **New scene** and **Map image**, press **From starter packs**.
+- In the **DM** panel, under **Show a handout**, press **From starter packs**.
+- In the map builder's **Stamp** mode, press **Choose a stamp** and open the **Starter** tab.
+
+Each place shows only the packs that suit it, sorted by pack and then by category inside the pack: Dyson's maps by Taverns and inns, Caves or Crypts and tombs, for example, and the Bestiary by Dragons, Undead and so on. The search box looks through names, categories and tags across all the packs on show, so `owlbear`, `crypt` or `elf` takes you straight to what you're after. Tap a picture to see its name, its pack, its author and its license, then press **Use**.
+
+**How a pick joins the room.** When you use a map, a token or a handout, the app copies that picture into your room's library together with its credit, and then carries on just as it would after an upload of your own: a token picture opens in the crop editor, a map becomes a new scene, and a handout is ready to show. From then on it is one of the room's images like any other. It goes into your backups, and it travels with the room if you move it to another server.
+
+Stamps work differently. A starter stamp isn't copied into the room at all: the builder places it straight from the app, the same way it places the stamps that come with the app.
+
+**It doesn't use your storage.** Each room can store only so much, but pictures from the starter packs don't count toward that limit, however many you pick. In the **Library**, they sit after your own images in a folded group called **From starter packs**, so your own maps and tokens stay easy to find. You can delete a pick you no longer need, just like any other image, and pick it again later if you want it back.
+
+**Maps with a grid.** Most of Dyson's maps and the painted cavern have a grid drawn on them, and for 22 of them the app already knows exactly where it lies. A scene made from one of those starts lined up on its grid, so you can skip [Lining up the grid](#lining-up-the-grid) entirely. For a few more, the app knows how big the squares are but not where they start, so the scene opens on **Line up grid** with the box already the right size, and all you need to do is move it onto the drawn squares. The Scarlet Heroes maps, the Index Card Dungeons and three of Dyson's maps have no drawn grid, so they open on **Line up grid**, just as a map of your own would. Ink maps are black lines on white paper, where the app's usual white grid lines would disappear, so their scenes start with a dark grid instead. The Index Card Dungeons are meant for exploring rather than for fighting square by square, so they work best as a map the party moves across.
+
+**Credits.** A picked image keeps its credit, which you can read in the Library's viewer and in the token panel: who made it, its license, and what the app changed, which is usually only its size and file format, or for the ink maps, a reduction to four shades of gray that keeps every line sharp. The About page credits every pack. If you share a starter map or picture beyond your table, keep its credit with it, since that is what its license asks of you.
+
+Players get the **Starter** tab too, in the image picker for their own characters' tokens, so a player without a portrait can pick one. Maps, handouts and stamps stay yours.
 
 ## Lining up the grid
 
@@ -201,7 +234,7 @@ Open the builder from the toolbar, or with **Open the builder** in the scene's s
 - **Heights and stairs**: see [Heights and stairs](#heights-and-stairs).
 - **Label**: type the text, then tap the map to place it. **Label size** is S, M or L. To change a label later, tap it in this mode to edit or delete it, or drag it to move it. Tapping a label with the Select tool opens it too.
 - **Lights**: see [Light and party vision](#light-and-party-vision).
-- **Stamp**: press **Choose a stamp** to pick one of the 46 pictures that come with the app (trees, bushes, rocks, campfires, furniture, barrels and more) or any token image in the room's library, then tap the map to place it. Drag a placed stamp to move it, and use its handles to turn and resize it. While a stamp is picked, the row offers **Tint**, **Flip**, **Bring to front**, **Duplicate**, **DM only** (to hide it from players), **Delete** and **Done**. With **Snap** on, a stamp turns in 15° steps and moves in half squares, and with it off, it follows your finger freely.
+- **Stamp**: press **Choose a stamp** to pick one of the 46 pictures that come with the app (trees, bushes, rocks, campfires, furniture, barrels and more) or any token image in the room's library, then tap the map to place it. The picker's **Starter** tab holds 131 more props from the starter packs, such as ruins, boats, benches, tables, crates and treasure (see [Starter art](#starter-art)). Drag a placed stamp to move it, and use its handles to turn and resize it. While a stamp is picked, the row offers **Tint**, **Flip**, **Bring to front**, **Duplicate**, **DM only** (to hide it from players), **Delete** and **Done**. With **Snap** on, a stamp turns in 15° steps and moves in half squares, and with it off, it follows your finger freely.
 
 The **Undo** and **Redo** buttons in the builder's row are the same undo as everywhere else, with one step for each stroke or room. **Clear build**, under **⋯**, removes the whole build, including any walls and lights that came from an import.
 
@@ -349,7 +382,7 @@ The copies are numbered for you: "Goblin Warrior 1", "Goblin Warrior 2" and so o
 
 For a legendary monster, the editor looks for two names in particular. A trait named "Legendary Resistance (3/Day, or 4/Day in Lair)" sets its Legendary Resistance, and a first legendary action named "Legendary Action Uses: 3 (4 in Lair)" sets its legendary actions, so its tokens get the right number of uses. There is no separate section for lair actions.
 
-**Token image.** On a monster's page, **Token image** sets the picture that every new token of that monster starts with. To give the picture to the tokens already on the map too, press **Apply to N tokens on this scene**.
+**Token image.** Every SRD monster comes with a token picture of its own: an icon from game-icons.net on a disk colored by the monster's creature type, such as a wolf's head on brown for a beast or a skeleton on black for the undead, with dragons in their own colors. You can tell a pack of wolves from a band of goblins at a glance before you have chosen a single picture. On a monster's page, **Token image** shows that default with its credit, and **Change image** sets a picture of your own for this room, which every new token of that monster then starts with (the image picker's **Starter** tab is a good place to look). **Use the default icon** goes back to the default. To give the picture to the tokens already on the map too, press **Apply to N tokens on this scene**.
 
 ## Encounters
 
@@ -730,7 +763,7 @@ The **DM** panel holds the tools that act on your players' screens.
 
 ![The DM panel: Handouts, Players' screens, Check their view, Player link and Table display.](dm-guide/dm-panel.webp)
 
-- **Handouts**: **Show a handout** shows an image or a PDF as a popup, to **Everyone** or to **Chosen players**. Pick **From the library** or **Upload a file**, give it a **Title**, then press **Show**. For a PDF, the app asks which pages to include (up to 100). **Showing now** lists what is up, with **Hide** to take a handout down for everyone.
+- **Handouts**: **Show a handout** shows an image or a PDF as a popup, to **Everyone** or to **Chosen players**. Pick **From the library** or **Upload a file**, or press **From starter packs** to choose one of the pictures that come with the app (see [Starter art](#starter-art)). Give it a **Title** (a starter picture fills in its own name if you haven't typed one), then press **Show**. For a PDF, the app asks which pages to include (up to 100). **Showing now** lists what is up, with **Hide** to take a handout down for everyone.
 - **Players' screens**:
   - **Follow me**: the players' maps follow yours as you pan and zoom, until you turn it off.
   - **Bring everyone here**: moves every player's map to what you see right now, once.
