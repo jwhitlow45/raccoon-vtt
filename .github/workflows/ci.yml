@@ -1,0 +1,166 @@
+# Every check on a push to main or to a ci/ branch: the typecheck, unit and
+# integration tests on Linux, and the e2e files in five shards on macOS.
+#
+# The e2e shards run on macOS because the layout tests measure pixels, and
+# Linux renders fonts differently from the Macs they were tuned on. A public
+# repository runs at most five macOS jobs at a time, hence five shards. The
+# client is built once, on Linux since the bundle is the same bytes on every
+# OS, and each shard downloads it. scripts/e2e-shard.ts decides which files
+# each shard runs, and README.md ("Continuous integration") has the rest.
+#
+# It needs no secrets and deploys nothing.
+name: CI
+
+on:
+  push:
+    branches: [main, "ci/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a branch replaces that branch's run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The Node of the production image (the Dockerfile's NODE_IMAGE). pnpm
+  # comes from package.json's packageManager field.
+  NODE_VERSION: 24.21.0
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 3
+
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      # The development database of docker-compose.yml: postgres 17 on Alpine,
+      # by the digest docker-compose.yml pins for its backup image, with the
+      # same user, password and database. The server applies db/schema.sql
+      # itself on its first connection.
+      postgres:
+        image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        env:
+          POSTGRES_USER: raccoon
+          POSTGRES_PASSWORD: raccoon
+          POSTGRES_DB: raccoon
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U raccoon -d raccoon"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://raccoon:raccoon@localhost:5434/raccoon
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - id: install
+        run: pnpm install --frozen-lockfile
+      # Each check runs even when an earlier one failed, so one push reports all three.
+      - name: Typecheck
+        run: pnpm -s typecheck
+      - name: Unit tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm -s test
+      - name: Integration tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm -s test:int
+
+  e2e:
+    needs: build
+    # Apple silicon, the newest macOS the runner images offer. Named rather
+    # than macos-latest, so the fonts change only when this line does.
+    runs-on: macos-26
+    # The longest shard is one file of about 16 minutes on a laptop, and a
+    # failing file runs twice.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+    env:
+      DATABASE_URL: postgres://raccoon:raccoon@localhost:5434/raccoon
+      E2E_SCREENSHOT_DIR: test-results/e2e-screenshots
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      # Each runner installs for itself, since sharp and argon2 bring native
+      # binaries for the machine's own OS and CPU.
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+      # The macOS images have no Docker and no PostgreSQL, so it comes from
+      # Homebrew, at the major version of docker-compose.yml's image. It is
+      # set up as that image sets itself up: user and password raccoon,
+      # passwords checked on TCP, and a database named raccoon. The database
+      # is created over TCP, the way the server connects, so a wrong password
+      # setup fails here rather than in the first e2e file.
+      - name: Start PostgreSQL 17
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+          PGPASSWORD: raccoon
+        run: |
+          brew install postgresql@17
+          bin="$(brew --prefix postgresql@17)/bin"
+          data="$RUNNER_TEMP/pgdata"
+          printf raccoon > "$RUNNER_TEMP/pgpass"
+          mkdir -p test-results
+          "$bin/initdb" --pgdata="$data" --username=raccoon --pwfile="$RUNNER_TEMP/pgpass" \
+            --auth-local=trust --auth-host=scram-sha-256 --encoding=UTF8 --locale=en_US.UTF-8
+          "$bin/pg_ctl" --pgdata="$data" --log=test-results/postgres.log --options="-p 5434" --wait start
+          "$bin/createdb" --host=localhost --port=5434 --username=raccoon raccoon
+      - name: e2e shard ${{ matrix.shard }}
+        id: shard
+        run: node scripts/e2e-shard.ts ${{ matrix.shard }} ${{ strategy.job-total }}
+      # A shard that failed, or passed only through a rerun, keeps its logs
+      # and screenshots for two weeks.
+      - name: Keep logs and screenshots
+        if: ${{ failure() || steps.shard.outputs.reran == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-shard-${{ matrix.shard }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
