@@ -7,6 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
 import { ConsoleWatch, dragWorld, openSideTab, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { chooseStarterWork, starterWork } from "./starterPick.ts";
 import { A5, LETTER, LETTER_WIDE, pdfOf } from "./pdfFixture.ts";
 
 /**
@@ -455,6 +456,11 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await picker.getByRole("tab", { name: "Search the web" }).click();
         await picker.getByLabel("Search for").waitFor();
         await checkDialog(picker, `${label}, Search the web`, { name: "Search", in: "body" });
+        // The Starter tab: a work chosen, its credit and Use in reach (docs/design-v1-starter-art.md 4).
+        await picker.getByRole("tab", { name: "Starter" }).click();
+        await chooseStarterWork(picker, starterWork("token"), "browse", false);
+        await checkDialog(picker, `${label}, Starter`, { name: "Use", in: "body" });
+        await shoot("starter-picked");
         await picker.getByRole("tab", { name: "Library" }).click();
         await picker.getByRole("button", { name: "Use this image" }).first().click();
         const crop = page.getByRole("dialog", { name: "Crop the image" });
@@ -558,6 +564,10 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         const stamps = page.getByRole("dialog", { name: "Stamps" });
         await checkDialog(stamps, `${label}, Stamps`, null);
         await shoot("stamps");
+        await stamps.getByRole("tab", { name: "Starter" }).click();
+        await chooseStarterWork(stamps, starterWork("stamp"), "browse", false);
+        await checkDialog(stamps, `${label}, Stamps, Starter`, { name: "Use", in: "body" });
+        await shoot("stamps-starter");
         await closeDialog(stamps);
         await tapCell(page, run.bounds, run.stamp);
         const bar = page.getByRole("toolbar", { name: "Map builder options" });

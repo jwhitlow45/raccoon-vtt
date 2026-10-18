@@ -2,9 +2,9 @@ import { type AreaTemplate, type BuildChunk, type Drawing, type FreeWall, type R
 import { keys } from "#shared/keys.ts";
 import { projectEntity, projectState, stampCells } from "#shared/project.ts";
 import { labelBox } from "#shared/rules/labels.ts";
-import { STAMP_ART } from "#shared/stamps.ts";
 import type { Rect } from "../../lib/camera.ts";
 import { displayName, footprint } from "../../lib/scene.ts";
+import { shippedStamp } from "../builder/stamps/rules.ts";
 
 /**
  * The scene outliner's rows (docs/design-v1-dm-tools.md 3.2), as pure
@@ -104,8 +104,6 @@ const SHAPE_WORD: Record<AreaTemplate["shape"], string> = {
   sphere: "Sphere",
 };
 
-const STAMP_NAMES = new Map(STAMP_ART.map((s) => [s.key, s.name]));
-
 /**
  * A companion's detail and mark (docs/design-v1-combat-flow.md 3.6.10):
  * whose it is, in place of its kind word, so searching "companion" lists
@@ -155,7 +153,7 @@ export function outlineRows(view: RoomState, sceneId: string): OutlineRow[] {
 
   for (const s of Object.values(view.stamps ?? {})) {
     if (!s || s.sceneId !== sceneId) continue;
-    const name = "key" in s.art ? (STAMP_NAMES.get(s.art.key) ?? s.art.key) : "Image";
+    const name = "key" in s.art ? (shippedStamp(s.art.key)?.name ?? s.art.key) : "Image";
     const cells = stampCells(s);
     const mark = s.visibility === "dm" ? "DM only" : seen.stamps[s.id] ? null : "Under fog";
     add({ group: "map", kind: "stamp", id: s.id, name, detail: "Stamp", mark, rect: rectOf(cells.x0, cells.y0, cells.x1, cells.y1) });

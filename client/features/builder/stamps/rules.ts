@@ -1,5 +1,7 @@
 import { STAMP_MAX_CELLS, STAMP_MIN_CELLS, type Scene, type Stamp, type StampArt } from "#shared/model.ts";
 import type { StampInput } from "#shared/protocol.ts";
+import type { StarterStamp, StarterWork } from "#shared/starter.ts";
+import { STARTER_STAMPS } from "#shared/starterStamps.ts";
 import { STAMP_ART, type ShippedStamp } from "#shared/stamps.ts";
 
 /**
@@ -225,6 +227,15 @@ export function duplicateOf(stamp: Stamp, id: string, z: number, bounds: SceneBo
   return toInput({ ...stamp, id, z, x: center.x, y: center.y });
 }
 
+/**
+ * A starter pack's prop as the next tap places it (docs/design-v1-starter-art.md
+ * 5): by the stamp key the catalog gives it, at its footprint, or null for a
+ * work that is no stamp.
+ */
+export function starterChoice(work: Pick<StarterWork, "name" | "stamp">): ChosenArt | null {
+  return work.stamp ? { art: { key: work.stamp.key }, w: work.stamp.w, h: work.stamp.h, name: work.name } : null;
+}
+
 /** The shipped stamps whose name holds every word typed, in catalog order. */
 export function matchStamps(query: string, catalog: readonly ShippedStamp[] = STAMP_ART): ShippedStamp[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -235,10 +246,26 @@ export function matchStamps(query: string, catalog: readonly ShippedStamp[] = ST
   });
 }
 
-const BY_KEY = new Map(STAMP_ART.map((s) => [s.key, s]));
+/** A stamp the board can draw from `/stamps/<key>.webp`: a shipped one or a starter pack's. */
+export type KnownStamp = Pick<ShippedStamp, "key" | "name" | "w" | "h">;
 
-/** The catalog entry for a key, or null for a key this client does not ship, which draws as a dashed box. */
-export function shippedStamp(key: string): ShippedStamp | null {
+/**
+ * Every stamp the client ships by key: the shipped set and the starter
+ * packs' props, which share the folder under pack-prefixed keys. A shipped
+ * key wins should a starter key ever repeat one, so a placed stamp never
+ * changes what it draws.
+ */
+export function knownStamps(shipped: readonly KnownStamp[], starter: readonly StarterStamp[]): ReadonlyMap<string, KnownStamp> {
+  const known = new Map<string, KnownStamp>();
+  for (const s of starter) known.set(s.key, { key: s.key, name: s.name, w: s.w, h: s.h });
+  for (const s of shipped) known.set(s.key, s);
+  return known;
+}
+
+const BY_KEY = knownStamps(STAMP_ART, STARTER_STAMPS);
+
+/** The entry for a key, or null for a key this client does not ship, which draws as a dashed box. */
+export function shippedStamp(key: string): KnownStamp | null {
   return BY_KEY.get(key) ?? null;
 }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { IconImage, ImageRef } from "#shared/model.ts";
+import type { FoundWork } from "#shared/starter.ts";
 import { Button } from "../../components/Button.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
 import { Empty } from "../../components/Empty.tsx";
@@ -17,14 +18,16 @@ import { IconsTab } from "./IconsTab.tsx";
 import { rememberAsset } from "./library.ts";
 import { honorsImageOrientation } from "./orientation.ts";
 import { isThumbnailUrl } from "#shared/searchThumbnails.ts";
+import { StarterBrowser } from "../starter/StarterBrowser.tsx";
 import { PickError, checkImageUrl, searchConfig, uploadTokenImage } from "./upload.ts";
 
 /**
  * The image picker for tokens, characters and monsters (features section 6,
  * design 11.1 to 11.3): a shipped game-icons.net icon on a colored disk,
  * upload from the device (the camera roll on a phone), paste from the
- * clipboard, paste an image link, search the web, or reuse an image already
- * in the room's library.
+ * clipboard, paste an image link, search the web, reuse an image already
+ * in the room's library, or copy one in from the starter packs
+ * (docs/design-v1-starter-art.md 4).
  *
  * Icons come first and always work: picking one is the caller's op alone,
  * with no upload and no quota (docs/design-v1-dm-tools.md 3.12). Every
@@ -39,7 +42,12 @@ import { PickError, checkImageUrl, searchConfig, uploadTokenImage } from "./uplo
 
 export type PickedImage = { id: string; width?: number; height?: number };
 
-type Tab = "icons" | "device" | "link" | "search" | "library";
+/** The starter works a token or portrait may use. */
+const STARTER_USES = ["token"] as const;
+/** The picker's status while a starter work is copied in, which is also how its Use knows the copy is its own. */
+const STARTER_BUSY = "Adding to the room…";
+
+type Tab = "icons" | "starter" | "device" | "link" | "search" | "library";
 
 export function ImagePicker(props: {
   onPick(image: PickedImage): void;
@@ -123,6 +131,13 @@ export function ImagePicker(props: {
     [finish, run, roomId],
   );
 
+  // A starter work is copied in as the room's own token image, with the catalog's credit, then cropped as a library pick is.
+  const pickStarter = useCallback(
+    async (found: FoundWork) =>
+      finish(await run(STARTER_BUSY, (signal, onWaiting) => api.pickStarter(roomId, { work: found.work.key, kind: "token" }, { signal, onWaiting }))),
+    [finish, run, roomId],
+  );
+
   // A paste anywhere while the picker is open: an image uploads, a link imports.
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
@@ -146,6 +161,7 @@ export function ImagePicker(props: {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "icons", label: "Icons" },
+    { id: "starter", label: "Starter" },
     { id: "device", label: "Device" },
     { id: "link", label: "Link" },
     ...(searchEnabled ? [{ id: "search" as const, label: "Search the web" }] : []),
@@ -197,6 +213,16 @@ export function ImagePicker(props: {
       <div role="tabpanel">
         {tab === "icons" ? (
           <IconsTab disabled={busy !== null} initial={props.current && "icon" in props.current ? props.current : undefined} onUse={props.onPickIcon} />
+        ) : null}
+        {tab === "starter" ? (
+          <StarterBrowser
+            uses={STARTER_USES}
+            hint="Openly licensed art packs. Use copies the picture into this room's library with its credit."
+            busy={busy === STARTER_BUSY}
+            busyLabel="Adding…"
+            disabled={busy !== null}
+            onUse={(found) => void pickStarter(found)}
+          />
         ) : null}
         {tab === "device" ? <DeviceTab disabled={busy !== null} onFile={upload} onUrl={importUrl} onError={setError} /> : null}
         {tab === "link" ? <LinkTab disabled={busy !== null} onUrl={importUrl} /> : null}

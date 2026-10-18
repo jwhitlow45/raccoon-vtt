@@ -7,6 +7,7 @@ import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import { ConsoleWatch, openSideTab, OpSocket, pagePoint, readCamera, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { assetRow, chooseStarterWork, starterWork } from "./starterPick.ts";
 
 /**
  * A DM at a computer with a keyboard, after the design pass's live play:
@@ -416,6 +417,29 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     const camAfter = await readCamera(dm);
     assert.ok(camBefore && camAfter && (camAfter.x !== camBefore.x || camAfter.y !== camBefore.y), `Space and a drag did not move the map: ${JSON.stringify({ camBefore, camAfter })}`);
     await dm.keyboard.press("Escape");
+  });
+
+  test("sa-a-3. a handout from a starter pack: Use copies the picture in, the form picks it under the work's name, and Show shows it", async () => {
+    const found = starterWork("handout");
+    await openSideTab(dm, "DM");
+    const panel = dm.getByRole("tabpanel");
+    await panel.getByRole("button", { name: "Show a handout" }).click();
+    await panel.getByRole("button", { name: "From starter packs" }).click();
+    const dialog = dm.getByRole("dialog", { name: "Starter handouts" });
+    await chooseStarterWork(dialog, found, "browse", false);
+    await shots.take(dm, "sa-a-3-handout-starter");
+    await dialog.getByRole("button", { name: "Use", exact: true }).click();
+    await dialog.waitFor({ state: "detached" });
+    await panel.getByRole("button", { name: "Change" }).waitFor();
+    assert.equal(await panel.getByLabel("Title").inputValue(), found.work.name);
+    await panel.getByRole("button", { name: "Show", exact: true }).click();
+    const shown = await waitFor("the starter handout in the DM's state", () => Object.values(dmSocket.state?.handouts ?? {}).find((h) => h?.title === found.work.name));
+    const row = await assetRow(dmContext.request, server.origin, run.roomId, shown.assetId);
+    assert.equal(row?.kind, "handout");
+    assert.equal(row?.starter, found.work.key, "the row names the work it was copied from");
+    assert.equal(row?.credit?.creator, found.work.credit.author, "the credit is the catalog's");
+    await shots.take(dm, "sa-a-3-handout-shown");
+    await panel.getByRole("button", { name: "Hide" }).first().click();
   });
 
   test("9. no page errors along the way", () => {

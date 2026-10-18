@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { MAX_SCENE_CELLS } from "#shared/protocol.ts";
+import type { FoundWork } from "#shared/starter.ts";
 import { Button } from "../../components/Button.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Help } from "../../components/Panel.tsx";
@@ -10,8 +11,11 @@ import { theme } from "../../lib/theme.ts";
 import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { copyUrls, importFound, importSearch, IMPORT_WAIT_MS, nameGivesSize, searchOnImport, type ImportSearch, type ImportWait } from "../grid/findGrid.ts";
 import { showOutcome } from "../grid/outcome.ts";
-import { useGridStore } from "../grid/store.ts";
+import { endFinding, useGridStore } from "../grid/store.ts";
 import { useLandLater } from "../grid/useFindGrid.ts";
+import { loadedStarterWork } from "../starter/catalog.ts";
+import { starterMapScene } from "../starter/mapScene.ts";
+import { StarterDialog } from "../starter/StarterDialog.tsx";
 import { thisDevice } from "../uvtt/limits.ts";
 import { ColorInput, NumberInput } from "./controls.tsx";
 import { builderScene, MAT_BACKGROUND, mapScene, matScene, nameFromFile, type MapAsset } from "./create.ts";
@@ -37,6 +41,12 @@ const MAX_SCENES = 50;
  * A search of the copy still running when the wait ends goes on in Line
  * up grid, as Find the grid's does.
  *
+ * A map from the starter packs (docs/design-v1-starter-art.md 7) is copied
+ * into the room and starts on the grid the catalog measured, so it is
+ * never searched and skips grid alignment. One the catalog has no grid,
+ * or only a square's size, for opens on Line up grid, as an upload with
+ * no size does.
+ *
  * The kind is a choice of native radios, and a tap on the chosen radio does
  * nothing, so the form folds with its own Cancel. During an upload that
  * Cancel stops the upload and keeps the form, so the DM can try again.
@@ -51,6 +61,9 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
   const [h, setH] = useState(20);
   const [background, setBackground] = useState(MAT_BACKGROUND);
   const [file, setFile] = useState<File | null>(null);
+  const [starter, setStarter] = useState(false);
+  const starterButton = useRef<HTMLButtonElement>(null);
+  const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
   const [status, setStatus] = useState<{ busy: boolean; waiting: boolean; finding?: boolean; error: string | null }>({ busy: false, waiting: false, error: null });
   const abortRef = useRef<AbortController | null>(null);
   /** The search for the picked file's grid, running while the DM fills in the form and the file uploads. */
@@ -141,6 +154,26 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
     } else wait.later?.cancel();
     // A scale from the file name is usually right. A guess never is.
     open(id, hinted ? null : "grid");
+  };
+
+  const createFromStarter = (row: AssetRow, found: FoundWork) => {
+    // A starter map is never searched: its grid is the catalog's. A file picked before it is dropped, and so is its
+    // search, whether it still runs here or was handed on to Line up grid after an upload (useLandLater).
+    stopSearch();
+    const running = gridStore.getState().finding;
+    if (running) endFinding(gridStore, running.sceneId);
+    const id = actions.newId();
+    const { scene, aligned } = starterMapScene({ id, name, asset: { id: row.id, width: row.width, height: row.height }, work: found.work });
+    actions.dispatch({ t: "scene.create", scene });
+    setStarter(false);
+    open(id, aligned ? null : "grid");
+  };
+
+  // A starter map already in the room starts on its catalog grid again, when the catalog is here to say what it is.
+  const reuseMap = (row: AssetRow) => {
+    const found = row.starter ? loadedStarterWork(row.starter) : null;
+    if (found) createFromStarter(row, found);
+    else createFromAsset({ id: row.id, width: row.width, height: row.height }, "Map");
   };
 
   const pickFile = (next: File | null) => {
@@ -262,7 +295,25 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
                   {status.error}
                 </p>
               ) : null}
-              <UploadedMaps roomId={roomId} disabled={status.busy} onPick={(asset) => createFromAsset(asset, "Map")} />
+              <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>
+                <Help>Or start from a map in the starter packs</Help>
+                <Button ref={starterButton} size="sm" disabled={status.busy} onClick={() => setStarter(true)}>
+                  From starter packs
+                </Button>
+              </div>
+              {starter ? (
+                <StarterDialog
+                  title="Starter maps"
+                  uses={STARTER_MAP_USES}
+                  kind="map"
+                  hint="Openly licensed maps. Use copies the map into this room with its credit and makes the scene, on the map's own grid where it has one."
+                  note={(found) => <FeetNote found={found} roomFeet={feetPerCell} />}
+                  onPicked={createFromStarter}
+                  onClose={() => setStarter(false)}
+                  opener={starterButton}
+                />
+              ) : null}
+              <UploadedMaps roomId={roomId} disabled={status.busy} onPick={reuseMap} />
             </>
           ) : (
             <>
@@ -286,11 +337,28 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
   );
 }
 
+const STARTER_MAP_USES = ["map"] as const;
+
+/**
+ * A scene has no scale of its own: feet per square is the room's. So a
+ * starter map drawn at another scale says so before it is used, rather
+ * than measuring its distances wrong without a word.
+ */
+function FeetNote(props: { found: FoundWork; roomFeet: number }) {
+  const feet = props.found.work.grid?.feetPerCell;
+  if (!feet || feet === props.roomFeet) return null;
+  return (
+    <span style={{ fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.textMuted }}>
+      Its squares are {feet} ft. This room counts {props.roomFeet} ft a square, set in the room's settings.
+    </span>
+  );
+}
+
 /**
  * Maps already in the room, so one image can back several scenes. The list
  * is fetched when the form opens, never polled.
  */
-function UploadedMaps(props: { roomId: string; disabled: boolean; onPick(asset: MapAsset): void }) {
+function UploadedMaps(props: { roomId: string; disabled: boolean; onPick(row: AssetRow): void }) {
   const assets = useAssets();
   const [maps, setMaps] = useState<AssetRow[] | null>(null);
   useEffect(() => {
@@ -314,7 +382,7 @@ function UploadedMaps(props: { roomId: string; disabled: boolean; onPick(asset: 
             type="button"
             title="Use this map"
             disabled={props.disabled}
-            onClick={() => props.onPick({ id: m.id, width: m.width, height: m.height })}
+            onClick={() => props.onPick(m)}
             style={{
               flex: "none",
               padding: 0,

@@ -12,7 +12,8 @@ export type FallbackProps = { failure: Failure; retry(): void };
 
 type State = { error: unknown; failure: Failure | null };
 
-function browserProbe(): LoadProbe {
+/** The page's own answers for classifyLoadFailure, also for a data module loaded outside a boundary, such as the starter catalog. */
+export function browserProbe(): LoadProbe {
   return {
     online: () => navigator.onLine !== false,
     origin: location.origin,

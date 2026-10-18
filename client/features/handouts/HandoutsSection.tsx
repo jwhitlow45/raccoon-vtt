@@ -25,6 +25,9 @@ import { HandoutViewer, type ViewerPage } from "./HandoutViewer.tsx";
 import { JobBlock } from "./pdf/JobBlock.tsx";
 import { isPdfFile, jobPageIds, pdfPickRefusal } from "./pdf/job.ts";
 import { usePdfJob } from "./pdf/live.ts";
+import { StarterDialog } from "../starter/StarterDialog.tsx";
+
+const STARTER_HANDOUT_USES = ["handout"] as const;
 
 /** A handout's thumbnail in its row: a picture, so larger than a row's 32 px disk, still inside a 56 px two-line row. */
 const THUMB_PX = 44;
@@ -222,6 +225,8 @@ function ShowHandout(props: {
   const [library, setLibrary] = useState<AssetRow[] | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [starter, setStarter] = useState(false);
+  const starterButton = useRef<HTMLButtonElement>(null);
   // A PDF saved while the form is open with nothing picked is picked at once, its title too unless one was typed (4.1.5).
   const savedDocId = pdf.job?.phase.k === "saved" ? pdf.job.docId : null;
   const savedDocHere = savedDocId !== null && props.docs[savedDocId] !== undefined;
@@ -296,6 +301,14 @@ function ShowHandout(props: {
     } finally {
       setStatus(null);
     }
+  };
+
+  // A starter picture is copied in as a handout image and picked as an upload is, titled with the work's name (docs/design-v1-starter-art.md 4).
+  const pickStarter = (row: AssetRow, name: string) => {
+    setStarter(false);
+    setError(null);
+    setLibrary((list) => (list && !list.some((a) => a.id === row.id) ? [row, ...list] : list));
+    draftStore.setState(withPick(draftStore.getState(), { kind: "image", asset: row }, name));
   };
 
   // An image takes today's path, and a PDF opens in the upload's own block (4.1.3).
@@ -377,7 +390,21 @@ function ShowHandout(props: {
                 From the library
               </Button>
               <FileButton label="Upload a file" accept="image/*,application/pdf,.pdf" size="sm" disabled={status !== null} onFile={upload} />
+              <Button ref={starterButton} size="sm" onClick={() => setStarter(true)} disabled={status !== null}>
+                From starter packs
+              </Button>
             </div>
+            {starter ? (
+              <StarterDialog
+                title="Starter handouts"
+                uses={STARTER_HANDOUT_USES}
+                kind="handout"
+                hint="Openly licensed pictures to show players. Use copies one into this room's library with its credit."
+                onPicked={(row, found) => pickStarter(row, found.work.name)}
+                onClose={() => setStarter(false)}
+                opener={starterButton}
+              />
+            ) : null}
             {library || docs.length > 0 ? (
               docs.length === 0 && loose?.length === 0 ? (
                 <Help>No handout images yet. Upload one.</Help>

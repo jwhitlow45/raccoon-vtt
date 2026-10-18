@@ -14,6 +14,8 @@ import {
 import type { HeaderBack } from "../components/SheetHeader.tsx";
 import { retryableLazy } from "../lib/retryableLazy.ts";
 import { scopeSlot, useScopedIfAny } from "../state/scope.ts";
+// The starter catalog's background load joins the panels' (features/starter/catalog.ts). Its pickers live in lazy panels, too late to register it.
+import "./starter/catalog.ts";
 
 /**
  * The room's panels (design section 14.4): bottom sheets on phones, sheets

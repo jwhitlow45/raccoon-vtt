@@ -7,6 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type Route } from "playwright-core";
 import { INTER_FAMILY } from "../client/lib/interFont.ts";
 import { ConsoleWatch, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { assetRow, chooseStarterWork, starterCounts, starterWork } from "./starterPick.ts";
 
 /**
  * The token panel, the stat summary and AC on tokens
@@ -1686,6 +1687,87 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await thorn.getByRole("button", { name: "Close", exact: true }).first().click();
     }
     await dmCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
+  });
+
+  test("sa-a-1. token image from a starter pack: the Starter tab copies a work in, the crop editor opens on it, and the token wears it with the catalog's credit", async () => {
+    const found = starterWork("token");
+    await setUp(dm, dmCdp, DESK, null);
+    const sceneId = dmSocket.you?.sceneId ?? run.sceneId;
+    const bounds = dmSocket.state!.scenes[sceneId]!.bounds;
+    const id = randomUUID();
+    await ops.send({ t: "token.create", token: { id, sceneId, size: "medium", visibility: "all", x: 1, y: 1, disposition: "hostile", kind: "monster", name: "Starter wolf", actor: { inline: actor() } } });
+    await waitFor("the token in the DM's view", () => dmSocket.state?.tokens[id]);
+    const at = await pagePoint(dm, bounds, { x: 1.5, y: 1.5 });
+    await dm.mouse.click(at.x, at.y);
+    await bar(dm, "Starter wolf").getByRole("button", { name: "Details", exact: true }).click();
+    const panel = tokenPanel(dm);
+    await panel.getByRole("heading", { name: "Starter wolf" }).waitFor();
+    await openGroup(panel, "Image");
+    await panel.getByRole("button", { name: "Add image", exact: true }).click();
+    const picker = dm.getByRole("dialog", { name: "Choose an image" });
+    await picker.getByRole("tab", { name: "Starter", exact: true }).click();
+    const { packs, works } = starterCounts("token");
+    await picker.getByText(`${packs} ${packs === 1 ? "pack" : "packs"}, ${works} works.`).waitFor();
+    await chooseStarterWork(picker, found, "search", false);
+    await shots.take(dm, "sa-a-1-token-starter-tab");
+    await picker.getByRole("button", { name: "Use", exact: true }).click();
+    // Use goes on as a library pick does: the crop editor, then the token wears the image.
+    const crop = dm.getByRole("dialog", { name: "Crop the image" });
+    await crop.waitFor();
+    await crop.getByRole("button", { name: "Save", exact: true }).click();
+    const image = await waitFor("the token's starter image", () => {
+      const img = dmSocket.state?.tokens[id]?.image;
+      return img && "assetId" in img ? img : null;
+    });
+    const row = await assetRow(dmContext.request, server.origin, run.roomId, image.assetId);
+    assert.equal(row?.kind, "token");
+    assert.equal(row?.starter, found.work.key, "the row names the work it was copied from");
+    assert.equal(row?.credit?.creator, found.work.credit.author, "the credit is the catalog's");
+    await shots.take(dm, "sa-a-1-token-wears-starter-image");
+    // The library lists the pick apart from the room's own images, in the starter packs' fold.
+    await openSideTab(dm, "Library");
+    const library = dm.getByRole("tabpanel", { name: "Library" });
+    await library.getByRole("button", { name: /^From starter packs \(\d+\)$/ }).click();
+    await library.getByRole("list", { name: "Token images from starter packs" }).locator(`img[src*="${image.assetId}"]`).first().waitFor();
+    assert.equal(await library.getByRole("list", { name: "Token images in this room" }).locator(`img[src*="${image.assetId}"]`).count(), 0, "the pick is listed with the room's own images");
+    await shots.take(dm, "sa-a-1-library-starter-fold");
+    await ops.send({ t: "token.delete", tokenId: id });
+  });
+
+  test("sa-a-5. a player sees the Starter tab in their own character's image picker, with the token art alone, and picks a portrait from it", async () => {
+    const found = starterWork("token");
+    await setUp(player, playerCdp, { width: 390, height: 844, scale: 1 }, null);
+    // On a phone the Characters panel is a sheet from the tool bar's Panels list.
+    await player.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+    await player.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Characters/ }).click();
+    const sheet = player.locator('dialog[data-rvtt-sheet][aria-label="Characters"]');
+    const opener = sheet.locator(`[data-opener="character:${run.thorn.characterId}"]`);
+    if ((await opener.getAttribute("aria-expanded")) !== "true") await opener.click();
+    await sheet.getByRole("button", { name: /^(Add|Change) image$/ }).first().click();
+    const picker = player.getByRole("dialog", { name: "Choose an image" });
+    await picker.getByRole("tab", { name: "Starter", exact: true }).click();
+    const { packs, works } = starterCounts("token");
+    await picker.getByText(`${packs} ${packs === 1 ? "pack" : "packs"}, ${works} works.`).waitFor();
+    // No map, handout or stamp of the catalog's shows here.
+    const map = starterWork("map");
+    await picker.getByRole("searchbox", { name: "Search the starter packs" }).fill(map.work.name);
+    assert.equal(await picker.getByRole("list", { name: map.pack.title, exact: true }).count(), 0, "a starter map shows in a player's picker");
+    await chooseStarterWork(picker, found, "search", false);
+    await shots.take(player, "sa-a-5-player-starter-tab");
+    await picker.getByRole("button", { name: "Use", exact: true }).click();
+    const crop = player.getByRole("dialog", { name: "Crop the image" });
+    await crop.waitFor();
+    await crop.getByRole("button", { name: "Save", exact: true }).click();
+    const image = await waitFor("Thorn's starter portrait", () => {
+      const img = playerSocket.state?.characters[run.thorn.characterId]?.defaultImage;
+      return img && "assetId" in img ? img : null;
+    });
+    const row = await assetRow(playerContext.request, server.origin, run.roomId, image.assetId);
+    assert.equal(row?.starter, found.work.key);
+    // Nowhere else: the places for maps, handouts and stamps are the DM's alone.
+    assert.equal(await player.getByRole("button", { name: "From starter packs" }).count(), 0);
+    assert.equal(await player.getByRole("button", { name: "Map builder" }).count(), 0);
+    await player.keyboard.press("Escape");
   });
 
   test("10. no page errors along the way", () => {

@@ -7,7 +7,10 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 import sharp from "sharp";
 import type { BuildChunk, RoomState, Scene, Stamp } from "#shared/model.ts";
 import { drawMap } from "../client/features/grid/synthetic.ts";
+import { STARTER_STAMPS } from "#shared/starterStamps.ts";
+import { starterMapScene } from "../client/features/starter/mapScene.ts";
 import { ConsoleWatch, dragWorld, openSideTab, pickOption, pressOption, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { assetRow, chooseStarterWork, starterWork } from "./starterPick.ts";
 
 /**
  * The v1 wave 3 run (docs/design-v1-maps-vision.md section 3): the real
@@ -487,6 +490,67 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await dm.getByText("This scene came with its own grid.", { exact: false }).first().waitFor({ timeout: 15_000 });
     assert.deepEqual(sceneOf(dmSocket.state, run.sceneId)?.map, fileGrid, "the file's grid stays");
     await shots.take(dm, "maps-gd-own-grid");
+  });
+
+  test("sa-a-2. new scene from a starter map: the map is copied in, and the scene starts on its measured grid in its grid color, with no alignment", async () => {
+    // A paper map with a measured grid and its own grid color, the case the catalog's grid exists for.
+    const found = starterWork("map", (w) => w.grid?.originPx !== undefined && w.gridColor !== undefined);
+    const known = new Set(Object.keys(dmSocket.state?.scenes ?? {}));
+    // gd-a left Line up grid open, so the select tool first, to see that this scene never opens it.
+    await dm.getByRole("button", { name: "Select", exact: true }).click();
+    await dm.getByRole("toolbar", { name: "Line up grid options" }).waitFor({ state: "detached" });
+    await openSideTab(dm, "Scenes");
+    await dm.getByRole("radio", { name: "Map image" }).click();
+    await dm.getByRole("button", { name: "From starter packs" }).click();
+    const dialog = dm.getByRole("dialog", { name: "Starter maps" });
+    await chooseStarterWork(dialog, found, "browse", false);
+    await shots.take(dm, "sa-a-2-starter-maps");
+    await dialog.getByRole("button", { name: "Use", exact: true }).click();
+    const scene = await waitFor("the starter map's scene", () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s?.map && !known.has(s.id)), 30_000);
+    await waitFor("the DM on it", () => dmSocket.you?.sceneId === scene.id || null, 30_000);
+    const map = scene.map!;
+    assert.equal(scene.name, found.work.name);
+    assert.ok(Math.abs(map.cellPx - found.work.grid!.cellPx * (map.widthPx / found.work.width)) < 0.01, `the scene's squares are ${map.cellPx} px`);
+    assert.equal(scene.grid.color, found.work.gridColor!.toLowerCase());
+    const expected = starterMapScene({ id: scene.id, name: "", asset: { id: map.assetId, width: map.widthPx, height: map.heightPx }, work: found.work }).scene;
+    assert.deepEqual(map.originPx, expected.map?.originPx);
+    assert.deepEqual(scene.bounds, expected.bounds);
+    // On the map's own grid, so Line up grid never opens.
+    await dm.waitForTimeout(500);
+    assert.equal(await dm.getByRole("toolbar", { name: "Line up grid options" }).count(), 0, "a starter map with a grid opened grid alignment");
+    const row = await assetRow(dmContext.request, server.origin, run.roomId, map.assetId);
+    assert.equal(row?.kind, "map");
+    assert.equal(row?.starter, found.work.key, "the row names the work it was copied from");
+    await shots.take(dm, "sa-a-2-starter-map-scene");
+  });
+
+  test("sa-a-4. a starter prop from the stamp picker's Starter tab is placed by its key, with nothing copied, and the outliner names it", async () => {
+    const found = starterWork("stamp");
+    const sceneId = dmSocket.you!.sceneId!;
+    const bounds = dmSocket.state!.scenes[sceneId]!.bounds;
+    const assetsBefore = ((await (await dmContext.request.get(`${server.origin}/api/rooms/${run.roomId}/assets`)).json()) as { assets: unknown[] }).assets.length;
+    await dm.getByRole("button", { name: "Map builder" }).click();
+    await pickOption(dm, "Map builder", "Builder mode", "Stamp");
+    await dm.getByRole("button", { name: /Choose (a|another) stamp/ }).click();
+    const picker = dm.getByRole("dialog", { name: "Stamps" });
+    await picker.getByRole("tab", { name: "Starter", exact: true }).click();
+    await chooseStarterWork(picker, found, "browse", false);
+    await shots.take(dm, "sa-a-4-starter-stamps");
+    await picker.getByRole("button", { name: "Use", exact: true }).click();
+    await picker.waitFor({ state: "detached" });
+    await tapCell(dm, bounds, { x: 2, y: 2 });
+    const key = found.work.stamp!.key;
+    const stamp = await waitFor("the starter stamp in the DM's state", () => stampsOf(dmSocket.state, sceneId).find((s) => "key" in s.art && s.art.key === key));
+    assert.deepEqual({ w: stamp.w, h: stamp.h }, { w: found.work.stamp!.w, h: found.work.stamp!.h });
+    const assetsAfter = ((await (await dmContext.request.get(`${server.origin}/api/rooms/${run.roomId}/assets`)).json()) as { assets: unknown[] }).assets.length;
+    assert.equal(assetsAfter, assetsBefore, "placing a starter stamp copied an image into the room");
+    await pressOption(dm, "Map builder", "Done");
+    await dm.getByRole("button", { name: "Select", exact: true }).click();
+    // The outliner names it as the catalog does, rather than by its key.
+    const name = STARTER_STAMPS.find((s) => s.key === key)?.name ?? found.work.name;
+    await openSideTab(dm, "Outliner");
+    await dm.getByRole("tabpanel", { name: "Outliner" }).getByText(name, { exact: true }).first().waitFor();
+    await shots.take(dm, "sa-a-4-starter-stamp-placed");
   });
 
   test("8. no page logged an error or a warning", () => {

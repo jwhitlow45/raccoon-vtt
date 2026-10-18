@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Stamp } from "#shared/model.ts";
+import { STARTER_STAMPS } from "#shared/starterStamps.ts";
 import { STAMP_ART } from "#shared/stamps.ts";
 import {
   duplicateOf,
   handleAt,
   handlePositions,
+  knownStamps,
   libraryFootprint,
   matchStamps,
   normalizeDegrees,
@@ -16,6 +18,7 @@ import {
   shippedStamp,
   sizeBucket,
   stampAt,
+  starterChoice,
   toInput,
   toLocal,
   topZ,
@@ -212,6 +215,31 @@ describe("the picker", () => {
   test("a key this client does not ship has no catalog entry, so it draws as a dashed box", () => {
     assert.equal(shippedStamp("barrel")?.name, "Barrel");
     assert.equal(shippedStamp("throne"), null);
+  });
+
+  test("the board and the outliner know the starter packs' props beside the shipped set, and a shipped key wins a clash", () => {
+    const known = knownStamps(STAMP_ART, [
+      { key: "polyhaven-bench", name: "Bench", w: 2, h: 1, pack: "polyhaven" },
+      { key: "barrel", name: "A clash", w: 3, h: 3, pack: "polyhaven" },
+    ]);
+    assert.deepEqual(known.get("polyhaven-bench"), { key: "polyhaven-bench", name: "Bench", w: 2, h: 1 });
+    assert.equal(known.get("barrel")?.name, "Barrel");
+    assert.equal(known.size, STAMP_ART.length + 1);
+    // The shipped list and the starter packs' never share a key, and every starter stamp is one the board draws.
+    for (const s of STARTER_STAMPS) {
+      assert.equal(STAMP_ART.some((shipped) => shipped.key === s.key), false, `${s.key} repeats a shipped key`);
+      assert.equal(shippedStamp(s.key)?.name, s.name);
+    }
+  });
+
+  test("a starter prop is placed by its stamp key at its footprint, and a work that is no stamp places nothing", () => {
+    assert.deepEqual(starterChoice({ name: "Oak bench", stamp: { key: "polyhaven-bench", w: 2, h: 0.75 } }), {
+      art: { key: "polyhaven-bench" },
+      w: 2,
+      h: 0.75,
+      name: "Oak bench",
+    });
+    assert.equal(starterChoice({ name: "Owlbear" }), null);
   });
 });
 

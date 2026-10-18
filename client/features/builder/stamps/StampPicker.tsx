@@ -9,8 +9,9 @@ import { api } from "../../../lib/api.ts";
 import { theme } from "../../../lib/theme.ts";
 import { useAssets, useRoomView } from "../../../state/view.ts";
 import { STAMP_TILE_FLOOR } from "./draw.ts";
-import { libraryFootprint, matchStamps, shippedChoice, type ChosenArt } from "./rules.ts";
+import { libraryFootprint, matchStamps, shippedChoice, starterChoice, type ChosenArt } from "./rules.ts";
 import { imageAssetId } from "#shared/imageRef.ts";
+import { StarterBrowser } from "../../starter/StarterBrowser.tsx";
 
 /** The search field's share of the header: room for a word or two, with the title kept whole down to a 390 px phone. */
 const SEARCH_BASIS = 240;
@@ -19,6 +20,9 @@ const SEARCH_BASIS = 240;
  * The stamp picker (design 3.5): a search box and a grid of 56 px tiles,
  * each with its name, for the shipped art, then the room's own token images
  * under "This room's images". Picking one sets what the next tap places.
+ * Its Starter tab offers the starter packs' props by pack and category
+ * (docs/design-v1-starter-art.md 4), which a stamp names by key as the
+ * shipped ones do, so a pick copies nothing and asks the server nothing.
  *
  * It is the one Dialog shell (docs/design-v1-visual.md 2.3), a bottom
  * sheet on a phone, so the room behind is inert, Escape and Android's Back
@@ -35,7 +39,9 @@ export function StampPicker(props: {
   opener: RefObject<HTMLElement | null>;
 }) {
   const [query, setQuery] = useState("");
+  const [tab, setTab] = useState<"stamps" | "starter">("stamps");
   const shipped = useMemo(() => matchStamps(query), [query]);
+  const { onPick } = props;
 
   const chosenKey = props.chosen && "key" in props.chosen.art ? props.chosen.art.key : null;
   const chosenAsset = props.chosen && "assetId" in props.chosen.art ? props.chosen.art.assetId : null;
@@ -49,21 +55,71 @@ export function StampPicker(props: {
       backClose
       opener={props.opener}
       headerActions={
-        <Input type="search" aria-label="Search stamps" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} style={{ flex: `0 1 ${SEARCH_BASIS}px`, width: 0 }} />
+        // The Starter tab searches its packs in a field of its own, as the image picker's does.
+        tab === "stamps" ? (
+          <Input type="search" aria-label="Search stamps" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} style={{ flex: `0 1 ${SEARCH_BASIS}px`, width: 0 }} />
+        ) : undefined
       }
     >
-      {shipped.length === 0 ? <Empty>No stamp is called that.</Empty> : null}
-      <ul style={gridStyle}>
-        {shipped.map((s) => (
-          <li key={s.key}>
-            <Tile name={s.name} src={`/stamps/${s.key}.webp`} chosen={chosenKey === s.key} onPick={() => props.onPick(shippedChoice(s))} />
-          </li>
+      <div role="tablist" aria-label="Which stamps" style={{ display: "flex", gap: theme.space(1), marginBottom: theme.space(3) }}>
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            onClick={() => setTab(t.id)}
+            style={{
+              flex: "1 0 auto",
+              minHeight: theme.touch,
+              padding: `0 ${theme.space(3)}px`,
+              borderRadius: theme.radius.md,
+              fontFamily: theme.font.body,
+              fontSize: theme.font.body14,
+              fontWeight: theme.weight.strong,
+              cursor: "pointer",
+              ...choiceLook(tab === t.id),
+            }}
+          >
+            {t.label}
+          </button>
         ))}
-      </ul>
-      <RoomImages chosen={chosenAsset} onPick={props.onPick} onMeasured={props.onMeasured} />
+      </div>
+      <div role="tabpanel">
+        {tab === "stamps" ? (
+          <>
+            {shipped.length === 0 ? <Empty>No stamp is called that.</Empty> : null}
+            <ul style={gridStyle}>
+              {shipped.map((s) => (
+                <li key={s.key}>
+                  <Tile name={s.name} src={`/stamps/${s.key}.webp`} chosen={chosenKey === s.key} onPick={() => onPick(shippedChoice(s))} />
+                </li>
+              ))}
+            </ul>
+            <RoomImages chosen={chosenAsset} onPick={onPick} onMeasured={props.onMeasured} />
+          </>
+        ) : (
+          <StarterBrowser
+            uses={STARTER_STAMP_USES}
+            hint="Openly licensed props from the starter packs. Use sets what the next tap places."
+            floor={STAMP_TILE_FLOOR}
+            onUse={(found) => {
+              const choice = starterChoice(found.work);
+              if (choice) onPick(choice);
+            }}
+          />
+        )}
+      </div>
     </Dialog>
   );
 }
+
+const TABS = [
+  { id: "stamps", label: "Stamps" },
+  { id: "starter", label: "Starter" },
+] as const;
+
+const STARTER_STAMP_USES = ["stamp"] as const;
 
 const gridStyle = {
   listStyle: "none",
