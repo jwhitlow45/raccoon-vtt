@@ -404,11 +404,11 @@ Menu, This device holds settings kept on this device alone:
 - **Map detail**: Phone size (up to 4096 pixels across, loads faster) or Full size (sharper on a large screen).
 - **Turn sound** and **Ping sound**.
 - **Show others' rolls as they happen**: a toast for each roll someone else makes while the Dice panel is not on screen. On at first.
-- "Show the shortcuts": the keys, and what a key or another mouse button does with a click, a drag or the wheel.
+- "Show the shortcuts": the keys, and what a key or another mouse button does with a click, a drag or the wheel. With a keyboard, each single key can be changed there for this device.
 
 ## Shortcuts
 
-`?` shows the list for your role, and so does Menu, This device, "Show the shortcuts". It lists the keys, then what a key or another mouse button does with a click, a drag or the wheel (on a device with a mouse or trackpad), then the keys that work inside one part of the room. A plain click, tap, drag or pinch is described with its feature above.
+`?` shows the list for your role, and so does Menu, This device, "Show the shortcuts". It lists the keys, then what a key or another mouse button does with a click, a drag or the wheel (on a device with a mouse or trackpad), then the keys that work inside one part of the room. A plain click, tap, drag or pinch is described with its feature above. The tables below list the default keys. On a device with a keyboard, Change in the list gives any single key of the Keys table another letter, digit or symbol, kept on that device alone, and Reset all keys brings the defaults back.
 
 ### Keys
 

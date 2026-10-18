@@ -1011,4 +1011,6 @@ These are the keys a DM uses most:
 - `W` turns full screen on or off, where the browser allows it.
 - Escape closes the newest pop-up, sheet or action bar.
 
+These are the default keys. On any device with a keyboard, you can move a shortcut to another key from the shortcut list: press **Change** beside it, then press the new key. The change stays on that device, so your players keep their own keys, and **Reset all keys** at the bottom of the list brings the defaults back.
+
 With a mouse, Shift or Ctrl and a click adds a token to the selection, and Shift or Ctrl and a drag on empty map draws a selection box. To move the map, drag with the right or middle button, or hold Space and drag.
