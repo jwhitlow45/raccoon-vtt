@@ -2,6 +2,7 @@ import type { Character } from "#shared/model.ts";
 import type { ActorPatch } from "#shared/protocol.ts";
 import { pcShape } from "#shared/rules/pcStats.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
+import { whose } from "../tokens/companionBlocks.ts";
 
 /**
  * A shape on a character's own token (docs/design-v1-pc-stats.md 3.6 and
@@ -36,9 +37,26 @@ export function shapePatch(creature: Pick<SrdMonster, "srdId" | "ac" | "speeds">
 /** Ends either shape: clearing the creature takes the mark with it, and the reducer puts the character's AC and speeds back. */
 export const END_SHAPE: ActorPatch = { srdId: null };
 
+/**
+ * What a character keeps in Wild Shape. Its Intelligence, Wisdom, Charisma
+ * and proficiencies are its stat block's, so a character with none takes all
+ * of the creature's numbers (docs/design-v1-pc-stats.md 3.6), and the words
+ * say so, pointing at the stat block where the viewer may add one.
+ */
+function noBlockWords(name: string, creature: string, canAdd: boolean): string {
+  return `${name} has no stat block, so rolls use all of ${whose(creature)} numbers.${canAdd ? ` Add a stat block to keep ${whose(name)} Intelligence, Wisdom, Charisma and proficiencies.` : ""}`;
+}
+
+/** The Wild Shape choice's words, as Take a shape offers it. */
+export function wildShapeDetail(character: Pick<Character, "name" | "stats">, creature: string, canAdd: boolean): string {
+  if (!character.stats) return noBlockWords(character.name, creature, canAdd);
+  return `${character.name} keeps Intelligence, Wisdom, Charisma and proficiencies, and each save and skill takes the higher of the two.`;
+}
+
 /** What the section says while the character is in a shape. */
-export function shapeNote(character: Pick<Character, "actor">, creature: string): string | null {
+export function shapeNote(character: Pick<Character, "actor" | "name" | "stats">, creature: string, canAdd: boolean): string | null {
   const shape = pcShape(character);
+  if (shape === "wild" && !character.stats) return `In Wild Shape as ${creature}. ${noBlockWords(character.name, creature, canAdd)}`;
   if (shape === "wild") return `In Wild Shape as ${creature}. Rolls use its Strength, Dexterity and Constitution, and each save and skill takes the higher.`;
   if (shape === "other") return `In the shape of ${creature}. Rolls use all of its numbers.`;
   return null;

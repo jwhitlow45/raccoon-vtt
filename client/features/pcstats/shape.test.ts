@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { actor } from "#shared/testutil.ts";
-import { END_SHAPE, shapeNote, shapePatch, shapeTempHp } from "./shape.ts";
+import type { PcStats } from "#shared/model.ts";
+import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
+import { END_SHAPE, shapeNote, shapePatch, shapeTempHp, wildShapeDetail } from "./shape.ts";
 
 /** Take a shape and the section's words (docs/design-v1-pc-stats.md 7.3). The numbers a shape rolls with are doc 1's creatureNumbers (shared/rules/pcStats.shape.test.ts). */
 describe("shapes", () => {
@@ -26,8 +28,17 @@ describe("shapes", () => {
   });
 
   test("the section says what the shape does", () => {
-    assert.equal(shapeNote({ actor: actor({ srdId: "brown-bear", wildShape: true }) }, "Brown Bear"), "In Wild Shape as Brown Bear. Rolls use its Strength, Dexterity and Constitution, and each save and skill takes the higher.");
-    assert.equal(shapeNote({ actor: actor({ srdId: "brown-bear" }) }, "Brown Bear"), "In the shape of Brown Bear. Rolls use all of its numbers.");
-    assert.equal(shapeNote({ actor: actor() }, "Brown Bear"), null);
+    const stats = EMPTY_PC_STATS as PcStats;
+    assert.equal(shapeNote({ name: "Bree", stats, actor: actor({ srdId: "brown-bear", wildShape: true }) }, "Brown Bear", true), "In Wild Shape as Brown Bear. Rolls use its Strength, Dexterity and Constitution, and each save and skill takes the higher.");
+    assert.equal(shapeNote({ name: "Bree", stats, actor: actor({ srdId: "brown-bear" }) }, "Brown Bear", true), "In the shape of Brown Bear. Rolls use all of its numbers.");
+    assert.equal(shapeNote({ name: "Bree", stats, actor: actor() }, "Brown Bear", true), null);
+  });
+
+  test("Wild Shape on a character with no stat block says it takes all of the creature's numbers, and points at adding one where the viewer may (LP7-PC-11)", () => {
+    const sage = { name: "Sage", actor: actor({ srdId: "wolf", wildShape: true }) };
+    assert.equal(shapeNote(sage, "Wolf", true), "In Wild Shape as Wolf. Sage has no stat block, so rolls use all of Wolf’s numbers. Add a stat block to keep Sage’s Intelligence, Wisdom, Charisma and proficiencies.");
+    assert.equal(shapeNote(sage, "Wolf", false), "In Wild Shape as Wolf. Sage has no stat block, so rolls use all of Wolf’s numbers.");
+    assert.equal(wildShapeDetail(sage, "Wolf", true), "Sage has no stat block, so rolls use all of Wolf’s numbers. Add a stat block to keep Sage’s Intelligence, Wisdom, Charisma and proficiencies.");
+    assert.equal(wildShapeDetail({ ...sage, stats: EMPTY_PC_STATS as PcStats }, "Wolf", true), "Sage keeps Intelligence, Wisdom, Charisma and proficiencies, and each save and skill takes the higher of the two.");
   });
 });

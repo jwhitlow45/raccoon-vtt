@@ -9,13 +9,14 @@ import { Help } from "../../components/Panel.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { UnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
-import { useRoomActions } from "../../state/view.ts";
+import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { MonsterList, type ListedRow } from "../monsters/MonsterList.tsx";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { SrdCredit, useSrdMonsters } from "../monsters/StatBlockView.tsx";
+import { editsPcStats } from "../tokens/access.ts";
 import { whose } from "../tokens/companionBlocks.ts";
 import { monsterMatcher } from "../tokens/monsterSearch.ts";
-import { shapePatch, shapeTempHp, type ShapeKind } from "./shape.ts";
+import { shapePatch, shapeTempHp, wildShapeDetail, type ShapeKind } from "./shape.ts";
 
 /** Whether an SRD creature is a Beast, which Wild Shape and Polymorph take. */
 function isBeast(m: SrdMonster): boolean {
@@ -30,7 +31,7 @@ function isBeast(m: SrdMonster): boolean {
  * temporary HP, a checkbox on by default (W7B-P-9). HP stays the
  * character's.
  */
-export function ShapePicker(props: { character: Pick<Character, "id" | "name" | "level" | "actor">; onClose(): void }) {
+export function ShapePicker(props: { character: Pick<Character, "id" | "name" | "level" | "actor" | "ownerIds" | "stats">; onClose(): void }) {
   const actions = useRoomActions();
   const { monsters, failed } = useSrdMonsters();
   const [query, setQuery] = useState("");
@@ -45,6 +46,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
     [monsters, beastsOnly, matches],
   );
   const name = props.character.name;
+  const you = useRoomView((s) => s.you);
 
   if (picked) {
     const temp = shapeTempHp(kind, props.character, picked);
@@ -72,7 +74,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
         {/* Its step rises from the bottom on a phone, so a shape other than Wild Shape, which only Take the shape sends, holds it against a swipe (docs/design-v1-sheet-swipe.md 4.6). */}
         <UnsavedInput unsaved={kind !== "wild" || !gainTemp} />
         <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
-          <ShapeChoice name={name} creature={picked.name} value={kind} onChange={setKind} />
+          <ShapeChoice name={name} creature={picked.name} wild={wildShapeDetail(props.character, picked.name, editsPcStats(you, props.character))} value={kind} onChange={setKind} />
           {holding >= temp ? (
             <Help>{`${whose(name)} ${holding} temporary HP stay, as they are no fewer than the ${temp} the shape gives.`}</Help>
           ) : (
@@ -106,10 +108,10 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
 }
 
 /** Wild Shape or another shape, as two radios each 44 px tall, whose words say what the shape keeps. */
-function ShapeChoice(props: { name: string; creature: string; value: ShapeKind; onChange(kind: ShapeKind): void }) {
+function ShapeChoice(props: { name: string; creature: string; wild: string; value: ShapeKind; onChange(kind: ShapeKind): void }) {
   const group = useId();
   const options: { value: ShapeKind; label: string; detail: string }[] = [
-    { value: "wild", label: "Wild Shape", detail: `${props.name} keeps Intelligence, Wisdom, Charisma and proficiencies, and each save and skill takes the higher of the two.` },
+    { value: "wild", label: "Wild Shape", detail: props.wild },
     { value: "other", label: "Polymorph or another shape", detail: `All of ${props.creature}’s numbers.` },
   ];
   return (

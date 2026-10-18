@@ -119,7 +119,7 @@ function ShapeBody(props: { character: Character; edits: boolean }) {
   if (!list) return <Loading text="Loading the creature’s stat block…" />;
   return (
     <>
-      <Note tone="info">{shapeNote(character, monster?.name ?? srdId)}</Note>
+      <Note tone="info">{shapeNote(character, monster?.name ?? srdId, props.edits)}</Note>
       {numbers ? (
         <p data-shape-numbers="" style={{ margin: 0, fontSize: theme.font.body14 }}>
           <span style={{ color: theme.color.textMuted }}>Rolls now: saves </span>
