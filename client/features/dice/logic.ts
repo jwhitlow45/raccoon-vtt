@@ -32,14 +32,19 @@ function diceOf(entry: LogEntry): DiceLine | null {
  * first. Lines with one roller and one batch become one row whatever lies
  * between them, so a group rolled in batches reads as one roll. One
  * member's bare lines next to each other become one row.
+ *
+ * `held` names the tag whose dice are in the air: its lines stay out until
+ * they land, so the new row never shows before the dice do
+ * (docs/design-v1-roll-animation.md 3.4).
  */
-export function recentRolls(log: readonly LogEntry[]): RecentRow[] {
+export function recentRolls(log: readonly LogEntry[], held: string | null = null): RecentRow[] {
   const rows: RecentRow[] = [];
   const byBatch = new Map<string, Extract<RecentRow, { kind: "dice" }>>();
   for (let i = log.length - 1; i >= 0; i--) {
     const entry = log[i]!;
     const data = entry.data;
     if (entry.kind !== "event" || !data) continue;
+    if (held !== null && (data.type === "dice" || data.type === "roll") && data.tag === held) continue;
     if (data.type === "roll") {
       if (data.dice) rows.push({ kind: "answer", key: entry.id, line: data, at: entry.at, ids: [entry.id] });
       continue;

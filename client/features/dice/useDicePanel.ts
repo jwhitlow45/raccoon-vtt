@@ -10,6 +10,8 @@ import type { RoomView } from "../../state/types.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import { useRoomStore, useRoomView } from "../../state/view.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender, type RollSender } from "./send.ts";
+import { throwHooksSlot } from "./throw/hooks.ts";
+import type { ThrowOrigin } from "./throw/store.ts";
 
 /**
  * The Dice panel's one-roll choices and its newest roll
@@ -97,15 +99,16 @@ export type DicePanelApi = {
    * Rolls on the server. With no `to` it is a panel roll: it takes the
    * choices, goes under the taken Secret, and becomes the sticky line. With
    * `to` it goes under that visibility with only its own sources. Returns
-   * its tag, or null when nothing was sent.
+   * its tag, or null when nothing was sent. With `origin`, a Dice panel
+   * control's tap, its dice may be thrown (docs/design-v1-roll-animation.md 3.1).
    */
-  roll(rolls: PanelRoll[], opts?: { dc?: number; ac?: number; to?: "all" | "dm"; tag?: string }): string | null;
+  roll(rolls: PanelRoll[], opts?: { dc?: number; ac?: number; to?: "all" | "dm"; tag?: string; origin?: ThrowOrigin }): string | null;
   /** A chip's tap. Adv and Dis are never pressed together. */
   press(choice: "adv" | "dis" | "secret"): void;
   /** Again: rolls exactly what was rolled, under its own visibility, taking no choice. */
-  again(rolls: readonly DiceRollInput[], to: "all" | "dm"): string | null;
+  again(rolls: readonly DiceRollInput[], to: "all" | "dm", origin?: ThrowOrigin): string | null;
   /** An answer or a death save the panel sent with its own op becomes the sticky line, with no Again. */
-  noted(tag: string, label: string): void;
+  noted(tag: string, label: string, origin?: ThrowOrigin): void;
 };
 
 function take(store: StoreApi<DiceState>, start: boolean, key: string): Taken {
@@ -166,9 +169,19 @@ export type DicePanelActions = Omit<DicePanelApi, "adv" | "dis" | "secret">;
  * formula typed there included. `panelKey` names the panel's creatures
  * now (panelKeyIn), which a press of Secret belongs to.
  */
-export function createDicePanel(deps: { store: StoreApi<DiceState>; sender: RollSender; secretStart(creatures: readonly ActorTarget[]): boolean; panelKey?(): string }): DicePanelActions {
+export function createDicePanel(deps: {
+  store: StoreApi<DiceState>;
+  sender: RollSender;
+  secretStart(creatures: readonly ActorTarget[]): boolean;
+  panelKey?(): string;
+  /** The throw's store, which every roll from a Dice panel control is told of with its origin. */
+  registerThrow?(tag: string, origin: ThrowOrigin): void;
+}): DicePanelActions {
   const { store, sender, secretStart } = deps;
   const panelKey = deps.panelKey ?? (() => "");
+  const thrown = (tag: string, origin: ThrowOrigin | undefined) => {
+    if (origin) deps.registerThrow?.(tag, origin);
+  };
   const fail = (error: string) => store.setState({ last: { error, at: Date.now() } });
   return {
     take: (creatures = []) => take(store, secretStart(creatures), panelKey()),
@@ -207,18 +220,21 @@ export function createDicePanel(deps: { store: StoreApi<DiceState>; sender: Roll
         return null;
       }
       if (panel) store.setState({ last: { tag: sent.tag, rolls: inputs, ...envelope } });
+      thrown(sent.tag, opts.origin);
       return sent.tag;
     },
-    noted(tag, label) {
+    noted(tag, label, origin) {
       store.setState({ last: { tag, once: true, label } });
+      thrown(tag, origin);
     },
-    again(rolls, to) {
+    again(rolls, to, origin) {
       const sent = send(sender, [...rolls], { to }, () => undefined);
       if (!sent.ok) {
         fail(sent.error);
         return null;
       }
       store.setState({ last: { tag: sent.tag, rolls: [...rolls], to } });
+      thrown(sent.tag, origin);
       return sent.tag;
     },
   };
@@ -245,14 +261,22 @@ export function useDicePanel(): DicePanelApi {
   const store = useScoped(diceChoicesSlot);
   const sender = useRollSender();
   const room = useRoomStore();
+  const throws = useScoped(throwHooksSlot);
   const start = useRoomView((s) => secretStartIn(s, []));
   const key = useRoomView(panelKeyIn);
   const adv = useStore(store, (s) => s.adv);
   const dis = useStore(store, (s) => s.dis);
   const secret = useStore(store, (s) => secretNow(s, key, start));
   const actions = useMemo(
-    () => createDicePanel({ store, sender, secretStart: (creatures) => secretStartIn(room.getState(), creatures), panelKey: () => panelKeyIn(room.getState()) }),
-    [store, sender, room],
+    () =>
+      createDicePanel({
+        store,
+        sender,
+        secretStart: (creatures) => secretStartIn(room.getState(), creatures),
+        panelKey: () => panelKeyIn(room.getState()),
+        registerThrow: (tag, origin) => throws.current?.register(tag, origin),
+      }),
+    [store, sender, room, throws],
   );
   return useMemo(() => ({ ...actions, adv, dis, secret }), [actions, adv, dis, secret]);
 }

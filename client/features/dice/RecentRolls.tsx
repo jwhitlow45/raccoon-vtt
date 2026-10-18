@@ -10,6 +10,8 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
 import { usePanelHere } from "../panels.ts";
 import { againInput, askedRoll, recentRolls, type RecentRow } from "./logic.ts";
+import type { ThrowOrigin } from "./throw/store.ts";
+import { useThrows, useThrowView } from "./throw/useThrows.ts";
 
 /**
  * Recent rolls (docs/design-v1-dice.md 8.3): every roll in the viewer's
@@ -127,8 +129,9 @@ function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; na
   );
 }
 
-function Row(props: { row: RecentRow; names: LogNames; me: string; dm: boolean; open: boolean; again(rolls: DiceRollInput[], to: "all" | "dm"): void }) {
+function Row(props: { row: RecentRow; names: LogNames; me: string; dm: boolean; open: boolean; again(rolls: DiceRollInput[], to: "all" | "dm", origin: ThrowOrigin): void }) {
   const { row, names } = props;
+  const throws = useThrows();
   const [all, setAll] = useState(props.open);
   // The sticky line's tap scrolls its row into view, which would otherwise stop with the row's head under that line, as RollOptions allows for too.
   const base: CSSProperties = { display: "grid", gap: theme.space(1), padding: `${theme.space(2)}px 0`, borderTop: `${theme.line.border}px solid ${theme.color.border}`, scrollMarginTop: 48 };
@@ -168,7 +171,7 @@ function Row(props: { row: RecentRow; names: LogNames; me: string; dm: boolean; 
         icon="again"
         label={`Roll again: ${[askedRoll(first)?.formula, first.label === undefined ? undefined : labelText(first.label)].filter(Boolean).join(" ")}${single ? "" : ` and ${row.rolls.length - 1} more`}`}
         title="Roll again"
-        onClick={() => props.again(inputs as DiceRollInput[], row.to)}
+        onClick={() => props.again(inputs as DiceRollInput[], row.to, throws.origin())}
       />
     ) : null;
   return (
@@ -188,13 +191,18 @@ function Row(props: { row: RecentRow; names: LogNames; me: string; dm: boolean; 
   );
 }
 
-/** Recent rolls under the options. `open` names a line whose row starts unfolded, the one the sticky line opened. */
-export function RecentRolls(props: { names: LogNames; me: string; open: string | null; again(rolls: DiceRollInput[], to: "all" | "dm"): void }) {
+/**
+ * Recent rolls under the options. `open` names a line whose row starts
+ * unfolded, the one the sticky line opened. A roll whose dice are in the
+ * air joins the list as they land.
+ */
+export function RecentRolls(props: { names: LogNames; me: string; open: string | null; again(rolls: DiceRollInput[], to: "all" | "dm", origin: ThrowOrigin): void }) {
   const log = useRoomView((s) => s.view?.log ?? EMPTY_LOG);
   const dm = useRoomView((s) => s.you?.role === "dm");
   const ui = useRoomUi();
   const here = usePanelHere();
-  const rows = useMemo(() => recentRolls(log), [log]);
+  const { held } = useThrowView();
+  const rows = useMemo(() => recentRolls(log, held), [log, held]);
   return (
     <section aria-labelledby="dice-recent" style={{ display: "grid", gap: theme.space(1) }}>
       <h3 id="dice-recent" style={{ margin: 0, fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted, textTransform: "uppercase", letterSpacing: theme.caps }}>

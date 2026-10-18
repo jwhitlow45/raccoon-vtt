@@ -6,7 +6,7 @@ import type { StoreApi } from "zustand";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
 import type { DiceRoll, RollTest, RoomState } from "#shared/model.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
-import { useRoomScope } from "../../state/scope.ts";
+import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { PreviewContext } from "../dm/previewContext.ts";
 import { openAsk } from "../rolls/open.ts";
@@ -16,6 +16,7 @@ import { logSeq, remembered, rowTag, useOption, useOptionStore, type OptionState
 import { useReceipt, useReceipts, type ReceiptState, type ReceiptTracker } from "./useReceipt.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "./send.ts";
 import { useDicePanel, type PanelRoll } from "./useDicePanel.ts";
+import { throwHooksSlot } from "./throw/hooks.ts";
 
 /** The words on every option while a roll cannot go: no connection, or a preview, whose actions are refused. */
 export const IN_PREVIEW = "Rolls are not sent from a preview.";
@@ -38,9 +39,14 @@ function rollTestOf(test: Extract<D20Test, { kind: "save" | "check" }>): RollTes
  * the tracker's value box: a d20 tap goes by its route, any other roll is a
  * panel roll, and each remembers its tag on its row so the row shows its
  * result in place.
+ *
+ * `surface` is "dice" for the Dice panel's own options, whose rolls may
+ * throw dice (docs/design-v1-roll-animation.md 3.1). Left out, as the
+ * tracker's Roll leaves it, they never throw, even with Dice open beside.
  */
-export function useRollOption() {
+export function useRollOption(surface?: "dice") {
   const panel = useDicePanel();
+  const throws = useScoped(throwHooksSlot);
   const sender = useRollSender();
   const scope = useRoomScope();
   const store = useOptionStore();
@@ -48,6 +54,7 @@ export function useRollOption() {
   const actions = useRoomActions();
   const dm = useRoomView((s) => s.you?.role === "dm");
   return useMemo(() => {
+    const origin = () => (surface === "dice" ? throws.current?.origin() : undefined);
     const remember = (row: string, tag: string | null) => {
       if (tag) store.setState((s) => remembered(s, row, tag, logSeq(room.getState().view?.log)));
       return tag;
@@ -112,10 +119,10 @@ export function useRollOption() {
             taken.restore();
             return null;
           }
-          panel.noted(tag, input.label);
+          panel.noted(tag, input.label, origin());
           return remember(input.row, tag);
         }
-        return remember(input.row, panel.roll([asInitiative(asSave(d20Roll(input.creature, input.bonus, input.preset, input.label, input.critOn), input.test), input.test)]));
+        return remember(input.row, panel.roll([asInitiative(asSave(d20Roll(input.creature, input.bonus, input.preset, input.label, input.critOn), input.test), input.test)], { origin: origin() }));
       },
       /** A death save, counted by the server from the state then (4.3). */
       deathSave(creature: ActorTarget, preset: RollPreset, row: string): string | null {
@@ -131,7 +138,7 @@ export function useRollOption() {
           taken.restore();
           return null;
         }
-        panel.noted(tag, "Death Save");
+        panel.noted(tag, "Death Save", origin());
         return remember(row, tag);
       },
       /** A monster's initiative score set on its row without a roll (4.2), as a typed value goes. */
@@ -141,10 +148,10 @@ export function useRollOption() {
       /** Damage, healing, a plain roll or a recharge, as panel rolls. */
       rolls(rolls: PanelRoll[], row: string): string | null {
         if (rolls.length === 0) return null;
-        return remember(row, panel.roll(rolls));
+        return remember(row, panel.roll(rolls, { origin: origin() }));
       },
     };
-  }, [panel, sender, scope, store, room, actions, dm]);
+  }, [panel, sender, scope, store, room, actions, dm, surface, throws]);
 }
 
 /**

@@ -127,6 +127,7 @@ const lowPowerSetting = setting("rvtt.lowPower", parseLowPower, (on) => (on ? "o
 export const lowPower = lowPowerSetting.get;
 export const setLowPower = lowPowerSetting.set;
 export const useLowPower = lowPowerSetting.use;
+export const subscribeLowPower = lowPowerSetting.subscribe;
 
 /** Device pixels per CSS pixel on the map canvas (canvas/konvaSetup.ts): at most 2, and 1 in low power. */
 export function pixelRatioFor(low: boolean, devicePixelRatio: number): number {

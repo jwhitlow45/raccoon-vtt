@@ -264,12 +264,88 @@ summary::-webkit-details-marker {
   }
 }
 
+/* The roll animation's tray (features/dice/throw/Tray.tsx), timed from
+   the answer over 2.1 s: the scrim fades in over 170 ms and out with the
+   dice from 1.8 s, a natural 20's ring grows and fades over 520 ms as its
+   die lands at 1 s, a natural 1's ring shows from the landing, and the
+   "+N" disc arrives with the dice. The canvas fades itself to match. */
+@keyframes rvtt-tray-scrim {
+  from {
+    opacity: 0;
+  }
+  8.1% {
+    opacity: 0.92;
+  }
+  85.7% {
+    opacity: 0.92;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes rvtt-tray-ring {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  1% {
+    opacity: 0.95;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.8);
+  }
+}
+
+@keyframes rvtt-tray-mark {
+  from {
+    opacity: 0;
+  }
+  47.6% {
+    opacity: 0;
+  }
+  53.3% {
+    opacity: 0.95;
+  }
+  85.7% {
+    opacity: 0.95;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes rvtt-tray-disc {
+  from {
+    opacity: 0;
+  }
+  38% {
+    opacity: 0;
+  }
+  47.6% {
+    opacity: 1;
+  }
+  85.7% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+
+  /* Cut to 0.01 ms, the tray would jump to its faded end. Still, the scrim, the rings and the disc hold for the dice's 2 s, which then go. */
+  [data-dice-tray] * {
+    animation: none !important;
   }
 
   /* A 0.01 ms turn repeated forever would flicker, so the spinner holds still and its words carry it. */

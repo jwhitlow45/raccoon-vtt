@@ -1,7 +1,7 @@
-import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { addDie, formatFormula, parseRollText } from "#shared/dice/formula.ts";
 import { labelText } from "#shared/logText.ts";
-import type { DiceRoll } from "#shared/model.ts";
+import type { DiceRoll, LogEntry } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Chip } from "../../components/Chip.tsx";
 import { Input } from "../../components/Field.tsx";
@@ -12,8 +12,11 @@ import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
-import { answerVerdict, headerRoll, readHistory, readingOf, rollsOf, stepHistory, withHistory, writeHistory } from "./logic.ts";
+import { answerVerdict, headerRoll, readHistory, readingOf, rollsOf, stepHistory, withHistory, writeHistory, type HeaderRoll } from "./logic.ts";
+import { critical } from "./options.ts";
 import { FACE_CHIP, faceChips, rollVerdict } from "./RecentRolls.tsx";
+import { Tray } from "./throw/Tray.tsx";
+import { useThrows, useThrowView } from "./throw/useThrows.ts";
 import { againOf, useDicePanel, useLastRoll } from "./useDicePanel.ts";
 import { useRollBlocked } from "./useRollOption.ts";
 import { useReceipt } from "./useReceipt.ts";
@@ -40,46 +43,75 @@ const NOTE_LINE = 1.3;
 // The d20 leads, as the die rolled most: at 130% on a phone the strip scrolls after d10, and at 100% after d12.
 const QUICK_DICE = [20, 4, 6, 8, 10, 12, 100] as const;
 
+/** The header line's verdict: an answer's pass or fail as its player reads it, else a dice line's against its DC or AC. */
+function shownVerdict(roll: DiceRoll, data: LogEntry["data"]): string | null {
+  return data?.type === "roll" ? answerVerdict(roll, data.result) : rollVerdict(roll, data?.type === "dice" ? data : {});
+}
+
+/**
+ * What the live region says of a verdict: the header line's, except that a
+ * weapon's wider critical range says Critical Hit as its Critical chip
+ * does (critical()). A panel Attack carries no AC, so the header line's
+ * words alone never say it.
+ */
+export function spokenVerdict(roll: DiceRoll, data: LogEntry["data"]): string | null {
+  if (data?.type === "dice" && data.ac === undefined && roll.critOn !== undefined && critical(roll)) return "Critical Hit";
+  return shownVerdict(roll, data);
+}
+
+/** The live region's words for a result, said once at the answer: "Rolled 23, Critical Hit: Longsword." */
+export function spokenResult(head: HeaderRoll, verdict: string | null): string {
+  return `Rolled ${head.total}${head.sums ? ` (${head.sums})` : ""}${verdict ? `, ${verdict}` : ""}${head.label ? `: ${labelText(head.label)}` : ""}.`;
+}
+
 /**
  * The newest panel roll, from the first roll on: "Rolling..." while it
  * waits, then its total, label, dice and Again, or the refusal's words. It
  * sticks to the scroller's top, as Initiative's round header does, so an
  * option rolled at the sheet's foot shows its result at the top too. A tap
  * on it opens the whole roll in Recent rolls.
+ *
+ * A roll the panel throws holds its result until the dice land
+ * (docs/design-v1-roll-animation.md 3.4): the live region says it at once,
+ * and the line shows it 1 s later, or at once on any tap or key. Again
+ * stays as a busy button while the roll waits, so a keyboard press keeps
+ * its focus, and is live from the answer on.
  */
 export function LastResult(props: { onOpen(lineId: string): void }) {
   const last = useLastRoll();
   const panel = useDicePanel();
+  const throws = useThrows();
+  const thrown = useThrowView();
   const tag = last && "tag" in last ? last.tag : null;
+  const holding = tag !== null && thrown.held === tag;
   const receipt = useReceipt(tag);
   const waiting = receipt !== null && (receipt.state === "sending" || receipt.state === "checking");
   const slow = useDelayed(waiting);
-  const [said, setSaid] = useState("");
   const committed = receipt?.state === "committed" ? receipt : null;
   const rolls = useMemo(() => (committed ? rollsOf(committed.lines) : []), [committed]);
   const first = rolls[0];
   const head = useMemo(() => headerRoll(rolls), [rolls]);
   const firstLine = committed?.lines[0]?.id ?? null;
-  // A polite live region says each result once: "Rolled 13: Longsword."
-  useEffect(() => {
-    if (head) setSaid(`Rolled ${head.total}${head.sums ? ` (${head.sums})` : ""}${head.label ? `: ${labelText(head.label)}` : ""}.`);
-  }, [head]);
+  const data = committed?.lines[0]?.data;
+  // A polite live region says each result once, from the render that first holds it, so it is said as it lands on the server even while the dice still fly.
+  const said = first && head ? spokenResult(head, spokenVerdict(first, data)) : "";
   if (!last) return null;
+  const rollingNote = (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(2), color: theme.color.textMuted }}>
+      <Spinner size={16} /> Rolling…
+    </span>
+  );
   let body;
   if ("error" in last) body = <span role="alert" style={{ color: theme.color.dangerText }}>{last.error}</span>;
   // The shared delayed indicator: a quick answer never flashes "Rolling...".
-  else if (!receipt || waiting)
-    body = slow ? (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(2), color: theme.color.textMuted }}>
-        <Spinner size={16} /> Rolling…
-      </span>
-    ) : null;
+  else if (!receipt || waiting) body = slow ? rollingNote : null;
+  // The dice are in the air: the line stays as it was, "Rolling…" only where the wait was long enough to say it.
+  else if (receipt.state === "committed" && holding) body = thrown.rolling ? rollingNote : null;
   else if (receipt.state === "refused") body = <span role="alert" style={{ color: theme.color.dangerText }}>{receipt.text || receipt.message}</span>;
   else if (receipt.state === "unknown") body = <span style={{ color: theme.color.textMuted }}>This may have happened. Check the log.</span>;
   else if (!first || !head) body = <span style={{ color: theme.color.textMuted }}>Rolled. Its result is no longer in the log.</span>;
   else {
-    const data = committed?.lines[0]?.data;
-    const verdict = data?.type === "roll" ? answerVerdict(first, data.result) : rollVerdict(first, data?.type === "dice" ? data : {});
+    const verdict = shownVerdict(first, data);
     const label = head.label !== undefined ? labelText(head.label) : "once" in last ? last.label : undefined;
     body = (
       <button
@@ -93,7 +125,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
       </button>
     );
   }
-  const again = waiting ? null : againOf(last);
+  const again = againOf(last);
   return (
     <div
       data-dice-last=""
@@ -113,7 +145,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), minHeight: LAST_LINE_PX, fontSize: theme.font.body14 }}>
         <div style={{ display: "flex", alignItems: "center", flex: 1, minWidth: 0 }}>{body}</div>
         {again ? (
-          <Button size="sm" variant="quiet" icon="again" style={{ flex: "none", minHeight: LAST_LINE_PX }} onClick={() => panel.again(again.rolls, again.to)}>
+          <Button size="sm" variant="quiet" icon="again" busy={waiting} style={{ flex: "none", minHeight: LAST_LINE_PX }} onClick={() => panel.again(again.rolls, again.to, throws.origin())}>
             Again
           </Button>
         ) : null}
@@ -121,6 +153,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
       <span role="status" aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>
         {said}
       </span>
+      <Tray />
     </div>
   );
 }
@@ -227,6 +260,7 @@ export function Roller() {
   // Offline, or a preview as a player, which refuses every op: Roll waits and says why, as every option does.
   const blocked = useRollBlocked();
   const panel = useDicePanel();
+  const throws = useThrows();
   const [text, setText] = useState("");
   // A formula only Roll sends keeps the sheet from a swipe's close, and the field clears once it goes (docs/design-v1-sheet-swipe.md 4.6).
   useUnsavedInput(text.trim() !== "");
@@ -256,7 +290,7 @@ export function Roller() {
       setError(parsed.error);
       return;
     }
-    const tag = panel.roll([{ formula: formatFormula(parsed.formula), ...(parsed.label !== undefined ? { label: parsed.label } : {}), sources: parsed.sources }]);
+    const tag = panel.roll([{ formula: formatFormula(parsed.formula), ...(parsed.label !== undefined ? { label: parsed.label } : {}), sources: parsed.sources }], { origin: throws.origin() });
     if (tag === null) return;
     setSent(tag);
     const next = withHistory(history, text);

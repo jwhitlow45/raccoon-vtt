@@ -39,6 +39,8 @@ export const ROLLING_MS = 200;
 export const DISPOSE_MS = 30_000;
 /** A pointer up with no click after it within this long was a scroll or a drag, and the result shows then. */
 export const CLICK_WAIT_MS = 300;
+/** A control pressed this recently is the one whose roll is being sent. */
+export const PRESS_MS = 1000;
 /** The warm-up runs in a quiet moment, and within this long after the panel opens. */
 export const WARM_MAX_MS = 1500;
 /** A pane shorter than this cannot hold the header line and the tray, and shows the result at once. */
@@ -169,6 +171,9 @@ export class ThrowStore {
   #clickTimer: unknown = null;
   /** A pointer took the dice away, and the result waits for its click. */
   #pressed = false;
+  /** The control the panel's last pointer or key went to, and when: a roll from it throws from there. */
+  #pressedEl: Element | null = null;
+  #pressedAt = Number.NEGATIVE_INFINITY;
 
   /** Binds the store to its Room, once. */
   bind(env: ThrowEnv): void {
@@ -195,6 +200,11 @@ export class ThrowStore {
   };
 
   view = (): ThrowView => this.#view;
+
+  /** The store's clock, which a throw's `startedAt` is read on. */
+  now(): number {
+    return this.#env?.clock.now() ?? 0;
+  }
 
   /** Whether this tag's result waits for the dice: the header line and Recent rolls leave it out until they land. */
   held(tag: string | null): boolean {
@@ -273,8 +283,23 @@ export class ThrowStore {
     this.#check();
   }
 
+  /**
+   * The origin of the panel tap being handled now: the control its pointer
+   * or key went to, if that was just now, so the dice leave from there.
+   */
+  origin(): ThrowOrigin {
+    const now = this.#env?.clock.now() ?? 0;
+    return { surface: "dice", element: now - this.#pressedAt < PRESS_MS ? this.#pressedEl : null, tapAt: now };
+  }
+
+  #press(target: Element | null): void {
+    this.#pressedEl = target;
+    this.#pressedAt = this.#env?.clock.now() ?? 0;
+  }
+
   /** A pointer down anywhere in the panel takes the dice away. Its click shows the result, after the browser has chosen what it lands on. */
-  pointerDown(): void {
+  pointerDown(target: Element | null = null): void {
+    this.#press(target);
     if (this.#view.held !== null) this.#pressed = true;
     if (!this.#view.shown) return;
     this.#stage?.stop();
@@ -298,7 +323,8 @@ export class ThrowStore {
   }
 
   /** A key down in the panel ends the throw at once. */
-  keyDown(): void {
+  keyDown(target: Element | null = null): void {
+    this.#press(target);
     this.#end();
   }
 
@@ -314,13 +340,20 @@ export class ThrowStore {
     } else this.#maybeWarm();
   }
 
-  /** The Room went away. */
+  /**
+   * The Room went away. React's development double mount disposes a Room
+   * and then keeps using it, so the store is left unbound, and the next
+   * render binds it again.
+   */
   dispose(): void {
     this.#end();
     this.#dispose();
     for (const stop of this.#unsubscribe) stop();
     this.#unsubscribe = [];
     this.#pending.clear();
+    this.#panel = null;
+    this.#tray = null;
+    this.#env = null;
   }
 
   // ------------------------------------------------------------ deciding at the commit

@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { createStore } from "zustand/vanilla";
 import type { DiceRoll, LogEntry } from "#shared/model.ts";
+import type { ClientOp } from "#shared/protocol.ts";
 import { chance, int, pick, rng } from "#shared/testutil.ts";
 import { FakeClock } from "../../../state/testing.ts";
-import type { ReceiptState } from "../useReceipt.ts";
+import type { OnAnswer } from "../../../state/types.ts";
+import { sendRoll, type RollSender } from "../send.ts";
+import { createDicePanel, type DiceState } from "../useDicePanel.ts";
+import { ReceiptTracker, type ReceiptState } from "../useReceipt.ts";
 import type { DieKind } from "./layout.ts";
 import type { LoadState } from "./probe.ts";
 import { DISPOSE_MS, GONE_MS, LAND_MS, LATE_MS, ThrowStore, type PanelHost, type Stage, type StagedThrow, type StageEvents, type StageModule, type ThrowOrigin, type TrayHost } from "./store.ts";
@@ -409,6 +414,93 @@ describe("the throw's store", () => {
     const tag = h.tap();
     h.commit(tag);
     assert.equal(h.store.held(tag), true);
+  });
+});
+
+/**
+ * Every way a Dice panel control rolls, through the panel's own actions
+ * (createDicePanel) and the real receipt tracker: each that carries the
+ * panel's origin throws, and the tracker's Roll, which carries none, does
+ * not, even with Dice open beside it.
+ */
+describe("every way a panel control rolls", () => {
+  function setup() {
+    const clock = new FakeClock();
+    const idle = new FakeIdle();
+    const log: LogEntry[] = [];
+    const tracker = new ReceiptTracker();
+    tracker.env = { lookup: async () => ({ parts: [] }), log: () => log };
+    const waiting: { op: ClientOp; answer: OnAnswer | undefined }[] = [];
+    const sender: RollSender = {
+      dispatch: (op, opts) => (waiting.push({ op, answer: opts?.onAnswer }), waiting.length),
+      connected: () => true,
+      receipts: tracker,
+    };
+    const loader = new FakeLoader();
+    let stage: FakeStage | null = null;
+    const store = new ThrowStore();
+    store.bind({ clock, idle: idle.idle, tracker, loader, hidden: () => false });
+    loader.finish({ createStage: (events) => (stage = new FakeStage(clock, events)) });
+    store.mount({ kinds: () => ["d20"] });
+    store.attach({ parent: null, measure: () => GEOMETRY });
+    idle.runAll();
+    stage!.warmups[0]!.finish(true);
+    const choices = createStore<DiceState>(() => ({ adv: false, dis: false, secret: null, version: 0, last: null }));
+    const panel = createDicePanel({ store: choices, sender, secretStart: () => false, registerThrow: (tag, origin) => store.register(tag, origin) });
+    /** The server's answer to everything sent: each op's line in the log, then its ack. */
+    const answerAll = () => {
+      for (const { op, answer } of waiting.splice(0)) {
+        const tag = (op as { tag: string }).tag;
+        const roll: DiceRoll = { formula: "1d20+4", faces: [12], total: 16, characterId: "thorn" };
+        log.push(op.t === "roll.dice" ? { id: `${log.length + 1}:0`, at: "", kind: "event", data: { type: "roll", test: { kind: "save", choices: [{ ability: "dex" }] }, characterId: "thorn", total: 16, dice: roll, tag } } : line(tag, [roll]));
+        answer?.("taken");
+      }
+    };
+    const origin = () => store.origin();
+    return { store, panel, sender, answerAll, origin, stage: () => stage! };
+  }
+
+  const ROLL = { formula: "1d20+4", label: "Stealth", creature: { characterId: "thorn" } };
+
+  test("the formula's Roll and a roll option throw", () => {
+    const h = setup();
+    const tag = h.panel.roll([ROLL], { origin: h.origin() })!;
+    h.answerAll();
+    assert.equal(h.store.held(tag), true);
+    const option = h.panel.roll([{ ...ROLL, label: "Longsword", critOn: 19 }], { origin: h.origin() })!;
+    h.answerAll();
+    assert.equal(h.store.held(option), true);
+  });
+
+  test("the header line's Again and Recent rolls' Again throw", () => {
+    const h = setup();
+    const header = h.panel.again([{ formula: "1d20+4" }], "all", h.origin())!;
+    h.answerAll();
+    assert.equal(h.store.held(header), true);
+    const row = h.panel.again([{ formula: "2d6+3" }], "dm", h.origin())!;
+    h.answerAll();
+    assert.equal(h.store.held(row), true);
+  });
+
+  test("an answer to a request and a death save sent from the panel throw", () => {
+    const h = setup();
+    for (const op of [
+      { t: "roll.dice", tag: "answer-1", rollId: "q1", target: { characterId: "thorn" } },
+      { t: "actor.deathRoll", tag: "death-1", target: { characterId: "thorn" } },
+    ] as const) {
+      sendRoll(h.sender, op as never);
+      h.panel.noted(op.tag, op.t === "roll.dice" ? "Dexterity save" : "Death save", h.origin());
+      h.answerAll();
+      assert.equal(h.store.held(op.tag), true, op.t);
+    }
+  });
+
+  test("the tracker's Roll, which carries no origin, never throws", () => {
+    const h = setup();
+    const tag = h.panel.roll([ROLL])!;
+    h.answerAll();
+    assert.equal(h.store.held(tag), false);
+    assert.equal(h.stage().plays.length, 0);
   });
 });
 

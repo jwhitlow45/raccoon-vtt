@@ -395,6 +395,7 @@ export const ALLOWLIST: readonly AllowEntry[] = [
   { match: (f) => f === "client/features/images/icons.ts", why: "the icon glyph's inks", exempt: { colors: true }, declarations: ["NEAR_BLACK", "WHITE"] },
   { match: (f) => f === "client/features/images/iconColors.ts", why: "the icon disk's neutrals", exempt: { colors: true }, declarations: ["ICON_NEUTRALS", "DEFAULT_ICON_COLOR"] },
   { match: (f) => f === "client/features/images/IconsTab.tsx", why: "the names of the icon disk's colors", exempt: { colors: true }, declarations: ["COLOR_NAMES"] },
+  { match: (f) => f === "client/features/dice/throw/sets.ts", why: "the dice sets' colors, drawn into the dice", exempt: { colors: true }, declarations: ["DICE_SETS"] },
   { match: (f) => f.startsWith("client/features/display/"), why: "the table display's TV sizes and stacking", exempt: { colors: true, sizes: true, stacking: true } },
 ];
 

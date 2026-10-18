@@ -63,6 +63,13 @@ export function throwDice(result: Pick<DiceResult, "formula" | "faces">): ThrowD
   return out;
 }
 
+/** The kinds of these rolls' dice, for the warm-up: a d20 and a d6 when there are none. */
+export function kindsIn(rolls: readonly Pick<DiceResult, "formula" | "faces">[]): DieKind[] {
+  const kinds = new Set<DieKind>();
+  for (const roll of rolls) for (const die of throwDice(roll) ?? []) kinds.add(die.kind);
+  return kinds.size > 0 ? [...kinds] : ["d20", "d6"];
+}
+
 /** How a throw's deciding d20 is marked once it lands: the accent's ring, or a natural 1's. */
 export type Mark = "critical" | "fumble";
 

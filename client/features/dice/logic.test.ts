@@ -31,6 +31,21 @@ describe("Recent rolls", () => {
     assert.equal((rows[0] as Extract<RecentRow, { kind: "dice" }>).by, "p2");
   });
 
+  test("a roll whose dice are in the air stays out until they land, all its lines and only its own (docs/design-v1-roll-animation.md 3.4)", () => {
+    const older = entry(dice({ tag: "older" }));
+    const answer = entry({ type: "roll", test: { kind: "save", choices: [{ ability: "dex" }] }, characterId: "c1", total: 14, dice: { formula: "1d20+2", faces: [12], total: 14 }, tag: "held" });
+    const part0 = entry(dice({ tag: "held", batch: "B", rolls: [{ ...ROLL, total: 1 }] }));
+    const part1 = entry(dice({ tag: "held", batch: "B", part: 1, rolls: [{ ...ROLL, total: 2 }] }));
+    const others = entry(dice({ by: "p2", tag: "theirs" }));
+    const log = [older, answer, part0, part1, others];
+    assert.deepEqual(
+      recentRolls(log, "held").map((r) => r.key),
+      [others.id, older.id],
+    );
+    assert.equal(recentRolls(log, null).length, 4, "nothing held: every row");
+    assert.deepEqual(recentRolls(log, "older").map((r) => r.ids).flat().sort(), [answer.id, part0.id, part1.id, others.id].sort(), "another tag held: only its row goes");
+  });
+
   test("lines of one roller and one batch are one row in roll order, whatever lies between them", () => {
     const a = entry(dice({ batch: "B1", rolls: [{ ...ROLL, total: 1 }] }));
     const other = entry(dice({ by: "p2", batch: "B1" }));

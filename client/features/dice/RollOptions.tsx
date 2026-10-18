@@ -366,7 +366,7 @@ function OptionCell(props: { text: string; tag?: string | undefined; name: strin
  */
 function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { typed: TypedBonus }; text: string; label?: string; critOn?: 18 | 19; rowKey?: string; grow?: boolean; common?: readonly string[]; onLanded?(critical: boolean): void }) {
   const { ctx, test } = props;
-  const option = useRollOption();
+  const option = useRollOption("dice");
   const route = routeOf({ state: ctx.dice.view, creature: ctx.creature, test, dm: ctx.dice.you.role === "dm", played: ctx.played, ask: ctx.ask });
   const tap = props.unknown ? typedTap(route.kind, props.unknown.typed) : { bonus: props.bonus, waits: null };
   // An answer rolls the request's own test, with its `spell`, so the button shows the preset its tap sends.
@@ -502,7 +502,7 @@ const TESTS: readonly D20Test[] = [
  */
 function InitiativeCell(props: { ctx: Ctx; bonus: number; bonusText: string }) {
   const { ctx } = props;
-  const option = useRollOption();
+  const option = useRollOption("dice");
   const watch = useWatchInitiative();
   const row = `${ctx.key}|initiative`;
   const landed = useRowResult(row);
@@ -549,7 +549,7 @@ function InitiativeCell(props: { ctx: Ctx; bonus: number; bonusText: string }) {
 /** The death save, rolled by the server with the creature's own numbers. Where this viewer holds none of them its bonus goes unsaid. */
 function DeathSaveCell(props: { ctx: Ctx; bonus: number | null }) {
   const { ctx } = props;
-  const option = useRollOption();
+  const option = useRollOption("dice");
   const test: D20Test = { kind: "deathSave" };
   const preset = presetFor(ctx.dice, ctx.creature, test, { rolls: ctx.rolls });
   const row = `deathSave:${"tokenId" in ctx.creature ? ctx.creature.tokenId : ctx.creature.characterId}`;
@@ -579,7 +579,7 @@ function DeathSaveCell(props: { ctx: Ctx; bonus: number | null }) {
  */
 function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
   const { ctx } = props;
-  const option = useRollOption();
+  const option = useRollOption("dice");
   const store = useOptionStore();
   const roomId = useRoomView((s) => s.roomId);
   const rowKey = `${ctx.key}|${props.named.key}`;
