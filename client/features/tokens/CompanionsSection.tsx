@@ -6,7 +6,7 @@ import { Button } from "../../components/Button.tsx";
 import { ErrorText, Input } from "../../components/Field.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { Spinner } from "../../components/Loading.tsx";
-import { Group, Help, Section as PanelSection } from "../../components/Panel.tsx";
+import { GROUP_BOX, GROUP_FOLD, Group, Help, Section as PanelSection } from "../../components/Panel.tsx";
 import { Row, RowList } from "../../components/Row.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { Tag } from "../../components/Tag.tsx";
@@ -574,7 +574,8 @@ export function MakeCompanion(props: { token: Token }) {
   const confirm = () => {
     if (!character) return;
     make.send({ t: "token.update", tokenId: token.id, patch: makeCompanionPatch(token, character.id, chosen.value) });
-    handFocusOn(form.current?.closest("section"), ["h3 button"]);
+    // To Token settings' fold, the group the form sits in.
+    handFocusOn(form.current?.closest<HTMLElement>(GROUP_BOX), [GROUP_FOLD]);
   };
   return (
     <div ref={form} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>

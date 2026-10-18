@@ -185,6 +185,14 @@ function FoldLabel(props: { id: string; label: ReactNode; tone?: "danger"; fold:
 const InGroup = createContext(false);
 
 /**
+ * A group's box and its fold, for code inside a group that hands focus to
+ * its heading once the pressed control goes, as Make a companion's does
+ * (lib/handFocus.ts). A group is no `section`, so these are how to find it.
+ */
+export const GROUP_BOX = "[data-panel-group]";
+export const GROUP_FOLD = "[data-group-fold]";
+
+/**
  * A fold of a panel's sections that belong together by use (the Token
  * panel's Combat, Notes and Position, docs/design-v1-dice-ui.md 5): a 48 px
  * row with a chevron, the group's name at 16 px weight 700, and when folded
@@ -224,7 +232,7 @@ export function Group(props: {
       </span>
     ) : null;
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
+    <div data-panel-group="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
       {/* The action wraps under the name where both do not fit, as Add a stat block and Take a shape do in a narrow card, rather than run over it. */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: 48 }}>
         <h3 style={{ margin: 0, display: "flex", flex: "1 1 auto", minWidth: 0 }}>
@@ -232,6 +240,7 @@ export function Group(props: {
             <button
               ref={props.foldRef}
               type="button"
+              data-group-fold=""
               // Named by the group's name alone, so the name never changes as it folds. The summary describes it.
               aria-labelledby={id}
               aria-describedby={summary ? summaryId : undefined}

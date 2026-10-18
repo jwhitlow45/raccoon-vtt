@@ -4,7 +4,7 @@ import { describe, test } from "node:test";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { Group, Section } = await import("./Panel.tsx");
+const { GROUP_BOX, GROUP_FOLD, Group, Section } = await import("./Panel.tsx");
 
 /** A panel's groups (docs/design-v1-dice-ui.md 3.2, docs/design-v1-token-panel-groups.md 4), as markup. */
 describe("Group", () => {
@@ -30,6 +30,16 @@ describe("Group", () => {
     const markup = renderToStaticMarkup(createElement(Group, { label: "Stat block" }, "block"));
     assert.match(markup, /<h3[^>]*><span[^>]*><span[^>]*>Stat block<\/span>/);
     assert.doesNotMatch(markup, /aria-expanded/);
+    assert.doesNotMatch(markup, /data-group-fold/, "and no fold to hand focus to");
+  });
+
+  test("code inside a group finds its box and its fold by GROUP_BOX and GROUP_FOLD, since the box is no section", () => {
+    const markup = renderToStaticMarkup(createElement(Group, { label: "Token settings", open: true, onToggle: () => {} }, createElement(Section, { label: "Make a companion", children: "form" })));
+    assert.equal(GROUP_BOX, "[data-panel-group]");
+    assert.equal(GROUP_FOLD, "[data-group-fold]");
+    assert.match(markup, /^<div data-panel-group=""/, "the group's own box");
+    assert.match(markup, /<h3[^>]*><button[^>]*data-group-fold=""[^>]*aria-expanded="true"/, "its fold, in its heading");
+    assert.equal(markup.match(/data-group-fold/g)?.length, 1, "one fold: a section's label inside is not one");
   });
 
   test("the sections inside part by 16 px with no bottom padding of their own, their labels a level under the group's (h4)", () => {
