@@ -26,7 +26,7 @@ import { buildModel, cellOf, faceLocal, landing, MAX_TILT, shownFace, type DieMo
 import { LAND_MS, LAST_FRAME_MS, pathFor, poseAt, type DiePath } from "./poses.ts";
 import { contextAttributes } from "./probe.ts";
 import { diceSet, type DiceSet } from "./sets.ts";
-import type { Stage, StagedThrow, StageEvents } from "./store.ts";
+import type { PreviewTarget, Stage, StagedThrow, StageEvents } from "./store.ts";
 
 /**
  * The dice drawn (docs/design-v1-roll-animation.md 5 to 9): the renderer
@@ -387,6 +387,49 @@ export function createStage(events: StageEvents): Stage | null {
 
     stop,
 
+    async previews(targets: readonly PreviewTarget[], px: number) {
+      if (raf || thrown.length > 0) return false;
+      await fonts();
+      if (raf || thrown.length > 0) return false;
+      const { model } = modelOf("d20");
+      const twenty = 19;
+      const shown = shownFace(model, twenty);
+      renderer.setPixelRatio(ratio);
+      renderer.setSize(px, px, false);
+      camera.left = -px / 2;
+      camera.right = px / 2;
+      camera.top = px / 2;
+      camera.bottom = -px / 2;
+      camera.updateProjectionMatrix();
+      hideAll();
+      for (const t of targets) {
+        const look = diceSet(t.set);
+        const die = acquire("d20", look, 0);
+        die.decal.material.map = decalOf("20", look, true);
+        die.decal.material.needsUpdate = true;
+        die.decal.material.opacity = 1;
+        die.decal.scale.setScalar((shown.label?.size ?? 0.8) * shown.face.size);
+        placeOn(die.decal, shown.label?.at ?? shown.face.center, shown.face.normal, shown.up);
+        die.group.position.set(0, 0, 0);
+        die.group.quaternion.copy(landing(model, twenty, 0));
+        die.group.scale.setScalar((px / 2) * 0.92);
+        die.body.opacity = bodyOpacity(look);
+        die.edge.opacity = 1;
+        die.group.visible = true;
+        renderer.render(scene, camera);
+        // Copied while the frame is fresh: the drawing buffer is not kept past this task.
+        const g = t.canvas.getContext("2d");
+        if (g) {
+          g.clearRect(0, 0, t.canvas.width, t.canvas.height);
+          g.drawImage(canvas, 0, 0, t.canvas.width, t.canvas.height);
+        }
+      }
+      hideAll();
+      renderer.setPixelRatio(1);
+      renderer.setSize(1, 1);
+      return true;
+    },
+
     dispose() {
       deliberate = true;
       stop();
@@ -407,4 +450,21 @@ export function createStage(events: StageEvents): Stage | null {
       canvas.remove();
     },
   };
+}
+
+/**
+ * The dice set picker's previews (9.2): each set's d20 rendered once and
+ * copied into its tile. It uses the stage's renderer when one exists, else
+ * a short-lived one it lets go at once, so This device never keeps a
+ * context of its own.
+ */
+export async function drawPreviews(targets: readonly PreviewTarget[], px: number, stage: Stage | null): Promise<boolean> {
+  if (stage?.previews) return stage.previews(targets, px);
+  const own = createStage({ lost() {}, restored() {} });
+  if (!own?.previews) return false;
+  try {
+    return await own.previews(targets, px);
+  } finally {
+    own.dispose();
+  }
 }

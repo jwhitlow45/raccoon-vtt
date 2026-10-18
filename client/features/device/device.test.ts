@@ -3,13 +3,20 @@ import { describe, test } from "node:test";
 import { cameraForView, worldToScreen } from "../../lib/camera.ts";
 import { EPH_PER_SECOND } from "../../state/socket.ts";
 import { barInset, cameraInZoomed, chromeZoom, effectiveZoom, insetsInZoomed, inZoomed, layoutSize, sizeInZoomed, smallUi, type ZoomedElement } from "./layout.ts";
-import { ephRate, mapVariantFor, parseLowPower, parseUiScale, pixelRatioFor, stageMountKey, UI_SCALES, uiScaleLabel } from "./settings.ts";
+import { ephRate, mapVariantFor, parseDiceSet, parseLowPower, parseRollAnimation, parseUiScale, pixelRatioFor, stageMountKey, UI_SCALES, uiScaleLabel } from "./settings.ts";
 
 describe("this device's settings", () => {
   test("the interface size reads only its four sizes, anything else as 100%", () => {
     assert.deepEqual(UI_SCALES.map(uiScaleLabel), ["85%", "100%", "115%", "130%"]);
     for (const s of UI_SCALES) assert.equal(parseUiScale(String(s)), s);
     for (const raw of [null, "", "2", "0.5", "abc", "1.0000001"]) assert.equal(parseUiScale(raw), 1, String(raw));
+  });
+
+  test("the roll animation is on unless stored off, and the dice set is a known one's id, else Ivory", () => {
+    for (const raw of [null, "on", "", "yes"]) assert.equal(parseRollAnimation(raw), true, String(raw));
+    assert.equal(parseRollAnimation("off"), false);
+    assert.equal(parseDiceSet("sapphire"), "sapphire");
+    for (const raw of [null, "", "plaid"]) assert.equal(parseDiceSet(raw), "ivory", String(raw));
   });
 
   test("low power is off unless stored on", () => {

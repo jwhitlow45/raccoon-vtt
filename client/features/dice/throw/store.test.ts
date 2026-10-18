@@ -76,7 +76,7 @@ class FakeIdle {
 class Warmup {
   done: (() => void)[] = [];
   failed: (() => void)[] = [];
-  promise = { then: (ok: () => void, fail: () => void) => (this.done.push(ok), this.failed.push(fail)) } as unknown as Promise<void>;
+  promise = { then: (ok?: () => void, fail?: () => void) => (this.done.push(ok ?? (() => undefined)), this.failed.push(fail ?? (() => undefined))) } as unknown as Promise<void>;
   finish(ok: boolean): void {
     for (const cb of ok ? this.done : this.failed) cb();
     this.done = [];
@@ -754,6 +754,13 @@ function run(seed: number): void {
         shownNow();
       }
     } else if (k < 0.86) {
+      if (chance(r, 0.15)) {
+        // Another dice set: its textures are drawn ahead, and nothing stops.
+        const set = pick(r, ["ivory", "ruby", "gold"]);
+        did(`set ${set}`);
+        store.setInputs({ set });
+        continue;
+      }
       const key = pick(r, ["on", "lowPower", "reducedMotion", "preview"] as const);
       // A setting that stops the dice is turned back soon, so throws keep coming.
       const stopping = key === "on" ? !inputs.on : inputs[key];

@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 import { Button } from "../../components/Button.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
@@ -8,7 +9,23 @@ import { keyText, setShortcutSheet, useShortcutKeys } from "../../state/shortcut
 import { RadioGroup } from "../dm/controls.tsx";
 import { setSoundOn, useSoundOn } from "../encounter/alerts.ts";
 import { setSoundEnabled, usePingSound } from "../pings/feedback.ts";
-import { setLowPower, setMapDetail, setRollToasts, setUiScale, UI_SCALES, uiScaleLabel, useLowPower, useMapVariant, useRollToastsOn, useUiScale, type UiScale } from "./settings.ts";
+import { diceLoader } from "../dice/throw/hooks.ts";
+import { DiceSetPicker } from "./DiceSetPicker.tsx";
+import {
+  setLowPower,
+  setMapDetail,
+  setRollAnimation,
+  setRollToasts,
+  setUiScale,
+  UI_SCALES,
+  uiScaleLabel,
+  useLowPower,
+  useMapVariant,
+  useRollAnimation,
+  useRollToastsOn,
+  useUiScale,
+  type UiScale,
+} from "./settings.ts";
 
 /**
  * Menu, This device (docs/design-v1-dm-tools.md 2.7): what belongs to this
@@ -23,6 +40,8 @@ export default function ThisDevice() {
   const turnSound = useSoundOn();
   const pingSound = usePingSound();
   const rollToasts = useRollToastsOn();
+  const rollAnimation = useRollAnimation();
+  const dice = useSyncExternalStore(diceLoader.subscribe, diceLoader.state, diceLoader.state);
   const fullscreen = useFullscreen();
   // The keys the help below names, as this device has them.
   const keys = useShortcutKeys();
@@ -46,7 +65,7 @@ export default function ThisDevice() {
       <Section label="Battery">
         <Switch
           label="Low power"
-          help="Draws the map at a lower resolution and skips small animations, to save battery on long sessions. Text on the map looks softer."
+          help="Draws the map at a lower resolution, skips small animations and shows rolls without dice, to save battery on long sessions. Text on the map looks softer."
           checked={lowPower}
           onChange={setLowPower}
         />
@@ -75,6 +94,19 @@ export default function ThisDevice() {
       </Section>
       <Section label="Rolls">
         <Switch label="Show others' rolls as they happen" help="A short note for each roll someone else makes, while the Dice panel is not on screen." checked={rollToasts} onChange={setRollToasts} />
+        <Switch
+          label="Roll animation"
+          help={
+            dice === "no-webgl"
+              ? "This device cannot draw the dice, so the result shows at once."
+              : lowPower
+                ? "Low power shows each result at once, without dice."
+                : "Your own rolls in the Dice panel throw dice that land on the result in about a second. A tap or a key shows it at once."
+          }
+          checked={rollAnimation}
+          onChange={setRollAnimation}
+        />
+        <DiceSetPicker />
       </Section>
       <Section label="Shortcuts">
         <Help>

@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import { setBoardInterfaceScale } from "../../lib/boardScale.ts";
 import { preferredMapVariant, readMapVariantSetting, type MapVariantSetting } from "../../lib/device.ts";
 import { formatKeyChanges, parseKeyChanges, type KeyChanges } from "../../state/keyBindings.ts";
+import { parseDiceSet } from "../dice/throw/sets.ts";
 
 /**
  * This device's own settings (docs/design-v1-dm-tools.md 2.7): the
@@ -164,6 +165,27 @@ const rollToastsSetting = setting("rvtt.rollToasts", parseRollToasts, (on) => (o
 
 export const setRollToasts = rollToastsSetting.set;
 export const useRollToastsOn = rollToastsSetting.use;
+
+/** "Roll animation" (docs/design-v1-roll-animation.md 9.2): this device's own rolls in the Dice panel throw dice. On by default. */
+export function parseRollAnimation(raw: string | null): boolean {
+  return raw !== "off";
+}
+
+const rollAnimationSetting = setting("rvtt.rollAnimation", parseRollAnimation, (on) => (on ? "on" : "off"));
+
+export const rollAnimation = rollAnimationSetting.get;
+export const setRollAnimation = rollAnimationSetting.set;
+export const useRollAnimation = rollAnimationSetting.use;
+export const subscribeRollAnimation = rollAnimationSetting.subscribe;
+
+/** "Dice": the set this device throws, by id (features/dice/throw/sets.ts), Ivory when unset or unknown. */
+export { parseDiceSet };
+const diceSetSetting = setting("rvtt.diceSet", parseDiceSet, (id) => id);
+
+export const diceSetId = diceSetSetting.get;
+export const setDiceSetId = diceSetSetting.set;
+export const useDiceSetId = diceSetSetting.use;
+export const subscribeDiceSet = diceSetSetting.subscribe;
 
 // ---------------------------------------------------------------- map detail
 

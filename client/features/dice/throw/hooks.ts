@@ -1,6 +1,6 @@
 import { preloadInBackground } from "../../../lib/retryableLazy.ts";
 import { scopeSlot } from "../../../state/scope.ts";
-import { lowPower, subscribeLowPower } from "../../device/settings.ts";
+import { lowPower, rollAnimation, subscribeLowPower, subscribeRollAnimation } from "../../device/settings.ts";
 import { canDrawDice, stageLoader } from "./probe.ts";
 import type { StageModule, ThrowOrigin } from "./store.ts";
 
@@ -13,9 +13,9 @@ import type { StageModule, ThrowOrigin } from "./store.ts";
  * is before any tap in it.
  */
 
-/** Whether the settings let the dice chunk load at all. */
+/** Whether the settings let the dice chunk load at all: the switch on and Low power off. */
 function loadAllowed(): boolean {
-  return !lowPower();
+  return rollAnimation() && !lowPower();
 }
 
 /**
@@ -25,7 +25,10 @@ function loadAllowed(): boolean {
  */
 export const diceLoader = stageLoader<StageModule>({
   allowed: loadAllowed,
-  subscribe: (listener) => subscribeLowPower(listener),
+  subscribe: (listener) => {
+    const stops = [subscribeLowPower(listener), subscribeRollAnimation(listener)];
+    return () => stops.forEach((stop) => stop());
+  },
   probe: canDrawDice,
   load: () => import("./stage.ts"),
 });

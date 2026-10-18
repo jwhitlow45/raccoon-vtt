@@ -72,12 +72,21 @@ export type Stage = {
   play(t: StagedThrow): void;
   stop(): void;
   dispose(): void;
+  /** Draws each set's d20 showing 20 once into its 2D canvas, for the dice set picker. False while a throw is on screen. */
+  previews?(targets: readonly PreviewTarget[], px: number): Promise<boolean>;
 };
+
+/** A picker tile's canvas and the set it shows. */
+export type PreviewTarget = { set: string; canvas: HTMLCanvasElement };
 
 /** What the stage tells the store. A loss the stage caused itself says so. */
 export type StageEvents = { lost(deliberate: boolean): void; restored(): void };
 
-export type StageModule = { createStage(events: StageEvents): Stage | null };
+export type StageModule = {
+  createStage(events: StageEvents): Stage | null;
+  /** The picker's previews, on the stage's renderer where there is one, else on a short-lived one. */
+  drawPreviews?(targets: readonly PreviewTarget[], px: number, stage: Stage | null): Promise<boolean>;
+};
 
 /** The Dice panel, while it is mounted: which dice to warm up. */
 export type PanelHost = {
@@ -230,6 +239,14 @@ export class ThrowStore {
     const now = this.#inputs;
     // Turning the dice off, Low power on, reduced motion on or a preview ends a throw at once.
     if ((!now.on && before.on) || (now.lowPower && !before.lowPower) || (now.reducedMotion && !before.reducedMotion) || (now.preview && !before.preview)) this.#end();
+    // A new set's textures are drawn ahead of its first throw. The stage stays warm meanwhile: the old set's shaders already run.
+    const env = this.#env;
+    if (now.set !== before.set && this.#warm === "warm" && this.#stage && env) {
+      const stage = this.#stage;
+      env.idle(() => {
+        if (this.#stage === stage) stage.warm(this.#panel?.kinds() ?? ["d20", "d6"], now.set).then(undefined, () => undefined);
+      }, WARM_MAX_MS);
+    }
     this.#maybeWarm();
   }
 

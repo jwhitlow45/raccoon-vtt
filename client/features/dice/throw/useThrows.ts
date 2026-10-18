@@ -3,7 +3,7 @@ import { idle } from "../../../lib/idle.ts";
 import { scopeSlot, useScoped } from "../../../state/scope.ts";
 import { realClock } from "../../../state/timing.ts";
 import { usePreview } from "../../dm/previewContext.ts";
-import { lowPower, subscribeLowPower } from "../../device/settings.ts";
+import { diceSetId, lowPower, rollAnimation, subscribeDiceSet, subscribeLowPower, subscribeRollAnimation } from "../../device/settings.ts";
 import { useReceipts, type ReceiptTracker } from "../useReceipt.ts";
 import { diceLoader, throwHooksSlot, type ThrowHooks } from "./hooks.ts";
 import { ThrowStore, type ThrowView } from "./store.ts";
@@ -11,13 +11,11 @@ import { ThrowStore, type ThrowView } from "./store.ts";
 /**
  * The throw's store bound to the page (docs/design-v1-roll-animation.md 6):
  * the dice chunk's loader (throw/hooks.ts), the page's visibility, reduced
- * motion and Low power, and one store per Room, so a "view as a player"
- * preview keeps its own and never throws. Only the Dice panel's chunk
- * loads this module, and binding the store hands the room's rolling code
- * its hooks.
+ * motion, the device's settings, and one store per Room, so a "view as a
+ * player" preview keeps its own and never throws. Only the Dice panel's
+ * chunk and This device load this module, and binding the store hands the
+ * room's rolling code its hooks.
  */
-
-export { diceLoader };
 
 const REDUCED = "(prefers-reduced-motion: reduce)";
 
@@ -49,8 +47,10 @@ function bind(bound: Bound, tracker: ReceiptTracker, preview: boolean, hooks: { 
     hooks.current = null;
   });
   store.bind({ clock: realClock, idle, tracker, loader: diceLoader, hidden: pageHidden });
-  store.setInputs({ lowPower: lowPower(), reducedMotion: reducedMotion(), preview });
+  store.setInputs({ on: rollAnimation(), lowPower: lowPower(), reducedMotion: reducedMotion(), preview, set: diceSetId() });
   bound.stop.push(subscribeLowPower(() => store.setInputs({ lowPower: lowPower() })));
+  bound.stop.push(subscribeRollAnimation(() => store.setInputs({ on: rollAnimation() })));
+  bound.stop.push(subscribeDiceSet(() => store.setInputs({ set: diceSetId() })));
   if (typeof document !== "undefined") {
     const onVisibility = () => store.visibility(pageHidden());
     document.addEventListener("visibilitychange", onVisibility);
