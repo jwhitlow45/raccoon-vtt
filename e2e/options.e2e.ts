@@ -1421,7 +1421,9 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await tools(dm).getByRole("button", { name: "Area" }).tap();
     const pill = dm.getByRole("button", { name: "Area options hidden. Tap to show." });
     assert.ok(await wholeInReach(pill), "the pill is in reach");
-    await pill.tap();
+    // The whole pill takes the tap, so a thumb just under its words still lands (LP7-CHROME-3).
+    const pillBox = (await dm.locator('[data-options-line="shown"]').boundingBox())!;
+    await dm.touchscreen.tap(pillBox.x + pillBox.width / 2, pillBox.y + pillBox.height - 3);
     await options(dm).getByRole("button", { name: "Place", exact: true }).waitFor();
     await key(dm, "v");
   });

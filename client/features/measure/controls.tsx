@@ -718,14 +718,14 @@ function OptionsLine(props: { line: StripLine | null; tool: string; frame: Optio
     boxSizing: "border-box",
     maxWidth: floating ? floating.maxWidth : "100%",
     width: "fit-content",
-    padding: `${theme.space(1.5)}px ${theme.space(2.5)}px`,
+    padding: `${LINE_PAD.y}px ${LINE_PAD.x}px`,
     borderRadius: theme.radius.sm,
     background: theme.color.overlay,
     border: `${theme.line.border}px solid ${theme.color.border}`,
     fontSize: tone === "reading" && !pill ? theme.font.body14 : theme.font.small,
     lineHeight: theme.leading.body,
     // A hint's 13 px stands as tall as a reading's 14 px. The line's height is the map's reserve (pages/Room.tsx useOptionsBox), so a hint turning into a reading as a drag starts would otherwise refit the map under the pointer.
-    minHeight: theme.font.body14 * theme.leading.body + 2 * theme.space(1.5) + 2 * theme.line.border,
+    minHeight: LINE_MIN + 2 * theme.line.border,
     color: pill ? theme.color.text : LINE_COLORS[tone],
     pointerEvents: "auto",
     ...(floating ? { position: "absolute", left: floating.left, bottom: `calc(100% + ${theme.layout.options.lineGap + (floating.lift ?? 0)}px)` } : null),
@@ -771,12 +771,23 @@ const LINE_COLORS: Record<LineTone, string> = {
   status: theme.color.success,
 };
 
-/** The line as a button: the pill's own words, with no look of its own. */
+/** The pill's padding, and its least height inside its border: a 14 px reading's line and that padding. */
+const LINE_PAD = { x: theme.space(2.5), y: theme.space(1.5) };
+const LINE_MIN = theme.font.body14 * theme.leading.body + 2 * LINE_PAD.y;
+
+/**
+ * The line as a button, with no look of its own. It reaches over the
+ * pill's padding to its border, so a tap anywhere on the pill takes,
+ * not only one on its words. The negative margins keep the pill's width
+ * and height what its words alone give it.
+ */
 const LINE_BUTTON: CSSProperties = {
   display: "block",
-  width: "100%",
-  padding: 0,
-  margin: 0,
+  boxSizing: "border-box",
+  width: `calc(100% + ${2 * LINE_PAD.x}px)`,
+  minHeight: LINE_MIN,
+  padding: `${LINE_PAD.y}px ${LINE_PAD.x}px`,
+  margin: `${-LINE_PAD.y}px ${-LINE_PAD.x}px`,
   border: "none",
   background: "transparent",
   color: "inherit",
