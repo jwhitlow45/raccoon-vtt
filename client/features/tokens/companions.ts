@@ -68,9 +68,10 @@ export function lateCompanionText(name: string, answer: OpAnswer, refusal?: Pick
  * fills each field the user has left alone: the name while it is empty,
  * the size, HP with the block's average, AC, and the picture with a stored
  * block's picture, or an SRD monster's shipped icon, when none is chosen.
- * A picture an earlier block filled is not chosen, so the block picked
- * now replaces it with its own, or with none when it has none: a wolf's
- * icon never stays on an owl. What it filled stays when it is removed.
+ * A name or picture an earlier block filled is not chosen, so the block
+ * picked now replaces it with its own, or the picture with none when it
+ * has none: a wolf's name and icon never stay on an owl. What it filled
+ * stays when it is removed.
  */
 export function withBlock(draft: CompanionDraft, chosen: ChosenBlock | null): CompanionDraft {
   if (!chosen) return { ...draft, block: null };
@@ -81,7 +82,7 @@ export function withBlock(draft: CompanionDraft, chosen: ChosenBlock | null): Co
     next[field] = value;
     filled.add(field);
   };
-  if (draft.name.trim() === "") fill("name", chosen.view.name);
+  if (draft.name.trim() === "" || (left("name") && draft.filled.includes("name"))) fill("name", chosen.view.name);
   if (left("size")) fill("size", chosen.view.size);
   if (left("hp") && chosen.view.hp.average >= 1) fill("hp", chosen.view.hp.average);
   if (left("ac")) fill("ac", chosen.view.ac);

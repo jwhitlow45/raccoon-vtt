@@ -413,13 +413,35 @@ describe("the companion picker's lists (docs/design-v1-companion-stat-blocks.md 
     assert.deepEqual(wolf.image, { icon: "lorc/wolf-head", color: "#ad7f58" });
     const owl = withBlock(wolf, pick("owl"));
     assert.deepEqual([owl.size, owl.ac, owl.image], ["tiny", 11, { icon: "caro-asercion/barn-owl", color: "#ad7f58" }]);
-    // The name fills only while it is empty (design 5.6), so it stays the wolf's.
-    assert.equal(owl.name, "Wolf");
+    // The name the wolf's block filled goes with it, as its picture does (design 5.6).
+    assert.equal(owl.name, "Owl");
     const mine = { icon: "lorc/fox-head", color: "#336699" };
     assert.deepEqual(withBlock(draftWith(wolf, { image: mine }), pick("owl")).image, mine);
     // A stored block with no picture leaves none, rather than the wolf's.
     const plain = companionBlock("plain", "bree");
     assert.equal(withBlock(wolf, { link: { blockId: "plain" }, view: monsterView(plain), source: "block" }).image, null);
+  });
+
+  test("an Owl changed to a Wolf takes the wolf's name and icon, and a name the user typed or changed stays", () => {
+    const lists = pickerLists({ name: "", query: "", blocks: [], characterName: "Bree", srd: SRD });
+    const pick = (srdId: string): ChosenBlock => {
+      const row = lists.srd.find((r) => "srdId" in r.link && r.link.srdId === srdId)!;
+      return { link: row.link, view: row.view, source: "srd", picture: row.picture! };
+    };
+    const owl = withBlock(NEW_COMPANION, pick("owl"));
+    assert.equal(owl.name, "Owl");
+    const wolf = withBlock(owl, pick("wolf"));
+    assert.deepEqual([wolf.name, wolf.size, wolf.image], ["Wolf", "medium", { icon: "lorc/wolf-head", color: "#ad7f58" }]);
+    // Removed, the block leaves what it filled, and a block picked after still replaces it.
+    const removed = withBlock(wolf, null);
+    assert.equal(removed.name, "Wolf");
+    assert.equal(withBlock(removed, pick("owl")).name, "Owl");
+    // A name the user changed after the pick is theirs.
+    assert.equal(withBlock(draftWith(owl, { name: "Hoot" }), pick("wolf")).name, "Hoot");
+    // So is one typed before any pick, which the block never filled.
+    assert.equal(withBlock(withBlock(draftWith(NEW_COMPANION, { name: "Hoot" }), pick("owl")), pick("wolf")).name, "Hoot");
+    // A name cleared after a pick fills again, as an empty name always does.
+    assert.equal(withBlock(draftWith(owl, { name: "" }), pick("wolf")).name, "Wolf");
   });
 
   test("before the SRD loads, the character's blocks list at once", () => {

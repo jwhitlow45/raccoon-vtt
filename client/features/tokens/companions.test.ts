@@ -175,9 +175,9 @@ describe("adding a companion from a stat block (docs/design-v1-companion-stat-bl
     const typed = draftWith(draftWith(draftWith(NEW_COMPANION, { name: "Hoot" }), { hp: 4 }), { image: imageRef("mine") });
     const kept = withBlock(typed, mothChosen);
     assert.deepEqual([kept.name, kept.hp, kept.image, kept.size, kept.ac], ["Hoot", 4, imageRef("mine"), "small", 12]);
-    // A second pick refills what the first filled, and Remove keeps it all.
+    // A second pick refills what the first filled, the name included, and Remove keeps it all.
     const changed = withBlock(filled, mothChosen);
-    assert.deepEqual([changed.name, changed.size, changed.hp, changed.ac], ["Owl", "small", 9, 12], "the name is no longer empty");
+    assert.deepEqual([changed.name, changed.size, changed.hp, changed.ac], ["Moth Spirit", "small", 9, 12], "the first block's name stayed");
     const removed = withBlock(changed, null);
     assert.equal(removed.block, null);
     assert.deepEqual([removed.size, removed.hp, removed.ac], ["small", 9, 12]);
