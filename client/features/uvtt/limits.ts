@@ -1,3 +1,5 @@
+import { isCoarsePointer } from "../../lib/device.ts";
+
 /**
  * The bounds of a Universal VTT import (docs/design-v1-maps-vision.md
  * section 3.1). The file comes from the DM's own disk and is untrusted, so
@@ -58,6 +60,13 @@ export type Device = "computer" | "phone" | "iPad";
 export function deviceFrom(input: { coarsePointer: boolean; shortSidePx: number; ios: boolean }): Device {
   if (input.coarsePointer && input.shortSidePx < 900) return "phone";
   return input.ios ? "iPad" : "computer";
+}
+
+/** This browser's device, read from its screen, pointer and platform. The import and the grid search on a picked map both go by it. */
+export function thisDevice(): Device {
+  const short = typeof screen === "undefined" ? 1024 : Math.min(screen.width, screen.height);
+  const ios = typeof navigator !== "undefined" && isIos({ userAgent: navigator.userAgent, platform: navigator.platform, maxTouchPoints: navigator.maxTouchPoints });
+  return deviceFrom({ coarsePointer: isCoarsePointer(), shortSidePx: short, ios });
 }
 
 /**

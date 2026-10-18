@@ -1,4 +1,6 @@
 import type { Scene } from "#shared/model.ts";
+import { sniffImage } from "../uvtt/image.ts";
+import type { Device } from "../uvtt/limits.ts";
 import type { GridDetection } from "./detect.ts";
 import { calibrationFromFind, type Calibration, type Point } from "./calibrate.ts";
 
@@ -183,4 +185,84 @@ export function within<T>(search: { result: Promise<T | null>; cancel(): void },
       resolve(answer);
     });
   });
+}
+
+/** Enough of a file for its size: a JPEG's can follow a large EXIF block. */
+export const HEADER_BYTES = 1 << 20;
+
+/**
+ * Where an import looks for a picked map's grid: in the picked file, or in
+ * the server's phone-sized copy once the upload answers, as Find the grid
+ * looks. A computer decodes the file from the pick, so the answer is often
+ * in by the time the upload is. A phone or an iPad decodes it only when its
+ * header gives both sides at most DECODE_MAX_SIDE. WebKit decodes the whole
+ * picture before it resizes it, and a large map's full decode in the middle
+ * of its upload could cost the tab its memory. So a larger file, or one
+ * whose header gives no size, is searched on the copy.
+ */
+export function importSearchFrom(input: { device: Device; size: { width: number; height: number } | null }): "file" | "copy" {
+  if (input.device === "computer") return "file";
+  const { size } = input;
+  return size && size.width <= DECODE_MAX_SIDE && size.height <= DECODE_MAX_SIDE ? "file" : "copy";
+}
+
+/** The size a file's header gives, or null when it gives none or cannot be read. Only its first bytes are read. */
+export async function headerSize(file: Blob): Promise<{ width: number; height: number } | null> {
+  try {
+    return sniffImage(new Uint8Array(await file.slice(0, HEADER_BYTES).arrayBuffer()));
+  } catch {
+    return null;
+  }
+}
+
+export type ImportSearch = {
+  /** The answer, once the upload has answered with the map's addresses, within `ms` of the call or null. A search of the copy starts here. */
+  afterUpload(urls: string[], ms: number): Promise<SearchDone | null>;
+  /** Ends it, on either path, with any Worker it started. A later `afterUpload` answers null. */
+  cancel(): void;
+};
+
+/**
+ * An import's search for a picked file, on the path `importSearchFrom`
+ * picks. A computer's starts on the file at once, as it always did.
+ * Elsewhere the header is read first, then the file is searched or the
+ * copy waits for the upload. The wait after the upload holds either way.
+ */
+export function importSearch(
+  file: Blob,
+  device: Device,
+  deps: { makeWorker?: () => SearchWorker; timers?: Timers; size?: (file: Blob) => Promise<{ width: number; height: number } | null> } = {},
+): ImportSearch {
+  let cancelled = false;
+  let search: GridSearch | null = null;
+  const start = (request: SearchRequest) => (search = searchGrid(request, deps.makeWorker));
+  if (device === "computer") start({ file });
+  const path: Promise<"file" | "copy"> =
+    device === "computer"
+      ? Promise.resolve("file")
+      : (deps.size ?? headerSize)(file).then((size) => {
+          const from = importSearchFrom({ device, size });
+          if (from === "file" && !cancelled) start({ file });
+          return from;
+        });
+  // A cancel answers a wait at once, even one still waiting on the header.
+  let stop!: () => void;
+  const stopped = new Promise<null>((resolve) => (stop = () => resolve(null)));
+  const cancel = () => {
+    cancelled = true;
+    search?.cancel();
+    stop();
+  };
+  return {
+    afterUpload(urls, ms) {
+      if (cancelled) return Promise.resolve(null);
+      const found = path.then((from): Promise<SearchDone | null> | null => {
+        if (cancelled) return null;
+        if (from === "copy" && !search) start({ urls });
+        return search?.result ?? null;
+      });
+      return within({ result: Promise.race([stopped, found]), cancel }, ms, deps.timers);
+    },
+    cancel,
+  };
 }

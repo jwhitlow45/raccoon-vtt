@@ -13,15 +13,16 @@ import { Switch } from "../../components/Switch.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { calibrationFromCounts, fitBounds, imageSquares, sameCalibration } from "../grid/calibrate.ts";
-import { importFound, IMPORT_WAIT_MS, nameGivesSize, searchGrid, searchOnImport, within, type SearchDone } from "../grid/findGrid.ts";
+import { importFound, importSearch, IMPORT_WAIT_MS, nameGivesSize, searchOnImport, type SearchDone } from "../grid/findGrid.ts";
 import { showOutcome } from "../grid/outcome.ts";
 import { useGridStore } from "../grid/store.ts";
 import { useFindGrid } from "../grid/useFindGrid.ts";
 import { MapExport } from "../mapexport/MapExport.tsx";
 import { BlockMovementSetting } from "../movement/SceneSetting.tsx";
 import { PhasesSection } from "../phases/PhasesSection.tsx";
+import { thisDevice } from "../uvtt/limits.ts";
 import { VisionSettings } from "../vision/VisionSettings.tsx";
 import { ColorInput, ConfirmButton, NumberInput, Select, Slider } from "./controls.tsx";
 import { fogsWithFirstMap, replaceMap, sameArt, viewFromCamera } from "./create.ts";
@@ -366,6 +367,7 @@ function MapImageRow(props: { scene: Scene; close(): void }) {
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
   const gridStore = useGridStore();
+  const assets = useAssets();
   const phaseCount = scene.phases?.length ?? 0;
 
   const choose = async (file: File) => {
@@ -375,15 +377,16 @@ function MapImageRow(props: { scene: Scene; close(): void }) {
     // A new image is searched for a drawn grid while it uploads, as a new
     // map scene's is (NewScene.tsx). Only the upload tells whether it is
     // the old art at another size, which keeps the scene's grid, scaled.
-    let search = searchOnImport({ source: "image", named: nameGivesSize(file.name) }) ? searchGrid({ file }) : null;
+    const device = thisDevice();
+    let search = searchOnImport({ source: "image", named: nameGivesSize(file.name) }) ? importSearch(file, device) : null;
     abort.signal.addEventListener("abort", () => search?.cancel());
     try {
       const asset = await uploadMap(roomId, file, { signal: abort.signal, onWaiting: (waiting) => setUpload((u) => ({ ...u, waiting })) });
       let answer: SearchDone | null = null;
       if ((!map || !sameArt(map, asset)) && asset.cellPx === undefined) {
-        search ??= searchGrid({ file });
+        search ??= importSearch(file, device);
         setUpload({ busy: true, waiting: false, finding: true, error: null });
-        answer = await within(search, IMPORT_WAIT_MS);
+        answer = await search.afterUpload([assets.url(asset.id, "mobile"), assets.url(asset.id, "full")], IMPORT_WAIT_MS);
       } else search?.cancel();
       if (abort.signal.aborted) return;
       setUpload({ busy: false, waiting: false, error: null });

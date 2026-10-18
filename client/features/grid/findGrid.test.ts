@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import sharp from "sharp";
 import { jpegOrientation, sniffImage } from "../uvtt/image.ts";
 import { detectGrid, type AxisFit, type GridDetection } from "./detect.ts";
-import { cameWithGrid, decodeSize, findFound, foundGrid, importFound, nameGivesSize, searchGrid, searchOnImport, within, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
+import { cameWithGrid, decodeSize, headerSize, importSearch, importSearchFrom, findFound, foundGrid, importFound, nameGivesSize, searchGrid, searchOnImport, within, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
 import { rng } from "./synthetic.ts";
 
 const AXIS = { found: 20, expected: 20, from: 0, to: 0, snr: 50, between: 0, parity: 1, rms: 0.1, continuity: 1, restart: 0, coverage: 1, drift: 0 } as const;
@@ -247,6 +247,175 @@ describe("a search's Worker, cancel and deadline", () => {
       assert.deepEqual(deadlineResults, [expected], label);
       assert.equal(worker.terminated, 1, label);
       assert.equal(timers.pending(), 0, label);
+    }
+  });
+});
+
+/** A header read the test lets finish when it chooses. */
+function heldSize() {
+  let answer!: (size: { width: number; height: number } | null) => void;
+  const read = new Promise<{ width: number; height: number } | null>((resolve) => (answer = resolve));
+  return { size: () => read, answer };
+}
+
+describe("where an import searches a picked map", () => {
+  test("a computer searches the file, a phone or an iPad only a file no larger than the decode, else the server's copy", () => {
+    const big = { width: 8000, height: 3000 };
+    const small = { width: 4096, height: 2000 };
+    assert.equal(importSearchFrom({ device: "computer", size: big }), "file");
+    assert.equal(importSearchFrom({ device: "computer", size: null }), "file");
+    for (const device of ["phone", "iPad"] as const) {
+      assert.equal(importSearchFrom({ device, size: small }), "file", device);
+      assert.equal(importSearchFrom({ device, size: big }), "copy", device);
+      assert.equal(importSearchFrom({ device, size: { width: 3000, height: 4097 } }), "copy", `${device}: either side`);
+      assert.equal(importSearchFrom({ device, size: null }), "copy", `${device}: a header that gives no size`);
+    }
+  });
+
+  test("the size comes from the file's first bytes, and a file that is no image gives none", async () => {
+    const turned = await turnedJpeg();
+    assert.deepEqual(await headerSize(new Blob([new Uint8Array(turned)])), { type: "image/jpeg", width: 4800, height: 2400 });
+    assert.equal(await headerSize(new Blob(["not an image"])), null);
+  });
+
+  test("a computer starts on the file at the pick, as before", async () => {
+    const worker = new FakeWorker();
+    const file = new Blob(["x"]);
+    const search = importSearch(file, "computer", { makeWorker: () => worker, size: () => assert.fail("a computer reads no header") });
+    assert.deepEqual(worker.posted, [{ file }]);
+    const answer = done(detection(50, { x: 0, y: 0 }, 0.9), 10, 10);
+    worker.answer(answer);
+    assert.equal(await search.afterUpload(["/m"], 2000), answer);
+  });
+
+  test("a phone with a small file searches the file once its header is read", async () => {
+    const workers: FakeWorker[] = [];
+    const file = new Blob(["x"]);
+    const header = heldSize();
+    const search = importSearch(file, "phone", { makeWorker: () => (workers.push(new FakeWorker()), workers.at(-1)!), size: header.size });
+    assert.equal(workers.length, 0, "nothing decodes before the header says how big it is");
+    header.answer({ width: 3000, height: 2000 });
+    await settled();
+    assert.deepEqual(workers[0]?.posted, [{ file }]);
+    const answer = done(detection(50, { x: 0, y: 0 }, 0.9), 10, 10);
+    workers[0]!.answer(answer);
+    assert.equal(await search.afterUpload(["/m/mobile", "/m/full"], 2000), answer);
+    assert.equal(workers.length, 1);
+  });
+
+  test("a phone with a large file, or one of no known size, never decodes it, and searches the copy once the upload answers", async () => {
+    for (const size of [{ width: 8000, height: 6000 }, null]) {
+      const workers: FakeWorker[] = [];
+      const timers = fakeTimers();
+      const search = importSearch(new Blob(["x"]), "phone", { makeWorker: () => (workers.push(new FakeWorker()), workers.at(-1)!), timers, size: async () => size });
+      await settled();
+      assert.equal(workers.length, 0, "no Worker while it uploads");
+      const result = search.afterUpload(["/m/mobile", "/m/full"], 2000);
+      await settled();
+      assert.deepEqual(workers[0]?.posted, [{ urls: ["/m/mobile", "/m/full"] }], "the copy, phone-sized first");
+      const answer = done(detection(50, { x: 0, y: 0 }, 0.9), 10, 10);
+      workers[0]!.answer(answer);
+      assert.equal(await result, answer);
+      assert.equal(timers.pending(), 0);
+    }
+  });
+
+  test("the scene waits 2 s after the upload for the copy's answer, then goes on without one", async () => {
+    const workers: FakeWorker[] = [];
+    const timers = fakeTimers();
+    const search = importSearch(new Blob(["x"]), "iPad", { makeWorker: () => (workers.push(new FakeWorker()), workers.at(-1)!), timers, size: async () => null });
+    const result = search.afterUpload(["/m"], 2000);
+    await settled();
+    timers.fire();
+    assert.equal(await result, null);
+    assert.equal(workers[0]?.terminated, 1, "the search ends with the wait");
+    workers[0]!.answer(done(detection(50, { x: 0, y: 0 }, 0.9), 10, 10));
+    assert.equal(timers.pending(), 0);
+  });
+
+  test("a cancel before the header is read starts nothing, ever", async () => {
+    let made = 0;
+    const header = heldSize();
+    const search = importSearch(new Blob(["x"]), "phone", { makeWorker: () => (made++, new FakeWorker()), size: header.size });
+    search.cancel();
+    header.answer({ width: 100, height: 100 });
+    await settled();
+    assert.equal(await search.afterUpload(["/m"], 2000), null);
+    assert.equal(made, 0);
+  });
+
+  /**
+   * Random runs of an import's search on every device and file size: the
+   * header read finishing, the upload answering, the Worker answering or
+   * failing, the page cancelling, the wait's deadline, in any order.
+   * Invariants, every run:
+   * - A phone or an iPad never decodes a file over the decode's size or of
+   *   no known size: no Worker is ever given it.
+   * - An import makes one Worker at most, and none after a cancel.
+   * - The answer is the Worker's only when it came before any cancel,
+   *   failure or deadline, and after the upload answered on the copy's
+   *   path. Otherwise it is null. It settles once.
+   * - A Worker that was made is ended exactly once by the run's end, and
+   *   no deadline timer is left.
+   */
+  test("random header reads, uploads, answers, failures, cancels and deadlines keep every invariant", async () => {
+    const next = rng(20261020);
+    const devices = ["computer", "phone", "iPad"] as const;
+    const sizes = [{ width: 3000, height: 2000 }, { width: 8000, height: 3000 }, null];
+    const kinds = ["header", "upload", "answer", "error", "cancel", "deadline"] as const;
+    for (let run = 0; run < 500; run++) {
+      const device = devices[Math.floor(next() * devices.length)]!;
+      const size = sizes[Math.floor(next() * sizes.length)]!;
+      const fromFile = importSearchFrom({ device, size }) === "file";
+      const workers: FakeWorker[] = [];
+      const timers = fakeTimers();
+      const header = heldSize();
+      const search = importSearch(new Blob(["x"]), device, { makeWorker: () => (workers.push(new FakeWorker()), workers.at(-1)!), timers, size: header.size });
+      const results: unknown[] = [];
+      const answer = done(detection(40 + run, { x: 1, y: 2 }, 0.9), 100, 100);
+      // The model: what has happened, and what the import's answer must be.
+      const m = { read: device === "computer", uploaded: false, ended: false, worker: device === "computer", settled: undefined as SearchDone | null | undefined, expected: undefined as SearchDone | null | undefined };
+      const decide = () => {
+        if (m.uploaded && m.expected === undefined && m.ended) m.expected = null;
+        else if (m.uploaded && m.expected === undefined && m.read && m.settled !== undefined) m.expected = m.settled;
+      };
+      const events: string[] = [];
+      for (let step = 0, steps = 1 + Math.floor(next() * 8); step < steps; step++) {
+        const kind = kinds[Math.floor(next() * kinds.length)]!;
+        events.push(kind);
+        if (kind === "header") {
+          header.answer(size);
+          if (!m.read && !m.ended) m.worker ||= fromFile || m.uploaded;
+          m.read = true;
+        } else if (kind === "upload") {
+          if (!m.uploaded) void search.afterUpload(["/m"], 2000).then((r) => results.push(r));
+          if (!m.uploaded && m.read && !m.ended && !fromFile) m.worker = true;
+          m.uploaded = true;
+        } else if (kind === "answer" || kind === "error") {
+          if (kind === "answer") workers.at(-1)?.answer(answer);
+          else workers.at(-1)?.fail();
+          if (m.worker && m.settled === undefined && !m.ended) m.settled = kind === "answer" ? answer : null;
+        } else if (kind === "cancel") {
+          search.cancel();
+          m.ended = true;
+        } else if (timers.pending() > 0) {
+          timers.fire();
+          m.ended = true;
+        }
+        decide();
+        await settled();
+        const label = `run ${run} (${device}, ${size ? `${size.width} x ${size.height}` : "no size"}): ${events.join(", ")}`;
+        assert.equal(workers.length, m.worker ? 1 : 0, `${label}: the Workers made`);
+        for (const w of workers) for (const posted of w.posted) assert.equal("file" in posted, fromFile, `${label}: what the Worker was given`);
+        assert.deepEqual(results, m.expected === undefined ? [] : [m.expected], `${label}: the answer`);
+      }
+      // The page ends whatever is left, as an unmount or a new pick does.
+      search.cancel();
+      header.answer(size);
+      await settled();
+      const label = `run ${run}: ${events.join(", ")}`;
+      assert.equal(timers.pending(), 0, `${label}: no timer left`);
+      for (const w of workers) assert.equal(w.terminated, 1, `${label}: the Worker ended once`);
     }
   });
 });

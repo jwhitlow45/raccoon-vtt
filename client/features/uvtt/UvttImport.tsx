@@ -2,10 +2,9 @@ import { useState } from "react";
 import { LIMITS } from "#shared/limits.ts";
 import type { Scene } from "#shared/model.ts";
 import { Help, Note } from "../../components/Panel.tsx";
-import { isCoarsePointer } from "../../lib/device.ts";
 import { theme } from "../../lib/theme.ts";
 import { FilePicker, ImportDialog, type ImportTarget } from "./ImportDialog.tsx";
-import { deviceFrom, fileSizeProblem, isIos, type Device } from "./limits.ts";
+import { fileSizeProblem, thisDevice, type Device } from "./limits.ts";
 import { entryShown } from "./rules.ts";
 
 /**
@@ -14,12 +13,6 @@ import { entryShown } from "./rules.ts";
  * image alone. The button opens the file picker at once, and the dialog
  * takes over from the picked file.
  */
-
-function thisDevice(): Device {
-  const short = typeof screen === "undefined" ? 1024 : Math.min(screen.width, screen.height);
-  const ios = typeof navigator !== "undefined" && isIos({ userAgent: navigator.userAgent, platform: navigator.platform, maxTouchPoints: navigator.maxTouchPoints });
-  return deviceFrom({ coarsePointer: isCoarsePointer(), shortSidePx: short, ios });
-}
 
 function Entry(props: { label: string; hint: string; target: ImportTarget; full?: boolean }) {
   const [picked, setPicked] = useState<{ file: File; device: Device } | null>(null);

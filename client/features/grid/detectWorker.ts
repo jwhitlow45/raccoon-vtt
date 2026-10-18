@@ -1,6 +1,6 @@
 import { jpegOrientation, sniffImage } from "../uvtt/image.ts";
 import { detectGrid, type Pixels } from "./detect.ts";
-import { DECODE_MAX_SIDE, decodeSize, type SearchAnswer, type SearchRequest } from "./findGrid.ts";
+import { DECODE_MAX_SIDE, decodeSize, HEADER_BYTES, type SearchAnswer, type SearchRequest } from "./findGrid.ts";
 
 /**
  * The grid finder's Worker (docs/design-v1-grid-detect.md section 6). It
@@ -15,9 +15,6 @@ const scope = self as unknown as {
   postMessage(message: SearchAnswer): void;
   addEventListener(type: "message", listener: (e: MessageEvent<SearchRequest>) => void): void;
 };
-
-/** Enough of the file for a JPEG's size, which can follow a large EXIF block. */
-const HEADER_BYTES = 1 << 20;
 
 async function pixelsOf(blob: Blob): Promise<Pixels> {
   if (typeof OffscreenCanvas === "undefined" || typeof createImageBitmap !== "function") throw new Error("no canvas");

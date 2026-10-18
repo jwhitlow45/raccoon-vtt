@@ -8,9 +8,10 @@ import { api, type AssetRow } from "../../lib/api.ts";
 import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
-import { importFound, IMPORT_WAIT_MS, nameGivesSize, searchGrid, searchOnImport, within, type GridSearch, type SearchDone } from "../grid/findGrid.ts";
+import { importFound, importSearch, IMPORT_WAIT_MS, nameGivesSize, searchOnImport, type ImportSearch, type SearchDone } from "../grid/findGrid.ts";
 import { showOutcome } from "../grid/outcome.ts";
 import { useGridStore } from "../grid/store.ts";
+import { thisDevice } from "../uvtt/limits.ts";
 import { ColorInput, NumberInput } from "./controls.tsx";
 import { builderScene, MAT_BACKGROUND, mapScene, matScene, nameFromFile, type MapAsset } from "./create.ts";
 import { uploadErrorText, uploadMap } from "./upload.ts";
@@ -28,7 +29,9 @@ const MAX_SCENES = 50;
  *
  * A map whose name gives no size is searched for a drawn grid while it
  * uploads (docs/design-v1-grid-detect.md section 6), in a Worker started
- * when the file is picked. A grid found with high confidence goes on the
+ * when the file is picked, or on a phone or an iPad, for a large file, on
+ * the server's phone-sized copy once the upload answers (findGrid.ts
+ * `importSearchFrom`). A grid found with high confidence goes on the
  * scene as one undo step after it is made, and Line up grid opens on it.
  *
  * The kind is a choice of native radios, and a tap on the chosen radio does
@@ -48,8 +51,9 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
   const [status, setStatus] = useState<{ busy: boolean; waiting: boolean; finding?: boolean; error: string | null }>({ busy: false, waiting: false, error: null });
   const abortRef = useRef<AbortController | null>(null);
   /** The search for the picked file's grid, running while the DM fills in the form and the file uploads. */
-  const searchRef = useRef<{ file: File; search: GridSearch } | null>(null);
+  const searchRef = useRef<{ file: File; search: ImportSearch } | null>(null);
   const gridStore = useGridStore();
+  const assets = useAssets();
   const stopSearch = () => {
     searchRef.current?.search.cancel();
     searchRef.current = null;
@@ -135,7 +139,7 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
     setFile(next);
     setStatus({ busy: false, waiting: false, error: null });
     stopSearch();
-    if (next && searchOnImport({ source: "image", named: nameGivesSize(next.name) })) searchRef.current = { file: next, search: searchGrid({ file: next }) };
+    if (next && searchOnImport({ source: "image", named: nameGivesSize(next.name) })) searchRef.current = { file: next, search: importSearch(next, thisDevice()) };
   };
 
   const upload = async () => {
@@ -154,9 +158,9 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
       let answer: SearchDone | null = null;
       if (asset.cellPx !== undefined) stopSearch();
       else {
-        if (searchRef.current?.file !== file) searchRef.current = { file, search: searchGrid({ file }) };
+        if (searchRef.current?.file !== file) searchRef.current = { file, search: importSearch(file, thisDevice()) };
         setStatus({ busy: true, waiting: false, finding: true, error: null });
-        answer = await within(searchRef.current.search, IMPORT_WAIT_MS);
+        answer = await searchRef.current.search.afterUpload([assets.url(asset.id, "mobile"), assets.url(asset.id, "full")], IMPORT_WAIT_MS);
         if (abort.signal.aborted) return;
         searchRef.current = null;
       }
