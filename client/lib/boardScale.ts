@@ -71,6 +71,16 @@ export type BoardSizes = {
    * from these and draw at the rounded ones.
    */
   unrounded: { namePx: number; focusNamePx: number; gapPx: number };
+  /**
+   * The most a label's text size moves at one rounding step as the zoom
+   * changes: half a pixel, or more where the interface size's rounding
+   * falls on the zoom's (14.5 px to 15.5 px and on to 16.5 px at 130%).
+   * Zero well inside the zooms where the name and HP sizes are both held
+   * at a floor or ceiling, since zooming moves no text there. It reaches a
+   * tenth of the zoom past the first and last steps, so a shape chosen
+   * just before the steps begin is held through them (boardText.ts).
+   */
+  stepPx: number;
 };
 
 /**
@@ -92,6 +102,7 @@ export function boardSizes(cellPx: number, ui: number = interfaceScale): BoardSi
   const nameUnrounded = unroundedTextPx(12, cellPx, 16);
   const namePx = half(nameUnrounded);
   const hpPx = textPx(11, cellPx, 15);
+  const steps = (designPx: number, ceilingPx: number) => designPx * f > 0.9 * TEXT_FLOOR_PX && designPx * f < 1.1 * ceilingPx;
   const gapUnrounded = clamp(3 * f, 2, 4);
   // Every screen size but the ring scales: the ring is the token's own edge, which belongs to the map.
   const k = (px: number) => half(px * ui);
@@ -111,6 +122,7 @@ export function boardSizes(cellPx: number, ui: number = interfaceScale): BoardSi
     barPx: k(clamp(5 * f, 3, 8)),
     gapPx: k(gapUnrounded),
     unrounded: { namePx: nameUnrounded * ui, focusNamePx: Math.max(14, nameUnrounded) * ui, gapPx: gapUnrounded * ui },
+    stepPx: steps(12, 16) || steps(11, 15) ? Math.ceil(ui) / 2 : 0,
   };
 }
 

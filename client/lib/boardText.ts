@@ -22,10 +22,12 @@ import type { BoardSizes } from "./boardScale.ts";
  *   Bloodied or Dying keeps that word alone before its name alone, so the
  *   word a table reads in a fight outlasts the name, which the token's
  *   initials or number badge and a tap still give.
- * - A label keeps the side it had on the last layout while that side is
- *   still free, so a pinch does not make labels jump between frames. Its
- *   shape (where the name wraps, whether the HP shares its line) is decided
- *   at one fixed size (SHAPE_PX), so a pinch does not wrap it back and forth.
+ * - A label keeps the shape and side it had on the last layout while they
+ *   still fit, and takes another only when that one clearly fits, so a
+ *   pinch does not make labels jump between frames (KEEP_CLEARANCE_PX).
+ *   Its shape (where the name wraps, whether the HP shares its line) is
+ *   decided at one fixed size (SHAPE_PX), so a pinch does not wrap it back
+ *   and forth.
  */
 
 /** Width in screen pixels of `text` at font size `px`. */
@@ -47,6 +49,8 @@ export type LabelStyle = {
   /** Clearance kept between a label and anything it keeps off. */
   gapPx: number;
   room: Room;
+  /** The most the text size moves at one rounding step of a zoom (boardScale.ts). */
+  stepPx: number;
 };
 
 /**
@@ -91,7 +95,7 @@ const ems = (v: number) => Math.round(v * 1024) / 1024;
 
 /** A token's label style at a zoom, for a token `tokenPx` wide on screen. */
 export function labelStyle(
-  sizes: Pick<BoardSizes, "namePx" | "hpPx" | "gapPx"> & { unrounded: Pick<BoardSizes["unrounded"], "namePx" | "gapPx"> },
+  sizes: Pick<BoardSizes, "namePx" | "hpPx" | "gapPx" | "stepPx"> & { unrounded: Pick<BoardSizes["unrounded"], "namePx" | "gapPx"> },
   tokenPx: number,
   cellPx: number,
 ): LabelStyle {
@@ -103,6 +107,7 @@ export function labelStyle(
     maxWidth: 15 * sizes.namePx,
     padX: Math.ceil(sizes.namePx * HALO_EM),
     gapPx: sizes.gapPx,
+    stepPx: sizes.stepPx,
     room: {
       wrapEm: ems(Math.max((tokenPx + cellPx) / u.namePx, 10) - 2 * HALO_EM),
       maxEm: 15 - 2 * HALO_EM,
@@ -112,7 +117,7 @@ export function labelStyle(
 }
 
 /** The focus plate's style: the focus sizes, up to 16 ems a line, on a plate padded 6 px each side, the HP always on its own line. */
-export function focusStyle(sizes: Pick<BoardSizes, "focusNamePx" | "focusHpPx" | "gapPx" | "unrounded">): LabelStyle {
+export function focusStyle(sizes: Pick<BoardSizes, "focusNamePx" | "focusHpPx" | "gapPx" | "stepPx" | "unrounded">): LabelStyle {
   const padX = 6;
   const maxEm = ems(16 - (2 * padX) / sizes.unrounded.focusNamePx);
   return {
@@ -122,6 +127,7 @@ export function focusStyle(sizes: Pick<BoardSizes, "focusNamePx" | "focusHpPx" |
     maxWidth: 16 * sizes.focusNamePx,
     padX,
     gapPx: sizes.gapPx,
+    stepPx: sizes.stepPx,
     room: { wrapEm: maxEm, maxEm, ownEm: 0 },
   };
 }
@@ -160,6 +166,8 @@ export type PlacedLabel = {
   nameShown: boolean;
   hpShown: boolean;
   cut: boolean;
+  /** The text it was laid out from, so the next layout can tell a renamed token or new HP from a zoom. */
+  source: string;
 };
 
 const ELLIPSIS = "…";
@@ -297,7 +305,7 @@ export function cutName(name: string, number: number | undefined, width: number,
 export type Content = { lines: LabelLine[]; nameShown: boolean; hpShown: boolean; cut: boolean };
 
 /** A label's possible content: fixed lines, or the name cut to whatever room is free beside them. */
-export type Template = { kind: "lines"; content: Content } | { kind: "cut"; hp: LabelLine | null };
+export type Template = { kind: "lines"; content: Content } | { kind: "cut"; hp: LabelLine | null; widest: string | null };
 
 /**
  * What a label may show, richest first, in levels: each level is one
@@ -347,6 +355,8 @@ function makeTemplates(input: LabelInput, measure: Measure): Template[][] {
   }
   const hp = input.nameOnly ? null : input.hp;
   const hpLine: LabelLine | null = hp ? { text: hp, px: s.hpPx, kind: "hp" } : null;
+  // The longest cut the width rule allows, decided like a shape, so a font whose widths do not scale with its size cannot move it at each step.
+  const widest = cutName(input.name, input.number, Math.max(0, room.maxEm) * SHAPE_PX, SHAPE_PX, measure);
   const out: Template[][] = [];
   const shape = (lines: LabelLine[], nameShown: boolean, hpShown: boolean): Template => ({ kind: "lines", content: { lines, nameShown, hpShown, cut: false } });
 
@@ -360,12 +370,12 @@ function makeTemplates(input: LabelInput, measure: Measure): Template[][] {
     if (oneEm > room.ownEm && oneEm <= room.maxEm) whole.push(shape([name(one)], true, true));
     out.push(whole);
     if (input.alert) {
-      out.push([{ kind: "cut", hp: hpLine }]);
+      out.push([{ kind: "cut", hp: hpLine, widest }]);
       out.push([shape([hpLine], false, true)]);
     }
   }
   out.push(wholeForms.map((lines) => shape(lines.map(name), true, false)));
-  out.push([{ kind: "cut", hp: null }]);
+  out.push([{ kind: "cut", hp: null, widest }]);
   return out.filter((level) => level.length > 0);
 }
 
@@ -411,6 +421,24 @@ function grow(b: Box, by: number): Box {
 export type Obstacle = { box: Box; owner?: string; kind: "body" | "mark" | "pill" | "map" };
 
 /**
+ * How firmly a label holds the shape it showed on the last layout. Text
+ * grows with the zoom in rounding steps, about 4% at a time, while the
+ * room between tokens grows smoothly. So beside a neighbor, a shape that
+ * fit before a step could miss after it and fit again within the step, at
+ * every step of one smooth zoom. A shown shape is kept while it fits with
+ * KEEP_CLEARANCE_PX of clearance instead of the full gap, and another
+ * replaces it only when that one fits with room to spare for a step's jump
+ * as well (`clearly` in placeLabels). The band between the two is wider
+ * than a step, so a label changes only on a real change: the zoom moving
+ * on past the band, a token moving, a neighbor coming or going, or its own
+ * text changing, which lays it out afresh. A label never overlaps anything
+ * either way, and a hidden one shows again only where a shape clearly fits.
+ */
+const KEEP_CLEARANCE_PX = 0;
+/** The spare height a change asks for, in text steps: a step moves each line's rounded height and the marks above it. */
+const STEP_Y = 4;
+
+/**
  * Places every label, most important first: rank, then a Bloodied or Dying
  * creature, then the bigger creature, then the shorter name, then the id,
  * so the order never depends on how the tokens happen to be listed or on
@@ -421,15 +449,14 @@ export type Obstacle = { box: Box; owner?: string; kind: "body" | "mark" | "pill
  *
  * `obstacles` holds every visible token's body (tiny ones too, which have
  * no label of their own) and marks, and the other layers' pills. A label
- * keeps off all of them but its own body. `previous` is the side each label
- * had on the last layout, tried first, with a pixel of slack, so a label
- * holds its place across a pinch until something really takes it.
+ * keeps off all of them but its own body. `previous` is the last layout's
+ * result, whose shapes and sides hold as KEEP_CLEARANCE_PX says.
  */
 export function placeLabels(
   inputs: readonly LabelInput[],
   obstacles: readonly Obstacle[],
   measure: Measure,
-  previous?: ReadonlyMap<string, Side>,
+  previous?: ReadonlyMap<string, PlacedLabel>,
 ): Map<string, PlacedLabel> {
   const natural = new Map(inputs.map((input) => [input.id, measure(fullName(input.name, input.number), SHAPE_PX)]));
   const order = [...inputs].sort(
@@ -443,32 +470,71 @@ export function placeLabels(
   const placed: Box[] = [];
   const out = new Map<string, PlacedLabel>();
   for (const input of order) {
-    const gap = input.style.gapPx;
-    const free = (box: Box, slack: number) => {
-      const probe = grow(box, gap - slack);
+    const s = input.style;
+    const gap = s.gapPx;
+    const free = (box: Box, clearance: number) => {
+      const probe = grow(box, clearance);
       return !placed.some((p) => overlaps(probe, p)) && !obstacles.some((o) => !(o.kind === "body" && o.owner === input.id) && overlaps(probe, o.box));
     };
+    const fits: Fits = (box) => free(box, gap);
+    const still: Fits = (box) => free(box, KEEP_CLEARANCE_PX);
+    // Spare room for one step's jump of this text and the text beside it, since a step widens a text by stepPx for each em of its
+    // width, half on each side. None from the label's own token, whose marks it sits against by design.
+    const clearly: Fits = (box) => {
+      const probe = grow(box, gap);
+      const selfEm = (box.x1 - box.x0) / s.namePx;
+      const off = (other: Box, otherEm: number) => {
+        const x = ((selfEm + otherEm) * s.stepPx) / 2;
+        const y = STEP_Y * s.stepPx;
+        return overlaps({ x0: probe.x0 - x, y0: probe.y0 - y, x1: probe.x1 + x, y1: probe.y1 + y }, other);
+      };
+      return !placed.some((p) => off(p, (p.x1 - p.x0) / s.namePx)) && !obstacles.some((o) => (o.owner === input.id ? o.kind !== "body" && overlaps(probe, o.box) : off(o.box, 0)));
+    };
     const sides: Side[] = input.sides ? ["below", "above", "right", "left"] : ["below", "above"];
-    const before = previous?.get(input.id);
-    const tryOrder = before && sides.includes(before) ? [before, ...sides.filter((s) => s !== before)] : sides;
-    let result: PlacedLabel | null = null;
-    search: for (const level of templates(input, measure)) {
-      for (const side of tryOrder) {
-        const slack = side === before ? 1 : 0;
-        for (const template of level) {
-          const content = template.kind === "lines" ? template.content : cutToRoom(input, template.hp, side, (box) => free(box, slack), measure);
-          if (!content) continue;
-          const size = linesSize(content.lines, input.style, measure);
-          const box = boxAt(input, side, size.width, size.height);
-          if (free(box, slack)) {
-            result = { ...content, box, side };
-            break search;
+    const levels = templates(input, measure);
+    const source = [input.name, input.number, input.nameOnly ? null : input.hp, input.alert].join("\u0000");
+    const last = previous?.get(input.id);
+    const kept = last?.source === source ? last : undefined;
+    const keptSide = kept && kept.lines.length > 0 && sides.includes(kept.side) ? kept.side : undefined;
+    const tryOrder = keptSide ? [keptSide, ...sides.filter((side) => side !== keptSide)] : sides;
+    const at = (content: Content, side: Side): PlacedLabel => {
+      const size = linesSize(content.lines, s, measure);
+      return { ...content, box: boxAt(input, side, size.width, size.height), side, source };
+    };
+    /** The first shape that fits in the order shapes are preferred, or only those before `until`. */
+    const search = (test: Fits, until?: ShapeAt): PlacedLabel | null => {
+      for (const [l, level] of levels.entries()) {
+        for (const [i, side] of tryOrder.entries()) {
+          for (const [t, template] of level.entries()) {
+            // The kept side comes first, so everything preferred to the kept shape comes before it here.
+            if (until && l === until.level && i === 0 && t === until.template) return null;
+            const content = template.kind === "lines" ? template.content : cutToRoom(input, template, side, test, measure);
+            if (!content) continue;
+            const label = at(content, side);
+            if (test(label.box)) return label;
           }
         }
       }
+      return null;
+    };
+    let result: PlacedLabel | null;
+    if (!kept) result = search(fits);
+    else if (!keptSide) result = kept.lines.length === 0 ? search(clearly) : search(fits);
+    else {
+      const shape = keptShape(input, levels, kept);
+      if (!shape) result = search(fits);
+      else {
+        const longer = shape.cut ? cutToRoom(input, shape.cut, keptSide, clearly, measure) : null;
+        const same = at(shape.content, keptSide);
+        result =
+          search(clearly, shape) ??
+          (longer && [...longer.lines[0]!.text].length > [...shape.content.lines[0]!.text].length ? at(longer, keptSide) : null) ??
+          (still(same.box) ? same : null) ??
+          search(fits);
+      }
     }
     if (!result) {
-      out.set(input.id, { lines: [], box: { x0: 0, y0: 0, x1: 0, y1: 0 }, side: "below", nameShown: false, hpShown: false, cut: false });
+      out.set(input.id, { lines: [], box: { x0: 0, y0: 0, x1: 0, y1: 0 }, side: "below", nameShown: false, hpShown: false, cut: false, source });
       continue;
     }
     placed.push(result.box);
@@ -477,12 +543,54 @@ export function placeLabels(
   return out;
 }
 
+type Fits = (box: Box) => boolean;
+
+/** Where the kept shape sits among a label's templates, and its content at the current sizes. */
+type ShapeAt = { level: number; template: number; content: Content; cut: Extract<Template, { kind: "cut" }> | null };
+
 /**
- * The name cut to the widest room free on `side`, with `hp` under it if
- * given: the box grows until it would touch something. Null when not even
- * MIN_CUT_LETTERS letters fit.
+ * The last layout's shape among this layout's templates, or null when the
+ * label's text changed so that it is no longer one of them. A cut name
+ * matches the cut it came from while it is still a cut of the same name.
  */
-function cutToRoom(input: LabelInput, hp: LabelLine | null, side: Side, free: (box: Box) => boolean, measure: Measure): Content | null {
+function keptShape(input: LabelInput, levels: Template[][], kept: PlacedLabel): ShapeAt | null {
+  const sameLine = (a: LabelLine, b: LabelLine) => a.text === b.text && a.kind === b.kind;
+  for (const [level, templatesAt] of levels.entries()) {
+    for (const [template, t] of templatesAt.entries()) {
+      if (t.kind === "lines") {
+        const lines = t.content.lines;
+        if (!kept.cut && lines.length === kept.lines.length && lines.every((line, i) => sameLine(line, kept.lines[i]!))) return { level, template, content: t.content, cut: null };
+        continue;
+      }
+      const [name, hp, ...rest] = kept.lines;
+      if (!kept.cut || !name || name.kind !== "name" || rest.length > 0 || (hp?.text ?? null) !== (t.hp?.text ?? null) || !isCutOf(name.text, input)) continue;
+      if (!t.widest || [...name.text].length > [...t.widest].length) continue;
+      const lines: LabelLine[] = [{ text: name.text, px: input.style.namePx, kind: "name" }];
+      if (t.hp) lines.push(t.hp);
+      return { level, template, content: { lines, nameShown: true, hpShown: !!t.hp, cut: true }, cut: t };
+    }
+  }
+  return null;
+}
+
+/** Whether `text` is a cut of the label's name as cutName makes them. */
+function isCutOf(text: string, input: Pick<LabelInput, "name" | "number">): boolean {
+  const tail = `${ELLIPSIS}${input.number === undefined ? "" : ` ${input.number}`}`;
+  if (!text.endsWith(tail)) return false;
+  const head = text.slice(0, text.length - tail.length);
+  const name = input.name.trim();
+  return head.length < name.length && name.startsWith(head) && [...head].filter((c) => /\S/.test(c)).length >= MIN_CUT_LETTERS;
+}
+
+/**
+ * The name cut to the widest room free on `side`, with the template's HP
+ * under it if any: the box grows until it would touch something, and the
+ * cut keeps to the template's widest. Null when not even MIN_CUT_LETTERS
+ * letters fit.
+ */
+function cutToRoom(input: LabelInput, template: Extract<Template, { kind: "cut" }>, side: Side, free: (box: Box) => boolean, measure: Measure): Content | null {
+  const { hp, widest } = template;
+  if (!widest) return null;
   const s = input.style;
   const nameH = lineHeight(s.namePx, s.leading);
   const height = nameH + (hp ? lineHeight(hp.px, s.leading) : 0);
@@ -497,8 +605,9 @@ function cutToRoom(input: LabelInput, hp: LabelLine | null, side: Side, free: (b
     if (free(boxAt(input, side, mid, height))) lo = mid;
     else hi = mid;
   }
-  const text = cutName(input.name, input.number, lo - 2 * s.padX, s.namePx, measure);
-  if (!text) return null;
+  const roomy = cutName(input.name, input.number, lo - 2 * s.padX, s.namePx, measure);
+  if (!roomy) return null;
+  const text = [...roomy].length > [...widest].length ? widest : roomy;
   const lines: LabelLine[] = [{ text, px: s.namePx, kind: "name" }];
   if (hp) lines.push(hp);
   return { lines, nameShown: true, hpShown: !!hp, cut: true };

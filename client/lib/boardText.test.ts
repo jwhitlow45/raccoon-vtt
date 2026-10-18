@@ -27,7 +27,7 @@ const measure = (text: string, px: number) => [...text].length * px * 0.5;
 
 function style(cell: number): LabelStyle {
   const namePx = Math.max(11, Math.min(16, (12 * cell) / 40));
-  return labelStyle({ namePx, hpPx: Math.max(11, Math.min(15, (11 * cell) / 40)), gapPx: 3, unrounded: { namePx, gapPx: 3 } }, cell, cell);
+  return labelStyle({ namePx, hpPx: Math.max(11, Math.min(15, (11 * cell) / 40)), gapPx: 3, stepPx: 0.5, unrounded: { namePx, gapPx: 3 } }, cell, cell);
 }
 
 type Spec = { id: string; x: number; y: number; size?: number; name: string; number?: number; hp?: string | null; alert?: boolean; rank?: number; label?: boolean };
@@ -60,7 +60,7 @@ function board(cell: number, specs: Spec[]): { inputs: LabelInput[]; obstacles: 
   return { inputs, obstacles };
 }
 
-function place(cell: number, specs: Spec[], previous?: Map<string, "below" | "above" | "right" | "left">) {
+function place(cell: number, specs: Spec[], previous?: ReadonlyMap<string, PlacedLabel>) {
   const { inputs, obstacles } = board(cell, specs);
   return { placed: placeLabels(inputs, obstacles, measure, previous), obstacles };
 }
@@ -291,7 +291,7 @@ describe("label placement", () => {
   });
 
   test("a picture duplicate whose name gave way shows its number on the token", () => {
-    const named: PlacedLabel = { lines: [{ text: "Goblin… 3", px: 12, kind: "name" }], box: { x0: 0, y0: 0, x1: 1, y1: 1 }, side: "below", nameShown: true, hpShown: false, cut: true };
+    const named: PlacedLabel = { lines: [{ text: "Goblin… 3", px: 12, kind: "name" }], box: { x0: 0, y0: 0, x1: 1, y1: 1 }, side: "below", nameShown: true, hpShown: false, cut: true, source: "Goblin 3" };
     const dropped: PlacedLabel = { ...named, lines: [], nameShown: false };
     assert.equal(showsNumberBadge({ image: true, number: 3, widthPx: 34 }, dropped), true);
     assert.equal(showsNumberBadge({ image: true, number: 3, widthPx: 34 }, named), false);
@@ -302,9 +302,31 @@ describe("label placement", () => {
   test("a label holds its side across a zoom step while that side stays free", () => {
     const specs: Spec[] = [{ id: "orc", x: 0, y: 0, name: "Orc" }];
     assert.equal(place(40, specs).placed.get("orc")!.side, "below");
-    assert.equal(place(41, specs, new Map([["orc", "above"]])).placed.get("orc")!.side, "above");
+    // A body under the orc sends its label above, and the label stays there once the body has gone.
+    const above = place(40, [...specs, { id: "s", x: 0, y: 1, name: "x", label: false }]).placed;
+    assert.equal(above.get("orc")!.side, "above");
+    assert.equal(place(41, specs, above).placed.get("orc")!.side, "above");
     const blocked: Spec[] = [...specs, { id: "n", x: 0, y: -1, name: "x", label: false }];
-    assert.equal(place(41, blocked, new Map([["orc", "above"]])).placed.get("orc")!.side, "below");
+    assert.equal(place(41, blocked, above).placed.get("orc")!.side, "below");
+  });
+
+  test("a kept shape gives way when a neighbor leaves or the name changes", () => {
+    const pair: Spec[] = [
+      { id: "a", x: 0, y: 0, name: "Goblin Warrior", rank: 1 },
+      { id: "b", x: 2, y: 0, name: "Goblin Warrior Captain" },
+      { id: "n", x: 2, y: -1, name: "x", label: false },
+    ];
+    const crowded = place(40, pair).placed;
+    assert.ok(crowded.get("b")!.cut, `b is cut beside a: ${texts(crowded.get("b"))}`);
+    const alone = place(40, pair.slice(1), crowded).placed;
+    assert.deepEqual(texts(alone.get("b")), texts(place(40, pair.slice(1)).placed.get("b")), "with a gone, b takes what a fresh layout gives it");
+    assert.ok(alone.get("b")!.nameShown && !alone.get("b")!.cut);
+    // Hidden beside a, b shows again only where a shape clearly fits, unless its text changed: "Rat" just fits, with less than that margin.
+    const tight = (name: string): Spec[] => [pair[0]!, { id: "b", x: 1.475, y: 0, name }, { id: "n", x: 1.475, y: -1, name: "x", label: false }];
+    const hidden = place(40, tight("Bartholomew")).placed;
+    assert.deepEqual(texts(hidden.get("b")), []);
+    assert.deepEqual(texts(place(40, tight("Bartholomew"), hidden).placed.get("b")), [], "the same layout again changes nothing");
+    assert.deepEqual(texts(place(40, tight("Rat"), hidden).placed.get("b")), ["Rat"], "a renamed token lays out afresh");
   });
 
   test("placement does not depend on the order tokens arrive in", () => {
@@ -338,13 +360,13 @@ describe("a smooth zoom", () => {
     return Array.from({ length: 13 }, (_, i) => (room / [...c.edge.text].length) * (0.94 + i * 0.01));
   }
 
-  function labelAt(cell: number, ui: number, c: Case, measure: Measure, previous: Map<string, Side>): string[] {
+  function labelAt(cell: number, ui: number, c: Case, measure: Measure, previous: Map<string, PlacedLabel>): string[] {
     const sizes = boardSizes(cell, ui);
     const w = c.cells * cell;
     const box: Box = { x0: 0, y0: 0, x1: w, y1: w };
     const input: LabelInput = { id: "t", box, belowY: w + sizes.gapPx, aboveY: -sizes.gapPx, name: c.name, hp: c.hp, alert: false, rank: 0, sides: false, nameOnly: false, style: labelStyle(sizes, w, cell) };
     const p = placeLabels([input], [{ box, owner: "t", kind: "body" }], measure, previous).get("t")!;
-    previous.set("t", p.side);
+    previous.set("t", p);
     return texts(p);
   }
 
@@ -372,7 +394,7 @@ describe("a smooth zoom", () => {
         for (const em of emsAround(c)) {
           for (const [f, measure] of fonts(em).entries()) {
             const what = `${c.what}, ${em.toFixed(4)} em a letter${f ? " snapped" : ""}, at ${ui * 100}%`;
-            const previous = new Map<string, Side>();
+            const previous = new Map<string, PlacedLabel>();
             const zoomIn = cells.map((cell) => labelAt(cell, ui, c, measure, previous));
             const zoomOut = [...cells].reverse().map((cell) => labelAt(cell, ui, c, measure, previous));
             assertSettles(zoomIn, `${what}, zooming in`);
@@ -388,7 +410,7 @@ describe("a smooth zoom", () => {
   test("a pack alike in size and name places in one order at every zoom, so the same goblin keeps its whole name", () => {
     // Boxes of one size differ by float error with where they stand, which once reordered the pack at every frame of a zoom.
     const pack = [7, 8, 9].map((x, i) => ({ id: `g${i + 1}`, x, y: 3 }));
-    const previous = new Map<string, Side>();
+    let previous = new Map<string, PlacedLabel>();
     const whole = new Map<string, boolean[]>(pack.map((g) => [g.id, []]));
     for (const cell of cells) {
       const sizes = boardSizes(cell, 1);
@@ -399,18 +421,73 @@ describe("a smooth zoom", () => {
         obstacles.push({ box, owner: g.id, kind: "body" });
         inputs.push({ id: g.id, box, belowY: box.y1 + sizes.gapPx, aboveY: box.y0 - sizes.gapPx, name: "Goblin Warrior", hp: "7/7", alert: false, rank: 0, sides: false, nameOnly: false, style: labelStyle(sizes, cell, cell) });
       }
-      const placed = placeLabels(inputs, obstacles, measure, previous);
-      previous.clear();
-      for (const [id, p] of placed) {
-        if (p.lines.length > 0) previous.set(id, p.side);
-        whole.get(id)!.push(p.nameShown && !p.cut);
-      }
+      previous = placeLabels(inputs, obstacles, measure, previous);
+      for (const [id, p] of previous) whole.get(id)!.push(p.nameShown && !p.cut);
     }
     for (const [id, seen] of whole) {
       const changes = seen.filter((w, i) => i > 0 && w !== seen[i - 1]).length;
       assert.ok(changes <= 1, `${id}'s name turns whole and cut ${changes} times`);
     }
     assert.ok(whole.get("g1")!.every(Boolean), "the first of the pack by id keeps its name whole");
+  });
+
+  test("random packs swept in and out never overlap, hold still once the zoom stops, and never flip at the text's steps", () => {
+    // A pinch lays labels out frame by frame, each layout kept for the next. On every frame of every pack: no label covers another
+    // token's body or another label. When the zoom stops, the same inputs again change nothing. And no label goes back to a shape it
+    // left within two and a half text steps of zoom, across a step, unless another label changed in between and moved it.
+    const names = ["Goblin Warrior", "Kobold Scale Sorcerer", "Thorn", "Owlbear Matriarch", "Bandit Captain", "Cultist", "Owlbear Matriarch of the Thornwood"];
+    let seed = 7;
+    const random = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+    const sweep = Array.from({ length: 301 }, (_, i) => 26 + (50 * i) / 300);
+    const shapeOf = (p: PlacedLabel) => `${p.side}: ${texts(p).join(" / ")}`;
+    for (let pack = 0; pack < 60; pack++) {
+      const spots = new Map<string, { id: string; x: number; y: number; size: number; name: string; hp: string | null }>();
+      for (let i = 0; i < 5; i++) {
+        const t = { id: `t${i}`, x: Math.floor(random() * 5), y: Math.floor(random() * 5), size: random() < 0.15 ? 2 : 1, name: names[Math.floor(random() * names.length)]!, hp: random() < 0.5 ? (random() < 0.5 ? "7/7" : "Bloodied") : null };
+        spots.set(`${t.x},${t.y}`, t);
+      }
+      const tokens = [...spots.values()];
+      const ui = random() < 0.3 ? 1.3 : 1;
+      const font = fonts(0.5 + random() * 0.1)[random() < 0.5 ? 0 : 1]!;
+      const layout = (cell: number, previous?: ReadonlyMap<string, PlacedLabel>) => {
+        const sizes = boardSizes(cell, ui);
+        const obstacles: Obstacle[] = [];
+        const inputs: LabelInput[] = [];
+        for (const t of tokens) {
+          const w = t.size * cell;
+          const box: Box = { x0: t.x * cell, y0: t.y * cell, x1: t.x * cell + w, y1: t.y * cell + w };
+          obstacles.push({ box, owner: t.id, kind: "body" });
+          inputs.push({ id: t.id, box, belowY: box.y1 + sizes.gapPx, aboveY: box.y0 - sizes.gapPx, name: t.name, hp: t.hp, alert: t.hp === "Bloodied", rank: 0, sides: false, nameOnly: false, style: labelStyle(sizes, w, cell) });
+        }
+        return { placed: placeLabels(inputs, obstacles, font, previous), obstacles, textPx: `${sizes.namePx} ${sizes.hpPx}` };
+      };
+      let previous: Map<string, PlacedLabel> | undefined;
+      for (const cells of [sweep, [...sweep].reverse()]) {
+        const frames: { cell: number; namePx: number; textPx: string; shapes: Map<string, string> }[] = [];
+        for (const cell of cells) {
+          const { placed, obstacles, textPx } = layout(cell, previous);
+          assertClear(placed, obstacles);
+          frames.push({ cell, namePx: boardSizes(cell, ui).namePx, textPx, shapes: new Map([...placed].map(([id, p]) => [id, shapeOf(p)])) });
+          previous = placed;
+        }
+        const stopped = layout(cells.at(-1)!, previous).placed;
+        for (const [id, p] of stopped) assert.equal(shapeOf(p), shapeOf(previous!.get(id)!), `pack ${pack}: ${id} moves after the zoom stops`);
+        const ids = tokens.map((t) => t.id);
+        const changes = new Map(ids.map((id) => [id, frames.flatMap((f, i) => (i > 0 && f.shapes.get(id) !== frames[i - 1]!.shapes.get(id) ? [i] : []))]));
+        for (const id of ids) {
+          const at = changes.get(id)!;
+          for (let c = 1; c < at.length; c++) {
+            const i = at[c - 1]!;
+            const j = at[c]!;
+            if (frames[j]!.shapes.get(id) !== frames[i - 1]!.shapes.get(id)) continue;
+            const near = Math.abs(frames[j]!.cell - frames[i]!.cell) / frames[i]!.cell <= (2.5 * 0.5 * Math.ceil(ui)) / frames[i]!.namePx;
+            const stepped = frames.slice(i - 1, j + 1).some((f, k, all) => k > 0 && f.textPx !== all[k - 1]!.textPx);
+            const moved = ids.some((other) => other !== id && changes.get(other)!.some((k) => k >= i && k <= j));
+            assert.ok(!near || !stepped || moved, `pack ${pack}: ${id} flips back to ${frames[j]!.shapes.get(id)} between ${frames[i]!.cell.toFixed(2)} and ${frames[j]!.cell.toFixed(2)} px a cell`);
+          }
+        }
+      }
+    }
   });
 
   test("the focus plate's name wraps once at most, zooming in or out", () => {

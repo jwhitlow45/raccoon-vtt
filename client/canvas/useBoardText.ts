@@ -2,7 +2,7 @@ import { useMemo, useRef } from "react";
 import type { Actor, Character } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import { boardSizes } from "../lib/boardScale.ts";
-import { focusLines, focusStyle, labelStyle, linesSize, placeLabels, showsNumberBadge, type Box, type LabelInput, type LabelLine, type Obstacle, type Side } from "../lib/boardText.ts";
+import { focusLines, focusStyle, labelStyle, linesSize, placeLabels, showsNumberBadge, type Box, type LabelInput, type LabelLine, type Obstacle, type PlacedLabel } from "../lib/boardText.ts";
 import { footprint, type ViewToken } from "../lib/scene.ts";
 import { DECOR_MIN_PX, healthState, hpDisplay, type HpDisplay } from "../lib/tokenView.ts";
 import { pillPlace } from "../features/measure/Pill.tsx";
@@ -39,9 +39,9 @@ export type TokenText = {
  * viewer's own tokens there try for their names.
  *
  * `pills` are other layers' pills (an area's name, the move marker), and
- * `mapLabels` the DM's text on the map, which labels keep off too. The
- * side each label took is kept for the next layout, so a pinch does not
- * shuffle them.
+ * `mapLabels` the DM's text on the map, which labels keep off too. Each
+ * layout is kept for the next, whose labels hold their shapes and sides
+ * while they fit, so a pinch does not shuffle them.
  *
  * Plates are laid over the result afterwards. A hover on a desktop shows
  * its token's plate without placing anything again (decided 2026-10-14), so
@@ -67,8 +67,8 @@ export function useBoardText(input: {
   /** Moves on when the interface font arrives (boardFont.ts), so labels measured in the fallback are placed again. */
   fontEpoch: number;
 }): Map<string, TokenText> {
-  // The last layout's sides, read and written inside the layout on purpose: they steer the next one, never trigger one.
-  const previous = useRef<Map<string, Side>>(new Map());
+  // The last layout and the font it was measured in, read and written inside the layout on purpose: its shapes steer the next one, never trigger one.
+  const previous = useRef<{ fontEpoch: number; placed: Map<string, PlacedLabel> }>({ fontEpoch: input.fontEpoch, placed: new Map() });
   const { tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, mapLabels, lockShown, fontEpoch } = input;
   const layout = useMemo(() => {
     const sizes = boardSizes(scale);
@@ -134,19 +134,19 @@ export function useBoardText(input: {
         style: labelStyle(sizes, widthPx, scale),
       });
     }
-    const placed = placeLabels(labelInputs, obstacles, measureLabel, previous.current);
-    const sides = new Map<string, Side>();
+    // A new font is a new measure, so labels are laid out afresh, not held to shapes measured in the old one.
+    const kept = previous.current.fontEpoch === fontEpoch ? previous.current.placed : undefined;
+    const placed = placeLabels(labelInputs, obstacles, measureLabel, kept);
     for (const [id, p] of placed) {
       const m = meta.get(id)!;
       const text = out.get(id)!;
       if (p.lines.length > 0) {
-        sides.set(id, p.side);
         text.label = { lines: p.lines, x: p.box.x0 - m.ox, y: p.box.y0 - m.oy, width: p.box.x1 - p.box.x0, height: p.box.y1 - p.box.y0 };
       }
       text.numberBadge = showsNumberBadge(m, p);
     }
     for (const [id, m] of meta) if (!placed.has(id)) out.get(id)!.numberBadge = showsNumberBadge(m, undefined);
-    previous.current = sides;
+    previous.current = { fontEpoch, placed };
     return { out, meta, sizes };
   }, [tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, pills, mapLabels, lockShown, fontEpoch]);
 
