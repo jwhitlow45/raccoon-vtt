@@ -31,14 +31,9 @@ export function byCategory(pack: StarterPack): Category[] {
 
 export type SearchGroups = { groups: { pack: StarterPack; works: StarterWork[] }[]; total: number; shown: number };
 
-/**
- * A search's results by pack, in catalog order, cut at `cap` tiles. The
- * catalog's words are split at every mark that is not a letter or a digit,
- * so the typed words are too, and a name typed as written ("The Mage's
- * Tower", "dragon,") matches.
- */
+/** A search's results (searchWorks) by pack, in catalog order, cut at `cap` tiles. */
 export function searchGroups(packs: readonly StarterPack[], query: string, cap: number = SEARCH_SHOWN): SearchGroups {
-  const found = searchWorks(packs, query.toLowerCase().replace(/[^a-z0-9]+/g, " "));
+  const found = searchWorks(packs, query);
   const groups: SearchGroups["groups"] = [];
   for (const { pack, work } of found.slice(0, cap)) {
     const last = groups.at(-1);

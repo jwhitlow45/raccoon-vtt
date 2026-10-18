@@ -133,13 +133,20 @@ export function categoriesOf(pack: StarterPack): string[] {
   return [...new Set(pack.works.map((work) => work.category))];
 }
 
+/** Lowercase words split at every mark that is not a letter or a digit: "The Mage's Tower" is the, mage, s and tower. */
+function wordsOf(text: string): string[] {
+  return text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
 /**
  * The works whose name, category, tags or pack hold every word typed, in
  * catalog order. Matching is on whole-word prefixes, so "owl" finds the
- * owlbear and not a bowl.
+ * owlbear and not a bowl. The typed words are split at marks as the
+ * catalog's are, so a name typed as written ("The Mage's Tower",
+ * "dragon,") matches, wherever the search runs.
  */
 export function searchWorks(packs: readonly StarterPack[], query: string): FoundWork[] {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const words = wordsOf(query);
   const found: FoundWork[] = [];
   for (const pack of packs) {
     for (const work of pack.works) {
@@ -147,8 +154,7 @@ export function searchWorks(packs: readonly StarterPack[], query: string): Found
         found.push({ pack, work });
         continue;
       }
-      const text = [work.name, work.category, pack.title, pack.author, ...work.tags].join(" ").toLowerCase();
-      const starts = text.split(/[^a-z0-9]+/).filter(Boolean);
+      const starts = wordsOf([work.name, work.category, pack.title, pack.author, ...work.tags].join(" "));
       if (words.every((word) => starts.some((start) => start.startsWith(word)))) found.push({ pack, work });
     }
   }
