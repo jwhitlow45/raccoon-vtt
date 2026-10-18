@@ -8,7 +8,7 @@ import type { LightLevel, MapPhase, RoomState, Scene, SceneVision } from "#share
 
 export const LIGHT_LEVELS: readonly { value: LightLevel; label: string; note: string }[] = [
   { value: "bright", label: "Bright", note: "Lit everywhere, as by day: the party sees everything in its line of sight." },
-  { value: "dim", label: "Dim", note: "Dim everywhere: shadows the party sees darker. Darkvision sees dim light as bright." },
+  { value: "dim", label: "Dim", note: "Dim everywhere: shadows the party sees darker. Darkvision sees Dim Light as Bright Light." },
   { value: "dark", label: "Dark", note: "Dark where no light reaches: the party sees only by light and Darkvision." },
 ];
 

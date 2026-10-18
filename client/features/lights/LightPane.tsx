@@ -131,9 +131,9 @@ function LightEditor(props: { light: Light; onClose(): void; sheet: boolean }) {
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
         <span style={{ color: theme.color.textMuted }}>Bright</span>
-        <NumberInput label="Bright light, feet" value={light.bright} min={0} max={MAX_LIGHT_FT} onChange={(bright) => put({ bright })} />
+        <NumberInput label="Bright Light, feet" value={light.bright} min={0} max={MAX_LIGHT_FT} onChange={(bright) => put({ bright })} />
         <span style={{ color: theme.color.textMuted }}>ft, dim for</span>
-        <NumberInput label="Dim light beyond it, feet" value={light.dim} min={0} max={MAX_LIGHT_FT} onChange={(dim) => put({ dim })} />
+        <NumberInput label="Dim Light beyond it, feet" value={light.dim} min={0} max={MAX_LIGHT_FT} onChange={(dim) => put({ dim })} />
         <span style={{ color: theme.color.textMuted }}>ft beyond</span>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
