@@ -256,7 +256,7 @@ export function HpSection(props: {
   if (hpLess(actor, props.token)) {
     const effect = props.token?.companion !== undefined && props.token.kind === "object";
     return (
-      <Section title="Hit points">
+      <Section title="Hit Points">
         <Note>{effect ? "No HP: it is an effect." : "No HP yet."}</Note>
         {!effect && access.hp === "all" ? (
           <FieldRow label="Max HP">
@@ -274,7 +274,7 @@ export function HpSection(props: {
   }
 
   return (
-    <Section title="Hit points">
+    <Section title="Hit Points">
       {access.full && hp ? (
         // Focusable from script alone: where focus goes once a life button takes itself away (LifeControls).
         <div data-hp-vitals="" tabIndex={-1} style={{ display: "flex", alignItems: "baseline", gap: theme.space(2), flexWrap: "wrap", fontVariantNumeric: "tabular-nums" }}>
@@ -300,7 +300,7 @@ export function HpSection(props: {
         // label beside its field, both labels go above their fields together (globals.css), so the pair never staggers.
         <div
           role="group"
-          aria-label="Maximum and temporary HP"
+          aria-label="Maximum and Temporary HP"
           data-rvtt-hp-pair=""
           style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", columnGap: theme.space(4), containerType: "inline-size" }}
         >

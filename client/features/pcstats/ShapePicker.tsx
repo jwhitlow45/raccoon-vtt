@@ -76,10 +76,10 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
         <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
           <ShapeChoice name={name} creature={picked.name} wild={wildShapeDetail(props.character, picked.name, editsPcStats(you, props.character))} value={kind} onChange={setKind} />
           {holding >= temp ? (
-            <Help>{`${whose(name)} ${holding} temporary HP stay, as they are no fewer than the ${temp} the shape gives.`}</Help>
+            <Help>{`${whose(name)} ${holding} Temporary HP stay, as they are no fewer than the ${temp} the shape gives.`}</Help>
           ) : (
             <Checkbox
-              label={`Gain ${temp} temporary HP (${kind === "wild" ? "Wild Shape" : "Polymorph"})`}
+              label={`Gain ${temp} Temporary HP (${kind === "wild" ? "Wild Shape" : "Polymorph"})`}
               help={kind === "wild" ? `The Druid level, read as ${whose(name)} level.` : `${whose(picked.name)} HP. What is left of them goes when the shape ends.`}
               checked={gainTemp}
               onChange={setGainTemp}

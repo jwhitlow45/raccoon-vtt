@@ -267,7 +267,7 @@ function PartyLongRest(props: { characters: Character[] }) {
       }}
     >
       <Help>
-        {resting.length === 1 ? "1 character gets" : `${resting.length} characters get`} all HP back, lose temporary HP and one Exhaustion level.
+        {resting.length === 1 ? "1 character gets" : `${resting.length} characters get`} all HP back, lose Temporary HP and one Exhaustion level.
         {left > 0 ? ` ${left === 1 ? "1 character at 0 HP stays" : `${left} characters at 0 HP stay`} as they are.` : ""}
       </Help>
       <div style={{ display: "flex", gap: theme.space(2) }}>

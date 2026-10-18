@@ -273,7 +273,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     const choice = ana.getByRole("dialog", { name: "Take the shape of Brown Bear" });
     assert.equal(await choice.getByRole("radio", { name: /Wild Shape/ }).isChecked(), true, "Wild Shape by default");
     // Bree is level 9 since step 3, and the Druid level Wild Shape gives reads as it (W7B-P-9).
-    assert.equal(await choice.getByRole("checkbox", { name: "Gain 9 temporary HP (Wild Shape)" }).isChecked(), true, "the temporary HP on by default");
+    assert.equal(await choice.getByRole("checkbox", { name: "Gain 9 Temporary HP (Wild Shape)" }).isChecked(), true, "the temporary HP on by default");
     await shots.take(ana, "pcstats-shape-choice");
     await choice.getByRole("button", { name: "Take the shape", exact: true }).click();
     const breeActor = () => anaSocket.state?.characters[run.bree.characterId]?.actor;

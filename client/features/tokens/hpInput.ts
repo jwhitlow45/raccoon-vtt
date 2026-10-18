@@ -61,7 +61,7 @@ export function parseHpInput(raw: string, mode: HpMode): HpParse {
     if (!s || temp[1] === "") return { ok: false, error: UNREADABLE };
     if (s.value < 0) return { ok: false, error: "Temporary HP cannot be negative." };
     if (tooLarge(s.value)) return { ok: false, error: "That number is too large." };
-    return { ok: true, change: { kind: "temp", amount: s.value }, summary: `Set temporary HP to ${s.value}` };
+    return { ok: true, change: { kind: "temp", amount: s.value }, summary: `Set Temporary HP to ${s.value}` };
   }
 
   if (text.startsWith("=")) {
@@ -86,7 +86,7 @@ export function parseHpInput(raw: string, mode: HpMode): HpParse {
     case "set":
       return set(s.value);
     case "temp":
-      return { ok: true, change: { kind: "temp", amount: s.value }, summary: `Set temporary HP to ${s.value}` };
+      return { ok: true, change: { kind: "temp", amount: s.value }, summary: `Set Temporary HP to ${s.value}` };
   }
 }
 

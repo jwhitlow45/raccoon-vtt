@@ -545,7 +545,7 @@ function hpChangePhrase(kind: OpOf<"actor.hp">["change"]["kind"], name: string):
     case "heal":
       return `healing ${name}`;
     case "temp":
-      return `giving ${name} temporary HP`;
+      return `giving ${name} Temporary HP`;
     case "set":
       return `setting ${name}'s HP`;
   }

@@ -60,7 +60,7 @@ export function RestSection(props: { actor: Pick<Actor, "hp" | "life"> | undefin
         </>
       ) : null}
       {canRest && kind === "long" ? (
-        <Note>All HP back, temporary HP gone, one less Exhaustion level, and Legendary Resistance reset. Spell slots and features are on your sheet.</Note>
+        <Note>All HP back, Temporary HP gone, one less Exhaustion level, and Legendary Resistance reset. Spell slots and features are on your sheet.</Note>
       ) : null}
       {canRest && kind ? (
         <div style={{ display: "flex", gap: theme.space(2) }}>

@@ -46,7 +46,7 @@ describe("event text", () => {
     assert.equal(describeEvent({ type: "hp", ...target, change: "damage", amount: 7, crit: true, label: "Bloodied" }, state), "Thorn takes 7 damage from a critical hit (Bloodied).");
     assert.equal(describeEvent({ type: "hp", ...target, change: "heal", label: "Healthy" }, state), "Thorn regains HP (Healthy).");
     assert.equal(describeEvent({ type: "hp", ...target, change: "set", amount: 12 }, state), "Thorn's HP is set to 12.");
-    assert.equal(describeEvent({ type: "hp", ...target, change: "temp", amount: 5 }, state), "Thorn gains 5 temporary HP.");
+    assert.equal(describeEvent({ type: "hp", ...target, change: "temp", amount: 5 }, state), "Thorn gains 5 Temporary HP.");
     // With the numbers, the line says what was left, and the label only when it adds Dying or Dead.
     const left = (cur: number, temp = 0) => ({ cur, max: 7, temp });
     assert.equal(describeEvent({ type: "hp", ...target, change: "damage", amount: 4, label: "Bloodied", left: left(3) }, state), "Thorn takes 4 damage, 3/7 left.");

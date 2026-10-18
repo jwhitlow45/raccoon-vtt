@@ -345,7 +345,7 @@ function changeTakenBack(data: Extract<LogEvent, { type: "hp" }>, who: string): 
     case "set":
       return `a change to ${who}'s HP`;
     case "temp":
-      return `${who}'s temporary HP`;
+      return `${who}'s Temporary HP`;
   }
 }
 
@@ -385,8 +385,8 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
           return data.amount !== undefined ? `${who}'s HP is set to ${data.amount}${label}.` : `${who}'s HP was changed${label}.`;
         case "temp":
           return data.amount !== undefined
-            ? `${who} gains ${data.amount} temporary HP${label}.`
-            : `${who} gains temporary HP${label}.`;
+            ? `${who} gains ${data.amount} Temporary HP${label}.`
+            : `${who} gains Temporary HP${label}.`;
       }
       return `${who}'s HP changed${label}.`;
     }

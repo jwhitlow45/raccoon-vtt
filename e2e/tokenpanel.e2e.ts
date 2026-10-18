@@ -756,7 +756,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     for (let i = 1; i < at.length; i++) assert.ok(at[i]! > at[i - 1]!, `out of order: ${headings.join(" | ")}`);
     assert.equal(headings.includes("companion"), false);
     assert.equal(await panel.getByRole("heading", { name: "Combat", level: 3 }).count(), 1, "a group is an h3");
-    for (const name of ["Hit points", "Conditions", "Range rings", "Rest"]) assert.equal(await panel.getByRole("heading", { name, level: 4 }).count(), 1, `${name} is an h4 inside Combat`);
+    for (const name of ["Hit Points", "Conditions", "Range rings", "Rest"]) assert.equal(await panel.getByRole("heading", { name, level: 4 }).count(), 1, `${name} is an h4 inside Combat`);
     assert.equal(await panel.getByRole("region").count(), 0, "no group is a landmark");
     for (const name of ["Notes", "Position", "Image", "Stats", "Token settings", "Owners"]) assert.equal(await panel.getByRole("button", { name, exact: true }).getAttribute("aria-expanded"), "false", `${name} starts open`);
     assert.equal(await panel.getByRole("button", { name: "Combat", exact: true }).getAttribute("aria-expanded"), "true", "Combat starts folded");
@@ -766,11 +766,11 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.equal(await rowText("Position"), "Position On the ground");
     assert.equal(await rowText("Combat"), "Combat", "an open group's row has a summary");
     await panel.getByRole("button", { name: "Combat", exact: true }).click();
-    await panel.getByRole("heading", { name: "Hit points" }).waitFor({ state: "detached" });
+    await panel.getByRole("heading", { name: "Hit Points" }).waitFor({ state: "detached" });
     assert.match(await rowText("Combat"), /^Combat HP 10\/10/);
     await shots.take(dm, "tokenpanel-dm-combat-folded");
     await panel.getByRole("button", { name: "Combat", exact: true }).click();
-    await panel.getByRole("heading", { name: "Hit points" }).waitFor();
+    await panel.getByRole("heading", { name: "Hit Points" }).waitFor();
     await openGroup(panel, "Image");
 
     // The image row: the preview, then "Change image" and "Add another image" on one line beside it.
@@ -783,7 +783,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await hpPairSideBySide(panel, "the side panel", "beside");
     await ringsCompact(panel, "the side panel");
     await ringsFull(panel, "the side panel");
-    await panel.getByRole("group", { name: "Maximum and temporary HP", exact: true }).scrollIntoViewIfNeeded();
+    await panel.getByRole("group", { name: "Maximum and Temporary HP", exact: true }).scrollIntoViewIfNeeded();
     await shots.take(dm, "tokenpanel-dm-hp-pair");
     await panel.getByRole("group", { name: "Range rings in feet", exact: true }).scrollIntoViewIfNeeded();
     await shots.take(dm, "tokenpanel-dm-range-rings");
@@ -831,7 +831,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     const summary = thorn.locator("[data-quick-numbers]").first();
     await summary.getByRole("img", { name: "Armor Class 16" }).waitFor();
     assert.equal(await summary.getByRole("link", { name: "Open the sheet" }).getAttribute("href"), SHEET);
-    assert.ok((await rectOf(summary)).top < (await rectOf(thorn.getByRole("heading", { name: "Hit points" }))).top, "the summary line sits above Hit points");
+    assert.ok((await rectOf(summary)).top < (await rectOf(thorn.getByRole("heading", { name: "Hit Points" }))).top, "the summary line sits above Hit Points");
     await shots.take(dm, "tokenpanel-dm-thorn-summary-line");
     await dm.keyboard.press("Escape");
   });
@@ -1267,7 +1267,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     const gap = await pair.evaluate((el) => Number.parseFloat((el as unknown as { ownerDocument: { defaultView: { getComputedStyle(e: unknown): { columnGap: string } } } }).ownerDocument.defaultView.getComputedStyle(el).columnGap));
     assert.equal(Math.abs(change.top - another.top) <= 2, column >= change.width + another.width + gap * 1.3 - 0.5, `the pair's lines with a ${column} px column`);
     await hpPairSideBySide(panel, "243 px", "above");
-    await panel.getByRole("group", { name: "Maximum and temporary HP", exact: true }).scrollIntoViewIfNeeded();
+    await panel.getByRole("group", { name: "Maximum and Temporary HP", exact: true }).scrollIntoViewIfNeeded();
     await shots.take(dm, "tokenpanel-480x320at130-hp-pair");
     await noSideScroll(panel, "480 x 320 at 130%, the very short panel");
     // Escape is the modal's own: it closes the sheet.
