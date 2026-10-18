@@ -118,7 +118,8 @@ export function PartyBar(props: { dock?: boolean; short?: boolean; onLeave?(): v
       {folded ? (
         <FoldedParty entries={entries} onFrame={frame} />
       ) : (
-        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(0.5), maxHeight: props.dock ? screenHeight(40) : undefined, overflowY: props.dock ? "auto" : undefined }}>
+        // One column no wider than the bar, so a long name ends in an ellipsis rather than pushing every row's HP past the edge.
+        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(0.5), maxHeight: props.dock ? screenHeight(40) : undefined, overflowY: props.dock ? "auto" : undefined }}>
           {entries.map((e) => (
             <li key={e.character.id}>
               <Entry entry={e} onFrame={() => frame(e)} />
@@ -184,7 +185,8 @@ export function Entry(props: { entry: PartyEntry; onFrame(): void }) {
       }}
     >
       <Portrait entry={{ characterId: entry.character.id }} size={36} dim={entry.life === "dead"} />
-      <span style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
+      {/* One column no wider than the row, so a long name ends in an ellipsis and its HP stays in view. */}
+      <span style={{ flex: 1, minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(0.5) }}>
         <span style={{ display: "flex", alignItems: "baseline", gap: theme.space(2) }}>
           <strong style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: theme.font.body14 }}>{entry.character.name}</strong>
           <span style={{ fontSize: theme.font.small, fontVariantNumeric: "tabular-nums" }}>
