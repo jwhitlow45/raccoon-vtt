@@ -98,7 +98,8 @@ function PingOptions(props: { role: "dm" | "player" }) {
 export const pingTool: ToolDef = {
   id: "ping",
   label: "Ping",
-  icon: { path: "M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 4.2a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6z" },
+  // Not a pin: the Pin tool draws one, and the two read as one tool (docs/design-v1-icons.md 2.3).
+  icon: { icon: "ping" },
   roles: ["dm", "player"],
   order: TOOL_ORDER.ping,
   cursor: "pointer",

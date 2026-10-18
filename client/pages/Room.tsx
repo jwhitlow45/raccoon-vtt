@@ -1502,11 +1502,15 @@ function EndedScreen(props: { ended: Ended; roomId: string; role: "dm" | "player
   );
 }
 
+/** A tool's icon in the toolbar, a little larger than a button's 20 px, as the tools' own shapes are drawn. */
+const TOOL_ICON_PX = 22;
+
 function ToolIcon(props: { tool: ToolDef }) {
   const { icon } = props.tool;
   if ("glyph" in icon) return <span aria-hidden style={{ fontSize: theme.font.heading, fontWeight: theme.weight.bold, lineHeight: 1 }}>{icon.glyph}</span>;
+  if ("icon" in icon) return <Icon name={icon.icon} size={TOOL_ICON_PX} />;
   return (
-    <svg aria-hidden viewBox="0 0 24 24" width={22} height={22} style={{ display: "block" }}>
+    <svg aria-hidden viewBox="0 0 24 24" width={TOOL_ICON_PX} height={TOOL_ICON_PX} style={{ display: "block" }}>
       <path d={icon.path} fill="currentColor" />
     </svg>
   );
@@ -1893,11 +1897,7 @@ function Toolbar(props: {
     );
   }
 
-  const panelsIcon = (
-    <svg aria-hidden viewBox="0 0 24 24" width={22} height={22} style={{ display: "block" }}>
-      <path d="M4 5h16v2H4zm0 6h16v2H4zm0 6h16v2H4z" fill="currentColor" />
-    </svg>
-  );
+  const panelsIcon = <Icon name="panels" size={TOOL_ICON_PX} />;
   const menuPopover = (handle: PopoverHandle, label: string, sections: readonly MenuSection[]) => (
     // The nav takes no taps of its own, so its menus take theirs back. No box of its own, so it takes no gap in the row.
     <div style={{ display: "contents", pointerEvents: "auto" }}>

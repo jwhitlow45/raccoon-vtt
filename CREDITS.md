@@ -48,7 +48,7 @@ Changes to every icon: the black background square was removed and the fill set 
 
 The interface icons marked Lucide in `client/components/Icon.tsx` are path data copied from [Lucide](https://github.com/lucide-icons/lucide) ([lucide.dev](https://lucide.dev)), version 0.525.0, used under the ISC License. The app does not ship the Lucide package. The other icons in that file were drawn for this project. The icons copied, by Lucide's names:
 
-`copy-plus`, `eye`, `eye-off`, `footprints`, `image`, `lock`, `pencil`, `redo-2`, `refresh-cw`, `repeat`, `trash-2`, `undo-2`, `users`.
+`copy-plus`, `eye`, `eye-off`, `footprints`, `image`, `lock`, `menu`, `pencil`, `radar`, `redo-2`, `refresh-cw`, `repeat`, `trash-2`, `undo-2`, `users`.
 
 ```
 ISC License

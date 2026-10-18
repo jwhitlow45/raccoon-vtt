@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type R
 import { largerEach } from "../canvas/barDock.ts";
 import { fitSlot } from "../canvas/fitSlot.ts";
 import { ReconnectBanner } from "../components/ConnectionStatus.tsx";
+import { Icon, type IconName } from "../components/Icon.tsx";
+import { useTooltip } from "../components/Tooltip.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { findCamera, findRect, nextOwnToken, sheetCover, type OpenSheet } from "../features/find/findToken.ts";
 import { badgeText } from "../features/log/unread.ts";
@@ -222,47 +224,52 @@ export function UndoButtons() {
   const actions = useRoomActions();
   return (
     <span style={{ flex: "none", display: "flex", marginRight: -theme.space(2) }}>
-      <IconButton label="Undo" title="Undo your last change" path="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11" stroke onClick={() => actions.undo()} />
-      <IconButton label="Redo" title="Redo what you undid" path="m15 14 5-5-5-5M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13" stroke onClick={() => actions.redo()} />
+      <IconButton label="Undo" title="Undo your last change" draw="undo" onClick={() => actions.undo()} />
+      <IconButton label="Redo" title="Redo what you undid" draw="redo" onClick={() => actions.redo()} />
     </span>
   );
 }
 
 /**
  * A 44 px square icon button for the top bar, in the shape of
- * components/IconButton.tsx. Its own, since Undo, Redo, Fit and Find draw
- * icons that the shared set does not have. They keep the text color: they
- * are the bar's actions, not a header's close.
+ * components/IconButton.tsx. Its own, since Fit and Find draw shapes of
+ * their own beside Undo and Redo from Icon.tsx, and all four keep the text
+ * color: they are the bar's actions, not a header's close.
  */
-function IconButton(props: { label: string; title: string; path: string; stroke?: boolean; onClick(): void }) {
+function IconButton(props: { label: string; title: string; draw: IconName | { path: string }; onClick(): void }) {
+  // The name on hover, keyboard focus and a long press, never the native title (docs/design-v1-icons.md 3.2).
+  const tooltip = useTooltip(props.title, { describes: props.title !== props.label });
   return (
-    <button
-      type="button"
-      aria-label={props.label}
-      title={props.title}
-      onClick={props.onClick}
-      style={{
-        flex: "none",
-        display: "grid",
-        placeItems: "center",
-        width: theme.touch,
-        height: theme.touch,
-        padding: 0,
-        border: `${theme.line.border}px solid transparent`,
-        borderRadius: theme.radius.md,
-        background: "transparent",
-        color: theme.color.text,
-        cursor: "pointer",
-      }}
-    >
-      <svg aria-hidden viewBox="0 0 24 24" width={theme.icon.md} height={theme.icon.md} style={{ display: "block" }}>
-        {props.stroke ? (
-          <path d={props.path} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    <>
+      <button
+        type="button"
+        aria-label={props.label}
+        {...tooltip.anchor()}
+        onClick={props.onClick}
+        style={{
+          flex: "none",
+          display: "grid",
+          placeItems: "center",
+          width: theme.touch,
+          height: theme.touch,
+          padding: 0,
+          border: `${theme.line.border}px solid transparent`,
+          borderRadius: theme.radius.md,
+          background: "transparent",
+          color: theme.color.text,
+          cursor: "pointer",
+        }}
+      >
+        {typeof props.draw === "string" ? (
+          <Icon name={props.draw} />
         ) : (
-          <path d={props.path} fill="currentColor" />
+          <svg aria-hidden viewBox="0 0 24 24" width={theme.icon.md} height={theme.icon.md} style={{ display: "block" }}>
+            <path d={props.draw.path} fill="currentColor" />
+          </svg>
         )}
-      </svg>
-    </button>
+      </button>
+      {tooltip.tip}
+    </>
   );
 }
 
@@ -278,7 +285,7 @@ export function FitButton() {
       <IconButton
         label="Fit the map to the screen"
         title="Fit the map to the screen"
-        path="M4 4h6v2H6v4H4zm10 0h6v6h-2V6h-4zM4 14h2v4h4v2H4zm14 0h2v6h-6v-2h4z"
+        draw={{ path: "M4 4h6v2H6v4H4zm10 0h6v6h-2V6h-4zM4 14h2v4h4v2H4zm14 0h2v6h-6v-2h4z" }}
         onClick={() => slot.fit?.()}
       />
     </span>
@@ -316,7 +323,7 @@ export function FindButton(props: { openSheet(): OpenSheet | null }) {
       <IconButton
         label="Find my token"
         title="Find my token"
-        path="M11 1h2v4h-2zm0 18h2v4h-2zM1 11h4v2H1zm18 0h4v2h-4zM12 5a7 7 0 1 0 0 14a7 7 0 1 0 0-14zm0 2a5 5 0 1 1 0 10a5 5 0 1 1 0-10zm0 2.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z"
+        draw={{ path: "M11 1h2v4h-2zm0 18h2v4h-2zM1 11h4v2H1zm18 0h4v2h-4zM12 5a7 7 0 1 0 0 14a7 7 0 1 0 0-14zm0 2a5 5 0 1 1 0 10a5 5 0 1 1 0-10zm0 2.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z" }}
         onClick={find}
       />
     </span>

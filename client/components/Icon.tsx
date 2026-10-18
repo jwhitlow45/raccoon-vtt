@@ -67,7 +67,9 @@ export type IconName =
   | "image"
   | "retry"
   | "locked"
-  | "duplicate";
+  | "duplicate"
+  | "ping"
+  | "panels";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -88,6 +90,8 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   retry: "refresh-cw",
   locked: "lock",
   duplicate: "copy-plus",
+  ping: "radar",
+  panels: "menu",
 };
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -261,6 +265,15 @@ const SHAPES: Record<IconName, ReactNode> = {
       <rect x="8" y="8" width="14" height="14" rx="2" />
     </g>
   ),
+  // Lucide radar: the Ping tool, a call to look here. Never a pin, which the Pin tool draws.
+  ping: (
+    <g {...STROKE}>
+      <path d="M19.07 4.93A10 10 0 0 0 6.99 3.34M4 6h.01M2.29 9.62A10 10 0 1 0 21.31 8.35M16.24 7.76A6 6 0 1 0 8.23 16.67M12 18h.01M17.99 11.66A6 6 0 0 1 15.77 16.67M13.41 10.59l5.66-5.66" />
+      <circle cx="12" cy="12" r="2" />
+    </g>
+  ),
+  // Lucide menu: the toolbar's Panels, which lists the side panels.
+  panels: <path {...STROKE} d="M4 12h16M4 18h16M4 6h16" />,
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];

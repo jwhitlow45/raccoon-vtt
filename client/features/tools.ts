@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import type { Scene } from "#shared/model.ts";
+import type { IconName } from "../components/Icon.tsx";
 import type { Camera, Point } from "../lib/camera.ts";
 import type { RoomScope } from "../state/scope.ts";
 import type { RoomUi } from "../state/store.ts";
@@ -94,8 +95,8 @@ export type ToolPointerHandlers = {
   hover?(p: ToolPointer, ctx: ToolContext): void;
 };
 
-/** An SVG path in a 24 x 24 box, filled with the current text color, or a short text glyph. */
-export type ToolIcon = { path: string } | { glyph: string };
+/** An SVG path in a 24 x 24 box, filled with the current text color, an interface icon by its meaning, or a short text glyph. */
+export type ToolIcon = { path: string } | { icon: IconName } | { glyph: string };
 
 export type ToolDef = {
   id: string;
