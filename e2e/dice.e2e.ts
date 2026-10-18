@@ -290,4 +290,17 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     assert.ok(await inView(player, '[data-dice-last] button:has-text("Again")'), "Again is on screen");
     await shots.take(player, "dice-hundred-dice-sticky");
   });
+
+  test("9. a tap on the sticky line opens its roll in Recent rolls with the row's head in sight below the line (LP7-DICE-5)", async () => {
+    const sticky = player.locator("[data-dice-last]");
+    await sticky.getByRole("button", { name: "Show this roll in Recent rolls" }).tap();
+    const row = player.getByRole("region", { name: "Dice" }).locator("[data-roll-row]").first();
+    // The row of 100 dice is taller than the sheet, so it scrolls to its head.
+    await waitFor("the row's head below the sticky line", async () => {
+      const line = await sticky.boundingBox();
+      const head = await row.boundingBox();
+      return line && head && head.y >= line.y + line.height - 1 && head.y < line.y + line.height + 40 ? true : null;
+    });
+    await shots.take(player, "dice-sticky-opens-row");
+  });
 });

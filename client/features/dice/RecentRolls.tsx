@@ -127,7 +127,8 @@ export function againInput(roll: DiceRoll): DiceRollInput | null {
 function Row(props: { row: RecentRow; names: LogNames; me: string; open: boolean; again(rolls: DiceRollInput[], to: "all" | "dm"): void }) {
   const { row, names } = props;
   const [all, setAll] = useState(props.open);
-  const base: CSSProperties = { display: "grid", gap: theme.space(1), padding: `${theme.space(2)}px 0`, borderTop: `${theme.line.border}px solid ${theme.color.border}` };
+  // The sticky line's tap scrolls its row into view, which would otherwise stop with the row's head under that line, as RollOptions allows for too.
+  const base: CSSProperties = { display: "grid", gap: theme.space(1), padding: `${theme.space(2)}px 0`, borderTop: `${theme.line.border}px solid ${theme.color.border}`, scrollMarginTop: 48 };
   if (row.kind === "bare") {
     const who = memberName(names, row.by);
     return (
