@@ -1,6 +1,6 @@
 # raccoon-vtt design: starter packs for DMs
 
-Status: research and design, draft 2. Nothing is added to the repository until the project owner approves the packs from their contact sheets.
+Status: draft 2, with the packs decided (section 12) and built. The project owner reviews the built packs in the app.
 
 The project owner asked: "please also add some open source art that can be selected from to help DMs get started. group the art into categories and organize it. just overall i want to make things as easy as possible for dms. you must be 100% positive that the art is open source and abide strictly by licenses as we have so far."
 
@@ -49,7 +49,7 @@ Sizes are as the build would encode them (section 8), thumbnails apart.
 | Flat greyscale props (held) | Mark Gosbell | CC0 | Stamps | 50 | 0.1 |
 | Historical art (optional) | AIC and Cleveland open access | CC0 | Handouts, portraits | 47 | 7.3 |
 
-Each pack's evidence (its page, the license in the page's words and in its license file, a Wayback snapshot, the AI check, the credit the author asks for) is in the candidate list, and its contact sheet is in `~/Desktop/screenshots/raccoon-vtt/starter-art/packs/`.
+Each pack's evidence (its page, the license in the page's words and in its license file, a Wayback snapshot, the AI check, the credit the author asks for) is in the candidate list, and its contact sheet is among the contact sheets (kept outside the repository).
 
 ### 3.1 Notes per pack
 
@@ -107,7 +107,7 @@ Unchanged from draft 1. `shared/srd/tokenIcons.ts`, written by a script from the
 
 ## 7. Maps in the app
 
-- **The grid.** Each map in the catalog carries its cell size in pixels, measured on the file as shipped, and feet per cell where the map or post says. A scene made from it starts at that cell size (`mapScene` takes it as it takes a file name's hint today), so it skips grid alignment. A map with no grid opens on Grid, as an upload does.
+- **The grid.** Each map in the catalog carries its cell size in pixels, measured on the file as shipped, and feet per cell where the map or post says. A scene made from it starts at that cell size (`mapScene` takes it as it takes a file name's hint today), so it skips grid alignment. A map with no grid opens on Grid, as an upload does, and so does one whose square size was measured but not where its lines fall (5 of Dyson's), with the box already at that size.
 - **Black and white maps.** Dyson's, Majcher's and the Sine Nomine maps are ink on white. The app's default grid (white, 25%) vanishes on white paper, so the catalog gives these maps a dark grid color and the scene starts with it. The DM's 50% fog turns the paper gray, which reads fine.
 - **Encoding.** Line-art maps ship as 4-level gray PNG at 4096 px on the long side: 7.7 MB for Dyson's 29, against 16.4 MB as WebP, with no visible loss at 1:1 (checked on a crop). Pixel-art maps ship as lossless WebP, since lossy WebP smears pixels. The painted cavern ships as WebP at quality 80. The upload pipeline then makes the room's variants as for any map.
 - **The notes in the margin.** 24 of Dyson's maps carry "SUPPORTED ON PATREON | www.DYSONLOGOS.com" in the margin. They stay: a crop is a change to record, and it moves the grid's origin.
@@ -176,21 +176,24 @@ Per-file caps: a line-art map at most 4096 px and 1 MB, a color map 2.5 MB, toke
 
 Every rejected pack and source, with its reason, is in the candidate list's `rejected` section (draft 1's included).
 
-## 12. Questions for the project owner
+## 12. Decisions
 
-1. **The packs.** Approve them from the contact sheets, dropping any work by its number.
-2. **Dyson Logos (29 maps).** Each post's own words: "For those that want/need a Creative Commons license, it would look something like this: Cartography by Dyson Logos is licensed under a Creative Commons Attribution 4.0 International License". His Commercial Maps page said in 2019 that the maps are "ALSO released under" CC BY 4.0 (https://web.archive.org/web/20190430123109/https://dysonlogos.blog/maps/commercial-maps/), and today gives a custom license that reserves moral rights. A CC BY 4.0 grant cannot be withdrawn, and the app changes the maps only by resizing. Recommended: accept. Without it the starter maps are thin.
-3. **Warlock's Gauntlet.** The license is stated by the project lead for the artists, not by each artist. The 15 shipped stamps from these packs rest on the same statement. Recommended: accept.
-4. **Mark Gosbell's flat greyscale props.** CC0, hand-inked, but flat with no color or shadow, unlike the shipped stamps. They match Dyson's black and white maps. Recommended: ship as their own pack if Dyson is accepted.
-5. **Sine Nomine's Spears of the Dawn maps and figures.** The maps' dedication is read only as quoted on OpenGameArt, and four use Dungeonographer's stock symbols, which belong to Inkwell Ideas. The figures are mixed hands, mostly scenes. Recommended: leave both out.
-6. **Kenney sample maps.** Rendered from Kenney's own map files, which this design counts as a format conversion. Recommended: leave out. Small pixel scenes do little for a D&D table.
-7. **Historical art.** Recommended: keep the 47 as an optional pack, since nothing else covers letters, old maps, treasure and scene paintings.
-8. **The Bestiary's size.** 1024 px (5.4 MB) so a DM can show a monster as a handout, or 512 px (2.1 MB) for tokens only. Recommended: 1024.
-9. **SRD tokens.** Disks colored by creature type, and a separate fix for the dragon turtle's id. Recommended: yes to both.
+The questions of draft 2 are settled as follows, and the build follows them. The "held" marks in section 3 are superseded by this list.
+
+1. **The packs.** 14 packs, 501 works: Dyson Logos maps (29), Scarlet Heroes maps (5), Index Card Dungeons (10), Cavern Battlemap (1), Illustrated Bestiary (60), Cute Heroes and Monsters (64), Dungeon Crawl Stone Soup monsters (61), Lemurs Fantasy Portraits (58), Fantasy RPG Portraits (25), Flare Hero Portraits (10), Warlock's Gauntlet (40), Poly Haven props (41), Mark Gosbell's flat greyscale props (50) and Historical art (47).
+2. **Dyson Logos.** In, under CC BY 4.0 with the credit "Cartography by Dyson Logos". The maps are changed only mechanically.
+3. **Warlock's Gauntlet.** In, on the project lead's statement, as the shipped stamps are.
+4. **Mark Gosbell's flat greyscale props.** In, as a pack of their own.
+5. **Sine Nomine's Spears of the Dawn maps and figures.** Left out.
+6. **Kenney sample maps.** Left out.
+7. **Historical art.** In, as its own pack of 47.
+8. **The Bestiary's size.** 1024 px, so a monster can be shown as a handout.
+9. **SRD tokens.** Every one of the 330 monsters gets a default token, a disk colored by creature type (section 6). The dragon turtle's id is fixed separately, later.
+10. **A starter pick in a room export.** It keeps its starter mark on import only when the importing server's catalog has that work with the same SHA-256. Otherwise it imports as an ordinary upload and counts toward the room's storage.
 
 ## 13. Evidence and checking
 
-- **The candidate list** holds every pack with its evidence and every work with its source, size and grid, plus every rejected source with its reason. It stays outside the repository until the owner approves it, then becomes `scripts/starter-art.json`.
+- **The candidate list** holds every pack with its evidence and every work with its source, size and grid, plus every rejected source with its reason. It stays outside the repository. The decided packs and works, with their evidence, become `scripts/starter-art.json`.
 - **Contact sheets**, one per pack, number every work as the list does. A held pack's title says so.
 - **An independent checker** verifies every pack's license before anything is built. A pack it cannot confirm is dropped, not argued.
 
