@@ -11,6 +11,12 @@
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" />
+    <!-- The interface font (lib/interFont.ts), fetched beside the app's
+         script rather than once its styles are read, so the first text
+         drawn is usually Inter already. Fonts are always fetched with CORS,
+         so a preload without crossorigin would not be reused and the file
+         would come twice. The italic loads when some text needs it. -->
+    <link rel="preload" href="/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin />
     <title>RaccoonVTT</title>
   </head>
   <body>

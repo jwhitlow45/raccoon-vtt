@@ -95,7 +95,8 @@ export const theme = {
   line: { border: 1, strong: 2, stripe: 3 },
   space: (n: number) => n * 4,
   font: {
-    body: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+    /** Inter, bundled (lib/interFont.ts). The system fonts after it draw until it loads, and any character it lacks. */
+    body: 'Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
     mono: 'ui-monospace, "SF Mono", Menlo, monospace',
     /** Tags in dense rows, counters and badges only. Never a sentence. */
     tiny: 11,

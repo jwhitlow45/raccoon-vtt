@@ -1,10 +1,35 @@
-/* Only what inline styles cannot express: the base document, native
-   controls drawn dark, the hidden attribute, focus rings, the tap flash
-   and the disclosure marker, selection, the loading spinner's turn and
-   delay, the "Your turn" notice's keyframes, the interface size's two
-   rules, the room focus keeps under the tracker's sticky header, the HP
-   pair's container query, reduced motion, and the sheet grabber under
-   forced colors. Everything else is inline from lib/theme.ts. */
+/* Only what inline styles cannot express: the interface font's faces, the
+   base document, native controls drawn dark, the hidden attribute, focus
+   rings, the tap flash and the disclosure marker, selection, the loading
+   spinner's turn and delay, the "Your turn" notice's keyframes, the
+   interface size's two rules, the room focus keeps under the tracker's
+   sticky header, the HP pair's container query, reduced motion, and the
+   sheet grabber under forced colors. Everything else is inline from
+   lib/theme.ts. */
+
+/* Inter, the interface font (lib/interFont.ts, which says why one font),
+   from the app's own origin. Each file is variable, so one holds every
+   weight. swap draws text in the next font of the stack at once and again
+   in Inter when the file arrives, so a slow phone never shows blank text.
+   unicode-range is the subset the files keep, so a character outside it
+   goes straight to the system font without waiting for Inter. */
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/InterVariable.woff2") format("woff2");
+  unicode-range: U+0020-007E, U+00A0-017F, U+2000-206F, U+2190-2199, U+2212;
+}
+
+@font-face {
+  font-family: Inter;
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/InterVariable-Italic.woff2") format("woff2");
+  unicode-range: U+0020-007E, U+00A0-017F, U+2000-206F, U+2190-2199, U+2212;
+}
 
 /* Native checkboxes, radios, selects, date fields and scrollbars draw for
    a dark page. Without it an unchecked box is a white square. */
@@ -19,7 +44,7 @@ body,
   height: 100dvh;
   background: #16161a;
   color: #f1efe9;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-text-size-adjust: 100%;
 }
 

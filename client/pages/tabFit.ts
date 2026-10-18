@@ -5,11 +5,10 @@
  * Nothing counts use and nothing moves a tab: the result depends only on
  * the widths measured on this device and the room the row has.
  *
- * Widths are measured, not set per role: the tab font is system-ui, so a
- * title's width differs between macOS, Windows, Android and Linux, and a
- * browser's minimum font size can widen every tab. All widths are in the
- * side panel's own px, which the interface size zooms as a whole, so it
- * cancels out.
+ * Widths are measured, not set per role: the tab font is Inter, but the
+ * system font draws until Inter loads, and a browser's minimum font size
+ * can widen every tab. All widths are in the side panel's own px, which
+ * the interface size zooms as a whole, so it cancels out.
  */
 
 /**
