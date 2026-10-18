@@ -501,6 +501,9 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     const goblin = dmSocket.state!.tokens[run.goblinId]!;
     await tapCell(dm, scene.bounds, { x: goblin.x, y: goblin.y });
     await dm.getByRole("tab", { name: "Token" }).click();
+    // The picture's buttons sit in the panel's Image group, which starts folded (docs/design-v1-token-panel-groups.md 2).
+    const imageGroup = dm.getByRole("tabpanel", { name: "Token" }).getByRole("button", { name: "Image", exact: true });
+    if ((await imageGroup.getAttribute("aria-expanded")) === "false") await imageGroup.click();
     await dm.getByRole("button", { name: "Change image" }).first().click();
     const picker = dm.getByRole("dialog").filter({ has: dm.getByRole("tab", { name: "Icons" }) });
     await picker.getByRole("tab", { name: "Icons", selected: true }).waitFor();

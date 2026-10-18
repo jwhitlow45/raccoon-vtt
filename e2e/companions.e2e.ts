@@ -111,7 +111,8 @@ function bar(page: Page, name: string): Locator {
 }
 
 function tokenPanel(page: Page): Locator {
-  return page.getByRole("tabpanel", { name: "Token" }).or(page.getByRole("region", { name: "Token" }));
+  // Exact, since the panel's Token settings group is a region of its own.
+  return page.getByRole("tabpanel", { name: "Token", exact: true }).or(page.getByRole("region", { name: "Token", exact: true }));
 }
 
 function companionOf(name: string) {

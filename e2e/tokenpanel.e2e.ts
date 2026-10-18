@@ -212,7 +212,15 @@ function bar(page: Page, name: string): Locator {
 
 /** The token's panel: the side panel's Token tab from 900 px up, the Token sheet below. */
 function tokenPanel(page: Page): Locator {
-  return page.getByRole("tabpanel", { name: "Token" }).or(page.getByRole("region", { name: "Token" }));
+  // Exact, since the panel's Token settings group is a region of its own.
+  return page.getByRole("tabpanel", { name: "Token", exact: true }).or(page.getByRole("region", { name: "Token", exact: true }));
+}
+
+/** Opens one of the panel's groups (docs/design-v1-token-panel-groups.md), which Image, Notes and Position start folded. */
+async function openGroup(panel: Locator, name: string): Promise<void> {
+  const fold = panel.getByRole("button", { name, exact: true });
+  if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
+  await waitFor(`${name} open`, async () => ((await fold.getAttribute("aria-expanded")) === "true" ? true : null), 3000);
 }
 
 /**
@@ -589,7 +597,8 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.ok(Math.abs((await rectOf(details)).top - tops[3]!) < 2, "Details sits beside Stat block");
 
     // The two rows: play first, then setup and Delete apart, starting a line of their own.
-    const names = async (row: string) => (await goblin.locator(`[data-bar-row="${row}"] button`).allInnerTexts()).map((t) => t.trim());
+    // By name, since Hidden, Locked and Duplicate show their icon alone to a mouse (docs/design-v1-icons.md 4).
+    const names = async (row: string) => goblin.locator(`[data-bar-row="${row}"] button`).evaluateAll((els) => els.map((el) => (el.getAttribute("aria-label") ?? el.textContent ?? "").trim()));
     // Roll opens the Dice panel's options for the goblin (docs/design-v1-roll-options.md 4.5).
     assert.deepEqual(await names("play"), ["Conditions", "Hidden", "Multi-select", "Roll"]);
     assert.deepEqual(await names("less"), ["Locked", "Duplicate", "Delete"]);
@@ -664,16 +673,16 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.ok(await panel.getByRole("heading", { name: "Goblin Warrior" }).isVisible());
     await shots.take(dm, "tokenpanel-dm-stat-block-beside-bar");
 
-    // From the panel's top, the block's disclosure is within 240 px, with the summary line under it.
+    // From the panel's top, the block's disclosure is within 240 px, with the quick numbers above it under the name (docs/design-v1-token-panel-groups.md 3).
     await panel.evaluate((el) => ((el as unknown as El).scrollTop = 0));
     await settle(panel);
     await dm.waitForTimeout(100);
     const top = (await rectOf(panel)).top;
     const disclosure = await rectOf(panel.getByRole("button", { name: "Stat block", exact: true }));
     assert.ok(disclosure.top - top <= 240, `the stat block starts ${disclosure.top - top} px down the panel`);
-    const summary = await rectOf(panel.locator("[data-stat-block] [data-vitals]"));
-    assert.ok(summary.top >= disclosure.bottom - 1, "the summary line sits under the disclosure");
-    assert.ok((await panel.locator("[data-stat-block] [data-vitals]").innerText()).includes("Passive Perception 9"));
+    const numbers = panel.locator("[data-quick-numbers]");
+    assert.ok((await rectOf(numbers)).bottom <= disclosure.top + 1, "the quick numbers sit under the name, above the block");
+    await numbers.getByRole("img", { name: "Passive Perception 9" }).waitFor();
     assert.equal(await storedFolds(dm), before, "the request wrote the folds");
 
     // Escape hides the bar and keeps the goblin in the panel, focus on the tab. A second lets go.
@@ -691,13 +700,27 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await bar(dm, "Goblin 4").getByRole("button", { name: "Details", exact: true }).click();
     const panel = tokenPanel(dm);
     await panel.getByRole("heading", { name: "Goblin 4" }).waitFor();
-    const headings = (await panel.locator("h3").allInnerTexts()).map((h) => h.trim().toLowerCase());
-    const order = ["goblin 4", "stat block", "hit points", "conditions", "position", "range rings", "notes", "rest", "stats", "token settings", "owners", "remove"];
+    // A folded group's heading holds its summary after its name, so each is read by its first line.
+    const headings = (await panel.locator("h3").allInnerTexts()).map((h) => h.trim().toLowerCase().split("\n")[0]!.trim());
+    const order = ["goblin 4", "stat block", "combat", "hit points", "conditions", "range rings", "rest", "notes", "position", "image", "stats", "token settings", "owners", "remove"];
     const at = order.map((h) => headings.indexOf(h));
     assert.ok(at.every((i) => i >= 0), `missing headings: ${JSON.stringify({ headings })}`);
     for (let i = 1; i < at.length; i++) assert.ok(at[i]! > at[i - 1]!, `out of order: ${headings.join(" | ")}`);
     assert.equal(headings.includes("companion"), false);
-    for (const name of ["Stats", "Token settings", "Owners"]) assert.equal(await panel.getByRole("button", { name, exact: true }).getAttribute("aria-expanded"), "false", `${name} starts open`);
+    for (const name of ["Notes", "Position", "Image", "Stats", "Token settings", "Owners"]) assert.equal(await panel.getByRole("button", { name, exact: true }).getAttribute("aria-expanded"), "false", `${name} starts open`);
+    assert.equal(await panel.getByRole("button", { name: "Combat", exact: true }).getAttribute("aria-expanded"), "true", "Combat starts folded");
+    // A folded group says what it holds on its row, and only while folded.
+    const rowText = async (name: string) => ((await panel.getByRole("button", { name, exact: true }).innerText()) ?? "").replace(/\s+/g, " ").trim();
+    assert.equal(await rowText("Notes"), "Notes None yet");
+    assert.equal(await rowText("Position"), "Position On the ground");
+    assert.equal(await rowText("Combat"), "Combat", "an open group's row has a summary");
+    await panel.getByRole("button", { name: "Combat", exact: true }).click();
+    await panel.getByRole("heading", { name: "Hit points" }).waitFor({ state: "detached" });
+    assert.match(await rowText("Combat"), /^Combat HP 10\/10/);
+    await shots.take(dm, "tokenpanel-dm-combat-folded");
+    await panel.getByRole("button", { name: "Combat", exact: true }).click();
+    await panel.getByRole("heading", { name: "Hit points" }).waitFor();
+    await openGroup(panel, "Image");
 
     // The image row: the preview, then "Change image" and "Add another image" on one line beside it.
     const change = await rectOf(panel.getByRole("button", { name: "Change image", exact: true }));
@@ -754,9 +777,9 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     const thorn = tokenPanel(dm);
     await thorn.getByRole("heading", { name: "Thorn" }).first().waitFor();
     assert.equal(await thorn.getByRole("button", { name: "Stat block", exact: true }).count(), 0);
-    const summary = thorn.locator("[data-vitals]").first();
+    const summary = thorn.locator("[data-quick-numbers]").first();
     await summary.getByRole("img", { name: "Armor Class 16" }).waitFor();
-    assert.equal(await summary.getByRole("link", { name: "Open the sheet ↗" }).getAttribute("href"), SHEET);
+    assert.equal(await summary.getByRole("link", { name: "Open the sheet" }).getAttribute("href"), SHEET);
     assert.ok((await rectOf(summary)).top < (await rectOf(thorn.getByRole("heading", { name: "Hit points" }))).top, "the summary line sits above Hit points");
     await shots.take(dm, "tokenpanel-dm-thorn-summary-line");
     await dm.keyboard.press("Escape");
@@ -845,7 +868,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     const mirePanel = tokenPanel(dm).locator("[data-stat-block]");
     await mirePanel.getByText("This token’s stat block was deleted from this room.").waitFor();
     await mirePanel.getByRole("button", { name: "Detach", exact: true }).waitFor();
-    await mirePanel.getByRole("img", { name: "Armor Class 13" }).waitFor();
+    await tokenPanel(dm).locator("[data-quick-numbers]").getByRole("img", { name: "Armor Class 13" }).waitFor();
     await dm.keyboard.press("Escape");
 
     // An HP-less token: no vitals, no HP entry, no shield.
@@ -985,6 +1008,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     const fold = panel.getByRole("button", { name: "Stat block", exact: true });
     await fold.waitFor();
     // 356 px inside: the preview and both first buttons on one line, and Max and Temp HP on one row.
+    await openGroup(panel, "Image");
     const change = await rectOf(panel.getByRole("button", { name: "Change image", exact: true }));
     const another = await rectOf(panel.getByRole("button", { name: "Add another image", exact: true }));
     assert.ok(Math.abs(change.top - another.top) <= 2 && change.left - (await rectOf(panel)).left >= 48, "the image row takes one line on a phone held upright");
@@ -995,14 +1019,14 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.equal(await fold.getAttribute("aria-expanded"), "false", "the block starts folded on a phone");
     await fold.click();
     await panel.getByRole("heading", { name: "Goblin Warrior" }).waitFor();
-    await dm.getByRole("region", { name: "Token" }).getByRole("button", { name: "Close Token" }).click();
+    await dm.getByRole("region", { name: "Token", exact: true }).getByRole("button", { name: "Close Token" }).click();
     await panel.waitFor({ state: "detached" });
     await dm.keyboard.press("Escape");
     await tapToken(dm, run.dragon.at, 3);
     await bar(dm, "Adult White Dragon").getByRole("button", { name: "Details", exact: true }).click();
     assert.equal(await tokenPanel(dm).getByRole("button", { name: "Stat block", exact: true }).getAttribute("aria-expanded"), "true", "the fold is remembered for the next monster");
     await tokenPanel(dm).getByRole("button", { name: "Stat block", exact: true }).click();
-    await dm.getByRole("region", { name: "Token" }).getByRole("button", { name: "Close Token" }).click();
+    await dm.getByRole("region", { name: "Token", exact: true }).getByRole("button", { name: "Close Token" }).click();
     await dm.keyboard.press("Escape");
 
     // From the bar, Stat block hides it, opens the Token sheet at the block and focuses its disclosure.
@@ -1085,6 +1109,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await shots.take(dm, `tokenpanel-${size.label.replace(/ /g, "")}-stat-block-beside`);
 
       // The image row under the preview, the pair sharing a line exactly where the column holds both.
+      await openGroup(panel, "Image");
       await panel.evaluate((el) => ((el as unknown as El).scrollTop = 0));
       await settle(panel);
       const pair = panel.locator("[data-image-pair]");
@@ -1147,6 +1172,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       const panel = tokenPanel(dm);
       await panel.getByRole("heading", { name: "Goblin Warrior" }).waitFor();
       await goblin.waitFor({ state: "hidden" });
+      await openGroup(panel, "Image");
       await panel.evaluate((el) => ((el as unknown as El).scrollTop = 0));
       await settle(panel);
       const pair = panel.locator("[data-image-pair]");
@@ -1180,6 +1206,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     // The bar cannot stand beside a panel that covers the screen, so Stat block puts it away (docs/design-v1-token-panel.md 3.4).
     assert.equal(await goblin.isVisible(), false, "the bar still shows");
     await shots.take(dm, "tokenpanel-480x320at130-very-short-stat-block");
+    await openGroup(panel, "Image");
     await panel.evaluate((el) => ((el as unknown as El).scrollTop = 0));
     await settle(panel);
     const pair = panel.locator("[data-image-pair]");
@@ -1241,7 +1268,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await thorn.getByRole("img", { name: "Armor Class 16" }).waitFor();
     const text = (await thorn.innerText()).replace(/\s+/g, " ");
     for (const words of ["HP 31/38", "+5", "Speed 30 ft", "Passive Perception 14"]) assert.ok(text.includes(words), `Thorn's bar lacks ${words}`);
-    assert.equal(await thorn.getByRole("link", { name: "Open the sheet ↗" }).getAttribute("href"), SHEET);
+    assert.equal(await thorn.getByRole("link", { name: "Open the sheet" }).getAttribute("href"), SHEET);
     await thorn.getByRole("button", { name: "Details", exact: true }).waitFor();
     assert.equal(await thorn.locator("[data-saves]").count(), 0);
     // Conditions and Multi-select in view as the bar opens, with Size under them (the project owner's answer to W5B-P-2).
