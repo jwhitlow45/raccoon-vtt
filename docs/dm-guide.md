@@ -54,7 +54,7 @@ The app has three parts: the **map** in the middle, the **toolbar** under it, an
 
 ![The DM's screen on a computer: the map, the toolbar under it, and the side panel on the right with the party bar above the tabs.](dm-guide/screen-computer.webp)
 
-- **On a computer** (a window 900 px wide or more), panels are tabs in the side panel on the right. The most used tabs come first, as many as fit, and **More** lists the rest under **In play** and **Prepare**. **Hide panels** at the end of the tabs, or the `S` key, hides the side panel, and **Panels** in the toolbar brings it back. **Two panels**, at the top of More, shows two panels at once, such as Initiative above a token's stats.
+- **On a computer** (a window 900 px wide or more), panels are tabs in the side panel on the right. The most used tabs come first, as many as fit, and **More** lists the rest under **In play** and **Prepare**. **Hide panels** at the end of the tabs, or the `S` key, hides the side panel, and **Panels** in the toolbar brings it back. **Two panels**, at the top of More, shows two panels at once, such as Initiative above a token's stats. Above the tabs, the party bar folds to one line with **Party**: your players' characters with their HP, which scroll sideways when they don't all fit, and **Ask**.
 - **On a phone**, **Panels** in the toolbar opens the list of panels, and each one opens as a sheet from the bottom. Swipe a sheet down to close it. Your setup tools (Add token, Pin, Map builder and Line up grid) sit behind **Setup** in the toolbar.
 
 ![The DM's panel list on a phone, grouped under In play and Prepare.](dm-guide/screen-phone.webp)
@@ -522,7 +522,7 @@ With several tokens selected, the Dice panel offers group rolls: one save or che
 
 ![Request a roll: Dexterity save picked, DC 15, the party's characters as chips under Who rolls, and Send.](dm-guide/request.webp)
 
-Open it with **Ask the party** in the party bar (above the side panel's tabs on a computer, or the **Party** panel on a phone), with **Request a roll** in the action bar of several selected creatures, or from one creature's roll options with **Ask Thorn to roll** on.
+Open it with **Ask the party** in the party bar (above the side panel's tabs on a computer, where it reads **Ask** while the bar is folded, or the **Party** panel on a phone), with **Request a roll** in the action bar of several selected creatures, or from one creature's roll options with **Ask Thorn to roll** on.
 
 1. Pick what to roll: **Save** or **Check** by ability, or a **Skill** (it starts at its usual ability, and **with** changes it). **Or a second choice** lets the creature pick, such as Athletics or Acrobatics.
 2. Type the **DC**, or pick a typical one for a check (5 Very easy to 30 Nearly impossible), or leave it empty.
