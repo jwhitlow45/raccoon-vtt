@@ -1,6 +1,6 @@
 # raccoon-vtt v1: a UI and UX pass on the Dice panel and stat blocks
 
-Status: design draft 1, for review. The prototype is in its own commits on top of this one, so the build can take it over.
+Status: decided by the project owner on 2026-10-17 (section 12) and built. The prototype's commits on top of this one became the build.
 
 The project owner asked for it on 2026-10-17: "please do a ui pass on the stat block and dice pages it's really good but spacing is inconsistent. There's also many elements that are on the next line that don't need to be, like critical and damage rolls. Also for spells that are saves in place of damage they should display the save dc in place of damage. We also don't need to display the damage roll under the button it should just be in the header. A roll animation would also be cool but can be done after these changes. TBH just do a ui ux review to see how space can be saved and the new features can be made more intuitive". Two more passes were folded in the same day: icons across the whole app (docs/design-v1-icons.md) and the Token panel (docs/design-v1-token-panel-groups.md).
 
@@ -29,7 +29,7 @@ Screenshots: `screenshots/dice-ui/audit/` (before, the stacked tip with this pas
 | 11 | The editor leaves a save total alone on a line (LP7-PC-12) | "16 ☐ Proficient Save" then "+4" under it at 375 x 667, 130% | "Save" and its total wrap as one (6.2) |
 | 12 | The group save's "What players see" is a bare summary, the Damage field has no visible name (LP7-PC-10) | `d-groupsave` | The request sheet's fold and words, and a "Damage" label (4.6) |
 | 13 | An answer or a death save leaves the header on an older roll (LP7-DICE-10) | | The header's form with no Again (4.1) |
-| 14 | One request shows as two cards for the DM | A save-ends card and its request's live card both offer Allow and Keep for the same reroll (`d-request-saveends-dm-01`) | Question 3 |
+| 14 | One request shows as two cards for the DM | A save-ends card and its request's live card both offer Allow and Keep for the same reroll (`d-request-saveends-dm-01`) | 7, decided (12.3) |
 | 15 | An empty 53 px band (LP7-CHROME-4) | A stacked phone with no options row keeps a bordered band | Reserved, never painted (3.1 rule 6) |
 | 16 | Icons | Again uses Redo's arrow, Secret has no mark | The icons doc (`again`, `hidden`) |
 
@@ -40,7 +40,7 @@ Findings 1 to 4 are the owner's points 4, 2, 2 and 3. Point 1 (spacing) is secti
 1. **Spacing**: one set of rules (3.1), applied to every surface in scope (4 to 7). Appendix A has the measurements.
 2. **Wrapping**: a row's controls share a line wherever they fit (3.3). Critical, the riders and Damage share the controls line (4.4). At 390 x 844 every weapon row holds Attack, Damage and Critical on one line, and one rider beside them where its words are short.
 3. **Save DC**: "DC 14 Dex, 2d8 radiant" in the row's header, where an attack row reads "+6 to hit, 1d8+3 slashing" (4.4). A save with no damage reads "DC 14 Wis" alone.
-4. **The damage roll under the button**: gone. The result shows once, in the panel's header line (4.1), and the damage formula once, in the row's header (4.4). Question 1 asks whether the row should keep a quiet copy of its own last total.
+4. **The damage roll under the button**: gone. The result shows once, in the panel's header line (4.1), and the damage formula once, in the row's header (4.4). A row keeps no copy of its own last total (decided, 12.1).
 5. **Roll animation**: later. The header line is where it plays, and nothing in this pass moves it (4.7).
 6. **UX review**: section 1.
 
@@ -145,7 +145,7 @@ At 390 x 844 a weapon with no rider is 84 px, from 118, and one with a short rid
 Not designed here. What this pass keeps ready for it:
 
 - **Where**: the header line. Every panel roll lands there, so one animation serves every control. A card animates its own result in place.
-- **How it could work**: while the roll is in flight the total slot shows a die face (a game-icons d20 from the shipped set) turning, and on the answer the faces chips land one by one and the total counts up, within 400 ms after the answer and never delaying it more. A natural 20's face rings once in the accent. CSS transforms and opacity only, no animation loop at rest.
+- **How it could work**: while the roll is in flight the total slot shows a die face turning (which die is for the animation's own design, 12.2), and on the answer the faces chips land one by one and the total counts up, within 400 ms after the answer and never delaying it more. A natural 20's face rings once in the accent. CSS transforms and opacity only, no animation loop at rest.
 - **Never moves layout**: the line is 40 px before, during and after (3.1 rule 4).
 - **Reduced motion**: with `prefers-reduced-motion: reduce`, or Low power on, nothing turns or counts: the result appears at once, as today. The live region speaks at once in every case.
 - **Others' rolls** (toasts, the log) never animate.
@@ -170,12 +170,12 @@ Its own document: docs/design-v1-token-panel-groups.md. In short: AC, speed, Pas
 
 ### 6.3 A monster's block
 
-The SRD's own Markdown, unchanged. Its ability table would read better three across like 6.1, but it is the stat block's text, so it is question 4.
+The SRD's own Markdown, unchanged as stored. The block view reads its ability table (the six-column `| STR | DEX | ... |` table and its one row of scores) into 6.1's grid, three across: the abbreviation, then the score and modifier as the table writes them ("18 (+4)"). A save line in the block's own text stays where it is, so a monster's box has no "Save" line. A table that is not that shape (another column count, a second row) draws as the Markdown table, as today. Decided in 12.4.
 
 ## 7. Cards, toasts and log lines
 
 - **The request card** (`p-request-save-player-01`) keeps its layout: the reminders, Roll with Adv and Dis, the typed total and Send. Its gaps take 3.1's steps.
-- **The DM's live card and the save-ends card**: see finding 14 and question 3.
+- **The DM's live card and the save-ends card**: while a save-ends card holds a request (its reroll asked of the player, or the player's reroll waiting for Allow or Keep), the request's live card folds to its one-line summary, and its fold opens it on a tap. Allow and Keep show once, on the save-ends card. Once the save-ends card lets go, the live card is drawn as it was. Decided in 12.3.
 - **Concentration and recharge cards**: their results stay in place (4.1). Their buttons keep their words (icons doc 3.1 rule 4).
 - **Toasts and log lines of rolls** keep their words (`rollToastText`, `describeEvent`): they are read, not tapped.
 
@@ -224,12 +224,16 @@ Three parts, each its own build with a review, in this order:
 
 The prototype is the starting point of each: its commits are split along the same lines. What the prototype leaves to the build: the relation keys of the folds, the token panel's sheet link, `panelGroups` as a pure function, the tests above, the e2e selectors, and the icons doc's section 4 beyond the action bar.
 
-## 12. Questions for the project owner
+## 12. Decided by the project owner (2026-10-17)
 
-1. **A row's own last result.** Recommended: none, as built. The header line shows every result and stays in view. The alternative keeps a quiet total at the right of the row's header ("17", "9"), one token wide and never a new line, for a player who wants the attack's total after rolling its damage. Either fits point 4.
-2. **The roll animation's die**: a d20 from game-icons.net for every roll, or the die the formula rolls most (a d6 for 8d6)? Recommended: the d20 for d20 rolls and a plain d6 for the rest, both from the shipped set, when the animation is designed.
-3. **Two cards for one save-ends request.** Recommended: while a save-ends card holds a request, its live card folds to its one-line summary, so Allow and Keep show once. The alternative is today's two cards. This changes which card shows, so it is the owner's call.
-4. **The monster block's ability table** three across, as 6.1? Recommended yes, by reading the Markdown's table into the same grid in the block view (no change to the stored text). It touches every SRD block's look, so it waits for a yes.
+The project owner saw the before and after screenshots and took every recommendation.
+
+1. **No row totals.** A row never shows its own last result. The header line shows every result and stays in view.
+2. **The roll animation's die waits for its own design.** Section 4.7's note stands, and the die is chosen there.
+3. **One card for a save-ends request.** While a save-ends card holds a request, its live card folds to its one-line summary, so Allow and Keep show once (7.2).
+4. **The monster block's ability table goes three across**, as 6.1, read from the Markdown's table into the same grid in the block view. The stored text does not change.
+
+The icon pass's two answers are in docs/design-v1-icons.md 10.
 
 ## Appendix A. Measurements
 

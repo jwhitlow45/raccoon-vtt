@@ -1,6 +1,6 @@
 # raccoon-vtt v1: icons across the app
 
-Status: design draft 1, for review. Prototype commits on top of this one show the rules on the Dice panel, the Token panel, the token action bar and the top bar. The rest of section 4 is for the build.
+Status: decided by the project owner on 2026-10-17 (section 10) and built. The prototype's commits showed the rules on the Dice panel, the Token panel, the token action bar and the top bar, and the build carried section 4 across the app.
 
 The project owner asked for it on 2026-10-17: "We should also do a pass of using icons to save space and make the app look better. there's a ton of text right now and i think some well placed icons/replacing some text with icons (which should still show the text on hover) would do a lot for usability/intuitiveness, please go a general ui/ux pass of the entire app in this category." It is part of the dice UI pass (docs/design-v1-dice-ui.md), which cites this document for every icon it uses.
 
@@ -187,7 +187,7 @@ One part, after the dice UI part's Icon.tsx commit (which brings the first Lucid
 
 The side headers build and this one both touch Icon.tsx: whichever lands second rebases onto the other's names, which agree (2.2).
 
-## 10. Questions for the project owner
+## 10. Decided by the project owner (2026-10-17)
 
-1. **Toolbar labels.** Keep the words under the tool icons (recommended: they teach the tools, and the row has room), or drop them on a computer, where tooltips name them? Dropping saves no width, since the toolbar is a fixed row.
-2. **The Menu's rows** take leading icons (rule 3). Recommended yes: it is a list read by scanning. The alternative is words alone, as today.
+1. **The toolbar keeps its labels.** The words under the tool icons stay on every screen: they teach the tools, and dropping them would save no width in a fixed row.
+2. **The Menu's rows take leading icons** (rule 3): Members, Room settings, This device, About and Leave room, each with its icon before its words.

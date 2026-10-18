@@ -1,6 +1,6 @@
 # raccoon-vtt v1: the Token panel grouped by use
 
-Status: design draft 1, for review, with a prototype. Part of the dice UI pass (docs/design-v1-dice-ui.md, which holds the shared rules this document uses: its section 3) and the icon pass (docs/design-v1-icons.md).
+Status: built, with the dice UI pass the project owner took on 2026-10-17 (docs/design-v1-dice-ui.md 12). Part of the dice UI pass (docs/design-v1-dice-ui.md, which holds the shared rules this document uses: its section 3) and the icon pass (docs/design-v1-icons.md).
 
 The project owner, 2026-10-17: "the token panel could also use a pass to cleanup. the ac/speed/passive perception and anything else that goes there should probably go at the top by name/size, the hp/conditions/range rings/rest should probably have their own drop down, as should notes. ill let you come up with exact intricacies but there's a lot there that could be collapsible (though the more used ones should start open)". And then: "not all of those have to be their own collapsible section, they can be grouped for stuff that is combat relevant vs notes".
 
