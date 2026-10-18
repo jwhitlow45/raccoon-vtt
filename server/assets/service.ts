@@ -14,7 +14,7 @@ import { OpenverseSearch, openverseHttp, type OpenverseHttp } from "./openverse.
 import { ImageSearch, httpJson, type HttpJson } from "./serpapi.ts";
 import { IntakeSlots, Semaphore, type SlotLimits } from "./slots.ts";
 import { StarterWorkError, copyHashing, starterCatalog, starterFilePath, starterGrid, type StarterCatalog, type StarterOptions } from "./starter.ts";
-import { addCredit, addUploaders, findRoomAsset, placeAndInsert, toView, uploadedAssetIds } from "./store.ts";
+import { addCredit, addUploaders, findRoomAsset, placeAndInsert, toView, uploadedAssetIds, type AssetRow } from "./store.ts";
 import { tempFile } from "./upload.ts";
 
 /**
@@ -220,11 +220,7 @@ export class AssetService {
     // The types already require one. Checked here too, since a row stored with neither would escape the quota unmarked.
     if (!reservation && !starter) throw new Error("an image is stored against a reservation or as a starter pick");
     const existing = await findRoomAsset(this.pool, input.roomId, input.sha256, input.kind);
-    if (existing) {
-      await addUploaders(this.pool, existing.id, input.uploaderIds);
-      if (input.credit) await addCredit(this.pool, existing.id, input.credit);
-      return withCreated(withHint(toView(existing), input.nameHint), false);
-    }
+    if (existing) return this.#reuse(existing, input);
 
     await sniffImage(input.tempPath);
     await this.assertFreeDisk();
@@ -258,8 +254,11 @@ export class AssetService {
    *
    * The copy is hashed as it is made and must be the catalog's SHA-256: a
    * shipped file that changed must never be stored under its work's mark,
-   * where an export would vouch for it. The answer describes the pick
-   * whether the row was made now or reused, so it never shows a reuse
+   * where an export would vouch for it. A work the room already holds as
+   * this kind is answered from its row, with no copy: its bytes are the
+   * catalog's by their hash, and such a pick spends no hourly budget, so it
+   * must cost the server no file read either. The answer describes the
+   * pick whether the row was made now or reused, so it never shows a reuse
    * (design 11.1).
    */
   async ingestStarter(input: { roomId: string; uploaderIds: readonly string[]; found: FoundWork; kind: StarterKind; background?: boolean }): Promise<StarterResult> {
@@ -267,26 +266,49 @@ export class AssetService {
     // A credit the listing could not read would be stored and then never shown, and the license asks for it.
     const credit = assetCreditSchema.safeParse(starterAssetCredit(input.found));
     if (!credit.success) throw new StarterWorkError(`the credit of starter work ${work.key} does not read as an asset credit`);
+    const sha256 = Buffer.from(work.sha256, "hex");
+    // A work the room holds as this kind already: the row is these bytes, so the shipped file is neither read nor hashed again.
+    const existing = await findRoomAsset(this.pool, input.roomId, sha256, input.kind);
+    const result = existing
+      ? await this.#reuse(existing, { uploaderIds: input.uploaderIds, credit: credit.data })
+      : await this.#copyStarter(input, credit.data);
+    const grid = result.kind === "map" ? starterGrid(work, result.width) : undefined;
+    return { ...result, ...grid, credit: credit.data, starter: work.key, sha256: work.sha256.toLowerCase() };
+  }
+
+  /** A shipped work's file copied to the side, checked against the catalog's hash as it is copied, then ingested as a starter pick. */
+  async #copyStarter(input: { roomId: string; uploaderIds: readonly string[]; found: FoundWork; kind: StarterKind; background?: boolean }, credit: AssetCredit): Promise<UploadResult> {
+    const { work } = input.found;
     const source = starterFilePath(this.starter.root, work.file);
     const temp = tempFile(this.tmpDir, "intake");
     try {
       const digest = await copyHashing(source, temp);
       if (digest.toString("hex") !== work.sha256.toLowerCase()) throw new StarterWorkError(`the shipped file of starter work ${work.key} is not the one the catalog pins`);
-      const result = await this.ingest({
+      return await this.ingest({
         roomId: input.roomId,
         uploaderIds: input.uploaderIds,
         kind: input.kind,
         tempPath: temp,
         sha256: digest,
         starter: work.key,
-        credit: credit.data,
+        credit,
         background: input.background,
       });
-      const grid = result.kind === "map" ? starterGrid(work, result.width) : undefined;
-      return { ...result, ...grid, credit: credit.data, starter: work.key, sha256: work.sha256.toLowerCase() };
     } finally {
       await unlink(temp).catch(() => undefined);
     }
+  }
+
+  /**
+   * The answer for bytes the room holds as this kind already: the uploader
+   * gains the row, so a player keeps read access to what they added, a
+   * credit fills a row that had none, and the answer is built as a new
+   * row's, so it never shows the reuse (design 11.1).
+   */
+  async #reuse(existing: AssetRow, input: { uploaderIds: readonly string[]; credit?: AssetCredit; nameHint?: string }): Promise<UploadResult> {
+    await addUploaders(this.pool, existing.id, input.uploaderIds);
+    if (input.credit) await addCredit(this.pool, existing.id, input.credit);
+    return withCreated(withHint(toView(existing), input.nameHint), false);
   }
 }
 

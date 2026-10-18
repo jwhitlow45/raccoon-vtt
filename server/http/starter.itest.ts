@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import type { FastifyInstance } from "fastify";
@@ -420,6 +420,34 @@ describe("a starter pick", () => {
     assert.equal(handout.statusCode, 200, handout.body);
     assert.notEqual(handout.json().id, a.json().id);
     assert.equal((await rowsOf(roomId)).length, 2);
+  });
+
+  test("a pick of a work the room holds answers from its row, reading no shipped file, exactly as the pick that made it", async () => {
+    const roomId = await room();
+    const dm = auth.allow(roomId, "dm");
+    const first = await pick(app, roomId, dm, { work: "test-pack/inn", kind: "map" });
+    assert.equal(first.statusCode, 200, first.body);
+    assert.deepEqual([first.json().cellPx, first.json().originPx, first.json().sha256], [50, { x: 12, y: 30 }, sha(fixture.files.inn!)]);
+    // With the shipped file gone, a copy would fail as a broken build (500), so a 200 here never read it.
+    const path = join(fixture.root, "starter", "test-pack", "inn.png");
+    await rm(path);
+    try {
+      const player = auth.allow(roomId, "player");
+      const again = await pick(app, roomId, dm, { work: "test-pack/inn", kind: "map" });
+      assert.equal(again.statusCode, 200, again.body);
+      assert.equal(again.body, first.body);
+      assert.deepEqual(await readdir(join(dir, "tmp")), []);
+      // The role rule still comes first: a map the room holds is no more a player's to pick.
+      assert.equal((await pick(app, roomId, player, { work: "test-pack/inn", kind: "map" })).statusCode, 403);
+      // A player's held pick still makes them an uploader of the row, which is their read access to it.
+      const token = await pick(app, roomId, dm, { work: "test-pack/knight", kind: "token" });
+      const theirs = await pick(app, roomId, player, { work: "test-pack/knight", kind: "token" });
+      assert.equal(theirs.body, token.body);
+      const uploaders = await pool.query<{ member_id: string }>("select member_id from asset_uploaders where asset_id = $1", [token.json().id]);
+      assert.ok(uploaders.rows.some((r) => r.member_id === player.memberId));
+    } finally {
+      await writeFile(path, fixture.files.inn!);
+    }
   });
 
   test("an upload of the same bytes the room already holds stays an upload, counted, and the pick answers as a pick", async () => {
