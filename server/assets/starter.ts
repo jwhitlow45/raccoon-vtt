@@ -20,18 +20,21 @@ export type StarterCatalog = { works: ReadonlyMap<string, FoundWork>; root: stri
 export type StarterOptions = { packs: readonly StarterPack[]; root: string };
 
 /**
- * The folder the app's own files are served from: the build's dist/ when
- * there is one, as server/app.ts decides, so a pick copies the very file
- * the Starter tab showed. Else public/, in development and tests, where
- * Vite serves it.
+ * The folder the Starter tab's files come from, so a pick copies the very
+ * file the tab showed. In production that is the build's dist/, which
+ * server/app.ts serves. Anywhere else it is public/: in development Vite
+ * serves public/, and a dist/ left from an older build would hold other
+ * files, or none, so every pick would fail while the tab showed the works.
+ * A built server outside production, as the e2e suite runs, serves dist/,
+ * whose starter files the build copied from public/ unchanged.
  */
-export function shippedRoot(): string {
+export function shippedRoot(production: boolean, exists: (path: string) => boolean = existsSync): string {
   const dist = fileURLToPath(new URL("../../dist/", import.meta.url));
-  return existsSync(dist) ? dist : fileURLToPath(new URL("../../public/", import.meta.url));
+  return production && exists(dist) ? dist : fileURLToPath(new URL("../../public/", import.meta.url));
 }
 
-export function starterCatalog(opts: Partial<StarterOptions> = {}): StarterCatalog {
-  return { works: indexWorks(opts.packs ?? STARTER_PACKS), root: resolve(opts.root ?? shippedRoot()) };
+export function starterCatalog(opts: Partial<StarterOptions> = {}, production = false): StarterCatalog {
+  return { works: indexWorks(opts.packs ?? STARTER_PACKS), root: resolve(opts.root ?? shippedRoot(production)) };
 }
 
 /**

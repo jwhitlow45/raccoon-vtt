@@ -112,7 +112,7 @@ export class AssetService {
     this.hourly = new WindowLimiter(3600_000, opts.now);
     this.egress = opts.egress ?? createEgress(opts.config);
     this.bodyTiming = opts.bodyTiming;
-    this.starter = starterCatalog(opts.starter);
+    this.starter = starterCatalog(opts.starter, opts.config.production);
     const key = opts.config.SERPAPI_KEY;
     this.search = key
       ? new ImageSearch({ pool: opts.pool, apiKey: key, http: opts.serpApiHttp ?? httpJson(this.egress.strict), now: opts.now })

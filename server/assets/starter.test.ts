@@ -4,7 +4,7 @@ import { describe, test } from "node:test";
 import { assetCreditSchema } from "#shared/protocol.ts";
 import { STARTER_KEY, STARTER_KINDS, indexWorks, starterAssetCredit, type StarterPack, type StarterWork } from "#shared/starter.ts";
 import { STARTER_PACKS } from "#shared/starterArt.ts";
-import { StarterWorkError, starterFilePath, starterGrid, workForKind } from "./starter.ts";
+import { StarterWorkError, shippedRoot, starterFilePath, starterGrid, workForKind } from "./starter.ts";
 
 const root = join("/srv", "app", "dist");
 
@@ -59,6 +59,15 @@ describe("a work for a kind", () => {
     assert.equal(workForKind(catalog, "test-pack/knight", "map"), undefined);
     assert.equal(workForKind(catalog, "test-pack/bench", "token"), undefined);
     assert.equal(workForKind(catalog, "test-pack/nope", "token"), undefined);
+  });
+});
+
+describe("where a pick's file is read from", () => {
+  test("is the build's dist in production, and public, where Vite serves the tab, anywhere else, even with a dist left behind", () => {
+    const always = () => true;
+    assert.match(shippedRoot(true, always), /[\\/]dist[\\/]$/);
+    assert.match(shippedRoot(false, always), /[\\/]public[\\/]$/);
+    assert.match(shippedRoot(true, () => false), /[\\/]public[\\/]$/, "production with no build reads public");
   });
 });
 
