@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, pagePoint, reopenRoom, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * A DM running a session from a phone, after the whole-app design pass
@@ -174,7 +174,7 @@ async function setUp(view: { width: number; height: number; scale: number; top?:
   await dmCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: view.top ?? 0, bottom: view.bottom ?? 0, left: view.side ?? 0, right: view.side ?? 0 } });
   await dm.setViewportSize({ width: view.width, height: view.height });
   await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
-  await dm.reload();
+  await reopenRoom(dm);
   await dm.getByRole("status", { name: "Connected" }).first().waitFor();
   await dm.locator(".konvajs-content").first().waitFor();
 }
@@ -370,7 +370,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
       await dm.setViewportSize({ width: view.width, height: view.height });
       await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
-      await dm.reload();
+      await reopenRoom(dm);
       await dm.getByRole("status", { name: "Connected" }).first().waitFor();
       await waitFor(`time up in the band, ${label}`, async () => /Time’s up\s*\+/.test((await band(dm)).timerText) || null, 15_000);
       const b = await band(dm);
@@ -388,7 +388,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await ops.send({ t: "encounter.end" });
     await dm.evaluate(() => localStorage.removeItem("rvtt.uiScale"));
     await dm.setViewportSize({ width: 390, height: 844 });
-    await dm.reload();
+    await reopenRoom(dm);
     await dm.getByRole("status", { name: "Connected" }).first().waitFor();
   });
 

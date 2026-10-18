@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, pagePoint, reopenRoom, Shots, SocketWatch, startServer, tapCell, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * A player on a phone after the visual design pass, from the live play
@@ -108,7 +108,7 @@ function actor(hp = 20) {
 async function setUp(view: { width: number; height: number; scale: number }): Promise<void> {
   await player.setViewportSize({ width: view.width, height: view.height });
   await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
-  await player.reload();
+  await reopenRoom(player);
   await player.getByRole("status", { name: "Connected" }).first().waitFor();
   await player.locator(".konvajs-content").first().waitFor();
 }

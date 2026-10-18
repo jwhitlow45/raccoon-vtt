@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, dragWorld, openSideTab, OpSocket, pagePoint, pickOption, pickTool, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragWorld, openSideTab, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { A5, LETTER, LETTER_WIDE, pdfOf } from "./pdfFixture.ts";
 
 /**
@@ -401,7 +401,7 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         const phone = narrow(size, scale);
         await page.setViewportSize({ width: size.width, height: size.height });
         await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
-        await page.reload();
+        await reopenRoom(page);
         await page.getByRole("status", { name: "Connected" }).first().waitFor();
         const shoot = async (name: string) => {
           if (scale === 1.3) await shots.take(page, `size-${size.name}-130-${name}`);
@@ -579,7 +579,7 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await player.setViewportSize({ width: size.width, height: size.height });
         if (!player.url().startsWith(server.origin)) await player.goto(`${server.origin}/r/${run.roomId}`);
         await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
-        await player.reload();
+        await reopenRoom(player);
         await player.getByRole("status", { name: "Connected" }).first().waitFor();
         const handoutId = randomUUID();
         const title = `A letter, ${label}`;

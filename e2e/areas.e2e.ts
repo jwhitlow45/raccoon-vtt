@@ -8,7 +8,7 @@ import { chromium, type Browser, type BrowserContext, type CDPSession, type Loca
 import type { AreaTemplate, Token } from "../shared/model.ts";
 import { footprintRect } from "../shared/rules/footprint.ts";
 import { cubeCenter } from "../client/features/areas/placement.ts";
-import { ConsoleWatch, dragCells, linuxFontTodo, OpSocket, openSideTab, pagePoint, pickOption, pickTool, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragCells, linuxFontTodo, OpSocket, openSideTab, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * The area tool's From control end to end
@@ -228,7 +228,7 @@ async function setUp(page: Page, cdp: CDPSession, view: { width: number; height:
   await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
   await page.setViewportSize({ width: view.width, height: view.height });
   await page.evaluate((s) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
-  await page.reload();
+  await reopenRoom(page);
   await page.getByRole("status", { name: "Connected" }).first().waitFor();
   await page.locator(".konvajs-content").first().waitFor();
 }

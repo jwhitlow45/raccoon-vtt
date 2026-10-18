@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, reopenRoom, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Stat blocks for player characters end to end (docs/design-v1-pc-stats.md
@@ -208,7 +208,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
   test("1b. at 375 x 667 at 130% each save's word and its total share a line in the editor (LP7-PC-12)", async () => {
     await ana.setViewportSize({ width: 375, height: 667 });
     await ana.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
-    await ana.reload();
+    await reopenRoom(ana);
     await ana.getByRole("status", { name: "Connected" }).first().waitFor();
     await ana.locator(".konvajs-content").first().waitFor();
     await tapCell(ana, BOUNDS, { x: 5, y: 5 });
@@ -233,7 +233,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await sheet.waitFor({ state: "detached" });
     await ana.setViewportSize({ width: 1280, height: 800 });
     await ana.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
-    await ana.reload();
+    await reopenRoom(ana);
     await ana.getByRole("status", { name: "Connected" }).first().waitFor();
     await ana.locator(".konvajs-content").first().waitFor();
   });

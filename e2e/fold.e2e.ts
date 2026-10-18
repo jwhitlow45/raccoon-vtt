@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, pagePoint, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * What floats over a phone's map under a sheet (docs/design-v1-visual.md
@@ -97,7 +97,7 @@ async function setUp(page: Page, cdp: CDPSession, view: { width: number; height:
   await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: view.top ?? 0, bottom: view.bottom ?? 0, left: 0, right: 0 } });
   await page.setViewportSize({ width: view.width, height: view.height });
   await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
-  await page.reload();
+  await reopenRoom(page);
   await page.getByRole("status", { name: "Connected" }).first().waitFor();
   await page.locator(".konvajs-content").first().waitFor();
 }

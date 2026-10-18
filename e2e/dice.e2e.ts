@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
-import { ConsoleWatch, OpSocket, openSideTab, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Dice on the server (docs/design-v1-dice.md 13), on the real server serving
@@ -543,7 +543,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     for (const scale of [1, 1.3]) {
       if (scale !== 1) {
         await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
-        await player.reload();
+        await reopenRoom(player);
         await player.getByRole("status", { name: "Connected" }).first().waitFor();
         await openDicePhone(player);
         await rollWithEnter(player, playerSocket, "1d20+3");
@@ -557,7 +557,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       await shots.take(player, `dice-header-line-column-${Math.round(scale * 100)}`);
     }
     await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
-    await player.reload();
+    await reopenRoom(player);
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
   });
 
@@ -583,7 +583,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       const label = `390 x 844 at ${Math.round(scale * 100)}%`;
       await dm.setViewportSize({ width: 390, height: 844 });
       await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
-      await dm.reload();
+      await reopenRoom(dm);
       await dm.getByRole("status", { name: "Connected" }).first().waitFor();
       await dm.locator(".konvajs-content").first().waitFor();
       await tapCell(dm, bounds, { x: 2.5, y: 2.5 });
@@ -601,7 +601,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     }
     await dm.setViewportSize({ width: 1280, height: 800 });
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
-    await dm.reload();
+    await reopenRoom(dm);
     await dm.getByRole("status", { name: "Connected" }).first().waitFor();
   });
 
@@ -613,7 +613,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       const label = `${width} x ${height} at ${Math.round(scale * 100)}%`;
       await player.setViewportSize({ width, height });
       await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
-      await player.reload();
+      await reopenRoom(player);
       await player.getByRole("status", { name: "Connected" }).first().waitFor();
       await openDicePhone(player);
       const rolls = thornRolls(player);
@@ -640,7 +640,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     await ops!.send({ t: "room.update", settings: { critRule: "rollTwice" } });
     await player.setViewportSize({ width: 390, height: 844 });
     await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
-    await player.reload();
+    await reopenRoom(player);
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
     assert.deepEqual(dmConsole.errors, []);
     assert.deepEqual(playerConsole.errors, []);

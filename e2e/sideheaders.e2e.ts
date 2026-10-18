@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, touchSwipe, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, reopenRoom, Shots, SocketWatch, startServer, touchSwipe, waitFor, type Server } from "./harness.ts";
 
 /**
  * The side panel's compact headers (docs/design-v1-side-headers.md 11.2),
@@ -92,7 +92,7 @@ async function reloadAt(page: Page, scale: number, folded: boolean): Promise<voi
     },
     { s: scale, f: folded },
   );
-  await page.reload();
+  await reopenRoom(page);
   await page.getByRole("status", { name: "Connected" }).first().waitFor();
   await page.locator(".konvajs-content").first().waitFor();
   await tablist(page).getByRole("tab").first().waitFor();

@@ -193,6 +193,20 @@ export async function waitFor<T>(what: string, check: () => T | Promise<T>, time
   }
 }
 
+/**
+ * Opens the page's room again, for a new window or interface size set just
+ * before: a new navigation, never `page.reload()`. A resize can open a
+ * sheet, and its Back entry (client/lib/backClose.ts), pushed as the reload
+ * starts, can end up on the room's own history entry. The reloaded room
+ * finds that entry marked and steps back off it, out of the room: to Home
+ * for a DM who made the room there, or to the page a player came from, and
+ * "Connected" never shows. A new navigation starts on an entry of its own,
+ * with no mark. A test of what a reload keeps still reloads.
+ */
+export async function reopenRoom(page: Page): Promise<void> {
+  await page.goto(page.url());
+}
+
 type Json = Record<string, unknown>;
 
 /**

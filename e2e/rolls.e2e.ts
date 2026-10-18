@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pickTool, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, pickTool, reopenRoom, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * Roll requests on phones (docs/design-v1-visual.md 3.3.1): the real
@@ -366,7 +366,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
   test("7. at 667 x 375 at 115% the card across the screen folds beside the right-hand sheet into a summary that closes it", async () => {
     await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.15"));
     await player.setViewportSize({ width: 667, height: 375 });
-    await player.reload();
+    await reopenRoom(player);
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
     await ask("save", "wis");
     // With its roll row the card's answer block no longer fits under the top bars here, so the card starts folded behind
@@ -391,7 +391,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await closeAll();
     await player.evaluate(() => localStorage.removeItem("rvtt.uiScale"));
     await player.setViewportSize(PHONE);
-    await player.reload();
+    await reopenRoom(player);
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
   });
 

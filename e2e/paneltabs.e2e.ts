@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, linuxFontTodo, openSideTab, OpSocket, pagePoint, Shots, sideTabName, SocketWatch, startServer, tapCell, Touches, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, linuxFontTodo, openSideTab, OpSocket, pagePoint, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, Touches, waitFor, type Server } from "./harness.ts";
 
 /**
  * The side panel's tabs in one row with a grouped More menu
@@ -101,7 +101,7 @@ async function reloadAt(page: Page, scale: number, sidePanel: "keep" | "clear" =
     },
     { s: scale, clear: sidePanel === "clear" },
   );
-  await page.reload();
+  await reopenRoom(page);
   await page.getByRole("status", { name: "Connected" }).first().waitFor();
   await page.locator(".konvajs-content").first().waitFor();
   await page.waitForTimeout(300);

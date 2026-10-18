@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * The shortcut sheet (docs/design-v1-dm-tools.md 3.14): the keys, then on
@@ -178,7 +178,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
   test("3b. on a 320 px phone at 130%, the sheet scrolls only down: a key's note wraps under its keycap", async () => {
     await player.setViewportSize({ width: 320, height: 568 });
     await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
-    await player.reload();
+    await reopenRoom(player);
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
     await player.locator('button[title="Panels"]').click();
     await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
@@ -199,7 +199,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await sheet.waitFor({ state: "detached" });
     await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
     await player.setViewportSize({ width: 390, height: 844 });
-    await player.reload();
+    await reopenRoom(player);
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
   });
 
