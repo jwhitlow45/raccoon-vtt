@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { bonusFor, type D20Test, type NamedRoll } from "#shared/dice/bonus.ts";
 import { critRuleOf } from "#shared/dice/crit.ts";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type RoomState, type SkillKey } from "#shared/model.ts";
+import { playersTypeTotals } from "#shared/permissions.ts";
 import { playersToken } from "#shared/project.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { pcSlots } from "#shared/rules/pcStats.ts";
@@ -479,8 +480,9 @@ function InitiativeCell(props: { ctx: Ctx; bonus: number; bonusText: string }) {
   const changed = useInitiativeChanged(tag);
   const state = ctx.dice.view;
   const entry = initiativeRow(state, ctx.creature);
-  const score = entry ? scoreOf(state, ctx.creature) : null;
   const dm = ctx.dice.you.role === "dm";
+  // A score set without a roll is a typed value to the server, which a player's room may have off (shared/permissions.ts playersTypeTotals).
+  const score = entry && (dm || playersTypeTotals(state.meta.settings)) ? scoreOf(state, ctx.creature) : null;
   const test: D20Test = { kind: "initiative" };
   const preset = presetFor(ctx.dice, ctx.creature, test, { rolls: ctx.rolls });
   const roll = () => {

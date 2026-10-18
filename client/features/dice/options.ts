@@ -262,12 +262,14 @@ const clampInit = (n: number) => Math.max(-50, Math.min(100, n));
  * goes: `encounter.setValue` for a player's own row and `encounter.setValues`
  * for the DM. Only while the row still holds the value it had at the tap,
  * so a value typed meanwhile is never overwritten. Null when it changed.
+ * A player's names the roll's tag, so the server takes it while the room
+ * has typed totals off (shared/permissions.ts rolledInitiative).
  */
-export function initiativeOp(state: RoomState, entryId: string, before: number | null, value: number, dm: boolean): ClientOp | null {
+export function initiativeOp(state: RoomState, entryId: string, before: number | null, value: number, dm: boolean, roll?: string): ClientOp | null {
   const row = state.encounter?.entries.find((e) => e.id === entryId);
   if (!row || row.value !== before) return null;
   const v = clampInit(value);
-  return dm ? { t: "encounter.setValues", values: [{ entryId, value: v }] } : { t: "encounter.setValue", entryId, value: v };
+  return dm ? { t: "encounter.setValues", values: [{ entryId, value: v }] } : { t: "encounter.setValue", entryId, value: v, ...(roll !== undefined ? { roll } : {}) };
 }
 
 // ------------------------------------------------------------ named rolls

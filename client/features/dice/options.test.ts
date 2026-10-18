@@ -106,6 +106,8 @@ describe("initiative", () => {
     assert.equal(initiativeOp(state, "e-gob", null, 15, true), null, "typed meanwhile");
     assert.equal(initiativeOp(state, "gone", null, 15, true), null);
     assert.deepEqual(initiativeOp(state, "e-bree", null, 140, false), { t: "encounter.setValue", entryId: "e-bree", value: 100 }, "clamped as a typed value is");
+    assert.deepEqual(initiativeOp(state, "e-bree", null, 17, false, "t1"), { t: "encounter.setValue", entryId: "e-bree", value: 17, roll: "t1" }, "a player's names its roll, for a room with typed totals off");
+    assert.deepEqual(initiativeOp(state, "e-gob", 7, 15, true, "t1"), { t: "encounter.setValues", values: [{ entryId: "e-gob", value: 15 }] }, "the DM's needs none");
   });
 
   test("a token of a character finds the character's row, and a room using scores gives a monster its score", () => {

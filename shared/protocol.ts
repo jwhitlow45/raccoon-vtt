@@ -1450,7 +1450,12 @@ export const clientOps = [
   op("encounter.end", {}),
   op("encounter.add", { entries: z.array(entryInput).min(1).max(MAX_ENTRIES_PER_OP) }),
   op("encounter.remove", { entryIds: z.array(id).min(1).max(MAX_ENTRIES_PER_OP) }),
-  op("encounter.setValue", { entryId: id, value: z.number().int().min(-50).max(100).nullable() }),
+  /**
+   * `roll` is the tag of the dice line a rolled value came from. While the
+   * room has typed totals off, a player's value must be that roll's total
+   * (shared/permissions.ts rolledInitiative). The reducer ignores it.
+   */
+  op("encounter.setValue", { entryId: id, value: z.number().int().min(-50).max(100).nullable(), roll: id.optional() }),
   op("encounter.setValues", {
     values: z.array(z.strictObject({ entryId: id, value: z.number().int().min(-50).max(100).nullable() })).min(1).max(MAX_ENTRIES_PER_OP),
   }),

@@ -14,6 +14,7 @@ import type { Point } from "./rules/geom.ts";
 import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY } from "./rules/movement.ts";
 import { OWNER_SIZES, resizeRefusal } from "./rules/resize.ts";
 import { turnMovedOn } from "./rules/initiative.ts";
+import { entryMatchesAnchor } from "./rules/durations.ts";
 import { EXHAUSTION_MAX_LEVEL, levelFits } from "./srd/conditions.ts";
 
 /**
@@ -654,7 +655,10 @@ function forPlayer(op: Op, c: Check): Decision {
     case "encounter.setValue": {
       const entry = c.visibleEntry(op.entryId);
       if (!entry) return GONE;
-      return c.ownsEntry(entry) ? OK : NOT_YOURS;
+      if (!c.ownsEntry(entry)) return NOT_YOURS;
+      // Clearing the value types no number, so it goes either way.
+      if (op.value !== null && !playersTypeTotals(c.state.meta.settings) && !rolledInitiative(c.state, c.actor.memberId, entry, op)) return refuse("forbidden", NO_TYPED_INITIATIVE);
+      return OK;
     }
     case "encounter.update": {
       // A player marks their own creature's Reaction spent, as when a readied action fires (features section 10). Every other row flag is the DM's.
@@ -788,6 +792,29 @@ export function playersTypeTotals(settings: Partial<Pick<RoomSettings, "playersT
 
 /** The refusal of a player's typed total while the room has them off. */
 export const NO_TYPED_TOTALS = "The DM has turned off typed totals in this room. Tap Roll instead.";
+/** The refusal of a player's typed initiative while the room has typed totals off. */
+export const NO_TYPED_INITIATIVE = "The DM has turned off typed totals in this room. Roll your initiative instead.";
+
+/**
+ * Whether a player's initiative value is the total of their own roll for
+ * that row's creature: a `dice` line of theirs under the tag the value
+ * names, with a roll for the row's creature (its token or its character)
+ * whose total, kept within the row's -50 to 100, is the value. The line is
+ * in the log every viewer of it reads, so its formula stays in plain view.
+ */
+function rolledInitiative(state: RoomState, memberId: string, entry: InitEntry, op: OpOf<"encounter.setValue">): boolean {
+  if (op.roll === undefined) return false;
+  for (let i = state.log.length - 1; i >= 0; i--) {
+    const data = state.log[i]!.data;
+    if (data?.type !== "dice" || data.tag !== op.roll || data.by !== memberId) continue;
+    const ok = data.rolls.some((r) => {
+      const creature = r.tokenId !== undefined ? { tokenId: r.tokenId } : r.characterId !== undefined ? { characterId: r.characterId } : null;
+      return creature !== null && entryMatchesAnchor(state, entry, creature) && Math.max(-50, Math.min(100, r.total)) === op.value;
+    });
+    if (ok) return true;
+  }
+  return false;
+}
 
 /**
  * The refusal of a live answer without its tag, the DM's or a player's

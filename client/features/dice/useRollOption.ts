@@ -205,7 +205,7 @@ export function watchInitiative(env: InitiativeEnv, tag: string, at: { entryId: 
     // After the answer that settled it is done, since that answer arrives inside the store's own update.
     queueMicrotask(() => {
       const view = env.view();
-      const op = view ? initiativeOp(view, at.entryId, at.before, total, env.dm) : null;
+      const op = view ? initiativeOp(view, at.entryId, at.before, total, env.dm, tag) : null;
       if (op) env.dispatch(op);
       else env.store.setState((s) => ({ acted: { ...s.acted, [`${tag}:changed`]: true } }));
     });

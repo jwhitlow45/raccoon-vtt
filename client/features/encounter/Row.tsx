@@ -1,5 +1,6 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject } from "react";
 import type { Effect, InitEntry, Token } from "#shared/model.ts";
+import { playersTypeTotals } from "#shared/permissions.ts";
 import { playerPlays, type ProjectedActor } from "#shared/project.ts";
 import { hpLess, shownLife } from "#shared/rules/hp.ts";
 import { rowCharacter } from "#shared/rules/initiative.ts";
@@ -76,6 +77,8 @@ export function EntryRow(props: {
 }) {
   const { entry, active, role, mine } = props;
   const dm = role === "dm";
+  // With typed totals off a player rolls their initiative and never types it (shared/permissions.ts playersTypeTotals).
+  const typeTotals = useRoomView((s) => playersTypeTotals(s.view?.meta.settings ?? {}));
   const name = useRoomView((s) => (s.view ? entryName(s.view, entry) : ""));
   const token = useRoomView((s) => (entry.tokenId !== undefined ? s.view?.tokens[entry.tokenId] : undefined));
   const characterId = entry.characterId ?? (token && "ref" in token.actor ? token.actor.ref : undefined);
@@ -244,7 +247,7 @@ export function EntryRow(props: {
             </span>
           </span>
         </button>
-        <ValueBox entry={entry} name={name} editable={dm || mine} roll={rollBeside ? rollButton : null} />
+        <ValueBox entry={entry} name={name} editable={dm || (mine && typeTotals)} roll={rollBeside ? rollButton : null} />
         {dm || mine ? (
           // A disclosure: open shows in aria-expanded and the pressed look, never aria-pressed.
           <IconButton icon="more" label={`${name} options`} onClick={props.onExpand} pressed={props.expanded} aria-pressed={undefined} aria-expanded={props.expanded} />
