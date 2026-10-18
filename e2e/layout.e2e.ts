@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickTool, readCamera, reopenRoom, Shots, sideTabName, SocketWatch, startServer, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickTool, readCamera, Shots, sideTabName, SocketWatch, startServer, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * Layout and hierarchy (docs/design-v1-layout-hierarchy.md section 10):
@@ -73,7 +73,7 @@ async function view(page: Page, cdp: CDPSession, size: { width: number; height: 
 async function reloadAt(page: Page, scale: number): Promise<void> {
   const now = await page.evaluate(() => localStorage.getItem("rvtt.uiScale"));
   if (now !== String(scale)) await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
-  await reopenRoom(page);
+  await page.reload();
   await page.getByRole("status", { name: "Connected" }).first().waitFor();
   await page.locator(".konvajs-content").first().waitFor();
   await page.waitForTimeout(300);
