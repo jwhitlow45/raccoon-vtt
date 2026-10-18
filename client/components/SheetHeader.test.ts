@@ -31,3 +31,25 @@ describe("Hide's icon", () => {
     assert.equal(svg(button), icon("collapsePanel"));
   });
 });
+
+/*
+ * A subpage in a side panel pane sits under the tab row or the bar, which
+ * name its panel, so its header takes a header row's 44 px and a pane
+ * title's 16 px rather than a sheet's 56 and 18
+ * (docs/design-v1-side-headers.md 3.3).
+ */
+describe("a compact header", () => {
+  const header = (compact: boolean) => renderToStaticMarkup(createElement(SheetHeader, { title: "Members", compact, back: { label: "Back to Menu", onBack() {} } }));
+
+  test("is one 44 px row with the title at 16 px", () => {
+    const markup = header(true);
+    assert.match(markup, /^<header style="[^"]*min-height:44px/);
+    assert.match(markup, /<h2[^>]*font-size:16px/);
+  });
+
+  test("a sheet's header keeps 56 px and 18 px", () => {
+    const markup = header(false);
+    assert.match(markup, /^<header style="[^"]*min-height:56px/);
+    assert.match(markup, /<h2[^>]*font-size:18px/);
+  });
+});
