@@ -76,6 +76,12 @@ export const SETTING_GROUPS: SettingGroup[] = [
       },
       {
         kind: "toggle",
+        key: "playersTypeTotals",
+        label: "Players may type their roll totals",
+        help: "Players may answer a roll you ask for, or set their initiative, with a total they rolled at the table. Off, they tap Roll and the app rolls for them. On by default.",
+      },
+      {
+        kind: "toggle",
         key: "pcHpVisibleToParty",
         label: "Players see the party's HP",
         help: "Every player sees the exact HP of the other player characters. Off shows them only Healthy, Bloodied or Dying.",
@@ -147,12 +153,6 @@ export const SETTING_GROUPS: SettingGroup[] = [
           { value: "doubleDice", label: "Double the dice rolled", help: "The dice roll once and count twice: (2d6 × 2) + 3." },
           { value: "doubleTotal", label: "Double the total", help: "The whole damage counts twice: (2d6 + 3) × 2." },
         ],
-      },
-      {
-        kind: "toggle",
-        key: "playersTypeTotals",
-        label: "Players may type their roll totals",
-        help: "Players may answer a roll you ask for, or set their initiative, with a total they rolled at the table. Off, they tap Roll and the app rolls for them. On by default.",
       },
       {
         kind: "seconds",
