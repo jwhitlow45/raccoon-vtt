@@ -14,7 +14,7 @@ import { endFinding, type FoundNote, type GridToolState } from "./store.ts";
  * no grid is said. Import and Find the grid share it.
  */
 
-type GridScene = Pick<Scene, "id" | "bounds" | "autoWalls"> & { map: SceneMap };
+type GridScene = Pick<Scene, "id" | "bounds" | "gridFromFile"> & { map: SceneMap };
 type Gesture = Pick<RoomActions, "dispatch" | "newId">;
 
 /**

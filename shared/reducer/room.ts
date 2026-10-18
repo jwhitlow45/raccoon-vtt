@@ -143,6 +143,7 @@ export function sceneCreate(tx: Tx, op: OpOf<"scene.create">): void {
     // Only fog remembers what the party explored (docs/design-v1-maps-vision.md 4.3.1).
     if (input.vision.on && input.fogEnabled === undefined) scene.fogEnabled = true;
   }
+  if (input.gridFromFile) scene.gridFromFile = true;
   tx.write(keys.scene(scene.id), scene);
 }
 

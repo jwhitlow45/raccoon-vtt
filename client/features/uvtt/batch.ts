@@ -66,7 +66,8 @@ export function placeMap(plan: Pick<ImportPlan, "frame" | "pixelsPerGrid">, uplo
 /**
  * The new scene. It walls nothing by itself (`autoWalls: "off"`), since the
  * file brings its walls, and the reducer never infers the rule, so the op
- * says it. Fog follows "Start under fog".
+ * says it. Its grid is the file's, exact, which the scene keeps a mark of
+ * (`gridFromFile`) for Find the grid. Fog follows "Start under fog".
  */
 export function importScene(plan: Pick<ImportPlan, "frame">, map: SceneMap, choices: SceneChoices): SceneInput {
   return {
@@ -78,6 +79,7 @@ export function importScene(plan: Pick<ImportPlan, "frame">, map: SceneMap, choi
     fogEnabled: choices.fog,
     map,
     autoWalls: "off",
+    gridFromFile: true,
     ...BLOCKS_MOVES,
     // The light level for when the DM turns party vision on (docs/design-v1-maps-vision.md 4.3.8). Vision itself stays off.
     ...(choices.light ? { vision: { on: false, light: choices.light } } : {}),

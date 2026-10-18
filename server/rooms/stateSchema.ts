@@ -135,6 +135,8 @@ const scene = z
     // Backups from before wave 4 have neither, which reads as off (docs/design-v1-maps-vision.md 2.3).
     blockMovement: z.boolean().optional(),
     vision: mapSchemas.sceneVision.optional(),
+    // Backups from before schema version 13 have none, and their imports keep the older sign (Scene.gridFromFile).
+    gridFromFile: z.literal(true).optional(),
   })
   .refine(
     (s) =>

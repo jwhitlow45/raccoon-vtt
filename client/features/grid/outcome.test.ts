@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
-import type { SceneMap } from "#shared/model.ts";
-import type { ClientOp } from "#shared/protocol.ts";
+import type { Scene, SceneMap } from "#shared/model.ts";
+import type { ClientOp, Op } from "#shared/protocol.ts";
+import { apply, room as roomState } from "#shared/testutil.ts";
+import { mapScene } from "../scenes/create.ts";
+import { importScene, placeMap } from "../uvtt/batch.ts";
 import type { AxisFit, GridDetection } from "./detect.ts";
 import { calibrationFromBox, nudgeBox, sameCalibration } from "./calibrate.ts";
-import type { SearchAnswer, SearchRequest, SearchWorker, Timers } from "./findGrid.ts";
+import { cameWithGrid, type SearchAnswer, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
 import { applyGrid, boxAround, findOnScene, gridOps, middleOf, showOutcome } from "./outcome.ts";
 import { boxCalibration, endFinding, type GridToolState } from "./store.ts";
 import { rng } from "./synthetic.ts";
+
+type GridScene = Pick<Scene, "id" | "bounds" | "gridFromFile"> & { map: SceneMap };
 
 // A 1400 x 1000 map made with today's first guess: 47 px squares from the corner.
 const MAP: SceneMap = { assetId: "a1", widthPx: 1400, heightPx: 1000, cellPx: 47, originPx: { x: 0, y: 0 } };
@@ -131,7 +136,7 @@ describe("Find the grid", () => {
     const { sent, actions, store } = room();
     const worker = new AnsweringWorker();
     // The file's grid: 70.5 px squares, the first whole one starting before the image.
-    const uvtt = { ...SCENE, autoWalls: "off" as const, map: { ...MAP, cellPx: 70.5, originPx: { x: -50, y: -35 } } };
+    const uvtt = { ...SCENE, gridFromFile: true as const, map: { ...MAP, cellPx: 70.5, originPx: { x: -50, y: -35 } } };
     const running = findOnScene({ actions, store, sceneId: "s1", scene: () => uvtt, urls: ["/m"], makeWorker: () => worker });
     worker.answer({ t: "done", result: DETECTED, width: 700, height: 500 });
     await running;
@@ -448,5 +453,57 @@ describe("a search the DM works around", () => {
         `run ${run}: every Worker ended once`,
       );
     }
+  });
+});
+
+describe("where a scene came from", () => {
+  /** A scene made and changed by the room's own reducer, as the room would hold it. */
+  function held(ops: Op[]): GridScene {
+    let state = roomState();
+    for (const op of ops) state = apply(state, op);
+    const made = Object.values(state.scenes).find((s) => s.id === "made");
+    assert.ok(made?.map);
+    return { ...made, map: made.map };
+  }
+
+  async function find(scene: GridScene) {
+    const live = { sent: [] as ClientOp[], store: createStore<GridToolState>(() => ({ box: null, drag: null, fitScene: true, sceneId: null, found: null, finding: null })) };
+    const actions = { dispatch: (op: ClientOp) => live.sent.push(op), newId: () => "g1" };
+    const worker = new AnsweringWorker();
+    const running = findOnScene({ actions, store: live.store, sceneId: "made", scene: () => scene, urls: ["/m"], makeWorker: () => worker });
+    // Decoded at half the map's size, as a phone copy is.
+    worker.answer({ t: "done", result: DETECTED, width: scene.map.widthPx / 2, height: scene.map.heightPx / 2 });
+    await running;
+    return { sent: live.sent, found: live.store.getState().found };
+  }
+
+  test("a Universal VTT scene keeps its protection after Automatic walls goes from Off to Floor", async () => {
+    // A file's 20 by 14 squares of 70 px from the image's corner, as the import places them.
+    const plan = { frame: { shift: { x: 0, y: 0 }, image: { x: 0, y: 0 }, w: 20, h: 14 }, pixelsPerGrid: 70 };
+    const map = placeMap(plan, { assetId: "a1", width: 1400, height: 1000, fileImageWidth: 1400 });
+    assert.ok(map);
+    const scene = held([
+      { t: "scene.create", scene: importScene(plan, map, { id: "made", name: "Crypt", fog: true }) },
+      { t: "scene.update", sceneId: "made", patch: { autoWalls: "floor" } },
+    ]);
+    assert.equal(scene.gridFromFile, true);
+    assert.equal(cameWithGrid(scene), true);
+    const { sent, found } = await find(scene);
+    assert.deepEqual(sent, [], "a sure find is only offered");
+    assert.equal(found?.outcome, "offered");
+    assert.equal(found?.ownGrid, true);
+  });
+
+  test("an ordinary map with automatic walls off is searched and applied as usual", async () => {
+    const { scene: input } = mapScene({ id: "made", name: "Tavern", asset: { id: "a1", width: 1400, height: 1000 } });
+    const scene = held([
+      { t: "scene.create", scene: input },
+      { t: "scene.update", sceneId: "made", patch: { autoWalls: "off" } },
+    ]);
+    assert.equal(scene.gridFromFile, undefined);
+    assert.equal(cameWithGrid(scene), false);
+    const { sent, found } = await find(scene);
+    assert.deepEqual(sent[0], { t: "scene.setGrid", sceneId: "made", cellPx: 70, originPx: { x: 20, y: 35 } });
+    assert.equal(found?.outcome, "applied");
   });
 });

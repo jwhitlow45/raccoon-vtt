@@ -305,6 +305,15 @@ export type Scene = {
   blockMovement?: boolean;
   /** Party vision and the scene's light level (section 4.3). Absent reads as off. */
   vision?: SceneVision;
+  /**
+   * DM only. The scene's grid came exact with its file, a Universal VTT
+   * import's, and its walls stand in that grid's squares, so Find the grid
+   * only offers what it finds there (docs/design-v1-grid-detect.md section
+   * 6). Only `scene.create` sets it, and nothing clears it. A scene
+   * imported before it existed lacks it, and a first grid line before the
+   * image, which only the import makes, stands in for it.
+   */
+  gridFromFile?: true;
 };
 
 /** How lit a scene is where no light reaches (section 4.3.2). */

@@ -493,9 +493,9 @@ describe("wave 7's one bump: op version 7 and snapshot version 11 (docs/design-v
 });
 
 describe("the order setting's bump: op version 8 and snapshot version 12 (docs/design-v1-combat-flow.md 11.4)", () => {
-  test("is the version now, and both steps return what they are given", () => {
-    assert.equal(OP_VERSION, 8);
-    assert.equal(SNAPSHOT_VERSION, 12);
+  test("is reached, and both steps return what they are given", () => {
+    assert.ok(OP_VERSION >= 8);
+    assert.ok(SNAPSHOT_VERSION >= 12);
     const ops: unknown[] = [
       { t: "encounter.next" },
       { t: "dice.roll", tag: "t1", to: "dm", rolls: [{ formula: "1d20+2", label: "Initiative", creature: { tokenId: "g1" } }] },
@@ -517,5 +517,25 @@ describe("the order setting's bump: op version 8 and snapshot version 12 (docs/d
   test("a version 8 op and a version 12 snapshot never migrate down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 8, 7, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 12, 11, snapshotMigrations), /down/);
+  });
+});
+
+describe("the Universal VTT mark's bump: op version 9 and snapshot version 13 (docs/design-v1-grid-detect.md section 6)", () => {
+  test("is the version now, and both steps return what they are given", () => {
+    assert.equal(OP_VERSION, 9);
+    assert.equal(SNAPSHOT_VERSION, 13);
+    const ops: unknown[] = [
+      { t: "scene.create", scene: { id: "s3", name: "Crypt", bounds: { w: 10, h: 10 }, autoWalls: "off" } },
+      { t: "encounter.next" },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 8, 9, opMigrations), op);
+    const state = room();
+    assert.equal(runMigrations(state, 12, 13, snapshotMigrations), state);
+    assert.deepEqual(migrateOp({ t: "log.chat", text: "hi" }, 4), { t: "log.chat", text: "hi" });
+  });
+
+  test("a version 9 op and a version 13 snapshot never migrate down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 9, 8, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 13, 12, snapshotMigrations), /down/);
   });
 });

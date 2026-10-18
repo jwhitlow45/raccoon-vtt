@@ -62,9 +62,9 @@ describe("what a found grid becomes", () => {
 
   test("a scene that came with its own grid, from a Universal VTT file, is only offered a find, however sure", () => {
     const corner = { originPx: { x: 0, y: 0 } };
-    assert.equal(cameWithGrid({ autoWalls: "off", map: corner }), true, "the import turns automatic walls off");
-    assert.equal(cameWithGrid({ autoWalls: "floor", map: { originPx: { x: -25, y: 0 } } }), true, "only the import puts the first line before the image");
-    assert.equal(cameWithGrid({ autoWalls: "floor", map: corner }), false);
+    assert.equal(cameWithGrid({ gridFromFile: true, map: corner }), true, "the import marks its scene");
+    assert.equal(cameWithGrid({ map: { originPx: { x: -25, y: 0 } } }), true, "an import from before the mark: only the import puts the first line before the image");
+    assert.equal(cameWithGrid({ map: corner }), false);
     assert.equal(cameWithGrid({ map: { originPx: { x: 12, y: 30 } } }), false);
     const sure = { tier: "high", cal: { cellPx: 50, originPx: { x: 0, y: 0 } } } as const;
     assert.deepEqual(findFound(sure, true), { ...sure, tier: "medium" });

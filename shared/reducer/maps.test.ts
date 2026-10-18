@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { chunkKey, keys } from "../keys.ts";
 import { checkLimits, LIMITS } from "../limits.ts";
 import type { FreeWall, Light, RoomState, Scene, Stamp } from "../model.ts";
-import type { Op, StampInput } from "../protocol.ts";
+import { clientOpSchema, type Op, type StampInput } from "../protocol.ts";
 import { hashValue } from "../project.ts";
 import { applyOp, type Applied } from "../reducer.ts";
 import { DM, actor, apply, comparable, drawing, effect, env, refused, room, scene, template, token } from "../testutil.ts";
@@ -203,6 +203,17 @@ describe("automatic walls and thumbnails on a scene", () => {
     assert.equal(made.scenes.s3!.folder, "Act 1");
     const plain = apply(room(), { t: "scene.create", scene: { id: "s3", name: "Crypt", bounds: { w: 10, h: 10 }, map: { assetId: "m1", widthPx: 100, heightPx: 100, cellPx: 10, originPx: { x: 0, y: 0 } } } });
     assert.equal("autoWalls" in plain.scenes.s3!, false);
+  });
+
+  test("a Universal VTT import's mark comes only with the scene, and stays through a change of its walls rule", () => {
+    let state = apply(room(), { t: "scene.create", scene: { id: "s3", name: "Crypt", bounds: { w: 10, h: 10 }, autoWalls: "off", gridFromFile: true } });
+    assert.equal(state.scenes.s3!.gridFromFile, true);
+    state = apply(state, { t: "scene.update", sceneId: "s3", patch: { autoWalls: "floor" } });
+    assert.equal(state.scenes.s3!.gridFromFile, true);
+    assert.equal(clientOpSchema.safeParse({ t: "scene.update", sceneId: "s3", patch: { gridFromFile: true } }).success, false, "no patch sets it");
+    assert.equal(clientOpSchema.safeParse({ t: "scene.create", scene: { id: "s4", name: "Crypt", bounds: { w: 10, h: 10 }, gridFromFile: false } }).success, false, "it is a mark, never false");
+    const plain = apply(room(), { t: "scene.create", scene: { id: "s3", name: "Crypt", bounds: { w: 10, h: 10 } } });
+    assert.equal("gridFromFile" in plain.scenes.s3!, false);
   });
 
   test("folders are set and cleared", () => {

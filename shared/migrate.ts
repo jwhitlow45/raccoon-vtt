@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 12;
-export const OP_VERSION = 8;
+export const SNAPSHOT_VERSION = 13;
+export const OP_VERSION = 9;
 
 export type MigrationStep = {
   from: number;
@@ -102,6 +102,10 @@ export const snapshotMigrations: MigrationStep[] = [
   // older build, which would ignore them and send players every row and roll the DM kept from them, refuses a v12
   // snapshot instead.
   { from: 11, to: 12, apply: (state) => state },
+  // A Universal VTT import's mark (Scene.gridFromFile, docs/design-v1-grid-detect.md section 6) is an optional field
+  // whose absence reads as before, so a v12 room is a v13 room as it is. The number moves so that an older build, whose
+  // strict state schema refuses the field, refuses a v13 snapshot instead of failing on the scene.
+  { from: 12, to: 13, apply: (state) => state },
 ];
 
 /**
@@ -298,6 +302,22 @@ export const opMigrations: MigrationStep[] = [
     // since.
     from: 7,
     to: 8,
+    apply: (op) => op,
+  },
+  {
+    // `scene.create` takes a Universal VTT import's mark (`gridFromFile`,
+    // docs/design-v1-grid-detect.md section 6). Older ops lack it and
+    // replay as they were, so the step is the identity. An older build's
+    // strict schema refuses the mark in a stored create, which the version
+    // makes that build refuse cleanly instead.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 9, and the shutdown writes version 13 snapshots.
+    // Rollback: an older build refuses to migrate either down
+    // (runMigrations), so going back restores that backup, losing the play
+    // since.
+    from: 8,
+    to: 9,
     apply: (op) => op,
   },
 ];

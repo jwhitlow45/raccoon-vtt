@@ -1,4 +1,4 @@
-import type { AutoWalls } from "#shared/model.ts";
+import type { Scene } from "#shared/model.ts";
 import type { GridDetection } from "./detect.ts";
 import { calibrationFromFind, type Calibration, type Point } from "./calibrate.ts";
 
@@ -61,13 +61,13 @@ export function searchOnImport(input: { source: "image" | "uvtt"; named: boolean
  * Whether a scene came with its own grid, exact, from a Universal VTT
  * file. Its walls stand in squares of that grid, so Find the grid only
  * places the box there, however sure the find, for the DM to compare
- * before Apply. A scene keeps no record of where it came from, so this
- * reads the two marks the import leaves: automatic walls off, which a DM
- * may also choose, and a first line before the image, which only the
- * import makes.
+ * before Apply. The import marks its scene (`gridFromFile`), and nothing
+ * the DM changes later, such as Automatic walls, takes the mark away. A
+ * scene imported before the mark existed counts by the one sign only the
+ * import leaves: a first grid line before the image.
  */
-export function cameWithGrid(scene: { autoWalls?: AutoWalls; map: { originPx: Point } }): boolean {
-  return scene.autoWalls === "off" || scene.map.originPx.x < 0 || scene.map.originPx.y < 0;
+export function cameWithGrid(scene: Pick<Scene, "gridFromFile"> & { map: { originPx: Point } }): boolean {
+  return scene.gridFromFile === true || scene.map.originPx.x < 0 || scene.map.originPx.y < 0;
 }
 
 /** What Find the grid makes of a find: on a scene that came with its own grid, even a sure one is only offered. */

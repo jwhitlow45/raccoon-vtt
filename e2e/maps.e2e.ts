@@ -236,6 +236,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     assert.equal(scene.name, UVTT.name);
     assert.deepEqual(scene.bounds, { w: 11, h: 9 }, "the scene covers the partial square before the image");
     assert.equal(scene.autoWalls, "off", "an import brings its own walls");
+    assert.equal(scene.gridFromFile, true, "and keeps a mark that its grid came with the file");
     assert.equal(scene.fogEnabled, true);
     assert.ok(scene.map, "the scene has no map image");
     run.dayAssetId = scene.map.assetId;

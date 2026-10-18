@@ -1229,6 +1229,8 @@ export const clientOps = [
       /** The client turns it on for new scenes (section 4.1). Absent reads as off. */
       blockMovement: z.boolean().optional(),
       vision: sceneVision.optional(),
+      /** A Universal VTT import's mark (Scene.gridFromFile). No patch takes it, so it stays with the scene. */
+      gridFromFile: z.literal(true).optional(),
     }),
   }),
   op("scene.update", {
