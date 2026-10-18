@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
-import { askedFormula, askedRoll, collapseBare, findRolls, readingOf, recentRolls, stepHistory, withHistory, type RecentRow } from "./logic.ts";
+import { askedFormula, askedRoll, collapseBare, findRolls, headerRoll, readingOf, recentRolls, stepHistory, withHistory, type RecentRow } from "./logic.ts";
 import type { ReceiptLookup } from "../../lib/api.ts";
 import { ReceiptTracker, refusalWords } from "./useReceipt.ts";
 
@@ -259,5 +259,29 @@ describe("a tag's receipt (docs/design-v1-dice.md 8.7)", () => {
     stop();
     t.announced("B");
     assert.deepEqual(t.unannounced(), []);
+  });
+});
+
+describe("the header line's roll (docs/design-v1-dice-ui.md 4.1)", () => {
+  const bite = (type: string, extra: Partial<DiceRoll>): DiceRoll => ({ formula: "3d10+7", faces: [3, 6, 6], total: 22, label: `Bite critical damage, ${type}`, tokenId: "t1", ...extra });
+
+  test("a damage of two types reads as its sum under their shared label, with both parts' dice and crit sums (LP8-COMBAT-1)", () => {
+    const piercing = bite("piercing", { total: 52, crit: "maxPlusRoll" });
+    const fire = bite("fire", { formula: "2d6", faces: [2, 6], total: 20, crit: "maxPlusRoll" });
+    assert.deepEqual(headerRoll([piercing, fire]), { total: 72, label: "Bite critical damage", sums: "30 max + 22, 12 max + 8", dice: [piercing, fire], more: 0 });
+  });
+
+  test("a damage of two types rolled twice reads as its sum with no crit sums", () => {
+    const piercing = bite("piercing", { formula: "6d10+7", faces: [7, 7, 6, 10, 7, 6], total: 50, crit: "rollTwice" });
+    const fire = bite("fire", { formula: "4d6", faces: [3, 4, 3, 5], total: 15, crit: "rollTwice" });
+    assert.deepEqual(headerRoll([piercing, fire]), { total: 65, label: "Bite critical damage", sums: null, dice: [piercing, fire], more: 0 });
+  });
+
+  test("any other line leads with its first roll and counts the rest", () => {
+    const saves = [1, 2, 3].map((i): DiceRoll => ({ formula: "1d20+2", faces: [i], total: i + 2, label: "Dexterity save", tokenId: `g${i}` }));
+    assert.deepEqual(headerRoll(saves), { total: 3, label: "Dexterity save", sums: null, dice: [saves[0]!], more: 2 });
+    const crit: DiceRoll = { formula: "2d6+3", faces: [4, 6], total: 25, label: "Scimitar critical damage, slashing", crit: "maxPlusRoll" };
+    assert.deepEqual(headerRoll([crit]), { total: 25, label: "Scimitar critical damage, slashing", sums: "12 max + 13", dice: [crit], more: 0 });
+    assert.equal(headerRoll([]), null);
   });
 });

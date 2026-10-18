@@ -1,6 +1,7 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { addDie, formatFormula, parseRollText } from "#shared/dice/formula.ts";
-import { critSums, critSumText, labelText } from "#shared/logText.ts";
+import { labelText } from "#shared/logText.ts";
+import type { DiceRoll } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Chip } from "../../components/Chip.tsx";
 import { Input } from "../../components/Field.tsx";
@@ -11,7 +12,7 @@ import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
-import { readHistory, readingOf, rollsOf, stepHistory, withHistory, writeHistory } from "./logic.ts";
+import { headerRoll, readHistory, readingOf, rollsOf, stepHistory, withHistory, writeHistory } from "./logic.ts";
 import { FACE_CHIP, faceChips, rollVerdict } from "./RecentRolls.tsx";
 import { againOf, useDicePanel, useLastRoll } from "./useDicePanel.ts";
 import { useRollBlocked } from "./useRollOption.ts";
@@ -49,11 +50,12 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   const committed = receipt?.state === "committed" ? receipt : null;
   const rolls = useMemo(() => (committed ? rollsOf(committed.lines) : []), [committed]);
   const first = rolls[0];
+  const head = useMemo(() => headerRoll(rolls), [rolls]);
   const firstLine = committed?.lines[0]?.id ?? null;
   // A polite live region says each result once: "Rolled 13: Longsword."
   useEffect(() => {
-    if (first) setSaid(`Rolled ${first.total}${critSums([first])}${first.label ? `: ${labelText(first.label)}` : ""}.`);
-  }, [first]);
+    if (head) setSaid(`Rolled ${head.total}${head.sums ? ` (${head.sums})` : ""}${head.label ? `: ${labelText(head.label)}` : ""}.`);
+  }, [head]);
   if (!last) return null;
   let body;
   if ("error" in last) body = <span role="alert" style={{ color: theme.color.dangerText }}>{last.error}</span>;
@@ -66,11 +68,10 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
     ) : null;
   else if (receipt.state === "refused") body = <span role="alert" style={{ color: theme.color.dangerText }}>{receipt.text || receipt.message}</span>;
   else if (receipt.state === "unknown") body = <span style={{ color: theme.color.textMuted }}>This may have happened. Check the log.</span>;
-  else if (!first) body = <span style={{ color: theme.color.textMuted }}>Rolled. Its result is no longer in the log.</span>;
+  else if (!first || !head) body = <span style={{ color: theme.color.textMuted }}>Rolled. Its result is no longer in the log.</span>;
   else {
     const verdict = rollVerdict(first, (committed?.lines[0]?.data?.type === "dice" ? committed.lines[0].data : {}) as { dc?: number; ac?: number });
-    const sum = critSumText(first);
-    const label = first.label !== undefined ? labelText(first.label) : "once" in last ? last.label : undefined;
+    const label = head.label !== undefined ? labelText(head.label) : "once" in last ? last.label : undefined;
     body = (
       <button
         type="button"
@@ -78,8 +79,8 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         aria-label={`Show this roll in Recent rolls`}
         style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: theme.space(2), minWidth: 0, flex: 1, minHeight: LAST_LINE_PX, overflow: "hidden", whiteSpace: "nowrap" }}
       >
-        <span style={{ flex: "none", fontSize: theme.font.heading, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>{first.total.toLocaleString("en-US")}</span>
-        <ResultRest sum={sum} label={label} faces={first} more={rolls.length - 1} verdict={verdict} />
+        <span style={{ flex: "none", fontSize: theme.font.heading, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>{head.total.toLocaleString("en-US")}</span>
+        <ResultRest sum={head.sums} label={label} dice={head.dice} more={head.more} verdict={verdict} />
       </button>
     );
   }
@@ -157,8 +158,12 @@ function LineStart(props: { reverse?: boolean; dice?: boolean }) {
  * the last, so a part gives up nothing while one before it in turn still
  * has room (docs/design-v1-dice-ui.md 4.1).
  */
-function ResultRest(props: { sum: string | null; label: string | undefined; faces: Parameters<typeof faceChips>[0]; more: number; verdict: string | null }) {
-  const chips = useMemo(() => faceChips(props.faces), [props.faces]);
+function ResultRest(props: { sum: string | null; label: string | undefined; dice: readonly DiceRoll[]; more: number; verdict: string | null }) {
+  // A damage of several types shows every part's dice, each part keyed apart since each restarts its chips' keys.
+  const chips = useMemo(() => {
+    const parts = props.dice.map((roll) => faceChips(roll));
+    return parts.some((p) => p === null) ? null : parts.flatMap((p, i) => (p && p.length > 0 ? [<Fragment key={i}>{p}</Fragment>] : []));
+  }, [props.dice]);
   const dice = useRef<HTMLSpanElement>(null);
   const [dropped, setDropped] = useState(0);
   useLayoutEffect(() => {
@@ -191,7 +196,7 @@ function ResultRest(props: { sum: string | null; label: string | undefined; face
           {props.label ? <span style={{ flex: "0 10 auto", minWidth: 0, fontSize: theme.font.body14, overflow: "hidden", textOverflow: "ellipsis" }}>{props.label}</span> : null}
           {chips === null ? (
             // A stored formula that no longer parses shows as its text (rolledTerms).
-            <span style={{ flex: "0 1000 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", ...muted }}>{props.faces.formula}</span>
+            <span style={{ flex: "0 1000 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", ...muted }}>{props.dice.map((roll) => roll.formula).join(" + ")}</span>
           ) : chips.length > 0 || props.more > 0 ? (
             // A shrink far above the label's takes the dice's room first, down to nothing, before the label's "…".
             <span ref={dice} aria-hidden="true" style={{ position: "relative", flex: "0 1000 auto", minWidth: 0, height: REST_PX, overflow: "hidden", display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(1) }}>

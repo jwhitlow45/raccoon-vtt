@@ -1,5 +1,6 @@
 import { askedCritical } from "#shared/dice/crit.ts";
 import { applyMode, formatFormula, formulaRange, parseFormula, parseRollText, type AdvantageMode } from "#shared/dice/formula.ts";
+import { critSumText, oneDamage } from "#shared/logText.ts";
 import type { DiceResult, DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
 import type { DiceRollInput } from "#shared/protocol.ts";
 
@@ -97,6 +98,31 @@ export function findRolls(log: readonly LogEntry[], tag: string, part?: number):
 /** Every roll the lines of a tag hold, in order. */
 export function rollsOf(lines: readonly LogEntry[]): DiceRoll[] {
   return lines.flatMap((e) => (e.data?.type === "dice" ? e.data.rolls : e.data?.type === "roll" && e.data.dice ? [e.data.dice] : []));
+}
+
+export type HeaderRoll = { total: number; label: string | undefined; sums: string | null; dice: DiceRoll[]; more: number };
+
+/**
+ * What the header line leads with (docs/design-v1-dice-ui.md 4.1). One
+ * damage tap of several types reads as its sum under their shared label,
+ * with every part's dice and crit sums, as its toast and the HP entry's
+ * chip read it: the line is the panel's one result, so one type's total
+ * must never stand for the whole hit. Any other line leads with its first
+ * roll and counts the rest as "and 2 more".
+ */
+export function headerRoll(rolls: readonly DiceRoll[]): HeaderRoll | null {
+  const first = rolls[0];
+  if (!first) return null;
+  const damage = oneDamage(rolls);
+  const parts = damage ? rolls : [first];
+  const sums = parts.flatMap((r) => critSumText(r) ?? []);
+  return {
+    total: damage ? damage.total : first.total,
+    label: damage ? damage.head : first.label,
+    sums: sums.length > 0 ? sums.join(", ") : null,
+    dice: [...parts],
+    more: rolls.length - parts.length,
+  };
 }
 
 /**

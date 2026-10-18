@@ -276,7 +276,7 @@ const DAMAGE_WORDS = new Set<string>(DAMAGE_TYPES);
  * or null when they are not one damage: a label without a type, two heads,
  * a type twice or two creatures.
  */
-function oneDamage(rolls: readonly DiceRoll[]): { head: string; total: number; roll: DiceRoll } | null {
+export function oneDamage(rolls: readonly DiceRoll[]): { head: string; total: number; roll: DiceRoll } | null {
   const first = rolls[0];
   if (rolls.length < 2 || !first) return null;
   let head: string | null = null;
