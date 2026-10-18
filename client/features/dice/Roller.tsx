@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { addDie, formatFormula, parseRollText } from "#shared/dice/formula.ts";
 import { critSums, critSumText } from "#shared/logText.ts";
 import { Button } from "../../components/Button.tsx";
@@ -12,7 +12,7 @@ import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { readHistory, readingOf, rollsOf, stepHistory, withHistory, writeHistory } from "./logic.ts";
-import { DiceFaces, rollVerdict } from "./RecentRolls.tsx";
+import { FACE_CHIP, faceChips, rollVerdict } from "./RecentRolls.tsx";
 import { againOf, useDicePanel, useLastRoll } from "./useDicePanel.ts";
 import { useRollBlocked } from "./useRollOption.ts";
 import { useReceipt } from "./useReceipt.ts";
@@ -78,19 +78,8 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         aria-label={`Show this roll in Recent rolls`}
         style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: theme.space(2), minWidth: 0, flex: 1, minHeight: LAST_LINE_PX, overflow: "hidden", whiteSpace: "nowrap" }}
       >
-        <span style={{ fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>{first.total.toLocaleString("en-US")}</span>
-        {/* A table crit rule's sum leads the label, so a long label's ellipsis never takes it. */}
-        {sum || label ? (
-          <span style={{ fontSize: theme.font.body14, overflow: "hidden", textOverflow: "ellipsis" }}>
-            {sum ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{`(${sum})${label ? " " : ""}`}</span> : null}
-            {label}
-          </span>
-        ) : null}
-        <span style={{ overflow: "hidden" }}>
-          <DiceFaces result={first} oneLine />
-        </span>
-        {verdict ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{verdict}</span> : null}
-        {rolls.length > 1 ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>and {rolls.length - 1} more</span> : null}
+        <span style={{ flex: "none", fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>{first.total.toLocaleString("en-US")}</span>
+        <ResultRest sum={sum} label={label} faces={first} more={rolls.length - 1} verdict={verdict} />
       </button>
     );
   }
@@ -114,7 +103,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), minHeight: LAST_LINE_PX, fontSize: theme.font.body14 }}>
         <div style={{ display: "flex", alignItems: "center", flex: 1, minWidth: 0 }}>{body}</div>
         {again ? (
-          <Button size="sm" variant="quiet" icon="again" style={{ minHeight: LAST_LINE_PX }} onClick={() => panel.again(again.rolls, again.to)}>
+          <Button size="sm" variant="quiet" icon="again" style={{ flex: "none", minHeight: LAST_LINE_PX }} onClick={() => panel.again(again.rolls, again.to)}>
             Again
           </Button>
         ) : null}
@@ -123,6 +112,97 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         {said}
       </span>
     </div>
+  );
+}
+
+/** The height of the header line's text and dice, a die's chip. */
+const REST_PX = 24;
+
+/**
+ * A row one line tall whose items wrap, whole, onto a second line it never
+ * shows. It keeps each item whole: one with no room goes, and every item
+ * after it. The empty item it starts with (`LineStart`) lets even the first
+ * real one go, since a line always keeps its first item. `reverse` lays it
+ * out from the right, so the items listed first are kept longest.
+ */
+function dropsWhole(reverse = false): CSSProperties {
+  return {
+    flex: "1 1 0",
+    minWidth: 0,
+    height: REST_PX,
+    overflow: "hidden",
+    display: "flex",
+    flexDirection: reverse ? "row-reverse" : "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    // Laid out from the right, its items still sit at the left.
+    justifyContent: reverse ? "flex-end" : "flex-start",
+    columnGap: theme.space(2),
+  };
+}
+
+/** `dropsWhole`'s empty first item. `dice` is for the dice's box, whose gap is the chips' 4 px. */
+function LineStart(props: { reverse?: boolean; dice?: boolean }) {
+  // Its negative margin takes back the gap after it, so the items after it start at the row's edge.
+  const back = -theme.space(props.dice ? 1 : 2);
+  return <span style={{ flex: "none", width: 0, height: REST_PX, ...(props.reverse ? { marginInlineStart: back } : { marginInlineEnd: back }) }} />;
+}
+
+/**
+ * The header line after its total. Where the line is short, its parts give
+ * way in turn, and none is ever cut through a glyph: "and 3 more", then the
+ * dice, whole chips at a time, with "+2" for those it drops, then the label
+ * to its "…". After those, each goes whole: "+2", the verdict, and last a
+ * critical hit's sum. The total and Again stay. Each step is a box inside
+ * the last, so a part gives up nothing while one before it in turn still
+ * has room (docs/design-v1-dice-ui.md 4.1).
+ */
+function ResultRest(props: { sum: string | null; label: string | undefined; faces: Parameters<typeof faceChips>[0]; more: number; verdict: string | null }) {
+  const chips = useMemo(() => faceChips(props.faces), [props.faces]);
+  const dice = useRef<HTMLSpanElement>(null);
+  const [dropped, setDropped] = useState(0);
+  useLayoutEffect(() => {
+    const el = dice.current;
+    if (!el) {
+      setDropped(0);
+      return;
+    }
+    const count = () => setDropped([...el.querySelectorAll<HTMLElement>("[data-face]")].filter((chip) => chip.offsetTop > 0).length);
+    count();
+    const observer = new ResizeObserver(count);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [chips]);
+  const muted = { fontSize: theme.font.small, color: theme.color.textMuted } as const;
+  return (
+    <span style={dropsWhole()}>
+      <LineStart />
+      {props.sum ? <span style={{ flex: "none", ...muted }}>{`(${props.sum})`}</span> : null}
+      <span style={dropsWhole(true)}>
+        <LineStart reverse />
+        {props.verdict ? <span style={{ flex: "none", ...muted }}>{props.verdict}</span> : null}
+        {dropped > 0 ? (
+          <span aria-hidden="true" style={{ ...FACE_CHIP, border: `${theme.line.border}px solid ${theme.color.border}`, color: theme.color.textMuted }}>
+            +{dropped}
+          </span>
+        ) : null}
+        {/* Grows only to its own width, so the parts after it sit beside it rather than at the line's end. */}
+        <span style={{ flex: "1 1 0", minWidth: 0, maxWidth: "max-content", display: "flex", alignItems: "center", gap: theme.space(2), overflow: "hidden" }}>
+          {props.label ? <span style={{ flex: "0 10 auto", minWidth: 0, fontSize: theme.font.body14, overflow: "hidden", textOverflow: "ellipsis" }}>{props.label}</span> : null}
+          {chips === null ? (
+            // A stored formula that no longer parses shows as its text (rolledTerms).
+            <span style={{ flex: "0 1000 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", ...muted }}>{props.faces.formula}</span>
+          ) : chips.length > 0 || props.more > 0 ? (
+            // A shrink far above the label's takes the dice's room first, down to nothing, before the label's "…".
+            <span ref={dice} aria-hidden="true" style={{ position: "relative", flex: "0 1000 auto", minWidth: 0, height: REST_PX, overflow: "hidden", display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(1) }}>
+              <LineStart dice />
+              {chips}
+              {props.more > 0 ? <span style={{ flex: "none", marginInlineStart: theme.space(1), ...muted }}>and {props.more} more</span> : null}
+            </span>
+          ) : null}
+        </span>
+      </span>
+    </span>
   );
 }
 

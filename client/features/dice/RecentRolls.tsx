@@ -23,44 +23,13 @@ const FOLDED = 5;
 
 /**
  * The faces of one roll as chips: a dropped die struck through, a natural
- * 20 or 1 marked. Text for a screen reader beside them. `oneLine` keeps
- * them on one line for the sticky line, which clips what does not fit
- * rather than growing over the panel (docs/design-v1-dice.md 8.2).
+ * 20 or 1 marked. Text for a screen reader beside them.
  */
-export function DiceFaces(props: { result: Pick<DiceResult, "formula" | "faces" | "total" | "mode" | "crit">; oneLine?: boolean }) {
-  const terms = rolledTerms(props.result);
-  const natural = naturalOf(props.result);
-  if (!terms) return <span style={{ color: theme.color.textMuted }}>{props.result.formula}</span>;
-  const chips = terms.flatMap((t, ti) =>
-    "kept" in t
-      ? t.faces.map((face, i) => {
-          const dropped = !t.kept[i];
-          const nat = !dropped && t.term.sides === 20 && natural !== null && face === natural;
-          const style: CSSProperties = {
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            minWidth: 24,
-            height: 24,
-            padding: `0 ${theme.space(1)}px`,
-            borderRadius: theme.radius.sm,
-            fontSize: theme.font.small,
-            fontWeight: theme.weight.strong,
-            border: `${theme.line.border}px solid ${nat ? (face === 20 ? theme.color.accent : theme.color.danger) : theme.color.border}`,
-            color: dropped ? theme.color.textDisabled : theme.color.text,
-            textDecoration: dropped ? "line-through" : undefined,
-            background: theme.color.surfaceRaised,
-          };
-          return (
-            <span key={`${ti}:${i}`} style={style}>
-              {face.toLocaleString("en-US")}
-            </span>
-          );
-        })
-      : [],
-  );
+export function DiceFaces(props: { result: FacesOf }) {
+  const chips = faceChips(props.result);
+  if (!chips) return <span style={{ color: theme.color.textMuted }}>{props.result.formula}</span>;
   return (
-    <span style={{ display: "inline-flex", flexWrap: props.oneLine ? "nowrap" : "wrap", gap: theme.space(1), alignItems: "center" }}>
+    <span style={{ display: "inline-flex", flexWrap: "wrap", gap: theme.space(1), alignItems: "center" }}>
       <span aria-hidden="true" style={{ display: "contents" }}>
         {chips}
       </span>
@@ -68,6 +37,49 @@ export function DiceFaces(props: { result: Pick<DiceResult, "formula" | "faces" 
     </span>
   );
 }
+
+type FacesOf = Pick<DiceResult, "formula" | "faces" | "total" | "mode" | "crit">;
+
+/** A roll's faces as chips, each marked `data-face`, or null for a roll with no dice drawn. */
+export function faceChips(result: FacesOf): ReactNode[] | null {
+  const terms = rolledTerms(result);
+  const natural = naturalOf(result);
+  if (!terms) return null;
+  return terms.flatMap((t, ti) =>
+    "kept" in t
+      ? t.faces.map((face, i) => {
+          const dropped = !t.kept[i];
+          const nat = !dropped && t.term.sides === 20 && natural !== null && face === natural;
+          const style: CSSProperties = {
+            ...FACE_CHIP,
+            border: `${theme.line.border}px solid ${nat ? (face === 20 ? theme.color.accent : theme.color.danger) : theme.color.border}`,
+            color: dropped ? theme.color.textDisabled : theme.color.text,
+            textDecoration: dropped ? "line-through" : undefined,
+          };
+          return (
+            <span key={`${ti}:${i}`} data-face="" style={style}>
+              {face.toLocaleString("en-US")}
+            </span>
+          );
+        })
+      : [],
+  );
+}
+
+/** A die's chip, 24 px tall, and the header line's "+2" for the dice it drops (Roller.tsx). */
+export const FACE_CHIP: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flex: "none",
+  minWidth: 24,
+  height: 24,
+  padding: `0 ${theme.space(1)}px`,
+  borderRadius: theme.radius.sm,
+  fontSize: theme.font.small,
+  fontWeight: theme.weight.strong,
+  background: theme.color.surfaceRaised,
+};
 
 const visuallyHidden: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
 

@@ -37,6 +37,8 @@ export function Chip(props: {
   describedBy?: string;
   title?: string;
   "aria-label"?: string;
+  /** Words that may be long, such as a monster's rider: they wrap inside the chip, which grows a line, rather than run past its row's edge. */
+  wrap?: boolean;
   /** Marks for the caller's own queries, such as finding the chip to focus after one is removed. */
   [data: `data-${string}`]: string | boolean | undefined;
   onClick(): void;
@@ -66,7 +68,7 @@ export function Chip(props: {
         // A value narrower than the 44 px minimum stays in the middle rather than against the left padding.
         justifyContent: "center",
         gap: theme.space(1.5),
-        flex: "none",
+        ...(props.wrap ? { flex: "0 1 auto", maxWidth: "100%", textAlign: "center" as const } : { flex: "none" }),
         minHeight: theme.touch,
         minWidth: theme.touch,
         ...(circle ? { width: theme.touch, height: theme.touch } : null),
@@ -76,7 +78,7 @@ export function Chip(props: {
         fontSize: theme.font.body14,
         fontWeight: theme.weight.strong,
         fontFamily: theme.font.body,
-        whiteSpace: "nowrap",
+        whiteSpace: props.wrap ? "normal" : "nowrap",
         cursor: off ? "default" : "pointer",
         ...choiceLook(on, off),
       }}

@@ -131,7 +131,7 @@ function PlayerOptions(props: { view: RoomState; selected: readonly string[] }) 
       {options.length > 1 ? (
         <ChipRow label="Roll for">
           {options.map((o) => (
-            <Chip key={o.key} pressed={o.key === current.key} onClick={() => store.setState({ picked: o.key })}>
+            <Chip key={o.key} wrap pressed={o.key === current.key} onClick={() => store.setState({ picked: o.key })}>
               {o.name}
             </Chip>
           ))}
@@ -336,7 +336,9 @@ function OptionCell(props: { text: string; tag?: string | undefined; name: strin
         justifyContent: "space-between",
         columnGap: theme.space(1),
         rowGap: 0,
-        flex: props.grow ? "1 1 auto" : "none",
+        // A named row's cell keeps its own width, and wraps its words rather than run past the panel's edge.
+        flex: props.grow ? "1 1 auto" : "0 1 auto",
+        maxWidth: "100%",
         borderRadius: theme.radius.md,
         border: `${theme.line.border}px solid ${theme.color.controlBorder}`,
         background: theme.color.surfaceRaised,
@@ -347,7 +349,8 @@ function OptionCell(props: { text: string; tag?: string | undefined; name: strin
         width: props.grow === false ? undefined : "100%",
       }}
     >
-      <span style={{ fontSize: theme.font.body14, fontWeight: theme.weight.strong, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>
+      {/* Its words wrap inside the cell, which grows a line, and never run out of it or end in "…" (the project owner, 2026-10-17). */}
+      <span style={{ minWidth: 0, fontSize: theme.font.body14, fontWeight: theme.weight.strong, textAlign: "left", overflowWrap: "anywhere" }}>
         {waiting ? `${props.text}…` : props.text}
       </span>
       {props.tag ? <span style={{ flex: "none", fontSize: theme.font.tiny, fontWeight: theme.weight.strong, color: theme.color.textMuted, whiteSpace: "nowrap" }}>{props.tag}</span> : null}
@@ -433,7 +436,9 @@ function UnknownNumbers(props: { ctx: Ctx; name: string; skillsOpen: boolean; on
       <Note>{noNumbersNote({ name: props.name, hidden, rollsHere })}</Note>
       {props.addBlock ? (
         <div>
-          <SmallButton onClick={props.addBlock}>Add a stat block</SmallButton>
+          <SmallButton wrap onClick={props.addBlock}>
+            Add a stat block
+          </SmallButton>
         </div>
       ) : null}
       {rollsHere ? (
@@ -520,7 +525,7 @@ function InitiativeCell(props: { ctx: Ctx; bonus: number; bonusText: string }) {
     <div style={{ display: "grid", gap: theme.space(1) }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: theme.space(1) }}>
         {scored ? (
-          <SmallButton disabled={ctx.blocked !== null} onClick={() => option.setInitiative(entry.id, score, dm)} label={`Score ${score}, sets its row`}>
+          <SmallButton wrap disabled={ctx.blocked !== null} onClick={() => option.setInitiative(entry.id, score, dm)} label={`Score ${score}, sets its row`}>
             {`Score ${score}`}
           </SmallButton>
         ) : null}
@@ -669,7 +674,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
         ) : null}
         {named.damage.map((part, i) =>
           part.optional ? (
-            <Chip key={i} pressed={on.has(i)} onClick={() => toggleRider(i)} aria-label={`Add ${part.formula}${part.name ? ` ${part.name}` : ""} to the next damage`}>
+            <Chip key={i} wrap pressed={on.has(i)} onClick={() => toggleRider(i)} aria-label={`Add ${part.formula}${part.name ? ` ${part.name}` : ""} to the next damage`}>
               {cutLabel(riderText(part))}
             </Chip>
           ) : null,
@@ -741,7 +746,7 @@ function GroupSaveButton(props: { ctx: Ctx; named: NamedRoll }) {
   const go = (replace: boolean) => spendOnStart(() => start(input, { replace }), named.recharge !== undefined ? () => writeUsed(roomId, withUsed(readUsed(roomId), ctx.key, named.key, true)) : null);
   return (
     <>
-      <SmallButton disabled={ctx.blocked !== null} onClick={() => !go(false) && setPending(true)} label={`Group save, DC ${save.dc} ${ABILITY_SHORT[save.ability]}`}>
+      <SmallButton wrap disabled={ctx.blocked !== null} onClick={() => !go(false) && setPending(true)} label={`Group save, DC ${save.dc} ${ABILITY_SHORT[save.ability]}`}>
         Group save
       </SmallButton>
       {pending ? (
