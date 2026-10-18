@@ -2,8 +2,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import pg from "pg";
-import { anyRerun, attempt, filePassed, NO_TIME, outcome, passedOnRerun, plan, runLimit, secondsFor, summaryCount, withTimeout, type Durations, type Result, type Run } from "./e2e-shard-plan.ts";
+import { clearJoinCounts } from "./e2e-join-counts.ts";
+import { anyRerun, attempt, filePassed, NO_TIME, outcome, passedOnRerun, plan, runLimit, secondsFor, summaryCount, type Durations, type Result, type Run } from "./e2e-shard-plan.ts";
 
 /**
  * One shard of the e2e run, for continuous integration, for a laptop that
@@ -47,41 +47,6 @@ const ACTIONS = process.env.GITHUB_ACTIONS === "true";
 
 /** e2e/macos-only.json: each file's name, and why it runs only on macOS. */
 type MacosOnly = { rule: string; files: Record<string, string> };
-
-/**
- * The server counts successful joins and room creations per address in
- * Postgres (server/auth/ratelimit.ts), and every e2e file joins from
- * 127.0.0.1. One file stays under the hourly limits, but a shard's files
- * together can pass them, so the counts are cleared before each run, as the
- * full check on a laptop does. A fresh database has no table until the
- * first server applies the schema, and then there is nothing to clear.
- *
- * A database that stops answering would otherwise hold the shard, so the
- * cleanup gets `seconds` in all and says whether it finished: pg gives up
- * on the connection and on the statement at half that each, and a race
- * ends the wait whatever pg does. pg's timeouts all say "timeout", and the
- * server's statement timeout is 57014. Any other error, such as a wrong
- * DATABASE_URL, stops the shard.
- */
-async function clearJoinCounts(seconds: number): Promise<boolean> {
-  const half = (seconds * 1000) / 2;
-  const client = new pg.Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: half, statement_timeout: half, query_timeout: half });
-  const work = (async () => {
-    await client.connect();
-    await client.query("delete from rate_events where key like 'ok:%' or key like 'create:%'");
-  })();
-  try {
-    return (await withTimeout(work, seconds * 1000)).done;
-  } catch (err) {
-    const { code, message } = err as { code?: unknown; message?: unknown };
-    if (code === "42P01") return true;
-    if (code === "57014" || /timeout/i.test(String(message))) return false;
-    throw new Error(`Could not clear the join counts in DATABASE_URL's database: ${String(message)}`);
-  } finally {
-    // A stalled connection's end is not waited on for long.
-    await withTimeout(client.end().catch(() => {}), 1000);
-  }
-}
 
 let current: ChildProcess | null = null;
 let stopping: NodeJS.Signals | null = null;
@@ -168,7 +133,7 @@ async function runFile(file: string, label: string, limit: number): Promise<Omit
 function attemptFile(file: string, label: string, limit: number): Promise<Run | typeof NO_TIME> {
   return attempt(limit, {
     now: () => Date.now() / 1000,
-    clear: clearJoinCounts,
+    clear: (seconds) => clearJoinCounts(DATABASE_URL, seconds),
     run: (seconds) => runFile(file, label, seconds),
     note: (line) => console.log(ACTIONS ? `::warning title=Join counts not cleared::${label}: ${line}` : `${label}: ${line}`),
   });
@@ -281,4 +246,14 @@ async function main(): Promise<number> {
   return results.every(filePassed) ? 0 : 1;
 }
 
-process.exitCode = await main();
+let code = 1;
+try {
+  code = await main();
+} catch (err) {
+  console.error(err);
+}
+// The report is out, so the shard ends here, once its output is written.
+// Nothing left behind, such as a stray timer or a socket a database never
+// closed, may hold the CI step open.
+for (const out of [process.stdout, process.stderr]) await new Promise<void>((resolve) => out.write("", () => resolve()));
+process.exit(code);
