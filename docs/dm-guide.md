@@ -475,7 +475,7 @@ Tap a row to select its token and open its action bar. A row's **⋯** holds, fo
 
 **Initiative order players see**, in Room settings under Combat, decides which rows players hold before those creatures act:
 
-- **Player characters, the rest on their turn**, the default in a new room. Players see the creatures players play from the start: their characters, their companions and any token you lend a player. Every other creature, your NPCs and allies included, joins their order when its first turn comes, in its place, and stays for the rest of the fight, whatever its value becomes. Before that nothing of it reaches them: no row, value or count, and no initiative roll for it, even one you roll with Secret off.
+- **Player characters, the rest on their turn**, the default in a new room. Players see the creatures players play from the start: their characters and their companions. A monster or NPC you lend a player shows from the start to that player alone, and to the others on its first turn. Every other creature, your NPCs and allies included, joins their order when its first turn comes, in its place, and stays for the rest of the fight, whatever its value becomes. Before that nothing of it reaches them: no row, value or count, and no initiative roll for it, even one you roll with Secret off.
 - **Player characters and allies, the rest on their turn**: the same, and every creature with the Ally ring shows from the start.
 - **Everyone**: the whole order from the start, which rooms made before the setting keep.
 
@@ -487,7 +487,7 @@ A creature added mid-fight waits for its own turn, and a dead one that "Skip def
 
 ## Dice
 
-Every roll in the app happens on the server, so everyone sees the same result. Players can still roll real dice and type totals where the app asks for one. The **Dice** panel is for everyone.
+Every roll in the app happens on the server, so everyone sees the same result. Players can still roll real dice and type totals where the app asks for one, unless you turn off **Players may type their roll totals** in Room settings. The **Dice** panel is for everyone.
 
 ![The Dice panel with a goblin selected: the formula field, quick dice, Adv, Dis and Secret, and the goblin's roll options with its saves, checks and Scimitar attack.](dm-guide/dice.webp)
 
@@ -504,7 +504,7 @@ Select one token, or press **Roll** in its action bar, and the Dice panel lists 
 - **Saves**, **Checks** and **Skills**, each with its bonus. Conditions apply on their own and say so ("Dis: Restrained", "+1d4: Blessed", "Fails: Stunned").
 - **Initiative**, which sets its row in a running fight ("Initiative +2, sets its row", or "replaces 14").
 - **Death save** while it is dying.
-- Its traits, actions, bonus actions, reactions and legendary actions. An attack has **Attack +5** and **Damage 1d6+3**: a natural 20 turns on **Critical** for the damage that follows, and riders such as **+3d6 Sneak Attack** are chips to add. A save action has **Group save, DC 13 Dex**, which opens the [group save](#the-group-save). Multiattack is a note at the head of the actions: roll each attack it names.
+- Its traits, actions, bonus actions, reactions and legendary actions. An attack has **Attack +5** and **Damage 1d6+3**: a natural 20 turns on **Critical** for the damage that follows, which rolls by the room's **Critical hit damage** rule (see [Room settings](#room-settings-for-fights-and-maps)), and riders such as **+3d6 Sneak Attack** are chips to add. A save action has **Group save, DC 13 Dex**, which opens the [group save](#the-group-save). Multiattack is a note at the head of the actions: roll each attack it names.
 - An action that recharges shows **Recharge 5–6** and a **Used** switch. Rolling its damage or its group save marks it used. **Recharge 1d6** rolls the recharge, and the app reminds you at the start of the monster's turn. See [Alerts during a fight](#alerts-during-a-fight).
 - For a character with a stat block: its weapons and spells, **Spell save DC**, **Spell attack**, and a slot level for spells that scale.
 
@@ -518,7 +518,7 @@ With several tokens selected, the Dice panel offers group rolls: one save or che
 
 ## Asking for rolls
 
-**Request a roll** asks players for a saving throw or an ability check. Each player rolls it in the app or types the total they rolled at the table.
+**Request a roll** asks players for a saving throw or an ability check. Each player rolls it in the app or types the total they rolled at the table, while **Players may type their roll totals** is on.
 
 ![Request a roll: Dexterity save picked, DC 15, the party's characters as chips under Who rolls, and Send.](dm-guide/request.webp)
 
@@ -530,7 +530,7 @@ Open it with **Ask the party** in the party bar (above the side panel's tabs on 
 4. Under **What players see**: **Players see the DC**, **Players see pass or fail**, **Against a spell** (for Magic Resistance), and a note ("against the poison").
 5. Press **Send**. **Recent** keeps your last three requests, one tap each.
 
-Players get a card with the question, roll with their bonus (conditions and Bless included), or type a total. Your live card, at the right of the map, counts the answers ("2 of 4 answered: 1 pass, 1 fail") and shows each roll. On it you can:
+Players get a card with the question, roll with their bonus (conditions and Bless included), or type a total where typed totals are allowed. Your live card, at the right of the map, counts the answers ("2 of 4 answered: 1 pass, 1 fail") and shows each roll. On it you can:
 
 - **Roll +5** for a player who is waiting, such as one who stepped away. It never replaces an answer that came first.
 - Mark **Pass** or **Fail** yourself, for a roll with no DC or to overrule one.
@@ -726,10 +726,16 @@ Menu, **Room settings** (DM only). Switches apply at once.
 
 ![Room settings: the Players settings with their help lines, and Combat below.](dm-guide/room-settings.webp)
 
-- **Players**: **Who can move any token** (No one), **Who can draw** (Every player), **Players can create their own characters** (on), **Players can apply damage and healing** (off), **Players see the party's HP** (on), **Players see each other's areas** (on).
-- **Combat**: **Monsters die at 0 HP** (on), **Healing brings back the dead** (on), **Skip defeated creatures** (on), **Use initiative scores for monsters** (off), **Reveal hidden combatants on their turn** (on), **Initiative order players see** (**Player characters, the rest on their turn** in a new room), **Turn timer** (Off).
+- **Players**: **Who can move any token** (No one), **Who can draw** (Every player), **Players can create their own characters** (on), **Players can apply damage and healing** (off), **Players may type their roll totals** (on), **Players see the party's HP** (on), **Players see each other's areas** (on).
+- **Combat**: **Monsters die at 0 HP** (on), **Healing brings back the dead** (on), **Skip defeated creatures** (on), **Use initiative scores for monsters** (off), **Reveal hidden combatants on their turn** (on), **Initiative order players see** (**Player characters, the rest on their turn** in a new room), **Critical hit damage** (**Roll the dice twice**), **Turn timer** (Off).
 - **Grid and distance**: **Feet per square** (5) and **Diagonal moves**: **Every square is 5 ft** (the 2024 rule, the default), **Alternate 5 ft and 10 ft**, or **True distance**.
 - **Areas of effect**: **Which squares an area covers** (**At least half the square**, the 2024 rule) and **Which creatures an area catches** (**Any square the creature is in**).
+
+**Players may type their roll totals** is on by default. Turn it off and players answer every roll you ask for with **Roll**, and the app rolls for them. They can still fail a save without rolling. Totals they already typed stand.
+
+**Critical hit damage** picks how every critical hit rolls its damage, riders such as Sneak Attack included: **Roll the dice twice** (the 2024 rule and the default), **Max plus a roll**, **Double the dice rolled**, or **Double the total**. The server rolls by the rule standing at the roll, and each roll shows how it reached its total, such as "12 max + 2d6+3 (4, 6) = 25".
+
+**Initiative order players see** is separate from **Hidden**: turning a token's **Hidden** off shows its row only where this setting shows it, so in a new room a monster's row still waits for its first turn. See [What players see of the order](#what-players-see-of-the-order).
 
 # Scenarios
 

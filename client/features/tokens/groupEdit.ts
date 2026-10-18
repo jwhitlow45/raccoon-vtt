@@ -128,7 +128,9 @@ export function flagPatch(tokens: readonly GroupToken[], flag: "hidden" | "locke
  * the DM turns it off: a token's action bar, a group's, the H key and the
  * token panel's switch. Their rows in the fight that players cannot see
  * show too (the project owner, 2026-10-17), so a creature revealed on the
- * map is revealed in the order at once, not only at its first turn. A row
+ * map is revealed in the order at once, not only at its first turn, where
+ * the order setting shows it: under its new-room default a monster's row
+ * still waits for its first turn (docs/design-v1-combat-flow.md 11). A row
  * can still be hidden on its own from the tracker, and hiding a token
  * leaves its rows as they are. The caller sends these with the tokens'
  * change as one gesture, so one undo takes both back.
