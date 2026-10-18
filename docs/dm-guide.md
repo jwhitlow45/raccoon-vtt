@@ -374,20 +374,31 @@ The monsters go on the scene you are viewing, with average HP and their monsters
 
 Tap a token with the **Select** tool to open its **action bar**. On a phone held upright, the bar opens under the token. On a wider screen, it opens as a window at the bottom right of the map, which you can drag by its header to move it. For everything about the selected token, open the **Token** panel.
 
-![A goblin's action bar: AC, HP, speed and passive Perception, the HP entry, its saves and defenses, then Conditions, Hidden, Multi-select, Roll, Size, Locked, Duplicate and Delete.](dm-guide/action-bar.webp)
+![A goblin's action bar: AC, HP, speed and passive Perception, the HP entry, its saves and defenses, then Conditions, Hidden, Multi-select, Roll, Size, and the padlock, copy and trash can icons.](dm-guide/action-bar.webp)
 
 The action bar holds, from top to bottom:
 
 - The token's AC, HP, speed and passive Perception, then its **HP entry**. For a monster or NPC, you also see its six saving throws and its resistances, immunities and vulnerabilities. Where the bar is short, **More stats** holds the rest.
 - **Stat block**, which opens the creature's full stat block in the Token panel, and **Details**, which opens the Token panel.
 - **Elevation**, with **−5** and **+5** (or Page Down and Page Up).
-- **Conditions**, **Hidden** (to hide the token from players), **Multi-select**, **Roll** (the creature's roll options in the Dice panel) and **Light**.
-- **Size**, which steps the creature one size smaller or larger, for Enlarge, Wild Shape or a polymorph.
-- **Locked** (nobody can drag it, you included), **Duplicate** and **Delete**.
+- **Conditions**, **Hidden** (an eye struck through, which hides the token from players), **Multi-select**, **Roll** (the creature's roll options in the Dice panel) and **Light**.
+- **Size**, whose **−** and **+** step the creature one size smaller or larger, for Enlarge, Wild Shape or a polymorph.
+- **Locked** (a padlock: once it is on, nobody can drag the token, you included), **Duplicate** (two pages and a plus) and **Delete** (a trash can, which asks "Sure?" before it deletes anything).
+
+With a mouse, Hidden, Locked and Duplicate show only their icons, to keep the bar small. Hover over one, or reach it with Tab, and its name appears. On a touch screen they keep their words, since there is no hover to show them.
 
 A few keys work on the selected tokens: `H` hides or shows them, `L` locks them, and Delete removes them (Ctrl+Z brings them back). The arrow keys move the selection one square at a time.
 
-**The Token panel** holds, from top to bottom: the token's name and image, the stat block of a monster or NPC, **Hit points**, **Conditions**, **Position** (elevation and facing), **Range rings** (up to 4 circles, such as 30 and 120 ft, for checking reach and range at a glance), **Notes**, **Rest** and **Sight**. Folded at the foot are **Stats** (size, AC, speeds, initiative bonus, passive Perception and senses), **Token settings** and **Owners**.
+**The Token panel** starts with the token's picture and name. Under the name sit its quick numbers, the ones you reach for most in a fight: AC, speed, **PP** (passive Perception), **Init** (its initiative bonus), its elevation, and a link to its sheet. A monster or NPC's stat block comes next.
+
+The rest of the panel is sorted into groups by what you use them for, and each group folds as one, so you can keep open only what matters right now:
+
+- **Combat**: **Hit points**, **Conditions**, **Range rings** (up to 4 circles, such as 30 and 120 ft, for checking reach and range at a glance) and **Rest**.
+- **Notes**: the token's notes (see below).
+- **Position**: its elevation and facing, and **Sight**.
+- **Image**: change, crop or remove the token's picture, and its other images.
+
+A folded group sums up what it holds on its own line, such as "3/7 HP · 2 conditions", so you can check on a creature without opening anything. Combat starts open, and your device remembers which groups you open and close. Folded at the foot of the panel are **Stats** (size, AC, speeds, initiative bonus, passive Perception and senses), **Token settings** and **Owners**.
 
 **Token settings** holds the options only you can set:
 
@@ -407,7 +418,7 @@ When you want to move, damage or hide a whole group, select them all first. Ther
 - Press **Multi-select** in a token's action bar, then tap more tokens, or drag a box across empty map.
 - With a mouse, hold Shift or Ctrl (Cmd on a Mac) and click to add a token, or hold Shift or Ctrl and drag across empty map to draw a box.
 
-Drag any one of the selected tokens to move them all. The group gets an action bar of its own with one **HP entry** for all of them, **Conditions** and elevation, and for you, **Roll**, **Request a roll**, **Hidden**, **Locked**, **Start a fight** or **Add to the fight**, **Delete**, and **More** (ring, size, layer, image, what players see, and owners). Each change to the group is one undo step. Press **Done** in the Multi-select bar when you are finished.
+Drag any one of the selected tokens to move them all. The group gets an action bar of its own with one **HP entry** for all of them, **Conditions** and elevation, and for you, **Roll**, **Request a roll**, **Hidden**, **Locked**, **Start a fight** or **Add to the fight**, **More** (three dots, which hold the ring, size, layer, image, what players see, and owners), **Delete**, and **Clear** (a cross, which lets go of the group without changing anything). Each change to the group is one undo step. Press **Done** in the Multi-select bar when you are finished.
 
 ## HP, damage and conditions
 
@@ -473,7 +484,7 @@ Each creature needs an initiative value before the fight can sort them. There ar
 
 Each roll is a d20 plus the creature's modifier, with advantage or disadvantage from its conditions (Invisible, Surprised or Incapacitated). The row shows an **Adv** or **Dis** badge as a reminder, which helps most when someone types in a roll made at the table. If a creature has advantage from something the app doesn't track, such as a barbarian's Feral Instinct, set it by hand in the row's **⋯**, and the app's own rolls for that row follow it too.
 
-The order runs from high to low. When a row's value ties with others, the app slots it in with player characters ahead of everyone else (monsters, NPCs and companions alike), then the higher initiative bonus first, and leaves alone any order you have already set. Tied rows show a drag handle, and their **⋯** has **Move up** and **Move down**, so you can settle a tie however your table likes without changing anyone's value.
+The order runs from high to low. When a row's value ties with others, the app slots it in with player characters ahead of everyone else (monsters, NPCs and companions alike), then the higher initiative bonus first, and leaves alone any order you have already set. Tied rows show a drag handle, and their **⋯** has **Move up** and **Move down** (an up and a down arrow), so you can settle a tie however your table likes without changing anyone's value.
 
 ### Running turns
 
@@ -502,9 +513,9 @@ Tap a row to select its token and open its action bar. Each row's **⋯** holds 
 - The Ready controls, for a creature that readies an action. Type its trigger ("if the door opens") and press **Ready**. The row and token show "Readied" until its next turn. Players see the trigger only for a creature a player plays, or when you turn on **Show the trigger to players**. When the trigger happens, **It fired: Reaction used** ends the readied action and marks the creature's reaction as spent.
 - For a legendary monster, **Legendary actions used** and **Legendary resistances used today**, as pips you tap. The row's "LA 3/3" and "LR 2/3" tags show what is left, to you alone.
 - **Revive**, for a dead creature, which brings it back with 1 HP.
-- **Remove from the fight**.
+- **Remove**, which takes the creature out of the fight. Its token stays on the map.
 
-**HP changes**, under the order, lists every HP change of the fight ("Goblin Warrior 2 takes 7 damage, 3/10 left."). **Undo** on a line takes back that one change, as long as the creature is still as that change left it. To damage or heal several creatures from the tracker, turn on **Multi-select** in the **Several at once** section and tap their rows (or their tokens). One HP entry then applies to all of them.
+**HP changes**, under the order, lists every HP change of the fight ("Goblin Warrior 2 takes 7 damage, 3/10 left."). **Undo** (a curved arrow) on a line takes back that one change, as long as the creature is still as that change left it. To damage or heal several creatures from the tracker, turn on **Multi-select** in the **Several at once** section and tap their rows (or their tokens). One HP entry then applies to all of them.
 
 ### What players see of the order
 
@@ -514,7 +525,7 @@ The room setting **Initiative order players see** (in Room settings, under Comba
 - **Player characters and allies, the rest on their turn**: the same, except that every creature with the Ally ring shows from the start.
 - **Everyone**: the whole order from the start. Rooms made before the setting existed keep this one.
 
-A few more details follow from this. A creature added mid-fight waits for its own turn, and a dead one that "Skip defeated creatures" passes over never shows at all. If you press **Previous** back past a creature's first turn, it leaves the players' order again. A row that is **Hidden from players** stays out whichever choice you pick. In your own tracker, each row the players don't see yet is tagged **Secret until its turn**, and **View as a player** in the DM panel shows you the order as they see it. Players never see who comes next, so the turn strip can't give a creature away.
+A few more details follow from this. A creature added mid-fight waits for its own turn, and a dead one that "Skip defeated creatures" passes over never shows at all. If you press **Previous** back past a creature's first turn, it leaves the players' order again. A row that is **Hidden from players** stays out whichever choice you pick. In your own tracker, each row the players don't see yet is tagged **Secret until its turn**, beside an eye struck through, the same mark the app uses everywhere for what players can't see, and **View as a player** in the DM panel shows you the order as they see it. Players never see who comes next, so the turn strip can't give a creature away.
 
 ### Ending it
 
@@ -538,7 +549,7 @@ The line under the field reads back the roll and its range before you roll it ("
 
 **Adv**, **Dis** and **Secret** apply to the next roll only, then turn themselves off. A secret roll shows in full to the DMs, while the other players read only "Dana rolled in secret." Your rolls for monsters start secret: with a monster selected, even a formula you type starts secret. With nothing selected, or a character selected, it starts in the open.
 
-The newest roll stays at the top of the panel with its dice, and **Again** rolls it once more. **Recent rolls** lists the rolls in the log, newest first. Other people's rolls pop up as short notices while your Dice panel isn't on screen. To turn those off, open the Menu, then **This device**, and turn off **Show others' rolls as they happen**.
+The newest roll stays at the top of the panel with its dice, and **Again** rolls it once more. This line is the one place in the panel where a result appears, even for a roll you made from a creature's roll options further down, so the panel never grows under your finger as rolls land. An answer you send to a request and a death save show there too, without Again, since neither can be sent again as it was. On a narrow screen the line keeps the total and Again whole, shows as many dice as fit, and counts the rest as "+2". Tap the line to see the whole roll in Recent rolls. **Recent rolls** lists the rolls in the log, newest first. Other people's rolls pop up as short notices while your Dice panel isn't on screen. To turn those off, open the Menu, then **This device**, and turn off **Show others' rolls as they happen**.
 
 ### Roll options
 
@@ -547,9 +558,9 @@ Rather than typing a monster's bonuses, let the app read them from its stat bloc
 - **Saves**, **Checks** and **Skills**, each with its bonus. Conditions apply on their own, and the roll says so ("Dis: Restrained", "+1d4: Blessed", "Fails: Stunned").
 - **Initiative**, which sets the creature's row in a running fight ("Initiative +2, sets its row", or "replaces 14").
 - **Death save**, while the creature is dying.
-- Its traits, actions, bonus actions, reactions and legendary actions. An attack has **Attack +5** and **Damage 1d6+3**. A natural 20 on the attack turns on **Critical** for the damage that follows, which then rolls by the room's **Critical hit damage** rule (see [Room settings](#room-settings-for-fights-and-maps)). Riders such as **+3d6 Sneak Attack** are chips you can add. An action that calls for a saving throw has **Group save, DC 13 Dex**, which opens the [group save](#the-group-save). Multiattack appears as a note at the head of the actions: roll each attack it names in turn.
+- Its traits, actions, bonus actions, reactions and legendary actions. Each one reads the way a stat block prints it, such as "Scimitar +4 to hit, 1d6+2 slashing", with its buttons on the line underneath: **Attack**, **Damage** and **Critical**. A natural 20 on the attack turns on **Critical** for the damage that follows, which then rolls by the room's **Critical hit damage** rule (see [Room settings](#room-settings-for-fights-and-maps)). Riders such as **Sneak Attack** are chips you can add, and the line above names them with their dice. An action that calls for a saving throw reads like "DC 13 Dex, 2d6 fire" and has a **Group save** button, which opens the [group save](#the-group-save). Multiattack appears as a note at the head of the actions: roll each attack it names in turn.
 - An action that recharges shows **Recharge 5–6** and a **Used** switch. Rolling its damage or its group save marks it used. **Recharge 1d6** rolls the recharge, and the app reminds you at the start of the monster's turn. See [Alerts during a fight](#alerts-during-a-fight).
-- For a character with a stat block: its weapons and spells, **Spell save DC**, **Spell attack**, and a slot level for spells that scale.
+- For a character with a stat block: its weapons and spells, each save spell with its DC in its line ("DC 14 Wis"), **Spell save DC**, **Spell attack**, and a slot level for spells that scale, which you step with **−** and **+** ("− Level 2 +").
 
 Whenever someone rolls damage, its total appears in every HP entry as **Use 9**, so you can apply it with one tap.
 
@@ -629,11 +640,11 @@ Placed areas stay on the map until you remove them. To change one, tap it with t
 - Drag it to move it. A cone, line or cube cast from a creature turns around that creature instead.
 - Change its **Size**, or turn on **Hidden** to hide it from players.
 - Press **Save and damage** to open the [group save](#the-group-save) for everyone inside it.
-- Press **Copy** to start a new draft from it, **Delete** to remove it, or **Done** to let it go.
+- Press **Copy** (two pages and a plus) to start a new draft from it, **Delete** (a trash can) to remove it, or **Done** to let it go.
 
 Under **⋯**, you can still change settings such as its aim, reminders and color. A placed area can't gain a caster or change its elevation, though. To change those, press **Copy**, fix the copy, place it, and delete the old one.
 
-The **Areas** panel lists every area along with who is in it, kept up to date as creatures move, and offers **Edit**, **Save and damage** and **Delete** on each row. Only you and an area's owner can change it. Players see each other's areas, unless you turn off the room setting "Players see each other's areas".
+The **Areas** panel lists every area along with who is in it, kept up to date as creatures move, and offers **Edit**, **Save and damage** and **Delete** (a trash can) on each row. Only you and an area's owner can change it. Players see each other's areas, unless you turn off the room setting "Players see each other's areas".
 
 ### Auras
 
@@ -657,7 +668,7 @@ The group save rolls one saving throw for many creatures at once and applies the
 
 When you start it from an area, the page fills itself in from the spell and its caster: "From Fireball: Dexterity save, DC 15 (Ivo's spell save DC), 8d6 fire, half on a pass." Then work down the page:
 
-1. Check **What they roll** (**Save**, **Check** or **No save**), the **Ability** and the **DC**. **Hide the monsters' rolls from players** is on by default. **Against a spell** gives creatures with Magic Resistance their advantage.
+1. Check **What they roll** (**Save**, **Check** or **No save**), the **Ability** and the **DC**. **Hide the monsters' rolls from players** is on by default. **What players see** sums up on one line whether players see the DC and the pass or fail, just as it does in Request a roll. Open it to change either. **Against a spell** gives creatures with Magic Resistance their advantage.
 2. Check the damage (`8d6 fire`). **On a pass** is **Half** or **None**. **On a fail** can add up to three conditions, with how long they last and an optional save at the end of each turn.
 3. Check the rows. Each creature in the area has one. Monsters roll on the server. Players' creatures are asked, so the player rolls on their own device, or you can press **Roll +3** for them. To change how a single row rolls, pick **Ask**, **Server** or **Type** (you type the total), or **Fails**, which is offered when a condition such as Stunned fails the roll outright. To decide a row yourself, pick **Fail**, **Pass** or **Skip**.
 4. Press the roll button ("Roll 4 saves", or "Roll 2 saves and ask 2 players"). Each row shows its roll and result ("Fail vs DC 15"), along with its defenses: resistances and immunities from its stat block, **Evasion**, and **Use Legendary Resistance (2 left)** for a legendary monster that failed.
@@ -717,7 +728,7 @@ The **DM** panel holds the tools that act on your players' screens.
 
 ![The DM panel: Handouts, Players' screens, Check their view, Player link and Table display.](dm-guide/dm-panel.webp)
 
-- **Handouts**: **Show a handout** shows an image or a PDF as a popup, to **Everyone** or to **Chosen players**. Pick **From the library** or **Upload a file**, give it a **Title**, then press **Show**. For a PDF, the app asks which pages to include (up to 100). **Showing now** lists what is up, with **Close** to take a handout down for everyone.
+- **Handouts**: **Show a handout** shows an image or a PDF as a popup, to **Everyone** or to **Chosen players**. Pick **From the library** or **Upload a file**, give it a **Title**, then press **Show**. For a PDF, the app asks which pages to include (up to 100). **Showing now** lists what is up, with **Hide** to take a handout down for everyone.
 - **Players' screens**:
   - **Follow me**: the players' maps follow yours as you pan and zoom, until you turn it off.
   - **Bring everyone here**: moves every player's map to what you see right now, once.
@@ -847,7 +858,7 @@ Goblins and wolves wait in the trees beside a road, and the party is about to wa
 2. In **Initiative**, under **Start a fight with**, press **Everyone here**. Use this rather than "Visible to players", which would leave the hidden goblins out. Their rows start hidden.
 3. The players roll their own initiative. Press **Auto initiative**: the four goblin warriors share one roll ("By creature"), and so do the two wolves. Then press **Start**.
 4. The hidden goblins appear on their first turn, thanks to "Reveal hidden combatants on their turn". If you would rather spring them all at once, select them and press **Hidden** in the group's bar, and their tokens appear together. Their rows still join the players' order one by one, on each goblin's first turn, because that is how **Initiative order players see** works in a new room. If you want the rows to appear along with the tokens, set that option to **Everyone** in Room settings before the fight.
-5. On a goblin's turn, tap it and press **Roll** to see its roll options. Roll **Attack +4** with its scimitar against Thorn's AC, then **Damage**. Tap Thorn, use the **Use 5** chip in his HP entry, and press **Apply**.
+5. On a goblin's turn, tap it and press **Roll** to see its roll options. On its Scimitar line ("+4 to hit"), press **Attack** to roll against Thorn's AC, then **Damage**. Tap Thorn, use the **Use 5** chip in his HP entry, and press **Apply**.
 6. A wolf hits Mara and knocks her down: open **Conditions** on her token and tap **Prone**.
 7. Ivo casts Fireball. His player picks the **Area** tool, searches "fireball", and places the 20 ft sphere among the goblins. Your screen shows the area, with "In area (4): …" naming who it catches.
 8. Press **Save and damage** on the area. The group save fills itself in from Ivo's stat block: "Dexterity save, DC 15 (Ivo's spell save DC), 8d6 fire, half on a pass." Press the roll button, and the goblins roll on the server. Take Ivo's own damage roll ("Use Ivo's 28") or press **Roll**, check the rows, and press **Apply**. A single undo would take all of it back.
@@ -920,7 +931,7 @@ The party faces an adult red dragon in its lair. It has Multiattack, Fire Breath
 **Its turn**
 
 1. Tap the dragon, then press **Roll** in its bar. **Rolls for Adult Red Dragon** lists its actions. Multiattack is a note at the head of the actions: roll each attack it names with **Attack** and **Damage**, and apply each hit with the **Use** chip in the target's HP entry.
-2. For Fire Breath, press **Group save, DC 21 Dex**. The group save opens with "17d6 fire, half on a pass." Its rows follow what you have selected, so select the characters in the cone first. Or place a cone **Area** from the dragon and use its **Save and damage**, which picks them for you. The players are asked to roll. Roll the damage, then press **Apply**. Fire Breath is now marked **Used**.
+2. Fire Breath's line in the roll options reads "DC 21 Dex, 17d6 fire". Press its **Group save**. The group save opens with "17d6 fire, half on a pass." Its rows follow what you have selected, so select the characters in the cone first. Or place a cone **Area** from the dragon and use its **Save and damage**, which picks them for you. The players are asked to roll. Roll the damage, then press **Apply**. Fire Breath is now marked **Used**.
 3. At the start of the dragon's next turn, a card says "Fire Breath can recharge (5–6)." Press **Roll**, and on a 5 or 6, Used clears.
 
 **Between turns**
