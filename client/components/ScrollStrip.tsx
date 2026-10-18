@@ -28,6 +28,14 @@ export function ScrollStrip(props: {
   onKeyDown?(e: KeyboardEvent<HTMLDivElement>): void;
   /** Between its buttons. */
   gap?: number;
+  /**
+   * Room at each end for the focus ring of the first and last button, 3 px
+   * by default. The party line's chips draw their ring around a pill that
+   * reaches their edges (components/HeaderRow.tsx), so they ask for 4. The
+   * toolbar keeps 3: on a 390 px phone its tools fill the row to the pixel,
+   * and one more at each end made it scroll.
+   */
+  edge?: number;
   style?: CSSProperties;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -108,8 +116,7 @@ export function ScrollStrip(props: {
           overflowY: "hidden",
           overscrollBehaviorX: "contain",
           scrollbarWidth: "none",
-          // Room for the focus ring of the first and last button.
-          paddingInline: 4,
+          paddingInline: props.edge ?? 3,
           maskImage: mask,
           WebkitMaskImage: mask,
         }}

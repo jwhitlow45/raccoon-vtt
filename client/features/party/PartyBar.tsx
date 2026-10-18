@@ -116,7 +116,7 @@ export function PartyBar(props: { dock?: boolean; short?: boolean; onLeave?(): v
     return (
       <section aria-label="Party" style={{ display: "flex", alignItems: "center", gap: theme.space(1), minHeight: theme.touch }}>
         {heading}
-        <ScrollStrip style={{ flex: 1 }}>
+        <ScrollStrip edge={4} style={{ flex: 1 }}>
           <FoldedParty entries={entries} onFrame={frame} />
         </ScrollStrip>
         <PillButton aria-label="Ask the party" title="Ask the party" onClick={ask}>
