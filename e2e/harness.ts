@@ -191,7 +191,30 @@ export async function waitFor<T>(what: string, check: () => T | Promise<T>, time
  * so a reload after a resize stays covered.
  */
 export async function reopenRoom(page: Page): Promise<void> {
-  await page.goto(page.url());
+  await openPage(page, page.url());
+}
+
+/**
+ * Opens `url` in the page with a new navigation, again if the page's own
+ * history step aborted it (net::ERR_ABORTED). A sheet or an action bar
+ * that closes, by a tap, Escape or a resize that changes the layout, steps
+ * back off its Back entry (client/lib/backClose.ts) a moment later, and
+ * that step aborts a navigation begun in the meantime, as a test that
+ * closes or resizes and then navigates at once does under load. Each step
+ * aborts one navigation and has landed by the time the abort is reported,
+ * and a test closes at most a sheet and a bar together, hence three tries.
+ */
+export async function openPage(page: Page, url: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.goto(url);
+      return;
+    } catch (err) {
+      if (attempt === 3 || !String(err).includes("net::ERR_ABORTED")) throw err;
+      // Said in the run's output, so a log shows how often the race comes.
+      console.log(`openPage: the page's own history step aborted opening ${url}, try ${attempt + 1}`);
+    }
+  }
 }
 
 type Json = Record<string, unknown>;

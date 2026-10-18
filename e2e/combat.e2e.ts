@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import type { LogEvent } from "#shared/model.ts";
-import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, openPage, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The combat flow (docs/design-v1-combat-flow.md section 8) on the real
@@ -94,7 +94,7 @@ async function setUp(page: Page, cdp: CDPSession, view: { width: number; height:
    * steps back off it (lib/backClose.ts), which can land mid-navigation on
    * the page before the room.
    */
-  await page.goto(`${server.origin}/r/${run.roomId}`);
+  await openPage(page, `${server.origin}/r/${run.roomId}`);
   await page.getByRole("status", { name: "Connected" }).first().waitFor();
   await page.locator(".konvajs-content").first().waitFor();
 }
