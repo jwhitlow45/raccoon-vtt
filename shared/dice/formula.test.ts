@@ -134,11 +134,11 @@ describe("advantage on the dice (3.4)", () => {
     const adv = applyMode(formula("1d20+5"), "adv");
     assert.ok(adv.ok);
     assert.equal(formatFormula(adv.formula), "2d20kh1+5");
-    assert.equal(formatFormula(adv.formula, "adv"), "1d20+5 with advantage");
+    assert.equal(formatFormula(adv.formula, "adv"), "1d20+5 with Advantage");
     const dis = applyMode(formula("1d20+5+1d4"), "dis");
     assert.ok(dis.ok);
     assert.equal(formatFormula(dis.formula), "2d20kl1+5+1d4");
-    assert.equal(formatFormula(dis.formula, "dis"), "1d20+5+1d4 with disadvantage");
+    assert.equal(formatFormula(dis.formula, "dis"), "1d20+5+1d4 with Disadvantage");
   });
 
   test("a roll without exactly one such d20 is refused", () => {

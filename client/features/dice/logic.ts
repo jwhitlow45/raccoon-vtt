@@ -131,7 +131,7 @@ export function askedFormula(result: Pick<DiceResult, "formula" | "mode">): stri
   if (!parsed.ok) return null;
   if (!result.mode) return formatFormula(parsed.formula);
   const text = formatFormula(parsed.formula, result.mode);
-  return text.replace(/ with (advantage|disadvantage)$/, "");
+  return text.replace(/ with (Advantage|Disadvantage)$/, "");
 }
 
 /**

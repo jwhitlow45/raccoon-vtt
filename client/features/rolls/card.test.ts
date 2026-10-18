@@ -36,7 +36,7 @@ describe("the card's Roll (docs/design-v1-roll-request.md 5.2, 5.3)", () => {
   test("the reading names each source and extra, and nothing at all draws none", () => {
     const blessed = reminderPreset([...restrained, { key: "blessed" }], DEX);
     const roll = cardRoll({ bonus: 3, preset: blessed, inputs: NO_INPUTS, text: "" });
-    assert.equal(roll.reading, "Rolls 1d20+3 with disadvantage (Restrained), +1d4 (Blessed).");
+    assert.equal(roll.reading, "Rolls 1d20+3 with Disadvantage (Restrained), +1d4 (Blessed).");
     assert.deepEqual(roll.fields, { ok: true, value: { mode: "dis", extra: "+1d4" } });
     // Restrained and the player's Adv: any advantage with any disadvantage is a normal roll.
     const adv = cardRoll({ bonus: 3, preset: reminderPreset(restrained, DEX), inputs: { ...NO_INPUTS, pressed: "adv" }, text: "" });
@@ -50,7 +50,7 @@ describe("the card's Roll (docs/design-v1-roll-request.md 5.2, 5.3)", () => {
     assert.equal(tired.reading, "Rolls 1d20+3, -4 (Exhaustion), +1d4 (Blessed), +1d6.");
     assert.deepEqual(tired.fields, { ok: true, value: { extra: "-4+1d4+1d6" } });
     assert.equal(cardRoll({ bonus: 3, preset: reminderPreset([], DEX), inputs: NO_INPUTS, text: "" }).reading, null);
-    assert.equal(cardRoll({ bonus: 3, preset: reminderPreset([], DEX), inputs: { ...NO_INPUTS, pressed: "adv" }, text: "" }).reading, "Rolls 1d20+3 with advantage.");
+    assert.equal(cardRoll({ bonus: 3, preset: reminderPreset([], DEX), inputs: { ...NO_INPUTS, pressed: "adv" }, text: "" }).reading, "Rolls 1d20+3 with Advantage.");
     assert.equal(tired.extraRoom, 40 - "-4+1d4".length, "the whole extra keeps within 40 characters");
   });
 
@@ -77,8 +77,8 @@ describe("a rolled result's words (5.4)", () => {
   const dis: DiceResult = { formula: "2d20kl1+3+1d4", faces: [14, 6, 3], total: 12, mode: "dis" };
   test("the dice with the dropped one, the verdict, a natural, and the news", () => {
     const target: RollTarget = { characterId: "thorn", total: 12, result: "fail", dice: dis, tag: "t1" };
-    assert.deepEqual(rolledDice(dis), { formula: "1d20+3+1d4 with disadvantage", faces: [{ face: 14, dropped: true }, { face: 6, dropped: false }, { face: 3, dropped: false }] });
-    assert.equal(rolledText(target), "Rolled 12 (1d20+3+1d4 with disadvantage: 14 dropped, 6, 3). Fail.");
+    assert.deepEqual(rolledDice(dis), { formula: "1d20+3+1d4 with Disadvantage", faces: [{ face: 14, dropped: true }, { face: 6, dropped: false }, { face: 3, dropped: false }] });
+    assert.equal(rolledText(target), "Rolled 12 (1d20+3+1d4 with Disadvantage: 14 dropped, 6, 3). Fail.");
     assert.equal(rolledNews("Thorn", target), "Thorn rolled 12. Fail.");
     const twenty: RollTarget = { characterId: "thorn", total: 25, result: "pass", dice: { formula: "1d20+5", faces: [20], total: 25 }, tag: "t2" };
     assert.equal(rolledText(twenty), "Rolled 25 (1d20+5: 20). Natural 20. Pass.");
@@ -143,7 +143,7 @@ describe("asking the DM to change an answer (5.5)", () => {
     assert.deepEqual(askItems({}, false), [], "with typed totals off, Fix my total is gone");
     assert.ok(askItems({ dice: { formula: "1d20+5", faces: [7], total: 12 } }, false).some((i) => i.label.includes("Bardic")), "a rolled answer keeps its asks");
     assert.equal(askedText({ reason: "heroic-inspiration" }), "Asked the DM to reroll (Heroic Inspiration).");
-    assert.equal(askRowText({ reason: "lucky" }), "Asks for advantage (Lucky)");
+    assert.equal(askRowText({ reason: "lucky" }), "Asks for Advantage (Lucky)");
     assert.equal(askRowText({ reason: "bardic-inspiration", die: 8 }), "Asks to add a d8 (Bardic Inspiration)");
     assert.equal(askRowText({ reason: "fix-total" }, "Thorn"), "Thorn asks to fix the total");
   });

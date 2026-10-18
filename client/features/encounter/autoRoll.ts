@@ -476,7 +476,7 @@ const signed = (n: number) => (n < 0 ? `−${-n}` : `+${n}`);
 /**
  * One line per shared roll for the DM's result card, from the faces the
  * server drew, such as "d20 (12) +2 = 14", "d20 (12) +2 −2 = 12" with
- * Exhaustion, or "2d20 with advantage (5, 17) keeps 17, +1 = 18". The minus
+ * Exhaustion, or "2d20 with Advantage (5, 17) keeps 17, +1 = 18". The minus
  * sign is typographic, as a stat block prints it. A result whose text no
  * longer parses reads as its formula and total.
  */
@@ -493,7 +493,7 @@ export function describeRoll(roll: Pick<DiceResult, "formula" | "faces" | "total
     }
     if (head === null && t.term.sides === 20 && t.term.sign === 1) {
       if (t.term.keep) {
-        const how = t.term.keep.high ? "with advantage" : "with disadvantage";
+        const how = t.term.keep.high ? "with Advantage" : "with Disadvantage";
         const keeps = t.faces.filter((_, i) => t.kept[i]);
         head = `${t.term.count}d20 ${how} (${t.faces.join(", ")}) keeps ${keeps.join(", ")}`;
         kept = true;

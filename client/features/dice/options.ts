@@ -348,7 +348,7 @@ export function resultWords(rolls: readonly DiceRoll[], kind: "d20" | "attack" |
   else if (kind === "attack" && face === 1) parts.push("Natural 1: a miss");
   else if (face === 20) parts.push("Natural 20");
   else if (face === 1) parts.push("Natural 1");
-  if (first.cancelled) parts.push("normal: advantage and disadvantage cancelled");
+  if (first.cancelled) parts.push("normal: Advantage and Disadvantage cancelled");
   return parts.join(", ");
 }
 

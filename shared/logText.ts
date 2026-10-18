@@ -90,7 +90,7 @@ const CHANGE_NAMES = { "heroic-inspiration": "Heroic Inspiration", "halfling-luc
 
 /**
  * A rolled answer's dice inside its line: "1d20+5: 12", "1d20+3, your
- * bonus: 9", "1d20+5 with advantage: 14, 7 dropped". Only a player types a
+ * bonus: 9", "1d20+5 with Advantage: 14, 7 dropped". Only a player types a
  * bonus, and a player reads only their own creatures' answers, so the bonus
  * is "your bonus" for them and "their bonus" for the DM.
  */
@@ -155,7 +155,7 @@ export function critSumText(result: Pick<DiceResult, "formula" | "faces" | "crit
   }
 }
 
-/** A roll's formula as a reader reads it: as asked with its mode, "1d20+5 with advantage", or a crit's by its rule. */
+/** A roll's formula as a reader reads it: as asked with its mode, "1d20+5 with Advantage", or a crit's by its rule. */
 export function rolledFormula(result: Pick<DiceResult, "formula" | "faces" | "mode" | "crit">): string {
   const crit = critParts(result);
   if (crit) return critFormula(crit);
@@ -165,7 +165,7 @@ export function rolledFormula(result: Pick<DiceResult, "formula" | "faces" | "mo
 
 /**
  * One roll's dice (docs/design-v1-dice.md 5.5): "2d6+3 (4, 6) = 13", and
- * with a mode "1d20+5 with advantage (14, 7 dropped) = 19". A critical hit
+ * with a mode "1d20+5 with Advantage (14, 7 dropped) = 19". A critical hit
  * by a table's rule reads its arithmetic: "12 max + 2d6+3 (4, 6) = 25". A
  * formula a later grammar refuses reads as its text and total.
  */

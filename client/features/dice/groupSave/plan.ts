@@ -220,7 +220,7 @@ export type RowWords = {
 function rolledText(total: number, dice: { formula: string; faces: number[]; mode?: import("#shared/dice/formula.ts").AdvantageMode; cancelled?: true }): string {
   const parsed = parseFormula(dice.formula);
   const formula = parsed.ok ? formatFormula(parsed.formula, dice.mode) : dice.formula;
-  return `${total} (${formula}: ${dice.faces.join(", ")})${dice.cancelled ? ", normal: advantage and disadvantage cancelled" : ""}`;
+  return `${total} (${formula}: ${dice.faces.join(", ")})${dice.cancelled ? ", normal: Advantage and Disadvantage cancelled" : ""}`;
 }
 
 /**

@@ -45,7 +45,7 @@ export const FORMULA_ERRORS = {
   long: "That roll is too long.",
   tooMuch: "That is too much to roll at once. Roll fewer at a time.",
   label: "A label holds at most 60 characters.",
-  mode: "Advantage and disadvantage need one d20 in the roll.",
+  mode: "Advantage and Disadvantage need one d20 in the roll.",
   other: "Try 1d20+5 or 2d6+3 fire.",
 } as const;
 
@@ -220,7 +220,8 @@ function termText(t: Term): string {
 /**
  * The canonical text, "1d20+5": lowercase, no spaces, every count and n
  * written. With a mode it writes the mode's d20 back as `1d20` and says the
- * mode, so the text says what was asked: "1d20+5 with advantage".
+ * mode in the SRD's capitals, so the text says what was asked: "1d20+5 with
+ * Advantage".
  */
 export function formatFormula(formula: Formula, mode?: AdvantageMode): string {
   let modeAt = -1;
@@ -232,7 +233,7 @@ export function formatFormula(formula: Formula, mode?: AdvantageMode): string {
       return `${t.sign === -1 ? "-" : "+"}${body}`;
     })
     .join("");
-  return mode ? `${text} with ${mode === "adv" ? "advantage" : "disadvantage"}` : text;
+  return mode ? `${text} with ${mode === "adv" ? "Advantage" : "Disadvantage"}` : text;
 }
 
 /** The dice a formula rolls, every die of a term counted, kept or not. */

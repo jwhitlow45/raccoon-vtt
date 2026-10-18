@@ -73,7 +73,7 @@ export function SaveEndsFields(props: { form: SaveEndsForm; onChange(form: SaveE
           {follows ? (
             <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{form.dc === null ? "Left empty, it is the save's DC." : "Its own DC, not the save's."}</span>
           ) : (
-            <Checkbox checked={form.spell} onChange={(spell) => props.onChange({ ...form, spell })} label="Against a spell" help="A creature with Magic Resistance makes it with advantage." />
+            <Checkbox checked={form.spell} onChange={(spell) => props.onChange({ ...form, spell })} label="Against a spell" help="A creature with Magic Resistance makes it with Advantage." />
           )}
         </>
       ) : null}

@@ -335,7 +335,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     page.phase === "setup" ? (
       <div style={{ display: "grid", gap: theme.space(1) }}>
         <Switch label="Hide the monsters' rolls from players" help="Their damage too, unless a player's creature cast it." checked={page.secret} onChange={(secret) => update({ ...pageRef.current, secret })} />
-        {page.test.kind === "save" ? <Switch label="Against a spell" help="A creature with Magic Resistance rolls with advantage, asked or not." checked={page.spell} onChange={(spell) => update({ ...pageRef.current, spell })} /> : null}
+        {page.test.kind === "save" ? <Switch label="Against a spell" help="A creature with Magic Resistance rolls with Advantage, asked or not." checked={page.spell} onChange={(spell) => update({ ...pageRef.current, spell })} /> : null}
         {anyAsk || (openRolls && page.dc !== null) ? (
           // The request sheet's fold and words (LP7-PC-10): a chevron, and folded, what players will see.
           <Section

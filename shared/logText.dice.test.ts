@@ -22,8 +22,8 @@ const LONGSWORD: DiceRoll = { formula: "2d6+3", faces: [4, 6], total: 13, label:
 describe("dice wording (docs/design-v1-dice.md 5.5)", () => {
   test("a roll's dice: its formula as asked, every face, a dropped one said, and the total", () => {
     assert.equal(diceText({ formula: "2d6+3", faces: [4, 6], total: 13 }), "2d6+3 (4, 6) = 13");
-    assert.equal(diceText({ formula: "2d20kh1+5", faces: [14, 7], total: 19, mode: "adv" }), "1d20+5 with advantage (14, 7 dropped) = 19");
-    assert.equal(diceText({ formula: "2d20kl1+5", faces: [14, 7], total: 12, mode: "dis" }), "1d20+5 with disadvantage (14 dropped, 7) = 12");
+    assert.equal(diceText({ formula: "2d20kh1+5", faces: [14, 7], total: 19, mode: "adv" }), "1d20+5 with Advantage (14, 7 dropped) = 19");
+    assert.equal(diceText({ formula: "2d20kl1+5", faces: [14, 7], total: 12, mode: "dis" }), "1d20+5 with Disadvantage (14 dropped, 7) = 12");
     assert.equal(diceText({ formula: "4d6kh3", faces: [3, 5, 1, 5], total: 13 }), "4d6kh3 (3, 5, 1 dropped, 5) = 13");
     assert.equal(diceText({ formula: "2d1000", faces: [1000, 999], total: 1999 }), "2d1000 (1,000, 999) = 1,999");
     assert.equal(diceText({ formula: "2d6 words", faces: [1, 2], total: 3 }), "2d6 words = 3", "a formula a later grammar refuses reads as its text and total");
@@ -125,7 +125,7 @@ describe("a rolled answer's line (5.5)", () => {
     assert.equal(describeEvent(owl({ typedBonus: true }), names), "Owl rolled 12 (1d20+3, your bonus: 9) on a Dexterity saving throw against DC 13: fail.", "the player who typed it");
     assert.equal(describeEvent(owl({ typedBonus: true }), names, true), "Owl rolled 12 (1d20+3, their bonus: 9) on a Dexterity saving throw against DC 13: fail.", "the DM (LP7-DICE-11)");
     assert.equal(describeEvent(owl({ total: 21, dice: { formula: "1d20+3", faces: [18], total: 21, fails: "stunned" } }), names), "Owl rolled 21 (1d20+3: 18) on a Dexterity saving throw against DC 13: fails (Stunned).");
-    assert.equal(describeEvent(owl({ total: 20, result: "pass", dice: { formula: "2d20kh1+3", faces: [17, 4], total: 20, mode: "adv" } }), names), "Owl rolled 20 (1d20+3 with advantage: 17, 4 dropped) on a Dexterity saving throw against DC 13: pass.");
+    assert.equal(describeEvent(owl({ total: 20, result: "pass", dice: { formula: "2d20kh1+3", faces: [17, 4], total: 20, mode: "adv" } }), names), "Owl rolled 20 (1d20+3 with Advantage: 17, 4 dropped) on a Dexterity saving throw against DC 13: pass.");
     assert.equal(describeEvent(owl({ total: 12, dice: undefined, tag: undefined }), names), "Owl rolled 12 on a Dexterity saving throw against DC 13: fail.", "a typed total reads as before");
   });
 
@@ -135,7 +135,7 @@ describe("a rolled answer's line (5.5)", () => {
       describeEvent(owl({ total: 17, result: "pass", dice: { formula: "1d20+3+1d4", faces: [11, 3], total: 17 }, changed: change("heroic-inspiration") }), names),
       "Owl rerolled 17 (Heroic Inspiration, 1d20+3+1d4: 11, 3) on a Dexterity saving throw against DC 13: pass.",
     );
-    assert.equal(describeEvent(owl({ total: 19, result: "pass", dice: { formula: "2d20kh1+3", faces: [9, 16], total: 19, mode: "adv" }, changed: change("lucky") }), names), "Owl used Lucky: 19 (1d20+3 with advantage: 9 dropped, 16) on a Dexterity saving throw against DC 13: pass.");
+    assert.equal(describeEvent(owl({ total: 19, result: "pass", dice: { formula: "2d20kh1+3", faces: [9, 16], total: 19, mode: "adv" }, changed: change("lucky") }), names), "Owl used Lucky: 19 (1d20+3 with Advantage: 9 dropped, 16) on a Dexterity saving throw against DC 13: pass.");
     assert.equal(describeEvent(owl({ total: 15, result: "pass", dice: { formula: "1d20+3+1d8", faces: [9, 3], total: 15 }, changed: change("bardic-inspiration", 8) }), names), "Owl added Bardic Inspiration's 1d8: 3, now 15 on a Dexterity saving throw against DC 13: pass.");
   });
 });

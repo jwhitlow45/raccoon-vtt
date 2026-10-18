@@ -226,8 +226,8 @@ export function AutoInitiativeResult() {
               )}
               {group?.mixedModifier ? <span style={note}>Their modifiers differ: it adds the one most of them have.</span> : null}
               {group?.mixedExtra ? <span style={note}>Their penalties differ: it adds the one most of them have.</span> : null}
-              {group?.mixedAdvantage ? <span style={note}>Their advantage reminders differ, so one plain d20 was rolled.</span> : null}
-              {group?.roll.cancelled && !group.mixedAdvantage ? <span style={note}>Advantage and disadvantage cancel, so one plain d20 was rolled.</span> : null}
+              {group?.mixedAdvantage ? <span style={note}>Their Advantage reminders differ, so one plain d20 was rolled.</span> : null}
+              {group?.roll.cancelled && !group.mixedAdvantage ? <span style={note}>Advantage and Disadvantage cancel, so one plain d20 was rolled.</span> : null}
             </span>
             <span aria-label={`Total ${total}`} style={{ flex: "none", minWidth: 36, textAlign: "right", fontSize: theme.font.title, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>
               {total}

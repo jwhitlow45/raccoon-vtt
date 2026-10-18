@@ -182,7 +182,7 @@ export function HpReadout(props: { hp: HpView }) {
 export function RollBadge(props: { kind: "adv" | "dis" }) {
   const adv = props.kind === "adv";
   return (
-    <SharedTag tone={adv ? "success" : "danger"} dense title={adv ? "Rolls initiative with advantage" : "Rolls initiative with disadvantage"}>
+    <SharedTag tone={adv ? "success" : "danger"} dense title={adv ? "Rolls initiative with Advantage" : "Rolls initiative with Disadvantage"}>
       {adv ? "Adv" : "Dis"}
     </SharedTag>
   );

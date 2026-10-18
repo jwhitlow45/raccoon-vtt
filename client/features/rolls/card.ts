@@ -140,9 +140,9 @@ export function cardRoll(input: { bonus: number | null; preset: RollPreset | nul
   const extras = parts.length > 0 ? `, ${parts.join(", ")}` : "";
   let reading: string | null = null;
   if (mode.mode) {
-    // The player's own chip needs no naming beside the mode it gives: "with advantage", not "with advantage (Advantage)".
+    // The player's own chip needs no naming beside the mode it gives: "with Advantage", not "with Advantage (Advantage)".
     const why = names(sources.filter((src) => src.from !== "pressed"), mode.mode);
-    reading = `Rolls ${base} with ${mode.mode === "adv" ? "advantage" : "disadvantage"}${why.length > 0 ? ` (${list(why)})` : ""}${extras}.`;
+    reading = `Rolls ${base} with ${mode.mode === "adv" ? "Advantage" : "Disadvantage"}${why.length > 0 ? ` (${list(why)})` : ""}${extras}.`;
   }
   else if (mode.cancelled) reading = `Rolls ${base}${extras}: ${list([...names(sources, "adv"), ...names(sources, "dis")])} cancel.`;
   else if (parts.length > 0) reading = `Rolls ${base}${extras}.`;
@@ -208,7 +208,7 @@ export function verdictText(target: Pick<RollTarget, "result" | "dice">): string
 }
 
 /**
- * The card's result in words (5.4): "Rolled 17 (1d20+5 with advantage: 12, 7
+ * The card's result in words (5.4): "Rolled 17 (1d20+5 with Advantage: 12, 7
  * dropped). Pass.", with "Natural 20." where it shows one. The screen draws
  * the same with a dropped die struck through.
  */
@@ -311,7 +311,7 @@ export function askItems(target: Pick<RollTarget, "dice">, typeTotals: boolean):
   return items;
 }
 
-/** What an ask asks for, mid-sentence: "to reroll (Heroic Inspiration)", "for advantage (Lucky)", "to add a d8 (Bardic Inspiration)", "to fix the total". */
+/** What an ask asks for, mid-sentence: "to reroll (Heroic Inspiration)", "for Advantage (Lucky)", "to add a d8 (Bardic Inspiration)", "to fix the total". */
 function askWords(change: Pick<RollChange, "reason" | "die">): string {
   switch (change.reason) {
     case "heroic-inspiration":
@@ -319,7 +319,7 @@ function askWords(change: Pick<RollChange, "reason" | "die">): string {
     case "halfling-luck":
       return "to reroll (Halfling Luck)";
     case "lucky":
-      return "for advantage (Lucky)";
+      return "for Advantage (Lucky)";
     case "bardic-inspiration":
       return `to add a d${change.die ?? "?"} (Bardic Inspiration)`;
     case "fix-total":

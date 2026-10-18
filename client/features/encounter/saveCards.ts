@@ -149,7 +149,7 @@ export type SaveCardModel = {
 const CHANGE_WORDS: Record<RollChange["reason"], string> = {
   "heroic-inspiration": "asks to reroll (Heroic Inspiration)",
   "halfling-luck": "asks to reroll (Halfling Luck)",
-  lucky: "asks for advantage (Lucky)",
+  lucky: "asks for Advantage (Lucky)",
   "bardic-inspiration": "asks to add a die (Bardic Inspiration)",
   "fix-total": "asks to fix the total",
 };

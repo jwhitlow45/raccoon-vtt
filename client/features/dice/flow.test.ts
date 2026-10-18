@@ -300,7 +300,7 @@ describe("a roll that cannot go (docs/design-v1-dice.md 4.5 and 11)", () => {
     });
     assert.equal(panel.roll([{ formula: "2d6", sources: [{ kind: "adv", from: "typed" }] }]), null);
     const s = choices.getState();
-    assert.deepEqual(s.last && "error" in s.last ? s.last.error : null, "Advantage and disadvantage need one d20 in the roll.");
+    assert.deepEqual(s.last && "error" in s.last ? s.last.error : null, "Advantage and Disadvantage need one d20 in the roll.");
     assert.notEqual(panel.roll([{ formula: "2d6" }]), null);
     assert.equal((sent[0] as OpOf<"dice.roll">).rolls[0]?.mode, undefined, "Adv pressed never goes on damage");
     assert.equal((sent[0] as OpOf<"dice.roll">).to, "all", "a DM's free formula starts in the open");
