@@ -22,8 +22,10 @@
  * and the result is named for the first 8 hex digits of its SHA-256
  * (InterVariable-8a540aa8.woff2), since the server lets browsers keep the
  * files for good (server/http/static.ts). The script prints the names,
- * which INTER_FILES, globals.css and index.html then take, and
- * interFont.test.ts checks that each name matches its file.
+ * which INTER_FILES, globals.css, index.html and the font's credit
+ * (shared/credits.ts and CREDITS.md) then take. interFont.test.ts checks
+ * that each name matches its file, and credits.test.ts that both credit
+ * files list every file shipped.
  *
  * Both axes stay (weight 100 to 900 and optical size 14 to 32), so every
  * weight the theme uses comes from one file. `tnum` joins fonttools'
@@ -102,9 +104,6 @@ if (import.meta.main) {
   if (got !== RELEASE.sha256) {
     throw new Error(`${RELEASE.url} changed upstream (sha256 ${got}). Re-check its license before re-pinning.`);
   }
-  mkdirSync(OUT_DIR, { recursive: true });
-  // The last run's files, whose names a new subset would not reuse.
-  for (const name of readdirSync(OUT_DIR)) if (name.endsWith(".woff2")) rmSync(join(OUT_DIR, name));
   const work = mkdtempSync(join(tmpdir(), "raccoon-inter-"));
   try {
     const entries = await readZipEntries(zip, [...FONTS.map(([entry]) => entry), LICENSE[0]]);
@@ -115,6 +114,7 @@ if (import.meta.main) {
     const python = join(venv, "bin", "python");
     execFileSync(python, ["-I", "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--only-binary=:all:", ...PIP_PINS], { stdio: "inherit" });
 
+    const made: { name: string; data: Buffer; hash: string }[] = [];
     for (const [entry, out] of FONTS) {
       const subset = join(work, `${out}.woff2`);
       execFileSync(
@@ -133,13 +133,22 @@ if (import.meta.main) {
       );
       const data = readFileSync(subset);
       const hash = sha256(data);
-      const name = `${out}-${hash.slice(0, 8)}.woff2`;
-      writeFileSync(join(OUT_DIR, name), data);
-      console.log(`/fonts/${name}  ${data.length} bytes  sha256 ${hash}`);
+      made.push({ name: `${out}-${hash.slice(0, 8)}.woff2`, data, hash });
     }
-    console.log("Give these names to INTER_FILES (client/lib/interFont.ts), the @font-face rules (client/globals.css) and the preload (client/index.html).");
+
+    // public/fonts/ changes only once every step above has worked, so a failed venv, pip install or subset leaves the app its fonts.
+    mkdirSync(OUT_DIR, { recursive: true });
+    for (const { name, data } of made) writeFileSync(join(OUT_DIR, name), data);
     writeFileSync(join(OUT_DIR, LICENSE[1]), entries.get(LICENSE[0])!);
+    // The last run's files, whose names a new subset would not reuse.
+    const kept = new Set(made.map((f) => f.name));
+    for (const name of readdirSync(OUT_DIR)) if (name.endsWith(".woff2") && !kept.has(name)) rmSync(join(OUT_DIR, name));
+
+    for (const { name, data, hash } of made) console.log(`/fonts/${name}  ${data.length} bytes  sha256 ${hash}`);
     console.log(`${LICENSE[1]}  copied from the release`);
+    console.log(
+      "Give these names to INTER_FILES (client/lib/interFont.ts), the @font-face rules (client/globals.css), the preload (client/index.html) and the font's credit (shared/credits.ts and CREDITS.md).",
+    );
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
