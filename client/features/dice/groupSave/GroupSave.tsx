@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { bonusFor } from "#shared/dice/bonus.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { uuidv7 } from "#shared/ids.ts";
@@ -13,6 +13,7 @@ import { Chip, ChipRow } from "../../../components/Chip.tsx";
 import { Input } from "../../../components/Field.tsx";
 import { Segmented } from "../../../components/Segmented.tsx";
 import { stickyPaneFoot } from "../../../components/Sheet.tsx";
+import { Section } from "../../../components/Panel.tsx";
 import { Switch } from "../../../components/Switch.tsx";
 import { theme } from "../../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../../state/view.ts";
@@ -145,6 +146,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   const blocked = useRollBlocked();
   const [error, setError] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [seenOpen, setSeenOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [outcomeOpen, setOutcomeOpen] = useState(page.phase === "setup");
   const pageRef = useRef(page);
@@ -335,11 +337,19 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
         <Switch label="Hide the monsters' rolls from players" help="Their damage too, unless a player's creature cast it." checked={page.secret} onChange={(secret) => update({ ...pageRef.current, secret })} />
         {page.test.kind === "save" ? <Switch label="Against a spell" help="A creature with Magic Resistance rolls with advantage, asked or not." checked={page.spell} onChange={(spell) => update({ ...pageRef.current, spell })} /> : null}
         {anyAsk || (openRolls && page.dc !== null) ? (
-          <details>
-            <summary style={{ minHeight: theme.touch, display: "flex", alignItems: "center", cursor: "pointer" }}>What players see</summary>
+          // The request sheet's fold and words (LP7-PC-10): a chevron, and folded, what players will see.
+          <Section
+            label="What players see"
+            divider={false}
+            fold={{
+              open: seenOpen,
+              onToggle: () => setSeenOpen((v) => !v),
+              summary: <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>{groupSeen(page.dc !== null && page.switches.dcShown, page.dc !== null, anyAsk && page.switches.resultShown)}</span>,
+            }}
+          >
             {page.dc !== null ? <Checkbox checked={page.switches.dcShown} onChange={(dcShown) => update({ ...pageRef.current, switches: { ...pageRef.current.switches, dcShown } })} label="Players see the DC" /> : null}
             {anyAsk ? <Checkbox checked={page.switches.resultShown} onChange={(resultShown) => update({ ...pageRef.current, switches: { ...pageRef.current.switches, resultShown } })} label="Players see pass or fail" /> : null}
-          </details>
+          </Section>
         ) : null}
       </div>
     ) : null;
@@ -626,6 +636,8 @@ function OutcomePanel(props: {
 }) {
   const { page } = props;
   const theirs = useMemo(() => othersDamage(props.view, props.me, page.fill?.name), [props.view.log, props.me, page.fill?.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Before the folded form's early return, so every render calls the same hooks.
+  const damageId = useId();
   // Read from the page each render, so the form follows a fill, a DC typed later and a reload, never a copy taken once.
   const saveEnds = page.outcome.saveEnds;
   const save: SaveEndsForm = { on: saveEnds !== null, ability: saveEnds?.ability ?? (page.test.kind === "none" ? "wis" : page.test.ability), dc: saveEnds?.dc ?? null, spell: page.spell };
@@ -650,15 +662,19 @@ function OutcomePanel(props: {
   const fight = props.view.encounter?.entries ?? [];
   return (
     <div role="group" aria-label="Outcome" style={{ display: "grid", gap: theme.space(2) }}>
+      {/* A visible name, so the field never reads as part of the fold above it (LP7-PC-10). */}
+      <label htmlFor={damageId} style={{ fontSize: theme.font.body14, fontWeight: theme.weight.strong }}>
+        Damage
+      </label>
       <form
         onSubmit={(e) => {
           e.preventDefault();
           if (hasDice) props.onRoll();
         }}
-        style={{ display: "flex", gap: theme.space(1) }}
+        style={{ display: "flex", gap: theme.space(1), marginTop: -theme.space(1) }}
       >
         <Input
-          aria-label="Damage"
+          id={damageId}
           value={page.outcome.damage}
           disabled={frozen}
           placeholder="8d6 fire, or 28"
@@ -953,4 +969,11 @@ function othersDamage(view: RoomState, me: string, name: string | undefined): { 
     return { chip: `Use ${who}'s ${total} (${name} damage)`, text };
   }
   return null;
+}
+
+/** The folded "What players see" in the request sheet's words (rolls/logic.ts seenSummary), for a group save's two switches. */
+function groupSeen(dcShown: boolean, hasDc: boolean, resultShown: boolean): string {
+  if (hasDc && dcShown) return resultShown ? "The DC and pass or fail." : "The DC. Pass or fail hidden.";
+  if (hasDc) return resultShown ? "DC hidden. Pass or fail shown." : "DC and pass or fail hidden.";
+  return resultShown ? "Pass or fail shown." : "Pass or fail hidden.";
 }
