@@ -152,6 +152,7 @@ describe("dice lines in a room's export (5.3)", () => {
     // An initiative roll the DM kept from players (docs/design-v1-combat-flow.md 11.3).
     const kept = JSON.parse(JSON.stringify(withLines()));
     kept.log[0].data.rolls[0].hidden = true;
+    kept.log[0].data.rolls[0].initiative = true;
     assert.ok(parseRoomState(kept).ok);
     kept.log[0].data.rolls[0].hidden = false;
     assert.equal(parseRoomState(kept).ok, false);

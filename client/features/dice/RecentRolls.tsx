@@ -9,7 +9,7 @@ import { IconButton } from "../../components/IconButton.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
 import { usePanelHere } from "../panels.ts";
-import { askedRoll, recentRolls, type RecentRow } from "./logic.ts";
+import { againInput, askedRoll, recentRolls, type RecentRow } from "./logic.ts";
 
 /**
  * Recent rolls (docs/design-v1-dice.md 8.3): every roll in the viewer's
@@ -106,24 +106,6 @@ function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; na
       {props.end ? <span style={{ marginLeft: "auto", display: "inline-flex" }}>{props.end}</span> : null}
     </div>
   );
-}
-
-/**
- * A roll as Again sends it: its formula as asked, with the mode beside it,
- * its label, creature and range. A critical hit's damage goes as asked and
- * marked critical again, so it rolls by the room's rule then.
- */
-export function againInput(roll: DiceRoll): DiceRollInput | null {
-  const asked = askedRoll(roll);
-  if (asked === null) return null;
-  const input: DiceRollInput = { ...asked };
-  if (roll.mode) input.mode = roll.mode;
-  if (roll.cancelled) input.cancelled = true;
-  if (roll.label !== undefined) input.label = roll.label;
-  if (roll.tokenId !== undefined) input.creature = { tokenId: roll.tokenId };
-  else if (roll.characterId !== undefined) input.creature = { characterId: roll.characterId };
-  if (roll.critOn !== undefined) input.critOn = roll.critOn;
-  return input;
 }
 
 function Row(props: { row: RecentRow; names: LogNames; me: string; dm: boolean; open: boolean; again(rolls: DiceRollInput[], to: "all" | "dm"): void }) {

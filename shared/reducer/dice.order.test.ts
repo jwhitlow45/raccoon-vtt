@@ -98,6 +98,21 @@ describe("initiative rolls under the order setting (docs/design-v1-combat-flow.m
     assert.deepEqual(later.rolls.map((r) => r.tokenId), ["pc1"], "the mark is never rewritten");
   });
 
+  test("every marked roll keeps its mark on the line, and a repeat of it before the reveal stays the DM's, open or secret (B7B-ASTRA-01)", () => {
+    for (const to of ["all", "dm"] as const) {
+      let state = run(fight("party"), initiative([{ tokenId: "gob" }], to));
+      state = run(state, initiative([{ tokenId: "gob" }], to));
+      const roll = diceFor(state, DM)!.rolls[0]!;
+      assert.equal(roll.initiative, true);
+      assert.equal(roll.hidden, true);
+      assert.equal(diceFor(state, P1), null, `${to}: the repeat reaches no player`);
+    }
+    const shown = diceFor(run(fight("party"), initiative([{ tokenId: "pc1" }], "all")), DM)!.rolls[0]!;
+    assert.equal(shown.initiative, true, "a roll players may have keeps the mark too, so its Again is checked again");
+    assert.equal(shown.hidden, undefined);
+    assert.equal(diceFor(run(fight("party"), initiative([{ tokenId: "gob" }], "all", false)), DM)!.rolls[0]!.initiative, undefined);
+  });
+
   test("a stored marked roll parses as replay parses it, and replays to the same line", () => {
     const op = initiative([{ tokenId: "gob" }], "all");
     const stored = opSchema.parse(JSON.parse(JSON.stringify(op))) as Op;

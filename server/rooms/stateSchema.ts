@@ -570,6 +570,7 @@ const logEvent = z.discriminatedUnion("type", [
           characterId: id.optional(),
           seen: z.literal(true).optional(),
           critOn: diceSchemas.critOn.optional(),
+          initiative: z.literal(true).optional(),
           hidden: z.literal(true).optional(),
         }),
       )

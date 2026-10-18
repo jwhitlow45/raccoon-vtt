@@ -1,6 +1,7 @@
 import { askedCritical } from "#shared/dice/crit.ts";
 import { applyMode, formatFormula, formulaRange, parseFormula, parseRollText, type AdvantageMode } from "#shared/dice/formula.ts";
 import type { DiceResult, DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
+import type { DiceRollInput } from "#shared/protocol.ts";
 
 /**
  * What the Dice panel reads from the log (docs/design-v1-dice.md 8.3 and
@@ -143,6 +144,29 @@ export function askedRoll(result: Pick<DiceResult, "formula" | "mode" | "crit">)
   if (critical) return { formula: formatFormula(critical), critical: true };
   const formula = askedFormula(result);
   return formula === null ? null : { formula };
+}
+
+/**
+ * A roll as Again sends it: its formula as asked, with the mode beside it,
+ * its label, creature and range. A critical hit's damage goes as asked and
+ * marked critical again, so it rolls by the room's rule then. A creature's
+ * initiative goes marked as initiative again, so the server keeps it from
+ * players while the order setting keeps the creature's place from them then
+ * (docs/design-v1-combat-flow.md 11.3). A line from before the mark was kept
+ * says so by its `hidden`, which only an initiative roll carries.
+ */
+export function againInput(roll: DiceRoll): DiceRollInput | null {
+  const asked = askedRoll(roll);
+  if (asked === null) return null;
+  const input: DiceRollInput = { ...asked };
+  if (roll.mode) input.mode = roll.mode;
+  if (roll.cancelled) input.cancelled = true;
+  if (roll.label !== undefined) input.label = roll.label;
+  if (roll.tokenId !== undefined) input.creature = { tokenId: roll.tokenId };
+  else if (roll.characterId !== undefined) input.creature = { characterId: roll.characterId };
+  if (roll.critOn !== undefined) input.critOn = roll.critOn;
+  if ((roll.initiative || roll.hidden) && input.creature) input.initiative = true;
+  return input;
 }
 
 // ------------------------------------------------------------ history

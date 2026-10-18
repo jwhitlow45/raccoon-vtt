@@ -53,7 +53,10 @@ function diceLine(tx: Tx, op: Sys, asked: Asked<"dice.roll">): void {
     if (roll.label !== undefined) out.label = roll.label;
     if (roll.creature) Object.assign(out, rollCreature(tx, roll.creature));
     if (roll.critOn !== undefined) out.critOn = roll.critOn;
-    if (roll.initiative && roll.creature && initiativeHidden(tx.state, roll.creature)) out.hidden = true;
+    if (roll.initiative && roll.creature) {
+      out.initiative = true;
+      if (initiativeHidden(tx.state, roll.creature)) out.hidden = true;
+    }
     return out;
   });
   const line: Extract<LogEvent, { type: "dice" }> = { type: "dice", tag: asked.tag, batch: op.batch, by: tx.actor.memberId, to: asked.to, rolls };
