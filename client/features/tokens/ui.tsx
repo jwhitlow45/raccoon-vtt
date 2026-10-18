@@ -22,7 +22,8 @@ import { theme } from "../../lib/theme.ts";
 
 export const inputStyle: CSSProperties = fieldStyle();
 
-export function Section(props: { title: string; children: ReactNode; aside?: ReactNode; fold?: ComponentProps<typeof PanelSection>["fold"] }) {
+/** A token panel section. `title` is left out where its group's heading already names it, as Notes and Position. */
+export function Section(props: { title?: string; children: ReactNode; aside?: ReactNode; fold?: ComponentProps<typeof PanelSection>["fold"] }) {
   return (
     <PanelSection label={props.title} action={props.aside} fold={props.fold}>
       {props.children}

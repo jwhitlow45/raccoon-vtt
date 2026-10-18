@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { Character, CompanionTurn, CreatureSize, Token } from "#shared/model.ts";
 import { playersToken } from "#shared/project.ts";
 import type { ClientOp, TokenPatch } from "#shared/protocol.ts";
@@ -6,7 +6,7 @@ import { Button } from "../../components/Button.tsx";
 import { ErrorText, Input } from "../../components/Field.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { Spinner } from "../../components/Loading.tsx";
-import { Help, Section as PanelSection } from "../../components/Panel.tsx";
+import { Group, Help, Section as PanelSection } from "../../components/Panel.tsx";
 import { Row, RowList } from "../../components/Row.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { Tag } from "../../components/Tag.tsx";
@@ -51,7 +51,7 @@ import {
   type CompanionDraft,
   type CompanionWhat,
 } from "./companions.ts";
-import { FieldRow, NumberField, Section, Select } from "./ui.tsx";
+import { FieldRow, NumberField, Select } from "./ui.tsx";
 
 /**
  * Companions in the interface (docs/design-v1-combat-flow.md 3.6.3, 3.6.9
@@ -430,8 +430,8 @@ function capitalized(text: string): string {
 export function CompanionSection(props: {
   token: Token;
   access: TokenAccess;
-  /** The token panel's fold for this section, given the summary to show beside its label while folded (docs/design-v1-token-panel.md 3.5). */
-  fold?(summary: ReactNode): ComponentProps<typeof Section>["fold"];
+  /** The token panel's fold for this group, which names its character while folded (docs/design-v1-token-panel.md 3.5). */
+  group?: { open: boolean; onToggle(): void };
 }) {
   const { token, access } = props;
   const companion = token.companion;
@@ -451,12 +451,11 @@ export function CompanionSection(props: {
   const list = Object.values(characters ?? {})
     .filter((c): c is Character => !!c)
     .sort((a, b) => a.name.localeCompare(b.name));
-  // Folded, the section names its character beside its label, as Owners names its players.
-  const summary = <span style={{ flex: "0 1 auto", minWidth: 0, color: theme.color.textMuted, fontSize: theme.font.small, overflowWrap: "anywhere" }}>{name}</span>;
   // A stored block is its character's, so giving the companion away or letting it go leaves the block behind (docs/design-v1-companion-stat-blocks.md 5.5).
   const staysLine = stored ? <Help style={{ overflowWrap: "anywhere" }}>{`Its stat block is ${name}’s and stays with ${name}.`}</Help> : null;
   return (
-    <Section title="Companion" fold={props.fold?.(summary)}>
+    // A group as Owners beside it is, which names its character while folded as Owners names its players.
+    <Group label="Companion" open={props.group?.open} onToggle={props.group?.onToggle} summary={name}>
       {access.dm ? (
         <>
           <FieldRow label="Belongs to">
@@ -502,7 +501,7 @@ export function CompanionSection(props: {
           {staysLine}
         </div>
       ) : null}
-    </Section>
+    </Group>
   );
 }
 

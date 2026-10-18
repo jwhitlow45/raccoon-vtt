@@ -47,7 +47,8 @@ function groupsFor(state: ReturnType<typeof room>, viewer: typeof DM, tokenId: s
     summary: vitals({ actor: a, token: t, fullAccess: access.full, place: "panel" }).length > 0,
     actor: a !== undefined,
     ownerRenames: !access.dm && access.canEditToken("name"),
-    notes: access.canEditToken("notes") || !!t.notes || access.dm,
+    // As TokenPanel decides it, the card's notes included.
+    notes: access.canEditToken("notes") || !!t.notes || access.dm || (access.full && a !== undefined && (access.canEditActor("notes") || a.notes !== undefined)),
     image: access.canEditToken("image"),
   });
   return parts.map((p: PanelPart) => (p.group === null ? p.id : `${p.group}: ${p.sections.join(" ")}`));

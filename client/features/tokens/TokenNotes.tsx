@@ -29,7 +29,8 @@ export function TokenNotes(props: {
   const { notes, canEdit, dm } = props;
   if (!canEdit && !notes && !dm && !props.card) return null;
   return (
-    <Section title="Notes">
+    // No label of its own: the Notes group's heading names it.
+    <Section>
       <Labeled label="For everyone" hint={canEdit ? "Every player who can see this token reads it." : undefined}>
         {canEdit ? (
           <TextField

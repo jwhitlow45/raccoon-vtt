@@ -204,9 +204,9 @@ function TokenDetails(props: PanelProps) {
             {access.dm ? <DmSettings token={token} feetPerCell={feetPerCell} update={update} /> : <OwnerNames token={token} access={access} update={update} />}
           </Group>
         );
-      // docs/design-v1-combat-flow.md 3.6.9's section, folded through this panel's folds with its character beside its label.
+      // docs/design-v1-combat-flow.md 3.6.9's section, a group folded through this panel's folds with its character beside its name.
       case "companion":
-        return <CompanionSection key={id} token={token} access={access} fold={(summary) => fold("companion", summary)} />;
+        return <CompanionSection key={id} token={token} access={access} group={groupFold("companion")} />;
       case "owners":
         return <Owners key={id} token={token} update={update} fold={fold} />;
       case "remove":
@@ -232,7 +232,7 @@ function TokenDetails(props: PanelProps) {
         if (part.group === null) return section(part.id);
         const g = groups[part.group];
         return (
-          <Group key={part.group} label={g.label} {...groupFold(g.key)} summary={g.summary}>
+          <Group key={part.group} label={g.label} {...groupFold(g.key)} summary={g.summary} holds="sections">
             {part.sections.map(section)}
           </Group>
         );
@@ -323,14 +323,15 @@ function PositionSection(props: { token: Token; access: TokenAccess; update(patc
   const rotation = (((token.rotation ?? 0) % 360) + 360) % 360;
   if (!canElevate && !canRotate) {
     const badge = elevationBadge(token.elevation);
+    // No label of their own: the Position group's heading names them.
     return (
-      <Section title="Position">
+      <Section>
         <Note>{badge ? `Elevation ${badge} ft` : "On the ground"}</Note>
       </Section>
     );
   }
   return (
-    <Section title="Position">
+    <Section>
       {canElevate ? (
         <FieldRow label="Elevation" hint="Feet. Negative is below ground.">
           <Stepper label="Elevation" value={token.elevation ?? 0} step={5} min={-100_000} max={100_000} onChange={(elevation) => update({ elevation })} />

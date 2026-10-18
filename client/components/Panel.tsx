@@ -83,7 +83,8 @@ export function Section(props: {
   style?: CSSProperties;
 }) {
   const id = useId();
-  // Inside a Group the sections part by space alone: the group's own line already heads them (docs/design-v1-dice-ui.md 3.2).
+  // Inside a Group the sections part by space alone: the group's own line already heads them (docs/design-v1-dice-ui.md 3.2). The group's body
+  // spaces them by space(4), so none adds its own bottom padding, and their labels are a level under the group's heading.
   const inGroup = useContext(InGroup);
   const divider = props.divider ?? !inGroup;
   if (props.fold) {
@@ -96,12 +97,12 @@ export function Section(props: {
           gridTemplateColumns: "minmax(0, 1fr)",
           gap: theme.space(2),
           paddingTop: divider ? theme.space(2) : 0,
-          paddingBottom: fold.open ? theme.space(4) : theme.space(2),
+          paddingBottom: inGroup ? 0 : fold.open ? theme.space(4) : theme.space(2),
           borderTop: divider ? `${theme.line.border}px solid ${theme.color.border}` : undefined,
           ...props.style,
         }}
       >
-        <FoldLabel id={id} label={props.label} tone={props.tone} fold={fold} />
+        <FoldLabel id={id} label={props.label} tone={props.tone} fold={fold} level={inGroup ? 4 : 3} />
         {fold.open ? props.children : null}
       </section>
     );
@@ -115,13 +116,13 @@ export function Section(props: {
         gridTemplateColumns: "minmax(0, 1fr)",
         gap: theme.space(2),
         paddingTop: divider ? theme.space(4) : 0,
-        paddingBottom: theme.space(4),
+        paddingBottom: inGroup ? 0 : theme.space(4),
         borderTop: divider ? `${theme.line.border}px solid ${theme.color.border}` : undefined,
         ...props.style,
       }}
     >
       {props.label ? (
-        <SectionLabel id={id} tone={props.tone} action={props.action}>
+        <SectionLabel id={id} tone={props.tone} action={props.action} level={inGroup ? 4 : 3}>
           {props.label}
         </SectionLabel>
       ) : null}
@@ -137,11 +138,12 @@ export function Section(props: {
  * is the section label's: 13 px, weight 700, capitals, muted. Whatever a
  * caller adds after it, a summary, stays outside the button.
  */
-function FoldLabel(props: { id: string; label: ReactNode; tone?: "danger"; fold: NonNullable<Parameters<typeof Section>[0]["fold"]> }) {
+function FoldLabel(props: { id: string; label: ReactNode; tone?: "danger"; fold: NonNullable<Parameters<typeof Section>[0]["fold"]>; level: 3 | 4 }) {
   const { fold } = props;
+  const Heading = props.level === 4 ? "h4" : "h3";
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2) }}>
-      <h3 id={props.id} style={{ flex: "1 1 auto", minWidth: 0, margin: 0, display: "flex" }}>
+      <Heading id={props.id} style={{ flex: "1 1 auto", minWidth: 0, margin: 0, display: "flex" }}>
         <button
           ref={fold.foldRef}
           type="button"
@@ -174,7 +176,7 @@ function FoldLabel(props: { id: string; label: ReactNode; tone?: "danger"; fold:
           <Icon name={fold.open ? "chevronDown" : "chevronRight"} size="sm" />
           {props.label}
         </button>
-      </h3>
+      </Heading>
       {fold.summary}
     </div>
   );
@@ -186,9 +188,12 @@ const InGroup = createContext(false);
  * A fold of a panel's sections that belong together by use (the Token
  * panel's Combat, Notes and Position, docs/design-v1-dice-ui.md 5): a 48 px
  * row with a chevron, the group's name at 16 px weight 700, and when folded
- * a one-line summary of what it holds ("18/24 HP, 2 conditions"). Groups
- * part by a 1 px line, and the sections inside part by space, keeping their
- * capitals labels, so the two levels never look alike.
+ * a one-line summary of what it holds ("HP 18/24 · 2 conditions"). Groups
+ * part by a 1 px line, and the sections inside part by `space(4)`, keeping
+ * their capitals labels as h4 under the group's h3, so the two levels never
+ * look alike. A group of fields rather than sections spaces them as a
+ * Section does. A group is no landmark: its heading is enough to move by, and
+ * the Token panel held up to eight regions when each was one (Section).
  */
 export function Group(props: {
   label: string;
@@ -199,6 +204,8 @@ export function Group(props: {
   /** On the header's row after the name, outside the disclosure: "Take a shape", "Attach a stat block". */
   action?: ReactNode;
   foldRef?: Ref<HTMLButtonElement>;
+  /** `sections` for a group of Sections, parted by `space(4)`. A group of fields and lines, the default, keeps a Section's own `space(2)`. */
+  holds?: "sections" | "rows";
   children?: ReactNode;
 }) {
   const id = useId();
@@ -217,7 +224,7 @@ export function Group(props: {
       </span>
     ) : null;
   return (
-    <section aria-labelledby={id} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
       {/* The action wraps under the name where both do not fit, as Add a stat block and Take a shape do in a narrow card, rather than run over it. */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: 48 }}>
         <h3 style={{ margin: 0, display: "flex", flex: "1 1 auto", minWidth: 0 }}>
@@ -267,10 +274,10 @@ export function Group(props: {
       </div>
       {open && props.children ? (
         <InGroup.Provider value={true}>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), paddingTop: theme.space(1), paddingBottom: theme.space(4) }}>{props.children}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(props.holds === "sections" ? 4 : 2), paddingTop: theme.space(1), paddingBottom: theme.space(4) }}>{props.children}</div>
         </InGroup.Provider>
       ) : null}
-    </section>
+    </div>
   );
 }
 
