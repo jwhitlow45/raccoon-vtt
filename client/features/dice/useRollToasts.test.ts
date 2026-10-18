@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
 import { parseRollToasts } from "../device/settings.ts";
-import { othersRolls, ownResultText } from "./useRollToasts.ts";
+import { BATCH_REMEMBERED_MS, othersRolls, ownResultText, unseenGroups } from "./useRollToasts.ts";
 
 /** Rolls as toasts (docs/design-v1-dice.md 8.5 and 8.7). */
 let seq = 0;
@@ -28,6 +28,20 @@ describe("others' rolls as toasts", () => {
       groups.map((g) => g.length),
       [2, 1],
     );
+  });
+
+  test("a group's later part landing in a later frame makes no second toast, until the batch is long past (LP7-DICE-9)", () => {
+    const seen = new Map<string, number>();
+    const first = othersRolls([line({ batch: "G" }), line({ batch: "H", by: "dm1" })], "p1");
+    assert.equal(unseenGroups(first, seen, 1_000).length, 2);
+    const later = othersRolls([line({ batch: "G" }), line({})], "p1");
+    assert.deepEqual(
+      unseenGroups(later, seen, 3_000).map((g) => g[0]?.batch),
+      [undefined],
+      "the second part of G is quiet, a line with no batch still toasts",
+    );
+    assert.equal(unseenGroups(othersRolls([line({ batch: "G", by: "p3" })], "p1"), seen, 3_000).length, 1, "another roller's batch of the same name is its own");
+    assert.equal(unseenGroups(othersRolls([line({ batch: "G" })], "p1"), seen, 3_000 + BATCH_REMEMBERED_MS + 1).length, 1, "long past, the batch is forgotten");
   });
 
   test("this device's own roll nobody saw lands as its total, its refusal, or a word to check", () => {

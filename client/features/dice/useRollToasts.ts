@@ -31,6 +31,28 @@ export function othersRolls(fresh: readonly LogEntry[], me: string): DiceLine[][
   return [...groups.values()];
 }
 
+/** How long a batch that toasted is remembered, so its later parts make no second toast. */
+export const BATCH_REMEMBERED_MS = 10_000;
+
+/**
+ * The groups still to toast: one toast a batch, across frames too. A
+ * group's batches usually land in one frame, but a resend or a busy server
+ * can split them, and each later part would toast again. A batch is
+ * remembered from its first part, and each later part keeps it remembered,
+ * however its parts came. `seen` is the hook's own memory, `now` the clock.
+ */
+export function unseenGroups(groups: DiceLine[][], seen: Map<string, number>, now: number): DiceLine[][] {
+  for (const [key, at] of seen) if (now - at > BATCH_REMEMBERED_MS) seen.delete(key);
+  return groups.filter((lines) => {
+    const first = lines[0];
+    if (first?.batch === undefined) return true;
+    const key = `${first.by}|${first.batch}`;
+    const known = seen.has(key);
+    seen.set(key, now);
+    return !known;
+  });
+}
+
 /** This device's own roll nobody saw land: its total, its refusal, or that it may have happened. */
 export function ownResultText(state: Exclude<ReceiptState, { state: "sending" | "checking" }>): string {
   if (state.state === "refused") return state.text || state.message;
@@ -56,6 +78,8 @@ export function useRollToasts(diceShown: boolean): void {
   const ui = useRoomUi();
   /** The newest entry already read. Undefined until the first snapshot, whose lines are history, not news. */
   const read = useRef<string | null | undefined>(undefined);
+  /** Batches already toasted, or shown while the panel was on screen, by when they were last heard of. */
+  const batches = useRef(new Map<string, number>());
 
   useEffect(() => {
     if (!loaded) return;
@@ -67,8 +91,10 @@ export function useRollToasts(diceShown: boolean): void {
     const since = read.current;
     const fresh = since === null ? log : log.filter((e) => compareLogIds(e.id, since) > 0);
     read.current = latest;
+    // Remembered even when not toasted, so a later part of a group seen in the panel stays quiet once it closes.
+    const groups = unseenGroups(othersRolls(fresh, me), batches.current, Date.now());
     if (!on || diceShown) return;
-    for (const lines of othersRolls(fresh, me)) ui.notify(rollToastText(lines, names));
+    for (const lines of groups) ui.notify(rollToastText(lines, names));
   }, [loaded, log, on, diceShown, me, names, ui]);
 
   const tracker = useReceipts();
