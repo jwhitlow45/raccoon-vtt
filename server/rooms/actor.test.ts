@@ -17,7 +17,7 @@ import {
 } from "#shared/limits.ts";
 import { partySight, type VisionWorld } from "#shared/rules/vision.ts";
 import { sceneWalls, splitRefusal } from "#shared/rules/walls.ts";
-import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
+import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import type { Actor, Member, RoomState } from "#shared/model.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
@@ -30,7 +30,7 @@ import { roomExport, type RoomExport } from "./exportRoom.ts";
 import { remapState } from "./remap.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { checkWholeScenes, roomLevelBytes } from "./sizeGuard.ts";
-import type { Pool } from "./persistence.ts";
+import { loadRoom, type Pool } from "./persistence.ts";
 
 /**
  * The actor's commit and replay failure paths (design 7.2 and 16.2), against
@@ -376,6 +376,65 @@ describe("op admission", () => {
       await actor.op(conn, 2, { t: "token.update", tokenId, patch: { image } });
       assert.equal(db.assetLookups, 1);
       assert.deepEqual(sent.at(-1), { t: "retry", n: 2, code: "busy" });
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("a page left open across the dragon turtle's rename places, saves and pictures it under the new id, which the room stores and loads again", async () => {
+    const OLD = "dragon-tur-t-le";
+    const NEW = "dragon-turtle";
+    const dm = member("DM", "dm");
+    const initial = createInitialState({ roomName: "Shell", dm });
+    const db = new FakeDb({ state: initial, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const { conn, sent } = connect(actor, dm);
+      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      const tokenId = uuidv7();
+      const entryId = uuidv7();
+      const encounterId = uuidv7();
+      const picture = { icon: "lorc/turtle", color: "#30a46c" };
+      const stale: Op[] = [
+        { t: "token.create", token: { id: tokenId, sceneId: initial.meta.playerSceneId!, kind: "monster", name: "Dragon Turtle", size: "gargantuan", x: 1, y: 1, actor: { inline: { ...inline, srdId: OLD } } } },
+        { t: "savedEncounter.create", encounter: { id: encounterId, name: "Shell game", monsters: [{ srdId: OLD, count: 2 }] } },
+        { t: "monster.setSrdImage", srdId: OLD, image: picture },
+        { t: "encounter.start", entries: [{ id: entryId, tokenId, groupKey: OLD }] },
+      ];
+      for (const [i, op] of stale.entries()) {
+        await actor.op(conn, i + 1, op);
+        const answer = await answerTo(sent, i + 1);
+        assert.ok(answer !== "stuck" && answer.acks?.includes(i + 1), `${op.t} is applied`);
+      }
+      const state = actor.committed.state;
+      assert.equal(JSON.stringify(state).includes(OLD), false);
+      assert.deepEqual(state.tokens[tokenId]?.actor, { inline: { ...inline, srdId: NEW } });
+      assert.deepEqual(state.savedEncounters[encounterId]?.monsters, [{ srdId: NEW, count: 2 }]);
+      assert.deepEqual(Object.keys(state.srdImages), [NEW]);
+      assert.equal(state.srdImages[NEW]?.id, NEW);
+      assert.equal(state.encounter?.entries[0]?.groupKey, NEW);
+      assert.equal(JSON.stringify(db.storedRows).includes(OLD), false, "no stored op names the old id");
+      assert.ok(db.storedRows.every((row) => (row as { op_version: number }).op_version === OP_VERSION));
+
+      // The fight's undo and redo take it back and bring it again under the id it was stored with.
+      await actor.op(conn, 5, { t: "undo" });
+      const undone = await answerTo(sent, 5);
+      assert.ok(undone !== "stuck" && undone.acks?.includes(5));
+      assert.equal(actor.committed.state.encounter, null);
+      await actor.op(conn, 6, { t: "redo" });
+      const redone = await answerTo(sent, 6);
+      assert.ok(redone !== "stuck" && redone.acks?.includes(6));
+
+      const reasons: string[] = [];
+      const reloaded = new FakeDb({ state: initial, opRows: db.storedRows, dmGrants: [dm.id] });
+      const loaded = await loadRoom(reloaded.pool(), ROOM, (_seq, reason) => reasons.push(reason));
+      assert.deepEqual(reasons, []);
+      assert.equal(loaded?.replayFailed, false);
+      assert.deepEqual(loaded?.state, actor.committed.state);
+      assert.deepEqual(loaded?.state.srdImages[NEW]?.image, picture);
+      assert.equal(loaded?.state.encounter?.entries[0]?.groupKey, NEW);
     } finally {
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });

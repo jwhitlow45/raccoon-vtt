@@ -463,6 +463,18 @@ function renameSrdIdsInOp(op: unknown): unknown {
 }
 
 /**
+ * A live op with every retired SRD id it names spelled as today's, and the
+ * very same op where it names none. A page left open across op step 9 to
+ * 10 still sends the old ids, and an op stored at version 10 never runs
+ * that step again, so the room would keep a retired id for good: a token
+ * with no stat block and no icon, even after a reload. Renaming rather than
+ * refusing keeps the old page's action working.
+ */
+export function withTodaysSrdIds<T extends Op>(op: T): T {
+  return renameSrdIdsInOp(op) as T;
+}
+
+/**
  * Whether a stored restore's hash guards were taken over values that named
  * SRD monsters by their ids before op step 9 to 10, so the reducer also
  * matches them against `withOldSrdIds` of what the room holds now. Live ops

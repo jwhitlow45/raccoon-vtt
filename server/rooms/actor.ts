@@ -2,6 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, checkLimits, LIMITS, ROLLING_TOO_FAST, type LimitCheck } from "#shared/limits.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
+import { withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { HandoutPage, LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { canApply, type PermissionDeps } from "#shared/permissions.ts";
@@ -876,8 +877,9 @@ export class RoomActor {
       this.#refuse(key, wm, n, "invalid", parsed.error.issues[0]?.message ?? "invalid op");
       return;
     }
-    let op: Op = parsed.data;
-    const clientOp = parsed.data;
+    // A page left open across the dragon turtle's rename still names the old id, which nothing would rename once stored.
+    const clientOp = withTodaysSrdIds(parsed.data);
+    let op: Op = clientOp;
     let restoredFrom: "undo" | "redo" | null = null;
     let step: UndoEntry | null = null;
     let fromLog = false;

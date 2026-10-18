@@ -16,6 +16,7 @@ import {
   runMigrations,
   snapshotMigrations,
   withOldSrdIds,
+  withTodaysSrdIds,
   type MigrationStep,
 } from "./migrate.ts";
 import type { Encounter, RoomState } from "./model.ts";
@@ -626,6 +627,13 @@ describe("the dragon turtle's id: op version 10 and snapshot version 14", () => 
       assert.deepEqual(migrated, renamed(op), op.t);
       assert.ok(opSchema.safeParse(migrated).success, `${op.t} validates`);
     }
+  });
+
+  test("a live op from a page open across the rename takes the new id too, and one that names none is the very same op", () => {
+    const stale: Op = { t: "savedEncounter.create", encounter: { id: "se2", name: "Shell game", monsters: [{ srdId: OLD, count: 2 }] } };
+    assert.deepEqual(withTodaysSrdIds(stale), renamed(stale));
+    const today: Op = { t: "monster.setSrdImage", srdId: NEW, image: null };
+    assert.equal(withTodaysSrdIds(today), today);
   });
 
   test("an op that names no SRD monster by the old id is the very same op, text that mentions it included", () => {
