@@ -23,6 +23,22 @@ const SIZES = {
   sm: { fontSize: theme.font.body14, padding: `0 ${theme.space(3)}px` },
 } as const;
 
+/** The box every button draws, shared with `ButtonGhost`, which must measure as the button does. */
+function buttonBox(size: "md" | "sm"): CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: theme.space(2),
+    minHeight: theme.touch,
+    minWidth: theme.touch,
+    ...SIZES[size],
+    borderRadius: theme.radius.md,
+    fontWeight: theme.weight.strong,
+    fontFamily: theme.font.body,
+  };
+}
+
 export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   ref?: Ref<HTMLButtonElement>;
   variant?: ButtonVariant;
@@ -117,16 +133,7 @@ export function Button(props: ButtonProps) {
         onClick?.(e);
       }}
       style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: theme.space(2),
-        minHeight: theme.touch,
-        minWidth: theme.touch,
-        ...SIZES[size],
-        borderRadius: theme.radius.md,
-        fontWeight: theme.weight.strong,
-        fontFamily: theme.font.body,
+        ...buttonBox(size),
         cursor: disabled || busy ? "default" : "pointer",
         width: block ? "100%" : undefined,
         ...buttonLook(variant, { pressed: pressed ?? expanded, disabled, armed }),
@@ -144,5 +151,21 @@ export function Button(props: ButtonProps) {
       {button}
       {tooltip.tip}
     </>
+  );
+}
+
+/**
+ * An unseen copy of a button with its words and icon, the size the button
+ * would draw at. A slot that stacks it under a button keeps the button's
+ * widest form, so a button that grows into it moves nothing around it
+ * (docs/design-v1-icons.md 4.1), such as Delete growing "Sure?". A span,
+ * so nothing that counts a row's buttons, or focus, ever finds it.
+ */
+export function ButtonGhost(props: { size?: "md" | "sm"; icon?: IconName; children: ReactNode; style?: CSSProperties }) {
+  return (
+    <span aria-hidden style={{ ...buttonBox(props.size ?? "md"), border: `${theme.line.border}px solid transparent`, visibility: "hidden", ...props.style }}>
+      {props.icon ? <Icon name={props.icon} size="sm" /> : null}
+      {props.children}
+    </span>
   );
 }

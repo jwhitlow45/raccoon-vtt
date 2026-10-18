@@ -6,7 +6,7 @@ import { stopFootprint } from "#shared/rules/footprint.ts";
 import { hpLess, shownLife } from "#shared/rules/hp.ts";
 import { reshapeLeg } from "#shared/rules/path.ts";
 import type { ClientOp } from "#shared/protocol.ts";
-import { Button } from "../components/Button.tsx";
+import { Button, ButtonGhost } from "../components/Button.tsx";
 import { RETURN_RANK, useSheetReturnFocus } from "../components/sheetFocus.ts";
 import { Icon, type IconName } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
@@ -305,6 +305,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
         return (
           <DeleteButton
             key={id}
+            holdsRoom
             onDelete={() => {
               actions.dispatch({ t: "token.delete", tokenId: token.id });
               props.onClose();
@@ -1339,7 +1340,17 @@ function DismissButton(props: { tokenId: string; name: string }) {
   );
 }
 
-function DeleteButton(props: { onDelete(): void; armedText?: string }) {
+/**
+ * Delete, armed by its first tap. `holdsRoom` gives it a slot as wide as
+ * its armed form, the trash can at the slot's start, so arming grows it
+ * over the slot and never wraps it to another line, where the second tap,
+ * aimed at the trash can, would land on nothing (docs/design-v1-icons.md
+ * 3.1 rule 6). The single token's bar takes it: on a tablet or a phone
+ * held sideways, Locked and Duplicate with their words leave room for the
+ * trash can alone. The group bar's Clear follows its Delete, so a slot
+ * there would leave a gap before it.
+ */
+function DeleteButton(props: { onDelete(): void; armedText?: string; holdsRoom?: boolean }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
@@ -1347,7 +1358,7 @@ function DeleteButton(props: { onDelete(): void; armedText?: string }) {
     return () => clearTimeout(timer);
   }, [armed]);
   const words = deleteButtonWords(armed, props.armedText);
-  return (
+  const button = (
     <BarButton
       danger
       armed={armed}
@@ -1363,6 +1374,15 @@ function DeleteButton(props: { onDelete(): void; armedText?: string }) {
     >
       {words.text}
     </BarButton>
+  );
+  if (!props.holdsRoom) return button;
+  return (
+    <span style={{ display: "inline-grid", flex: "none" }}>
+      <ButtonGhost size="sm" icon="delete" style={{ gridArea: "1 / 1" }}>
+        {deleteButtonWords(true, props.armedText).text}
+      </ButtonGhost>
+      <span style={{ gridArea: "1 / 1", display: "flex" }}>{button}</span>
+    </span>
   );
 }
 

@@ -692,6 +692,47 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await dm.getByText(`Hag rolled ${rolled.total}:`).first().waitFor();
     }
   });
+
+  test("lp8fix-a. on a tablet and a phone held sideways, the armed Delete grows over the trash can's spot, so a second tap there deletes (LP8-UI-4, docs/design-v1-icons.md 3.1 rule 6)", async () => {
+    const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
+    const cell = { x: Math.floor(bounds.w / 2), y: Math.floor(bounds.h / 2) };
+    for (const view of [
+      { width: 820, height: 1180, scale: 1 },
+      { width: 844, height: 390, scale: 1, side: 47, bottom: 21 },
+    ]) {
+      const label = `${view.width} x ${view.height}`;
+      const id = randomUUID();
+      await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: "Zombie", x: cell.x, y: cell.y, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
+      await waitFor(`${label}: the zombie in the DM's view`, () => dmSocket.state?.tokens[id] ?? null);
+      await setUp(view);
+      const p = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+      assert.equal(await hit(dm, p), "CANVAS", `${label}: the zombie is under something`);
+      await dm.touchscreen.tap(p.x, p.y);
+      const bar = dm.getByRole("dialog", { name: "Zombie actions" });
+      await bar.waitFor();
+      // Locked and Duplicate show their words on touch, which leaves their line room for the trash can and not for "Sure?".
+      const trash = bar.getByRole("button", { name: "Delete", exact: true });
+      await trash.scrollIntoViewIfNeeded();
+      await dm.waitForTimeout(250);
+      const was = await rectOf(trash);
+      const spot = { x: (was.left + was.right) / 2, y: (was.top + was.bottom) / 2 };
+      await dm.touchscreen.tap(spot.x, spot.y);
+      const armed = bar.getByRole("button", { name: "Tap again to delete", exact: true });
+      await armed.waitFor();
+      const grown = await rectOf(armed);
+      assert.ok(grown.left <= spot.x && spot.x <= grown.right && grown.top <= spot.y && spot.y <= grown.bottom, `${label}: the armed Delete left the trash can's spot: ${JSON.stringify({ was, grown })}`);
+      const under = await dm.evaluate(([x, y]) => {
+        type Node = { closest(s: string): { getAttribute(name: string): string | null } | null };
+        const el = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): Node | null } }).document.elementFromPoint(x, y);
+        return el?.closest("button")?.getAttribute("aria-label") ?? null;
+      }, [spot.x, spot.y] as const);
+      assert.equal(under, "Tap again to delete", `${label}: a second tap on the trash can's spot lands elsewhere`);
+      await shots.take(dm, `dmphone-delete-armed-${view.width}x${view.height}`);
+      await dm.touchscreen.tap(spot.x, spot.y);
+      await waitFor(`${label}: the zombie deleted by the second tap`, () => (dmSocket.state && !dmSocket.state.tokens[id] ? true : null));
+    }
+    await dmCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
+  });
 });
 
 function goblin() {
