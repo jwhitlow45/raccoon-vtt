@@ -381,20 +381,28 @@ function mappedId(id: unknown, ids: IdMap): unknown {
  * value where it names none of the ids, so a room or op without one is
  * left as it was.
  */
-function withMappedSrdIds(value: unknown, ids: IdMap): unknown {
+function withMappedSrdIds(value: unknown, ids: IdMap, keepsGroupKey?: (row: Record<string, unknown>) => boolean): unknown {
   if (value === null || typeof value !== "object") return value;
   if (Array.isArray(value)) {
     let out: unknown[] | undefined;
     value.forEach((item, i) => {
-      const next = withMappedSrdIds(item, ids);
+      const next = withMappedSrdIds(item, ids, keepsGroupKey);
       if (next !== item) (out ??= [...value])[i] = next;
     });
     return out ?? value;
   }
+  const row = value as Record<string, unknown>;
   let out: Record<string, unknown> | undefined;
-  for (const [field, item] of Object.entries(value)) {
-    const next = SRD_ID_FIELDS.has(field) ? mappedId(item, ids) : field === "shapeTemp" ? mappedShapes(item, ids) : withMappedSrdIds(item, ids);
-    if (next !== item) (out ??= { ...value })[field] = next;
+  for (const [field, item] of Object.entries(row)) {
+    const next =
+      field === "groupKey" && keepsGroupKey?.(row)
+        ? item
+        : SRD_ID_FIELDS.has(field)
+          ? mappedId(item, ids)
+          : field === "shapeTemp"
+            ? mappedShapes(item, ids)
+            : withMappedSrdIds(item, ids, keepsGroupKey);
+    if (next !== item) (out ??= { ...row })[field] = next;
   }
   return out ?? value;
 }
@@ -484,13 +492,28 @@ export function oldSrdIdGuards(opVersion: number | undefined): boolean {
   return opVersion !== undefined && opVersion < 10;
 }
 
-/** An entity of the room as a build from before op version 10 held it, its SRD ids spelled the old way. */
-export function withOldSrdIds(key: string, value: unknown): unknown {
+/**
+ * An entity of the room as a build from before op version 10 held it, its
+ * SRD ids spelled the old way. An initiative row's `dragon-turtle` key is
+ * the one that may not have been an id: then as now, a monster with no SRD
+ * link groups by its name (groupKeyFor), so a token named `dragon-turtle`
+ * gave its row that very key. A row keeps the key where its token is still
+ * such a monster with that name. Every other row takes the old id, the rows
+ * of a fight whose tokens are gone included, as before.
+ */
+export function withOldSrdIds(key: string, value: unknown, tokens: RoomState["tokens"]): unknown {
   if (key.startsWith(SRD_IMAGE_KEY)) {
     const old = OLD_SRD_IDS.get(key.slice(SRD_IMAGE_KEY.length));
     return old === undefined ? value : srdImageWithId(value, old);
   }
-  return withMappedSrdIds(value, OLD_SRD_IDS);
+  return withMappedSrdIds(value, OLD_SRD_IDS, (row) => groupKeyIsName(row, tokens));
+}
+
+/** Whether a row's group key is its token's name, as groupKeyFor gives a monster with no SRD link. */
+function groupKeyIsName(row: Record<string, unknown>, tokens: RoomState["tokens"]): boolean {
+  const token = typeof row.tokenId === "string" ? tokens[row.tokenId] : undefined;
+  if (!token || token.kind === "pc" || !("inline" in token.actor)) return false;
+  return token.actor.inline.srdId === undefined && token.name === row.groupKey;
 }
 
 /**

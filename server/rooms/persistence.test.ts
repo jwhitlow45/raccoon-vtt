@@ -6,7 +6,7 @@ import type { Member, RoomState, Viewer } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { stableStringify } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { DM, actor, character, env, member, reveal, room, token } from "#shared/testutil.ts";
+import { DM, actor, character, entry, env, member, reveal, room, token } from "#shared/testutil.ts";
 import { assetIdsOf, loadRoom, type Pool } from "./persistence.ts";
 
 /**
@@ -75,6 +75,39 @@ describe("replaying stored ops", () => {
     assert.equal(loaded?.seq, 3);
     assert.deepEqual(loaded?.state.tokens.t1, token("t1", { rev: 2, name: "Dragon Turtle", actor: { inline: actor({ srdId: "dragon-turtle" }) } }));
     assert.deepEqual(Object.keys(loaded?.state.srdImages ?? {}), ["dragon-turtle"]);
+  });
+
+  test("a fight with an SRD dragon turtle and a monster named dragon-turtle loads, an older undo of one of its rows replayed", async () => {
+    const OLD = "dragon-tur-t-le";
+    const NEW = "dragon-turtle";
+    // The rows' keys as that build gave them: the SRD id for the turtle, the name for the room's own monster.
+    const old = room({
+      tokens: {
+        t1: token("t1", { name: "Dragon Turtle", actor: { inline: actor({ srdId: OLD }) } }),
+        t2: token("t2", { name: NEW, actor: { inline: actor({ monsterId: "m1" }) } }),
+      },
+      encounter: { rev: 1, round: 1, activeEntryId: null, entries: [entry("e1", { tokenId: "t1", groupKey: OLD }), entry("e2", { tokenId: "t2", groupKey: NEW })] },
+    });
+    const react: Op = { t: "encounter.update", entryId: "e2", patch: { reactionUsed: true } };
+    const reacted = applyOp(old, react, DM, env(1));
+    assert.ok(reacted.ok && reacted.inverse);
+    const undo = { t: "sys.restore", entries: reacted.inverse, from: "undo", deps: true };
+    assert.ok(applyOp(reacted.state, undo as Op, DM, env(2)).ok, "the undo applied in the build that stored it");
+    const rows = [react, undo].map((op, i) => ({ seq: String(i + 1), at: new Date(env(i + 1).at), actor_member_id: "dm1", actor_role: "dm", op, op_version: 9 }));
+    const query = (sql: string) => Promise.resolve({ rows: sql.includes("room_snapshots") ? [{ seq: "0", state: JSON.parse(JSON.stringify(old)), schema_version: 13 }] : rows });
+    const reasons: string[] = [];
+    const loaded = await loadRoom({ query, connect: () => Promise.reject(new Error("not used")) } as unknown as Pool, "R", (_seq, reason) => reasons.push(reason));
+    assert.deepEqual(reasons, []);
+    assert.equal(loaded?.replayFailed, false);
+    assert.equal(loaded?.seq, 2);
+    const entries = loaded?.state.encounter?.entries ?? [];
+    assert.deepEqual(
+      entries.map((e) => [e.id, e.groupKey, e.reactionUsed]),
+      [
+        ["e1", NEW, false],
+        ["e2", NEW, false],
+      ],
+    );
   });
 
   test("a room from before who may move any token loads with the switch's answer, and its older settings changes and their undo replay", async () => {

@@ -92,7 +92,7 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
     if (entry.key.startsWith("log:")) throw invalid("log entries are never restored");
     const current = tx.read(entry.key);
     before.set(entry.key, current);
-    const matches = guardMatches(entry, current) || (oldSrdIdGuards(tx.env.opVersion) && guardMatches(entry, withOldSrdIds(entry.key, current)));
+    const matches = guardMatches(entry, current) || (oldSrdIdGuards(tx.env.opVersion) && guardMatches(entry, withOldSrdIds(entry.key, current, tx.state.tokens)));
     if (!matches) throw invalid(CHANGED_SINCE);
     if (entry.key === keys.meta && (entry.value === null || entry.value === undefined)) throw invalid("the room meta cannot be removed");
     if (current !== null && (entry.value === null || entry.value === undefined)) removed.push(parsed);
