@@ -6,7 +6,7 @@ import { loadMonsters, type SrdMonster } from "#shared/srd/monsters.ts";
 import { loadSrdRolls } from "#shared/srd/rolls.ts";
 import { actor, character, effect, room, token } from "#shared/testutil.ts";
 import type { DiceView } from "../creature.ts";
-import { countWords, groupRows, rowResult, type RowState } from "./rows.ts";
+import { countWords, creatureCount, groupRows, rowResult, type RowState } from "./rows.ts";
 
 /** A group save's rows and their results (docs/design-v1-roll-options.md 5.2 and 5.3). */
 
@@ -83,5 +83,11 @@ describe("a row's result", () => {
     assert.equal(rowResult(row, { way: "type" }, { kind: "none" }, null), "fail");
     assert.equal(rowResult(row, { way: "type", mark: "skip" }, { kind: "none" }, null), "skip");
     assert.equal(countWords(["pass", "pass", "fail", null, "skip"]), "2 pass, 1 fail, 1 waiting");
+  });
+
+  test("the setup's count says one creature, not one creatures (LP7-PC-7)", () => {
+    assert.equal(creatureCount(1), "1 creature");
+    assert.equal(creatureCount(3), "3 creatures");
+    assert.equal(creatureCount(0), "0 creatures");
   });
 });

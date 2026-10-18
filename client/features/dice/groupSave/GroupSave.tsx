@@ -63,7 +63,7 @@ import {
 } from "./chain.ts";
 import { parseParts } from "./outcome.ts";
 import { amountsOf, applyWaits, applyWords, buildPlan, damageTo, pageBound, rowOutcome, rowWords } from "./plan.ts";
-import { countWords, d20Of, groupRows, type GroupTest, type Mark, type RowBase, type Way } from "./rows.ts";
+import { countWords, creatureCount, d20Of, groupRows, type GroupTest, type Mark, type RowBase, type Way } from "./rows.ts";
 import { useGroupSave, useGroupSaveStore } from "./store.ts";
 import { actionFill, areaFill, casterActions } from "./fills.ts";
 
@@ -356,7 +356,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   const rowList = (
     <div role="group" aria-label="Creatures" style={{ display: "grid", gap: theme.space(1) }}>
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
-        <span style={{ fontWeight: theme.weight.strong, flex: 1 }}>{page.phase === "setup" && page.test.kind !== "none" ? `${rows.length} creatures` : count}</span>
+        <span style={{ fontWeight: theme.weight.strong, flex: 1 }}>{page.phase === "setup" && page.test.kind !== "none" ? creatureCount(rows.length) : count}</span>
         <Button size="sm" disabled={page.phase === "applying" || page.phase === "applied"} onClick={() => update(rows.reduce((p, r) => (stateOf(p, r).mark === "skip" && r.skip ? p : mark(p, r.holder, "fail")), { ...pageRef.current, rows } as Page))}>
           All fail
         </Button>

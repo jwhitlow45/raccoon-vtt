@@ -148,6 +148,11 @@ export function rowTotal(state: RowState): number | undefined {
   return state.answer?.total ?? state.rolled?.total ?? state.typed;
 }
 
+/** The setup's count of its rows: "1 creature", "3 creatures". */
+export function creatureCount(n: number): string {
+  return `${n} ${n === 1 ? "creature" : "creatures"}`;
+}
+
 /** The header's count: "4 pass, 2 fail, 1 waiting". */
 export function countWords(results: readonly (Mark | null)[]): string {
   const pass = results.filter((r) => r === "pass").length;
