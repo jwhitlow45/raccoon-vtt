@@ -1,3 +1,4 @@
+import { askedCritical } from "#shared/dice/crit.ts";
 import { applyMode, formatFormula, formulaRange, parseFormula, parseRollText, type AdvantageMode } from "#shared/dice/formula.ts";
 import type { DiceResult, DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
 
@@ -130,6 +131,18 @@ export function askedFormula(result: Pick<DiceResult, "formula" | "mode">): stri
   if (!result.mode) return formatFormula(parsed.formula);
   const text = formatFormula(parsed.formula, result.mode);
   return text.replace(/ with (advantage|disadvantage)$/, "");
+}
+
+/**
+ * A roll as Again asks for it: its formula as asked, and a critical hit's
+ * damage marked critical again, so the server rolls it by the room's rule
+ * then (the critical hit rules addendum of docs/design-v1-dice.md).
+ */
+export function askedRoll(result: Pick<DiceResult, "formula" | "mode" | "crit">): { formula: string; critical?: true } | null {
+  const critical = askedCritical(result);
+  if (critical) return { formula: formatFormula(critical), critical: true };
+  const formula = askedFormula(result);
+  return formula === null ? null : { formula };
 }
 
 // ------------------------------------------------------------ history

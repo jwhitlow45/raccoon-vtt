@@ -1,18 +1,20 @@
 import { LIMITS, serializedBytes } from "../limits.ts";
-import { applyMode, diceCount, FORMULA_ERRORS, parseFormula, type AdvantageMode, type FormulaError } from "./formula.ts";
+import { critBound } from "./crit.ts";
+import { applyMode, diceCount, doubleDice, FORMULA_ERRORS, parseFormula, type AdvantageMode, type FormulaError } from "./formula.ts";
 
 /**
  * The splitter (docs/design-v1-dice.md 8.4): a group of rolls into
  * `dice.roll` ops that each keep within the three op bounds, 20 rolls, 3 KiB
  * serialized and 100 dice counted after each mode (advantage's d20 counts
- * two). Every batch goes under one tag, numbered by `part`, so the server's
+ * two) and each critical's rule (its dice count twice, as `critBound` has
+ * it). Every batch goes under one tag, numbered by `part`, so the server's
  * receipts settle each on its own and every viewer groups them by `batch`
  * as one roll.
  *
  * Every roll is checked first, so one bad formula sends nothing. A single
  * roll past a bound on its own is refused in that bound's words.
  */
-export type BatchRoll = { formula: string; mode?: AdvantageMode };
+export type BatchRoll = { formula: string; mode?: AdvantageMode; critical?: true };
 
 export type BatchOp<R, E> = E & { t: "dice.roll"; part?: number; rolls: R[] };
 
@@ -27,7 +29,11 @@ export function batchRolls<R extends BatchRoll, E extends object>(rolls: readonl
     const parsed = parseFormula(roll.formula);
     if (!parsed.ok) return { ok: false, error: parsed.error, index };
     let formula = parsed.formula;
-    if (roll.mode) {
+    if (roll.critical) {
+      const bound = critBound(formula);
+      if (bound) return { ok: false, error: bound, index };
+      formula = doubleDice(formula);
+    } else if (roll.mode) {
       const applied = applyMode(formula, roll.mode);
       if (!applied.ok) return { ok: false, error: applied.error, index };
       formula = applied.formula;

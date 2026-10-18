@@ -2,6 +2,7 @@ import type { Actor, DiceResult, RoomState } from "../model.ts";
 import type { ActorTarget, OpOf, RefusalCode } from "../protocol.ts";
 import { failingCondition } from "../rules/rollReminders.ts";
 import { creatureBonus, isSave, testOf, type D20Test, type SrdRolls } from "./bonus.ts";
+import { critRuleOf, rollCritical } from "./crit.ts";
 import { formulaRange, parseExtra, parseFormula, type Formula } from "./formula.ts";
 import { CANNOT_REROLL, rerolled, rerollFace, rollFormula, withDie, withLucky, type Changed, type Draw } from "./roll.ts";
 
@@ -54,7 +55,8 @@ function freeRolls(op: OpOf<"dice.roll">, state: RoomState, deps: ResolveDeps): 
   for (const roll of op.rolls) {
     const parsed = parseFormula(roll.formula);
     if (!parsed.ok) return refuse(parsed.error);
-    const rolled = rollFormula(parsed.formula, deps.draw, roll.mode);
+    // A critical hit's damage rolls by the room's rule as it stands now, which its result keeps (the critical hit rules addendum).
+    const rolled = roll.critical ? rollCritical(parsed.formula, deps.draw, critRuleOf(state.meta.settings)) : rollFormula(parsed.formula, deps.draw, roll.mode);
     if (!rolled.ok) return refuse(rolled.error);
     const result = roll.cancelled ? { ...rolled.result, cancelled: true as const } : rolled.result;
     // A free save for a creature fails as its request's would, so its line and every verdict read the fail (W7B-P-21).

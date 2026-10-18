@@ -95,6 +95,12 @@ describe("HP chips", () => {
     );
   });
 
+  test("a damage the server rolled as a critical hit is critical by its rule, whatever its label says", () => {
+    const crit: DiceRoll = { ...roll("Shared damage for 2 hits, fire", 30), crit: "maxPlusRoll" };
+    const chips = hpChips([line("me", [roll("Shared damage for 2 hits, fire", 7), crit])], "me", "damage", opts());
+    assert.deepEqual(chips.map((c) => [c.amount, c.critical]), [[37, true]]);
+  });
+
   test("a roll sent as several lines, such as 21 hits' damage, is one chip of its whole total, and applying it takes every line (ASTRA-12)", () => {
     const batched = (id: string, rolls: DiceRoll[]): LogEntry => ({ id, at: "", kind: "event", data: { type: "dice", by: "me", to: "all", batch: "b1", rolls } });
     const hit = roll("Scimitar damage for 21 hits, slashing", 4);

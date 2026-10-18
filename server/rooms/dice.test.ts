@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { LogEntry, LogEvent } from "#shared/model.ts";
-import { AT, DM, P1, actor, character, member, room, token } from "#shared/testutil.ts";
+import { FORMULA_ERRORS } from "#shared/dice/formula.ts";
+import type { CritRule, LogEntry, LogEvent } from "#shared/model.ts";
+import { AT, DM, P1, actor, apply, character, member, room, token } from "#shared/testutil.ts";
 import { batchOf, resolveDice } from "./dice.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
@@ -70,6 +71,51 @@ describe("the server's dice (docs/design-v1-dice.md 4.2)", () => {
   });
 });
 
+describe("a critical hit's damage rolls by the room's rule (the critical hit rules addendum)", () => {
+  const crit = (rolls: { formula: string; label?: string; critical?: true }[]) => ({ t: "dice.roll", tag: TAG, to: "all", rolls }) as const;
+  const withRule = (critRule?: CritRule) => {
+    const state = room({ members: { dm1: member("dm1", "dm"), p1: member("p1") } });
+    if (critRule === undefined) delete state.meta.settings.critRule;
+    else state.meta.settings.critRule = critRule;
+    return state;
+  };
+
+  test("each rule from the room's settings, an absent one rolling twice, and a plain roll beside it untouched", () => {
+    const op = crit([{ formula: "2d6+3", label: "Scimitar critical damage, slashing", critical: true }, { formula: "2d6+3" }]);
+    const results = (critRule: CritRule | undefined, faces: number[]) => {
+      const resolved = resolveDice(op, withRule(critRule), P1, { draw: () => faces.shift()! });
+      assert.ok(resolved.ok, resolved.ok ? "" : resolved.message);
+      return resolved.op.results;
+    };
+    assert.deepEqual(results(undefined, [1, 2, 5, 6, 3, 3]), [
+      { formula: "4d6+3", faces: [1, 2, 5, 6], total: 17, crit: "rollTwice" },
+      { formula: "2d6+3", faces: [3, 3], total: 9 },
+    ]);
+    assert.deepEqual(results("maxPlusRoll", [4, 6, 3, 3])[0], { formula: "2d6+3", faces: [4, 6], total: 25, crit: "maxPlusRoll" });
+    assert.deepEqual(results("doubleDice", [4, 6, 3, 3])[0], { formula: "2d6+3", faces: [4, 6], total: 23, crit: "doubleDice" });
+    assert.deepEqual(results("doubleTotal", [4, 6, 3, 3])[0], { formula: "2d6+3", faces: [4, 6], total: 26, crit: "doubleTotal" });
+  });
+
+  test("the line keeps the rule it was rolled under after the DM picks another, and replays to the same line", () => {
+    const state = withRule("maxPlusRoll");
+    const resolved = resolveDice(crit([{ formula: "1d6+2", label: "Scimitar critical damage, slashing", critical: true }]), state, P1, { draw: () => 4 });
+    assert.ok(resolved.ok);
+    const rolled = apply(state, resolved.op, P1, 1);
+    const changed = apply(rolled, { t: "room.update", settings: { critRule: "doubleTotal" } }, DM, 2);
+    const line = changed.log.flatMap((e) => (e.data?.type === "dice" ? [e.data] : []))[0];
+    assert.deepEqual(line?.rolls, [{ formula: "1d6+2", faces: [4], total: 12, crit: "maxPlusRoll", label: "Scimitar critical damage, slashing" }]);
+    const again = apply(withRule("doubleTotal"), resolved.op, P1, 1);
+    assert.deepEqual(again.log.at(-1)?.data, rolled.log.at(-1)?.data, "a stored sys.dice replays the same under any later setting");
+  });
+
+  test("a crit past the op's 100 dice under the most drawing rule is refused before any draw", () => {
+    const resolved = resolveDice(crit([{ formula: "51d6", critical: true }]), withRule("maxPlusRoll"), P1, {
+      draw: () => assert.fail("no die is drawn"),
+    });
+    assert.deepEqual(resolved, { ok: false, code: "invalid", message: FORMULA_ERRORS.dice });
+  });
+});
+
 describe("dice lines in a room's export (5.3)", () => {
   function withLines(): ReturnType<typeof room> {
     const state = room({ members: { dm1: member("dm1", "dm"), p1: member("p1") }, tokens: { g1: token("g1") }, characters: { bree: character("bree") } });
@@ -83,6 +129,7 @@ describe("dice lines in a room's export (5.3)", () => {
       rolls: [
         { formula: "2d20kh1+4", faces: [17, 3], total: 21, mode: "adv", label: "Scimitar", tokenId: "g1", seen: true, critOn: 19 },
         { formula: "1d20", faces: [4], total: 4, characterId: "bree", cancelled: true },
+        { formula: "1d6+2", faces: [4], total: 12, label: "Scimitar critical damage, slashing", tokenId: "g1", crit: "maxPlusRoll" },
       ],
     };
     const bare: LogEvent = { type: "dice", by: "dm1", to: "dm", rolls: [] };
@@ -99,6 +146,9 @@ describe("dice lines in a room's export (5.3)", () => {
     const tooLong = withLines();
     (tooLong.log[0]!.data as Extract<LogEvent, { type: "dice" }>).rolls[0]!.label = "x".repeat(61);
     assert.equal(parseRoomState(JSON.parse(JSON.stringify(tooLong))).ok, false);
+    const otherRule = JSON.parse(JSON.stringify(withLines()));
+    otherRule.log[0].data.rolls[2].crit = "tripleDice";
+    assert.equal(parseRoomState(otherRule).ok, false, "a crit's rule is one of the four");
   });
 
   test("remap moves the roller and every roll's creature to their new ids", () => {

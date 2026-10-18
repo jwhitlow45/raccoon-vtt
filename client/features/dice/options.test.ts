@@ -121,11 +121,11 @@ describe("damage, critical hits and results", () => {
     ],
   };
 
-  test("riders toggled on join the one line, one roll per type, doubled on a critical", () => {
+  test("riders toggled on join the one line, one roll per type, a critical sent as asked for the server's rule", () => {
     assert.deepEqual(damageRolls(rapier, { on: new Set(), critical: false }), [{ formula: "1d8+4", label: "Rapier damage, piercing" }]);
     assert.deepEqual(damageRolls(rapier, { on: new Set([1, 2]), critical: true, creature: { characterId: "bree" } }), [
-      { formula: "2d8+4+6d6", label: "Rapier critical damage and Sneak Attack, piercing", creature: { characterId: "bree" } },
-      { formula: "2d6", label: "Rapier critical damage and Sneak Attack, fire", creature: { characterId: "bree" } },
+      { formula: "1d8+4+3d6", label: "Rapier critical damage and Sneak Attack, piercing", creature: { characterId: "bree" }, critical: true },
+      { formula: "1d6", label: "Rapier critical damage and Sneak Attack, fire", creature: { characterId: "bree" }, critical: true },
     ]);
   });
 

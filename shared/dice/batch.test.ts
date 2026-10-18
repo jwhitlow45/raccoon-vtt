@@ -55,6 +55,17 @@ describe("the splitter (docs/design-v1-dice.md 8.4)", () => {
     );
   });
 
+  test("a critical hit's damage counts its dice twice, whatever the room's rule, and one past the bounds says so", () => {
+    const four = batchRolls(rolls(4, { formula: "12d6+3", critical: true }), ENVELOPE);
+    assert.ok(four.ok);
+    assert.deepEqual(four.ops.map((op) => op.rolls.length), [4], "96 dice counted");
+    const five = batchRolls(rolls(5, { formula: "12d6+3", critical: true }), ENVELOPE);
+    assert.ok(five.ok);
+    assert.deepEqual(five.ops.map((op) => op.rolls.length), [4, 1], "120 dice counted");
+    assert.deepEqual(batchRolls([{ formula: "50d6", critical: true }], ENVELOPE).ok, true);
+    assert.deepEqual(batchRolls([{ formula: "1d20" }, { formula: "51d6", critical: true }], ENVELOPE), { ok: false, error: FORMULA_ERRORS.dice, index: 1 });
+  });
+
   test("an op never passes 3 KiB serialized, the largest part number counted", () => {
     const label = "x".repeat(LIMITS.diceLabelChars);
     const long = rolls(20, { formula: `1d20+${"1d6+".repeat(9)}1d6`.slice(0, 100), label });

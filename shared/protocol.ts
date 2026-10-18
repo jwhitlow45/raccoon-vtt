@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { LIMITS, serializedBytes } from "./limits.ts";
-import { applyMode, diceCount, parseExtra, parseFormula, type Formula } from "./dice/formula.ts";
+import { critBound } from "./dice/crit.ts";
+import { applyMode, diceCount, doubleDice, parseExtra, parseFormula, type Formula } from "./dice/formula.ts";
 import { ICON_KEY_RE } from "./imageRef.ts";
 import { DAMAGE_TYPES } from "./rules/damage.ts";
 import {
@@ -1067,6 +1068,11 @@ const diceRollInput = z.strictObject({
    * request's rolled save does (4.2, W7B-P-21). Ignored without `creature`.
    */
   save: ability.optional(),
+  /**
+   * A critical hit's damage, as asked: the resolve applies the room's rule
+   * (the critical hit rules addendum), so no client computes a crit.
+   */
+  critical: z.literal(true).optional(),
 });
 const diceRollFields = {
   /** The receipt's key (1.2): one tag for a whole group, and `part` 0 to 19 for each batch of it. */
@@ -1082,13 +1088,20 @@ const diceRollFields = {
 /**
  * Each formula as the resolve will roll it: parsed, with its mode applied.
  * The words of the first that fails, so a raw op past a bound is refused
- * in the bound's own words (Appendix A).
+ * in the bound's own words (Appendix A). A critical's counts doubled, the
+ * rule that draws the most, so the op's bounds hold under any room's rule.
  */
-function diceFormulas(rolls: readonly { formula: string; mode?: "adv" | "dis" }[]): { ok: true; formulas: Formula[] } | { ok: false; message: string } {
+function diceFormulas(rolls: readonly { formula: string; mode?: "adv" | "dis"; critical?: true }[]): { ok: true; formulas: Formula[] } | { ok: false; message: string } {
   const formulas: Formula[] = [];
   for (const roll of rolls) {
     const parsed = parseFormula(roll.formula);
     if (!parsed.ok) return { ok: false, message: parsed.error };
+    if (roll.critical) {
+      const bound = critBound(parsed.formula);
+      if (bound) return { ok: false, message: bound };
+      formulas.push(doubleDice(parsed.formula));
+      continue;
+    }
     const applied = roll.mode ? applyMode(parsed.formula, roll.mode) : parsed;
     if (!applied.ok) return { ok: false, message: applied.error };
     formulas.push(applied.formula);
@@ -1145,6 +1158,8 @@ const diceResult = z.strictObject({
   mode: advantageMode.optional(),
   cancelled: z.literal(true).optional(),
   fails: z.enum(CONDITION_KEYS).optional(),
+  /** A critical hit's damage and the rule it was rolled under (the critical hit rules addendum). */
+  crit: z.enum(CRIT_RULES).optional(),
 });
 
 /**
@@ -1522,6 +1537,10 @@ export const clientOps = [
    */
   op("dice.roll", diceRollFields)
     .refine((o) => o.dc === undefined || o.ac === undefined, { message: "a roll is compared with a DC or an AC, not both" })
+    // A critical hit's damage is damage: no d20 test, and so never a save (the critical hit rules addendum).
+    .refine((o) => o.rolls.every((r) => !r.critical || (r.mode === undefined && r.cancelled === undefined && r.save === undefined && r.critOn === undefined)), {
+      message: "a critical hit's damage is no d20 roll",
+    })
     .superRefine((o, ctx) => {
       const checked = diceFormulas(o.rolls);
       if (!checked.ok) ctx.addIssue({ code: "custom", message: checked.message });

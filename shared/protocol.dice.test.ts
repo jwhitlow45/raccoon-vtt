@@ -45,6 +45,25 @@ describe("dice.roll's bounds", () => {
     assert.equal(firstIssue(op({ rolls: big })), FORMULA_ERRORS.tooMuch);
   });
 
+  test("a critical hit's damage counts its dice twice under any rule, and is no d20 roll (the critical hit rules addendum)", () => {
+    assert.equal(firstIssue(op({ rolls: [{ formula: "2d6+3", label: "Scimitar critical damage, slashing", critical: true }] })), null);
+    assert.equal(firstIssue(op({ rolls: [{ formula: "50d6", critical: true }] })), null);
+    assert.equal(firstIssue(op({ rolls: [{ formula: "51d6", critical: true }] })), FORMULA_ERRORS.dice);
+    assert.equal(firstIssue(op({ rolls: [{ formula: "25d6", critical: true }, { formula: "50d6" }] })), null);
+    assert.equal(firstIssue(op({ rolls: [{ formula: "25d6", critical: true }, { formula: "51d6" }] })), FORMULA_ERRORS.dice, "a crit's 25 dice count 50 in the op");
+    const tooLong = `${Array.from({ length: 10 }, () => "5d1000").join("+")}${"+1000".repeat(5)}`;
+    assert.equal(firstIssue(op({ rolls: [{ formula: tooLong }] })), null);
+    assert.equal(firstIssue(op({ rolls: [{ formula: tooLong, critical: true }] })), FORMULA_ERRORS.long, "its counts doubled pass 100 characters");
+    for (const extra of [{ mode: "adv" }, { cancelled: true }, { save: "dex" }, { critOn: 19 }]) {
+      assert.equal(firstIssue(op({ rolls: [{ formula: "1d20+2d6", critical: true, ...extra }] })), "a critical hit's damage is no d20 roll", JSON.stringify(extra));
+    }
+    assert.notEqual(firstIssue(op({ rolls: [{ formula: "2d6", critical: false }] })), null);
+    const result = { formula: "2d6+3", faces: [4, 6], total: 25, crit: "maxPlusRoll" };
+    const sys = { t: "sys.dice", asked: op({ rolls: [{ formula: "2d6+3", critical: true }] }), batch: "AbCdEfGhIjKlMnOp", results: [result] };
+    assert.equal(serverOnlyOpSchema.safeParse(sys).success, true);
+    assert.equal(serverOnlyOpSchema.safeParse({ ...sys, results: [{ ...result, crit: "tripleDice" }] }).success, false);
+  });
+
   test("no client may send sys.dice", () => {
     const sys = { t: "sys.dice", asked: op(), batch: "AbCdEfGhIjKlMnOp", results: [{ formula: "2d6+3", faces: [1, 1], total: 5 }] };
     assert.equal(clientOpSchema.safeParse(sys).success, false);
@@ -64,11 +83,13 @@ describe("dice.roll's bounds", () => {
     for (let run = 0; run < 200; run++) {
       const rolls = Array.from({ length: int(r, 1, 80) }, () => {
         const dice = int(r, 1, 30);
-        const roll: { formula: string; mode?: "adv" | "dis"; label?: string; creature?: { tokenId: string }; critOn?: 19 } = { formula: chance(r, 0.5) ? `1d20+${dice}d6+${int(r, 0, 9)}` : `${dice}d${pick(r, [4, 6, 8, 10, 12])}` };
+        const roll: { formula: string; mode?: "adv" | "dis"; label?: string; creature?: { tokenId: string }; critOn?: 19; critical?: true } = { formula: chance(r, 0.5) ? `1d20+${dice}d6+${int(r, 0, 9)}` : `${dice}d${pick(r, [4, 6, 8, 10, 12])}` };
         if (roll.formula.startsWith("1d20") && chance(r, 0.4)) roll.mode = pick(r, ["adv", "dis"] as const);
         if (chance(r, 0.6)) roll.label = "x".repeat(int(r, 1, 60));
         if (chance(r, 0.5)) roll.creature = { tokenId: randomUUID() };
-        if (chance(r, 0.2)) roll.critOn = 19;
+        // A critical hit's damage, whose dice count twice, is no attack roll.
+        if (!roll.formula.startsWith("1d20") && chance(r, 0.3)) roll.critical = true;
+        else if (chance(r, 0.2)) roll.critOn = 19;
         return roll;
       });
       const batched = batchRolls(rolls, { tag: TAG, to: "all" as const, ...(chance(r, 0.3) ? { ac: 15 } : {}) });

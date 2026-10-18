@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
-import { askedFormula, collapseBare, findRolls, readingOf, recentRolls, stepHistory, withHistory, type RecentRow } from "./logic.ts";
+import { askedFormula, askedRoll, collapseBare, findRolls, readingOf, recentRolls, stepHistory, withHistory, type RecentRow } from "./logic.ts";
 import type { ReceiptLookup } from "../../lib/api.ts";
 import { ReceiptTracker, refusalWords } from "./useReceipt.ts";
 
@@ -107,6 +107,11 @@ describe("the field", () => {
     assert.equal(askedFormula({ formula: "2d20kl1+5+1d4", mode: "dis" }), "1d20+5+1d4");
     assert.equal(askedFormula({ formula: "4d6kh3" }), "4d6kh3");
     assert.equal(askedFormula({ formula: "2d6 words" }), null);
+    // A critical hit's damage goes again as asked, marked critical, whatever rule it was rolled under (the critical hit rules addendum).
+    assert.deepEqual(askedRoll({ formula: "4d6+3", crit: "rollTwice" }), { formula: "2d6+3", critical: true });
+    assert.deepEqual(askedRoll({ formula: "1d8+4+3d6", crit: "maxPlusRoll" }), { formula: "1d8+4+3d6", critical: true });
+    assert.deepEqual(askedRoll({ formula: "4d6+3" }), { formula: "4d6+3" }, "a line from before the setting rolls its doubled dice again");
+    assert.deepEqual(askedRoll({ formula: "2d20kh1+5", mode: "adv" }), { formula: "1d20+5" });
   });
 
   test("the history keeps 20 different texts, newest first, and Up and Down walk it back to the draft", () => {

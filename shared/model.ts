@@ -1348,6 +1348,12 @@ export type DiceResult = {
   cancelled?: true;
   /** A rolled save its creature fails whatever the total, by a condition its players can see (4.2). */
   fails?: ConditionKey;
+  /**
+   * A critical hit's damage, and the room's rule it was rolled under (the
+   * critical hit rules addendum). Only the resolve sets it, so the line
+   * reads by that rule whatever the setting says later.
+   */
+  crit?: CritRule;
 };
 
 /** A request's answer, or the one a later answer replaced. */

@@ -1,5 +1,5 @@
 import { testOf, type D20Test, type DamagePart, type NamedRoll } from "#shared/dice/bonus.ts";
-import { d20Formula, doubleDice, formatFormula, parseFormula } from "#shared/dice/formula.ts";
+import { d20Formula, formatFormula, parseFormula } from "#shared/dice/formula.ts";
 import { keptD20 } from "#shared/dice/roll.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
@@ -245,9 +245,12 @@ function riderName(part: DamagePart): string | null {
 /**
  * One Damage tap (4.2, 4.3): the parts and every toggled rider in one line,
  * one roll per damage type, so a damage is never split across lines.
- * A critical hit doubles every part's dice, riders included. Labels name
- * the roll, never the creature: "Rend damage, fire", with a rider "Rapier
- * damage and Sneak Attack, piercing", and "Rend critical damage, fire".
+ * A critical hit sends every part as asked, riders included, marked
+ * `critical`: the server rolls it by the room's rule (the critical hit
+ * rules addendum of docs/design-v1-dice.md), so this device never needs
+ * to know it. Labels name the roll, never the creature: "Rend damage,
+ * fire", with a rider "Rapier damage and Sneak Attack, piercing", and
+ * "Rend critical damage, fire".
  */
 export function damageRolls(named: NamedRoll, opts: { on: ReadonlySet<number>; critical: boolean; creature?: ActorTarget }): PanelRoll[] {
   const parts = named.damage.filter((p, i) => !p.optional || opts.on.has(i));
@@ -258,7 +261,7 @@ export function damageRolls(named: NamedRoll, opts: { on: ReadonlySet<number>; c
   for (const part of parts) {
     const parsed = parseFormula(part.formula);
     if (!parsed.ok) continue;
-    const text = formatFormula(opts.critical ? doubleDice(parsed.formula) : parsed.formula);
+    const text = formatFormula(parsed.formula);
     const key = part.type ?? "";
     byType.set(key, [...(byType.get(key) ?? []), text]);
   }
@@ -268,6 +271,7 @@ export function damageRolls(named: NamedRoll, opts: { on: ReadonlySet<number>; c
     if (!parsed.ok) continue;
     const roll: PanelRoll = { formula: formatFormula(parsed.formula), label: cutLabel(type ? `${head}, ${type}` : head) };
     if (opts.creature) roll.creature = opts.creature;
+    if (opts.critical) roll.critical = true;
     out.push(roll);
   }
   return out;
@@ -419,7 +423,8 @@ export function hpChips(log: readonly LogEntry[], me: string, kind: "damage" | "
       const amount = rolls.reduce((n, r) => n + r.total, 0);
       const what = chipWhat(data.rolls[0]!);
       const text = own ? `Use ${amount} (${what})` : `Use ${amount} (${opts.nameOf(data.by)}'s ${what})`;
-      chip = { lineId: entry.id, lineIds: ids, amount, text, critical: rolls.some((r) => /\bcritical\b/i.test(r.label ?? "")) };
+      // A line rolled before the server marked a crit says so only in its label.
+      chip = { lineId: entry.id, lineIds: ids, amount, text, critical: rolls.some((r) => r.crit !== undefined || /\bcritical\b/i.test(r.label ?? "")) };
     }
     if (own) mine = chip;
     else theirs = chip;

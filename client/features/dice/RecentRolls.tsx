@@ -10,7 +10,7 @@ import { IconButton } from "../../components/IconButton.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
 import { usePanelHere } from "../panels.ts";
-import { askedFormula, recentRolls, type RecentRow } from "./logic.ts";
+import { askedRoll, recentRolls, type RecentRow } from "./logic.ts";
 
 /**
  * Recent rolls (docs/design-v1-dice.md 8.3): every roll in the viewer's
@@ -110,11 +110,15 @@ function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; na
   );
 }
 
-/** A roll as Again sends it: its formula as asked, with the mode beside it, its label, creature and range. */
+/**
+ * A roll as Again sends it: its formula as asked, with the mode beside it,
+ * its label, creature and range. A critical hit's damage goes as asked and
+ * marked critical again, so it rolls by the room's rule then.
+ */
 export function againInput(roll: DiceRoll): DiceRollInput | null {
-  const formula = askedFormula(roll);
-  if (formula === null) return null;
-  const input: DiceRollInput = { formula };
+  const asked = askedRoll(roll);
+  if (asked === null) return null;
+  const input: DiceRollInput = { ...asked };
   if (roll.mode) input.mode = roll.mode;
   if (roll.cancelled) input.cancelled = true;
   if (roll.label !== undefined) input.label = roll.label;
@@ -163,7 +167,7 @@ function Row(props: { row: RecentRow; names: LogNames; me: string; dm: boolean; 
     canAgain && first ? (
       <IconButton
         icon="redo"
-        label={`Roll again: ${[askedFormula(first), first.label].filter(Boolean).join(" ")}${single ? "" : ` and ${row.rolls.length - 1} more`}`}
+        label={`Roll again: ${[askedRoll(first)?.formula, first.label].filter(Boolean).join(" ")}${single ? "" : ` and ${row.rolls.length - 1} more`}`}
         title="Again"
         onClick={() => props.again(inputs as DiceRollInput[], row.to)}
       />
