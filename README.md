@@ -116,13 +116,23 @@ GitHub Actions runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 on every push to `main` or to a branch under `ci/`, and by hand from the
 Actions tab. It needs no secrets and deploys nothing.
 
-- **build**, on Linux: `pnpm build` once, kept for the e2e shards.
-- **checks**, on Linux: `pnpm typecheck`, `pnpm test` and `pnpm test:int`,
-  against a postgres service container like the one in `docker-compose.yml`.
-- **e2e**, on macOS, five shards at once: each shard installs, downloads
-  the build, starts a postgres of its own from Homebrew and runs its share
-  of `e2e/*.e2e.ts`, one file at a time. They run on macOS because the
-  layout tests measure pixels, and Linux renders fonts differently.
+These jobs run on Ubuntu:
+
+- **build**: `pnpm build` once, kept for the e2e shards.
+- **checks**: `pnpm typecheck`, `pnpm test` and `pnpm test:int`, against a
+  postgres service container like the one in `docker-compose.yml`.
+- **e2e**, eight shards at once: each shard installs, downloads the build,
+  gets a postgres service container of its own and runs its share of
+  `e2e/*.e2e.ts`, one file at a time, in Google Chrome.
+
+The app's text is in the system font, which Android draws in Roboto and
+Ubuntu in DejaVu Sans. So each shard installs Roboto and makes it the
+system font with `e2e/fonts.conf`, so pages lay out close to an Android
+phone. A file that fails on Linux from font metrics alone, and cannot be
+made tolerant without losing what it guards, goes in `e2e/macos-only.json`
+with the reason. The Linux shards leave those files out, and an
+**e2e-macos** job runs them on a Mac. The list is empty, and the macOS job
+runs only when it is not.
 
 A newer push to a branch cancels that branch's run in progress. A failing
 e2e file runs once more, and its shard fails only if the rerun fails too. A
@@ -138,7 +148,8 @@ lands, copy its time into the list.
 
 A shard runs on a laptop too, against the dev postgres. Build first, then
 give the shard's number and the shard count. `--list` prints what every
-shard would run, without running it.
+shard would run, without running it. On a Mac a shard includes the files
+of `e2e/macos-only.json`, and `--macos-only` shards only those.
 
 ```bash
 pnpm build
