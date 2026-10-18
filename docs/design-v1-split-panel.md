@@ -28,6 +28,8 @@ Every size is in layout px, the chrome's own (`features/device/layout.ts`). Insi
 
 ### 3.1 Two panes and the bar
 
+Changed by docs/design-v1-side-headers.md: the bar is a 45 px header row in the tab row's look, its name in the chosen tab's pill, and a pane's minimum counts the 45 px subpage header, 133 px, so room for two is 311 own px.
+
 ```
 +--------------------------------------------+
 | PARTY v                    [Ask the party] |

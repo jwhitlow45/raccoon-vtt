@@ -296,6 +296,8 @@ Busy: the button that started the work shows `busy`. A form that waits on it (Jo
 
 **Sheet header and panel subpages** (`SheetHeader.tsx`, new). One row, 56 px tall: an optional back IconButton, the title at `heading` weight 700, optional trailing actions, and the close IconButton. Its side padding is `space(2)`. `Sheet`, `Dialog` and panel subpages use it.
 
+- Changed by docs/design-v1-side-headers.md: in the side panel, a subpage's header is a 44 px row with a 16 px title (`compact`), and the side panel's chosen tab draws the pressed look on a 32 px pill. Sheets and dialogs keep 56 px.
+
 - `features/panels.ts` gains `usePanelHeader({ title, parent, onBack, armed })`. A panel calls it while it shows a subpage. While `armed` holds a label, the back button shows it beside the icon in the armed danger look, and the label is its name. Encounters uses it for "Discard changes?" (3.3).
 - The back button's accessible name is "Back to" and the parent's name: "Back to Menu", "Back to Journal", "Back to Areas", "Back to Encounters", "Back to Monsters". Its visible content is the back icon only.
 - A phone sheet shows the subpage's title and wires its back button to `onBack`. With no subpage named, its back button returns to the Panels grid as today ("All panels").

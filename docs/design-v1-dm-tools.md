@@ -354,6 +354,8 @@ Choices are pairs, never separate lists of abilities and skills, which would los
 
 ### 3.4 Party bar
 
+Changed by docs/design-v1-side-headers.md: folded in the side panel, the bar is one 45 px line, its names and HP in a strip that scrolls sideways, and Ask.
+
 The request: "Party bar: AC, passive Perception and HP at a glance."
 
 **Behavior.** DM only. A player already sees each party member's name, conditions and whatever HP the DM allows (an exact number or only a label) in the Characters panel, and that rule, "Other players see only the name, conditions and whatever HP the DM allows" (features 15), keeps other characters' AC and Passive Perception out of a player's data, so a player's bar would show nothing new.

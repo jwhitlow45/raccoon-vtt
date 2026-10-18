@@ -131,6 +131,8 @@ Tabs and More take 6 px side padding, down from 8 (`Room.tsx:1779`). Measured at
 
 ### 3.5 Badges
 
+Changed by docs/design-v1-side-headers.md: the row has no padding above or below, and a badge sits on the corner of its tab's 32 px pill, inside the row.
+
 - **On the corner.** Every badge in the row sits on its button's top right corner (`Badge` with `corner`, as on the toolbar's Panels button), so a count never changes a tab's width and the fit never reads one. Each tab is `position: relative` for it. The row's 8 px top padding holds the badge's 6 px rise.
 - **On More.** More shows the sum of the counts of the panels it holds, the open one included, capped at "9+" as every badge is. So the Journal's count shows on More while the Journal is in More, and on the Journal's own tab wherever the row holds it, as a chosen Journal tab shows its count today.
 - **In the menu.** Each item shows its own count at its end, as the phone's list does (`Room.tsx:1634`).
