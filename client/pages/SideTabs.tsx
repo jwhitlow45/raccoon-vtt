@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from "react";
 import { flushSync } from "react-dom";
+import { headerRow, Pill, PILL_FOCUS, PILL_HOST } from "../components/HeaderRow.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { PRESSED } from "../components/looks.ts";
 import { Menu, type MenuItem, type MenuSection } from "../components/Menu.tsx";
@@ -44,8 +45,19 @@ const TAB_BOX: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-/** A side panel tab at rest. The chosen one takes the pressed look, as every other chosen option (docs/design-v1-visual.md 3.2), with the same 1 px border, so choosing never changes a width. */
+/**
+ * A side panel tab at rest. The chosen one draws the pressed look on its
+ * pill (components/HeaderRow.tsx), as every other chosen option does
+ * (docs/design-v1-visual.md 3.2), so choosing never changes a width, and
+ * the bar's name wears the same pill for the panel below
+ * (docs/design-v1-side-headers.md).
+ */
 const TAB_REST: CSSProperties = { background: "transparent", border: `${theme.line.border}px solid transparent`, color: theme.color.textMuted };
+
+/** A tab's look: its text in the accent while chosen, its pill pressed. */
+export function tabLook(chosen: boolean): { button: CSSProperties; pill: CSSProperties | null } {
+  return { button: { ...TAB_REST, ...(chosen ? { color: theme.color.accent } : null) }, pill: chosen ? PRESSED : null };
+}
 
 /** More's place among the row's stops for the tab keys. */
 const MORE = "\u0000more";
@@ -55,9 +67,9 @@ const SPLIT_ITEM = "\u0000split";
 
 /**
  * The bottom panel's mark on its tab (docs/design-v1-split-panel.md 6): a
- * 2 px accent line along its foot, over its 1 px border, inside the tab's
- * fixed box, so the fit reads nothing new. A border, unlike a shadow,
- * stays in forced colors.
+ * 2 px accent line along its pill's foot, over the pill's 1 px border,
+ * inside the tab's fixed box, so the fit reads nothing new. A border,
+ * unlike a shadow, stays in forced colors.
  */
 const BELOW_MARK: CSSProperties = {
   position: "absolute",
@@ -312,12 +324,13 @@ export function SideTabs(props: {
   return (
     <>
       {/* The tab list, More's menu right after it in the page, so Tab from the menu goes on to Hide panels, and Hide panels outside the list. */}
-      <div style={{ position: "relative", display: "flex", alignItems: "flex-start", gap: theme.space(1), padding: theme.space(2), borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>
+      <div style={{ position: "relative", ...headerRow(true) }}>
         <div ref={listRef} role="tablist" aria-label="Panels" onKeyDown={onTabKey} style={{ flex: "1 1 auto", minWidth: 0, display: "flex", alignItems: "center", gap: TAB_GAP }}>
           {row.map((p, i) => {
             const chosen = p.id === tab;
             const marked = p.id === below;
             const opensGroup = i > 0 && row[i - 1]?.group !== p.group;
+            const look = tabLook(chosen);
             return (
               <button
                 key={p.id}
@@ -332,12 +345,15 @@ export function SideTabs(props: {
                 data-active={chosen}
                 data-stop={p.id}
                 data-index={i}
+                {...PILL_FOCUS}
                 onClick={() => props.onTab(p.id)}
-                style={{ ...TAB_BOX, position: "relative", flex: "none", marginLeft: opensGroup ? GROUP_GAP - TAB_GAP : 0, ...(chosen ? PRESSED : TAB_REST), cursor: "pointer" }}
+                style={{ ...TAB_BOX, ...PILL_HOST, flex: "none", marginLeft: opensGroup ? GROUP_GAP - TAB_GAP : 0, ...look.button, cursor: "pointer" }}
               >
                 {p.title}
-                <Badge count={props.badges[p.id] ?? 0} corner label={props.badgeLabels[p.id]} />
-                {marked ? <span aria-hidden data-below-mark="" style={BELOW_MARK} /> : null}
+                <Pill look={look.pill}>
+                  <Badge count={props.badges[p.id] ?? 0} corner label={props.badgeLabels[p.id]} />
+                  {marked ? <span aria-hidden data-below-mark="" style={BELOW_MARK} /> : null}
+                </Pill>
               </button>
             );
           })}
@@ -356,9 +372,10 @@ export function SideTabs(props: {
               tabIndex={stop === MORE ? 0 : -1}
               data-active={chosenHeld !== undefined}
               data-stop={MORE}
+              {...PILL_FOCUS}
               onClick={menu.onAnchorClick}
               onKeyDown={menu.onAnchorKeyDown}
-              style={{ ...TAB_BOX, position: "relative", flex: "0 1 auto", maxWidth: fit.moreRoom, ...(chosenHeld ? PRESSED : TAB_REST), cursor: "pointer" }}
+              style={{ ...TAB_BOX, ...PILL_HOST, flex: "0 1 auto", maxWidth: fit.moreRoom, ...tabLook(chosenHeld !== undefined).button, cursor: "pointer" }}
             >
               {/* The title cuts in its own span, so the corner badge never does. Its name keeps the whole title. */}
               <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -372,7 +389,9 @@ export function SideTabs(props: {
               </span>
               {/* The icon set has one chevron for down and up, turned while the menu is open. */}
               <Icon name="chevronDown" size="sm" style={menu.open ? { transform: "rotate(180deg)" } : undefined} />
-              <Badge count={heldCount} corner spoken={false} />
+              <Pill look={tabLook(chosenHeld !== undefined).pill}>
+                <Badge count={heldCount} corner spoken={false} />
+              </Pill>
             </button>
           ) : null}
         </div>

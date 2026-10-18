@@ -99,6 +99,13 @@ export function SheetHeader(props: {
   grab?: boolean;
   /** "Full screen", for a sheet that fills the screen when swiped up (docs/design-v1-sheet-swipe.md 4.7): first in the header, hidden until it has focus. */
   fullScreen?: { pressed: boolean; onPress(): void };
+  /**
+   * A header row of the side panel (docs/design-v1-side-headers.md): one
+   * 44 px line with the title at 16 px, the size of a pane's title, in
+   * place of 56 px and 18 px. A subpage there sits under its pane's tab
+   * row or bar, which already name the panel, so it takes the rows' height.
+   */
+  compact?: boolean;
 }) {
   const { back, level = 2 } = props;
   const grab = grabProps(props.grab);
@@ -123,7 +130,7 @@ export function SheetHeader(props: {
       style={{
         ...TITLE_STYLE,
         paddingLeft: back && !stacked ? 0 : theme.space(2),
-        fontSize: theme.font.heading,
+        fontSize: props.compact ? theme.font.input : theme.font.heading,
         fontWeight: theme.weight.bold,
         lineHeight: stacked ? `${STACKED_TITLE_LINE}px` : theme.leading.tight,
       }}
@@ -167,7 +174,8 @@ export function SheetHeader(props: {
     </>
   );
   // A row that never wraps would otherwise ask its parent for the title's whole width, before the title's ellipsis can act.
-  const rowStyle: CSSProperties = { flex: "none", display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0, minHeight: 56, padding: `0 ${padding}px` };
+  const rowHeight = props.compact ? theme.touch : 56;
+  const rowStyle: CSSProperties = { flex: "none", display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0, minHeight: rowHeight, padding: `0 ${padding}px` };
   if (props.detail) {
     return (
       <header {...grab.attrs} style={{ flex: "none", display: "flex", flexDirection: "column", minWidth: 0, paddingTop: lift, borderBottom: divider, ...grab.style, ...lead }}>
@@ -180,7 +188,7 @@ export function SheetHeader(props: {
     );
   }
   return (
-    <header {...grab.attrs} style={{ ...rowStyle, minHeight: lift + 56, padding: `${lift}px ${padding}px 0`, borderBottom: divider, ...grab.style, ...lead }}>
+    <header {...grab.attrs} style={{ ...rowStyle, minHeight: lift + rowHeight, padding: `${lift}px ${padding}px 0`, borderBottom: divider, ...grab.style, ...lead }}>
       {grabber}
       {row}
     </header>

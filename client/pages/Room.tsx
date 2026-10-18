@@ -2513,10 +2513,10 @@ function SidePane(props: {
   useSubpageFocus(props.subpage, { title: titleRef, body: bodyRef, root: rootRef, fallback: props.fallback });
   usePanelScroll(props.panelId, props.subpage, bodyRef, props.subject);
   const header = props.subpage ? (
-    <SheetHeader title={props.subpage.title} back={subpageBack(props.subpage)} titleRef={titleRef} />
+    <SheetHeader compact title={props.subpage.title} back={subpageBack(props.subpage)} titleRef={titleRef} />
   ) : props.cutTitle ? (
     // A name More cuts is named in full above the panel (docs/design-v1-panel-tabs.md 3.8). A subpage's header names it in its Back instead.
-    <SheetHeader title={props.cutTitle} />
+    <SheetHeader compact title={props.cutTitle} />
   ) : null;
   return (
     <div ref={rootRef} id={props.rootId} hidden={props.hidden} {...props.root} style={{ display: "flex", flexDirection: "column", minHeight: 0, ...props.style }}>

@@ -1,21 +1,25 @@
 import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { Pill, PILL_FOCUS, PILL_HOST } from "../components/HeaderRow.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
-import { buttonLook } from "../components/looks.ts";
 import { Menu, type MenuSection } from "../components/Menu.tsx";
 import { Popover, usePopover, type PopoverSide } from "../components/Popover.tsx";
 import { panelSections, type PanelDef } from "../features/panels.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { theme } from "../lib/theme.ts";
 import { Badge } from "./RoomChrome.tsx";
-import { innerBox } from "./SideTabs.tsx";
+import { innerBox, tabLook } from "./SideTabs.tsx";
 import { BAR_PX, dragTop, gripStep, separatorValue, type PaneSizes } from "./splitPanes.ts";
 
 /**
  * The bar between the side panel's two panels
  * (docs/design-v1-split-panel.md 3.1, 3.3 and 3.4): the bottom pane's
  * header and the divider. Left to right, the grip, the bottom panel's
- * name, which opens "Panel below", then Swap and Close.
+ * name, which opens "Panel below", then Swap and Close. It takes the tab
+ * row's look (docs/design-v1-side-headers.md): the same band, padding and
+ * icons, and the name in the chosen tab's pill, as More wears it for a
+ * panel it holds, so the panel below reads as the same kind of thing as
+ * the one on top.
  *
  * The grip is the keyboard's way to move the bar, a focusable separator
  * whose Up and Down move it 8 px, or 64 with Shift, each press stored at
@@ -179,7 +183,7 @@ export function SplitBar(props: {
         display: "flex",
         alignItems: "center",
         gap: theme.space(1),
-        padding: `0 ${theme.space(1)}px`,
+        padding: `0 ${theme.space(2)}px`,
         background: theme.color.surfaceRaised,
         borderTop: `${theme.line.border}px solid ${theme.color.border}`,
         borderBottom: `${theme.line.border}px solid ${theme.color.border}`,
@@ -217,7 +221,8 @@ export function SplitBar(props: {
           if (!menu.open && (e.key === "ArrowDown" || e.key === "ArrowUp")) decideSide();
           menu.onAnchorKeyDown(e);
         }}
-        style={{ ...NAME, ...buttonLook("quiet", { pressed: menu.open }) }}
+        {...PILL_FOCUS}
+        style={{ ...NAME, ...tabLook(true).button }}
       >
         {/* The title cuts in its own span, and the name keeps the whole title and says where it is, so speech input that says "Token" finds it. */}
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -225,6 +230,7 @@ export function SplitBar(props: {
           <span style={VISUALLY_HIDDEN}> below</span>
         </span>
         <Icon name="chevronDown" size="sm" style={menu.open ? { transform: "rotate(180deg)" } : undefined} />
+        <Pill look={tabLook(true).pill} />
       </button>
       <Popover handle={menu} side={side} bound={() => innerBox(props.nameRef.current?.closest("aside") ?? document.body, latest.current.zoom)}>
         <Menu label="Panel below" sections={sections} onPick={props.onPick} data={{ "data-tabs-menu": "" }} />
@@ -251,15 +257,16 @@ const GRIP: CSSProperties = {
   cursor: "row-resize",
 };
 
-/** The bottom panel's name: a quiet button in a tab's text style, as wide as its words. */
+/** The bottom panel's name: a tab's box and type, as wide as its words, as More is when it names a panel. */
 const NAME: CSSProperties = {
+  ...PILL_HOST,
   flex: "0 1 auto",
   minWidth: theme.touch,
   minHeight: theme.touch,
   display: "inline-flex",
   alignItems: "center",
-  gap: theme.space(1),
-  padding: `0 ${theme.space(2)}px`,
+  gap: 2,
+  padding: `0 ${theme.space(1.5)}px`,
   borderRadius: theme.radius.md,
   fontFamily: theme.font.body,
   fontSize: theme.font.body14,

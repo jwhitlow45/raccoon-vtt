@@ -79,6 +79,18 @@ dialog[data-rvtt-sheet]:not([open]) {
   outline-offset: 2px;
 }
 
+/* A control in a side panel header row draws its shape as a pill inside
+   its 44 px target (components/HeaderRow.tsx), so the ring goes on the
+   pill: it hugs the shape, and in a strip that scrolls it is not clipped
+   by the strip's top and bottom. */
+[data-pill-focus]:focus-visible {
+  outline: none;
+}
+[data-pill-focus]:focus-visible > [data-pill] {
+  outline: 2px solid var(--rvtt-focus, var(--rvtt-accent, #f7df00));
+  outline-offset: 2px;
+}
+
 /* The option draws its own chosen look, and a tap on a phone would flash
    Chrome's grey square over it as well, which on a round swatch reads as a
    glitch. */
