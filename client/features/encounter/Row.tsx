@@ -194,7 +194,7 @@ export function EntryRow(props: {
             >
               {name}
             </span>
-            <span id={lineId} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), fontSize: theme.font.small, color: theme.color.textMuted }}>
+            <span id={lineId} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), fontSize: theme.font.small, color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>
               <DescribedItems
                 items={[
                   ac !== null ? <AcBadge ac={ac} size="sm" /> : null,
@@ -373,7 +373,7 @@ function CompanionRow(props: { token: Token; characterName: string; entryId: str
             >
               {name}
             </span>
-            <span id={lineId} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), fontSize: theme.font.small, color: theme.color.textMuted }}>
+            <span id={lineId} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), fontSize: theme.font.small, color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>
               <DescribedItems
                 items={[
                   ac !== null ? <AcBadge ac={ac} size="sm" /> : null,
@@ -939,7 +939,7 @@ function RowMenu(props: {
 function Pips(props: { label: string; max: number; used: number; onChange(used: number): void }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-      <span style={{ flex: 1, fontSize: theme.font.small, color: theme.color.textMuted }}>
+      <span style={{ flex: 1, fontSize: theme.font.small, color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>
         {props.label}: {props.used} of {props.max}
       </span>
       <div role="group" aria-label={props.label} style={{ display: "flex" }}>

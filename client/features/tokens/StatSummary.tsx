@@ -140,7 +140,7 @@ function Unit(props: { unit: VitalUnit }) {
 export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: ReactNode; end?: ReactNode }) {
   if (props.items.length === 0 && props.end == null) return null;
   return (
-    <div data-vitals="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", rowGap: theme.space(1), columnGap: theme.space(1.5), fontSize: theme.font.body14, minWidth: 0 }}>
+    <div data-vitals="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", rowGap: theme.space(1), columnGap: theme.space(1.5), fontSize: theme.font.body14, minWidth: 0, fontVariantNumeric: "tabular-nums" }}>
       {props.items.flatMap((item, i) =>
         item.units.flatMap((unit, j) => {
           const last = j === item.units.length - 1;

@@ -386,6 +386,7 @@ export function Badge(props: {
         fontWeight: theme.weight.bold,
         lineHeight: 1,
         verticalAlign: "middle",
+        fontVariantNumeric: "tabular-nums",
       }}
     >
       <span aria-hidden>{text}</span>

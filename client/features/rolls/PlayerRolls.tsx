@@ -336,7 +336,7 @@ export function PlayerRolls() {
       onClick={tapSummary}
       // Showing and folding the chips past the first two is a disclosure. The sheet's kind closes the sheet instead, so it has none.
       expanded={stack.button === "sheet" ? undefined : stack.button === "less"}
-      style={{ pointerEvents: "auto", boxShadow: theme.shadow.float }}
+      style={{ pointerEvents: "auto", boxShadow: theme.shadow.float, fontVariantNumeric: "tabular-nums" }}
     >
       {summary.text}
     </Button>

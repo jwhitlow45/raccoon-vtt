@@ -337,7 +337,7 @@ function chip(lit: boolean): CSSProperties {
   };
 }
 
-const roundStyle: CSSProperties = { flex: "none", fontSize: theme.font.small, fontWeight: theme.weight.bold, color: theme.color.textMuted };
+const roundStyle: CSSProperties = { flex: "none", fontSize: theme.font.small, fontWeight: theme.weight.bold, color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" };
 
 /**
  * The whole strip opens the tracker. The button lies over the strip's

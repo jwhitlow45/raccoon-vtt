@@ -400,7 +400,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   const rowList = (
     <div role="group" aria-label="Creatures" style={{ display: "grid", gap: theme.space(1) }}>
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
-        <span style={{ fontWeight: theme.weight.strong, flex: 1 }}>{page.phase === "setup" && page.test.kind !== "none" ? creatureCount(rows.length) : count}</span>
+        <span style={{ fontWeight: theme.weight.strong, flex: 1, fontVariantNumeric: "tabular-nums" }}>{page.phase === "setup" && page.test.kind !== "none" ? creatureCount(rows.length) : count}</span>
         <Button size="sm" disabled={page.phase === "applying" || page.phase === "applied"} onClick={() => update(rows.reduce((p, r) => (stateOf(p, r).mark === "skip" && r.skip ? p : mark(p, r.holder, "fail")), { ...pageRef.current, rows } as Page))}>
           All fail
         </Button>

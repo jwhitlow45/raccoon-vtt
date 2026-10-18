@@ -277,7 +277,7 @@ export function HpSection(props: {
     <Section title="Hit points">
       {access.full && hp ? (
         // Focusable from script alone: where focus goes once a life button takes itself away (LifeControls).
-        <div data-hp-vitals="" tabIndex={-1} style={{ display: "flex", alignItems: "baseline", gap: theme.space(2), flexWrap: "wrap" }}>
+        <div data-hp-vitals="" tabIndex={-1} style={{ display: "flex", alignItems: "baseline", gap: theme.space(2), flexWrap: "wrap", fontVariantNumeric: "tabular-nums" }}>
           <span style={{ fontSize: theme.font.display, fontWeight: theme.weight.bold }}>{hp.cur}</span>
           <span style={{ color: theme.color.textMuted }}>/ {hp.max}</span>
           {hp.temp > 0 ? <span style={{ color: theme.color.ally, fontWeight: theme.weight.strong }}>+{hp.temp} temp</span> : null}
@@ -286,7 +286,7 @@ export function HpSection(props: {
         </div>
       ) : (
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-          <span style={{ fontSize: theme.font.heading, fontWeight: theme.weight.strong }}>{hpText(display) ?? "Hidden"}</span>
+          <span style={{ fontSize: theme.font.heading, fontWeight: theme.weight.strong, fontVariantNumeric: "tabular-nums" }}>{hpText(display) ?? "Hidden"}</span>
           {display.kind === "bar" ? <Bar fraction={display.fraction} /> : null}
         </div>
       )}

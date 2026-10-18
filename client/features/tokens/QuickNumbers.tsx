@@ -88,7 +88,7 @@ export function QuickNumbers(props: { items: readonly VitalItem[]; actor: Partia
   }
   if (units.length === 0) return null;
   return (
-    <div data-quick-numbers="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(3), rowGap: theme.space(1), fontSize: theme.font.body14 }}>
+    <div data-quick-numbers="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(3), rowGap: theme.space(1), fontSize: theme.font.body14, fontVariantNumeric: "tabular-nums" }}>
       {units}
     </div>
   );

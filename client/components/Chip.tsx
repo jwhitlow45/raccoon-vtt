@@ -85,7 +85,7 @@ export function Chip(props: {
     >
       {props.children}
       {props.count !== undefined && props.count !== null ? (
-        <span style={{ color: off ? theme.color.textDisabled : theme.color.textMuted, fontWeight: theme.weight.regular }}>{props.count}</span>
+        <span style={{ color: off ? theme.color.textDisabled : theme.color.textMuted, fontWeight: theme.weight.regular, fontVariantNumeric: "tabular-nums" }}>{props.count}</span>
       ) : null}
       {remove ? <Icon name="close" size="sm" style={{ color: off ? theme.color.textDisabled : theme.color.textMuted }} /> : null}
     </button>

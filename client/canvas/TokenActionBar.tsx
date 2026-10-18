@@ -326,7 +326,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
     </>
   );
 
-  const badgeText = badge ? <span style={{ flex: "none", color: theme.color.accentSoft, fontWeight: theme.weight.bold }}>{badge} ft</span> : null;
+  const badgeText = badge ? <span style={{ flex: "none", color: theme.color.accentSoft, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>{badge} ft</span> : null;
   // A window too narrow for the badge in its header's one row shows it under the name instead (docs/design-v1-token-window.md 7.1).
   const badgeInHeader = frame.header.badgeInHeader;
 
@@ -379,6 +379,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
                 borderRadius: theme.radius.pill,
                 background: theme.color.surfaceRaised,
                 fontSize: theme.font.small,
+                fontVariantNumeric: "tabular-nums",
               }}
             >
               <EffectIcon effect={effect} size={20} />
@@ -1419,7 +1420,7 @@ function StepperRow(props: { label: string; children: ReactNode; group?: boolean
   return (
     <div role={props.group ? "group" : undefined} aria-label={props.group ? props.label : undefined} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
       <span style={{ flex: "1 1 auto", color: theme.color.textMuted }}>{props.label}</span>
-      <div style={{ flex: "none", marginLeft: "auto", display: "flex", alignItems: "center", gap: theme.space(1) }}>{props.children}</div>
+      <div style={{ flex: "none", marginLeft: "auto", display: "flex", alignItems: "center", gap: theme.space(1), fontVariantNumeric: "tabular-nums" }}>{props.children}</div>
     </div>
   );
 }

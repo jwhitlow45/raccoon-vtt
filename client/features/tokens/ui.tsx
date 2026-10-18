@@ -224,7 +224,7 @@ function DraftNumber(props: NumberFieldProps & { align: "right" | "center" }) {
         if (e.key === "Enter") e.currentTarget.blur();
         if (e.key === "Escape") focus.discard(e.currentTarget);
       }}
-      style={{ ...fieldStyle({ disabled: props.disabled || props.unavailable }), width: props.width ?? NUMBER_FIELD_WIDTH, textAlign: props.align }}
+      style={{ ...fieldStyle({ disabled: props.disabled || props.unavailable }), width: props.width ?? NUMBER_FIELD_WIDTH, textAlign: props.align, fontVariantNumeric: "tabular-nums" }}
     />
   );
 }

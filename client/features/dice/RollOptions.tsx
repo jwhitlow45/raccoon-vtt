@@ -713,7 +713,7 @@ function SlotStepper(props: { name: string; value: number; min: number; onChange
   return (
     <span role="group" aria-label={`Slot level for ${props.name}`} style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1) }}>
       <SmallButton icon="minus" label={`Slot level for ${props.name}, lower`} disabled={props.value <= props.min} onClick={() => set(props.value - 1)} />
-      <span aria-live="polite" style={{ minWidth: 48, textAlign: "center", fontSize: theme.font.body14, fontWeight: theme.weight.strong, whiteSpace: "nowrap" }}>
+      <span aria-live="polite" style={{ minWidth: 48, textAlign: "center", fontSize: theme.font.body14, fontWeight: theme.weight.strong, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
         Level {props.value}
       </span>
       <SmallButton icon="plus" label={`Slot level for ${props.name}, higher`} disabled={props.value >= 9} onClick={() => set(props.value + 1)} />

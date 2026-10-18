@@ -79,6 +79,7 @@ export const FACE_CHIP: CSSProperties = {
   fontSize: theme.font.small,
   fontWeight: theme.weight.strong,
   background: theme.color.surfaceRaised,
+  fontVariantNumeric: "tabular-nums",
 };
 
 const visuallyHidden: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
@@ -113,7 +114,7 @@ function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; na
     <div style={{ display: "flex", alignItems: "flex-start", gap: theme.space(2) }}>
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1), minHeight: props.end ? theme.touch : undefined }}>
         {props.lead}
-        <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, minWidth: 28 }}>{roll.total.toLocaleString("en-US")}</span>
+        <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, minWidth: 28, fontVariantNumeric: "tabular-nums" }}>{roll.total.toLocaleString("en-US")}</span>
         {what ? <span style={{ fontSize: theme.font.body14, overflowWrap: "anywhere" }}>{what}</span> : null}
         <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{formula}</span>
         <DiceFaces result={roll} />

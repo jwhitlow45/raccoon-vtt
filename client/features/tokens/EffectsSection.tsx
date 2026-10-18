@@ -112,7 +112,7 @@ export function EffectsSection(props: {
               >
                 <EffectIcon effect={effect} />
                 <span style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
-                  <span style={{ display: "block", fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight }}>{effectChip(effect).label}</span>
+                  <span style={{ display: "block", fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight, fontVariantNumeric: "tabular-nums" }}>{effectChip(effect).label}</span>
                   {effect.duration ? (
                     <span style={{ display: "block", fontSize: theme.font.small, color: theme.color.textMuted }}>
                       {describeDuration(view, effect.duration)}

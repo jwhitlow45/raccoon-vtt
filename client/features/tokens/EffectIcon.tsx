@@ -75,6 +75,7 @@ export function EffectIcon(props: { effect: Pick<Effect, "key" | "label" | "glyp
             fontSize: badge * 0.7,
             display: "grid",
             placeItems: "center",
+            fontVariantNumeric: "tabular-nums",
           }}
         >
           {level}

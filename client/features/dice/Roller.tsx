@@ -78,7 +78,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         aria-label={`Show this roll in Recent rolls`}
         style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: theme.space(2), minWidth: 0, flex: 1, minHeight: LAST_LINE_PX, overflow: "hidden", whiteSpace: "nowrap" }}
       >
-        <span style={{ flex: "none", fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>{first.total.toLocaleString("en-US")}</span>
+        <span style={{ flex: "none", fontSize: theme.font.heading, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>{first.total.toLocaleString("en-US")}</span>
         <ResultRest sum={sum} label={label} faces={first} more={rolls.length - 1} verdict={verdict} />
       </button>
     );
@@ -177,7 +177,7 @@ function ResultRest(props: { sum: string | null; label: string | undefined; face
   return (
     <span style={dropsWhole()}>
       <LineStart />
-      {props.sum ? <span style={{ flex: "none", ...muted }}>{`(${props.sum})`}</span> : null}
+      {props.sum ? <span style={{ flex: "none", ...muted, fontVariantNumeric: "tabular-nums" }}>{`(${props.sum})`}</span> : null}
       <span style={dropsWhole(true)}>
         <LineStart reverse />
         {props.verdict ? <span style={{ flex: "none", ...muted }}>{props.verdict}</span> : null}

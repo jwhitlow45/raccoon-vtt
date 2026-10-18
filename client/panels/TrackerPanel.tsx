@@ -234,7 +234,7 @@ function TurnControls(props: { compact: boolean }) {
   const heading = props.compact ? (
     // One line that ends in an ellipsis on a short panel. The whole whose-turn text stays in it, so a screen reader reads all of it.
     <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-      <span style={{ fontWeight: theme.weight.bold }}>Round {round}</span>
+      <span style={{ fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>Round {round}</span>
       {timer && active ? (
         <>
           {" "}
@@ -247,7 +247,7 @@ function TurnControls(props: { compact: boolean }) {
     <div style={{ flex: 1, minWidth: 0 }}>
       {/* Beside the DM's Previous and Next, "Time's up +1:05" leaves no room, so the clock goes under the round rather than splitting "Round" from its number. */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: theme.space(2) }}>
-        <span style={{ fontSize: theme.font.title, fontWeight: theme.weight.bold, whiteSpace: "nowrap" }}>Round {round}</span>
+        <span style={{ fontSize: theme.font.title, fontWeight: theme.weight.bold, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>Round {round}</span>
         {timer && active ? <TimerClock state={timer} size={theme.font.body14} /> : null}
       </div>
       <div style={{ color: theme.color.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line}</div>

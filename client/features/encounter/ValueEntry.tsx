@@ -116,7 +116,7 @@ export function ValueEntry(props: { entries: InitEntry[]; onDone(): void }) {
               value={field.text}
               onChange={(e) => setTexts({ ...texts, [field.key]: e.target.value })}
               onKeyDown={onKeyDown}
-              style={{ width: 60, padding: `0 ${theme.space(1)}px`, textAlign: "center" }}
+              style={{ width: 60, padding: `0 ${theme.space(1)}px`, textAlign: "center", fontVariantNumeric: "tabular-nums" }}
             />
           </li>
         ))}

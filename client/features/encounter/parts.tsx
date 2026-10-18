@@ -98,7 +98,7 @@ export function Chips(props: { effects: readonly Effect[]; max?: number }) {
   const overflow = all.length - shown.length;
   if (all.length === 0) return null;
   return (
-    <span style={{ display: "inline-flex", flexWrap: "wrap", gap: theme.space(1) }}>
+    <span style={{ display: "inline-flex", flexWrap: "wrap", gap: theme.space(1), fontVariantNumeric: "tabular-nums" }}>
       {shown.map((chip, i) => (
         <span
           key={i}

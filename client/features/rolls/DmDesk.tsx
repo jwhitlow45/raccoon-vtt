@@ -162,7 +162,7 @@ export function DmDesk() {
       onClick={() => (stack.button === "sheet" ? open() : setExpanded(stack.button === "more"))}
       // Showing and folding the cards past the newest two is a disclosure. The sheet's kind closes the sheet instead, so it has none.
       expanded={stack.button === "sheet" ? undefined : stack.button === "less"}
-      style={{ pointerEvents: "auto", justifySelf: stack.button === "sheet" ? "end" : undefined, boxShadow: theme.shadow.float }}
+      style={{ pointerEvents: "auto", justifySelf: stack.button === "sheet" ? "end" : undefined, boxShadow: theme.shadow.float, fontVariantNumeric: "tabular-nums" }}
     >
       {summary.text}
     </Button>
@@ -237,7 +237,7 @@ function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; onClose(
           }}
         >
           <span style={{ fontWeight: theme.weight.bold, fontSize: theme.font.body14 }}>{title}</span>
-          <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
+          <span style={{ fontSize: theme.font.small, color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>
             {tally.answered}
             {hidden}
           </span>

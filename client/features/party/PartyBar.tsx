@@ -178,7 +178,7 @@ export function FoldedParty(props: { entries: readonly PartyEntry[]; onFrame(ent
             style={{ ...pill, cursor: e.tokenId ? "pointer" : "default" }}
           >
             <strong style={{ maxWidth: CHIP_NAME_MAX, overflow: "hidden", textOverflow: "ellipsis", color: e.tokenId ? theme.color.text : theme.color.textMuted }}>{e.character.name}</strong>
-            <span style={{ color: LABEL_COLOR[e.label] }}>{lifeWord(e.life) ?? hpLine(e.hp)}</span>
+            <span style={{ color: LABEL_COLOR[e.label], fontVariantNumeric: "tabular-nums" }}>{lifeWord(e.life) ?? hpLine(e.hp)}</span>
             <Pill look={{ background: theme.color.surfaceRaised, border: `${theme.line.border}px solid ${theme.color.border}` }} />
           </button>
         </div>

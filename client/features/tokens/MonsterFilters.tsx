@@ -118,6 +118,7 @@ function CountBadge(props: { count: number }) {
         fontWeight: theme.weight.bold,
         lineHeight: theme.leading.body,
         textAlign: "center",
+        fontVariantNumeric: "tabular-nums",
       }}
     >
       {props.count}

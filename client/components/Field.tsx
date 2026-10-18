@@ -35,7 +35,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement> & { ref?: Ref
     <input
       aria-invalid={error ? true : undefined}
       {...rest}
-      style={{ ...fieldStyle({ error, disabled: props.disabled }), ...(number ? { width: NUMBER_FIELD_WIDTH, textAlign: "right" } : null), ...style }}
+      style={{ ...fieldStyle({ error, disabled: props.disabled }), ...(number ? { width: NUMBER_FIELD_WIDTH, textAlign: "right", fontVariantNumeric: "tabular-nums" } : null), ...style }}
     />
   );
 }

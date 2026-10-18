@@ -220,7 +220,7 @@ function EntryRow(props: { entry: LogEntry; names: LogNames; me: string; dm: boo
         <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere", whiteSpace: "pre-line" }}>{describeEvent(entry.data, names, props.dm)}</span>
         {/* The DM takes an HP change back from the log (features section 10). */}
         {props.canUndo ? <TakeBack logId={entry.id} /> : null}
-        <time dateTime={entry.at} style={{ flex: "none" }}>
+        <time dateTime={entry.at} style={{ flex: "none", fontVariantNumeric: "tabular-nums" }}>
           {time(entry.at)}
         </time>
       </li>
@@ -244,7 +244,7 @@ function EntryRow(props: { entry: LogEntry; names: LogNames; me: string; dm: boo
       ) : null}
       <span style={{ display: "flex", alignItems: "baseline", gap: theme.space(2) }}>
         <strong style={{ color: from?.color ?? theme.color.text }}>{memberName(names, entry.from)}</strong>
-        <time dateTime={entry.at} style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>
+        <time dateTime={entry.at} style={{ color: theme.color.textMuted, fontSize: theme.font.small, fontVariantNumeric: "tabular-nums" }}>
           {time(entry.at)}
         </time>
       </span>
