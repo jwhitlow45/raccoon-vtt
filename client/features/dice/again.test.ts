@@ -4,7 +4,7 @@ import { resolveDiceOp } from "#shared/dice/resolve.ts";
 import type { DiceRoll, LogEvent, RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import type { DiceRollInput, Op, OpOf } from "#shared/protocol.ts";
-import { DM, P1, apply, room, token } from "#shared/testutil.ts";
+import { DM, P1, actor, apply, effect, room, token } from "#shared/testutil.ts";
 import { againInput } from "./logic.ts";
 
 /**
@@ -82,5 +82,29 @@ describe("Again on an initiative roll (B7B-ASTRA-01, docs/design-v1-combat-flow.
     assert.equal(forPlayer(state)!.rolls[0]!.total, 14);
     state = rolled(state, [againInput(first.rolls[0]!)!], "dm");
     assert.deepEqual(forPlayer(state), { type: "dice", by: "dm1", to: "dm", rolls: [] });
+  });
+});
+
+describe("Again on a creature's save", () => {
+  const SAVE: DiceRollInput = { formula: "1d20+2", label: "Dexterity save", creature: { tokenId: "gob" }, save: "dex" };
+
+  test("the line keeps the save, and Again on a Stunned creature's save records the fail again", () => {
+    const stunned = room({ tokens: { gob: token("gob", { actor: { inline: actor({ effects: [effect("e1", { key: "stunned" })] }) } }) } });
+    let state = rolled(stunned, [SAVE], "all");
+    const first = lastDice(state).rolls[0]!;
+    assert.equal(first.save, "dex");
+    assert.equal(first.fails, "stunned");
+    assert.deepEqual(againInput(first), SAVE);
+    state = rolled(state, [againInput(first)!], "all");
+    assert.equal(lastDice(state).rolls[0]!.fails, "stunned", "the repeated save fails as the first did");
+  });
+
+  test("a save with no creature, and a check, go as they came", () => {
+    const state = room({ tokens: { gob: token("gob") } });
+    const loose = rolled(state, [{ formula: "1d20+2", label: "Dexterity save", save: "dex" }], "all");
+    assert.equal(lastDice(loose).rolls[0]!.save, undefined, "no creature, no save");
+    const check: DiceRollInput = { formula: "1d20+2", label: "Stealth check", creature: { tokenId: "gob" } };
+    const checked = rolled(state, [check], "all");
+    assert.deepEqual(againInput(lastDice(checked).rolls[0]!), check);
   });
 });

@@ -573,6 +573,7 @@ const logEvent = z.discriminatedUnion("type", [
           seen: z.literal(true).optional(),
           critOn: diceSchemas.critOn.optional(),
           initiative: z.literal(true).optional(),
+          save: z.enum(ABILITY_KEYS).optional(),
           hidden: z.literal(true).optional(),
         }),
       )

@@ -156,6 +156,12 @@ describe("dice lines in a room's export (5.3)", () => {
     assert.ok(parseRoomState(kept).ok);
     kept.log[0].data.rolls[0].hidden = false;
     assert.equal(parseRoomState(kept).ok, false);
+    // A creature's save, which its Again sends as that save again.
+    const save = JSON.parse(JSON.stringify(withLines()));
+    save.log[0].data.rolls[0].save = "dex";
+    assert.ok(parseRoomState(save).ok);
+    save.log[0].data.rolls[0].save = "luck";
+    assert.equal(parseRoomState(save).ok, false, "a save names one of the six abilities");
   });
 
   test("remap moves the roller and every roll's creature to their new ids", () => {

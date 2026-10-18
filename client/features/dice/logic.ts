@@ -153,7 +153,9 @@ export function askedRoll(result: Pick<DiceResult, "formula" | "mode" | "crit">)
  * initiative goes marked as initiative again, so the server keeps it from
  * players while the order setting keeps the creature's place from them then
  * (docs/design-v1-combat-flow.md 11.3). A line from before the mark was kept
- * says so by its `hidden`, which only an initiative roll carries.
+ * says so by its `hidden`, which only an initiative roll carries. A
+ * creature's save goes as that save again, so the server records the
+ * condition that fails it then, as the first roll did.
  */
 export function againInput(roll: DiceRoll): DiceRollInput | null {
   const asked = askedRoll(roll);
@@ -166,6 +168,7 @@ export function againInput(roll: DiceRoll): DiceRollInput | null {
   else if (roll.characterId !== undefined) input.creature = { characterId: roll.characterId };
   if (roll.critOn !== undefined) input.critOn = roll.critOn;
   if ((roll.initiative || roll.hidden) && input.creature) input.initiative = true;
+  if (roll.save !== undefined && input.creature) input.save = roll.save;
   return input;
 }
 

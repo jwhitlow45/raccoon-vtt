@@ -1760,12 +1760,14 @@ export type LogEvent =
  * an attack roll's critical range. `seen` marks a roll for a token whose
  * non-owners could see it when it was written, as other token events are.
  * `initiative` marks a creature's initiative, so a roll made again from it
- * is one too and meets the order rule as it stands then. `hidden` marks the
+ * is one too and meets the order rule as it stands then. `save` names the
+ * ability of a creature's save, so a roll made again from it is that save
+ * again and a condition that fails it still records the fail. `hidden` marks the
  * initiative of a creature whose place in the order players did not know
  * then (docs/design-v1-combat-flow.md 11.3): only the DM and the creature's
  * own players get that roll.
  */
-export type DiceRoll = DiceResult & { label?: string; tokenId?: TokenId; characterId?: CharacterId; seen?: true; critOn?: 18 | 19 | 20; initiative?: true; hidden?: true };
+export type DiceRoll = DiceResult & { label?: string; tokenId?: TokenId; characterId?: CharacterId; seen?: true; critOn?: 18 | 19 | 20; initiative?: true; save?: AbilityKey; hidden?: true };
 
 export type LogEntry = {
   /** `"<seq>:<index>"`, so a replay can never insert the same entry twice. */

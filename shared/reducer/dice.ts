@@ -43,8 +43,9 @@ function rollCreature(tx: Tx, creature: ActorTarget): Pick<DiceRoll, "tokenId" |
 
 /**
  * A free roll: one `dice` line with each roll's result, its label, its
- * creature and its critical range, and a creature's initiative marked as
- * the DM's while players may not know its place in the order.
+ * creature, its critical range and a creature's save, and a creature's
+ * initiative marked as the DM's while players may not know its place in
+ * the order.
  */
 function diceLine(tx: Tx, op: Sys, asked: Asked<"dice.roll">): void {
   if (op.results.length !== asked.rolls.length) throw invalid("each roll has one result");
@@ -57,6 +58,7 @@ function diceLine(tx: Tx, op: Sys, asked: Asked<"dice.roll">): void {
       out.initiative = true;
       if (initiativeHidden(tx.state, roll.creature)) out.hidden = true;
     }
+    if (roll.save !== undefined && roll.creature) out.save = roll.save;
     return out;
   });
   const line: Extract<LogEvent, { type: "dice" }> = { type: "dice", tag: asked.tag, batch: op.batch, by: tx.actor.memberId, to: asked.to, rolls };
