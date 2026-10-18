@@ -294,7 +294,7 @@ The draft lets you set up a reveal, check it, and show it all at once. If you wo
 
 **Builder room** fills everything joined to the room you tap, and only walls, windows and closed doors stop it. Close the doors between rooms first, or the reveal spills into the next room.
 
-**With party vision on**, the players' fog also remembers what the party has explored, and **Add fog** can't hide explored ground again. Only **Fog all** makes the players forget it. If you undo a Fog all, the ground you had revealed is revealed again, but the party's memory of what it explored doesn't come back, so anything the party had only explored stays fogged until you reveal it by hand.
+**With party vision on**, the players' fog also remembers what the party has explored, and **Add fog** can't hide explored ground again. Only **Fog all** makes the players forget it. If you undo a Fog all, the ground you had revealed is revealed again, but the party's memory of what it explored doesn't come back, so anything the party had only explored stays fogged until the party sees it again or you reveal it.
 
 ## Map phases, imports and exports
 
