@@ -67,6 +67,17 @@ function pictureOf(image: ImageRef): string {
 }
 
 /**
+ * Whether an image is an SRD monster's shipped icon on its shipped disk.
+ * The disk's color counts here, unlike for the DM's own pictures: the
+ * shipped icon is on every token of that monster, so a token wearing the
+ * same icon on another color was marked by hand, such as the pack leader's
+ * wolf head on red.
+ */
+function isShippedIcon(image: ImageRef, shipped: ImageRef | undefined): boolean {
+  return shipped !== undefined && "icon" in image && "icon" in shipped && image.icon === shipped.icon && image.color.toLowerCase() === shipped.color.toLowerCase();
+}
+
+/**
  * Whether a token was placed from this monster. Tokens are independent
  * copies (design section 6), so this reads what a token keeps of where it
  * came from:
@@ -95,10 +106,10 @@ export function isTokenOf(token: Pick<Token, "kind" | "name" | "actor">, ref: Mo
  * What putting a monster's image on its tokens on one scene would change.
  * Tokens keep no record of who chose their image, so one counts as set by
  * hand when it wears a picture the monster never gave it: not this image,
- * not an SRD monster's shipped icon, and none of the images this monster
- * had while its page was open on this device. The shipped icon stays the
- * monster's after the DM picks another, since tokens placed before that
- * pick wear it.
+ * not an SRD monster's shipped icon on its shipped color, and none of the
+ * images this monster had while its page was open on this device. The
+ * shipped icon stays the monster's after the DM picks another, since
+ * tokens placed before that pick wear it.
  *
  * A token a player plays, owned by one or a player character, is never
  * repainted unless the DM asks, whatever it wears: it may be a druid's
@@ -126,12 +137,13 @@ export function planApply(input: {
 }): ApplyPlan {
   const plan: ApplyPlan = { plain: [], own: [], played: [], done: 0 };
   const shipped = shippedImage(input.ref);
-  const ours = new Set([pictureOf(input.image), ...(shipped ? [pictureOf(shipped)] : []), ...(input.previous ?? []).map(pictureOf)]);
+  // The shipped icon is matched with its color (isShippedIcon), so its key alone never makes a recolored token the monster's.
+  const ours = new Set([input.image, ...(input.previous ?? [])].filter((image) => !isShippedIcon(image, shipped)).map(pictureOf));
   for (const token of input.tokens) {
     if (!token || token.sceneId !== input.sceneId || !isTokenOf(token, input.ref, input.monsters)) continue;
     if (sameImage(token.image, input.image)) plan.done++;
     else if ((token.ownerIds?.length ?? 0) > 0 || token.kind === "pc") plan.played.push(token.id);
-    else if (!token.image || ours.has(pictureOf(token.image))) plan.plain.push(token.id);
+    else if (!token.image || isShippedIcon(token.image, shipped) || ours.has(pictureOf(token.image))) plan.plain.push(token.id);
     else plan.own.push(token.id);
   }
   plan.plain.sort();

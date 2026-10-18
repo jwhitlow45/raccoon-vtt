@@ -216,7 +216,7 @@ describe("applying a new image to a monster's tokens", () => {
     assert.deepEqual(now, was);
   });
 
-  test("a token wearing the SRD monster's shipped icon is the monster's, whatever the DM picked since", () => {
+  test("a token wearing the SRD monster's shipped icon on its shipped color is the monster's, whatever the DM picked since", () => {
     const state = setup();
     const shipped = shippedImage({ srdId: "goblin-warrior" })!;
     state.tokens = {
@@ -230,9 +230,11 @@ describe("applying a new image to a monster's tokens", () => {
     };
     const input = { tokens: Object.values(state.tokens), sceneId: "s1", ref: { srdId: "goblin-warrior" }, monsters: {} };
     // The DM's new picture replaces the shipped icon with no opt-in, as it replaces an earlier picture of the monster's.
-    assert.deepEqual(planApply({ ...input, image: imageRef("goblin-pic") }), { plain: ["bare", "recolored", "shipped"], own: ["disguise"], played: ["wildShape"], done: 0 });
-    // With no choice made, the page offers the shipped icon to tokens placed before it existed.
-    assert.deepEqual(planApply({ ...input, image: shipped }), { plain: ["bare", "recolored"], own: ["disguise"], played: [], done: 2 });
+    // The same icon on another color was set by hand, so it waits for the DM's say.
+    assert.deepEqual(planApply({ ...input, image: imageRef("goblin-pic") }), { plain: ["bare", "shipped"], own: ["disguise", "recolored"], played: ["wildShape"], done: 0 });
+    // With no choice made, the page offers the shipped icon to tokens placed before it existed, and still not over a recolored one.
+    assert.deepEqual(planApply({ ...input, image: shipped }), { plain: ["bare"], own: ["disguise", "recolored"], played: [], done: 2 });
+    assert.deepEqual(planApply({ ...input, image: imageRef("goblin-pic"), previous: [shipped] }).own, ["disguise", "recolored"], "a shipped icon seen before is matched by its color too");
     // A room monster has no shipped icon, so a token wearing one is set by hand.
     const lurker = { ...input, ref: { monsterId: "lurker" }, monsters: state.monsters, tokens: [token("l1", { name: "Cave Lurker", image: shipped })] };
     assert.deepEqual(planApply({ ...lurker, image: imageRef("lurker-pic", 1.4) }), { plain: [], own: ["l1"], played: [], done: 0 });
