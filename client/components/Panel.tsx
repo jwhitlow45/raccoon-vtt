@@ -23,7 +23,8 @@ import { Icon } from "./Icon.tsx";
 export function SectionLabel(props: { children: ReactNode; id?: string; tone?: "danger"; action?: ReactNode; level?: 2 | 3 | 4 }) {
   const Heading = props.level === 2 ? "h2" : props.level === 4 ? "h4" : "h3";
   const label = (
-    <Heading id={props.id} style={{ flex: 1, minWidth: 0, margin: 0, ...sectionLabelLook(props.tone) }}>
+    // Its own width first ("1 1 auto", as FoldLabel's), so in the wrapping row below an action that does not fit beside it wraps under it. With a basis of 0 the action always took the line, and narrow fonts squeezed the label to a few pixels, its words running into the buttons.
+    <Heading id={props.id} style={{ flex: "1 1 auto", minWidth: 0, margin: 0, ...sectionLabelLook(props.tone) }}>
       {props.children}
     </Heading>
   );
