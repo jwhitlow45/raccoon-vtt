@@ -13,7 +13,8 @@ import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, tapCell, waitF
  * the real server serving the production build, with the DM and a player
  * each on a phone at 375 x 667 and the DM's interface at 130%: one
  * goblin's options from its bar's Roll, a tap on an option scrolled to
- * the foot of the sheet showing its result in view, then three goblins and
+ * the foot of the sheet showing its result in view, a critical hit's
+ * damage under the room's "Max plus a roll" rule, then three goblins and
  * Bree selected for a DC 13 Dexterity save. The goblins roll on the
  * server, Bree's player answers on her card, 5d6 fire + 5d6 radiant rolls
  * in one line, and Apply hurts each by its save in one step, which the
@@ -227,6 +228,57 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
       return box !== null && box.y >= shown.top - 1 && box.y + box.height <= shown.bottom + 1 ? true : null;
     });
     await shots.take(dm, "groupsave-option-result-130");
+    await sheet.getByRole("button", { name: "Close Dice" }).tap();
+    await sheet.waitFor({ state: "hidden" });
+  });
+
+  test("2b. under Max plus a roll, a goblin's Scimitar with Critical pressed rolls 6 max + 1d6+2 on the server, and its row and line say so", async () => {
+    await ops.send({ t: "room.update", settings: { critRule: "maxPlusRoll" } });
+    await waitFor("the rule in the DM's view", () => dmSocket.state?.meta.settings.critRule === "maxPlusRoll" || null);
+    const goblin = run.goblins[0]!;
+    await tapCell(dm, run.bounds, goblin);
+    const bar = dm.getByRole("dialog", { name: `${goblin.name} actions` });
+    await bar.waitFor();
+    await bar.getByRole("button", { name: "Roll", exact: true }).tap();
+    const sheet = diceSheet(dm);
+    await sheet.waitFor();
+    const options = sheet.locator("[data-roll-options]");
+    // How far the sheet scrolls sideways. The sticky line bleeds into the pane's padding, so it is not 0 at rest: a long label must add nothing.
+    const sideways = () =>
+      dm.evaluate(() => {
+        type El = { scrollWidth: number; clientWidth: number; querySelectorAll(s: string): ArrayLike<El> };
+        const g = globalThis as unknown as { document: { querySelector(s: string): El | null }; getComputedStyle(el: El): { overflowY: string } };
+        const sheet = g.document.querySelector('dialog[data-rvtt-sheet][aria-label="Dice"]');
+        const body = Array.from(sheet?.querySelectorAll("div") ?? []).find((el) => g.getComputedStyle(el).overflowY === "auto");
+        if (!body) throw new Error("The Dice sheet has no scrolling body");
+        return body.scrollWidth - body.clientWidth;
+      });
+    const atRest = await sideways();
+    await options.getByRole("button", { name: "Critical hit for Scimitar's next damage" }).tap();
+    // The Damage cell names the room's rule, which the server rolls it by.
+    const damage = options.getByRole("button", { name: "Scimitar damage, Critical: max plus a roll" });
+    await damage.evaluate((el) => (el as unknown as { scrollIntoView(o: { block: string }): void }).scrollIntoView({ block: "center" }));
+    const before = diceLines(dmSocket.state?.log).length;
+    await damage.tap();
+    const line = await waitFor("the critical damage line", () => diceLines(dmSocket.state?.log).slice(before).find((l) => l.rolls.some((r) => r.crit !== undefined)) ?? null);
+    const roll = line.rolls[0]!;
+    assert.equal(roll.formula, "1d6+2", "the formula as asked, not doubled");
+    assert.equal(roll.crit, "maxPlusRoll");
+    assert.equal(roll.faces.length, 1);
+    assert.equal(roll.total, 6 + roll.faces[0]! + 2);
+    assert.match(roll.label ?? "", /^Scimitar critical damage/);
+    // The tap that rolls lets Critical go, so the cell's name loses the rule's words.
+    const result = options.getByRole("button", { name: "Scimitar damage", exact: true }).locator("xpath=..").getByRole("status");
+    await result.getByText(`${roll.total} (6 max + ${roll.faces[0]! + 2})`).waitFor();
+    await shots.take(dm, "groupsave-crit-max-plus-roll-130");
+    const after = await sideways();
+    assert.ok(after <= atRest + 1, `the crit's label and sum on the sticky line widen the sheet sideways from ${atRest} to ${after} px`);
+    // The sticky line puts the sum beside the total, and Recent rolls reads the rule's formula before the dice.
+    await sheet.locator("[data-dice-last]").getByText(`(6 max + ${roll.faces[0]! + 2})`, { exact: true }).waitFor();
+    const recent = sheet.getByText("6 max + 1d6+2", { exact: true });
+    await recent.scrollIntoViewIfNeeded();
+    await shots.take(dm, "groupsave-crit-recent-rolls-130");
+    await ops.send({ t: "room.update", settings: { critRule: "rollTwice" } });
     await sheet.getByRole("button", { name: "Close Dice" }).tap();
     await sheet.waitFor({ state: "hidden" });
   });
