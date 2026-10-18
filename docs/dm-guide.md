@@ -457,7 +457,7 @@ On each **Next** the app clears the new creature's **Reaction used**, refills it
 
 On their own turn a player gets "Your turn" and an **End turn** button. Under the top bar, or as a chip in it on a wide screen, a strip shows whose turn it is, and to you alone who comes next. Tap it to open the tracker. **Camera follows the turn**, under **This device**, pans your map to whoever acts.
 
-**Hidden rows.** Turning a token's **Hidden** off, in its action bar, a group's bar, its panel or with `H`, shows its row to players too. Otherwise a hidden creature's row shows at its first turn (with "Reveal hidden combatants on their turn" on). A row also has its own **Hidden from players** in its **⋯**, which hides the row alone while its token shows.
+**Hidden rows.** Turning a token's **Hidden** off, in its action bar, a group's bar, its panel or with `H`, shows its row to players too. Otherwise a hidden creature's row shows at its first turn (with "Reveal hidden combatants on their turn" on). A row also has its own **Hidden from players** in its **⋯**, which hides the row alone while its token shows. The row then still follows **Initiative order players see** (below): in a new room a monster's row reaches players only from its first turn, so turning **Hidden** off before then shows its token at once and its row on its turn. Pick **Everyone** there for the row to show with the token.
 
 ### Rows and what they hold
 
@@ -755,7 +755,7 @@ Goblins and wolves wait in the trees beside a road. The party walks into them.
 1. If the party is surprised, select the four characters (**Multi-select**), open **Conditions** in the group's bar and tap **Surprised**. Their initiative rolls then have disadvantage, and their rows show **Dis**.
 2. **Initiative**, **Start a fight with**, **Everyone here**. Use this, not "Visible to players", which leaves the hidden goblins out. Their rows start hidden.
 3. Players roll their own initiative. Press **Auto initiative**: the four goblin warriors share one roll ("By creature"), and so do the wolves. Press **Start**.
-4. The hidden goblins appear on their first turn ("Reveal hidden combatants on their turn"). To reveal them all at once instead, select them and press **Hidden** in the group's bar: their tokens and their rows show together.
+4. The hidden goblins appear on their first turn ("Reveal hidden combatants on their turn"). To reveal them all at once instead, select them and press **Hidden** in the group's bar: their tokens show together. Their rows join the players' order on each goblin's first turn, as **Initiative order players see** has it in a new room. For the rows to show with the tokens, set it to **Everyone** in Room settings first.
 5. On a goblin's turn, tap it and press **Roll** for its roll options: **Attack +4** with the scimitar against Thorn's AC, then **Damage**. Tap Thorn and use the **Use 5** chip in his HP entry, then **Apply**.
 6. A wolf hits Mara and knocks her down: open **Conditions** on her token and tap **Prone**.
 7. Ivo casts Fireball. His player picks the **Area** tool, searches "fireball", and places the 20 ft sphere among the goblins. Your screen shows the area and "In area (4): …".
