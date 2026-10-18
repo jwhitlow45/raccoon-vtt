@@ -2,8 +2,9 @@ import type { CSSProperties, ReactNode } from "react";
 import { ABILITY_KEYS, SKILL_KEYS, type Character, type PcRoll } from "#shared/model.ts";
 import { statsDefenses, pcActorNumbers, pcDerived, sortedRolls } from "#shared/rules/pcStats.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
-import { ABILITY_NAMES as ABILITY_SHORT, signed } from "#shared/statBlock.ts";
+import { signed } from "#shared/statBlock.ts";
 import { theme } from "../../lib/theme.ts";
+import { AbilityGrid } from "../monsters/AbilityGrid.tsx";
 import { defenseLinesOf, rollReading, rollTitle } from "./reading.ts";
 
 /**
@@ -30,29 +31,7 @@ export function PcStatsView(props: { character: Pick<Character, "stats" | "level
       <p style={LINE}>
         <strong>Level {level ?? "not set"}</strong>, proficiency {signed(d.pb)}
       </p>
-      {/* The six abilities three across, as the 2024 block prints them: about a third of the height of a seven-row table (docs/design-v1-dice-ui.md 6.1). */}
-      <dl style={{ margin: 0, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: theme.space(1) }}>
-        {ABILITY_KEYS.map((a) => {
-          const proficient = stats.saves.includes(a);
-          return (
-            <div key={a} style={{ padding: `${theme.space(1)}px ${theme.space(2)}px`, borderRadius: theme.radius.sm, background: theme.color.surfaceRaised, lineHeight: theme.leading.tight }}>
-              <dt style={{ fontSize: theme.font.tiny, fontWeight: theme.weight.bold, letterSpacing: theme.caps, textTransform: "uppercase", color: theme.color.textMuted }}>
-                <abbr title={ABILITY_NAMES[a]} style={{ textDecoration: "none" }}>
-                  {ABILITY_SHORT[a]}
-                </abbr>
-              </dt>
-              <dd style={{ margin: 0, whiteSpace: "nowrap" }}>
-                <strong style={{ fontSize: theme.font.input }}>{stats.abilities[a]}</strong> <span style={{ color: theme.color.textMuted }}>{signed(d.mods[a])}</span>
-              </dd>
-              <dd style={{ margin: 0, fontSize: theme.font.small, whiteSpace: "nowrap", fontWeight: proficient ? theme.weight.bold : theme.weight.regular }}>
-                <span style={{ color: theme.color.textMuted, fontWeight: theme.weight.regular }}>Save </span>
-                {signed(d.saves[a].total)}
-                {proficient ? <span style={HIDDEN}>, proficient</span> : null}
-              </dd>
-            </div>
-          );
-        })}
-      </dl>
+      <AbilityGrid abilities={ABILITY_KEYS.map((a) => ({ key: a, score: String(stats.abilities[a]), mod: signed(d.mods[a]), save: signed(d.saves[a].total), proficient: stats.saves.includes(a) }))} />
       {skills.length > 0 ? (
         <Labeled label="Skills">{skills.map((s) => `${SKILLS[s].name} ${signed(d.skills[s].total)}${stats.skills[s] === "expert" ? " (expertise)" : ""}`).join(", ")}</Labeled>
       ) : null}
@@ -86,7 +65,6 @@ export function PcStatsView(props: { character: Pick<Character, "stats" | "level
 }
 
 const LINE: CSSProperties = { margin: 0 };
-const HIDDEN: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
 
 function Labeled(props: { label: string; children: ReactNode }) {
   return (
