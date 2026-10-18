@@ -142,8 +142,14 @@ A newer push to a `ci/` branch cancels that branch's run in progress. Every
 push to `main` runs to the end, so each commit there is tested. A failing
 e2e file runs once more, and its shard fails only if the rerun fails too. A
 file that passed only on its rerun shows as a warning on the run. A shard
-that failed or reran keeps its logs and screenshots as an artifact for two
-weeks.
+that failed, was cancelled or reran keeps its logs and screenshots as an
+artifact for two weeks.
+
+Each shard has a deadline 5 minutes inside its job's time limit
+(`--deadline`). A run's limit leaves time for a rerun and for the files
+after it, a rerun that would not fit is skipped, and the shard reports
+what ran either way. So a file that hangs every time still fails with its
+logs kept, rather than the job being cut off.
 
 `scripts/e2e-shard.ts` decides which files each shard runs, by the times in
 `e2e/durations.json`: the longest file first, each onto the shard with the

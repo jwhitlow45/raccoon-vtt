@@ -3,7 +3,7 @@ import { appendFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { anyRerun, filePassed, outcome, passedOnRerun, plan, secondsFor, summaryCount, type Durations, type Result, type Run } from "./e2e-shard-plan.ts";
+import { anyRerun, filePassed, NO_TIME, outcome, passedOnRerun, plan, runLimit, secondsFor, summaryCount, type Durations, type Result, type Run } from "./e2e-shard-plan.ts";
 
 /**
  * One shard of the e2e run, for continuous integration and for a laptop
@@ -12,6 +12,7 @@ import { anyRerun, filePassed, outcome, passedOnRerun, plan, secondsFor, summary
  *   node scripts/e2e-shard.ts <index> <count>                run shard <index> of <count>, counted from 1
  *   node scripts/e2e-shard.ts <index> <count> --list         print every shard's files and run nothing
  *   node scripts/e2e-shard.ts <index> <count> --macos-only   shard only the files of e2e/macos-only.json
+ *   node scripts/e2e-shard.ts <index> <count> --deadline <unix seconds>   report by then, as a CI job's limit needs
  *
  * It needs dist/ from `pnpm build`, and reads what the e2e files read:
  * E2E_PORT, DATABASE_URL and E2E_SCREENSHOT_DIR. Each run's output is also
@@ -26,13 +27,18 @@ import { anyRerun, filePassed, outcome, passedOnRerun, plan, secondsFor, summary
  * once more, and the shard fails only when that run fails too. Both results
  * are reported, so a file that passed only on its rerun still shows as flaky.
  *
+ * With a deadline, each run's limit leaves time for its rerun and for the
+ * files after it, and a run the time left cannot hold is not started. So a
+ * file that hangs every time still leaves the shard time to report and the
+ * job time to keep its logs.
+ *
  * The files in e2e/macos-only.json are left out anywhere but macOS, since
  * they are known to fail elsewhere from font metrics alone. CI runs them
  * in a macOS job of their own with --macos-only.
  */
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const USAGE = "Usage: node scripts/e2e-shard.ts <index> <count> [--list] [--macos-only]   (index counted from 1)";
+const USAGE = "Usage: node scripts/e2e-shard.ts <index> <count> [--list] [--macos-only] [--deadline <unix seconds>]   (index counted from 1)";
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
 const SHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? "test-results/e2e-screenshots";
 const LOG_DIR = path.join(ROOT, "test-results/e2e-logs");
@@ -61,16 +67,6 @@ async function clearJoinCounts(): Promise<void> {
   }
 }
 
-/**
- * A hung run, such as a browser that stops answering, would otherwise hold
- * the shard until the job's own limit. 25 minutes is the laptop's limit for
- * one file, and a slower machine gets three times the file's recorded time
- * when that is longer.
- */
-function limitSeconds(seconds: number): number {
-  return Math.max(1500, 3 * seconds);
-}
-
 let current: ChildProcess | null = null;
 let stopping: NodeJS.Signals | null = null;
 
@@ -88,15 +84,22 @@ function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
   }
 }
 
+/**
+ * A stop ends the run in progress and starts no other, and the shard still
+ * reports what ran. A cancelled CI job sends SIGINT, then SIGTERM a few
+ * seconds later, so a second signal kills the run outright rather than
+ * wait on it, and with no run to wait on it exits.
+ */
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    stopping = signal;
-    if (current) signalGroup(current, signal);
-    else process.exit(signal === "SIGINT" ? 130 : 143);
+    const again = stopping !== null;
+    stopping ??= signal;
+    if (current) signalGroup(current, again ? "SIGKILL" : signal);
+    else if (again) process.exit(stopping === "SIGINT" ? 130 : 143);
   });
 }
 
-async function runFile(file: string, label: string, seconds: number): Promise<Run> {
+async function runFile(file: string, label: string, limit: number): Promise<Run> {
   await clearJoinCounts();
   mkdirSync(LOG_DIR, { recursive: true });
   const log = createWriteStream(path.join(LOG_DIR, `${label}.log`));
@@ -111,6 +114,8 @@ async function runFile(file: string, label: string, seconds: number): Promise<Ru
     detached: true,
   });
   current = child;
+  // A stop that came while the join counts were cleared reaches this run too.
+  if (stopping) signalGroup(child, stopping);
   // The test runner's totals come last, so only the end of the output is kept for them.
   let tail = "";
   const forward = (sink: NodeJS.WriteStream) => (chunk: Buffer) => {
@@ -123,10 +128,10 @@ async function runFile(file: string, label: string, seconds: number): Promise<Ru
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    console.error(`${label} is still running after ${limitSeconds(seconds)} s, stopping it`);
+    console.error(`${label} is still running after ${limit} s, stopping it`);
     signalGroup(child, "SIGTERM");
     setTimeout(() => signalGroup(child, "SIGKILL"), 10_000).unref();
-  }, limitSeconds(seconds) * 1000);
+  }, limit * 1000);
   const code = await new Promise<number | null>((resolve) => child.once("close", (c) => resolve(c)));
   clearTimeout(timer);
   // Whatever the run left behind in its group goes too, so the next file finds its port free.
@@ -145,17 +150,17 @@ async function runFile(file: string, label: string, seconds: number): Promise<Ru
 }
 
 function report(index: number, count: number, results: Result[]): void {
-  const width = Math.max(...results.map((r) => r.file.length));
+  const width = Math.max(0, ...results.map((r) => r.file.length));
   console.log(`\nshard ${index} of ${count}`);
   for (const r of results) {
-    const rerun = r.rerun ? `, then its rerun ${outcome(r.rerun)}` : "";
+    const rerun = r.rerun === null ? "" : r.rerun === NO_TIME ? ", and no rerun, too little of the job's time left" : `, then its rerun ${outcome(r.rerun)}`;
     console.log(`  ${r.file.padEnd(width)}  ${outcome(r.first)}${rerun}`);
     if (ACTIONS && passedOnRerun(r)) console.log(`::warning title=Flaky e2e file::${r.file} failed, then passed on its rerun. Its logs and screenshots are in this shard's artifact.`);
-    if (ACTIONS && !filePassed(r)) console.log(`::error title=Failed e2e file::${r.file} ${r.rerun ? "failed twice" : "failed"}. Its logs and screenshots are in this shard's artifact.`);
+    if (ACTIONS && !filePassed(r)) console.log(`::error title=Failed e2e file::${r.file} ${r.rerun !== null && r.rerun !== NO_TIME ? "failed twice" : "failed"}. Its logs and screenshots are in this shard's artifact.`);
   }
   const summaryFile = process.env.GITHUB_STEP_SUMMARY;
   if (summaryFile) {
-    const rows = results.map((r) => `| ${r.file} | ${outcome(r.first)} | ${r.rerun ? outcome(r.rerun) : ""} |`);
+    const rows = results.map((r) => `| ${r.file} | ${outcome(r.first)} | ${r.rerun === null ? "" : outcome(r.rerun)} |`);
     appendFileSync(summaryFile, [`### e2e shard ${index} of ${count}`, "", "| File | Run | Rerun |", "| --- | --- | --- |", ...rows, ""].join("\n") + "\n");
   }
   // The workflow keeps the logs and screenshots of a shard that failed, and of one that passed only through a rerun.
@@ -163,17 +168,34 @@ function report(index: number, count: number, results: Result[]): void {
   if (outputFile) appendFileSync(outputFile, `reran=${anyRerun(results)}\n`);
 }
 
-async function main(): Promise<number> {
-  const args = process.argv.slice(2);
-  const list = args.includes("--list");
-  const macosOnly = args.includes("--macos-only");
-  const [indexText, countText, ...extra] = args.filter((a) => a !== "--list" && a !== "--macos-only");
+type Args = { index: number; count: number; list: boolean; macosOnly: boolean; deadline: number | null };
+
+/** The arguments, or null when they make no sense. */
+function parseArgs(argv: readonly string[]): Args | null {
+  const rest = [...argv];
+  let deadline: number | null = null;
+  const at = rest.indexOf("--deadline");
+  if (at !== -1) {
+    deadline = Number(rest[at + 1]);
+    if (!Number.isFinite(deadline)) return null;
+    rest.splice(at, 2);
+  }
+  const list = rest.includes("--list");
+  const macosOnly = rest.includes("--macos-only");
+  const [indexText, countText, ...extra] = rest.filter((a) => a !== "--list" && a !== "--macos-only");
   const index = Number(indexText);
   const count = Number(countText);
-  if (extra.length > 0 || !Number.isInteger(count) || count < 1 || !Number.isInteger(index) || index < 1 || index > count) {
+  if (extra.length > 0 || !Number.isInteger(count) || count < 1 || !Number.isInteger(index) || index < 1 || index > count) return null;
+  return { index, count, list, macosOnly, deadline };
+}
+
+async function main(): Promise<number> {
+  const args = parseArgs(process.argv.slice(2));
+  if (!args) {
     console.error(USAGE);
     return 2;
   }
+  const { index, count, list, macosOnly, deadline } = args;
 
   const durations = JSON.parse(readFileSync(path.join(ROOT, "e2e/durations.json"), "utf8")) as Durations;
   const every = readdirSync(path.join(ROOT, "e2e"))
@@ -211,14 +233,25 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  const left = () => (deadline === null ? Infinity : deadline - Date.now() / 1000);
   const results: Result[] = [];
-  for (const file of mine.files) {
-    const first = await runFile(file, file, cost(file));
-    const rerun = first.ok || stopping ? null : await runFile(file, `${file}-rerun`, cost(file));
-    results.push({ file, first, rerun });
-    if (stopping) break;
+  try {
+    for (const [i, file] of mine.files.entries()) {
+      if (stopping) break;
+      const rest = mine.files.slice(i + 1).reduce((sum, f) => sum + cost(f), 0);
+      const firstLimit = runLimit(cost(file), left(), rest, true);
+      const first = firstLimit === null ? NO_TIME : await runFile(file, file, firstLimit);
+      let rerun: Result["rerun"] = null;
+      if (first !== NO_TIME && !first.ok && !stopping) {
+        const limit = runLimit(cost(file), left(), rest, false);
+        rerun = limit === null ? NO_TIME : await runFile(file, `${file}-rerun`, limit);
+      }
+      results.push({ file, first, rerun });
+    }
+  } finally {
+    // Also after an error, such as a database that cannot be reached, so the job's summary says how far the shard got.
+    report(index, count, results);
   }
-  report(index, count, results);
   if (stopping) return stopping === "SIGINT" ? 130 : 143;
   return results.every(filePassed) ? 0 : 1;
 }

@@ -113,8 +113,8 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     # Eight shards of about 7 minutes each on a laptop, balanced by
-    # scripts/e2e-shard.ts from e2e/durations.json. No file runs over 5, so
-    # a failing file's rerun fits well inside the limit.
+    # scripts/e2e-shard.ts from e2e/durations.json. The shard's deadline
+    # keeps it inside this limit even when a file hangs.
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -139,6 +139,11 @@ jobs:
       DATABASE_URL: postgres://raccoon:raccoon@localhost:5434/raccoon
       E2E_SCREENSHOT_DIR: test-results/e2e-screenshots
     steps:
+      # The shard reports by this deadline, 5 minutes inside the job's
+      # limit: for the service container, which starts before this step,
+      # and for keeping the logs after the shard.
+      - name: Deadline for the shard
+        run: echo "E2E_DEADLINE=$(( $(date +%s) + (45 - 5) * 60 ))" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -167,11 +172,11 @@ jobs:
       - run: google-chrome --version
       - name: e2e shard ${{ matrix.shard }}
         id: shard
-        run: node scripts/e2e-shard.ts ${{ matrix.shard }} ${{ strategy.job-total }}
-      # A shard that failed, or passed only through a rerun, keeps its logs
-      # and screenshots for two weeks.
+        run: node scripts/e2e-shard.ts ${{ matrix.shard }} ${{ strategy.job-total }} --deadline "$E2E_DEADLINE"
+      # A shard that failed, was cancelled or passed only through a rerun
+      # keeps its logs and screenshots for two weeks.
       - name: Keep logs and screenshots
-        if: ${{ failure() || steps.shard.outputs.reran == 'true' }}
+        if: ${{ always() && (steps.shard.outcome != 'success' || steps.shard.outputs.reran == 'true') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-shard-${{ matrix.shard }}
@@ -191,6 +196,9 @@ jobs:
       DATABASE_URL: postgres://raccoon:raccoon@localhost:5434/raccoon
       E2E_SCREENSHOT_DIR: test-results/e2e-screenshots
     steps:
+      # As in the e2e job: 5 minutes inside the job's limit.
+      - name: Deadline for the shard
+        run: echo "E2E_DEADLINE=$(( $(date +%s) + (75 - 5) * 60 ))" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -229,9 +237,9 @@ jobs:
           "$bin/createdb" --host=localhost --port=5434 --username=raccoon raccoon
       - name: e2e on macOS
         id: shard
-        run: node scripts/e2e-shard.ts 1 1 --macos-only
+        run: node scripts/e2e-shard.ts 1 1 --macos-only --deadline "$E2E_DEADLINE"
       - name: Keep logs and screenshots
-        if: ${{ failure() || steps.shard.outputs.reran == 'true' }}
+        if: ${{ always() && (steps.shard.outcome != 'success' || steps.shard.outputs.reran == 'true') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-macos
