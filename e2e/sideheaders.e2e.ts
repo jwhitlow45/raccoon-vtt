@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, touchSwipe, waitFor, type Server } from "./harness.ts";
 
 /**
  * The side panel's compact headers (docs/design-v1-side-headers.md 11.2),
@@ -386,10 +386,7 @@ describe("raccoon-vtt: the side panel's compact headers", { timeout: 900_000 }, 
     assert.ok(t);
     const cdp = await touch.newCDPSession(tablet);
     const y = t.y + t.height / 2;
-    const at = (x: number) => [{ x, y, id: 1 }];
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(t.x + 160) });
-    for (let i = 1; i <= 8; i++) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: at(t.x + 160 - i * 15) });
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await touchSwipe(cdp, { x: t.x + 160, y }, { x: t.x + 160 - 8 * 15, y }, { steps: 8 });
     await waitFor("a swipe scrolls the strip", async () => ((await stripOf(tablet)).scrollLeft > 30 ? true : null));
     assert.equal((await stripOf(tablet)).scrollbar, 0, "no scrollbar on a touch screen");
     await touch.close();

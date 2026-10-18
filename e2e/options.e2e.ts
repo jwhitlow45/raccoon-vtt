@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, test } from "node:test";
 import type { Locator, Page } from "playwright-core";
-import { openSideTab, pagePoint, pickTool, waitFor, wholeInReach } from "./harness.ts";
+import { openSideTab, pagePoint, pickTool, Touches, waitFor, wholeInReach } from "./harness.ts";
 import {
   assertNoConsoleErrors,
   closeAll,
@@ -156,22 +156,21 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     assert.ok(map);
     const cx = map.x + map.width / 2;
     const cy = map.y + map.height / 3;
-    const touch = (type: "touchStart" | "touchMove" | "touchEnd", points: { x: number; y: number; id: number }[]) => dmCdp.send("Input.dispatchTouchEvent", { type, touchPoints: points.map((p) => ({ x: p.x, y: p.y, id: p.id })) });
-    await touch("touchStart", [{ x: cx, y: cy, id: 1 }]);
-    await dm.waitForTimeout(50);
-    await touch("touchStart", [{ x: cx, y: cy, id: 1 }, { x: cx + 60, y: cy, id: 2 }]);
-    await touch("touchMove", [{ x: cx + 20, y: cy + 10, id: 1 }, { x: cx + 80, y: cy + 10, id: 2 }]);
-    await touch("touchEnd", [{ x: cx + 80, y: cy + 10, id: 2 }]);
-    await touch("touchEnd", []);
+    const touches = new Touches(dmCdp);
+    await touches.start([{ x: cx, y: cy, id: 1 }]);
+    await touches.start([{ x: cx, y: cy, id: 1 }, { x: cx + 60, y: cy, id: 2 }], 50);
+    await touches.move([{ x: cx + 20, y: cy + 10, id: 1 }, { x: cx + 80, y: cy + 10, id: 2 }]);
+    await touches.end([{ x: cx + 80, y: cy + 10, id: 2 }]);
+    await touches.end();
     await dm.waitForTimeout(200);
     assert.ok(await dm.getByRole("dialog", { name: "Stroke" }).isVisible(), "a pinch leaves the popover open");
 
     // One finger on the map closes it as the finger lifts, and draws nothing.
     const drawings = Object.keys(dmSocket.state?.drawings ?? {}).length;
-    await touch("touchStart", [{ x: cx, y: cy, id: 3 }]);
-    await touch("touchMove", [{ x: cx + 40, y: cy + 40, id: 3 }]);
+    await touches.start([{ x: cx, y: cy, id: 3 }]);
+    for (let i = 1; i <= 4; i++) await touches.move([{ x: cx + i * 10, y: cy + i * 10, id: 3 }]);
     assert.ok(await dm.getByRole("dialog", { name: "Stroke" }).isVisible(), "still open while the finger is down");
-    await touch("touchEnd", []);
+    await touches.end();
     await dm.getByRole("dialog", { name: "Stroke" }).waitFor({ state: "detached" });
     await dm.waitForTimeout(300);
     assert.equal(Object.keys(dmSocket.state?.drawings ?? {}).length, drawings, "the press drew nothing");

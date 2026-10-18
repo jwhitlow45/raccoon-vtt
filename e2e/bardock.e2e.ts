@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type CDPSession, type Locator, type Page } from "playwright-core";
-import { dragCells, openSideTab, pagePoint, waitFor } from "./harness.ts";
+import { dragCells, openSideTab, pagePoint, touchSwipe, waitFor } from "./harness.ts";
 import {
   actor,
   assertNoConsoleErrors,
@@ -118,12 +118,7 @@ async function dragHeader(page: Page, to: { x: number; y: number }, opts: { esca
 
 /** A one-finger drag through the browser's touch input, as a phone or a tablet sends it. */
 async function touchDrag(cdp: CDPSession, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: from.x, y: from.y }] });
-  for (let i = 1; i <= 10; i++) {
-    const t = i / 10;
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }] });
-  }
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await touchSwipe(cdp, from, to, { steps: 10 });
 }
 
 function storedSpot(page: Page): Promise<string | null> {

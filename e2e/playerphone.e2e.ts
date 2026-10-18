@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * A player on a phone after the visual design pass, from the live play
@@ -187,10 +187,15 @@ function hit(p: { x: number; y: number }): Promise<string | null> {
 async function touch(points: { x: number; y: number }[], holdMs = 0): Promise<void> {
   const [first, ...rest] = points;
   assert.ok(first);
-  await playerCdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: first.x, y: first.y }] });
-  if (holdMs > 0) await player.waitForTimeout(holdMs);
-  for (const p of rest) await playerCdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: p.x, y: p.y }] });
-  await playerCdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  const touches = new Touches(playerCdp);
+  await touches.start([first]);
+  // The first event after the landing comes once the hold is over, by the page's clock too.
+  let after = Math.max(holdMs, 16);
+  for (const p of rest) {
+    await touches.move([p], after);
+    after = 16;
+  }
+  await touches.end([], after);
 }
 
 /** A line of points from one to the other, as a finger moves. */
@@ -681,9 +686,10 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     try {
       const empty = await emptyPoint(player);
       await touch(along(empty, { x: empty.x + 20, y: empty.y + 10 }));
-      await playerCdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: empty.x, y: empty.y, id: 1 }, { x: empty.x + 40, y: empty.y, id: 2 }] });
-      for (let i = 1; i <= 6; i++) await playerCdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: empty.x - i * 4, y: empty.y, id: 1 }, { x: empty.x + 40 + i * 4, y: empty.y, id: 2 }] });
-      await playerCdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      const pinch = new Touches(playerCdp);
+      await pinch.start([{ x: empty.x, y: empty.y, id: 1 }, { x: empty.x + 40, y: empty.y, id: 2 }]);
+      for (let i = 1; i <= 6; i++) await pinch.move([{ x: empty.x - i * 4, y: empty.y, id: 1 }, { x: empty.x + 40 + i * 4, y: empty.y, id: 2 }]);
+      await pinch.end();
       await player.waitForTimeout(150);
       assert.ok(await bar.isVisible(), "a pan or a pinch closed the bar");
       // The DM's page hears the ping: the server sends a member's own ping to the others.

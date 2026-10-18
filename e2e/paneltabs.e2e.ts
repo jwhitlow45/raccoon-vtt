@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pagePoint, Shots, sideTabName, SocketWatch, startServer, tapCell, Touches, waitFor, type Server } from "./harness.ts";
 
 /**
  * The side panel's tabs in one row with a grouped More menu
@@ -671,7 +671,11 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
       await page.getByRole("status", { name: "Connected" }).first().waitFor();
       await page.locator(".konvajs-content").first().waitFor();
       const cdp = await touch.newCDPSession(page);
-      const fingers = (type: "touchStart" | "touchMove" | "touchEnd", points: [number, number][]) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points.map(([x, y], id) => ({ x, y, id })) });
+      const touches = new Touches(cdp);
+      const fingers = (type: "touchStart" | "touchMove" | "touchEnd", points: [number, number][], afterMs?: number) => {
+        const at = points.map(([x, y], id) => ({ x, y, id }));
+        return type === "touchStart" ? touches.start(at, afterMs) : type === "touchMove" ? touches.move(at, afterMs) : touches.end(at, afterMs);
+      };
       await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: "Ping", exact: true }).tap();
       const pink = "#e93d82";
       const spot = await pagePoint(page, run.bounds, { x: 4.5, y: 12.5 });
@@ -679,11 +683,14 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
       await more(page).tap();
       await menu(page).waitFor();
       await fingers("touchStart", [[spot.x, spot.y]]);
-      await page.waitForTimeout(50);
-      await fingers("touchStart", [
-        [spot.x, spot.y],
-        [spot.x + 120, spot.y + 60],
-      ]);
+      await fingers(
+        "touchStart",
+        [
+          [spot.x, spot.y],
+          [spot.x + 120, spot.y + 60],
+        ],
+        50,
+      );
       await fingers("touchMove", [
         [spot.x - 10, spot.y - 10],
         [spot.x + 140, spot.y + 80],
@@ -697,7 +704,7 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
       await fingers("touchStart", [[spot.x, spot.y]]);
       await page.waitForTimeout(80);
       assert.equal(await menu(page).count(), 1, "one finger down: still open");
-      await fingers("touchEnd", []);
+      await fingers("touchEnd", [], 80);
       await menu(page).waitFor({ state: "detached" });
       await page.waitForTimeout(400);
       assert.equal(await circleFilled(page, pink), false, "the tap that closed the menu pinged nothing");

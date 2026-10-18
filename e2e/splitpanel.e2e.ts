@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pagePoint, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
 
 /**
  * Two panels in the side panel (docs/design-v1-split-panel.md 12.2), on
@@ -797,9 +797,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
       const before = await roomOf(page);
       const tx = b.x + b.width / 2;
       const ty = b.y + b.height / 2;
-      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: tx, y: ty, id: 1 }] });
-      for (let i = 1; i <= 6; i++) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: tx, y: ty + i * 10, id: 1 }] });
-      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await touchSwipe(cdp, { x: tx, y: ty }, { x: tx, y: ty + 60 }, { steps: 6 });
       await page.waitForTimeout(200);
       const after = await roomOf(page);
       assert.ok(Math.abs((after.barTop ?? 0) - (before.barTop ?? 0) - 60) <= 1.5, `a finger moved the bar ${(after.barTop ?? 0) - (before.barTop ?? 0)} px`);

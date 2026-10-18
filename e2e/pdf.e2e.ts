@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type Request, type Route } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, touchSwipe, untilTapsClick, waitFor, type Server } from "./harness.ts";
 import { A5, BANDS, LETTER, LETTER_WIDE, bandProblem, fontBoxDistance, pdfOf, shapeProblem, type PdfPage } from "./pdfFixture.ts";
 
 /**
@@ -311,14 +311,9 @@ function loaded(img: Locator): Promise<boolean> {
   });
 }
 
-/** A quick one-finger swipe through the browser's touch input, which a phone ends in a fling. */
+/** A quick one-finger swipe through the browser's touch input, which a phone ends in a fling: moves 16 ms apart, several px a ms. */
 async function swipe(cdp: CDPSession, from: { x: number; y: number }, to: { x: number; y: number }, steps = 6): Promise<void> {
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: from.x, y: from.y }] });
-  for (let i = 1; i <= steps; i++) {
-    const t = i / steps;
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }] });
-  }
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await touchSwipe(cdp, from, to, { steps, everyMs: 16 });
 }
 
 /** Where focus is in the page: the focused element's accessible name, as far as an aria-label or its text gives it. */
@@ -889,6 +884,8 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await swipe(phoneCdp, { x: s.x + s.width / 2, y: s.y + s.height - 120 }, { x: s.x + s.width / 2, y: s.y + 120 });
     await indicatorIs(popup, "3 of 3", "a fling to the end");
     await shots.take(phone, "pdf-popup-flung");
+    // The steps after take taps, which Chrome's own fling from these swipes would swallow.
+    await untilTapsClick(phone, popup.getByRole("heading", { name: "Strange letter", exact: true }));
     assert.ok(p1);
   });
 

@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickTool, readCamera, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickTool, readCamera, Shots, sideTabName, SocketWatch, startServer, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * Layout and hierarchy (docs/design-v1-layout-hierarchy.md section 10):
@@ -1747,10 +1747,11 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
       { x: at.x - d / 2, y: at.y, id: 1 },
       { x: at.x + d / 2, y: at.y, id: 2 },
     ];
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: points(from) });
+    const touches = new Touches(cdp);
+    await touches.start(points(from));
     const stepsN = 10;
-    for (let i = 1; i <= stepsN; i++) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: points(from + ((to - from) * i) / stepsN) });
-    return { lift: () => cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }).then(() => {}) };
+    for (let i = 1; i <= stepsN; i++) await touches.move(points(from + ((to - from) * i) / stepsN));
+    return { lift: () => touches.end() };
   }
 
   async function insets(cdp: CDPSession, page: Page, size: { width: number; height: number }, i: { top: number; bottom: number; side: number }): Promise<void> {

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { BrowserContext, Locator, Page } from "playwright-core";
+import type { BrowserContext, CDPSession, Locator, Page } from "playwright-core";
 import WebSocket from "ws";
 import type { RoomState } from "#shared/model.ts";
 import { applyChanges, type ProjectedState } from "#shared/project.ts";
@@ -89,6 +89,83 @@ export async function startServer(opts: ServerOptions): Promise<Server> {
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export type TouchAt = { x: number; y: number; id?: number };
+
+/**
+ * Touch input through the DevTools protocol with a finger's timing: each
+ * event of a gesture carries its own time, `afterMs` past the one before,
+ * and waits that long for real from 10 ms up. Sent back to back with no
+ * times, a few moves read as a flick of tens of thousands of px per
+ * second, to the page's own fling math and to Chrome's. A flick a test
+ * needs keeps gaps of a few ms, as a fast finger's still has them. A
+ * gesture that starts with every finger up starts at the real time, so a
+ * pause between gestures counts. After a flick, see untilTapsClick.
+ */
+export class Touches {
+  private readonly cdp: CDPSession;
+  /** The time of the last event sent, in seconds since the epoch, as the protocol takes it. */
+  private clock = 0;
+  private lifted = true;
+
+  constructor(cdp: CDPSession) {
+    this.cdp = cdp;
+  }
+
+  private async send(type: "touchStart" | "touchMove" | "touchEnd", points: readonly TouchAt[], afterMs: number): Promise<void> {
+    const fresh = this.lifted && type === "touchStart";
+    if (!fresh && afterMs >= 10) await sleep(afterMs);
+    this.clock = fresh ? Math.max(this.clock + afterMs / 1000, Date.now() / 1000) : Math.max(this.clock + afterMs / 1000, Date.now() / 1000 - 5);
+    this.lifted = type === "touchEnd" && points.length === 0;
+    await this.cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points.map((p) => ({ x: p.x, y: p.y, id: p.id ?? 1 })), timestamp: this.clock });
+  }
+
+  /** Fingers land: every finger down now, those already down included. */
+  start(points: readonly TouchAt[], afterMs = 16): Promise<void> {
+    return this.send("touchStart", points, afterMs);
+  }
+
+  move(points: readonly TouchAt[], afterMs = 16): Promise<void> {
+    return this.send("touchMove", points, afterMs);
+  }
+
+  /** Fingers lift: the ones still down after it, none by default. */
+  end(points: readonly TouchAt[] = [], afterMs = 16): Promise<void> {
+    return this.send("touchEnd", points, afterMs);
+  }
+}
+
+/**
+ * After a flick, Chrome's touch emulation keeps a fling of its own going
+ * for a second or more, even over content that cannot scroll, and the
+ * first tap in that time only stops it: no click. A slower machine reaches
+ * its next tap inside that time (pdf.e2e.ts 7b on Linux CI runners). This
+ * taps `inert`, something a tap does nothing to, until a tap clicks again.
+ */
+export async function untilTapsClick(page: Page, inert: Locator, timeoutMs = 5_000): Promise<void> {
+  await inert.evaluate((el) => {
+    const target = el as unknown as { rvttClicks?: number; addEventListener(type: string, fn: () => void): void };
+    if (target.rvttClicks === undefined) target.addEventListener("click", () => (target.rvttClicks = (target.rvttClicks ?? 0) + 1));
+    target.rvttClicks = 0;
+  });
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    await inert.tap();
+    await sleep(150);
+    if ((await inert.evaluate((el) => (el as unknown as { rvttClicks?: number }).rvttClicks ?? 0)) > 0) return;
+    if (Date.now() > deadline) throw new Error(`A tap still made no click ${timeoutMs} ms after a flick`);
+  }
+}
+
+/** One finger from `from` to `to` in `steps` even moves, `everyMs` apart, then up. */
+export async function touchSwipe(cdp: CDPSession, from: TouchAt, to: TouchAt, opts: { steps?: number; everyMs?: number } = {}): Promise<void> {
+  const steps = opts.steps ?? 10;
+  const every = opts.everyMs ?? 16;
+  const touches = new Touches(cdp);
+  await touches.start([from]);
+  for (let i = 1; i <= steps; i++) await touches.move([{ x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps }], every);
+  await touches.end([], every);
 }
 
 /** Polls until `check` returns something truthy, or fails with `what` and the last value seen. */
