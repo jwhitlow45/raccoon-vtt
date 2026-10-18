@@ -146,6 +146,8 @@ At 390 x 844 a weapon with no rider is 84 px, from 118, and one with a short rid
 
 Not designed here. What this pass keeps ready for it:
 
+- **Since built**: docs/design-v1-roll-animation.md, which throws 3D dice into a tray under the header line instead of the sketch below.
+
 - **Where**: the header line. Every panel roll lands there, so one animation serves every control. A card animates its own result in place.
 - **How it could work**: while the roll is in flight the total slot shows a die face turning (which die is for the animation's own design, 12.2), and on the answer the faces chips land one by one and the total counts up, within 400 ms after the answer and never delaying it more. A natural 20's face rings once in the accent. CSS transforms and opacity only, no animation loop at rest.
 - **Never moves layout**: the line is 40 px before, during and after (3.1 rule 4).

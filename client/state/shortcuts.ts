@@ -744,6 +744,16 @@ export const BEHAVIORS: readonly Behavior[] = [
     device: "keys",
     surface: "Dice",
   },
+  // A throw of your own dice: features/dice/throw/store.ts, through DicePanel.tsx's capture-phase listeners (docs/design-v1-roll-animation.md 3.5). A tap is listed with the key, as the two do the same.
+  {
+    id: "diceThrowEnd",
+    input: "Any tap or key",
+    does: "Show the result at once, then do its own job",
+    roles: EVERYONE,
+    when: "in the Dice panel while your dice are in the air",
+    device: "keys",
+    surface: "Dice",
+  },
   // The group save's damage field: features/dice/groupSave/GroupSave.tsx (docs/design-v1-roll-options.md 14).
   { id: "groupDamageEnter", input: "Enter", does: "Roll the parts, or take the typed numbers", roles: DM, when: "in the group save's damage field", device: "keys", surface: "Dice" },
 

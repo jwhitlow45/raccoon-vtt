@@ -973,6 +973,34 @@ Public domain dedication. Source: https://www.drivethrurpg.com/product/114894/Sc
 
 `public/icon.svg` was drawn as an SVG for this project. `public/icons/app-192.png`, `public/icons/app-512.png`, `public/icons/app-maskable-512.png` and `public/icons/apple-touch-icon-180.png` are rasterized from it by `node scripts/icons.ts`. It is not third-party art.
 
+## 3D dice
+
+The dice the Dice panel throws, their numbers and their finishes are drawn in code, with no image, texture or model file. They are rendered with [three.js](https://threejs.org) 0.160.0, by the three.js authors, bundled into the app's dice chunk and used under the MIT License:
+
+```
+The MIT License
+
+Copyright © 2010-2023 three.js authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
 ## Rules content (SRD 5.2.1)
 
 Condition text, monster stat blocks, area spells, the encounter XP budgets, and the SRD names in the passphrase word list come from the [System Reference Document 5.2.1](https://www.dndbeyond.com/srd) by Wizards of the Coast LLC, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The material was converted to JSON and edited. The required notice is in [`shared/srd/NOTICE.md`](shared/srd/NOTICE.md).
