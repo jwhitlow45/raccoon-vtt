@@ -95,6 +95,13 @@ describe("the guide's outline (outline.ts)", () => {
     }
   });
 
+  test("the guide holds no table, which its page draws as the journal's, one unwrapped line a cell, wider than any phone", () => {
+    assert.deepEqual(
+      keptBlocks(OUTLINE).flatMap((b) => (b.kind === "table" ? [b.header.map((c) => inlineText(c)).join(" | ")] : [])),
+      [],
+    );
+  });
+
   test("a part's own subheadings before its first section stay in its introduction", () => {
     const o = guideOutline(parseMarkdown("Intro.\n\n## Contents\n\n- a\n\n## Start\n\nGo.\n\n# Part\n\nFirst. Second.\n\n### Aside\n\nText.\n\n## One\n\n### Sub\n\nBody.", guide));
     assert.deepEqual(o.intro.map((b) => b.kind), ["paragraph"]);
