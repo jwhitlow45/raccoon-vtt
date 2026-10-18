@@ -44,9 +44,23 @@ export type DiceState = {
    * or any player's roll.
    */
   secret: boolean | null;
+  /**
+   * The DM's panel creatures a pressed Secret was pressed for (panelKey).
+   * The chip follows the selection: a press belongs to the creatures it
+   * was made for, so another selection reads Secret's own start again, and
+   * a goblin's un-pressed Secret never carries over to the next monster.
+   * Absent is the same as "", nothing selected, which a player's panel
+   * always has.
+   */
+  secretFor?: string;
   version: number;
   last: LastRoll | null;
 };
+
+/** Secret as it stands for the panel's creatures now: the press made for them, else the start. */
+export function secretNow(s: Pick<DiceState, "secret" | "secretFor">, key: string, start: boolean): boolean {
+  return s.secret !== null && (s.secretFor ?? "") === key ? s.secret : start;
+}
 
 export const diceChoicesSlot = scopeSlot(() => createStore<DiceState>(() => ({ adv: false, dis: false, secret: null, version: 0, last: null })));
 
@@ -77,12 +91,12 @@ export type DicePanelApi = {
   again(rolls: readonly DiceRollInput[], to: "all" | "dm"): string | null;
 };
 
-function take(store: StoreApi<DiceState>, start: boolean): Taken {
+function take(store: StoreApi<DiceState>, start: boolean, key: string): Taken {
   const before = store.getState();
   const sources: AdvantageSource[] = [];
   if (before.adv) sources.push({ kind: "adv", from: "pressed" });
   if (before.dis) sources.push({ kind: "dis", from: "pressed" });
-  const secret = before.secret ?? start;
+  const secret = secretNow(before, key, start);
   const version = before.version + 1;
   store.setState({ adv: false, dis: false, secret: null, version });
   return {
@@ -90,7 +104,7 @@ function take(store: StoreApi<DiceState>, start: boolean): Taken {
     secret,
     restore() {
       if (store.getState().version !== version) return;
-      store.setState({ adv: before.adv, dis: before.dis, secret: before.secret, version: version + 1 });
+      store.setState({ adv: before.adv, dis: before.dis, secret: before.secret, secretFor: before.secretFor, version: version + 1 });
     },
   };
 }
@@ -132,23 +146,26 @@ export type DicePanelActions = Omit<DicePanelApi, "adv" | "dis" | "secret">;
  * `secretStart` gives Secret's start for a roll for these creatures, and
  * with none, for the panel's own: a DM's Dice panel opened for a monster
  * starts pressed, so the chip shows what its next roll does, a free
- * formula typed there included.
+ * formula typed there included. `panelKey` names the panel's creatures
+ * now (panelKeyIn), which a press of Secret belongs to.
  */
-export function createDicePanel(deps: { store: StoreApi<DiceState>; sender: RollSender; secretStart(creatures: readonly ActorTarget[]): boolean }): DicePanelActions {
+export function createDicePanel(deps: { store: StoreApi<DiceState>; sender: RollSender; secretStart(creatures: readonly ActorTarget[]): boolean; panelKey?(): string }): DicePanelActions {
   const { store, sender, secretStart } = deps;
+  const panelKey = deps.panelKey ?? (() => "");
   const fail = (error: string) => store.setState({ last: { error, at: Date.now() } });
   return {
-    take: (creatures = []) => take(store, secretStart(creatures)),
+    take: (creatures = []) => take(store, secretStart(creatures), panelKey()),
     press(choice) {
       const s = store.getState();
       const version = s.version + 1;
-      if (choice === "secret") store.setState({ secret: !(s.secret ?? secretStart([])), version });
+      const key = panelKey();
+      if (choice === "secret") store.setState({ secret: !secretNow(s, key, secretStart([])), secretFor: key, version });
       else if (choice === "adv") store.setState({ adv: !s.adv, dis: false, version });
       else store.setState({ dis: !s.dis, adv: false, version });
     },
     roll(rolls, opts = {}) {
       const panel = opts.to === undefined;
-      const taken = panel ? take(store, secretStart(rolls.flatMap((r) => (r.creature ? [r.creature] : [])))) : null;
+      const taken = panel ? take(store, secretStart(rolls.flatMap((r) => (r.creature ? [r.creature] : []))), panelKey()) : null;
       const to = opts.to ?? (taken?.secret ? "dm" : "all");
       const inputs: DiceRollInput[] = [];
       for (const roll of rolls) {
@@ -192,6 +209,11 @@ function panelCreatures(s: Pick<RoomView, "local">): ActorTarget[] {
   return s.local.selectedIds.map((tokenId) => ({ tokenId }));
 }
 
+/** The DM's panel creatures as one key, which a press of Secret belongs to. A player's panel has none: their press stands until a roll takes it. */
+export function panelKeyIn(s: Pick<RoomView, "you" | "local">): string {
+  return s.you?.role === "dm" ? [...s.local.selectedIds].sort().join(" ") : "";
+}
+
 /** Secret's start for a roll for these creatures, or with none for the panel's own (createDicePanel). */
 export function secretStartIn(s: Pick<RoomView, "view" | "you" | "local">, creatures: readonly ActorTarget[]): boolean {
   if (!s.view || s.you?.role !== "dm") return false;
@@ -204,10 +226,14 @@ export function useDicePanel(): DicePanelApi {
   const sender = useRollSender();
   const room = useRoomStore();
   const start = useRoomView((s) => secretStartIn(s, []));
+  const key = useRoomView(panelKeyIn);
   const adv = useStore(store, (s) => s.adv);
   const dis = useStore(store, (s) => s.dis);
-  const secret = useStore(store, (s) => s.secret ?? start);
-  const actions = useMemo(() => createDicePanel({ store, sender, secretStart: (creatures) => secretStartIn(room.getState(), creatures) }), [store, sender, room]);
+  const secret = useStore(store, (s) => secretNow(s, key, start));
+  const actions = useMemo(
+    () => createDicePanel({ store, sender, secretStart: (creatures) => secretStartIn(room.getState(), creatures), panelKey: () => panelKeyIn(room.getState()) }),
+    [store, sender, room],
+  );
   return useMemo(() => ({ ...actions, adv, dis, secret }), [actions, adv, dis, secret]);
 }
 

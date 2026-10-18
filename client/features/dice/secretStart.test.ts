@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { character, room, token } from "#shared/testutil.ts";
+import { createStore } from "zustand/vanilla";
+import type { ClientOp, OpOf } from "#shared/protocol.ts";
 import { INITIAL_LOCAL } from "../../state/types.ts";
-import { secretStartIn } from "./useDicePanel.ts";
+import { createDicePanel, panelKeyIn, secretNow, secretStartIn, type DiceState } from "./useDicePanel.ts";
+import { ReceiptTracker } from "./useReceipt.ts";
 
 /**
  * Where the Dice panel's Secret starts (docs/design-v1-dice.md 8.2 and 17):
@@ -34,5 +37,43 @@ describe("the panel's Secret start", () => {
 
   test("a player's panel never starts pressed", () => {
     assert.equal(secretStartIn({ ...dm(["goblin"]), you: { memberId: "p1", role: "player" } }, [{ tokenId: "goblin" }]), false);
+  });
+});
+
+describe("Secret follows the DM's selection (LP7-DICE-8)", () => {
+  function panelFor(selection: { now: string }) {
+    const sent: ClientOp[] = [];
+    const store = createStore<DiceState>(() => ({ adv: false, dis: false, secret: null, version: 0, last: null }));
+    const sender = { dispatch: (op: ClientOp) => sent.push(op), connected: () => true, receipts: new ReceiptTracker() };
+    // A monster is selected unless Thorn is.
+    const panel = createDicePanel({ store, sender, secretStart: () => selection.now !== "thorn", panelKey: () => selection.now });
+    return { sent, store, panel };
+  }
+
+  test("a goblin's Secret pressed off goes back to its start when another monster is selected, so that monster's roll starts secret", () => {
+    const selection = { now: "goblin" };
+    const { sent, store, panel } = panelFor(selection);
+    panel.press("secret");
+    assert.equal(secretNow(store.getState(), "goblin", true), false, "off for the goblin");
+    selection.now = "sniper";
+    assert.equal(secretNow(store.getState(), "sniper", true), true, "the sniper reads Secret's start");
+    panel.roll([{ formula: "1d20+2" }]);
+    assert.equal((sent[0] as OpOf<"dice.roll">).to, "dm");
+  });
+
+  test("a press stands for the creatures it was made for, and Thorn's start is in the open", () => {
+    const selection = { now: "thorn" };
+    const { sent, store, panel } = panelFor(selection);
+    panel.press("secret");
+    assert.equal(secretNow(store.getState(), "thorn", false), true);
+    panel.roll([{ formula: "1d20+5" }]);
+    assert.equal((sent[0] as OpOf<"dice.roll">).to, "dm", "pressed for Thorn, rolled for Thorn");
+    assert.equal(secretNow(store.getState(), "thorn", false), false, "the roll took it");
+  });
+
+  test("the key is the DM's selection in any order, and a player's panel has none, so a player's press stands", () => {
+    const dm = { you: { memberId: "dm1", role: "dm" as const }, local: { ...INITIAL_LOCAL, selectedIds: ["b", "a"] } };
+    assert.equal(panelKeyIn(dm), panelKeyIn({ ...dm, local: { ...INITIAL_LOCAL, selectedIds: ["a", "b"] } }));
+    assert.equal(panelKeyIn({ ...dm, you: { memberId: "p1", role: "player" } }), "");
   });
 });
