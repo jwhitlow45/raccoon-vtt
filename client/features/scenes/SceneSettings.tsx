@@ -15,7 +15,7 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { calibrationFromCounts, fitBounds, imageSquares, sameCalibration } from "../grid/calibrate.ts";
-import { copyUrls, importFound, importSearch, IMPORT_WAIT_MS, nameGivesSize, searchOnImport, type SearchDone } from "../grid/findGrid.ts";
+import { copyUrls, importSearch, IMPORT_WAIT_MS, nameGivesSize, replacementFound, searchOnImport, type SearchDone } from "../grid/findGrid.ts";
 import { showOutcome } from "../grid/outcome.ts";
 import { useGridStore } from "../grid/store.ts";
 import { useFindGrid } from "../grid/useFindGrid.ts";
@@ -392,21 +392,22 @@ function MapImageRow(props: { scene: Scene; close(): void }) {
       setUpload({ busy: false, waiting: false, error: null });
       setArmed(false);
       const next = replaceMap(map, asset);
-      const found = importFound(answer, asset.cellPx !== undefined, next);
+      const { found, ownGrid } = replacementFound(answer, asset.cellPx !== undefined, next, scene);
       // Fog first, so players on this scene never see the map before it.
       if (firstFog && (!playersHere || fogIt)) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { fogEnabled: true } });
       actions.dispatch({ t: "scene.setMap", sceneId: scene.id, map: next });
       // A replacement keeps the scene as it is, unless a grid was found on
-      // new art. A first image either knows its scale from its name, so
-      // the scene fits it now, or the grid tool comes up to find the scale
-      // (and fits the scene when applied).
+      // new art, which a scene with its own grid is only offered. A first
+      // image either knows its scale from its name, so the scene fits it
+      // now, or the grid tool comes up to find the scale (and fits the
+      // scene when applied).
       if (!map && asset.cellPx !== undefined && next.cellPx === asset.cellPx) {
         const bounds = fitBounds(next);
         if (bounds.w !== scene.bounds.w || bounds.h !== scene.bounds.h) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { bounds } });
       } else if (!map || found) {
         if (found) {
           const at = { x: next.widthPx / 2, y: next.heightPx / 2 };
-          showOutcome({ actions, store: gridStore, scene: { id: scene.id, bounds: scene.bounds, map: next }, found, fit: true, at, fallback: { cellPx: next.cellPx, originPx: next.originPx } });
+          showOutcome({ actions, store: gridStore, scene: { id: scene.id, bounds: scene.bounds, map: next }, found, fit: true, at, fallback: { cellPx: next.cellPx, originPx: next.originPx }, ownGrid });
         }
         ui.setTool("grid");
         props.close();

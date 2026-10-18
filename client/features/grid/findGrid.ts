@@ -96,6 +96,24 @@ export function findFound(found: FoundGrid | null, ownGrid: boolean): FoundGrid 
 }
 
 /**
+ * What a scene's new image makes of its search (Scene settings): an
+ * import's find, except that on a scene that came with its own grid even
+ * a sure one is only offered, as Find the grid's is. New art keeps the
+ * imported walls, which stand in the file's grid, so the scene keeps its
+ * mark. `scene.map` is the image before, whose first line before the image
+ * marks an import from before the mark.
+ */
+export function replacementFound(
+  answer: SearchDone | null,
+  named: boolean,
+  next: { widthPx: number; heightPx: number },
+  scene: Pick<Scene, "gridFromFile"> & { map?: { originPx: Point } },
+): { found: FoundGrid | null; ownGrid: boolean } {
+  const ownGrid = cameWithGrid({ gridFromFile: scene.gridFromFile, map: scene.map ?? { originPx: { x: 0, y: 0 } } });
+  return { found: findFound(importFound(answer, named, next), ownGrid), ownGrid };
+}
+
+/**
  * Whether a file name looks like it gives the map's size in squares, as
  * `crypt_30x20.jpg` does. The server decides (server/assets/kinds.ts
  * `cellPxHint`), and may still refuse counts that do not fit the image, so

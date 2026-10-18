@@ -216,6 +216,15 @@ describe("automatic walls and thumbnails on a scene", () => {
     assert.equal("gridFromFile" in plain.scenes.s3!, false);
   });
 
+  test("a Universal VTT import's mark stays through new art and through the image's removal, since its walls stay", () => {
+    const map = { assetId: "m1", widthPx: 1400, heightPx: 1000, cellPx: 70, originPx: { x: 0, y: 0 } };
+    let state = apply(room(), { t: "scene.create", scene: { id: "s3", name: "Crypt", bounds: { w: 20, h: 14 }, map, autoWalls: "off", gridFromFile: true } });
+    state = apply(state, { t: "scene.setMap", sceneId: "s3", map: { ...map, assetId: "m2", heightPx: 1400, cellPx: 47 } });
+    assert.equal(state.scenes.s3!.gridFromFile, true, "other art of another shape");
+    state = apply(state, { t: "scene.setMap", sceneId: "s3", map: null });
+    assert.equal(state.scenes.s3!.gridFromFile, true, "no image at all");
+  });
+
   test("folders are set and cleared", () => {
     let state = apply(room(), { t: "scene.update", sceneId: "s1", patch: { folder: "Act 1" } });
     assert.equal(state.scenes.s1!.folder, "Act 1");

@@ -8,7 +8,7 @@ import { mapScene } from "../scenes/create.ts";
 import { importScene, placeMap } from "../uvtt/batch.ts";
 import type { AxisFit, GridDetection } from "./detect.ts";
 import { calibrationFromBox, nudgeBox, sameCalibration } from "./calibrate.ts";
-import { cameWithGrid, type SearchAnswer, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
+import { cameWithGrid, replacementFound, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
 import { applyGrid, boxAround, fallbackOps, findOnScene, gridOps, middleOf, showOutcome } from "./outcome.ts";
 import { boxCalibration, endFinding, type GridToolState } from "./store.ts";
 import { rng } from "./synthetic.ts";
@@ -509,6 +509,38 @@ describe("where a scene came from", () => {
     assert.deepEqual(sent, [], "a sure find is only offered");
     assert.equal(found?.outcome, "offered");
     assert.equal(found?.ownGrid, true);
+  });
+
+  test("new art on a Universal VTT scene keeps its mark, and a sure find on it is only offered, as Find the grid's", () => {
+    const plan = { frame: { shift: { x: 0, y: 0 }, image: { x: 0, y: 0 }, w: 20, h: 14 }, pixelsPerGrid: 70 };
+    const map = placeMap(plan, { assetId: "a1", width: 1400, height: 1000, fileImageWidth: 1400 });
+    assert.ok(map);
+    const before = held([{ t: "scene.create", scene: importScene(plan, map, { id: "made", name: "Crypt", fog: true }) }]);
+    // Other art, of another shape, with today's first guess, as Scene settings sends it.
+    const next = { assetId: "a2", widthPx: 1400, heightPx: 1400, cellPx: 47, originPx: { x: 0, y: 0 } };
+    const after = held([
+      { t: "scene.create", scene: importScene(plan, map, { id: "made", name: "Crypt", fog: true }) },
+      { t: "scene.setMap", sceneId: "made", map: next },
+    ]);
+    assert.equal(after.gridFromFile, true, "the imported walls stay, and so does the mark");
+    const sure: SearchDone = { t: "done", result: DETECTED, width: 700, height: 700 };
+    const { found, ownGrid } = replacementFound(sure, false, next, before);
+    assert.equal(ownGrid, true);
+    assert.equal(found?.tier, "medium");
+    const { sent, actions, store } = room();
+    showOutcome({ actions, store, scene: after, found, fit: true, at: { x: 700, y: 700 }, fallback: next, ownGrid });
+    assert.deepEqual(sent, [], "nothing applied");
+    assert.equal(store.getState().found?.outcome, "offered");
+    assert.equal(store.getState().found?.ownGrid, true);
+  });
+
+  test("new art elsewhere is applied when sure, and an import from before the mark is known by its first line", () => {
+    const sure: SearchDone = { t: "done", result: DETECTED, width: 700, height: 500 };
+    const next = { widthPx: 1400, heightPx: 1000 };
+    assert.deepEqual(replacementFound(sure, false, next, { map: { originPx: { x: 0, y: 0 } } }).found?.tier, "high");
+    assert.deepEqual(replacementFound(sure, false, next, {}).ownGrid, false, "a first image on a mat");
+    assert.deepEqual(replacementFound(sure, false, next, { map: { originPx: { x: -35, y: 0 } } }), { found: { tier: "medium", cal: { cellPx: 70, originPx: { x: 20, y: 35 } } }, ownGrid: true });
+    assert.equal(replacementFound(sure, true, next, { gridFromFile: true }).found, null, "a size in the name still wins");
   });
 
   test("an ordinary map with automatic walls off is searched and applied as usual", async () => {
