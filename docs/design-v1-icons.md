@@ -48,7 +48,7 @@ The audit read every client file for visible words on controls. Its two tables (
 | `filter` | funnel | app (Lucide `funnel`) | Filters | |
 | `expand` | four corners | app | Full screen | Fit the map (top bar's own) |
 
-Build additions, in the same shape: `download`, `share`, `settings` (gear: settings only), `external` (`external-link`), `arrowUp` and `arrowDown` (move up and down, never a fold), `leave` (`log-out`), `crop`, `eraser` (clear a ruler or drawings), `focus` (Ping's Look here), `pass` and `fail` (`check` and `x` inside the DM desk's pair only). A picture, upload, search, paste and the X-card's pause kept their words, with no icon built for them.
+Build additions, in the same shape: `download`, `share`, `settings` (gear: settings only), `external` (`external-link`), `arrowUp` and `arrowDown` (move up and down, never a fold), `leave` (`log-out`), `crop`, `eraser` (clear a ruler or drawings), `focus` (Ping's Look here), `pass` and `fail` (`check` and `x` inside the DM desk's pair only), `fullScreen` and `leaveFullScreen` (`maximize-2` and `minimize-2`: the whole page in the browser's full screen and back, from the top bar, never `expand`'s corners, which Fit beside them already draws). A picture, upload, search, paste and the X-card's pause kept their words, with no icon built for them.
 
 Where an app icon and Lucide's draw the same shape (close, chevrons, plus, minus, copy), the app's stays, so nothing changes for no gain. The side headers design names Lucide equivalents for its icons (its section 7): this table agrees with every one, and either build may swap them without the other.
 

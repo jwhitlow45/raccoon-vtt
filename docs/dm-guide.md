@@ -72,7 +72,7 @@ Above the tabs sits the party bar, which shows your players' characters with the
 
 When you pick a tool, its options appear in a row just above the toolbar, and anything that doesn't fit in the row waits behind **⋯** (More options). If the row is in your way, tap the tool you are using again to hide its options. The tool stays in use, and another tap brings the options back.
 
-**The top bar** holds **Undo** and **Redo** (`Ctrl+Z` and `Ctrl+Shift+Z`, or Cmd on a Mac), which take back your own changes one at a time and put them back again. Beside them is **Fit the map to the screen** (`0`), for when you have panned or zoomed the map out of sight.
+**The top bar** holds **Undo** and **Redo** (`Ctrl+Z` and `Ctrl+Shift+Z`, or Cmd on a Mac), which take back your own changes one at a time and put them back again. Beside them is **Fit the map to the screen** (`0`), for when you have panned or zoomed the map out of sight. On a computer, the last button in the top bar is **Full screen** (`W`), which gives the whole screen to the room. Press it or `W` again to leave. If the window is too narrow for the button, **This device** in the Menu has the same switch, and that is also where you find it on a tablet or an Android phone.
 
 **The Menu** panel holds the X-card, **Copy player link**, **Members**, **Room settings**, **This device**, **DM guide**, **About** and **Leave room**.
 
@@ -1008,6 +1008,7 @@ These are the keys a DM uses most:
 - `/` searches the scene in the Outliner.
 - `Ctrl+Z` and `Ctrl+Shift+Z` are Undo and Redo (Cmd on a Mac).
 - `0` fits the map to the screen, and `+` and `-` zoom. `S` hides or shows the side panel, and `O` switches to the other of two panels.
+- `W` turns full screen on or off, where the browser allows it.
 - Escape closes the newest pop-up, sheet or action bar.
 
 With a mouse, Shift or Ctrl and a click adds a token to the selection, and Shift or Ctrl and a drag on empty map draws a selection box. To move the map, drag with the right or middle button, or hold Space and drag.
