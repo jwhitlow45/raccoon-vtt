@@ -176,7 +176,7 @@ function SharedAttack(props: { name: string; each: Attacker[]; dice: NonNullable
         <NumberField label="Target's AC" value={ac ?? undefined} min={1} max={50} nullable placeholder="AC" onCommit={setAc} width={72} />
       </div>
       {results.length > 0 ? (
-        <Note>{results.map((r) => `${r.roll.total}${r.verdict === "critical" ? " critical hit" : r.verdict === "hit" ? " hit" : r.verdict === "miss" ? " miss" : ""}`).join(", ")}</Note>
+        <Note>{results.map((r) => `${r.roll.total}${r.verdict === "critical" ? " Critical Hit" : r.verdict === "hit" ? " hit" : r.verdict === "miss" ? " miss" : ""}`).join(", ")}</Note>
       ) : null}
       {hits.length > 0 ? (
         <Button size="sm" disabled={props.blocked !== null} busy={damage?.state === "sending"} onClick={rollDamage}>

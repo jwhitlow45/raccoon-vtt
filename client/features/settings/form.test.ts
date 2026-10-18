@@ -48,7 +48,7 @@ describe("settings form", () => {
     const field = allFields().find((f) => f.key === "critRule");
     assert.equal(field?.kind, "choice");
     if (field?.kind !== "choice") return;
-    assert.equal(field.label, "Critical hit damage");
+    assert.equal(field.label, "Critical Hit damage");
     assert.equal(SETTING_GROUPS.find((g) => g.fields.includes(field))?.heading, "Combat");
     assert.deepEqual(
       field.options.map((o) => [o.value, o.label]),

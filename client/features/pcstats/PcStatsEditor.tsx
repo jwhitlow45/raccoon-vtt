@@ -771,11 +771,11 @@ function OtherNumbers(props: StatsProps) {
         controls={<IntInput label="All checks" value={d.allChecks} min={-20} max={20} nullable sign onChange={(n) => setStats((s) => withAllBonus(s, "allChecks", n))} />}
       />
       <NumberRow
-        name="Critical hits on"
+        name="Critical Hits on"
         hint="Improved Critical and Superior Critical widen a weapon attack’s range"
         controls={
           <Select
-            aria-label="Critical hits on"
+            aria-label="Critical Hits on"
             value={String(stats.critOn ?? 20)}
             onChange={(e) =>
               setStats((s) => {

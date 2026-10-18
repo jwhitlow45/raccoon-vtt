@@ -203,7 +203,7 @@ function rollVerdict(roll: DiceRoll, line: Pick<DiceEvent, "dc" | "ac">): string
   if (line.dc !== undefined) return ` against DC ${line.dc}: ${roll.fails || roll.total < line.dc ? "fail" : "pass"}`;
   if (line.ac !== undefined) {
     const hit = hitOf(roll, line.ac);
-    return ` against AC ${line.ac}: ${hit === "critical" ? "critical hit" : hit}`;
+    return ` against AC ${line.ac}: ${hit === "critical" ? "Critical Hit" : hit}`;
   }
   return "";
 }
@@ -376,7 +376,7 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
       switch (data.change) {
         case "damage": {
           const amount = data.amount !== undefined ? `${data.amount} damage` : "damage";
-          return `${who} takes ${amount}${data.crit ? " from a critical hit" : ""}${numbers ? `, ${numbers} left` : ""}${label}.`;
+          return `${who} takes ${amount}${data.crit ? " from a Critical Hit" : ""}${numbers ? `, ${numbers} left` : ""}${label}.`;
         }
         case "heal":
           return `${who} regains ${data.amount !== undefined ? `${data.amount} HP` : "HP"}${numbers ? `, ${numbers} now` : ""}${label}.`;

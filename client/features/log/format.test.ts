@@ -43,7 +43,7 @@ describe("event text", () => {
   test("numbers appear only when the event kept them", () => {
     const state = fixture();
     const target = { characterId: FIXTURE_IDS.thornChar };
-    assert.equal(describeEvent({ type: "hp", ...target, change: "damage", amount: 7, crit: true, label: "Bloodied" }, state), "Thorn takes 7 damage from a critical hit (Bloodied).");
+    assert.equal(describeEvent({ type: "hp", ...target, change: "damage", amount: 7, crit: true, label: "Bloodied" }, state), "Thorn takes 7 damage from a Critical Hit (Bloodied).");
     assert.equal(describeEvent({ type: "hp", ...target, change: "heal", label: "Healthy" }, state), "Thorn regains HP (Healthy).");
     assert.equal(describeEvent({ type: "hp", ...target, change: "set", amount: 12 }, state), "Thorn's HP is set to 12.");
     assert.equal(describeEvent({ type: "hp", ...target, change: "temp", amount: 5 }, state), "Thorn gains 5 Temporary HP.");

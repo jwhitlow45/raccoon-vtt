@@ -256,7 +256,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
         return body.scrollWidth - body.clientWidth;
       });
     const atRest = await sideways();
-    await options.getByRole("button", { name: "Critical hit for Scimitar's next damage" }).tap();
+    await options.getByRole("button", { name: "Critical Hit for Scimitar's next damage" }).tap();
     // The Damage cell names the room's rule, which the server rolls it by.
     const damage = options.getByRole("button", { name: "Scimitar damage, Critical: max plus a roll" });
     await damage.evaluate((el) => (el as unknown as { scrollIntoView(o: { block: string }): void }).scrollIntoView({ block: "center" }));

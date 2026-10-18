@@ -46,7 +46,7 @@ export function PcStatsView(props: { character: Pick<Character, "stats" | "level
         </Labeled>
       ))}
       {stats.evasion ? <Labeled label="Evasion">A Dexterity save for half takes none on a pass, half on a fail.</Labeled> : null}
-      {stats.critOn ? <Labeled label="Critical hits">{`Weapon attacks score a critical hit on ${stats.critOn} or higher.`}</Labeled> : null}
+      {stats.critOn ? <Labeled label="Critical Hits">{`Weapon attacks score a Critical Hit on ${stats.critOn} or higher.`}</Labeled> : null}
       <RollList title="Weapons" rolls={group("weapon")} line={(r) => rollLine(r)} />
       <RollList title="Spells" rolls={group("spell")} line={(r) => rollLine(r)} />
       <RollList title="Other rolls" rolls={group("other")} line={(r) => rollLine(r)} />

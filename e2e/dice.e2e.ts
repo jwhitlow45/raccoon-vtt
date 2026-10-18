@@ -497,7 +497,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     await attack.scrollIntoViewIfNeeded();
     // By their middles, since a chip and a button may differ in height on one line.
     const middles = await Promise.all(
-      [attack, rolls.getByRole("button", { name: "Longsword damage", exact: true }), rolls.getByRole("button", { name: "Critical hit for Longsword's next damage", exact: true })].map(async (l) => {
+      [attack, rolls.getByRole("button", { name: "Longsword damage", exact: true }), rolls.getByRole("button", { name: "Critical Hit for Longsword's next damage", exact: true })].map(async (l) => {
         const box = (await l.boundingBox())!;
         return box.y + box.height / 2;
       }),
@@ -625,7 +625,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
         await chip.scrollIntoViewIfNeeded();
         await chip.tap();
       }
-      await rolls.getByRole("button", { name: `Critical hit for ${name}'s next damage` }).tap();
+      await rolls.getByRole("button", { name: `Critical Hit for ${name}'s next damage` }).tap();
       const count = diceLines(playerSocket.state?.log).length;
       await rolls.getByRole("button", { name: new RegExp(`^${name} damage, Critical: max plus a roll`) }).tap();
       const line = await waitFor("the critical damage's line", () => diceLines(playerSocket.state?.log).slice(count).find((l) => l.data.rolls[0]?.crit !== undefined)?.data ?? null);

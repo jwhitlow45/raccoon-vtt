@@ -145,8 +145,8 @@ export const SETTING_GROUPS: SettingGroup[] = [
       {
         kind: "choice",
         key: "critRule",
-        label: "Critical hit damage",
-        help: "How a critical hit rolls its damage, riders included, for every attack in this room.",
+        label: "Critical Hit damage",
+        help: "How a Critical Hit rolls its damage, riders included, for every attack in this room.",
         options: [
           { value: "rollTwice", label: "Roll the dice twice", help: "2d6+3 crits as 4d6+3. The 2024 rule." },
           { value: "maxPlusRoll", label: "Max plus a roll", help: "The dice at their highest, plus a roll: 12 + 2d6 + 3." },

@@ -88,7 +88,7 @@ const visuallyHidden: CSSProperties = { position: "absolute", width: 1, height: 
 export function rollVerdict(roll: DiceRoll, row: { dc?: number; ac?: number }): string | null {
   if (row.ac !== undefined) {
     const hit = hitOf(roll, row.ac);
-    return hit === "critical" ? "Critical hit" : hit === "hit" ? "Hit" : "Miss";
+    return hit === "critical" ? "Critical Hit" : hit === "hit" ? "Hit" : "Miss";
   }
   const natural = naturalOf(roll);
   const verdict = row.dc !== undefined ? (roll.fails || roll.total < row.dc ? "Fail" : "Pass") : null;

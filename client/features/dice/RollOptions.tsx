@@ -669,7 +669,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
           />
         ) : null}
         {hasDamage && canCrit ? (
-          <Chip pressed={crit} onClick={() => setCrit(!crit)} aria-label={`Critical hit for ${named.name}'s next damage`} title={CRIT_WORDS[critRule]}>
+          <Chip pressed={crit} onClick={() => setCrit(!crit)} aria-label={`Critical Hit for ${named.name}'s next damage`} title={CRIT_WORDS[critRule]}>
             Critical
           </Chip>
         ) : null}

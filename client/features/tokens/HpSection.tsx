@@ -196,7 +196,7 @@ export function HpEntry(props: {
         </ChipRow>
       ) : null}
       {showCrit ? (
-        <Checkbox checked={crit} onChange={setCrit} label="Critical hit (two failed death saves)" />
+        <Checkbox checked={crit} onChange={setCrit} label="Critical Hit (two failed death saves)" />
       ) : null}
       {error || refusal ? (
         <Note tone="error">{error ?? refusal}</Note>

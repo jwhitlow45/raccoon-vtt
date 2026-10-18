@@ -37,7 +37,7 @@ describe("dice wording (docs/design-v1-dice.md 5.5)", () => {
     assert.equal(diceLineText(line([{ formula: "1d20+5", faces: [8], total: 13 }], { dc: 15 }), names), "Bree rolled 1d20+5 (8) = 13 against DC 15: fail.");
     assert.equal(diceLineText(line([{ formula: "1d20+5", faces: [10], total: 15 }], { dc: 15 }), names), "Bree rolled 1d20+5 (10) = 15 against DC 15: pass.");
     assert.equal(diceLineText(line([{ formula: "1d20+4", faces: [13], total: 17 }], { ac: 15 }), names), "Bree rolled 1d20+4 (13) = 17 against AC 15: hit.");
-    assert.equal(diceLineText(line([{ formula: "1d20+4", faces: [19], total: 23, critOn: 19 }], { ac: 25 }), names), "Bree rolled 1d20+4 (19) = 23 against AC 25: critical hit.");
+    assert.equal(diceLineText(line([{ formula: "1d20+4", faces: [19], total: 23, critOn: 19 }], { ac: 25 }), names), "Bree rolled 1d20+4 (19) = 23 against AC 25: Critical Hit.");
     assert.equal(diceLineText(line([{ formula: "1d20+20", faces: [1], total: 21 }], { ac: 15 }), names), "Bree rolled 1d20+20 (1) = 21 against AC 15: miss.");
   });
 
