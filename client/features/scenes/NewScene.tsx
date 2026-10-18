@@ -8,6 +8,9 @@ import { api, type AssetRow } from "../../lib/api.ts";
 import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { importFound, IMPORT_WAIT_MS, nameGivesSize, searchGrid, searchOnImport, within, type GridSearch, type SearchDone } from "../grid/findGrid.ts";
+import { showOutcome } from "../grid/outcome.ts";
+import { useGridStore } from "../grid/store.ts";
 import { ColorInput, NumberInput } from "./controls.tsx";
 import { builderScene, MAT_BACKGROUND, mapScene, matScene, nameFromFile, type MapAsset } from "./create.ts";
 import { uploadErrorText, uploadMap } from "./upload.ts";
@@ -23,6 +26,11 @@ const MAX_SCENES = 50;
  * lands on the new scene, with the next tool ready: grid alignment for a map
  * whose scale is only a guess, the builder for a builder scene.
  *
+ * A map whose name gives no size is searched for a drawn grid while it
+ * uploads (docs/design-v1-grid-detect.md section 6), in a Worker started
+ * when the file is picked. A grid found with high confidence goes on the
+ * scene as one undo step after it is made, and Line up grid opens on it.
+ *
  * The kind is a choice of native radios, and a tap on the chosen radio does
  * nothing, so the form folds with its own Cancel. During an upload that
  * Cancel stops the upload and keeps the form, so the DM can try again.
@@ -37,9 +45,22 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
   const [h, setH] = useState(20);
   const [background, setBackground] = useState(MAT_BACKGROUND);
   const [file, setFile] = useState<File | null>(null);
-  const [status, setStatus] = useState<{ busy: boolean; waiting: boolean; error: string | null }>({ busy: false, waiting: false, error: null });
+  const [status, setStatus] = useState<{ busy: boolean; waiting: boolean; finding?: boolean; error: string | null }>({ busy: false, waiting: false, error: null });
   const abortRef = useRef<AbortController | null>(null);
-  useEffect(() => () => abortRef.current?.abort(), []);
+  /** The search for the picked file's grid, running while the DM fills in the form and the file uploads. */
+  const searchRef = useRef<{ file: File; search: GridSearch } | null>(null);
+  const gridStore = useGridStore();
+  const stopSearch = () => {
+    searchRef.current?.search.cancel();
+    searchRef.current = null;
+  };
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      searchRef.current?.search.cancel();
+    },
+    [],
+  );
   // Only Create sends it, so a sheet's swipe springs back once a name or a size is typed or a map picked (docs/design-v1-sheet-swipe.md 4.5).
   useUnsavedSince({ name, w, h, background, file: file?.name ?? null });
 
@@ -49,6 +70,7 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
     // Another kind of scene ends an upload in flight, or it would still
     // make its map scene after the DM moved on.
     abortRef.current?.abort();
+    stopSearch();
     setKind(k);
     setStatus({ busy: false, waiting: false, error: null });
     if (k === "builder") {
@@ -62,6 +84,7 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
 
   const cancel = () => {
     abortRef.current?.abort();
+    stopSearch();
     setStatus({ busy: false, waiting: false, error: null });
     if (!status.busy) {
       setKind(null);
@@ -92,12 +115,27 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
     open(id, "build");
   };
 
-  const createFromAsset = (asset: MapAsset, fileName: string) => {
+  const createFromAsset = (asset: MapAsset, fileName: string, answer: SearchDone | null = null) => {
     const id = actions.newId();
     const { scene, hinted } = mapScene({ id, name: name.trim() || nameFromFile(fileName), asset });
     actions.dispatch({ t: "scene.create", scene });
+    // The scene is made with the guess first, so undo takes a found grid
+    // back to it in one step, and Use default puts it back.
+    const map = scene.map!;
+    const found = importFound(answer, hinted, map);
+    if (found) {
+      const at = { x: map.widthPx / 2, y: map.heightPx / 2 };
+      showOutcome({ actions, store: gridStore, scene: { id, bounds: scene.bounds, map }, found, fit: true, at, fallback: { cellPx: map.cellPx, originPx: map.originPx } });
+    }
     // A scale from the file name is usually right. A guess never is.
     open(id, hinted ? null : "grid");
+  };
+
+  const pickFile = (next: File | null) => {
+    setFile(next);
+    setStatus({ busy: false, waiting: false, error: null });
+    stopSearch();
+    if (next && searchOnImport({ source: "image", named: nameGivesSize(next.name) })) searchRef.current = { file: next, search: searchGrid({ file: next }) };
   };
 
   const upload = async () => {
@@ -110,8 +148,20 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
         signal: abort.signal,
         onWaiting: (waiting) => setStatus((s) => ({ ...s, waiting })),
       });
+      // The name's size wins. Otherwise the search started at the pick
+      // gets a short wait, or one starts now: for a name whose counts the
+      // server refused, or an upload tried again after a cancel.
+      let answer: SearchDone | null = null;
+      if (asset.cellPx !== undefined) stopSearch();
+      else {
+        if (searchRef.current?.file !== file) searchRef.current = { file, search: searchGrid({ file }) };
+        setStatus({ busy: true, waiting: false, finding: true, error: null });
+        answer = await within(searchRef.current.search, IMPORT_WAIT_MS);
+        if (abort.signal.aborted) return;
+        searchRef.current = null;
+      }
       setStatus({ busy: false, waiting: false, error: null });
-      createFromAsset(asset, file.name);
+      createFromAsset(asset, file.name, answer);
     } catch (err) {
       if (abort.signal.aborted) return;
       setStatus({ busy: false, waiting: false, error: uploadErrorText(err) });
@@ -180,18 +230,15 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
                   accept="image/*"
                   disabled={status.busy}
                   style={{ position: "absolute", inset: 0, width: "100%", opacity: 0, cursor: status.busy ? "default" : "pointer" }}
-                  onChange={(e) => {
-                    setFile(e.target.files?.[0] ?? null);
-                    setStatus({ busy: false, waiting: false, error: null });
-                  }}
+                  onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
                 />
               </label>
               <Help>
-                A name like <code>crypt_30x20.jpg</code> sets the scale for 30 by 20 squares. Otherwise you line up the grid next.
+                A name like <code>crypt_30x20.jpg</code> sets the scale for 30 by 20 squares. Otherwise a grid drawn on the map is looked for, and you check it or line up the grid next.
               </Help>
               {actionsRow(
                 <Button size="sm" variant="primary" busy={status.busy} disabled={!file} onClick={() => void upload()}>
-                  {status.busy ? "Uploading…" : "Upload and create"}
+                  {status.finding ? "Looking for a grid…" : status.busy ? "Uploading…" : "Upload and create"}
                 </Button>,
               )}
               {status.waiting ? <Help>Waiting for the server…</Help> : null}

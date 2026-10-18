@@ -15,12 +15,16 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { calibrationFromCounts, fitBounds, imageSquares, sameCalibration } from "../grid/calibrate.ts";
+import { importFound, IMPORT_WAIT_MS, nameGivesSize, searchGrid, searchOnImport, within, type SearchDone } from "../grid/findGrid.ts";
+import { showOutcome } from "../grid/outcome.ts";
+import { useGridStore } from "../grid/store.ts";
+import { useFindGrid } from "../grid/useFindGrid.ts";
 import { MapExport } from "../mapexport/MapExport.tsx";
 import { BlockMovementSetting } from "../movement/SceneSetting.tsx";
 import { PhasesSection } from "../phases/PhasesSection.tsx";
 import { VisionSettings } from "../vision/VisionSettings.tsx";
 import { ColorInput, ConfirmButton, NumberInput, Select, Slider } from "./controls.tsx";
-import { fogsWithFirstMap, replaceMap, viewFromCamera } from "./create.ts";
+import { fogsWithFirstMap, replaceMap, sameArt, viewFromCamera } from "./create.ts";
 import { useStartFraming } from "./FrameView.tsx";
 import { currentStageCamera } from "./stageCamera.ts";
 import { uploadErrorText, uploadMap } from "./upload.ts";
@@ -224,6 +228,7 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close():
   const { scene, map } = props;
   const actions = useRoomActions();
   const ui = useRoomUi();
+  const findGrid = useFindGrid();
   const squares = imageSquares(map);
   const [across, setAcross] = useState(squares.across);
   const [down, setDown] = useState(squares.down);
@@ -252,15 +257,29 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close():
         help={`${formatPx(map.cellPx)} px per square, first line at ${formatPx(map.originPx.x)}, ${formatPx(map.originPx.y)} of a ${map.widthPx} × ${map.heightPx} image.`}
         wide
       >
-        <Button
-          size="sm"
-          onClick={() => {
-            ui.setTool("grid");
-            props.close();
-          }}
-        >
-          Line up the grid
-        </Button>
+        <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
+          <Button
+            size="sm"
+            onClick={() => {
+              ui.setTool("grid");
+              props.close();
+            }}
+          >
+            Line up the grid
+          </Button>
+          {/* The search's progress and its answer show in Line up grid, which opens over the map it looks at. */}
+          <Button
+            size="sm"
+            title="Look for a grid drawn on the map and line up with it"
+            onClick={() => {
+              findGrid(scene.id);
+              ui.setTool("grid");
+              props.close();
+            }}
+          >
+            Find the grid
+          </Button>
+        </div>
       </SettingRow>
       {/* Counting assumes squares that start at the image's corner. A grid whose first line sits before the image
           only comes from a Universal VTT file, and counting would slide the image half a square under its walls. */}
@@ -343,30 +362,49 @@ function MapImageRow(props: { scene: Scene; close(): void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const warningId = useId();
   useExpansionFocus(playersHere && armed, { inside: fileRef, opener: askRef });
-  const [upload, setUpload] = useState<{ busy: boolean; waiting: boolean; error: string | null }>({ busy: false, waiting: false, error: null });
+  const [upload, setUpload] = useState<{ busy: boolean; waiting: boolean; finding?: boolean; error: string | null }>({ busy: false, waiting: false, error: null });
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
+  const gridStore = useGridStore();
   const phaseCount = scene.phases?.length ?? 0;
 
   const choose = async (file: File) => {
     const abort = new AbortController();
     abortRef.current = abort;
     setUpload({ busy: true, waiting: false, error: null });
+    // A new image is searched for a drawn grid while it uploads, as a new
+    // map scene's is (NewScene.tsx). Only the upload tells whether it is
+    // the old art at another size, which keeps the scene's grid, scaled.
+    let search = searchOnImport({ source: "image", named: nameGivesSize(file.name) }) ? searchGrid({ file }) : null;
+    abort.signal.addEventListener("abort", () => search?.cancel());
     try {
       const asset = await uploadMap(roomId, file, { signal: abort.signal, onWaiting: (waiting) => setUpload((u) => ({ ...u, waiting })) });
+      let answer: SearchDone | null = null;
+      if ((!map || !sameArt(map, asset)) && asset.cellPx === undefined) {
+        search ??= searchGrid({ file });
+        setUpload({ busy: true, waiting: false, finding: true, error: null });
+        answer = await within(search, IMPORT_WAIT_MS);
+      } else search?.cancel();
+      if (abort.signal.aborted) return;
       setUpload({ busy: false, waiting: false, error: null });
       setArmed(false);
       const next = replaceMap(map, asset);
+      const found = importFound(answer, asset.cellPx !== undefined, next);
       // Fog first, so players on this scene never see the map before it.
       if (firstFog && (!playersHere || fogIt)) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { fogEnabled: true } });
       actions.dispatch({ t: "scene.setMap", sceneId: scene.id, map: next });
-      // A replacement keeps the scene as it is. A first image either knows
-      // its scale from its name, so the scene fits it now, or the grid
-      // tool comes up to find the scale (and fits the scene when applied).
+      // A replacement keeps the scene as it is, unless a grid was found on
+      // new art. A first image either knows its scale from its name, so
+      // the scene fits it now, or the grid tool comes up to find the scale
+      // (and fits the scene when applied).
       if (!map && asset.cellPx !== undefined && next.cellPx === asset.cellPx) {
         const bounds = fitBounds(next);
         if (bounds.w !== scene.bounds.w || bounds.h !== scene.bounds.h) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { bounds } });
-      } else if (!map) {
+      } else if (!map || found) {
+        if (found) {
+          const at = { x: next.widthPx / 2, y: next.heightPx / 2 };
+          showOutcome({ actions, store: gridStore, scene: { id: scene.id, bounds: scene.bounds, map: next }, found, fit: true, at, fallback: { cellPx: next.cellPx, originPx: next.originPx } });
+        }
         ui.setTool("grid");
         props.close();
       }
@@ -395,7 +433,7 @@ function MapImageRow(props: { scene: Scene; close(): void }) {
         ...buttonLook("secondary", { disabled: upload.busy }),
       }}
     >
-      {upload.busy ? "Uploading…" : label}
+      {upload.finding ? "Looking for a grid…" : upload.busy ? "Uploading…" : label}
       <input
         ref={fileRef}
         type="file"

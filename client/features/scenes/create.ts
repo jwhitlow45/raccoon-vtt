@@ -126,10 +126,8 @@ export function mapScene(input: { id: string; name: string; asset: MapAsset }): 
  * ratio, so tokens and builds stay on their squares.
  */
 export function replaceMap(old: SceneMap | undefined, asset: MapAsset): SceneMap {
-  if (!old) return initialMap(asset).map;
+  if (!old || !sameArt(old, asset)) return initialMap(asset).map;
   const k = asset.width / old.widthPx;
-  const sameShape = Math.abs(asset.height / old.heightPx - k) < 0.01;
-  if (!sameShape) return initialMap(asset).map;
   return {
     assetId: asset.id,
     widthPx: asset.width,
@@ -137,6 +135,15 @@ export function replaceMap(old: SceneMap | undefined, asset: MapAsset): SceneMap
     cellPx: Math.min(MAX_CELL_PX, Math.max(MIN_CELL_PX, old.cellPx * k)),
     originPx: { x: old.originPx.x * k, y: old.originPx.y * k },
   };
+}
+
+/**
+ * Whether a new image is taken for the old art at another size: the same
+ * shape, to 1%. Anything else starts over from the upload, as a first
+ * image does.
+ */
+export function sameArt(old: SceneMap, asset: MapAsset): boolean {
+  return Math.abs(asset.height / old.heightPx - asset.width / old.widthPx) < 0.01;
 }
 
 /**

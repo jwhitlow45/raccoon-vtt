@@ -2,21 +2,26 @@ import { useState } from "react";
 import { useStore } from "zustand";
 import type { Scene } from "#shared/model.ts";
 import { theme } from "../../lib/theme.ts";
+import { dispatchGesture } from "../../state/actions.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { OptButton, OptionsStrip, StripText, ValueChip } from "../measure/controls.tsx";
-import { calibrationFromBox, fitBounds, nudgeBox, sameCalibration, type CalBox } from "./calibrate.ts";
+import { calibrationFromBox, fitBounds, nudgeBox, sameCalibration, type CalBox, type Calibration } from "./calibrate.ts";
+import { boxAround, gridOps, middleOf } from "./outcome.ts";
 import { useGridStore } from "./store.ts";
+import { useFindGrid } from "./useFindGrid.ts";
 
 /** One canonical pixel per nudge: on the largest maps a thirtieth of a square or less. */
 const STEP = 1;
 
 /**
  * The grid tool's options (docs/design-v1-tool-options.md 9.10): Apply,
- * the nudges behind a chip, and the box's square size. Applying sends one
- * `scene.setGrid` (and, when the scene should match the map, one
- * `scene.update` for its size). Resize scene and Grid lines are always in
- * ⋯. After Apply the line says the grid is saved until the box moves
- * again, since an unavailable button alone did not.
+ * Use default after an import applied a grid it found, Find the grid
+ * (docs/design-v1-grid-detect.md section 6), the nudges behind a chip, and
+ * the box's square size. Applying sends one `scene.setGrid` (and, when
+ * the scene should match the map, one `scene.update` for its size).
+ * Resize scene and Grid lines are always in ⋯. After Apply the line says
+ * the grid is saved until the box moves again, since an unavailable
+ * button alone did not.
  */
 export default function GridOptions() {
   const sceneId = useRoomView((s) => s.sceneId);
@@ -24,7 +29,10 @@ export default function GridOptions() {
   const gridState = useGridStore();
   const box = useStore(gridState, (s) => s.box);
   const fitScene = useStore(gridState, (s) => s.fitScene);
+  const found = useStore(gridState, (s) => s.found);
+  const finding = useStore(gridState, (s) => s.finding);
   const actions = useRoomActions();
+  const findGrid = useFindGrid();
   /** The box last applied, to say so while it stands. */
   const [applied, setApplied] = useState<CalBox | null>(null);
 
@@ -39,6 +47,9 @@ export default function GridOptions() {
   const resize = fitScene && (bounds.w !== scene.bounds.w || bounds.h !== scene.bounds.h);
   const set = (next: CalBox) => gridState.setState({ box: next });
   const saved = applied === box && !changed && !resize;
+  const searching = finding?.sceneId === sceneId;
+  // A search's note stands while the box is where the search left it.
+  const note = found?.sceneId === sceneId && found.box === box ? found : null;
 
   const apply = () => {
     if (changed) actions.dispatch({ t: "scene.setGrid", sceneId, cellPx: cal.cellPx, originPx: cal.originPx });
@@ -46,11 +57,35 @@ export default function GridOptions() {
     setApplied(box);
   };
 
+  /** Back to the grid the scene had before an import applied a found one, as one undo step. */
+  const putBack = (fallback: Calibration) => {
+    dispatchGesture(actions, gridOps({ id: sceneId, bounds: scene.bounds, map }, fallback, true));
+    gridState.setState({ found: null, box: boxAround(fallback, middleOf(box, map)) });
+  };
+
+  const line = searching
+    ? { tone: "status" as const, content: "Looking for a grid…" }
+    : note?.outcome === "applied"
+      ? { tone: "status" as const, content: `Found a grid of ${formatFound(note.cellPx)} px squares.` }
+      : note?.outcome === "offered"
+        ? {
+            tone: "hint" as const,
+            content: note.ownGrid
+              ? `This scene came with its own grid. The lines found make ${formatFound(note.cellPx)} px squares: check the box, then Apply.`
+              : `These lines may be the map's grid: ${formatFound(note.cellPx)} px squares. Check the box, then Apply.`,
+          }
+        : note?.outcome === "none"
+          ? { tone: "status" as const, content: "No grid found. Drag a box over 3 by 3 squares instead." }
+          : saved
+            ? { tone: "status" as const, content: `Grid saved at ${formatPx(cal.cellPx)} px per square.` }
+            : { tone: "hint" as const, content: "Drag a box over 3 by 3 squares of the art, then fit it by its corners." };
+  const fallback = note?.outcome === "applied" ? note.fallback : undefined;
+
   return (
     <OptionsStrip
       tool="Line up grid"
-      task={changed || resize}
-      line={saved ? { tone: "status", content: `Grid saved at ${formatPx(cal.cellPx)} px per square.` } : { tone: "hint", content: "Drag a box over 3 by 3 squares of the art, then fit it by its corners." }}
+      task={changed || resize || searching}
+      line={line}
       slots={[
         {
           id: "apply",
@@ -58,6 +93,24 @@ export default function GridOptions() {
           control: (
             <OptButton tone="primary" disabled={!changed && !resize} ends onClick={apply}>
               Apply
+            </OptButton>
+          ),
+        },
+        fallback && {
+          id: "useDefault",
+          priority: 2,
+          control: (
+            <OptButton label="Put back the grid the scene started with" onClick={() => putBack(fallback)}>
+              Use default
+            </OptButton>
+          ),
+        },
+        {
+          id: "find",
+          priority: 3,
+          control: (
+            <OptButton label="Look for a grid drawn on the map and line up with it" onClick={() => findGrid(sceneId)}>
+              {searching ? "Finding…" : "Find the grid"}
             </OptButton>
           ),
         },
@@ -82,7 +135,7 @@ export default function GridOptions() {
         },
         {
           id: "scale",
-          priority: 3,
+          priority: 4,
           // Tabular figures at the width of the widest value, so a nudge never moves the controls beside it.
           control: (
             <StripText tabular all={[`${formatPx(cal.cellPx)} px per square`, "888.88 px per square"]}>
@@ -123,6 +176,11 @@ function GridLinesToggle(props: { scene: Scene }) {
       Grid lines
     </OptButton>
   );
+}
+
+/** A found square's size in a sentence, to a tenth of a pixel: "70.4", or "70" for 69.998. */
+function formatFound(v: number): string {
+  return String(Math.round(v * 10) / 10);
 }
 
 function formatPx(v: number): string {

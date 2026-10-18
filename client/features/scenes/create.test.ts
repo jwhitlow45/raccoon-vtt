@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { apply, room } from "#shared/testutil.ts";
-import { builderScene, fogsWithFirstMap, guessCellPx, mapScene, matScene, nameFromFile, replaceMap, viewFromCamera } from "./create.ts";
+import { builderScene, fogsWithFirstMap, guessCellPx, mapScene, matScene, nameFromFile, replaceMap, sameArt, viewFromCamera } from "./create.ts";
 
 function valid(scene: unknown) {
   const parsed = clientOpSchema.safeParse({ t: "scene.create", scene });
@@ -69,6 +69,8 @@ describe("new scenes", () => {
     const other = replaceMap(old, { id: "c", width: 1000, height: 1000, cellPx: 50 });
     assert.equal(other.cellPx, 50);
     assert.deepEqual(other.originPx, { x: 0, y: 0 });
+    assert.equal(sameArt(old, { id: "b", width: 1220, height: 845 }), true);
+    assert.equal(sameArt(old, { id: "c", width: 1000, height: 1000 }), false);
   });
 });
 
