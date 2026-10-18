@@ -89,8 +89,8 @@ describe("where the options stand (4.1, 4.3)", () => {
   test("the floor is Draw's priority-1 set as the kit draws it", () => {
     // A value chip (features/measure/controls.tsx chipLook): its 1 px borders, 12 px before its content, 6 px after, a 4 px gap and the 16 px caret.
     const chip = (content: number) => 2 * theme.line.border + theme.space(3) + theme.space(1.5) + theme.space(1) + theme.icon.sm + content;
-    // "Eraser", the widest drawing tool's name, at 14 px weight 600 as Chrome draws it: the tool chip measures 83.4 in the dev room.
-    const eraser = 43.4;
+    // "Eraser", the widest drawing tool's name, at 14 px weight 600 as Chrome draws it in Inter: the tool chip measures 83.5 in the dev room.
+    const eraser = 43.5;
     const set = chip(eraser) + SLOT_GAP + chip(theme.layout.options.disk) + SLOT_GAP + chip(theme.icon.lg) + MORE_ROOM;
     assert.equal(MERGE_MIN, Math.ceil(set));
   });
@@ -183,10 +183,14 @@ describe("the fit (6.3)", () => {
     assert.deepEqual(fit.more, []);
   });
 
-  test("everything fits once compact forms are taken, lowest priority first: the DM's Ruler at 343 keeps its kept rulers' chip in short words", () => {
-    const slots = [slot("shared", 1, 74), slot("keep", 2, 60), slot("clear", 2, 62), slot("kept", 3, 141, { compact: 92 })];
-    assert.equal(ids(fitRow({ room: 343, slots, alwaysMore: false, pins: [] })), "shared keep clear kept:compact");
-    assert.equal(ids(fitRow({ room: 374, slots, alwaysMore: false, pins: [] })), "shared keep clear kept");
+  test("everything fits once compact forms are taken, lowest priority first: the DM's Ruler at 374 keeps its kept rulers' chip in short words", () => {
+    // The DM's Ruler row with two kept rulers, as Inter draws it in the dev room: Shared and Clear with their icons, and "Kept rulers (2)" or "Kept (2)".
+    const slots = [slot("shared", 1, 98), slot("keep", 2, 60.6), slot("clear", 2, 86), slot("kept", 3, 146, { compact: 94 })];
+    assert.equal(ids(fitRow({ room: 403, slots, alwaysMore: false, pins: [] })), "shared keep clear kept");
+    assert.equal(ids(fitRow({ room: 374, slots, alwaysMore: false, pins: [] })), "shared keep clear kept:compact");
+    assert.equal(ids(fitRow({ room: 358, slots, alwaysMore: false, pins: [] })), "shared keep clear kept:compact");
+    // At 343, the pair at 130%, even the short words leave the row 8 px over, so the chip waits behind ⋯.
+    assert.equal(ids(fitRow({ room: 343, slots, alwaysMore: false, pins: [] })), "shared keep clear …");
   });
 
   test("content always in ⋯ skips the first pass and keeps ⋯", () => {
@@ -223,13 +227,13 @@ describe("the fit (6.3)", () => {
   });
 
   test("a slot waits in its chip's popover, and the chip shows its value where the row holds it", () => {
-    // Today's widths (3.4): the shape chip at its widest value, Emanation, and "Emanation 1,000 ft" with the size.
+    // Area's placing row as Inter draws it in the dev room: the shape chip at its widest value, Emanation, and "Emanation 1,000 ft" with the size.
     const slots = [
-      slot("shape", 1, 119, { compact: 44, glyph: 145, hosts: { id: "size", words: 175, glyph: 201 } }),
-      slot("size", 3, 152, { home: "shape" }),
-      slot("place", 1, 63),
-      slot("shared", 4, 74),
-      slot("cancel", 2, 72),
+      slot("shape", 1, 111.4, { compact: 60, glyph: 135.4, hosts: { id: "size", words: 166, glyph: 190 } }),
+      slot("size", 3, 149.9, { home: "shape" }),
+      slot("place", 1, 63.2),
+      slot("shared", 4, 98),
+      slot("cancel", 2, 73),
       slot("spell", 5, 96, { home: "shape", max: 170 }),
     ];
     const roomy = fitRow({ room: 622, slots, alwaysMore: true, pins: [] });
@@ -284,28 +288,28 @@ describe("the fit (6.3)", () => {
 /**
  * Area's row with the From control (docs/design-v1-area-from-character.md
  * 3.6 and Appendix A): each room's row from the widths the dev room's
- * measuring layer gives at 1280 x 800, for a short name and one at the
- * name cap, as the toggle and as the chip, and the disabled "From you".
- * From, Shape and Place stand inline in every room.
+ * measuring layer gives in Inter at 1280 x 800, for a short name and one
+ * at the name cap, as the toggle and as the chip, and the disabled "From
+ * you". From, Shape and Place stand inline in every room.
  */
 describe("Area with the From control (Appendix A)", () => {
   const FROM = {
-    toggle: 104.2,
-    capped: 132.2,
-    chip: 118.2,
-    chipCapped: 146.2,
-    you: 88.7,
+    toggle: 104.4,
+    capped: 131.8,
+    chip: 118.4,
+    chipCapped: 145.8,
+    you: 88.9,
   } as const;
   type Form = keyof typeof FROM;
-  const shape = (hosts: boolean) => slot("shape", 1, 111.2, { compact: 60, glyph: 135.2, ...(hosts ? { hosts: { id: "size", words: 167, glyph: 191 } } : {}) });
+  const shape = (hosts: boolean) => slot("shape", 1, 111.4, { compact: 60, glyph: 135.4, ...(hosts ? { hosts: { id: "size", words: 166, glyph: 190 } } : {}) });
   const from = (form: Form) => slot("from", 1, FROM[form], { compact: theme.touch });
   const placing = (form: Form) => [
     from(form),
     shape(true),
-    slot("size", 3, 152.4, { home: "shape" }),
-    slot("place", 1, 62.9),
-    slot("shared", 4, 74),
-    slot("cancel", 2, 72.3),
+    slot("size", 3, 149.9, { home: "shape" }),
+    slot("place", 1, 63.2),
+    slot("shared", 4, 98),
+    slot("cancel", 2, 73),
     slot("spell", 5, 96, { home: "shape", max: 170 }),
   ];
   const idle = (form: Form) => [from(form), shape(false), slot("spell", 3, 96, { home: "shape", max: 170 })];
@@ -343,12 +347,13 @@ describe("Area with the From control (Appendix A)", () => {
       [[387], "from shape:glyph place …"],
       [[422], "from shape:hosts place …"],
       [[455], "from shape place cancel …"],
-      [[538], "from shape place shared cancel …"],
-      [[591], "from shape:hosts place shared cancel …"],
+      [[538], "from shape:hostsGlyph place cancel …"],
+      [[591], "from shape:glyph place shared cancel …"],
       [[602, 615], "from shape size place cancel …"],
       [[622], "from shape:glyph size place cancel …"],
-      [[715], "from shape:glyph size place shared cancel …"],
-      [[804, 960], "from shape:glyph size place shared cancel spell …"],
+      [[715], "from shape size place shared cancel …"],
+      [[804], "from shape size place shared cancel spell …"],
+      [[960], "from shape:glyph size place shared cancel spell …"],
     ]);
     rows("placing", "chipCapped", [
       [[230, 259, 275, 284], "from:compact shape:compact place …"],
@@ -357,11 +362,11 @@ describe("Area with the From control (Appendix A)", () => {
       [[387], "from shape place …"],
       [[422], "from shape:glyph place …"],
       [[455], "from shape place cancel …"],
-      [[538], "from shape place shared cancel …"],
-      [[591, 602], "from shape:hosts place shared cancel …"],
+      [[538], "from shape:hostsGlyph place cancel …"],
+      [[591, 602], "from shape:glyph place shared cancel …"],
       [[615, 622], "from shape size place cancel …"],
-      [[715], "from shape:glyph size place shared cancel …"],
-      [[804], "from shape size place shared cancel spell …"],
+      [[715], "from shape size place shared cancel …"],
+      [[804], "from shape:glyph size place shared cancel …"],
       [[960], "from shape:glyph size place shared cancel spell …"],
     ]);
   });
@@ -374,20 +379,22 @@ describe("Area with the From control (Appendix A)", () => {
       [[374, 387], "from shape:glyph place …"],
       [[422], "from shape:hosts place …"],
       [[455], "from shape:glyph place cancel …"],
-      [[538], "from shape:glyph place shared cancel …"],
+      [[538], "from shape place shared cancel …"],
       [[591, 602], "from shape size place cancel …"],
       [[615, 622], "from shape:glyph size place cancel …"],
       [[715], "from shape:glyph size place shared cancel …"],
-      [[804, 960], "from shape:glyph size place shared cancel spell …"],
+      [[804], "from shape size place shared cancel spell …"],
+      [[960], "from shape:glyph size place shared cancel spell …"],
     ]);
     rows("placing", "you", [
       [[230, 259], "from:compact shape:compact place …"],
       [[275, 284, 301, 304], "from shape:compact place …"],
-      [[343, 356, 358, 366, 370, 374], "from shape:glyph place …"],
+      [[343], "from shape place …"],
+      [[356, 358, 366, 370, 374], "from shape:glyph place …"],
       [[387], "from shape:hosts place …"],
       [[422], "from shape:glyph place cancel …"],
       [[455], "from shape:hosts place cancel …"],
-      [[538], "from shape:hosts place shared cancel …"],
+      [[538], "from shape:glyph place shared cancel …"],
       [[591, 602, 615, 622], "from shape:glyph size place cancel …"],
       [[715], "from shape:glyph size place shared cancel …"],
       [[804, 960], "from shape:glyph size place shared cancel spell …"],
@@ -419,6 +426,11 @@ describe("Area with the From control (Appendix A)", () => {
       [[343, 356, 358], "from shape:compact spell"],
       [[366, 370, 374], "from shape spell"],
       [[387, 422, 455, 538, 591, 602, 615, 622, 715, 804, 960], "from shape:glyph spell"],
+    ]);
+    rows("idle", "you", [
+      [[230], "from:compact shape:compact spell"],
+      [[259, 275, 284, 301, 304], "from shape:compact spell"],
+      [[343, 356, 358, ...rest], "from shape:glyph spell"],
     ]);
   });
 

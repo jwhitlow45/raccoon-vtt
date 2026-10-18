@@ -19,10 +19,11 @@ export type Arrangement = "stacked" | "floating" | "merged" | "pair";
 /**
  * The least room the merged and pair arrangements give the options: the
  * widest player tool's priority-1 controls in their compact forms with ⋯
- * beside them, which is Draw's. Its tool chip keeps its words (83.4 px at
- * "Eraser"), then the color chip (64) and the stroke's bar (64), two 4 px
- * gaps, and ⋯ with its gap (48): 267.4. optionsLayout.test.ts derives it
- * from the kit's chip and the theme, so the two cannot drift apart.
+ * beside them, which is Draw's. Its tool chip keeps its words (83.5 px at
+ * "Eraser" in Inter), then the color chip (64) and the stroke's bar (64),
+ * two 4 px gaps, and ⋯ with its gap (48): 267.5. optionsLayout.test.ts
+ * derives it from the kit's chip and the theme, so the two cannot drift
+ * apart.
  */
 export const MERGE_MIN = 268;
 
