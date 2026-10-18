@@ -13,8 +13,10 @@ import { ConsoleWatch, openSideTab, OpSocket, reopenRoom, Shots, SocketWatch, st
  * 45 px line of 44 px targets, the tab row and the bar between two panes
  * in one look, the folded party bar's one line whose chips scroll sideways
  * (the fade, the wheel, a swipe and Tab reach every chip, one off the
- * scene included), a long name cut on its chip and never pushing a row's
- * HP past the edge, and two panels on a phone held sideways.
+ * scene included, and Tab both ways at 85% and 130%), the phone toolbar's
+ * picked tool scrolled clear of the same fade at a large interface size,
+ * a long name cut on its chip and never pushing a row's HP past the edge,
+ * and two panels on a phone held sideways.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twenty-three, one file
  * after another. The other environment variables are the smoke run's
@@ -182,8 +184,39 @@ function stripOf(page: Page): Promise<Strip> {
   );
 }
 
-/** The ScrollStrip's fade, in the page's px at an interface size. */
+/** The ScrollStrip's fade in its own px, which the page draws at the interface size: 41.6 px at 130%. */
 const FADE = 32;
+
+/** A button in a ScrollStrip and the strip around it, in the page's px, with whether a fade shows at each end. */
+type InStrip = { left: number; right: number; stripLeft: number; stripRight: number; fadeLeft: boolean; fadeRight: boolean };
+
+function inStrip(button: Locator): Promise<InStrip> {
+  return button.evaluate((node) => {
+    type El = {
+      parentElement: El | null;
+      scrollLeft: number;
+      scrollWidth: number;
+      clientWidth: number;
+      getBoundingClientRect(): { left: number; right: number };
+      ownerDocument: { defaultView: { getComputedStyle(e: unknown): { overflowX: string } } };
+    };
+    const el = node as unknown as El;
+    let strip = el.parentElement;
+    while (strip && el.ownerDocument.defaultView.getComputedStyle(strip).overflowX !== "auto") strip = strip.parentElement;
+    if (!strip) throw new Error("the button stands in no scroll strip");
+    const b = el.getBoundingClientRect();
+    const s = strip.getBoundingClientRect();
+    return { left: b.left, right: b.right, stripLeft: s.left, stripRight: s.right, fadeLeft: strip.scrollLeft > 1, fadeRight: strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 1 };
+  });
+}
+
+/** Inside its strip and clear of each fade that shows, the fade drawn at `zoom`. Within a pixel, as the boxes are drawn on device pixels. */
+function assertClear(at: InStrip, zoom: number, what: string): void {
+  const fade = FADE * zoom;
+  assert.ok(at.left >= at.stripLeft - 0.5 && at.right <= at.stripRight + 0.5, `${what} lies inside the strip`);
+  if (at.fadeLeft) assert.ok(at.left >= at.stripLeft + fade - 1, `${what} starts ${(at.left - at.stripLeft).toFixed(1)} px in, under the ${fade.toFixed(1)} px fade`);
+  if (at.fadeRight) assert.ok(at.right <= at.stripRight - fade + 1, `${what} ends ${(at.stripRight - at.right).toFixed(1)} px short of the edge, under the ${fade.toFixed(1)} px fade`);
+}
 
 async function splitWith(page: Page, top: string, below: string): Promise<void> {
   await openSideTab(page, top);
@@ -390,6 +423,55 @@ describe("raccoon-vtt: the side panel's compact headers", { timeout: 900_000 }, 
     await waitFor("a swipe scrolls the strip", async () => ((await stripOf(tablet)).scrollLeft > 30 ? true : null));
     assert.equal((await stripOf(tablet)).scrollbar, 0, "no scrollbar on a touch screen");
     await touch.close();
+  });
+
+  test("3-ifx-a. at 85% and 130%, Tab and Shift+Tab along the folded line bring each chip clear of the fade, which zooms with the panel", async () => {
+    for (const scale of [0.85, 1.3]) {
+      const size = `${Math.round(scale * 100)}%`;
+      await reloadAt(dm, scale, true);
+      assert.ok(Math.abs((await zoomOf(dm)) - scale) < 0.001, `the side panel at ${size}`);
+      await partyToggle(dm).focus();
+      for (const p of PARTY) {
+        await dm.keyboard.press("Tab");
+        assert.ok(await isFocused(chip(dm, p.name)), `${size}: Tab reaches ${p.name}`);
+        assertClear(await inStrip(chip(dm, p.name)), scale, `${size}, Tab: ${p.name}`);
+      }
+      await dm.keyboard.press("Tab");
+      assert.ok(await isFocused(ask(dm)), `${size}: Ask follows the last chip`);
+      for (const p of PARTY.toReversed()) {
+        await dm.keyboard.press("Shift+Tab");
+        assert.ok(await isFocused(chip(dm, p.name)), `${size}: Shift+Tab reaches ${p.name}`);
+        assertClear(await inStrip(chip(dm, p.name)), scale, `${size}, Shift+Tab: ${p.name}`);
+      }
+      await dm.keyboard.press("Shift+Tab");
+      assert.ok(await isFocused(partyToggle(dm)), `${size}: Party comes before the first chip`);
+    }
+  });
+
+  // At 85% the 320 px phone's toolbar overflows by less than one button, so nothing lies far down it there. Tab at 85% is step 3-ifx-a's.
+  test("3-ifx-b. on a 320 px phone at 115% and 130%, a tool picked by its key from past the toolbar's edge scrolls clear of the fade, and no further", async () => {
+    const phone = await dmContext.newPage();
+    await phone.setViewportSize({ width: 320, height: 568 });
+    const ping = phone.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: "Ping", exact: true });
+    for (const scale of [1.15, 1.3]) {
+      const size = `${Math.round(scale * 100)}%`;
+      // The phone shares the DM's storage, so its next load takes this size.
+      await dm.evaluate((s) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", String(s)), scale);
+      await phone.goto(`${server.origin}/r/${run.roomId}`);
+      await phone.getByRole("status", { name: "Connected" }).first().waitFor();
+      await ping.waitFor();
+      await phone.waitForTimeout(300);
+      const start = await inStrip(ping);
+      assert.ok(!start.fadeLeft, `${size}: the toolbar starts at its start, with Select`);
+      assert.ok(start.right > start.stripRight - FADE * scale, `${size}: Ping starts under the fade or past the edge, ${(start.right - start.stripRight).toFixed(1)} px from it`);
+      await phone.keyboard.press("p");
+      await waitFor(`${size}: P picks Ping`, async () => ((await ping.getAttribute("aria-pressed")) === "true" ? true : null));
+      const at = await inStrip(ping);
+      assertClear(at, scale, `${size}: Ping`);
+      assert.ok(at.right >= at.stripRight - FADE * scale - 1, `${size}: the toolbar scrolled ${(at.stripRight - FADE * scale - at.right).toFixed(1)} px past what Ping needs`);
+      await shots.take(phone, `sideheaders-toolbar-ping-${Math.round(scale * 100)}`);
+    }
+    await phone.close();
   });
 
   test("4. a long name is cut on its chip and never pushes a row's HP past the edge, folded, open or on a phone", async () => {

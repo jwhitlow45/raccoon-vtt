@@ -67,6 +67,12 @@ export function ScrollStrip(props: {
    * buttons are fractions of a pixel wide their rounding left a button up
    * to a pixel and a half under the fade. The strip has no border and no
    * scrollbar, so its box is the part that shows.
+   *
+   * The boxes as drawn are in the page's px, which the interface size's
+   * zoom scales, while scrollLeft and the fade are in the strip's own px.
+   * So each distance is divided by the strip's zoom before it meets them.
+   * Mixed, a button at 130% stayed under the fade, and at 85% an active
+   * tool far down the strip scrolled to well past its edge.
    */
   const reveal = useCallback(
     (target: HTMLElement | null) => {
@@ -74,10 +80,12 @@ export function ScrollStrip(props: {
       if (!el || !target) return;
       const strip = el.getBoundingClientRect();
       const button = target.getBoundingClientRect();
-      const start = button.left - strip.left + el.scrollLeft - FADE_PX;
-      const end = button.right - strip.left + el.scrollLeft + FADE_PX;
+      const zoom = zoomOf(el, strip.width);
+      const width = strip.width / zoom;
+      const start = (button.left - strip.left) / zoom + el.scrollLeft - FADE_PX;
+      const end = (button.right - strip.left) / zoom + el.scrollLeft + FADE_PX;
       if (start < el.scrollLeft) el.scrollLeft = Math.floor(start);
-      else if (end > el.scrollLeft + strip.width) el.scrollLeft = Math.ceil(end - strip.width);
+      else if (end > el.scrollLeft + width) el.scrollLeft = Math.ceil(end - width);
       measure();
     },
     [measure],
@@ -168,6 +176,19 @@ function Chevron(props: { side: "left" | "right"; onPress(): void }) {
       <Icon name={props.side === "left" ? "back" : "chevronRight"} />
     </button>
   );
+}
+
+/**
+ * How many of the page's px each of the element's own px draws as, the
+ * zoom of every piece of chrome around it (features/device/layout.ts
+ * chromeZoom). currentCSSZoom says so exactly. A browser without it gets
+ * the drawn width over offsetWidth instead, which offsetWidth's rounding
+ * to whole pixels leaves off by half a pixel in the strip's width at most.
+ */
+function zoomOf(el: HTMLElement, drawnWidth: number): number {
+  const exact = (el as { currentCSSZoom?: number }).currentCSSZoom;
+  if (typeof exact === "number" && exact > 0) return exact;
+  return el.offsetWidth > 0 && drawnWidth > 0 ? drawnWidth / el.offsetWidth : 1;
 }
 
 /** A mask reads only alpha, so any opaque color shows the strip. */
