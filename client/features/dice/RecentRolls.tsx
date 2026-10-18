@@ -1,5 +1,5 @@
 import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { hitOf, naturalOf, rolledTerms } from "#shared/dice/roll.ts";
+import { naturalOf, rolledTerms } from "#shared/dice/roll.ts";
 import { creatureName, describeEvent, diceText, keptFrom, labelText, memberName, rolledFormula, type LogNames } from "#shared/logText.ts";
 import type { DiceResult, DiceRoll, LogEntry } from "#shared/model.ts";
 import type { DiceRollInput } from "#shared/protocol.ts";
@@ -9,7 +9,7 @@ import { IconButton } from "../../components/IconButton.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
 import { usePanelHere } from "../panels.ts";
-import { againInput, askedRoll, recentRolls, type RecentRow } from "./logic.ts";
+import { againInput, askedRoll, recentRolls, rollVerdict, type RecentRow } from "./logic.ts";
 import type { ThrowOrigin } from "./throw/store.ts";
 import { useThrows, useThrowView } from "./throw/useThrows.ts";
 
@@ -85,18 +85,6 @@ export const FACE_CHIP: CSSProperties = {
 };
 
 const visuallyHidden: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
-
-/** "Natural 20", "Critical hit", "Hit", "Miss", "Pass" or "Fail": what a roll's d20 or its DC or AC says. */
-export function rollVerdict(roll: DiceRoll, row: { dc?: number; ac?: number }): string | null {
-  if (row.ac !== undefined) {
-    const hit = hitOf(roll, row.ac);
-    return hit === "critical" ? "Critical Hit" : hit === "hit" ? "Hit" : "Miss";
-  }
-  const natural = naturalOf(roll);
-  const verdict = row.dc !== undefined ? (roll.fails || roll.total < row.dc ? "Fail" : "Pass") : null;
-  const nat = natural === 20 ? "Natural 20" : natural === 1 ? "Natural 1" : null;
-  return [nat, verdict].filter(Boolean).join(", ") || null;
-}
 
 /**
  * One roll of a row: its total, its creature and label, its dice and its

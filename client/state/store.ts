@@ -20,7 +20,7 @@ import { shareRecord, shareState } from "./share.ts";
 import { backoffDelay, realClock, Timer, type Clock } from "./timing.ts";
 import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
 import { panelById } from "../features/panels.ts";
-import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type Ended, type LocalUi, type OnAnswer, type OpAnswer, type OpRefusal, type PanelHow, type PendingOp, type RoomView, type Toast, type UnknownCause, type You } from "./types.ts";
+import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type Ended, type LocalUi, type OnAnswer, type OpAnswer, type OpRefusal, type PanelHow, type PendingOp, type RoomView, type Toast, type ToastDie, type UnknownCause, type You } from "./types.ts";
 
 export type { PendingOp } from "./types.ts";
 
@@ -125,9 +125,9 @@ export type RoomUi = {
   /**
    * A short note from this page rather than the server, for this device
    * only: why a drag did nothing, or a whisper that arrived while the Log
-   * is closed.
+   * is closed. Someone else's D20 Test leads with its die.
    */
-  notify(text: string, tone?: Toast["tone"]): void;
+  notify(text: string, tone?: Toast["tone"], die?: ToastDie): void;
   dismissToast(id: number): void;
   /** Hides the X-card with this id on this device (features/xcard). */
   dismissXcard(id: number): void;
@@ -384,10 +384,10 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     });
   }
 
-  function pushToast(text: string, tone: Toast["tone"] = "error"): void {
+  function pushToast(text: string, tone: Toast["tone"] = "error", die?: ToastDie): void {
     const toasts = get().toasts;
     if (toasts.some((t) => t.text === text)) return;
-    store.setState({ toasts: [...toasts, { id: ++toastSeq, text, tone }].slice(-MAX_TOASTS) });
+    store.setState({ toasts: [...toasts, { id: ++toastSeq, text, tone, ...(die ? { die } : {}) }].slice(-MAX_TOASTS) });
   }
 
   // ------------------------------------------------------------ sending
@@ -492,8 +492,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     crossWide(wide) {
       setLocal(crossWide(get().local, wide));
     },
-    notify(text, tone = "info") {
-      pushToast(text, tone);
+    notify(text, tone = "info", die) {
+      pushToast(text, tone, die);
     },
     dismissToast(id) {
       const toasts = get().toasts;

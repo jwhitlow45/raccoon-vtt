@@ -32,6 +32,7 @@ import { PcStatsHost } from "../features/pcstats/PcStatsEditor.tsx";
 import { useJobWaiting, usePdfJobRoom } from "../features/handouts/pdf/live.ts";
 import { useJournalUnread } from "../features/journal/store.ts";
 import { useLogUnread } from "../features/log/useLogUnread.ts";
+import { D20Icon } from "../features/dice/throw/D20Icon.tsx";
 import { useRollToasts } from "../features/dice/useRollToasts.ts";
 import { PhaseMenu } from "../features/phases/PhaseMenu.tsx";
 import { FrameViewBar } from "../features/scenes/FrameView.tsx";
@@ -62,7 +63,7 @@ import { TOAST_MS } from "../state/store.ts";
 import { keyText, sidePanelKeysSlot, splitKeysSlot, useShortcutKeys, useShortcuts } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
-import type { Ended, Toast } from "../state/types.ts";
+import type { Ended, Toast, ToastDie } from "../state/types.ts";
 import { barDismiss, dismissal } from "../state/selection.ts";
 import { useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
@@ -1490,8 +1491,54 @@ function ToastNote(props: { toast: Toast; onDismiss(): void }) {
         cursor: "pointer",
       }}
     >
-      {t.text}
+      {t.die ? <ToastD20 die={t.die} text={t.text} /> : t.text}
     </button>
+  );
+}
+
+/** The toast die's size, and its ring's gap and width, in CSS px. */
+const TOAST_DIE_PX = 28;
+const TOAST_RING_GAP_PX = 3;
+const TOAST_RING_PX = 2;
+
+/**
+ * Someone else's D20 Test leads with a flat d20 showing its kept face
+ * (docs/design-v1-roll-animation.md 4), in the app's neutral colors, never
+ * the roller's set. A natural 20 or a critical hit rings once in the accent,
+ * and a natural 1 is outlined in danger. The icon is hidden from a screen
+ * reader, so the verdict follows the text as hidden words.
+ */
+function ToastD20(props: { die: ToastDie; text: string }) {
+  const { die } = props;
+  const outer = TOAST_DIE_PX / 2 + TOAST_RING_GAP_PX + TOAST_RING_PX;
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+      <span data-toast-die={die.face} style={{ position: "relative", flex: "none", width: TOAST_DIE_PX, height: TOAST_DIE_PX }}>
+        <D20Icon size={TOAST_DIE_PX} text={String(die.face)} body={theme.color.surface} edge={theme.color.textMuted} ink={theme.color.text} {...(die.fumble ? { outline: theme.color.danger } : {})} />
+        {die.ring ? (
+          <span
+            aria-hidden="true"
+            data-toast-ring=""
+            style={{
+              position: "absolute",
+              left: TOAST_DIE_PX / 2 - outer,
+              top: TOAST_DIE_PX / 2 - outer,
+              width: 2 * outer,
+              height: 2 * outer,
+              boxSizing: "border-box",
+              borderRadius: theme.radius.round,
+              border: `${TOAST_RING_PX}px solid ${theme.color.accent}`,
+              opacity: 0.95,
+              animation: "rvtt-tray-ring 520ms ease-out both",
+            }}
+          />
+        ) : null}
+      </span>
+      <span>
+        {props.text}
+        {die.verdict ? <span style={VISUALLY_HIDDEN}> {die.verdict}.</span> : null}
+      </span>
+    </span>
   );
 }
 

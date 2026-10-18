@@ -80,7 +80,15 @@ export const EMPTY_EPHEMERAL: Ephemeral = Object.freeze({
   focus: null,
 });
 
-export type Toast = { id: number; text: string; tone: "error" | "info" };
+export type Toast = { id: number; text: string; tone: "error" | "info"; die?: ToastDie };
+
+/**
+ * The flat d20 that leads a toast of someone else's D20 Test
+ * (docs/design-v1-roll-animation.md 4): its kept face, a ring for a natural
+ * 20 or a critical hit against an AC, an outline for a natural 1, and the
+ * verdict's words for a screen reader.
+ */
+export type ToastDie = { face: number; ring: boolean; fumble: boolean; verdict: string | null };
 
 /**
  * Someone tapped the X-card (docs/design-v1-dm-tools.md 3.11). `id` grows by

@@ -343,8 +343,9 @@ summary::-webkit-details-marker {
     transition-duration: 0.01ms !important;
   }
 
-  /* Cut to 0.01 ms, the tray would jump to its faded end. Still, the scrim, the rings and the disc hold for the dice's 2 s, which then go. */
-  [data-dice-tray] * {
+  /* Cut to 0.01 ms, the tray would jump to its faded end. Still, the scrim, the rings and the disc hold for the dice's 2 s, which then go, and a toast's ring holds for its toast. */
+  [data-dice-tray] *,
+  [data-toast-ring] {
     animation: none !important;
   }
 

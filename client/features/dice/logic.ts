@@ -1,6 +1,6 @@
 import { askedCritical } from "#shared/dice/crit.ts";
 import { applyMode, formatFormula, formulaRange, parseFormula, parseRollText, type AdvantageMode } from "#shared/dice/formula.ts";
-import { naturalOf } from "#shared/dice/roll.ts";
+import { hitOf, naturalOf } from "#shared/dice/roll.ts";
 import { critSumText, oneDamage } from "#shared/logText.ts";
 import type { DiceResult, DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
 import type { DiceRollInput } from "#shared/protocol.ts";
@@ -13,6 +13,18 @@ import type { DiceRollInput } from "#shared/protocol.ts";
  */
 
 export type DiceLine = Extract<LogEvent, { type: "dice" }>;
+
+/** "Natural 20", "Critical Hit", "Hit", "Miss", "Pass" or "Fail": what a roll's d20 or its DC or AC says. */
+export function rollVerdict(roll: DiceRoll, row: { dc?: number; ac?: number }): string | null {
+  if (row.ac !== undefined) {
+    const hit = hitOf(roll, row.ac);
+    return hit === "critical" ? "Critical Hit" : hit === "hit" ? "Hit" : "Miss";
+  }
+  const natural = naturalOf(roll);
+  const verdict = row.dc !== undefined ? (roll.fails || roll.total < row.dc ? "Fail" : "Pass") : null;
+  const nat = natural === 20 ? "Natural 20" : natural === 1 ? "Natural 1" : null;
+  return [nat, verdict].filter(Boolean).join(", ") || null;
+}
 export type AnswerLine = Extract<LogEvent, { type: "roll" }>;
 
 export type RecentRow =

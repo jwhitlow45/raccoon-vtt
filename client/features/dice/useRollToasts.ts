@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { hitOf, keptD20 } from "#shared/dice/roll.ts";
 import { compareLogIds } from "#shared/keys.ts";
 import { critSums, labelText, rollToastText, type LogNames } from "#shared/logText.ts";
 import type { LogEntry } from "#shared/model.ts";
 import { useRollToastsOn } from "../device/settings.ts";
+import type { ToastDie } from "../../state/types.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
-import { rollsOf, type DiceLine } from "./logic.ts";
+import { rollsOf, rollVerdict, type DiceLine } from "./logic.ts";
 import { useReceipts, type ReceiptState } from "./useReceipt.ts";
 
 /**
@@ -29,6 +31,22 @@ export function othersRolls(fresh: readonly LogEntry[], me: string): DiceLine[][
     else groups.set(key, [data]);
   }
   return [...groups.values()];
+}
+
+/**
+ * The die a toast of one D20 Test leads with (docs/design-v1-roll-animation.md 4):
+ * an attack, a save, a check or initiative, read by its deciding d20. It
+ * rings for a natural 20, or a critical hit against an AC, and is outlined
+ * for a natural 1. Null for any other toast: damage, several rolls, or a
+ * roll with no deciding d20.
+ */
+export function toastDie(lines: readonly DiceLine[]): ToastDie | null {
+  const line = lines.length === 1 ? lines[0] : undefined;
+  const roll = line?.rolls.length === 1 ? line.rolls[0] : undefined;
+  const d20 = roll ? keptD20(roll) : null;
+  if (!line || !roll || !d20) return null;
+  const critical = line.ac !== undefined && hitOf(roll, line.ac) === "critical";
+  return { face: d20.face, ring: d20.face === 20 || critical, fumble: d20.face === 1, verdict: rollVerdict(roll, line) };
 }
 
 /** How long a batch that toasted is remembered, so its later parts make no second toast. */
@@ -94,7 +112,7 @@ export function useRollToasts(diceShown: boolean): void {
     // Remembered even when not toasted, so a later part of a group seen in the panel stays quiet once it closes.
     const groups = unseenGroups(othersRolls(fresh, me), batches.current, Date.now());
     if (!on || diceShown) return;
-    for (const lines of groups) ui.notify(rollToastText(lines, names));
+    for (const lines of groups) ui.notify(rollToastText(lines, names), "info", toastDie(lines) ?? undefined);
   }, [loaded, log, on, diceShown, me, names, ui]);
 
   const tracker = useReceipts();
