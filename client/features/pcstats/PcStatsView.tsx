@@ -30,40 +30,29 @@ export function PcStatsView(props: { character: Pick<Character, "stats" | "level
       <p style={LINE}>
         <strong>Level {level ?? "not set"}</strong>, proficiency {signed(d.pb)}
       </p>
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ borderCollapse: "collapse", fontSize: theme.font.small, minWidth: "100%" }}>
-          <thead>
-            <tr>
-              <th style={cell(true)}>
-                <span style={HIDDEN}>Ability</span>
-              </th>
-              <th style={cell(true)}>Score</th>
-              <th style={cell(true)}>Mod</th>
-              <th style={cell(true)}>Save</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ABILITY_KEYS.map((a) => {
-              const proficient = stats.saves.includes(a);
-              return (
-                <tr key={a}>
-                  <th scope="row" style={cell(false)}>
-                    <abbr title={ABILITY_NAMES[a]} style={{ textDecoration: "none" }}>
-                      {ABILITY_SHORT[a]}
-                    </abbr>
-                  </th>
-                  <td style={cell(false)}>{stats.abilities[a]}</td>
-                  <td style={cell(false)}>{signed(d.mods[a])}</td>
-                  <td style={{ ...cell(false), fontWeight: proficient ? theme.weight.bold : theme.weight.regular }}>
-                    {signed(d.saves[a].total)}
-                    {proficient ? <span style={HIDDEN}>, proficient</span> : null}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      {/* The six abilities three across, as the 2024 block prints them: about a third of the height of a seven-row table (docs/design-v1-dice-ui.md 6.1). */}
+      <dl style={{ margin: 0, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: theme.space(1) }}>
+        {ABILITY_KEYS.map((a) => {
+          const proficient = stats.saves.includes(a);
+          return (
+            <div key={a} style={{ padding: `${theme.space(1)}px ${theme.space(2)}px`, borderRadius: theme.radius.sm, background: theme.color.surfaceRaised, lineHeight: theme.leading.tight }}>
+              <dt style={{ fontSize: theme.font.tiny, fontWeight: theme.weight.bold, letterSpacing: theme.caps, textTransform: "uppercase", color: theme.color.textMuted }}>
+                <abbr title={ABILITY_NAMES[a]} style={{ textDecoration: "none" }}>
+                  {ABILITY_SHORT[a]}
+                </abbr>
+              </dt>
+              <dd style={{ margin: 0, whiteSpace: "nowrap" }}>
+                <strong style={{ fontSize: theme.font.input }}>{stats.abilities[a]}</strong> <span style={{ color: theme.color.textMuted }}>{signed(d.mods[a])}</span>
+              </dd>
+              <dd style={{ margin: 0, fontSize: theme.font.small, whiteSpace: "nowrap", fontWeight: proficient ? theme.weight.bold : theme.weight.regular }}>
+                <span style={{ color: theme.color.textMuted, fontWeight: theme.weight.regular }}>Save </span>
+                {signed(d.saves[a].total)}
+                {proficient ? <span style={HIDDEN}>, proficient</span> : null}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
       {skills.length > 0 ? (
         <Labeled label="Skills">{skills.map((s) => `${SKILLS[s].name} ${signed(d.skills[s].total)}${stats.skills[s] === "expert" ? " (expertise)" : ""}`).join(", ")}</Labeled>
       ) : null}
@@ -98,17 +87,6 @@ export function PcStatsView(props: { character: Pick<Character, "stats" | "level
 
 const LINE: CSSProperties = { margin: 0 };
 const HIDDEN: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
-
-function cell(head: boolean): CSSProperties {
-  return {
-    padding: "3px 8px",
-    textAlign: "center",
-    borderBottom: `1px solid ${theme.color.border}`,
-    color: head ? theme.color.textMuted : theme.color.text,
-    fontWeight: head ? theme.weight.strong : theme.weight.regular,
-    whiteSpace: "nowrap",
-  };
-}
 
 function Labeled(props: { label: string; children: ReactNode }) {
   return (
