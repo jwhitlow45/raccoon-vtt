@@ -947,7 +947,7 @@ A watchtower stands on a rise above a field, and harpies circle overhead.
 4. Place an archer on the tower. A token placed on raised ground stands on top of it.
 5. Place the harpies and raise them to 40 ft with **+5** in the action bar, or Page Up. Each shows "↑40", with a shadow on the ground under it.
 
-![The watchtower: the rise and the tower with their stairs, Mara on top as the archer, harpies flying at 40 and 30 ft, and the Ruler from Mara down to Thorn reading 50 ft.](dm-guide/heights-build.webp)
+![The watchtower: the rise and the tower with their stairs, Mara on top as the archer, harpies flying at 40 ft, and the Ruler from Mara down to Thorn reading 50 ft.](dm-guide/heights-build.webp)
 
 **Running it**
 
@@ -992,7 +992,7 @@ Bree casts Spirit Guardians and wades into the goblins, while Ivo's owl familiar
 4. Resolve it. For one goblin, select it, roll its Wisdom save from its roll options, and apply Bree's 3d8 radiant damage (half on a pass) with the **Use** chip. For several at once, press **Save and damage** on the aura and **Skip** the rows that weren't affected this time.
 5. When Bree takes damage, her player gets the concentration check. If it fails, delete the aura from the **Areas** panel, because areas don't end on their own when concentration does.
 
-![Spirit Guardians around Bree: the attached aura, the skeletons inside it in the Areas panel, and the reminder's notice as Skeleton 2 walks in.](dm-guide/guardians.webp)
+![Spirit Guardians around Bree among the goblins: the attached aura, the goblins inside it in the Areas panel, and the reminder's notice as Goblin Warrior 1 walks in.](dm-guide/guardians.webp)
 
 **The familiar**
 
@@ -1036,7 +1036,7 @@ This part is for quick lookups during play, starting with the keys that save a D
 
 Press `?` (or open the Menu, then **This device**, then **Show the shortcuts**) for the full list of shortcuts for your role.
 
-![The shortcut list the ? key opens, down to W for full screen: Change beside each key, Reset under the other panel's key after its move to K, and Swap for the side panel's key, since Full screen already has W.](dm-guide/shortcuts.webp)
+![The shortcut list the ? key opens, down to W for full screen: Change beside each key, Reset under Go to the other panel after its move to K, and Swap for Hide or show the side panel, since Full screen already has W.](dm-guide/shortcuts.webp)
 
 These are the keys a DM uses most:
 
