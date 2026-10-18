@@ -529,8 +529,8 @@ Where the action bar opens as a window: on a screen 600 px or wider, or a phone 
 
 | Key | Does | Who |
 | --- | --- | --- |
-| Enter | Save the initiative you typed | everyone, in a row's initiative box |
-| Escape | Drop the initiative you typed | everyone, in a row's initiative box |
+| Enter | Save the Initiative you typed | everyone, in a row's Initiative box |
+| Escape | Drop the Initiative you typed | everyone, in a row's Initiative box |
 | Enter | Go to the next box, and save after the last | DM, while typing several values |
 
 ### Dice

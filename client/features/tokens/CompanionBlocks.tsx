@@ -263,7 +263,7 @@ function NumbersStep(props: {
               ))}
             </ul>
           ) : (
-            <Help>{`${token.name} already has ${whose(props.block)} AC, speeds, senses, Passive Perception and initiative.`}</Help>
+            <Help>{`${token.name} already has ${whose(props.block)} AC, speeds, senses, Passive Perception and Initiative.`}</Help>
           )}
           {/* Read out as it changes: the preview, then "Resizing…" and how the resize came out. */}
           <p role="status" data-size-line="" style={{ margin: 0, overflowWrap: "anywhere" }}>
@@ -284,7 +284,7 @@ function NumbersStep(props: {
           <Help>Temporary HP, conditions and effects stay.</Help>
         </>
       ) : (
-        <Help style={{ overflowWrap: "anywhere" }}>{`Only the stat block is attached. ${token.name} keeps its AC, HP, speeds, senses and initiative.`}</Help>
+        <Help style={{ overflowWrap: "anywhere" }}>{`Only the stat block is attached. ${token.name} keeps its AC, HP, speeds, senses and Initiative.`}</Help>
       )}
     </fieldset>
   );

@@ -449,7 +449,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const sheet = dm.locator('dialog[data-rvtt-sheet][aria-modal="true"]');
     // A value box focused deep in the order scrolls into view under the stuck header (its scroll margin), where a tap reaches it.
     const valueBoxInReach = async (row: number) => {
-      const box = dm.locator("[data-round-section] ol > li").nth(row).getByRole("button", { name: /initiative \d+/ });
+      const box = dm.locator("[data-round-section] ol > li").nth(row).getByRole("button", { name: /Initiative \d+/ });
       await box.focus();
       await dm.waitForTimeout(100);
       return wholeInReach(box);
@@ -725,10 +725,10 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await setUp(dm, dmCdp, { width: 390, height: 844, scale: 1 });
     const section = await openTracker(dm);
     // Auto initiative's heading at the scroller's top: the round section has scrolled past, so its header went with it.
-    await dm.getByRole("heading", { name: "Auto initiative" }).evaluate((h) => (h as unknown as { scrollIntoView(o: object): void }).scrollIntoView({ block: "start" }));
+    await dm.getByRole("heading", { name: "Auto Initiative" }).evaluate((h) => (h as unknown as { scrollIntoView(o: object): void }).scrollIntoView({ block: "start" }));
     const gone = await measure(dm);
-    const auto = await dm.getByRole("heading", { name: "Auto initiative" }).boundingBox();
-    assert.ok(auto && gone.header.bottom <= auto.y + 1, `the header still covers Auto initiative: ${JSON.stringify({ header: gone.header, auto })}`);
+    const auto = await dm.getByRole("heading", { name: "Auto Initiative" }).boundingBox();
+    assert.ok(auto && gone.header.bottom <= auto.y + 1, `the header still covers Auto Initiative: ${JSON.stringify({ header: gone.header, auto })}`);
     await shots.take(dm, "combat-header-gone");
     // Shift+Tab from Auto initiative's first control back into the last rows.
     await dm.getByRole("radio", { name: "By creature" }).focus();
@@ -761,15 +761,15 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
   test("5. the tracker's sections run by use, the roll card under Auto initiative, and a player's run Join the fight first", async () => {
     await setUp(dm, dmCdp, { ...DESK, scale: 1 });
     await openTracker(dm);
-    assert.deepEqual(await headings(dm), ["Auto initiative", "Initiative", "Add to the fight", "Several at once", "HP changes", "Turn timer", "End", "This device"]);
+    assert.deepEqual(await headings(dm), ["Auto Initiative", "Initiative", "Add to the fight", "Several at once", "HP changes", "Turn timer", "End", "This device"]);
     // Twelve goblins with values: re-roll them, and the card of what it rolled sits under the button.
     await dm.getByRole("checkbox", { name: "Re-roll monsters that have a value" }).check();
-    await dm.getByRole("button", { name: /^Auto initiative \(\d+\)/ }).click();
-    const card = dm.getByRole("region", { name: "Auto initiative results" });
+    await dm.getByRole("button", { name: /^Auto Initiative \(\d+\)/ }).click();
+    const card = dm.getByRole("region", { name: "Auto Initiative results" });
     await card.waitFor();
-    const button = await dm.getByRole("button", { name: /^Auto initiative \(\d+\)/ }).boundingBox();
+    const button = await dm.getByRole("button", { name: /^Auto Initiative \(\d+\)/ }).boundingBox();
     const cardBox = await card.boundingBox();
-    assert.ok(button && cardBox && cardBox.y > button.y, "the roll card sits under Auto initiative's button");
+    assert.ok(button && cardBox && cardBox.y > button.y, "the roll card sits under Auto Initiative's button");
     await shots.take(dm, "combat-order-dm");
     await openTracker(ana);
     assert.deepEqual(await headings(ana), ["Several at once", "HP changes", "This device"], "Bree is in the fight already, so Join the fight is gone");
@@ -783,7 +783,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const value = (entryId: string) => dmSocket.state?.encounter?.entries.find((e) => e.id === entryId)?.value;
     // Roll sits beside the value box where an unset row has room, else in the row's options, where a set row's replaces its value.
     const rollRow = async (page: Page, name: string, entryId: string) => {
-      const roll = page.getByRole("button", { name: new RegExp(`^Roll [+−-]\\d+ initiative for ${name}(, replacing -?\\d+)?$`) }).first();
+      const roll = page.getByRole("button", { name: new RegExp(`^Roll [+−-]\\d+ Initiative for ${name}(, replacing -?\\d+)?$`) }).first();
       if (!(await roll.isVisible())) await page.getByRole("button", { name: `${name} options` }).click();
       const before = lines().length;
       await roll.click();
@@ -794,7 +794,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await setUp(dm, dmCdp, { ...DESK, scale: 1 });
     await openTracker(dm);
     // A set row offers Roll only in its options, as "Roll again", so a stray tap never reorders the fight (W7B-P-6).
-    const setRoll = dm.getByRole("button", { name: new RegExp(`^Roll [+−-]\\d+ initiative for ${goblinName(0)}, replacing -?\\d+$`) });
+    const setRoll = dm.getByRole("button", { name: new RegExp(`^Roll [+−-]\\d+ Initiative for ${goblinName(0)}, replacing -?\\d+$`) });
     assert.equal(await setRoll.isVisible(), false, "a set row has no Roll beside its value");
     await rollRow(dm, goblinName(0), "e-g0");
     await dm.locator("[data-round-section]").getByText(/^Roll again, replaces -?\d+$/).first().waitFor();
@@ -1060,8 +1060,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await waitFor("its row", () => dmSocket.state?.encounter?.entries.some((e) => e.tokenId === spirit.id) || null);
     // Its player types its value, and the row reads whose companion it is.
     const row = await rowButton(ana, "Wildfire Spirit");
-    await ana.getByRole("button", { name: /^Wildfire Spirit initiative not set/ }).click();
-    await ana.getByRole("textbox", { name: "Wildfire Spirit initiative" }).fill("13");
+    await ana.getByRole("button", { name: /^Wildfire Spirit Initiative not set/ }).click();
+    await ana.getByRole("textbox", { name: "Wildfire Spirit Initiative" }).fill("13");
     await ana.keyboard.press("Enter");
     await waitFor("its value", () => (dmSocket.state?.encounter?.entries.find((e) => e.tokenId === spirit.id)?.value === 13 ? true : null));
     assert.match((await row.textContent()) ?? "", /Companion of Bree/);

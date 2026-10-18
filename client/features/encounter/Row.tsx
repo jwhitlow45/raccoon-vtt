@@ -555,7 +555,7 @@ function ValueBox(props: { entry: InitEntry; name: string; editable: boolean; ro
           setText(valueText(entry.value));
           setError(null);
         }}
-        aria-label={`${props.name} initiative ${entry.value ?? "not set"}${props.editable ? ", tap to type it" : ""}`}
+        aria-label={`${props.name} Initiative ${entry.value ?? "not set"}${props.editable ? ", tap to type it" : ""}`}
         style={{
           ...boxStyle,
           display: "grid",
@@ -594,7 +594,7 @@ function ValueBox(props: { entry: InitEntry; name: string; editable: boolean; ro
       </Button>
       <input
         autoFocus
-        aria-label={`${props.name} initiative`}
+        aria-label={`${props.name} Initiative`}
         aria-invalid={error ? true : undefined}
         title={error ?? undefined}
         inputMode="numeric"
@@ -747,7 +747,7 @@ function InitiativeRoll(props: { entry: InitEntry; creature: ActorTarget; name: 
       busy={waiting || loading}
       disabled={reason !== null}
       title={reason ?? undefined}
-      aria-label={`${text} initiative for ${props.name}${entry.value === null ? "" : `, replacing ${entry.value}`}`}
+      aria-label={`${text} Initiative for ${props.name}${entry.value === null ? "" : `, replacing ${entry.value}`}`}
       onClick={roll}
       style={{ flex: "none", width: ROLL_PX, padding: `0 ${theme.space(2)}px` }}
     >

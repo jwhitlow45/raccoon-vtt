@@ -721,8 +721,8 @@ export const BEHAVIORS: readonly Behavior[] = [
   { id: "windowResizeKeys", input: "Arrow keys", does: "Resize it 8 px, or 64 px with Shift", roles: EVERYONE, when: "with its corner handle focused, on a computer", device: "keys", surface: "Token window" },
 
   // The initiative tracker: features/encounter/Row.tsx, ValueEntry.tsx.
-  { id: "initEnter", input: "Enter", does: "Save the initiative you typed", roles: EVERYONE, when: "in a row's initiative box", device: "keys", surface: "Initiative" },
-  { id: "initEscape", input: "Escape", does: "Drop the initiative you typed", roles: EVERYONE, when: "in a row's initiative box", device: "keys", surface: "Initiative" },
+  { id: "initEnter", input: "Enter", does: "Save the Initiative you typed", roles: EVERYONE, when: "in a row's Initiative box", device: "keys", surface: "Initiative" },
+  { id: "initEscape", input: "Escape", does: "Drop the Initiative you typed", roles: EVERYONE, when: "in a row's Initiative box", device: "keys", surface: "Initiative" },
   {
     id: "initSeveral",
     input: "Enter",

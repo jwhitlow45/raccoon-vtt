@@ -341,7 +341,7 @@ function PlaceSection(props: { draft: Draft; srd: SrdList; close(): void }) {
       {deleted > 0 ? <Notice>{deleted === 1 ? "1 creature" : `${deleted} creatures`} of a monster deleted from this room will be left out.</Notice> : null}
       <div>
         <Checkbox checked={hidden} onChange={setHidden} label="Hidden from players" help="Reveal them later from their tokens." />
-        {fighting ? <Checkbox checked={addToFight} onChange={setAddToFight} label="Add them to the fight" help="Each gets a row, grouped with the same monsters for one initiative value." /> : null}
+        {fighting ? <Checkbox checked={addToFight} onChange={setAddToFight} label="Add them to the fight" help="Each gets a row, grouped with the same monsters for one Initiative value." /> : null}
       </div>
       {/* One above the other: side by side, the longer label runs past a 360 px side panel. */}
       <div style={{ display: "grid", gap: theme.space(2) }}>

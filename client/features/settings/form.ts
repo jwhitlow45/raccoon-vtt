@@ -78,7 +78,7 @@ export const SETTING_GROUPS: SettingGroup[] = [
         kind: "toggle",
         key: "playersTypeTotals",
         label: "Players may type their roll totals",
-        help: "Players may answer a roll you ask for, or set their initiative, with a total they rolled at the table. Off, they tap Roll and the app rolls for them. On by default.",
+        help: "Players may answer a roll you ask for, or set their Initiative, with a total they rolled at the table. Off, they tap Roll and the app rolls for them. On by default.",
       },
       {
         kind: "toggle",
@@ -113,13 +113,13 @@ export const SETTING_GROUPS: SettingGroup[] = [
         kind: "toggle",
         key: "skipDefeated",
         label: "Skip defeated creatures",
-        help: "Next turn passes over dead creatures in the initiative order, player characters included.",
+        help: "Next turn passes over dead creatures in the Initiative order, player characters included.",
       },
       {
         kind: "toggle",
         key: "monsterInitScore",
-        label: "Use initiative scores for monsters",
-        help: "Monsters added to combat get their fixed initiative score (10 + Dexterity modifier) instead of a typed roll. You can still change it.",
+        label: "Use Initiative scores for monsters",
+        help: "Monsters added to combat get their fixed Initiative score (10 + Dexterity modifier) instead of a typed roll. You can still change it.",
       },
       {
         kind: "toggle",

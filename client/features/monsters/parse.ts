@@ -328,7 +328,7 @@ export function parseStatBlockText(input: string): ParsedStatBlock {
   if (initText) block.initiative = clampInt(parseSigned(initText.replace(/\s/g, "")), -20, 40);
   else {
     block.initiative = abilityMod(block.abilities.dex.score);
-    warnings.push("No initiative was given, so it is the Dexterity modifier.");
+    warnings.push("No Initiative was given, so it is the Dexterity modifier.");
   }
 
   const hp = (values.get("hp") ?? "").match(/^(\d+)?\s*(?:\(([^)]*)\))?/);

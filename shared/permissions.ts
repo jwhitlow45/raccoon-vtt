@@ -795,7 +795,7 @@ export function playersTypeTotals(settings: Partial<Pick<RoomSettings, "playersT
 /** The refusal of a player's typed total while the room has them off. */
 export const NO_TYPED_TOTALS = "The DM has turned off typed totals in this room. Tap Roll instead.";
 /** The refusal of a player's typed initiative while the room has typed totals off. */
-export const NO_TYPED_INITIATIVE = "The DM has turned off typed totals in this room. Roll your initiative instead.";
+export const NO_TYPED_INITIATIVE = "The DM has turned off typed totals in this room. Roll your Initiative instead.";
 
 /**
  * Whether a player's initiative value for a row is a typed one the room

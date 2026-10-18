@@ -133,7 +133,7 @@ describe("pasted stat blocks", () => {
       "No size, type and alignment line was found.",
       "No AC was found.",
       "No ability scores were found.",
-      "No initiative was given, so it is the Dexterity modifier.",
+      "No Initiative was given, so it is the Dexterity modifier.",
       "No Hit Points were found.",
       "No speed was found.",
       "No Passive Perception was given, so it is 10 plus the Wisdom modifier.",
@@ -154,7 +154,7 @@ describe("pasted stat blocks", () => {
       }
       delete expected.xpInLair;
       assert.deepEqual(parsed.block, expected, name);
-      assert.deepEqual(parsed.warnings, ["No initiative was given, so it is the Dexterity modifier.", ...expectedWarnings(block)], name);
+      assert.deepEqual(parsed.warnings, ["No Initiative was given, so it is the Dexterity modifier.", ...expectedWarnings(block)], name);
     }
   });
 });

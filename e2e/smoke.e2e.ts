@@ -552,12 +552,12 @@ describe("raccoon-vtt smoke run", { timeout: 300_000 }, () => {
 
 /** Types a value into a tracker row, the way a person taps the box and types. */
 async function setInitiative(page: Page, name: RegExp, value: string): Promise<void> {
-  const box = page.getByRole("button", { name: new RegExp(`${name.source} initiative not set, tap to type it$`) });
+  const box = page.getByRole("button", { name: new RegExp(`${name.source} Initiative not set, tap to type it$`) });
   await box.click();
-  const input = page.getByRole("textbox", { name: new RegExp(`${name.source} initiative$`) });
+  const input = page.getByRole("textbox", { name: new RegExp(`${name.source} Initiative$`) });
   await input.fill(value);
   await input.press("Enter");
-  await page.getByRole("button", { name: new RegExp(`${name.source} initiative ${value}`) }).waitFor();
+  await page.getByRole("button", { name: new RegExp(`${name.source} Initiative ${value}`) }).waitFor();
 }
 
 async function placeMonster(name: string, cell: { x: number; y: number }): Promise<void> {

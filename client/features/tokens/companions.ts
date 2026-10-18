@@ -135,10 +135,10 @@ export function turnChoices(name: string, what: CompanionWhat): TurnChoice[] {
     {
       value: "shared",
       label: `On ${name}'s turn, listed under ${name}`,
-      help: `It acts on ${name}'s turn and shows under ${name} in the initiative order, like a summoned spirit.`,
+      help: `It acts on ${name}'s turn and shows under ${name} in the Initiative order, like a summoned spirit.`,
     },
-    { value: "none", label: `On ${name}'s turn, not listed`, help: `It acts on ${name}'s turn and stays out of the initiative order, like Spiritual Weapon.` },
-    { value: "own", label: "Its own turn", help: "It rolls its own initiative and joins the fight as a row of its own." },
+    { value: "none", label: `On ${name}'s turn, not listed`, help: `It acts on ${name}'s turn and stays out of the Initiative order, like Spiritual Weapon.` },
+    { value: "own", label: "Its own turn", help: "It rolls its own Initiative and joins the fight as a row of its own." },
   ];
   return what === "effect" ? all.filter((c) => c.value !== "own") : all;
 }

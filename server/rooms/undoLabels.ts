@@ -213,20 +213,20 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     case "encounter.end":
       return "ending the fight";
     case "encounter.add":
-      return "adding to initiative";
+      return "adding to Initiative";
     case "encounter.remove":
-      return "removing from initiative";
+      return "removing from Initiative";
     case "encounter.setValue":
     case "encounter.setValues":
-      return "setting initiative";
+      return "setting Initiative";
     case "encounter.reorder":
-      return "reordering initiative";
+      return "reordering Initiative";
     case "encounter.next":
       return "moving to the next turn";
     case "encounter.prev":
       return "going back a turn";
     case "encounter.update":
-      return "changing an initiative entry";
+      return "changing an Initiative entry";
     case "log.chat":
     case "log.whisper":
       return "sending a message";

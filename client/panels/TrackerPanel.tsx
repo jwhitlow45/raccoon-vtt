@@ -575,7 +575,7 @@ function DmSetup(props: { selectedTokenId: string | null; editingValues: boolean
 
   return (
     <>
-      <Section label="Auto initiative" style={COLUMN}>
+      <Section label="Auto Initiative" style={COLUMN}>
         <AutoInitiativeControls />
         <AutoInitiativeResult />
       </Section>
@@ -598,7 +598,7 @@ function DmSetup(props: { selectedTokenId: string | null; editingValues: boolean
           ) : null}
         </Wrap>
         <Switch
-          label="Monsters use initiative scores"
+          label="Monsters use Initiative scores"
           help="10 + DEX modifier instead of a roll. New monster rows start with it."
           checked={scores}
           onChange={(on) => actions.dispatch({ t: "room.update", settings: { monsterInitScore: on } })}

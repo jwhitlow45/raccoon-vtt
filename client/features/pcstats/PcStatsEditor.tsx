@@ -747,7 +747,7 @@ function OtherNumbers(props: StatsProps) {
     <Group title="Other numbers">
       <NumberRow
         name="Initiative"
-        hint={held.initBonus === d.initiative.total ? partsText(d.initiative) : `${partsText(d.initiative)}. The token’s initiative stops at ${signed(held.initBonus)}.`}
+        hint={held.initBonus === d.initiative.total ? partsText(d.initiative) : `${partsText(d.initiative)}. The token’s Initiative stops at ${signed(held.initBonus)}.`}
         controls={
           <>
             <Checkbox label="Alert: add proficiency" checked={stats.alert === true} onChange={(on) => setStats((s) => withFlag(s, "alert", on))} />
@@ -767,7 +767,7 @@ function OtherNumbers(props: StatsProps) {
       />
       <NumberRow
         name="All checks"
-        hint="Added to every ability check, initiative included"
+        hint="Added to every ability check, Initiative included"
         controls={<IntInput label="All checks" value={d.allChecks} min={-20} max={20} nullable sign onChange={(n) => setStats((s) => withAllBonus(s, "allChecks", n))} />}
       />
       <NumberRow

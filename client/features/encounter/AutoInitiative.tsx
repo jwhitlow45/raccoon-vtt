@@ -135,7 +135,7 @@ export function AutoInitiativeControls() {
             restart();
           }}
         >
-          {waiting ? "Rolling…" : `Auto initiative (${toRoll.length})`}
+          {waiting ? "Rolling…" : `Auto Initiative (${toRoll.length})`}
         </Button>
       </div>
       {!online && !waiting && toRoll.length > 0 ? <Help>{NEEDS_CONNECTION}</Help> : null}
@@ -144,7 +144,7 @@ export function AutoInitiativeControls() {
           {rows.length === 0
             ? "No monsters here to roll for."
             : scores
-              ? "Every monster has a value: this room gives monsters their initiative scores. Turn on re-roll to roll instead."
+              ? "Every monster has a value: this room gives monsters their Initiative scores. Turn on re-roll to roll instead."
               : "Every monster has a value. Turn on re-roll to roll them again."}
         </Help>
       ) : null}
@@ -181,7 +181,7 @@ export function AutoInitiativeResult() {
   );
   if (last.rolled === null) {
     return (
-      <section aria-label="Auto initiative results" style={CARD}>
+      <section aria-label="Auto Initiative results" style={CARD}>
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
           <div role="status" style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere", color: last.error === MAY_HAVE_HAPPENED ? theme.color.warning : theme.color.dangerText }}>
             {last.error}
@@ -201,7 +201,7 @@ export function AutoInitiativeResult() {
   const kept = lines.flatMap((line) => line.rows.filter((r) => changed.has(r.entryId)).map((r) => r.name));
   const note = { color: theme.color.textMuted, fontSize: theme.font.small } as const;
   return (
-    <section aria-label="Auto initiative results" style={CARD}>
+    <section aria-label="Auto Initiative results" style={CARD}>
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: theme.weight.bold, overflowWrap: "anywhere" }}>
@@ -222,7 +222,7 @@ export function AutoInitiativeResult() {
                   {describeRoll(group.roll)}
                 </span>
               ) : (
-                <span style={note}>{rows.length === 1 ? "Takes its group's initiative" : "Take their group's initiative"}, as identical monsters do.</span>
+                <span style={note}>{rows.length === 1 ? "Takes its group's Initiative" : "Take their group's Initiative"}, as identical monsters do.</span>
               )}
               {group?.mixedModifier ? <span style={note}>Their modifiers differ: it adds the one most of them have.</span> : null}
               {group?.mixedExtra ? <span style={note}>Their penalties differ: it adds the one most of them have.</span> : null}
@@ -286,17 +286,17 @@ export function RowRollTools(props: { entry: InitEntry }) {
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(1) }}>
         <span style={small}>
           Initiative modifier {row.modifier < 0 ? `−${-row.modifier}` : `+${row.modifier}`}
-          {noBonusSet(entryActor(facts.view, entry)) ? " (no initiative bonus set)" : ""}
+          {noBonusSet(entryActor(facts.view, entry)) ? " (no Initiative bonus set)" : ""}
         </span>
         <Button size="sm" busy={busy} disabled={!busy && !online} onClick={() => !busy && online && press([row], "each")}>
-          {busy ? "Rolling…" : "Roll initiative"}
+          {busy ? "Rolling…" : "Roll Initiative"}
         </Button>
       </div>
       {!online && !busy ? <Help>{NEEDS_CONNECTION}</Help> : null}
       {grouped.length > 1 ? (
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(1) }}>
           <span style={small}>
-            Shares auto initiative with {grouped.length - 1} identical {grouped.length - 1 === 1 ? "monster" : "monsters"}
+            Shares Auto Initiative with {grouped.length - 1} identical {grouped.length - 1 === 1 ? "monster" : "monsters"}
           </span>
           <Button
             size="sm"
@@ -308,7 +308,7 @@ export function RowRollTools(props: { entry: InitEntry }) {
         </div>
       ) : joinable.length > 1 && ownKey !== undefined ? (
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(1) }}>
-          <span style={small}>Rolls its own auto initiative</span>
+          <span style={small}>Rolls its own Auto Initiative</span>
           <Button
             size="sm"
             busy={regroup.waiting}

@@ -255,7 +255,7 @@ export function pcStatsTooBig(name: string): string {
 
 /** The refusal of a typed initiative or Passive Perception on a character whose block gives them (section 3.5). */
 export function pcNumbersFromBlock(name: string): string {
-  return `${name}'s initiative and Passive Perception come from the stat block. Change them there.`;
+  return `${name}'s Initiative and Passive Perception come from the stat block. Change them there.`;
 }
 
 /** The refusal of a Wild Shape mark anywhere but beside the SRD creature a character's own actor takes the shape of (section 3.6). */

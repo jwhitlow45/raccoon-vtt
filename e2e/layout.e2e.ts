@@ -1174,8 +1174,8 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
 
     await openPanel(phone, "Initiative");
     await modal("Initiative", false);
-    await sheet(phone, "Initiative").getByRole("button", { name: /^Goblin 1 initiative 18, tap to type it$/ }).tap();
-    const editor = sheet(phone, "Initiative").getByRole("textbox", { name: "Goblin 1 initiative", exact: true });
+    await sheet(phone, "Initiative").getByRole("button", { name: /^Goblin 1 Initiative 18, tap to type it$/ }).tap();
+    const editor = sheet(phone, "Initiative").getByRole("textbox", { name: "Goblin 1 Initiative", exact: true });
     await editor.fill("1");
     await view(phone, phoneCdp, short, insets);
     await modal("Initiative", true);

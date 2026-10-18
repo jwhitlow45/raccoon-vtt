@@ -108,7 +108,7 @@ export function ValueEntry(props: { entries: InitEntry[]; onDone(): void }) {
               ±
             </Button>
             <Input
-              aria-label={`${field.label} initiative`}
+              aria-label={`${field.label} Initiative`}
               error={!!errors[field.key]}
               inputMode="numeric"
               enterKeyHint="next"
