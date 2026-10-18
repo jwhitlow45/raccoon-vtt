@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type Route } from "playwright-core";
-import { ConsoleWatch, linuxFontTodo, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The token panel, the stat summary and AC on tokens
@@ -1427,7 +1427,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await shots.take(dm, "tokenpanel-dm-group-bar");
   });
 
-  test("9c. sizes on the fly (docs/design-v1-token-window.md 8): the DM's steps and Stats, Pat's growth away from walls and back, no room in a corridor, undo keeping damage, an unchecked scene, a locked and a Custom token, a turn's trail kept through a resize, and the row on phones", { todo: linuxFontTodo("in Roboto, the Size stepper fits beside its label at 320 x 480 and 130%, so the row does not wrap") }, async () => {
+  test("9c. sizes on the fly (docs/design-v1-token-window.md 8): the DM's steps and Stats, Pat's growth away from walls and back, no room in a corridor, undo keeping damage, an unchecked scene, a locked and a Custom token, a turn's trail kept through a resize, and the row on phones", async () => {
     const SIZES = { w: 20, h: 14 };
     const sizes = { sceneId: randomUUID(), thorn: randomUUID(), goblin: randomUUID(), owl: randomUUID() };
     const wall = { kind: "wall" } as const;
@@ -1634,7 +1634,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await ops.send({ t: "encounter.end" });
     await ops.send({ t: "token.update", tokenId: sizes.thorn, patch: { size: "medium", x: 4, y: 4 } });
 
-    // On phones: the row's buttons take a tap with no sideways scroll, wrapped under the label on the narrowest.
+    // On phones: the row's buttons take a tap with no sideways scroll, and the stepper stays on its label's line or wraps under it, right-aligned (docs/design-v1-token-window.md 8, the stepper row). Whether it wraps at 320 px and 130% depends on the font's widths, so either holds there.
     for (const view of [
       { width: 844, height: 390, scale: 1, insets: { side: 47, bottom: 21 } },
       { width: 320, height: 480, scale: 1.3 },
@@ -1655,8 +1655,15 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       assert.equal(wide, false, `${label}: the window scrolls sideways`);
       const words = await rectOf(row.getByText("Size", { exact: true }));
       const stepper = await rectOf(row.getByRole("button", { name: "One size larger" }));
-      if (view.width === 320) assert.ok(stepper.top >= words.bottom - 1, `${label}: the stepper does not wrap under its label`);
-      else assert.ok(Math.abs(stepper.top + (stepper.bottom - stepper.top) / 2 - (words.top + (words.bottom - words.top) / 2)) < 12, `${label}: the stepper left its label's line`);
+      const onLine = Math.abs(stepper.top + (stepper.bottom - stepper.top) / 2 - (words.top + (words.bottom - words.top) / 2)) < 12;
+      const under = stepper.top >= words.bottom - 1;
+      if (view.width === 320) {
+        assert.ok(onLine || under, `${label}: the stepper is neither on its label's line nor under it`);
+        if (under) {
+          const end = await rectOf(row);
+          assert.ok(Math.abs(stepper.right - end.right) <= 1, `${label}: the wrapped stepper is not right-aligned`);
+        }
+      } else assert.ok(onLine, `${label}: the stepper left its label's line`);
       await shots.take(player, `token-window-size-row-${view.width}x${view.height}-${Math.round(view.scale * 100)}`);
       await thorn.getByRole("button", { name: "Close", exact: true }).first().click();
     }

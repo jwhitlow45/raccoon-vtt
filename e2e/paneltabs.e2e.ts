@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, linuxFontTodo, openSideTab, OpSocket, pagePoint, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, Touches, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pagePoint, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, Touches, waitFor, type Server } from "./harness.ts";
 
 /**
  * The side panel's tabs in one row with a grouped More menu
@@ -490,7 +490,7 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     await pat.keyboard.press("Escape");
   });
 
-  test("6. hidden and shown: focus on More, the menu closed, and a large phone held sideways cuts a name and names it above the panel", { todo: linuxFontTodo("in Roboto, Encounters fits in More at 932 x 430, so no name is cut. Test 8 cuts one with a wide font") }, async () => {
+  test("6. hidden and shown: focus on More, the menu closed, and a large phone held sideways cuts a name and names it above the panel", async () => {
     await openSideTab(dm, "Monsters");
     await hidePanels(dm).click();
     await sidePanel(dm).waitFor({ state: "hidden" });

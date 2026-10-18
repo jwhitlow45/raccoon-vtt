@@ -9,21 +9,22 @@ import { P1, actor, character, companionBlock, customMonster, room, token } from
 import { defenseLines, hpUnits, linkedBlockState, moreStatsShown, saveUnits, shortSplit, speedUnits, unitText, validSheetUrl, vitals, type VitalItem, type VitalUnit } from "./statSummary.ts";
 
 /*
- * Arial's advance widths in ems, the face the canvas measures labels in
- * (canvas/measureText.ts), for the characters the vitals use. Node has no
- * canvas, and its flat fallback of 0.58 em a character overstates narrow
- * letters by a third. A unit's label is regular and its value at weight
- * 600, which runs about 6% wider.
+ * Inter's advance widths in ems at text size (its optical size 14), the
+ * interface font the vitals draw in (client/lib/interFont.ts), for the
+ * characters they use. Node has no font to measure, and its flat 0.6 em a
+ * character overstates narrow letters by a third. The vitals line asks for
+ * tabular digits, each 0.648 em. A unit's label is regular and its value at
+ * weight 600, which runs about 2% wider.
  */
-const ARIAL: Record<string, number> = {
-  " ": 0.278, ",": 0.278, "/": 0.278, "+": 0.584, "(": 0.333, ")": 0.333, "%": 0.889, "↗": 1,
-  ...Object.fromEntries([..."0123456789"].map((d) => [d, 0.556])),
-  a: 0.556, b: 0.556, c: 0.5, d: 0.556, e: 0.556, f: 0.278, g: 0.556, h: 0.556, i: 0.222, k: 0.5, l: 0.222, m: 0.833, n: 0.556, o: 0.556, p: 0.556,
-  r: 0.333, s: 0.5, t: 0.278, u: 0.556, v: 0.5, w: 0.722, y: 0.5, A: 0.667, C: 0.722, D: 0.722, H: 0.722, O: 0.778, P: 0.667, S: 0.667,
+const INTER: Record<string, number> = {
+  " ": 0.281, ",": 0.288, "/": 0.36, "+": 0.648, "(": 0.365, ")": 0.365, "%": 0.982, "↗": 0.775,
+  ...Object.fromEntries([..."0123456789"].map((d) => [d, 0.648])),
+  a: 0.562, b: 0.612, c: 0.571, d: 0.612, e: 0.583, f: 0.37, g: 0.613, h: 0.591, i: 0.242, k: 0.549, l: 0.242, m: 0.876, n: 0.591, o: 0.6, p: 0.612,
+  r: 0.376, s: 0.528, t: 0.327, u: 0.591, v: 0.562, w: 0.818, y: 0.562, A: 0.69, C: 0.73, D: 0.722, H: 0.743, O: 0.765, P: 0.639, S: 0.642,
 };
-const ems = (text: string) => [...text].reduce((w, ch) => w + (ARIAL[ch] ?? 0.6), 0);
+const ems = (text: string) => [...text].reduce((w, ch) => w + (INTER[ch] ?? 0.6), 0);
 const unitWidth = (unit: VitalUnit) =>
-  unit.kind === "text" ? (ems(unit.label ? `${unit.label} ` : "") + ems(`${unit.value}${unit.comma ? "," : ""}`) * 1.06) * 14 : ems(unitText(unit)) * 14 * 1.06;
+  unit.kind === "text" ? (ems(unit.label ? `${unit.label} ` : "") + ems(`${unit.value}${unit.comma ? "," : ""}`) * 1.02) * 14 : ems(unitText(unit)) * 14 * 1.02;
 
 const keys = (items: readonly VitalItem[]) => items.map((i) => i.key);
 const words = (item: VitalItem | undefined) => item?.units.map(unitText) ?? [];
@@ -137,13 +138,13 @@ describe("the vitals' units", () => {
     assert.deepEqual(stable.at(-1), { kind: "tag", text: "Stable", tone: "warning" });
   });
 
-  test("no unit is wider than about 140 px, the largest numbers included", () => {
+  test("no unit is wider than the narrowest box it shows in, the largest numbers included", () => {
     const big = actor({ ac: 100, hp: { cur: 100000, max: 100000, temp: 100000 }, speeds: { walk: 1000, fly: 1000, swim: 1000, climb: 1000, burrow: 1000, hover: true }, passivePerception: 60 });
     const items = vitals({ actor: big, token: { kind: "monster", hpVisibility: "exact" }, fullAccess: true, place: "bar" });
     for (const unit of items.flatMap((i) => i.units)) {
       const w = unitWidth(unit);
-      // About 140: "Passive Perception 60" draws a fraction over it, and the narrowest box is 233 px.
-      assert.ok(w <= 145, `"${unitText(unit)}" is ${Math.round(w)} px`);
+      // The compact bar at 480 x 320 at 130% gives its content 234 px (docs/design-v1-token-panel.md 3.12). The widest unit, "Passive Perception 60", is about 150.
+      assert.ok(w <= 234, `"${unitText(unit)}" is ${Math.round(w)} px`);
     }
     assert.ok(unitWidth({ kind: "text", label: "HP", value: "100000/100000" }) >= 120, "the HP unit is about 130 px");
   });

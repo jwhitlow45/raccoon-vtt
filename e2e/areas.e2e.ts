@@ -8,7 +8,7 @@ import { chromium, type Browser, type BrowserContext, type CDPSession, type Loca
 import type { AreaTemplate, Token } from "../shared/model.ts";
 import { footprintRect } from "../shared/rules/footprint.ts";
 import { cubeCenter } from "../client/features/areas/placement.ts";
-import { ConsoleWatch, dragCells, linuxFontTodo, OpSocket, openSideTab, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragCells, OpSocket, openSideTab, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * The area tool's From control end to end
@@ -627,7 +627,7 @@ describe("raccoon-vtt an area from your character", { timeout: 900_000 }, () => 
     await pickTool(dm, "Select");
   });
 
-  test("11. at 320 x 568 at 130%, idle and placing, the square, the shape glyph and Place inline at Appendix A's widths, for a short and a ten-character name", { todo: linuxFontTodo("in Roboto, Place measures 60.6 px against the 62.9 ± 1 that Appendix A measured in San Francisco") }, async () => {
+  test("11. at 320 x 568 at 130%, idle and placing, the square, the shape glyph and Place inline at Appendix A's widths, for a short and a ten-character name", async () => {
     for (const name of ["Thorn", "Kethryllia"]) {
       await ops.send({ t: "character.update", characterId: run.thornChar, patch: { name } });
       await ops.send({ t: "token.update", tokenId: run.thorn, patch: { name } });
