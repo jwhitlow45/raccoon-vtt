@@ -601,7 +601,7 @@ function Details(props: { draft: StatBlock; set(patch: Partial<StatBlock>): void
       <Text label="Languages" value={draft.languages} onChange={(languages) => set({ languages })} placeholder="Common, Draconic" />
       <Row min={96}>
         <Choice label="CR" value={draft.cr} options={CR_OPTIONS} onChange={(cr) => props.setDraft((d) => withCr(d, cr))} />
-        <Num label="XP" value={draft.xp} min={0} max={1_000_000} onChange={(xp) => set({ xp: xp ?? 0 })} hint={`Proficiency bonus +${proficiencyBonus(draft.cr)}`} />
+        <Num label="XP" value={draft.xp} min={0} max={1_000_000} onChange={(xp) => set({ xp: xp ?? 0 })} hint={`Proficiency Bonus +${proficiencyBonus(draft.cr)}`} />
         <Num label="XP in lair" value={draft.xpInLair} min={0} max={1_000_000} optional onChange={(xpInLair) => set({ xpInLair })} />
       </Row>
     </Group>

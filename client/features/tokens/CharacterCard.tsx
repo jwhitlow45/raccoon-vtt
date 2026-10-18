@@ -90,7 +90,7 @@ export function CharacterCard(props: { character: Character }) {
           </FieldRow>
         ) : null}
         {access.canEdit("level") ? (
-          <FieldRow label="Level" hint={access.dm ? "The encounter builder's XP budget counts it. Sets the proficiency bonus too." : "Sets the proficiency bonus too."}>
+          <FieldRow label="Level" hint={access.dm ? "The encounter builder's XP budget counts it. Sets the Proficiency Bonus too." : "Sets the Proficiency Bonus too."}>
             <NumberField label="Character level" value={character.level} min={1} max={20} nullable placeholder="Not set" onCommit={(level) => update({ level })} />
           </FieldRow>
         ) : null}

@@ -29,7 +29,7 @@ export function PcStatsView(props: { character: Pick<Character, "stats" | "level
   return (
     <div data-pc-stats="" style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14, lineHeight: 1.45, overflowWrap: "anywhere" }}>
       <p style={LINE}>
-        <strong>Level {level ?? "not set"}</strong>, proficiency {signed(d.pb)}
+        <strong>Level {level ?? "not set"}</strong>, PB {signed(d.pb)}
       </p>
       <AbilityGrid abilities={ABILITY_KEYS.map((a) => ({ key: a, score: String(stats.abilities[a]), mod: signed(d.mods[a]), save: signed(d.saves[a].total), proficient: stats.saves.includes(a) }))} />
       {skills.length > 0 ? (

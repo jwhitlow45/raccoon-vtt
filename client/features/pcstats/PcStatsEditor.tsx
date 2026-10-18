@@ -506,7 +506,7 @@ function PasteStep(props: { text: string; onText(text: string): void; level: num
         placeholder={"Bree Tallow\nMedium Humanoid, Neutral Good\nAC 15  Initiative +3 (13)\n…"}
         style={{ width: "100%", fontFamily: theme.font.mono }}
       />
-      {props.level === undefined ? <Notice tone="warning">{`Set ${whose(props.name)} level first, so proficiency reads right.`}</Notice> : null}
+      {props.level === undefined ? <Notice tone="warning">{`Set ${whose(props.name)} level first, so the Proficiency Bonus reads right.`}</Notice> : null}
     </div>
   );
 }
@@ -638,9 +638,9 @@ function LevelRow(props: { draft: PcDraft; onLevel(level: number | undefined): v
         </label>
         {/* Wide enough for "Not set" whole at 16 px, which a two-digit field cuts to "Not se". */}
         <IntInput id={id} value={props.draft.level} min={1} max={20} nullable placeholder="Not set" width={96} onChange={(n) => props.onLevel(n ?? undefined)} />
-        <span style={{ color: theme.color.textMuted }}>Proficiency {signed(pb)}</span>
+        <span style={{ color: theme.color.textMuted }}>PB {signed(pb)}</span>
       </div>
-      {props.draft.level === undefined ? <Help>Level not set: proficiency +2.</Help> : null}
+      {props.draft.level === undefined ? <Help>Level not set: PB +2.</Help> : null}
     </div>
   );
 }
@@ -705,7 +705,7 @@ function Skills(props: StatsProps) {
     });
   return (
     <Group title="Skills">
-      <Checkbox label="Jack of All Trades" help="Half the proficiency bonus, rounded down, on every skill with neither" checked={stats.jack === true} onChange={(on) => setStats((s) => withFlag(s, "jack", on))} />
+      <Checkbox label="Jack of All Trades" help="Half the Proficiency Bonus, rounded down, on every skill with neither" checked={stats.jack === true} onChange={(on) => setStats((s) => withFlag(s, "jack", on))} />
       {SKILL_KEYS.map((skill) => (
         <NumberRow
           key={skill}
@@ -750,7 +750,7 @@ function OtherNumbers(props: StatsProps) {
         hint={held.initBonus === d.initiative.total ? partsText(d.initiative) : `${partsText(d.initiative)}. The token’s Initiative stops at ${signed(held.initBonus)}.`}
         controls={
           <>
-            <Checkbox label="Alert: add proficiency" checked={stats.alert === true} onChange={(on) => setStats((s) => withFlag(s, "alert", on))} />
+            <Checkbox label="Alert: add Proficiency Bonus" checked={stats.alert === true} onChange={(on) => setStats((s) => withFlag(s, "alert", on))} />
             <TotalInput label="Initiative" number={d.initiative} onTotal={total({ kind: "init" })} />
           </>
         }

@@ -45,7 +45,7 @@ export function cantripTier(level: number | undefined): number {
   return l >= 17 ? 4 : l >= 11 ? 3 : l >= 5 ? 2 : 1;
 }
 
-/** One part of a derived number, for the editor's hint: "DEX +2", "proficiency +3". A fixed part prints as its value alone: "8". */
+/** One part of a derived number, for the editor's hint: "DEX +2", "PB +3". A fixed part prints as its value alone: "8". */
 export type PcPart = { label: string; value: number; fixed?: true };
 
 /** A number as the rules give it (`base`), the stored adjustment, and the total a field shows. */
@@ -112,7 +112,7 @@ function derive(stats: PcStats, level: number, mods_?: Partial<Record<AbilityKey
     saves[a] = number(
       nonZero([
         { label: ABILITY_ABBR[a], value: mod },
-        { label: "proficiency", value: proficient ? pb : 0 },
+        { label: "PB", value: proficient ? pb : 0 },
         { label: "all saves", value: allSaves },
       ]),
       adjust.saves?.[a] ?? 0,
@@ -125,7 +125,7 @@ function derive(stats: PcStats, level: number, mods_?: Partial<Record<AbilityKey
     const marked = stats.skills[s];
     const skillLevel: SkillLevel = marked ?? (stats.jack ? "jack" : "none");
     const value = skillLevel === "expert" ? 2 * pb : skillLevel === "prof" ? pb : skillLevel === "jack" ? Math.floor(pb / 2) : 0;
-    const label = skillLevel === "expert" ? "expertise" : skillLevel === "jack" ? "Jack of All Trades" : "proficiency";
+    const label = skillLevel === "expert" ? "expertise" : skillLevel === "jack" ? "Jack of All Trades" : "PB";
     skills[s] = {
       ...number(
         nonZero([
@@ -164,14 +164,14 @@ function derive(stats: PcStats, level: number, mods_?: Partial<Record<AbilityKey
         [
           { label: "8", value: 8, fixed: true },
           { label: ABILITY_ABBR[caster], value: mod },
-          { label: "proficiency", value: pb },
+          { label: "PB", value: pb },
         ],
         adjust.spellDc ?? 0,
       ),
       attack: number(
         [
           { label: ABILITY_ABBR[caster], value: mod },
-          { label: "proficiency", value: pb },
+          { label: "PB", value: pb },
         ],
         adjust.spellAttack ?? 0,
       ),

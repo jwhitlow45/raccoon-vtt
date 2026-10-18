@@ -14,12 +14,12 @@ import type { DefenseLine } from "../tokens/statSummary.ts";
  * number into a button.
  */
 
-/** A part as the editor's hint lists it: "DEX +2", "proficiency +3", and a fixed part as its value: "8". */
+/** A part as the editor's hint lists it: "DEX +2", "PB +3", and a fixed part as its value: "8". */
 export function partText(part: PcPart): string {
   return part.fixed ? String(part.value) : `${part.label} ${signed(part.value)}`;
 }
 
-/** A number's parts: "DEX +2, proficiency +3, other +1". */
+/** A number's parts: "DEX +2, PB +3, other +1". */
 export function partsText(number: PcNumber): string {
   return number.parts.map(partText).join(", ");
 }

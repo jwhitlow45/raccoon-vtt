@@ -45,8 +45,8 @@ describe("the bar's saves and defense lines from a block", () => {
 
   test("a number's parts as the editor's hint lists them", () => {
     const d = pcDerived({ ...BLOCK, abilities: { ...BLOCK.abilities, wis: 14 }, skills: { perception: "prof" }, spellAbility: "wis", adjust: { passive: 1 } }, 5);
-    assert.equal(partsText(d.skills.perception), "WIS +2, proficiency +3");
+    assert.equal(partsText(d.skills.perception), "WIS +2, PB +3");
     assert.equal(partsText(d.passive), "10, Perception +5, other +1");
-    assert.equal(partsText(d.spell!.dc), "8, WIS +2, proficiency +3");
+    assert.equal(partsText(d.spell!.dc), "8, WIS +2, PB +3");
   });
 });
