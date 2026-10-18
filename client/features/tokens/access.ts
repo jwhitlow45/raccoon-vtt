@@ -69,6 +69,16 @@ export function ownsToken(view: View, memberId: MemberId | null | undefined, tok
   return character !== undefined && listed(character.ownerIds, memberId);
 }
 
+/**
+ * Everyone who owns a token, directly or through its character, each once,
+ * as ownsToken counts them. The Owners group's folded summary reads it, so
+ * a PC whose player owns it only through the character card never reads
+ * "None".
+ */
+export function tokenOwnerIds(view: View, token: Pick<Token, "ownerIds" | "actor">): MemberId[] {
+  return [...new Set([...(token.ownerIds ?? []), ...(characterOf(view, token)?.ownerIds ?? [])])];
+}
+
 export function ownsCharacter(memberId: MemberId | null | undefined, character: Pick<Character, "ownerIds">): boolean {
   return listed(character.ownerIds, memberId);
 }

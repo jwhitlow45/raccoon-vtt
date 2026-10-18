@@ -19,7 +19,7 @@ import { ImagePreview } from "../features/images/IconDisk.tsx";
 import { RangeRingsSection } from "../features/measure/RangeRingsSection.tsx";
 import { statBlockShown } from "../features/monsters/statBlockLink.ts";
 import { GroundNotice } from "../features/movement/GroundNotice.tsx";
-import { ownsCharacter, tokenAccess, type TokenAccess } from "../features/tokens/access.ts";
+import { ownsCharacter, tokenAccess, tokenOwnerIds, type TokenAccess } from "../features/tokens/access.ts";
 import { useAltImages } from "../features/tokens/AltImages.tsx";
 import { CompanionOwners, CompanionSection, MakeCompanion, followsPartyHp } from "../features/tokens/CompanionsSection.tsx";
 import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
@@ -531,8 +531,11 @@ function Owners(props: { token: Token; update(patch: TokenPatch): void; group: {
       </Group>
     );
   }
+  const everyone = tokenOwnerIds({ characters: character ? { [character.id]: character } : {} }, token)
+    .map((id) => members?.[id]?.name)
+    .filter((n): n is string => !!n);
   return (
-    <Group label="Owners" {...props.group} summary={names.length > 0 ? names.join(", ") : "None"}>
+    <Group label="Owners" {...props.group} summary={everyone.length > 0 ? everyone.join(", ") : "None"}>
       <Note>Owners can move it and edit what their role allows.</Note>
       <div style={{ display: "grid" }}>
         {list.map((m) => (

@@ -5,7 +5,7 @@ import { projectState } from "#shared/project.ts";
 import type { ActorPatch, TokenPatch } from "#shared/protocol.ts";
 import type { RoomState } from "#shared/model.ts";
 import { DM, P1, P2, character, companionBlock, room, token } from "#shared/testutil.ts";
-import { characterAccess, editsPcStats, ownsToken, tokenAccess } from "./access.ts";
+import { characterAccess, editsPcStats, ownsToken, tokenAccess, tokenOwnerIds } from "./access.ts";
 import { resizePatch } from "./resize.ts";
 
 const deps = { canUseAsset: () => true };
@@ -86,6 +86,14 @@ describe("ownership", () => {
     assert.equal(ownsToken(state, "p1", state.tokens.goblin!), false);
     assert.equal(ownsToken(state, "p2", state.tokens.pc!), false);
     assert.equal(ownsToken(state, null, state.tokens.pc!), false);
+  });
+
+  test("a token's owners count those through its character, each once, so a PC played through its card has one", () => {
+    const state = fixture();
+    assert.deepEqual(tokenOwnerIds(state, state.tokens.pc!), ["p1"]);
+    assert.deepEqual(tokenOwnerIds(state, { ...state.tokens.pc!, ownerIds: ["p2", "p1"] }), ["p2", "p1"]);
+    assert.deepEqual(tokenOwnerIds(state, state.tokens.familiar!), ["p1"]);
+    assert.deepEqual(tokenOwnerIds(state, state.tokens.goblin!), []);
   });
 
   test("a player's projection of someone else's token has no owner list, and that means not theirs", () => {
