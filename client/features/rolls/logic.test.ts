@@ -1015,6 +1015,7 @@ describe("the card's one answer path (docs/design-v1-roll-request.md 5.2, 5.6)",
     assert.equal(chipName(seen, ["x"]), "x Open to ask the DM to change it.");
     const hidden = { test: DEX_SAVE, dcShown: false, dcHidden: true as const, resultShown: true, targets: [{ characterId: "ayla", total: 9, result: "fail" as const, tag: "t" }] };
     assert.equal(chipName(hidden, ["x"]), "x Open to ask the DM to fix it.");
+    assert.equal(chipName(hidden, [chipLine(hidden, hidden.targets[0]!)]), "Dex save: sent 9. Fail. Final. Open to ask the DM to fix it.", "the ask said once (LP7-DICE-12)");
     assert.equal(chipName({ targets: hidden.targets, resultShown: true }, ["x"]), "x Open to change it.", "with the DC shown a typed answer may change");
   });
 

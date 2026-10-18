@@ -17,8 +17,9 @@ import { focusInView, usePopoverContext } from "./Popover.tsx";
  * `role="menu"` named by `label`, its items `menuitemradio`, the one in
  * use checked, since choosing among them is one choice. An item may be a
  * `menuitemcheckbox` instead, a switch of its own beside that choice, such
- * as More's "Two panels" (docs/design-v1-split-panel.md 6), and any item
- * may be disabled: it takes focus, so its description is heard, and picks
+ * as More's "Two panels" (docs/design-v1-split-panel.md 6), or a plain
+ * `menuitem` in a menu of actions with no choice to hold, such as a roll
+ * card's asks of the DM, and any item may be disabled: it takes focus, so its description is heard, and picks
  * nothing. A section's
  * heading is hidden text that names its `role="group"`, and a section may
  * start after a `role="separator"` line. Keys (components/menuKeys.ts):
@@ -39,8 +40,11 @@ export type MenuItem = {
   description?: string;
   /** A tile's glyph, above its words, or a row's, before them. */
   glyph?: ReactNode;
-  /** "radio" (the default): one of the menu's one choice. "checkbox": a switch of its own, checked in the pressed look with a check mark at its end. */
-  kind?: "radio" | "checkbox";
+  /**
+   * "radio" (the default): one of the menu's one choice. "checkbox": a switch of its own, checked in the pressed look with a check mark at its end.
+   * "action": a plain menuitem that does something and holds no state, so it has no checked state to announce.
+   */
+  kind?: "radio" | "checkbox" | "action";
   /** `aria-disabled`: it stays focusable and picks nothing. */
   disabled?: boolean;
   /** Muted words at a row's end, such as "on top". Hidden from screen readers, since its description says it. */
@@ -131,8 +135,8 @@ export function Menu(props: {
           if (node) nodes.current.set(it.id, node);
           else nodes.current.delete(it.id);
         }}
-        role={checkbox ? "menuitemcheckbox" : "menuitemradio"}
-        aria-checked={checked}
+        role={checkbox ? "menuitemcheckbox" : it.kind === "action" ? "menuitem" : "menuitemradio"}
+        aria-checked={it.kind === "action" ? undefined : checked}
         aria-disabled={disabled || undefined}
         aria-describedby={described}
         tabIndex={-1}

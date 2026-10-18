@@ -1046,7 +1046,7 @@ function AskChange(props: {
             <Popover handle={menu} side="above" bound={viewportBound}>
               <Menu
                 label={`Ask the DM to change ${props.name}'s answer`}
-                sections={[{ key: "asks", items: items.map((i) => ({ id: i.id, title: i.label })) }]}
+                sections={[{ key: "asks", items: items.map((i) => ({ id: i.id, title: i.label, kind: "action" as const })) }]}
                 onPick={(id) => {
                   const item = items.find((i) => i.id === id);
                   if (item) props.onAsk(item);

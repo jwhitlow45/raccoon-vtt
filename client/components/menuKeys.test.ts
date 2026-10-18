@@ -80,6 +80,7 @@ describe("the item a key open focuses", () => {
     assert.equal(openingIndex(withSplit(true, 4), "first"), 5, "the checked panel");
     assert.equal(openingIndex(withSplit(true, -1), "last"), 10, "with Up, the last panel");
     assert.equal(openingIndex([{ kind: "checkbox" }, { kind: "checkbox" }], "last"), 1, "a menu of checkboxes alone opens at its end");
+    assert.equal(openingIndex([{ kind: "action" }, { kind: "action" }, { kind: "action" }], "first"), 0, "a menu of actions, a roll card's asks, opens at its first (LP7-DICE-12)");
   });
 });
 

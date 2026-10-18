@@ -60,14 +60,14 @@ export function menuAction(e: MenuKey, index: number, count: number, tiles: bool
 }
 
 /** What the opening item is chosen by: whether an item is one of the menu's one choice ("radio", the default) and whether it is checked. */
-export type OpeningItem = { kind?: "radio" | "checkbox"; checked?: boolean };
+export type OpeningItem = { kind?: "radio" | "checkbox" | "action"; checked?: boolean };
 
 /**
  * The item a key open focuses: the checked one, else the first, or with
  * Up ("last") the last. Only radio items count, so a checkbox at the top
  * of the menu, such as More's "Two panels" (docs/design-v1-split-panel.md
  * 6), never takes the place a key open lands on, checked or not. A menu
- * of checkboxes alone opens at its first or last.
+ * of checkboxes or actions alone opens at its first or last.
  */
 export function openingIndex(items: readonly OpeningItem[], from: "first" | "last"): number {
   if (items.length === 0) return -1;

@@ -743,6 +743,9 @@ export function finalForPlayer(request: Pick<RollRequest, "dcHidden" | "resultSh
   return request.dcHidden === true && request.resultShown && target.result !== undefined;
 }
 
+/** What a chip's line adds after a final answer, which a tap opens the card to do. */
+const ASK_THE_DM = " Ask the DM to change it.";
+
 /**
  * A player's folded chip for one creature: "Dex save: sent 17. Pass.",
  * "sent 17" when pass or fail is hidden, the choice rolled when the test
@@ -760,7 +763,7 @@ export function chipLine(request: Pick<RollRequest, "test" | "dcHidden" | "resul
     return `${lead}: rolled ${choice ? `${choiceShort(choice)} ` : ""}${target.total ?? target.dice.total} (${answerDice(target.dice, target.typedBonus === true)}).${verdict} Final.`;
   }
   // A DM's mark is a result like any other, so it is final on the same request (shared/reducer/rolls.ts isFinal).
-  const final = finalForPlayer(request, target) ? " Final. Ask the DM to change it." : "";
+  const final = finalForPlayer(request, target) ? ` Final.${ASK_THE_DM}` : "";
   if (target.total !== undefined) {
     const result = target.result !== undefined ? ` ${RESULT[target.result]}.` : "";
     return `${lead}: sent ${answerWords(target, request.test)}.${result}${final}`;
@@ -784,7 +787,9 @@ export function chipName(request: Pick<RollRequest, "targets" | "dcHidden" | "re
   if (done.length === 0) return text;
   // An answer the player may still change opens to change it. A final one opens to ask the DM (docs/design-v1-roll-request.md 5.4).
   if (done.some((t) => !finalForPlayer(request, t))) return `${text} Open to change it.`;
-  return done.some((t) => t.dice !== undefined) ? `${text} Open to ask the DM to change it.` : `${text} Open to ask the DM to fix it.`;
+  // The name says the ask once, at its end: a line's own "Ask the DM to change it." would say it twice (LP7-DICE-12).
+  const asked = text.replaceAll(ASK_THE_DM, "");
+  return done.some((t) => t.dice !== undefined) ? `${asked} Open to ask the DM to change it.` : `${asked} Open to ask the DM to fix it.`;
 }
 
 /** What a final answer says on the open card, before "Final. Ask the DM to change it.", read in the chip's order: "Sent Dex 13. Pass". */

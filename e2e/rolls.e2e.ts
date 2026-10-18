@@ -557,7 +557,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     // Heroic Inspiration, asked from the chip's card and allowed in one tap.
     await chip.tap();
     await c.getByRole("button", { name: "Ask the DM to change Thorn's answer" }).tap();
-    await player.getByRole("menu", { name: "Ask the DM to change Thorn's answer" }).getByRole("menuitemradio", { name: "Reroll: Heroic Inspiration" }).tap();
+    await player.getByRole("menu", { name: "Ask the DM to change Thorn's answer" }).getByRole("menuitem", { name: "Reroll: Heroic Inspiration" }).tap();
     await c.getByText("Asked the DM to reroll (Heroic Inspiration).").waitFor();
     await shots.take(player, "rolls-card-asked");
     await live.getByText("Asks to reroll (Heroic Inspiration)", { exact: true }).waitFor();
