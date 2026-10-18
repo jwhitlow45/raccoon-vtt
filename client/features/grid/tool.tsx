@@ -67,10 +67,23 @@ export const gridTool: ToolDef = {
   order: TOOL_ORDER.grid,
   cursor: "crosshair",
   activate(ctx) {
-    ctx.scope.get(gridSlot).setState({ box: centeredBox(ctx), drag: null });
+    // A grid just found for this scene (outcome.ts) brings its own box.
+    const { found } = ctx.scope.get(gridSlot).getState();
+    const box = found?.sceneId === ctx.scene.id && found.box ? found.box : centeredBox(ctx);
+    ctx.scope.get(gridSlot).setState({ box, drag: null, sceneId: ctx.scene.id });
   },
   deactivate(ctx) {
-    ctx.scope.get(gridSlot).setState({ box: null, drag: null });
+    // A note or a search for the scene being left ends with it. One for
+    // another scene stays: an import makes its scene, then switches to it.
+    const { found, finding, sceneId } = ctx.scope.get(gridSlot).getState();
+    if (finding && finding.sceneId === sceneId) finding.cancel();
+    ctx.scope.get(gridSlot).setState({
+      box: null,
+      drag: null,
+      sceneId: null,
+      ...(found && found.sceneId === sceneId ? { found: null } : {}),
+      ...(finding && finding.sceneId === sceneId ? { finding: null } : {}),
+    });
   },
   pointer: {
     down(p, ctx) {
