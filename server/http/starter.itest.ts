@@ -568,6 +568,30 @@ describe("a starter pick in a room export and import (docs/design-v1-starter-art
     assert.ok((await roomStoredBytes(t.pool, roomId)) >= Number(token?.bytes));
   });
 
+  test("an import whose images do not fit the room's quota is refused whole, and its room is removed", async () => {
+    // Each zip image reserves its kind's whole size cap, which a 1 MiB quota never has room for.
+    const small = await startEngine({ env: { ROOM_QUOTA_MB: "1" }, assets: { starter: { packs: fixture.packs, root: fixture.root } } });
+    try {
+      const entries = new Map(files);
+      const v1 = { formatVersion: 1, assets: manifest.assets.map(({ starter: _starter, ...a }) => a) };
+      entries.set("assets.json", Buffer.from(JSON.stringify(v1)));
+      const named = async () => (await small.pool.query<{ n: string }>("select count(*) as n from rooms where name = $1", ["Starter source"])).rows[0]?.n;
+      const before = await named();
+      const res = await small.client().request(
+        "POST",
+        "/api/rooms/import",
+        undefined,
+        { "content-type": "application/zip", "x-import-form": Buffer.from(JSON.stringify({ playerPassword: "owlbear-druid-wand", dmName: "Importer" })).toString("base64url") },
+        await zipOf(entries),
+      );
+      assert.equal(res.statusCode, 413, res.body);
+      assert.deepEqual(res.json(), { error: "quota_exceeded" });
+      assert.equal(await named(), before);
+    } finally {
+      await small.close();
+    }
+  });
+
   test("a version 1 manifest, which has no marks, imports every image as an upload", async () => {
     const { rows } = await importWith((m) => ({ formatVersion: 1, assets: m.assets.map(({ starter: _starter, ...a }) => a) }));
     assert.deepEqual(rows.map((r) => r.starter), [null, null]);

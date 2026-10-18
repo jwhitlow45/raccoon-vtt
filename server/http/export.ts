@@ -3,6 +3,7 @@ import { PassThrough } from "node:stream";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
+import { isAssetError } from "../assets/errors.ts";
 import { WindowLimiter } from "../assets/limits.ts";
 import { receiveToFile, tempFile } from "../assets/upload.ts";
 import { formerDmsOfLiveRoom, putGrant } from "../auth/grants.ts";
@@ -153,6 +154,11 @@ export function registerExportRoutes(app: FastifyInstance, kit: AuthKit, deps: {
         if (err instanceof HttpError) {
           if (err.retryAfter !== undefined) reply.header("retry-after", String(err.retryAfter));
           return reply.code(err.status).send({ error: err.code, ...err.extra });
+        }
+        // The images' refusals that refuse a whole import: a room over its quota, a full disk.
+        if (isAssetError(err)) {
+          if (err.retryAfter !== undefined) reply.header("retry-after", String(err.retryAfter));
+          return reply.code(err.status).send({ error: err.code });
         }
         const status = (err as { statusCode?: number }).statusCode;
         if (status === 415) return reply.code(415).send({ error: "unsupported_type" satisfies ApiErrorCode });

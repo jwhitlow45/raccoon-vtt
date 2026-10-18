@@ -59,7 +59,10 @@ export function importErrorText(err: unknown): string {
     case "rate_limited":
       return "Too many rooms were created from here recently. Try again later.";
     case "disk_full":
+    case "storage_full":
       return "The server is out of disk space. Ask the server owner.";
+    case "quota_exceeded":
+      return "This export's images are more than a room may store on this server, so it cannot be imported.";
     case "turnstile_failed":
       return "The human check did not pass. Try again.";
     case "turnstile_unavailable":

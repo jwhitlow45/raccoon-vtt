@@ -337,22 +337,33 @@ async function importImages(
           return mapped === undefined ? [] : [mapped];
         });
     const entry = entries.get(assetFileName(sha, kind, "full"));
-    try {
-      const shipped = shippedWork(deps.assets.starter, asset.starter, sha, kind);
-      const imported =
-        (shipped ? await importShipped(deps, roomId, shipped, uploaders) : null) ??
-        (entry ? await importFromZip(deps, zip, entry, roomId, counter, { kind, uploaders, credit: asset.credit }) : null);
-      if (imported) out.set(asset.id, imported);
-    } catch (err) {
-      // One bad image does not sink the room: the manifest is untrusted, so a refusal is expected input.
-      if (err instanceof Error && "status" in err && typeof (err as { status: unknown }).status === "number" && (err as { status: number }).status < 500) {
-        deps.log.warn({ roomId, entry: entry?.fileName ?? asset.id, err: err.message }, "import skipped an image");
-        continue;
-      }
-      throw err;
-    }
+    const name = entry?.fileName ?? asset.id;
+    const shipped = shippedWork(deps.assets.starter, asset.starter, sha, kind);
+    const imported =
+      (shipped ? await importShipped(deps, roomId, shipped, uploaders, name) : null) ??
+      (entry ? await importFromZip(deps, zip, entry, roomId, counter, { kind, uploaders, credit: asset.credit }) : null);
+    if (imported) out.set(asset.id, imported);
   }
   return out;
+}
+
+/**
+ * Runs one image's import, skipping the image when it is refused: the
+ * manifest is untrusted, so one bad image is expected input and does not
+ * sink the room. Only the image's own steps run here. A room over its
+ * quota, or a disk that is full, is no fault of one image, so those
+ * refusals are checked before and refuse the whole import.
+ */
+async function skippingRefusals(deps: ImportDeps, roomId: string, name: string, run: () => Promise<ImportedAsset | null>): Promise<ImportedAsset | null> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof Error && "status" in err && typeof (err as { status: unknown }).status === "number" && (err as { status: number }).status < 500) {
+      deps.log.warn({ roomId, entry: name, err: err.message }, "import skipped an image");
+      return null;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -372,19 +383,31 @@ function shippedWork(catalog: StarterCatalog, mark: unknown, sha: string, kind: 
  * that cannot be copied as the catalog describes it is logged, and the
  * image comes from the zip as an upload instead (null).
  */
-async function importShipped(deps: ImportDeps, roomId: string, shipped: { found: FoundWork; kind: StarterKind }, uploaders: readonly string[]): Promise<ImportedAsset | null> {
+async function importShipped(
+  deps: ImportDeps,
+  roomId: string,
+  shipped: { found: FoundWork; kind: StarterKind },
+  uploaders: readonly string[],
+  name: string,
+): Promise<ImportedAsset | null> {
   await deps.assets.assertFreeDisk();
-  try {
-    const result = await deps.assets.ingestStarter({ roomId, uploaderIds: uploaders, found: shipped.found, kind: shipped.kind, background: true });
-    return { id: result.id, kind: result.kind };
-  } catch (err) {
-    if (!(err instanceof StarterWorkError)) throw err;
-    deps.log.error({ err, roomId, work: shipped.found.work.key }, "import took a starter image from the zip, since its shipped work could not be copied");
-    return null;
-  }
+  return skippingRefusals(deps, roomId, name, async () => {
+    try {
+      const result = await deps.assets.ingestStarter({ roomId, uploaderIds: uploaders, found: shipped.found, kind: shipped.kind, background: true });
+      return { id: result.id, kind: result.kind };
+    } catch (err) {
+      if (!(err instanceof StarterWorkError)) throw err;
+      deps.log.error({ err, roomId, work: shipped.found.work.key }, "import took a starter image from the zip, since its shipped work could not be copied");
+      return null;
+    }
+  });
 }
 
-/** An image from the zip, as an upload of the room's, counted in its quota. */
+/**
+ * An image from the zip, as an upload of the room's, counted in its quota.
+ * The quota is reserved before the image's own steps, outside the skip, so
+ * a room over its quota refuses the import, as it did before starter picks.
+ */
 async function importFromZip(
   deps: ImportDeps,
   zip: yauzl.ZipFile,
@@ -392,31 +415,33 @@ async function importFromZip(
   roomId: string,
   counter: InflatedCounter,
   asset: { kind: AssetKind; uploaders: readonly string[]; credit: unknown },
-): Promise<ImportedAsset> {
+): Promise<ImportedAsset | null> {
   const cap = KINDS[asset.kind].maxUploadBytes;
   await deps.assets.assertFreeDisk();
   const reservation = await deps.assets.quota.reserve(roomId, cap);
   const path = tempFile(deps.assets.tmpDir, "intake");
   try {
-    const digest = await entryToFile(zip, entry, path, cap, counter);
-    const result = await deps.assets.ingest({
-      roomId,
-      uploaderIds: asset.uploaders,
-      kind: asset.kind,
-      tempPath: path,
-      sha256: digest,
-      reservation,
-      background: true,
+    return await skippingRefusals(deps, roomId, entry.fileName, async () => {
+      const digest = await entryToFile(zip, entry, path, cap, counter);
+      const result = await deps.assets.ingest({
+        roomId,
+        uploaderIds: asset.uploaders,
+        kind: asset.kind,
+        tempPath: path,
+        sha256: digest,
+        reservation,
+        background: true,
+      });
+      // An Openverse image keeps its credit (docs/design-v1-dm-tools.md 2.5), and so does a starter pick imported as an
+      // upload, checked as bounded text like any of the file's text, since the file is untrusted. A credit that does not
+      // parse is left behind with a warning.
+      if (asset.credit !== undefined) {
+        const credit = assetCreditSchema.safeParse(asset.credit);
+        if (credit.success) await deps.pool.query("update assets set credit = $2 where id = $1", [result.id, JSON.stringify(credit.data)]);
+        else deps.log.warn({ roomId, entry: entry.fileName }, "import left out an image's credit it could not read");
+      }
+      return { id: result.id, kind: result.kind };
     });
-    // An Openverse image keeps its credit (docs/design-v1-dm-tools.md 2.5), and so does a starter pick imported as an
-    // upload, checked as bounded text like any of the file's text, since the file is untrusted. A credit that does not
-    // parse is left behind with a warning.
-    if (asset.credit !== undefined) {
-      const credit = assetCreditSchema.safeParse(asset.credit);
-      if (credit.success) await deps.pool.query("update assets set credit = $2 where id = $1", [result.id, JSON.stringify(credit.data)]);
-      else deps.log.warn({ roomId, entry: entry.fileName }, "import left out an image's credit it could not read");
-    }
-    return { id: result.id, kind: result.kind };
   } finally {
     reservation.release();
     await unlink(path).catch(() => undefined);

@@ -29,6 +29,8 @@ describe("room import", () => {
     assert.match(importErrorText(err(413, "too_large")), /up to 95 MB/);
     assert.match(importErrorText(err(413, "import_too_large")), /1 GB/);
     assert.match(importErrorText(err(413, undefined)), /too big/);
+    assert.match(importErrorText(err(413, "quota_exceeded")), /more than a room may store/);
+    assert.match(importErrorText(err(507, "storage_full")), /out of disk space/);
     assert.match(importErrorText(err(400, "bad_zip")), /not a room export/);
     assert.match(importErrorText(err(400, "weak_password", { reason: "too_common" })), /too common/);
     assert.match(importErrorText(err(429, "rate_limited")), /Too many rooms/);
