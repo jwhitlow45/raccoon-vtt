@@ -14,7 +14,7 @@ import { showOutcome } from "../grid/outcome.ts";
 import { endFinding, useGridStore } from "../grid/store.ts";
 import { useLandLater } from "../grid/useFindGrid.ts";
 import { loadedStarterWork } from "../starter/catalog.ts";
-import { starterMapScene } from "../starter/mapScene.ts";
+import { answeredGrid, retainedGrid, starterMapScene, type StarterGrid } from "../starter/mapScene.ts";
 import { StarterDialog } from "../starter/StarterDialog.tsx";
 import { thisDevice } from "../uvtt/limits.ts";
 import { ColorInput, NumberInput } from "./controls.tsx";
@@ -156,23 +156,23 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
     open(id, hinted ? null : "grid");
   };
 
-  const createFromStarter = (row: AssetRow, found: FoundWork) => {
+  const createFromStarter = (row: AssetRow, found: FoundWork, grid: StarterGrid | null) => {
     // A starter map is never searched: its grid is the catalog's. A file picked before it is dropped, and so is its
     // search, whether it still runs here or was handed on to Line up grid after an upload (useLandLater).
     stopSearch();
     const running = gridStore.getState().finding;
     if (running) endFinding(gridStore, running.sceneId);
     const id = actions.newId();
-    const { scene, aligned } = starterMapScene({ id, name, asset: { id: row.id, width: row.width, height: row.height }, work: found.work });
+    const { scene, aligned } = starterMapScene({ id, name, asset: { id: row.id, width: row.width, height: row.height }, work: found.work, grid });
     actions.dispatch({ t: "scene.create", scene });
     setStarter(false);
     open(id, aligned ? null : "grid");
   };
 
-  // A starter map already in the room starts on its catalog grid again, when the catalog is here to say what it is.
+  // A starter map already in the room starts on its catalog grid again, when the catalog is here and describes the room's file.
   const reuseMap = (row: AssetRow) => {
     const found = row.starter ? loadedStarterWork(row.starter) : null;
-    if (found) createFromStarter(row, found);
+    if (found) createFromStarter(row, found, retainedGrid(row, found.work));
     else createFromAsset({ id: row.id, width: row.width, height: row.height }, "Map");
   };
 
@@ -308,7 +308,7 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
                   kind="map"
                   hint="Openly licensed maps. Use copies the map into this room with its credit and makes the scene, on the map's own grid where it has one."
                   note={(found) => <FeetNote found={found} roomFeet={feetPerCell} />}
-                  onPicked={createFromStarter}
+                  onPicked={(row, found) => createFromStarter(row, found, answeredGrid(row))}
                   onClose={() => setStarter(false)}
                   opener={starterButton}
                 />

@@ -74,7 +74,7 @@ async function starterFixture(): Promise<Fixture> {
     attribution: "Art by An Artist",
     works: [
       work("knight", ["token", "handout"], [300, 300], "CC-BY-4.0"),
-      work("inn", ["map"], [1000, 800], "CC-BY-4.0", { grid: { cellPx: 50 }, gridColor: "#000000" }),
+      work("inn", ["map"], [1000, 800], "CC-BY-4.0", { grid: { cellPx: 50, originPx: { x: 12, y: 30 } }, gridColor: "#000000" }),
       work("scroll", ["handout"], [400, 600], "public-domain-dedication"),
       work("changed", ["token"], [200, 200], "CC-BY-4.0", { sha256: sha(Buffer.from("not these bytes")) }),
       work("missing", ["token"], [64, 64], "CC-BY-4.0"),
@@ -278,7 +278,8 @@ describe("a starter pick", () => {
     const res = await pick(app, roomId, player, { work: "test-pack/knight", kind: "token" });
     assert.equal(res.statusCode, 200, res.body);
     const body = res.json();
-    assert.deepEqual(Object.keys(body).sort(), ["credit", "height", "id", "kind", "starter", "variants", "width"]);
+    assert.deepEqual(Object.keys(body).sort(), ["credit", "height", "id", "kind", "sha256", "starter", "variants", "width"]);
+    assert.equal(body.sha256, sha(fixture.files.knight!));
     assert.equal(body.kind, "token");
     assert.equal(body.starter, "test-pack/knight");
     assert.deepEqual([body.width, body.height], [300, 300]);
@@ -300,6 +301,7 @@ describe("a starter pick", () => {
       const listed = (await app.inject({ url: `/api/rooms/${roomId}/assets`, headers: who.headers })).json().assets;
       assert.equal(listed.length, 1);
       assert.equal(listed[0].starter, "test-pack/knight");
+      assert.equal(listed[0].sha256, sha(fixture.files.knight!), "a pick's file, for a client to check its catalog against");
       assert.deepEqual(listed[0].credit, credit);
     }
     // The picker reads it as it reads an upload.
@@ -322,12 +324,13 @@ describe("a starter pick", () => {
     assert.equal(stored.licenseVersion, undefined);
   });
 
-  test("a map answers the catalog's cell size and is made with every map variant", async () => {
+  test("a map answers the catalog's grid, origin and all, and is made with every map variant", async () => {
     const roomId = await room();
     const dm = auth.allow(roomId, "dm");
     const res = await pick(app, roomId, dm, { work: "test-pack/inn", kind: "map" });
     assert.equal(res.statusCode, 200, res.body);
     assert.equal(res.json().cellPx, 50);
+    assert.deepEqual(res.json().originPx, { x: 12, y: 30 });
     assert.deepEqual(res.json().variants, ["full", "mobile", "thumb"]);
     assert.deepEqual([res.json().width, res.json().height], [1000, 800]);
   });
@@ -409,6 +412,8 @@ describe("a starter pick", () => {
     const [row] = await rowsOf(roomId);
     assert.equal(row?.starter, null);
     assert.equal(await roomStoredBytes(pool, roomId), stored);
+    const listed = (await app.inject({ url: `/api/rooms/${roomId}/assets`, headers: player.headers })).json().assets;
+    assert.deepEqual([listed[0].starter, listed[0].sha256], [undefined, undefined], "an upload lists no mark and no hash");
   });
 
   test("a shipped file that is not the catalog's is refused with a 500, and nothing is stored", async () => {

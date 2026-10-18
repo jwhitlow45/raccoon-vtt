@@ -93,12 +93,17 @@ export function isStarterKind(kind: string): kind is StarterKind {
 }
 
 /**
- * A map pick's cell size on the image as the room stored it: the catalog's
- * measure on the shipped file, scaled when the pipeline made it smaller,
- * rounded as cellPxHint rounds a file name's.
+ * A map pick's drawn grid on the image as the room stored it: the
+ * catalog's measure on the shipped file, scaled when the pipeline made it
+ * smaller, rounded as cellPxHint rounds a file name's. The pick's answer
+ * carries it, so the scene starts on the grid of the file this server
+ * copied, never on a client's catalog, which a tab may hold from before a
+ * rebuild. The origin is absent where the build found only the square's
+ * size.
  */
-export function starterCellPx(work: Pick<StarterWork, "grid" | "width">, storedWidth: number): number | undefined {
-  const cellPx = work.grid?.cellPx;
-  if (cellPx === undefined || work.width <= 0) return undefined;
-  return Math.round(((cellPx * storedWidth) / work.width) * 100) / 100;
+export function starterGrid(work: Pick<StarterWork, "grid" | "width">, storedWidth: number): { cellPx: number; originPx?: { x: number; y: number } } | undefined {
+  const grid = work.grid;
+  if (grid === undefined || work.width <= 0) return undefined;
+  const scale = (px: number) => Math.round(((px * storedWidth) / work.width) * 100) / 100;
+  return { cellPx: scale(grid.cellPx), ...(grid.originPx ? { originPx: { x: scale(grid.originPx.x), y: scale(grid.originPx.y) } } : null) };
 }

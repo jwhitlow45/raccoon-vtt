@@ -13,7 +13,7 @@ import { RoomQuota, assertFreeDisk, roomStoredBytes, type Reservation } from "./
 import { OpenverseSearch, openverseHttp, type OpenverseHttp } from "./openverse.ts";
 import { ImageSearch, httpJson, type HttpJson } from "./serpapi.ts";
 import { IntakeSlots, Semaphore, type SlotLimits } from "./slots.ts";
-import { StarterWorkError, copyHashing, starterCatalog, starterCellPx, starterFilePath, type StarterCatalog, type StarterOptions } from "./starter.ts";
+import { StarterWorkError, copyHashing, starterCatalog, starterFilePath, starterGrid, type StarterCatalog, type StarterOptions } from "./starter.ts";
 import { addCredit, addUploaders, findRoomAsset, placeAndInsert, toView, uploadedAssetIds } from "./store.ts";
 import { tempFile } from "./upload.ts";
 
@@ -76,7 +76,7 @@ export type IngestInput = {
 } & ({ reservation: Reservation; starter?: undefined } | { reservation?: undefined; starter: string });
 
 /** A starter pick's answer: an upload's, with the catalog's credit, the work's key, and a map's cell size. */
-export type StarterResult = UploadResult & { credit: AssetCredit; starter: string };
+export type StarterResult = UploadResult & { credit: AssetCredit; starter: string; sha256: string; originPx?: { x: number; y: number } };
 
 export const MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024;
 
@@ -272,8 +272,8 @@ export class AssetService {
         credit: credit.data,
         background: input.background,
       });
-      const cellPx = result.kind === "map" ? starterCellPx(work, result.width) : undefined;
-      return { ...result, ...(cellPx === undefined ? {} : { cellPx }), credit: credit.data, starter: work.key };
+      const grid = result.kind === "map" ? starterGrid(work, result.width) : undefined;
+      return { ...result, ...grid, credit: credit.data, starter: work.key, sha256: work.sha256.toLowerCase() };
     } finally {
       await unlink(temp).catch(() => undefined);
     }

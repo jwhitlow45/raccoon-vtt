@@ -170,7 +170,10 @@ export async function listRoomAssets(pool: pg.Pool, roomId: string, ids?: Readon
     const view: AssetView = toView(row);
     const credit = row.credit === null ? undefined : assetCreditSchema.safeParse(row.credit);
     if (credit?.success) view.credit = credit.data;
-    if (row.starter !== null) view.starter = row.starter;
+    if (row.starter !== null) {
+      view.starter = row.starter;
+      view.sha256 = row.sha256.toString("hex");
+    }
     return view;
   });
 }

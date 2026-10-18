@@ -4,7 +4,7 @@ import { describe, test } from "node:test";
 import { assetCreditSchema } from "#shared/protocol.ts";
 import { STARTER_KEY, STARTER_KINDS, indexWorks, starterAssetCredit, type StarterPack, type StarterWork } from "#shared/starter.ts";
 import { STARTER_PACKS } from "#shared/starterArt.ts";
-import { StarterWorkError, starterCellPx, starterFilePath, workForKind } from "./starter.ts";
+import { StarterWorkError, starterFilePath, starterGrid, workForKind } from "./starter.ts";
 
 const root = join("/srv", "app", "dist");
 
@@ -62,15 +62,15 @@ describe("a work for a kind", () => {
   });
 });
 
-describe("a map pick's cell size", () => {
-  test("is the catalog's on a stored copy of the shipped size, and scales with a smaller copy", () => {
-    assert.equal(starterCellPx({ width: 4096, grid: { cellPx: 70.4 } }, 4096), 70.4);
-    assert.equal(starterCellPx({ width: 4096, grid: { cellPx: 70 } }, 2048), 35);
-    assert.equal(starterCellPx({ width: 3000, grid: { cellPx: 50 } }, 1000), 16.67);
+describe("a map pick's grid", () => {
+  test("is the catalog's on a stored copy of the shipped size, and scales with a smaller copy, origin and all", () => {
+    assert.deepEqual(starterGrid({ width: 4096, grid: { cellPx: 70.4, originPx: { x: 12, y: 0.5 } } }, 4096), { cellPx: 70.4, originPx: { x: 12, y: 0.5 } });
+    assert.deepEqual(starterGrid({ width: 4096, grid: { cellPx: 70, originPx: { x: 21, y: 9 } } }, 2048), { cellPx: 35, originPx: { x: 10.5, y: 4.5 } });
+    assert.deepEqual(starterGrid({ width: 3000, grid: { cellPx: 50 } }, 1000), { cellPx: 16.67 });
   });
 
   test("is unknown for a map with no drawn grid", () => {
-    assert.equal(starterCellPx({ width: 4096 }, 4096), undefined);
+    assert.equal(starterGrid({ width: 4096 }, 4096), undefined);
   });
 });
 

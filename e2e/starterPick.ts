@@ -50,9 +50,9 @@ export async function chooseStarterWork(within: Locator, found: FoundWork, how: 
 }
 
 /** The room's row for an image, as the library lists it, with its starter mark and credit. */
-export async function assetRow(request: APIRequestContext, origin: string, roomId: string, id: string): Promise<{ id: string; kind: string; starter?: string; credit?: { creator?: string; title?: string } } | undefined> {
+export async function assetRow(request: APIRequestContext, origin: string, roomId: string, id: string): Promise<{ id: string; kind: string; starter?: string; sha256?: string; credit?: { creator?: string; title?: string } } | undefined> {
   const res = await request.get(`${origin}/api/rooms/${roomId}/assets`);
   assert.ok(res.ok(), `listing the room's images answered ${res.status()}`);
-  const { assets } = (await res.json()) as { assets: { id: string; kind: string; starter?: string; credit?: { creator?: string; title?: string } }[] };
+  const { assets } = (await res.json()) as { assets: { id: string; kind: string; starter?: string; sha256?: string; credit?: { creator?: string; title?: string } }[] };
   return assets.find((a) => a.id === id);
 }

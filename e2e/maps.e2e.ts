@@ -8,7 +8,7 @@ import sharp from "sharp";
 import type { BuildChunk, RoomState, Scene, Stamp } from "#shared/model.ts";
 import { drawMap } from "../client/features/grid/synthetic.ts";
 import { STARTER_STAMPS } from "#shared/starterStamps.ts";
-import { starterMapScene } from "../client/features/starter/mapScene.ts";
+import { retainedGrid, starterMapScene } from "../client/features/starter/mapScene.ts";
 import { ConsoleWatch, dragWorld, openSideTab, pickOption, pressOption, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { assetRow, chooseStarterWork, starterWork } from "./starterPick.ts";
 
@@ -512,7 +512,9 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     assert.equal(scene.name, found.work.name);
     assert.ok(Math.abs(map.cellPx - found.work.grid!.cellPx * (map.widthPx / found.work.width)) < 0.01, `the scene's squares are ${map.cellPx} px`);
     assert.equal(scene.grid.color, found.work.gridColor!.toLowerCase());
-    const expected = starterMapScene({ id: scene.id, name: "", asset: { id: map.assetId, width: map.widthPx, height: map.heightPx }, work: found.work }).scene;
+    // The catalog's grid on this very file, as the server answered it from its own catalog.
+    const grid = retainedGrid({ width: map.widthPx, sha256: found.work.sha256 }, found.work);
+    const expected = starterMapScene({ id: scene.id, name: "", asset: { id: map.assetId, width: map.widthPx, height: map.heightPx }, work: found.work, grid }).scene;
     assert.deepEqual(map.originPx, expected.map?.originPx);
     assert.deepEqual(scene.bounds, expected.bounds);
     // On the map's own grid, so Line up grid never opens.
@@ -521,6 +523,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     const row = await assetRow(dmContext.request, server.origin, run.roomId, map.assetId);
     assert.equal(row?.kind, "map");
     assert.equal(row?.starter, found.work.key, "the row names the work it was copied from");
+    assert.equal(row?.sha256, found.work.sha256, "and the file it holds, so a later scene can trust the catalog's grid for it");
     await shots.take(dm, "sa-a-2-starter-map-scene");
   });
 

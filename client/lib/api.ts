@@ -37,8 +37,10 @@ export type AssetRow = {
   width: number;
   height: number;
   variants: AssetVariant[];
-  /** Upload responses for maps only: a suggested cellPx from a hint such as `30x20` in the file name. */
+  /** Upload responses for maps only: a suggested cellPx from a hint such as `30x20` in the file name, or a starter map's measured grid. */
   cellPx?: number;
+  /** A starter map pick's answer only: where its measured grid's lines cross, when the build found it, on the image as stored. */
+  originPx?: { x: number; y: number };
   /** An Openverse image's credit, with the original's size (docs/design-v1-dm-tools.md 3.13). */
   credit?: AssetCredit;
   /** For a DM only: whether the room's committed state names the image (docs/design-v1-dm-tools.md 3.19). */
@@ -49,6 +51,8 @@ export type AssetRow = {
   created?: boolean;
   /** A starter pick's work key, `<pack>/<work>` (docs/design-v1-starter-art.md 5). Absent for the room's own uploads. */
   starter?: string;
+  /** A starter pick's SHA-256 in hex, sent with `starter`, to tell whether this page's catalog describes the file the room holds. */
+  sha256?: string;
 };
 /** The server's own shape, which sends the original's size only when the search service gave it. */
 export type { SearchResult, SearchSource };

@@ -107,6 +107,12 @@ export type AssetView = {
   credit?: AssetCredit;
   /** A starter pick's work key, `<pack>/<work>` (docs/design-v1-starter-art.md 5). Absent for the room's own uploads. */
   starter?: string;
+  /**
+   * A starter pick's SHA-256 in hex, sent with `starter` only: the work a
+   * key names can be rebuilt, so a client applies its catalog's grid to a
+   * retained pick only when its catalog's file is this one.
+   */
+  sha256?: string;
   /** A DM's library only: whether the room's committed state names it (section 3.19). Absent when that cannot be known. */
   inUse?: boolean;
   /** A DM's library only: the stored size of all its variants, which deleting it frees from the room's quota, unless it is a starter pick, which never counted. */
