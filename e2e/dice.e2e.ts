@@ -165,7 +165,9 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     await sticky.getByText(String(total), { exact: true }).waitFor();
     await shots.take(player, "dice-rolled-phone");
     await openSideTab(dm, "Dice");
-    await dm.getByRole("region", { name: "Dice" }).getByText("fire", { exact: true }).first().waitFor();
+    await dm.getByRole("tabpanel", { name: sideTabName("Dice") }).getByText("fire", { exact: true }).first().waitFor();
+    // The tab names the panel, and nothing inside it is a second region called Dice (LP7-CHROME-2).
+    assert.equal(await dm.getByRole("region", { name: "Dice" }).count(), 0, "a region named Dice inside the Dice tab");
     await shots.take(dm, "dice-panel-dm");
   });
 
@@ -200,6 +202,8 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     await player.goto(`${server.origin}/r/${run.roomId}`);
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
     await openDicePhone(player);
+    // The sheet's own region names the panel, once (LP7-CHROME-2).
+    assert.equal(await player.getByRole("region", { name: "Dice" }).count(), 1, "the phone's Dice sheet holds a second region of its name");
     const recent = player.getByRole("region", { name: "Dice" }).locator("[data-roll-row]");
     await waitFor("Recent rolls after the reload", async () => (await recent.count()) >= 3 || null);
     await field(player).press("ArrowUp");

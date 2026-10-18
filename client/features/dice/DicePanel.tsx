@@ -44,14 +44,16 @@ export default function DicePanel(props: PanelProps) {
   if (groupShown && group) {
     return (
       // The page shows its own results, and its rolls never become the panel's last roll, so the sticky line would only take room.
-      <section aria-label="Dice" style={{ display: "grid", gap: theme.space(2) }}>
+      // A plain box: the sheet or the tab around it already names the panel "Dice", and a second region of that name is heard twice.
+      <div style={{ display: "grid", gap: theme.space(2) }}>
         <GroupSave parent="Dice" onBack={() => groupStore.setState({ shownIn: null })} />
-      </section>
+      </div>
     );
   }
   return (
     // One column no wider than the pane: an auto column grows to its widest row's content, so one long roll would widen the whole panel past the screen.
-    <section aria-label="Dice" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
+    // A plain box, as above: the sheet or the tab names the panel.
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
       <LastResult onOpen={show} />
       <Roller />
       {group && role === "dm" ? (
@@ -67,6 +69,6 @@ export default function DicePanel(props: PanelProps) {
       ) : null}
       <RollOptions {...props} />
       <RecentRolls names={names} me={me} open={open} again={(rolls, to) => void panel.again(rolls, to)} />
-    </section>
+    </div>
   );
 }
