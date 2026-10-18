@@ -307,7 +307,7 @@ The base's rules (7.1), and for the tool popovers, Setup and Tools:
 
 ### 7.6 Stacking
 
-While a popover is open, its options element or toolbar takes `theme.z.popover`, a new token of 21 (today's "options over notices", `Room.tsx:1461`), so the popover stands over notices and toasts and under the alerts opened over the screen (22), a player's roll card (25) and modal dialogs. The rest of the time the options keep `theme.z.options` (14) and the toolbar `theme.z.bars` (15). The compact token bar (16) covers the toolbar and the merged row together, as it covers the toolbar today.
+While a popover is open, its options element or toolbar takes `theme.z.popover`, a new token of 21 (today's "options over notices", `Room.tsx:1461`), so the popover stands over notices and toasts and under the alerts opened over the screen (22), a player's roll card (25) and modal dialogs. A roll card at a narrow screen's foot stands on the options row, where the options' popovers rise, so it folds into "Roll asked" while one of them is open, as under a sheet (docs/design-v1-visual.md 3.3.1), and comes back when it closes. The rest of the time the options keep `theme.z.options` (14) and the toolbar `theme.z.bars` (15). The compact token bar (16) covers the toolbar and the merged row together, as it covers the toolbar today.
 
 ### 7.7 Code it reuses
 

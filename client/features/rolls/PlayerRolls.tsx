@@ -10,6 +10,7 @@ import { Chip } from "../../components/Chip.tsx";
 import { Menu } from "../../components/Menu.tsx";
 import { Popover, usePopover } from "../../components/Popover.tsx";
 import type { Rect } from "../../components/popoverPlace.ts";
+import { popoverSlot } from "../../components/popoverRules.ts";
 import { Input } from "../../components/Field.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { SheetGrabber } from "../../components/SheetGrabber.tsx";
@@ -115,7 +116,10 @@ type FootStand = "options" | "toolbar" | "screen";
  * The card is the prompt, but it never covers an open sheet
  * (docs/design-v1-visual.md 3.3.1): under one it folds, mounted but
  * hidden so what was typed survives, and with the chips it becomes one
- * summary whose tap closes the sheet and opens the request to answer.
+ * summary whose tap closes the sheet and opens the request to answer. A
+ * card at a narrow screen's foot folds the same way while a popover of the
+ * tool's options is open, since that popover rises from the row the card
+ * stands on and the card stands over popovers (docs/design-v1-tool-options.md 7.6).
  */
 export function PlayerRolls() {
   const rolls = useRoomView((s) => s.view?.rolls ?? NO_ROLLS);
@@ -226,9 +230,13 @@ export function PlayerRolls() {
   }, [dockStore, atFoot, zoom, shown?.id]);
   useLayoutEffect(() => () => dockStore.setState({ foot: 0, footYields: false }), [dockStore]);
   const foldsUnderSheet = cardFoldsUnderSheet({ width, height: size.height, wideMinWidth: theme.layout.wideMinWidth });
-  const cardHidden = shown !== undefined && covered && foldsUnderSheet;
+  const toolPopover = useStore(dockStore, (s) => s.toolPopover);
+  const foldedBySheet = covered && foldsUnderSheet;
+  // A card already folded for the token bar or a short screen has its own summary row, so a popover leaves it as it is.
+  const underPopover = atFoot && toolPopover && !foldedBySheet && !yieldsToBar;
+  const cardHidden = shown !== undefined && (foldedBySheet || underPopover);
   // As the DM's cards do: the column sits above a phone's sheets in portrait, so everything folds into one summary
-  // while one is open. A card folded under a sheet in landscape takes the chips with it into the same summary.
+  // while one is open. A card folded under a sheet in landscape, or under a popover of the tool's options, takes the chips with it into the same summary.
   const underSheet = deskLayout({ width, height: size.height, wideMinWidth: theme.layout.wideMinWidth, sheetOpen: covered }).folded || cardHidden;
   const stack = chipStack({ count: chips.length + (cardHidden ? 1 : 0), phone: width < theme.layout.wideMinWidth, underSheet, expanded });
   const keepShown = chipsStayShown(requests.length);
@@ -259,9 +267,13 @@ export function PlayerRolls() {
    * from Later, as a chip's tap brings it (requestToOpen). Focus moves
    * once the card has unfolded, in the effect after.
    */
+  const popovers = useScoped(popoverSlot);
   const open = (options?: { barAway?: boolean }) => {
     const target = requestToOpen(requests, needs, folded, opened);
     ui.closeSheets();
+    // A press on the summary closes the tool's popover as it starts, as any press outside it does, and the card unfolds
+    // with it. A click alone, as a screen reader's, reaches here with the popover still open.
+    if (underPopover) popovers.closeOpen("press");
     if (!target) {
       setSummoned(null);
       setFocusAfter({ chip: true });
@@ -309,7 +321,7 @@ export function PlayerRolls() {
     revealAndFocus(focusable(summaryRef.current) ? summaryRef.current : dockSummaryButton(sheetFocus));
   }, [cardHidden, sheetFocus]);
 
-  const summary = stack.button === "sheet" ? sheetSummary(requests, opens) : stack.button ? foldedChips(chips.slice(PHONE_CHIPS), stack.button) : null;
+  const summary = stack.button === "sheet" ? sheetSummary(requests, opens, underPopover ? "popover" : "sheet") : stack.button ? foldedChips(chips.slice(PHONE_CHIPS), stack.button) : null;
   const tapSummary = () => {
     if (stack.button === "sheet") open();
     else setExpanded(stack.button === "more");

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, pickTool, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * Roll requests on phones (docs/design-v1-visual.md 3.3.1): the real
@@ -19,8 +19,10 @@ import { ConsoleWatch, OpSocket, Shots, sleep, SocketWatch, startServer, tapCell
  * already mounted first, so a typed total is never dropped. Back closes
  * the sheet, never a card folded under it. In landscape at 667 x 375 at
  * 115% the card across the screen folds the same way beside the right-hand
- * sheet. The DM's phone shows the newest two requests and a "Rolls d/a"
- * disclosure for the rest.
+ * sheet. A card at the phone's foot folds the same way while a popover of
+ * the tool's options is open, since that popover rises from the row the
+ * card stands on. The DM's phone shows the newest two requests and a
+ * "Rolls d/a" disclosure for the rest.
  *
  * In portrait the summary that stands for the folded card is the dock's on
  * the sheet's edge once Room has its dock (part 3 of the design pass), and
@@ -624,7 +626,59 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await closeAll();
   });
 
-  test("14. nothing went wrong in the browsers", () => {
+  test("14. a card at the phone's foot folds into Roll asked while a popover of the tool's options is open, and comes back with its total once it closes", async () => {
+    await ask("check", "wis");
+    const c = card(player);
+    await c.getByLabel("Total Thorn rolled").fill("11");
+    await pickTool(player, "Area");
+    const shapeChip = player.getByRole("toolbar", { name: "Area options" }).getByRole("button", { name: /^Shape:/ });
+    const shape = player.getByRole("dialog", { name: "Shape" });
+    // The popover rises from the row the card stands on, and the card stands over popovers (docs/design-v1-tool-options.md 7.6).
+    await shapeChip.tap();
+    await shape.waitFor();
+    await rollAsked(player).waitFor();
+    assert.ok(await cardElement(player).isHidden(), "the card folds while the popover is open");
+    assert.equal(await rollAsked(player).getAttribute("aria-label"), "Roll asked: the DM asks for a Wisdom check. Open it to answer.");
+    assert.ok(await wholeInReach(shape), "the popover shows whole and takes a tap");
+    await shots.take(player, "rolls-folded-under-options-popover");
+    await player.keyboard.press("Escape");
+    await shape.waitFor({ state: "detached" });
+    await c.waitFor();
+    assert.equal(await rollAsked(player).count(), 0, "the summary is gone with the popover");
+    assert.equal(await c.getByLabel("Total Thorn rolled").inputValue(), "11", "the typed total survives the fold");
+
+    // The spell field's results are a popover of the row too.
+    const spell = player.getByRole("toolbar", { name: "Area options" }).getByLabel("Spell", { exact: true });
+    await spell.fill("fire");
+    const spells = player.getByRole("dialog", { name: "Spells" });
+    await spells.waitFor();
+    assert.ok(await cardElement(player).isHidden(), "the card folds while the spell results are open");
+    assert.ok(await wholeInReach(spells), "the spell results show whole and take a tap");
+    await player.keyboard.press("Escape");
+    await spells.waitFor({ state: "detached" });
+    await c.waitFor();
+    await spell.fill("");
+
+    // A tap on the summary closes the popover, as any press outside it does, and the card comes back.
+    await shapeChip.tap();
+    await shape.waitFor();
+    await rollAsked(player).tap();
+    await shape.waitFor({ state: "detached" });
+    await c.waitFor();
+    assert.equal(await c.getByLabel("Total Thorn rolled").inputValue(), "11");
+    await shots.take(player, "rolls-card-back-from-options-popover");
+    // A click alone, as a screen reader sends, is a request to answer too: it closes the popover, and the card takes focus.
+    await shapeChip.tap();
+    await shape.waitFor();
+    await rollAsked(player).dispatchEvent("click");
+    await shape.waitFor({ state: "detached" });
+    await c.waitFor();
+    assert.equal(await focused(player), "card");
+    await pickTool(player, "Select");
+    await closeAll();
+  });
+
+  test("15. nothing went wrong in the browsers", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(playerConsole.errors, [], "the player's page logged errors");
   });

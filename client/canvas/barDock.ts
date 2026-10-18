@@ -1053,11 +1053,13 @@ type BarDockState = {
   columnCramped: boolean;
   /** The column's alerts show over the screen (askedAlerts), so the top bars rise over the notices with them. */
   alertsOverlay: boolean;
+  /** A popover of the tool's options is open (pages/Room.tsx ToolOptions). It rises under a roll card at a narrow screen's foot, which folds while it is open. */
+  toolPopover: boolean;
 };
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
-  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false })),
+  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false, toolPopover: false })),
 );
 
 function clamp(n: number, lo: number, hi: number): number {

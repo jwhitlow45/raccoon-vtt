@@ -984,18 +984,26 @@ export function deskLayout(input: { width: number; height: number; wideMinWidth:
  * it sees finds the button (WCAG 2.5.3). Showing and folding is a
  * disclosure, told by aria-expanded, so that name stays the same.
  */
-export function foldedChips(requests: readonly RollRequest[], tap: ChipButton = "sheet"): { text: string; label: string } {
+export function foldedChips(requests: readonly RollRequest[], tap: ChipButton = "sheet", under: FoldedUnder = "sheet"): { text: string; label: string } {
   const asked = requests.reduce((n, r) => n + r.targets.length, 0);
   const done = requests.reduce((n, r) => n + r.targets.filter(answered).length, 0);
   const more = tap === "sheet" ? "" : "more ";
   const count = requests.length === 1 ? `1 ${more}roll request` : `${requests.length} ${more}roll requests`;
   const text = `Rolls ${done}/${asked}`;
-  const what = tap === "sheet" ? (requests.length === 1 ? " Close the sheet to see it." : " Close the sheet to see them.") : "";
+  const them = requests.length === 1 ? "it" : "them";
+  const what = tap !== "sheet" ? "" : under === "sheet" ? ` Close the sheet to see ${them}.` : ` Open to see ${them}.`;
   return { text, label: `${text}: ${count}, ${done} of ${asked} answered.${what}` };
 }
 
 /** What the button under a player's chips does: close the sheet over them, show the chips past the first two, or fold those again. */
 export type ChipButton = "sheet" | "more" | "less";
+
+/**
+ * What a player's folded card stands under: an open sheet, or a popover of
+ * the tool's options, which the summary's tap closes as it does the sheet,
+ * since a press outside a popover closes it.
+ */
+export type FoldedUnder = "sheet" | "popover";
 
 /** How many chips a phone shows before the rest fold into the button. */
 export const PHONE_CHIPS = 2;
@@ -1080,15 +1088,16 @@ export function answeredCount(requests: readonly RollRequest[]): { text: string;
 }
 
 /**
- * The player's own summary button while everything folds under a sheet:
- * "Roll asked" with what to answer while a request waits, else the folded
- * chips' count (foldedChips). Its tap closes the sheet, so it is no
+ * The player's own summary button while everything folds under a sheet, or
+ * under a popover of the tool's options (FoldedUnder): "Roll asked" with
+ * what to answer while a request waits, else the folded chips' count
+ * (foldedChips). Its tap closes the sheet or the popover, so it is no
  * disclosure, and its name starts with its visible text (WCAG 2.5.3).
  */
-export function sheetSummary(requests: readonly RollRequest[], opens: string | null = null): { text: string; label: string } {
+export function sheetSummary(requests: readonly RollRequest[], opens: string | null = null, under: FoldedUnder = "sheet"): { text: string; label: string } {
   const summary = rollsSummary(requests, opens);
-  if (!summary.waiting) return foldedChips(requests, "sheet");
-  return { text: summary.text, label: `${summary.text}: ${summary.name}. Close the sheet to answer.` };
+  if (!summary.waiting) return foldedChips(requests, "sheet", under);
+  return { text: summary.text, label: `${summary.text}: ${summary.name}. ${under === "sheet" ? "Close the sheet" : "Open it"} to answer.` };
 }
 
 // ------------------------------------------------------------ one creature's answer on the card

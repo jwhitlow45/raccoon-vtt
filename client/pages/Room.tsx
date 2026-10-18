@@ -1566,6 +1566,12 @@ function ToolOptions(props: {
     [outer],
   );
   const [raised, setRaised] = useState(false);
+  // A roll card at a narrow screen's foot stands over these popovers (7.6), so it folds while one is open (features/rolls/PlayerRolls.tsx).
+  const dockStore = useScoped(barDockSlot);
+  useLayoutEffect(() => {
+    if (dockStore.getState().toolPopover !== raised) dockStore.setState({ toolPopover: raised });
+  }, [dockStore, raised]);
+  useLayoutEffect(() => () => dockStore.setState({ toolPopover: false }), [dockStore]);
   const [description, setDescription] = useState<string | null>(null);
   // A state with no row (6.6) draws only its line, 6 px above the toolbar, unless the row stacks, where the map keeps its 53 px.
   const [rowless, setRowless] = useState(false);

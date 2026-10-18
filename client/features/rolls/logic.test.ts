@@ -905,6 +905,17 @@ describe("the player's card under a sheet (docs/design-v1-visual.md 3.3.1)", () 
     assert.equal(sheetSummary([answeredOne]).label, "Rolls 1/1: 1 roll request, 1 of 1 answered. Close the sheet to see it.");
     assert.deepEqual(answeredCount([answeredOne, waiting]), { text: "Rolls 1/2", name: "rolls 1 of 2 answered" });
   });
+
+  test("folded under a popover of the tool's options, the summary says its tap opens the card, since there is no sheet to close", () => {
+    let state = ask(setup(), { dc: "15" });
+    const waiting = projectState(state, P1, { sceneId: null }).rolls.r1!;
+    assert.deepEqual(sheetSummary([waiting], null, "popover"), { text: "Roll asked", label: "Roll asked: the DM asks for a Dexterity saving throw. Open it to answer." });
+    state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, total: 17 }, P1, 2);
+    const answeredOne = projectState(state, P1, { sceneId: null }).rolls.r1!;
+    assert.equal(sheetSummary([answeredOne], null, "popover").label, "Rolls 1/1: 1 roll request, 1 of 1 answered. Open to see it.");
+    assert.equal(foldedChips([answeredOne, waiting], "sheet", "popover").label, "Rolls 1/2: 2 roll requests, 1 of 2 answered. Open to see them.");
+    assert.equal(foldedChips([answeredOne], "more", "popover").label, "Rolls 1/1: 1 more roll request, 1 of 1 answered.", "showing more chips says nothing of the popover");
+  });
 });
 
 describe("the DM's cards on a phone with no sheet open (docs/design-v1-visual.md 3.3.1)", () => {
