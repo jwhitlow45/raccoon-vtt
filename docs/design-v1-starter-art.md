@@ -1,6 +1,6 @@
 # raccoon-vtt design: starter packs for DMs
 
-Status: draft 2, with the packs decided (section 12) and built. The project owner reviews the built packs in the app.
+Status: draft 2, with the packs decided (section 12) and built. Sections 1, 3, 7, 8 and 10 describe the build. The project owner reviews the built packs in the app.
 
 The project owner asked: "please also add some open source art that can be selected from to help DMs get started. group the art into categories and organize it. just overall i want to make things as easy as possible for dms. you must be 100% positive that the art is open source and abide strictly by licenses as we have so far."
 
@@ -8,15 +8,15 @@ After draft 1's contact sheets (single museum works), the owner set the directio
 
 ## 1. Summary of the decisions
 
-1. **Starter art ships as packs**: sets from one artist or project in one style, made for tabletop fantasy. 13 packs pass the license rules and 4 more are held for the owner (section 3).
-2. **Battle maps:** Dyson Logos's hand-inked maps are the heart of it, 29 picked from the 276 posts that carry CC BY 4.0 (held, question 2). Beside them: the Scarlet Heroes maps, Majcher Arcana's index card dungeons, Ferrin's painted cavern, and Kenney's sample maps. No color battle map pack passes: of 711 itch.io map pages read, none of the 145 free battle maps carries an allowed license.
+1. **Starter art ships as packs**: sets from one artist or project in one style, made for tabletop fantasy. 14 packs of 501 works (section 3), decided in section 12.
+2. **Battle maps:** Dyson Logos's hand-inked maps are the heart of it, 29 picked from the 276 posts that carry CC BY 4.0. Beside them: the Scarlet Heroes maps, Majcher Arcana's index card dungeons and Ferrin's painted cavern. No color battle map pack passes: of 711 itch.io map pages read, none of the 145 free battle maps carries an allowed license.
 3. **Tokens and portraits:** Oozejar's Illustrated Bestiary (60 monsters in color), Justin Nichol's cute heroes and monsters, Dungeon Crawl Stone Soup's monster tiles, and three portrait packs for NPCs.
-4. **Builder stamps:** the rest of the Warlock's Gauntlet top-down packs (40 props in the shipped look) and 41 Poly Haven models rendered from above.
+4. **Builder stamps:** the rest of the Warlock's Gauntlet top-down packs (40 props in the shipped look), 41 Poly Haven models rendered from above, and Mark Gosbell's 50 flat greyscale props.
 5. **The museum pictures stay as one optional pack, Historical art**, trimmed from 134 to 47: no D&D pack offers letters, old maps, treasure or scene paintings for handouts.
 6. **Every SRD monster gets a default token** from the shipped game-icons.net icons, as draft 1 planned.
 7. **Starter art is its own selector.** A Starter tab, by pack then category, in each place art is picked: the token image picker, New scene, Handouts, and the builder's stamps. It never shows in, or counts against, the room's library until the DM picks a work.
 8. **A pick copies the work into the room** as an ordinary asset with its credit, marked as starter art, outside the room's storage quota and grouped apart in the library. Stamps stay a reference to the bundled file, as the 46 shipped stamps are.
-9. **About 24 MB** in the repository and the image for the 13 packs that pass, and 36 MB with every held pack, under the 40 MB budget.
+9. **32.7 MB** in `public/starter` (679 files, thumbnails included) and 0.96 MiB of new stamps, under the 40 MB budget (section 10).
 
 ## 2. What changed from draft 1
 
@@ -27,41 +27,37 @@ After draft 1's contact sheets (single museum works), the owner set the directio
 
 ## 3. The packs
 
-Sizes are as the build would encode them (section 8), thumbnails apart.
+Sizes are as the build encoded them (section 8), thumbnails apart. Draft 2 also weighed Kenney's sample maps and Sine Nomine's Spears of the Dawn maps and figures, and held four packs for the owner. Section 12 settled them all: those three sets are left out, and the held packs that are in appear below.
 
 | Pack | Author | License | For | Works | MB |
 | --- | --- | --- | --- | --- | --- |
-| Dyson Logos maps (held) | Dyson Logos | CC BY 4.0, on each map's post | Maps | 29 | 7.7 |
+| Dyson Logos maps | Dyson Logos | CC BY 4.0, on each map's post | Maps | 29 | 7.9 |
 | Scarlet Heroes maps | Dyson Logos, released by Kevin Crawford (Sine Nomine) | Public domain dedication | Maps | 5 | 0.6 |
-| Index Card Dungeons | Majcher Arcana (Marc Majcher) | CC BY 4.0 | Maps | 10 | 0.9 |
+| Index Card Dungeons | Majcher Arcana (Marc Majcher) | CC BY 4.0 | Maps | 10 | 0.8 |
 | Cavern Battlemap | Ferrin | CC0 | Maps | 1 | 0.2 |
-| Kenney sample maps | Kenney | CC0 | Maps | 5 | 0.1 |
-| Spears of the Dawn maps (held) | Kevin Crawford (Sine Nomine) | Public domain dedication | Maps | 7 | 0.6 |
-| Illustrated Bestiary | Oozejar (Gourdin Konbo Club) | CC BY-SA 4.0 | Tokens, handouts | 60 | 5.4 |
+| Illustrated Bestiary | Oozejar (Gourdin Konbo Club) | CC BY-SA 4.0 | Tokens, handouts | 60 | 5.7 |
 | Cute Heroes and Monsters | Justin Nichol | CC BY 4.0 | Tokens | 64 | 0.8 |
 | Dungeon Crawl Stone Soup monsters | the DCSS artists | CC0 | Tokens | 61 | 0.04 |
-| Lemurs Fantasy Portraits | Jon Aspeheim | CC BY 4.0 | Portraits, handouts | 58 | 2.0 |
+| Lemurs Fantasy Portraits | Jon Aspeheim | CC BY 4.0 | Portraits, handouts | 58 | 2.1 |
 | Fantasy RPG Portraits | Joseph Hewitt | CC BY 4.0 | Portraits, handouts | 25 | 2.0 |
-| Flare Hero Portraits | Justin Nichol, for the Flare project | CC BY-SA 3.0 (6), CC BY 3.0 (4) | Portraits | 10 | 0.8 |
-| Sine Nomine figures (held) | several artists, released by Kevin Crawford | Public domain dedication | Handouts | 26 | 4.2 |
-| Warlock's Gauntlet: ruins, wrecks, bones and woods | the Warlock's Gauntlet artists, stated by the project lead | CC BY 3.0 | Stamps | 40 | 0.3 |
-| Poly Haven props | named per model | CC0 | Stamps | 41 | 0.35 |
-| Flat greyscale props (held) | Mark Gosbell | CC0 | Stamps | 50 | 0.1 |
-| Historical art (optional) | AIC and Cleveland open access | CC0 | Handouts, portraits | 47 | 7.3 |
+| Flare Hero Portraits | Justin Nichol, for the Flare project | CC BY-SA 3.0 (6), CC BY 3.0 (4) | Portraits, handouts | 10 | 0.8 |
+| Warlock's Gauntlet: ruins, wrecks, bones and woods | the Warlock's Gauntlet artists, stated by the project lead | CC BY 3.0 | Stamps | 40 | 0.4 |
+| Poly Haven props | named per model | CC0 | Stamps | 41 | 0.5 |
+| Flat greyscale props | Mark Gosbell | CC0 | Stamps | 50 | 0.1 |
+| Historical art | AIC and Cleveland open access | CC0 | Handouts, portraits | 47 | 9.4 |
 
 Each pack's evidence (its page, the license in the page's words and in its license file, a Wayback snapshot, the AI check, the credit the author asks for) is in the candidate list, and its contact sheet is among the contact sheets (kept outside the repository).
 
 ### 3.1 Notes per pack
 
-- **Dyson Logos.** A full count through the blog's public API: of 3,425 posts, 276 carry "Cartography by Dyson Logos is licensed under a Creative Commons Attribution 4.0 International License" on the live page, all dated 2013-12-20 to 2019-06-13. The 29 picks cover inns, caves, dungeons, temples, ruins, castles and towers, a town, a hamlet, wilderness, a shipwreck, docks, crypts, sewers and manors. 23 have a drawn grid, measured. 247 more maps carry the line if the pack should grow.
+- **Dyson Logos.** A full count through the blog's public API: of 3,425 posts, 276 carry "Cartography by Dyson Logos is licensed under a Creative Commons Attribution 4.0 International License" on the live page, all dated 2013-12-20 to 2019-06-13. The 29 picks cover inns, caves, dungeons, temples, ruins, castles and towers, a town, a hamlet, wilderness, a shipwreck, docks, crypts, sewers and manors. 26 have a drawn grid: the build measured its square on all 26, and where its lines fall on 21. 247 more maps carry the line if the pack should grow.
 - **Scarlet Heroes maps.** Five Dyson maps from 2014 that Kevin Crawford bought outright and released: "I am releasing all the art from that book into the public domain", on the publisher's DriveThruRPG page (Wayback 2014-03-28). No drawn grid.
 - **Index Card Dungeons.** Inked 3 by 5 inch cards from 2014, each a whole small dungeon: exploration maps, not 5 ft battle grids.
-- **Kenney sample maps.** Rendered from Kenney's own Tiled map files, since nearly every sample image has his logo drawn over it. Weak for a D&D table (question 6).
 - **Illustrated Bestiary.** The best find: hand-drawn color monsters on transparency for the Cairn RPG, covering the owlbear, mimic, gelatinous cube, chromatic dragons and more, 60 of 145 picked. Every file name carries "CC-BY-SA_Oozejar".
 - **Dungeon Crawl Stone Soup.** Only the vetted November 2015 release of the crawl/tiles repository, whose maintainer states CC0 for the artists who signed off. The OpenGameArt zips are repacks that include tiles since withdrawn, so they are not used. 32 px pixel art, upscaled 8 times with nearest neighbor.
 - **Portraits.** Lemurs are ink heads of many races, Hewitt's are naive acrylic paintings, Flare's are painterly. Flare's packs 2 to 5 are left out: they are likenesses of named Kickstarter backers.
-- **Warlock's Gauntlet.** The rest of the six top-down pages the shipped bushes and campfires come from. The license is stated by Liosan, the project lead, who wrote in 2013 that the artists "agreed to license it as CC for use in the WG project" (question 3).
-- **Poly Haven props.** Benches, a settle, chairs and stools, tables, candles, a lantern, a statue, pots, goblets, baskets, tubs, a crate, a chessboard, a cannon, a pier, stumps, logs and boulders, rendered from above by `scripts/stamps.ts` as the shipped furniture is. Three picks are one part of a model set, so their renders need a look.
+- **Warlock's Gauntlet.** The rest of the six top-down pages the shipped bushes and campfires come from. The license is stated by Liosan, the project lead, who wrote in 2013 that the artists "agreed to license it as CC for use in the WG project" (decided in section 12).
+- **Poly Haven props.** Benches, a settle, chairs and stools, tables, candles, a lantern, a statue, pots, goblets, baskets, tubs, a crate, a chessboard, a cannon, a pier, stumps, logs and boulders, rendered from above by `scripts/stamps.ts` as the shipped furniture is. Three picks are one part of a model set, and their renders were checked on a contact sheet.
 - **Historical art.** The clearest 14 people, 10 creatures, 10 places, 7 items and 6 documents of draft 1's 134, each keeping draft 1's evidence.
 
 ## 4. Where a DM finds it: its own selector
@@ -75,7 +71,7 @@ Starter art never mixes into the room's own images. Each place that picks art ga
 | Handouts | Portrait packs, the Bestiary, Historical art | Copies it in as a `handout` image |
 | Builder, Stamp mode | Prop packs | Places the stamp by reference, as shipped stamps are placed |
 
-One component, `client/features/starter/StarterBrowser.tsx`, serves all four, given the uses to show. The catalog and its 256 px thumbnails load with the panels the room preloads in the background (design.md 14.1). Players see the Starter tab in the image picker for their own character's portrait, since `token` is a kind a player may add. Maps and handouts stay DM kinds.
+One component, `client/features/starter/StarterBrowser.tsx`, serves all four, given the uses to show. The catalog loads with the panels the room preloads in the background (design.md 14.1). The 256 px thumbnails load when a pack opens, each showing loading until it arrives: a pick needs the server anyway, so having them early would buy nothing offline, and a phone would fetch every pack's previews for a picker it may never open. Players see the Starter tab in the image picker for their own character's portrait, since `token` is a kind a player may add. Maps and handouts stay DM kinds.
 
 ## 5. How a pick joins the room
 
@@ -88,13 +84,14 @@ One component, `client/features/starter/StarterBrowser.tsx`, serves all four, gi
 
 What keeps a copy from cluttering the DM's own images:
 
-- **Route.** `POST /api/rooms/:id/assets/starter { work, kind }` looks the work up in the shipped catalog, reads the file from the server's own `dist/starter/`, runs the upload pipeline for the kind, and stores the credit from the catalog, never one the client sends, in the `credit` column the Openverse import added (docs/design-v1-dm-tools.md 3.13). The work must be in the catalog and the kind among its uses. `map` and `handout` need the DM.
+- **Route.** `POST /api/rooms/:id/assets/starter { work, kind }` looks the work up in the shipped catalog, reads the file from the folder the Starter tab is served from (`dist/starter/` in production, `public/starter/` elsewhere, where Vite serves it), runs the upload pipeline for the kind, and stores the credit from the catalog, never one the client sends, in the `credit` column the Openverse import added (docs/design-v1-dm-tools.md 3.13). The work must be in the catalog and the kind among its uses. `map` and `handout` need the DM. Picks spend an hourly budget of their own, apart from uploads (60 a session, 120 an IP, 240 a room), and a pick of a work the room already holds as that kind spends nothing. A map's answer carries its grid as the server's catalog measured the file it copied.
 - **Marked as starter.** `assets` gains `starter text`, the work's key (null for uploads). A second pick of one work reuses the row (`unique (room_id, sha256, kind)`).
-- **Library.** The Library panel and the picker's Library tab list the DM's uploads first, then a folded "From starter packs" group, so a DM managing their own maps never wades through starter art.
+- **Library.** The Library panel and the picker's Library tab list the DM's uploads first, then a folded "From starter packs" group, so a DM managing their own maps never wades through starter art. New scene's "Or use a map already in this room" and the handout form's list put the DM's own first and the picks after, apart.
 - **Quota.** A starter row does not count toward the room's stored bytes (`roomStoredBytes` skips rows with `starter`). Its file is shared by every room that picked it and can always be made again from the image.
 - **Storage and backups.** Asset files are stored by content hash, so a work picked in ten rooms is one file on disk, and the incremental backup copies it once.
 - **"Not in use" cleanup.** A picked work nothing uses any more is marked Not in use like an upload. Deleting it is harmless, since the DM can pick it again.
-- **Export and import.** The export carries the file and its credit, so a room moves to another server whole.
+- **Export and import.** The export carries the file, its credit and its mark, so a room moves to another server whole. An import keeps the mark only where that server ships the work with the same SHA-256 (section 12), and an import over the room's quota is refused whole.
+- **A later scene from a pick.** The listing gives a pick's SHA-256, so a scene made later from a map the room holds takes the catalog's grid only when the catalog's file is the room's. A work rebuilt since, or a tab holding an older catalog, opens on Grid instead.
 
 ## 6. SRD monster tokens
 
@@ -103,13 +100,14 @@ Unchanged from draft 1. `shared/srd/tokenIcons.ts`, written by a script from the
 - 330 monsters: 113 exact icons, 214 close, 3 generic (Ettin, Weasel, Giant Weasel). 265 distinct icons by 10 authors, all CC BY 3.0 and already credited by author.
 - The disk is colored by creature type from the 14 swatches (Aberration purple, Beast brown, Celestial yellow, Construct gray, Elemental orange, Fey pink, Fiend coral, Giant dark gray, Humanoid blue, Monstrosity teal, Ooze light gray, Plant green, Undead black). Dragons take their own color where the palette has one.
 - The Bestiary pictures about 60 SRD monsters in color. A later step could offer "Use the Bestiary's picture" on those monsters' pages. The default stays the icon, since it covers all 330.
-- The dragon turtle's SRD id is `dragon-tur-t-le` and its name "Dragon Tur t le" (`shared/srd/monsters.json`, `rolls.json`), a parsing slip. Rooms key `srdImages` by that id, so the fix needs a small migration of its own (question 9).
+- The dragon turtle's SRD id is `dragon-tur-t-le` and its name "Dragon Tur t le" (`shared/srd/monsters.json`, `rolls.json`), a parsing slip. Rooms key `srdImages` by that id, so the fix needs a small migration of its own (decided in section 12).
+- A token wearing the shipped icon on another color was marked by hand, so Apply to N tokens leaves it for the DM's say.
 
 ## 7. Maps in the app
 
-- **The grid.** Each map in the catalog carries its cell size in pixels, measured on the file as shipped, and feet per cell where the map or post says. A scene made from it starts at that cell size (`mapScene` takes it as it takes a file name's hint today), so it skips grid alignment. A map with no grid opens on Grid, as an upload does, and so does one whose square size was measured but not where its lines fall (5 of Dyson's), with the box already at that size.
-- **Black and white maps.** Dyson's, Majcher's and the Sine Nomine maps are ink on white. The app's default grid (white, 25%) vanishes on white paper, so the catalog gives these maps a dark grid color and the scene starts with it. The DM's 50% fog turns the paper gray, which reads fine.
-- **Encoding.** Line-art maps ship as 4-level gray PNG at 4096 px on the long side: 7.7 MB for Dyson's 29, against 16.4 MB as WebP, with no visible loss at 1:1 (checked on a crop). Pixel-art maps ship as lossless WebP, since lossy WebP smears pixels. The painted cavern ships as WebP at quality 80. The upload pipeline then makes the room's variants as for any map.
+- **The grid.** Each map in the catalog carries its cell size in pixels, measured on the file as shipped, and feet per cell where the map or post says. A scene made from it starts at that cell size (`mapScene` takes it as it takes a file name's hint today), and where the build also found where the lines fall, at that origin, so it skips grid alignment. A map with no grid opens on Grid, as an upload does, and so does one whose square size was measured but not where its lines fall (5 of Dyson's), with the box already at that size.
+- **Black and white maps.** Dyson's, Majcher's and the Scarlet Heroes maps are ink on white. The app's default grid (white, 25%) vanishes on white paper, so the catalog gives these maps a dark grid color and the scene starts with it. The DM's 50% fog turns the paper gray, which reads fine.
+- **Encoding.** Line-art maps ship as 4-level gray PNG at 4096 px on the long side: 7.9 MB for Dyson's 29, against 16.4 MB as WebP, with no visible loss at 1:1 (checked on a crop). The painted cavern ships as WebP at quality 80. The upload pipeline then makes the room's variants as for any map, as WebP, and the pick's credit says so.
 - **The notes in the margin.** 24 of Dyson's maps carry "SUPPORTED ON PATREON | www.DYSONLOGOS.com" in the margin. They stay: a crop is a change to record, and it moves the grid's origin.
 
 ## 8. The build
@@ -118,13 +116,13 @@ Unchanged from draft 1. `shared/srd/tokenIcons.ts`, written by a script from the
 
 - **Input.** `scripts/starter-art.json`: each pack's id, title, author, license, page, the license in its own words, its Wayback snapshot and AI check, and each work's key, name, category, tags, uses, grid, source URL and pinned SHA-256.
 - **Fetch and pin.** It fetches each pack's archive or files from where the author published them and checks the pinned hash, so a changed upstream file fails loudly and asks for its license to be checked again. itch.io gives a fresh download link per request, which the script asks the page for, as a browser does.
-- **Encode.** Maps as section 7 says. Token art at 512 px on the long side (the token kind's full size), pixel art upscaled 8 times with nearest neighbor to 256 px, portraits and pictures shown as handouts at 1024 px, all WebP at quality 80. A 256 px thumbnail per work. Only mechanical changes: resize, crop, format and color space, each recorded per work.
+- **Encode.** Maps as section 7 says. Token art at 512 px on the long side (the token kind's full size), pixel art upscaled 8 times with nearest neighbor to 256 px, portraits and the Bestiary at 1024 px, and Historical art's pictures up to 1600 px, shrunk until each is under 300 KB, all WebP at quality 80 (encoder effort 4). A 256 px thumbnail per work. Only mechanical changes: resize, crop, format and color space, each recorded per work.
 - **Output.** `public/starter/<pack>/<key>.<ext>` and `public/starter/<pack>/thumbs/<key>.webp`, stamps into `public/stamps/` with pack-prefixed keys, and `shared/starterArt.ts`, the catalog the client and server read. The outputs are committed, as the stamps are.
 
 ## 9. Credits and credits.test.ts
 
 - `CREDITS.md` gains a "Starter packs" section: one block per pack with its author, page, license, the credit the author asks for and what changed, then a table of its files. Historical art lists each work with its museum page.
-- `shared/credits.ts` gains a `starter-packs` group, one credit per pack (one per work for Historical art), for the About page. Each picked image also carries its credit on its asset row, shown in the library and the token panel.
+- `shared/credits.ts` gains a `starter-packs` group, one credit per pack (one per work for Historical art), for the About page. Each picked image also carries its credit on its asset row, shown in the library and the token panel with the credit line its author asks for, where one does. A public domain dedication's credit links the snapshot of the page that makes it.
 - `shared/licenses.ts` gains `CC-BY-SA-4.0` (the Bestiary) and `public-domain-dedication` (the Scarlet Heroes maps), the second named plainly, never as CC0.
 - `credits.test.ts`: `shippedArt` adds `public/starter`. New tests:
   - The catalog equals the files on disk, and every file belongs to a pack.
@@ -133,17 +131,17 @@ Unchanged from draft 1. `shared/srd/tokenIcons.ts`, written by a script from the
 
 ## 10. Size budget
 
+As built:
+
 | Part | MB |
 | --- | --- |
-| Map packs that pass (Scarlet Heroes, Index Card Dungeons, Cavern, Kenney) | 1.8 |
-| Token and portrait packs that pass | 11.0 |
-| Prop packs that pass (Poly Haven measured from thumbnails, renders about 8 KB each) | 0.7 |
-| Historical art | 7.3 |
-| Thumbnails, about 550 at 6 KB on average | 3 |
-| **All that passes** | **about 24** |
-| Dyson Logos maps, if accepted | 7.7 |
-| The other held packs (Spears of the Dawn, Sine Nomine figures, flat greyscale props) | 4.9 |
-| **Everything** | **about 36** |
+| Map packs (Dyson Logos, Scarlet Heroes, Index Card Dungeons, Cavern) | 9.5 |
+| Token and portrait packs (Bestiary, Cute Heroes, DCSS, Lemurs, Hewitt, Flare) | 11.5 |
+| Historical art | 9.4 |
+| Thumbnails, 309 (the DCSS tiles are their own) | 2.3 |
+| **`public/starter`, 679 files** | **32.7** |
+| Prop packs, as stamps in `public/stamps` (Warlock's Gauntlet, Poly Haven, flat greyscale) | 1.0 |
+| **Everything** | **33.7** |
 
 Per-file caps: a line-art map at most 4096 px and 1 MB, a color map 2.5 MB, token art 512 px, a picture 1024 to 1600 px and 300 KB, a thumbnail under 30 KB. The repository's pack is about 25 MB today, and these files do not compress further, so it grows by the same amount, and the Docker image too, since `public/` is copied into `dist/`.
 
@@ -178,7 +176,7 @@ Every rejected pack and source, with its reason, is in the candidate list's `rej
 
 ## 12. Decisions
 
-The questions of draft 2 are settled as follows, and the build follows them. The "held" marks in section 3 are superseded by this list.
+The questions of draft 2 are settled as follows, and the build follows them.
 
 1. **The packs.** 14 packs, 501 works: Dyson Logos maps (29), Scarlet Heroes maps (5), Index Card Dungeons (10), Cavern Battlemap (1), Illustrated Bestiary (60), Cute Heroes and Monsters (64), Dungeon Crawl Stone Soup monsters (61), Lemurs Fantasy Portraits (58), Fantasy RPG Portraits (25), Flare Hero Portraits (10), Warlock's Gauntlet (40), Poly Haven props (41), Mark Gosbell's flat greyscale props (50) and Historical art (47).
 2. **Dyson Logos.** In, under CC BY 4.0 with the credit "Cartography by Dyson Logos". The maps are changed only mechanically.
@@ -190,11 +188,13 @@ The questions of draft 2 are settled as follows, and the build follows them. The
 8. **The Bestiary's size.** 1024 px, so a monster can be shown as a handout.
 9. **SRD tokens.** Every one of the 330 monsters gets a default token, a disk colored by creature type (section 6). The dragon turtle's id is fixed separately, later.
 10. **A starter pick in a room export.** It keeps its starter mark on import only when the importing server's catalog has that work with the same SHA-256. Otherwise it imports as an ordinary upload and counts toward the room's storage.
+11. **Removing an SRD monster's image.** "Use the default icon" takes the place of "Remove image", so an SRD monster's tokens never start as initials only. A DM's own image or icon still wins.
+12. **The picks' rate.** Picks have an hourly budget of their own, apart from uploads, as handouts and thumbnails have, and a pick the room already holds costs nothing.
 
 ## 13. Evidence and checking
 
 - **The candidate list** holds every pack with its evidence and every work with its source, size and grid, plus every rejected source with its reason. It stays outside the repository. The decided packs and works, with their evidence, become `scripts/starter-art.json`.
-- **Contact sheets**, one per pack, number every work as the list does. A held pack's title says so.
+- **Contact sheets**, one per pack, number every work as the list does. Draft 2's sheets marked a held pack in its title.
 - **An independent checker** verifies every pack's license before anything is built. A pack it cannot confirm is dropped, not argued.
 
 ## 14. Build split and tests
