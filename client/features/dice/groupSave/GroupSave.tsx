@@ -29,6 +29,7 @@ import { useDiceView } from "../useDiceView.ts";
 import { SrdLoadFailed } from "../../monsters/SrdLoadFailed.tsx";
 import { useReceipt, type ReceiptState } from "../useReceipt.ts";
 import { useRollBlocked } from "../useRollOption.ts";
+import { knownOrTyped } from "../../rolls/card.ts";
 import {
   apply,
   applyAgain,
@@ -376,7 +377,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
           loading={loading && row.bonus === null}
           blocked={blocked ?? (offScene ? "Go back to the scene first." : null)}
           onChange={(next) => update(page.phase === "setup" ? { ...next, rows: pageRef.current.rows } : next)}
-          onDmRoll={() => {
+          onDmRoll={(typed) => {
             const s = stateOf(page, row);
             const d20 = d20Of(page.test, page.spell);
             if (!s.asked || !d20 || !row.askRef) return;
@@ -388,6 +389,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
               target: row.askRef,
               unanswered: true,
               ...(preset.extra.length > 0 ? { extra: preset.extra.join("").replace(/^\+/, "") } : {}),
+              ...(typed !== undefined ? { bonus: typed } : {}),
               ...modeOf(preset.sources),
             };
             run(dmRoll(pageRef.current, row.holder, op));
@@ -738,7 +740,8 @@ function GroupRow(props: {
   loading: boolean;
   blocked: string | null;
   onChange(page: Page): void;
-  onDmRoll(): void;
+  /** The DM's roll of an asked row, with the bonus typed for a creature with no stat block. */
+  onDmRoll(typed?: number): void;
   onRollAgain(): void;
 }) {
   const { page, row, outcome } = props;
@@ -756,6 +759,9 @@ function GroupRow(props: {
   const set = (patch: Partial<typeof s>) => props.onChange({ ...page, states: { ...page.states, [row.holder]: { ...s, ...patch } } });
   // The amount opens a field of its own (5.4): what the DM types there wins, and going back takes the worked-out amount again.
   const [editing, setEditing] = useState(false);
+  // The DM's roll for an asked creature with no stat block takes the bonus typed beside it (knownOrTyped).
+  const [bonusText, setBonusText] = useState("");
+  const typed = knownOrTyped(row.bonus, bonusText, !props.loading);
   // A page with No save has no roll, so it is in setup until Apply: its rows' amounts open there too.
   const takes = (!setup || page.test.kind === "none") && !frozen && !s.gone && (outcome.result === "fail" || outcome.result === "pass");
   return (
@@ -812,9 +818,28 @@ function GroupRow(props: {
       {details.length > 0 ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted, display: "grid", gap: 2 }}>{details.map((d, i) => <span key={i}>{d}</span>)}</div> : null}
       {!setup && !frozen ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), alignItems: "center" }}>
-          {waitingAsk && row.bonus !== null ? (
-            <Button size="sm" disabled={props.blocked !== null} busy={page.dmRolls.some((r) => r.holder === row.holder && r.state === "sending")} onClick={props.onDmRoll}>
-              {`Roll ${signedText(row.bonus)}`}
+          {waitingAsk && typed.typing ? (
+            <Input
+              aria-label={`Bonus for ${row.name}`}
+              value={bonusText}
+              placeholder="+0"
+              enterKeyHint="done"
+              autoComplete="off"
+              maxLength={3}
+              error={typed.error}
+              onChange={(e) => setBonusText(e.target.value)}
+              style={{ width: 64, flex: "none", textAlign: "center" }}
+            />
+          ) : null}
+          {waitingAsk && (row.bonus !== null || typed.typing) ? (
+            <Button
+              size="sm"
+              disabled={(props.blocked ?? typed.waits) !== null}
+              title={props.blocked ?? typed.waits ?? undefined}
+              busy={page.dmRolls.some((r) => r.holder === row.holder && r.state === "sending")}
+              onClick={() => typed.bonus !== null && props.onDmRoll(typed.typing ? typed.bonus : undefined)}
+            >
+              {row.bonus !== null ? `Roll ${signedText(row.bonus)}` : typed.bonus !== null ? `Roll d20${signedText(typed.bonus)}` : "Roll d20"}
             </Button>
           ) : null}
           {s.status === "notRolled" || s.status === "unknown" ? (

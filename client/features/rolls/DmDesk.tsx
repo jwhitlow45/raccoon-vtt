@@ -5,6 +5,7 @@ import { ABILITY_NAMES } from "#shared/rules/skills.ts";
 import { useStore } from "zustand";
 import type { RollRequest, RollTarget } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
+import { Input } from "../../components/Field.tsx";
 import { useAlertsSummary } from "../../components/sheetFocus.ts";
 import { revealAndFocus } from "../../lib/reveal.ts";
 import { theme } from "../../lib/theme.ts";
@@ -20,7 +21,7 @@ import { useDiceView } from "../dice/useDiceView.ts";
 import { refusalWords } from "../dice/useReceipt.ts";
 import { useLayoutSize } from "../device/layout.ts";
 import { AskRow } from "./AskRow.tsx";
-import { askRowText, bestChoice, dmRoll } from "./card.ts";
+import { askRowText, bestChoice, dmRoll, knownOrTyped } from "./card.ts";
 import {
   allAnsweredIds,
   answered,
@@ -315,9 +316,10 @@ function TargetRow(props: { request: RollRequest; target: RollTarget }) {
 
 /**
  * Roll for a creature still waiting (docs/design-v1-roll-request.md 6),
- * where Reopen stands on an answered row: shown only while the DM's view
- * knows the bonus, so a token on a scene the DM is not viewing has none.
- * The preset reads every effect over the DM's view and the request's
+ * where Reopen stands on an answered row: shown only while the creature is
+ * in the DM's view, so a token on a scene the DM is not viewing has none.
+ * One with no stat block rolls with a bonus the DM types beside it, never
+ * a "+0" no one gave. The preset reads every effect over the DM's view and the request's
  * `spell`, and two choices roll the higher bonus. It sends `unanswered`,
  * so an answer that came first stands and this roll is refused before any
  * draw. Its result shows in the row itself, which the answer fills.
@@ -332,20 +334,22 @@ function DmRollButton(props: { request: RollRequest; target: RollTarget; name: s
   const creatures = useMemo(() => [ref], [ref]);
   const { dice } = useDiceView(creatures);
   const [busy, setBusy] = useState(false);
+  const [text, setText] = useState("");
   const connected = useRoomView((s) => s.connection === "open");
   const rolls = dice ? creatureRolls(dice, ref) : null;
   const two = request.test.choices.length > 1;
   const bonuses = request.test.choices.map((_, i) => (rolls?.numbers ? bonusFor(rolls.numbers, testOf(request, i)) : null));
   const choice = two ? bestChoice(bonuses) : 0;
-  const bonus = bonuses[choice] ?? null;
-  if (!dice || bonus === null) return null;
+  const known = bonuses[choice] ?? null;
+  if (!dice || !rolls) return null;
+  const { bonus, waits, error } = knownOrTyped(known, text, true);
   const test = testOf(request, choice);
   const picked = request.test.choices[choice]!;
-  const roll = dmRoll({ bonus, preset: presetFor(dice, ref, test, { rolls }), ...(two ? { ability: ABILITY_NAMES[picked.ability].slice(0, 3) } : {}) });
+  const roll = dmRoll({ bonus, typed: known === null, preset: presetFor(dice, ref, test, { rolls }), ...(two ? { ability: ABILITY_NAMES[picked.ability].slice(0, 3) } : {}) });
   const tap = () => {
-    if (busy) return;
+    if (busy || bonus === null) return;
     // Read again at the tap, so the effects and Magic Resistance then decide (doc 3 3.2).
-    const now = dmRoll({ bonus, preset: presetFor(dice, ref, test, { rolls }) });
+    const now = dmRoll({ bonus, typed: known === null, preset: presetFor(dice, ref, test, { rolls }) });
     const tag = actions.newId();
     const op = { t: "roll.dice" as const, tag, rollId: request.id, target: ref, ...(two ? { choice } : {}), ...now.fields, unanswered: true as const };
     const n = sendRoll(sender, op, {
@@ -359,18 +363,35 @@ function DmRollButton(props: { request: RollRequest; target: RollTarget; name: s
     if (n === null) ui.notify(NEEDS_CONNECTION, "error");
     else setBusy(true);
   };
-  return (
+  const button = (
     <Button
       variant="quiet"
       size="sm"
       busy={busy}
-      disabled={!connected}
-      title={connected ? undefined : NEEDS_CONNECTION}
+      disabled={!connected || waits !== null}
+      title={!connected ? NEEDS_CONNECTION : (waits ?? undefined)}
       aria-label={`${roll.label} for ${name}`}
       onClick={tap}
       style={{ justifySelf: "start", padding: 0, fontSize: theme.font.small, textAlign: "left" }}
     >
       {roll.label}
     </Button>
+  );
+  if (known !== null) return button;
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: theme.space(1), flexWrap: "wrap" }}>
+      <Input
+        aria-label={`Bonus for ${name}`}
+        value={text}
+        placeholder="+0"
+        enterKeyHint="done"
+        autoComplete="off"
+        maxLength={3}
+        error={error}
+        onChange={(e) => setText(e.target.value)}
+        style={{ width: 64, flex: "none", textAlign: "center" }}
+      />
+      {button}
+    </span>
   );
 }

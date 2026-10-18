@@ -39,6 +39,20 @@ export function parseBonus(text: string): { ok: true; bonus: number } | { ok: fa
   return { ok: true, bonus: n === 0 ? 0 : n };
 }
 
+/**
+ * A roll's bonus where the app may know none: the creature's, else the one
+ * typed beside its Roll once its block would have loaded. A creature with
+ * no stat block still rolls, and never with a "+0" no one gave. `typing`
+ * is whether the field shows, and `waits` why the Roll waits.
+ */
+export function knownOrTyped(known: number | null, text: string, loaded: boolean): { bonus: number | null; typing: boolean; waits: string | null; error: boolean } {
+  const typing = loaded && known === null;
+  const typed = typing ? parseBonus(text) : null;
+  const bonus = known ?? (typed?.ok ? typed.bonus : null);
+  const waits = typing && bonus === null ? (typed?.ok === false ? typed.error : TYPE_BONUS) : null;
+  return { bonus, typing, waits, error: typed?.ok === false };
+}
+
 /** A source's name in a reading: "Restrained", "Magic Resistance", or "Advantage" for the one the player pressed. */
 export function sourceName(source: AdvantageSource): string {
   if (source.from === "pressed") return source.kind === "adv" ? "Advantage" : "Disadvantage";
@@ -232,21 +246,24 @@ export function holds(request: Pick<RollRequest, "targets"> | undefined, target:
  * view, the preset over every effect and the request's `spell`, worded as
  * doc 3's buttons are, "Roll +5", "Roll Dex +5, Disadvantage (Restrained)"
  * or "Roll +5: fails (Stunned)", and the fields its `roll.dice` sends with
- * `unanswered`, so an answer that came first stands.
+ * `unanswered`, so an answer that came first stands. Where the DM's view
+ * knows no bonus, the DM types one: "Roll d20" until then, "Roll d20+3"
+ * after, and the fields carry it for the server to use where it knows none.
  */
-export function dmRoll(input: { bonus: number; preset: RollPreset | null; ability?: string }): { label: string; fields: { mode?: AdvantageMode; cancelled?: true; extra?: string } } {
-  const { preset } = input;
+export function dmRoll(input: { bonus: number | null; typed?: boolean; preset: RollPreset | null; ability?: string }): { label: string; fields: { mode?: AdvantageMode; cancelled?: true; extra?: string; bonus?: number } } {
+  const { preset, bonus } = input;
   const sources = preset?.sources ?? [];
   const mode = advantageFields(sources);
   const extra = (preset?.extra ?? []).join("");
-  let label = `Roll ${input.ability ? `${input.ability} ` : ""}${signed(input.bonus)}`;
+  const how = bonus === null ? "d20" : input.typed ? `d20${signed(bonus)}` : signed(bonus);
+  let label = `Roll ${input.ability ? `${input.ability} ` : ""}${how}`;
   if (mode.mode) label += `, ${mode.mode === "adv" ? "Advantage" : "Disadvantage"} (${list(names(sources, mode.mode))})`;
   for (const term of preset?.extra ?? []) {
     const name = extraName(term);
     label += `, ${term}${name ? ` (${name})` : ""}`;
   }
   if (preset?.fails) label += `: fails (${CONDITIONS[preset.fails].name})`;
-  return { label, fields: { ...mode, ...(extra !== "" ? { extra } : {}) } };
+  return { label, fields: { ...mode, ...(extra !== "" ? { extra } : {}), ...(input.typed && bonus !== null ? { bonus } : {}) } };
 }
 
 // ------------------------------------------------------------ asking the DM to change an answer

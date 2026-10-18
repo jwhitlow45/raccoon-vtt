@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DiceResult, RollTarget } from "#shared/model.ts";
 import { reminderPreset } from "#shared/rules/rollReminders.ts";
-import { askedText, askItems, askKept, askRowText, bestChoice, cardRoll, dmRoll, choiceLabel, CLEAR_TOTAL, NO_INPUTS, parseBonus, rolledDice, rolledNews, rolledText, TYPE_BONUS, verdictText } from "./card.ts";
+import { askedText, askItems, askKept, askRowText, bestChoice, BONUS_WORDS, cardRoll, dmRoll, choiceLabel, CLEAR_TOTAL, knownOrTyped, NO_INPUTS, parseBonus, rolledDice, rolledNews, rolledText, TYPE_BONUS, verdictText } from "./card.ts";
 
 const DEX = { kind: "save", ability: "dex" } as const;
 const restrained = [{ key: "restrained" as const }];
@@ -90,6 +90,20 @@ describe("the DM's Roll for a waiting creature (6)", () => {
     const mr = reminderPreset([], { ...DEX, spell: true }, { magicResistance: true });
     assert.deepEqual(dmRoll({ bonus: 2, preset: mr }), { label: "Roll +2, Advantage (Magic Resistance)", fields: { mode: "adv" } });
     assert.deepEqual(dmRoll({ bonus: 2, preset: reminderPreset([{ key: "blessed" }], DEX) }), { label: "Roll +2, +1d4 (Blessed)", fields: { extra: "+1d4" } });
+  });
+
+  test("a creature with no stat block rolls with the bonus the DM types, sent for the server to use, and reads d20 until then (owner's no-numbers rule)", () => {
+    assert.deepEqual(dmRoll({ bonus: null, typed: true, preset: reminderPreset([], DEX) }), { label: "Roll d20", fields: {} });
+    assert.deepEqual(dmRoll({ bonus: 3, typed: true, preset: reminderPreset(restrained, DEX) }), { label: "Roll d20+3, Disadvantage (Restrained)", fields: { mode: "dis", bonus: 3 } });
+    assert.deepEqual(dmRoll({ bonus: -1, typed: true, preset: reminderPreset([], DEX), ability: "Dex" }).label, "Roll Dex d20-1");
+  });
+
+  test("the bonus beside it: the known one wins, else the one typed, and the Roll waits for it in the card's words", () => {
+    assert.deepEqual(knownOrTyped(null, "", false), { bonus: null, typing: false, waits: null, error: false }, "nothing typed while the block loads");
+    assert.deepEqual(knownOrTyped(null, "", true), { bonus: null, typing: true, waits: TYPE_BONUS, error: false });
+    assert.deepEqual(knownOrTyped(null, "+3", true), { bonus: 3, typing: true, waits: null, error: false });
+    assert.deepEqual(knownOrTyped(null, "x", true), { bonus: null, typing: true, waits: BONUS_WORDS, error: true });
+    assert.deepEqual(knownOrTyped(4, "+3", true), { bonus: 4, typing: false, waits: null, error: false });
   });
 });
 
