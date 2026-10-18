@@ -7,7 +7,10 @@ import { fitTabs, MORE_CAP, moreReserve, nameCut, rowWidth, type TabWidths } fro
  * The fixtures are the widths measured in Chrome, 14 px at weight 600 in
  * the tab look with 6 px side padding, and in More's look with its caret,
  * for macOS's system font, Segoe UI (through Selawik, built to its
- * metrics) and DejaVu Sans, as section 3.2 quotes them.
+ * metrics) and DejaVu Sans, as section 3.2 quotes them. Inter, the font
+ * the app draws in, was measured the same way in Chrome 153 from the
+ * side panel's own measuring spans. The other three stay as the fonts
+ * that draw until Inter loads.
  */
 
 type Font = { tab: Record<string, number>; more: Record<string, number> };
@@ -23,6 +26,10 @@ const SEGOE: Font = {
 const DEJAVU: Font = {
   tab: { Token: 59.7, Initiative: 85, Log: 44, Journal: 69.9, Areas: 59, DM: 44, Scenes: 69.7, Monsters: 87.3, Encounters: 102.8, Characters: 99.8, Outliner: 78.5, Library: 70.1, Menu: 57.4 },
   more: { Token: 77.7, Initiative: 103, Log: 60.6, Journal: 87.9, Areas: 77, DM: 57.6, Scenes: 87.7, Monsters: 105.3, Encounters: 120.8, Characters: 117.8, Outliner: 96.5, Library: 88.1, Menu: 75.4, More: 72 },
+};
+const INTER: Font = {
+  tab: { Token: 55.2, Initiative: 71.6, Log: 44, Journal: 65.2, Areas: 53.6, DM: 44, Scenes: 64.1, Monsters: 78, Encounters: 91.2, Characters: 88.9, Outliner: 68, Library: 61.8, Menu: 52.3 },
+  more: { Token: 73.2, Initiative: 89.6, Log: 57.2, Journal: 83.2, Areas: 71.6, DM: 55, Scenes: 82.1, Monsters: 96, Encounters: 109.2, Characters: 106.9, Outliner: 86, Library: 79.8, Menu: 70.3, More: 67 },
 };
 /** DejaVu Sans with today's 8 px padding, which 3.4 replaces. */
 const DEJAVU_8: Font = {
@@ -92,7 +99,7 @@ describe("which tabs stand in the row", () => {
   });
 
   test("More's room is never under its reserve, and a wider room never fits fewer tabs", () => {
-    for (const font of [MACOS, SEGOE, DEJAVU]) {
+    for (const font of [INTER, MACOS, SEGOE, DEJAVU]) {
       for (const panels of [DM, PLAYER]) {
         let last = 0;
         for (let room = 1; room <= 600; room++) {
@@ -107,7 +114,7 @@ describe("which tabs stand in the row", () => {
   });
 
   test("with today's registry, More never holds exactly one panel: Menu, last, is narrower than More's label", () => {
-    for (const font of [MACOS, SEGOE, DEJAVU, DEJAVU_8]) {
+    for (const font of [INTER, MACOS, SEGOE, DEJAVU, DEJAVU_8]) {
       for (const panels of [DM, PLAYER]) {
         for (let room = 1; room <= 600; room++) assert.notEqual(fitTabs(widths(font, panels, room))!.count, panels.length - 1, `at ${room}`);
       }
@@ -124,6 +131,7 @@ describe("the measured fonts (3.2)", () => {
 
   test("at 295 every font holds Token, Initiative and Log, for the DM and for players", () => {
     for (const [font, room] of [
+      [INTER, 118.2],
       [MACOS, 118.9],
       [SEGOE, 120.9],
       [DEJAVU, 100.3],
@@ -136,11 +144,12 @@ describe("the measured fonts (3.2)", () => {
     }
   });
 
-  test("DejaVu Sans cuts exactly Monsters, Encounters and Characters, and the other two cut none", () => {
+  test("DejaVu Sans cuts exactly Monsters, Encounters and Characters, and the other three cut none", () => {
     assert.deepEqual(cutAt(DEJAVU, DM, 295), ["Monsters", "Encounters", "Characters"]);
     assert.deepEqual(cutAt(DEJAVU, PLAYER, 295), ["Characters"], "a player's More holds only Characters of these");
     assert.deepEqual(cutAt(MACOS, DM, 295), []);
     assert.deepEqual(cutAt(SEGOE, DM, 295), []);
+    assert.deepEqual(cutAt(INTER, DM, 295), []);
   });
 
   test("with macOS's widths, 248 and 236 give two tabs, and at 236 exactly Encounters and Characters are cut", () => {
@@ -156,7 +165,7 @@ describe("the measured fonts (3.2)", () => {
 
   // docs/design-v1-split-panel.md 6: "Two panels" heads More's menu, so More must always be there. A registry that one day fits every tab in the row needs another place for it.
   test("More holds a panel for both roles at every room up to the 360 px side panel's widest row, so Two panels always has its place", () => {
-    for (const [name, font] of [["macOS", MACOS], ["Segoe UI", SEGOE], ["DejaVu Sans", DEJAVU]] as const) {
+    for (const [name, font] of [["Inter", INTER], ["macOS", MACOS], ["Segoe UI", SEGOE], ["DejaVu Sans", DEJAVU]] as const) {
       for (const [role, panels] of [["DM", DM], ["player", PLAYER]] as const) {
         for (let room = 1; room <= 295; room++) {
           const fit = fitTabs(widths(font, panels, room));

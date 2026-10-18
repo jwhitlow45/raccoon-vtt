@@ -17,8 +17,9 @@
  * leaves room never cuts one. Past it a long name is cut with an
  * ellipsis, and the side panel names the panel in full above it (3.8),
  * so that Log keeps its place in the row with a wide font such as DejaVu
- * Sans. Set so that Token, Initiative, Log and More fit a 295 px row with
- * macOS's system font, Segoe UI and DejaVu Sans.
+ * Sans. Set so that Token, Initiative, Log and More fit a 295 px row in
+ * Inter, and in the fonts that draw until it loads: macOS's system font,
+ * Segoe UI and DejaVu Sans.
  */
 export const MORE_CAP = 92;
 
