@@ -135,7 +135,7 @@ export function JobBlock(props: {
         overflowWrap: "anywhere",
       }}
     >
-      <h4 ref={heading} tabIndex={-1} style={{ margin: 0, fontSize: theme.font.body14, fontWeight: theme.weight.bold, outlineOffset: 2 }}>
+      <h4 ref={heading} tabIndex={-1} style={{ margin: 0, fontSize: theme.font.body14, fontWeight: theme.weight.bold }}>
         {job.phase.k === "recovery" || job.phase.k === "recovered" ? "PDF upload" : job.phase.k === "range" ? openedWords(job)[0] : job.fileName}
       </h4>
       {/* The start, each pause or stop, and the end, never every page (4.1.4). A new child each time, so the same words said twice are heard twice. */}

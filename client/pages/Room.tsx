@@ -817,8 +817,8 @@ function RoomPage() {
       {/* The map's chrome pads for the right safe area only where the map reaches that edge: not beside the side panel, which holds it (theme.safe.mapRight). */}
       <div style={{ position: "relative", flex: 1, minWidth: 0, ["--rvtt-map-safe-right" as string]: sideShown ? "0px" : theme.safe.right }}>
         <MapArea gate={gate} role={role} actionBar={actionBar} insets={insets} onSelect={select} onOpenDetails={openDetails} tokenPanelShown={tokenPanelShown} onHideBar={hideBar} />
-        {/* The map's focus target (mapFocus.ts): after the map, so its ring draws over it, and before the bars, so Tab from it goes on to them. Taps pass through it. */}
-        <div ref={mapFocusRef} tabIndex={-1} role="img" aria-label="Map" style={MAP_FOCUS_STYLE} />
+        {/* The map's focus target (mapFocus.ts): after the map, so its ring draws over it, and before the bars, so Tab from it goes on to them. Taps pass through it. Unlike other places focus lands, it keeps its ring under keys (data-rvtt-ring, globals.css). */}
+        <div ref={mapFocusRef} tabIndex={-1} role="img" aria-label="Map" data-rvtt-ring="" style={MAP_FOCUS_STYLE} />
         <TopBar
           ref={topBarRef}
           zoom={zoom}

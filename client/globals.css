@@ -145,6 +145,20 @@ dialog[data-rvtt-sheet]:not([open]) {
   outline: none;
 }
 
+/* Some elements take focus from script only as a place to land, to say
+   where the reader now is: a heading, such as the DM guide's after a
+   Contents pick, a region the dock's summary shows, or a dialog that takes
+   the first focus so a screen reader starts at its label. None is a
+   control, so none draws a ring, after a pointer or keys. The page shows
+   where it is: the heading at the top, the region or dialog just opened.
+   A control kept out of the tab order, such as a menu's row or a strip's
+   arrow, keeps its ring. So does the map's focus target (data-rvtt-ring,
+   pages/mapFocus.ts), where nothing else would show that focus went to
+   the map. */
+[tabindex="-1"]:not(a[href], button, input, select, textarea, summary, [contenteditable]:not([contenteditable="false"]), [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [role="option"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="slider"], [role="spinbutton"], [role="treeitem"], [role="gridcell"], [data-rvtt-ring]):focus {
+  outline: none;
+}
+
 /* The option draws its own chosen look, and a tap on a phone would flash
    Chrome's grey square over it as well, which on a round swatch reads as a
    glitch. */
