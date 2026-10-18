@@ -1,11 +1,11 @@
 /* Only what inline styles cannot express: the interface font's faces, the
-   base document, native controls drawn dark, the hidden attribute, focus
-   rings, the tap flash and the disclosure marker, selection, the loading
-   spinner's turn and delay, the "Your turn" notice's keyframes, the
-   interface size's two rules, the room focus keeps under the tracker's
-   sticky header, the HP pair's container query, reduced motion, and the
-   sheet grabber under forced colors. Everything else is inline from
-   lib/theme.ts. */
+   base document, native controls drawn dark and in the page's font, the
+   hidden attribute, focus rings, the tap flash and the disclosure marker,
+   selection, the loading spinner's turn and delay, the "Your turn"
+   notice's keyframes, the interface size's two rules, the room focus
+   keeps under the tracker's sticky header, the HP pair's container query,
+   reduced motion, and the sheet grabber under forced colors. Everything
+   else is inline from lib/theme.ts. */
 
 /* Inter, the interface font (lib/interFont.ts, which says why one font),
    from the app's own origin. Each file is variable, so one holds every
@@ -50,6 +50,19 @@ body,
 
 body {
   overscroll-behavior: none;
+}
+
+/* The browser's own stylesheet gives buttons and form fields its control
+   font, which they do not take from the page. So a button whose inline
+   style names no family, such as a toolbar tool, drew in a different font
+   on each device. inherit draws every control in the family around it,
+   Inter unless a parent names another. Only the family: each control
+   keeps its own size, such as the 16 px inputs on phones. */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
 }
 
 *,

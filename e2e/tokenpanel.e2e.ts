@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type Route } from "playwright-core";
+import { INTER_FAMILY } from "../client/lib/interFont.ts";
 import { ConsoleWatch, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
@@ -252,6 +253,11 @@ async function rectOf(locator: Locator): Promise<Rect> {
   const b = await locator.boundingBox();
   assert.ok(b, "nothing on screen to measure");
   return { left: b.x, top: b.y, right: b.x + b.width, bottom: b.y + b.height, width: b.width, height: b.height };
+}
+
+/** The font family the page computes for an element, which its text draws in. */
+function familyOf(locator: Locator): Promise<string> {
+  return locator.evaluate((el) => (el as unknown as { ownerDocument: { defaultView: { getComputedStyle(e: unknown): { fontFamily: string } } } }).ownerDocument.defaultView.getComputedStyle(el).fontFamily);
 }
 
 /**
@@ -610,6 +616,18 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await steadyAboveSize(goblin, "a docked window");
     assert.ok((await rectOf(goblin.getByRole("group", { name: "Size", exact: true }))).bottom <= locked.top + 1, "Size stands under the less-used buttons");
     await shots.take(dm, "tokenpanel-dm-goblin-bar");
+
+    // Buttons whose style names no family draw in Inter as the page does, not in the browser's control font (client/globals.css): a toolbar tool and the Conditions grid.
+    const conditions = goblin.getByRole("button", { name: "Conditions", exact: true });
+    await conditions.click();
+    const grid = goblin.getByRole("group", { name: "Conditions", exact: true });
+    const tool = dm.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Select", exact: true });
+    for (const [what, control] of [["the Select tool", tool], ["a condition", grid.getByRole("button").first()]] as const) {
+      const family = await familyOf(control);
+      assert.ok(family.startsWith(`${INTER_FAMILY},`), `${what} draws in ${family}`);
+    }
+    await conditions.click();
+    await grid.waitFor({ state: "detached" });
 
     // The shield on the goblin's token, in its bottom left corner, and none on the chest.
     const goblinBox = await footprintRect(dm, run.goblin.at);

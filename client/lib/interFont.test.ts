@@ -74,4 +74,19 @@ describe("the interface font", () => {
     assert.ok(theme.font.body.startsWith(`${INTER_FAMILY}, system-ui,`), theme.font.body);
     assert.match(read("client/globals.css"), new RegExp(`font-family: ${theme.font.body.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")};`));
   });
+
+  test("buttons and form fields take the page's family over the browser's control font, and only the family", () => {
+    const css = read("client/globals.css").replace(/\/\*[\s\S]*?\*\//g, "");
+    const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+      selectors: m[1]!.split(",").map((s) => s.trim()),
+      declarations: m[2]!
+        .split(";")
+        .map((d) => d.trim())
+        .filter(Boolean),
+    }));
+    const controls = rules.find((r) => ["button", "input", "select", "textarea"].every((tag) => r.selectors.includes(tag)));
+    assert.ok(controls, "no rule in globals.css names button, input, select and textarea");
+    assert.ok(controls.declarations.includes("font-family: inherit"), controls.declarations.join("; "));
+    assert.ok(!controls.declarations.some((d) => /^font(-size)?\s*:/.test(d)), "each control keeps its own size, such as the 16 px inputs on phones");
+  });
 });
