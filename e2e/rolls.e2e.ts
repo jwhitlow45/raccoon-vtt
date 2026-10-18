@@ -551,7 +551,8 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await chip.waitFor();
 
     await live.getByRole("button", { expanded: false }).first().tap();
-    await live.getByText(new RegExp(`^rolled ${rolled.total} \\(1d20\\+4, your bonus: \\d+\\)`)).waitFor();
+    // The DM reads the player's typed bonus as theirs (LP7-DICE-11).
+    await live.getByText(new RegExp(`^rolled ${rolled.total} \\(1d20\\+4, their bonus: \\d+\\)`)).waitFor();
 
     // Heroic Inspiration, asked from the chip's card and allowed in one tap.
     await chip.tap();

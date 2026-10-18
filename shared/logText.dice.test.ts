@@ -95,7 +95,8 @@ describe("a rolled answer's line (5.5)", () => {
 
   test("the dice follow the total, a typed bonus and a failing condition say so", () => {
     assert.equal(describeEvent(owl({}), names), "Owl rolled 12 (1d20+3: 9) on a Dexterity saving throw against DC 13: fail.");
-    assert.equal(describeEvent(owl({ typedBonus: true }), names), "Owl rolled 12 (1d20+3, your bonus: 9) on a Dexterity saving throw against DC 13: fail.");
+    assert.equal(describeEvent(owl({ typedBonus: true }), names), "Owl rolled 12 (1d20+3, your bonus: 9) on a Dexterity saving throw against DC 13: fail.", "the player who typed it");
+    assert.equal(describeEvent(owl({ typedBonus: true }), names, true), "Owl rolled 12 (1d20+3, their bonus: 9) on a Dexterity saving throw against DC 13: fail.", "the DM (LP7-DICE-11)");
     assert.equal(describeEvent(owl({ total: 21, dice: { formula: "1d20+3", faces: [18], total: 21, fails: "stunned" } }), names), "Owl rolled 21 (1d20+3: 18) on a Dexterity saving throw against DC 13: fails (Stunned).");
     assert.equal(describeEvent(owl({ total: 20, result: "pass", dice: { formula: "2d20kh1+3", faces: [17, 4], total: 20, mode: "adv" } }), names), "Owl rolled 20 (1d20+3 with advantage: 17, 4 dropped) on a Dexterity saving throw against DC 13: pass.");
     assert.equal(describeEvent(owl({ total: 12, dice: undefined, tag: undefined }), names), "Owl rolled 12 on a Dexterity saving throw against DC 13: fail.", "a typed total reads as before");

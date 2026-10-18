@@ -668,7 +668,7 @@ function dmWords(answer: RollAnswer, test: RollTest): string | null {
   let words: string;
   if (answer.dice !== undefined) {
     const total = answer.total ?? answer.dice.total;
-    const dice = answerDice(answer.dice, answer.typedBonus === true);
+    const dice = answerDice(answer.dice, answer.typedBonus === true, true);
     const changed = answer.changed;
     if (changed && (changed.reason === "heroic-inspiration" || changed.reason === "halfling-luck")) words = `rerolled ${total} (${CHANGE_REASONS[changed.reason]})`;
     // Lucky on a disadvantage roll cancels to a normal roll and draws nothing, so its words come from the dice, not the ask.

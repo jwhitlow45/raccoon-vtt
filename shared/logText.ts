@@ -55,7 +55,7 @@ type RollEvent = Extract<LogEvent, { type: "roll" }>;
  * rolling.", or the DM's mark: "Thorn failed a Dexterity saving throw." The
  * DC and the result are there only when the viewer's line kept them.
  */
-export function rollText(data: RollEvent, who: string): string {
+export function rollText(data: RollEvent, who: string, dm = false): string {
   const chosen = data.choice === undefined ? undefined : data.test.choices[data.choice];
   const test = testText(chosen ? { kind: data.test.kind, choices: [chosen] } : data.test);
   const dc = data.dc !== undefined ? ` against DC ${data.dc}` : "";
@@ -69,7 +69,7 @@ export function rollText(data: RollEvent, who: string): string {
   const failed = data.result === "fail" && data.dice?.fails ? `: fails (${effectName(data.dice.fails)})` : undefined;
   const result = failed ?? (data.result !== undefined ? `: ${data.result}` : "");
   if (!data.dice) return `${who} rolled ${data.total} on ${test}${dc}${result}.`;
-  const dice = answerDice(data.dice, data.typedBonus === true);
+  const dice = answerDice(data.dice, data.typedBonus === true, dm);
   switch (data.changed?.reason) {
     case "heroic-inspiration":
     case "halfling-luck":
@@ -87,13 +87,18 @@ export function rollText(data: RollEvent, who: string): string {
 
 const CHANGE_NAMES = { "heroic-inspiration": "Heroic Inspiration", "halfling-luck": "Halfling Luck" } as const;
 
-/** A rolled answer's dice inside its line: "1d20+5: 12", "1d20+3, your bonus: 9", "1d20+5 with advantage: 14, 7 dropped". */
-export function answerDice(result: DiceResult, typedBonus: boolean): string {
+/**
+ * A rolled answer's dice inside its line: "1d20+5: 12", "1d20+3, your
+ * bonus: 9", "1d20+5 with advantage: 14, 7 dropped". Only a player types a
+ * bonus, and a player reads only their own creatures' answers, so the bonus
+ * is "your bonus" for them and "their bonus" for the DM.
+ */
+export function answerDice(result: DiceResult, typedBonus: boolean, dm = false): string {
   const terms = rolledTerms(result);
   const parsed = parseFormula(result.formula);
   const formula = parsed.ok ? formatFormula(parsed.formula, result.mode) : result.formula;
   const faces = terms ? terms.flatMap((t) => ("kept" in t ? t.faces.map((face, i) => (t.kept[i] ? count(face) : `${count(face)} dropped`)) : [])) : [];
-  return `${formula}${typedBonus ? ", your bonus" : ""}${faces.length > 0 ? `: ${faces.join(", ")}` : ""}`;
+  return `${formula}${typedBonus ? (dm ? ", their bonus" : ", your bonus") : ""}${faces.length > 0 ? `: ${faces.join(", ")}` : ""}`;
 }
 
 /** A count with thousands separators, as dice text writes every number. */
@@ -271,14 +276,15 @@ function plural(n: number, one: string, many: string): string {
  * One event as a sentence. Numbers appear only when the projection kept
  * them, which it does only for viewers who may see that creature's exact
  * HP. Otherwise the HP label (Bloodied, Dying) is all there is to say.
+ * `dm` is the reader's role, which a few words follow (answerDice).
  */
-export function describeEvent(data: LogEvent, names: LogNames): string {
-  const text = eventText(data, names);
+export function describeEvent(data: LogEvent, names: LogNames, dm = false): string {
+  const text = eventText(data, names, dm);
   // Only the DM's log holds these lines (design 7.3), so the DM can tell what players never read.
   return "hidden" in data && data.hidden ? `${text.replace(/\.$/, "")} (hidden from players).` : text;
 }
 
-function eventText(data: LogEvent, names: LogNames): string {
+function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
   switch (data.type) {
     case "hp": {
       const who = creatureName(names, data);
@@ -400,7 +406,7 @@ function eventText(data: LogEvent, names: LogNames): string {
       // Only the DM's log holds it (docs/design-v1-maps-vision.md 4.1).
       return `${creatureName(names, data)} teleported past a ${data.past}.`;
     case "roll":
-      return rollText(data, creatureName(names, data));
+      return rollText(data, creatureName(names, data), dm);
     case "companion": {
       // Only the DM's log holds it (docs/design-v1-combat-flow.md 3.6.3). The name is the companion's when it came.
       const character = names.characters[data.characterId]?.name ?? "their character";

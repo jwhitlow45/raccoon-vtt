@@ -1059,7 +1059,7 @@ describe("the DM's live card (docs/design-v1-roll-request.md 6)", () => {
     assert.equal(dmAnswerText({ characterId: "a", total: 25, result: "pass", tag: "t", dice: dice("1d20+5", [20], 25) }, DEX_SAVE), "rolled 25 (1d20+5: 20), natural 20");
     assert.equal(dmAnswerText({ characterId: "a", total: 17, result: "fail", tag: "t", dice: dice("1d20+5", [12], 17, { fails: "stunned" }) }, DEX_SAVE), "rolled 17 (1d20+5: 12), fails (Stunned)");
     assert.equal(dmAnswerText({ characterId: "a", total: 17, result: "pass", mark: "pass", tag: "t", dice: dice("1d20+5", [12], 17, { fails: "stunned" }) }, DEX_SAVE), "rolled 17 (1d20+5: 12), marked Pass", "the DM's Pass over a condition's fail");
-    assert.equal(dmAnswerText({ characterId: "a", total: 9, tag: "t", typedBonus: true, dice: dice("1d20+5", [4], 9) }, DEX_SAVE), "rolled 9 (1d20+5, your bonus: 4)");
+    assert.equal(dmAnswerText({ characterId: "a", total: 9, tag: "t", typedBonus: true, dice: dice("1d20+5", [4], 9) }, DEX_SAVE), "rolled 9 (1d20+5, their bonus: 4)", "the DM reads the player's typed bonus as theirs (LP7-DICE-11)");
     assert.equal(dmAnswerText({ characterId: "a", total: 3, result: "pass", mark: "pass", tag: "t" }, DEX_SAVE), "typed 3, marked Pass");
     assert.equal(dmAnswerText({ characterId: "a", result: "fail", mark: "fail", tag: "t" }, DEX_SAVE), "marked Fail");
     const two = { kind: "save" as const, choices: [{ ability: "str" as const }, { ability: "dex" as const }] };

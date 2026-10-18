@@ -165,7 +165,7 @@ export function registerLogRoutes(app: FastifyInstance, kit: AuthKit, deps: { ma
         const actor = await deps.manager.acquire(roomId);
         const log = await logs.get(actor, { memberId: grant.memberId, role: grant.role });
         const entries = entriesBetween(log.entries, from, to);
-        const body = renderLogExport({ roomName: log.roomName, entries, names: log.names, me: grant.memberId, tz });
+        const body = renderLogExport({ roomName: log.roomName, entries, names: log.names, me: grant.memberId, tz, dm: grant.role === "dm" });
         // A session is named for the evening it started, everything for its newest line.
         const name = exportFileName(log.roomName, from === undefined ? entries.at(-1)?.at : entries[0]?.at, tz);
         return reply

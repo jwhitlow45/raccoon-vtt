@@ -86,10 +86,10 @@ function messageText(text: string): string {
 }
 
 /** One line of the file, as the Log panel reads it, with the time in the viewer's zone. */
-export function exportLine(entry: LogEntry, names: LogNames, me: string, time: string): string | null {
+export function exportLine(entry: LogEntry, names: LogNames, me: string, time: string, dm = false): string | null {
   if (entry.kind === "event") {
     if (!entry.data) return null;
-    return `- ${time} ${messageText(describeEvent(entry.data, names))}`;
+    return `- ${time} ${messageText(describeEvent(entry.data, names, dm))}`;
   }
   const who = `**${escapeName(memberName(names, entry.from))}**`;
   const text = messageText(entry.text ?? "");
@@ -105,7 +105,7 @@ export function exportLine(entry: LogEntry, names: LogNames, me: string, time: s
  * line per entry, oldest first. When the lines span more than one day in the
  * viewer's zone, each day gets a heading of its own.
  */
-export function renderLogExport(input: { roomName: string; entries: readonly LogEntry[]; names: LogNames; me: string; tz: string }): string {
+export function renderLogExport(input: { roomName: string; entries: readonly LogEntry[]; names: LogNames; me: string; tz: string; dm?: boolean }): string {
   const c = clock(input.tz);
   const first = input.entries[0];
   const last = input.entries[input.entries.length - 1];
@@ -126,7 +126,7 @@ export function renderLogExport(input: { roomName: string; entries: readonly Log
         day = today;
       }
     }
-    const line = exportLine(entry, input.names, input.me, plain(c.time.format(at)));
+    const line = exportLine(entry, input.names, input.me, plain(c.time.format(at)), input.dm === true);
     if (line !== null) out.push(line);
   }
   return `${out.join("\n")}\n`;

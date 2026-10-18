@@ -166,7 +166,7 @@ export default function LogPanel(_props: PanelProps) {
       {entries.length === 0 ? <Empty>No messages yet. Chat, whispers and what happens at the table show here.</Empty> : null}
       <ol ref={listRef} aria-label="Log" style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(2) }}>
         {entries.map((entry) => (
-          <EntryRow key={entry.id} entry={entry} names={names} me={me} canUndo={you?.role === "dm" && undoable(entry)} />
+          <EntryRow key={entry.id} entry={entry} names={names} me={me} dm={you?.role === "dm"} canUndo={you?.role === "dm" && undoable(entry)} />
         ))}
       </ol>
       {exporting ? <ExportLog onClose={() => setExporting(false)} /> : null}
@@ -207,14 +207,14 @@ function time(at: string): string {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-function EntryRow(props: { entry: LogEntry; names: LogNames; me: string; canUndo: boolean }) {
+function EntryRow(props: { entry: LogEntry; names: LogNames; me: string; dm: boolean; canUndo: boolean }) {
   const { entry, names, me } = props;
   if (entry.kind === "event") {
     if (!entry.data) return null;
     return (
       <li style={{ display: "flex", alignItems: "center", gap: theme.space(2), color: theme.color.textMuted, fontSize: theme.font.small, lineHeight: theme.leading.body }}>
         {/* A name with no break in it, such as an 80-letter one, wraps anywhere rather than run past a narrow panel, as a chat line does. A line of several rolls puts each on its own line. */}
-        <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere", whiteSpace: "pre-line" }}>{describeEvent(entry.data, names)}</span>
+        <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere", whiteSpace: "pre-line" }}>{describeEvent(entry.data, names, props.dm)}</span>
         {/* The DM takes an HP change back from the log (features section 10). */}
         {props.canUndo ? <TakeBack logId={entry.id} /> : null}
         <time dateTime={entry.at} style={{ flex: "none" }}>

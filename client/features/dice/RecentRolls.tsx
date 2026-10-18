@@ -124,7 +124,7 @@ export function againInput(roll: DiceRoll): DiceRollInput | null {
   return input;
 }
 
-function Row(props: { row: RecentRow; names: LogNames; me: string; open: boolean; again(rolls: DiceRollInput[], to: "all" | "dm"): void }) {
+function Row(props: { row: RecentRow; names: LogNames; me: string; dm: boolean; open: boolean; again(rolls: DiceRollInput[], to: "all" | "dm"): void }) {
   const { row, names } = props;
   const [all, setAll] = useState(props.open);
   // The sticky line's tap scrolls its row into view, which would otherwise stop with the row's head under that line, as RollOptions allows for too.
@@ -140,7 +140,7 @@ function Row(props: { row: RecentRow; names: LogNames; me: string; open: boolean
   if (row.kind === "answer") {
     return (
       <li data-roll-row={row.ids.join(" ")} style={base}>
-        <span style={{ fontSize: theme.font.body14, overflowWrap: "anywhere" }}>{describeEvent(row.line, names)}</span>
+        <span style={{ fontSize: theme.font.body14, overflowWrap: "anywhere" }}>{describeEvent(row.line, names, props.dm)}</span>
         {row.line.dice ? <DiceFaces result={row.line.dice} /> : null}
       </li>
     );
@@ -188,6 +188,7 @@ function Row(props: { row: RecentRow; names: LogNames; me: string; open: boolean
 /** Recent rolls under the options. `open` names a line whose row starts unfolded, the one the sticky line opened. */
 export function RecentRolls(props: { names: LogNames; me: string; open: string | null; again(rolls: DiceRollInput[], to: "all" | "dm"): void }) {
   const log = useRoomView((s) => s.view?.log ?? EMPTY_LOG);
+  const dm = useRoomView((s) => s.you?.role === "dm");
   const ui = useRoomUi();
   const here = usePanelHere();
   const rows = useMemo(() => recentRolls(log), [log]);
@@ -201,7 +202,7 @@ export function RecentRolls(props: { names: LogNames; me: string; open: string |
       ) : (
         <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
           {rows.map((row) => (
-            <Row key={`${row.key}:${props.open !== null && row.ids.includes(props.open)}`} row={row} names={props.names} me={props.me} open={props.open !== null && row.ids.includes(props.open)} again={props.again} />
+            <Row key={`${row.key}:${props.open !== null && row.ids.includes(props.open)}`} row={row} names={props.names} me={props.me} dm={dm} open={props.open !== null && row.ids.includes(props.open)} again={props.again} />
           ))}
         </ol>
       )}

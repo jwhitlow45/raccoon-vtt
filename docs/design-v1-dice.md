@@ -234,7 +234,7 @@ So a secret roll for a goblin the party sees reads "Mara rolled in secret", as t
 
 - `diceText(result)`: "2d6+3 (4, 6) = 13". A dropped die reads "7 dropped" in text and is struck through on screen: "1d20+5 with advantage (14, 7 dropped) = 19". Numbers carry thousands separators.
 - A `dice` line: "Bree rolled Longsword: 2d6+3 (4, 6) = 13." For a creature: "Bree rolled for Thorn, Stealth: …". With `dc`: "… = 13 against DC 15: fail." With `ac`: "… = 17 against AC 15: hit", "critical hit" or "miss". Several rolls: one line per roll under "Mara rolled 6 times:". A secret line read in full ends "(secret)". The bare line: "Mara rolled in secret."
-- A rolled `roll` line: `rollText` with the dice after the total, "Thorn rolled 17 (1d20+5: 12) on a Dexterity saving throw against DC 15: pass." It adds "your bonus" after the formula for `typedBonus`, "fails (Stunned)" for `fails`, and for a change "Thorn rerolled 17 (Heroic Inspiration, 1d20+3+1d4: …)" or "Thorn added Bardic Inspiration's 1d8: 3, now 15".
+- A rolled `roll` line: `rollText` with the dice after the total, "Thorn rolled 17 (1d20+5: 12) on a Dexterity saving throw against DC 15: pass." It adds "your bonus" after the formula for `typedBonus` for the player who typed it, and "their bonus" for the DM (only a player types a bonus, and a player reads only their own creatures' answers), "fails (Stunned)" for `fails`, and for a change "Thorn rerolled 17 (Heroic Inspiration, 1d20+3+1d4: …)" or "Thorn added Bardic Inspiration's 1d8: 3, now 15".
 - Each viewer names a creature from its own projection, so a hidden name reads as players see it. A label never repeats a creature's name (docs 3 and 4 hold to this), since it reaches everyone the line reaches.
 
 ### 5.6 Attacks against an AC
