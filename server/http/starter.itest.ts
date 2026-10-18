@@ -10,6 +10,7 @@ import yazl from "yazl";
 import type { LicenseId } from "#shared/licenses.ts";
 import { STARTER_KINDS, indexWorks, starterAssetCredit, type StarterPack, type StarterUse, type StarterWork } from "#shared/starter.ts";
 import { STARTER_PACKS } from "#shared/starterArt.ts";
+import { STARTER_HOURLY } from "../assets/limits.ts";
 import { roomStoredBytes } from "../assets/quota.ts";
 import { FakeAuth, buildAssetApp, dropRooms, makeRoom, testConfig, testPool } from "../assets/testApp.ts";
 import { solid, tempDir } from "../assets/testImages.ts";
@@ -228,15 +229,41 @@ describe("a starter pick's refusals", () => {
     assert.deepEqual(res.json(), { error: "read_only" });
   });
 
-  test("a pick spends the hourly upload budget, and is refused once it is spent", async () => {
+  test("a pick spends an hourly budget of its own, and is refused once it is spent", async () => {
     const roomId = await room();
     const player = auth.allow(roomId, "player");
-    const checks = app.assets.hourlyChecks(player.sessionId, "x", roomId, "token").slice(0, 1);
-    for (let i = 0; i < 30; i++) app.assets.hourly.record(checks);
+    const checks = app.assets.starterHourlyChecks(player.sessionId, "x", roomId).slice(0, 1);
+    for (let i = 0; i < STARTER_HOURLY.session; i++) app.assets.hourly.record(checks);
     const res = await pick(app, roomId, player, { work: "test-pack/knight", kind: "token" });
     assert.equal(res.statusCode, 429);
     assert.ok(Number(res.headers["retry-after"]) > 0);
     assert.deepEqual(await rowsOf(roomId), []);
+  });
+
+  test("a pick never spends the upload budget, and with that budget spent a pick still goes", async () => {
+    const roomId = await room();
+    const player = auth.allow(roomId, "player");
+    const uploads = app.assets.hourlyChecks(player.sessionId, "x", roomId, "token").slice(0, 1);
+    for (let i = 0; i < 30; i++) app.assets.hourly.record(uploads);
+    const res = await pick(app, roomId, player, { work: "test-pack/knight", kind: "token" });
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(app.assets.hourly.retryAfter(app.assets.starterHourlyChecks(player.sessionId, "x", roomId).slice(0, 1)), 0);
+  });
+
+  test("a pick of a work the room already holds as that kind spends nothing, even with the pick budget spent", async () => {
+    const roomId = await room();
+    const dm = auth.allow(roomId, "dm");
+    assert.equal((await pick(app, roomId, dm, { work: "test-pack/knight", kind: "token" })).statusCode, 200);
+    // The first pick spent one, and this spends the rest of the session's budget.
+    const checks = app.assets.starterHourlyChecks(dm.sessionId, "x", roomId).slice(0, 1);
+    for (let i = 1; i < STARTER_HOURLY.session; i++) app.assets.hourly.record(checks);
+    for (let i = 0; i < 2; i++) {
+      const again = await pick(app, roomId, dm, { work: "test-pack/knight", kind: "token" });
+      assert.equal(again.statusCode, 200, again.body);
+    }
+    // The same work as another kind makes a new image, so the spent budget refuses it.
+    assert.equal((await pick(app, roomId, dm, { work: "test-pack/knight", kind: "handout" })).statusCode, 429);
+    assert.equal((await rowsOf(roomId)).length, 1);
   });
 
   test("a pick takes an intake slot as an upload does, and is refused while none is free", async () => {

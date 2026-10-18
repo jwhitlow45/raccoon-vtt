@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { HANDOUT_HOURLY, WindowLimiter, hourlyChecks } from "./limits.ts";
+import { HANDOUT_HOURLY, STARTER_HOURLY, WindowLimiter, hourlyChecks, starterHourlyChecks } from "./limits.ts";
 
 describe("hourlyChecks (design 10.3, docs/design-v1-pdf-handouts.md 3.7)", () => {
   test("a token, a map and a URL import spend the shared budget, per session, IP and room", () => {
@@ -23,6 +23,19 @@ describe("hourlyChecks (design 10.3, docs/design-v1-pdf-handouts.md 3.7)", () =>
       { key: "handout:s:sess", limit: HANDOUT_HOURLY.session },
       { key: "handout:r:ROOM0001", limit: HANDOUT_HOURLY.room },
     ]);
+  });
+
+  test("a starter pick spends a budget of its own, per session, IP and room, apart from every upload's", () => {
+    assert.deepEqual(starterHourlyChecks("sess", "1.2.3.0/24", "ROOM0001"), [
+      { key: "starter:s:sess", limit: STARTER_HOURLY.session },
+      { key: "starter:ip:1.2.3.0/24", limit: STARTER_HOURLY.ip },
+      { key: "starter:r:ROOM0001", limit: STARTER_HOURLY.room },
+    ]);
+    const hourly = new WindowLimiter(3600_000, () => 0);
+    const picks = starterHourlyChecks("dm", "ip", "ROOM0001");
+    for (let i = 0; i < STARTER_HOURLY.session; i++) hourly.record(picks);
+    assert.ok(hourly.retryAfter(picks) > 0, "past its own limit");
+    for (const kind of ["map", "token", "handout"] as const) assert.equal(hourly.retryAfter(hourlyChecks("dm", "ip", "ROOM0001", kind)), 0, kind);
   });
 
   test("two documents at the page cap fit in an hour, and the next page waits while maps and tokens still go up", () => {

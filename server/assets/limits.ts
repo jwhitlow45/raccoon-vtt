@@ -92,6 +92,27 @@ const THUMB_HOURLY = { session: 240, room: 240 } as const;
 export const HANDOUT_HOURLY = { session: 250, room: 250 } as const;
 
 /**
+ * Starter picks (docs/design-v1-starter-art.md 5) have a budget of their
+ * own too. A pick runs the image pipeline as an upload does, which is the
+ * cost this guards, but it never grows the room's storage, and a DM trying
+ * works while preparing picks more often than they upload. A pick of a
+ * work the room already holds as that kind makes no new image and spends
+ * nothing (the pick route checks). Per IP and per room as well as per
+ * session, since a player may pick a portrait and anyone with the
+ * password can mint new sessions.
+ */
+export const STARTER_HOURLY = { session: 60, ip: 120, room: 240 } as const;
+
+/** The hourly budgets a starter pick spends, whatever its kind. */
+export function starterHourlyChecks(sessionId: string, ip: string, roomId: string): Array<{ key: string; limit: number }> {
+  return [
+    { key: `starter:s:${sessionId}`, limit: STARTER_HOURLY.session },
+    { key: `starter:ip:${ip}`, limit: STARTER_HOURLY.ip },
+    { key: `starter:r:${roomId}`, limit: STARTER_HOURLY.room },
+  ];
+}
+
+/**
  * The hourly budgets an upload of `kind` spends, by key. Uploads and URL
  * imports share one (design section 10.3): 30 per session, 60 per IP, 120
  * per room. Per IP and per room are there because anyone with the password

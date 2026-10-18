@@ -7,7 +7,7 @@ import type { Config } from "../config.ts";
 import { createEgress, type Egress } from "./egress.ts";
 import { AssetError } from "./errors.ts";
 import { KINDS, PIPELINE, cellPxHint, type AssetKind, type UploadResult } from "./kinds.ts";
-import { WindowLimiter, hourlyChecks } from "./limits.ts";
+import { WindowLimiter, hourlyChecks, starterHourlyChecks } from "./limits.ts";
 import { ProcessingQueue, configureSharp, processImage, removeFiles, sniffImage } from "./process.ts";
 import { RoomQuota, assertFreeDisk, roomStoredBytes, type Reservation } from "./quota.ts";
 import { OpenverseSearch, openverseHttp, type OpenverseHttp } from "./openverse.ts";
@@ -168,6 +168,16 @@ export class AssetService {
   /** The hourly budgets an upload spends (limits.ts hourlyChecks). */
   hourlyChecks(sessionId: string, ip: string, roomId: string, kind?: AssetKind): Array<{ key: string; limit: number }> {
     return hourlyChecks(sessionId, ip, roomId, kind);
+  }
+
+  /** The hourly budgets a starter pick spends (limits.ts starterHourlyChecks). */
+  starterHourlyChecks(sessionId: string, ip: string, roomId: string): Array<{ key: string; limit: number }> {
+    return starterHourlyChecks(sessionId, ip, roomId);
+  }
+
+  /** Whether the room already holds this starter work as this kind, so a pick of it makes no new image. */
+  async holdsStarter(roomId: string, found: FoundWork, kind: StarterKind): Promise<boolean> {
+    return (await findRoomAsset(this.pool, roomId, Buffer.from(found.work.sha256, "hex"), kind)) !== null;
   }
 
   assertHourly(checks: Array<{ key: string; limit: number }>): void {

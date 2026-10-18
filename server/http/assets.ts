@@ -257,10 +257,12 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
     /*
      * A starter pick (docs/design-v1-starter-art.md 5) is an upload whose
      * bytes come from the server's own build: the same role rule, room
-     * checks, hourly budgets and intake slot as an upload of its kind, and
-     * the work looked up in the shipped catalog, which names the file and
-     * the credit. It takes no quota reservation, since the row never counts
-     * toward the room's storage.
+     * checks and intake slot as an upload of its kind, and the work looked
+     * up in the shipped catalog, which names the file and the credit. It
+     * spends an hourly budget of its own (limits.ts STARTER_HOURLY), and
+     * nothing when the room already holds the work as that kind, since that
+     * pick makes no new image. It takes no quota reservation, since the row
+     * never counts toward the room's storage.
      */
     scope.post<{ Params: { id: string } }>("/api/rooms/:id/assets/starter", async (req, reply) => {
       const roomId = req.params.id;
@@ -277,7 +279,7 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
       const room = await writableRoom(roomId);
       await service.assertFreeDisk();
       const ip = ipKey(clientIp(req, trustCf));
-      const checks = service.hourlyChecks(grant.sessionId, ip, roomId, kind);
+      const checks = (await service.holdsStarter(roomId, found, kind)) ? [] : service.starterHourlyChecks(grant.sessionId, ip, roomId);
       service.assertHourly(checks);
       const releaseSlot = service.slots.acquire({ kind: "upload", roomId, ip, sessionId: grant.sessionId, pinned: room.pinned });
       try {
