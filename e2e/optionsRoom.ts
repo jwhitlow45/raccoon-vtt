@@ -179,6 +179,52 @@ export async function view(page: Page, cdp: CDPSession, size: Size): Promise<voi
   await page.waitForTimeout(300);
 }
 
+/**
+ * view() for the sweep: the same resize, then a wait until the room's
+ * layout holds still (the bars, the side panel and the options row in the
+ * same boxes three frames running) instead of a fixed 300 ms. The row
+ * measures itself through ResizeObservers (pages/Room.tsx), so it settles
+ * within a few frames, and the sweeps resize well over a thousand times.
+ * It gives up waiting after a second, as a slow machine's frames come late.
+ */
+export async function settledView(page: Page, cdp: CDPSession, size: Size): Promise<void> {
+  const i = size.insets;
+  await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: i.top ?? 0, bottom: i.bottom ?? 0, left: i.side ?? 0, right: i.side ?? 0 } });
+  await page.setViewportSize({ width: size.width, height: size.height });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        const g = globalThis as unknown as {
+          document: { querySelectorAll(s: string): ArrayLike<PageNode> };
+          innerWidth: number;
+          innerHeight: number;
+          requestAnimationFrame(f: () => void): number;
+          performance: { now(): number };
+        };
+        const parts = 'header, nav[aria-label="Tools"], aside, [role="toolbar"][data-rvtt-arrangement], [data-options-row] > [data-rvtt-slot], [data-rvtt-more], [data-options-line]';
+        const layout = () =>
+          `${g.innerWidth}x${g.innerHeight} ` +
+          Array.from(g.document.querySelectorAll(parts))
+            .map((e) => {
+              const b = e.getBoundingClientRect();
+              return `${e.tagName}${e.getAttribute("data-rvtt-arrangement") ?? ""}:${b.left},${b.top},${b.width},${b.height}`;
+            })
+            .join(" ");
+        const deadline = g.performance.now() + 1000;
+        let last = "";
+        let still = 0;
+        const frame = () => {
+          const now = layout();
+          still = now === last ? still + 1 : 0;
+          last = now;
+          if (still >= 3 || g.performance.now() > deadline) resolve();
+          else g.requestAnimationFrame(frame);
+        };
+        g.requestAnimationFrame(frame);
+      }),
+  );
+}
+
 export const DESK: Size = { width: 1280, height: 800, insets: {} };
 
 export async function reloadAt(page: Page, scale: number): Promise<void> {
@@ -567,9 +613,9 @@ export const STATES: State[] = [
  * next state starts with the options in view.
  */
 export async function closeSheet(page: Page, cdp: CDPSession): Promise<void> {
-  await view(page, cdp, SIZES[1]!);
+  await settledView(page, cdp, SIZES[1]!);
   await closeShownSheet(page);
-  await view(page, cdp, DESK);
+  await settledView(page, cdp, DESK);
 }
 
 /** Closes the sheet on a phone's screen, if one shows. A sheet's close is named for its title ("Close Initiative"), the panel list's is plain "Close". */
@@ -745,7 +791,7 @@ export async function controlsInReach(frame: Locator): Promise<boolean> {
 export async function sweep(page: Page, cdp: CDPSession, role: Role, scale: number, at: readonly Size[] = sizes()): Promise<number> {
   let steps = 0;
   for (const state of STATES.filter((s) => s.roles.includes(role) && (!ONLY_STATES || ONLY_STATES.some((o) => s.name.startsWith(o))))) {
-    await view(page, cdp, state.enterAt ?? DESK);
+    await settledView(page, cdp, state.enterAt ?? DESK);
     try {
       await state.enter(page);
     } catch (err) {
@@ -755,7 +801,7 @@ export async function sweep(page: Page, cdp: CDPSession, role: Role, scale: numb
     }
     let reference: Seen | null = null;
     for (const size of at) {
-      await view(page, cdp, size);
+      await settledView(page, cdp, size);
       const label = `${role}, ${sizeLabel(size, scale)}, ${state.name}`;
       const seen = await checkState(page, role, size, scale, state, label);
       steps += 1;
@@ -770,7 +816,7 @@ export async function sweep(page: Page, cdp: CDPSession, role: Role, scale: numb
       }
       if (scale === 1.3 && size.width === 480) await shots.take(page, `options-${role}-480x320-130-${state.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`);
     }
-    await view(page, cdp, DESK);
+    await settledView(page, cdp, DESK);
     await state.leave?.(page).catch(async (err) => miss(`${role} at ${scale}: leaving "${state.name}" failed: ${(err as Error).message.split("\n")[0]}`));
     await closeSheet(page, cdp);
   }
