@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { actor, character, member, room, token } from "#shared/testutil.ts";
 import type { DiceView } from "../creature.ts";
 import { OUTCOME_TOO_BIG } from "#shared/protocol.ts";
-import { mark, newPage, setAmount, setDc, typeTotal, type Page } from "./chain.ts";
+import { mark, markGone, newPage, setAmount, setDc, stateOf, typeTotal, type Page } from "./chain.ts";
 import { worstCase } from "./outcome.ts";
 import { applyWaits, buildPlan, damageTo, openSaveState, pageBound, rowOutcome, rowWords } from "./plan.ts";
 import { groupRows } from "./rows.ts";
@@ -46,6 +46,18 @@ describe("the save that ends the conditions", () => {
     assert.equal(rowOutcome(sunburst(13, 12), ROWS[0]!, DICE, []).conditions[0]?.save?.dc, 12);
     assert.equal(applyWaits(sunburst(null), DICE, []), "Give the save that ends it a DC");
     assert.equal(applyWaits(sunburst(null, 15), DICE, []), null);
+  });
+});
+
+describe("creatures gone from the group save", () => {
+  test("with the DM on another scene, whose tokens the view does not hold, no row reads gone, and back on its scene a deleted creature does (LP7-PC-14)", () => {
+    const page = sunburst(13);
+    const row = ROWS[0]!;
+    const away = markGone(page, "other", () => false);
+    assert.equal(stateOf(away, row).gone ?? false, false);
+    assert.equal(buildPlan(away, DICE, [], { plan: "p", newId: () => "e" })!.targets.length, 1);
+    assert.equal(stateOf(markGone(page, "s", () => true), row).gone ?? false, false);
+    assert.equal(stateOf(markGone(page, "s", () => false), row).gone, true);
   });
 });
 

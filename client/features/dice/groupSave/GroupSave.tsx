@@ -147,9 +147,9 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   useEffect(() => {
     if (!view || page.phase === "setup") return;
     let next = syncRequests(pageRef.current, view.rolls, key);
-    next = markGone(next, (row) => view.tokens[row.tokenId] !== undefined);
+    next = markGone(next, viewing, (row) => view.tokens[row.tokenId] !== undefined);
     if (next !== pageRef.current) update(next);
-  }, [view?.rolls, view?.tokens, page.phase]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view?.rolls, view?.tokens, viewing, page.phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const title = pageTitle(shown);
   usePanelHeader({ title, parent: props.parent, onBack: props.onBack });

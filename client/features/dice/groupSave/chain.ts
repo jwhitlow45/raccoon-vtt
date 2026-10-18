@@ -505,8 +505,13 @@ export function replace(old: Page | null): { ok: true; send: Command[] } | { ok:
 
 export const APPLYING = "The open group save is applying. Wait for it to finish.";
 
-/** Creatures the view no longer holds: after the roll their rows hold, and Apply leaves them out. */
-export function markGone(page: Page, present: (row: RowBase) => boolean): Page {
+/**
+ * Creatures the view no longer holds: after the roll their rows hold, and Apply leaves them out.
+ * The view holds only the scene on screen, so with the DM on another scene a missing token says
+ * nothing about whether it was deleted, and every row keeps what it had.
+ */
+export function markGone(page: Page, viewing: string | null, present: (row: RowBase) => boolean): Page {
+  if (page.sceneId !== viewing) return page;
   let next = page;
   for (const row of page.rows) {
     const gone = !present(row);

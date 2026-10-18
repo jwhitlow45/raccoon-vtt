@@ -432,7 +432,7 @@ test("the group save's page keeps its invariants over 2,000 random sequences", (
           const row = pick(r, ROWS);
           const { [row.tokenId]: _gone, ...tokens } = view.tokens;
           view = { ...view, tokens };
-          page = markGone(page, (w) => view.tokens[w.tokenId] !== undefined);
+          page = markGone(page, page.sceneId, (w) => view.tokens[w.tokenId] !== undefined);
           count("gone");
           break;
         }
