@@ -4,9 +4,9 @@ import type { DamagePart, NamedRoll, RollNumbers } from "../dice/bonus.ts";
 import type { Defense } from "../dice/defenses.ts";
 import { formatFormula, parseFormula, type DiceTerm, type Formula, type Term } from "../dice/formula.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
-import { ABILITY_NAMES, abilityMod } from "../statBlock.ts";
+import { abilityMod } from "../statBlock.ts";
 import { DAMAGE_TYPES } from "./damage.ts";
-import { SKILLS } from "./skills.ts";
+import { ABILITY_ABBR, SKILLS } from "./skills.ts";
 import { AREA_SPELLS } from "../srd/area-spells.ts";
 import { SAVE_SPELLS } from "../srd/save-spells.ts";
 
@@ -45,7 +45,7 @@ export function cantripTier(level: number | undefined): number {
   return l >= 17 ? 4 : l >= 11 ? 3 : l >= 5 ? 2 : 1;
 }
 
-/** One part of a derived number, for the editor's hint: "Dex +2", "proficiency +3". A fixed part prints as its value alone: "8". */
+/** One part of a derived number, for the editor's hint: "DEX +2", "proficiency +3". A fixed part prints as its value alone: "8". */
 export type PcPart = { label: string; value: number; fixed?: true };
 
 /** A number as the rules give it (`base`), the stored adjustment, and the total a field shows. */
@@ -111,13 +111,13 @@ function derive(stats: PcStats, level: number, mods_?: Partial<Record<AbilityKey
     const proficient = stats.saves.includes(a);
     saves[a] = number(
       nonZero([
-        { label: ABILITY_NAMES[a], value: mod },
+        { label: ABILITY_ABBR[a], value: mod },
         { label: "proficiency", value: proficient ? pb : 0 },
         { label: "all saves", value: allSaves },
       ]),
       adjust.saves?.[a] ?? 0,
     );
-    checks[a] = number(nonZero([{ label: ABILITY_NAMES[a], value: mod }, { label: "all checks", value: allChecks }]), 0);
+    checks[a] = number(nonZero([{ label: ABILITY_ABBR[a], value: mod }, { label: "all checks", value: allChecks }]), 0);
   }
   const skills = {} as PcDerived["skills"];
   for (const s of SKILL_KEYS) {
@@ -129,7 +129,7 @@ function derive(stats: PcStats, level: number, mods_?: Partial<Record<AbilityKey
     skills[s] = {
       ...number(
         nonZero([
-          { label: ABILITY_NAMES[usual], value: mods[usual] },
+          { label: ABILITY_ABBR[usual], value: mods[usual] },
           { label, value },
           { label: "all checks", value: allChecks },
         ]),
@@ -141,7 +141,7 @@ function derive(stats: PcStats, level: number, mods_?: Partial<Record<AbilityKey
   // Initiative is a Dexterity check, so the checks bonus counts. Jack of All Trades needs a skill, so it does not.
   const initiative = number(
     nonZero([
-      { label: ABILITY_NAMES.dex, value: mods.dex },
+      { label: ABILITY_ABBR.dex, value: mods.dex },
       { label: "Alert", value: stats.alert ? pb : 0 },
       { label: "all checks", value: allChecks },
     ]),
@@ -163,14 +163,14 @@ function derive(stats: PcStats, level: number, mods_?: Partial<Record<AbilityKey
       dc: number(
         [
           { label: "8", value: 8, fixed: true },
-          { label: ABILITY_NAMES[caster], value: mod },
+          { label: ABILITY_ABBR[caster], value: mod },
           { label: "proficiency", value: pb },
         ],
         adjust.spellDc ?? 0,
       ),
       attack: number(
         [
-          { label: ABILITY_NAMES[caster], value: mod },
+          { label: ABILITY_ABBR[caster], value: mod },
           { label: "proficiency", value: pb },
         ],
         adjust.spellAttack ?? 0,

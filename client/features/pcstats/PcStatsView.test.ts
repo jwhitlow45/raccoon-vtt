@@ -24,7 +24,7 @@ describe("a PC block's abilities three across (docs/design-v1-dice-ui.md 6.1)", 
     assert.match(markup, /<dl data-ability-grid=""[^>]*grid-template-columns:repeat\(3, minmax\(0, 1fr\)\)/);
     assert.equal(boxes.length, 6);
     assert.doesNotMatch(markup, /<table/);
-    assert.match(boxes[1]!, /title="Dexterity"[^>]*>Dex<\/abbr>/);
+    assert.match(boxes[1]!, /title="Dexterity"[^>]*>DEX<\/abbr>/);
     assert.match(boxes[1]!, /<strong[^>]*>18<\/strong> <span[^>]*>\+4<\/span>/, "the score and its modifier");
   });
 

@@ -7,7 +7,7 @@ import { playersToken } from "#shared/project.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { pcSlots } from "#shared/rules/pcStats.ts";
 import { SKILLS } from "#shared/rules/skills.ts";
-import { ABILITY_NAMES as ABILITY_SHORT } from "#shared/statBlock.ts";
+import { ABILITY_ABBR as ABILITY_SHORT } from "#shared/rules/skills.ts";
 import { Chip, ChipRow } from "../../components/Chip.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
@@ -572,7 +572,7 @@ function DeathSaveCell(props: { ctx: Ctx; bonus: number | null }) {
 /**
  * One named roll (4.2), in two lines (docs/design-v1-dice-ui.md 4.3): its
  * header, the name with its uses and recharge, Used, and its numbers as a
- * stat block reads them ("+6 to hit, 1d8+3 slashing", "DC 14 Dex, 2d8
+ * stat block reads them ("+6 to hit, 1d8+3 slashing", "DC 14 DEX, 2d8
  * radiant"), then one line of controls that wraps only where the panel is
  * too narrow: Attack, Damage, Critical, each rider, Heal, a plain roll, a
  * group save, Recharge and a spell's slot level.
@@ -722,7 +722,7 @@ function SlotStepper(props: { name: string; value: number; min: number; onChange
 }
 
 /**
- * A save action's "Group save, DC 21 Dex" (5.6): the group save's setup
+ * A save action's "Group save, DC 21 DEX" (5.6): the group save's setup
  * filled from the action, its rows the selection less the acting creature
  * as it changes until the roll (5.1). The button shows with one creature
  * selected, so the page opens saying to select the creatures it hits, and

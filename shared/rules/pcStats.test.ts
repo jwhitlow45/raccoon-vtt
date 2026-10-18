@@ -65,7 +65,7 @@ describe("the derived numbers (docs/design-v1-pc-stats.md 3.3)", () => {
     assert.equal(d.saves.dex.total, 2 + 0 + 1 + 2);
     assert.equal(d.saves.con.total, 1);
     assert.deepEqual(d.saves.dex.parts, [
-      { label: "Dex", value: 2 },
+      { label: "DEX", value: 2 },
       { label: "all saves", value: 1 },
       { label: "other", value: 2 },
     ]);

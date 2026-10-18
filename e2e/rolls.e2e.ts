@@ -277,7 +277,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await player.goBack();
     await waitFor("the sheet closed by Back", async () => !(await logOpen(player)) || null);
     await card(player).waitFor();
-    assert.equal(await player.getByRole("button", { name: /^Wis check: waiting/ }).count(), 0, "Back folded the card into a chip");
+    assert.equal(await player.getByRole("button", { name: /^WIS check: waiting/ }).count(), 0, "Back folded the card into a chip");
     assert.equal(await rollAsked(player).count(), 0, "the summary is gone with the sheet");
     await shots.take(player, "rolls-card-after-back");
   });
@@ -296,7 +296,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     assert.equal(await card(player).getByLabel("Total Thorn rolled").inputValue(), "14");
     await card(player).getByRole("button", { name: "Send", exact: true }).tap();
     await card(player).waitFor({ state: "detached" });
-    await player.getByRole("button", { name: /^Wis check: sent 14\./ }).waitFor();
+    await player.getByRole("button", { name: /^WIS check: sent 14\./ }).waitFor();
     await closeAll();
   });
 
@@ -312,7 +312,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await player.getByRole("button", { name: "Close Log" }).tap();
     await card(player).getByText("The DM asks for a Dexterity saving throw.").waitFor();
     assert.equal(await card(player).getByLabel("Total Thorn rolled").inputValue(), "9", "the typed total is kept");
-    await player.getByRole("button", { name: /^Str save: waiting for your roll\./ }).waitFor();
+    await player.getByRole("button", { name: /^STR save: waiting for your roll\./ }).waitFor();
     await shots.take(player, "rolls-newer-request-a-chip");
     await closeAll();
   });
@@ -323,7 +323,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await ask("save", "con");
     await card(player).getByText("The DM asks for a Constitution saving throw.").waitFor();
     // The oldest is a chip under the newest two: open it, then put it off. With no answer yet it offers no change (LPD-PLAYER-6).
-    await player.getByRole("button", { name: "Str save: waiting for your roll.", exact: true }).tap();
+    await player.getByRole("button", { name: "STR save: waiting for your roll.", exact: true }).tap();
     await card(player).getByText("The DM asks for a Strength saving throw.").waitFor();
     await card(player).getByRole("button", { name: "Fold it into a chip, to answer later" }).tap();
     await card(player).getByText("The DM asks for a Constitution saving throw.").waitFor();
@@ -350,7 +350,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await ask("check", "wis");
     await ask("check", "cha");
     await card(player).getByText("The DM asks for a Charisma check.").waitFor();
-    await player.getByRole("button", { name: /^Wis check: waiting for your roll\./ }).tap();
+    await player.getByRole("button", { name: /^WIS check: waiting for your roll\./ }).tap();
     await card(player).getByText("The DM asks for a Wisdom check.").waitFor();
     await card(player).getByLabel("Total Thorn rolled").fill("11");
     await openLog(player);
@@ -403,7 +403,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await waitFor("the newest two cards", async () => ((await cards.count()) === 2 ? true : null));
     const more = dm.getByRole("button", { name: /^Rolls 0\/1: 1 more roll request/ });
     assert.equal(await more.getAttribute("aria-expanded"), "false");
-    assert.equal(await cards.nth(0).getByText("Con save").count(), 1, "the newest on top");
+    assert.equal(await cards.nth(0).getByText("CON save").count(), 1, "the newest on top");
     await shots.take(dm, "rolls-dm-phone-two-cards");
     await more.tap();
     await waitFor("every card", async () => ((await cards.count()) === 3 ? true : null));
@@ -438,7 +438,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await player.keyboard.press("Escape");
     await waitFor("the sheet closed by Escape", async () => !(await logOpen(player)) || null);
     assert.equal(await cardElement(player).count(), 0, "Later held: no card came up");
-    await player.getByRole("button", { name: /^Str check: waiting for your roll\./ }).waitFor();
+    await player.getByRole("button", { name: /^STR check: waiting for your roll\./ }).waitFor();
     assert.match(await focused(player), /in "Thorn actions"|"Thorn actions"/, "focus went to the token bar");
     await closeAll();
   });
@@ -472,7 +472,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await second.getByRole("radiogroup", { name: "Ability check" }).getByRole("radio", { name: "Dexterity" }).tap();
     assert.equal(await second.getByRole("radiogroup", { name: "Saving throw" }).getByRole("radio", { name: "Dexterity" }).isDisabled(), true, "a save cannot join a check");
     assert.equal(await second.getByRole("radiogroup", { name: "Ability check" }).getByRole("radio", { name: "Strength" }).isDisabled(), true, "nor the first choice itself");
-    await second.getByText("Both choices are checks. Str check is the first choice.").waitFor();
+    await second.getByText("Both choices are checks. STR check is the first choice.").waitFor();
     await sheet.getByText(/^Strength or Dexterity check, no DC\. 1 asked\.$/).waitFor();
     await shots.take(dm, "rolls-sheet-two-choices");
     await sheet.getByRole("button", { name: "Remove the first choice" }).tap();
@@ -496,8 +496,8 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     const sheet = dm.getByRole("dialog", { name: "Request a roll" });
     await sheet.waitFor();
     const recent = sheet.getByRole("group", { name: "Recent requests" });
-    assert.deepEqual(await recent.getByRole("button").allInnerTexts(), ["Str check"], "the request step 10 sent");
-    await recent.getByRole("button", { name: "Str check" }).tap();
+    assert.deepEqual(await recent.getByRole("button").allInnerTexts(), ["STR check"], "the request step 10 sent");
+    await recent.getByRole("button", { name: "STR check" }).tap();
     await sheet.getByText(/^Strength check, no DC\. 1 asked\.$/).waitFor();
     assert.equal(await sheet.getByRole("radiogroup", { name: "Ability check" }).getByRole("radio", { name: "Strength" }).isChecked(), true, "the picker shows what the tap filled");
 
@@ -524,9 +524,9 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await openPanel(dm, "Party");
     await dm.getByRole("button", { name: "Ask the party" }).first().tap();
     await sheet.waitFor();
-    assert.deepEqual(await recent.getByRole("button").allInnerTexts(), ["Str check, DC 12", "Str check"]);
+    assert.deepEqual(await recent.getByRole("button").allInnerTexts(), ["STR check, DC 12", "STR check"]);
     await sheet.getByText("Pass or fail shown. No note.").waitFor();
-    await recent.getByRole("button", { name: "Str check, DC 12" }).tap();
+    await recent.getByRole("button", { name: "STR check, DC 12" }).tap();
     await sheet.getByText("DC hidden. Pass or fail shown. Note: to hear the guards.").waitFor();
     await shots.take(dm, "rolls-sheet-recent");
     await sheet.getByRole("button", { name: "Cancel" }).tap();
@@ -535,7 +535,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
 
   test("12. with no stat block the card rolls d20 with a typed bonus, keeps the result until Done, and the DM allows a Heroic Inspiration reroll", async () => {
     // The DM's own card for this request, opened, since a phone's cards start folded.
-    const live = dm.getByRole("group", { name: "Roll request: Dex save, DC 10" });
+    const live = dm.getByRole("group", { name: "Roll request: DEX save, DC 10" });
     const id = await ask("save", "dex", 10);
     const c = card(player);
     await c.getByText("The DM asks for a Dexterity saving throw, DC 10.").waitFor();
@@ -549,7 +549,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await shots.take(player, "rolls-card-rolled-in-place");
     await c.getByRole("button", { name: "Done, fold it into a chip" }).tap();
     await c.waitFor({ state: "detached" });
-    const chip = player.getByRole("button", { name: new RegExp(`^Dex save: rolled ${rolled.total} \\(1d20\\+4, your bonus: \\d+\\)\\. (Pass|Fail)\\. Final\\. Open to ask the DM to change it\\.$`) });
+    const chip = player.getByRole("button", { name: new RegExp(`^DEX save: rolled ${rolled.total} \\(1d20\\+4, your bonus: \\d+\\)\\. (Pass|Fail)\\. Final\\. Open to ask the DM to change it\\.$`) });
     await chip.waitFor();
 
     await live.getByRole("button", { expanded: false }).first().tap();
@@ -605,7 +605,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await shots.take(player, "rolls-card-fail-stunned");
 
     // The DM rolls the waiting creature from the live card: its Fail is recorded with the total.
-    const live = dm.getByRole("group", { name: "Roll request: Dex save, DC 13" });
+    const live = dm.getByRole("group", { name: "Roll request: DEX save, DC 13" });
     await live.getByRole("button", { expanded: false }).first().tap();
     await live.getByRole("button", { name: "Roll +5: fails (Stunned) for Thorn" }).tap();
     await live.getByText(/^rolled \d+ \(1d20\+5: \d+\)(, natural (20|1))?, fails \(Stunned\)/).waitFor();
@@ -619,7 +619,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await c.getByLabel("Total Thorn rolled").fill("12");
     await c.getByRole("button", { name: "Send", exact: true }).tap();
     await c.waitFor({ state: "detached" });
-    await player.getByRole("button", { name: /^Wis check: sent 12\./ }).tap();
+    await player.getByRole("button", { name: /^WIS check: sent 12\./ }).tap();
     await c.getByLabel("Total Thorn rolled").waitFor();
     assert.equal(await c.getByRole("button", { name: /^Roll .* for Thorn$/ }).count(), 0, "no roll after a typed answer");
     await c.getByRole("button", { name: "Fold it into a chip, to answer later" }).or(c.getByRole("button", { name: "Done, fold it into a chip" })).tap();

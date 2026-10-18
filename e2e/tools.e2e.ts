@@ -380,15 +380,15 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     await shots.take(player, "tools-roll-card");
     await card.getByRole("button", { name: "Send", exact: true }).tap();
     await card.waitFor({ state: "detached" });
-    const chip = player.getByRole("button", { name: /^Str or Dex save: sent Dex 15\. Pass\./ });
+    const chip = player.getByRole("button", { name: /^STR or DEX save: sent DEX 15\. Pass\./ });
     await chip.waitFor();
     await shots.take(player, "tools-roll-chip");
 
-    const live = dm.getByRole("group", { name: "Roll request: Str or Dex save, DC 12" });
+    const live = dm.getByRole("group", { name: "Roll request: STR or DEX save, DC 12" });
     await live.getByText("1 of 1 answered").waitFor();
     const answer = dmSocket.state!.rolls[run.rollId]!.targets[0]!;
     assert.deepEqual({ choice: answer.choice, total: answer.total, result: answer.result }, { choice: 1, total: 15, result: "pass" });
-    await live.getByRole("button", { name: "Close the Str or Dex save request" }).click();
+    await live.getByRole("button", { name: "Close the STR or DEX save request" }).click();
     await chip.waitFor({ state: "detached" });
     await waitFor("the request gone for the player", () => Object.keys(playerSocket.state?.rolls ?? {}).length === 0 || null);
     assert.ok(tvSocket.received.every((f) => !f.includes(run.rollId)), "the display received the roll request");

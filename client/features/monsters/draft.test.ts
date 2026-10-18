@@ -79,7 +79,7 @@ describe("the editor's draft", () => {
     assert.deepEqual(check({ name: "" }), ["Name is needed."]);
     assert.deepEqual(check({ skills: "x".repeat(501) }), ["Skills is too long (at most 500 characters)."]);
     assert.deepEqual(check({ ac: 120 }), ["AC is too high (at most 100)."]);
-    assert.deepEqual(check({ abilities: { ...block.abilities, dex: { score: -1, save: 0 } } }), ["Ability scores, Dex, score is too low (at least 0)."]);
+    assert.deepEqual(check({ abilities: { ...block.abilities, dex: { score: -1, save: 0 } } }), ["Ability scores, DEX, score is too low (at least 0)."]);
     assert.deepEqual(check({ actions: [{ name: "Bite", text: "ok" }, { name: "Two\nlines", text: "" }] }), ["Actions, entry 2, name has a line break or a hidden character it cannot hold."]);
     assert.deepEqual(check({ cr: "1/3" }), ["CR is not a challenge rating."]);
     const huge = check({ traits: Array.from({ length: 6 }, (_, i) => ({ name: `T${i}`, text: "x".repeat(3_000) })) });

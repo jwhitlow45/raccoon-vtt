@@ -200,8 +200,8 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await view.getByText("Stealth +9 (expertise)").waitFor();
     await view.getByText("Initiative").waitFor();
     // The Dex box of the six across: its score, its modifier, and its save named as proficient (docs/design-v1-dice-ui.md 6.1).
-    assert.match((await view.textContent()) ?? "", /Dex16 \+3Save \+6, proficient/);
-    assert.match(await savesLine(ana), /Dex \+6/);
+    assert.match((await view.textContent()) ?? "", /DEX16 \+3Save \+6, proficient/);
+    assert.match(await savesLine(ana), /DEX \+6/);
     await shots.take(ana, "pcstats-panel");
   });
 
@@ -241,7 +241,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
   test("2. the DM's device shows the totals, and Cy's has none of the block", async () => {
     const panel = await showBree(dm);
     await panel.locator("[data-pc-stats]").getByText("Stealth +9 (expertise)").waitFor();
-    assert.match(await savesLine(dm), /Dex \+6/);
+    assert.match(await savesLine(dm), /DEX \+6/);
     await shots.take(dm, "pcstats-dm-panel");
     await waitFor("Cy's view of Bree", () => cySocket.state?.characters[run.bree.characterId] ?? null);
     assert.equal("stats" in cySocket.state!.characters[run.bree.characterId]!, false, "Cy's device never receives the block");
@@ -260,8 +260,8 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await sheet.getByRole("button", { name: "Save", exact: true }).click();
     await sheet.waitFor({ state: "detached" });
     await panel.locator("[data-pc-stats]").getByText("Stealth +11 (expertise)").waitFor();
-    assert.match(await savesLine(ana), /Dex \+7/);
-    assert.match(await savesLine(dm), /Dex \+7/);
+    assert.match(await savesLine(ana), /DEX \+7/);
+    assert.match(await savesLine(dm), /DEX \+7/);
   });
 
   test("4. Take a shape as Wild Shape changes the bar's saves line, AC and speeds and gives the temporary HP, and End the shape restores the rest", async () => {
@@ -284,12 +284,12 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await bar(ana).getByRole("img", { name: "Armor Class 11" }).waitFor();
     await bar(dm).getByRole("img", { name: "Armor Class 11" }).waitFor();
     // Strength from the bear (+3, its own save), Dexterity the bear's +1 with Bree's proficiency +4.
-    await waitFor("the shaped saves line", async () => ((await savesLine(ana)).includes("Str +3") && (await savesLine(ana)).includes("Dex +5") ? true : null));
+    await waitFor("the shaped saves line", async () => ((await savesLine(ana)).includes("STR +3") && (await savesLine(ana)).includes("DEX +5") ? true : null));
     await shots.take(ana, "pcstats-wild-shape");
     await panel.getByRole("button", { name: "End the shape" }).click();
     await waitFor("the shape ended", () => (breeActor()?.srdId === undefined ? true : null));
-    await waitFor("the saves line back", async () => ((await savesLine(ana)).includes("Dex +7") ? true : null));
-    assert.match(await savesLine(ana), /Str \+0/);
+    await waitFor("the saves line back", async () => ((await savesLine(ana)).includes("DEX +7") ? true : null));
+    assert.match(await savesLine(ana), /STR \+0/);
     await bar(ana).getByRole("img", { name: "Armor Class 15" }).waitFor();
     assert.deepEqual([breeActor()?.ac, breeActor()?.speeds, breeActor()?.hp.temp], [15, { walk: 30 }, 9], "Wild Shape's temporary HP stay");
   });

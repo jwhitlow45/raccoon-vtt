@@ -304,7 +304,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await dcField.press("Enter");
     const asksBefore = Object.keys(dmSocket.state?.rolls ?? {}).length;
     const linesBefore = diceLines(dmSocket.state?.log).length;
-    await groupRolls.getByRole("button", { name: "Dex save for 4" }).tap();
+    await groupRolls.getByRole("button", { name: "DEX save for 4" }).tap();
 
     // The page opens with the results coming in: one line of three goblin saves, one request for Bree.
     const line = await waitFor("the goblins' saves", () => diceLines(dmSocket.state?.log).slice(linesBefore).find((l) => l.rolls.length === 3) ?? null);
@@ -410,7 +410,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await bar.getByRole("button", { name: "Roll", exact: true }).tap();
     const sheet = diceSheet(dm);
     await sheet.waitFor();
-    const groupSave = sheet.locator("[data-roll-options]").getByRole("button", { name: "Group save, DC 13 Dex" });
+    const groupSave = sheet.locator("[data-roll-options]").getByRole("button", { name: "Group save, DC 13 DEX" });
     await groupSave.scrollIntoViewIfNeeded();
     await groupSave.tap();
     await sheet.getByText("Select the creatures it hits, or place an area from it.").waitFor();

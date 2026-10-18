@@ -987,7 +987,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         await card(player).getByRole("button", { name: "Later" }).tap();
         await card(player).waitFor({ state: "detached" });
         await player.waitForTimeout(300);
-        const way = await wayBack(label, /^Wis save: waiting for your roll\./);
+        const way = await wayBack(label, /^WIS save: waiting for your roll\./);
         await shots.take(player, `playerphone-way-back-${shot}`);
         await way.tap();
         await player.waitForTimeout(400);
@@ -1019,7 +1019,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         const options = player.getByRole("toolbar", { name: "Select options" });
         await options.getByRole("button", { name: "Actions", exact: true }).tap();
         await barFrame(player).waitFor();
-        const chip = player.getByRole("button", { name: /^Wis save: waiting for your roll\./ });
+        const chip = player.getByRole("button", { name: /^WIS save: waiting for your roll\./ });
         assert.ok(await wholeInReach(chip), `${label}: the chip is out of reach with the bar open`);
         await shots.take(player, `playerphone-several-bar-over-chip-480x320-${Math.round(scale * 100)}`);
 
@@ -1070,7 +1070,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       const options = player.getByRole("toolbar", { name: "Select options" });
       const actions = options.getByRole("button", { name: "Actions", exact: true });
       assert.ok(await wholeInReach(actions), `${label}: something covers Actions after Later`);
-      const way = await wayBack(label, /^Wis save: waiting for your roll\./);
+      const way = await wayBack(label, /^WIS save: waiting for your roll\./);
       await shots.take(player, "playerphone-several-fight-way-back-480x320");
       await way.tap();
       await player.waitForTimeout(400);
@@ -1124,7 +1124,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         await card(player).getByRole("button", { name: "Later" }).tap();
         await card(player).waitFor({ state: "detached" });
         await player.waitForTimeout(300);
-        const way = await wayBack(label, /^Wis save: waiting for your roll\./);
+        const way = await wayBack(label, /^WIS save: waiting for your roll\./);
         assert.ok(await wholeInReach(endTurn), `${label}: End turn is covered with the way back showing`);
         const options = player.getByRole("toolbar", { name: `${tool === "Ruler" ? "Ruler" : "Select"} options` });
         for (const name of tool === "Ruler" ? ["Keep this ruler on the map", "Clear"] : ["Actions", "Done"]) {
@@ -1166,7 +1166,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         await card(player).getByRole("button", { name: "Later" }).tap();
         await card(player).waitFor({ state: "detached" });
         await player.waitForTimeout(300);
-        await wayBack(label, /^Wis save: waiting for your roll\./);
+        await wayBack(label, /^WIS save: waiting for your roll\./);
         await shots.take(player, `playerphone-kept-rulers-way-back-${shot}`);
         // Every control in the row, and ⋯, takes a tap with the way back showing.
         const controls = options.locator("[data-options-row] > [data-rvtt-slot] button, [data-rvtt-more] button");

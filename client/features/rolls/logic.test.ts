@@ -429,7 +429,7 @@ describe("the DM's sheet", () => {
     assert.deepEqual(second.check.disabled, ["str", "dex", "con", "int", "wis", "cha"], "the Check row is disabled while the first is a save");
     assert.equal(second.skill.disabled.length, 18);
     assert.deepEqual(second.save.disabled, ["str"], "the first choice's own pick");
-    assert.equal(second.why, "Both choices are saves. Str save is the first choice.");
+    assert.equal(second.why, "Both choices are saves. STR save is the first choice.");
     assert.equal(pickRefusal(draft, 1, { kind: "check", ability: "dex" }), "Both choices are saves.");
     assert.equal(pickRefusal(draft, 1, { kind: "save", ability: "str" }), "That is the first choice.");
     assert.equal(choose(draft, 1, { kind: "check", ability: "dex" }), draft, "a refused pick changes nothing");
@@ -508,14 +508,14 @@ describe("the DM's sheet", () => {
     list = withRecent(list, perception);
     list = withRecent(list, two);
     list = withRecent(list, { ...dex, note: "again" });
-    assert.deepEqual(list.map(recentLabel), ["Dex save, DC 15", "Str or Dex save, DC 13", "Wis (Perception) check"]);
+    assert.deepEqual(list.map(recentLabel), ["DEX save, DC 15", "STR or DEX save, DC 13", "WIS (Perception) check"]);
     assert.equal(list[0]!.note, "again", "sent again, it moves to the front with what it was sent with");
     assert.equal(withRecent(list, { ...perception, dc: 10 }).length, 3, "at most three");
     assert.deepEqual(parseRecent(null), [], "no storage, as in a private window");
     assert.deepEqual(switchesOf([]), { dcShown: true, resultShown: true }, "and both switches on");
     assert.deepEqual(switchesOf(list), { dcShown: false, resultShown: true }, "else as the newest request had them");
     const stored = JSON.stringify([{ test: { kind: "save", choices: [{ ability: "dex", skill: "stealth" }] }, dcShown: true, resultShown: true }, two, "junk", { ...dex, dc: 99 }, perception]);
-    assert.deepEqual(parseRecent(stored).map(recentLabel), ["Str or Dex save, DC 13", "Wis (Perception) check"], "an entry that fails its check is dropped, the others shown");
+    assert.deepEqual(parseRecent(stored).map(recentLabel), ["STR or DEX save, DC 13", "WIS (Perception) check"], "an entry that fails its check is dropped, the others shown");
     assert.deepEqual(parseRecent("{not json"), []);
     // A tap fills the choices, the DC, the switches, Against a spell and the note, and keeps who rolls.
     const ticked = [{ characterId: "ayla" }] as const;
@@ -582,7 +582,7 @@ describe("answers on the DM's card", () => {
     let state = ask(setup(), { choices: [{ kind: "check", ability: "str", skill: "athletics" }, { kind: "check", ability: "dex", skill: "acrobatics" }] });
     state = ask(state, {}, "r2");
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, choice: 1, total: 14 }, P1, 3);
-    assert.equal(dmAnswerText(state.rolls.r1!.targets[0]!, state.rolls.r1!.test), "Dex (Acrobatics): typed 14");
+    assert.equal(dmAnswerText(state.rolls.r1!.targets[0]!, state.rolls.r1!.test), "DEX (Acrobatics): typed 14");
     assert.deepEqual(allAnsweredIds(state.rolls), []);
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "bram" }, total: 3 }, P2, 4);
     assert.deepEqual(allAnsweredIds(state.rolls), ["r1"]);
@@ -714,9 +714,9 @@ describe("the player's card and chip", () => {
     assert.equal(JSON.stringify(seenHidden).includes("15"), false, "the hidden DC never reaches the player");
     assert.equal(dcText(seenHidden, "player"), "DC hidden");
     assert.equal(dcText(seenNone, "player"), null);
-    assert.equal(chipLine(seenHidden, seenHidden.targets[0]!), "Dex save: sent 12. Fail. Final. Ask the DM to change it.");
+    assert.equal(chipLine(seenHidden, seenHidden.targets[0]!), "DEX save: sent 12. Fail. Final. Ask the DM to change it.");
     assert.equal(finalForPlayer(seenHidden, seenHidden.targets[0]!), true);
-    assert.equal(chipLine(seenNone, seenNone.targets[0]!), "Dex save: sent 12.");
+    assert.equal(chipLine(seenNone, seenNone.targets[0]!), "DEX save: sent 12.");
     assert.equal(finalForPlayer(seenNone, seenNone.targets[0]!), false);
     // The reducer holds to it whatever a device shows.
     assert.equal(canApply({ t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, total: 18, tag: "answer-3" }, P1, hidden, deps).ok, true);
@@ -728,7 +728,7 @@ describe("the player's card and chip", () => {
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, total: 17 }, P1, 2);
     const seen = projectState(state, P1, { sceneId: null }).rolls.r1!;
     assert.equal(seen.targets.length, 1);
-    assert.equal(chipLine(seen, seen.targets[0]!), "Dex save: sent 17.");
+    assert.equal(chipLine(seen, seen.targets[0]!), "DEX save: sent 17.");
     const bram = projectState(state, P2, { sceneId: null }).rolls.r1!;
     assert.equal(playerNeedsAnswer(bram), true);
   });
@@ -740,7 +740,7 @@ describe("the player's card and chip", () => {
     const seen = () => projectState(state, P1, { sceneId: null }).rolls.r1!;
     assert.equal(seen().targets[0]!.result, undefined, "the result stays hidden");
     assert.equal(playerNeedsAnswer(seen()), false, "answered, so the card stays folded");
-    assert.equal(chipLine(seen(), seen().targets[0]!), "Dex save: failed without rolling.");
+    assert.equal(chipLine(seen(), seen().targets[0]!), "DEX save: failed without rolling.");
     assert.equal(dmAnswerText(state.rolls.r1!.targets[0]!, state.rolls.r1!.test), "failed without rolling");
 
     const before = new Map([["r1", playerNeedsAnswer(seen())]]);
@@ -752,7 +752,7 @@ describe("the player's card and chip", () => {
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, result: "fail" }, P1, 4);
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, total: 11 }, P1, 5);
     assert.equal(seen().targets[0]!.noRoll, undefined, "a total replaces it");
-    assert.equal(chipLine(seen(), seen().targets[0]!), "Dex save: sent 11.");
+    assert.equal(chipLine(seen(), seen().targets[0]!), "DEX save: sent 11.");
   });
 
   test("a fail without rolling the DM overrules reads as the DM's pass, and a DM's own fail is no player's fail", () => {
@@ -761,10 +761,10 @@ describe("the player's card and chip", () => {
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, result: "pass" }, DM, 3);
     const seen = projectState(state, P1, { sceneId: null }).rolls.r1!;
     assert.equal(seen.targets[0]!.noRoll, true);
-    assert.equal(chipLine(seen, seen.targets[0]!), "Dex save: marked Pass by the DM.");
+    assert.equal(chipLine(seen, seen.targets[0]!), "DEX save: marked Pass by the DM.");
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "bram" }, result: "fail" }, DM, 4);
     const bram = projectState(state, P2, { sceneId: null }).rolls.r1!;
-    assert.equal(chipLine(bram, bram.targets[0]!), "Dex save: marked Fail by the DM.");
+    assert.equal(chipLine(bram, bram.targets[0]!), "DEX save: marked Fail by the DM.");
     assert.equal(dmAnswerText(state.rolls.r1!.targets[1]!, state.rolls.r1!.test), "marked Fail");
   });
 
@@ -773,7 +773,7 @@ describe("the player's card and chip", () => {
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, result: "pass" }, DM, 2);
     const seen = projectState(state, P1, { sceneId: null }).rolls.r1!;
     assert.equal(finalForPlayer(seen, seen.targets[0]!), true);
-    assert.equal(chipLine(seen, seen.targets[0]!), "Dex save: marked Pass by the DM. Final. Ask the DM to change it.");
+    assert.equal(chipLine(seen, seen.targets[0]!), "DEX save: marked Pass by the DM. Final. Ask the DM to change it.");
     assert.equal(finalAnswerText(seen.targets[0]!, DEX_SAVE), "Marked Pass by the DM", "never a fail without rolling the player did not send");
     assert.equal(applyOp(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, total: 9, tag: "answer-3" }, P1, env(3)).ok, false, "the reducer holds to it");
     assert.equal(finalAnswerText({ characterId: "ayla", total: 12, result: "fail" }, DEX_SAVE), "Sent 12. Fail", "with the result, as the chip says it (LP5-ROLLS-5)");
@@ -785,8 +785,8 @@ describe("the player's card and chip", () => {
     let state = ask(setup(), { choices: [{ kind: "save", ability: "str" }, { kind: "save", ability: "dex" }], dc: "15", dcShown: false });
     state = run(state, { t: "roll.answer", rollId: "r1", target: { characterId: "ayla" }, choice: 1, total: 12 }, P1, 2);
     const seen = projectState(state, P1, { sceneId: null }).rolls.r1!;
-    assert.equal(chipLine(seen, seen.targets[0]!), "Str or Dex save: sent Dex 12. Fail. Final. Ask the DM to change it.");
-    assert.equal(finalAnswerText(seen.targets[0]!, seen.test), "Sent Dex 12. Fail");
+    assert.equal(chipLine(seen, seen.targets[0]!), "STR or DEX save: sent DEX 12. Fail. Final. Ask the DM to change it.");
+    assert.equal(finalAnswerText(seen.targets[0]!, seen.test), "Sent DEX 12. Fail");
   });
 
   test("a typed total is a whole number from -50 to 100", () => {
@@ -856,11 +856,11 @@ describe("the player's card under a sheet (docs/design-v1-visual.md 3.3.1)", () 
 
   test("a chip put off with Later is named by its lines alone, and offers a change only once it has an answer (LPD-PLAYER-6)", () => {
     const waiting = request("w", 1);
-    assert.equal(chipName(waiting, [chipLine(waiting, waiting.targets[0]!)]), "Dex save: waiting for your roll.");
+    assert.equal(chipName(waiting, [chipLine(waiting, waiting.targets[0]!)]), "DEX save: waiting for your roll.");
     const sent = { ...request("s", 2), targets: [{ characterId: "ayla", total: 15 }] };
-    assert.equal(chipName(sent, [chipLine(sent, sent.targets[0]!)]), "Dex save: sent 15. Open to change it.");
+    assert.equal(chipName(sent, [chipLine(sent, sent.targets[0]!)]), "DEX save: sent 15. Open to change it.");
     const half = { ...request("h", 3), targets: [{ characterId: "ayla", total: 9 }, { tokenId: "wolf" }] };
-    assert.equal(chipName(half, ["Dex save (Ayla): sent 9.", "Dex save (Wolf): waiting for your roll."]), "Dex save (Ayla): sent 9. Dex save (Wolf): waiting for your roll. Open to change it.");
+    assert.equal(chipName(half, ["DEX save (Ayla): sent 9.", "DEX save (Wolf): waiting for your roll."]), "DEX save (Ayla): sent 9. DEX save (Wolf): waiting for your roll. Open to change it.");
   });
 
   test("the summary opens a mounted card first, else the newest request put off with Later, else nothing", () => {
@@ -1046,8 +1046,8 @@ describe("the card's one answer path (docs/design-v1-roll-request.md 5.2, 5.6)",
     assert.deepEqual(offers({ ...rolled, change: { id: "a1", on: "t1", reason: "lucky" } }), { roll: false, send: false, fail: false, ask: true, withdraw: true }, "a newer item replaces the ask");
     assert.equal(offers({ ...rolled, tag: undefined }).ask, false, "an answer from before tags cannot be named");
     const seen = { test: DEX_SAVE, dcShown: true, resultShown: true };
-    assert.equal(chipLine(seen, rolled), "Dex save: rolled 17 (1d20+5: 12). Pass. Final.");
-    assert.equal(chipLine(seen, { ...rolled, result: "fail", dice: { ...rolled.dice, fails: "stunned" } }), "Dex save: rolled 17 (1d20+5: 12). Fail (Stunned). Final.");
+    assert.equal(chipLine(seen, rolled), "DEX save: rolled 17 (1d20+5: 12). Pass. Final.");
+    assert.equal(chipLine(seen, { ...rolled, result: "fail", dice: { ...rolled.dice, fails: "stunned" } }), "DEX save: rolled 17 (1d20+5: 12). Fail (Stunned). Final.");
   });
 
   test("a chip opens to change an answer, or to ask the DM once it is final", () => {
@@ -1055,7 +1055,7 @@ describe("the card's one answer path (docs/design-v1-roll-request.md 5.2, 5.6)",
     assert.equal(chipName(seen, ["x"]), "x Open to ask the DM to change it.");
     const hidden = { test: DEX_SAVE, dcShown: false, dcHidden: true as const, resultShown: true, targets: [{ characterId: "ayla", total: 9, result: "fail" as const, tag: "t" }] };
     assert.equal(chipName(hidden, ["x"]), "x Open to ask the DM to fix it.");
-    assert.equal(chipName(hidden, [chipLine(hidden, hidden.targets[0]!)]), "Dex save: sent 9. Fail. Final. Open to ask the DM to fix it.", "the ask said once (LP7-DICE-12)");
+    assert.equal(chipName(hidden, [chipLine(hidden, hidden.targets[0]!)]), "DEX save: sent 9. Fail. Final. Open to ask the DM to fix it.", "the ask said once (LP7-DICE-12)");
     assert.equal(chipName({ targets: hidden.targets, resultShown: true }, ["x"]), "x Open to change it.", "with the DC shown a typed answer may change");
   });
 
@@ -1104,7 +1104,7 @@ describe("the DM's live card (docs/design-v1-roll-request.md 6)", () => {
     assert.equal(dmAnswerText({ characterId: "a", total: 3, result: "pass", mark: "pass", tag: "t" }, DEX_SAVE), "typed 3, marked Pass");
     assert.equal(dmAnswerText({ characterId: "a", result: "fail", mark: "fail", tag: "t" }, DEX_SAVE), "marked Fail");
     const two = { kind: "save" as const, choices: [{ ability: "str" as const }, { ability: "dex" as const }] };
-    assert.equal(dmAnswerText({ characterId: "a", choice: 1, total: 17, tag: "t", dice: dice("1d20+5", [12], 17) }, two), "Dex: rolled 17 (1d20+5: 12)");
+    assert.equal(dmAnswerText({ characterId: "a", choice: 1, total: 17, tag: "t", dice: dice("1d20+5", [12], 17) }, two), "DEX: rolled 17 (1d20+5: 12)");
     assert.equal(
       dmAnswerText({ characterId: "a", total: 15, result: "pass", tag: "u", previous: { total: 12, result: "fail", tag: "t", dice: dice("1d20+5", [7], 12) } }, DEX_SAVE),
       "typed 15, changed from rolled 12 (1d20+5: 7) (Fail)",

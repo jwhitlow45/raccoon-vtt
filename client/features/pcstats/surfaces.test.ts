@@ -29,7 +29,7 @@ describe("the stat block section on a player character's token", () => {
 
 describe("the bar's saves and defense lines from a block", () => {
   test("six saves in the block's minus sign", () => {
-    assert.deepEqual(saveUnitsOf({ str: 4, dex: -1, con: 3, int: 0, wis: 5, cha: 7 }), ["Str +4", "Dex −1", "Con +3", "Int +0", "Wis +5", "Cha +7"]);
+    assert.deepEqual(saveUnitsOf({ str: 4, dex: -1, con: 3, int: 0, wis: 5, cha: 7 }), ["STR +4", "DEX −1", "CON +3", "INT +0", "WIS +5", "CHA +7"]);
   });
 
   test("defenses in the 2024 block's words and order, and none in another shape", () => {
@@ -45,8 +45,8 @@ describe("the bar's saves and defense lines from a block", () => {
 
   test("a number's parts as the editor's hint lists them", () => {
     const d = pcDerived({ ...BLOCK, abilities: { ...BLOCK.abilities, wis: 14 }, skills: { perception: "prof" }, spellAbility: "wis", adjust: { passive: 1 } }, 5);
-    assert.equal(partsText(d.skills.perception), "Wis +2, proficiency +3");
+    assert.equal(partsText(d.skills.perception), "WIS +2, proficiency +3");
     assert.equal(partsText(d.passive), "10, Perception +5, other +1");
-    assert.equal(partsText(d.spell!.dc), "8, Wis +2, proficiency +3");
+    assert.equal(partsText(d.spell!.dc), "8, WIS +2, proficiency +3");
   });
 });

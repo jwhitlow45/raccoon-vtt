@@ -72,7 +72,7 @@ function buildEntry(tx: Tx, input: EntryInput, existing: InitEntry[]): InitEntry
   if (input.advantage !== undefined) entry.advantage = input.advantage;
   const groupKey = input.groupKey ?? groupKeyFor(tx.state, entry, tx.env.opVersion);
   if (groupKey !== undefined) entry.groupKey = groupKey;
-  // With initiative scores on, a monster enters at 10 + Dex modifier instead of waiting for a typed roll.
+  // With initiative scores on, a monster enters at 10 + DEX modifier instead of waiting for a typed roll.
   if (entry.value === null && token && token.kind !== "pc") {
     entry.value = scoredValue(actorOfEntry(tx.state, entry), tx.state.meta.settings);
   }

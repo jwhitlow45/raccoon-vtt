@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { d20Formula, type AdvantageSource } from "#shared/dice/formula.ts";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type SkillKey } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
-import { ABILITY_NAMES as ABILITY_SHORT } from "#shared/statBlock.ts";
+import { ABILITY_ABBR as ABILITY_SHORT } from "#shared/rules/skills.ts";
 import { SKILLS } from "#shared/rules/skills.ts";
 import { Button } from "../../../components/Button.tsx";
 import { displayName } from "../../../lib/scene.ts";

@@ -5,8 +5,8 @@ import { MAX_PC_DICE_PARTS, MAX_PC_ROLLS, type CharacterPatch } from "#shared/pr
 import { fillSummary } from "#shared/rules/pcFill.ts";
 import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
 import { pcActorNumbers, pcDerived, pcProficiency, srdOnPass, unknownOnPass, type PcNumber } from "#shared/rules/pcStats.ts";
-import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
-import { ABILITY_NAMES as ABILITY_SHORT, signed } from "#shared/statBlock.ts";
+import { ABILITY_ABBR, ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
+import { signed } from "#shared/statBlock.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Dialog, DiscardQuestion } from "../../components/Dialog.tsx";
@@ -710,7 +710,7 @@ function Skills(props: StatsProps) {
         <NumberRow
           key={skill}
           name={SKILLS[skill].name}
-          aside={ABILITY_SHORT[SKILLS[skill].ability]}
+          aside={ABILITY_ABBR[SKILLS[skill].ability]}
           hint={partsText(d.skills[skill])}
           controls={
             <>

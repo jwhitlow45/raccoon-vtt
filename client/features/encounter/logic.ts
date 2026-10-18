@@ -561,7 +561,7 @@ export function entryBatches(tokens: readonly Token[], newId: () => string): Ent
 
 /**
  * Monster rows still waiting for a value that have a 2024 initiative score
- * (10 + Dex modifier), for rooms that use scores instead of rolls. The same
+ * (10 + DEX modifier), for rooms that use scores instead of rolls. The same
  * rule `encounter.add` applies (shared/rules/initiative.ts scoredValue), for
  * rows added before the setting was turned on.
  */

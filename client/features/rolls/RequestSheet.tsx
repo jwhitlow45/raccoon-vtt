@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "rea
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type SkillKey } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
-import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
+import { ABILITY_ABBR, ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Chip, ChipRow } from "../../components/Chip.tsx";
@@ -304,9 +304,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
   );
 }
 
-const SHORT: Record<AbilityKey, string> = Object.fromEntries(ABILITY_KEYS.map((a) => [a, ABILITY_NAMES[a].slice(0, 3)])) as Record<AbilityKey, string>;
-
-/** The 18 skills by name, each with its usual ability: "Perception (Wis)". */
+/** The 18 skills by name, each with its usual ability: "Perception (WIS)". */
 const SKILLS_BY_NAME: readonly SkillKey[] = [...SKILL_KEYS].sort((a, b) => SKILLS[a].name.localeCompare(SKILLS[b].name));
 
 /**
@@ -321,7 +319,7 @@ function ChoicePicker(props: { draft: AskDraft; index: number; disabled: boolean
   const whyId = useId();
   const title = two ? (props.index === 0 ? "First choice" : "Or the second") : "What to roll";
   const abilities = (disabled: readonly AbilityKey[]) =>
-    ABILITY_KEYS.map((a) => ({ value: a, label: SHORT[a], title: ABILITY_NAMES[a], disabled: disabled.includes(a) }));
+    ABILITY_KEYS.map((a) => ({ value: a, label: ABILITY_ABBR[a], title: ABILITY_NAMES[a], disabled: disabled.includes(a) }));
   return (
     <div role={two ? "group" : undefined} aria-label={two ? title : undefined} aria-describedby={view.why ? whyId : undefined} data-choice={props.index}>
       <Group
@@ -371,7 +369,7 @@ function ChoicePicker(props: { draft: AskDraft; index: number; disabled: boolean
                 <option value="">Choose a skill</option>
                 {SKILLS_BY_NAME.map((s) => (
                   <option key={s} value={s} disabled={view.skill.disabled.includes(s)}>
-                    {SKILLS[s].name} ({SHORT[SKILLS[s].ability]})
+                    {SKILLS[s].name} ({ABILITY_ABBR[SKILLS[s].ability]})
                   </option>
                 ))}
               </Select>

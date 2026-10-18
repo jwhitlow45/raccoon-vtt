@@ -247,7 +247,7 @@ export function holds(request: Pick<RollRequest, "targets"> | undefined, target:
 /**
  * The DM's Roll for a creature still waiting (6): its bonus from the DM's
  * view, the preset over every effect and the request's `spell`, worded as
- * doc 3's buttons are, "Roll +5", "Roll Dex +5, Disadvantage (Restrained)"
+ * doc 3's buttons are, "Roll +5", "Roll DEX +5, Disadvantage (Restrained)"
  * or "Roll +5: fails (Stunned)", and the fields its `roll.dice` sends with
  * `unanswered`, so an answer that came first stands. Where the DM's view
  * knows no bonus, the DM types one: "Roll d20" until then, "Roll d20+3"

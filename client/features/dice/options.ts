@@ -6,7 +6,7 @@ import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
 import type { CharacterId, CritRule, DiceRoll, InitEntry, LogEntry, LogEvent, RollRequest, RollTarget, RoomState, TokenId } from "#shared/model.ts";
 import { findEntryFor } from "#shared/rules/durations.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
-import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
+import { ABILITY_ABBR, ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { critSums, effectName } from "#shared/logText.ts";
 import type { PanelRoll } from "./useDicePanel.ts";
 import { parseBonus, TYPE_BONUS } from "../rolls/card.ts";
@@ -214,7 +214,7 @@ export function typedTap(route: Route["kind"], typed: TypedBonus): { bonus: numb
   return { bonus: null, waits: typed?.ok === false ? typed.error : TYPE_BONUS };
 }
 
-/** Such a creature's option as its button reads: "Str d20", then "Str d20+3" once a bonus is typed. */
+/** Such a creature's option as its button reads: "STR d20", then "STR d20+3" once a bonus is typed. */
 export function typedText(name: string, typed: TypedBonus): string {
   return typed?.ok ? `${name} d20${signedText(typed.bonus)}` : `${name} d20`;
 }
@@ -516,11 +516,11 @@ export function groupNote(presets: readonly RollPreset[]): string {
   return [...new Set(presets.flatMap((p) => presetLine(p).split(". ")).filter(Boolean))].join(". ");
 }
 
-const SAVE_SHORT: Record<string, string> = { str: "Str", dex: "Dex", con: "Con", int: "Int", wis: "Wis", cha: "Cha" };
+const SAVE_SHORT: Record<string, string> = ABILITY_ABBR;
 
 /**
  * A named roll's line in its header, as a stat block reads: "+6 to hit,
- * 1d8+3 slashing, +2d8 Divine Smite", "DC 14 Dex, 2d8 radiant", "2d8+3
+ * 1d8+3 slashing, +2d8 Divine Smite", "DC 14 DEX, 2d8 radiant", "2d8+3
  * healing". A save stands where an attack's bonus stands (the project
  * owner, 2026-10-17). A rider's dice are said here, so its toggle needs
  * only its name and the controls share one line more often.

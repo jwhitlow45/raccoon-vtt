@@ -150,7 +150,7 @@ export function StatsFields(props: {
       {dm || actor.initScore !== undefined ? (
         <Stat
           label="Initiative score"
-          hint="10 + Dex modifier, used when the room uses scores for monsters"
+          hint="10 + DEX modifier, used when the room uses scores for monsters"
           value={actor.initScore}
           editable={canEdit("initScore")}
         >

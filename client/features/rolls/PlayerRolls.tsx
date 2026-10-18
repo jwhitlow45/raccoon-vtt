@@ -1127,7 +1127,7 @@ function RolledResult(props: { target: RollTarget }) {
 }
 
 /**
- * A folded request: "Dex save: sent 17. Pass." per creature. A tap opens
+ * A folded request: "DEX save: sent 17. Pass." per creature. A tap opens
  * the card to change the answer while the request is open, except when
  * every answer on it is final, which the chip then says in plain text.
  */

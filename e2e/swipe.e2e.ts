@@ -887,7 +887,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     const screen = await player.evaluate(() => (globalThis as unknown as Win).innerHeight);
     assert.ok(cardRest.top + slide >= screen - 0.5, `the card's slide stops above the screen's foot: ${JSON.stringify({ cardRest, slide, screen })}`);
     assert.equal(await settled(card), "gone", "the card did not fold");
-    const chip = player.getByRole("button", { name: /^Con save/ }).first();
+    const chip = player.getByRole("button", { name: /^CON save/ }).first();
     await chip.waitFor();
     await chip.click();
     await card.waitFor();

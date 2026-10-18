@@ -332,21 +332,21 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     }
     await ops.send({ t: "roll.answer", rollId: ids.dex, target: { characterId }, result: "pass", tag: randomUUID() });
     const card = (test: string) => dm.getByRole("group", { name: `Roll request: ${test}` });
-    await card("Wis save").waitFor();
+    await card("WIS save").waitFor();
 
     // Close all answered stands above the cards, so focus goes to the first card left.
     await dm.getByRole("button", { name: "Close all answered (1)" }).tap();
-    await card("Dex save").waitFor({ state: "detached" });
-    await waitFor("the Wis save card focused", async () => (await focused(dm)).name.startsWith("Wis save"));
+    await card("DEX save").waitFor({ state: "detached" });
+    await waitFor("the WIS save card focused", async () => (await focused(dm)).name.startsWith("WIS save"));
 
     // A card's Close: focus goes to the card after it.
-    await dm.getByRole("button", { name: "Close the Wis save request" }).tap();
-    await waitFor("the Str save card focused", async () => (await focused(dm)).name.startsWith("Str save"));
+    await dm.getByRole("button", { name: "Close the WIS save request" }).tap();
+    await waitFor("the STR save card focused", async () => (await focused(dm)).name.startsWith("STR save"));
     await shots.take(dm, "dmphone-next-card-focused");
 
     // The last card's Close: nothing in the column is left, so the map takes focus.
-    await dm.getByRole("button", { name: "Close the Str save request" }).tap();
-    await card("Str save").waitFor({ state: "detached" });
+    await dm.getByRole("button", { name: "Close the STR save request" }).tap();
+    await card("STR save").waitFor({ state: "detached" });
     await waitFor("the map focused", async () => (await focused(dm)).name === "Map");
   });
 

@@ -3,8 +3,8 @@ import { ABILITY_KEYS, CR_VALUES, type Actor, type Character, type CompanionBloc
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { companionBlockInputSchema, MAX_LEGENDARY_USES, MAX_NAME, monsterInputSchema, type ClientOp } from "#shared/protocol.ts";
 import { tokenUses } from "#shared/srd/monsters.ts";
+import { ABILITY_ABBR } from "#shared/rules/skills.ts";
 import {
-  ABILITY_NAMES,
   abilityMod,
   hpAverage,
   legendaryUses,
@@ -554,13 +554,13 @@ function Abilities(props: { draft: StatBlock; setDraft(update: (d: StatBlock) =>
           return (
             <div key={key} style={{ display: "grid", gap: theme.space(1), padding: theme.space(2), borderRadius: theme.radius.md, background: theme.color.surfaceRaised }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <strong>{ABILITY_NAMES[key]}</strong>
+                <strong>{ABILITY_ABBR[key]}</strong>
                 <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>mod {signed(abilityMod(row.score))}</span>
               </div>
-              <NumberInput label={`${ABILITY_NAMES[key]} score`} value={row.score} min={0} max={99} onChange={(n) => setDraft((d) => withScore(d, key, n ?? 10))} />
+              <NumberInput label={`${ABILITY_ABBR[key]} score`} value={row.score} min={0} max={99} onChange={(n) => setDraft((d) => withScore(d, key, n ?? 10))} />
               <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>Save</span>
               <NumberInput
-                label={`${ABILITY_NAMES[key]} save`}
+                label={`${ABILITY_ABBR[key]} save`}
                 value={row.save}
                 min={-20}
                 max={40}

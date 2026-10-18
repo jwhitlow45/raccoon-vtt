@@ -4,7 +4,7 @@ import { anyPlayer, playersToken } from "#shared/project.ts";
 import { z } from "zod";
 import { dmToolSchemas, type ActorTarget, type ClientOp } from "#shared/protocol.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
-import { ABILITY_NAMES, choiceText, SKILLS, testShortText, testText, TYPICAL_DCS } from "#shared/rules/skills.ts";
+import { ABILITY_ABBR, choiceText, SKILLS, testShortText, testText, TYPICAL_DCS } from "#shared/rules/skills.ts";
 import { answerDice } from "#shared/logText.ts";
 import { naturalOf } from "#shared/dice/roll.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
@@ -206,7 +206,7 @@ export function pickOf(kind: RollTest["kind"], choice: RollChoice): RollPick {
   return choice.skill === undefined ? { kind, ability: choice.ability } : { kind, ability: choice.ability, skill: choice.skill };
 }
 
-/** A pick in the test's own words, short: "Dex save", "Wis (Perception) check". */
+/** A pick in the test's own words, short: "DEX save", "WIS (Perception) check". */
 export function pickText(pick: RollPick): string {
   return testShortText({ kind: pick.kind, choices: [choiceOf(pick)] });
 }
@@ -532,7 +532,7 @@ export function writeRecent(roomId: string, list: readonly RecentAsk[]): void {
   }
 }
 
-/** A recent request's button: "Dex save, DC 15", "Wis (Perception) check". */
+/** A recent request's button: "DEX save, DC 15", "WIS (Perception) check". */
 export function recentLabel(entry: RecentAsk): string {
   return `${testShortText(entry.test)}${entry.dc !== undefined ? `, DC ${entry.dc}` : ""}`;
 }
@@ -628,9 +628,9 @@ export function testTitle(test: RollTest): string {
 
 export { testShortText };
 
-/** One choice in a few letters, as a card names what was rolled: "Str (Athletics)", "Dex". */
+/** One choice in a few letters, as a card names what was rolled: "STR (Athletics)", "DEX". */
 export function choiceShort(choice: RollChoice): string {
-  const ability = ABILITY_NAMES[choice.ability].slice(0, 3);
+  const ability = ABILITY_ABBR[choice.ability];
   return choice.skill === undefined ? ability : `${ability} (${SKILLS[choice.skill].name})`;
 }
 
@@ -663,7 +663,7 @@ export const CHANGE_REASONS: Record<RollChange["reason"], string> = {
  * 17 (1d20+5: 12)", "typed 17", "failed without rolling", "marked Pass",
  * with a natural 20 or 1, a condition that failed a rolled save, the DM's
  * own mark beside a total, and the choice first when the test offered two,
- * "Dex: rolled 17 (…)". An allowed change names its reason.
+ * "DEX: rolled 17 (…)". An allowed change names its reason.
  */
 function dmWords(answer: RollAnswer, test: RollTest): string | null {
   let words: string;
@@ -692,7 +692,7 @@ function dmWords(answer: RollAnswer, test: RollTest): string | null {
 
 /**
  * The DM's line for one target, beside the Pass and Fail marks: "waiting",
- * "rolled 17 (1d20+5: 12)", "typed 17", "Dex: typed 17", "failed without
+ * "rolled 17 (1d20+5: 12)", "typed 17", "DEX: typed 17", "failed without
  * rolling", "marked Pass", and an answer that replaced another says so:
  * "typed 15, changed from rolled 12 (1d20+5: 7) (Fail)", an allowed change
  * "rerolled 19 (Heroic Inspiration), was 9", a reopen "waiting again, was
@@ -748,9 +748,9 @@ export function finalForPlayer(request: Pick<RollRequest, "dcHidden" | "resultSh
 const ASK_THE_DM = " Ask the DM to change it.";
 
 /**
- * A player's folded chip for one creature: "Dex save: sent 17. Pass.",
+ * A player's folded chip for one creature: "DEX save: sent 17. Pass.",
  * "sent 17" when pass or fail is hidden, the choice rolled when the test
- * offered two ("Str or Dex save: sent Dex 12. Fail."), "failed without rolling" (from
+ * offered two ("STR or DEX save: sent DEX 12. Fail."), "failed without rolling" (from
  * `noRoll`, which their projection keeps on every device whatever the
  * switch says), or "waiting" before an answer. A fail without rolling that
  * the DM overruled to a pass reads as that pass, as the log line does.
@@ -758,7 +758,7 @@ const ASK_THE_DM = " Ask the DM to change it.";
 export function chipLine(request: Pick<RollRequest, "test" | "dcHidden" | "resultShown">, target: RollTarget, opts: { name?: string } = {}): string {
   const lead = `${testShortText(request.test)}${opts.name ? ` (${opts.name})` : ""}`;
   if (target.dice !== undefined) {
-    // A rolled answer is final, with its dice: "Dex save: rolled 17 (1d20+5: 12). Pass. Final."
+    // A rolled answer is final, with its dice: "DEX save: rolled 17 (1d20+5: 12). Pass. Final."
     const choice = request.test.choices.length > 1 && target.choice !== undefined ? request.test.choices[target.choice] : undefined;
     const verdict = target.result === undefined ? "" : target.result === "fail" && target.dice.fails ? ` Fail (${CONDITIONS[target.dice.fails].name}).` : ` ${RESULT[target.result]}.`;
     return `${lead}: rolled ${choice ? `${choiceShort(choice)} ` : ""}${target.total ?? target.dice.total} (${answerDice(target.dice, target.typedBonus === true)}).${verdict} Final.`;
@@ -793,7 +793,7 @@ export function chipName(request: Pick<RollRequest, "targets" | "dcHidden" | "re
   return done.some((t) => t.dice !== undefined) ? `${asked} Open to ask the DM to change it.` : `${asked} Open to ask the DM to fix it.`;
 }
 
-/** What a final answer says on the open card, before "Final. Ask the DM to change it.", read in the chip's order: "Sent Dex 13. Pass". */
+/** What a final answer says on the open card, before "Final. Ask the DM to change it.", read in the chip's order: "Sent DEX 13. Pass". */
 export function finalAnswerText(target: RollTarget, test: RollTest): string {
   if (target.total !== undefined) return `Sent ${answerWords(target, test)}${target.result !== undefined ? `. ${RESULT[target.result]}` : ""}`;
   if (target.result === "pass") return "Marked Pass by the DM";

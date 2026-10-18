@@ -36,7 +36,7 @@ describe("skills (docs/design-v1-dm-tools.md 3.3)", () => {
     assert.equal(testText({ kind: "save", choices: [{ ability: "str" }, { ability: "dex" }] }), "a Strength or Dexterity saving throw");
     assert.equal(testText({ kind: "check", choices: [{ ability: "str", skill: "athletics" }, { ability: "dex", skill: "acrobatics" }] }), "a Strength (Athletics) or Dexterity (Acrobatics) check");
     assert.equal(testText({ kind: "check", choices: [{ ability: "int", skill: "arcana" }] }), "an Intelligence (Arcana) check");
-    assert.equal(testShortText({ kind: "save", choices: [{ ability: "dex" }] }), "Dex save");
+    assert.equal(testShortText({ kind: "save", choices: [{ ability: "dex" }] }), "DEX save");
   });
 
   test("the typical DCs are page 6's six", () => {

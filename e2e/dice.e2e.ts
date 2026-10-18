@@ -533,8 +533,8 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       const header = rolls.locator("div").filter({ has: player.getByText(name, { exact: true }) }).last();
       return (await header.innerText()).replace(/\s+/g, " ").trim();
     };
-    assert.match(await headerOf("Hold Person"), /^Hold Person ?DC 14 Wis$/);
-    assert.match(await headerOf("Sacred Flame"), /^Sacred Flame ?DC 14 Dex, \dd8 radiant/);
+    assert.match(await headerOf("Hold Person"), /^Hold Person ?DC 14 WIS$/);
+    assert.match(await headerOf("Sacred Flame"), /^Sacred Flame ?DC 14 DEX, \dd8 radiant/);
     await rolls.getByText("Hold Person", { exact: true }).scrollIntoViewIfNeeded();
     await shots.take(player, "dice-save-spells-dc");
   });
@@ -591,7 +591,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       await bar.getByRole("button", { name: "Roll", exact: true }).click();
       const sheet = dm.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
       const options = sheet.locator("[data-roll-options]");
-      const group = options.getByRole("button", { name: /^Group save, DC 16 Wis/ });
+      const group = options.getByRole("button", { name: /^Group save, DC 16 WIS/ });
       await group.waitFor();
       assert.deepEqual(await overflowing(options), [], `${label}: words run past their buttons`);
       await group.scrollIntoViewIfNeeded();

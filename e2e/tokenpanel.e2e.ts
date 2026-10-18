@@ -594,7 +594,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     for (const words of ["HP 10/10", "Speed 30 ft", "Passive Perception 9"]) assert.ok(text.replace(/\s+/g, " ").includes(words), `the vitals lack "${words}": ${text}`);
     const saves = goblin.locator("[data-saves]");
     await saves.waitFor();
-    assert.equal((await saves.innerText()).replace(/\s+/g, " ").trim(), "Saves Str −1 Dex +2 Con +0 Int +0 Wis −1 Cha −1");
+    assert.equal((await saves.innerText()).replace(/\s+/g, " ").trim(), "Saves STR −1 DEX +2 CON +0 INT +0 WIS −1 CHA −1");
     const entry = goblin.getByRole("textbox", { name: "HP change" });
     assert.equal(await fieldBeforeModes(goblin), false, "the full layout's modes come first in Tab order, as it draws them");
     const statBlock = goblin.getByRole("button", { name: "Stat block", exact: true });
@@ -1149,7 +1149,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await shots.take(dm, `tokenpanel-${size.label.replace(/ /g, "")}-short-bar`);
       await more.click();
       const opened = (await goblin.innerText()).replace(/\s+/g, " ");
-      for (const words of ["Speed 30 ft", "Passive Perception 9", "Saves Str −1"]) assert.ok(opened.includes(words), `${size.label}: More stats lacks ${words}`);
+      for (const words of ["Speed 30 ft", "Passive Perception 9", "Saves STR −1"]) assert.ok(opened.includes(words), `${size.label}: More stats lacks ${words}`);
       await noSideScroll(goblin, `${size.label}, the short bar`);
 
       // Stat block keeps the bar open beside the sheet or side panel, which opens at the block.

@@ -270,7 +270,7 @@ export async function setFight(fight: Fight): Promise<void> {
 // ------------------------------------------------ the player: a roll asked of Thorn
 
 export const ROLL_CARD = "The DM asks for a roll";
-export const CHIP = /^Wis save: waiting for your roll\./;
+export const CHIP = /^WIS save: waiting for your roll\./;
 
 export async function selectThorn(): Promise<boolean> {
   const find = player.getByRole("button", { name: "Find my token" });

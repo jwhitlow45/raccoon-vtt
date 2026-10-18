@@ -1,6 +1,5 @@
 import type { CSSProperties } from "react";
-import { ABILITY_NAMES } from "#shared/rules/skills.ts";
-import { ABILITY_NAMES as ABILITY_SHORT } from "#shared/statBlock.ts";
+import { ABILITY_ABBR, ABILITY_NAMES } from "#shared/rules/skills.ts";
 import { theme } from "../../lib/theme.ts";
 import type { AbilityBox } from "./abilityTable.ts";
 
@@ -19,7 +18,7 @@ export function AbilityGrid(props: { abilities: readonly AbilityBox[] }) {
         <div key={a.key} style={{ padding: `${theme.space(1)}px ${theme.space(2)}px`, borderRadius: theme.radius.sm, background: theme.color.surfaceRaised, lineHeight: theme.leading.tight }}>
           <dt style={{ fontSize: theme.font.tiny, fontWeight: theme.weight.bold, letterSpacing: theme.caps, textTransform: "uppercase", color: theme.color.textMuted }}>
             <abbr title={ABILITY_NAMES[a.key]} style={{ textDecoration: "none" }}>
-              {ABILITY_SHORT[a.key]}
+              {ABILITY_ABBR[a.key]}
             </abbr>
           </dt>
           <dd style={{ margin: 0, whiteSpace: "nowrap" }}>

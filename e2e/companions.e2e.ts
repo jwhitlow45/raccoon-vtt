@@ -349,7 +349,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     assert.deepEqual(owl.actor.inline.speeds, { walk: 5, fly: 60 });
     const b = bar(ana, "Owl");
     await b.waitFor();
-    await b.getByText(/Str −4/).waitFor();
+    await b.getByText(/STR −4/).waitFor();
     await shots.take(ana, "companions-owl-bar");
     await b.getByRole("button", { name: "Stat block", exact: true }).click();
     const panel = tokenPanel(ana);
@@ -447,7 +447,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     // The bar reads its saves and defenses from the block.
     await showCompanion(ana, "Hoot");
     await bar(ana, "Hoot").getByText("Cold", { exact: false }).first().waitFor();
-    await bar(ana, "Hoot").getByText(/Str −2/).waitFor();
+    await bar(ana, "Hoot").getByText(/STR −2/).waitFor();
     await shots.take(ana, "companions-block-bar");
     await bar(ana, "Hoot").getByRole("button", { name: "Stat block", exact: true }).click();
     await panel.getByRole("button", { name: "Detach", exact: true }).click();

@@ -30,6 +30,13 @@ export const SIZE_WORDS: Record<MonsterSize, string> = {
   gargantuan: "Gargantuan",
 };
 
+/**
+ * The ability labels of a stat block's table, as the SRD's tables write
+ * them. The writer below and the readers of a stored block (`statBlockFromSrd`
+ * and client/features/monsters/abilityTable.ts) match this form by case, and
+ * blocks already stored hold it, so it stays as the SRD has it. What the app
+ * prints is ABILITY_ABBR in shared/rules/skills.ts.
+ */
 export const ABILITY_NAMES: Record<AbilityKey, string> = { str: "Str", dex: "Dex", con: "Con", int: "Int", wis: "Wis", cha: "Cha" };
 
 export type SectionKey = "traits" | "actions" | "bonusActions" | "reactions" | "legendaryActions";

@@ -1,5 +1,6 @@
 import type { AbilityKey, CompanionBlock, ImageRef, StatBlock, StatBlockEntry } from "#shared/model.ts";
 import { BLOCK_SAVES_TOO_FAST, LIMITS } from "#shared/limits.ts";
+import { ABILITY_ABBR } from "#shared/rules/skills.ts";
 import type { MonsterPatch } from "#shared/protocol.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { stableStringify } from "#shared/project.ts";
@@ -139,7 +140,7 @@ function placeOf(path: PropertyKey[]): string {
     if (typeof part === "number") parts.push(`entry ${part + 1}`);
     else if (part === "formula") parts.push("hit dice");
     else if (part === "text" || part === "name" || part === "score" || part === "save") parts.push(part);
-    else if (typeof part === "string") parts.push(part.length === 3 ? part.charAt(0).toUpperCase() + part.slice(1) : part);
+    else if (typeof part === "string") parts.push(Object.hasOwn(ABILITY_ABBR, part) ? ABILITY_ABBR[part as AbilityKey] : part);
   }
   return parts.join(", ");
 }

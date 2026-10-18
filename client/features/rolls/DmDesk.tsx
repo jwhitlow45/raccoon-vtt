@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bonusFor, testOf } from "#shared/dice/bonus.ts";
 import { ANSWERED_MEANWHILE } from "#shared/permissions.ts";
-import { ABILITY_NAMES } from "#shared/rules/skills.ts";
+import { ABILITY_ABBR } from "#shared/rules/skills.ts";
 import { useStore } from "zustand";
 import type { RollRequest, RollTarget } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
@@ -350,7 +350,7 @@ function DmRollButton(props: { request: RollRequest; target: RollTarget; name: s
   const { bonus, waits, error } = knownOrTyped(known, text, true);
   const test = testOf(request, choice);
   const picked = request.test.choices[choice]!;
-  const roll = dmRoll({ bonus, typed: known === null, preset: presetFor(dice, ref, test, { rolls }), ...(two ? { ability: ABILITY_NAMES[picked.ability].slice(0, 3) } : {}) });
+  const roll = dmRoll({ bonus, typed: known === null, preset: presetFor(dice, ref, test, { rolls }), ...(two ? { ability: ABILITY_ABBR[picked.ability] } : {}) });
   const tap = () => {
     if (busy || bonus === null) return;
     // Read again at the tap, so the effects and Magic Resistance then decide (doc 3 3.2).

@@ -2,7 +2,8 @@ import type { AbilityKey, Actor, CompanionBlock, CustomMonster, HpVisibility, Li
 import { ABILITY_KEYS } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
-import { ABILITY_NAMES, signed, statBlockFromSrd, statBlockOf } from "#shared/statBlock.ts";
+import { ABILITY_ABBR } from "#shared/rules/skills.ts";
+import { signed, statBlockFromSrd, statBlockOf } from "#shared/statBlock.ts";
 import { shieldAc } from "../../canvas/tokenMarks.ts";
 import { hpDisplay, type HpView } from "../../lib/tokenView.ts";
 import { tokenStatBlock } from "../monsters/statBlockLink.ts";
@@ -155,14 +156,14 @@ export function shortSplit(items: readonly VitalItem[]): { line: VitalItem[]; mo
   };
 }
 
-/** The six saves in the block's own numbers and minus sign: "Str +5", "Dex −1". All six, since any of them can be called for. */
+/** The six saves in the block's own numbers and minus sign: "STR +5", "DEX −1". All six, since any of them can be called for. */
 export function saveUnits(block: Pick<StatBlock, "abilities">): string[] {
-  return ABILITY_KEYS.map((k) => `${ABILITY_NAMES[k]} ${signed(block.abilities[k].save)}`);
+  return ABILITY_KEYS.map((k) => `${ABILITY_ABBR[k]} ${signed(block.abilities[k].save)}`);
 }
 
 /** The same from the numbers a creature rolls with, such as a player character's stat block's (docs/design-v1-pc-stats.md 7.4). */
 export function saveUnitsOf(saves: Readonly<Record<AbilityKey, number>>): string[] {
-  return ABILITY_KEYS.map((k) => `${ABILITY_NAMES[k]} ${signed(saves[k])}`);
+  return ABILITY_KEYS.map((k) => `${ABILITY_ABBR[k]} ${signed(saves[k])}`);
 }
 
 export type DefenseLine = { label: "Vulnerabilities" | "Resistances" | "Immunities"; text: string };

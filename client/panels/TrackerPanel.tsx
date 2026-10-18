@@ -599,7 +599,7 @@ function DmSetup(props: { selectedTokenId: string | null; editingValues: boolean
         </Wrap>
         <Switch
           label="Monsters use initiative scores"
-          help="10 + Dex modifier instead of a roll. New monster rows start with it."
+          help="10 + DEX modifier instead of a roll. New monster rows start with it."
           checked={scores}
           onChange={(on) => actions.dispatch({ t: "room.update", settings: { monsterInitScore: on } })}
         />

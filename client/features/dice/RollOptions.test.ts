@@ -98,7 +98,7 @@ function render(viewer: Viewer, landed: boolean, pending = false): string {
 describe("a roll option's result shows in the header line, never under its button (docs/design-v1-dice-ui.md 4.1)", () => {
   test("before any roll, the options draw and no total is anywhere", () => {
     const markup = render(P1, false);
-    assert.match(markup, /Dex \+7/, "the save's button");
+    assert.match(markup, /DEX \+7/, "the save's button");
     assert.match(markup, /Rapier/);
     for (const total of Object.values(TOTALS)) assert.doesNotMatch(markup, new RegExp(String(total)));
   });
@@ -113,13 +113,13 @@ describe("a roll option's result shows in the header line, never under its butto
     for (const total of Object.values(TOTALS)) {
       assert.doesNotMatch(options, new RegExp(`${total}|${total.toLocaleString("en-US")}`), `no ${total} under a button`);
     }
-    assert.match(options, /Dex \+7/, "the cell's words are as before the roll");
+    assert.match(options, /DEX \+7/, "the cell's words are as before the roll");
   });
 
   test("a row reads its own roll: one still on its way shows busy on its button", () => {
     const markup = render(P1, true, true);
     const busy = [...markup.matchAll(/<button[^>]*aria-busy="true"[^>]*>(.*?)<\/button>/g)].map((m) => m[1]);
     assert.equal(busy.length, 1, "only the roll still on its way");
-    assert.match(busy[0]!, /Dex \+7/, "the Dex save waits for its line");
+    assert.match(busy[0]!, /DEX \+7/, "the Dex save waits for its line");
   });
 });

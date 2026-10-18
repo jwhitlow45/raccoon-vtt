@@ -19,6 +19,14 @@ export const ABILITY_NAMES: Record<AbilityKey, string> = {
   cha: "Charisma",
 };
 
+/**
+ * The abbreviations the app prints, in capitals: "DEX save", "STR +5" (the
+ * project owner, 2026-10-18). The SRD's stat block tables write "Str", and
+ * a stored table keeps that form (ABILITY_NAMES in shared/statBlock.ts),
+ * since the readers of a stored block match it by case.
+ */
+export const ABILITY_ABBR: Record<AbilityKey, string> = { str: "STR", dex: "DEX", con: "CON", int: "INT", wis: "WIS", cha: "CHA" };
+
 /** The Skills table (SRD 5.2.1 page 9): each skill's name and the ability it is usually used with. */
 export const SKILLS: Record<SkillKey, { name: string; ability: AbilityKey }> = {
   acrobatics: { name: "Acrobatics", ability: "dex" },
@@ -84,10 +92,10 @@ export function testText(test: RollTest): string {
   return `${/^[AEIOU]/.test(named) ? "an" : "a"} ${named} ${noun}`;
 }
 
-/** The short name a chip uses: "Dex save", "Str (Athletics) check", "Str or Dex save". */
+/** The short name a chip uses: "DEX save", "STR (Athletics) check", "STR or DEX save". */
 export function testShortText(test: RollTest): string {
   const short = (choice: RollChoice) => {
-    const ability = ABILITY_NAMES[choice.ability].slice(0, 3);
+    const ability = ABILITY_ABBR[choice.ability];
     return choice.skill === undefined ? ability : `${ability} (${SKILLS[choice.skill].name})`;
   };
   return `${test.choices.map(short).join(" or ")} ${test.kind === "save" ? "save" : "check"}`;

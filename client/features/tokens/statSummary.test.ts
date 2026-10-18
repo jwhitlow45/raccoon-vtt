@@ -180,14 +180,14 @@ describe("a short bar's split", () => {
 describe("saves and defenses", () => {
   test("from a room monster, in its own numbers", () => {
     const block = statBlockOf(customMonster("m1"));
-    assert.deepEqual(saveUnits(block), ["Str +2", "Dex +2", "Con +1", "Int −4", "Wis +3", "Cha −2"]);
+    assert.deepEqual(saveUnits(block), ["STR +2", "DEX +2", "CON +1", "INT −4", "WIS +3", "CHA −2"]);
   });
 
   test("from an SRD monster, with the SRD's minus sign", async () => {
     const list = await loadMonsters();
     const state = linkedBlockState({ srdId: "goblin-warrior" }, {}, { list, failed: false });
     assert.equal(state.kind, "ready");
-    assert.deepEqual(saveUnits(state.kind === "ready" ? state.block : statBlockOf(customMonster("x"))), ["Str −1", "Dex +2", "Con +0", "Int +0", "Wis −1", "Cha −1"]);
+    assert.deepEqual(saveUnits(state.kind === "ready" ? state.block : statBlockOf(customMonster("x"))), ["STR −1", "DEX +2", "CON +0", "INT +0", "WIS −1", "CHA −1"]);
   });
 
   test("defense lines: none, each alone, and all three in the block's order", () => {
