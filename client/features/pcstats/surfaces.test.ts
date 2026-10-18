@@ -19,6 +19,12 @@ describe("the stat block section on a player character's token", () => {
     // A token of its own, kind PC but no character, keeps the old rule.
     assert.equal(statBlockShown({ dm: true, owner: false, kind: "pc", actor: {} }), false);
   });
+
+  test("a player who owns only the token, a character lent to them, gets no section, since the block never reaches them (LP7-PC-3)", () => {
+    assert.equal(statBlockShown({ dm: false, owner: true, kind: "pc", actor: {}, character: true, ownsCharacter: false }), false);
+    assert.equal(statBlockShown({ dm: false, owner: true, kind: "pc", actor: {}, character: true, ownsCharacter: true }), true);
+    assert.equal(statBlockShown({ dm: true, owner: false, kind: "pc", actor: {}, character: true, ownsCharacter: false }), true);
+  });
 });
 
 describe("the bar's saves and defense lines from a block", () => {

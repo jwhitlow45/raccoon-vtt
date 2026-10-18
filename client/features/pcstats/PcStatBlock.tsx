@@ -38,7 +38,7 @@ export function PcStatBlock(props: {
   const { character, fold } = props;
   const openStats = useOpenPcStats();
   const you = useRoomView((s) => s.you);
-  // A token's owner who does not own its character sees the block, never the buttons that change it.
+  // A token's owner who does not own its character gets no section at all (statBlockShown), and never the buttons that change it.
   const edits = editsPcStats(you, character);
   const [picking, setPicking] = useState(false);
   const shaped = pcShape(character) !== "none";

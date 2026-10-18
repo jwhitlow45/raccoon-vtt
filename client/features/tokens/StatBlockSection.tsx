@@ -13,7 +13,7 @@ import { useOpenEditor } from "../monsters/EditorHost.tsx";
 import { MonsterPicker } from "../monsters/MonsterPicker.tsx";
 import { StatBlockView, useSrdMonsters } from "../monsters/StatBlockView.tsx";
 import { attachPatch, DETACH_PATCH, OWNER_DETACH_PATCH, statBlockFoldable, statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
-import type { TokenAccess } from "./access.ts";
+import { ownsCharacter, type TokenAccess } from "./access.ts";
 import { AttachBlockDialog } from "./CompanionBlocks.tsx";
 import { whose } from "./companionBlocks.ts";
 import { usePreview } from "../dm/previewContext.ts";
@@ -70,6 +70,7 @@ export function StatBlockSection(props: {
   const keeperName = useRoomView((s) => (token.companion ? s.view?.characters[token.companion.of]?.name : undefined));
   // A player character's token shows its character's own stat block (docs/design-v1-pc-stats.md 7.3).
   const pc = useRoomView((s) => ("ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
+  const you = useRoomView((s) => s.you);
   const keeper: Keeper | null = token.companion ? { id: token.companion.of, name: keeperName ?? "its character" } : null;
   const { folds, slot } = usePanelFolds();
   const preview = usePreview() !== null;
@@ -98,7 +99,7 @@ export function StatBlockSection(props: {
     });
   }, [askedSeq, askedFocus, request]);
 
-  if (!statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion: keeper !== null, character: "ref" in token.actor })) return null;
+  if (!statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion: keeper !== null, character: "ref" in token.actor, ownsCharacter: pc ? ownsCharacter(you?.memberId, pc) : undefined })) return null;
   const toggle = () => {
     // A tap is the viewer's own choice: the request's override gives way to it, and it is what this device remembers.
     openedStore.setState({ tokenId: null });

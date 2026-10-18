@@ -18,7 +18,7 @@ import { ImageField } from "../features/images/ImageField.tsx";
 import { RangeRingsSection } from "../features/measure/RangeRingsSection.tsx";
 import { statBlockShown } from "../features/monsters/statBlockLink.ts";
 import { GroundNotice } from "../features/movement/GroundNotice.tsx";
-import { tokenAccess, type TokenAccess } from "../features/tokens/access.ts";
+import { ownsCharacter, tokenAccess, type TokenAccess } from "../features/tokens/access.ts";
 import { useAltImages } from "../features/tokens/AltImages.tsx";
 import { CompanionOwners, CompanionSection, MakeCompanion, followsPartyHp } from "../features/tokens/CompanionsSection.tsx";
 import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
@@ -130,7 +130,7 @@ function TokenDetails(props: PanelProps) {
     owner: access.owner,
     kind: token.kind,
     companion,
-    statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion, character: "ref" in token.actor }),
+    statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion, character: "ref" in token.actor, ownsCharacter: character ? ownsCharacter(you?.memberId, character) : undefined }),
     summary: summary !== null,
     actor: actor !== undefined,
     ownerRenames: !access.dm && access.canEditToken("name"),
