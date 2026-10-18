@@ -525,10 +525,9 @@ Tiers:
 - Edit several selected tokens at once.
   - Built in v1 wave 5. With two or more tokens selected, the action bar sets conditions on all of them (lit when all have one, half lit when some do), raises or lowers them 5 ft, and requests a roll. For the DM it also hides, locks, adds them to the fight or deletes them ("Delete 6 tokens?" on a second tap), and More sets their ring, size, layer, image, what players see of their HP and names, whether they stay visible under fog, and their owners.
   - Each change applies to all of them or none, and one undo takes it back. A player gets only what they may do to every selected token. One HP entry for several creatures is also one undo step now.
-
-**Later**
-
-- Triggers and traps that run when a token enters an area.
+- Triggers and traps that run when a token enters an area (moved up from Later on 2026-10-18 at the project owner's request, design in docs/design-v1-traps.md).
+  - A pressure plate, trip wire or trapped door that the DM builds, arms and keeps hidden. It goes off for the creatures it is set for (the party, others or anyone, on the floor or not) when they step onto it, cross it, open it, or start or end a turn on it. It can stop the creature, shut or lock doors, put out lights, show hidden creatures and stamps, and give players a line and a sound. Its save and damage open the group save, filled.
+  - Players find and disarm traps through the DM's roll requests. A found trap shows them its name and outline only. The SRD's example traps are presets.
 
 ## 14. Dice
 
