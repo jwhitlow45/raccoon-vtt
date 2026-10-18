@@ -1193,7 +1193,8 @@ function PartFields(props: { roll: PcRoll; part: PcDice; index: number; onChange
       {damage && part.optional ? (
         <Labeled label="Its name">{(id) => <Input id={id} type="text" value={part.name ?? ""} maxLength={30} placeholder="Sneak Attack" onChange={(e) => onChange({ ...part, name: e.target.value })} style={{ width: "100%" }} />}</Labeled>
       ) : null}
-      {cantrip ? <Checkbox label="Grows with level" help="Twice the dice from level 5, three times from 11 and four times from 17" checked={part.grows === true} onChange={(on) => flag("grows", on)} /> : null}
+      {/* A leveled spell saved with the mark before editedRoll dropped it shows the box too, so the mark can be seen and taken off. */}
+      {cantrip || part.grows === true ? <Checkbox label="Grows with level" help="Twice the dice from level 5, three times from 11 and four times from 17" checked={part.grows === true} onChange={(on) => flag("grows", on)} /> : null}
       {leveled && part.type !== undefined ? (
         <Labeled label="At higher levels">
           {(id) => (

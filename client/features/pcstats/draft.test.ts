@@ -144,6 +144,13 @@ describe("rolls", () => {
     assert.equal(editedRoll(roll(), { ...roll(), name: "x" }).ddb, undefined);
   });
 
+  test("only a cantrip's dice grow, so a new spell given a level or another kind drops the mark it started with (LP7-PC-1)", () => {
+    const fresh: PcRoll = { ...newRoll("spell", "s"), name: "Moonbeam", dice: [{ formula: "2d10", type: "radiant", grows: true }] };
+    assert.deepEqual(editedRoll(fresh, { ...fresh, level: 2 }).dice, [{ formula: "2d10", type: "radiant" }]);
+    assert.deepEqual(editedRoll(fresh, { ...fresh, kind: "other" }).dice, [{ formula: "2d10", type: "radiant" }]);
+    assert.deepEqual(editedRoll(fresh, { ...fresh, name: "Fire Bolt" }).dice, [{ formula: "2d10", type: "radiant", grows: true }], "a cantrip keeps it");
+  });
+
   test("a part says one thing: upcast on damage or healing, a rider on damage, its name on a rider", () => {
     assert.deepEqual(tidyPart({ formula: "1d8", upcast: "1d8", optional: true, name: "x" }), { formula: "1d8" });
     assert.deepEqual(tidyPart({ formula: "1d8", type: "healing", upcast: "1d8", optional: true, name: "x" }), { formula: "1d8", type: "healing", upcast: "1d8" });

@@ -183,10 +183,19 @@ export function newRoll(kind: PcRoll["kind"], id: string): PcRoll {
   return { id, name: "", kind, dice: [{ formula: "" }] };
 }
 
-/** A roll as edited here, which is the player's own from now on even if an import made it (section 6.1). */
+/**
+ * A roll as edited here, which is the player's own from now on even if an
+ * import made it (section 6.1). Only a cantrip's dice grow with level, and
+ * a new spell starts as one, so a roll that stops being a cantrip, as when
+ * its level is picked, drops the mark: its checkbox no longer shows, and a
+ * level 2 spell would otherwise roll its dice twice over from level 5.
+ */
 export function editedRoll(roll: PcRoll, next: PcRoll): PcRoll {
   const { ddb: _ddb, ...own } = next;
-  return roll.ddb ? own : next;
+  const out = roll.ddb ? own : next;
+  const cantrip = out.kind === "spell" && (out.level ?? 0) === 0;
+  if (cantrip || !out.dice.some((p) => p.grows)) return out;
+  return { ...out, dice: out.dice.map(({ grows: _grows, ...part }) => part) };
 }
 
 /** A part made to say one thing: `upcast` only on damage or healing, a rider only on damage, its name only on a rider. */
