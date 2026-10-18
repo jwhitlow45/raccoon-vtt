@@ -147,7 +147,7 @@ export function SceneList(props: { scenes: Scene[]; viewingId: string | null; pl
                 <ArrowButton label={`Move ${scene.name} down`} icon="arrowDown" disabled={i === group.scenes.length - 1} onClick={() => reorder(moveScene(groups, scene.id, 1))} />
               </>
             ) : (
-              <SceneMenuButton scene={scene} viewing={viewing} sceneCount={scenes.length} folders={folders} />
+              <SceneMenuButton scene={scene} viewing={viewing} scenes={scenes} folders={folders} />
             )}
           </div>
           {arranging ? null : (

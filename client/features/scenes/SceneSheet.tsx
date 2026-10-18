@@ -1,6 +1,7 @@
 import type { ReactNode, RefObject } from "react";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
+import { dangerLook } from "../../components/looks.ts";
 import { theme } from "../../lib/theme.ts";
 
 /**
@@ -41,13 +42,14 @@ export function SceneSheet(props: {
  * looks (components/Row.tsx), whose hint wraps rather than cuts off, since
  * it says what the choice will do ("Open this scene first").
  */
-export function SheetRow(props: { label: ReactNode; hint?: ReactNode; disabled?: boolean; onClick(): void }) {
+export function SheetRow(props: { label: ReactNode; hint?: ReactNode; disabled?: boolean; danger?: "rest" | "armed"; onClick(): void }) {
   const { disabled } = props;
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={props.onClick}
+      // Armed keeps the row's size, so the second tap lands where the first did.
       style={{
         display: "grid",
         alignContent: "center",
@@ -65,6 +67,7 @@ export function SheetRow(props: { label: ReactNode; hint?: ReactNode; disabled?:
         lineHeight: theme.leading.tight,
         textAlign: "left",
         cursor: disabled ? "default" : "pointer",
+        ...(props.danger && !disabled ? dangerLook(props.danger === "armed") : null),
       }}
     >
       {props.label}

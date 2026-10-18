@@ -12,6 +12,7 @@ import { useRoomScope } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomStore } from "../../state/view.ts";
 import { DUPLICATE_DEFAULTS, duplicateOp, fogHint, type DuplicateInclude } from "./duplicate.ts";
 import { cleanFolderName } from "./folders.ts";
+import { sceneAfterDelete } from "./afterDelete.ts";
 import { makeThumbnail, thumbsSlot } from "./thumbs.ts";
 import { CheckRow, SceneSheet, SheetRow } from "./SceneSheet.tsx";
 
@@ -22,23 +23,23 @@ type Step = "menu" | "duplicate" | "folder";
  * sheet stays open through its steps, so Back and Escape always close the
  * same thing.
  */
-export function SceneMenuButton(props: { scene: Scene; viewing: boolean; sceneCount: number; folders: readonly string[] }) {
+export function SceneMenuButton(props: { scene: Scene; viewing: boolean; scenes: readonly Scene[]; folders: readonly string[] }) {
   const { scene } = props;
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   return (
     <>
       <IconButton ref={button} icon="more" label={`More for ${scene.name || "Untitled"}`} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)} />
-      {open ? <SceneMenu scene={scene} viewing={props.viewing} sceneCount={props.sceneCount} folders={props.folders} opener={button} onClose={() => setOpen(false)} /> : null}
+      {open ? <SceneMenu scene={scene} viewing={props.viewing} scenes={props.scenes} folders={props.folders} opener={button} onClose={() => setOpen(false)} /> : null}
     </>
   );
 }
 
-function SceneMenu(props: { scene: Scene; viewing: boolean; sceneCount: number; folders: readonly string[]; opener: RefObject<HTMLButtonElement | null>; onClose(): void }) {
+function SceneMenu(props: { scene: Scene; viewing: boolean; scenes: readonly Scene[]; folders: readonly string[]; opener: RefObject<HTMLButtonElement | null>; onClose(): void }) {
   const { scene, onClose } = props;
   const [step, setStep] = useState<Step>("menu");
   const duplicate = useDuplicate(scene, onClose);
-  const full = props.sceneCount >= LIMITS.scenesPerRoom;
+  const full = props.scenes.length >= LIMITS.scenesPerRoom;
   const name = scene.name || "Untitled";
 
   if (step === "folder") {
@@ -100,6 +101,7 @@ function SceneMenu(props: { scene: Scene; viewing: boolean; sceneCount: number; 
         <SheetRow label="Duplicate…" hint="A copy next to this scene, with what you choose." onClick={() => setStep("duplicate")} />
         <SheetRow label="Move to folder…" hint={scene.folder === undefined ? "In no folder now." : `In ${scene.folder} now.`} onClick={() => setStep("folder")} />
         <UpdateThumbnail scene={scene} viewing={props.viewing} />
+        <DeleteScene scene={scene} viewing={props.viewing} scenes={props.scenes} onDone={onClose} />
       </div>
     </SceneSheet>
   );
@@ -269,5 +271,51 @@ function UpdateThumbnail(props: { scene: Scene; viewing: boolean }) {
       />
       <ErrorText>{status === "failed" ? "The thumbnail could not be updated. Check the connection and try again." : null}</ErrorText>
     </>
+  );
+}
+
+/**
+ * Delete with the app's two taps: the first arms the row where it stands, the
+ * second deletes. The row keeps its size armed, so the second tap lands on it.
+ * A tap anywhere else, or the 4 seconds ConfirmButton allows, disarms it.
+ */
+function DeleteScene(props: { scene: Scene; viewing: boolean; scenes: readonly Scene[]; onDone(): void }) {
+  const { scene } = props;
+  const actions = useRoomActions();
+  const [armed, setArmed] = useState(false);
+  const row = useRef<HTMLDivElement>(null);
+  const next = sceneAfterDelete(props.scenes, scene.id);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    const away = (e: Event) => {
+      if (!row.current?.contains(e.target as Node)) setArmed(false);
+    };
+    document.addEventListener("pointerdown", away, true);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("pointerdown", away, true);
+    };
+  }, [armed]);
+  const press = () => {
+    if (!next) return;
+    if (!armed) {
+      setArmed(true);
+      return;
+    }
+    actions.dispatch({ t: "scene.delete", sceneId: scene.id });
+    if (props.viewing) actions.switchScene(next.id);
+    props.onDone();
+  };
+  return (
+    <div ref={row} style={{ display: "grid" }}>
+      <SheetRow
+        label={armed ? "Tap again to delete" : "Delete"}
+        hint={next ? "Removes its tokens, drawings, build and fog too." : "The last scene cannot be deleted."}
+        danger={armed ? "armed" : "rest"}
+        disabled={!next}
+        onClick={press}
+      />
+    </div>
   );
 }

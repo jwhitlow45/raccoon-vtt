@@ -607,6 +607,108 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await shots.take(dm, "sa-a-4-starter-stamp-placed");
   });
 
+  /** A battle mat made from the Scenes tab, which the DM's view then switches to. */
+  async function makeMat(name: string): Promise<string> {
+    const known = new Set(Object.keys(dmSocket.state?.scenes ?? {}));
+    await openSideTab(dm, "Scenes");
+    await dm.getByRole("radio", { name: "Battle mat" }).click();
+    await dm.getByPlaceholder("Battle mat").fill(name);
+    await dm.getByRole("button", { name: "Create", exact: true }).click();
+    const made = await waitFor(`the scene ${name}`, () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s?.name === name && !known.has(s.id)));
+    await waitFor("the DM on it", () => dmSocket.you?.sceneId === made.id || null);
+    return made.id;
+  }
+
+  async function openMenu(name: string) {
+    await openSideTab(dm, "Scenes");
+    await dm.getByRole("button", { name: `More for ${name}`, exact: true }).click();
+    const menu = dm.getByRole("dialog", { name, exact: true });
+    await menu.waitFor();
+    return menu;
+  }
+
+  test("sd-a. Delete in the scene menu takes two taps, for a scene off screen and for the one on screen", async () => {
+    const off = await makeMat("Del off");
+    const keep = await makeMat("Del keep");
+
+    // Not the scene on screen: the first tap arms the row in place, the second deletes and closes the sheet.
+    const menu = await openMenu("Del off");
+    await shots.take(dm, "sd-a-menu-rest");
+    await menu.getByRole("button", { name: /^Delete/ }).click();
+    const armed = menu.getByRole("button", { name: /^Tap again to delete/ });
+    await armed.waitFor();
+    assert.ok(sceneOf(dmSocket.state, off), "one tap deleted the scene");
+    await shots.take(dm, "sd-a-menu-armed");
+    await armed.click();
+    await waitFor("the scene gone", () => (sceneOf(dmSocket.state, off) ? null : true));
+    await menu.waitFor({ state: "detached" });
+    assert.equal(dmSocket.you?.sceneId, keep, "deleting another scene moved the DM's view");
+  });
+
+  test("sd-b. Deleting the scene on screen switches the DM to another, and a tap elsewhere disarms the row", async () => {
+    const keep = Object.values(dmSocket.state?.scenes ?? {}).find((s) => s?.name === "Del keep")!.id;
+    const shown = await makeMat("Del shown");
+    // One tap, then a tap elsewhere in the sheet: the row is back at rest and the scene stays.
+    let menu = await openMenu("Del shown");
+    await menu.getByRole("button", { name: /^Delete/ }).click();
+    await menu.getByRole("button", { name: /^Tap again to delete/ }).waitFor();
+    await menu.getByRole("heading", { name: "Del shown" }).click();
+    await menu.getByRole("button", { name: /^Delete/ }).waitFor();
+    assert.equal(await menu.getByRole("button", { name: /^Tap again to delete/ }).count(), 0);
+    assert.ok(sceneOf(dmSocket.state, shown), "a tap elsewhere deleted the scene");
+    // The scene on screen: the DM lands on another scene.
+    await menu.getByRole("button", { name: /^Delete/ }).click();
+    await menu.getByRole("button", { name: /^Tap again to delete/ }).click();
+    await waitFor("the scene gone", () => (sceneOf(dmSocket.state, shown) ? null : true));
+    await waitFor("the DM on another scene", () => (dmSocket.you?.sceneId && dmSocket.you.sceneId !== shown ? true : null));
+    await menu.waitFor({ state: "detached" });
+    assert.ok(sceneOf(dmSocket.state, keep), "the other scene is still there");
+  });
+
+  test("sd-d. on a phone the armed row stays where it was, so the second tap lands on it", async () => {
+    await makeMat("Del phone");
+    const desktop = dm.viewportSize()!;
+    await dm.setViewportSize({ width: 390, height: 844 });
+    try {
+      // The resize closes the menu but leaves the Scenes sheet open.
+      await dm.getByRole("button", { name: "More for Del phone", exact: true }).click();
+      const menu = dm.getByRole("dialog", { name: "Del phone", exact: true });
+      const row = menu.getByRole("button", { name: /^Delete/ });
+      await row.waitFor();
+      const before = await row.boundingBox();
+      await shots.take(dm, "sd-d-phone-menu-rest");
+      await row.click();
+      await menu.getByRole("button", { name: /^Tap again to delete/ }).waitFor();
+      const after = await menu.getByRole("button", { name: /^Tap again to delete/ }).boundingBox();
+      assert.deepEqual(after, before, "arming moved or resized the row");
+      await shots.take(dm, "sd-d-phone-menu-armed");
+      await dm.keyboard.press("Escape");
+      await menu.waitFor({ state: "detached" });
+    } finally {
+      await dm.setViewportSize(desktop);
+    }
+  });
+
+  test("sd-c. the last scene's Delete row is disabled", async () => {
+    // Players' scene and every other scene go through the same menu, so the last one is left at the end.
+    for (let guard = 0; Object.keys(dmSocket.state?.scenes ?? {}).length > 1 && guard < 30; guard++) {
+      const count = Object.keys(dmSocket.state?.scenes ?? {}).length;
+      const target = Object.values(dmSocket.state?.scenes ?? {}).find((s) => s && s.id !== dmSocket.you?.sceneId)!;
+      const menu = await openMenu(target.name);
+      await menu.getByRole("button", { name: /^Delete/ }).click();
+      await menu.getByRole("button", { name: /^Tap again to delete/ }).click();
+      await waitFor("a scene gone", () => (Object.keys(dmSocket.state?.scenes ?? {}).length < count ? true : null));
+      await menu.waitFor({ state: "detached" });
+    }
+    const [last] = Object.values(dmSocket.state?.scenes ?? {});
+    const menu = await openMenu(last!.name);
+    const row = menu.getByRole("button", { name: /^Delete/ });
+    assert.equal(await row.isDisabled(), true);
+    await menu.getByText("The last scene cannot be deleted.").waitFor();
+    await shots.take(dm, "sd-c-last-scene");
+    await dm.keyboard.press("Escape");
+  });
+
   test("8. no page logged an error or a warning", () => {
     for (const c of [dmConsole, playerConsole]) {
       assert.deepEqual(c.errors, [], `${c.label} logged errors`);

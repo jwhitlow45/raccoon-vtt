@@ -24,6 +24,7 @@ import { BlockMovementSetting } from "../movement/SceneSetting.tsx";
 import { PhasesSection } from "../phases/PhasesSection.tsx";
 import { thisDevice } from "../uvtt/limits.ts";
 import { VisionSettings } from "../vision/VisionSettings.tsx";
+import { sceneAfterDelete } from "./afterDelete.ts";
 import { ColorInput, ConfirmButton, NumberInput, Select, Slider } from "./controls.tsx";
 import { fogsWithFirstMap, replaceMap, sameArt, viewFromCamera } from "./create.ts";
 import { useStartFraming } from "./FrameView.tsx";
@@ -130,7 +131,7 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close(): v
             title="Delete this scene and everything on it"
             disabled={others.length === 0}
             onConfirm={() => {
-              const next = others[0];
+              const next = sceneAfterDelete(others, scene.id);
               if (!next) return;
               actions.dispatch({ t: "scene.delete", sceneId: scene.id });
               actions.switchScene(next.id);
