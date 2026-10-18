@@ -4,7 +4,7 @@ import type { StoreApi } from "zustand/vanilla";
 import { dispatchGesture } from "../../state/actions.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { boxAtCell, canonicalToWorld, fitBounds, sameCalibration, type CalBox, type Calibration, type Point } from "./calibrate.ts";
-import { cameWithGrid, findFound, foundGrid, searchGrid, within, type FoundGrid, type SearchWorker, type Timers } from "./findGrid.ts";
+import { cameWithGrid, findFound, foundGrid, searchGrid, within, type FoundGrid, type GridSearch, type SearchWorker, type Timers } from "./findGrid.ts";
 import { endFinding, type Fallback, type FoundNote, type GridToolState } from "./store.ts";
 
 /**
@@ -14,7 +14,7 @@ import { endFinding, type Fallback, type FoundNote, type GridToolState } from ".
  * no grid is said. Import and Find the grid share it.
  */
 
-type GridScene = Pick<Scene, "id" | "bounds" | "gridFromFile"> & { map: SceneMap };
+export type GridScene = Pick<Scene, "id" | "bounds" | "gridFromFile"> & { map: SceneMap };
 type Gesture = Pick<RoomActions, "dispatch" | "newId">;
 
 /**
@@ -134,12 +134,7 @@ export const FIND_TIMEOUT_MS = 30_000;
 /**
  * Find the grid, on the scene's current map at any time: the phone-sized
  * copy first, which is at most the size the Worker decodes anyway. A
- * second press while one runs does nothing. Apply, a move of the box by
- * hand and the tool closing each end the search (store.ts `endFinding`).
- * An answer that still comes is dropped unless the scene shows the same
- * image with the same grid and size as when the search began, so work
- * done meanwhile, on this device or another, is never overwritten. On a
- * scene that came with its own grid, a find is only offered.
+ * second press while one runs does nothing. It lands as `landSearch` says.
  */
 export async function findOnScene(input: {
   actions: Gesture;
@@ -150,26 +145,61 @@ export async function findOnScene(input: {
   makeWorker?: () => SearchWorker;
   timers?: Timers;
 }): Promise<void> {
-  const { store } = input;
   const start = input.scene();
-  if (!start || store.getState().finding) return;
+  if (!start || input.store.getState().finding) return;
   const search = searchGrid({ urls: input.urls }, input.makeWorker);
-  const finding = { sceneId: input.sceneId, cancel: search.cancel };
+  await landSearch({ ...input, start, search, ms: FIND_TIMEOUT_MS });
+}
+
+/**
+ * A search the grid tool holds for a scene as its `finding`, and what it
+ * finds shown there: Find the grid's, and an import's search of the phone
+ * copy that outlived the import's wait. The options line says "Looking for
+ * a grid…" meanwhile. Apply, a move of the box by hand, the tool closing
+ * and leaving the scene each end it (store.ts `endFinding`, tool.tsx
+ * `deactivate`), and so does a newer search, which takes its place. An
+ * answer that still comes is dropped unless the scene shows the same
+ * image with the same grid and size as at `start`, so work done meanwhile,
+ * on this device or another, is never overwritten. On a scene that came
+ * with its own grid, a find is only offered.
+ */
+export async function landSearch(input: {
+  actions: Gesture;
+  store: StoreApi<GridToolState>;
+  sceneId: string;
+  /** The scene as the search began, or as the import made it. */
+  start: GridScene;
+  scene(): GridScene | null;
+  search: GridSearch;
+  /** How long it may still take, ms. */
+  ms: number;
+  timers?: Timers;
+  /** Fit the scene to a found grid. Find the grid goes by Resize scene, an import always fits, as on time. */
+  fit?: boolean;
+  /** An import's first guess, for Use default. */
+  fallback?: Calibration;
+  /** The scene came with its own grid, when its image before says so and this one cannot (findGrid.ts `replacementFound`). */
+  ownGrid?: boolean;
+}): Promise<void> {
+  const { store } = input;
+  store.getState().finding?.cancel();
+  const finding = { sceneId: input.sceneId, cancel: input.search.cancel };
   store.setState({ finding, found: null });
-  const answer = await within(search, FIND_TIMEOUT_MS, input.timers);
+  const answer = await within(input.search, input.ms, input.timers);
   if (store.getState().finding !== finding) return;
   store.setState({ finding: null });
   const scene = input.scene();
-  if (!scene || !unchangedSince(start, scene)) return;
+  if (!scene || !unchangedSince(input.start, scene)) return;
   const state = store.getState();
-  const ownGrid = cameWithGrid(scene);
+  const ownGrid = input.ownGrid ?? cameWithGrid(scene);
   showOutcome({
     actions: input.actions,
     store,
     scene,
     found: findFound(answer ? foundGrid(answer.result, answer, scene.map) : null, ownGrid),
-    fit: state.fitScene,
+    fit: input.fit ?? state.fitScene,
     at: middleOf(state.box, scene.map),
     ownGrid,
+    ...(input.fallback ? { fallback: input.fallback } : {}),
   });
 }

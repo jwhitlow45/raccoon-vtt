@@ -8,8 +8,8 @@ import { mapScene } from "../scenes/create.ts";
 import { importScene, placeMap } from "../uvtt/batch.ts";
 import type { AxisFit, GridDetection } from "./detect.ts";
 import { calibrationFromBox, nudgeBox, sameCalibration } from "./calibrate.ts";
-import { cameWithGrid, replacementFound, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
-import { applyGrid, boxAround, fallbackOps, findOnScene, gridOps, middleOf, showOutcome } from "./outcome.ts";
+import { cameWithGrid, IMPORT_WAIT_MS, importSearch, importSearchFrom, replacementFound, type ImportWait, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
+import { applyGrid, boxAround, fallbackOps, FIND_TIMEOUT_MS, findOnScene, gridOps, landSearch, middleOf, showOutcome } from "./outcome.ts";
 import { boxCalibration, endFinding, type GridToolState } from "./store.ts";
 import { rng } from "./synthetic.ts";
 
@@ -554,5 +554,247 @@ describe("where a scene came from", () => {
     const { sent, found } = await find(scene);
     assert.deepEqual(sent[0], { t: "scene.setGrid", sceneId: "made", cellPx: 70, originPx: { x: 20, y: 35 } });
     assert.equal(found?.outcome, "applied");
+  });
+});
+
+/** A header read the test lets finish when it chooses. */
+function heldSize() {
+  let answer!: (size: { width: number; height: number } | null) => void;
+  const read = new Promise<{ width: number; height: number } | null>((resolve) => (answer = resolve));
+  return { size: () => read, answer };
+}
+
+describe("an import's search, and the phone copy's that lands after the scene opens", () => {
+  test("a search of the copy that outlives the wait lands on the scene the import made, with Use default", async () => {
+    const live = liveRoom();
+    const timers = fakeTimers();
+    const worker = new CountingWorker();
+    const search = importSearch(new Blob(["x"]), "phone", { makeWorker: () => worker, timers, size: async () => null });
+    const waiting = search.afterUpload(["/m/mobile"], IMPORT_WAIT_MS);
+    await settled();
+    timers.fire();
+    const { answer, later } = await waiting;
+    assert.equal(answer, null);
+    assert.ok(later);
+    const guess = { cellPx: 47, originPx: { x: 0, y: 0 } };
+    const landing = landSearch({ actions: live.actions, store: live.store, sceneId: "s1", start: live.scene(), scene: live.scene, search: later, ms: FIND_TIMEOUT_MS, timers, fit: true, fallback: guess });
+    assert.equal(live.store.getState().finding?.sceneId, "s1", "Line up grid says it is looking");
+    worker.answer(SURE);
+    await landing;
+    assert.deepEqual(
+      live.sent.map((s) => s.op.t),
+      ["scene.setGrid", "scene.update"],
+    );
+    assert.ok(live.sent.every((s) => s.group !== undefined && s.group === live.sent[0]!.group), "one undo step");
+    const found = live.store.getState().found;
+    assert.equal(found?.outcome, "applied");
+    assert.deepEqual(found?.fallback, { ...guess, bounds: { w: 29, h: 21 } });
+  });
+
+  /**
+   * Random runs of an import's search on every device and file size, and
+   * of the landing of a phone copy's search that outlives the wait: the
+   * header read finishing, the upload answering, the Worker answering
+   * (sure, doubtful, no grid) or failing, a cancel (the page's before the
+   * wait ends, the tool closing after), the deadlines (the import's 2 s, the
+   * landing's 30 s), Apply, a drag, and the scene changed on another device,
+   * in any order. Invariants, after every event of every run:
+   * - A phone or an iPad never gives the Worker a file over the decode's
+   *   size or of no known size, and an import makes one Worker at most,
+   *   none after a cancel.
+   * - The wait ends with exactly the model's answer, once. It hands on a
+   *   running search only on the copy's path, at the deadline, with
+   *   nothing else having ended it.
+   * - `finding` is set exactly while a handed-on search runs. Such a search
+   *   lands only when it answers while it still runs and the scene is as
+   *   it was when it opened: a sure find as one undo step with the note
+   *   and Use default, a doubtful one offered, none said. After a close,
+   *   Apply, a drag, its deadline or a change elsewhere it changes nothing.
+   * - Nothing but Apply and such a landing sends an op.
+   * - Exactly the running search's Worker is alive, each Worker is ended
+   *   once by the run's end, and only a running wait or landing has a
+   *   timer.
+   */
+  test("random header reads, uploads, answers, cancels, deadlines, Applies, drags and changes elsewhere keep every invariant", async () => {
+    const next = rng(20261021);
+    const devices = ["computer", "phone", "iPad"] as const;
+    const sizes = [{ width: 3000, height: 2000 }, { width: 8000, height: 3000 }, null];
+    // Weighted so that most runs on the copy's path reach a landing, and then go on to what can befall it.
+    const kinds = [
+      ["header", 2],
+      ["upload", 2],
+      ["sure", 1],
+      ["doubtful", 0.5],
+      ["nothing", 0.5],
+      ["fail", 0.5],
+      ["cancel", 0.6],
+      ["deadline", 2.5],
+      ["apply", 0.8],
+      ["drag", 0.8],
+      ["elsewhere", 0.8],
+    ] as const;
+    // Once a landing runs, its 30 s deadline comes rarely, so its answers get their turn.
+    const pickKind = (landing: boolean) => {
+      const weight = (kind: string, w: number) => (landing && kind === "deadline" ? 0.4 : w);
+      let r = next() * kinds.reduce((sum, [kind, w]) => sum + weight(kind, w), 0);
+      for (const [kind, w] of kinds) if ((r -= weight(kind, w)) < 0) return kind;
+      return kinds[0][0];
+    };
+    const guess = { cellPx: 47, originPx: { x: 0, y: 0 } };
+    for (let run = 0; run < 800; run++) {
+      // Half the runs take the copy's path, the rest any device and size.
+      const copyRun = next() < 0.5;
+      const device = copyRun ? (next() < 0.5 ? "phone" : "iPad") : devices[Math.floor(next() * devices.length)]!;
+      const size = copyRun ? (next() < 0.5 ? sizes[1]! : null) : sizes[Math.floor(next() * sizes.length)]!;
+      const fromFile = importSearchFrom({ device, size }) === "file";
+      const live = liveRoom();
+      const workers: CountingWorker[] = [];
+      const timers = fakeTimers();
+      const header = heldSize();
+      const search = importSearch(new Blob(["x"]), device, { makeWorker: () => (workers.push(new CountingWorker()), workers.at(-1)!), timers, size: header.size });
+      const waits: ImportWait[] = [];
+      // The model.
+      const m = {
+        read: device === "computer",
+        uploaded: false,
+        ended: false,
+        worker: device === "computer",
+        settled: undefined as SearchDone | null | undefined,
+        wait: undefined as { answer: SearchDone | null; handed: boolean } | undefined,
+        landing: null as { stale: boolean; over: boolean } | null,
+      };
+      const decide = () => {
+        if (!m.uploaded || m.wait) return;
+        if (m.ended) m.wait = { answer: null, handed: false };
+        else if (m.read && m.settled !== undefined) m.wait = { answer: m.settled, handed: false };
+      };
+      const events: string[] = [];
+      for (let step = 0, steps = 1 + Math.floor(next() * 14); step < steps; step++) {
+        const kind = pickKind(m.landing !== null && !m.landing.over);
+        events.push(kind);
+        const label = `run ${run} (${device}, ${size ? `${size.width} x ${size.height}` : "no size"}): ${events.join(", ")}`;
+        const sentBefore = live.sent.length;
+        const before = live.store.getState();
+        let lands: "applied" | "offered" | "none" | null = null;
+        let applied = false;
+        const landingRuns = m.landing !== null && !m.landing.over;
+        if (kind === "header") {
+          header.answer(size);
+          if (!m.read && !m.ended) m.worker ||= fromFile || m.uploaded;
+          m.read = true;
+        } else if (kind === "upload") {
+          if (!m.uploaded) {
+            void search.afterUpload(["/m/mobile"], IMPORT_WAIT_MS).then((w) => {
+              waits.push(w);
+              // What the page does with a search handed on: Line up grid takes it (useFindGrid.ts `useLandLater`).
+              if (w.later) void landSearch({ actions: live.actions, store: live.store, sceneId: "s1", start: live.scene(), scene: live.scene, search: w.later, ms: FIND_TIMEOUT_MS, timers, fit: true, fallback: guess });
+            });
+            if (m.read && !m.ended && !fromFile) m.worker = true;
+          }
+          m.uploaded = true;
+        } else if (kind === "sure" || kind === "doubtful" || kind === "nothing" || kind === "fail") {
+          const w = workers.at(-1);
+          if (kind === "fail") w?.fail();
+          else w?.answer(kind === "sure" ? SURE : kind === "doubtful" ? DOUBTFUL : NOTHING);
+          const value = kind === "sure" ? SURE : kind === "doubtful" ? DOUBTFUL : kind === "nothing" ? NOTHING : null;
+          if (m.worker && m.settled === undefined && !m.ended && !(m.landing?.over ?? false)) {
+            m.settled = value as SearchDone | null;
+            if (landingRuns) {
+              if (!m.landing!.stale) lands = kind === "sure" ? "applied" : kind === "doubtful" ? "offered" : "none";
+              m.landing!.over = true;
+            }
+          }
+        } else if (kind === "cancel") {
+          if (landingRuns) {
+            // The tool closes.
+            const { finding } = live.store.getState();
+            finding?.cancel();
+            live.store.setState({ finding: null });
+            m.landing!.over = true;
+          } else if (!m.wait) {
+            // The page cancels the upload.
+            search.cancel();
+            m.ended = true;
+          }
+        } else if (kind === "deadline") {
+          if (timers.pending() > 0) {
+            timers.fire();
+            if (landingRuns) {
+              if (!m.landing!.stale) lands = "none";
+              m.landing!.over = true;
+            } else if (m.uploaded && !m.wait) {
+              if (m.worker && !fromFile && m.settled === undefined && !m.ended) {
+                m.wait = { answer: null, handed: true };
+                m.landing = { stale: false, over: false };
+              } else m.ended = true;
+            }
+          }
+        } else if (kind === "apply") {
+          const cal = { cellPx: 80 + Math.floor(next() * 4), originPx: { x: 0, y: 0 } };
+          const change = !sameCalibration(cal, live.scene().map);
+          applyGrid({ actions: live.actions, store: live.store, sceneId: "s1", cal: change ? cal : null, bounds: null });
+          applied = change;
+          if (landingRuns) m.landing!.over = true;
+        } else if (kind === "drag") {
+          endFinding(live.store, "s1");
+          live.store.setState({ box: { x: Math.floor(next() * 500), y: 10, size: 240 } });
+          if (landingRuns) m.landing!.over = true;
+        } else {
+          // Each change moves on from the last, so the scene never comes back to how a landing found it.
+          const s = live.scene();
+          const which = Math.floor(next() * 3);
+          live.elsewhere(
+            which === 0
+              ? { ...s, map: { ...s.map, cellPx: s.map.cellPx + 3 } }
+              : which === 1
+                ? { ...s, bounds: { w: s.bounds.w + 1, h: s.bounds.h } }
+                : { ...s, map: { ...s.map, assetId: `${s.map.assetId}+` } },
+          );
+          if (landingRuns) m.landing!.stale = true;
+        }
+        decide();
+        await settled();
+
+        const after = live.store.getState();
+        const runs = m.landing !== null && !m.landing.over;
+        assert.equal(workers.length, m.worker ? 1 : 0, `${label}: the Workers made`);
+        for (const w of workers) for (const posted of w.posted) assert.equal("file" in posted, fromFile, `${label}: what the Worker was given`);
+        assert.deepEqual(
+          waits.map((w) => ({ answer: w.answer, handed: w.later !== null })),
+          m.wait ? [m.wait] : [],
+          `${label}: how the wait ended`,
+        );
+        assert.equal(after.finding !== null, runs, `${label}: finding is set exactly while a handed-on search runs`);
+        const alive = m.worker && m.settled === undefined && !m.ended && !(m.landing?.over ?? false);
+        assert.equal(workers.filter((w) => w.terminated === 0).length, alive ? 1 : 0, `${label}: only a running search's Worker is alive`);
+        assert.ok(
+          workers.every((w) => w.terminated <= 1),
+          `${label}: no Worker is ended twice`,
+        );
+        assert.equal(timers.pending(), (m.uploaded && !m.wait) || runs ? 1 : 0, `${label}: only a running wait or landing has a timer`);
+        const sent = live.sent.slice(sentBefore);
+        if (lands) {
+          assert.equal(after.found?.outcome, lands, label);
+          if (lands === "applied") {
+            assert.ok(sent.length <= 2 && sent.every((s) => s.group !== undefined && s.group === sent[0]!.group), `${label}: one undo step`);
+            assert.ok(sameCalibration(live.scene().map, { cellPx: 70, originPx: { x: 20, y: 35 } }), `${label}: the found grid is on`);
+            assert.deepEqual(after.found?.fallback && { cellPx: after.found.fallback.cellPx, originPx: after.found.fallback.originPx }, guess, `${label}: Use default`);
+          } else assert.equal(sent.length, 0, label);
+        } else {
+          assert.equal(sent.length, applied ? 1 : 0, `${label}: only Apply sent anything`);
+          // A landing that begins clears the last note. Nothing else touches it.
+          if (!(m.wait?.handed && waits.length === 1 && before.finding === null && after.finding !== null)) assert.equal(after.found, before.found, `${label}: the note is the one before`);
+          if (kind !== "drag") assert.equal(after.box, before.box, `${label}: the box is the one before`);
+        }
+      }
+      // The page and the tool end whatever is left, as an unmount or a close does.
+      if (!m.wait) search.cancel();
+      endFinding(live.store, "s1");
+      header.answer(size);
+      await settled();
+      const label = `run ${run}: ${events.join(", ")}`;
+      assert.equal(timers.pending(), 0, `${label}: no timer left`);
+      for (const w of workers) assert.equal(w.terminated, 1, `${label}: the Worker ended once`);
+    }
   });
 });

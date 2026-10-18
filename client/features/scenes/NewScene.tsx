@@ -8,9 +8,10 @@ import { api, type AssetRow } from "../../lib/api.ts";
 import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
-import { copyUrls, importFound, importSearch, IMPORT_WAIT_MS, nameGivesSize, searchOnImport, type ImportSearch, type SearchDone } from "../grid/findGrid.ts";
+import { copyUrls, importFound, importSearch, IMPORT_WAIT_MS, nameGivesSize, searchOnImport, type ImportSearch, type ImportWait } from "../grid/findGrid.ts";
 import { showOutcome } from "../grid/outcome.ts";
 import { useGridStore } from "../grid/store.ts";
+import { useLandLater } from "../grid/useFindGrid.ts";
 import { thisDevice } from "../uvtt/limits.ts";
 import { ColorInput, NumberInput } from "./controls.tsx";
 import { builderScene, MAT_BACKGROUND, mapScene, matScene, nameFromFile, type MapAsset } from "./create.ts";
@@ -33,6 +34,8 @@ const MAX_SCENES = 50;
  * the server's phone-sized copy once the upload answers (findGrid.ts
  * `importSearchFrom`). A grid found with high confidence goes on the
  * scene as one undo step after it is made, and Line up grid opens on it.
+ * A search of the copy still running when the wait ends goes on in Line
+ * up grid, as Find the grid's does.
  *
  * The kind is a choice of native radios, and a tap on the chosen radio does
  * nothing, so the form folds with its own Cancel. During an upload that
@@ -54,6 +57,7 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
   const searchRef = useRef<{ file: File; search: ImportSearch } | null>(null);
   const gridStore = useGridStore();
   const assets = useAssets();
+  const landLater = useLandLater();
   const stopSearch = () => {
     searchRef.current?.search.cancel();
     searchRef.current = null;
@@ -119,18 +123,22 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
     open(id, "build");
   };
 
-  const createFromAsset = (asset: MapAsset, fileName: string, answer: SearchDone | null = null) => {
+  const createFromAsset = (asset: MapAsset, fileName: string, wait: ImportWait = { answer: null, later: null }) => {
     const id = actions.newId();
     const { scene, hinted } = mapScene({ id, name: name.trim() || nameFromFile(fileName), asset });
     actions.dispatch({ t: "scene.create", scene });
     // The scene is made with the guess first, so undo takes a found grid
     // back to it in one step, and Use default puts it back.
     const map = scene.map!;
-    const found = importFound(answer, hinted, map);
+    const fallback = { cellPx: map.cellPx, originPx: map.originPx };
+    const found = importFound(wait.answer, hinted, map);
     if (found) {
       const at = { x: map.widthPx / 2, y: map.heightPx / 2 };
-      showOutcome({ actions, store: gridStore, scene: { id, bounds: scene.bounds, map }, found, fit: true, at, fallback: { cellPx: map.cellPx, originPx: map.originPx } });
-    }
+      showOutcome({ actions, store: gridStore, scene: { id, bounds: scene.bounds, map }, found, fit: true, at, fallback });
+    } else if (wait.later && !hinted) {
+      // A phone's search of the copy that outlived the wait goes on, and Line up grid shows it.
+      landLater({ sceneId: id, start: { id, bounds: scene.bounds, map }, search: wait.later, fallback });
+    } else wait.later?.cancel();
     // A scale from the file name is usually right. A guess never is.
     open(id, hinted ? null : "grid");
   };
@@ -155,17 +163,20 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
       // The name's size wins. Otherwise the search started at the pick
       // gets a short wait, or one starts now: for a name whose counts the
       // server refused, or an upload tried again after a cancel.
-      let answer: SearchDone | null = null;
+      let wait: ImportWait | undefined;
       if (asset.cellPx !== undefined) stopSearch();
       else {
         if (searchRef.current?.file !== file) searchRef.current = { file, search: importSearch(file, thisDevice()) };
         setStatus({ busy: true, waiting: false, finding: true, error: null });
-        answer = await searchRef.current.search.afterUpload(copyUrls(thisDevice(), (variant) => assets.url(asset.id, variant)), IMPORT_WAIT_MS);
-        if (abort.signal.aborted) return;
+        wait = await searchRef.current.search.afterUpload(copyUrls(thisDevice(), (variant) => assets.url(asset.id, variant)), IMPORT_WAIT_MS);
+        if (abort.signal.aborted) {
+          wait.later?.cancel();
+          return;
+        }
         searchRef.current = null;
       }
       setStatus({ busy: false, waiting: false, error: null });
-      createFromAsset(asset, file.name, answer);
+      createFromAsset(asset, file.name, wait);
     } catch (err) {
       if (abort.signal.aborted) return;
       setStatus({ busy: false, waiting: false, error: uploadErrorText(err) });

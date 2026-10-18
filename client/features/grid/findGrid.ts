@@ -244,10 +244,22 @@ export async function headerSize(file: Blob): Promise<{ width: number; height: n
   }
 }
 
+/**
+ * What an import's wait after its upload ends with: the answer, or, when
+ * the wait ran out on the copy's path, the search still running, which the
+ * page hands to Line up grid to land later (outcome.ts `landSearch`).
+ */
+export type ImportWait = { answer: SearchDone | null; later: GridSearch | null };
+
 export type ImportSearch = {
-  /** The answer, once the upload has answered with the map's addresses, within `ms` of the call or null. A search of the copy starts here. */
-  afterUpload(urls: string[], ms: number): Promise<SearchDone | null>;
-  /** Ends it, on either path, with any Worker it started. A later `afterUpload` answers null. */
+  /**
+   * The answer, once the upload has answered with the map's addresses,
+   * within `ms` of the call. A search of the copy starts here, and one that
+   * has not answered by then comes back as `later`, still running. On the
+   * file's path the deadline ends the search, as it always did.
+   */
+  afterUpload(urls: string[], ms: number): Promise<ImportWait>;
+  /** Ends it, on either path, with any Worker it started. A later `afterUpload` answers with nothing. */
   cancel(): void;
 };
 
@@ -256,13 +268,18 @@ export type ImportSearch = {
  * picks. A computer's starts on the file at once, as it always did.
  * Elsewhere the header is read first, then the file is searched or the
  * copy waits for the upload. The wait after the upload holds either way.
+ * The copy's search on a phone takes longer than the wait, downloading
+ * and decoding a 4096 px image, so instead of ending there it goes on
+ * after the scene opens.
  */
 export function importSearch(
   file: Blob,
   device: Device,
   deps: { makeWorker?: () => SearchWorker; timers?: Timers; size?: (file: Blob) => Promise<{ width: number; height: number } | null> } = {},
 ): ImportSearch {
+  const timers = deps.timers ?? realTimers;
   let cancelled = false;
+  let fromCopy = false;
   let search: GridSearch | null = null;
   const start = (request: SearchRequest) => (search = searchGrid(request, deps.makeWorker));
   if (device === "computer") start({ file });
@@ -282,15 +299,40 @@ export function importSearch(
     search?.cancel();
     stop();
   };
+  const nothing: ImportWait = { answer: null, later: null };
   return {
     afterUpload(urls, ms) {
-      if (cancelled) return Promise.resolve(null);
+      if (cancelled) return Promise.resolve(nothing);
       const found = path.then((from): Promise<SearchDone | null> | null => {
         if (cancelled) return null;
-        if (from === "copy" && !search) start({ urls });
+        if (from === "copy" && !search) {
+          fromCopy = true;
+          start({ urls });
+        }
         return search?.result ?? null;
       });
-      return within({ result: Promise.race([stopped, found]), cancel }, ms, deps.timers);
+      return new Promise<ImportWait>((resolve) => {
+        let done = false;
+        const handle = timers.set(() => {
+          if (done) return;
+          done = true;
+          if (fromCopy && search && !cancelled) {
+            // The landing owns it from here: this import's cancel no longer reaches it.
+            const later = search;
+            search = null;
+            resolve({ answer: null, later });
+          } else {
+            cancel();
+            resolve(nothing);
+          }
+        }, ms);
+        void Promise.race([stopped, found]).then((answer) => {
+          if (done) return;
+          done = true;
+          timers.clear(handle);
+          resolve({ answer, later: null });
+        });
+      });
     },
     cancel,
   };

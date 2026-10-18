@@ -285,7 +285,7 @@ describe("where an import searches a picked map", () => {
     assert.deepEqual(worker.posted, [{ file }]);
     const answer = done(detection(50, { x: 0, y: 0 }, 0.9), 10, 10);
     worker.answer(answer);
-    assert.equal(await search.afterUpload(["/m"], 2000), answer);
+    assert.deepEqual(await search.afterUpload(["/m"], 2000), { answer, later: null });
   });
 
   test("a phone with a small file searches the file once its header is read", async () => {
@@ -299,7 +299,7 @@ describe("where an import searches a picked map", () => {
     assert.deepEqual(workers[0]?.posted, [{ file }]);
     const answer = done(detection(50, { x: 0, y: 0 }, 0.9), 10, 10);
     workers[0]!.answer(answer);
-    assert.equal(await search.afterUpload(["/m/mobile", "/m/full"], 2000), answer);
+    assert.deepEqual(await search.afterUpload(["/m/mobile", "/m/full"], 2000), { answer, later: null });
     assert.equal(workers.length, 1);
   });
 
@@ -310,27 +310,50 @@ describe("where an import searches a picked map", () => {
       const search = importSearch(new Blob(["x"]), "phone", { makeWorker: () => (workers.push(new FakeWorker()), workers.at(-1)!), timers, size: async () => size });
       await settled();
       assert.equal(workers.length, 0, "no Worker while it uploads");
-      const result = search.afterUpload(["/m/mobile", "/m/full"], 2000);
+      const result = search.afterUpload(["/m/mobile"], 2000);
       await settled();
-      assert.deepEqual(workers[0]?.posted, [{ urls: ["/m/mobile", "/m/full"] }], "the copy, phone-sized first");
+      assert.deepEqual(workers[0]?.posted, [{ urls: ["/m/mobile"] }], "the copy");
       const answer = done(detection(50, { x: 0, y: 0 }, 0.9), 10, 10);
       workers[0]!.answer(answer);
-      assert.equal(await result, answer);
+      assert.deepEqual(await result, { answer, later: null });
       assert.equal(timers.pending(), 0);
     }
   });
 
-  test("the scene waits 2 s after the upload for the copy's answer, then goes on without one", async () => {
+  test("the scene waits 2 s after the upload for the copy's answer, then opens with the search still running", async () => {
     const workers: FakeWorker[] = [];
     const timers = fakeTimers();
     const search = importSearch(new Blob(["x"]), "iPad", { makeWorker: () => (workers.push(new FakeWorker()), workers.at(-1)!), timers, size: async () => null });
     const result = search.afterUpload(["/m"], 2000);
     await settled();
     timers.fire();
-    assert.equal(await result, null);
-    assert.equal(workers[0]?.terminated, 1, "the search ends with the wait");
-    workers[0]!.answer(done(detection(50, { x: 0, y: 0 }, 0.9), 10, 10));
+    const wait = await result;
+    assert.equal(wait.answer, null);
+    assert.ok(wait.later, "the copy's search is handed on");
+    assert.equal(workers[0]?.terminated, 0, "and still runs");
+    search.cancel();
+    assert.equal(workers[0]?.terminated, 0, "the import's own cancel no longer reaches it");
+    const answer = done(detection(50, { x: 0, y: 0 }, 0.9), 10, 10);
+    workers[0]!.answer(answer);
+    assert.equal(await wait.later.result, answer);
     assert.equal(timers.pending(), 0);
+  });
+
+  test("on the file's path the 2 s wait ends the search, as it always did", async () => {
+    for (const [device, size] of [
+      ["computer", null],
+      ["phone", { width: 3000, height: 2000 }],
+    ] as const) {
+      const workers: FakeWorker[] = [];
+      const timers = fakeTimers();
+      const search = importSearch(new Blob(["x"]), device, { makeWorker: () => (workers.push(new FakeWorker()), workers.at(-1)!), timers, size: async () => size });
+      await settled();
+      const result = search.afterUpload(["/m"], 2000);
+      await settled();
+      timers.fire();
+      assert.deepEqual(await result, { answer: null, later: null }, device);
+      assert.equal(workers[0]?.terminated, 1, `${device}: the search ends with the wait`);
+    }
   });
 
   test("a cancel before the header is read starts nothing, ever", async () => {
@@ -340,82 +363,7 @@ describe("where an import searches a picked map", () => {
     search.cancel();
     header.answer({ width: 100, height: 100 });
     await settled();
-    assert.equal(await search.afterUpload(["/m"], 2000), null);
+    assert.deepEqual(await search.afterUpload(["/m"], 2000), { answer: null, later: null });
     assert.equal(made, 0);
-  });
-
-  /**
-   * Random runs of an import's search on every device and file size: the
-   * header read finishing, the upload answering, the Worker answering or
-   * failing, the page cancelling, the wait's deadline, in any order.
-   * Invariants, every run:
-   * - A phone or an iPad never decodes a file over the decode's size or of
-   *   no known size: no Worker is ever given it.
-   * - An import makes one Worker at most, and none after a cancel.
-   * - The answer is the Worker's only when it came before any cancel,
-   *   failure or deadline, and after the upload answered on the copy's
-   *   path. Otherwise it is null. It settles once.
-   * - A Worker that was made is ended exactly once by the run's end, and
-   *   no deadline timer is left.
-   */
-  test("random header reads, uploads, answers, failures, cancels and deadlines keep every invariant", async () => {
-    const next = rng(20261020);
-    const devices = ["computer", "phone", "iPad"] as const;
-    const sizes = [{ width: 3000, height: 2000 }, { width: 8000, height: 3000 }, null];
-    const kinds = ["header", "upload", "answer", "error", "cancel", "deadline"] as const;
-    for (let run = 0; run < 500; run++) {
-      const device = devices[Math.floor(next() * devices.length)]!;
-      const size = sizes[Math.floor(next() * sizes.length)]!;
-      const fromFile = importSearchFrom({ device, size }) === "file";
-      const workers: FakeWorker[] = [];
-      const timers = fakeTimers();
-      const header = heldSize();
-      const search = importSearch(new Blob(["x"]), device, { makeWorker: () => (workers.push(new FakeWorker()), workers.at(-1)!), timers, size: header.size });
-      const results: unknown[] = [];
-      const answer = done(detection(40 + run, { x: 1, y: 2 }, 0.9), 100, 100);
-      // The model: what has happened, and what the import's answer must be.
-      const m = { read: device === "computer", uploaded: false, ended: false, worker: device === "computer", settled: undefined as SearchDone | null | undefined, expected: undefined as SearchDone | null | undefined };
-      const decide = () => {
-        if (m.uploaded && m.expected === undefined && m.ended) m.expected = null;
-        else if (m.uploaded && m.expected === undefined && m.read && m.settled !== undefined) m.expected = m.settled;
-      };
-      const events: string[] = [];
-      for (let step = 0, steps = 1 + Math.floor(next() * 8); step < steps; step++) {
-        const kind = kinds[Math.floor(next() * kinds.length)]!;
-        events.push(kind);
-        if (kind === "header") {
-          header.answer(size);
-          if (!m.read && !m.ended) m.worker ||= fromFile || m.uploaded;
-          m.read = true;
-        } else if (kind === "upload") {
-          if (!m.uploaded) void search.afterUpload(["/m"], 2000).then((r) => results.push(r));
-          if (!m.uploaded && m.read && !m.ended && !fromFile) m.worker = true;
-          m.uploaded = true;
-        } else if (kind === "answer" || kind === "error") {
-          if (kind === "answer") workers.at(-1)?.answer(answer);
-          else workers.at(-1)?.fail();
-          if (m.worker && m.settled === undefined && !m.ended) m.settled = kind === "answer" ? answer : null;
-        } else if (kind === "cancel") {
-          search.cancel();
-          m.ended = true;
-        } else if (timers.pending() > 0) {
-          timers.fire();
-          m.ended = true;
-        }
-        decide();
-        await settled();
-        const label = `run ${run} (${device}, ${size ? `${size.width} x ${size.height}` : "no size"}): ${events.join(", ")}`;
-        assert.equal(workers.length, m.worker ? 1 : 0, `${label}: the Workers made`);
-        for (const w of workers) for (const posted of w.posted) assert.equal("file" in posted, fromFile, `${label}: what the Worker was given`);
-        assert.deepEqual(results, m.expected === undefined ? [] : [m.expected], `${label}: the answer`);
-      }
-      // The page ends whatever is left, as an unmount or a new pick does.
-      search.cancel();
-      header.answer(size);
-      await settled();
-      const label = `run ${run}: ${events.join(", ")}`;
-      assert.equal(timers.pending(), 0, `${label}: no timer left`);
-      for (const w of workers) assert.equal(w.terminated, 1, `${label}: the Worker ended once`);
-    }
   });
 });
