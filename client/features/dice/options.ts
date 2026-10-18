@@ -550,6 +550,19 @@ export function riderText(part: DamagePart): string {
   return short.charAt(0).toUpperCase() + short.slice(1);
 }
 
+/**
+ * A rider toggle's name: the words it shows, so a voice user who says them
+ * finds it (WCAG 2.5.3), then the dice it adds. A clause cut short on the
+ * toggle is read whole: "When the target is in dim light or darkness: add
+ * 1d6 to the next damage".
+ */
+export function riderToggleName(part: DamagePart): string {
+  const shown = riderText(part);
+  if (!part.name) return `${shown}: add it to the next damage`;
+  const words = shown.endsWith("…") ? part.name.charAt(0).toUpperCase() + part.name.slice(1) : shown;
+  return `${words}: add ${part.formula} to the next damage`;
+}
+
 /** A rider's name, or a block's clause cut short: "Divine Smite", "with Advantage". */
 function shortRider(name: string): string {
   if (/^if the attack roll (had|has) advantage$/i.test(name)) return "with Advantage";

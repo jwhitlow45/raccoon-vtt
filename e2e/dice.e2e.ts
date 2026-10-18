@@ -621,7 +621,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       // Longsword has a Divine Smite of its own, so the chips are found in this weapon's row.
       const row = namedRow(rolls.getByRole("button", { name, exact: true }));
       for (const rider of ["Flame Tongue", "Divine Smite", "Hunter's Mark"]) {
-        const chip = row.getByRole("button", { name: new RegExp(`^Add \\d+d\\d+ ${rider} to the next damage`) });
+        const chip = row.getByRole("button", { name: new RegExp(`^${rider}: add \\d+d\\d+ to the next damage`) });
         await chip.scrollIntoViewIfNeeded();
         await chip.tap();
       }

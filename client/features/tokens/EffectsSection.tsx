@@ -158,12 +158,8 @@ function CountSteps(props: { effect: Effect; target: ActorTarget }) {
   const name = effectChip({ ...props.effect, level: undefined }).label;
   return (
     <span style={{ flex: "none", display: "flex", gap: theme.space(1) }}>
-      <SmallButton label={`${name}: one less`} disabled={count <= min} onClick={() => set(count - 1)}>
-        <Icon name="minus" />
-      </SmallButton>
-      <SmallButton label={`${name}: one more`} disabled={count >= max} onClick={() => set(count + 1)}>
-        <Icon name="plus" />
-      </SmallButton>
+      <SmallButton icon="minus" label={`${name}: one less`} disabled={count <= min} onClick={() => set(count - 1)} />
+      <SmallButton icon="plus" label={`${name}: one more`} disabled={count >= max} onClick={() => set(count + 1)} />
     </span>
   );
 }

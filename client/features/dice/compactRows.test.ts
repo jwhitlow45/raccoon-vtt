@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { presetTag, riderText, rowSummary } from "./options.ts";
+import { presetTag, riderToggleName, riderText, rowSummary } from "./options.ts";
 
 describe("the compact rows' words (docs/design-v1-dice-ui.md 4)", () => {
   test("a preset's tag is its few characters, the effects' names left to the group's label", () => {
@@ -26,5 +26,15 @@ describe("the compact rows' words (docs/design-v1-dice-ui.md 4)", () => {
     assert.equal(riderText({ formula: "1d4", optional: true, name: "if the attack roll had Advantage" }), "With Advantage");
     assert.equal(riderText({ formula: "1d6", optional: true, name: "when the target is in dim light or darkness" }), "When the target is in…");
     assert.equal(riderText({ formula: "1d6", optional: true }), "+1d6");
+  });
+
+  test("a rider toggle's name starts with the words it shows, a clause cut short on it read whole", () => {
+    assert.equal(riderToggleName({ formula: "2d8", type: "radiant", optional: true, name: "Divine Smite" }), "Divine Smite: add 2d8 to the next damage");
+    assert.equal(riderToggleName({ formula: "1d4", optional: true, name: "if the attack roll had Advantage" }), "With Advantage: add 1d4 to the next damage");
+    assert.equal(riderToggleName({ formula: "1d6", optional: true, name: "when the target is in dim light or darkness" }), "When the target is in dim light or darkness: add 1d6 to the next damage");
+    assert.equal(riderToggleName({ formula: "1d6", optional: true }), "+1d6: add it to the next damage");
+    for (const part of [{ formula: "1d6", optional: true, name: "when the target is in dim light or darkness" }, { formula: "1d4", optional: true, name: "if the attack roll had Advantage" }] as const) {
+      assert.ok(riderToggleName(part).startsWith(riderText(part).replace(/…$/, "")), part.name);
+    }
   });
 });

@@ -40,6 +40,7 @@ import {
   presetLine,
   presetTag,
   readUsed,
+  riderToggleName,
   riderText,
   routedTest,
   rowSummary,
@@ -674,7 +675,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
         ) : null}
         {named.damage.map((part, i) =>
           part.optional ? (
-            <Chip key={i} wrap pressed={on.has(i)} onClick={() => toggleRider(i)} aria-label={`Add ${part.formula}${part.name ? ` ${part.name}` : ""} to the next damage`}>
+            <Chip key={i} wrap pressed={on.has(i)} onClick={() => toggleRider(i)} aria-label={riderToggleName(part)}>
               {cutLabel(riderText(part))}
             </Chip>
           ) : null,
@@ -711,15 +712,11 @@ function SlotStepper(props: { name: string; value: number; min: number; onChange
   const set = (n: number) => props.onChange(Math.max(props.min, Math.min(9, n)));
   return (
     <span role="group" aria-label={`Slot level for ${props.name}`} style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1) }}>
-      <SmallButton label={`Slot level for ${props.name}, lower`} disabled={props.value <= props.min} onClick={() => set(props.value - 1)}>
-        −
-      </SmallButton>
+      <SmallButton icon="minus" label={`Slot level for ${props.name}, lower`} disabled={props.value <= props.min} onClick={() => set(props.value - 1)} />
       <span aria-live="polite" style={{ minWidth: 48, textAlign: "center", fontSize: theme.font.body14, fontWeight: theme.weight.strong, whiteSpace: "nowrap" }}>
         Level {props.value}
       </span>
-      <SmallButton label={`Slot level for ${props.name}, higher`} disabled={props.value >= 9} onClick={() => set(props.value + 1)}>
-        +
-      </SmallButton>
+      <SmallButton icon="plus" label={`Slot level for ${props.name}, higher`} disabled={props.value >= 9} onClick={() => set(props.value + 1)} />
     </span>
   );
 }

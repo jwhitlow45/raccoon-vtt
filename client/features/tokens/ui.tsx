@@ -261,7 +261,9 @@ export function SmallButton(props: {
   ref?: Ref<HTMLButtonElement>;
   /** Optional for a submit button, whose form handles the press. */
   onClick?(): void;
-  children: ReactNode;
+  /** None for an icon alone, whose `label` is its name and its tooltip. */
+  children?: ReactNode;
+  icon?: IconName;
   label?: string;
   tone?: "default" | "primary" | "danger";
   /** A `danger` button waiting for its second tap (components/Button.tsx). */
@@ -283,6 +285,8 @@ export function SmallButton(props: {
       onClick={onClick ? () => onClick() : undefined}
       aria-label={props.label}
       title={props.label}
+      icon={props.icon}
+      iconOnly={props.icon && props.children === undefined ? "always" : undefined}
       pressed={props.pressed}
       armed={props.armed}
       disabled={props.disabled}
