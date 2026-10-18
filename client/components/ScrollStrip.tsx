@@ -60,15 +60,24 @@ export function ScrollStrip(props: {
     return () => observer.disconnect();
   }, [measure, props.children]);
 
-  // Clear of the fade on either side, so the button reads fully.
+  /*
+   * Clear of the fade on either side, so the button reads fully. Measured
+   * from the boxes as drawn, and the scroll rounded outward: offsetLeft,
+   * offsetWidth and clientWidth are whole pixels, and with a font whose
+   * buttons are fractions of a pixel wide their rounding left a button up
+   * to a pixel and a half under the fade. The strip has no border and no
+   * scrollbar, so its box is the part that shows.
+   */
   const reveal = useCallback(
     (target: HTMLElement | null) => {
       const el = ref.current;
       if (!el || !target) return;
-      const start = target.offsetLeft - FADE_PX;
-      const end = target.offsetLeft + target.offsetWidth + FADE_PX;
-      if (start < el.scrollLeft) el.scrollLeft = start;
-      else if (end > el.scrollLeft + el.clientWidth) el.scrollLeft = end - el.clientWidth;
+      const strip = el.getBoundingClientRect();
+      const button = target.getBoundingClientRect();
+      const start = button.left - strip.left + el.scrollLeft - FADE_PX;
+      const end = button.right - strip.left + el.scrollLeft + FADE_PX;
+      if (start < el.scrollLeft) el.scrollLeft = Math.floor(start);
+      else if (end > el.scrollLeft + strip.width) el.scrollLeft = Math.ceil(end - strip.width);
       measure();
     },
     [measure],
