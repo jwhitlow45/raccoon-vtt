@@ -26,7 +26,7 @@ import { openStatBlock } from "../tokens/statBlockOpen.ts";
 import { usePanelHere } from "../panels.ts";
 import { RowRollTools } from "./AutoInitiative.tsx";
 import { useSend } from "./hooks.ts";
-import { entryActor, entryName, hpView, nestedCompanions, parseInitiative, rollReminder, rowAc, valueText, type HpView } from "./logic.ts";
+import { entryActor, entryName, hpView, nestedCompanions, parseInitiative, rollReminder, rowAc, SECRET_ROW, secretUntilItsTurn, valueText, type HpView } from "./logic.ts";
 import { Chips, DescribedHp, DescribedItems, Portrait, RollBadge, Spinner } from "./parts.tsx";
 import { readiedEffect, rowTarget, type ReactionTarget } from "./ready.ts";
 import { ReadyControls } from "./ReadyControls.tsx";
@@ -102,6 +102,7 @@ export function EntryRow(props: {
   const reminder = dm || mine ? rollReminder(entry, effects) : undefined;
   const legendary = dm ? actor?.legendary : undefined;
   const readied = readiedEffect(effects);
+  const secret = useRoomView((s) => dm && s.view !== null && secretUntilItsTurn(s.view, entry));
   // A Ready action's trigger reaches other players only on a creature a player plays (shared/project.ts).
   const playerOwned = useRoomView((s) => {
     if (!s.view) return false;
@@ -198,6 +199,11 @@ export function EntryRow(props: {
                   dm && entry.hidden ? (
                     <Tag tone="muted" dense>
                       Hidden
+                    </Tag>
+                  ) : null,
+                  secret ? (
+                    <Tag tone="muted" dense title={SECRET_ROW.help}>
+                      {SECRET_ROW.label}
                     </Tag>
                   ) : null,
                   readied ? (

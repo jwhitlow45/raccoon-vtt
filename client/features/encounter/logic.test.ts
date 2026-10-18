@@ -29,6 +29,8 @@ import {
   rowAc,
   turnOp,
   rollReminder,
+  SECRET_ROW,
+  secretUntilItsTurn,
   scoreFills,
   sortedEntries,
   stripRows,
@@ -653,3 +655,46 @@ describe("companions in the tracker (docs/design-v1-combat-flow.md 3.6.7)", () =
   });
 });
 
+describe("the DM's tag on a row players do not see yet (docs/design-v1-combat-flow.md 11)", () => {
+  function fight(): RoomState {
+    const state = room();
+    state.meta.settings.playersSeeOrder = "party";
+    state.tokens.pc1 = token("pc1", { kind: "pc", ownerIds: ["p1"] });
+    state.tokens.gob = token("gob");
+    state.tokens.guard = token("guard", { kind: "npc", disposition: "ally" });
+    state.tokens.away = token("away", { sceneId: "s2" });
+    state.encounter = {
+      rev: 0,
+      round: 1,
+      activeEntryId: null,
+      entries: [entry("r-pc", { tokenId: "pc1", value: 20 }), entry("r-gob", { tokenId: "gob", value: 15, tieOrder: 1 }), entry("r-guard", { tokenId: "guard", value: 12, tieOrder: 2 }), entry("r-lair", { label: "Lair", value: 10, tieOrder: 3 })],
+    };
+    return state;
+  }
+  const tagged = (state: RoomState) => state.encounter!.entries.filter((e) => secretUntilItsTurn(state, e)).map((e) => e.id);
+
+  test("shows on every row the setting keeps from players, and leaves each as its turn comes", () => {
+    let state = fight();
+    assert.deepEqual(tagged(state), ["r-gob", "r-guard", "r-lair"]);
+    state = apply(state, { t: "encounter.next" }, DM, 1);
+    state = apply(state, { t: "encounter.next" }, DM, 2);
+    assert.deepEqual(tagged(state), ["r-guard", "r-lair"], "the goblin acting, and after it");
+    state = apply(state, { t: "encounter.next" }, DM, 3);
+    assert.deepEqual(tagged(state), ["r-lair"]);
+  });
+
+  test("follows the choice, says nothing for a row whose token is on another scene, and reads in plain words", () => {
+    const state = fight();
+    state.meta.settings.playersSeeOrder = "allies";
+    assert.deepEqual(tagged(state), ["r-gob", "r-lair"]);
+    state.meta.settings.playersSeeOrder = "all";
+    assert.deepEqual(tagged(state), []);
+    delete state.meta.settings.playersSeeOrder;
+    assert.deepEqual(tagged(state), [], "a room from before the setting shows players every row");
+    const dmView = projectState({ ...fight(), encounter: { ...fight().encounter!, entries: [entry("r-away", { tokenId: "away" })] } }, DM, { sceneId: "s1" }) as unknown as RoomState;
+    assert.equal(secretUntilItsTurn(dmView, dmView.encounter!.entries[0]!), false);
+    assert.equal(SECRET_ROW.label, "Secret until its turn");
+    assert.match(SECRET_ROW.help, /first turn comes/);
+    assert.doesNotMatch(`${SECRET_ROW.label} ${SECRET_ROW.help}`, /[—;]/);
+  });
+});

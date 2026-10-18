@@ -2,7 +2,7 @@ import type { Effect, Encounter, InitEntry, LogEntry, RoomState, Token } from "#
 import type { ClientOp, EntryInput } from "#shared/protocol.ts";
 import { MAX_ENTRIES_PER_OP } from "#shared/protocol.ts";
 import type { ProjectedActor } from "#shared/project.ts";
-import { withheldWhereItStands } from "#shared/project.ts";
+import { orderShown, withheldWhereItStands } from "#shared/project.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import { actsOnCharacterTurn } from "#shared/reducer/companions.ts";
 import { advantageHint, compareEntries, rowCharacter } from "#shared/rules/initiative.ts";
@@ -280,6 +280,24 @@ export function rowAc(actor: ProjectedActor | undefined, token?: Pick<Token, "ki
   if (actor?.life === "dead" || hpLess(actor, token)) return null;
   return ac;
 }
+
+/**
+ * Whether the DM's row says players do not see it yet: the room's order
+ * setting keeps its place from them until its first turn
+ * (docs/design-v1-combat-flow.md 11). The DM's view holds only the scene the
+ * DM looks at, so a row whose token stands elsewhere cannot be told and
+ * says nothing.
+ */
+export function secretUntilItsTurn(view: RoomState, entry: InitEntry): boolean {
+  if (entry.tokenId !== undefined && !view.tokens[entry.tokenId]) return false;
+  return !orderShown(view, entry);
+}
+
+/** The tag's words, and its tooltip. */
+export const SECRET_ROW = {
+  label: "Secret until its turn",
+  help: "Players do not see this row yet. It joins their order when its first turn comes (Room settings, Initiative order players see).",
+} as const;
 
 /**
  * The roll reminder next to a row (design 9.4): the DM's hand-set reminder,

@@ -1372,6 +1372,11 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     assert.equal(anaSocket.everSaw('"e-ogre"'), false, "the ogre's row reached Ana before its turn");
     const tracker = await openTracker(ana);
     assert.equal(await tracker.getByRole("button", { name: /^Ogre[.,]/ }).count(), 0);
+    // The DM's row says players do not see it yet, until its turn comes.
+    await openTracker(dm);
+    await rowButton(dm, "Ogre");
+    const secret = async () => (await descriptions(dmCdp, /^Ogre[.,]/)).some((d) => d.includes("Secret until its turn"));
+    await waitFor("the DM's tag on the ogre's row", async () => ((await secret()) ? true : null));
     for (let step = 0; step < 20 && dmSocket.state?.encounter?.activeEntryId !== "e-ogre"; step++) {
       const was = dmSocket.state!.encounter!;
       await ops.send({ t: "encounter.next" });
@@ -1383,6 +1388,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const entries = anaSocket.state!.encounter!.entries;
     assert.equal(entries.at(-1)?.id, "e-ogre", "last, in its place");
     await rowButton(ana, "Ogre");
+    await waitFor("the DM's tag gone from the ogre's row", async () => ((await secret()) ? null : true));
     // Its next turn keeps it there.
     await ops.send({ t: "encounter.next" });
     await waitFor("the ogre's turn over", () => (anaSocket.state?.encounter?.activeEntryId !== "e-ogre" ? true : null));
