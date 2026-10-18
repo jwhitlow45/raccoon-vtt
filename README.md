@@ -46,6 +46,10 @@ is the planning list behind it, with what comes next and what was skipped.
 Update FEATURES.md in the same change that adds, changes or removes a
 feature.
 
+The [DM guide](docs/dm-guide.md) teaches the DM tools step by step, from a
+quick start to building maps, running fights and worked scenarios. Update it
+too when a change alters a step it describes.
+
 ## Quick start
 
 To try it with nothing but Docker:
