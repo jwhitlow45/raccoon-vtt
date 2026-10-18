@@ -5,7 +5,7 @@ import type { DiceView } from "../creature.ts";
 import { OUTCOME_TOO_BIG } from "#shared/protocol.ts";
 import { mark, newPage, setAmount, setDc, typeTotal, type Page } from "./chain.ts";
 import { worstCase } from "./outcome.ts";
-import { applyWaits, buildPlan, damageTo, pageBound, rowOutcome, rowWords } from "./plan.ts";
+import { applyWaits, buildPlan, damageTo, openSaveState, pageBound, rowOutcome, rowWords } from "./plan.ts";
 import { groupRows } from "./rows.ts";
 
 /** What Apply freezes from the page (docs/design-v1-roll-options.md 5.4, 5.5). */
@@ -126,5 +126,19 @@ describe("the damage line's readers", () => {
     assert.equal(damageTo({ ...base, fill: { name: "Fireball", from: "", caster: "breeTok" } }, view), "all");
     assert.equal(damageTo({ ...base, fill: { name: "Fire Breath", from: "", caster: "g1" } }, view), "dm");
     assert.equal(damageTo({ ...base, secret: false, fill: null }, view), "all");
+  });
+});
+
+describe("the Dice panel's row for the open group save", () => {
+  test("says all answered while the damage is still owed, never ready while Apply waits for it (LP7-PC-13)", () => {
+    const answered = sunburst(13);
+    const owed = { ...answered, outcome: { ...answered.outcome, damage: "8d6 fire" } };
+    assert.equal(applyWaits(owed, DICE, null), "Type the damage, or roll it");
+    assert.equal(openSaveState(owed, 0), "all answered");
+    assert.equal(openSaveState({ ...owed, damage: { state: "committed", tag: "d", amounts: [28] } }, 0), "ready to apply");
+    assert.equal(openSaveState(answered, 0), "ready to apply", "no damage to owe");
+    assert.equal(openSaveState(owed, 2), "2 waiting");
+    assert.equal(openSaveState({ ...owed, phase: "setup" }, 0), "set up");
+    assert.equal(openSaveState({ ...owed, phase: "applied" }, 0), "applied");
   });
 });

@@ -62,7 +62,7 @@ import {
   type Step,
 } from "./chain.ts";
 import { parseParts } from "./outcome.ts";
-import { amountsOf, applyWaits, applyWords, buildPlan, damageTo, pageBound, rowOutcome, rowWords } from "./plan.ts";
+import { amountsOf, applyWaits, applyWords, buildPlan, damageTo, openSaveState, pageBound, rowOutcome, rowWords } from "./plan.ts";
 import { countWords, creatureCount, d20Of, groupRows, type GroupTest, type Mark, type RowBase, type Way } from "./rows.ts";
 import { useGroupSave, useGroupSaveStore } from "./store.ts";
 import { actionFill, areaFill, casterActions } from "./fills.ts";
@@ -851,8 +851,8 @@ export { DAMAGE_TYPES, type DamageType };
 /** The Dice panel's row for the open group save (5.1): "Fireball's save: 2 waiting. Open". */
 export function OpenGroupSave(props: { page: Page; onOpen(): void }) {
   const { page } = props;
-  const waiting = page.phase === "setup" ? null : [...results(page).values()].filter((r) => r === null).length;
-  const state = page.phase === "applied" ? "applied" : page.phase === "setup" ? "set up" : waiting ? `${waiting} waiting` : "ready to apply";
+  const waiting = page.phase === "setup" ? 0 : [...results(page).values()].filter((r) => r === null).length;
+  const state = openSaveState(page, waiting);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
       <span style={{ flex: 1, minWidth: 0 }}>{`${pageTitle(page)}: ${state}.`}</span>

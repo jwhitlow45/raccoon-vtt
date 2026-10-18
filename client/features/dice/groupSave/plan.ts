@@ -52,7 +52,7 @@ function effectsOf(dice: DiceView, target: ActorTarget): Effect[] {
 }
 
 /** The outcome's damage parts with their amounts, once typed or rolled, or null while a roll waits. */
-export function amountsOf(page: Page, fillType?: DamageType): PartAmount[] | null {
+export function amountsOf(page: Pick<Page, "outcome" | "damage">, fillType?: DamageType): PartAmount[] | null {
   if (page.outcome.damage.trim() === "") return [];
   const parsed = parseParts(page.outcome.damage, fillType);
   if (!parsed.ok) return null;
@@ -155,6 +155,19 @@ export function applyWaits(page: Page, dice: DiceView, amounts: PartAmount[] | n
   const waiting = live.filter((r) => rowOutcome(page, r, dice, amounts).result === null).length;
   if (waiting > 0) return `${waiting} still waiting: mark them or wait`;
   return null;
+}
+
+/**
+ * The Dice panel's row for the open group save, after its title (5.1):
+ * "set up", "2 waiting", "all answered" while its damage is still to be
+ * typed or rolled, so it never says ready while Apply waits, "ready to
+ * apply", and "applied".
+ */
+export function openSaveState(page: Pick<Page, "phase" | "outcome" | "damage" | "fill">, waiting: number): string {
+  if (page.phase === "applied") return "applied";
+  if (page.phase === "setup") return "set up";
+  if (waiting > 0) return `${waiting} waiting`;
+  return amountsOf(page, page.fill?.damageType) === null ? "all answered" : "ready to apply";
 }
 
 /** "Apply: 5 take damage, 3 Frightened". */
