@@ -4,6 +4,7 @@ import { fitLine, type SrdMonster, type StatBlockMonster } from "#shared/srd/mon
 import { signed, sizeAndType } from "#shared/statBlock.ts";
 import type { OnAnswer, OpAnswer, OpRefusal } from "../../state/types.ts";
 import { viewOf } from "../monsters/draft.ts";
+import { shippedImage } from "../monsters/images.ts";
 import type { ListedRow } from "../monsters/MonsterList.tsx";
 import { attachPatch, nameSuggestions, type BlockLink } from "../monsters/statBlockLink.ts";
 import { canResize } from "./access.ts";
@@ -46,7 +47,7 @@ export function characterBlocks(view: Pick<RoomState, "companionBlocks"> | null 
 }
 
 /** A row of the companion picker: a character's block or an SRD monster, with what it links. */
-/** `picture` is a stored block's own, carried with the row so whoever takes the row never looks the block up in a collection that may be older than it. */
+/** `picture` is a stored block's own, or an SRD monster's shipped icon, carried with the row so whoever takes the row never looks the block up in a collection that may be older than it. */
 export type PickerRow = ListedRow & { link: BlockLink; source: "block" | "srd"; picture?: ImageRef };
 
 /** A character's block as a list row, tagged with whose it is. */
@@ -59,9 +60,15 @@ export function blockDetail(block: Pick<CompanionBlock, "size" | "type" | "cr">)
   return `${sizeAndType(block)}, CR ${block.cr}`;
 }
 
-/** An SRD monster as a list row. */
+/**
+ * An SRD monster as a list row, with the monster's shipped icon for its
+ * picture, as its tokens start with on the map. Never the DM's own choice
+ * for the monster, which players are not sent, so a row gives the same
+ * picture to whoever picks it.
+ */
 export function srdRow(m: SrdMonster): PickerRow {
-  return { key: `srd:${m.srdId}`, source: "srd", view: m, link: { srdId: m.srdId } };
+  const picture = shippedImage({ srdId: m.srdId });
+  return { key: `srd:${m.srdId}`, source: "srd", view: m, link: { srdId: m.srdId }, ...(picture ? { picture } : {}) };
 }
 
 export type PickerLists = {
@@ -83,13 +90,14 @@ export type PickerLists = {
 export function pickerLists(input: { name: string; query: string; blocks: readonly CompanionBlock[]; characterName: string; srd: readonly SrdMonster[] | null }): PickerLists {
   const matches = monsterMatcher(input.query);
   const own = input.blocks.map((b) => blockRow(b, input.characterName));
-  const byKey = new Map(own.map((r) => [r.key, r]));
-  const sameName = nameSuggestions(input.name, own, input.srd ?? []).map((s) => byKey.get(s.key) ?? { key: s.key, view: s.view, source: "srd" as const, link: s.link });
+  const srd = (input.srd ?? []).map(srdRow);
+  const byKey = new Map([...own, ...srd].map((r) => [r.key, r]));
+  const sameName = nameSuggestions(input.name, own, input.srd ?? []).flatMap((s) => byKey.get(s.key) ?? []);
   return {
     own: own.filter((r) => matches(r.view)),
     ownCount: own.length,
     sameName: sameName.filter((r) => matches(r.view)),
-    srd: (input.srd ?? []).map(srdRow).filter((r) => matches(r.view)),
+    srd: srd.filter((r) => matches(r.view)),
   };
 }
 

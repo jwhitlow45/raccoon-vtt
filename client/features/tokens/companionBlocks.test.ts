@@ -25,6 +25,8 @@ import {
   type AttachPhase,
   type HpChoice,
 } from "./companionBlocks.ts";
+import { NEW_COMPANION, withBlock } from "./companions.ts";
+import { shippedImage } from "../monsters/images.ts";
 
 const SRD = JSON.parse(readFileSync(new URL("../../../shared/srd/monsters.json", import.meta.url), "utf8")) as SrdMonster[];
 const srd = (id: string) => SRD.find((m) => m.srdId === id)!;
@@ -389,6 +391,16 @@ describe("the companion picker's lists (docs/design-v1-companion-stat-blocks.md 
     const pictured = companionBlock("lamp", "bree", { defaultImage: { icon: "lorc/wolf-head", color: "#336699" } });
     assert.deepEqual(blockRow(pictured, "Bree").picture, { icon: "lorc/wolf-head", color: "#336699" });
     assert.equal("picture" in blockRow(companionBlock("plain", "bree"), "Bree"), false);
+  });
+
+  test("an SRD row's picture is the monster's shipped icon, in the same name list too, which a new companion takes", () => {
+    const lists = pickerLists({ name: "Owl", query: "", blocks: [], characterName: "Bree", srd: SRD });
+    const wolf = lists.srd.find((r) => "srdId" in r.link && r.link.srdId === "wolf");
+    assert.deepEqual(wolf?.picture, { icon: "lorc/wolf-head", color: "#ad7f58" });
+    assert.deepEqual(lists.sameName.map((r) => r.picture), [{ icon: "caro-asercion/barn-owl", color: "#ad7f58" }]);
+    for (const row of lists.srd) assert.deepEqual(row.picture, shippedImage({ srdId: (row.link as { srdId: string }).srdId }), row.key);
+    // A new companion with no picture of its own takes it, as a token placed from the monster does.
+    assert.deepEqual(withBlock(NEW_COMPANION, { link: wolf!.link, view: wolf!.view, source: "srd", picture: wolf!.picture! }).image, { icon: "lorc/wolf-head", color: "#ad7f58" });
   });
 
   test("before the SRD loads, the character's blocks list at once", () => {
