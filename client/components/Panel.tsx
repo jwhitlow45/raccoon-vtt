@@ -1,4 +1,4 @@
-import { useId, type CSSProperties, type ReactNode, type Ref } from "react";
+import { createContext, useContext, useId, type CSSProperties, type ReactNode, type Ref } from "react";
 import { theme } from "../lib/theme.ts";
 import { Icon } from "./Icon.tsx";
 
@@ -82,7 +82,9 @@ export function Section(props: {
   style?: CSSProperties;
 }) {
   const id = useId();
-  const divider = props.divider !== false;
+  // Inside a Group the sections part by space alone: the group's own line already heads them (docs/design-v1-dice-ui.md 3.2).
+  const inGroup = useContext(InGroup);
+  const divider = props.divider ?? !inGroup;
   if (props.fold) {
     const { fold } = props;
     return (
@@ -174,6 +176,100 @@ function FoldLabel(props: { id: string; label: ReactNode; tone?: "danger"; fold:
       </h3>
       {fold.summary}
     </div>
+  );
+}
+
+const InGroup = createContext(false);
+
+/**
+ * A fold of a panel's sections that belong together by use (the Token
+ * panel's Combat, Notes and Position, docs/design-v1-dice-ui.md 5): a 48 px
+ * row with a chevron, the group's name at 16 px weight 700, and when folded
+ * a one-line summary of what it holds ("18/24 HP, 2 conditions"). Groups
+ * part by a 1 px line, and the sections inside part by space, keeping their
+ * capitals labels, so the two levels never look alike.
+ */
+export function Group(props: {
+  label: string;
+  /** Absent for a group that never folds, such as a stat block with nothing to fold: the same row, with no chevron. */
+  open?: boolean;
+  onToggle?(): void;
+  summary?: ReactNode;
+  /** On the header's row after the name, outside the disclosure: "Take a shape", "Attach a stat block". */
+  action?: ReactNode;
+  foldRef?: Ref<HTMLButtonElement>;
+  children?: ReactNode;
+}) {
+  const id = useId();
+  const summaryId = `${id}-summary`;
+  const folds = props.open !== undefined && props.onToggle !== undefined;
+  const open = props.open ?? true;
+  const name = (
+    <span id={id} style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, flex: "none" }}>
+      {props.label}
+    </span>
+  );
+  const summary =
+    !open && props.summary ? (
+      <span id={summaryId} style={{ flex: 1, minWidth: 0, textAlign: "right", fontSize: theme.font.small, fontWeight: theme.weight.regular, color: theme.color.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {props.summary}
+      </span>
+    ) : null;
+  return (
+    <section aria-labelledby={id} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
+      {/* The action wraps under the name where both do not fit, as Add a stat block and Take a shape do in a narrow card, rather than run over it. */}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: 48 }}>
+        <h3 style={{ margin: 0, display: "flex", flex: "1 1 auto", minWidth: 0 }}>
+          {folds ? (
+            <button
+              ref={props.foldRef}
+              type="button"
+              // Named by the group's name alone, so the name never changes as it folds. The summary describes it.
+              aria-labelledby={id}
+              aria-describedby={summary ? summaryId : undefined}
+              aria-expanded={open}
+              onClick={(e) => {
+                // As FoldLabel: focus first, so a field being typed in commits before the fold unmounts it.
+                e.currentTarget.focus();
+                props.onToggle?.();
+              }}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                display: "flex",
+                alignItems: "center",
+                gap: theme.space(2),
+                minHeight: 48,
+                padding: 0,
+                background: "transparent",
+                border: "none",
+                color: theme.color.text,
+                fontFamily: theme.font.body,
+                textAlign: "left",
+                cursor: "pointer",
+              }}
+            >
+              <span style={{ color: theme.color.textMuted, display: "flex" }}>
+                <Icon name={open ? "chevronDown" : "chevronRight"} size="sm" />
+              </span>
+              {name}
+              {summary}
+            </button>
+          ) : (
+            <span style={{ display: "flex", alignItems: "center", gap: theme.space(2), minWidth: 0, flex: 1 }}>
+              {name}
+              {summary}
+            </span>
+          )}
+        </h3>
+        {props.action}
+      </div>
+      {open && props.children ? (
+        <InGroup.Provider value={true}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), paddingTop: theme.space(1), paddingBottom: theme.space(4) }}>{props.children}</div>
+        </InGroup.Provider>
+      ) : null}
+    </section>
   );
 }
 
