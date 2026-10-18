@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { describeEvent, diceLineText, diceText, rollToastText, type LogNames } from "./logText.ts";
+import { critSumText, describeEvent, diceLineText, diceText, rollToastText, type LogNames } from "./logText.ts";
 import type { DiceRoll, LogEvent } from "./model.ts";
 import { member, room, token, character } from "./testutil.ts";
 
@@ -51,6 +51,33 @@ describe("dice wording (docs/design-v1-dice.md 5.5)", () => {
     assert.equal(diceLineText(line([], { by: "mara", to: "dm" }), names), "Mara rolled in secret.");
     assert.equal(describeEvent(line([], { by: "mara", to: "dm" }), names), "Mara rolled in secret.");
     assert.equal(diceLineText(line([LONGSWORD], { by: "gone" }), names), "Someone rolled Longsword: 2d6+3 (4, 6) = 13.");
+  });
+
+  test("a critical hit by each rule says how it was reached, the maxed part labeled and a doubling as × 2 (the critical hit rules addendum)", () => {
+    const hit = (formula: string, faces: number[], total: number, crit: DiceRoll["crit"]): DiceRoll => ({ formula, faces, total, crit, label: "Scimitar critical damage, slashing" });
+    assert.equal(diceText(hit("4d6+3", [1, 2, 5, 6], 17, "rollTwice")), "4d6+3 (1, 2, 5, 6) = 17");
+    assert.equal(diceText(hit("2d6+3", [4, 6], 25, "maxPlusRoll")), "12 max + 2d6+3 (4, 6) = 25");
+    assert.equal(diceText(hit("2d6+3", [4, 6], 23, "doubleDice")), "2d6 × 2 + 3 (4, 6) = 23");
+    assert.equal(diceText(hit("2d6+3", [4, 6], 26, "doubleTotal")), "(2d6+3) × 2 (4, 6) = 26");
+    // A rider merged into the weapon's formula: several dice terms take parentheses where the rule doubles them.
+    assert.equal(diceText(hit("1d8+4+3d6", [5, 2, 3, 6], 46, "maxPlusRoll")), "26 max + 1d8+4+3d6 (5, 2, 3, 6) = 46");
+    assert.equal(diceText(hit("1d8+4+3d6", [5, 2, 3, 6], 36, "doubleDice")), "(1d8+3d6) × 2 + 4 (5, 2, 3, 6) = 36");
+    assert.equal(diceText(hit("2d6", [4, 6], 20, "doubleDice")), "2d6 × 2 (4, 6) = 20");
+    assert.equal(diceText(hit("2d6-1", [4, 6], 19, "doubleDice")), "2d6 × 2 - 1 (4, 6) = 19");
+    assert.equal(diceText(hit("1d6", [4], 8, "doubleTotal")), "1d6 × 2 (4) = 8");
+    assert.equal(diceText(hit("4d6kh3", [3, 5, 1, 5], 31, "maxPlusRoll")), "18 max + 4d6kh3 (3, 5, 1 dropped, 5) = 31");
+    assert.equal(critSumText(hit("2d6+3", [4, 6], 25, "maxPlusRoll")), "12 max + 13");
+    assert.equal(critSumText(hit("2d6+3", [4, 6], 23, "doubleDice")), "10 × 2 + 3");
+    assert.equal(critSumText(hit("2d6+3", [4, 6], 26, "doubleTotal")), "13 × 2");
+    assert.equal(critSumText(hit("1d4-1", [1], 4, "maxPlusRoll")), "4 max + 0", "a sum of 0 still shows, so the arithmetic reads");
+    assert.equal(critSumText(hit("4d6+3", [1, 2, 5, 6], 17, "rollTwice")), null, "the dice are the whole of it");
+    assert.equal(critSumText(LONGSWORD), null);
+    assert.equal(diceLineText(line([hit("2d6+3", [4, 6], 25, "maxPlusRoll")]), names), "Bree rolled Scimitar critical damage, slashing: 12 max + 2d6+3 (4, 6) = 25.");
+    assert.equal(rollToastText([line([hit("2d6+3", [4, 6], 25, "maxPlusRoll")])], names), "Bree rolled 25 (12 max + 13) for Scimitar critical damage, slashing.");
+    const fire: DiceRoll = { formula: "1d6", faces: [2], total: 8, crit: "maxPlusRoll", label: "Flame Tongue critical damage, fire" };
+    const slashing: DiceRoll = { formula: "2d6+3", faces: [4, 6], total: 25, crit: "maxPlusRoll", label: "Flame Tongue critical damage, slashing" };
+    assert.equal(rollToastText([line([slashing, fire])], names), "Bree rolled 33 (12 max + 13, 6 max + 2) for Flame Tongue critical damage.");
+    assert.equal(diceLineText(line([], { to: "dm" }), names), "Bree rolled in secret.", "a secret crit shows no sum to another player");
   });
 
   test("a hidden creature's name reads as the viewer's view names it", () => {

@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { addDie, formatFormula, parseRollText } from "#shared/dice/formula.ts";
+import { critSums, critSumText } from "#shared/logText.ts";
 import { Button } from "../../components/Button.tsx";
 import { Chip } from "../../components/Chip.tsx";
 import { Input } from "../../components/Field.tsx";
@@ -51,7 +52,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   const firstLine = committed?.lines[0]?.id ?? null;
   // A polite live region says each result once: "Rolled 13: Longsword."
   useEffect(() => {
-    if (first) setSaid(`Rolled ${first.total}${first.label ? `: ${first.label}` : ""}.`);
+    if (first) setSaid(`Rolled ${first.total}${critSums([first])}${first.label ? `: ${first.label}` : ""}.`);
   }, [first]);
   if (!last) return null;
   let body;
@@ -68,6 +69,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   else if (!first) body = <span style={{ color: theme.color.textMuted }}>Rolled. Its result is no longer in the log.</span>;
   else {
     const verdict = rollVerdict(first, (committed?.lines[0]?.data?.type === "dice" ? committed.lines[0].data : {}) as { dc?: number; ac?: number });
+    const sum = critSumText(first);
     body = (
       <button
         type="button"
@@ -76,7 +78,13 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: theme.space(2), minWidth: 0, flex: 1, minHeight: LAST_LINE_PX, overflow: "hidden", whiteSpace: "nowrap" }}
       >
         <span style={{ fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>{first.total.toLocaleString("en-US")}</span>
-        {first.label ? <span style={{ fontSize: theme.font.body14, overflow: "hidden", textOverflow: "ellipsis" }}>{first.label}</span> : null}
+        {/* A table crit rule's sum leads the label, so a long label's ellipsis never takes it. */}
+        {sum || first.label ? (
+          <span style={{ fontSize: theme.font.body14, overflow: "hidden", textOverflow: "ellipsis" }}>
+            {sum ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{`(${sum})${first.label ? " " : ""}`}</span> : null}
+            {first.label}
+          </span>
+        ) : null}
         <span style={{ overflow: "hidden" }}>
           <DiceFaces result={first} oneLine />
         </span>

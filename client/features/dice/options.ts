@@ -3,11 +3,11 @@ import { d20Formula, formatFormula, parseFormula } from "#shared/dice/formula.ts
 import { keptD20 } from "#shared/dice/roll.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
-import type { CharacterId, DiceRoll, InitEntry, LogEntry, LogEvent, RollRequest, RollTarget, RoomState, TokenId } from "#shared/model.ts";
+import type { CharacterId, CritRule, DiceRoll, InitEntry, LogEntry, LogEvent, RollRequest, RollTarget, RoomState, TokenId } from "#shared/model.ts";
 import { findEntryFor } from "#shared/rules/durations.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
-import { effectName } from "#shared/logText.ts";
+import { critSums, effectName } from "#shared/logText.ts";
 import type { PanelRoll } from "./useDicePanel.ts";
 
 /**
@@ -292,7 +292,7 @@ export function resultWords(rolls: readonly DiceRoll[], kind: "d20" | "attack" |
   if (!first) return "";
   if (kind === "damage") {
     const total = rolls.reduce((n, r) => n + r.total, 0);
-    return rolls.length > 1 ? `${total}: ${rolls.map((r) => `${r.total} ${(r.label ?? "").split(", ").at(-1)}`).join(", ")}` : `${total}`;
+    return rolls.length > 1 ? `${total}: ${rolls.map((r) => `${r.total} ${(r.label ?? "").split(", ").at(-1)}${critSums([r])}`).join(", ")}` : `${total}${critSums(rolls)}`;
   }
   if (kind === "recharge") {
     const need = opts.recharge ?? 6;
@@ -309,6 +309,14 @@ export function resultWords(rolls: readonly DiceRoll[], kind: "d20" | "attack" |
   if (first.cancelled) parts.push("normal: advantage and disadvantage cancelled");
   return parts.join(", ");
 }
+
+/** The Damage cell's second line while Critical is pressed: the room's rule, which the server rolls it by. */
+export const CRIT_WORDS: Record<CritRule, string> = {
+  rollTwice: "Critical: dice rolled twice",
+  maxPlusRoll: "Critical: max plus a roll",
+  doubleDice: "Critical: dice doubled",
+  doubleTotal: "Critical: total doubled",
+};
 
 /** Whether an attack's result makes its next Damage tap a critical hit. */
 export function critical(roll: DiceRoll | undefined): boolean {

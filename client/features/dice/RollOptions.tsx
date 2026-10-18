@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { bonusFor, type D20Test, type NamedRoll } from "#shared/dice/bonus.ts";
+import { critRuleOf } from "#shared/dice/crit.ts";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type RoomState, type SkillKey } from "#shared/model.ts";
 import { playersToken } from "#shared/project.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
@@ -22,6 +23,7 @@ import { creatureRolls, type CreatureRolls, type DiceView } from "./creature.ts"
 import {
   creatureKey,
   critical,
+  CRIT_WORDS,
   cutLabel,
   damageRolls,
   initiativeRow,
@@ -452,6 +454,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
   const roomId = useRoomView((s) => s.roomId);
   const rowKey = `${ctx.key}|${props.named.key}`;
   const crit = useOption((s) => s.critical[rowKey] === true);
+  const critRule = useRoomView((s) => critRuleOf(s.view?.meta.settings ?? {}));
   const riders = useOption((s) => s.riders[rowKey]);
   const slotPicked = useOption((s) => s.slots[rowKey]);
   const holder = ctx.key;
@@ -523,7 +526,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
         {hasDamage ? (
           <OptionCell
             text={`Damage ${formulaText}`}
-            sub={canCrit && crit ? "Critical: dice doubled" : undefined}
+            sub={canCrit && crit ? CRIT_WORDS[critRule] : undefined}
             name={`${named.name} damage`}
             row={damageRow}
             disabled={ctx.blocked}

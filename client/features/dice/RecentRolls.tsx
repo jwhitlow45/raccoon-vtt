@@ -1,7 +1,6 @@
 import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { formatFormula, parseFormula } from "#shared/dice/formula.ts";
 import { hitOf, naturalOf, rolledTerms } from "#shared/dice/roll.ts";
-import { creatureName, describeEvent, diceText, memberName, type LogNames } from "#shared/logText.ts";
+import { creatureName, describeEvent, diceText, memberName, rolledFormula, type LogNames } from "#shared/logText.ts";
 import type { DiceResult, DiceRoll, LogEntry } from "#shared/model.ts";
 import type { DiceRollInput } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
@@ -28,7 +27,7 @@ const FOLDED = 5;
  * them on one line for the sticky line, which clips what does not fit
  * rather than growing over the panel (docs/design-v1-dice.md 8.2).
  */
-export function DiceFaces(props: { result: Pick<DiceResult, "formula" | "faces" | "total" | "mode">; oneLine?: boolean }) {
+export function DiceFaces(props: { result: Pick<DiceResult, "formula" | "faces" | "total" | "mode" | "crit">; oneLine?: boolean }) {
   const terms = rolledTerms(props.result);
   const natural = naturalOf(props.result);
   if (!terms) return <span style={{ color: theme.color.textMuted }}>{props.result.formula}</span>;
@@ -95,8 +94,7 @@ function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; na
   const creature = roll.tokenId !== undefined || roll.characterId !== undefined ? creatureName(props.names, roll) : null;
   const what = [creature, roll.label].filter(Boolean).join(", ");
   const verdict = rollVerdict(roll, props.row);
-  const parsed = parseFormula(roll.formula);
-  const formula = parsed.ok ? formatFormula(parsed.formula, roll.mode) : roll.formula;
+  const formula = rolledFormula(roll);
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1) }}>
       {props.lead}

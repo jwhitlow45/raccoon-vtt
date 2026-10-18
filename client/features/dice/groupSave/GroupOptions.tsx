@@ -109,8 +109,8 @@ function QuickGrid(props: { label: string; n: number; disabled: string | null; o
  * The attacks every selected block has by name (4.4), each with its own
  * bonus and critical range, against an optional AC sent as the roll's AC,
  * never as a DC. "Roll damage for 4 hits" rolls each hit's damage, a
- * critical's dice doubled, in one line, which an HP entry offers as one
- * chip: one target takes the hits, so there is no Apply.
+ * critical's by the room's rule, in one line, which an HP entry offers as
+ * one chip: one target takes the hits, so there is no Apply.
  */
 function SharedAttacks(props: { tokenIds: readonly string[]; blocked: string | null }) {
   const creatures = useMemo<ActorTarget[]>(() => props.tokenIds.map((tokenId) => ({ tokenId })), [props.tokenIds]);

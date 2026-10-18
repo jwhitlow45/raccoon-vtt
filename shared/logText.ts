@@ -1,3 +1,4 @@
+import { critParts, type CritParts } from "./dice/crit.ts";
 import { formatFormula, parseFormula } from "./dice/formula.ts";
 import { hitOf, rolledTerms } from "./dice/roll.ts";
 import { compareLogIds } from "./keys.ts";
@@ -106,17 +107,79 @@ function count(n: number): string {
   return n.toLocaleString("en-US");
 }
 
+/** " + 3", " - 1", or nothing for 0 unless `always`: a sum after a part, spaced as a crit's arithmetic writes it. */
+function plus(n: number, always = false): string {
+  if (n === 0 && !always) return "";
+  return n < 0 ? ` - ${count(-n)}` : ` + ${count(n)}`;
+}
+
+/**
+ * A critical hit's damage as its rule rolled it (the critical hit rules
+ * addendum of docs/design-v1-dice.md): "12 max + 2d6+3", "2d6 × 2 + 3",
+ * "(2d6+3) × 2". Rolled twice it is its doubled formula, whose dice say it.
+ */
+function critFormula(parts: CritParts): string {
+  const whole = formatFormula(parts.formula);
+  switch (parts.rule) {
+    case "rollTwice":
+      return whole;
+    case "maxPlusRoll":
+      return `${count(parts.max)} max + ${whole}`;
+    case "doubleDice": {
+      const dice = parts.formula.filter((t) => t.kind === "dice");
+      const text = formatFormula(dice);
+      return `${dice.length > 1 ? `(${text})` : text} × 2${plus(parts.numbers)}`;
+    }
+    case "doubleTotal":
+      return `${parts.formula.length > 1 ? `(${whole})` : whole} × 2`;
+  }
+}
+
+/**
+ * A critical hit's sum in a few words, for a toast or a row beside its
+ * total: "12 max + 13", "10 × 2 + 3", "13 × 2". Null for any other roll,
+ * and for one rolled twice, whose dice are the whole of it.
+ */
+export function critSumText(result: Pick<DiceResult, "formula" | "faces" | "crit">): string | null {
+  const parts = critParts(result);
+  if (!parts) return null;
+  switch (parts.rule) {
+    case "rollTwice":
+      return null;
+    case "maxPlusRoll":
+      return `${count(parts.max)} max${plus(parts.base, true)}`;
+    case "doubleDice":
+      return `${count(parts.dice)} × 2${plus(parts.numbers)}`;
+    case "doubleTotal":
+      return `${count(parts.base)} × 2`;
+  }
+}
+
+/** A roll's formula as a reader reads it: as asked with its mode, "1d20+5 with advantage", or a crit's by its rule. */
+export function rolledFormula(result: Pick<DiceResult, "formula" | "faces" | "mode" | "crit">): string {
+  const crit = critParts(result);
+  if (crit) return critFormula(crit);
+  const parsed = parseFormula(result.formula);
+  return parsed.ok ? formatFormula(parsed.formula, result.mode) : result.formula;
+}
+
 /**
  * One roll's dice (docs/design-v1-dice.md 5.5): "2d6+3 (4, 6) = 13", and
- * with a mode "1d20+5 with advantage (14, 7 dropped) = 19". A formula a
- * later grammar refuses reads as its text and total.
+ * with a mode "1d20+5 with advantage (14, 7 dropped) = 19". A critical hit
+ * by a table's rule reads its arithmetic: "12 max + 2d6+3 (4, 6) = 25". A
+ * formula a later grammar refuses reads as its text and total.
  */
-export function diceText(result: Pick<DiceResult, "formula" | "faces" | "total" | "mode">): string {
+export function diceText(result: Pick<DiceResult, "formula" | "faces" | "total" | "mode" | "crit">): string {
   const terms = rolledTerms(result);
-  const parsed = parseFormula(result.formula);
-  if (!terms || !parsed.ok) return `${result.formula} = ${count(result.total)}`;
+  if (!terms) return `${result.formula} = ${count(result.total)}`;
   const faces = terms.flatMap((t) => ("kept" in t ? t.faces.map((face, i) => (t.kept[i] ? count(face) : `${count(face)} dropped`)) : []));
-  return `${formatFormula(parsed.formula, result.mode)} (${faces.join(", ")}) = ${count(result.total)}`;
+  return `${rolledFormula(result)} (${faces.join(", ")}) = ${count(result.total)}`;
+}
+
+/** " (12 max + 13)", or nothing: the sums of the rolls rolled by a table's crit rule, for a line that shows only totals. */
+export function critSums(rolls: readonly Pick<DiceResult, "formula" | "faces" | "crit">[]): string {
+  const sums = rolls.flatMap((r) => critSumText(r) ?? []);
+  return sums.length > 0 ? ` (${sums.join(", ")})` : "";
 }
 
 type DiceEvent = Extract<LogEvent, { type: "dice" }>;
@@ -194,7 +257,8 @@ function oneDamage(rolls: readonly DiceRoll[]): { head: string; total: number; r
  * Someone else's rolls of one batch, as one toast (8.5): "Bree rolled 19
  * for Stealth.", a damage of several types as its sum, "Bree rolled 14 for
  * Flame Tongue damage.", "Mara rolled 6 Dexterity saves." for several with
- * one label, else "Mara rolled 6 times.".
+ * one label, else "Mara rolled 6 times.". A critical hit by a table's rule
+ * says its sum: "Bree rolled 25 (12 max + 13) for Scimitar critical damage."
  */
 export function rollToastText(lines: readonly DiceEvent[], names: LogNames): string {
   const rolls = lines.flatMap((l) => l.rolls);
@@ -205,7 +269,7 @@ export function rollToastText(lines: readonly DiceEvent[], names: LogNames): str
   if (single) {
     const creature = rollCreature(single.roll, names);
     const what = [creature, single.label].filter((part) => part !== undefined).join(", ");
-    return `${who} rolled ${count(single.total)}${what ? ` for ${what}` : ""}.`;
+    return `${who} rolled ${count(single.total)}${critSums(rolls)}${what ? ` for ${what}` : ""}.`;
   }
   const labels = new Set(rolls.map((r) => r.label));
   const label = labels.size === 1 ? only?.label : undefined;

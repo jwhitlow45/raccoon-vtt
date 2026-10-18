@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { compareLogIds } from "#shared/keys.ts";
-import { rollToastText, type LogNames } from "#shared/logText.ts";
+import { critSums, rollToastText, type LogNames } from "#shared/logText.ts";
 import type { LogEntry } from "#shared/model.ts";
 import { useRollToastsOn } from "../device/settings.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
@@ -61,7 +61,7 @@ export function ownResultText(state: Exclude<ReceiptState, { state: "sending" | 
   const first = rolls[0];
   if (!first) return "Rolled. Its result is no longer in the log.";
   if (rolls.length > 1) return `Rolled ${rolls.length} times.`;
-  return `Rolled ${first.total.toLocaleString("en-US")}${first.label ? `: ${first.label}` : ""}.`;
+  return `Rolled ${first.total.toLocaleString("en-US")}${critSums([first])}${first.label ? `: ${first.label}` : ""}.`;
 }
 
 export function useRollToasts(diceShown: boolean): void {

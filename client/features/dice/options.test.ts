@@ -9,7 +9,7 @@ import { reminderPreset } from "#shared/rules/rollReminders.ts";
 import type { OptionState } from "./optionState.ts";
 import { ReceiptTracker } from "./useReceipt.ts";
 import { watchInitiative, type InitiativeEnv } from "./useRollOption.ts";
-import { asSave, creatureKey, critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, playerCreatures, presetLine, resultWords, routedTest, routeOf, scoreOf, spendOnStart, testLabel, withExtra, withUsed } from "./options.ts";
+import { asSave, creatureKey, CRIT_WORDS, critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, playerCreatures, presetLine, resultWords, routedTest, routeOf, scoreOf, spendOnStart, testLabel, withExtra, withUsed } from "./options.ts";
 
 /** The roll options' rules (docs/design-v1-roll-options.md 4.2 and 4.3). */
 
@@ -139,6 +139,15 @@ describe("damage, critical hits and results", () => {
     assert.equal(resultWords([{ formula: "1d6", faces: [5], total: 5 }], "recharge", { recharge: 5 }), "Recharged (5)");
     assert.equal(resultWords([{ formula: "1d6", faces: [3], total: 3 }], "recharge", { recharge: 5 }), "Not yet (3)");
     assert.equal(resultWords([{ formula: "1d8+4", faces: [3], total: 7, label: "Rapier damage, piercing" }, { formula: "2d6", faces: [2, 2], total: 4, label: "Rapier damage, fire" }], "damage"), "11: 7 piercing, 4 fire");
+  });
+
+  test("a critical damage's row says how its total was reached, and the Damage cell names the room's rule (the critical hit rules addendum)", () => {
+    const slashing: DiceRoll = { formula: "2d6+3", faces: [4, 6], total: 25, crit: "maxPlusRoll", label: "Scimitar critical damage, slashing" };
+    const fire: DiceRoll = { formula: "1d6", faces: [2], total: 8, crit: "maxPlusRoll", label: "Scimitar critical damage, fire" };
+    assert.equal(resultWords([slashing], "damage"), "25 (12 max + 13)");
+    assert.equal(resultWords([slashing, fire], "damage"), "33: 25 slashing (12 max + 13), 8 fire (6 max + 2)");
+    assert.equal(resultWords([{ ...slashing, formula: "4d6+3", faces: [1, 2, 5, 6], total: 17, crit: "rollTwice" }], "damage"), "17");
+    assert.deepEqual(Object.values(CRIT_WORDS), ["Critical: dice rolled twice", "Critical: max plus a roll", "Critical: dice doubled", "Critical: total doubled"]);
   });
 
   test("a save goes as a save of its ability, so the server records what fails it, and a check does not", () => {

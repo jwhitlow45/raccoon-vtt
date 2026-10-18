@@ -47,6 +47,8 @@ describe("others' rolls as toasts", () => {
   test("this device's own roll nobody saw lands as its total, its refusal, or a word to check", () => {
     assert.equal(ownResultText({ state: "committed", lines: [line({ by: "p1" })] }), "Rolled 19: Stealth.");
     assert.equal(ownResultText({ state: "committed", lines: [line({ by: "p1", rolls: [ROLL, ROLL] })] }), "Rolled 2 times.");
+    const crit: DiceRoll = { formula: "2d6+3", faces: [4, 6], total: 25, crit: "maxPlusRoll", label: "Scimitar critical damage, slashing" };
+    assert.equal(ownResultText({ state: "committed", lines: [line({ by: "p1", rolls: [crit] })] }), "Rolled 25 (12 max + 13): Scimitar critical damage, slashing.");
     assert.equal(ownResultText({ state: "committed", lines: [] }), "Rolled. Its result is no longer in the log.");
     assert.equal(ownResultText({ state: "refused", code: "quota", message: "x", text: "Not saved. You are going too fast. Wait a few seconds." }), "Not saved. You are going too fast. Wait a few seconds.");
     assert.equal(ownResultText({ state: "unknown" }), "A roll may have happened. Check the log.");
