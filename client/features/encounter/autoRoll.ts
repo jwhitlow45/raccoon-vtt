@@ -1,6 +1,6 @@
 import { advantageFields, d20Formula, type AdvantageSource } from "#shared/dice/formula.ts";
 import { rolledTerms } from "#shared/dice/roll.ts";
-import type { DiceResult, DiceRoll, InitEntry, RoomState, TokenId } from "#shared/model.ts";
+import type { DiceResult, DiceRoll, InitEntry, OrderReveal, RoomState, TokenId } from "#shared/model.ts";
 import { MAX_ENTRIES_PER_OP, type ClientOp } from "#shared/protocol.ts";
 import { rowGroup } from "#shared/rules/initiative.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
@@ -408,6 +408,18 @@ export type RollPress = {
   /** Settled: its totals were sent, or it ended without them. It never acts again. */
   done: boolean;
 };
+
+/**
+ * What the results card says players see of the totals. Where the room keeps
+ * monsters' places secret, a total reaches them only once its row joins their
+ * order (docs/design-v1-combat-flow.md 11.2), so the card must not tell the
+ * DM that every visible monster's total already went out.
+ */
+export function totalsHelp(reveal: OrderReveal): string {
+  return reveal === "all"
+    ? "Players see each visible monster's total, as if you typed it, never the dice or modifiers."
+    : "Players see a monster's total once it joins their order, never the dice or modifiers.";
+}
 
 /** An answer that never came back, which the receipt could not settle. Nothing is sent again on its own (docs/design-v1-dice.md 8.7). */
 export const MAY_HAVE_HAPPENED = "This may have happened. Check the log.";

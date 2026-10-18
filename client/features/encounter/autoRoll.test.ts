@@ -36,6 +36,7 @@ import {
   rollStillShown,
   rowsToRoll,
   settleRoll,
+  totalsHelp,
   valuesFrom,
   type RollMode,
   type RollPress,
@@ -1079,5 +1080,14 @@ describe("a press, randomized", () => {
       }
     }
     for (const [kind, n] of Object.entries(seen)) assert.ok(n >= 50, `only ${n} presses ${kind}`);
+  });
+});
+
+describe("the results card's word on what players see (LP8-COMBAT-2)", () => {
+  test("only a room that shows the whole order says every visible monster's total went out", () => {
+    assert.match(totalsHelp("all"), /^Players see each visible monster's total/);
+    for (const reveal of ["party", "allies"] as const) {
+      assert.equal(totalsHelp(reveal), "Players see a monster's total once it joins their order, never the dice or modifiers.");
+    }
   });
 });

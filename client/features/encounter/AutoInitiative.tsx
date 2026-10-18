@@ -3,7 +3,7 @@ import type { D20Test } from "#shared/dice/bonus.ts";
 import { FORMULA_ERRORS } from "#shared/dice/formula.ts";
 import type { InitEntry } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
-import { groupKeyFor, rowGroup } from "#shared/rules/initiative.ts";
+import { groupKeyFor, orderRevealOf, rowGroup } from "#shared/rules/initiative.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Help } from "../../components/Panel.tsx";
@@ -16,7 +16,7 @@ import { NEEDS_CONNECTION } from "../dice/send.ts";
 import { useDicePanel } from "../dice/useDicePanel.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useReceipt } from "../dice/useReceipt.ts";
-import { describeRoll, initiativeRolls, MAY_HAVE_HAPPENED, noBonusSet, planPress, rollRows, rowsToRoll, type RollMode, type RollRow } from "./autoRoll.ts";
+import { describeRoll, initiativeRolls, MAY_HAVE_HAPPENED, noBonusSet, planPress, rollRows, rowsToRoll, totalsHelp, type RollMode, type RollRow } from "./autoRoll.ts";
 import { useAuto, useRollBusy, useShownRoll } from "./autoState.ts";
 import { useRowFacts, useSendAll, useSortedEntries } from "./hooks.ts";
 import { entryActor, entryName } from "./logic.ts";
@@ -172,6 +172,7 @@ export function AutoInitiativeResult() {
   const { store, roll: last } = useShownRoll();
   // Watched from the tap, so a result this card shows is never told again in a toast.
   useReceipt(last?.tag ?? null);
+  const reveal = useRoomView((s) => (s.view ? orderRevealOf(s.view.meta.settings) : "all"));
   // While the dice are on their way, the button shows it.
   if (!last || !last.done) return null;
   const dismiss = (
@@ -207,7 +208,7 @@ export function AutoInitiativeResult() {
           <div style={{ fontWeight: theme.weight.bold, overflowWrap: "anywhere" }}>
             {count === 1 ? `Rolled ${lines[0]?.rows[0]?.name ?? "1 monster"}` : `Rolled ${count} monsters, ${MODE_LABEL[last.mode]}`}
           </div>
-          <Help>Players see each visible monster's total, as if you typed it, never the dice or modifiers.</Help>
+          <Help>{totalsHelp(reveal)}</Help>
         </div>
         {dismiss}
       </div>
