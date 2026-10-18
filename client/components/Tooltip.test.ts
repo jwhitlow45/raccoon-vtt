@@ -5,7 +5,7 @@ import { chance, int, pick, rng } from "#shared/testutil.ts";
 import { FakeClock } from "../state/testing.ts";
 import type { TipEvent } from "./Tooltip.tsx";
 
-const { FOCUS_MS, HOVER_MS, KEEP_MS, PRESS_MS, TipTimer, placeTip } = await import("./Tooltip.tsx");
+const { FOCUS_MS, HOVER_MS, KEEP_MS, PRESS_MS, TipTimer, addsWords, placeTip, placeTipZoomed } = await import("./Tooltip.tsx");
 
 /** The tooltip's rules (docs/design-v1-icons.md 3.2), on a fake clock and with plain boxes for the DOM. */
 
@@ -21,13 +21,13 @@ describe("when a tooltip shows (docs/design-v1-icons.md 3.2)", () => {
     const { clock, tip, changes } = timer();
     tip.send({ t: "enter", pointer: "mouse" });
     clock.advance(HOVER_MS - 1);
-    tip.send({ t: "leave" });
+    tip.send({ t: "leave", pointer: "mouse" });
     clock.advance(2000);
     assert.deepEqual(changes, [], "passing over shows nothing");
     tip.send({ t: "enter", pointer: "mouse" });
     clock.advance(HOVER_MS);
     assert.equal(tip.shown, true);
-    tip.send({ t: "leave" });
+    tip.send({ t: "leave", pointer: "mouse" });
     assert.equal(tip.shown, false, "leaving closes it at once");
   });
 
@@ -43,26 +43,72 @@ describe("when a tooltip shows (docs/design-v1-icons.md 3.2)", () => {
     assert.equal(tip.shown, false);
   });
 
-  test("a held finger shows it after 500 ms and keeps it 1.5 s after lifting. A tap shows nothing", () => {
+  test("a held finger shows it after 500 ms and keeps it 1.5 s after lifting, through the leave a lift sends. A tap shows nothing", () => {
     const { clock, tip, changes } = timer();
+    // A touch's events in the order browsers send them (Pointer Events): enter, down, up, then leave at once.
     tip.send({ t: "enter", pointer: "touch" });
     tip.send({ t: "down", pointer: "touch" });
     clock.advance(100);
     tip.send({ t: "up" });
+    tip.send({ t: "leave", pointer: "touch" });
     clock.advance(3000);
     assert.deepEqual(changes, [], "a tap is a tap");
+    assert.equal(tip.takeClick(), false, "a tap's click reaches the control");
+    tip.send({ t: "enter", pointer: "touch" });
     tip.send({ t: "down", pointer: "touch" });
     clock.advance(PRESS_MS);
     assert.equal(tip.shown, true);
     tip.send({ t: "up" });
+    tip.send({ t: "leave", pointer: "touch" });
     clock.advance(KEEP_MS - 1);
     assert.equal(tip.shown, true, "still up to be read");
     clock.advance(1);
     assert.equal(tip.shown, false);
   });
 
-  test("Escape, a scroll and a mouse press close it", () => {
-    for (const close of [{ t: "escape" }, { t: "scroll" }, { t: "down", pointer: "mouse" }] as TipEvent[]) {
+  test("a pen's lift keeps it too, and a mouse leaving closes it at once", () => {
+    const { clock, tip } = timer();
+    tip.send({ t: "down", pointer: "touch" });
+    clock.advance(PRESS_MS);
+    tip.send({ t: "up" });
+    tip.send({ t: "leave", pointer: "pen" });
+    assert.equal(tip.shown, true);
+    tip.send({ t: "leave", pointer: "mouse" });
+    assert.equal(tip.shown, false);
+  });
+
+  test("the click a long press's lift makes is the name's, once, and never a tap's or a cancelled press's", () => {
+    const { clock, tip } = timer();
+    tip.send({ t: "down", pointer: "touch" });
+    clock.advance(PRESS_MS);
+    tip.send({ t: "up" });
+    assert.equal(tip.takeClick(), true, "the long press's click is swallowed");
+    assert.equal(tip.takeClick(), false, "only that once");
+    // A press the browser cancels for a scroll closes the name and keeps nothing for a later click.
+    tip.send({ t: "down", pointer: "touch" });
+    clock.advance(PRESS_MS);
+    tip.send({ t: "cancel" });
+    assert.equal(tip.shown, false);
+    assert.equal(tip.takeClick(), false);
+    // A long press whose click never came (Android's context menu) does not eat the next tap's.
+    tip.send({ t: "down", pointer: "touch" });
+    clock.advance(PRESS_MS);
+    tip.send({ t: "up" });
+    tip.send({ t: "down", pointer: "touch" });
+    clock.advance(100);
+    tip.send({ t: "up" });
+    assert.equal(tip.takeClick(), false);
+    // A mouse held as long is a click as usual.
+    tip.send({ t: "enter", pointer: "mouse" });
+    clock.advance(HOVER_MS);
+    tip.send({ t: "down", pointer: "mouse" });
+    clock.advance(PRESS_MS);
+    tip.send({ t: "up" });
+    assert.equal(tip.takeClick(), false);
+  });
+
+  test("Escape, a scroll, a cancelled pointer and a mouse press close it", () => {
+    for (const close of [{ t: "escape" }, { t: "scroll" }, { t: "cancel" }, { t: "down", pointer: "mouse" }] as TipEvent[]) {
       const { clock, tip } = timer();
       tip.send({ t: "enter", pointer: "mouse" });
       clock.advance(HOVER_MS);
@@ -85,9 +131,10 @@ describe("when a tooltip shows (docs/design-v1-icons.md 3.2)", () => {
       for (let step = 0; step < 60; step++) {
         const e: TipEvent = pick(r, [
           { t: "enter", pointer: pick(r, ["mouse", "touch", "pen"]) },
-          { t: "leave" },
+          { t: "leave", pointer: pick(r, ["mouse", "touch", "pen"]) },
           { t: "down", pointer: pick(r, ["mouse", "touch"]) },
           { t: "up" },
+          { t: "cancel" },
           { t: "focus", visible: chance(r, 0.5) },
           { t: "blur" },
           { t: "escape" },
@@ -106,6 +153,8 @@ describe("when a tooltip shows (docs/design-v1-icons.md 3.2)", () => {
         } else if (e.t === "up") {
           armed = null;
           keepUntil = was ? clock.t + KEEP_MS : null;
+        } else if (e.t === "leave" && e.pointer !== "mouse") {
+          // A finger's or pen's leave comes with its lift, and changes nothing.
         } else if (e.t !== "enter") {
           armed = null;
           keepUntil = null;
@@ -134,6 +183,17 @@ describe("when a tooltip shows (docs/design-v1-icons.md 3.2)", () => {
   });
 });
 
+describe("whether a tooltip describes its control", () => {
+  test("only words its name lacks are read as a description", () => {
+    assert.equal(addsWords("Roll again", "Roll again: 1d20+5 Stealth"), false, "said already in the name");
+    assert.equal(addsWords("Hide panels", "Hide panels"), false);
+    assert.equal(addsWords("Show this roll in Recent rolls", "Show roll"), true);
+    assert.equal(addsWords(undefined, "Delete"), false);
+    assert.equal(addsWords("", "Delete"), false);
+    assert.equal(addsWords("Delete, asks first", undefined), true);
+  });
+});
+
 describe("where a tooltip goes (docs/design-v1-icons.md 3.2)", () => {
   test("above with a 6 px gap where there is room, centered on its control", () => {
     assert.deepEqual(placeTip({ top: 200, left: 100, width: 44, height: 44 }, { width: 80, height: 24 }, { width: 390 }), { top: 170, left: 82 });
@@ -142,6 +202,34 @@ describe("where a tooltip goes (docs/design-v1-icons.md 3.2)", () => {
   test("below where the screen's top leaves no room, and kept 8 px inside the window's sides", () => {
     assert.deepEqual(placeTip({ top: 10, left: 0, width: 44, height: 44 }, { width: 120, height: 24 }, { width: 390 }), { top: 60, left: 8 });
     assert.equal(placeTip({ top: 300, left: 360, width: 44, height: 44 }, { width: 120, height: 24 }, { width: 390 }).left, 390 - 8 - 120);
+  });
+
+  test("inside a 130% zoom, the measured boxes are divided by it, so the tip lands beside its control and inside the screen as drawn", () => {
+    const z = 1.3;
+    // Drawn pixels, as getBoundingClientRect gives them: a button near the bottom right of a 1280 px window, and its tip.
+    const anchor = { top: 700, left: 1220, width: 57.2, height: 57.2 };
+    const tip = { width: 104, height: 31.2 };
+    const at = placeTipZoomed(anchor, tip, { width: 1280 }, z);
+    const drawn = { top: at.top * z, left: at.left * z };
+    assert.ok(Math.abs(drawn.top + tip.height - (anchor.top - 6 * z)) < 0.01, `6 px above it, as drawn: ${JSON.stringify(drawn)}`);
+    assert.ok(Math.abs(drawn.left + tip.width - (1280 - 8 * z)) < 0.01, `8 px inside the right edge, as drawn: ${JSON.stringify(drawn)}`);
+    assert.deepEqual(placeTipZoomed(anchor, tip, { width: 1280 }, 1), placeTip(anchor, tip, { width: 1280 }), "no zoom changes nothing");
+  });
+
+  test("randomized: at 85% to 130% the tip as drawn never covers its control and stays inside the window", () => {
+    const r = rng(11);
+    for (let i = 0; i < 2000; i++) {
+      const z = pick(r, [0.85, 1, 1.15, 1.3]);
+      const view = { width: int(r, 320, 1600) };
+      const anchor = { top: int(r, 0, 900), left: int(r, 0, view.width - 60), width: int(r, 24, 200) * z, height: int(r, 24, 60) * z };
+      const tip = { width: int(r, 40, 240) * z, height: int(r, 18, 80) * z };
+      const at = placeTipZoomed(anchor, tip, view, z);
+      const drawn = { top: at.top * z, left: at.left * z };
+      const overlaps = drawn.top < anchor.top + anchor.height && drawn.top + tip.height > anchor.top && drawn.left < anchor.left + anchor.width && drawn.left + tip.width > anchor.left;
+      assert.equal(overlaps, false, JSON.stringify({ z, anchor, tip, drawn }));
+      assert.ok(drawn.left >= 8 * z - 1e-9, "never past the left edge");
+      if (tip.width + 16 * z <= view.width) assert.ok(drawn.left + tip.width <= view.width - 8 * z + 1e-9, "never past the right edge");
+    }
   });
 
   test("randomized: it never covers its control", () => {

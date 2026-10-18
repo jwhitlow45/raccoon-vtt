@@ -9,6 +9,7 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { Button } = await import("./Button.tsx");
 const { IconButton } = await import("./IconButton.tsx");
 const { ICON_NAMES, Icon } = await import("./Icon.tsx");
+const { OptButton } = await import("../features/measure/controls.tsx");
 
 const VARIANTS: ButtonVariant[] = ["primary", "secondary", "quiet", "danger"];
 
@@ -117,9 +118,27 @@ describe("choices and icon buttons", () => {
     // A tool row's button passes its words beside a check that shows only when pressed in ⋯ (measure/controls.tsx OptButton).
     const rowed = html(createElement(Button, { icon: "duplicate", iconOnly: "fine" }, "Duplicate", null));
     assert.match(rowed, /aria-label="Duplicate"/, "words beside nothing still name an icon alone");
+    // Nothing drawn beside the icon is an icon alone too: a tool row's Undo passes `[undefined, null]`.
+    const empty = html(createElement(Button, { icon: "undo", "aria-label": "Undo", title: "Undo" }, undefined, null));
+    assert.match(empty, /role="tooltip"[^>]*>Undo</, "an icon with empty children shows its name");
+    assert.doesNotMatch(empty, / title=/, "and no native title");
     const worded = html(createElement(Button, { icon: "copy", title: "Copies the link" }, "Copy link"));
     assert.match(worded, / title="Copies the link"/, "words beside an icon keep the native title");
     assert.doesNotMatch(worded, /role="tooltip"/);
+  });
+
+  test("a tool row's icon with no words (OptButton, as the nudge arrows and Draw's Undo) shows its name as a tooltip, not a native title", () => {
+    const nudge = html(createElement(OptButton, { icon: "arrowLeft", label: "Nudge the box left", onClick: () => {} }));
+    assert.match(nudge, /aria-label="Nudge the box left"/);
+    assert.match(nudge, /role="tooltip"[^>]*>Nudge the box left</);
+    assert.doesNotMatch(nudge, / title=/);
+  });
+
+  test("a caller's own description is kept beside the tip's, and a tip that only repeats words of the name describes nothing", () => {
+    const joined = html(createElement(IconButton, { icon: "undo", label: "Undo", title: "Undo your last change", "aria-describedby": "own-note" }));
+    assert.match(joined, /aria-describedby="own-note [^"]+"/);
+    const kept = html(createElement(IconButton, { icon: "again", label: "Roll again: 1d20+5 Stealth", title: "Roll again", "aria-describedby": "own-note" }));
+    assert.match(kept, /aria-describedby="own-note"/);
   });
 
   test("every icon draws and hides itself from screen readers", () => {

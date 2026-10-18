@@ -1,8 +1,8 @@
-import type { ButtonHTMLAttributes, CSSProperties, MouseEvent, ReactNode, Ref } from "react";
+import { Children, type ButtonHTMLAttributes, type CSSProperties, type MouseEvent, type ReactNode, type Ref } from "react";
 import { theme } from "../lib/theme.ts";
 import { Icon, type IconName } from "./Icon.tsx";
 import { Spinner } from "./Loading.tsx";
-import { useTooltip } from "./Tooltip.tsx";
+import { addsWords, useTooltip } from "./Tooltip.tsx";
 import { isCoarsePointer } from "../lib/device.ts";
 import { buttonLook, dangerLook, type ButtonVariant } from "./looks.ts";
 
@@ -88,14 +88,15 @@ function wordsOf(children: ReactNode): string | undefined {
  * destructive actions, and `armed` marks one that waits for its second tap.
  */
 export function Button(props: ButtonProps) {
-  const { variant = "secondary", size = "md", block, armed, pressed, expanded, busy, icon, iconOnly, title, style, disabled, onClick, children, onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onFocus, onBlur, ...rest } = props;
+  const { variant = "secondary", size = "md", block, armed, pressed, expanded, busy, icon, iconOnly, title, style, disabled, onClick, children, onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onPointerCancel, onClickCapture, onFocus, onBlur, ...rest } = props;
   const ignore = busy === true && disabled !== true;
   const bare = icon !== undefined && (iconOnly === "always" || (iconOnly === "fine" && !isCoarsePointer()));
   const name = rest["aria-label"] ?? wordsOf(children);
   // An icon alone shows its name on hover, keyboard focus and a long press (Tooltip.tsx), never the native title, which a keyboard never shows.
-  const tipped = icon !== undefined && (bare || children === undefined || children === null || children === false);
-  const tooltip = useTooltip(title ?? name ?? "", { describes: title !== undefined && title !== name });
-  const handlers = { onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onFocus, onBlur };
+  // Nothing drawn counts as alone, such as a tool row's `[undefined, null]` beside its icon (OptButton).
+  const tipped = icon !== undefined && (bare || Children.toArray(children).length === 0);
+  const tooltip = useTooltip(title ?? name ?? "", { describes: addsWords(title, name) });
+  const handlers = { onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onPointerCancel, onClickCapture, onFocus, onBlur };
   const button = (
     <button
       type="button"

@@ -2,7 +2,7 @@ import type { ButtonHTMLAttributes, CSSProperties, ReactNode, Ref } from "react"
 import { theme } from "../lib/theme.ts";
 import { Icon, type IconName } from "./Icon.tsx";
 import { PRESSED } from "./looks.ts";
-import { useTooltip } from "./Tooltip.tsx";
+import { addsWords, useTooltip } from "./Tooltip.tsx";
 
 /**
  * A 44 x 44 button that shows only an icon: a header's close and back, a
@@ -23,9 +23,9 @@ export function IconButton(
     children?: ReactNode;
   },
 ) {
-  const { icon, label, title, pressed, disabled, style, children, onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onFocus, onBlur, ...rest } = props;
+  const { icon, label, title, pressed, disabled, style, children, onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onPointerCancel, onClickCapture, onFocus, onBlur, ...rest } = props;
   // The name on hover, keyboard focus and a long press, never covering the button (docs/design-v1-icons.md 3). Said by a reader only when it adds to the name.
-  const tooltip = useTooltip(title ?? label, { describes: title !== undefined && title !== label });
+  const tooltip = useTooltip(title ?? label, { describes: addsWords(title, label) });
   const look: CSSProperties = disabled
     ? { background: "transparent", border: `${theme.line.border}px solid transparent`, color: theme.color.textDisabled }
     : pressed
@@ -39,7 +39,7 @@ export function IconButton(
       aria-pressed={pressed}
       disabled={disabled}
       {...rest}
-      {...tooltip.anchor({ onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onFocus, onBlur, "aria-describedby": rest["aria-describedby"] })}
+      {...tooltip.anchor({ onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onPointerCancel, onClickCapture, onFocus, onBlur, "aria-describedby": rest["aria-describedby"] })}
       style={{
         flex: "none",
         display: "inline-grid",

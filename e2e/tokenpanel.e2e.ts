@@ -634,6 +634,35 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await goblin.getByRole("img", { name: "Armor Class 15" }).waitFor();
   });
 
+  test("1z. at 130% on a desk, an icon's name shows beside it and inside the window: Duplicate in the action bar near the bottom, and Hide panels at the right edge (docs/design-v1-icons.md 3.2)", async () => {
+    await setUp(dm, dmCdp, { ...DESK, scale: 1.3 }, null);
+    await tapToken(dm, run.goblin.at);
+    const goblin = bar(dm, "Goblin 4");
+    await goblin.waitFor();
+    const view = dm.viewportSize()!;
+    const zoom = 1.3;
+    for (const control of [goblin.getByRole("button", { name: "Duplicate", exact: true }), dm.getByRole("button", { name: "Hide panels", exact: true })]) {
+      await dm.mouse.move(1, 1);
+      await control.hover();
+      const tip = dm.locator('[role="tooltip"]:popover-open');
+      await tip.waitFor();
+      const at = await rectOf(control);
+      const box = await rectOf(tip);
+      const label = `${await control.getAttribute("aria-label")}: ${JSON.stringify({ at, box })}`;
+      assert.ok(box.left >= -0.5 && box.top >= -0.5 && box.right <= view.width + 0.5 && box.bottom <= view.height + 0.5, `the tip leaves the window: ${label}`);
+      const above = Math.abs(at.top - box.bottom - 6 * zoom) < 2;
+      const below = Math.abs(box.top - at.bottom - 6 * zoom) < 2;
+      assert.ok(above || below, `the tip is not beside its control: ${label}`);
+      const centered = Math.abs(box.left + box.width / 2 - (at.left + at.width / 2)) < 2;
+      const atRightEdge = Math.abs(box.right - (view.width - 8 * zoom)) < 2;
+      assert.ok(centered || atRightEdge, `the tip is neither centered on its control nor kept inside the right edge: ${label}`);
+      await shots.take(dm, `tokenpanel-tip-130-${(await control.getAttribute("aria-label"))!.toLowerCase().replace(/\s+/g, "-")}`);
+    }
+    await dm.mouse.move(1, 1);
+    await dm.keyboard.press("Escape");
+    await setUp(dm, dmCdp, DESK, null);
+  });
+
   test("1b. a flip to the short layout while the HP field has focus keeps its focus and what was typed, and the page's order follows what shows once focus leaves", async () => {
     await setUp(dm, dmCdp, DESK, null);
     await tapToken(dm, run.goblin.at);

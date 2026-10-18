@@ -3,7 +3,7 @@ import { largerEach } from "../canvas/barDock.ts";
 import { fitSlot } from "../canvas/fitSlot.ts";
 import { ReconnectBanner } from "../components/ConnectionStatus.tsx";
 import { Icon, type IconName } from "../components/Icon.tsx";
-import { useTooltip } from "../components/Tooltip.tsx";
+import { addsWords, useTooltip } from "../components/Tooltip.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { findCamera, findRect, nextOwnToken, sheetCover, type OpenSheet } from "../features/find/findToken.ts";
 import { badgeText } from "../features/log/unread.ts";
@@ -238,7 +238,7 @@ export function UndoButtons() {
  */
 function IconButton(props: { label: string; title: string; draw: IconName | { path: string }; onClick(): void }) {
   // The name on hover, keyboard focus and a long press, never the native title (docs/design-v1-icons.md 3.2).
-  const tooltip = useTooltip(props.title, { describes: props.title !== props.label });
+  const tooltip = useTooltip(props.title, { describes: addsWords(props.title, props.label) });
   return (
     <>
       <button
