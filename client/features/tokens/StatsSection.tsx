@@ -117,9 +117,9 @@ export function StatsFields(props: {
         </Stat>
       )}
       {SPEED_KEYS.map((key) => (
-        <Stat key={key} label={`${SPEED_LABELS[key]} speed`} value={speeds[key] === undefined ? undefined : `${speeds[key]} ft`} editable={canEdit("speeds")}>
+        <Stat key={key} label={`${SPEED_LABELS[key]} Speed`} value={speeds[key] === undefined ? undefined : `${speeds[key]} ft`} editable={canEdit("speeds")}>
           <NumberField
-            label={`${SPEED_LABELS[key]} speed`}
+            label={`${SPEED_LABELS[key]} Speed`}
             value={speeds[key]}
             min={0}
             max={1000}

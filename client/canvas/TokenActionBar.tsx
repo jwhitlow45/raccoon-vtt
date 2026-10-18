@@ -649,7 +649,7 @@ function CountLegButton(props: { token: ViewToken }) {
     else actions.dispatch({ t: "token.countLeg", tokenId: props.token.id, counts: off });
   };
   return (
-    <BarButton pressed={off} label="The last move doesn't count against speed, for a shove or a teleport" onClick={press}>
+    <BarButton pressed={off} label="The last move doesn't count against Speed, for a shove or a teleport" onClick={press}>
       Doesn't count
     </BarButton>
   );

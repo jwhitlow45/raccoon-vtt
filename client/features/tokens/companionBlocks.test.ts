@@ -64,7 +64,7 @@ function attached(state: RoomState, patch: Record<string, unknown>): Actor {
 describe("the numbers a block sets (docs/design-v1-companion-stat-blocks.md 5.1)", () => {
   test("an SRD owl on Hoot: each number that changes, with the one it has now, and the HP it keeps at full", () => {
     const n = blockNumbers(OWL, HOOT, hoot(), average);
-    assert.deepEqual(n.lines, ["AC 11, now 10", "Speed 5 ft, fly 60 ft, now 30 ft", "Darkvision 120 ft, now none", "Passive Perception 15, now 10", "Initiative +1, now +0"]);
+    assert.deepEqual(n.lines, ["AC 11, now 10", "Speed 5 ft, Fly 60 ft, now 30 ft", "Darkvision 120 ft, now none", "Passive Perception 15, now 10", "Initiative +1, now +0"]);
     assert.deepEqual(n.patch, { ac: 11, speeds: { walk: 5, fly: 60 }, senses: "Darkvision 120 ft.", passivePerception: 15, initBonus: 1, hp: { max: 1, cur: 1 } });
     assert.equal(n.hpLine, "Hoot is unhurt, so it stays at full HP: 1 of 1.");
     assert.equal(n.average, 1);
@@ -76,7 +76,7 @@ describe("the numbers a block sets (docs/design-v1-companion-stat-blocks.md 5.1)
     const stored = companionBlock("moth", "bree", { speed: "10 ft., Fly 40 ft. (hover)" });
     const n = blockNumbers(monsterView(stored), HOOT, hoot(), average);
     assert.deepEqual(n.patch.speeds, { walk: 10, fly: 40, hover: true });
-    assert.ok(n.lines.includes("Speed 10 ft, fly 40 ft (hover), now 30 ft"));
+    assert.ok(n.lines.includes("Speed 10 ft, Fly 40 ft (hover), now 30 ft"));
     assert.deepEqual(n.patch.hp, { max: 9, cur: 9 });
   });
 
@@ -437,12 +437,12 @@ describe("words", () => {
 
   test("speeds read walk first, then each mode, with hover", () => {
     assert.equal(speedText({ walk: 30 }), "30 ft");
-    assert.equal(speedText({ walk: 5, fly: 60, hover: true, swim: 10 }), "5 ft, fly 60 ft (hover), swim 10 ft");
+    assert.equal(speedText({ walk: 5, fly: 60, hover: true, swim: 10 }), "5 ft, Fly 60 ft (hover), Swim 10 ft");
   });
 
   test("what a new companion takes from its block beside the form's fields", () => {
-    assert.equal(fromTheBlock(OWL), "From the block: speed 5 ft, fly 60 ft. Darkvision 120 ft. Passive Perception 15. Initiative +1.");
-    assert.equal(fromTheBlock(monsterView(customMonster("x", { senses: "", initiative: -1, speed: "30 ft." }))), "From the block: speed 30 ft. Passive Perception 11. Initiative −1.");
+    assert.equal(fromTheBlock(OWL), "From the block: Speed 5 ft, Fly 60 ft. Darkvision 120 ft. Passive Perception 15. Initiative +1.");
+    assert.equal(fromTheBlock(monsterView(customMonster("x", { senses: "", initiative: -1, speed: "30 ft." }))), "From the block: Speed 30 ft. Passive Perception 11. Initiative −1.");
   });
 });
 

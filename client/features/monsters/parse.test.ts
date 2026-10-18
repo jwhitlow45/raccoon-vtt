@@ -135,7 +135,7 @@ describe("pasted stat blocks", () => {
       "No ability scores were found.",
       "No Initiative was given, so it is the Dexterity modifier.",
       "No Hit Points were found.",
-      "No speed was found.",
+      "No Speed was found.",
       "No Passive Perception was given, so it is 10 plus the Wisdom modifier.",
       "No challenge rating was found.",
       "No actions were found.",

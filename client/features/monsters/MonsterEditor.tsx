@@ -12,6 +12,7 @@ import {
   SECTIONS,
   signed,
   SIZE_WORDS,
+  SPEED_WORDS,
   speedsOf,
   statBlockMarkdown,
   type SectionKey,
@@ -491,10 +492,10 @@ function Choice<T extends string>(props: { label: string; value: T; options: rea
 }
 
 function speedSummary(speeds: Actor["speeds"]): string {
-  const parts = [`walk ${speeds.walk} ft.`];
+  const parts = [`Walk ${speeds.walk} ft.`];
   for (const kind of ["burrow", "climb", "fly", "swim"] as const) {
     const feet = speeds[kind];
-    if (feet !== undefined) parts.push(`${kind} ${feet} ft.${kind === "fly" && speeds.hover ? " (hover)" : ""}`);
+    if (feet !== undefined) parts.push(`${SPEED_WORDS[kind]} ${feet} ft.${kind === "fly" && speeds.hover ? " (hover)" : ""}`);
   }
   return parts.join(", ");
 }

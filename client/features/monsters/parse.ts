@@ -338,8 +338,8 @@ export function parseStatBlockText(input: string): ParsedStatBlock {
   else warnings.push("No Hit Points were found.");
 
   const speed = values.get("speed");
-  if (speed) block.speed = truncate(normalizeSpeed(speed), 200, "The speed", warnings);
-  else warnings.push("No speed was found.");
+  if (speed) block.speed = truncate(normalizeSpeed(speed), 200, "The Speed", warnings);
+  else warnings.push("No Speed was found.");
 
   block.skills = truncate(values.get("skills") ?? "", 500, "Skills", warnings);
   block.vulnerabilities = truncate(capitalizeItems(values.get("vulnerabilities") ?? ""), 500, "Vulnerabilities", warnings);

@@ -108,7 +108,7 @@ describe("movement since the turn began", () => {
     assert.equal(movementText(15, speedsLeft({ walk: 30 }, 0, 15)), "Moved 15 ft\n15 ft left");
     assert.equal(movementText(40, speedsLeft({ walk: 30 }, 0, 40)), "Moved 40 ft\n20 ft left with Dash");
     assert.equal(movementText(70, speedsLeft({ walk: 30 }, 0, 70)), "Moved 70 ft\n10 ft past Dash");
-    assert.equal(movementText(15, speedsLeft({ walk: 30, fly: 60, swim: 10 }, 0, 15)), "Moved 15 ft\n15 ft left · fly 45 ft", "a speed already passed is left out");
+    assert.equal(movementText(15, speedsLeft({ walk: 30, fly: 60, swim: 10 }, 0, 15)), "Moved 15 ft\n15 ft left · Fly 45 ft", "a speed already passed is left out");
     assert.equal(movementText(35, speedsLeft({ walk: 30, fly: 60 }, 10, 35)), "Moved 35 ft\nFly: 25 ft left");
   });
 

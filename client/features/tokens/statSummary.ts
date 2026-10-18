@@ -3,7 +3,7 @@ import { ABILITY_KEYS } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { ABILITY_ABBR } from "#shared/rules/skills.ts";
-import { signed, statBlockFromSrd, statBlockOf } from "#shared/statBlock.ts";
+import { signed, SPEED_WORDS, statBlockFromSrd, statBlockOf } from "#shared/statBlock.ts";
 import { shieldAc } from "../../canvas/tokenMarks.ts";
 import { hpDisplay, type HpView } from "../../lib/tokenView.ts";
 import { tokenStatBlock } from "../monsters/statBlockLink.ts";
@@ -68,7 +68,7 @@ const SPEED_MODES = ["fly", "swim", "climb", "burrow"] as const;
 
 /**
  * A creature's speeds, walk first, one unit per mode: "Speed 30 ft," then
- * "fly 60 ft (hover)," then "swim 30 ft". A line may start at any mode,
+ * "Fly 60 ft (hover)," then "Swim 30 ft". A line may start at any mode,
  * so four or five modes wrap between them and never run out of the box.
  */
 export function speedUnits(speeds: Partial<Actor["speeds"]> | undefined): VitalUnit[] {
@@ -77,7 +77,7 @@ export function speedUnits(speeds: Partial<Actor["speeds"]> | undefined): VitalU
   for (const mode of SPEED_MODES) {
     const ft = speeds[mode];
     if (typeof ft !== "number" || ft <= 0) continue;
-    parts.push({ label: mode, value: `${ft} ft${mode === "fly" && speeds.hover ? " (hover)" : ""}` });
+    parts.push({ label: SPEED_WORDS[mode], value: `${ft} ft${mode === "fly" && speeds.hover ? " (hover)" : ""}` });
   }
   return parts.map((p, i) => ({ kind: "text", label: p.label, value: p.value, comma: i < parts.length - 1 }));
 }

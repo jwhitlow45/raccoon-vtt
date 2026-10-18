@@ -209,7 +209,7 @@ export function movementText(usedFt: number, left: readonly SpeedLeft[]): string
   const moved = `Moved ${formatFeet(usedFt)}`;
   const [first, ...rest] = left;
   if (!first) return moved;
-  const others = rest.filter((s) => s.band === "walk").map((s) => `${s.kind} ${formatFeet(s.leftFt)}`);
+  const others = rest.filter((s) => s.band === "walk").map((s) => `${capitalize(s.kind)} ${formatFeet(s.leftFt)}`);
   return `${moved}\n${[leftText(first), ...others].join(" · ")}`;
 }
 

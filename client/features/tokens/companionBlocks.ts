@@ -1,7 +1,7 @@
 import type { Actor, CompanionBlock, CreatureSize, ImageRef, MonsterSize, RoomState, Token } from "#shared/model.ts";
 import type { ActorPatch, ClientOp, TokenPatch } from "#shared/protocol.ts";
 import { fitLine, type SrdMonster, type StatBlockMonster } from "#shared/srd/monsters.ts";
-import { signed, sizeAndType } from "#shared/statBlock.ts";
+import { signed, sizeAndType, SPEED_WORDS } from "#shared/statBlock.ts";
 import type { OnAnswer, OpAnswer, OpRefusal } from "../../state/types.ts";
 import { viewOf } from "../monsters/draft.ts";
 import { shippedImage } from "../monsters/images.ts";
@@ -108,12 +108,12 @@ export function countLabel(shown: number, total: number): string {
 
 const SIZE_WORDS: Record<MonsterSize, string> = { tiny: "Tiny", small: "Small", medium: "Medium", large: "Large", huge: "Huge", gargantuan: "Gargantuan" };
 
-/** Speeds as the numbers step and the add form say them: "5 ft, fly 60 ft (hover)", the walk first. */
+/** Speeds as the numbers step and the add form say them: "5 ft, Fly 60 ft (hover)", the walk first. */
 export function speedText(speeds: Actor["speeds"]): string {
   const parts = [`${speeds.walk} ft`];
   for (const kind of ["burrow", "climb", "fly", "swim"] as const) {
     const feet = speeds[kind];
-    if (feet !== undefined) parts.push(`${kind} ${feet} ft${kind === "fly" && speeds.hover ? " (hover)" : ""}`);
+    if (feet !== undefined) parts.push(`${SPEED_WORDS[kind]} ${feet} ft${kind === "fly" && speeds.hover ? " (hover)" : ""}`);
   }
   return parts.join(", ");
 }
@@ -128,10 +128,10 @@ function sensesText(senses: string): string {
   return senses.trim().replace(/\.$/, "");
 }
 
-/** "From the block: speed 5 ft, fly 60 ft. Darkvision 120 ft. Passive Perception 15. Initiative +1.", what the add form takes besides its fields. */
+/** "From the block: Speed 5 ft, Fly 60 ft. Darkvision 120 ft. Passive Perception 15. Initiative +1.", what the add form takes besides its fields. */
 export function fromTheBlock(view: StatBlockMonster): string {
   const senses = sensesText(fitLine(view.senses));
-  return `From the block: speed ${speedText(view.speeds)}.${senses ? ` ${senses}.` : ""} Passive Perception ${view.passivePerception}. Initiative ${signed(view.initiative.bonus)}.`;
+  return `From the block: Speed ${speedText(view.speeds)}.${senses ? ` ${senses}.` : ""} Passive Perception ${view.passivePerception}. Initiative ${signed(view.initiative.bonus)}.`;
 }
 
 /** The max HP the numbers step sets: the block's average, a number typed, or the one it has. */

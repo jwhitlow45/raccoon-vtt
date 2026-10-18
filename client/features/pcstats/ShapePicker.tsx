@@ -85,7 +85,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
               onChange={setGainTemp}
             />
           )}
-          <Help>{`The token takes ${whose(picked.name)} AC and speeds until the shape ends, then ${whose(name)} own come back. It keeps ${whose(name)} HP, conditions and Passive Perception in either shape.`}</Help>
+          <Help>{`The token takes ${whose(picked.name)} AC and Speeds until the shape ends, then ${whose(name)} own come back. It keeps ${whose(name)} HP, conditions and Passive Perception in either shape.`}</Help>
         </div>
       </Dialog>
     );

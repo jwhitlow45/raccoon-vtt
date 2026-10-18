@@ -339,7 +339,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     await valueIs(ana.getByRole("combobox", { name: "Size" }), "tiny");
     await valueIs(ana.getByRole("textbox", { name: "HP" }), "1");
     await valueIs(ana.getByRole("textbox", { name: "AC" }), "11");
-    await ana.getByText("From the block: speed 5 ft, fly 60 ft. Darkvision 120 ft. Passive Perception 15. Initiative +1.").waitFor();
+    await ana.getByText("From the block: Speed 5 ft, Fly 60 ft. Darkvision 120 ft. Passive Perception 15. Initiative +1.").waitFor();
     await ana.getByText("The block’s average, 1 (1d4 − 1). Type another for a higher-level casting.").waitFor();
     await shots.take(ana, "companions-form-owl");
     await ana.getByRole("button", { name: "Add and place" }).click();
@@ -398,7 +398,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     await shots.take(ana, "companions-attach-pick");
     await dialog.getByRole("button", { name: /^Owl\b/ }).first().click();
     const step = ana.getByRole("dialog", { name: "Attach Owl" });
-    for (const line of ["AC 11, now 10", "Speed 5 ft, fly 60 ft, now 30 ft", "Darkvision 120 ft, now none", "Passive Perception 15, now 10", "Initiative +1, now +0"]) await step.getByText(line, { exact: true }).waitFor();
+    for (const line of ["AC 11, now 10", "Speed 5 ft, Fly 60 ft, now 30 ft", "Darkvision 120 ft, now none", "Passive Perception 15, now 10", "Initiative +1, now +0"]) await step.getByText(line, { exact: true }).waitFor();
     await step.getByText("Hoot is unhurt, so it stays at full HP: 1 of 1.").waitFor();
     await shots.take(ana, "companions-numbers-step");
     // Back keeps the search.

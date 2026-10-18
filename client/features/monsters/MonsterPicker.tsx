@@ -51,7 +51,7 @@ export function MonsterPicker(props: { name: string; onPick(link: BlockLink): vo
   return (
     <Dialog title="Attach a stat block" onClose={props.onClose} phone="fill" width="md">
       <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
-        <Help>Links the block only. The token keeps its own HP, AC and speeds.</Help>
+        <Help>Links the block only. The token keeps its own HP, AC and Speeds.</Help>
         {suggested.length > 0 ? (
           <>
             <ListLabel>Same name</ListLabel>

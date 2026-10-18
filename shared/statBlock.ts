@@ -30,6 +30,9 @@ export const SIZE_WORDS: Record<MonsterSize, string> = {
   gargantuan: "Gargantuan",
 };
 
+/** A speed's name as the SRD capitalizes it beside its number: "Fly 60 ft.". */
+export const SPEED_WORDS: Record<"walk" | "burrow" | "climb" | "fly" | "swim", string> = { walk: "Walk", burrow: "Burrow", climb: "Climb", fly: "Fly", swim: "Swim" };
+
 /**
  * The ability labels of a stat block's table, as the SRD's tables write
  * them. The writer below and the readers of a stored block (`statBlockFromSrd`

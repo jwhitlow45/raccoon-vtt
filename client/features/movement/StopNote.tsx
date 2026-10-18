@@ -111,7 +111,7 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
         size="sm"
         busy={busy}
         onClick={teleport}
-        title="For Misty Step and anything else that passes walls: the walk to the wall is taken back, and the teleport does not count against speed"
+        title="For Misty Step and anything else that passes walls: the walk to the wall is taken back, and the teleport does not count against Speed"
       >
         {busy ? "Teleporting…" : "Teleport here"}
       </Button>

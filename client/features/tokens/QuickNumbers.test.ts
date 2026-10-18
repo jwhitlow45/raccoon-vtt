@@ -32,7 +32,7 @@ describe("the quick numbers under a token's name", () => {
   test("the DM reads AC, speed, Passive Perception, initiative, the elevation and the sheet link, each named in full", () => {
     const t = token("g", { elevation: 20, actor: { inline: actor({ ac: 15, speeds: { walk: 30, fly: 60 }, passivePerception: 14, initBonus: 2, sheetUrl: "https://www.dndbeyond.com/characters/12345" }) } });
     const { names, markup } = numbersFor(DM, t);
-    assert.deepEqual(names, ["Armor Class 15", "Speed 30 ft, fly 60 ft", "Passive Perception 14", "Initiative +2", "Elevation 20 ft", "Open the sheet"]);
+    assert.deepEqual(names, ["Armor Class 15", "Speed 30 ft, Fly 60 ft", "Passive Perception 14", "Initiative +2", "Elevation 20 ft", "Open the sheet"]);
     assert.match(markup, />PP<\/span><strong>14<\/strong>/, "a short word beside the number, read at once on a phone");
     assert.match(markup, /href="https:\/\/www\.dndbeyond\.com\/characters\/12345" target="_blank" rel="noopener noreferrer"/);
   });

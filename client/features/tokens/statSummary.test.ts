@@ -123,11 +123,11 @@ describe("the vitals, by viewer", () => {
 describe("the vitals' units", () => {
   test("speed splits per mode, walk first, with the commas that join them", () => {
     assert.deepEqual(speedUnits({ walk: 30 }).map(unitText), ["Speed 30 ft"]);
-    assert.deepEqual(speedUnits({ walk: 30, fly: 60, hover: true }).map(unitText), ["Speed 30 ft,", "fly 60 ft (hover)"]);
-    assert.deepEqual(speedUnits({ walk: 0, fly: 30, hover: true }).map(unitText), ["Speed 0 ft,", "fly 30 ft (hover)"]);
-    assert.deepEqual(speedUnits({ walk: 40, burrow: 30, fly: 80, swim: 40 }).map(unitText), ["Speed 40 ft,", "fly 80 ft,", "swim 40 ft,", "burrow 30 ft"]);
+    assert.deepEqual(speedUnits({ walk: 30, fly: 60, hover: true }).map(unitText), ["Speed 30 ft,", "Fly 60 ft (hover)"]);
+    assert.deepEqual(speedUnits({ walk: 0, fly: 30, hover: true }).map(unitText), ["Speed 0 ft,", "Fly 30 ft (hover)"]);
+    assert.deepEqual(speedUnits({ walk: 40, burrow: 30, fly: 80, swim: 40 }).map(unitText), ["Speed 40 ft,", "Fly 80 ft,", "Swim 40 ft,", "Burrow 30 ft"]);
     const five = speedUnits({ walk: 1000, fly: 1000, swim: 1000, climb: 1000, burrow: 1000, hover: true }).map(unitText);
-    assert.deepEqual(five, ["Speed 1000 ft,", "fly 1000 ft (hover),", "swim 1000 ft,", "climb 1000 ft,", "burrow 1000 ft"]);
+    assert.deepEqual(five, ["Speed 1000 ft,", "Fly 1000 ft (hover),", "Swim 1000 ft,", "Climb 1000 ft,", "Burrow 1000 ft"]);
   });
 
   test("HP and temporary HP are separate units from the tag", () => {
