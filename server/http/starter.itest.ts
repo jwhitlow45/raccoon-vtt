@@ -430,6 +430,46 @@ describe("a player's pick waits out a floor, so its timing never tells what the 
     assert.deepEqual((outcomes.held as { second: { status: number } }).second.status, 503);
   });
 
+  test("from a player's pick until its answer, their library and the image's address show the same for a held work and a fresh one, and both take the pick once it answers", async () => {
+    const seenBy: Record<string, unknown> = {};
+    for (const held of [true, false]) {
+      const clock = gateClock();
+      const timed = await timedApp(clock);
+      try {
+        const roomId = await room();
+        if (held) assert.equal((await pick(timed, roomId, auth.allow(roomId, "dm"), { work: "test-pack/knight", kind: "token" })).statusCode, 200);
+        const player = auth.allow(roomId, "player");
+        const library = async () => ((await timed.inject({ method: "GET", url: `/api/rooms/${roomId}/assets`, headers: player.headers })).json() as { assets: { id: string }[] }).assets.map((a) => a.id);
+        const file = async (id: string) => (await timed.inject({ method: "GET", url: `/api/assets/${id}/full`, headers: player.headers })).statusCode;
+        const rowIds = async () => (await pool.query<{ id: string }>("select id from assets where room_id = $1", [roomId])).rows.map((r) => r.id);
+        const before = await library();
+        const answer = pick(timed, roomId, player, { work: "test-pack/knight", kind: "token" });
+        // Polled over and over while the pick copies or reuses, then once more inside its floor.
+        const polled = new Set<string>();
+        const files = new Set<number>();
+        while (clock.opens.length === 0) {
+          for (const id of await library()) polled.add(id);
+          for (const id of await rowIds()) files.add(await file(id));
+          await new Promise((r) => setTimeout(r, 2));
+        }
+        const [id] = await rowIds();
+        assert.ok(id);
+        for (const x of await library()) polled.add(x);
+        files.add(await file(id));
+        for (const open of clock.opens) open();
+        const res = await answer;
+        assert.equal(res.statusCode, 200, res.body);
+        assert.equal((res.json() as { id: string }).id, id);
+        const after = { library: (await library()).map((x) => (x === id ? "the pick" : x)), file: await file(id) };
+        seenBy[held ? "held" : "fresh"] = { before, during: { library: [...polled], files: [...files] }, after };
+      } finally {
+        await timed.close();
+      }
+    }
+    assert.deepEqual(seenBy.held, seenBy.fresh, JSON.stringify(seenBy));
+    assert.deepEqual(seenBy.fresh, { before: [], during: { library: [], files: [404] }, after: { library: ["the pick"], file: 200 } });
+  });
+
   test("a full processing queue refuses a player's pick alike, held work or fresh, and the DM's pick of a held work still goes", async () => {
     const timed = await timedApp(stillClock());
     // Each job starts only once the one before ends, so one gate holds them all.

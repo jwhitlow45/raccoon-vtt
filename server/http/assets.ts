@@ -13,7 +13,7 @@ import { sendVariant } from "../assets/serve.ts";
 import { isCachedThumbnail } from "../assets/serpapi.ts";
 import { AssetService, type AssetServiceOptions, type VisibleAssetsFn } from "../assets/service.ts";
 import { PLAYER_PICK_FLOOR_MS, noSoonerThan } from "../assets/starter.ts";
-import { getAsset, listRoomAssets, variantPath } from "../assets/store.ts";
+import { addUploaders, getAsset, listRoomAssets, variantPath } from "../assets/store.ts";
 import { receiveToFile, tempFile } from "../assets/upload.ts";
 import type { GrantContext } from "../auth/types.ts";
 import { clientIp } from "../auth/clientIp.ts";
@@ -274,9 +274,15 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
      * way. Phones at one table often share an address, so a tablemate's
      * upload can meet a 503 for that moment, which the image picker waits
      * out with its note. A held work takes its turn in the processing
-     * queue as a fresh copy does (queueWhenHeld). Its answer is built the
-     * same either way, and the player's library lists it by when they
-     * added it, not when the room first did (store.ts listRoomAssets).
+     * queue as a fresh copy does (queueWhenHeld). It joins the player's
+     * library, as an uploader of the row, only once the floor has passed:
+     * a reuse granted that at once and a copy only after encoding, so a
+     * library polled meanwhile showed a held work first. Its answer is
+     * built the same either way, and the player's library lists it by when
+     * they added it, not when the room first did (store.ts listRoomAssets).
+     * A server stopped between the copy and the grant leaves a starter row
+     * no one added, which the DM's library marks Not in use, outside the
+     * quota, and which the next pick of the work takes up as held.
      */
     scope.post<{ Params: { id: string } }>("/api/rooms/:id/assets/starter", async (req, reply) => {
       const started = service.pickClock.now();
@@ -303,8 +309,9 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
       try {
         service.hourly.record(checks);
         const result = await service
-          .ingestStarter({ roomId, uploaderIds: [grant.memberId], found, kind, queueWhenHeld: player })
+          .ingestStarter({ roomId, uploaderIds: player ? [] : [grant.memberId], found, kind, queueWhenHeld: player })
           .finally(() => (player ? noSoonerThan(started, PLAYER_PICK_FLOOR_MS, service.pickClock) : undefined));
+        if (player) await addUploaders(app.pool, result.id, [grant.memberId]);
         return reply.code(200).send(result);
       } finally {
         releaseSlot();
