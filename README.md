@@ -98,6 +98,7 @@ follows `PORT`.
 | `pnpm test` | unit tests (`*.test.ts`) |
 | `pnpm test:int` | integration tests against the dev postgres (`*.itest.ts`). Run `pnpm db:up` first |
 | `pnpm test:e2e` | builds the client, then runs the browser tests (`e2e/*.e2e.ts`) against a server on port 3100 (`E2E_PORT`) and the dev postgres. Needs Google Chrome installed. Screenshots go to `test-results/e2e-screenshots` (gitignored), or to the folder in `E2E_SCREENSHOT_DIR`, and `E2E_SCREENSHOT_DIR=0` takes none. Run it alone, not beside `pnpm test:int`, since both use the same database |
+| `pnpm test:e2e:shard <index> <count>` | one shard of the browser tests, as [continuous integration](#continuous-integration) runs them. Run `pnpm build` first |
 | `pnpm build` | the client into `dist/` |
 | `pnpm db:psql` | a psql shell in the dev postgres |
 | `pnpm db:down` | stop the dev postgres, keeping its data |
@@ -108,6 +109,49 @@ follows `PORT`.
 `docker compose up --build raccoon`, from the [Quick start](#quick-start),
 is also how to try a build of the production image before it goes to a
 server.
+
+## Continuous integration
+
+GitHub Actions runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+on every push to `main` or to a branch under `ci/`, and by hand from the
+Actions tab. It needs no secrets and deploys nothing.
+
+- **build**, on Linux: `pnpm build` once, kept for the e2e shards.
+- **checks**, on Linux: `pnpm typecheck`, `pnpm test` and `pnpm test:int`,
+  against a postgres service container like the one in `docker-compose.yml`.
+- **e2e**, on macOS, five shards at once: each shard installs, downloads
+  the build, starts a postgres of its own from Homebrew and runs its share
+  of `e2e/*.e2e.ts`, one file at a time. They run on macOS because the
+  layout tests measure pixels, and Linux renders fonts differently.
+
+A newer push to a branch cancels that branch's run in progress. A failing
+e2e file runs once more, and its shard fails only if the rerun fails too. A
+file that passed only on its rerun shows as a warning on the run. A shard
+that failed or reran keeps its logs and screenshots as an artifact for two
+weeks.
+
+`scripts/e2e-shard.ts` decides which files each shard runs, by the times in
+`e2e/durations.json`: the longest file first, each onto the shard with the
+least time so far. A file missing there counts as `defaultSeconds`. Each
+shard prints the time every file took, so after a file grows or a new one
+lands, copy its time into the list.
+
+A shard runs on a laptop too, against the dev postgres. Build first, then
+give the shard's number and the shard count. `--list` prints what every
+shard would run, without running it.
+
+```bash
+pnpm build
+pnpm test:e2e:shard 1 3
+pnpm test:e2e:shard 1 3 --list
+```
+
+It reads `E2E_PORT`, `DATABASE_URL` and `E2E_SCREENSHOT_DIR` as
+`pnpm test:e2e` does. Each file's output also goes to
+`test-results/e2e-logs`, and its screenshots to a folder of its own. Shards
+can run side by side on one machine when each has its own database and its
+own `E2E_PORT`, at least 30 apart: a file uses ports up to `E2E_PORT` plus
+23, and the join limits count every run from one address in the database.
 
 ## Deploying
 
