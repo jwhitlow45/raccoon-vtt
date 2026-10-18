@@ -336,6 +336,52 @@ describe("the shortcut table", () => {
     }
   });
 
+  // lib/fullscreen.ts. F stays the DM's Fog, and a letter matches with Shift too, so Shift+F is Fog as well.
+  test("W enters and leaves full screen for the DM and players, only where the browser can, and never while typing", async () => {
+    for (const role of ["dm", "player"] as const) {
+      assert.equal(run(env({ role }).env, press({ key: "w", code: "KeyW" })), null, "where nothing can go full screen, as on iPhone Safari");
+    }
+    const asked: string[] = [];
+    const doc = {
+      fullscreenEnabled: true,
+      fullscreenElement: null as unknown,
+      documentElement: {
+        requestFullscreen: async () => {
+          asked.push("enter");
+          doc.fullscreenElement = doc.documentElement;
+        },
+      },
+      exitFullscreen: async () => {
+        asked.push("leave");
+        doc.fullscreenElement = null;
+      },
+      addEventListener() {},
+      removeEventListener() {},
+    };
+    const global = globalThis as unknown as { document?: unknown };
+    global.document = doc;
+    const settle = () => new Promise((resolve) => setImmediate(resolve));
+    try {
+      for (const role of ["dm", "player"] as const) {
+        const { env: e, calls } = env({ role });
+        assert.equal(run(e, press({ key: "w", code: "KeyW" })), "fullscreen");
+        await settle();
+        assert.equal(run(e, press({ key: "W", code: "KeyW", shiftKey: true })), "fullscreen", "with Shift, as every letter");
+        await settle();
+        assert.equal(run(e, press({ key: "ц", code: "KeyW" })), "fullscreen", "by its place on a Russian layout");
+        await settle();
+        assert.equal(run(e, press({ key: "w", code: "KeyW", target: { tagName: "INPUT", type: "text" } })), null, "W in a text field types");
+        assert.equal(run(e, press({ key: "w", code: "KeyW" }), { dialogOpen: true, preview: false }), null, "under a dialog");
+        assert.equal(run(e, press({ key: "w", code: "KeyW", metaKey: true })), null, "Cmd+W stays the browser's");
+        assert.equal(run(e, press({ key: "f", code: "KeyF" })), role === "dm" ? "tool:fog" : null, "F is still the DM's Fog");
+        assert.deepEqual(calls.tool, role === "dm" ? ["fog"] : []);
+      }
+      assert.deepEqual(asked, ["enter", "leave", "enter", "leave", "enter", "leave"]);
+    } finally {
+      delete global.document;
+    }
+  });
+
   test("the split's grip, a separator, keeps the arrow and Page keys, so no token moves", () => {
     const { env: e } = env({ selected: ["t1"] });
     const grip = { tagName: "DIV", closest: (selector: string) => (selector.includes('[role="separator"]') ? {} : null) };

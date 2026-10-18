@@ -1246,6 +1246,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await view(desk, deskCdp, { width: 1280, height: 800 });
     for (const name of ["Undo", "Redo"]) assert.equal(await topBar(desk).getByRole("button", { name, exact: true }).isVisible(), true, `${name} in the top bar`);
     assert.equal(await topBar(desk).getByLabel("Map phase").isVisible(), true, "the Phase menu fits a 1280 px row");
+    assert.equal(await topBar(desk).getByRole("button", { name: "Full screen", exact: true }).isVisible(), true, "and Full screen beside it");
     if (await sidePanel(desk).isHidden()) await toolbar(desk).getByRole("button", { name: "Panels" }).click();
     await openSideTab(desk, "DM");
     const panel = desk.getByRole("tabpanel", { name: "DM" });
@@ -1269,6 +1270,8 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     assert.ok(fits <= 0, `the row overflows by ${fits} px`);
     assert.equal(await topBar(desk).getByRole("img", { name: "You are the DM" }).isVisible(), true, "the DM chip shows its dot");
     assert.equal(await topBar(desk).getByLabel("Map phase").count(), 0, "the Phase menu left the bar");
+    // Full screen leaves before the Phase menu, and Menu, This device and W still reach it.
+    assert.equal(await topBar(desk).getByRole("button", { name: "Full screen", exact: true }).count(), 0, "Full screen left the bar");
     // Fit tucks into the bar's padding, so both stay inside the top bar's own box, short of the side panel.
     const bar = await box(topBar(desk));
     for (const target of [topBar(desk).getByRole("button", { name: "Fit the map to the screen" }), topBar(desk).getByRole("button", { name: /^Initiative, round/ })]) {

@@ -4,14 +4,16 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * The shortcut sheet (docs/design-v1-dm-tools.md 3.14): the keys, then on
  * a desktop what a key or another mouse button does with a click, a drag
  * or the wheel, and on an Android phone its Back button, each for the
  * viewer's role. The DM opens it with `?` on a computer, and a player from
- * Menu, This device, on a phone.
+ * Menu, This device, on a phone. Full screen (lib/fullscreen.ts) rides
+ * along: the top bar's button, its key and its Menu switch on a computer,
+ * and the switch alone on a phone.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus fourteen.
  * The other environment variables are the smoke run's (smoke.e2e.ts).
@@ -50,6 +52,24 @@ function inputs(sheet: Locator, heading: string): Promise<string[]> {
 /** The sheet's section headings, in order. */
 function headings(sheet: Locator): Promise<string[]> {
   return sheet.getByRole("heading", { level: 3 }).allTextContents();
+}
+
+/** The page's own full screen element's tag: "HTML" for the whole page, or null. */
+function fullscreenTag(page: Page): Promise<string | null> {
+  return page.evaluate(() => (globalThis as unknown as { document: { fullscreenElement: { tagName: string } | null } }).document.fullscreenElement?.tagName ?? null);
+}
+
+async function fullscreenIs(page: Page, on: boolean, what: string): Promise<void> {
+  await waitFor(what, async () => (((await fullscreenTag(page)) === "HTML") === on ? true : null));
+}
+
+/** Whether a tap at the middle of `target` lands on it, so nothing, the page in full screen included, covers it. */
+async function onTop(target: Locator): Promise<boolean> {
+  return target.evaluate((el) => {
+    const r = (el as unknown as { getBoundingClientRect(): { left: number; top: number; width: number; height: number } }).getBoundingClientRect();
+    const hit = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): unknown } }).document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return hit !== null && (el as unknown as { contains(other: unknown): boolean }).contains(hit);
+  });
 }
 
 /** Chrome on an Android phone, whose Back button the room answers. */
@@ -201,6 +221,68 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await player.setViewportSize({ width: 390, height: 844 });
     await reopenRoom(player);
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
+  });
+
+  test("fs-a. full screen on a computer by the top bar's button, W and Menu, This device, and on a 390 px phone by the Menu alone, with sheets on top", async () => {
+    const bar = dm.locator("header:has(h1)").first();
+    await bar.getByRole("button", { name: "Full screen", exact: true }).click();
+    await fullscreenIs(dm, true, "full screen by the top bar");
+    const leave = bar.getByRole("button", { name: "Leave full screen", exact: true });
+    await leave.waitFor();
+    // A sheet opened in full screen shows over it, and Escape still closes it.
+    await dm.keyboard.press("?");
+    const sheet = dm.getByRole("dialog", { name: "Shortcuts" });
+    await sheet.waitFor();
+    assert.equal(await onTop(sheet.getByRole("heading", { name: "Keys", exact: true })), true, "the shortcut sheet shows in full screen");
+    assert.ok((await inputs(sheet, "Keys")).includes("W"), "the sheet lists W");
+    await shots.take(dm, "fs-a-dm-full-screen-sheet");
+    await dm.keyboard.press("Escape");
+    await sheet.waitFor({ state: "detached" });
+    await leave.click();
+    await fullscreenIs(dm, false, "out of full screen by the top bar");
+    await bar.getByRole("button", { name: "Full screen", exact: true }).waitFor();
+
+    // W, from the button that kept focus, and never while typing in a field.
+    await dm.keyboard.press("w");
+    await fullscreenIs(dm, true, "full screen by W");
+    await leave.waitFor();
+    await dm.keyboard.press("w");
+    await fullscreenIs(dm, false, "out of full screen by W");
+    await dm.keyboard.press("/");
+    const search = dm.getByRole("searchbox", { name: "Search the scene" }).or(dm.getByRole("textbox", { name: "Search the scene" }));
+    await waitFor("the outliner's search focused", () => search.evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement));
+    await dm.keyboard.press("w");
+    assert.equal(await search.inputValue(), "w", "W typed into the field");
+    assert.equal(await fullscreenTag(dm), null, "W in a field leaves full screen alone");
+    await search.fill("");
+
+    // Menu, This device: a switch named Full screen, checked while the page is in it.
+    await openSideTab(dm, "Menu");
+    await dm.getByRole("button", { name: /^This device/ }).click();
+    const toggle = dm.getByRole("switch", { name: "Full screen" });
+    assert.equal(await toggle.getAttribute("aria-checked"), "false");
+    await toggle.click();
+    await fullscreenIs(dm, true, "full screen by Menu, This device");
+    await waitFor("the switch on", async () => ((await toggle.getAttribute("aria-checked")) === "true" ? true : null));
+    await leave.waitFor();
+    await toggle.click();
+    await fullscreenIs(dm, false, "out of full screen by the switch");
+    await waitFor("the switch off", async () => ((await toggle.getAttribute("aria-checked")) === "false" ? true : null));
+
+    // A phone's top bar has no room and no button for it. Its Menu has the switch, and its sheet stays over the page in full screen.
+    assert.equal(await player.locator("header:has(h1)").first().getByRole("button", { name: /full screen/i }).count(), 0, "no full screen button in a 390 px top bar");
+    await player.locator('button[title="Panels"]').click();
+    await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
+    await player.getByRole("button", { name: /^This device/ }).click();
+    const phoneToggle = player.getByRole("switch", { name: "Full screen" });
+    await phoneToggle.tap();
+    await fullscreenIs(player, true, "a phone in full screen by Menu, This device");
+    await waitFor("the phone's switch on", async () => ((await phoneToggle.getAttribute("aria-checked")) === "true" ? true : null));
+    assert.equal(await onTop(phoneToggle), true, "the Menu's sheet stays over the page in full screen");
+    await shots.take(player, "fs-a-phone-full-screen-menu");
+    await phoneToggle.tap();
+    await fullscreenIs(player, false, "the phone out of full screen");
+    await player.keyboard.press("Escape");
   });
 
   test("4. neither page logged an error", () => {
