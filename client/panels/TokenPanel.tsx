@@ -585,6 +585,7 @@ function DmActions(props: { token: Token; onDeleted(): void }) {
   return (
     <Section title="Remove">
       <ConfirmButton
+        icon="delete"
         confirm="Tap again to delete"
         onConfirm={() => {
           actions.dispatch({ t: "token.delete", tokenId: props.token.id });

@@ -69,7 +69,8 @@ export type IconName =
   | "locked"
   | "duplicate"
   | "ping"
-  | "panels";
+  | "panels"
+  | "crop";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -92,6 +93,7 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   duplicate: "copy-plus",
   ping: "radar",
   panels: "menu",
+  crop: "crop",
 };
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -274,6 +276,8 @@ const SHAPES: Record<IconName, ReactNode> = {
   ),
   // Lucide menu: the toolbar's Panels, which lists the side panels.
   panels: <path {...STROKE} d="M4 12h16M4 18h16M4 6h16" />,
+  // Lucide crop: crop a picture.
+  crop: <path {...STROKE} d="M6 2v14a2 2 0 0 0 2 2h14M18 22V8a2 2 0 0 0-2-2H2" />,
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];

@@ -529,6 +529,8 @@ export function GroupActionBar(props: {
           <BarButton
             pressed={hidden === "all"}
             half={hidden === "some"}
+            icon="hidden"
+            iconOnly
             onClick={() => {
               const patch = flagPatch(tokens, "hidden");
               send([...updateManyOps(ids, patch), ...(patch.visibility === "all" ? shownRowOps(encounter, ids) : [])]);
@@ -543,7 +545,7 @@ export function GroupActionBar(props: {
         {offers.dm ? <BarButton onClick={openRolls}>Roll</BarButton> : null}
         {offers.dm && anyPlayed ? <BarButton onClick={() => openAsk(scope, { kind: "selection", tokenIds: ids })}>Request a roll</BarButton> : null}
         {offers.dm ? (
-          <BarButton pressed={locked === "all"} half={locked === "some"} onClick={() => send(updateManyOps(ids, flagPatch(tokens, "locked")))}>
+          <BarButton pressed={locked === "all"} half={locked === "some"} icon="locked" iconOnly onClick={() => send(updateManyOps(ids, flagPatch(tokens, "locked")))}>
             Locked
           </BarButton>
         ) : null}
@@ -551,7 +553,7 @@ export function GroupActionBar(props: {
           <BarButton onClick={() => send(fightOps(tokens, encounter, actions.newId))}>{encounter ? "Add to the fight" : "Start a fight"}</BarButton>
         ) : null}
         {offers.dm ? (
-          <BarButton ref={moreButton} onClick={() => setMore(true)}>
+          <BarButton ref={moreButton} icon="more" iconOnly always onClick={() => setMore(true)}>
             More
           </BarButton>
         ) : null}
@@ -564,7 +566,9 @@ export function GroupActionBar(props: {
             }}
           />
         ) : null}
-        <BarButton onClick={props.onClose}>Clear</BarButton>
+        <BarButton icon="close" iconOnly always onClick={props.onClose}>
+          Clear
+        </BarButton>
       </div>
       {more ? <GroupMoreSheet tokens={tokens} opener={moreButton} onClose={() => setMore(false)} /> : null}
     </BarFrame>
@@ -1390,9 +1394,7 @@ function SizeRow(props: { token: ViewToken; owner: boolean; canResize: boolean }
   };
   return (
     <StepperRow label="Size" group>
-      <BarButton ref={smaller} label="One size smaller" disabled={down === null} onClick={() => down && press(down, -1)}>
-        −
-      </BarButton>
+      <BarButton ref={smaller} label="One size smaller" icon="minus" iconOnly always disabled={down === null} onClick={() => down && press(down, -1)} />
       <span style={{ display: "inline-grid", textAlign: "center", fontWeight: theme.weight.bold }}>
         <span aria-hidden style={{ gridArea: "1 / 1", visibility: "hidden" }}>
           Gargantuan
@@ -1401,9 +1403,7 @@ function SizeRow(props: { token: ViewToken; owner: boolean; canResize: boolean }
           {SIZE_WORDS[token.size]}
         </span>
       </span>
-      <BarButton ref={larger} label="One size larger" disabled={up === null} onClick={() => up && press(up, 1)}>
-        +
-      </BarButton>
+      <BarButton ref={larger} label="One size larger" icon="plus" iconOnly always disabled={up === null} onClick={() => up && press(up, 1)} />
     </StepperRow>
   );
 }
@@ -1433,7 +1433,8 @@ function StepperRow(props: { label: string; children: ReactNode; group?: boolean
 function BarButton(props: {
   ref?: Ref<HTMLButtonElement>;
   onClick(): void;
-  children: ReactNode;
+  /** The words, which an icon alone keeps as its name. An icon alone named by `label` needs none. */
+  children?: ReactNode;
   label?: string;
   pressed?: boolean;
   half?: boolean;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode, type Ref } from "react";
 import { Button } from "../../components/Button.tsx";
+import type { IconName } from "../../components/Icon.tsx";
 import { FieldRow as PanelFieldRow, fieldStyle, NUMBER_FIELD_WIDTH, Select as FieldSelect } from "../../components/Field.tsx";
 import { Help, Section as PanelSection } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
@@ -337,7 +338,7 @@ export function Stepper(props: {
  * long label, such as a character's name, wrap inside the button and
  * break inside a long word, where a line is narrower than it.
  */
-export function ConfirmButton(props: { onConfirm(): void; children: ReactNode; confirm: string; label?: string; grow?: boolean; busy?: boolean; describedBy?: string; wrap?: boolean }) {
+export function ConfirmButton(props: { onConfirm(): void; children: ReactNode; confirm: string; label?: string; grow?: boolean; busy?: boolean; describedBy?: string; wrap?: boolean; icon?: IconName }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
@@ -351,6 +352,7 @@ export function ConfirmButton(props: { onConfirm(): void; children: ReactNode; c
       variant="danger"
       armed={armed}
       busy={props.busy}
+      icon={props.icon}
       aria-label={label}
       aria-describedby={props.describedBy}
       title={label}

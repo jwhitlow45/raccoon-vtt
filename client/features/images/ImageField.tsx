@@ -55,6 +55,7 @@ export function ImageField(props: {
   const row = useAssetRow(roomId, value?.assetId);
 
   const change = (
+    // Words alone, so the pair still fits beside the picture in the side panel and on a 390 px phone (docs/design-v1-icons.md 4.1).
     <Button size="sm" onClick={() => setStep({ kind: "pick" })} style={props.extra ? PAIR_BUTTON : undefined}>
       {set ? "Change image" : "Add image"}
     </Button>
@@ -62,12 +63,12 @@ export function ImageField(props: {
   const fix = (
     <>
       {value ? (
-        <Button size="sm" onClick={() => setStep({ kind: "crop", assetId: value.assetId, initial: value.crop })}>
+        <Button size="sm" icon="crop" onClick={() => setStep({ kind: "crop", assetId: value.assetId, initial: value.crop })}>
           Crop
         </Button>
       ) : null}
       {set ? (
-        <Button size="sm" variant="danger" onClick={() => props.onChange(null)}>
+        <Button size="sm" variant="danger" icon="delete" onClick={() => props.onChange(null)}>
           Remove
         </Button>
       ) : null}

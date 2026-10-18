@@ -104,7 +104,7 @@ export const LUCIDE_NOTICE =
  * (its LUCIDE table), and a test holds the two lists and CREDITS.md to
  * the same names, so a newly copied icon cannot ship uncredited.
  */
-export const LUCIDE_ICONS = ["copy-plus", "eye", "eye-off", "footprints", "image", "lock", "menu", "pencil", "radar", "redo-2", "refresh-cw", "repeat", "trash-2", "undo-2", "users"] as const;
+export const LUCIDE_ICONS = ["copy-plus", "crop", "eye", "eye-off", "footprints", "image", "lock", "menu", "pencil", "radar", "redo-2", "refresh-cw", "repeat", "trash-2", "undo-2", "users"] as const;
 
 export type LucideIcon = (typeof LUCIDE_ICONS)[number];
 
