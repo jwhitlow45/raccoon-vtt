@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
 import { askedFormula, collapseBare, findRolls, readingOf, recentRolls, stepHistory, withHistory, type RecentRow } from "./logic.ts";
 import type { ReceiptLookup } from "../../lib/api.ts";
-import { ReceiptTracker } from "./useReceipt.ts";
+import { ReceiptTracker, refusalWords } from "./useReceipt.ts";
 
 /** What the Dice panel reads from the log (docs/design-v1-dice.md 8.3 and 8.6). */
 let seq = 0;
@@ -153,6 +153,17 @@ describe("a tag's receipt (docs/design-v1-dice.md 8.7)", () => {
     t.answer("G", 1, "refused", { code: "quota", message: "You are going too fast. Wait a few seconds.", text: "Not saved. You are going too fast. Wait a few seconds." });
     const state = t.state("G");
     assert.ok(state?.state === "committed" && state.refused?.message.startsWith("You are going"));
+  });
+
+  test("a refusal reads in the server's words, never the store's \"Not saved.\" (LP7-DICE-3)", () => {
+    const t = tracker();
+    t.sending("Q", 0);
+    t.answer("Q", 0, "refused", { code: "quota", message: "You are going too fast. Wait a few seconds.", text: "Not saved. You are going too fast. Wait a few seconds." });
+    const state = t.state("Q");
+    assert.ok(state?.state === "refused");
+    assert.equal(state.text, "You are going too fast. Wait a few seconds.");
+    assert.equal(refusalWords({ text: "Not saved. It was settled meanwhile.", message: "It was settled meanwhile." }), "It was settled meanwhile.");
+    assert.equal(refusalWords({ text: "Not saved.", message: "" }), "Not saved.", "words with nothing after them stay");
   });
 
   test("an answer a snapshot swallowed is found in the log, or looked up once, and missing reads unknown", async () => {

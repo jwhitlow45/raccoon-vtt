@@ -44,6 +44,21 @@ function refusedPart(code: string, message: string): PartState {
   return { state: "refused", code, message, text: message };
 }
 
+/**
+ * A refused roll's or answer's words, as the server words them
+ * (docs/design-v1-dice.md 7): the store's toast words open a refusal with
+ * "Not saved.", which says the wrong thing where nothing was being saved.
+ */
+export function refusalWords(refusal: Pick<OpRefusal, "text" | "message"> | undefined): string {
+  const text = refusal?.text ?? refusal?.message ?? "";
+  return text.replace(/^Not saved\.\s*/, "") || text;
+}
+
+/** A refused part's words from a live answer, as the server words them, the same as a lookup gives them. */
+function liveRefusal(refusal: OpRefusal | undefined): PartState {
+  return { state: "refused", code: refusal?.code ?? "invalid", message: refusal?.message ?? "", text: refusalWords(refusal) };
+}
+
 type Entry = {
   parts: Map<number, PartState>;
   /** Mounted surfaces that show this tag, so a result nobody shows can go to a toast (8.7 rule 3). */
@@ -113,7 +128,7 @@ export class ReceiptTracker {
   answer(tag: string, part: number, answer: OpAnswer, refusal?: OpRefusal, cause?: UnknownCause): void {
     const entry = this.#entry(tag);
     if (answer === "taken") entry.parts.set(part, { state: "committed", lines: this.#lines(tag, part) });
-    else if (answer === "refused") entry.parts.set(part, { state: "refused", code: refusal?.code ?? "invalid", message: refusal?.message ?? "", text: refusal?.text ?? refusal?.message ?? "" });
+    else if (answer === "refused") entry.parts.set(part, liveRefusal(refusal));
     else {
       // A snapshot that settled the op is in the view now, so this part's own line, if it committed, is there to find.
       // Another part's line of the same tag says nothing of this one, which may have been refused (W7-SOL-02).

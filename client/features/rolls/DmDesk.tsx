@@ -17,6 +17,7 @@ import { creatureRolls } from "../dice/creature.ts";
 import { presetFor } from "../dice/presets.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "../dice/send.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
+import { refusalWords } from "../dice/useReceipt.ts";
 import { useLayoutSize } from "../device/layout.ts";
 import { AskRow } from "./AskRow.tsx";
 import { askRowText, bestChoice, dmRoll } from "./card.ts";
@@ -352,7 +353,7 @@ function DmRollButton(props: { request: RollRequest; target: RollTarget; name: s
         setBusy(false);
         if (store.getState().view?.rolls[request.id]) sender.receipts.announced(tag);
         if (answer !== "refused") return;
-        ui.notify(refusal?.message === ANSWERED_MEANWHILE ? `${name} answered before your roll.` : (refusal?.text ?? "The roll was refused."), "error");
+        ui.notify(refusal?.message === ANSWERED_MEANWHILE ? `${name} answered before your roll.` : (refusalWords(refusal) || "The roll was refused."), "error");
       },
     });
     if (n === null) ui.notify(NEEDS_CONNECTION, "error");

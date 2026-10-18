@@ -29,6 +29,7 @@ import { creatureRolls } from "../dice/creature.ts";
 import { presetFor } from "../dice/presets.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "../dice/send.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
+import { refusalWords } from "../dice/useReceipt.ts";
 import { useOpenPcStats } from "../pcstats/open.ts";
 import { editsPcStats } from "../tokens/access.ts";
 import { announceTurn } from "../encounter/alerts.ts";
@@ -708,7 +709,7 @@ function CreatureAnswer(props: {
     const latest = store.getState().view?.rolls[request.id];
     const now = latest?.targets.find((t) => targetKey(t) === tkey);
     const landing = answer === "unknown" ? landingOf(now, tag) : undefined;
-    step({ t: "answer", tag, answer, ...(refusal ? { text: refusal.text } : {}), ...(landing ? { landing } : {}) });
+    step({ t: "answer", tag, answer, ...(refusal ? { text: refusalWords(refusal) } : {}), ...(landing ? { landing } : {}) });
     return answer === "taken" || landing === "mine";
   };
 
