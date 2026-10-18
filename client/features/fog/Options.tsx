@@ -140,7 +140,7 @@ export default function FogOptions() {
           id: "undoCorner",
           priority: 2,
           control: (
-            <OptButton disabled={s.poly.length === 0} onClick={() => set({ poly: s.poly.slice(0, -1) })}>
+            <OptButton icon="undo" disabled={s.poly.length === 0} onClick={() => set({ poly: s.poly.slice(0, -1) })}>
               Undo corner
             </OptButton>
           ),

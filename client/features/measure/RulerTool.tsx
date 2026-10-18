@@ -219,6 +219,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
             // A fixed name that says what pressed means (docs/design-v1-visual.md 3.7).
             <OptButton
               pressed={share}
+              icon="shown"
               label="Players see this ruler"
               onClick={() => {
                 const ctx = tool.activeCtx;
@@ -250,7 +251,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
           id: "clear",
           priority: 2,
           control: (
-            <OptButton tone="danger" disabled={!ruler} onClick={() => tool.activeCtx && publish(tool.activeCtx, null)}>
+            <OptButton tone="danger" icon="eraser" disabled={!ruler} onClick={() => tool.activeCtx && publish(tool.activeCtx, null)}>
               Clear
             </OptButton>
           ),

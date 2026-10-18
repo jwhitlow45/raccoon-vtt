@@ -365,7 +365,7 @@ function DrawOptions(props: { role: "dm" | "player" }) {
   const color = st.color ?? memberColor;
 
   const clearMine = (
-    <OptButton tone="danger" disabled={!sceneId} onClick={() => sceneId && actions.dispatch({ t: "drawing.clear", sceneId, scope: "own" })}>
+    <OptButton tone="danger" icon="eraser" disabled={!sceneId} onClick={() => sceneId && actions.dispatch({ t: "drawing.clear", sceneId, scope: "own" })}>
       Clear mine
     </OptButton>
   );
@@ -380,9 +380,7 @@ function DrawOptions(props: { role: "dm" | "player" }) {
             id: "undo",
             priority: 1,
             control: (
-              <OptButton label="Undo your last change" onClick={() => actions.undo()}>
-                Undo
-              </OptButton>
+              <OptButton icon="undo" label="Undo your last change" rowWords="Undo" onClick={() => actions.undo()} />
             ),
           },
           { id: "clearMine", priority: 1, control: clearMine },
@@ -439,7 +437,12 @@ function DrawOptions(props: { role: "dm" | "player" }) {
           {
             id: "undoCorner",
             priority: 1,
-            control: <OptButton onClick={() => drawStore.setState({ draft: { kind: "polygon", points: st.draft!.points.slice(0, -2) } })}>Undo corner</OptButton>,
+            // Its words stay beside the arrow: Undo's arrow alone stands in the same row (docs/design-v1-icons.md 4).
+            control: (
+              <OptButton icon="undo" onClick={() => drawStore.setState({ draft: { kind: "polygon", points: st.draft!.points.slice(0, -2) } })}>
+                Undo corner
+              </OptButton>
+            ),
           },
           {
             id: "shapeCancel",
@@ -525,7 +528,7 @@ function DrawOptions(props: { role: "dm" | "player" }) {
           id: "dmOnly",
           priority: 5 + drop,
           control: (
-            <OptButton pressed={st.dmOnly} label="Only the DM sees new drawings" onClick={() => drawStore.setState({ dmOnly: !st.dmOnly })}>
+            <OptButton pressed={st.dmOnly} icon="hidden" label="Only the DM sees new drawings" onClick={() => drawStore.setState({ dmOnly: !st.dmOnly })}>
               DM only
             </OptButton>
           ),
@@ -535,7 +538,7 @@ function DrawOptions(props: { role: "dm" | "player" }) {
           id: "clearAll",
           priority: 9,
           always: true,
-          control: <ConfirmButton label="Clear all" confirm="Tap again to clear all" armedMs={CLEAR_ALL_ARMED_MS} disabled={!sceneId} onConfirm={() => sceneId && actions.dispatch({ t: "drawing.clear", sceneId, scope: "all" })} />,
+          control: <ConfirmButton icon="eraser" label="Clear all" confirm="Tap again to clear all" armedMs={CLEAR_ALL_ARMED_MS} disabled={!sceneId} onConfirm={() => sceneId && actions.dispatch({ t: "drawing.clear", sceneId, scope: "all" })} />,
         },
       ]}
     />

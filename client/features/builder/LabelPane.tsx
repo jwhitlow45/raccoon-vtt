@@ -170,7 +170,7 @@ function LabelEditor(props: { label: Label; onClose(): void; sheet: boolean }) {
       </div>
       {commit.kind === "empty" ? <Note>A label needs text. Delete removes it.</Note> : null}
       <PaneFooter>
-        <Button size="sm" variant="danger" armed={armedAt !== null} title="Delete this label" aria-label={armedAt !== null ? "Tap again to delete" : "Delete this label"} onClick={tapDeleteButton}>
+        <Button size="sm" variant="danger" armed={armedAt !== null} icon="delete" iconOnly={armedAt === null ? "always" : undefined} title="Delete this label" aria-label={armedAt !== null ? "Tap again to delete" : "Delete this label"} onClick={tapDeleteButton}>
           {armedAt !== null ? "Tap again to delete" : "Delete"}
         </Button>
         <Button size="sm" variant="primary" disabled={commit.kind === "empty" || commit.kind === "tooLong"} onClick={done}>

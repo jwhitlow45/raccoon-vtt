@@ -465,7 +465,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
           priority: 4,
           control: (
             // A fixed name that says what pressed means (docs/design-v1-visual.md 3.7).
-            <OptButton pressed={st.shared} disabled={!t} label="Everyone sees this preview" onClick={() => setShared(env, !st.shared)}>
+            <OptButton pressed={st.shared} icon="shown" disabled={!t} label="Everyone sees this preview" onClick={() => setShared(env, !st.shared)}>
               Shared
             </OptButton>
           ),
@@ -541,7 +541,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
         env.role === "dm" &&
           more(
             "dmOnly",
-            <OptButton pressed={d.visibility === "dm"} onClick={() => set({ visibility: d.visibility === "dm" ? "all" : "dm" })}>
+            <OptButton pressed={d.visibility === "dm"} icon="hidden" onClick={() => set({ visibility: d.visibility === "dm" ? "all" : "dm" })}>
               DM only
             </OptButton>,
           ),
@@ -575,7 +575,7 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
             priority: 4,
             control: (
               // A fixed name that says what pressed means (docs/design-v1-visual.md 3.7).
-              <OptButton pressed={t.visibility === "dm"} label="Hide it from players" onClick={() => update({ visibility: t.visibility === "dm" ? "all" : "dm" })}>
+              <OptButton pressed={t.visibility === "dm"} icon="hidden" label="Hide it from players" onClick={() => update({ visibility: t.visibility === "dm" ? "all" : "dm" })}>
                 Hidden
               </OptButton>
             ),
@@ -593,7 +593,7 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
           id: "copy",
           priority: 2,
           control: (
-            <OptButton ends onClick={copy}>
+            <OptButton ends icon="duplicate" iconOnly="fine" onClick={copy}>
               Copy
             </OptButton>
           ),
@@ -602,7 +602,7 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
           id: "delete",
           priority: 3,
           control: (
-            <OptButton tone="danger" ends onClick={() => deleteTemplate(env, template.id)}>
+            <OptButton tone="danger" ends icon="delete" iconOnly="always" onClick={() => deleteTemplate(env, template.id)}>
               Delete
             </OptButton>
           ),

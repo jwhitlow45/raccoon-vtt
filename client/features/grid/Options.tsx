@@ -67,23 +67,15 @@ export default function GridOptions() {
           control: (
             <ValueChip label="Nudge" kind="setting" plain heading="Nudge the box" value="nudge" options={[{ key: "nudge", words: "Nudge" }]} title="Move or size the box a pixel at a time">
               <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
-                {/* Arrows read as directions, so they stay text. The size steps take the icons for less and more. */}
-                <OptButton label="Nudge the box left" onClick={() => set(nudgeBox(box, -STEP, 0))}>
-                  ←
-                </OptButton>
-                <OptButton label="Nudge the box right" onClick={() => set(nudgeBox(box, STEP, 0))}>
-                  →
-                </OptButton>
-                <OptButton label="Nudge the box up" onClick={() => set(nudgeBox(box, 0, -STEP))}>
-                  ↑
-                </OptButton>
-                <OptButton label="Nudge the box down" onClick={() => set(nudgeBox(box, 0, STEP))}>
-                  ↓
-                </OptButton>
+                {/* The same arrows as a list's Move up and Move down: each moves the box one step its way. The size steps zoom, never add (docs/design-v1-icons.md 2.3). */}
+                <OptButton icon="arrowLeft" label="Nudge the box left" onClick={() => set(nudgeBox(box, -STEP, 0))} />
+                <OptButton icon="arrowRight" label="Nudge the box right" onClick={() => set(nudgeBox(box, STEP, 0))} />
+                <OptButton icon="arrowUp" label="Nudge the box up" onClick={() => set(nudgeBox(box, 0, -STEP))} />
+                <OptButton icon="arrowDown" label="Nudge the box down" onClick={() => set(nudgeBox(box, 0, STEP))} />
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
-                <OptButton icon="minus" label="Make the squares smaller" onClick={() => set(nudgeBox(box, 0, 0, -STEP))} />
-                <OptButton icon="plus" label="Make the squares larger" onClick={() => set(nudgeBox(box, 0, 0, STEP))} />
+                <OptButton icon="zoomOut" label="Make the squares smaller" onClick={() => set(nudgeBox(box, 0, 0, -STEP))} />
+                <OptButton icon="zoomIn" label="Make the squares larger" onClick={() => set(nudgeBox(box, 0, 0, STEP))} />
               </div>
             </ValueChip>
           ),

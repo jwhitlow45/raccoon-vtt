@@ -277,6 +277,8 @@ function PinEditor(props: { pin: Pin; onClose(): void; dismissRef: { current: ()
           variant="danger"
           armed={armedAt !== null}
           disabled={saving}
+          icon="delete"
+          iconOnly={armedAt === null ? "always" : undefined}
           title="Delete this pin"
           aria-label={armedAt !== null ? "Tap again to delete" : "Delete this pin"}
           onClick={tapDeleteButton}

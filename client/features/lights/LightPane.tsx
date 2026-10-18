@@ -166,6 +166,8 @@ function LightEditor(props: { light: Light; onClose(): void; sheet: boolean }) {
       </div>
       <PaneFooter>
         <ConfirmButton
+          icon="delete"
+          iconOnly
           label="Delete"
           confirm="Tap again to delete"
           title="Delete this light"

@@ -44,7 +44,7 @@ export function RangeRingsSection(props: { token: Pick<Token, "rangeRings">; can
       label="Range rings"
       action={
         rings.length > 0 ? (
-          <Button size="sm" variant="danger" aria-label="Remove every range ring" title="Remove every range ring" onClick={() => set([])}>
+          <Button size="sm" variant="danger" icon="eraser" aria-label="Remove every range ring" title="Remove every range ring" onClick={() => set([])}>
             Clear
           </Button>
         ) : null

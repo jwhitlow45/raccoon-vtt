@@ -142,6 +142,8 @@ export function useStampSlots(input: { more(): HTMLElement | null }): { slots: S
         part,
         control: (
           <OptButton
+            icon="duplicate"
+            iconOnly="fine"
             onClick={() => {
               const id = actions.newId();
               actions.dispatch({ t: "build.stamps", sceneId: selected.sceneId, put: [duplicateOf(selected, id, topZ([...others, selected]), bounds)] });
@@ -157,7 +159,7 @@ export function useStampSlots(input: { more(): HTMLElement | null }): { slots: S
         priority: 3,
         part,
         control: (
-          <OptButton label="Hide it from players" pressed={selected.visibility === "dm"} onClick={() => put({ ...selected, visibility: selected.visibility === "dm" ? "all" : "dm" })}>
+          <OptButton label="Hide it from players" icon="hidden" pressed={selected.visibility === "dm"} onClick={() => put({ ...selected, visibility: selected.visibility === "dm" ? "all" : "dm" })}>
             DM only
           </OptButton>
         ),
@@ -169,6 +171,7 @@ export function useStampSlots(input: { more(): HTMLElement | null }): { slots: S
         compact: true,
         control: (
           <ConfirmButton
+            icon="delete"
             label="Delete"
             confirm="Tap again to delete"
             short="Delete?"

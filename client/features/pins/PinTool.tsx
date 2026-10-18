@@ -168,7 +168,7 @@ function PinOptions() {
           id: "dmOnly",
           priority: 1,
           control: (
-            <OptButton pressed={dmOnly} label="New pins start DM only" onClick={() => store.setState({ dmOnly: !dmOnly })}>
+            <OptButton pressed={dmOnly} icon="hidden" label="New pins start DM only" onClick={() => store.setState({ dmOnly: !dmOnly })}>
               DM only
             </OptButton>
           ),

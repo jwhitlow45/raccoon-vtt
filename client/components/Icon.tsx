@@ -73,7 +73,12 @@ export type IconName =
   | "crop"
   | "arrowUp"
   | "arrowDown"
-  | "removeFromFight";
+  | "removeFromFight"
+  | "eraser"
+  | "arrowLeft"
+  | "arrowRight"
+  | "zoomIn"
+  | "zoomOut";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -100,6 +105,11 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   arrowUp: "arrow-up",
   arrowDown: "arrow-down",
   removeFromFight: "user-minus",
+  eraser: "eraser",
+  arrowLeft: "arrow-left",
+  arrowRight: "arrow-right",
+  zoomIn: "zoom-in",
+  zoomOut: "zoom-out",
 };
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -293,6 +303,26 @@ const SHAPES: Record<IconName, ReactNode> = {
     <g {...STROKE}>
       <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 11L16 11" />
       <circle cx="9" cy="7" r="4" />
+    </g>
+  ),
+  // Lucide eraser: clear a ruler, drawings or range rings off the map. Never Close.
+  eraser: <path {...STROKE} d="M21 21H8a2 2 0 0 1-1.42-.587l-3.994-3.999a2 2 0 0 1 0-2.828l10-10a2 2 0 0 1 2.829 0l5.999 6a2 2 0 0 1 0 2.828L12.834 21M5.082 11.09l8.828 8.828" />,
+  // Lucide arrow-left: nudge a thing left.
+  arrowLeft: <path {...STROKE} d="M12 19l-7-7 7-7M19 12H5" />,
+  // Lucide arrow-right: nudge a thing right.
+  arrowRight: <path {...STROKE} d="M5 12h14M12 5l7 7-7 7" />,
+  // Lucide zoom-in: make a grid's squares larger. Never Add, which takes the plus.
+  zoomIn: (
+    <g {...STROKE}>
+      <path d="M21 21L16.65 16.65M11 8L11 14M8 11L14 11" />
+      <circle cx="11" cy="11" r="8" />
+    </g>
+  ),
+  // Lucide zoom-out: make a grid's squares smaller.
+  zoomOut: (
+    <g {...STROKE}>
+      <path d="M21 21L16.65 16.65M8 11L14 11" />
+      <circle cx="11" cy="11" r="8" />
     </g>
   ),
 };

@@ -1333,6 +1333,12 @@ export function OptButton(props: {
   ends?: boolean;
   /** Its words in ⋯, where an icon alone would not read as a row ("Undo"). */
   rowWords?: string;
+  /**
+   * Its icon alone in the row, its words its name and tooltip (Button's
+   * `iconOnly`, docs/design-v1-icons.md 3.1). In ⋯ it is a row with its
+   * words, as every row there is.
+   */
+  iconOnly?: "always" | "fine";
 }) {
   const place = useSlotPlace();
   if (place?.at === "measure") return <OptButtonFace {...props} form={place.form} />;
@@ -1344,7 +1350,7 @@ function OptButtonFace(props: Parameters<typeof OptButton>[0] & { form: SlotForm
   const variant = props.tone ?? "secondary";
   const short = props.form === "compact" && props.short !== undefined;
   return (
-    <Button size="sm" variant={variant} pressed={props.pressed} icon={props.icon} disabled={props.disabled} tabIndex={-1} style={{ flex: "none", whiteSpace: "nowrap" }}>
+    <Button size="sm" variant={variant} pressed={props.pressed} icon={props.icon} iconOnly={short ? undefined : props.iconOnly} disabled={props.disabled} tabIndex={-1} style={{ flex: "none", whiteSpace: "nowrap" }}>
       {short ? props.short : props.children}
     </Button>
   );
@@ -1373,6 +1379,7 @@ function LiveOptButton(props: Parameters<typeof OptButton>[0] & { place: SlotPla
       pressed={pressed}
       armed={tone === "danger" && pressed === true}
       icon={props.icon}
+      iconOnly={short || row ? undefined : props.iconOnly}
       disabled={props.disabled && !atLimit}
       aria-disabled={atLimit || undefined}
       aria-label={short ? (hasWords(props.short) ? undefined : props.label) : children === undefined ? props.label : accessibleName(children, props.label)}
@@ -1481,7 +1488,7 @@ const ARMED_MS = 4000;
  * armed words ("Delete?"), and its second press closes the popover it
  * stands in (7.2).
  */
-export function ConfirmButton(props: { label: string; confirm: string; title?: string; onConfirm(): void; disabled?: boolean; short?: string; armedMs?: number }) {
+export function ConfirmButton(props: { label: string; confirm: string; title?: string; onConfirm(): void; disabled?: boolean; short?: string; armedMs?: number; icon?: IconName; iconOnly?: boolean }) {
   const place = useSlotPlace();
   if (place?.at === "measure") return <ConfirmFace {...props} armed={false} form={place.form} />;
   return <LiveConfirm {...props} place={place} />;
@@ -1492,16 +1499,16 @@ function confirmWords(props: { label: string; confirm: string; short?: string },
   return form === "compact" && props.short !== undefined ? props.short : props.confirm;
 }
 
-function ConfirmFace(props: { label: string; confirm: string; short?: string; disabled?: boolean; armed: boolean; form: SlotForm }) {
+function ConfirmFace(props: { label: string; confirm: string; short?: string; disabled?: boolean; armed: boolean; form: SlotForm; icon?: IconName }) {
   const all = [props.label, confirmWords(props, props.form, true)];
   return (
-    <Button size="sm" variant="danger" armed={props.armed} disabled={props.disabled} tabIndex={-1} style={{ flex: "none", whiteSpace: "nowrap" }}>
+    <Button size="sm" variant="danger" armed={props.armed} icon={props.icon} disabled={props.disabled} tabIndex={-1} style={{ flex: "none", whiteSpace: "nowrap" }}>
       <StableWords current={confirmWords(props, props.form, props.armed)} all={all} align="center" />
     </Button>
   );
 }
 
-function LiveConfirm(props: { label: string; confirm: string; title?: string; onConfirm(): void; disabled?: boolean; short?: string; armedMs?: number; place: SlotPlace | null }) {
+function LiveConfirm(props: { label: string; confirm: string; title?: string; onConfirm(): void; disabled?: boolean; short?: string; armedMs?: number; icon?: IconName; iconOnly?: boolean; place: SlotPlace | null }) {
   const [armed, setArmed] = useState(false);
   const { task } = usePopoverClose();
   useEffect(() => {
@@ -1518,6 +1525,9 @@ function LiveConfirm(props: { label: string; confirm: string; title?: string; on
       size="sm"
       variant="danger"
       armed={armed}
+      icon={props.icon}
+      // The icon alone until armed, then its words (docs/design-v1-icons.md 3.1 rule 6). A slot keeps its words: it holds its widest anyway, so a row never moves.
+      iconOnly={props.iconOnly && !armed && !slotted && !row ? "always" : undefined}
       disabled={props.disabled}
       aria-label={accessibleName(words, props.title)}
       title={props.title}
