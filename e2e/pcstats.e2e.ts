@@ -315,6 +315,16 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     const panel = await showBree(ana);
     await panel.getByRole("button", { name: "Take a shape" }).click();
     const picker = ana.getByRole("dialog", { name: "Take a shape" });
+    // shapelevel-a: a Druid level keeps the forms that level may take, and Any brings the whole list back.
+    await picker.getByLabel("Druid level").selectOption("4");
+    await picker.getByText("Up to CR 1/2, no Fly Speed.").waitFor();
+    assert.equal(await picker.getByRole("checkbox", { name: "Beasts only" }).isChecked(), true, "a level turns Beasts only on");
+    await picker.getByRole("button", { name: /Black Bear/ }).first().waitFor();
+    assert.equal(await picker.getByRole("button", { name: /Brown Bear/ }).count(), 0, "a CR 1 beast is gone at level 4");
+    await shots.take(ana, "pcstats-shape-level");
+    await picker.getByLabel("Druid level").selectOption("Any");
+    await picker.getByRole("button", { name: /Brown Bear/ }).first().waitFor();
+    assert.equal(await picker.getByText(/^Up to CR/).count(), 0, "Any states no limit");
     await picker.getByRole("searchbox", { name: "Search creatures" }).fill("brown bear");
     await picker.getByRole("button", { name: /Brown Bear/ }).first().click();
     const choice = ana.getByRole("dialog", { name: "Take the shape of Brown Bear" });

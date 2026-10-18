@@ -3,7 +3,7 @@ import type { Character } from "#shared/model.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { Button } from "../../components/Button.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
-import { Input } from "../../components/Field.tsx";
+import { Input, Select } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -16,6 +16,7 @@ import { SrdCredit, useSrdMonsters } from "../monsters/StatBlockView.tsx";
 import { editsPcStats } from "../tokens/access.ts";
 import { whose } from "../tokens/companionBlocks.ts";
 import { monsterMatcher } from "../tokens/monsterSearch.ts";
+import { byCrThenName, DRUID_LEVELS, fitsShapeLimit, shapeLimit } from "./shapeLevel.ts";
 import { shapePatch, shapeTempHp, wildShapeDetail, type ShapeKind } from "./shape.ts";
 
 /** Whether an SRD creature is a Beast, which Wild Shape and Polymorph take. */
@@ -36,15 +37,23 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
   const { monsters, failed } = useSrdMonsters();
   const [query, setQuery] = useState("");
   const [beastsOnly, setBeastsOnly] = useState(true);
+  const [druidLevel, setDruidLevel] = useState<number | null>(null);
   const [picked, setPicked] = useState<SrdMonster | null>(null);
   const [kind, setKind] = useState<ShapeKind>("wild");
   const [gainTemp, setGainTemp] = useState(true);
   const deferred = useDeferredValue(query);
   const matches = useMemo(() => monsterMatcher(deferred), [deferred]);
-  const rows = useMemo(
-    () => (monsters ?? []).filter((m) => (!beastsOnly || isBeast(m)) && matches(m)).map((m): ListedRow => ({ key: m.srdId, view: m, source: "srd" })),
-    [monsters, beastsOnly, matches],
-  );
+  const limit = useMemo(() => (druidLevel === null ? null : shapeLimit(druidLevel)), [druidLevel]);
+  const rows = useMemo(() => {
+    const kept = (monsters ?? []).filter((m) => (!beastsOnly || isBeast(m)) && matches(m) && (limit === null || fitsShapeLimit(limit, m)));
+    if (limit !== null) kept.sort(byCrThenName);
+    return kept.map((m): ListedRow => ({ key: m.srdId, view: m, source: "srd" }));
+  }, [monsters, beastsOnly, matches, limit]);
+  // Wild Shape forms must be Beasts, so choosing a level turns the filter on. It stays the user's to turn off again.
+  const chooseLevel = (value: string) => {
+    setDruidLevel(value === "" ? null : Number(value));
+    if (value !== "") setBeastsOnly(true);
+  };
   const name = props.character.name;
   const you = useRoomView((s) => s.you);
 
@@ -96,7 +105,21 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14, overflowWrap: "anywhere" }}>
         <Help>{`An SRD creature for ${whose(name)} token to take the shape of. The token keeps ${whose(name)} HP and conditions.`}</Help>
         <Input type="search" aria-label="Search creatures" placeholder="Search: wolf, cr 0-1" value={query} enterKeyHint="search" onChange={(e) => setQuery(e.target.value)} style={{ width: "100%" }} />
-        <Checkbox label="Beasts only" checked={beastsOnly} onChange={setBeastsOnly} />
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(4), rowGap: theme.space(1) }}>
+          <Checkbox label="Beasts only" checked={beastsOnly} onChange={setBeastsOnly} />
+          <label style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+            Druid level
+            <Select value={druidLevel === null ? "" : String(druidLevel)} onChange={(e) => chooseLevel(e.target.value)}>
+              <option value="">Any</option>
+              {DRUID_LEVELS.map((l) => (
+                <option key={l} value={l}>
+                  {l}
+                </option>
+              ))}
+            </Select>
+          </label>
+        </div>
+        {limit ? <Help>{limit.label}</Help> : null}
         {failed ? <SrdLoadFailed what="The creature list" /> : null}
         {!monsters && !failed ? <Loading text="Loading the creatures…" /> : null}
         <MonsterList items={rows} onPick={(key) => setPicked(monsters?.find((m) => m.srdId === key) ?? null)} />
