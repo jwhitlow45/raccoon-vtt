@@ -1120,7 +1120,7 @@ export type AnswerOffers = Record<AnswerOp, boolean>;
 
 /**
  * What the card offers (5.2, 5.5): Roll only while the creature waits, not
- * for a retype, with the Total field empty, a bonus known or typed and the
+ * for a retype while players may type totals, with the Total field empty, a bonus known or typed and the
  * socket open. Send and Fail only on an answer that is not final, and Send
  * only while the room lets players type their totals. Ask only on a final
  * answer, where a new ask replaces a pending one, and on a typed one, whose
@@ -1143,7 +1143,8 @@ export function answerOffers(input: {
   // A total typed before the room turned typed totals off is hidden with its field, so it holds nothing back.
   const typed = input.typeTotals && input.text.trim() !== "";
   return {
-    roll: !answered(target) && target.retype !== true && !typed && input.connected && input.bonusReady,
+    // A retype waits for a typed total, unless the room has typed totals off, when it rolls as the server takes it.
+    roll: !answered(target) && (target.retype !== true || !input.typeTotals) && !typed && input.connected && input.bonusReady,
     send: !final && typed && input.typeTotals,
     fail: !final && request.test.kind === "save",
     // A newer item replaces a pending ask (5.5). An answer from before tags has none, and no ask can name it.

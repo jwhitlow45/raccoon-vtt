@@ -1008,6 +1008,7 @@ describe("the card's one answer path (docs/design-v1-roll-request.md 5.2, 5.6)",
     assert.equal(offers({ characterId: "ayla" }, "", false).roll, false, "Rolling needs a connection");
     assert.equal(offers({ characterId: "ayla", total: 9, result: "fail", tag: "t0" }).roll, false, "a typed answer takes the roll row away");
     assert.equal(offers({ characterId: "ayla", retype: true }).roll, false, "an allowed retype types again and never rolls");
+    assert.equal(answerOffers({ holds: true, request, target: { characterId: "ayla", retype: true }, text: "", connected: true, bonusReady: true, typeTotals: false }).roll, true, "with typed totals off a retype rolls (B7B-P-3)");
     assert.equal(answerOffers({ holds: false, request, target: { characterId: "ayla" }, text: "", connected: true, bonusReady: true, typeTotals: true }).fail, false, "a request gone offers nothing");
   });
 

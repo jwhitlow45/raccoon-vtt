@@ -2,7 +2,7 @@ import { CANNOT_REROLL, LUCKY_CHANGES_NOTHING, rerollable, rerollFace, withDie, 
 import { keys } from "../keys.ts";
 import { answerProvenance } from "../migrate.ts";
 import type { LogEvent, RollAnswer, RollChange, RollRequest, RollTarget } from "../model.ts";
-import { SETTLED_MEANWHILE, fixPending } from "../permissions.ts";
+import { SETTLED_MEANWHILE, fixPending, playersTypeTotals } from "../permissions.ts";
 import { anyPlayer, playersToken } from "../project.ts";
 import type { ActorTarget, OpOf } from "../protocol.ts";
 import { effectEvent } from "../rules/hp.ts";
@@ -215,7 +215,9 @@ function taggedAnswer(tx: Tx, request: RollRequest, index: number, current: Roll
  * left as it is. With `change`, the DM's Allow of a "Fix my total" ask
  * (docs/design-v1-roll-request.md 5.5), the ask must still be pending on
  * this answer, and the target then waits with `retype`, for a total typed
- * again and never a roll. No line: the corrected answer writes its own.
+ * again and never a roll. While the room has typed totals off, a player
+ * types no total, so the Allow reopens it plainly, for a roll. No line: the
+ * corrected answer writes its own.
  */
 export function rollReopen(tx: Tx, op: OpOf<"roll.reopen">): void {
   const request = tx.state.rolls[op.rollId];
@@ -225,7 +227,7 @@ export function rollReopen(tx: Tx, op: OpOf<"roll.reopen">): void {
   if (!current) throw gone("roll target");
   if (op.change !== undefined) {
     if (!fixPending(current, op.change)) throw invalid(SETTLED_MEANWHILE);
-    writeTarget(tx, request, index, { ...creatureOf(current), previous: answerOf(current), retype: true });
+    writeTarget(tx, request, index, { ...creatureOf(current), previous: answerOf(current), ...(playersTypeTotals(tx.state.meta.settings) ? { retype: true as const } : {}) });
     return;
   }
   if (current.total === undefined && current.result === undefined) return;

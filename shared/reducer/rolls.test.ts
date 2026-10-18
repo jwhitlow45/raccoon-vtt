@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { resolveDiceOp } from "../dice/resolve.ts";
 import { CANNOT_REROLL, LUCKY_CHANGES_NOTHING, type Draw } from "../dice/roll.ts";
 import type { Actor, Effect, LogEntry, LogEvent, RollChange, RollTarget, RoomState, Viewer } from "../model.ts";
-import { ANSWER_NEEDS_TAG, ONLY_PLAYERS_ASK, SETTLED_MEANWHILE, TYPE_THE_TOTAL, canApply } from "../permissions.ts";
+import { ANSWER_NEEDS_TAG, NO_TYPED_TOTALS, ONLY_PLAYERS_ASK, SETTLED_MEANWHILE, TYPE_THE_TOTAL, canApply } from "../permissions.ts";
 import { projectState } from "../project.ts";
 import { clientOpSchema, type Op, type OpOf, type RestoreEntry, type RollRequestInput } from "../protocol.ts";
 import { reads, satisfies } from "../reads.ts";
@@ -519,6 +519,28 @@ describe("asking to change an answer, and the DM's answer (5.5, 6, 7.5)", () => 
     assert.equal(targetOf(failedInstead).retype, undefined);
     const marked = ok(send(reopened.state, answer({ result: "pass" }))).state;
     assert.equal(targetOf(marked).retype, undefined);
+  });
+
+  test("with typed totals off a Fix my total never strands the player: the Allow reopens for a roll, and a retype set before the switch takes the player's roll (B7B-P-3)", () => {
+    const fail = typed(3);
+    const pending = ok(send(fail, asking("a1", "fix-total", fail), P1)).state;
+    const allow = { t: "roll.reopen" as const, rollId: "r1", target: THORN, change: "a1" };
+    // Asked while on, allowed after the DM turned typed totals off.
+    const off = structuredClone(pending);
+    off.meta.settings.playersTypeTotals = false;
+    const reopened = ok(send(off, allow)).state;
+    assert.deepEqual({ retype: targetOf(reopened).retype, total: targetOf(reopened).total }, { retype: undefined, total: undefined }, "reopened for a roll");
+    assert.equal(targetOf(reopened).previous?.total, 3);
+    assert.ok(send(reopened, roll(), P1, [15]).ok, "the player rolls it");
+    assert.deepEqual(send(reopened, answer({ total: 13 }), P1), refusal("forbidden", NO_TYPED_TOTALS), "and types nothing");
+    // Allowed while on, then the switch went off: the retype stays, and the player rolls it all the same.
+    const retyped = ok(send(pending, allow)).state;
+    assert.equal(targetOf(retyped).retype, true);
+    const later = structuredClone(retyped);
+    later.meta.settings.playersTypeTotals = false;
+    const rolledLater = ok(send(later, roll(), P1, [15])).state;
+    assert.deepEqual({ total: targetOf(rolledLater).total !== undefined, retype: targetOf(rolledLater).retype }, { total: true, retype: undefined });
+    assert.deepEqual(send(retyped, roll(), P1, [15]), refusal("invalid", TYPE_THE_TOTAL), "on, a retype is still typed alone");
   });
 
   test("the DM's undo of a fixed-total Allow brings back the answer and the ask it allowed", () => {

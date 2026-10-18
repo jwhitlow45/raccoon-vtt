@@ -852,7 +852,9 @@ export const SETTLED_MEANWHILE = "It was settled meanwhile.";
  * waiting, as does any roll with `unanswered`, so a DM's Roll that crosses a
  * player's answer never replaces it. Nor does a player roll a target whose
  * "Fix my total" the DM allowed (`retype`): that reopens the answer for
- * typing alone, while the DM may still roll it. `change`, the DM's Allow, needs the
+ * typing alone, while the DM may still roll it. While the room has typed
+ * totals off the player types nothing, so they roll it, a `retype` set
+ * before the switch went off included. `change`, the DM's Allow, needs the
  * target's pending ask to have that id, to name the current answer and that
  * answer to be rolled, so an ask replaced or withdrawn while the Allow
  * travels, or a second device's Allow, draws nothing. All before any draw.
@@ -865,7 +867,7 @@ function rollDiceCheck(c: Check, op: OpOf<"roll.dice">): Decision {
   const player = c.actor.role === "player";
   if (player && !("tokenId" in op.target ? c.ownsTokenId(op.target.tokenId) : c.ownsCharacterId(op.target.characterId))) return GONE;
   if (player && op.change !== undefined) return refuse("forbidden", "Only the DM allows a change to a roll.");
-  if (player && target.retype) return refuse("invalid", TYPE_THE_TOTAL);
+  if (player && target.retype && playersTypeTotals(c.state.meta.settings)) return refuse("invalid", TYPE_THE_TOTAL);
   const answered = target.total !== undefined || target.result !== undefined;
   if (op.change === undefined) return (player || op.unanswered) && answered ? refuse("invalid", ANSWERED_MEANWHILE) : OK;
   const ask = target.change;

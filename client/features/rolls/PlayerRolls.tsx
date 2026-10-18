@@ -708,7 +708,7 @@ function CreatureAnswer(props: {
   const roll = cardRoll({ bonus, preset, inputs, text, typeTotals });
   const typedBonus = parseBonus(inputs.bonus);
   const offers = answerOffers({ holds: true, request, target, text, connected, bonusReady: bonus !== null || typedBonus?.ok === true, typeTotals });
-  const waiting = !answered(target) && target.retype !== true;
+  const waiting = !answered(target) && (target.retype !== true || !typeTotals);
   const failsFirst = waiting && preset?.fails !== undefined && request.test.kind === "save" && !final;
   const busy = flow.busy?.op ?? null;
   const readingId = useId();

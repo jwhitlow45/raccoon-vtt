@@ -54,8 +54,9 @@ import { ALREADY_ASKED, DIE_NEEDED, FINAL, ROLLED_ONLY, SEND_INSTEAD, TYPED_ONLY
  *     ask names its target's current answer, a Keep or Withdraw ends that
  *     ask and changes nothing else, and an Allow of "Fix my total" needs
  *     its pending fix.
- * 17. A target with `retype` takes no player roll. Only an allowed fix sets
- *     it, on a target left waiting, and every new answer clears it.
+ * 17. A target with `retype` takes no player roll while typed totals are
+ *     on, as they are in every room here. Only an allowed fix sets it, on a
+ *     target left waiting, and every new answer clears it.
  * 18. An ask lands only on the answer it names, as sent, and only when the
  *     Allow could apply it: a reroll, Lucky or a die on a rolled answer by
  *     the resolve's rules, "Fix my total" on a typed answer final for its
