@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { chromium, type Browser, type Page } from "playwright-core";
+import { chromium, type Browser, type Locator, type Page } from "playwright-core";
 import { ConsoleWatch, Shots, startServer, type Server } from "./harness.ts";
 
 /**
@@ -59,6 +59,22 @@ async function waitForMarked(page: Page, within: string, text: string): Promise<
 }
 
 const OUTLINE = 'nav[aria-label="Guide outline"]';
+
+/** What has focus, as its tag and then its id or else its text ("H3 initiative", "BUTTON Contents"). */
+function focusedName(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    const el = (globalThis as unknown as Win).document.activeElement;
+    return el ? `${el.tagName} ${el.id || el.textContent}` : null;
+  });
+}
+
+/** The outline an element draws, as computed. */
+function outlineOf(locator: Locator): Promise<{ style: string; width: string }> {
+  return locator.evaluate((el) => {
+    const s = (globalThis as unknown as { getComputedStyle(el: unknown): { outlineStyle: string; outlineWidth: string } }).getComputedStyle(el);
+    return { style: s.outlineStyle, width: s.outlineWidth };
+  });
+}
 
 /** Where the heading sits in the window: just under its top when the page has scrolled to it. */
 async function headingTop(page: Page, id: string): Promise<number> {
@@ -161,6 +177,81 @@ describe("raccoon-vtt DM guide page", { timeout: 90_000 }, () => {
       }
     });
   }
+
+  test("fr-a: after a tap, focus the page moves draws no ring, and a key press brings the rings back", async () => {
+    const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    /*
+     * The page acts as iOS Safari does, or Chrome would draw no ring here
+     * even without the rules this checks. iOS judges most focus the page
+     * moves itself as keyboard focus, where Chrome judges it by the input
+     * before, a tap here, so the page's focus() asks for keyboard focus.
+     * And iOS gives a tapped button no focus, so a closing sheet's opener
+     * takes it from the page's focus(), not from the dialog's own return.
+     */
+    await phone.addInitScript(() => {
+      type El = { closest?(selector: string): unknown };
+      const g = globalThis as unknown as {
+        HTMLElement: { prototype: { focus(options?: object): void } };
+        document: { addEventListener(type: string, listener: (e: { target: El | null; preventDefault(): void }) => void, capture: boolean): void };
+      };
+      const focus = g.HTMLElement.prototype.focus;
+      g.HTMLElement.prototype.focus = function (this: unknown, options?: object) {
+        focus.call(this, { ...options, focusVisible: true });
+      };
+      g.document.addEventListener(
+        "mousedown",
+        (e) => {
+          if (e.target?.closest?.("button")) e.preventDefault();
+        },
+        true,
+      );
+    });
+    const page = await phone.newPage();
+    const watch = new ConsoleWatch("fr-a");
+    watch.attach(page);
+    try {
+      await page.goto(`${server.origin}/docs/dm-guide`);
+      const button = page.getByRole("button", { name: "Contents", exact: true });
+      const sheet = page.getByRole("dialog", { name: "Contents" });
+      await button.tap();
+      await sheet.waitFor();
+      await sheet.locator('a[href="#initiative"]').tap();
+      await sheet.waitFor({ state: "detached" });
+      assert.equal(await focusedName(page), "H3 initiative");
+      assert.equal((await outlineOf(page.locator("#initiative"))).style, "none", "the heading a pick lands on draws no box");
+
+      await button.tap();
+      await sheet.waitFor();
+      await sheet.getByRole("button", { name: /^Close/ }).tap();
+      await sheet.waitFor({ state: "detached" });
+      assert.equal(await focusedName(page), "BUTTON Contents");
+      assert.equal((await outlineOf(button)).style, "none", "the opener focus goes back to draws no ring after a tap");
+      await shots.take(page, "fr-a-phone-after-taps");
+
+      // The Contents button is the page's last control, so Shift+Tab goes on to the one before it.
+      await page.keyboard.press("Shift+Tab");
+      const name = await focusedName(page);
+      assert.match(name ?? "", /^(A|BUTTON) /, `Shift+Tab lands on a control, not ${name}`);
+      assert.deepEqual(await outlineOf(page.locator(":focus")), { style: "solid", width: "2px" }, `the ring on ${name}`);
+      assert.deepEqual(watch.errors, []);
+    } finally {
+      await phone.close();
+    }
+
+    const computer = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const desk = await computer.newPage();
+    try {
+      await desk.goto(`${server.origin}/docs/dm-guide`);
+      await desk.locator(OUTLINE).getByRole("link", { name: "Contents", exact: true }).click();
+      await desk.waitForFunction(() => (globalThis as unknown as Win).location.hash === "#contents");
+      await desk.keyboard.press("Tab");
+      const name = await focusedName(desk);
+      assert.match(name ?? "", /^(A|BUTTON) /, `Tab lands on a control, not ${name}`);
+      assert.deepEqual(await outlineOf(desk.locator(":focus")), { style: "solid", width: "2px" }, `the ring on ${name}`);
+    } finally {
+      await computer.close();
+    }
+  });
 
   test("guidelook-c: the page numbers the parts and sections, and draws steps, keys, callouts and examples", async () => {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
