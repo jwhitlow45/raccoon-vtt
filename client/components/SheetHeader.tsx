@@ -98,7 +98,7 @@ export function SheetHeader(props: {
   detailId?: string;
   /** The header is the grab area of a sheet that swipes (lib/sheetSwipe.ts): a drag on it always moves the sheet. */
   grab?: boolean;
-  /** "Full screen", for a sheet that fills the screen when swiped up (docs/design-v1-sheet-swipe.md 4.7): first in the header, hidden until it has focus. */
+  /** "Expand sheet", for a sheet that fills the screen when swiped up (docs/design-v1-sheet-swipe.md 4.7): first in the header, hidden until it has focus. */
   fullScreen?: { pressed: boolean; onPress(): void };
   /**
    * A header row of the side panel (docs/design-v1-side-headers.md): one
@@ -203,12 +203,14 @@ export function SheetHeader(props: {
  * in the header's reading order, and Tab reaches it. Pressed while the
  * sheet fills the screen. Focus a script or the browser gives it, such as
  * a dialog's own pick of its first control, draws nothing, or it would
- * cover the title with no keyboard in sight.
+ * cover the title with no keyboard in sight. Its name is the sheet's own,
+ * "Expand sheet", so a screen reader never hears it as the room's Full
+ * screen, which fills the screen with the whole page.
  */
 function FullScreenButton(props: { pressed: boolean; onPress(): void; at: { left: number; top: number } }) {
   const [shown, setShown] = useState(false);
   const place: CSSProperties = shown ? { position: "absolute", left: props.at.left, top: props.at.top, zIndex: 1, ...(props.pressed ? null : { background: theme.color.surface }) } : { ...VISUALLY_HIDDEN, minWidth: 0, minHeight: 0, border: "none" };
-  return <IconButton icon="expand" label="Full screen" pressed={props.pressed} onClick={props.onPress} onFocus={(e) => setShown(keyboardFocus(e.currentTarget))} onBlur={() => setShown(false)} style={place} />;
+  return <IconButton icon="expand" label="Expand sheet" pressed={props.pressed} onClick={props.onPress} onFocus={(e) => setShown(keyboardFocus(e.currentTarget))} onBlur={() => setShown(false)} style={place} />;
 }
 
 /** A grab area's mark and style, or nothing. */

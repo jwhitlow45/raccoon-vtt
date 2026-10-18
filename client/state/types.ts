@@ -185,7 +185,7 @@ export type LocalUi = {
   pendingOpen: PendingOpen | null;
   /**
    * A phone's upright sheet fills the screen (docs/design-v1-sheet-swipe.md
-   * 4.7), by a swipe up or its Full screen button. Every open starts at the
+   * 4.7), by a swipe up or its Expand sheet button. Every open starts at the
    * normal height, and only the sheet's closing or its replacement ends it:
    * a subpage, Hide, a rotation and the crossing of 900 px keep it latent,
    * shaping nothing until the sheet stands upright again. Never stored.

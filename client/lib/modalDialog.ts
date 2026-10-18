@@ -137,7 +137,7 @@ export function sheetDialogSteps(now: SheetDialogState, want: { shown: boolean; 
  * - Made modal with focus outside it or on the page, for a sheet that names
  *   a `title` to land on: its title. The browser's own pick is the dialog's
  *   first control, which for a sheet swiped up to fill the screen was the
- *   Full screen button kept hidden until it has keyboard focus
+ *   Expand sheet button kept hidden until it has keyboard focus
  *   (docs/design-v1-sheet-swipe.md 4.7).
  * Null leaves focus where the browser put it, and "page" blurs it.
  */

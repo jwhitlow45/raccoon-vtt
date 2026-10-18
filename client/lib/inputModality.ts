@@ -91,7 +91,7 @@ export function startInputModality(): void {
 
 /**
  * Whether focus on a control came from the keyboard, for a look that, like
- * the ring, shows only then (a tooltip, the sheet's Full screen button):
+ * the ring, shows only then (a tooltip, the sheet's Expand sheet button):
  * never while a pointer was last, else as the browser judges
  * `:focus-visible`.
  */

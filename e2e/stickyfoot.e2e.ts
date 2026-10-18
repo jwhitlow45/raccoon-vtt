@@ -247,7 +247,7 @@ describe("raccoon-vtt: sticky footers sit on their pane's foot", { timeout: 600_
       await setUp(pat, { width: 390, height: 844, scale });
       const sheet = await logSheet(pat);
       await flush(sheet.locator("form").last(), `the Log's sheet at ${scale * 100}%`);
-      await sheet.getByRole("button", { name: "Full screen" }).focus();
+      await sheet.getByRole("button", { name: "Expand sheet" }).focus();
       await pat.keyboard.press("Enter");
       await waitFor("the sheet full", async () => ((await sheet.getAttribute("aria-modal")) === "true" ? true : null));
       await flush(sheet.locator("form").last(), `the Log full screen at ${scale * 100}%`);

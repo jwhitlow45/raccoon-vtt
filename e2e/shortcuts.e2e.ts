@@ -277,6 +277,10 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
     await player.getByRole("button", { name: /^This device/ }).click();
     const phoneToggle = player.getByRole("switch", { name: "Full screen" });
+    // The sheet's own hidden button fills the sheet, not the page, so it goes by a name of its own.
+    const menuSheet = player.getByRole("dialog").filter({ has: phoneToggle });
+    assert.equal(await menuSheet.getByRole("button", { name: "Expand sheet" }).count(), 1, "the sheet's own button is Expand sheet");
+    assert.equal(await menuSheet.getByRole("button", { name: /full screen/i }).count(), 0, "one Full screen control in the sheet");
     await phoneToggle.tap();
     await fullscreenIs(player, true, "a phone in full screen by Menu, This device");
     await waitFor("the phone's switch on", async () => ((await phoneToggle.getAttribute("aria-checked")) === "true" ? true : null));

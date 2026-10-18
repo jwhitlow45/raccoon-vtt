@@ -976,7 +976,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       const normal = await steadyRect(sheet);
       const up = normal.top;
       const step = stepOf(up, view.scale);
-      const fullScreen = sheet.getByRole("button", { name: "Full screen" });
+      const fullScreen = sheet.getByRole("button", { name: "Expand sheet" });
       assert.equal(await fullScreen.getAttribute("aria-pressed"), "false");
       // Short of half the way up: back to normal.
       await swipe(dmCdp, await headerPoint(sheet), -(16 + step - 12));
@@ -1127,7 +1127,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await ops.send({ t: "encounter.end" });
   });
 
-  test("12d. full screen on a tablet survives a turn past 900 px and back, a tap on Close that drifts up closes once, and the Full screen button does both ways by keyboard", async () => {
+  test("12d. full screen on a tablet survives a turn past 900 px and back, a tap on Close that drifts up closes once, and the Expand sheet button does both ways by keyboard", async () => {
     for (const view of [
       { width: 834, height: 1194 },
       { width: 768, height: 1024 },
@@ -1135,7 +1135,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       await setUp(dm, { ...view, scale: 1 });
       const sheet = await openPanel(dm, "Log");
       await steadyRect(sheet);
-      await sheet.getByRole("button", { name: "Full screen" }).focus();
+      await sheet.getByRole("button", { name: "Expand sheet" }).focus();
       await dm.keyboard.press("Enter");
       await waitFor("full", async () => (await sheet.getAttribute("aria-modal")) === "true" || null, 3_000);
       await dm.setViewportSize({ width: view.height, height: view.width });
@@ -1153,29 +1153,29 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await jitterTap(dmCdp, dm, await middleOf(close), [-4, -8, -12]);
     assert.equal(await settled(sheet), "gone", "a tap on Close that drifted up did not close");
     assert.equal(await closes(), 1);
-    // By keyboard: Tab shows Full screen, Enter fills the screen, Enter again steps down, and focus stays on it.
+    // By keyboard: Tab shows Expand sheet, Enter fills the screen, Enter again steps down, and focus stays on it.
     sheet = await openPanel(dm, "Log");
     const normal = await steadyRect(sheet);
-    const button = sheet.getByRole("button", { name: "Full screen" });
+    const button = sheet.getByRole("button", { name: "Expand sheet" });
     // By the keyboard: Shift+Tab from Back, the header's next stop, reaches it.
     await sheet.getByRole("button", { name: "All panels" }).focus();
     await dm.keyboard.press("Shift+Tab");
-    assert.equal(await button.evaluate((el) => (globalThis as unknown as Win).document.activeElement === (el as unknown as El)), true, "Shift+Tab from Back did not reach Full screen");
-    assert.ok((await rectOf(button)).width >= 44, "Full screen does not show with keyboard focus");
-    assert.ok(Math.abs((await rectOf(button)).top - (await rectOf(sheet.getByRole("button", { name: "Close Log" }))).top) < 0.5, "Full screen does not stand on the row it covers");
+    assert.equal(await button.evaluate((el) => (globalThis as unknown as Win).document.activeElement === (el as unknown as El)), true, "Shift+Tab from Back did not reach Expand sheet");
+    assert.ok((await rectOf(button)).width >= 44, "Expand sheet does not show with keyboard focus");
+    assert.ok(Math.abs((await rectOf(button)).top - (await rectOf(sheet.getByRole("button", { name: "Close Log" }))).top) < 0.5, "Expand sheet does not stand on the row it covers");
     await dm.keyboard.press("Enter");
     await waitFor("full", async () => (await sheet.getAttribute("aria-modal")) === "true" || null, 3_000);
     assert.equal(await button.getAttribute("aria-pressed"), "true");
-    assert.equal(await button.evaluate((el) => (globalThis as unknown as Win).document.activeElement === (el as unknown as El)), true, "focus left Full screen");
+    assert.equal(await button.evaluate((el) => (globalThis as unknown as Win).document.activeElement === (el as unknown as El)), true, "focus left Expand sheet");
     await dm.keyboard.press("Enter");
     await waitFor("normal", async () => (await sheet.getAttribute("aria-modal")) === null || null, 3_000);
-    assert.equal(await button.evaluate((el) => (globalThis as unknown as Win).document.activeElement === (el as unknown as El)), true, "focus left Full screen");
+    assert.equal(await button.evaluate((el) => (globalThis as unknown as Win).document.activeElement === (el as unknown as El)), true, "focus left Expand sheet");
     assert.deepEqual(await steadyRect(sheet), normal);
     await sheet.getByRole("button", { name: "Close Log" }).click();
   });
 
-  test("12e. a sheet filled with focus outside it lands focus on its title, and Full screen never draws over the title without the keyboard", async () => {
-    const fullButtonHidden = (sheet: Locator) => sheet.getByRole("button", { name: "Full screen" }).evaluate((el) => (el as unknown as El).getBoundingClientRect().width <= 2);
+  test("12e. a sheet filled with focus outside it lands focus on its title, and Expand sheet never draws over the title without the keyboard", async () => {
+    const fullButtonHidden = (sheet: Locator) => sheet.getByRole("button", { name: "Expand sheet" }).evaluate((el) => (el as unknown as El).getBoundingClientRect().width <= 2);
     const titleFocused = (sheet: Locator) => sheet.locator("header h2").first().evaluate((el) => (globalThis as unknown as Win).document.activeElement === (el as unknown as El));
     const up = async (sheet: Locator) => {
       const r = await steadyRect(sheet);
@@ -1190,12 +1190,12 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await steadyRect(sheet);
     await dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur(): void } | null } }).document.activeElement?.blur());
     let normal = await up(sheet);
-    assert.equal(await fullButtonHidden(sheet), true, "Full screen drew itself over the title of a sheet filled with focus on the page");
+    assert.equal(await fullButtonHidden(sheet), true, "Expand sheet drew itself over the title of a sheet filled with focus on the page");
     assert.equal(await titleFocused(sheet), true, "focus did not land on the full sheet's title");
     await swipe(dmCdp, await headerPoint(sheet), 8 + stepOf(normal.top) + 12);
     await waitFor("the step down", async () => (await sheet.getAttribute("aria-modal")) === null || null, 3_000);
     await settled(sheet);
-    assert.equal(await fullButtonHidden(sheet), true, "Full screen stayed over the title after the step down");
+    assert.equal(await fullButtonHidden(sheet), true, "Expand sheet stayed over the title after the step down");
     await sheet.getByRole("button", { name: "Close Log" }).click();
     // Initiative from the turn strip, which keeps focus on the strip.
     await ops.send({
@@ -1210,7 +1210,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       sheet = sheetOf(dm, "Initiative");
       await sheet.waitFor();
       normal = await up(sheet);
-      assert.equal(await fullButtonHidden(sheet), true, "Full screen drew itself over the title of Initiative opened from the turn strip");
+      assert.equal(await fullButtonHidden(sheet), true, "Expand sheet drew itself over the title of Initiative opened from the turn strip");
       assert.equal(await titleFocused(sheet), true, "focus did not land on Initiative's title");
       await shots.take(dm, "swipe-full-from-turn-strip");
       await swipe(dmCdp, await headerPoint(sheet), 8 + stepOf(normal.top) + 12);
@@ -1652,7 +1652,7 @@ async function grabberFit(surface: Locator): Promise<{ pill: Rect; area: Rect; s
       const r = n.getBoundingClientRect();
       return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
     };
-    // The visually hidden Full screen button is 1 px square: no line of its own.
+    // The visually hidden Expand sheet button is 1 px square: no line of its own.
     const parts = () => Array.from(area.querySelectorAll("button, h2, h3, strong, p, input")).map(box).filter((r) => r.width > 2 && r.height > 2);
     const p = box(pill);
     const at = doc.elementFromPoint((p.left + p.right) / 2, (p.top + p.bottom) / 2);

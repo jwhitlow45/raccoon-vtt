@@ -203,7 +203,7 @@ describe("a sheet's one dialog (useSheetDialog)", () => {
     assert.equal(sheetFocusAfter({ steps: ["close", "showModal"], before: "outside", hiding: false, title: true }), "title", "the turn strip had it");
     assert.equal(sheetFocusAfter({ steps: ["close", "showModal"], before: "page", hiding: false, title: true }), "title", "a tap on the map left it on the page");
     assert.equal(sheetFocusAfter({ steps: ["showModal"], before: "page", hiding: false, title: true }), "title");
-    assert.equal(sheetFocusAfter({ steps: ["close", "showModal"], before: "inside", hiding: false, title: true }), "before", "the Full screen button by keyboard keeps focus");
+    assert.equal(sheetFocusAfter({ steps: ["close", "showModal"], before: "inside", hiding: false, title: true }), "before", "the Expand sheet button by keyboard keeps focus");
     assert.equal(sheetFocusAfter({ steps: ["close", "show"], before: "page", hiding: false, title: true }), "page", "a step down is not modal");
   });
 

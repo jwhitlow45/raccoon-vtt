@@ -837,7 +837,7 @@ describe("12. randomized touches, from both stands", () => {
         const canFill = rnd() < 0.6;
         const up = canFill ? 150 + Math.floor(rnd() * 200) : 0;
         if (!canFill) stand = "normal";
-        // The Full screen button fills it between touches too.
+        // The Expand sheet button fills it between touches too.
         else if (rnd() < 0.3) stand = "full";
         const s = sessionStart({
           on: pick(["grab", "content", "owned"] as const),

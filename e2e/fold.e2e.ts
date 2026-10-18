@@ -208,8 +208,8 @@ async function assertHeaderFits(sheet: Locator, scale: number, label: string): P
   const buttons = await header.locator("button").evaluateAll((els) =>
     els
       .map((e) => ({ name: e.getAttribute("aria-label") ?? e.textContent ?? "", r: e.getBoundingClientRect() }))
-      // An upright sheet's Full screen is visually hidden until it has keyboard focus (docs/design-v1-sheet-swipe.md 4.7), so it is no target on screen. Every other header button is held to the rule.
-      .filter(({ name, r }) => r.width > 0 && name !== "Full screen")
+      // An upright sheet's Expand sheet button is visually hidden until it has keyboard focus (docs/design-v1-sheet-swipe.md 4.7), so it is no target on screen. Every other header button is held to the rule.
+      .filter(({ name, r }) => r.width > 0 && name !== "Expand sheet")
       .map(({ name, r }) => ({ name, left: r.left, right: r.right, h: r.height })),
   );
   assert.ok(buttons.length > 0, `${label}: the header has no buttons`);

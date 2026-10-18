@@ -53,7 +53,7 @@ export type SheetMode = "bottom" | "side" | "full";
  * it, the dock's row (pages/RoomDock.tsx). It provides its panel the
  * context that reports unsaved input, which makes a swipe spring back.
  *
- * Swiped up from its header, or by the Full screen button that Tab
+ * Swiped up from its header, or by the Expand sheet button that Tab
  * reaches in its header, it fills the screen (`expanded`, 4.7): the very
  * short mode's shape, modal, with the upright sheet's rounded top corners,
  * its header still the upright sheet's, with no Hide. A short swipe down
@@ -98,7 +98,7 @@ export function Sheet(props: {
   riders?: readonly (HTMLElement | null)[];
   /** At the foot, the sheet fills the screen. Room keeps it latent elsewhere. */
   expanded?: boolean;
-  /** Fills the screen or brings the sheet back to its normal height, by a swipe or the Full screen button. Without it the sheet never fills the screen. */
+  /** Fills the screen or brings the sheet back to its normal height, by a swipe or the Expand sheet button. Without it the sheet never fills the screen. */
   onExpand?(on: boolean): void;
   /** The sheet's height cap at the foot for the layout now, in layout px (sheetCap.ts), which a long swipe from full screen measures by after a change of layout. */
   cap?: number;

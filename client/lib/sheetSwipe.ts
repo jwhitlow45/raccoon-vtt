@@ -775,7 +775,7 @@ const NO_RIDERS: readonly HTMLElement[] = [];
  * React's own touch listeners are passive and cannot cancel a move. A
  * touch that cannot swipe returns at once. `rising` is the panel sheet's
  * box change for a drag above its normal top, and `expand` is what its
- * "Full screen" button does.
+ * "Expand sheet" button does.
  */
 export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: SheetSwipeOptions): { rising: boolean; expand(on: boolean): void } {
   const scale = useUiScale();
