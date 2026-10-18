@@ -109,10 +109,10 @@ jobs:
   e2e:
     needs: build
     runs-on: ubuntu-24.04
-    # options.e2e.ts alone is the longest shard, about 16 minutes on a
-    # laptop. Eight shards keep every other one near half of that, so a
-    # rerun there still ends first, and they balance once options splits.
-    timeout-minutes: 75
+    # Eight shards of about 7 minutes each on a laptop, balanced by
+    # scripts/e2e-shard.ts from e2e/durations.json. No file runs over 5, so
+    # a failing file's rerun fits well inside the limit.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
