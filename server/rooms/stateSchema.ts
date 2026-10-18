@@ -339,6 +339,7 @@ const entry = z.strictObject({
   reactionUsed: z.boolean(),
   inLair: z.boolean(),
   advantage: z.enum(["adv", "dis"]).optional(),
+  hadTurn: z.literal(true).optional(),
 });
 
 const turnStart = z.strictObject({

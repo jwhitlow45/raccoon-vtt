@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 11;
-export const OP_VERSION = 7;
+export const SNAPSHOT_VERSION = 12;
+export const OP_VERSION = 8;
 
 export type MigrationStep = {
   from: number;
@@ -97,6 +97,11 @@ export const snapshotMigrations: MigrationStep[] = [
   // blocks are optional fields and new log lines whose absence reads as before, so a v10 room is a v11 room as it is.
   // The number moves so that an older build, which would drop or misread them, refuses a v11 snapshot instead.
   { from: 10, to: 11, apply: (state) => state },
+  // The order setting (docs/design-v1-combat-flow.md 11.4): the setting, `InitEntry.hadTurn` and `DiceRoll.hidden` are
+  // optional fields whose absence reads as before, so a v11 room is a v12 room as it is. The number moves so that an
+  // older build, which would ignore them and send players every row and roll the DM kept from them, refuses a v12
+  // snapshot instead.
+  { from: 11, to: 12, apply: (state) => state },
 ];
 
 /**
@@ -274,6 +279,27 @@ export const opMigrations: MigrationStep[] = [
     to: 7,
     apply: (op) => op,
   },
+  {
+    // v7 ops ran before a row recorded that its turn had come
+    // (`InitEntry.hadTurn`, docs/design-v1-combat-flow.md 11.4). Replayed
+    // under a rule that records it, a turn advanced or passed on by a
+    // removal would leave the encounter and its history holding a field
+    // they did not hold then, and a later restore's guard would no longer
+    // match. Their shape is unchanged, so as in step 4 to 5, replay hands
+    // the reducer the stored version (`marksHadTurn`), and a v7 op makes the
+    // state it made then. The new `initiative` mark on a roll is a field an
+    // older build's strict schema refuses in a stored `sys.dice`, which the
+    // version makes that build refuse cleanly instead.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 8, and the shutdown writes version 12 snapshots.
+    // Rollback: an older build refuses to migrate either down
+    // (runMigrations), so going back restores that backup, losing the play
+    // since.
+    from: 7,
+    to: 8,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -346,6 +372,15 @@ export function answerProvenance(opVersion: number | undefined): boolean {
  */
 export function shapeKeepsOwnNumbers(opVersion: number | undefined): boolean {
   return opVersion === undefined || opVersion >= 7;
+}
+
+/**
+ * Whether a turn that starts marks its row as having had its turn
+ * (`InitEntry.hadTurn`, step 7 to 8 above). Ops stored before version 8 did
+ * not. Live ops carry no stored version and take today's rule.
+ */
+export function marksHadTurn(opVersion: number | undefined): boolean {
+  return opVersion === undefined || opVersion >= 8;
 }
 
 /** Runs the steps that lead from `from` to `to`, in order, and refuses a version with no path. */

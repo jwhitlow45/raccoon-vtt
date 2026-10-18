@@ -289,10 +289,11 @@ export function createFixtureState(options: FixtureOptions): RoomState {
     round: 2,
     activeEntryId: "i-thorn",
     entries: [
-      { id: "i-thorn", tokenId: byName("Thorn"), value: 18, tieOrder: 0, hidden: false, reactionUsed: false, inLair: false },
-      { id: "i-gob1", tokenId: byName("Goblin", 1), value: 15, tieOrder: 0, groupKey: "goblin", hidden: false, reactionUsed: false, inLair: false },
-      { id: "i-owl", tokenId: byName("Owlbear"), value: 12, tieOrder: 0, hidden: false, reactionUsed: true, inLair: false },
-      { id: "i-vex", tokenId: byName("Vex"), value: 9, tieOrder: 0, hidden: false, reactionUsed: false, inLair: false },
+      // Round 2: every row has had its turn, so players see each one's place in the order.
+      { id: "i-thorn", tokenId: byName("Thorn"), value: 18, tieOrder: 0, hidden: false, reactionUsed: false, inLair: false, hadTurn: true },
+      { id: "i-gob1", tokenId: byName("Goblin", 1), value: 15, tieOrder: 0, groupKey: "goblin", hidden: false, reactionUsed: false, inLair: false, hadTurn: true },
+      { id: "i-owl", tokenId: byName("Owlbear"), value: 12, tieOrder: 0, hidden: false, reactionUsed: true, inLair: false, hadTurn: true },
+      { id: "i-vex", tokenId: byName("Vex"), value: 9, tieOrder: 0, hidden: false, reactionUsed: false, inLair: false, hadTurn: true },
     ],
     turnStart: { entryId: "i-thorn", tokenId: byName("Thorn"), sceneId: cave.id, x: 2, y: 4, elevation: 0, seen: true, seq: 1 },
   };

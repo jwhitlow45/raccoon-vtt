@@ -10,6 +10,7 @@ import {
   tickEffects,
   unbindFromEntry,
 } from "../rules/durations.ts";
+import { marksHadTurn } from "../migrate.ts";
 import { activeRowShownTo, inSightOfNonOwners, rowSeenByNonOwners } from "../project.ts";
 import { effectEvent } from "../rules/hp.ts";
 import { actorOfEntry, groupKeyFor, nextTurn, placeEntry, renumber, rowCharacter, scoredValue, sortEntries, turnMovedOn } from "../rules/initiative.ts";
@@ -31,12 +32,15 @@ function writeEncounter(tx: Tx, encounter: Encounter): void {
 /**
  * The encounter with a new active row, and the spot that row's creature
  * stands on as where its turn began (features section 10). A row without a
- * token, or whose token is gone, has no spot.
+ * token, or whose token is gone, has no spot. The row is marked as having
+ * had its turn, so its place in the order stays in players' view for the
+ * rest of the fight (docs/design-v1-combat-flow.md 11.2).
  */
 function withTurn(tx: Tx, encounter: Encounter, activeEntryId: string | null): Encounter {
   const { turnStart: _previous, ...rest } = encounter;
   const next: Encounter = { ...rest, activeEntryId };
   const entry = activeEntryId === null ? undefined : encounter.entries.find((e) => e.id === activeEntryId);
+  if (entry && !entry.hadTurn && marksHadTurn(tx.env.opVersion)) next.entries = encounter.entries.map((e) => (e === entry ? { ...e, hadTurn: true } : e));
   const token = entry?.tokenId !== undefined ? tx.state.tokens[entry.tokenId] : undefined;
   if (entry && token) {
     // The seq names this turn, so a path recorded during it is told from one of an earlier turn (rules/path.ts).

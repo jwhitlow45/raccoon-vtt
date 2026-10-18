@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   DEFAULT_SETTINGS,
+  ORDER_REVEALS,
   type Actor,
   type AreaTemplate,
   type Character,
@@ -239,10 +240,15 @@ export function entry(id: string, overrides: Partial<InitEntry> = {}): InitEntry
   return { id, value: 10, tieOrder: 0, hidden: false, reactionUsed: false, inLair: false, ...overrides };
 }
 
-/** A room with a DM, two players, two scenes (s1 is the player scene) and nothing else. */
+/**
+ * A room with a DM, two players, two scenes (s1 is the player scene) and
+ * nothing else. Players see the whole initiative order in it, as in every
+ * room from before the order setting, so a fixture's rows reach them by the
+ * other rules alone. The order setting's own tests pick another.
+ */
 export function room(overrides: Partial<RoomState> = {}): RoomState {
   return {
-    meta: { name: "Test room", settings: { ...DEFAULT_SETTINGS }, playerSceneId: "s1", view: { follow: false, blackout: false } },
+    meta: { name: "Test room", settings: { ...DEFAULT_SETTINGS, playersSeeOrder: "all" }, playerSceneId: "s1", view: { follow: false, blackout: false } },
     members: { dm1: member("dm1", "dm"), p1: member("p1"), p2: member("p2") },
     scenes: { s1: scene("s1"), s2: scene("s2", { order: 1 }) },
     buildChunks: {},
@@ -613,7 +619,18 @@ export function randomState(r: () => number): RoomState {
   addDmTools(r, state);
   addCompanions(r, state);
   addCompanionBlocks(state);
+  addOrderReveal(r, state);
   return state;
+}
+
+/** The order setting (docs/design-v1-combat-flow.md 11), and rows whose turn has come in the fight and its saved steps. */
+function addOrderReveal(r: () => number, state: RoomState): void {
+  state.meta.settings.playersSeeOrder = pick(r, ORDER_REVEALS);
+  const mark = (entries: InitEntry[]) => {
+    for (const e of entries) if (chance(r, 0.4)) e.hadTurn = true;
+  };
+  if (state.encounter) mark(state.encounter.entries);
+  for (const step of state.encounterHistory) mark(step.encounter.entries);
 }
 
 /**
@@ -1238,7 +1255,7 @@ export function randomOp(r: () => number, state: RoomState, who: Viewer): Op {
     case 16:
       return { t: "room.setPlayerScene", sceneId };
     case 17:
-      return { t: "room.update", settings: { pcHpVisibleToParty: chance(r, 0.5), playersSeeAoeOfOthers: chance(r, 0.5) } };
+      return { t: "room.update", settings: { pcHpVisibleToParty: chance(r, 0.5), playersSeeAoeOfOthers: chance(r, 0.5), playersSeeOrder: pick(r, ORDER_REVEALS) } };
     case 18:
       return { t: "template.create", template: { id: seqId, sceneId, shape: "sphere", size: 20, origin: { x: 2, y: 2, z: 0 }, yaw: 0, includeOrigin: true, color: "#ff0000", ownerId: pick(r, ["dm1", "p1"]), visibility: pick(r, ["all", "dm"] as const), attachedTo: chance(r, 0.5) ? anyToken() : undefined, casterId: chance(r, 0.5) ? anyToken() : undefined } };
     case 19:

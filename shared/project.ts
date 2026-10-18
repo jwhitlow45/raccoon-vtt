@@ -51,7 +51,7 @@ import { visionRules, type PartySight } from "./ruleHooks.ts";
 import { decodeTile, encodeTile, getBit, isAboveFog, isRangeFullyFogged, labelCells, tilesAcross, TILE_CELLS } from "./rules/fog.ts";
 import { footprintRect, occupiedCells, occupiedRange, type CellRange } from "./rules/footprint.ts";
 import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
-import { compareEntries } from "./rules/initiative.ts";
+import { compareEntries, orderRevealOf } from "./rules/initiative.ts";
 import { pathThisTurn, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
 import { sightRect } from "./rules/vision.ts";
 
@@ -391,9 +391,9 @@ export function inSightOfNonOwners(state: RoomState, token: Token, env: Pick<Env
   return !withheldFromPlayers(state, fogReader(state), sightReader(state), token, revealSeenAnywhere(env.opVersion));
 }
 
-/** The same question for an initiative row, by the encounter projection's rule: not hidden, and its creature in sight. */
+/** The same question for an initiative row, by the encounter projection's rule: not hidden, in the order players see, and its creature in sight. */
 export function rowSeenByNonOwners(state: RoomState, entry: InitEntry, env: Pick<Env, "opVersion">): boolean {
-  if (entry.hidden || behindBlackout(state)) return false;
+  if (entry.hidden || behindBlackout(state) || !orderShown(state, entry)) return false;
   if (entry.tokenId !== undefined) {
     const token = state.tokens[entry.tokenId];
     if (!token || !seenByNonOwners(state, token, env)) return false;
@@ -1102,9 +1102,30 @@ function playerRollTarget(target: RollTarget, resultShown: boolean): RollTarget 
   return out;
 }
 
-/** Whether a player's encounter holds the row: not hidden, and its creature in their sight. */
+/**
+ * Whether the room's order setting lets players see the row now
+ * (docs/design-v1-combat-flow.md 11.2): the whole order, a creature a
+ * player plays, an ally where allies show, or a row whose turn has come.
+ * The acting row always passes, so the Hidden rules alone decide what
+ * players see of it on its turn.
+ */
+export function orderShown(state: RoomState, entry: InitEntry): boolean {
+  const reveal = orderRevealOf(state.meta.settings);
+  if (reveal === "all" || entry.hadTurn || state.encounter?.activeEntryId === entry.id) return true;
+  return shownFromTheStart(state, entry, reveal === "allies");
+}
+
+/** A creature whose place players see from the fight's start: one a player plays, or with `allies` one with the Ally ring. */
+function shownFromTheStart(state: RoomState, creature: { tokenId?: string; characterId?: string }, allies: boolean): boolean {
+  const token = creature.tokenId !== undefined ? state.tokens[creature.tokenId] : undefined;
+  if (token) return playersToken(state, token) || (allies && token.disposition === "ally");
+  const character = creature.characterId !== undefined ? state.characters[creature.characterId] : undefined;
+  return character !== undefined && anyPlayer(state, character.ownerIds);
+}
+
+/** Whether a player's encounter holds the row: not hidden, in the order players see, and its creature in their sight. */
 function entryShown(ctx: Ctx, entry: InitEntry, revealedSeen = false): boolean {
-  if (entry.hidden) return false;
+  if (entry.hidden || !orderShown(ctx.state, entry)) return false;
   if (entry.tokenId !== undefined && !tokenVisibleById(ctx, entry.tokenId, revealedSeen)) return false;
   return entry.characterId === undefined || ctx.state.characters[entry.characterId] !== undefined;
 }
@@ -1135,7 +1156,8 @@ function projectEncounterCtx(ctx: Ctx): ProjectedEncounter | null {
   const entries: ProjectedEntry[] = [];
   for (const entry of encounter.entries) {
     if (!entryShown(ctx, entry)) continue;
-    const { groupKey: _groupKey, ...rest } = entry;
+    // Which rows have had their turn stays the DM's. The order rule has read it already.
+    const { groupKey: _groupKey, hadTurn: _hadTurn, ...rest } = entry;
     // The row shows the token's projected name, so the DM's own label never leaks a hidden name.
     if (rest.tokenId !== undefined) delete rest.label;
     entries.push(rest);

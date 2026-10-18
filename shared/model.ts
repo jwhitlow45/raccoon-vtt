@@ -1297,6 +1297,12 @@ export type InitEntry = {
    * (design 9.4). Anyone else rolling only reads it.
    */
   advantage?: "adv" | "dis";
+  /**
+   * The row's turn has started in this fight, so players see its place in
+   * the order whatever `playersSeeOrder` reads (docs/design-v1-combat-flow.md
+   * 11.2). Set when its turn starts, never by an op's input. DM only.
+   */
+  hadTurn?: true;
 };
 
 export type EncounterSnapshot = {

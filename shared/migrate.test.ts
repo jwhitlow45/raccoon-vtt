@@ -5,6 +5,7 @@ import {
   OP_VERSION,
   SNAPSHOT_VERSION,
   healRevivesDead,
+  marksHadTurn,
   migrateOp,
   migrateSnapshot,
   opMigrations,
@@ -468,9 +469,9 @@ describe("op version 6: an actor links one stat block (docs/design-v1-companion-
 });
 
 describe("wave 7's one bump: op version 7 and snapshot version 11 (docs/design-v1-roll-request.md 7.5)", () => {
-  test("is the version now, and both steps return what they are given", () => {
-    assert.equal(OP_VERSION, 7);
-    assert.equal(SNAPSHOT_VERSION, 11);
+  test("is reached, and both steps return what they are given", () => {
+    assert.ok(OP_VERSION >= 7);
+    assert.ok(SNAPSHOT_VERSION >= 11);
     const ops: unknown[] = [
       { t: "roll.answer", rollId: "r1", target: { tokenId: "g1" }, total: 12 },
       { t: "log.chat", text: "hi" },
@@ -488,5 +489,33 @@ describe("wave 7's one bump: op version 7 and snapshot version 11 (docs/design-v
   test("a version 7 op and a version 11 snapshot never migrate down, so going back is the backup's restore", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 7, 6, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 11, 10, snapshotMigrations), /down/);
+  });
+});
+
+describe("the order setting's bump: op version 8 and snapshot version 12 (docs/design-v1-combat-flow.md 11.4)", () => {
+  test("is the version now, and both steps return what they are given", () => {
+    assert.equal(OP_VERSION, 8);
+    assert.equal(SNAPSHOT_VERSION, 12);
+    const ops: unknown[] = [
+      { t: "encounter.next" },
+      { t: "dice.roll", tag: "t1", to: "dm", rolls: [{ formula: "1d20+2", label: "Initiative", creature: { tokenId: "g1" } }] },
+      { t: "sys.restore", entries: [{ key: "encounter", value: null, expectHash: "abc" }], from: "undo", deps: true },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 7, 8, opMigrations), op);
+    const state = room();
+    assert.equal(runMigrations(state, 11, 12, snapshotMigrations), state);
+    assert.deepEqual(migrateOp({ t: "log.chat", text: "hi" }, 4), { t: "log.chat", text: "hi" });
+  });
+
+  test("marksHadTurn is false at version 7 and before, and true at 8 and for a live op", () => {
+    assert.equal(marksHadTurn(7), false);
+    assert.equal(marksHadTurn(1), false);
+    assert.equal(marksHadTurn(8), true);
+    assert.equal(marksHadTurn(undefined), true);
+  });
+
+  test("a version 8 op and a version 12 snapshot never migrate down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 8, 7, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 12, 11, snapshotMigrations), /down/);
   });
 });

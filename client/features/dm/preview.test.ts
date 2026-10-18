@@ -50,6 +50,17 @@ describe("view as a player", () => {
     assert.deepEqual(view.encounterHistory, []);
   });
 
+  test("keeps a monster's place in the order out until its turn, as the player's own view does (docs/design-v1-combat-flow.md 11)", () => {
+    const state = createFixtureState({ fog: "normal", blackout: false });
+    state.meta.settings.playersSeeOrder = "party";
+    delete state.encounter!.entries.find((e) => e.id === "i-gob1")!.hadTurn;
+    const preview = playerPreview(projectState(state, { memberId: dm, role: "dm" }, { sceneId: cave }) as unknown as RoomState, cave, thorn)!;
+    const rows = preview.encounter!.entries.map((e) => e.id);
+    assert.ok(!rows.includes("i-gob1"));
+    assert.ok(rows.includes("i-thorn"));
+    assert.deepEqual(rows, projectState(state, { memberId: thorn, role: "player" }, { sceneId: cave }).encounter!.entries.map((e) => e.id));
+  });
+
   test("needs the DM to be looking at the players' scene", () => {
     assert.equal(playerPreview(dmView(crypt), crypt, thorn), null);
   });
