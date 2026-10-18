@@ -23,9 +23,9 @@ The panel is a header, then groups by use, then setup. The order inside a group 
 |---|---|---|---|---|---|
 | Header | Picture, name, size and tags, quick numbers | never folds | shown | shown | shown |
 | Stat block | The block, or "Add a stat block" and "Take a shape" | none: the quick numbers moved up | open from 900 x 600 up, as today | as today | as today (it shows only where `statBlockShown` allows) |
-| Combat | Hit points, Conditions, Range rings, Rest | "3/7 HP · 2 conditions · rings 30 ft" | open | open | open |
+| Combat | Hit points, Conditions, Range rings, Rest | "HP 3/7 · 2 conditions · rings 30 ft" | open | open | open |
 | Notes | For everyone, On the card, For DMs only | "2 notes", "None yet" | folded | folded | open, when a note for everyone exists |
-| Position | Elevation and facing, Sight | "Elevation 30 ft, facing 90°", "On the ground" | folded | folded | not drawn: its elevation is a quick number |
+| Position | Elevation and facing, Sight | "Elevation ↑30 ft, facing 90°", "On the ground" | folded | folded | not drawn: its elevation is a quick number |
 | Image | Change image, other images, Crop, Remove | none | folded | folded | not drawn: nothing to change |
 | Stats, Token settings, Companion, Owners | as today | Owners keeps its names | folded | folded | not drawn, as today |
 | Remove | Delete this token | | shown | | |
@@ -61,9 +61,10 @@ Why these groups:
 
 `Group` in `components/Panel.tsx`:
 
-- A 48 px row: a chevron (`chevronRight` or `chevronDown`, muted, 16 px), the name at 16 px weight 700 in text color, and while folded a one-line summary at the right, 13 px muted, cut with an ellipsis. The whole row is the disclosure button (`aria-expanded`), named by the group's name alone, so the name never changes with its state.
+- A 48 px row: a chevron (`chevronRight` or `chevronDown`, muted, 16 px), the name at 16 px weight 700 in text color, and while folded a one-line summary at the right, 13 px muted, cut with an ellipsis. The whole row is the disclosure button (`aria-expanded`) inside an h3, named by the group's name alone, so the name never changes with its state. The group is no landmark: a panel of a dozen regions would crowd a screen reader's list of them, and the headings already lead there.
 - An **action** slot after the button on the same row, outside the disclosure: "Take a shape", "Attach a stat block".
-- A 1 px line above each group. **Inside a group, sections part by `space(4)` with no line**, and keep their 13 px capitals labels ("HIT POINTS"), so the two levels never look alike. `Section` reads this from context, so no section's code changes.
+- A 1 px line above each group. **Inside a group, sections part by `space(4)` with no line and no padding of their own**, and keep their 13 px capitals labels ("HIT POINTS") as h4s, so the two levels never look alike. `Section` reads this from context, so no section's code changes. A group of field rows rather than sections (Stats, Token settings, Owners) keeps the rows' `space(2)`.
+- A section alone in a group of its own name, Notes in Notes and Position in Position, has no label of its own, so "Notes" never stands over "NOTES".
 - A group that never folds (a block with nothing to fold) is the same row with no chevron.
 - Stats, Token settings, Owners and the stat block take the same look, so every fold in the panel is one thing to learn.
 
@@ -77,7 +78,7 @@ Why these groups:
 ## 6. What must not change
 
 - Every control stays, in the same section, with its name. Folded controls are not drawn, as today's folds, so a field being typed in commits before its group folds (the fold focuses itself first, `FoldLabel`'s rule).
-- The section headings stay headings with the same words ("Hit points", "Conditions"), so `e2e/tokenpanel.e2e.ts` and the other suites that find a section by its heading keep working. The groups add headings "Combat", "Notes", "Position", "Image" one level up.
+- The section headings stay headings with the same words ("Hit points", "Conditions"), so `e2e/tokenpanel.e2e.ts` and the other suites that find a section by its heading keep working, except the Notes and Position sections, whose group's heading now names them (section 4). The groups add headings "Combat", "Notes", "Position", "Image" one level up.
 - Combat starts open on every layout, so HP and conditions are where they are today on first use.
 - 44 px targets: the group row is 48 px.
 
@@ -88,7 +89,7 @@ Why these groups:
 | An object (a chest) | Header without speed, PP or Init. Combat holds Hit points only. No Rest, as today |
 | A hidden token (DM) | The "Hidden from players" tag in the header, as today |
 | A player looking at a monster with hidden HP and no notes | Header (name, size, elevation), Combat with Conditions only, nothing else |
-| A companion | Its Companion fold beside Owners, as today, in the group look |
+| A companion | Its Companion group beside Owners, its character's name as its summary |
 | A name of 80 characters | Wraps beside the picture, the numbers under it |
 | 130% at 375 x 667 | The quick numbers wrap to two lines. Group rows stay 48 px |
 | A group with nothing to show | Not drawn (Notes for a player with no note, Position for another's creature) |

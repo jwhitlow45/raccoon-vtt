@@ -43,13 +43,12 @@ The audit read every client file for visible words on controls. Its two tables (
 | `locked` | padlock | Lucide `lock` | A token that cannot be moved | Admin's pinned room |
 | `speed` | footprints | Lucide `footprints` | A creature's speed | |
 | `group` | two people | Lucide `users` | Several creatures at once: a group save, Members | |
-| `image` | a picture | Lucide `image` | A token's or a page's picture | |
 | `collapsePanel` | framed panel, arrow | app (Lucide `panel-right-close`) | Hide the side panel | Hidden from players |
 | `splitPanel`, `swapPanels`, `grip` | | app (Lucide `rows-2`, `arrow-down-up`, `grip-horizontal`) | The split panel, as the side headers design maps them | |
 | `filter` | funnel | app (Lucide `funnel`) | Filters | |
 | `expand` | four corners | app | Full screen | Fit the map (top bar's own) |
 
-Build additions, in the same shape: `download`, `share`, `upload`, `search`, `settings` (gear: settings only), `external` (`external-link`), `arrowUp` and `arrowDown` (move up and down, never a fold), `paste` (`clipboard-paste`), `leave` (`log-out`), `crop`, `eraser` (clear a ruler or drawings), `focus` (Ping's Look here), `pause` (X-card), `pass` and `fail` (`check` and `x` inside the DM desk's pair only).
+Build additions, in the same shape: `download`, `share`, `settings` (gear: settings only), `external` (`external-link`), `arrowUp` and `arrowDown` (move up and down, never a fold), `leave` (`log-out`), `crop`, `eraser` (clear a ruler or drawings), `focus` (Ping's Look here), `pass` and `fail` (`check` and `x` inside the DM desk's pair only). A picture, upload, search, paste and the X-card's pause kept their words, with no icon built for them.
 
 Where an app icon and Lucide's draw the same shape (close, chevrons, plus, minus, copy), the app's stays, so nothing changes for no gain. The side headers design names Lucide equivalents for its icons (its section 7): this table agrees with every one, and either build may swap them without the other.
 
@@ -76,12 +75,12 @@ Where an app icon and Lucide's draw the same shape (close, chevrons, plus, minus
 
 One `useTooltip` (`client/components/Tooltip.tsx`, prototyped with `IconButton`) replaces the native `title` on every icon-only control:
 
-- **When**: on mouse hover after 500 ms, on keyboard focus (`:focus-visible`) after 150 ms, and as a bonus on a touch press held 500 ms, kept 1.5 s after the finger lifts. A pointer passing along a row shows nothing.
-- **Where**: above the control with a 6 px gap, or below it where the screen's top leaves no room, centered on it and kept 8 px inside the window. It never covers the control it names, so a click aimed at the button never lands on its tip, and the tip ignores the pointer (`pointer-events: none`).
+- **When**: on mouse hover after 500 ms, on keyboard focus (`:focus-visible`) after 150 ms, and as a bonus on a touch press held 500 ms, kept 1.5 s after the finger lifts. A pointer passing along a row shows nothing. A hold that showed the tip never also presses: the click the browser sends after it is dropped, on that control and only that once.
+- **Where**: above the control with a 6 px gap, or below it where the screen's top leaves no room, centered on it and kept 8 px inside the window, at every interface size: the tip is placed in its own zoomed pixels, since the interface size zooms the chrome it sits in. It is placed before it paints, and hidden again as it closes, so a second show never paints a frame at the last spot. It never covers the control it names, so a click aimed at the button never lands on its tip, and the tip ignores the pointer (`pointer-events: none`).
 - **How it stacks**: it opens in the browser's top layer (`popover="manual"`), so no scrolling pane, sheet, dialog or zoomed chrome clips it. The design's other popovers keep the shared base (docs/design-v1-tool-options.md 7).
-- **Closing**: the pointer leaving, focus leaving, Escape (caught but not marked used, so the room's own Escape still runs), any scroll.
+- **Closing**: a mouse leaving (a finger or pen lifting off keeps its 1.5 s), focus leaving, a cancelled touch, Escape (caught but not marked used, so the room's own Escape still runs), any scroll.
 - **Look**: 13 px text on a raised surface, a `border` outline, radius `sm`, shadow `float`, at most 240 px wide.
-- **Screen readers**: the control's `aria-label` is its name. The tip is not read again, except where its words say more than the name: then it is the control's `aria-describedby`.
+- **Screen readers**: the control's `aria-label` is its name. The tip is not read again, except where its words add words the name lacks: then it joins the control's own `aria-describedby`, if it has one.
 
 The native `title` stays only on plain words that are cut (a long name in a chip), where the browser's own tip is what a user expects.
 
@@ -110,7 +109,7 @@ Widths at 100%: a small button is 7.7 px a character at 14 px weight 600 plus 24
 | Token action bar | Clear (group) | "Clear" | `close` | 1 | 18 |
 | Token action bar | Size − and + | text glyphs | `minus`, `plus` | 1 | 0, one style |
 | Token panel | Speed, Passive Perception, Initiative | words in the stat block's header | `speed`, then "PP", "Init" (dice UI doc 5.1) | 3 | a line |
-| Token panel | Change image, Add another image, Crop, Remove | four buttons under the picture | the Image group, its buttons with `image`, Lucide `crop`, `delete` (4.1: the first two keep words alone) | 3 | about 100 px of height |
+| Token panel | Change image, Add another image, Crop, Remove | four buttons under the picture | the Image group, Crop with Lucide `crop` and Remove with `delete`, Change image and Add another image in words alone (4.1) | 3 | about 100 px of height |
 | Token panel | Delete this token | words | `delete` and the words | 3 | 0 |
 | Dice panel | Again (newest roll) | redo arrow and "Again" | `again` and "Again" | 3 | 0, collision |
 | Dice panel | Roll again (Recent rolls) | redo arrow | `again` | 1 | 0, collision |
@@ -166,7 +165,7 @@ Stays words, by rule 4: Roll and every roll option, Apply, Send, Save, End turn,
 ## 6. Copying and credit
 
 - **Copy, do not install.** Each Lucide icon's `iconNode` (version 0.525.0, as the build's reference) becomes the JSX of one `SHAPES` entry: its paths joined into one `d` where they share the stroke, with a comment naming the Lucide icon and the meaning. The stroke is the app's `STROKE` (2 px, round caps and joins), which is Lucide's. A test (8) holds the list of Lucide-sourced names, so the credit names exactly the icons copied.
-- **Credit.** `shared/licenses.ts` gains `ISC`. `shared/credits.ts` gains the group "Interface icons" with Lucide's credit: its authors (Lucide Contributors, with portions by Cole Bemis as part of Feather, MIT), the source, the license, and in its changes the full ISC notice (`LUCIDE_NOTICE`), which the license asks to appear in all copies. The About page shows it from there. `CREDITS.md` gains the section "Interface icons" with the icons listed and the license text verbatim. Both are in the prototype.
+- **Credit.** `shared/licenses.ts` gains `ISC`. `shared/credits.ts` gains the group "Interface icons" with Lucide's credit: its authors (Lucide Contributors, with portions by Cole Bemis as part of Feather, MIT), the source, the license, and in its changes the full ISC notice (`LUCIDE_NOTICE`), which the license asks to appear in all copies, then Feather's MIT notice (`FEATHER_NOTICE`) for the copied icons Lucide's license lists as derived from Feather (`FEATHER_ICONS`). The About page shows both from there. `CREDITS.md` gains the section "Interface icons" with the icons listed and both license texts verbatim. Both are in the prototype.
 - **Repository notices**: the README's license section links CREDITS.md already, so no new file is needed.
 
 ## 7. Screenshots
@@ -183,9 +182,9 @@ Under `screenshots/icons/`, `before/` from the stacked tip (with this pass's fix
 
 - `components/Button.test.ts` (extended): every `IconName` draws and hides itself, an icon alone is named by its words and shows them in its tooltip, never a native `title`, and words beside an icon keep the native one.
 - `components/icons.test.ts` (new): every meaning draws a shape no other meaning draws, except the listed pair (pass and fail), and the Lucide-sourced names (`Icon.tsx` `LUCIDE`) match `shared/credits.ts` `LUCIDE_ICONS`, the credit's changes and CREDITS.md, so a new copied icon cannot ship uncredited.
-- `components/Tooltip.test.ts` (new, node:test with a fake clock): hover waits 500 ms and a quick pass shows nothing, focus by keyboard shows after 150 ms and a mouse focus never, a held touch shows after 500 ms and stays 1.5 s, Escape, scroll and a mouse press close, a randomized run of the timer's events, and the placement above with room, below without, never over the control.
-- `components/icons.test.ts` also checks that the ISC credit carries the license's whole notice.
-- A source scan (`lib/uiPassScan.test.ts`, the drift test's pattern): no text glyph (← → ↑ ↓ ↗ × as a whole label) inside a button. The native `title` cannot reach an icon alone: `Button`, `IconButton` and the top bar's buttons draw the tooltip in its place.
+- `components/Tooltip.test.ts` (new, node:test with a fake clock): hover waits 500 ms and a quick pass shows nothing, focus by keyboard shows after 150 ms and a mouse focus never, a held touch in the browser's own order (enter, down, up, leave) shows after 500 ms and stays 1.5 s, the click after a hold that showed it is dropped once, Escape, scroll, a cancelled touch and a mouse press close, a randomized run of the timer's events, and the placement above with room, below without, never over the control, at interface sizes from 85% to 130%.
+- `components/icons.test.ts` also checks that the ISC credit carries the license's whole notice, and that every copied icon from Feather, and only those, carries Feather's MIT notice on the About page and in CREDITS.md.
+- A source scan (`lib/uiPassScan.test.ts`, the drift test's pattern): no text glyph (← → ↑ ↓ ↗ × − + as a whole label) inside a button, a `SmallButton` included. The native `title` cannot reach an icon alone: `Button`, `IconButton` and the top bar's buttons draw the tooltip in its place.
 - e2e: the touched files only. `e2e/size.e2e.ts` and `e2e/reach.e2e.ts` (every control still in reach at every size), and the action bar's names (`Hidden`, `Locked`, `Duplicate`, `Delete` stay its buttons' accessible names, so `getByRole("button", { name })` queries keep working).
 
 ## 9. Build plan

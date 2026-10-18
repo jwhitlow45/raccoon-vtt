@@ -398,7 +398,7 @@ The rest of the panel is sorted into groups by what you use them for, and each g
 - **Position**: its elevation and facing, and **Sight**.
 - **Image**: change, crop or remove the token's picture, and its other images.
 
-A folded group sums up what it holds on its own line, such as "3/7 HP · 2 conditions", so you can check on a creature without opening anything. Combat starts open, and your device remembers which groups you open and close. Folded at the foot of the panel are **Stats** (size, AC, speeds, initiative bonus, passive Perception and senses), **Token settings** and **Owners**.
+A folded group sums up what it holds on its own line, such as "HP 3/7 · 2 conditions", so you can check on a creature without opening anything. Combat starts open, and your device remembers which groups you open and close. Folded at the foot of the panel are **Stats** (size, AC, speeds, initiative bonus, passive Perception and senses), **Token settings** and **Owners**.
 
 **Token settings** holds the options only you can set:
 
@@ -560,7 +560,7 @@ Rather than typing a monster's bonuses, let the app read them from its stat bloc
 - **Death save**, while the creature is dying.
 - Its traits, actions, bonus actions, reactions and legendary actions. Each one reads the way a stat block prints it, such as "Scimitar +4 to hit, 1d6+2 slashing", with its buttons on the line underneath: **Attack**, **Damage** and **Critical**. A natural 20 on the attack turns on **Critical** for the damage that follows, which then rolls by the room's **Critical hit damage** rule (see [Room settings](#room-settings-for-fights-and-maps)). Riders such as **Sneak Attack** are chips you can add, and the line above names them with their dice. An action that calls for a saving throw reads like "DC 13 Dex, 2d6 fire" and has a **Group save** button, which opens the [group save](#the-group-save). Multiattack appears as a note at the head of the actions: roll each attack it names in turn.
 - An action that recharges shows **Recharge 5–6** and a **Used** switch. Rolling its damage or its group save marks it used. **Recharge 1d6** rolls the recharge, and the app reminds you at the start of the monster's turn. See [Alerts during a fight](#alerts-during-a-fight).
-- For a character with a stat block: its weapons and spells, each save spell with its DC in its line ("DC 14 Wis"), **Spell save DC**, **Spell attack**, and a slot level for spells that scale, which you step with **−** and **+** ("− Level 2 +").
+- For a character with a stat block: its weapons and spells, each save spell with its DC in its line ("DC 14 Wis"), **Spell save DC**, **Spell attack**, and a slot level for spells that scale, which you step with its minus and plus buttons on either side of "Level 2".
 
 Whenever someone rolls damage, its total appears in every HP entry as **Use 9**, so you can apply it with one tap.
 
@@ -931,7 +931,7 @@ The party faces an adult red dragon in its lair. It has Multiattack, Fire Breath
 **Its turn**
 
 1. Tap the dragon, then press **Roll** in its bar. **Rolls for Adult Red Dragon** lists its actions. Multiattack is a note at the head of the actions: roll each attack it names with **Attack** and **Damage**, and apply each hit with the **Use** chip in the target's HP entry.
-2. Fire Breath's line in the roll options reads "DC 21 Dex, 17d6 fire". Press its **Group save**. The group save opens with "17d6 fire, half on a pass." Its rows follow what you have selected, so select the characters in the cone first. Or place a cone **Area** from the dragon and use its **Save and damage**, which picks them for you. The players are asked to roll. Roll the damage, then press **Apply**. Fire Breath is now marked **Used**.
+2. Fire Breath's line in the roll options reads "Recharge 5–6 · DC 21 Dex, half on a pass, 17d6 fire". Press its **Group save**. The group save opens with "17d6 fire, half on a pass." Its rows follow what you have selected, so select the characters in the cone first. Or place a cone **Area** from the dragon and use its **Save and damage**, which picks them for you. The players are asked to roll. Roll the damage, then press **Apply**. Fire Breath is now marked **Used**.
 3. At the start of the dragon's next turn, a card says "Fire Breath can recharge (5–6)." Press **Roll**, and on a 5 or 6, Used clears.
 
 **Between turns**
