@@ -1077,6 +1077,18 @@ describe("the DM's live card (docs/design-v1-roll-request.md 6)", () => {
     );
   });
 
+  test("Lucky reads as the roll it made: advantage on a normal roll, a normal roll on a disadvantage one (LP7-DICE-4)", () => {
+    const lucky = { id: "k", on: "t", reason: "lucky" as const };
+    assert.equal(
+      dmAnswerText({ characterId: "a", total: 19, tag: "u", dice: dice("2d20kh1+5", [4, 14], 19, { mode: "adv" }), changed: lucky, previous: { total: 9, tag: "t", dice: dice("1d20+5", [4], 9) } }, DEX_SAVE),
+      "used Lucky: 19 (1d20+5 with advantage: 4 dropped, 14), was 9",
+    );
+    assert.equal(
+      dmAnswerText({ characterId: "a", total: 10, tag: "u", dice: dice("1d20+3", [7], 10, { cancelled: true }), changed: lucky, previous: { total: 10, tag: "t", dice: dice("2d20kl1+3", [7, 13], 10, { mode: "dis" }) } }, DEX_SAVE),
+      "used Lucky: 10 (1d20+3: 7), was 10",
+    );
+  });
+
   test("the title row counts passes and fails, and the asks waiting for the DM", () => {
     const request = { targets: [{ characterId: "a", total: 17, result: "pass" as const }, { characterId: "b", total: 9, result: "fail" as const, change: { id: "k", on: "t", reason: "lucky" as const } }, { characterId: "c" }] };
     assert.deepEqual(tallyText(request), { answered: "2 of 3 answered: 1 pass, 1 fail", asks: "1 asks to change a roll" });
