@@ -12,6 +12,7 @@ import { Checkbox } from "../../../components/Checkbox.tsx";
 import { Chip, ChipRow } from "../../../components/Chip.tsx";
 import { Input } from "../../../components/Field.tsx";
 import { Segmented } from "../../../components/Segmented.tsx";
+import { stickyPaneFoot } from "../../../components/Sheet.tsx";
 import { Switch } from "../../../components/Switch.tsx";
 import { theme } from "../../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../../state/view.ts";
@@ -468,7 +469,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       ) : null}
       {/* Apply alone in the foot, so the count, the first row and Apply share a 130% phone's sheet with no scroll (5.8, Appendix D). */}
       {page.phase !== "setup" || page.test.kind === "none" ? (
-        <div style={{ position: "sticky", bottom: 0, background: theme.color.surface, paddingTop: theme.space(1), paddingBottom: theme.space(2), display: "grid", gap: theme.space(1) }}>{applyButton}</div>
+        <div style={{ ...stickyPaneFoot(theme.space(2)), background: theme.color.surface, paddingTop: theme.space(1), display: "grid", gap: theme.space(1) }}>{applyButton}</div>
       ) : null}
       {page.apply === "taken" ? <AppliedToast page={page} ui={ui} /> : null}
     </div>

@@ -1197,9 +1197,11 @@ function bandStyle(at: Corner, part: "width" | "height"): CSSProperties {
  * boxes it covers. As wide as its box, so in a row that wraps it takes a
  * line of its own.
  */
-export function ScrollForMore() {
+export function ScrollForMore(props: { inset?: number }) {
+  // A sticky box keeps inside its scroller's padding: `inset` is that box's bottom padding, so the fade still lies on its foot.
+  const inset = props.inset ?? 0;
   return (
-    <div aria-hidden style={{ position: "sticky", bottom: 0, width: "100%", height: 0, pointerEvents: "none" }}>
+    <div aria-hidden style={{ position: "sticky", bottom: -inset, width: "100%", height: 0, pointerEvents: "none" }}>
       <div
         style={{
           position: "absolute",

@@ -238,7 +238,7 @@ export function Sheet(props: {
           <div
             ref={bodyRef}
             data-pane-body=""
-            style={{ ...paneBodyPadding(theme.space(1), theme.space(4)), flex: 1, minHeight: 0, overflowY: "auto", padding: `${theme.space(1)}px ${theme.space(4)}px ${theme.space(4)}px`, overscrollBehavior: "contain" }}
+            style={{ ...paneBodyPadding(theme.space(1), theme.space(4), theme.space(4)), flex: 1, minHeight: 0, overflowY: "auto", padding: `${theme.space(1)}px ${theme.space(4)}px ${theme.space(4)}px`, overscrollBehavior: "contain" }}
           >
             <DraftScope value={drafts}>{props.children}</DraftScope>
           </div>
@@ -249,13 +249,28 @@ export function Sheet(props: {
 }
 
 /**
- * A scrolling pane body's top and side padding as CSS variables, for a
- * sticky header inside it. A sticky box keeps inside its scroller's
- * padding, so the header takes the padding back with a negative margin and
- * gives it back as its own padding (docs/design-v1-combat-flow.md 3.1).
- * Mark the body `data-pane-body` too, which the header looks for to
- * measure the room it has.
+ * A scrolling pane body's padding as CSS variables, for a sticky header or
+ * footer inside it. A sticky box keeps inside its scroller's padding, so
+ * the header takes the padding back with a negative margin and gives it
+ * back as its own padding (docs/design-v1-combat-flow.md 3.1), and a footer
+ * does the same at the foot (stickyPaneFoot). Mark the body
+ * `data-pane-body` too, which the header looks for to measure the room it
+ * has.
  */
-export function paneBodyPadding(top: number, x: number): CSSProperties {
-  return { ["--pane-pad-top" as string]: `${top}px`, ["--pane-pad-x" as string]: `${x}px` };
+export function paneBodyPadding(top: number, x: number, bottom: number): CSSProperties {
+  return { ["--pane-pad-top" as string]: `${top}px`, ["--pane-pad-x" as string]: `${x}px`, ["--pane-pad-bottom" as string]: `${bottom}px` };
+}
+
+/**
+ * A footer stuck to the foot of a pane's scrolling body, such as the Log's
+ * composer. At `bottom: 0` it would rest on the body's bottom padding, a
+ * strip above the pane's edge where what scrolls shows under it. So it
+ * sticks that padding lower, takes the padding back with a negative margin
+ * so nothing is left to scroll below it, and gives it back as its own
+ * padding under `pad`, so its fill reaches the edge. Outside a pane the
+ * padding reads as 0 and it sticks at the foot as before.
+ */
+export function stickyPaneFoot(pad: number): CSSProperties {
+  const bottom = "var(--pane-pad-bottom, 0px)";
+  return { position: "sticky", bottom: `calc(-1 * ${bottom})`, marginBottom: `calc(-1 * ${bottom})`, paddingBottom: `calc(${pad}px + ${bottom})` };
 }

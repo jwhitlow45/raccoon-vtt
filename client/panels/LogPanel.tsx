@@ -6,6 +6,7 @@ import { Button } from "../components/Button.tsx";
 import { Checkbox } from "../components/Checkbox.tsx";
 import { Empty } from "../components/Empty.tsx";
 import { Input, Select } from "../components/Field.tsx";
+import { stickyPaneFoot } from "../components/Sheet.tsx";
 import {
   chatTargets,
   composerTarget,
@@ -276,12 +277,12 @@ function Composer(props: { names: LogNames; me: string; onSend(op: NonNullable<R
     <form
       onSubmit={submit}
       style={{
-        position: "sticky",
-        bottom: 0,
+        // Flush on the pane's foot, so no entry shows under it.
+        ...stickyPaneFoot(theme.space(2)),
         display: "grid",
         gridTemplateColumns: "minmax(0, 1fr)",
         gap: theme.space(2),
-        padding: `${theme.space(2)}px 0`,
+        paddingTop: theme.space(2),
         background: theme.color.surface,
         borderTop: `${theme.line.border}px solid ${theme.color.border}`,
       }}

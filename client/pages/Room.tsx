@@ -2520,7 +2520,7 @@ function SidePane(props: {
         {...props.body}
         data-pane=""
         data-pane-body=""
-        style={{ ...paneBodyPadding(theme.space(4), theme.space(4)), flex: "1 1 0", minHeight: 0, overflowY: "auto", padding: theme.space(4) }}
+        style={{ ...paneBodyPadding(theme.space(4), theme.space(4), theme.space(4)), flex: "1 1 0", minHeight: 0, overflowY: "auto", padding: theme.space(4) }}
       >
         {props.children}
       </div>

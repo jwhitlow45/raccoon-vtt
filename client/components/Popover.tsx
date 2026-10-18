@@ -212,6 +212,9 @@ type PopoverContextValue = { handle: PopoverHandle; setInsideFocus(focus: FocusI
 
 const PopoverContext = createContext<PopoverContextValue | null>(null);
 
+/** The box's padding, which its "Scroll for more" sticks past to lie on the foot. */
+const POPOVER_PAD = theme.space(3);
+
 /** The popover a component renders in, for a <Menu>. */
 export function usePopoverContext(): PopoverContextValue {
   const value = useContext(PopoverContext);
@@ -439,7 +442,7 @@ function OpenPopover(props: PopoverProps) {
           boxSizing: "border-box",
           overflowY: "auto",
           overscrollBehavior: "contain",
-          padding: theme.space(3),
+          padding: POPOVER_PAD,
           background: theme.color.surface,
           border: `${theme.line.border}px solid ${theme.color.border}`,
           borderRadius: theme.radius.lg,
@@ -455,7 +458,7 @@ function OpenPopover(props: PopoverProps) {
           </div>
         ) : null}
         {props.children}
-        {more ? <ScrollForMore /> : null}
+        {more ? <ScrollForMore inset={POPOVER_PAD} /> : null}
       </div>
     </PopoverContext.Provider>
   );
