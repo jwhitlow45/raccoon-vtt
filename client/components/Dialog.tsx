@@ -59,6 +59,29 @@ export type DialogProps = {
   full?: boolean;
 };
 
+/** The scrolling body's padding, which `PINNED_FOOT` reaches into. */
+const BODY_PAD = theme.space(4);
+
+/**
+ * A row at the end of a dialog's body that stays in view while the body
+ * scrolls, such as a picker's chosen picture and its Use, which a phone
+ * held sideways or a large interface size would otherwise leave under the
+ * fold: stuck to the body's foot over what scrolls under it, and where it
+ * would sit anyway once the body reaches its end. Its padding reaches into
+ * the gap above it and the body's padding below, so it draws the same
+ * either way, on a ground that hides what passes under it.
+ */
+export const PINNED_FOOT: CSSProperties = {
+  position: "sticky",
+  bottom: 0,
+  zIndex: 1,
+  background: theme.color.surface,
+  paddingTop: theme.space(2),
+  marginTop: -theme.space(2),
+  paddingBottom: BODY_PAD,
+  marginBottom: -BODY_PAD,
+};
+
 function widthPx(width: DialogWidth): number {
   return typeof width === "number" ? width : theme.layout.dialog[width];
 }
@@ -191,7 +214,7 @@ export function Dialog(props: DialogProps) {
         }}
       >
         {header ? <SheetHeader title={props.title} back={props.back} actions={props.headerActions} detail={props.headerDetail} detailId={detailId} onClose={onClose} divider grab={bottom} /> : null}
-        <div ref={body} style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", padding: theme.space(4), ...props.bodyStyle, ...(headlessSheet ? { position: "relative" } : null) }}>
+        <div ref={body} style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", padding: BODY_PAD, ...props.bodyStyle, ...(headlessSheet ? { position: "relative" } : null) }}>
           {/* With no header to hold it, the X-card's pill sits at the top of its body, all it has to swipe by, in the 20 px its content keeps above its first line. */}
           {headlessSheet ? <SheetGrabber /> : null}
           <DraftScope value={drafts}>{props.children}</DraftScope>

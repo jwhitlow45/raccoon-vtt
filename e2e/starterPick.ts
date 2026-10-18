@@ -39,6 +39,8 @@ export async function chooseStarterWork(within: Locator, found: FoundWork, how: 
     await search.fill(work.name);
     tiles = within.getByRole("list", { name: pack.title, exact: true });
   } else {
+    // The search box shows while the catalog still loads, and a fold counted before then would be missed.
+    await within.getByRole("region", { name: "Starter packs", exact: true }).waitFor();
     const fold = within.getByRole("button", { name: pack.title, exact: true });
     if ((await fold.count()) > 0 && (await fold.getAttribute("aria-expanded")) === "false") await fold.click();
     tiles = within.getByRole("list", { name: `${pack.title}: ${work.category}`, exact: true });

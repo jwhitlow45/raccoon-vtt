@@ -1,6 +1,7 @@
 import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { packsFor, type FoundWork, type StarterPack, type StarterUse, type StarterWork } from "#shared/starter.ts";
 import { Button } from "../../components/Button.tsx";
+import { PINNED_FOOT } from "../../components/Dialog.tsx";
 import { Empty } from "../../components/Empty.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Icon } from "../../components/Icon.tsx";
@@ -30,7 +31,9 @@ import { loadedStarterPacks, loadStarterPacks, onStarterPacks } from "./catalog.
  * One pack opens at a time and a search shows at most SEARCH_SHOWN tiles,
  * so a phone never mounts a whole catalog's previews at once. The tiles
  * scroll in a box of their own, as the Icons tab's do, so Use stays in
- * view under them.
+ * view under them. Where the dialog is too short for the box and the
+ * chosen work's row, as on a phone held sideways or at 130%, that row is
+ * pinned to the dialog's foot (PINNED_FOOT).
  */
 
 const PLACEHOLDER: Record<StarterUse, string> = {
@@ -372,7 +375,7 @@ function Chosen(props: { found: FoundWork | null; floor?: string; note: ReactNod
   const { found } = props;
   const credit = found ? workCredit(found) : null;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: theme.space(3), minHeight: CHOSEN_SIDE }}>
+    <div style={{ display: "flex", alignItems: "center", gap: theme.space(3), minHeight: CHOSEN_SIDE, ...PINNED_FOOT }}>
       {found ? (
         <span
           style={{

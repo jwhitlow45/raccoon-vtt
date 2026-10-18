@@ -1,6 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { IconImage } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
+import { PINNED_FOOT } from "../../components/Dialog.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help } from "../../components/Panel.tsx";
@@ -67,7 +68,8 @@ export function IconsTab(props: { disabled: boolean; initial?: IconImage; onUse(
       ) : null}
       {/* The swatches wrap, so at 130% on the narrowest phone the row breaks in two rather than pushing the picker's Use off the screen. */}
       <Swatches label="Disk color" value={color} options={ICON_COLORS.map((c) => ({ color: c, name: COLOR_NAMES[c] ?? c }))} onChange={setColor} />
-      <div style={{ display: "flex", alignItems: "center", gap: theme.space(3), minHeight: 72 }}>
+      {/* Pinned to the dialog's foot, as the Starter tab's chosen work is, so Use never waits under the fold. */}
+      <div style={{ display: "flex", alignItems: "center", gap: theme.space(3), minHeight: 72, ...PINNED_FOOT }}>
         {selected ? (
           <IconDisk icon={selected} color={color} width={72} shape="circle" ring={theme.color.border} fallback={<span style={{ fontWeight: theme.weight.bold }}>{credit?.title.slice(0, 2) ?? ""}</span>} />
         ) : (

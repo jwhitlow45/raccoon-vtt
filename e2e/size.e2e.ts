@@ -253,6 +253,36 @@ async function checkDialog(dialog: Locator, label: string, main: { name: string 
   assertInside(await button.boundingBox(), `${label}: ${main.name}`, owner);
 }
 
+/**
+ * Use whole inside the dialog's scrolling body, and the one thing a tap on
+ * it reaches, with the body scrolled to its top and to its end: pinned to
+ * the foot where the body is too short for the picker (Dialog.tsx
+ * PINNED_FOOT), never under the fold.
+ */
+async function useAtFoot(dialog: Locator, label: string): Promise<void> {
+  const use = dialog.getByRole("button", { name: "Use", exact: true });
+  await use.waitFor();
+  for (const end of [false, true]) {
+    const seen = await use.evaluate((el, end) => {
+      type Node = { parentElement: Node | null; scrollTop: number; scrollHeight: number; clientHeight: number; getBoundingClientRect(): { top: number; bottom: number; left: number; right: number }; closest(s: string): Node | null };
+      const g = globalThis as unknown as { getComputedStyle(el: Node): { overflowY: string }; document: { elementFromPoint(x: number, y: number): Node | null } };
+      let body = (el as unknown as Node).parentElement;
+      while (body && g.getComputedStyle(body).overflowY !== "auto") body = body.parentElement;
+      if (!body) return null;
+      body.scrollTop = end ? body.scrollHeight : 0;
+      const b = body.getBoundingClientRect();
+      const u = (el as unknown as Node).getBoundingClientRect();
+      const hit = g.document.elementFromPoint((u.left + u.right) / 2, (u.top + u.bottom) / 2)?.closest("button");
+      return { scrolls: body.scrollHeight > body.clientHeight + 1, body: { top: b.top, bottom: b.bottom }, use: { top: u.top, bottom: u.bottom }, reached: hit === (el as unknown as Node) };
+    }, end);
+    assert.ok(seen, `${label}: Use is in no scrolling body`);
+    const where = `${label}, the body at its ${end ? "end" : "top"}: ${JSON.stringify(seen)}`;
+    if (!end) assert.ok(seen.scrolls, `${where}: the body does not scroll, so this size no longer checks the pin`);
+    assert.ok(seen.use.top >= seen.body.top - 0.5 && seen.use.bottom <= seen.body.bottom + 0.5, `${where}: Use is out of view`);
+    assert.ok(seen.reached, `${where}: a tap on Use reaches something else`);
+  }
+}
+
 /** A popover above the tool's row (docs/design-v1-tool-options.md 7.1): on the screen, no side scroll, and every control a 44 px target. */
 async function checkPopover(popover: Locator, label: string): Promise<void> {
   const owner = popover.page();
@@ -676,6 +706,46 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
     // Nothing uploaded yet, so Cancel ends the job at once.
     await block.getByRole("button", { name: "Cancel upload" }).click();
     await block.waitFor({ state: "detached" });
+  });
+
+  test("lp8fix-b. on a phone held sideways and at 130% on a small phone, the pickers' Use stays at the dialog's foot whatever the body's scroll: the Icons and Starter tabs and the starter handouts (LP8-UI-5)", async () => {
+    for (const view of [
+      { width: 844, height: 390, scale: 1 },
+      { width: 375, height: 667, scale: 1.3 },
+    ]) {
+      const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+      const phone = view.width / view.scale < 900;
+      await page.setViewportSize({ width: view.width, height: view.height });
+      await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+
+      await openPanel("Characters", phone);
+      await page.getByRole("button", { name: "New character" }).click();
+      await page.getByRole("button", { name: "Add image" }).first().click();
+      const picker = page.getByRole("dialog", { name: "Choose an image" });
+      await picker.getByRole("list", { name: "Icons" }).getByRole("button").first().click();
+      await useAtFoot(picker, `${label}, an icon picked`);
+      await picker.getByRole("tab", { name: "Starter" }).click();
+      await chooseStarterWork(picker, starterWork("token"), "browse", false);
+      await useAtFoot(picker, `${label}, Starter`);
+      await shots.take(page, `size-lp8fix-b-${view.width}x${view.height}-starter`);
+      await closeDialog(picker);
+      await closeSheet(phone);
+
+      await openPanel("DM", phone);
+      const open = page.getByRole("button", { name: "Show a handout" });
+      const form = page.getByRole("group", { name: "Show a handout" });
+      await open.or(form).first().waitFor();
+      if (await open.isVisible()) await open.click();
+      await form.getByRole("button", { name: "From starter packs" }).click();
+      const handouts = page.getByRole("dialog", { name: "Starter handouts" });
+      await chooseStarterWork(handouts, starterWork("handout"), "search", false);
+      await useAtFoot(handouts, `${label}, Starter handouts`);
+      await shots.take(page, `size-lp8fix-b-${view.width}x${view.height}-handouts`);
+      await closeDialog(handouts);
+      await closeSheet(phone);
+    }
   });
 
   test("3. no page errors along the way", () => {
