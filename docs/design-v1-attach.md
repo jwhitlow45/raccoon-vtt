@@ -1,0 +1,337 @@
+# raccoon-vtt v1: attached tokens
+
+Status: draft 4, after design review rounds 1 to 3, with the project owner's answers (section 15). Code is cited from `main` at `88f03125`.
+
+On 2026-10-18 the project owner moved three "Later" items up for design: "Movement and walls", "Attached tokens" and "Triggers and traps". This note is the second: "Attached tokens (rider on a mount, torch on a character)" (docs/features.md section 5). It covers a rider on a mount, a torch or light on a character, a familiar on a shoulder and a grappled creature dragged along: attaching and detaching on a phone and a computer, who may do it, what moves with what, how initiative and turns treat a mount and its rider under the 2024 mounted combat rules, how the movement budget and the ruler see a carried token, and what players see of a hidden attached token.
+
+Two notes are written beside it: docs/design-v1-movement.md (difficult terrain and walking around walls) and docs/design-v1-traps.md (something runs when a token enters an area). All three change how a token moves, so they share one contract for describing a move, its route, its cost and the tokens it carries, and one rule for hidden state, public determinism (section 9). They are built and deployed in the order movement, attach, traps, so this note builds on movement's routes and traps build on this note's groups.
+
+## 1. Answers in short
+
+- **One link, stored on the carried token.** A token can be attached to another, its holder, as one of four kinds fixed when it is attached: a **ride** (a rider on a mount), a **perch** (a familiar on a shoulder), a **carry** (a torch in a hand, a passenger on a cart, a grappled creature under an arm) or a **drag** (a grappled creature pulled along beside). The link lives on the carried token, so a holder's own data never says what it carries.
+- **Attaching.** The selected token's action bar gets Attach, which lists the tokens within 5 ft with the sentence each choice makes: "Ride Warhorse", "Perch on Bree", "Carry Torch", "Drag Goblin 2". One tap attaches. The same list works with a finger, a mouse and the keyboard.
+- **Moving.** Dragging a holder moves everything it carries, one op and one undo step. Dragging a rider of a controlled mount moves the mount, since the rider directs it. Dragging any other carried token moves it alone: it stays attached while it stays on its holder or within reach, and comes loose where it lands outside. Get off, Put down and Let go do the same in one tap.
+- **What follows the holder.** Position always. Elevation for a token on its holder, while a dragged one keeps to its own ground behind a walker and rises with a flier. Facing never. A carried token's own light and sight go where it goes, since they are its own.
+- **Mounted combat (2024).** A controlled mount moves and acts on its rider's turn, and its Reaction comes back when that turn starts. It keeps a row right after its rider with the rider's initiative, but for the rest of any round in which it shared its rider's turn, that row only moves time along for it (its durations and its area reminders). Find Steed and any mount made the rider's companion "On Bree's turn" already share the rider's turn (docs/design-v1-combat-flow.md 3.6), and nothing changes for them.
+- **Movement budget.** A carried leg never costs the carried creature anything. On the rider's turn the controlled mount's moves are recorded on the mount's own path, against the mount's speeds. Riding on or off costs the rider half its Speed on its own turn. Dragging or carrying a grappled creature costs the holder 1 extra foot per foot unless it is Tiny or two sizes smaller.
+- **Hidden attached tokens.** What each viewer observes of an op depends only on the op and that viewer's own projection, with one listed reveal: a token players can see that rides a holder they cannot see follows it, as a torch held by an invisible creature floats (section 8.0). A token the DM hides sends players nothing: not its moves, its link, a drag cost, a refusal, a limit or an undo that fails.
+- **Data.** One optional token field, one optional path stop mark, two optional initiative row fields, one optional turn start field (`TurnStart.mounts`), two new ops (`token.attach`, `token.detach`), and this feature's own op and snapshot versions when it is built.
+
+## 2. Today
+
+- A token can carry a light (`Token.light`, design 6 and 9.10): a torch on a character is already one tap in the action bar. This note keeps that as the way to light a creature. A torch becomes its own token only when it should be dropped, handed over or left burning on the floor.
+- A companion (docs/design-v1-combat-flow.md 3.6) belongs to a character and can act on the character's turn (`turn: 'shared'`, nested under its row) or not be listed (`'none'`). A familiar or a steed made a companion is played by the character's player.
+- A move is one straight leg per token (`token.move`, `token.moveMany`, design 9.2), and movement's routes add bends and costs (section 9). The active creature's moves on its own turn add legs to its path (`withPath`, shared/reducer/tokens.ts:377). A group drag sends one `token.moveMany` for the selection (client/lib/group.ts).
+- Area reminders read which tokens moved from the op's own token ids (`movedBy`, shared/reducer/areaTriggers.ts:170). The shared move description replaces that read (section 9).
+- A player's move undo answers `gone` for any token the player cannot see, in `poseRestore` (server/rooms/undo.ts:283) and again when the built restore passes `canApply` (`restoreMoveCheck` and `restorePoseCheck`, shared/permissions.ts:1011 and :1039, through server/rooms/actor.ts:995). Section 8.3 says how hidden passengers stay out of both.
+
+## 3. The rules (SRD 5.2.1, as the app ships it)
+
+- **Mounted Combat:** "A willing creature that is at least one size larger than a rider and that has an appropriate anatomy can serve as a mount."
+- **Mounting and Dismounting:** "During your move, you can mount a creature that is within 5 feet of you or dismount. Doing so costs an amount of movement equal to half your Speed (round down)."
+- **Controlling a Mount:** "You can control a mount only if it has been trained to accept a rider. ... The Initiative of a controlled mount changes to match yours when you mount it. It moves on your turn as you direct it, and it has only three action options during that turn: Dash, Disengage, and Dodge. A controlled mount can move and act even on the turn that you mount it. In contrast, an independent mount ... retains its place in the Initiative order and moves and acts as it likes."
+- **Reaction:** "Once you take a Reaction, you can't take another one until the start of your next turn."
+- **Falling Off:** "If an effect is about to move your mount against its will while you're on it, you must succeed on a DC 10 Dexterity saving throw or fall off ... While mounted, you must make the same save if you're knocked Prone or the mount is."
+- **Grappled, Movable:** "The grappler can drag or carry you when it moves, but every foot of movement costs it 1 extra foot unless you are Tiny or two or more sizes smaller than it." **Ending a Grapple:** the condition ends "if the distance between the Grappled target and the grappler exceeds the grapple's range", and "the grappler can release the target at any time (no action required)."
+- **Find Steed:** "In combat, it shares your Initiative count, and it functions as a controlled mount while you ride it." **Find Familiar:** "It rolls its own Initiative and acts on its own turn."
+- **Unconscious:** "You have the Incapacitated and Prone conditions, and you drop whatever you're holding."
+
+The app reminds and moves tokens. It decides nothing a die decides, and it never enforces a Speed of 0.
+
+## 4. What the DM and players see and do
+
+### 4.1 Attaching
+
+- **The button.** The single-token action bar's play row gains Attach, after Light, for whoever may attach the selected token to anything (section 6). It opens a list: a popover from 900 px up, a bottom sheet on a phone, rows at least 44 px tall.
+- **The list.** Every token this viewer sees on the scene within 5 ft of the selected one (the larger of 5 ft and one cell, by the room's distance rule, as a door's reach is, design 9.8), nearest first. For the DM it goes on to tokens up to 30 ft away, under "Farther away", with Ride, Perch and Carry only, since the DM also sets scenes up and a drag needs reach. At most 12 rows. Each row is a portrait and the sentence the choice makes, and a token can give two rows:
+  - **Ride Warhorse**: a creature that is not Tiny gets on a creature at least one size larger, under the mounted combat rules (getting on costs half its Speed in a fight, and Controlled applies). In a fight a player rides only on the rider's own turn, as the rules put mounting "during your move".
+  - **Perch on Bree**: a Tiny creature gets on a creature, as a familiar sits on a shoulder. It is no mount, so it costs no movement and is never controlled.
+  - **Carry Torch**, **Get on Cart**: an object gets on the selected token, or a creature gets on an object. **Carry Kobold**: a creature that fits and that the viewer sees Grappled gets on its grappler, carried under an arm. No movement to get on, and a carried creature costs its holder to move (7.3).
+  - **Drag Goblin 2**: the tapped creature is pulled along beside the selected one. For a player, it needs the Grappled condition they see, or the right to move it.
+  - A row the viewer may not use is not listed. With none, the list says "Nothing within 5 ft to ride, carry or drag." and, for a player, "A grappled creature can be dragged once the DM marks it Grappled."
+- **Controlled or independent.** Ride asks one more thing, a Segmented control under the row: "Controlled: moves on Bree's turn" (the default) or "Independent: keeps its own turn", with Ride under it. A player sees it only when they may move the mount, and then controlled is what they mean. The rider's token panel shows the same control later, under the tags (4.5).
+- **Where it goes.** Ride, Perch and Carry put the carried token on its seat: the spot on its own snap grid that lies inside the holder's footprint nearest where it stood (ties: smaller y, then smaller x), at the holder's elevation. The step onto the seat is a walk, so for a player on a scene where walls stop moves it must pass the leg test, and the list leaves out a seat behind a wall. Drag leaves the dragged creature where it stands.
+- **The kind is kept.** The list's choice is stored with the link (`attached.kind`), so a kobold carried while Grappled stays a carry when the condition ends, until it is let go. Nothing later reads conditions to decide what a link is.
+- **Busy.** An attach that waits for the server (section 8.4) shows busy on its row until the answer. Most are predicted and land at once.
+
+### 4.2 Moving a group
+
+- **The holder.** Dragging a holder drags its group as this viewer's copy shows it: what it carries, and what those carry. The preview moves them together, and the drop sends one `token.move` of the holder alone, with its route (section 9). The server moves its whole group, tokens this viewer cannot see included (section 8.2). Arrow keys nudge the same way.
+- **A rider of a controlled mount** drags the mount: the drag starts on the rider and moves the mount's group, since "it moves on your turn as you direct it". So does a carried token that covers its holder's whole footprint (a Small rider on a Medium mastiff), which could never move within it. The drag needs the right to move the mount (section 6), else it says "Warhorse carries Bree. Tap Get off to step down." and moves nothing.
+- **Any other carried token** drags alone. Dropped still on its holder (inside the holder's footprint) or within reach (a dragged creature within 5 ft), it stays attached in its new seat. Dropped anywhere else, it comes loose there. So a familiar takes off from a shoulder, a torch is thrown, and the DM pulls a grappled goblin free, each with one drag.
+- **Selections.** A selection that holds a holder and something it carries drags them once: followers leave out every token whose holder is also moving in this viewer's copy (client/lib/group.ts `groupFollowers`). An op that names several tokens splits them by the named ones: each named token moves where the op says, and each token it does not name follows its nearest named ancestor, whatever links anyone cannot see (8.2).
+- **Walls.** On a scene where walls stop players' moves, the holder's route is tested piece by piece, and so is the leg beside it of each dragged creature among the public members (those every player sees, by a link every player sees), the holder's route offset by its place. A token on its holder is not tested: it rides. The drop lands the group at the last spot where all those walkers may stand, as a lone token's drop lands today (design 9.8), and the preview stops there too. Any other dragged creature walks in the private pass: on a player's move it stops at the last spot of its own offset route its leg test allows, unseen, and everything it carries stops with it, since each member follows the route its own holder actually took (8.2). The link pass lets it loose if that leaves it out of reach. So no landing or refusal depends on a token or link some player cannot see.
+
+### 4.3 Getting off and letting go
+
+- The carried token's play row shows, in Attach's place: **Get off** for a creature on anything (a ride, a perch, a passenger on a cart, a creature carried), **Put down** for an object, **Let go** for a dragged creature. The holder's group line (4.4) has Let go beside each creature it drags or carries and Put down beside each object it holds, as "Let go of Goblin 2" and "Put down Torch". A rider or a passenger gets off from its own bar.
+- **Get off** puts the creature on the first free spot beside the holder: a footprint inside the scene, within 5 ft of the holder and clear of its footprint, on no creature the viewer sees, and for a player with a clear leg from the seat on a scene where walls stop moves, found in the fixed order companions use (`spreadPositions`, docs/design-v1-combat-flow.md 3.6.3). The server checks the place by the same rules, except the creatures, whose check would reveal a hidden one. With no spot, the button is disabled with "No room to get off." under it. Getting off is a walk, so a trap or an area where it lands sees it (section 9).
+- **Put down** and **Let go** take no place: the token comes loose where it stands. All three are one undo step, and Undo move in the bar takes them back (section 8.3).
+
+### 4.4 On the map
+
+- **Draw order.** A carried token draws right after its holder, whatever its layer, so a torch on the objects layer shows on the character holding it. Taps hit the topmost token, as today.
+- **Covering riders** (a carried token whose footprint covers its holder's whole footprint) draw inset to 70% of their size, so the mount's edge and ring show around the rider.
+- **Tethers.** A drag link draws a thin dashed line from the dragged creature's center to its holder's, in the holder's ring color at half opacity, under the tokens. It shows who holds whom at the table.
+- **The group line.** The action bar's summary area shows one line of buttons, each at least 44 px tall: on a carried token "On Warhorse" (or "Dragged by Thorn"), and on a holder "Carrying Bree, Torch". A tap selects that token and opens its bar. This is how a phone reaches a rider that hides its mount, and a familiar too small to tap.
+
+### 4.5 The token panel and the tracker
+
+- **Tags.** The name block (docs/design-v1-token-panel.md 3.10) gains the link: "Riding Warhorse", "On Bree", "Dragged by Thorn", and on a holder "Carries Bree and Torch". The rider's panel shows the Controlled control under the tags on a ride.
+- **The tracker.** A rider's row shows "Riding Warhorse" in its second line's tags. A controlled mount's row shows "Controlled by Bree: moves and acts on Bree's turn (Dash, Disengage or Dodge)", and while it only marks time the row reads muted (7.1).
+- **Falling off.** When Prone or Unconscious lands on a rider or on a mount that carries one by a ride, the DM's device shows a toast, "Bree may fall off Warhorse: DC 10 Dexterity save.", with "Ask for the save" when a player plays the rider, which opens Request a roll filled in (design 9.11). It decides nothing, and nothing detaches by itself.
+
+### 4.6 The shortcut sheet
+
+The sheet's behavior registry (client/state/shortcuts.ts `BEHAVIORS`) gains three rows, for mouse and touch alike: dragging a holder moves what it carries, dragging a rider of a controlled mount (or one that covers its mount) moves the mount, and dragging any other carried token off its holder lets it go. No new single key: Attach is a bar button, and its list takes the arrow keys and Enter as every list does. FEATURES.md gets the same lines in the lane's last commit.
+
+## 5. What moves with what
+
+### 5.1 The four kinds of link
+
+| | ride, perch, carry | drag |
+| --- | --- | --- |
+| For | a rider, a familiar on a shoulder, a torch in a hand, a passenger on a cart, a creature carried under an arm | a grappled creature, an unconscious friend pulled along |
+| Where | inside the holder's footprint | anywhere within 5 ft of it |
+| Fits when | the carried footprint lies inside the holder's, and for a ride or a carried creature the holder's size is at least one step larger | the two are within 5 ft |
+| Position | the holder's dx and dy | the holder's dx and dy |
+| Elevation | the holder's change, so it keeps its height above it (0 for a rider) | behind a holder on the ground at the leg's start, its own ground along the way and where it lands (design 9.9). Otherwise the holder's change, never below the ground there, so a griffon lifts the goblin it grabbed |
+| Walls | not tested | its own leg tested |
+
+- **Sizes** use movement's helpers (contract 4.9): `sizeCategory` gives each token a size, a custom one the smallest standard size whose square holds it, and `sizeSteps` counts the steps between two. "At least one size larger" is one step or more. Containment of the footprint is a separate test, so a custom 1 by 2 creature and a standard Large one are both Large, and neither rides the other. A Small halfling rides a Medium mastiff: one step, and the two 1-cell footprints fit. A Medium character cannot ride a Medium horse: dragging covers carrying a friend.
+- **The kinds**, chosen at attach time and stored: a **ride** is a creature that is not Tiny on a creature at least one step larger. A **perch** is a Tiny creature on a creature. A **carry** is an object on anything, a creature on an object, or a creature its holder grappled. A **drag** is beside. Only a ride costs movement to get on and off, only a ride may be controlled, and only a drag or a carried creature costs its holder to move (7.3).
+- **Facing** is never carried. A turned holder would have to swing its riders around its center, which would move them out of their cells on a grid. Each token keeps its own facing.
+- **Lights and sight.** A carried token's light is its own field and goes where it goes, at its own eye (its elevation plus its height). A carried party member lends sight from its own eye, as before. A rider's eye is not raised by its mount (out of scope, section 12).
+- **Squeezes.** Links read the full footprint, so a mount squeezing through a corridor keeps its rider.
+- **Limits.** A chain is at most 3 deep (a torch held by a rider on a horse), a token carries at most 8 directly, and a group is at most 20 tokens (`LIMITS.attachDepth`, `carriedPerToken`, `groupTokens`). The DM's ops count the whole link graph. A player's ops count only the check set (the public members plus the tokens the op names) (contract section 5): a refusal's words reach only the player, but every viewer sees that the op did not happen, so it must not depend on what any player cannot see. Past those, the server's own bound is the scene's 500 tokens, which every group lies within: every walk over the links keeps a visited set, so each token is counted and moved once per op whatever the links.
+- **Loops.** A loop among the public members and the named tokens is refused for a player, and any loop for the DM (8.1). A player's attach that closes a loop through a link not every player sees applies, and the loop stands: every group is collected with a visited set, so moving any token of it moves the whole loop once, which the carried-object reveal already allows players to see. The DM can take it apart.
+
+### 5.2 What else carries or breaks a link
+
+- **Teleport.** A holder's "Teleport here" takes what it carries on it and leaves what it drags, whose links then break, as a grapple ends past its range.
+- **Another scene.** A holder sent to another scene takes its whole group, as an attached area follows its token (design 8.2). A carried token sent alone comes loose.
+- **Links must hold.** At the end of dispatch, before the move is described (section 9), the reducer drops each link that no longer holds: the holder is gone, the two are on different scenes, a carried token no longer fits on its holder (a resize, a move), a dragged one is farther than 5 ft. The token comes loose where it stands. One rule covers deletion, Enlarge ending, teleports and every move of a carried token alone, so no token is ever carried from afar.
+- **Ground changes.** A change of the ground that is not a move, a height paint, Erase or Clear (`build.height`, design 9.9) or a pit a trap opens (docs/design-v1-traps.md), lifts or lowers each holder standing on that ground with its group, by the group rules above: what rides takes the holder's change of elevation, and is never lifted by the ground rule itself, since it stands on its holder, not the floor. A dragged creature follows its own ground. No leg is added to any path, as for a height paint today. The link pass then runs again after those writes (contract 3.6 step 5), so a dragged creature left on the far side of a pit's ledge comes loose when it is out of reach. Under a player's op the group is read by section 8.0's passes.
+- **Duplicates.** The bar's Duplicate copies a token without its link and without what it carries. A scene's duplicate copies links between the copies, with the copies' derived ids (`derivedId`, shared/reducer/duplicate.ts:173). An import remaps them and drops a link whose holder did not come through.
+
+## 6. Who may do what
+
+The DM may do everything in this note, within the fit, reach and limit rules, which hold for everyone.
+
+A player, on tokens their projection holds on the scene (anything else is `gone`). Every check below can refuse, and a refused op is missed by every viewer, so each reads only the check set (the public members plus the tokens the op names), and Grappled only as every player sees it (an effect not hidden from players):
+
+- **Ride, Perch or Carry:** they may move the carried token and the holder (they own it, or "Who can move any token" lets them, design 8.1), the two are within 5 ft, and on a scene where walls stop moves the step onto the seat passes the leg test. In a fight a ride is taken only while the rider's row is the acting row in their copy: "You can get on a mount on your own turn." A mount the DM runs is ridden by the DM's attach.
+- **Drag, or Carry a creature:** they may move the holder, the creature is within 5 ft, and they may move it too or it has the Grappled condition as their copy shows it (a Grappled effect hidden from players does not count, so the same request gets the same answer with or without one). The DM marking Grappled is the DM's consent, and the rules then let the grappler drag it (the owner's answer to question 2).
+- **Controlled:** set with Ride only.
+- **Detach** (Get off, Put down, Let go): they may move the carried token or its holder, and the link is in their copy. The holder's player can put down what it carries, and the carried creature's player can always get off. Get off's place must be beside the holder and its leg must pass the leg test (4.3).
+- **Moving a group:** the right to move the named token is enough: its whole group rides on it, whoever owns the rest and whether or not the player sees it.
+- **Directing a controlled mount:** a player may move a visible, unlocked token that carries a creature of theirs by a controlled ride in their copy, though they own nothing of it. That is the rules' "it moves as you direct it", and the DM chose it by marking the link controlled. Every other edit of the mount stays its owners' and the DM's.
+- **A new seat:** a player may move a token carried by one they may move, when the move keeps the link (4.2). Pulling a grappled goblin out of reach is a move of the goblin alone, which needs the right to move it.
+
+Locks: a locked holder cannot be dragged by players, as today. A locked carried token still rides along with its holder, since a lock stops a token's own drag.
+
+## 7. Turns, initiative and the movement budget
+
+### 7.1 Mounted combat: one turn shared with the rider
+
+A controlled mount "moves on your turn as you direct it, and it has only three action options during that turn". So everything it does belongs to its rider's turn, and its own row only lets time pass for it. The owner kept that row (question 1), and the coordinator's call settles what it carries. Sharing is bound to one turn and one ride: the turn's start (`TurnStart.mounts`, design 9.4) lists the mounts that share it. A mount joins that list only at two events, the rider's turn starting with the ride in place, and a controlled ride taken during the rider's turn, and only when every player then sees both tokens and the link (the rule of the path's `seen` marks, design 7.3). It leaves the list in the same op that ends that ride: a getting off, a Let go, the link pass, a deletion, an undo. A mount **shares its rider's turn** while it is on the list of the turn under way and the turn's creature still rides it. Joining the list also sets the mount row's `InitEntry.markRound` to the round, a separate mark that stays when the ride ends, and the row **marks time** while its `markRound` is the current round:
+
+| | On the rider's turn | On the mount's own row, while it marks time |
+| --- | --- | --- |
+| Movement | the mount's path and budget, against its own speeds (7.2) | none: a move of the mount there adds no leg and reads as a move outside its turn |
+| Actions | Dash, Disengage or Dodge, which the tracker tag names | none |
+| Reaction | comes back when the rider's turn starts: Next clears the mount row's `reactionUsed` with the rider's | not cleared |
+| Durations anchored to the mount's row | do not tick (the rider's own do) | tick at its start and end, as for any row |
+| Area reminders at a turn's start and end | for the rider only | for the mount, at its row's start and end |
+| Turn line, timer | the rider's | its own, so the DM presses Next through it |
+
+- **Why "every player sees", and only at the two events.** Whether a row marks time shows in the tracker, so it may depend only on what every player sees. Visibility is read only when a mount joins the list: a rider hidden at its turn's start shares nothing that turn even if revealed, and a rider hidden or walking out of sight mid-turn keeps sharing. A hidden rider who gets back on mid-turn, or another rider who takes the mount later in the round, shares only through an event of their own that qualifies. A controlled mount whose rider the DM hides acts, as far as turns go, as an independent creature: its row is ordinary, as it looks to the table (section 10).
+- **`markRound` is set when the mount joins the list, not when the ride ends,** whether or not the mount then moves or acts, since the app cannot see its actions and its turn was the rider's either way. Nothing later in the round, a rider getting off, hidden or walking out of sight, gives the mount a second budget on its own row, and nothing earlier, a ride that ended before the rider's turn, takes its own turn away. A new qualifying ride later in the round may share another rider's turn, as the rules allow: "A controlled mount can move and act even on the turn that you mount it."
+- **Getting on during a fight.** `token.attach` of a controlled ride, when the mount and the rider each have a row, gives the mount's row the rider's value and puts it right after the rider's row in the same op: "The Initiative of a controlled mount changes to match yours when you mount it." Then:
+  - A mount whose row had not had its turn this round (it stood after the acting row) needs nothing more.
+  - A mount whose row already had its turn this round (it stood before the acting row) is passed over by Next for the rest of the round (`InitEntry.skipRound`, the round number), so its durations never tick twice in one round. It still moves and acts on its rider's turn: "A controlled mount can move and act even on the turn that you mount it."
+  - When the mount's row is the acting row (only the DM can attach then, since a player rides on the rider's own turn), no row moves, since moving the acting row would skip or repeat the rows between. Its row options then offer the DM "Move after Bree", an ordinary `encounter.reorder` with the value set, for after its turn.
+  - A mount whose row moves from after the acting row to before it (its rider already acted) has no row turn left this round, so its durations wait a round. The rules give no answer, and the DM can move it back.
+- **Getting off**, or any other end of a controlled ride, changes no row and takes the mount off the turn's list at once: its later moves on the rider's turn record nothing, and getting back on shares again only if that mounting qualifies. Its initiative stays matched. A row whose `markRound` is this round keeps marking time to the round's end, and from the next round it is an ordinary turn with movement and actions again.
+- **A companion mount on its character's turn** (Find Steed, or any mount the DM makes a companion "On Bree's turn") has no row and already acts on the rider's turn. Its companion Reaction already comes back on its character's turn (combat-flow 3.6.8).
+- **An independent mount** keeps its row and place. It moves on its own turn and carries the rider then. The rider's own turn does not move it.
+- **Previous** puts back the encounter as it was, `reactionUsed`, `skipRound` and `markRound` included, since the saved step holds the whole encounter (design 9.4).
+
+### 7.2 Whose path a move writes
+
+- **The carried creature.** A leg it was carried is added to its path, when it is the active creature, as a stop marked `uncounted` and `carried` (section 8.1). It never counts, and the DM's trail does not draw it, since its holder's trail shows the way. Players receive the leg as an uncounted one, without the `carried` mark, so a leg carried by a hidden holder looks to them like any leg that does not count. "Doesn't count" on such a leg is never refused: pressed to count it, the leg counts and loses the mark, as a table's choice, so no refusal says how the leg was made. When a full path joins two legs (`withStop`), the joined leg keeps `carried` only when both legs were carried, and keeps today's `uncounted` rule.
+- **The controlled mount on its rider's turn.** While the mount shares its rider's turn (7.1: it is on the list of the turn under way and the ride holds), the path is recorded on the active creature and on each such mount above it in its chain, each tagged with the turn's seq. So the warhorse's walk on Bree's turn is the warhorse's movement, against the warhorse's speeds, and its trail shows on the map. Its first stop is where it stood before its first move this turn, and a remount on the same turn continues the same path. `pathThisTurn` reads "tagged with the turn under way", which only the turn's own moves can write, so older paths read as before.
+- **The controlled mount on its own row** writes no leg while it marks time (7.1), so its rider-turn budget is the only one it has that round. The pill shows nothing there.
+- **One pill.** While the active creature rides a controlled mount in this viewer's copy, the moved pill sits on the mount and reads the mount's numbers, with a second line for the rider's own movement when it is not 0 ("Bree: 15 ft"). The drag colors of the group read the mount's path and speeds.
+
+### 7.3 What movement costs
+
+- **Getting on** by a ride, on the rider's own turn: the leg into the seat costs half the rider's walking speed, rounded down, whatever its length (`PathStop.cost`, section 9). A perch, a carry and a drag cost nothing to take beyond the leg itself.
+- **Getting off** a ride on the rider's own turn: the leg off costs the same half, from the seat to the first spot along its route clear of the holder's footprint, and the rest of the leg costs what any leg costs. The reducer records those as two stops when they differ, using movement's route spots.
+- **Who sees the cost.** A mounting or dismounting cost comes from the rider's Speed, which only the DM and the rider's owners receive. So it reaches only them, and every other player reads that leg's plain distance, as movement's rule for costs from private inputs says (docs/design-v1-movement.md).
+- **Dragging and carrying.** `dragExtra(state, holderId)` is 1 when the holder is a creature that drags a creature, or carries one by a carry, that every player sees by a link every player sees (the rule of the path's `seen` marks, design 7.3, for the creature and for the holder, so a party member's link always counts and one the DM hides never does), and that is neither Tiny nor `sizeSteps` two or more below the holder. It is 1 however many there are. It reads the stored kinds, sizes, token kinds and what every player sees, never a condition, so the cost is the same whoever moves the holder and publishing it reveals nothing. The client adds it to every piece's `extra`, and movement sums it with difficult terrain and the rest, so a foot of difficult terrain while dragging costs 3.
+- **The ruler** treats a carried token as any token: a stop on it anchors to it and measures from where it stands now. Measuring from a rider measures from its own cells, not its mount's (section 12).
+
+## 8. Data, ops and rules
+
+### 8.0 Public determinism (contract section 5)
+
+What each viewer observes of an op depends only on the op and that viewer's own projection, except for the contract's listed reveals. Attach adds one of them, the carried-object reveal: a token players can see that rides a holder they cannot see follows its holder, so a torch held by an invisible creature floats and moves, as at a table, on the DM's moves and on a player's move of a holder whose hidden rider holds it. Nothing else about the hidden holder is revealed: no link, no path, no name. The contract's definitions apply as follows:
+
+- **Movement is the whole group, for every op.** A holder's move carries every token under it, by the same displacement and elevation rules, whoever sends the op and whoever sees what. A hidden token moves unseen. A token some player sees moves in their view by the reveal when the link above it is hidden from them, and as an ordinary carried token when it is not. This also settles question 7.
+- **Two sets, named plainly.** The **public members** of a group are its members and links every player sees. Every input another viewer can observe reads them and nothing else: traps' walkers, the dragged creatures `dragExtra` counts, the pair whose turn sharing shows in the tracker (7.1), the sampling step, and the dragged creatures the walls test walks with the holder. The **check set** is the public members plus the tokens the op names, and serves only checks that can refuse or stop: refusals, limits, loops, the seat and get-off checks, and each named token's own leg in the walls test. A named token outside the public members never enters a public input. Members outside the public members follow in the private pass and never shape a landing, a stop, a cost or a row.
+- **What can refuse reads the check set:** refusals and limits, the seat and get-off checks, loops, and whether a Grappled effect allows a drag. A refusal's words reach only the actor, but every viewer misses the op it stops, so no refusal reads a link or a token some player cannot see, beyond the tokens the op names itself, and no reveal ever shows through a refusal.
+- **Named moves are taken as named.** Every token an op names moves where the op says, and each token it does not name follows its nearest named ancestor (8.2), whatever links anyone cannot see, so two visible tokens sent different ways go different ways in every room. A link a named move breaks comes loose in the link pass.
+- **Grappled** eligibility reads only effects the actor's copy holds, and stored kinds never read conditions again.
+- **Paths.** The `carried` mark is the DM's, and "Doesn't count" never refuses a carried leg.
+- **Undo and redo** (8.3): every token of the step outside the public members and the named token, hidden or carried by the reveal, rides back silently or stays, and never answers. A link to a holder the actor cannot see is restored or dropped without changing the answer.
+
+Generators for the shared differential test, whose paired rooms differ only in hidden state and never only in a link that carries a visible token (the reveal shows that difference by design): a hidden rider on a visible mount, a hidden passenger under a visible holder, a passenger hidden from every player but its own player (an owner-visible Tiny familiar on a visible horse), a hidden token between a visible holder and a hidden-from-others chain end, a hidden dragged creature, a hidden Grappled effect, a hidden row beside a mount's row, a creature withheld by fog or sight inside a group, and a rider whose visibility flips during the round. Ops: group moves and nudges, `token.moveMany` with different destinations, every attach kind (controlled on and off the rider's turn), every detach, "Doesn't count", Next into and out of a rider's turn, End turn into a hidden rider's turn, and the undo and redo of each. The reveal itself gets its own test: in rooms that differ only in whether a visible torch rides a hidden holder, the torch follows the holder exactly in the room with the link, and every refusal, limit and undo answer is the same in both.
+
+### 8.1 Model and protocol (`shared/model.ts`, `shared/protocol.ts`)
+
+```ts
+Token.attached?: { to: TokenId; kind: 'ride' | 'perch' | 'carry' | 'drag'; steer?: true }   // steer: a controlled ride only
+PathStop.carried?: true          // DM only: always with uncounted, the holder's move took it along
+PathStop.cost?: number           // feet, when the leg costs other than its distance (shared with movement)
+InitEntry.skipRound?: number     // Next passes over the row in this round (7.1)
+InitEntry.markRound?: number     // the row marks time in this round: its mount shared a rider's turn in it (7.1)
+TurnStart.mounts?: TokenId[]     // the mounts sharing this turn, bound to its seq and its creature's ride (7.1), at most 8
+
+op('token.attach', { tokenId, to: id, kind: z.enum(['ride', 'perch', 'carry', 'drag']), steer: z.literal(true).optional(),
+                     x: coord, y: coord, elevation: feet })      // the seat the client picked: the reducer checks it fits
+op('token.detach', { tokenId, x: coord.optional(), y: coord.optional(), elevation: feet.optional() })   // a place only for Get off
+```
+
+- The reducer checks the kind against the tokens as the op finds them: sizes and fit for a ride, a perch and a carry, reach for a drag, `steer` only on a ride, and for a player's carry of a creature the Grappled effect in their copy (section 6). After that, the kind is never worked out again.
+- An attach of a token already attached replaces its link: to change Controlled, the client sends the same holder, kind and seat.
+- A detach's place is for a creature getting off: from a ride, a perch or a carry, on a creature or on an object such as a cart. Only a carried object (Put down) and a drag (Let go) refuse a place, with `invalid`: "Put down and Let go leave it where it stands". The place must lie inside the scene, within 5 ft of the holder and clear of its footprint. The server does not check that the place is free of creatures, which would reveal a hidden one: the client picks a free spot among those its viewer sees.
+- The reducer refuses with `invalid`, each judged on the public members and the named tokens for a player (8.0) and on the whole graph for the DM: the two on different scenes ("Bree and Warhorse are on different scenes"), a seat that does not fit ("Warhorse is not big enough to carry Bree"), a drag out of reach ("Goblin 2 is too far to drag"), `steer` on anything but a ride, a loop ("Bree would carry itself"), and the limits of 5.1 ("a token carries at most 8 others", "a chain of carried tokens is at most 3 deep", "a group moves at most 20 tokens"). A loop through a link not every player sees stands (5.1).
+- Permissions run the leg test on a player's seat step and get-off leg (section 6), as on a move.
+
+### 8.2 Reducer
+
+- **Groups.** `carriedGroup(state, tokenId, named)` (shared/rules/attach.ts): the token, then what it carries, depth first in token id order, over the whole graph, with a visited set, stopping at every other token in `named`, built from one pass over the scene's tokens. `moveGroups(state, named)` partitions an op's tokens by it: each unnamed token follows its nearest named ancestor, the first named token met walking up its links, so the partition is the same whatever order the op lists them in, a permitted loop included. Planning (`planMove`), dispatch, traps' walkers and undo all use that partition. `publicMembers(state, tokenId)` keeps the members and links every player sees, for every public input, and `checkSet(state, tokenId, named)` adds the named tokens, for refusals, limits, loops and the walls test (8.0).
+- **A move of a named token** (`token.move`, `token.moveMany`, a `token.update` of `x`, `y`, `elevation` or `sceneId`): it moves where the op says, along its route as traps may cut it. Each token of its part of `moveGroups` follows the route its own holder actually took, top down, offset by its place: those on a holder take its change of elevation, and dragged ones follow the table of 5.1, to their own ground behind a holder on the ground at the leg's start, else by the holder's change but never below the ground (shared/rules/heights.ts, as `build.height` lifts tokens in the reducer today). On a player's move a dragged creature outside the public members stops where its own leg test stops it (4.2), and what it carries follows its stopped route, so the stop carries down the chain. Planning, dispatch, traps' moments along the route and undo all read these actual routes. A teleport moves only those on it. A scene change moves all. This is the same for every sender (8.0). Then the path rules of 7.2 and the costs of 7.3.
+- **`token.attach`** writes the link, its kind and the seat, and on the rider's turn the seat leg with its cost when it is a ride. A controlled ride during a fight sets the mount's row as 7.1 says, and, taken on the rider's turn while every player sees the pair, adds the mount to the turn's `mounts` and sets its `markRound`.
+- **`token.detach`** clears the link, and with a place moves the token there, adding the leg with its cost on the rider's turn. Ending a controlled ride takes the mount off the turn's `mounts`, and changes no row.
+- **`encounter.next`** writes the new turn's `mounts`: each mount the starting creature rides by a controlled ride that every player then sees. For each, it clears the mount row's `reactionUsed` and sets its `markRound` to the round. On a row whose `markRound` is the round it leaves `reactionUsed`, and it passes over a row whose `skipRound` is the round. The fields are left in place after their round, where they no longer match.
+- **The link pass** (5.2) is the last part of dispatch, over the tokens the op wrote and the links that name them, in token id order. A controlled ride it ends leaves the turn's `mounts`, and it changes no row. The move description is taken after it (section 9).
+
+### 8.3 Undo and redo
+
+- The DM's attach and detach are ordinary steps: "putting Bree on Warhorse", "letting Thorn drag Goblin 2", "taking Bree off Warhorse", "letting go of Goblin 2".
+- A player's attach and detach go on the player's stack as moves (`POSE_FIELDS` gains `attached`), and the bar's Undo move covers them, since a mistaken Ride should not cost a Get off at half Speed. The undo takes back the link and the seat only: rows the attach matched stay matched, and a `markRound` already recorded this round stays, so the undo sets none and clears none (7.1).
+- **Sharing through undo and redo.** A step that ends or makes a controlled ride keeps the mount's entry in `TurnStart.mounts` as it stood, with the turn's seq. Undoing a Get off, or redoing a mounting, puts the entry back only when the turn under way has that same seq and the restored ride is the one the entry named, so the mount's later moves on the rider's turn record again. It never adds an entry the turn did not qualify for, never carries one into another turn, and never sets or clears `markRound`. Undoing a mounting takes its entry off, as any end of the ride does. A DM's step restores the encounter whole under its value guard, which takes back exactly what the step changed, and is refused once the turn has moved on.
+- **The pose a player's undo compares** holds `attached` only as their copy shows it: a link whose holder they cannot see is no part of it, so a change to a hidden link never makes their undo answer "moved since".
+- **A player's undo of a group move** puts back the step's named token and its public members by today's rule: refused when one stands anywhere else, "could not undo moving Thorn: it was moved since". A token the player may not move is allowed in that restore only while, before and after it, it is carried under a token in the same restore that the player may move: it rides back as it rode out.
+- **Passengers outside the public members** never answer: hidden ones, ones only some players see, and visible ones that rode along by the carried-object reveal. `poseRestore`, and the checks the built restore passes as the player (`restoreMoveCheck` on undo and `restorePoseCheck` on redo), leave them out: such a token, carried before and after under a token in the same restore that the player may move, takes no move-right check and no leg test. Each one still carried under the group goes back by the displacement the step gave it, which is its own holder's actual move, a stopped one included, wherever it sits now, so a visible torch on an invisible holder floats back as it floated out. One no longer under the group is left as it is. The link pass then keeps or drops each link by the usual rule. No refusal ever reads one of them.
+- **A link to a hidden holder.** When the step's token was attached to a holder the player cannot see now (a visible torch moved off an invisible holder, then undone), the token goes back by the visible rule, and the link is written back only when it would hold where the token lands, else left off. Either way the player's answer is the one they would get with no hidden holder at all.
+- The restore is built on the server when the undo arrives, guarded by each token's value then, so it replays as stored.
+- **Redo** follows movement's rule: the step keeps the route the move was allowed on, and a redo checks its pieces, testing only the holder and the visible-member dragged creatures, as the move did (docs/design-v1-movement.md). The redone move carries its whole group as any move does, hidden passengers and the reveal included.
+- **Traps.** When a trap stopped a player's group move or showed players a line, that player's undo of it is refused, and a silent trap leaves the undo as it is (the owner's answer, docs/design-v1-traps.md).
+- The DM's restore reference checks (design 7.7) add the link: putting back a link whose holder was deleted since is refused ("what it belongs to was deleted since"), and so is taking away a token that another token is attached to ("other work depends on it"). A player's restore never refuses on a link: it writes or drops it as above.
+
+### 8.4 Prediction (`shared/reads.ts`)
+
+A holder's move reads the holder and every token of its group in the viewer's view, so it is predicted for what that view holds. A hidden carried token is not in a player's view, and its move is nothing that player would see. A visible token that rides a holder the player cannot see moves only in the server's answer, by the reveal, and the device takes it from there. A controlled ride during a fight changes the order, which a player's renumbered copy cannot predict, so it reads the encounter as a whole collection and waits for players (design 7.4). Everything else is predicted.
+
+### 8.5 Projection (`shared/project.ts`)
+
+- **`attached` reaches a player only while its holder is in their projection**, with its kind and `steer`. Otherwise it is left out, as an area's `attachedTo` is sent as null (design 7.3). The fan-out re-projects every token attached to a touched token, since its copy depends on the holder's.
+- **A carried token the DM hides** sends players nothing: its moves change only fields their projection lacks, its drag frames go only to DMs and its owners as any hidden token's do (design 7.6), and the holder holds no field naming it. A carried token withheld by fog or sight follows the token rules as any token does.
+- **A visible token carried by a hidden holder** follows its holder, on every op, the contract's carried-object reveal: a torch carried by an invisible stalker floats along, and its drag frames go to everyone who sees it. Players get nothing else of the holder: no link (`attached` stays out of their copy), no path, no name. Its own path shows a carried leg as an uncounted one (7.2).
+- **Path stops**: `carried` is the DM's, and the uncounted mark follows design 7.3's rule. Mount and dismount costs reach only the DM and the rider's owners (7.3).
+- **`TurnStart.mounts`** reaches a player with the turn's start, holding only the mounts in their copy.
+- **The tracker tags**, the muted row and the group line come only from links in the viewer's copy.
+
+### 8.6 Versions
+
+This feature takes its own next free op version and snapshot version when it is built, after movement's and before traps'. The snapshot step is an identity step: its stored fields are optional, so an older build refuses the room cleanly, and going back is the backup's restore (design 16.2). Below its op version, replay writes none of its stored fields: with `opVersion !== undefined && opVersion < N`, a move is the token alone, `withStop` joins as before, and Next writes no `skipRound` or `markRound` and resets Reactions as before. Older ops never meet a link, so the gate changes nothing they did, and it keeps the boundary exact.
+
+## 9. The shared contract and the other two notes
+
+The contract (agreed with movement and traps on 2026-10-18, revised after review rounds 1 and 2) describes every move once, as `MovedToken` entries `{ tokenId, from, to, route, how, carriedBy? }` from `planMove` before the reducer and `describeMove` after it, and binds all three notes to public determinism (contract section 5).
+
+- **From movement:** the `route` a `token.move` may carry (straight pieces, each with its `extra` feet per foot), route spots, the leg cost, `PathStop.cost` (adopted from this note), `sizeCategory` and `sizeSteps`, the rule that a published cost uses only inputs players see (M1), routes from public inputs only (M11), the sampling step from the public members, those every player sees (M16 and contract section 5), and the redo rule that keeps a move's route (M7). A holder's drop is one `token.move` with its route, and each carried token follows that route offset by its place.
+- **To movement:** `dragExtra(state, holderId): 0 | 1`, added to every piece's `extra` while the holder drags or carries a creature, the rule that only the holder and its visible-member dragged creatures are tested against walls, piece by piece, and the mount's path on its rider's turn (7.2). A `carried` leg has no `cost` and no `via`. Party-knowledge routing applies when any public member of the group, the mover included, is player-owned or a party member (M13).
+- **To traps:** `carriedBy` entries, the elevation along the route of what rides (the holder's plus its height above it, so a rider on a flier is off the floor), groups that stop together at one shared progress along the holder's route, traps' walkers being the holder and its dragged creatures among the public members only, a named token not every player sees walking in the private pass (traps 5.3), while the walls test reads the public members plus the named tokens (contract 3.7 and section 5), the groups split by `moveGroups`, each unnamed token following its nearest named ancestor, the link pass at the end of dispatch, with a pit's height change moving tokens through the group rules and the link pass running after the trap's writes (traps' T18), and two walks traps test: a positioned detach (Get off), from the seat to the place, and the seat step of an attach, which traps leave out since the seat lies in the holder's space.
+- **Where the notes meet.** A holder crossing a pressure plate sets it off for itself and each dragged creature, never for what rides. A rider still enters an area such as a Stinking Cloud. Difficult terrain is paid by the walker: the mount, not its rider. Squeezing is the holder's: its riders keep their seats.
+
+## 10. Edge cases
+
+- **The active creature rides an independent mount.** Its own turn moves nothing under it. Dragging the mount on the rider's turn needs the right to move the mount, and records nothing on it.
+- **The mount dies.** Nothing detaches by itself. Find Steed's steed "disappears", so its player dismisses it, the link breaks, and the rider stays where it was.
+- **Getting off a flier.** The rider lands at the mount's height, as any flier lands (design 9.9). Falling is the table's.
+- **Two holders drag one creature.** One link per token: the second Drag replaces the first. The DM picks.
+- **A rider and its mount both selected.** One move of the mount, the rider riding.
+- **Prone on a familiar's holder.** The falling off toast speaks only of rides.
+- **A controlled mount of a hidden rider.** A rider the DM hides, a player's invisible character included, never shares its mount's turn, since every player must see the pair. The mount's row is ordinary: it moves and acts there as an independent creature, and its moves on the rider's turn record nothing, so the app tracks one budget a round, on its own row, while the table may move it on either turn. The gap is deliberate: a tracker that muted the row would tell the table an unseen rider steers it.
+- **Dismounting on the mount's own row.** The rider is not the acting creature, so the leg costs nothing and adds nothing to a path. The row still marks time if it shared the rider's turn this round.
+- **A rider hidden or revealed during the round.** A mount joins a turn's list only at the rider's turn start or at a mounting on that turn, read then: a rider hidden at its turn's start shares nothing that turn even if revealed, one hidden mid-turn keeps sharing until the turn or the ride ends, and a hidden rider who gets back on shares nothing. `markRound` is never cleared mid-round, so the mount's own row gets no second budget.
+- **Blackout, table displays, other scenes.** Nothing new: links travel with tokens and are projected as tokens are.
+- **Undo after the holder moved again.** The move's guard refuses it as moved since, for every token in the group the player sees.
+
+## 11. Performance on a phone
+
+A visible group is at most 20 tokens, so a drag moves at most 20 nodes a frame and sends at most 20 drag frames, as a 20-token selection does today. `carriedGroup`, `moveGroups`, `publicMembers`, `checkSet` and the link pass are each one pass over at most 500 tokens per op. The client keeps a children index on the view's tokens, rebuilt when tokens change, for the group line, the drag and the draw order. The tether is a static line drawn on change. Nothing animates at rest.
+
+## 12. Out of scope, and why
+
+- **A rider in its mount's space for reach and areas.** A rider has its own cells (the owner's answer to question 5), so a creature beside the far side of a Large horse measures 10 ft to its rider. The ruler can measure to the mount.
+- **A rider's eye raised by its mount.** Sight would need a second height per token.
+- **Falling, and forced movement on a mount.** The app cannot tell an effect that moves a mount against its will. The Prone toast covers the rule it can see.
+- **Ending Grappled when letting go,** and adding it when dragging. Conditions stay the DM's and their owners' (question 4).
+- **Players picking up loose objects** they may not move. A dropped torch is the DM's again unless the DM gave it to them.
+- **Free lights attached to tokens.** A token's light already is one.
+- **Carried facing,** vehicles with more than 8 passengers (a ship is a scene), and a drag-onto-a-mount gesture to ride, which would count a move into the mount's space and then the mount cost on top.
+
+## 13. Tests
+
+- **Rules** (`shared/rules/attach.test.ts`): fit and kinds for every pair of standard and custom sizes through `sizeCategory`, footprint containment apart from size, reach under each diagonal rule and with elevation, depth, the 8 and 20 limits over the DM's whole graph and over a player's check set, `carriedGroup`'s order and `moveGroups`' partition, `dragExtra` for drags and carried creatures, Tiny, two steps smaller, creatures players cannot see, and the same answer with or without a Grappled effect.
+- **Reducer** (`shared/reducer/attach.test.ts`): a holder's move moves the group by dx and dy, what rides with its elevation, and a dragged creature to its own ground behind a walker and up with a flier, on a height map. A carried token's move re-seats or detaches. A teleport takes what rides and breaks a drag, and a scene change takes all. The link pass runs after a delete, a resize and a teleport. A stored kind survives the end of Grappled. A detach's place is taken for a creature leaving a cart and refused for Put down and Let go. `moveGroups` gives the same partition for both input orders of nested named tokens and for a permitted loop, each unnamed token following its nearest named ancestor. `withStop` keeps `carried` only on two carried legs, and "Doesn't count" counts a carried leg.
+- **Turns** (`shared/reducer/attach.turns.test.ts`): a controlled ride sets the row's value and order with the mount's row after, before and at the acting row, `skipRound` passes it once, the Reaction comes back on the rider's turn and not on the mount's row, durations tick on the mount's row only, the mount joins the turn's `mounts` and gets `markRound` at the rider's turn start and at a qualifying mounting, it leaves the list when the ride ends, the row writes no leg while it marks time, a hidden rider leaves the row ordinary, a player's ride waits for their own turn, and Previous puts back all of it. The remount cases: a visible ride that shares and ends, then a hidden rider getting on the same turn, shares nothing, and another rider taking the mount later that round shares only through a qualifying mounting of their own. Two undo sequences: Get off then Undo, and Mount, Undo, Redo, each on the same turn, after which the mount's moves record on its path again, and each repeated after Next, when they restore the ride without sharing.
+- **A randomized test** of attach, detach, holder and carried moves, resizes, deletes, teleports, scene changes, Next, Previous, undos and visibility flips of riders and mounts (hide, reveal, fog), checking after every step: no link spans scenes or reach, no group past the scene's tokens with each token moved at most once per op, every carried token fits, no controlled mount records movement on two turns in one round unless a new qualifying mounting came between, a mount shares only a turn whose list it joined at a qualifying event, every restore applies whole or refuses, and replaying the stored ops rebuilds the same state. Its cases include a rider hidden at its turn's start then revealed and the mount moved, a rider hidden mid-turn after the mount moved, a getting off then the mount's own row, and the mount's row reached after each.
+- **The shared differential test** (contract section 5) with the generators of 8.0, through `shared/project.attach.test.ts` and `server/rooms/undo.attach.test.ts`: identical answers and words, per-viewer `ev` streams and drag frames in paired rooms, undos and redos through `poseRestore`, `restoreMoveCheck` and `restorePoseCheck` included, plus the reveal's own test of 8.0.
+- **Permissions** (`shared/permissions.attach.test.ts`): each rule of section 6, the leg test on seat steps and get-off legs, the steer move right and the re-seat right.
+- **Contract** (shared with movement and traps): `describeMove` equals `planMove` for random moves of groups, positioned detaches included.
+- **Client** (node --test): the attach list's rows and words, the seat choice, the get-off spot, the drag rule of 4.2, `groupFollowers` without carried tokens, the draw order, and the shortcut sheet rows.
+- **e2e** (`e2e/attach.e2e.ts`, steps labeled `at-`): on a phone and a desktop, a player rides their companion horse and moves it on their turn with the pill and costs shown, gets off, the DM attaches a hidden imp to a villain and the player's page never receives it, and a player drags a goblin the DM marked Grappled.
+
+## 14. Build plan
+
+1. `feat(rules): attached tokens, their kinds, fit, reach and groups` (shared/rules/attach.ts on movement's size helpers, model fields, limits).
+2. `feat(reducer): holders carry what they hold, and links that no longer hold come loose` (the move expansion over the whole group, public members, the link pass, named moves, loops, `token.attach` and `token.detach`, protocol, the version gate).
+3. `feat(rules): mounting costs, carried legs and the mount's path on its rider's turn` (path stops, `withStop`'s join, `pathThisTurn`, "Doesn't count" on carried legs).
+4. `feat(reducer): a controlled mount's turn is its rider's` (the row's value and order, `skipRound`, `TurnStart.mounts` bound to the turn and the ride, `markRound`, the Reaction, every player seeing the pair).
+5. `feat(permissions): who may attach, detach, drag and direct a mount` (leg tests on seats and get-off legs, limits and loops on the player's graph).
+6. `feat(sync): attached tokens in projection, prediction, undo, redo and import` (hidden passengers and hidden holders in `poseRestore`, `restoreMoveCheck` and `restorePoseCheck`, the projected pose, the differential test's generators).
+7. `feat(ui): attach list, group drag, group line and tethers` (bar, canvas, draw order).
+8. `feat(ui): mount tags in the panel and the tracker, and the falling off reminder`.
+9. `test(e2e): attached tokens on a phone and a desktop`.
+10. `docs: attached tokens in the feature list, the DM guide and the design` (FEATURES.md, docs/dm-guide.md, and docs/design.md: section 6's model, 7.3's projection of `attached`, 7.7's undo of group moves, hidden passengers and hidden holders, 8.1's ops, 9.2's `carried` and `cost` stop fields and the mount's path, 9.4's controlled mount, `skipRound` and `markRound`, and 16.2's Versioning paragraph for the new versions).
+
+The contract's shared parts (`describeMove`, `planMove`, the size helpers) land with movement, which builds first, and this note's groups land before traps build on them.
+
+## 15. Questions for the project owner, and the answers
+
+Round 0, before review: the project owner answered all six as recommended.
+
+1. **A controlled mount's own turn.** Answered: it keeps its row, right after its rider with the same initiative. The coordinator's calls inside that answer: the row only moves the mount's durations and reminders along, its movement, actions and Reaction come from the rider's turn, and getting off gives it no fresh budget the same round (7.1).
+2. **Players dragging what they do not own.** Answered: a player may drag a creature within 5 ft that the DM marked Grappled, without asking again.
+3. **Mounting costs.** Answered: getting on or off by a ride on the rider's own turn costs half its Speed automatically, and "Doesn't count" can still take it back.
+4. **Let go and Grappled.** Answered: Let go only detaches, and the DM removes Grappled.
+5. **Reach to a rider.** Answered: a rider stands in its own cells.
+6. **The falling off reminder.** Answered: the DM gets the toast when Prone or Unconscious lands on a rider or its mount.
+
+Round 1, asked of the other notes and touching this one:
+
+- **DM routes:** "Party's knowledge". A drag of a group with a player-owned token or a party member in it routes only over ground the party has seen, else it moves as a straight leg (section 9).
+- **Trap undo:** "No". A player's undo of a group move that a trap stopped, or that showed players a line, is refused, and a silent trap leaves the undo as it is (8.3).
+
+Round 2: **Plant Growth over difficult terrain** takes the larger cost only, the owner's chosen reading (docs/design-v1-movement.md). It touches this note only through `extra`, where dragging still adds its foot.
+
+The coordinator's other calls this note follows: getting off a mount tests traps (4.3), each feature takes its own op and snapshot versions at build time, built in the order movement, attach, traps (8.6), and product questions now go to the coordinator.
+
+7. **Another player's hidden creature on a moved holder.** The DM hides Ana's invisible character, who rides Bree's horse, from Bree. Bree moves the horse. Decided by the coordinator under the project owner's standing instruction, as recommended: Ana's character rides along. Bree's view (the horse) does not depend on it, and Ana's (the horse, her character and the link) depends only on the op and what Ana sees. Contract section 5 is stated per viewer to match.
+8. **The carried-object reveal.** Decided by the coordinator under the project owner's standing instruction, after review round 3: a token players can see that rides a holder they cannot see still follows its holder, on the DM's moves and on a player's move of a holder whose hidden rider holds it, and nothing else of the holder is revealed. It is the second listed reveal of contract section 5. Rejected: keeping the torch still, which breaks the link for no reason players could see, and refusing the move.

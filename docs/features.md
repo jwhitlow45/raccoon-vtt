@@ -221,9 +221,10 @@ Tiers:
 - Name tag showing who is dragging a token.
   - Someone else's drag shows their name over the token in their color, like their pings and rulers.
 
-**Later**
+**v1**
 
-- Attached tokens (rider on a mount, torch on a character).
+- Attached tokens: a rider on a mount, a torch on a character, a familiar on a shoulder, a grappled creature dragged along (moved up from Later on 2026-10-18 at the project owner's request).
+  - Designed in docs/design-v1-attach.md, not built yet.
 
 ## 6. Token images
 
