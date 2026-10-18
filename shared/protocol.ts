@@ -1977,6 +1977,12 @@ export const assetCreditSchema = z.strictObject({
   ...imageCreditFields,
   originalWidth: z.number().int().min(1).max(100_000),
   originalHeight: z.number().int().min(1).max(100_000),
+  /**
+   * A starter pick's own account of what was changed before it shipped
+   * (docs/design-v1-starter-art.md 9), shown in place of the app's guess.
+   * An Openverse import has none.
+   */
+  changes: line(300).optional(),
 });
 export type AssetCredit = z.infer<typeof assetCreditSchema>;
 

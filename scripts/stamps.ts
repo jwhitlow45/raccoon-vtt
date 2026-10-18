@@ -40,6 +40,7 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import sharp from "sharp";
 import yauzl from "yauzl";
 import type { StampSourceId } from "../shared/credits.ts";
+import { STARTER_STAMPS } from "../shared/starterStamps.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const OUT_DIR = join(ROOT, "public", "stamps");
@@ -47,10 +48,10 @@ const CATALOG = join(ROOT, "shared", "stamps.ts");
 const THREE_DIR = join(ROOT, "node_modules", "three");
 
 /** The client draws `/stamps/<key>.webp`, so a key is a slug, never a path (design 3.5). */
-const KEY = /^[a-z0-9-]{1,40}$/;
+export const KEY = /^[a-z0-9-]{1,40}$/;
 
 /** The design's cap on a stamp image's long side. */
-const MAX_PX = 512;
+export const MAX_PX = 512;
 
 // ---------------------------------------------------------------------------
 // Sprites
@@ -419,9 +420,9 @@ window.ready = true;
 // ---------------------------------------------------------------------------
 // Fetching and reading
 
-const sha256Of = (data: Buffer) => createHash("sha256").update(data).digest("hex");
+export const sha256Of = (data: Buffer) => createHash("sha256").update(data).digest("hex");
 
-function checkPin(label: string, data: Buffer, sha256: string): Buffer {
+export function checkPin(label: string, data: Buffer, sha256: string): Buffer {
   const actual = sha256Of(data);
   if (actual !== sha256) {
     throw new Error(`${label} changed upstream (sha256 ${actual}). Re-check its license before re-pinning.`);
@@ -434,7 +435,7 @@ function checkPin(label: string, data: Buffer, sha256: string): Buffer {
  * are named by their pinned hash alone, so nothing a server sends ever picks
  * a path, and a cached file is checked again before it is used.
  */
-async function fetchPinned(cache: string, url: string, sha256: string): Promise<{ path: string; data: Buffer }> {
+export async function fetchPinned(cache: string, url: string, sha256: string): Promise<{ path: string; data: Buffer }> {
   const path = join(cache, sha256);
   const cached = await readFile(path).catch(() => null);
   if (cached && sha256Of(cached) === sha256) return { path, data: cached };
@@ -502,9 +503,9 @@ async function read7zEntry(bin: string, archive: string, name: string): Promise<
 // ---------------------------------------------------------------------------
 // Images
 
-type Raw = { data: Buffer; width: number; height: number };
+export type Raw = { data: Buffer; width: number; height: number };
 
-const toRaw = async (image: Buffer): Promise<Raw> => {
+export const toRaw = async (image: Buffer): Promise<Raw> => {
   const { data, info } = await sharp(image).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   if (info.channels !== 4) throw new Error(`expected RGBA, got ${info.channels} channels`);
   return { data, width: info.width, height: info.height };
@@ -539,7 +540,7 @@ function opaqueBounds({ data, width, height }: Raw): { x0: number; y0: number; x
  * is larger than the canvas the new pixels are transparent. Returns how many
  * pixels that added, so the log says when a crop was not purely a crop.
  */
-function frame(image: Raw, w: number, h: number): { raw: Raw; added: number } {
+export function frame(image: Raw, w: number, h: number): { raw: Raw; added: number } {
   const b = opaqueBounds(image);
   const artW = b.x1 - b.x0 + 1;
   const artH = b.y1 - b.y0 + 1;
@@ -624,7 +625,7 @@ async function bakeShadow(render: Raw, objectPx: number, boxW: number, boxH: num
  * Lossy WebP with full alpha: the art is painted or photographic, and the
  * soft shadows need every alpha level.
  */
-async function encode(raw: Raw, width: number, height: number): Promise<Buffer> {
+export async function encode(raw: Raw, width: number, height: number): Promise<Buffer> {
   let image = sharp(raw.data, { raw: { width: raw.width, height: raw.height, channels: 4 } });
   if (width !== raw.width || height !== raw.height) {
     image = sharp(await image.resize(width, height, { fit: "fill", kernel: "lanczos3" }).png().toBuffer());
@@ -643,7 +644,7 @@ async function writeStamp(key: string, webp: Buffer): Promise<void> {
 }
 
 /** Sprites keep their own resolution, which is under the cap for every pack here. */
-function spriteSize(raw: Raw): { width: number; height: number } {
+export function spriteSize(raw: Raw): { width: number; height: number } {
   const scale = Math.min(1, MAX_PX / Math.max(raw.width, raw.height));
   return { width: Math.round(raw.width * scale), height: Math.round(raw.height * scale) };
 }
@@ -677,7 +678,7 @@ async function buildPack(pack: Pack, cache: string, sevenZipBin: () => Promise<s
  * answered by the script, with only the renderer, three.js and the pinned
  * files of the model in hand, and anything else is refused.
  */
-const ORIGIN = "http://stamps.invalid";
+export const ORIGIN = "http://stamps.invalid";
 
 const CONTENT_TYPES: Record<string, string> = {
   ".gltf": "model/gltf+json",
@@ -692,9 +693,9 @@ function threeFile(path: string): string | null {
   return file.startsWith(THREE_DIR + sep) ? file : null;
 }
 
-type Renderer = { page: Page; serve: (files: Map<string, Buffer>) => void };
+export type Renderer = { page: Page; serve: (files: Map<string, Buffer>) => void };
 
-async function openRenderer(browser: Browser): Promise<Renderer> {
+export async function openRenderer(browser: Browser): Promise<Renderer> {
   const page = await browser.newPage();
   let served = new Map<string, Buffer>();
   // Errors only: SwiftShader warns about every pixel read, which is expected here.
@@ -720,9 +721,10 @@ async function openRenderer(browser: Browser): Promise<Renderer> {
 }
 
 /** The glTF may name only pinned files, so the render reads nothing unchecked. */
-function checkGltfNames(model: Model, gltf: Buffer): void {
+export function checkGltfNames(model: { id: string; gltf: string; files: Record<string, unknown> }, gltf: Buffer): void {
   const json = JSON.parse(gltf.toString("utf8")) as { buffers?: { uri?: string }[]; images?: { uri?: string }[] };
-  const named = [...(json.buffers ?? []), ...(json.images ?? [])].map((entry) => entry.uri ?? "");
+  // A set: one texture can serve two of a model's images, as the flame of Poly Haven's candleholders does.
+  const named = [...new Set([...(json.buffers ?? []), ...(json.images ?? [])].map((entry) => entry.uri ?? ""))];
   const pinned = Object.keys(model.files).filter((path) => path !== model.gltf);
   if (named.sort().join("\n") !== pinned.sort().join("\n")) {
     throw new Error(`${model.id}: the glTF names ${named.join(", ")}, not the pinned files`);
@@ -734,6 +736,34 @@ type RenderResult = { png: string; metres: [number, number, number]; pxPerMetre:
 /** What RENDER_HTML puts on the page's global object. */
 type RenderPage = { ready?: boolean; renderTopDown: (args: RenderArgs) => Promise<RenderResult> };
 
+/** A model's render as a stamp: the WebP, its footprint in cells, its size in pixels, and the model's size in metres. */
+export type RenderedStamp = { webp: Buffer; w: number; h: number; outW: number; outH: number; metres: { width: number; depth: number } };
+
+/**
+ * Renders one model, or one set of its nodes, straight down and bakes its
+ * shadow, from files the renderer already serves under `/model/<id>/`. The
+ * starter packs' Poly Haven props (scripts/starter-art.ts) take this same
+ * path, so every Poly Haven stamp has one look.
+ */
+export async function renderModelStamp(renderer: Renderer, model: { id: string; gltf: string }, nodes: string[] | null): Promise<RenderedStamp> {
+  const result = await renderer.page.evaluate(
+    (args: RenderArgs) => (globalThis as unknown as RenderPage).renderTopDown(args),
+    { url: `${ORIGIN}/model/${model.id}/${model.gltf}`, nodes, size: RENDER_CANVAS_PX, margin: RENDER_MARGIN },
+  );
+  if (!/swiftshader/i.test(result.gpu)) throw new Error(`rendered on ${result.gpu}, not SwiftShader`);
+  const [width, depth] = result.metres;
+  const w = footprintCells(width);
+  const h = footprintCells(depth);
+  const render = await toRaw(Buffer.from(result.png.replace(/^data:image\/png;base64,/, ""), "base64"));
+  const cellPx = METRES_PER_CELL * result.pxPerMetre;
+  const raw = await bakeShadow(render, Math.max(width, depth) * result.pxPerMetre, Math.round(w * cellPx), Math.round(h * cellPx));
+  const density = Math.min(RENDER_PX_PER_CELL, MAX_PX / Math.max(w, h));
+  const outW = Math.round(w * density);
+  const outH = Math.round(h * density);
+  const webp = await encode(raw, outW, outH);
+  return { webp, w, h, outW, outH, metres: { width, depth } };
+}
+
 async function buildModel(model: Model, cache: string, renderer: Renderer): Promise<Built[]> {
   const files = new Map<string, Buffer>();
   for (const [path, sha256] of Object.entries(model.files)) {
@@ -743,26 +773,12 @@ async function buildModel(model: Model, cache: string, renderer: Renderer): Prom
   renderer.serve(files);
   const built: Built[] = [];
   for (const stamp of model.stamps) {
-    const result = await renderer.page.evaluate(
-      (args: RenderArgs) => (globalThis as unknown as RenderPage).renderTopDown(args),
-      { url: `${ORIGIN}/model/${model.id}/${model.gltf}`, nodes: stamp.nodes ?? null, size: RENDER_CANVAS_PX, margin: RENDER_MARGIN },
-    );
-    if (!/swiftshader/i.test(result.gpu)) throw new Error(`rendered on ${result.gpu}, not SwiftShader`);
-    const [width, depth] = result.metres;
-    const w = footprintCells(width);
-    const h = footprintCells(depth);
-    const render = await toRaw(Buffer.from(result.png.replace(/^data:image\/png;base64,/, ""), "base64"));
-    const cellPx = METRES_PER_CELL * result.pxPerMetre;
-    const raw = await bakeShadow(render, Math.max(width, depth) * result.pxPerMetre, Math.round(w * cellPx), Math.round(h * cellPx));
-    const density = Math.min(RENDER_PX_PER_CELL, MAX_PX / Math.max(w, h));
-    const outW = Math.round(w * density);
-    const outH = Math.round(h * density);
-    const webp = await encode(raw, outW, outH);
+    const { webp, w, h, outW, outH, metres } = await renderModelStamp(renderer, model, stamp.nodes ?? null);
     await writeStamp(stamp.key, webp);
     built.push({ key: stamp.key, name: stamp.name, w, h, source: model.id, bytes: webp.length });
     console.log(
       `${stamp.key}.webp  ${webp.length} bytes  ${outW}x${outH}  ${w}x${h} cells  from ${model.id}` +
-        `${stamp.nodes ? ` ${stamp.nodes.join(", ")}` : ""}  ${width.toFixed(2)} x ${depth.toFixed(2)} m`,
+        `${stamp.nodes ? ` ${stamp.nodes.join(", ")}` : ""}  ${metres.width.toFixed(2)} x ${metres.depth.toFixed(2)} m`,
     );
   }
   return built;
@@ -791,17 +807,29 @@ ${rows.join("\n")}
 `;
 }
 
+/** Removes stamps no longer in the set. The starter packs' stamps share the folder and belong to scripts/starter-art.ts. */
 async function removeStale(keep: Set<string>): Promise<void> {
+  const starter = new Set(STARTER_STAMPS.map((stamp) => stamp.key));
   for (const file of await readdir(OUT_DIR)) {
-    if (!file.endsWith(".webp") || keep.has(file.slice(0, -".webp".length))) continue;
+    const key = file.slice(0, -".webp".length);
+    if (!file.endsWith(".webp") || keep.has(key) || starter.has(key)) continue;
     await unlink(join(OUT_DIR, file));
     console.log(`removed ${file}, no longer in the set`);
   }
 }
 
-async function checkThree(): Promise<void> {
+export async function checkThree(): Promise<void> {
   const pkg = JSON.parse(await readFile(join(THREE_DIR, "package.json"), "utf8")) as { version?: string };
   if (pkg.version !== "0.160.0") throw new Error(`expected three 0.160.0, found ${pkg.version}`);
+}
+
+/** Chrome's software renderer, so the renders never depend on this machine's GPU. */
+export function launchRenderer(): Promise<Browser> {
+  return chromium.launch({
+    channel: "chrome",
+    headless: true,
+    args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
+  });
 }
 
 if (import.meta.main) {
@@ -814,12 +842,7 @@ if (import.meta.main) {
   // Only the 7z pack needs 7za, so it is made ready on first use.
   const tools: { sevenZip?: Promise<Awaited<ReturnType<typeof sevenZip>>> } = {};
   const sevenZipBin = async () => (await (tools.sevenZip ??= sevenZip())).bin;
-  // Chrome's software renderer, so the renders never depend on this machine's GPU.
-  const browser = await chromium.launch({
-    channel: "chrome",
-    headless: true,
-    args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchRenderer();
   try {
     const renderer = await openRenderer(browser);
     const built: Built[] = [];

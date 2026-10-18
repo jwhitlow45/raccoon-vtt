@@ -3,7 +3,7 @@
  *
  * CREDITS.md carries the same list for people reading the repository, and
  * credits.test.ts fails when a file in public/textures, public/icons,
- * public/stamps or public/fonts is missing from either one. The condition and status icon
+ * public/stamps, public/starter or public/fonts is missing from either one. The condition and status icon
  * maps below also drive `node scripts/icons.ts effects`, so the icon a key
  * uses and the credit shown for it cannot drift apart. Likewise each shipped
  * stamp names its source in shared/stamps.ts, which scripts/stamps.ts writes,
@@ -18,6 +18,8 @@
 import type { ConditionKey, StatusKey } from "./model.ts";
 import { GAME_ICON_AUTHORS, GAME_ICONS_DIR, GAME_ICONS_TOTAL, type GameIconAuthor } from "./gameIcons.ts";
 import type { LicenseId } from "./licenses.ts";
+import type { StarterWork } from "./starter.ts";
+import { STARTER_PACKS } from "./starterArt.ts";
 import { STAMP_ART } from "./stamps.ts";
 
 export { LICENSES, type LicenseId } from "./licenses.ts";
@@ -39,7 +41,7 @@ export type Credit = {
 };
 
 export type CreditGroup = {
-  id: "icons" | "interface-icons" | "font" | "textures" | "stamps" | "app-icon" | "srd" | "safety" | "passwords";
+  id: "icons" | "interface-icons" | "font" | "textures" | "stamps" | "starter-packs" | "app-icon" | "srd" | "safety" | "passwords";
   heading: string;
   credits: Credit[];
 };
@@ -244,6 +246,50 @@ function stampCredits(): Credit[] {
   }));
 }
 
+/**
+ * The starter packs (docs/design-v1-starter-art.md 9), credited from their
+ * catalog, which scripts/starter-art.ts writes with CREDITS.md's section.
+ * One credit per page a license is stated on: a pack published on one page
+ * is one credit, and a pack whose works each have a page of their own (a
+ * Dyson Logos map's post, a museum's object, a Poly Haven model) is one per
+ * work, so every credit links the page its license is on.
+ */
+function starterCredits(): Credit[] {
+  const credits: Credit[] = [];
+  for (const pack of STARTER_PACKS) {
+    const pages = new Map<string, StarterWork[]>();
+    for (const work of pack.works) {
+      const page = `${work.credit.source} ${work.credit.license}`;
+      const works = pages.get(page);
+      if (works) works.push(work);
+      else pages.set(page, [work]);
+    }
+    for (const works of pages.values()) {
+      const first = works[0];
+      if (!first) continue;
+      const one = works.length === 1;
+      const authors = new Set(works.map((w) => w.credit.author));
+      credits.push({
+        files: works.flatMap((w) => [w.file, ...(w.thumb && w.thumb !== w.file ? [w.thumb] : [])]).map((file) => `public${file}`),
+        title: one ? first.credit.title : (collectionTitle(works) ?? pack.title),
+        author: authors.size === 1 ? first.credit.author : pack.author,
+        ...(pack.authorUrl ? { authorUrl: pack.authorUrl } : {}),
+        source: first.credit.source,
+        license: first.credit.license,
+        changes: one ? first.credit.changes : pack.changes,
+      });
+    }
+  }
+  return credits;
+}
+
+/** What a page's works are part of, when each one's title names it: "hero_artificer, from Cute Heroes" is from "Cute Heroes". */
+function collectionTitle(works: readonly StarterWork[]): string | null {
+  const parts = works.map((w) => /, from (.+)$/.exec(w.credit.title)?.[1]);
+  const first = parts[0];
+  return first !== undefined && parts.every((p) => p === first) ? first : null;
+}
+
 export const CREDITS: CreditGroup[] = [
   {
     id: "icons",
@@ -358,6 +404,7 @@ export const CREDITS: CreditGroup[] = [
     ],
   },
   { id: "stamps", heading: "Map stamps", credits: stampCredits() },
+  { id: "starter-packs", heading: "Starter packs", credits: starterCredits() },
   {
     id: "app-icon",
     heading: "App icon",

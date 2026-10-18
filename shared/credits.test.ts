@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import sharp from "sharp";
 import { simplifyGameIcon } from "../scripts/icons.ts";
+import { STARTER_CAPS } from "../scripts/starter-art.ts";
 import { footprintCells } from "../scripts/stamps.ts";
 import {
   CONDITION_ICONS,
@@ -19,6 +21,9 @@ import {
 import { GAME_ICONS_DIR } from "./gameIcons.ts";
 import { ICON_KEY_RE } from "./imageRef.ts";
 import { CONDITION_KEYS, STATUS_KEYS, type TerrainId } from "./model.ts";
+import { STARTER_KEY, type StarterWork } from "./starter.ts";
+import { STARTER_PACKS } from "./starterArt.ts";
+import { STARTER_STAMPS } from "./starterStamps.ts";
 import { STAMP_ART } from "./stamps.ts";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -38,7 +43,7 @@ function filesUnder(dir: string): string[] {
 
 const allCredits: Credit[] = CREDITS.flatMap((group) => group.credits);
 const creditFor = (file: string) => allCredits.find((credit) => credit.files.includes(file));
-const shippedArt = [...filesUnder("public/textures"), ...filesUnder("public/icons"), ...filesUnder("public/stamps")];
+const shippedArt = [...filesUnder("public/textures"), ...filesUnder("public/icons"), ...filesUnder("public/stamps"), ...filesUnder("public/starter")];
 const shippedFonts = filesUnder("public/fonts");
 
 /**
@@ -263,9 +268,9 @@ describe("builder textures", () => {
 describe("map stamps", () => {
   const stampFile = (key: string) => `public/stamps/${key}.webp`;
 
-  test("the catalog lists exactly the files in public/stamps", () => {
+  test("the catalog lists exactly the files in public/stamps, the starter packs' stamps among them", () => {
     assert.ok(STAMP_ART.length > 0);
-    assert.deepEqual(new Set(filesUnder("public/stamps")), new Set(STAMP_ART.map((s) => stampFile(s.key))));
+    assert.deepEqual(new Set(filesUnder("public/stamps")), new Set([...STAMP_ART, ...STARTER_STAMPS].map((s) => stampFile(s.key))));
   });
 
   test("keys are unique slugs, names are unique", () => {
@@ -278,12 +283,15 @@ describe("map stamps", () => {
    * The client draws a stamp's image into its footprint, so an image of
    * another shape would be stretched. Rounding to whole pixels allows one.
    */
+  const opaqueStamps = new Set(["gb-square-pit"]);
+
   test("each stamp is a WebP of its footprint's shape, at most 512 px, footprints in quarter cells", async () => {
-    for (const stamp of STAMP_ART) {
+    for (const stamp of [...STAMP_ART, ...STARTER_STAMPS]) {
       const file = stampFile(stamp.key);
       const meta = await sharp(read(file)).metadata();
       assert.equal(meta.format, "webp", file);
-      assert.ok(meta.hasAlpha, file);
+      // A starter prop drawn to the edges of its squares, such as a square pit, has no transparent pixel to keep.
+      if (!opaqueStamps.has(stamp.key)) assert.ok(meta.hasAlpha, file);
       assert.ok(Math.max(meta.width, meta.height) <= 512, `${file} is over 512 px`);
       assert.ok(Math.abs((meta.width * stamp.h) / stamp.w - meta.height) <= 1, `${file} is not ${stamp.w} by ${stamp.h}`);
       for (const side of [stamp.w, stamp.h]) {
@@ -357,5 +365,144 @@ describe("PWA", () => {
     const apple = /<link rel="apple-touch-icon" href="([^"]+)" \/>/.exec(html)?.[1];
     assert.ok(apple);
     assert.deepEqual(pngSize(read(`public${apple}`)), { width: 180, height: 180 });
+  });
+});
+
+describe("starter packs", () => {
+  const works = STARTER_PACKS.flatMap((pack) => pack.works.map((work) => ({ pack, work })));
+  const isStamp = (work: StarterWork) => work.stamp !== undefined;
+  const publicPath = (served: string) => `public${served}`;
+  const filesOf = (work: StarterWork) => [work.file, ...(work.thumb && work.thumb !== work.file ? [work.thumb] : [])].map(publicPath);
+  type Input = { packs: { id: string; works: { id: string }[] }[] };
+  const input = JSON.parse(read("scripts/starter-art.json").toString("utf8")) as Input;
+
+  test("the catalog is the build of scripts/starter-art.json: the same packs and works, in order", () => {
+    assert.deepEqual(
+      STARTER_PACKS.map((p) => [p.id, p.works.map((w) => w.id)]),
+      input.packs.map((p) => [p.id, p.works.map((w) => w.id)]),
+    );
+  });
+
+  test("the catalog equals the files on disk, and every file belongs to a work", () => {
+    assert.ok(works.length > 0);
+    const listed = works.filter(({ work }) => !isStamp(work)).flatMap(({ work }) => filesOf(work));
+    assert.equal(new Set(listed).size, listed.length, "two works name one file");
+    assert.deepEqual(new Set(filesUnder("public/starter")), new Set(listed));
+    for (const { pack, work } of works) {
+      if (isStamp(work)) assert.equal(work.file, `/stamps/${work.stamp?.key}.webp`, work.key);
+      else assert.ok(work.file.startsWith(`/starter/${pack.id}/`) && work.thumb?.startsWith(`/starter/${pack.id}/`), work.key);
+    }
+    assert.deepEqual(
+      STARTER_STAMPS.map((s) => [s.key, s.pack, s.w, s.h]),
+      works.filter(({ work }) => isStamp(work)).map(({ pack, work }) => [work.stamp?.key, pack.id, work.stamp?.w, work.stamp?.h]),
+    );
+  });
+
+  test("each file is the one the catalog pinned: its hash, size and dimensions", async () => {
+    for (const { work } of works) {
+      const data = read(publicPath(work.file));
+      assert.equal(createHash("sha256").update(data).digest("hex"), work.sha256, work.key);
+      assert.equal(data.length, work.bytes, work.key);
+      const meta = await sharp(data).metadata();
+      assert.deepEqual([meta.width, meta.height], [work.width, work.height], work.key);
+    }
+  });
+
+  test("keys are unique and well formed, and stamp keys never take a shipped stamp's", () => {
+    const keys = works.map(({ work }) => work.key);
+    assert.equal(new Set(keys).size, keys.length);
+    for (const { pack, work } of works) {
+      assert.match(work.key, STARTER_KEY);
+      assert.ok(work.key.startsWith(`${pack.id}/`), work.key);
+    }
+    const shipped = new Set(STAMP_ART.map((s) => s.key));
+    for (const stamp of STARTER_STAMPS) assert.ok(!shipped.has(stamp.key), stamp.key);
+    assert.equal(new Set(STARTER_STAMPS.map((s) => s.key)).size, STARTER_STAMPS.length);
+  });
+
+  test("every pack names its page, an allowed license and a Wayback snapshot, and every work its credit", () => {
+    const allowed = new Set(["CC0-1.0", "CC-BY-3.0", "CC-BY-4.0", "CC-BY-SA-3.0", "CC-BY-SA-4.0", "public-domain-dedication"]);
+    for (const pack of STARTER_PACKS) {
+      assert.match(pack.page, /^https:\/\//, pack.id);
+      assert.match(pack.wayback, /^https:\/\/web\.archive\.org\/web\/\d{14}\/\S+$/, pack.id);
+      assert.ok(pack.licenses.length > 0 && pack.licenses.every((l) => allowed.has(l)), pack.id);
+      assert.ok(pack.title && pack.author && pack.changes, pack.id);
+      for (const work of pack.works) {
+        assert.ok(pack.licenses.includes(work.credit.license), work.key);
+        assert.ok(work.credit.title && work.credit.author && work.credit.changes, work.key);
+        assert.match(work.credit.source, /^https:\/\//, work.key);
+        assert.ok(work.name && work.category && work.uses.length > 0, work.key);
+      }
+    }
+  });
+
+  test("a work is a stamp in a stamp pack only, and a map only a map", () => {
+    for (const { work } of works) {
+      assert.equal(isStamp(work), work.uses.includes("stamp"), work.key);
+      if (isStamp(work)) assert.deepEqual(work.uses, ["stamp"], work.key);
+      if (work.uses.includes("map")) assert.deepEqual(work.uses, ["map"], work.key);
+    }
+  });
+
+  test("a map's grid is a square size, with where its lines fall inside one square", () => {
+    for (const { work } of works) {
+      if (!work.grid) continue;
+      assert.ok(work.uses.includes("map"), work.key);
+      assert.ok(work.grid.cellPx >= 8 && work.grid.cellPx < Math.min(work.width, work.height), work.key);
+      const origin = work.grid.originPx;
+      if (origin) for (const at of [origin.x, origin.y]) assert.ok(at >= 0 && at < work.grid.cellPx, work.key);
+    }
+  });
+
+  /** Section 10's caps, so growing the set, or a heavier encoding, is a decision. */
+  test("each file stays within its cap", () => {
+    const caps = STARTER_CAPS;
+    for (const { work } of works) {
+      const long = Math.max(work.width, work.height);
+      if (isStamp(work)) continue;
+      if (work.uses.includes("map")) {
+        const lineArt = work.file.endsWith(".png");
+        assert.ok(long <= (lineArt ? caps.lineMapPx : caps.colorMapPx), `${work.key} is ${long} px`);
+        assert.ok(work.bytes <= (lineArt ? caps.lineMapBytes : caps.colorMapBytes), `${work.key} is ${work.bytes} bytes`);
+      } else if (work.uses.includes("handout")) {
+        assert.ok(long <= caps.picturePx, `${work.key} is ${long} px`);
+        assert.ok(work.bytes <= caps.pictureBytes, `${work.key} is ${work.bytes} bytes`);
+      } else {
+        assert.ok(long <= caps.tokenPx, `${work.key} is ${long} px`);
+      }
+    }
+  });
+
+  test("each thumbnail is a small WebP at most 256 px", async () => {
+    for (const { work } of works) {
+      if (!work.thumb) continue;
+      const data = read(publicPath(work.thumb));
+      const meta = await sharp(data).metadata();
+      assert.equal(meta.format, "webp", work.key);
+      assert.ok(Math.max(meta.width, meta.height) <= STARTER_CAPS.thumbPx, work.key);
+      assert.ok(data.length < STARTER_CAPS.thumbBytes, `${work.thumb} is ${data.length} bytes`);
+    }
+  });
+
+  test("the packs stay within the whole-folder caps", () => {
+    const folder = filesUnder("public/starter").reduce((n, f) => n + statSync(join(ROOT, f)).size, 0);
+    assert.ok(folder <= STARTER_CAPS.folderBytes, `public/starter holds ${folder} bytes`);
+    const stamps = STARTER_STAMPS.reduce((n, s) => n + statSync(join(ROOT, `public/stamps/${s.key}.webp`)).size, 0);
+    assert.ok(stamps <= STARTER_CAPS.stampBytes, `the packs' stamps take ${stamps} bytes`);
+  });
+
+  test("every work is credited once, on the page its license is stated, in shared/credits.ts and CREDITS.md", () => {
+    const markdown = read("CREDITS.md").toString("utf8");
+    const group = CREDITS.find((g) => g.id === "starter-packs");
+    assert.ok(group);
+    for (const { work } of works) {
+      const credited: Credit[] = group.credits.filter((c) => c.files.includes(publicPath(work.file)));
+      assert.equal(credited.length, 1, work.key);
+      assert.equal(credited[0]?.source, work.credit.source, work.key);
+      assert.equal(credited[0]?.license, work.credit.license, work.key);
+      assert.ok(markdown.includes(work.credit.source), work.key);
+    }
+    for (const pack of STARTER_PACKS) assert.ok(markdown.includes(pack.wayback), pack.id);
+    assert.match(markdown, /stay under the same CC BY-SA license/);
   });
 });
