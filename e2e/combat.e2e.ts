@@ -725,7 +725,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await setUp(dm, dmCdp, { width: 390, height: 844, scale: 1 });
     const section = await openTracker(dm);
     // Auto initiative's heading at the scroller's top: the round section has scrolled past, so its header went with it.
-    await dm.getByRole("heading", { name: "Auto Initiative" }).evaluate((h) => (h as unknown as { scrollIntoView(o: object): void }).scrollIntoView({ block: "start" }));
+    await dm.getByRole("heading", { name: "Auto Initiative", exact: true }).evaluate((h) => (h as unknown as { scrollIntoView(o: object): void }).scrollIntoView({ block: "start" }));
     const gone = await measure(dm);
     const auto = await dm.getByRole("heading", { name: "Auto Initiative" }).boundingBox();
     assert.ok(auto && gone.header.bottom <= auto.y + 1, `the header still covers Auto Initiative: ${JSON.stringify({ header: gone.header, auto })}`);

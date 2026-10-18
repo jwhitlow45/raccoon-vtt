@@ -157,7 +157,7 @@ describe("raccoon-vtt shared components on the kit page", { timeout: 180_000 }, 
     await page.keyboard.press("ArrowRight");
     f = await focused();
     assert.deepEqual([f.value, f.checked], ["con", true], "ArrowRight moves to the next option and chooses it");
-    assert.equal(await page.getByRole("radio", { name: "DEX" }).isChecked(), false);
+    assert.equal(await page.getByRole("radio", { name: "DEX", exact: true }).isChecked(), false);
     await page.keyboard.press("ArrowLeft");
     f = await focused();
     assert.deepEqual([f.value, f.checked], ["dex", true]);

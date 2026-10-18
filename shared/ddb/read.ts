@@ -406,7 +406,7 @@ function read(json: unknown, newId: () => string): PcFill | null {
   }
   level = Math.max(1, level);
   // The level's proficiency is what every other number derives from, so a sheet without classes says so.
-  if (classes.length === 0) warnings.push(`No class was read, so the level reads 1 and PB +${pcProficiency(1)}.`);
+  if (classes.length === 0) warnings.push(`No class was read, so the level reads 1 and the Proficiency Bonus +${pcProficiency(1)}.`);
 
   const saves = ABILITY_KEYS.filter((a) => has(mods, "proficiency", `${ABILITY_SLUG[a]}-saving-throws`));
   const skills: PcStats["skills"] = {};

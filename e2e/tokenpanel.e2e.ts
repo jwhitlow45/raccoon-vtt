@@ -759,7 +759,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     for (let i = 1; i < at.length; i++) assert.ok(at[i]! > at[i - 1]!, `out of order: ${headings.join(" | ")}`);
     assert.equal(headings.includes("companion"), false);
     assert.equal(await panel.getByRole("heading", { name: "Combat", level: 3 }).count(), 1, "a group is an h3");
-    for (const name of ["Hit Points", "Conditions", "Range rings", "Rest"]) assert.equal(await panel.getByRole("heading", { name, level: 4 }).count(), 1, `${name} is an h4 inside Combat`);
+    for (const name of ["Hit Points", "Conditions", "Range rings", "Rest"]) assert.equal(await panel.getByRole("heading", { name, level: 4, exact: true }).count(), 1, `${name} is an h4 inside Combat`);
     assert.equal(await panel.getByRole("region").count(), 0, "no group is a landmark");
     for (const name of ["Notes", "Position", "Image", "Stats", "Token settings", "Owners"]) assert.equal(await panel.getByRole("button", { name, exact: true }).getAttribute("aria-expanded"), "false", `${name} starts open`);
     assert.equal(await panel.getByRole("button", { name: "Combat", exact: true }).getAttribute("aria-expanded"), "true", "Combat starts folded");

@@ -285,7 +285,7 @@ function Choices() {
       <Segmented
         label="Ability"
         value={ability}
-        options={["str", "dex", "con", "int", "wis", "cha"].map((v) => ({ value: v, label: v[0]!.toUpperCase() + v.slice(1) }))}
+        options={["str", "dex", "con", "int", "wis", "cha"].map((v) => ({ value: v, label: v.toUpperCase() }))}
         onChange={setAbility}
       />
       <Segmented

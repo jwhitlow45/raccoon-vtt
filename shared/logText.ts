@@ -34,7 +34,7 @@ function displayName(token: Pick<Token, "name" | "number">): string {
 
 export type AreaEvent = Extract<LogEvent, { type: "area" }>;
 
-const UNNAMED_AREA = /^(\d+ ft )(cone|sphere|cylinder|cube|line|emanation)$/;
+const UNNAMED_AREA = /^(\d+(?:\.\d+)? ft )(cone|sphere|cylinder|cube|line|emanation)$/;
 
 /**
  * An area's name as its reminder stores it, with the shape of one that has

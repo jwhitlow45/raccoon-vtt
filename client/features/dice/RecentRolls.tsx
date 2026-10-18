@@ -166,7 +166,7 @@ function Row(props: { row: RecentRow; names: LogNames; me: string; dm: boolean; 
     canAgain && first ? (
       <IconButton
         icon="again"
-        label={`Roll again: ${[askedRoll(first)?.formula, first.label].filter(Boolean).join(" ")}${single ? "" : ` and ${row.rolls.length - 1} more`}`}
+        label={`Roll again: ${[askedRoll(first)?.formula, first.label === undefined ? undefined : labelText(first.label)].filter(Boolean).join(" ")}${single ? "" : ` and ${row.rolls.length - 1} more`}`}
         title="Roll again"
         onClick={() => props.again(inputs as DiceRollInput[], row.to)}
       />

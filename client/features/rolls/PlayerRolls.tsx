@@ -1094,7 +1094,7 @@ function viewportBound(): Rect {
 
 /**
  * A rolled answer in place of the creature's rows (5.4): "Rolled 17
- * (1d20+5 with advantage: 12, 7 dropped). Pass." with a dropped die struck
+ * (1d20+5 with Advantage: 12, 7 dropped). Pass." with a dropped die struck
  * through, a natural 20 or 1, then "Final."
  */
 function RolledResult(props: { target: RollTarget }) {

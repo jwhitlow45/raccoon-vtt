@@ -248,10 +248,11 @@ const PAGE_TIPS = new TipStage();
  * own first, so a caller's `onPointerDown` or `onFocus` still runs.
  *
  * The tip opens in the browser's top layer (the popover attribute), so no
- * scrolling pane, sheet or dialog clips it. One shows at a time (TipStage). Escape is heard but not used
- * up, so the room's own Escape still runs. The control keeps its own
- * `aria-label`, and `describes` is set only when the tip says more than the
- * name (`addsWords`), its id joined to any description the control has.
+ * scrolling pane, sheet or dialog clips it. One shows at a time
+ * (TipStage). Escape is heard but not used up, so the room's own Escape
+ * still runs. The control keeps its own `aria-label`, and `describes` is
+ * set only when the tip says more than the name (`addsWords`), its id
+ * joined to any description the control has.
  * A long press that showed the name keeps the click its lift makes from
  * reaching the control (`TipTimer.takeClick`).
  */

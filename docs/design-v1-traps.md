@@ -68,7 +68,7 @@ Players:
 
 ### 4.4 The group save from a trap
 
-- A new `Source`, `{ kind: 'trap', trapId, due }` (`chain.ts:34`), whose rows are the occurrence's hits, frozen when it went off (5.6). The fill line reads "From Collapsing Roof: Dexterity save, DC 13, 2d10 bludgeoning, half on a pass." "Against a spell" starts off. **Two names.** `Fill` gains `publicName`, which every player-facing string the page sends uses: each request's note and the label of a roll made in the open. It is the trap's name once found, else "Trap". The page, the card and the DM's own secret lines keep the real name.
+- A new `Source`, `{ kind: 'trap', trapId, due }` (`chain.ts:34`), whose rows are the occurrence's hits, frozen when it went off (5.6). The fill line reads "From Collapsing Roof: Dexterity save, DC 13, 2d10 Bludgeoning, half on a pass." "Against a spell" starts off. **Two names.** `Fill` gains `publicName`, which every player-facing string the page sends uses: each request's note and the label of a roll made in the open. It is the trap's name once found, else "Trap". The page, the card and the DM's own secret lines keep the real name.
 - With no save the page opens on "No save: everyone takes it", so a pit applies in one tap. The preset's note says what the page cannot know ("succeeds automatically if it's Huge or larger: mark those Pass"). Apply sends `actor.outcome` with `trap: { trapId, due }`, which settles the occurrence in the same op. A second DM device's Apply or Dismiss is refused, "It was settled meanwhile.", and a lost answer is settled by the receipt (roll options 5.5), so a trap applies at most once. The page follows the trap's scene, as it follows an area's (roll options 5.10).
 
 ### 4.5 Found traps, for players

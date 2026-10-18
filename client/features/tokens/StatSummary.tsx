@@ -162,8 +162,9 @@ export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: Reac
  * The six saves, "Saves" then "STR +5" and the rest, each a unit that
  * never breaks. The abbreviation takes the ability grid's small capitals
  * (AbilityGrid.tsx): at the body's size, capitals widen the line past one
- * row on a phone held upright, where "Str" fit. While the SRD chunk loads the line keeps its place and,
- * after the usual 200 ms, says so, and a failed load offers the reload.
+ * row on a phone held upright, where "Str" fit. While the SRD chunk loads
+ * the line keeps its place and, after the usual 200 ms, says so, and a
+ * failed load offers the reload.
  */
 export function SavesLine(props: { block: LinkedBlock }) {
   const { block } = props;

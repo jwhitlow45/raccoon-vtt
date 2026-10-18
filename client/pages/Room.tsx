@@ -2134,45 +2134,45 @@ function ToolButton(props: {
   const tooltip = useTooltip(name, { describes: addsWords(name, props.label) });
   return (
     <>
-    <button
-      ref={ref}
-      type="button"
-      data-active={props.active}
-      aria-pressed={expanded === undefined && !popup ? props.active : undefined}
-      aria-expanded={expanded}
-      aria-haspopup={popup?.anchorProps["aria-haspopup"]}
-      {...(popup ? { "aria-expanded": popup.anchorProps["aria-expanded"] } : null)}
-      aria-controls={popup?.open ? popup.anchorProps["aria-controls"] : props.controls}
-      aria-label={props.iconOnly ? props.label : undefined}
-      title={props.alone ? undefined : name}
-      {...(props.alone ? tooltip.anchor({ "aria-describedby": props.describedBy }) : { "aria-describedby": props.describedBy })}
-      onClick={popup ? popup.anchorProps.onClick : props.onClick}
-      onKeyDown={popup?.anchorProps.onKeyDown}
-      style={{
-        position: "relative",
-        display: "grid",
-        placeItems: "center",
-        boxSizing: "border-box",
-        minHeight: theme.touch,
-        borderRadius: theme.radius.md,
-        border: `${theme.line.border}px solid ${props.active || popup?.open ? theme.color.accent : props.floating ? theme.color.border : "transparent"}`,
-        background: props.active || popup?.open ? theme.color.accentTint : props.floating ? theme.color.overlay : "transparent",
-        color: props.active || popup?.open ? theme.color.accent : theme.color.text,
-        fontSize: theme.font.small,
-        fontWeight: theme.weight.strong,
-        cursor: "pointer",
-        pointerEvents: "auto",
-        ...sizeStyle(props.size),
-      }}
-    >
-      {props.children}
-      {props.mark ? (
-        <span aria-hidden style={{ position: "absolute", top: theme.space(0.5), right: theme.space(0.5), display: "grid" }}>
-          <Icon name={props.mark === "tucked" ? "chevronUp" : "caret"} size={theme.icon.sm - 4} />
-        </span>
-      ) : null}
-    </button>
-    {props.alone ? tooltip.tip : null}
+      <button
+        ref={ref}
+        type="button"
+        data-active={props.active}
+        aria-pressed={expanded === undefined && !popup ? props.active : undefined}
+        aria-expanded={expanded}
+        aria-haspopup={popup?.anchorProps["aria-haspopup"]}
+        {...(popup ? { "aria-expanded": popup.anchorProps["aria-expanded"] } : null)}
+        aria-controls={popup?.open ? popup.anchorProps["aria-controls"] : props.controls}
+        aria-label={props.iconOnly ? props.label : undefined}
+        title={props.alone ? undefined : name}
+        {...(props.alone ? tooltip.anchor({ "aria-describedby": props.describedBy }) : { "aria-describedby": props.describedBy })}
+        onClick={popup ? popup.anchorProps.onClick : props.onClick}
+        onKeyDown={popup?.anchorProps.onKeyDown}
+        style={{
+          position: "relative",
+          display: "grid",
+          placeItems: "center",
+          boxSizing: "border-box",
+          minHeight: theme.touch,
+          borderRadius: theme.radius.md,
+          border: `${theme.line.border}px solid ${props.active || popup?.open ? theme.color.accent : props.floating ? theme.color.border : "transparent"}`,
+          background: props.active || popup?.open ? theme.color.accentTint : props.floating ? theme.color.overlay : "transparent",
+          color: props.active || popup?.open ? theme.color.accent : theme.color.text,
+          fontSize: theme.font.small,
+          fontWeight: theme.weight.strong,
+          cursor: "pointer",
+          pointerEvents: "auto",
+          ...sizeStyle(props.size),
+        }}
+      >
+        {props.children}
+        {props.mark ? (
+          <span aria-hidden style={{ position: "absolute", top: theme.space(0.5), right: theme.space(0.5), display: "grid" }}>
+            <Icon name={props.mark === "tucked" ? "chevronUp" : "caret"} size={theme.icon.sm - 4} />
+          </span>
+        ) : null}
+      </button>
+      {props.alone ? tooltip.tip : null}
     </>
   );
 }

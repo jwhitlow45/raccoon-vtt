@@ -588,7 +588,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     // Dexterity 16 is +3, and a proficient save at level 1 adds 2.
     const roll = c.getByRole("button", { name: "Roll +5 for Thorn" });
     await roll.waitFor();
-    await c.getByText("Rolls 1d20+5 with Disadvantage (Restrained).").waitFor();
+    await c.getByText("Rolls 1d20+5 with Disadvantage (Restrained).", { exact: true }).waitFor();
     await c.getByRole("button", { name: "Advantage", exact: true }).tap();
     await c.getByText("Rolls 1d20+5: Advantage and Restrained cancel.").waitFor();
     await shots.take(player, "rolls-card-restrained-adv");

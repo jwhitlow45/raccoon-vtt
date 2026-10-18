@@ -45,7 +45,7 @@ export function parseParts(text: string, fillType?: DamageType): { ok: true; par
     const m = /^(.*?)\s*([a-z]{3,})?$/i.exec(group.trim());
     const body = (m?.[1] ?? "").replace(/\s+/g, "");
     const word = m?.[2]?.toLowerCase();
-    if (word !== undefined && !TYPE_WORDS.has(word)) return { ok: false, error: `"${word}" is not a damage type. Try 8d6 fire or 28 fire.` };
+    if (word !== undefined && !TYPE_WORDS.has(word)) return { ok: false, error: `"${word}" is not a damage type. Try 8d6 Fire or 28 Fire.` };
     const type = (word as DamageType | undefined) ?? fillType;
     if (/^\d+$/.test(body)) {
       const amount = Number(body);

@@ -2484,7 +2484,7 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
 
     test("6. M8: Long rest for the party sits below the DM's list of characters", async () => {
       const panel = await sideTab(dm, "Characters");
-      const rest = panel.getByRole("button", { name: "Long Rest for the party" });
+      const rest = panel.getByRole("button", { name: "Long Rest for the party", exact: true });
       await rest.waitFor();
       const restTop = (await box(rest)).y;
       for (const name of ["Bree", "Thorn"]) {
