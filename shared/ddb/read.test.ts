@@ -139,6 +139,9 @@ describe("readDdbCharacter: the character", () => {
     assert.equal(readDdbCharacter(wren({ overrideHitPoints: 99 }), ids)!.actor.hpMax, 99);
     assert.deepEqual(fill.actor.speeds, { walk: 30, swim: 10 });
     assert.equal(fill.actor.senses, "Darkvision 60 ft.");
+    // Darkvision is the one sense it reads, so a character without it leaves the senses the card has, such as a typed Blindsight (LP7-PC-9).
+    const human = wren({ modifiers: { race: [mod("bonus", "dexterity-score", 2)] } });
+    assert.equal(readDdbCharacter(human, ids)!.actor.senses, undefined);
     assert.equal(fill.actor.sheetUrl, "https://www.dndbeyond.com/characters/12345678");
     const heavy = wren({ inventory: [{ equipped: true, definition: { id: 1, armorClass: 18, armorTypeId: 3 } }, { equipped: true, definition: { id: 2, armorClass: 2, armorTypeId: 4 } }], modifiers: {} });
     assert.equal(readDdbCharacter(heavy, ids)!.actor.ac, 20);

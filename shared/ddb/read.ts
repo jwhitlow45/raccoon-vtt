@@ -479,7 +479,8 @@ function read(json: unknown, newId: () => string): PcFill | null {
   const speeds = speedsOf(data);
   if (speeds) actor.speeds = speeds;
   const darkvision = Math.max(0, ...mods.filter((m) => m.type === "set-base" && m.subType === "darkvision" && m.value !== null).map((m) => m.value!));
-  actor.senses = darkvision > 0 ? `Darkvision ${Math.min(1000, Math.round(darkvision))} ft.` : "";
+  // Darkvision is the one sense read, so without it the card keeps whatever senses it has, never set to none by an import.
+  if (darkvision > 0) actor.senses = `Darkvision ${Math.min(1000, Math.round(darkvision))} ft.`;
   const id = num(data.id);
   if (id !== null && Number.isInteger(id) && id > 0 && id < 1e12) actor.sheetUrl = ddbSheetUrl(String(id));
 
