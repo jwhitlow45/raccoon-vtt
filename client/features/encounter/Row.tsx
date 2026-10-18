@@ -13,7 +13,8 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { creatureRolls, srdNeeds } from "../dice/creature.ts";
-import { signedText } from "../dice/options.ts";
+import { creatureKey, signedText } from "../dice/options.ts";
+import { useOptionStore } from "../dice/optionState.ts";
 import { presetFor } from "../dice/presets.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "../dice/useRollOption.ts";
@@ -693,13 +694,18 @@ function rollFitsBeside(linePx: number, slotted: boolean): boolean {
  * panel's choices, as the panel's own Initiative option rolls it. Busy
  * until its line lands, and disabled with the reason while a roll cannot
  * go. A creature this view does not hold, such as a token on another
- * scene, has no Roll: its bonus is not known here.
+ * scene, has no Roll: its bonus is not known here. A character rolled for
+ * through a token lent to this player, whose numbers are its own players'
+ * and the DM's, reads "Roll d20" and opens the Dice panel on it, where its
+ * player types the bonus (LP7-PC-4).
  */
 function InitiativeRoll(props: { entry: InitEntry; creature: ActorTarget; name: string; onRolled(at: RollAt): void }) {
   const { entry, creature } = props;
   const creatures = useMemo(() => [creature], [creature]);
   const { dice, failed } = useDiceView(creatures);
   const option = useRollOption();
+  const options = useOptionStore();
+  const ui = useRoomUi();
   const watch = useWatchInitiative();
   const blocked = useRollBlocked();
   const { waiting } = useRowResult(rollRow(entry.id));
@@ -710,6 +716,11 @@ function InitiativeRoll(props: { entry: InitEntry; creature: ActorTarget; name: 
   if (numbers === null && !loading && !failed) return null;
   const roll = () => {
     if (!numbers) return;
+    if (numbers.initBonus === null) {
+      options.setState((s) => ({ focus: s.focus + 1, picked: creatureKey(dice.view, creature) }));
+      ui.openPanel("dice");
+      return;
+    }
     const tag = option.d20({
       creature,
       test: INITIATIVE,
@@ -725,7 +736,7 @@ function InitiativeRoll(props: { entry: InitEntry; creature: ActorTarget; name: 
     watch(tag, entry.id);
     props.onRolled({ entryId: entry.id });
   };
-  const text = numbers ? `Roll ${signedText(numbers.initBonus)}` : "Roll";
+  const text = numbers ? (numbers.initBonus === null ? "Roll d20" : `Roll ${signedText(numbers.initBonus)}`) : "Roll";
   const reason = blocked ?? (failed ? "Its numbers did not load. Reload to try again." : null);
   return (
     <Button

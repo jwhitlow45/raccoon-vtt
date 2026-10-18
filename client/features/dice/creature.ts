@@ -18,7 +18,14 @@ import { ownsCharacter, ownsToken } from "../tokens/access.ts";
  */
 export type CreatureRolls = {
   numbers: RollNumbers | null;
-  initBonus: number;
+  /**
+   * Its initiative bonus, or null where this viewer holds none of its
+   * numbers: a character rolled for through a token lent to them, whose
+   * numbers go only to the DM and its own players (docs/design-v1-pc-stats.md
+   * 4.2). Such a creature rolls a d20 with the bonus its player types, never
+   * a "+0" this device does not know.
+   */
+  initBonus: number | null;
   named: NamedRoll[];
   defenses: Defense[];
   magicResistance: boolean;
@@ -142,9 +149,10 @@ export function creatureRolls(dice: DiceView, creature: ActorTarget): CreatureRo
   // A character's own block is read by the DM and its players. pcNamedRolls keeps only its other rolls in Wild Shape, and pcDefenses keeps Evasion there.
   const own = character && readsCharacter(dice, character) ? { named: pcNamedRolls(character), ...pcDefenses(character) } : { named: [], defenses: [], evasion: false };
   const legendary = actor.legendary;
+  const hidden = character !== undefined && !readsCharacter(dice, character);
   return {
-    numbers: creatureNumbers(sources, creature),
-    initBonus: creatureBonus(sources, creature, { kind: "initiative" }) ?? 0,
+    numbers: hidden ? null : creatureNumbers(sources, creature),
+    initBonus: hidden ? null : (creatureBonus(sources, creature, { kind: "initiative" }) ?? 0),
     named: [...(view ? blockActions(view) : []), ...own.named],
     defenses: [...own.defenses, ...(view ? blockDefenses(view) : []), ...effectDefenses(actor.effects)],
     magicResistance: view ? hasTrait(view, "Magic Resistance") : false,

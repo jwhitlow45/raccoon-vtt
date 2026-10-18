@@ -151,6 +151,15 @@ describe("a creature's rolls", () => {
     assert.deepEqual([other.named, other.evasion], [[], false]);
   });
 
+  test("a player lent only a token of a character holds none of its numbers, so its initiative bonus is not known rather than +0 (LP7-PC-4)", () => {
+    const s = state();
+    s.characters.bree!.stats = THORN;
+    s.tokens.lent = token("lent", { kind: "pc", name: "Bree", ownerIds: ["p2"], actor: { ref: "bree" } });
+    const lent = creatureRolls(dice({ memberId: "p2", role: "player" }, {}, s), { tokenId: "lent" })!;
+    assert.deepEqual([lent.numbers, lent.initBonus], [null, null]);
+    for (const you of [P1, DM]) assert.equal(creatureRolls(dice(you, {}, s), { tokenId: "lent" })!.initBonus, 3, you.role);
+  });
+
   test("a character in Wild Shape lists its creature's actions and defenses, keeps its own other rolls and Evasion, and waits for both chunks", () => {
     const s = state();
     s.characters.bree!.stats = { ...THORN, rolls: [...THORN.rolls, { id: "r2", name: "Bardic Die", kind: "other", dice: [{ formula: "1d8" }] }] };

@@ -8,6 +8,7 @@ import { pcSlots } from "#shared/rules/pcStats.ts";
 import { SKILLS } from "#shared/rules/skills.ts";
 import { ABILITY_NAMES as ABILITY_SHORT } from "#shared/statBlock.ts";
 import { Chip, ChipRow } from "../../components/Chip.tsx";
+import { Input } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { startInScrollBox } from "../../lib/reveal.ts";
@@ -17,6 +18,7 @@ import { useRoomView } from "../../state/view.ts";
 import type { PanelProps } from "../panels.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { useOpenPcStats } from "../pcstats/open.ts";
+import { parseBonus, TYPE_BONUS } from "../rolls/card.ts";
 import { editsPcStats } from "../tokens/access.ts";
 import { Note, Section, SmallButton, Stepper } from "../tokens/ui.tsx";
 import { creatureRolls, type CreatureRolls, type DiceView } from "./creature.ts";
@@ -184,7 +186,7 @@ function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creature: Ac
         />
       ) : null}
       {/* While dying, its death save is the one roll it makes, so it leads (W7B-P-19). */}
-      {actor?.life === "dying" ? <DeathSaveCell ctx={ctx} bonus={numbers?.deathSave ?? 0} /> : null}
+      {actor?.life === "dying" ? <DeathSaveCell ctx={ctx} bonus={rolls.initBonus === null ? null : (numbers?.deathSave ?? 0)} /> : null}
       {numbers ? (
         <>
           <Grid label="Saves">
@@ -209,8 +211,8 @@ function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creature: Ac
           </Section>
         </>
       ) : null}
-      <InitiativeCell ctx={ctx} />
-      {!numbers ? (
+      {rolls.initBonus === null ? <TypedBonusOptions ctx={ctx} name={props.name} /> : <InitiativeCell ctx={ctx} bonus={rolls.initBonus} bonusText={signedText(rolls.initBonus)} />}
+      {!numbers && rolls.initBonus !== null ? (
         <>
           <Note>No stat block. Roll from the field above.</Note>
           {character && actor?.srdId === undefined && editsPcStats(dice.you, character) ? (
@@ -376,12 +378,60 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; text: string; 
 }
 
 /**
+ * The options of a creature whose numbers this viewer does not hold: a
+ * character rolled for through a token lent to them, whose numbers go only
+ * to the DM and its own players (docs/design-v1-pc-stats.md 4.2). Its
+ * saves, checks and initiative roll a d20 with the bonus the player types,
+ * as a request's card does for a creature with no stat block, never a "+0"
+ * this device does not know. One field serves the roll tapped next.
+ */
+function TypedBonusOptions(props: { ctx: Ctx; name: string }) {
+  const { ctx } = props;
+  const [text, setText] = useState("");
+  const typed = parseBonus(text);
+  const bonus = typed?.ok ? typed.bonus : null;
+  const d20 = bonus === null ? "d20" : `d20${signedText(bonus)}`;
+  // Each roll waits for the bonus, its reason the card's words.
+  const cells: Ctx = ctx.blocked === null && bonus === null ? { ...ctx, blocked: typed?.ok === false ? typed.error : TYPE_BONUS } : ctx;
+  return (
+    <>
+      <Note>{`${props.name}'s numbers are for the DM and its own players. Type the bonus of the roll you make, then tap it.`}</Note>
+      <label style={{ display: "flex", alignItems: "center", gap: theme.space(2), fontWeight: theme.weight.strong }}>
+        Bonus
+        <Input
+          value={text}
+          placeholder="+0"
+          enterKeyHint="done"
+          autoComplete="off"
+          maxLength={3}
+          error={typed?.ok === false}
+          onChange={(e) => setText(e.target.value)}
+          style={{ width: 88, flex: "none", textAlign: "center" }}
+        />
+      </label>
+      {typed?.ok === false ? <Note tone="error">{typed.error}</Note> : null}
+      <Grid label="Saves">
+        {ABILITY_KEYS.map((a) => (
+          <D20Cell key={a} ctx={cells} test={{ kind: "save", ability: a }} bonus={bonus ?? 0} text={`${ABILITY_SHORT[a]} ${d20}`} />
+        ))}
+      </Grid>
+      <Grid label="Checks">
+        {ABILITY_KEYS.map((a) => (
+          <D20Cell key={a} ctx={cells} test={{ kind: "check", ability: a }} bonus={bonus ?? 0} text={`${ABILITY_SHORT[a]} ${d20}`} />
+        ))}
+      </Grid>
+      <InitiativeCell ctx={cells} bonus={bonus ?? 0} bonusText={d20} />
+    </>
+  );
+}
+
+/**
  * Initiative (4.2, 4.3): "+2", in a fight "Initiative +2, sets its row",
  * and a monster in a room that uses scores "Score 12, sets its row", with
  * "Roll instead". The value is written only to a row that still holds what
  * it held at the tap, by the room's listener, so the cell may close first.
  */
-function InitiativeCell(props: { ctx: Ctx }) {
+function InitiativeCell(props: { ctx: Ctx; bonus: number; bonusText: string }) {
   const { ctx } = props;
   const option = useRollOption();
   const watch = useWatchInitiative();
@@ -395,10 +445,10 @@ function InitiativeCell(props: { ctx: Ctx }) {
   const test: D20Test = { kind: "initiative" };
   const preset = presetFor(ctx.dice, ctx.creature, test, { rolls: ctx.rolls });
   const roll = () => {
-    const sent = option.d20({ creature: ctx.creature, test, bonus: ctx.rolls.initBonus, preset, label: "Initiative", row, played: false, ask: false });
+    const sent = option.d20({ creature: ctx.creature, test, bonus: props.bonus, preset, label: "Initiative", row, played: false, ask: false });
     if (sent !== null && sent !== "asked" && entry) watch(sent, entry.id);
   };
-  const bonus = signedText(ctx.rolls.initBonus);
+  const bonus = props.bonusText;
   const scored = score !== null && entry !== undefined;
   return (
     <div style={{ display: "grid", gap: theme.space(1), maxWidth: 320 }}>
@@ -420,7 +470,8 @@ function InitiativeCell(props: { ctx: Ctx }) {
   );
 }
 
-function DeathSaveCell(props: { ctx: Ctx; bonus: number }) {
+/** The death save, rolled by the server with the creature's own numbers. Where this viewer holds none of them its bonus goes unsaid. */
+function DeathSaveCell(props: { ctx: Ctx; bonus: number | null }) {
   const { ctx } = props;
   const option = useRollOption();
   const test: D20Test = { kind: "deathSave" };
@@ -430,7 +481,7 @@ function DeathSaveCell(props: { ctx: Ctx; bonus: number }) {
   return (
     <div style={{ maxWidth: 240 }}>
       <OptionCell
-        text={`Death save ${signedText(props.bonus)}`}
+        text={props.bonus === null ? "Death save" : `Death save ${signedText(props.bonus)}`}
         sub={presetLine(preset) || undefined}
         name="Death save"
         row={row}
