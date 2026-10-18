@@ -25,6 +25,7 @@ import { barDockSlot } from "../../canvas/barDock.ts";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { useScoped } from "../../state/scope.ts";
 import { sheetOpen, type OpAnswer, type OpRefusal } from "../../state/types.ts";
+import { playersTypeTotals } from "#shared/permissions.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { creatureRolls } from "../dice/creature.ts";
 import { presetFor } from "../dice/presets.ts";
@@ -705,7 +706,8 @@ function CreatureAnswer(props: {
   const preset = dice ? presetFor(dice, ref, test, { rolls }) : null;
   const roll = cardRoll({ bonus, preset, inputs, text });
   const typedBonus = parseBonus(inputs.bonus);
-  const offers = answerOffers({ holds: true, request, target, text, connected, bonusReady: bonus !== null || typedBonus?.ok === true });
+  const typeTotals = useRoomView((s) => playersTypeTotals(s.view?.meta.settings ?? {}));
+  const offers = answerOffers({ holds: true, request, target, text, connected, bonusReady: bonus !== null || typedBonus?.ok === true, typeTotals });
   const waiting = !answered(target) && target.retype !== true;
   const failsFirst = waiting && preset?.fails !== undefined && request.test.kind === "save" && !final;
   const busy = flow.busy?.op ?? null;
@@ -747,7 +749,7 @@ function CreatureAnswer(props: {
 
   const send = (op: { total: number } | { fail: true }) => {
     const tag = actions.newId();
-    if (step({ t: "tap", op: "fail" in op ? "fail" : "send", tag, offers: { ...offers, send: !final } }).busy?.tag !== tag) return;
+    if (step({ t: "tap", op: "fail" in op ? "fail" : "send", tag, offers: { ...offers, send: !final && typeTotals } }).busy?.tag !== tag) return;
     const answer = "fail" in op ? { result: "fail" as const } : { total: op.total, ...(two ? { choice } : {}) };
     // Quiet: a refusal shows under the rows in the server's words, such as the budget's (W7-P-55), not in a toast as well.
     const n = actions.dispatch(
@@ -844,6 +846,7 @@ function CreatureAnswer(props: {
           <AskChange
             target={target}
             name={name}
+            typeTotals={typeTotals}
             offers={offers}
             busy={busy}
             kept={kept}
@@ -953,45 +956,48 @@ function CreatureAnswer(props: {
                 ) : null}
               </form>
             ) : null}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                submit();
-              }}
-              style={{ display: "flex", gap: theme.space(2) }}
-            >
-              <Input
-                ref={field}
-                aria-label={`Total ${name} rolled`}
-                value={text}
-                inputMode="numeric"
-                enterKeyHint="send"
-                autoComplete="off"
-                placeholder="Total"
-                error={flow.error !== null}
-                disabled={busy === "roll"}
-                onChange={(e) => {
-                  setText(e.target.value);
-                  keep({ text: e.target.value });
-                  step({ t: "edit" });
-                  props.onEngage();
+            {/* Off, a player's answer is rolled on the server, and the server refuses a typed one (shared/permissions.ts playersTypeTotals). */}
+            {typeTotals ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  submit();
                 }}
-                onFocus={() => keep({ focused: true })}
-                onBlur={() => {
-                  if (drafts.has(key)) keep({ focused: false });
-                }}
-                style={{ flex: 1, width: 0 }}
-              />
-              <Button
-                type="submit"
-                variant={text.trim() !== "" ? "primary" : "secondary"}
-                size="sm"
-                busy={busy === "send"}
-                disabled={busy === null ? text.trim() === "" : busy !== "send"}
+                style={{ display: "flex", gap: theme.space(2) }}
               >
-                {answerLabel(busy === "send", connected, answered(target))}
-              </Button>
-            </form>
+                <Input
+                  ref={field}
+                  aria-label={`Total ${name} rolled`}
+                  value={text}
+                  inputMode="numeric"
+                  enterKeyHint="send"
+                  autoComplete="off"
+                  placeholder="Total"
+                  error={flow.error !== null}
+                  disabled={busy === "roll"}
+                  onChange={(e) => {
+                    setText(e.target.value);
+                    keep({ text: e.target.value });
+                    step({ t: "edit" });
+                    props.onEngage();
+                  }}
+                  onFocus={() => keep({ focused: true })}
+                  onBlur={() => {
+                    if (drafts.has(key)) keep({ focused: false });
+                  }}
+                  style={{ flex: 1, width: 0 }}
+                />
+                <Button
+                  type="submit"
+                  variant={text.trim() !== "" ? "primary" : "secondary"}
+                  size="sm"
+                  busy={busy === "send"}
+                  disabled={busy === null ? text.trim() === "" : busy !== "send"}
+                >
+                  {answerLabel(busy === "send", connected, answered(target))}
+                </Button>
+              </form>
+            ) : null}
           </div>
           {/* After the block: the measure stops at the type row (5.7), so a plain fail never pushes Send out of reach. */}
           {(request.test.kind === "save" && !failsFirst) || (waiting && bonus === null && noBlock) ? (
@@ -1030,6 +1036,7 @@ const EXTRA_FIELD_WIDTH = 88;
 function AskChange(props: {
   target: RollTarget;
   name: string;
+  typeTotals: boolean;
   offers: AnswerOffers;
   busy: AnswerOp | null;
   kept: boolean;
@@ -1038,7 +1045,7 @@ function AskChange(props: {
 }) {
   const { target } = props;
   const menu = usePopover({ kind: "menu" });
-  const items = askItems(target);
+  const items = askItems(target, props.typeTotals);
   const pending = target.change;
   return (
     <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>

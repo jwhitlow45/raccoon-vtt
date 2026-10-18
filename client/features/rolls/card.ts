@@ -281,11 +281,12 @@ const OTHER_DICE = 3;
  * `rerollFace` names, then one item per other die of the roll, Halfling
  * Luck while a d20 shows 1, Lucky where it changes something (a normal roll
  * whose sources did not cancel, or a disadvantage roll), and the four
- * Bardic Inspiration dice. On a typed answer that is final, "Fix my total".
+ * Bardic Inspiration dice. On a typed answer that is final, "Fix my total",
+ * while the room lets players type their totals.
  */
-export function askItems(target: Pick<RollTarget, "dice">): AskItem[] {
+export function askItems(target: Pick<RollTarget, "dice">, typeTotals: boolean): AskItem[] {
   const dice = target.dice;
-  if (!dice) return [{ id: "fix-total", label: "Fix my total", ask: { reason: "fix-total" } }];
+  if (!dice) return typeTotals ? [{ id: "fix-total", label: "Fix my total", ask: { reason: "fix-total" } }] : [];
   const items: AskItem[] = [];
   const face = rerollFace(dice, "heroic-inspiration");
   if (face !== null) items.push({ id: "heroic", label: "Reroll: Heroic Inspiration", ask: { reason: "heroic-inspiration", face } });

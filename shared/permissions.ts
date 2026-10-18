@@ -759,7 +759,8 @@ export function drawsAllowed(settings: Partial<Pick<RoomSettings, "playersDraw">
  * A player's answer to a roll request (docs/design-v1-dm-tools.md 3.3): a
  * request that exists and names a creature they own now, else `gone`, the
  * same answer a missing request gives, so a refusal never says whom else
- * the DM asked. They send a total, or fail a save without rolling. Whether
+ * the DM asked. They send a total, while the room lets players type them
+ * (playersTypeTotals), or fail a save without rolling. Whether
  * an answer is final is the reducer's, which applies it whatever the client
  * shows.
  */
@@ -772,8 +773,21 @@ function rollAnswerCheck(c: Check, op: OpOf<"roll.answer">): Decision {
   if (op.result !== undefined && (op.result !== "fail" || op.total !== undefined || request.test.kind !== "save")) {
     return refuse("forbidden", "players send the total they rolled, or fail a saving throw without rolling");
   }
+  if (op.total !== undefined && !playersTypeTotals(c.state.meta.settings)) return refuse("forbidden", NO_TYPED_TOTALS);
   return OK;
 }
+
+/**
+ * Whether players may type their roll totals (RoomSettings.playersTypeTotals):
+ * absent reads as on. Off, a player's answer is rolled on the server, and a
+ * typed one, or an ask to fix one, is refused. A typed answer already in stands.
+ */
+export function playersTypeTotals(settings: Partial<Pick<RoomSettings, "playersTypeTotals">>): boolean {
+  return settings.playersTypeTotals !== false;
+}
+
+/** The refusal of a player's typed total while the room has them off. */
+export const NO_TYPED_TOTALS = "The DM has turned off typed totals in this room. Tap Roll instead.";
 
 /**
  * The refusal of a live answer without its tag, the DM's or a player's
@@ -827,14 +841,18 @@ export const ONLY_PLAYERS_ASK = "Only a player asks to change a roll.";
  * (docs/design-v1-roll-request.md 7.5), as `roll.answer` is checked: a
  * request they can see that names a creature they own now, else `gone`.
  * Whether the ask fits the answer it names is the reducer's, since it reads
- * the request's DC, which a player's view may lack.
+ * the request's DC, which a player's view may lack. "Fix my total" goes only
+ * while the room lets players type their totals.
  */
 function rollChangeCheck(c: Check, op: OpOf<"roll.change">): Decision {
   const request = c.state.rolls[op.rollId];
   if (!request || !c.visible(keys.roll(op.rollId))) return GONE;
   const named = request.targets.some((t) => ("tokenId" in op.target ? t.tokenId === op.target.tokenId : t.characterId === op.target.characterId));
   const owned = "tokenId" in op.target ? c.ownsTokenId(op.target.tokenId) : c.ownsCharacterId(op.target.characterId);
-  return named && owned ? OK : GONE;
+  if (!named || !owned) return GONE;
+  // "Fix my total" leads only to a typed answer, which the room has off.
+  if (op.ask?.reason === "fix-total" && !playersTypeTotals(c.state.meta.settings)) return refuse("forbidden", NO_TYPED_TOTALS);
+  return OK;
 }
 
 /**

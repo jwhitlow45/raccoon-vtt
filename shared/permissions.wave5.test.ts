@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Drawing, RoomState, WhichPlayers } from "./model.ts";
-import { NO_DRAWING, NO_DRAWING_BACK, PAGE_FOR_A_PLAYER, canApply, drawsAllowed, type Decision, type PermissionDeps } from "./permissions.ts";
+import { NO_DRAWING, NO_DRAWING_BACK, NO_TYPED_TOTALS, PAGE_FOR_A_PLAYER, canApply, drawsAllowed, playersTypeTotals, type Decision, type PermissionDeps } from "./permissions.ts";
 import { clientOpSchema, type Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { DM, P1, P2, actor, character, effect, env, imageRef, room, token } from "./testutil.ts";
@@ -108,6 +108,20 @@ describe("roll answers (section 3.3)", () => {
     assert.equal(decide(state, { t: "roll.answer", rollId: "r1", target: { characterId: "thorn" }, total: 9, result: "fail", tag: "a1" }).code, "forbidden");
     assert.equal(decide(state, { t: "roll.answer", rollId: "r2", target: { characterId: "thorn" }, result: "fail", tag: "a1" }).code, "forbidden");
     assert.equal(decide(state, { t: "roll.answer", rollId: "r2", target: { characterId: "vex" }, result: "pass", tag: "a1" }, DM).ok, true);
+  });
+
+  test("with typed totals off a player's typed answer and Fix my total are refused, while rolls, a fail without rolling and the DM's totals go (owner's setting)", () => {
+    const state = asked();
+    assert.equal(playersTypeTotals(state.meta.settings), true, "on in a new room");
+    assert.equal(playersTypeTotals({}), true, "a room from before it reads as on");
+    state.meta.settings.playersTypeTotals = false;
+    assert.deepEqual(decide(state, { t: "roll.answer", rollId: "r1", target: { characterId: "thorn" }, total: 12, tag: "a1" }), { ok: false, code: "forbidden", message: NO_TYPED_TOTALS });
+    assert.equal(decide(state, { t: "roll.answer", rollId: "r1", target: { characterId: "thorn" }, result: "fail", tag: "a1" }).ok, true, "a fail types no number");
+    assert.equal(decide(state, { t: "roll.dice", tag: "d1", rollId: "r1", target: { characterId: "thorn" }, bonus: 3 }).ok, true, "a roll on the server goes, a typed bonus with it");
+    assert.equal(decide(state, { t: "roll.answer", rollId: "r1", target: { characterId: "thorn" }, total: 12, tag: "a1" }, DM).ok, true, "the DM's own total is unaffected");
+    assert.deepEqual(decide(state, { t: "roll.change", rollId: "r1", target: { characterId: "thorn" }, ask: { id: "c1", on: "a0", reason: "fix-total" } }), { ok: false, code: "forbidden", message: NO_TYPED_TOTALS });
+    assert.equal(decide(state, { t: "roll.change", rollId: "r1", target: { characterId: "thorn" }, ask: { id: "c1", on: "a0", reason: "lucky" } }).ok, true, "other asks stay");
+    assert.equal(decide(state, { t: "roll.change", rollId: "r9", target: { characterId: "thorn" }, ask: { id: "c1", on: "a0", reason: "fix-total" } }).code, "gone", "a missing request is still gone first");
   });
 
   test("asking, reopening and closing are the DM's", () => {

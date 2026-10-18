@@ -2,6 +2,7 @@ import { critRuleOf } from "#shared/dice/crit.ts";
 import type { AoeCoverage, AoeInclusion, CritRule, DiagonalRule, MemberId, MoveAnyToken, OrderReveal, RoomSettings, WhichPlayers } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { healRevivesDead } from "#shared/migrate.ts";
+import { playersTypeTotals } from "#shared/permissions.ts";
 import { orderRevealOf } from "#shared/rules/initiative.ts";
 import { MAX_NAME, type ClientOp } from "#shared/protocol.ts";
 import { TIMER_CHOICES } from "../encounter/timer.ts";
@@ -148,6 +149,12 @@ export const SETTING_GROUPS: SettingGroup[] = [
         ],
       },
       {
+        kind: "toggle",
+        key: "playersTypeTotals",
+        label: "Players may type their roll totals",
+        help: "Players may answer a roll you ask for with a total they rolled at the table. Off, they tap Roll and the app rolls for them. On by default.",
+      },
+      {
         kind: "seconds",
         key: "turnTimerSec",
         label: "Turn timer",
@@ -228,6 +235,7 @@ export function drawersOf(settings: Pick<RoomSettings, "playersDraw">): WhichPla
  */
 export function toggleOn(settings: RoomSettings, key: BoolKey): boolean {
   if (key === "healRevives") return healRevivesDead(settings);
+  if (key === "playersTypeTotals") return playersTypeTotals(settings);
   return settings[key] === true;
 }
 

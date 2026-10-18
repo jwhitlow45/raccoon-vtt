@@ -66,6 +66,8 @@ const settings = z.strictObject({
   // made under the old default and must not gain a permission.
   playersCreateCharacters: z.boolean().default(false),
   playersApplyDamage: z.boolean(),
+  // Older rooms and backups have no such setting: it reads as on, the rule they were played under.
+  playersTypeTotals: z.boolean().default(true),
   skipDefeated: z.boolean(),
   monsterInitScore: z.boolean(),
   revealHiddenOnTurn: z.boolean(),

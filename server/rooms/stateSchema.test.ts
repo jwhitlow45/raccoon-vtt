@@ -55,6 +55,19 @@ describe("roomStateSchema", () => {
     assert.equal(parseRoomState(bad).ok, false);
   });
 
+  test("a stored room from before typed totals had a switch keeps letting players type them (owner's setting)", () => {
+    const fresh = createInitialState({ roomName: "R", dm: { id: "m1", rev: 1, name: "DM", color: "#f38400", kind: "dm", createdAt: new Date().toISOString() } });
+    assert.equal(fresh.meta.settings.playersTypeTotals, true, "on in a new room");
+    const stored = JSON.parse(JSON.stringify(fresh));
+    delete stored.meta.settings.playersTypeTotals;
+    const parsed = parseRoomState(stored);
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.equal(parsed.ok && parsed.state.meta.settings.playersTypeTotals, true);
+    stored.meta.settings.playersTypeTotals = false;
+    const off = parseRoomState(stored);
+    assert.equal(off.ok && off.state.meta.settings.playersTypeTotals, false, "off stays off");
+  });
+
   test("a fresh room and random rooms parse after a JSON round trip", () => {
     const fresh = createInitialState({ roomName: "R", dm: { id: "m1", rev: 1, name: "DM", color: "#f38400", kind: "dm", createdAt: new Date().toISOString() } });
     assert.ok(parseRoomState(JSON.parse(JSON.stringify(fresh))).ok);

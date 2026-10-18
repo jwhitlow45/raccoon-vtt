@@ -1121,10 +1121,11 @@ export type AnswerOffers = Record<AnswerOp, boolean>;
 /**
  * What the card offers (5.2, 5.5): Roll only while the creature waits, not
  * for a retype, with the Total field empty, a bonus known or typed and the
- * socket open. Send and Fail only on an answer that is not final. Ask only
- * on a final answer, where a new ask replaces a pending one, and Withdraw
- * only with one pending. A request that no longer holds the creature
- * offers nothing.
+ * socket open. Send and Fail only on an answer that is not final, and Send
+ * only while the room lets players type their totals. Ask only on a final
+ * answer, where a new ask replaces a pending one, and on a typed one, whose
+ * one ask is "Fix my total", only while players may type. Withdraw only
+ * with one pending. A request that no longer holds the creature offers nothing.
  */
 export function answerOffers(input: {
   holds: boolean;
@@ -1133,6 +1134,8 @@ export function answerOffers(input: {
   text: string;
   connected: boolean;
   bonusReady: boolean;
+  /** The room's "Players may type their roll totals" (shared/permissions.ts playersTypeTotals). */
+  typeTotals: boolean;
 }): AnswerOffers {
   const { request, target } = input;
   if (!input.holds) return { roll: false, send: false, fail: false, ask: false, withdraw: false };
@@ -1140,10 +1143,10 @@ export function answerOffers(input: {
   const typed = input.text.trim() !== "";
   return {
     roll: !answered(target) && target.retype !== true && !typed && input.connected && input.bonusReady,
-    send: !final && typed,
+    send: !final && typed && input.typeTotals,
     fail: !final && request.test.kind === "save",
     // A newer item replaces a pending ask (5.5). An answer from before tags has none, and no ask can name it.
-    ask: final && target.tag !== undefined,
+    ask: final && target.tag !== undefined && (target.dice !== undefined || input.typeTotals),
     withdraw: target.change !== undefined,
   };
 }

@@ -108,7 +108,7 @@ describe("the DM's Roll for a waiting creature (6)", () => {
 });
 
 describe("asking the DM to change an answer (5.5)", () => {
-  const labels = (dice: DiceResult | undefined) => askItems({ dice }).map((i) => `${i.label}${i.ask.face !== undefined ? ` @${i.ask.face}` : ""}`);
+  const labels = (dice: DiceResult | undefined) => askItems({ dice }, true).map((i) => `${i.label}${i.ask.face !== undefined ? ` @${i.ask.face}` : ""}`);
   test("a disadvantage roll with Bless: the kept d20 by default, every other die named, Lucky, and the four Bardic dice", () => {
     const dis: DiceResult = { formula: "2d20kl1+3+1d4", faces: [14, 6, 3], total: 12, mode: "dis" };
     assert.deepEqual(labels(dis), [
@@ -134,7 +134,9 @@ describe("asking the DM to change an answer (5.5)", () => {
   });
 
   test("a typed answer that is final offers only Fix my total, and each ask has its words", () => {
-    assert.deepEqual(askItems({}).map((i) => i.label), ["Fix my total"]);
+    assert.deepEqual(askItems({}, true).map((i) => i.label), ["Fix my total"]);
+    assert.deepEqual(askItems({}, false), [], "with typed totals off, Fix my total is gone");
+    assert.ok(askItems({ dice: { formula: "1d20+5", faces: [7], total: 12 } }, false).some((i) => i.label.includes("Bardic")), "a rolled answer keeps its asks");
     assert.equal(askedText({ reason: "heroic-inspiration" }), "Asked the DM to reroll (Heroic Inspiration).");
     assert.equal(askRowText({ reason: "lucky" }), "Asks for advantage (Lucky)");
     assert.equal(askRowText({ reason: "bardic-inspiration", die: 8 }), "Asks to add a d8 (Bardic Inspiration)");

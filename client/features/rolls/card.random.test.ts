@@ -95,7 +95,7 @@ function serverAnswer(w: World, by: "mine" | "other", kind: "roll" | "send" | "f
 }
 
 function offersOf(w: World) {
-  return answerOffers({ holds: w.request !== null, request: w.request ?? REQUEST(false), target: w.target, text: w.text, connected: w.connected, bonusReady: true });
+  return answerOffers({ holds: w.request !== null, request: w.request ?? REQUEST(false), target: w.target, text: w.text, connected: w.connected, bonusReady: true, typeTotals: true });
 }
 
 test("2,000 sequences of 40 card events keep every invariant", () => {

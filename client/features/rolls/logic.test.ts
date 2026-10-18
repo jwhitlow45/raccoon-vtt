@@ -1000,7 +1000,7 @@ describe("a total typed into a card and not sent (LPD-PLAYER-1)", () => {
 describe("the card's one answer path (docs/design-v1-roll-request.md 5.2, 5.6)", () => {
   const request = { test: DEX_SAVE, dc: 13, dcShown: true, resultShown: true, targets: [{ characterId: "ayla" }] };
   const rolled = { characterId: "ayla", total: 17, result: "pass" as const, tag: "t1", dice: { formula: "1d20+5", faces: [12], total: 17 } };
-  const offers = (target: RollTarget, text = "", connected = true) => answerOffers({ holds: true, request, target, text, connected, bonusReady: true });
+  const offers = (target: RollTarget, text = "", connected = true) => answerOffers({ holds: true, request, target, text, connected, bonusReady: true, typeTotals: true });
 
   test("Roll only while the creature waits, the field is empty and the socket is open", () => {
     assert.deepEqual(offers({ characterId: "ayla" }), { roll: true, send: false, fail: true, ask: false, withdraw: false });
@@ -1008,7 +1008,17 @@ describe("the card's one answer path (docs/design-v1-roll-request.md 5.2, 5.6)",
     assert.equal(offers({ characterId: "ayla" }, "", false).roll, false, "Rolling needs a connection");
     assert.equal(offers({ characterId: "ayla", total: 9, result: "fail", tag: "t0" }).roll, false, "a typed answer takes the roll row away");
     assert.equal(offers({ characterId: "ayla", retype: true }).roll, false, "an allowed retype types again and never rolls");
-    assert.equal(answerOffers({ holds: false, request, target: { characterId: "ayla" }, text: "", connected: true, bonusReady: true }).fail, false, "a request gone offers nothing");
+    assert.equal(answerOffers({ holds: false, request, target: { characterId: "ayla" }, text: "", connected: true, bonusReady: true, typeTotals: true }).fail, false, "a request gone offers nothing");
+  });
+
+  test("with typed totals off the card offers Roll and Fail without rolling, no Send, and no Fix my total on a typed answer (owner's setting)", () => {
+    const off = (target: RollTarget, text = "") => answerOffers({ holds: true, request, target, text, connected: true, bonusReady: true, typeTotals: false });
+    assert.deepEqual(off({ characterId: "ayla" }), { roll: true, send: false, fail: true, ask: false, withdraw: false });
+    assert.equal(off({ characterId: "ayla" }, "12").send, false, "a total typed before the switch went off is not sent");
+    const typed = { characterId: "ayla", total: 15, result: "pass" as const, tag: "t2" };
+    assert.equal(offers(typed).ask, finalForPlayer(request, typed), "on, a final typed answer asks to fix it");
+    assert.equal(off(typed).ask, false, "off, its one ask is gone");
+    assert.equal(off(rolled).ask, true, "a rolled answer keeps its rerolls");
   });
 
   test("a rolled answer is final: no Send, no Fail, and an ask instead", () => {

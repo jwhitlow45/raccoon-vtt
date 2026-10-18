@@ -310,6 +310,7 @@ const settingsPatch = z.strictObject({
   playersMoveAny: moveAnyToken.optional(),
   playersCreateCharacters: z.boolean().optional(),
   playersApplyDamage: z.boolean().optional(),
+  playersTypeTotals: z.boolean().optional(),
   skipDefeated: z.boolean().optional(),
   monsterInitScore: z.boolean().optional(),
   revealHiddenOnTurn: z.boolean().optional(),
