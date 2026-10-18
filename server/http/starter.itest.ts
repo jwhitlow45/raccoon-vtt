@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import type { FastifyInstance } from "fastify";
@@ -384,6 +384,139 @@ describe("a player's pick waits out a floor, so its timing never tells what the 
       assert.deepEqual(clock.waits, []);
     } finally {
       await timed.close();
+    }
+  });
+
+  /** A clock whose first wait stays open until the test opens it, so a request can be caught inside its floor. Later waits end at once. */
+  function gateClock(): FloorClock & { opens: Array<() => void> } {
+    const opens: Array<() => void> = [];
+    return { opens, now: () => 0, wait: () => (opens.length > 0 ? Promise.resolve() : new Promise<void>((open) => opens.push(open))) };
+  }
+
+  async function until(what: string, check: () => boolean): Promise<void> {
+    for (let i = 0; i < 1000 && !check(); i++) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(check(), what);
+  }
+
+  /** What a player can read of an answer: its status, its body as far as it is not an id, and its headers that matter. */
+  function seen(res: { statusCode: number; headers: Record<string, unknown>; json(): unknown }) {
+    const body = res.json() as Record<string, unknown>;
+    const { id: _id, ...rest } = body;
+    return { status: res.statusCode, body: rest, retryAfter: res.headers["retry-after"], connection: res.headers.connection };
+  }
+
+  test("a second pick sent while a player's first waits out its floor is refused alike, held work or fresh, since the first keeps its slot", async () => {
+    const outcomes: Record<string, unknown> = {};
+    for (const held of [true, false]) {
+      const clock = gateClock();
+      const timed = await timedApp(clock);
+      try {
+        const roomId = await room();
+        if (held) assert.equal((await pick(timed, roomId, auth.allow(roomId, "dm"), { work: "test-pack/knight", kind: "token" })).statusCode, 200);
+        const player = auth.allow(roomId, "player");
+        // One device: the same session and address for both picks.
+        const device = { headers: { ...player.headers, "cf-connecting-ip": freshIp() } };
+        const first = pick(timed, roomId, device, { work: "test-pack/knight", kind: "token" });
+        await until("the first pick reaches its floor", () => clock.opens.length === 1);
+        const second = await pick(timed, roomId, device, { work: "test-pack/knight", kind: "token" });
+        for (const open of clock.opens) open();
+        const answered = await first;
+        outcomes[held ? "held" : "fresh"] = { first: answered.statusCode, firstBody: seen(answered).body, second: seen(second) };
+      } finally {
+        await timed.close();
+      }
+    }
+    assert.deepEqual(outcomes.held, outcomes.fresh, JSON.stringify(outcomes));
+    assert.deepEqual((outcomes.held as { second: { status: number } }).second.status, 503);
+  });
+
+  test("a full processing queue refuses a player's pick alike, held work or fresh, and the DM's pick of a held work still goes", async () => {
+    const timed = await timedApp(stillClock());
+    // Each job starts only once the one before ends, so one gate holds them all.
+    let open = () => {};
+    const gate = new Promise<void>((done) => (open = done));
+    const blockers: Promise<unknown>[] = [];
+    try {
+      const heldRoom = await room();
+      const dm = auth.allow(heldRoom, "dm");
+      assert.equal((await pick(timed, heldRoom, dm, { work: "test-pack/knight", kind: "token" })).statusCode, 200);
+      for (let i = 0; i < timed.assets.queue.maxJobs; i++) blockers.push(timed.assets.queue.run(() => gate));
+      const freshRoom = await room();
+      const held = await pick(timed, heldRoom, auth.allow(heldRoom, "player"), { work: "test-pack/knight", kind: "token" });
+      const fresh = await pick(timed, freshRoom, auth.allow(freshRoom, "player"), { work: "test-pack/knight", kind: "token" });
+      assert.equal(held.statusCode, 503, held.body);
+      assert.deepEqual(seen(fresh), seen(held));
+      assert.equal((await pick(timed, heldRoom, dm, { work: "test-pack/knight", kind: "token" })).statusCode, 200, "the DM's held pick needs no turn in the queue");
+    } finally {
+      open();
+      await Promise.all(blockers);
+      await timed.close();
+    }
+  });
+
+  test("a player's pick that fails after taking its slot still waits out the floor", async () => {
+    const clock = stillClock();
+    const timed = await timedApp(clock);
+    try {
+      const roomId = await room();
+      // The shipped file is not the one the catalog pins, so the copy fails.
+      const res = await pick(timed, roomId, auth.allow(roomId, "player"), { work: "test-pack/changed", kind: "token" });
+      assert.equal(res.statusCode, 500);
+      assert.deepEqual(clock.waits, [PLAYER_PICK_FLOOR_MS]);
+    } finally {
+      await timed.close();
+    }
+  });
+
+  test("a player's pick of a held work, and their upload of bytes the room held, list first in their library, as new ones do", async () => {
+    const roomId = await room();
+    const dm = auth.allow(roomId, "dm");
+    const player = auth.allow(roomId, "player");
+    const put = (who: { headers: Record<string, string> }, png: Buffer) =>
+      app.inject({ method: "PUT", url: `/api/rooms/${roomId}/assets?kind=token`, headers: { "content-type": "image/png", "cf-connecting-ip": freshIp(), ...who.headers }, payload: png });
+    const idOf = (res: { json(): unknown }) => (res.json() as { id: string }).id;
+    // The DM picks the knight and uploads a picture, before the player adds anything.
+    assert.equal((await pick(app, roomId, dm, { work: "test-pack/knight", kind: "token" })).statusCode, 200);
+    const shared = await solid(64, 64, "#994411").png().toBuffer();
+    assert.equal((await put(dm, shared)).statusCode, 200);
+    // Then the player uploads a portrait of their own, then picks the knight and uploads the DM's picture, both rows the room held.
+    const portrait = await put(player, await solid(64, 64, "#336699").png().toBuffer());
+    assert.equal(portrait.statusCode, 200, portrait.body);
+    const picked = await pick(app, roomId, player, { work: "test-pack/knight", kind: "token" });
+    assert.equal(picked.statusCode, 200, picked.body);
+    const reused = await put(player, shared);
+    assert.equal(reused.statusCode, 200, reused.body);
+    const listed = await app.inject({ method: "GET", url: `/api/rooms/${roomId}/assets`, headers: player.headers });
+    const ids = (listed.json() as { assets: { id: string }[] }).assets.map((a) => a.id);
+    assert.deepEqual(ids, [idOf(reused), idOf(picked), idOf(portrait)], "newest first, by when the player added each");
+    // The DM's library keeps the room's order: the portrait, the only row made last, leads.
+    const dmListed = await app.inject({ method: "GET", url: `/api/rooms/${roomId}/assets`, headers: dm.headers });
+    assert.equal((dmListed.json() as { assets: { id: string }[] }).assets[0]?.id, idOf(portrait));
+  });
+
+  test("an uploader row from before added_at takes its image's created_at, so an older library keeps its order", async () => {
+    const roomId = await room();
+    const player = auth.allow(roomId, "player");
+    const res = await app.inject({ method: "PUT", url: `/api/rooms/${roomId}/assets?kind=token`, headers: { "content-type": "image/png", "cf-connecting-ip": freshIp(), ...player.headers }, payload: await solid(48, 48, "#123456").png().toBuffer() });
+    assert.equal(res.statusCode, 200, res.body);
+    const id = (res.json() as { id: string }).id;
+    // In a transaction rolled back after, so the shared database never keeps the column as it stood before the migration.
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      await client.query("alter table asset_uploaders alter column added_at drop not null");
+      await client.query("update asset_uploaders set added_at = null where asset_id = $1", [id]);
+      await client.query("update assets set created_at = now() - interval '3 days' where id = $1", [id]);
+      // What a start runs.
+      await client.query(await readFile(new URL("../../db/schema.sql", import.meta.url), "utf8"));
+      const { rows } = await client.query<{ same: boolean; old: boolean }>(
+        "select u.added_at = a.created_at as same, u.added_at < now() - interval '2 days' as old from asset_uploaders u join assets a on a.id = u.asset_id where a.id = $1",
+        [id],
+      );
+      assert.deepEqual(rows, [{ same: true, old: true }]);
+    } finally {
+      await client.query("rollback");
+      client.release();
     }
   });
 });

@@ -200,6 +200,16 @@ alter table assets add column if not exists unused_since timestamptz;
 -- and never from a client: shared/protocol.ts assetCreditSchema. Null for
 -- every other image.
 alter table assets add column if not exists credit jsonb;
+-- When each member added an image, by upload or starter pick, which a
+-- player's library lists by. The row's own created_at is when the room
+-- first held the bytes, so listing a player's reused upload or pick by it
+-- placed it among older images and told the player the room held it
+-- already. Rows from before the column take their image's created_at,
+-- which the update finds none left to fill on every start after the first.
+alter table asset_uploaders add column if not exists added_at timestamptz;
+alter table asset_uploaders alter column added_at set default now();
+update asset_uploaders u set added_at = a.created_at from assets a where u.asset_id = a.id and u.added_at is null;
+alter table asset_uploaders alter column added_at set not null;
 -- Wave 7 (docs/design-v1-dice.md 1.2): the receipt of every admitted op
 -- that rolls or applies, by member, client tag and batch part, written in
 -- the same transaction as the batch that settles it. It holds the outcome

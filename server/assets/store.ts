@@ -154,14 +154,23 @@ export async function addUploaders(db: pg.Pool | pg.PoolClient, assetId: string,
  * may see the image may read (docs/design-v1-dm-tools.md 3.13). A starter
  * pick carries its work's key too, for players as for the DM: it names
  * only a work every server ships (docs/design-v1-starter-art.md 5).
+ *
+ * A player's list (`ids` with `memberId`) puts what they added by when
+ * they added it (asset_uploaders.added_at), so an upload or a pick the
+ * room already held lists as a new one does (design 11.1). What they see
+ * without having added it lists by when the room did. The DM's list keeps
+ * the room's order.
  */
-export async function listRoomAssets(pool: pg.Pool, roomId: string, ids?: ReadonlySet<string>): Promise<AssetView[]> {
+export async function listRoomAssets(pool: pg.Pool, roomId: string, ids?: ReadonlySet<string>, memberId?: string): Promise<AssetView[]> {
   if (ids && ids.size === 0) return [];
   type Listed = AssetRow & { credit: unknown; starter: string | null };
   const { rows } = ids
     ? await pool.query<Listed>(
-        `select ${ROW_COLUMNS}, credit, starter from assets where room_id = $1 and id = any($2::uuid[]) order by created_at desc, id`,
-        [roomId, [...ids]],
+        `select ${ROW_COLUMNS}, credit, starter from assets a
+         left join asset_uploaders u on u.asset_id = a.id and u.member_id = $3
+         where a.room_id = $1 and a.id = any($2::uuid[])
+         order by coalesce(u.added_at, a.created_at) desc, a.id`,
+        [roomId, [...ids], memberId ?? null],
       )
     : await pool.query<Listed>(`select ${ROW_COLUMNS}, credit, starter from assets where room_id = $1 order by created_at desc, id`, [
         roomId,

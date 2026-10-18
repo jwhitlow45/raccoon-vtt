@@ -11,7 +11,7 @@ import { ASSET_KINDS, KINDS, isVariant } from "../assets/kinds.ts";
 import type { Reservation } from "../assets/quota.ts";
 import { sendVariant } from "../assets/serve.ts";
 import { isCachedThumbnail } from "../assets/serpapi.ts";
-import { AssetService, type AssetServiceOptions, type StarterResult, type VisibleAssetsFn } from "../assets/service.ts";
+import { AssetService, type AssetServiceOptions, type VisibleAssetsFn } from "../assets/service.ts";
 import { PLAYER_PICK_FLOOR_MS, noSoonerThan } from "../assets/starter.ts";
 import { getAsset, listRoomAssets, variantPath } from "../assets/store.ts";
 import { receiveToFile, tempFile } from "../assets/upload.ts";
@@ -163,7 +163,7 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
         // The library marks what the room's state does not use (docs/design-v1-dm-tools.md 3.19).
         return { assets: app.hasDecorator("rooms") ? await withInUse(app.pool, app.rooms, roomId, assets) : assets };
       }
-      const assets = (await listRoomAssets(app.pool, roomId, await service.visibleAssets(roomId, grant.memberId))).filter((a) => KINDS[a.kind].playersRead);
+      const assets = (await listRoomAssets(app.pool, roomId, await service.visibleAssets(roomId, grant.memberId), grant.memberId)).filter((a) => KINDS[a.kind].playersRead);
       return { assets };
     });
 
@@ -265,9 +265,18 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
      * kind, since that pick makes no new image. A player's pick spends it
      * either way, so a spent budget refuses a held work and a fresh one
      * alike. It takes no quota reservation, since the row never counts
-     * toward the room's storage. A player's pick answers no sooner than
-     * PLAYER_PICK_FLOOR_MS after it came, held work or fresh, so neither
-     * its timing nor its budget tells what the room holds.
+     * toward the room's storage.
+     *
+     * A player's pick must never tell whether the room held the work: it
+     * answers no sooner than PLAYER_PICK_FLOOR_MS after it came, whether
+     * the work was held, copied fresh or failed, and keeps its intake slot
+     * until then, so a second pick sent meanwhile is refused alike either
+     * way. Phones at one table often share an address, so a tablemate's
+     * upload can meet a 503 for that moment, which the image picker waits
+     * out with its note. A held work takes its turn in the processing
+     * queue as a fresh copy does (queueWhenHeld). Its answer is built the
+     * same either way, and the player's library lists it by when they
+     * added it, not when the room first did (store.ts listRoomAssets).
      */
     scope.post<{ Params: { id: string } }>("/api/rooms/:id/assets/starter", async (req, reply) => {
       const started = service.pickClock.now();
@@ -286,20 +295,20 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
       await service.assertFreeDisk();
       const ip = ipKey(clientIp(req, trustCf));
       // The DM's library lists every image the room holds, so only the DM's pick of a held work is free.
-      const free = grant.role === "dm" && (await service.holdsStarter(roomId, found, kind));
+      const player = grant.role !== "dm";
+      const free = !player && (await service.holdsStarter(roomId, found, kind));
       const checks = free ? [] : service.starterHourlyChecks(grant.sessionId, ip, roomId);
       service.assertHourly(checks);
       const releaseSlot = service.slots.acquire({ kind: "upload", roomId, ip, sessionId: grant.sessionId, pinned: room.pinned });
-      let result: StarterResult;
       try {
         service.hourly.record(checks);
-        result = await service.ingestStarter({ roomId, uploaderIds: [grant.memberId], found, kind });
+        const result = await service
+          .ingestStarter({ roomId, uploaderIds: [grant.memberId], found, kind, queueWhenHeld: player })
+          .finally(() => (player ? noSoonerThan(started, PLAYER_PICK_FLOOR_MS, service.pickClock) : undefined));
+        return reply.code(200).send(result);
       } finally {
         releaseSlot();
       }
-      // With the slot given back, so the wait holds up no one else's upload.
-      if (grant.role !== "dm") await noSoonerThan(started, PLAYER_PICK_FLOOR_MS, service.pickClock);
-      return reply.code(200).send(result);
     });
 
     await registerSearchRoutes(scope, { requireGrant });

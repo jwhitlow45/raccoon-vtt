@@ -260,12 +260,17 @@ export class AssetService {
    * shipped file that changed must never be stored under its work's mark,
    * where an export would vouch for it. A work the room already holds as
    * this kind is answered from its row, with no copy: its bytes are the
-   * catalog's by their hash, and such a pick spends no hourly budget, so it
-   * must cost the server no file read either. The answer describes the
-   * pick whether the row was made now or reused, so it never shows a reuse
-   * (design 11.1).
+   * catalog's by their hash, and a DM's such pick spends no hourly budget,
+   * so it must cost the server no file read either. The answer describes
+   * the pick whether the row was made now or reused, so it never shows a
+   * reuse (design 11.1).
+   *
+   * `queueWhenHeld`, for a player's pick: a held work still takes a turn in
+   * the processing queue, as a fresh copy's encode does, so it waits behind
+   * the same jobs and meets the same full queue's refusal, and neither
+   * tells the player the room held it.
    */
-  async ingestStarter(input: { roomId: string; uploaderIds: readonly string[]; found: FoundWork; kind: StarterKind; background?: boolean }): Promise<StarterResult> {
+  async ingestStarter(input: { roomId: string; uploaderIds: readonly string[]; found: FoundWork; kind: StarterKind; background?: boolean; queueWhenHeld?: boolean }): Promise<StarterResult> {
     const { work } = input.found;
     // A credit the listing could not read would be stored and then never shown, and the license asks for it.
     const credit = assetCreditSchema.safeParse(starterAssetCredit(input.found));
@@ -273,6 +278,7 @@ export class AssetService {
     const sha256 = Buffer.from(work.sha256, "hex");
     // A work the room holds as this kind already: the row is these bytes, so the shipped file is neither read nor hashed again.
     const existing = await findRoomAsset(this.pool, input.roomId, sha256, input.kind);
+    if (existing && input.queueWhenHeld) await this.queue.run(async () => undefined, { background: input.background });
     const result = existing
       ? await this.#reuse(existing, { uploaderIds: input.uploaderIds, credit: credit.data })
       : await this.#copyStarter(input, credit.data);
