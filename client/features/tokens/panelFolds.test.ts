@@ -26,7 +26,7 @@ function storage(initial: string | null = null, throws = false) {
 
 const NARROW = { width: 899, height: 844 };
 const WIDE = { width: 900, height: 800 };
-const FOLDED: Folds = { statBlock: false, stats: false, settings: false, companion: false, owners: false };
+const FOLDED: Folds = { statBlock: false, stats: false, settings: false, companion: false, owners: false, combat: true, notes: false, position: false, image: false };
 
 describe("the folds' defaults", () => {
   test("the stat block opens at 900 px wide and 600 tall, and folds below either", () => {
@@ -36,10 +36,11 @@ describe("the folds' defaults", () => {
     assert.equal(foldDefaults({ width: 932, height: 430 }).statBlock, false, "a large phone held sideways in the wide layout");
   });
 
-  test("every other section starts folded everywhere", () => {
+  test("Combat starts open and every other section folded, everywhere", () => {
     for (const layout of [NARROW, WIDE]) {
-      const { statBlock: _, ...rest } = foldDefaults(layout);
-      assert.deepEqual(Object.values(rest), [false, false, false, false]);
+      const { statBlock: _, combat, ...rest } = foldDefaults(layout);
+      assert.equal(combat, true);
+      assert.ok(Object.values(rest).every((open) => !open));
     }
   });
 });
@@ -48,7 +49,7 @@ describe("reading the folds", () => {
   test("a valid value, at 899 and 900", () => {
     const value = JSON.stringify({ statBlock: false, stats: true, settings: true, companion: false, owners: true });
     for (const layout of [NARROW, WIDE]) {
-      assert.deepEqual(resolveFolds(storage(value), layout), { statBlock: false, stats: true, settings: true, companion: false, owners: true });
+      assert.deepEqual(resolveFolds(storage(value), layout), { statBlock: false, stats: true, settings: true, companion: false, owners: true, combat: true, notes: false, position: false, image: false });
     }
   });
 
@@ -81,7 +82,7 @@ describe("the Room's folds", () => {
     let heard = 0;
     folds.subscribe(() => heard++);
     folds.tap("settings", true, true);
-    assert.deepEqual(folds.get(WIDE), { statBlock: true, stats: false, settings: true, companion: false, owners: true });
+    assert.deepEqual(folds.get(WIDE), { statBlock: true, stats: false, settings: true, companion: false, owners: true, combat: true, notes: false, position: false, image: false });
     assert.deepEqual(JSON.parse(s.items.get(FOLDS_KEY)!), { owners: true, settings: true });
     assert.equal(heard, 1);
     folds.tap("statBlock", false, true);

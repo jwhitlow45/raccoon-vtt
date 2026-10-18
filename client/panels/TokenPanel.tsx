@@ -7,14 +7,15 @@ import { isCompanion } from "../canvas/barButtons.ts";
 import { Button } from "../components/Button.tsx";
 import { Checkbox } from "../components/Checkbox.tsx";
 import { Empty } from "../components/Empty.tsx";
+import { Group } from "../components/Panel.tsx";
 import { QuickStartLink } from "../features/guide/GuideLink.tsx";
-import { Section as PanelSection } from "../components/Panel.tsx";
 import { RowDot } from "../components/Row.tsx";
 import { Switch } from "../components/Switch.tsx";
 import { Tag } from "../components/Tag.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
 import type { PanelProps } from "../features/panels.ts";
 import { ImageField } from "../features/images/ImageField.tsx";
+import { ImagePreview } from "../features/images/IconDisk.tsx";
 import { RangeRingsSection } from "../features/measure/RangeRingsSection.tsx";
 import { statBlockShown } from "../features/monsters/statBlockLink.ts";
 import { GroundNotice } from "../features/movement/GroundNotice.tsx";
@@ -30,9 +31,10 @@ import { backTo, baseSize, customWords, SIZE_WORDS } from "../features/tokens/re
 import { RestSection } from "../features/tokens/RestSection.tsx";
 import { StatBlockSection } from "../features/tokens/StatBlockSection.tsx";
 import { CardNotesField, SheetUrlField, StatsFields } from "../features/tokens/StatsSection.tsx";
-import { useSrdList, VitalsLine } from "../features/tokens/StatSummary.tsx";
+import { useSrdList } from "../features/tokens/StatSummary.tsx";
 import { useResize } from "../features/tokens/useResize.ts";
-import { vitals } from "../features/tokens/statSummary.ts";
+import { hpUnits, unitText, vitals } from "../features/tokens/statSummary.ts";
+import { QuickNumbers } from "../features/tokens/QuickNumbers.tsx";
 import { TokenNotes } from "../features/tokens/TokenNotes.tsx";
 import { TokenSight } from "../features/vision/TokenSight.tsx";
 import { ConfirmButton, FieldRow, Note, NumberField, Section, Select, Stepper, TextField } from "../features/tokens/ui.tsx";
@@ -122,9 +124,11 @@ function TokenDetails(props: PanelProps) {
   };
   // A viewer's tap is what this device remembers. "View as a player" reads what is stored and never writes it.
   const fold = (key: FoldKey, summary?: ReactNode) => ({ open: folds[key], onToggle: () => slot.tap(key, !folds[key], !preview), summary: folds[key] ? undefined : summary });
+  const groupFold = (key: FoldKey) => ({ open: folds[key], onToggle: () => slot.tap(key, !folds[key], !preview) });
   const companion = isCompanion(token);
   const summaryItems = vitals({ actor, token, fullAccess: access.full, place: "panel" });
-  const summary = summaryItems.length > 0 ? <VitalsLine items={summaryItems} /> : null;
+  // The quick numbers stand under the name now (docs/design-v1-dice-ui.md 5.1), so the stat block's header no longer repeats them.
+  const summary = null;
   // A player lent only a token of a character holds none of its card (docs/design-v1-pc-stats.md 4.2), so it has no stat card to show or edit there.
   const playsCharacter = character !== undefined && ownsCharacter(you?.memberId, character);
   const sections = panelSections({
@@ -133,7 +137,7 @@ function TokenDetails(props: PanelProps) {
     kind: token.kind,
     companion,
     statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion, character: "ref" in token.actor, ownsCharacter: character ? playsCharacter : undefined }),
-    summary: summary !== null,
+    summary: summaryItems.length > 0,
     actor: actor !== undefined && (character === undefined || access.dm || playsCharacter),
     ownerRenames: !access.dm && access.canEditToken("name"),
   });
@@ -145,13 +149,17 @@ function TokenDetails(props: PanelProps) {
   const section = (id: PanelSectionId): ReactNode => {
     switch (id) {
       case "name":
-        return <NameBlock key={id} token={token} name={name} feetPerCell={feetPerCell} />;
+        return (
+          <NameBlock key={id} token={token} name={name} feetPerCell={feetPerCell}>
+            <QuickNumbers items={summaryItems} actor={actor} token={token} full={access.full} />
+          </NameBlock>
+        );
       case "image":
         return <ImageRow key={id} token={token} name={name} access={access} update={update} />;
       case "statBlock":
         return <StatBlockSection key={id} token={token} actor={actor} access={access} patchActor={patchActor} summary={summary} />;
       case "summary":
-        return <PanelSection key={id}>{summary}</PanelSection>;
+        return null;
       case "hp":
         return <HpSection key={id} actor={actor} hpVisibility={token.hpVisibility} target={{ tokenId: token.id }} access={access} name={name} token={token} />;
       case "conditions":
@@ -177,7 +185,7 @@ function TokenDetails(props: PanelProps) {
         return <TokenSight key={id} token={token} actor={actor} access={access} update={update} />;
       case "stats":
         return actor ? (
-          <Section key={id} title="Stats" fold={fold("stats")}>
+          <Group key={id} label="Stats" {...groupFold("stats")}>
             <SizeField token={token} actor={actor} access={access} feetPerCell={feetPerCell} />
             <StatsFields actor={actor} canEdit={access.canEditActor} onPatch={patchActor} dm={access.dm} noAc={hpLess(actor, token)} fromBlock={character?.stats !== undefined} />
             {access.canEditActor("sheetUrl") ? (
@@ -185,13 +193,13 @@ function TokenDetails(props: PanelProps) {
                 <SheetUrlField value={actor.sheetUrl ?? ""} onPatch={patchActor} />
               </FieldRow>
             ) : null}
-          </Section>
+          </Group>
         ) : null;
       case "settings":
         return (
-          <Section key={id} title="Token settings" fold={fold("settings")}>
+          <Group key={id} label="Token settings" {...groupFold("settings")}>
             {access.dm ? <DmSettings token={token} feetPerCell={feetPerCell} update={update} /> : <OwnerNames token={token} access={access} update={update} />}
-          </Section>
+          </Group>
         );
       // docs/design-v1-combat-flow.md 3.6.9's section, folded through this panel's folds with its character beside its label.
       case "companion":
@@ -203,11 +211,49 @@ function TokenDetails(props: PanelProps) {
     }
   };
 
-  return <div style={{ fontSize: theme.font.body14 }}>{sections.map(section)}</div>;
+  // Grouped by use (the project owner, 2026-10-17): what a fight changes, the notes, and where the token stands. Setup stays folded at the foot.
+  const has = (id: PanelSectionId) => sections.includes(id);
+  const combat = (["hp", "conditions", "rangeRings", "rest"] as const).filter(has);
+  const place = access.full ? (["position", "sight"] as const).filter(has) : [];
+  const notesShown = has("notes") && (access.canEditToken("notes") || !!token.notes || access.dm || cardNotes !== null);
+  const effects = actor?.effects?.length ?? 0;
+  const hpWords = hpUnits({ actor: actor as Parameters<typeof hpUnits>[0]["actor"], hpVisibility: token.hpVisibility, fullAccess: access.full }).map(unitText).join(" ");
+  const rings = token.rangeRings ?? [];
+  const combatSummary = [hpWords, effects > 0 ? `${effects} ${effects === 1 ? "condition" : "conditions"}` : "", rings.length > 0 ? `rings ${rings.join(", ")} ft` : ""].filter(Boolean).join(" · ");
+  const height = elevationBadge(token.elevation);
+  const noteCount = [token.notes, actor?.notes, access.dm ? actor?.dmNotes : undefined].filter((n) => typeof n === "string" && n.trim() !== "").length;
+  const before = sections.filter((id) => id === "name" || id === "statBlock");
+  const after = sections.filter((id) => ["stats", "settings", "companion", "owners", "remove"].includes(id));
+  return (
+    <div style={{ fontSize: theme.font.body14 }}>
+      {before.map(section)}
+      {combat.length > 0 ? (
+        <Group label="Combat" {...groupFold("combat")} summary={combatSummary}>
+          {combat.map(section)}
+        </Group>
+      ) : null}
+      {notesShown ? (
+        <Group label="Notes" {...groupFold("notes")} summary={noteCount === 0 ? "None yet" : `${noteCount} ${noteCount === 1 ? "note" : "notes"}`}>
+          {section("notes")}
+        </Group>
+      ) : null}
+      {place.length > 0 ? (
+        <Group label="Position" {...groupFold("position")} summary={[height ? `Elevation ${height} ft` : "On the ground", token.rotation ? `facing ${token.rotation}°` : ""].filter(Boolean).join(", ")}>
+          {place.map(section)}
+        </Group>
+      ) : null}
+      {access.canEditToken("image") ? (
+        <Group label="Image" {...groupFold("image")}>
+          {section("image")}
+        </Group>
+      ) : null}
+      {after.map(section)}
+    </div>
+  );
 }
 
 /** The name at the very top, whole and wrapping, then the size and the tags on one wrapping line. */
-function NameBlock(props: { token: Token; name: string; feetPerCell: number }) {
+function NameBlock(props: { token: Token; name: string; feetPerCell: number; children?: ReactNode }) {
   const { token } = props;
   // A companion names its character in the tracker's words (docs/design-v1-combat-flow.md 3.6.7), for whoever's copy holds the link.
   const companionOf = useRoomView((s) => (token.companion ? s.view?.characters[token.companion.of]?.name : undefined));
@@ -219,8 +265,10 @@ function NameBlock(props: { token: Token; name: string; feetPerCell: number }) {
   if (token.locked) badges.push("Locked");
   if (token.nameHidden) badges.push("Name hidden");
   return (
-    // One column no wider than the panel, so a badge too long for it is cut rather than widening the column.
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1), paddingTop: theme.space(2) }}>
+    // The picture beside the name, then one column no wider than the panel, so a badge too long for it is cut rather than widening the column.
+    <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", columnGap: theme.space(3), alignItems: "start", paddingTop: theme.space(2), paddingBottom: theme.space(4) }}>
+      <Thumbnail token={token} name={props.name} />
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
       <h3 style={{ margin: 0, fontSize: theme.font.heading, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>{props.name}</h3>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
         <span style={{ color: theme.color.textMuted, fontSize: theme.font.small, marginRight: theme.space(1) }}>
@@ -233,11 +281,29 @@ function NameBlock(props: { token: Token; name: string; feetPerCell: number }) {
           </Tag>
         ))}
       </div>
+      {props.children}
+      </div>
     </div>
   );
 }
 
-/** The 48 px preview with its buttons and the other images in one column beside it, or under it where the panel is narrow (3.6). */
+/** The token's picture at 48 px, as the image field previews it, ringed in its disposition's color. Changing it is the Image group's. */
+function Thumbnail(props: { token: Token; name: string }) {
+  const { token } = props;
+  const fp = footprint(token);
+  return (
+    <span aria-hidden style={{ display: "flex" }}>
+      <ImagePreview image={token.image} shape={token.kind === "object" ? "square" : "circle"} aspect={fp.w / fp.h} width={48} ring={RING[token.disposition] ?? theme.color.neutral} initials={initials(props.name)} />
+    </span>
+  );
+}
+
+/** A Section fold's open and toggle, for a Group. */
+function groupOf(fold: ComponentProps<typeof Section>["fold"]): { open?: boolean; onToggle?(): void } {
+  return fold ? { open: fold.open, onToggle: fold.onToggle } : {};
+}
+
+/** The image's buttons and the other images, in the Image group (docs/design-v1-dice-ui.md 5.2): the picture itself stands beside the name. */
 function ImageRow(props: { token: Token; name: string; access: TokenAccess; update(patch: TokenPatch): void }) {
   const { token, access, update } = props;
   const fp = footprint(token);
@@ -245,7 +311,7 @@ function ImageRow(props: { token: Token; name: string; access: TokenAccess; upda
   const ring = RING[token.disposition] ?? theme.color.neutral;
   const alts = useAltImages({ token, shape, aspect: fp.w / fp.h, ring, onPatch: update });
   return (
-    <div style={{ padding: `${theme.space(3)}px 0 ${theme.space(4)}px` }}>
+    <div style={{ paddingBottom: theme.space(4) }}>
       <ImageField
         value={token.image}
         onChange={(image) => update({ image })}
@@ -477,19 +543,16 @@ function Owners(props: { token: Token; update(patch: TokenPatch): void; fold(key
   const character = useRoomView((s) => ("ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
   const through = (character?.ownerIds ?? []).map((id) => members?.[id]?.name).filter(Boolean);
   const names = owners.map((id) => members?.[id]?.name).filter((n): n is string => !!n);
-  const summary = (
-    <span style={{ flex: "0 1 auto", minWidth: 0, color: theme.color.textMuted, fontSize: theme.font.small, overflowWrap: "anywhere" }}>{names.length > 0 ? names.join(", ") : "None"}</span>
-  );
   if (token.companion) {
     // A companion's owners are its character's, kept in step by the server (docs/design-v1-combat-flow.md 3.6.4).
     return (
-      <Section title="Owners" fold={props.fold("owners", summary)}>
+      <Group label="Owners" {...groupOf(props.fold("owners"))} summary={names.length > 0 ? names.join(", ") : "None"}>
         <CompanionOwners token={token} />
-      </Section>
+      </Group>
     );
   }
   return (
-    <Section title="Owners" fold={props.fold("owners", summary)}>
+    <Group label="Owners" {...groupOf(props.fold("owners"))} summary={names.length > 0 ? names.join(", ") : "None"}>
       <Note>Owners can move it and edit what their role allows.</Note>
       <div style={{ display: "grid" }}>
         {list.map((m) => (
@@ -512,7 +575,7 @@ function Owners(props: { token: Token; update(patch: TokenPatch): void; fold(key
           Also owned through {character?.name}: {through.join(", ")}.
         </Note>
       ) : null}
-    </Section>
+    </Group>
   );
 }
 

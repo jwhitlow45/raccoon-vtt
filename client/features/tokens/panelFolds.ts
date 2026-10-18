@@ -14,7 +14,7 @@ import { uiScale } from "../device/settings.ts";
  * node --test.
  */
 
-export const FOLD_KEYS = ["statBlock", "stats", "settings", "companion", "owners"] as const;
+export const FOLD_KEYS = ["statBlock", "stats", "settings", "companion", "owners", "combat", "notes", "position", "image"] as const;
 export type FoldKey = (typeof FOLD_KEYS)[number];
 export type Folds = Readonly<Record<FoldKey, boolean>>;
 
@@ -32,7 +32,8 @@ type WriteStorage = Pick<Storage, "getItem" | "setItem">;
  */
 export function foldDefaults(layout: Size): Folds {
   const wide = layout.width >= theme.layout.wideMinWidth && layout.height >= 600;
-  return { statBlock: wide, stats: false, settings: false, companion: false, owners: false };
+  // Combat holds what a fight changes (docs/design-v1-dice-ui.md 5.2), so it starts open on every layout.
+  return { statBlock: wide, stats: false, settings: false, companion: false, owners: false, combat: true, notes: false, position: false, image: false };
 }
 
 /** What storage holds, as an object, or nothing for a missing key, bad JSON, something not an object, or storage that throws. */

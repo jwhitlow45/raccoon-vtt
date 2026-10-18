@@ -4,6 +4,7 @@ import { ABILITY_KEYS, type AbilityKey, type Character } from "#shared/model.ts"
 import { pcShape } from "#shared/rules/pcStats.ts";
 import { signed } from "#shared/statBlock.ts";
 import { Loading } from "../../components/Loading.tsx";
+import { Group } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { editsPcStats } from "../tokens/access.ts";
@@ -57,38 +58,29 @@ export function PcStatBlock(props: {
   if (!character.stats && !shaped) {
     return (
       <>
-        <Section
-          title="Stat block"
-          aside={
+        <Group
+          label="Stat block"
+          action={
             <span style={{ display: "inline-flex", flexWrap: "wrap", justifyContent: "flex-end", gap: theme.space(2) }}>
               {add(fold.foldRef)}
               {take}
             </span>
           }
-        >
-          {props.summary}
-        </Section>
+        />
         {picker}
       </>
     );
   }
-  const summary =
-    take || props.summary ? (
-      <>
-        {take}
-        {props.summary ? <div style={{ flexBasis: "100%", minWidth: 0, paddingBottom: theme.space(1) }}>{props.summary}</div> : null}
-      </>
-    ) : undefined;
   return (
     <>
-      <Section title="Stat block" fold={{ ...fold, summary }}>
+      <Group label="Stat block" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} action={take}>
         {shaped ? <ShapeBody character={character} edits={edits} /> : <PcStatsView character={character} />}
         {edits ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
             {character.stats ? <SmallButton onClick={() => openStats(character.id)}>Edit</SmallButton> : add()}
           </div>
         ) : null}
-      </Section>
+      </Group>
       {picker}
     </>
   );

@@ -5,6 +5,7 @@ import type { ActorPatch } from "#shared/protocol.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { statBlockFromSrd, statBlockOf } from "#shared/statBlock.ts";
 import { Loading } from "../../components/Loading.tsx";
+import { Group } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomStore, useRoomView } from "../../state/view.ts";
@@ -108,7 +109,7 @@ export function StatBlockSection(props: {
   if ("ref" in token.actor) {
     return (
       <div ref={ref} data-stat-block="" style={{ scrollMarginTop: theme.space(2), overflowWrap: "anywhere" }}>
-        {pc ? <PcStatBlock character={pc} fold={{ open, onToggle: toggle, foldRef: focusRef }} summary={props.summary} /> : <Section title="Stat block">{props.summary}</Section>}
+        {pc ? <PcStatBlock character={pc} fold={{ open, onToggle: toggle, foldRef: focusRef }} /> : <Group label="Stat block" />}
       </div>
     );
   }
@@ -141,7 +142,7 @@ export function StatBlockSection(props: {
     // Its lines and buttons name the companion's character, whose name may be long and unbroken: it wraps rather than run out of the panel.
     <div ref={ref} data-stat-block="" style={{ scrollMarginTop: theme.space(2), overflowWrap: "anywhere" }}>
       {statBlockFoldable(link) ? (
-        <Section title="Stat block" fold={{ open, onToggle: toggle, foldRef: focusRef, summary: props.summary ? <div style={{ flexBasis: "100%", minWidth: 0, paddingBottom: theme.space(1) }}>{props.summary}</div> : undefined }}>
+        <Group label="Stat block" open={open} onToggle={toggle} foldRef={focusRef}>
           {link.kind === "room" ? (
             <>
               <StatBlockView view={viewOf(link.monster)} source="room" />
@@ -178,11 +179,11 @@ export function StatBlockSection(props: {
               </div>
             </>
           ) : null}
-        </Section>
+        </Group>
       ) : (
-        <Section
-          title="Stat block"
-          aside={
+        <Group
+          label="Stat block"
+          action={
             (link.kind === "none" || (keeper !== null && (link.kind === "deleted" || link.kind === "deletedBlock"))) && (access.dm || keeper !== null) ? (
               <SmallButton ref={focusRef} wrap onClick={() => setPicking(true)}>
                 Attach a stat block
@@ -190,14 +191,13 @@ export function StatBlockSection(props: {
             ) : null
           }
         >
-          {props.summary}
           {link.kind === "deleted" || link.kind === "deletedBlock" ? (
             <>
               <Note>{link.kind === "deletedBlock" ? "This companion’s stat block was deleted." : "This token’s stat block was deleted from this room."}</Note>
               <div style={{ display: "flex", gap: theme.space(2) }}>{detach}</div>
             </>
           ) : null}
-        </Section>
+        </Group>
       )}
       {picking && keeper ? (
         <AttachBlockDialog
