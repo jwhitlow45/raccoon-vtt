@@ -35,9 +35,8 @@ type Keeper = { id: string; name: string };
  * is linked to, read where the token is, with Edit or "Copy to this room's
  * monsters and edit", and Detach, under what they act on. Its heading is
  * the disclosure "Stat block", folded as this device last left it (the
- * Room's folds, panelFolds.ts), and `summary`, the token's own AC, speed
- * and Passive Perception, sits under the heading folded or open, so the
- * numbers read every turn never need the block. A token with no link
+ * Room's folds, panelFolds.ts). The numbers read every turn stand in the
+ * name's header above it, so they never need the block. A token with no link
  * offers "Attach a stat block" on the heading's row, with no fold. The
  * owner of an SRD monster, such as a druid's Wild Shape, reads its block
  * too, and nothing else here.
@@ -63,8 +62,6 @@ export function StatBlockSection(props: {
   actor: Partial<Actor> | undefined;
   access: TokenAccess;
   patchActor(patch: ActorPatch): void;
-  /** The summary line, shown under the heading whether the block is open or folded. */
-  summary: ReactNode;
 }) {
   const { token, actor, access } = props;
   const monsters = useRoomView((s) => s.view?.monsters);

@@ -2,8 +2,7 @@ import type { TokenKind } from "#shared/model.ts";
 
 /*
  * The token panel's order (docs/design-v1-token-panel.md 3.5), ranked by
- * use: the name, the image, the stat block (or the summary line alone),
- * then play from HP down, and setup folded at the foot. A plain function
+ * use: the name, the image, the stat block, then play from HP down, and setup folded at the foot. A plain function
  * for node --test. Each section still keeps its own rule for what it
  * shows, so a section listed here may draw nothing, such as Notes with no
  * note a player may read.
@@ -13,7 +12,6 @@ export type PanelSectionId =
   | "name"
   | "image"
   | "statBlock"
-  | "summary"
   | "hp"
   | "conditions"
   | "position"
@@ -36,8 +34,6 @@ export type PanelOrderInput = {
   companion: boolean;
   /** The viewer reads this token's stat block (statBlockLink.ts statBlockShown). */
   statBlockShown: boolean;
-  /** The viewer's copy holds any of the summary line's items: AC, speed, Passive Perception or a sheet link. */
-  summary: boolean;
   /** The viewer's copy holds an actor, whose stat card the Stats fold edits. */
   actor: boolean;
   /** An owner who may rename the token, a PC's or a companion's, whose Name fields sit in Token settings. */
@@ -49,7 +45,6 @@ export function panelSections(input: PanelOrderInput): PanelSectionId[] {
   const full = dm || owner;
   const out: PanelSectionId[] = ["name", "image"];
   if (input.statBlockShown) out.push("statBlock");
-  else if (input.summary) out.push("summary");
   out.push("hp", "conditions", "position", "rangeRings", "notes");
   if (full && input.kind !== "object") out.push("rest");
   out.push("sight");
@@ -94,9 +89,8 @@ const SETUP: readonly PanelSectionId[] = ["stats", "settings", "companion", "own
  * group holds panelSections' sections in its order, so nothing moves
  * against its neighbors, and a group with nothing in it is not drawn.
  *
- * The summary line is the quick numbers in the name's header now, so it
- * is no part of its own, and the picture stands there too, with its
- * buttons in Image. Position is the DM's and the owners': a player
+ * The quick numbers and the picture stand in the name's header, the
+ * picture's buttons in Image. Position is the DM's and the owners': a player
  * looking at another creature reads its elevation in the quick numbers,
  * and Sight shows them nothing. Notes shows only with a note to read or
  * write.

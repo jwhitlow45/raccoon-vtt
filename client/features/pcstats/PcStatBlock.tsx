@@ -1,4 +1,4 @@
-import { useState, type ReactNode, type Ref } from "react";
+import { useState, type Ref } from "react";
 import type { RollNumbers } from "#shared/dice/bonus.ts";
 import { ABILITY_KEYS, type AbilityKey, type Character } from "#shared/model.ts";
 import { pcShape } from "#shared/rules/pcStats.ts";
@@ -22,10 +22,10 @@ import { ShapePicker } from "./ShapePicker.tsx";
 /**
  * A player character's "Stat block" section (docs/design-v1-pc-stats.md
  * 7.1 and 7.3), for the DM and the character's players, in its token's
- * panel under the image and on its card. Without a block or a shape it
- * holds the summary line, with "Add a stat block" and "Take a shape" on
- * the heading's row. With either it is the disclosure "Stat block", "Take
- * a shape" still on its row and the summary under it, folded or open. A
+ * panel under the image and on its card. Without a block or a shape it is
+ * its heading alone, with "Add a stat block" and "Take a shape" on its
+ * row. With either it is the disclosure "Stat block", "Take a shape"
+ * still on its row. A
  * shape shows what it does, the numbers the character rolls with in it,
  * the creature's block and "End the shape". Without one, the block's view
  * and Edit.
@@ -33,8 +33,6 @@ import { ShapePicker } from "./ShapePicker.tsx";
 export function PcStatBlock(props: {
   character: Character;
   fold: { open: boolean; onToggle(): void; foldRef?: Ref<HTMLButtonElement> };
-  /** The token's summary line, under the heading whether the block is open or folded. */
-  summary?: ReactNode;
 }) {
   const { character, fold } = props;
   const openStats = useOpenPcStats();

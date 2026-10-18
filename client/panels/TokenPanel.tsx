@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Actor, CreatureSize, HpVisibility, Token, TokenKind } from "#shared/model.ts";
 import type { ActorPatch, ClientOp, TokenPatch } from "#shared/protocol.ts";
 import { hpLess } from "#shared/rules/hp.ts";
@@ -72,12 +72,11 @@ const HP_VISIBILITY_OPTIONS: { value: HpVisibility; label: string }[] = [
 const RING: Record<Token["disposition"], string> = { ally: theme.color.ally, neutral: theme.color.neutral, hostile: theme.color.hostile };
 
 /**
- * The selected token's panel (features sections 5, 7, 8 and 15), in the
- * order docs/design-v1-token-panel.md 3.5 ranks by use (panelOrder.ts):
- * the name, the image, the stat block with the summary line in its header,
- * then HP, conditions, position, range rings, notes, rest and sight, and
- * the setup sections folded at the foot, as this device last left them
- * (panelFolds.ts). The DM and the token's owners, directly or through its
+ * The selected token's panel (features sections 5, 7, 8 and 15), grouped
+ * by use (docs/design-v1-token-panel-groups.md, panelOrder.ts): the name
+ * with its picture and quick numbers, the stat block, then the Combat,
+ * Notes, Position and Image groups, and the setup groups folded at the
+ * foot, each as this device last left it (panelFolds.ts). The DM and the token's owners, directly or through its
  * character, get its full stat card and the controls their role allows.
  * Everyone else sees the public view: the name the projection gave them,
  * the HP the DM allows, conditions with their rules text, and the
@@ -123,12 +122,10 @@ function TokenDetails(props: PanelProps) {
     else update({ actor: patch });
   };
   // A viewer's tap is what this device remembers. "View as a player" reads what is stored and never writes it.
-  const fold = (key: FoldKey, summary?: ReactNode) => ({ open: folds[key], onToggle: () => slot.tap(key, !folds[key], !preview), summary: folds[key] ? undefined : summary });
   const groupFold = (key: FoldKey) => ({ open: folds[key], onToggle: () => slot.tap(key, !folds[key], !preview) });
   const companion = isCompanion(token);
-  const summaryItems = vitals({ actor, token, fullAccess: access.full, place: "panel" });
-  // The quick numbers stand under the name now (docs/design-v1-dice-ui.md 5.1), so the stat block's header no longer repeats them.
-  const summary = null;
+  // The quick numbers stand under the name (docs/design-v1-dice-ui.md 5.1).
+  const quickNumbers = vitals({ actor, token, fullAccess: access.full, place: "panel" });
   // A player lent only a token of a character holds none of its card (docs/design-v1-pc-stats.md 4.2), so it has no stat card to show or edit there.
   const playsCharacter = character !== undefined && ownsCharacter(you?.memberId, character);
   const cardNotes =
@@ -141,7 +138,6 @@ function TokenDetails(props: PanelProps) {
     kind: token.kind,
     companion,
     statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion, character: "ref" in token.actor, ownsCharacter: character ? playsCharacter : undefined }),
-    summary: summaryItems.length > 0,
     actor: actor !== undefined && (character === undefined || access.dm || playsCharacter),
     ownerRenames: !access.dm && access.canEditToken("name"),
     notes: access.canEditToken("notes") || !!token.notes || access.dm || cardNotes !== null,
@@ -154,15 +150,13 @@ function TokenDetails(props: PanelProps) {
       case "name":
         return (
           <NameBlock key={id} token={token} name={name} feetPerCell={feetPerCell}>
-            <QuickNumbers items={summaryItems} actor={actor} token={token} />
+            <QuickNumbers items={quickNumbers} actor={actor} token={token} />
           </NameBlock>
         );
       case "image":
         return <ImageRow key={id} token={token} name={name} access={access} update={update} />;
       case "statBlock":
-        return <StatBlockSection key={id} token={token} actor={actor} access={access} patchActor={patchActor} summary={summary} />;
-      case "summary":
-        return null;
+        return <StatBlockSection key={id} token={token} actor={actor} access={access} patchActor={patchActor} />;
       case "hp":
         return <HpSection key={id} actor={actor} hpVisibility={token.hpVisibility} target={{ tokenId: token.id }} access={access} name={name} token={token} />;
       case "conditions":
@@ -208,7 +202,7 @@ function TokenDetails(props: PanelProps) {
       case "companion":
         return <CompanionSection key={id} token={token} access={access} group={groupFold("companion")} />;
       case "owners":
-        return <Owners key={id} token={token} update={update} fold={fold} />;
+        return <Owners key={id} token={token} update={update} group={groupFold("owners")} />;
       case "remove":
         return <DmActions key={id} token={token} onDeleted={props.close} />;
     }
@@ -285,11 +279,6 @@ function Thumbnail(props: { token: Token; name: string }) {
       <ImagePreview image={token.image} shape={token.kind === "object" ? "square" : "circle"} aspect={fp.w / fp.h} width={48} ring={RING[token.disposition] ?? theme.color.neutral} initials={initials(props.name)} />
     </span>
   );
-}
-
-/** A Section fold's open and toggle, for a Group. */
-function groupOf(fold: ComponentProps<typeof Section>["fold"]): { open?: boolean; onToggle?(): void } {
-  return fold ? { open: fold.open, onToggle: fold.onToggle } : {};
 }
 
 /** The image's buttons and the other images, in the Image group (docs/design-v1-dice-ui.md 5.2): the picture itself stands beside the name. */
@@ -523,7 +512,7 @@ function CellsField(props: { label: string; value: number; onCommit(value: numbe
 }
 
 /** Who controls the token. A PC token is also owned through its character, which the character card sets. Folded, the names show beside its label. */
-function Owners(props: { token: Token; update(patch: TokenPatch): void; fold(key: FoldKey, summary?: ReactNode): ComponentProps<typeof Section>["fold"] }) {
+function Owners(props: { token: Token; update(patch: TokenPatch): void; group: { open: boolean; onToggle(): void } }) {
   const { token, update } = props;
   const members = useRoomView((s) => s.view?.members);
   const owners = token.ownerIds ?? [];
@@ -536,13 +525,13 @@ function Owners(props: { token: Token; update(patch: TokenPatch): void; fold(key
   if (token.companion) {
     // A companion's owners are its character's, kept in step by the server (docs/design-v1-combat-flow.md 3.6.4).
     return (
-      <Group label="Owners" {...groupOf(props.fold("owners"))} summary={names.length > 0 ? names.join(", ") : "None"}>
+      <Group label="Owners" {...props.group} summary={names.length > 0 ? names.join(", ") : "None"}>
         <CompanionOwners token={token} />
       </Group>
     );
   }
   return (
-    <Group label="Owners" {...groupOf(props.fold("owners"))} summary={names.length > 0 ? names.join(", ") : "None"}>
+    <Group label="Owners" {...props.group} summary={names.length > 0 ? names.join(", ") : "None"}>
       <Note>Owners can move it and edit what their role allows.</Note>
       <div style={{ display: "grid" }}>
         {list.map((m) => (

@@ -6,12 +6,11 @@ import { DM, P1, actor, character, room, token } from "#shared/testutil.ts";
 import { statBlockShown } from "../monsters/statBlockLink.ts";
 import { tokenAccess } from "./access.ts";
 import { offersMakeCompanion, panelGroups, panelRelation, panelSections, type PanelPart, type PanelSectionId } from "./panelOrder.ts";
-import { vitals } from "./statSummary.ts";
 
 /**
  * The sections a viewer gets for a token, worked out from their own copy
  * of the room as the panel does: access from ownership, the stat block
- * from its link, the summary from what the copy holds.
+ * from its link, Stats from what the copy holds.
  */
 function sectionsFor(state: ReturnType<typeof room>, viewer: typeof DM, tokenId: string, companion = false): PanelSectionId[] {
   const view = projectState(state, viewer, { sceneId: "s1" });
@@ -25,7 +24,6 @@ function sectionsFor(state: ReturnType<typeof room>, viewer: typeof DM, tokenId:
     kind: t.kind,
     companion,
     statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: t.kind, actor: a, companion }),
-    summary: vitals({ actor: a, token: t, fullAccess: access.full, place: "panel" }).length > 0,
     actor: a !== undefined,
     ownerRenames: !access.dm && access.canEditToken("name"),
   });
@@ -44,7 +42,6 @@ function groupsFor(state: ReturnType<typeof room>, viewer: typeof DM, tokenId: s
     kind: t.kind,
     companion,
     statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: t.kind, actor: a, companion }),
-    summary: vitals({ actor: a, token: t, fullAccess: access.full, place: "panel" }).length > 0,
     actor: a !== undefined,
     ownerRenames: !access.dm && access.canEditToken("name"),
     // As TokenPanel decides it, the card's notes included.
@@ -69,14 +66,14 @@ describe("the token panel's order", () => {
     assert.deepEqual(sectionsFor(state, DM, "n").slice(0, 3), ["name", "image", "statBlock"]);
   });
 
-  test("the DM on a character: the summary line alone, row 3b", () => {
+  test("the DM on a character with no stat block: play under the image, its numbers being in the name's header", () => {
     const state = room();
     state.characters.c = character("c");
     state.tokens.t = token("t", { kind: "pc", actor: { ref: "c" } });
-    assert.deepEqual(sectionsFor(state, DM, "t"), ["name", "image", "summary", ...PLAY, "rest", "sight", "stats", "settings", "owners", "remove"]);
+    assert.deepEqual(sectionsFor(state, DM, "t"), ["name", "image", ...PLAY, "rest", "sight", "stats", "settings", "owners", "remove"]);
   });
 
-  test("the DM on an object: no summary line, no rest", () => {
+  test("the DM on an object: no rest", () => {
     const state = room();
     state.tokens.o = token("o", { kind: "object", actor: { inline: actor() } });
     assert.deepEqual(sectionsFor(state, DM, "o"), ["name", "image", ...PLAY, "sight", "stats", "settings", "owners", "remove"]);
@@ -89,19 +86,18 @@ describe("the token panel's order", () => {
     assert.deepEqual(sections.slice(-4), ["settings", "companion", "owners", "remove"]);
   });
 
-  test("an owner of a character: the summary line, Stats and Token settings with their Name fields, no Owners or Remove", () => {
+  test("an owner of a character: Stats and Token settings with their Name fields, no Owners or Remove", () => {
     const state = room();
     state.characters.c = character("c", { ownerIds: ["p1"] });
     state.tokens.t = token("t", { kind: "pc", actor: { ref: "c" } });
-    assert.deepEqual(sectionsFor(state, P1, "t"), ["name", "image", "summary", ...PLAY, "rest", "sight", "stats", "settings"]);
+    assert.deepEqual(sectionsFor(state, P1, "t"), ["name", "image", ...PLAY, "rest", "sight", "stats", "settings"]);
   });
 
-  test("an owner of a character's token without the character: no summary line", () => {
+  test("an owner of a character's token without the character: no stat block", () => {
     const state = room();
     state.characters.c = character("c", { ownerIds: ["p2"] });
     state.tokens.t = token("t", { kind: "pc", ownerIds: ["p1"], actor: { ref: "c" } });
     const sections = sectionsFor(state, P1, "t");
-    assert.equal(sections.includes("summary"), false);
     assert.equal(sections.includes("statBlock"), false);
   });
 
