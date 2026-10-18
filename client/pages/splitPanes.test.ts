@@ -25,13 +25,14 @@ import {
 /* The side panel's two panes (docs/design-v1-split-panel.md 3.2, 3.4, 4.3 and 8). */
 
 describe("room for two", () => {
-  test("from exactly 336 own px: two pane minimums and the bar", () => {
-    assert.equal(PANE_MIN, 145, "a subpage header and the very short sheet's 88 px body");
-    assert.equal(BAR_PX, 46);
-    assert.equal(SPLIT_ROOM, 336);
-    assert.equal(roomForTwo(336), true);
-    assert.equal(roomForTwo(335), false);
-    assert.equal(roomForTwo(264), false, "a large phone sideways, the DM");
+  test("from exactly 311 own px: two pane minimums and the bar, each counting a 45 px header row", () => {
+    assert.equal(PANE_MIN, 133, "a compact subpage header with its rule and the very short sheet's 88 px body");
+    assert.equal(BAR_PX, 45, "a header row, as the tab row is (docs/design-v1-side-headers.md 5)");
+    assert.equal(SPLIT_ROOM, 311);
+    assert.equal(roomForTwo(311), true);
+    assert.equal(roomForTwo(310), false);
+    assert.equal(roomForTwo(319), true, "a large phone sideways with a home bar inset, the DM");
+    assert.equal(roomForTwo(264), false, "the same before the compact headers");
   });
 });
 
@@ -42,34 +43,33 @@ describe("the panes' sizes", () => {
   };
 
   test("with no share stored, even", () => {
-    assert.deepEqual(sizes(574), [264, 264], "1280 x 800, the DM");
-    assert.deepEqual(sizes(739), [346, 347], "1280 x 800, a player");
-    assert.deepEqual(sizes(390), [172, 172], "1280 x 800 at 130%, the DM");
-    assert.deepEqual(sizes(366), [160, 160], "1366 x 768 at 130%");
-    assert.deepEqual(sizes(369), [161, 162], "932 x 430, a player");
+    assert.deepEqual(sizes(710), [332, 333], "1280 x 800, the DM");
+    assert.deepEqual(sizes(755), [355, 355], "1280 x 800, a player");
+    assert.deepEqual(sizes(525), [240, 240], "1280 x 800 at 130%, the DM");
+    assert.deepEqual(sizes(442), [198, 199], "1366 x 768 at 130%");
+    assert.deepEqual(sizes(385), [170, 170], "932 x 430, a player");
   });
 
   test("a pane holding Initiative takes what keeps its round header stuck, as far as the other keeps its minimum", () => {
     assert.equal(INITIATIVE_STUCK, 193);
-    assert.deepEqual(sizes(390, null, "top"), [193, 151], "1280 x 800 at 130%");
-    assert.deepEqual(sizes(390, null, "below"), [151, 193], "in either pane");
-    assert.deepEqual(sizes(366, null, "top"), [175, 145], "1366 x 768 at 130%: too little room for 193");
-    assert.deepEqual(sizes(366, null, "below"), [145, 175]);
-    assert.deepEqual(sizes(406, null, "top"), [193, 167], "a tablet at 130%");
-    assert.deepEqual(sizes(369, null, "top"), [178, 145], "932 x 430, a player");
-    assert.deepEqual(sizes(574, null, "top"), [264, 264], "an even split already holds it");
+    assert.deepEqual(sizes(400, null, "top"), [193, 162], "a room of 400");
+    assert.deepEqual(sizes(400, null, "below"), [162, 193], "in either pane");
+    assert.deepEqual(sizes(360, null, "top"), [182, 133], "a room of 360: too little for 193");
+    assert.deepEqual(sizes(360, null, "below"), [133, 182]);
+    assert.deepEqual(sizes(385, null, "top"), [193, 147], "932 x 430, a player");
+    assert.deepEqual(sizes(710, null, "top"), [332, 333], "an even split already holds it");
   });
 
   test("a stored share always wins, clamped where it is drawn at both minimums", () => {
-    assert.deepEqual(sizes(574, 620, "below"), [327, 201]);
-    assert.deepEqual(sizes(574, 100), [145, 383], "clamped at the top's minimum");
-    assert.deepEqual(sizes(574, 950), [383, 145], "clamped at the bottom's minimum");
-    assert.deepEqual(sizes(390, 500, "top"), [172, 172], "a share below 193 lets Initiative's header scroll");
+    assert.deepEqual(sizes(710, 620, "below"), [412, 253]);
+    assert.deepEqual(sizes(710, 100), [133, 532], "clamped at the top's minimum");
+    assert.deepEqual(sizes(710, 950), [532, 133], "clamped at the bottom's minimum");
+    assert.deepEqual(sizes(390, 500, "top"), [173, 172], "a share below 193 lets Initiative's header scroll");
   });
 
   test("a stored share stays as it was while clamped, so a taller room draws it again", () => {
     const share = shareOf(500, 800);
-    assert.equal(splitPanes({ room: 390, share, initiative: null }).top, 199, "clamped in a short room");
+    assert.equal(splitPanes({ room: 390, share, initiative: null }).top, 212, "clamped in a short room");
     assert.equal(splitPanes({ room: 800, share, initiative: null }).top, 500, "back where it was");
   });
 
@@ -82,7 +82,7 @@ describe("the panes' sizes", () => {
   });
 
   test("the separator's percent of the room less the bar, with the clamps as its limits", () => {
-    assert.deepEqual(separatorValue(splitPanes({ room: 574, share: null, initiative: null })), { now: 50, min: 27, max: 73 });
+    assert.deepEqual(separatorValue(splitPanes({ room: 710, share: null, initiative: null })), { now: 50, min: 20, max: 80 });
   });
 });
 
@@ -100,8 +100,8 @@ describe("moving the bar", () => {
     const stepped = (dy: number) => splitPanes({ room: 574, share: shareOf(Math.min(s.max, Math.max(s.min, s.top + dy)), 574), initiative: null }).top;
     assert.equal(stepped(-8), 256);
     assert.equal(stepped(-64), 200);
-    assert.equal(stepped(-640), 145);
-    assert.equal(stepped(640), 383);
+    assert.equal(stepped(-640), 133);
+    assert.equal(stepped(640), 396);
   });
 
   test("a drag under the slop changes nothing, and past it follows the pointer, clamped", () => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
-import { Pill, PILL_FOCUS, PILL_HOST } from "../components/HeaderRow.tsx";
+import { headerRow, Pill, PILL_FOCUS, PILL_HOST } from "../components/HeaderRow.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
 import { Menu, type MenuSection } from "../components/Menu.tsx";
@@ -177,20 +177,16 @@ export function SplitBar(props: {
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
       style={{
+        ...headerRow(true),
+        position: "relative",
         flex: "none",
-        boxSizing: "border-box",
         height: BAR_PX,
-        display: "flex",
-        alignItems: "center",
-        gap: theme.space(1),
-        padding: `0 ${theme.space(2)}px`,
-        background: theme.color.surfaceRaised,
-        borderTop: `${theme.line.border}px solid ${theme.color.border}`,
-        borderBottom: `${theme.line.border}px solid ${theme.color.border}`,
         touchAction: "none",
         userSelect: "none",
       }}
     >
+      {/* The line over the bar, where it meets the pane above, drawn inside its band so the bar is a header row's height, as the tab row is. */}
+      <span aria-hidden style={{ position: "absolute", left: 0, right: 0, top: 0, height: theme.line.border, background: theme.color.border, pointerEvents: "none" }} />
       <div
         role="separator"
         tabIndex={0}

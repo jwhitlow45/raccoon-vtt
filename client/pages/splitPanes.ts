@@ -1,4 +1,4 @@
-import { SHEET_BODY_MIN, SHEET_HEADER } from "../components/sheetCap.ts";
+import { SHEET_BODY_MIN } from "../components/sheetCap.ts";
 import { TAP_SLOP_PX } from "../lib/gestures.ts";
 import { theme } from "../lib/theme.ts";
 
@@ -11,16 +11,23 @@ import { theme } from "../lib/theme.ts";
  */
 
 /**
- * A pane's least height: a subpage's header (SheetHeader's 56 px and its
- * 1 px border) above the very short sheet's least body. It holds whether or
- * not a header shows, so a subpage opening never moves the bar.
+ * Every header row of the side panel: a 44 px line and the 1 px rule at
+ * its foot (docs/design-v1-side-headers.md 5), the bar and a pane's
+ * subpage header alike.
  */
-export const PANE_MIN = SHEET_HEADER + theme.line.border + SHEET_BODY_MIN;
+const HEADER_ROW = theme.touch + theme.line.border;
 
-/** The bar between the panes: a 44 px row with a 1 px border above and below. */
-export const BAR_PX = theme.touch + 2 * theme.line.border;
+/**
+ * A pane's least height: a subpage's header (SheetHeader's compact row,
+ * 44 px, and its rule) above the very short sheet's least body. It holds
+ * whether or not a header shows, so a subpage opening never moves the bar.
+ */
+export const PANE_MIN = HEADER_ROW + SHEET_BODY_MIN;
 
-/** The room two panes and the bar take: 336 own px. */
+/** The bar between the panes: a header row, as the tab row is. */
+export const BAR_PX = HEADER_ROW;
+
+/** The room two panes and the bar take: 311 own px. */
 export const SPLIT_ROOM = 2 * PANE_MIN + BAR_PX;
 
 /**
