@@ -507,3 +507,100 @@ The quick dice lead with the d20, the die rolled most, so it is in view at every
 - "1d20+5 Stealth adv" parses to 1d20+5, label Stealth, one advantage source. Rolled with Dis pressed: two sources, a normal roll. Rolled alone: `2d20kh1+5`, drawn 14 and 7: "Bree rolled Stealth: 1d20+5 with advantage (14, 7 dropped) = 19."
 - The DM rolls Dexterity saves, secret, DC 15, for Goblin 1, which the party sees, and Goblin 3, hidden. The DMs read both rolls. Every player reads "Mara rolled in secret.", since made public the line would have kept Goblin 1. Rolled for Goblin 3 alone, players get nothing.
 - Bree's owl companion has a block with Dexterity save +3 and a request asks a Dexterity save, DC 13. The card shows "Roll +3". `roll.dice` resolves to 1d20+3, draws 9, total 12: the target gets `total: 12`, `result: 'fail'`, `dice`, and the DM and Bree read "Owl rolled 12 (1d20+3: 9) on a Dexterity saving throw against DC 13: fail." It is final for Bree. Bree asks for Bardic Inspiration's d8 (doc 4's `roll.change`), the DM's Allow sends `change` with the ask's id, the server draws 3: 15, a pass, `previous` keeps 12.
+
+## Addendum. Critical hit rules (2026-10-17)
+
+The project owner asked on 2026-10-17: "for crits please add a setting the dm can change for how crits are rolled. There are some common homebrew ways these are handled such as how our table does it: max damage + a roll. Please add the most common ones of these". This addendum adds one room setting with four rules, which the server applies. It changes sections 3.5, 4.1, 4.2, 5.1, 5.5, 8.3 and 8.7, and doc 3's Damage tap (4.2) and shared attacks (4.4), as X.7 lists.
+
+### X.1 The rules
+
+`RoomSettings.critRule`, one of four. Each applies to every damage die of the hit, riders included (Sneak Attack, Divine Smite, a toggled extra part). A flat modifier counts once, except where the rule doubles the total.
+
+| `critRule` | Its name in Room settings | A hit of 2d6+3 crits as | Faces 4 and 6 total |
+| --- | --- | --- | --- |
+| `rollTwice` (the default) | Roll the dice twice | 4d6+3 | four faces drawn instead |
+| `maxPlusRoll` | Max plus a roll | 12 + 2d6 + 3 | 25 |
+| `doubleDice` | Double the dice rolled | (2d6 × 2) + 3 | 23 |
+| `doubleTotal` | Double the total | (2d6 + 3) × 2 | 26 |
+
+- **Max** is every die at its highest face: a dice term's kept count times its sides, with the term's sign. A keep term maxes only what it keeps, so 4d6kh3 maxes to 18.
+- **A doubling** doubles the kept dice's sum (`doubleDice`) or the whole total (`doubleTotal`). A keep term keeps as it would without the crit.
+- **`rollTwice`** is section 3.5's `doubleDice`: every dice term's count doubled, a keep's n with it. It stays the default, the 2024 rule.
+- **One rule for the room**: the DM's monsters and the players' characters crit the same way. Absent, in every room from before the setting, reads `rollTwice` (`critRuleOf`), so no room changes until its DM picks another rule.
+- **Only attack damage after a critical hit.** Two paths roll it, the two callers of `damageRolls` (client/features/dice/options.ts): a named roll's Damage tap with Critical pressed, which an attack's kept d20 at or above `critOn` presses on its own, and the shared attack's "Roll damage for 4 hits" (doc 3 4.4), for each hit `hitOf` calls critical. Saves never crit: a save action's Damage shows no Critical (W7B-P-13), and the group save's damage is a save's. Doc 4's requests ask saves and checks only. Initiative, death saves and free formulas never crit.
+
+### X.2 Where the rule is applied: on the server
+
+The client sends the damage as asked with `critical: true` on the roll, and the resolve (4.2 step 4) applies the room's rule. Considered:
+
+1. **The client applies the rule and the server checks its formula** (rejected). A formula cannot say "max": 12+2d6+3 is a free roll anyone may type, so a check could test only its shape, and the result would not record which part was maxed. Client and server would also have to agree on the rule at the tap, so a setting changed while the tap travels would refuse a fair roll.
+2. **The server applies the rule from a `critical` flag** (chosen). No client computes a crit's formula or total. The resolve reads `state.meta.settings` as it reads a bonus, after permissions and before any draw, so the rule is the one standing when the op applies, and a client that does not know the rule cannot crit by another. The rule goes into the stored result (X.3), so replay, the log and every reader show the rule the dice were rolled under, whatever the setting says later.
+
+The server does not judge whether a hit was critical. Critical stays a person's toggle, as today: a hit within 5 feet on a paralyzed target crits whatever the d20 shows (SRD 5.2.1). The flag adds no power, since anyone may roll any formula. The label still says "critical damage", which an HP entry reads for a creature at 0 HP (doc 3 4.3).
+
+A page loaded before the deploy still sends the doubled formula without the flag. That rolls as a plain roll of those dice, the 2024 rule whatever the setting, until the page reloads. Nothing tells it from a free formula, so the server cannot refuse it.
+
+### X.3 Data and protocol
+
+```ts
+type CritRule = 'rollTwice' | 'maxPlusRoll' | 'doubleDice' | 'doubleTotal'   // CRIT_RULES (shared/model.ts)
+RoomSettings.critRule?: CritRule    // absent reads 'rollTwice'. DEFAULT_SETTINGS sets it for new rooms
+DiceRollInput.critical?: true       // a critical hit's damage: the resolve applies the room's rule (4.1)
+DiceResult.crit?: CritRule          // the rule this result was rolled under, set by the resolve alone (5.1)
+```
+
+- **`room.update`'s settings patch** gains `critRule`, one of the four. The patch is a strict object, so another value is refused. Only the DM sends `room.update` (unchanged), and its undo puts the meta back as for every setting.
+- **`dice.roll`**: a roll with `critical` has no `mode`, `save` or `critOn`, since it is damage, not a d20 test ("a critical hit's damage is no d20 roll"). Its dice count twice toward the op's 100, and its formula with every count doubled must fit 100 characters, whatever the room's rule. So the check stays the client op's own, needing no state, and `rollTwice`, the rule that draws the most, always fits. The splitter (8.4) counts the same way, so a crit past a bound is refused at the tap in Appendix A's words, where today's doubled formula was dropped without a word.
+- **The result**: under `rollTwice` the doubled formula and all its faces, as the client's doubled roll stored them. Under the other three the formula as asked and its faces, with `total` by the rule (`critTotal`). `crit` is set under all four, so a reader knows a critical hit's damage from the result, not only from its label.
+- **Schemas**: `sys.dice`'s results gain `crit`, and so do the import schema's `dice` lines and targets (`diceSchemas.diceResult`). A total stays within ±200,000: at most 50 dice of 1,000 sides before the rule, and 19 numbers of 1,000, give under 140,000 under any rule.
+- **Versions: neither moves.** `OP_VERSION` moves when a stored op must replay under the rule it was applied under, or when the protocol tightens (shared/migrate.ts). The reducer reads no crit rule: the resolve applies it before the op is stored, so a stored `sys.dice` replays to the same line under any later setting. Every new field is optional, and the new refusals touch only ops that carry `critical`, which no stored op does. `SNAPSHOT_VERSION` stays: a snapshot from before has no `critRule`, which reads `rollTwice`. A live room loads its snapshot without the import schema (server/rooms/persistence.ts), so the field stays absent there and an undo's guard hash of the meta still matches. The import schema defaults an old backup's to `rollTwice`, as it defaults `playersCreateCharacters`.
+
+### X.4 Functions (`shared/dice/crit.ts`)
+
+```ts
+critRuleOf(settings)              // the room's rule, absent read as 'rollTwice'
+rollCritical(formula, draw, rule) // Rolled: the resolve's roll of a critical hit's damage, `crit` set
+critTotal(formula, faces, rule)   // the total of the faces under the rule
+critParts(result)                 // { rule, max, dice, numbers, base } for a reader, null without `crit`
+critBound(formula)                // FormulaError | null: the op's and the splitter's check (X.3)
+askedCritical(result)             // the formula as asked, for Again: rollTwice's counts halved
+```
+
+### X.5 Display
+
+How a result was reached reads the same everywhere, from `crit` and the result's own formula and faces, never from the room's setting now:
+
+| Rule | `diceText`: the log, its export, a screen reader | Short: toasts, a row's result, the sticky line |
+| --- | --- | --- |
+| `rollTwice` | 4d6+3 (1, 2, 5, 6) = 17 | none, the dice say it |
+| `maxPlusRoll` | 12 max + 2d6+3 (4, 6) = 25 | 12 max + 13 |
+| `doubleDice` | 2d6 × 2 + 3 (4, 6) = 23 | 10 × 2 + 3 |
+| `doubleTotal` | (2d6+3) × 2 (4, 6) = 26 | 13 × 2 |
+
+- `doubleDice` writes its dice terms in parentheses when there are several, "(1d8+3d6) × 2 + 4", the numbers' sum after them. `doubleTotal` writes the formula in parentheses when it has more than one term.
+- **The log** (5.5): "Bree rolled Rapier critical damage and Sneak Attack, piercing: 26 max + 1d8+4+3d6 (5, 2, 3, 6) = 46."
+- **Recent rolls** (8.3): the row's formula reads the rule's expression before the face chips, "12 max + 2d6+3", so a player checks the sum.
+- **The sticky line** (8.2): the short form in muted text after the total and before the label, "25 (12 max + 13) Scimitar critical…", so a long label's ellipsis never takes it. A label too long for the line ellipsizes and never widens the panel sideways (the line's `minWidth: 0`, a fix the long crit labels showed). Its spoken result and **a closed panel's own roll** (8.7): "Rolled 25 (12 max + 13): Scimitar critical damage, slashing."
+- **Others' toasts** (8.5): "Bree rolled 25 (12 max + 13) for Scimitar critical damage, slashing." A damage of two types sums as today, with each roll's short form listed.
+- **A row's result** (doc 3 4.2): "25 (12 max + 13)", or by type "31: 25 slashing (12 max + 13), 6 fire (4 max + 2)".
+- **The Damage cell's second line** names the room's rule while Critical is pressed: "Critical: dice rolled twice", "Critical: max plus a roll", "Critical: dice doubled", "Critical: total doubled".
+- **Secret rolls stay secret**: another player's bare line carries no rolls (5.2), so no `crit` and no total reach them.
+
+### X.6 Room settings
+
+"Critical hit damage", in the Combat group, a choice of four. Its help: "How a critical hit rolls its damage, riders included, for every attack in this room." Each choice has one line:
+
+- **Roll the dice twice**: "2d6+3 crits as 4d6+3. The 2024 rule."
+- **Max plus a roll**: "The dice at their highest, plus a roll: 12 + 2d6 + 3."
+- **Double the dice rolled**: "The dice roll once and count twice: (2d6 × 2) + 3."
+- **Double the total**: "The whole damage counts twice: (2d6 + 3) × 2."
+
+### X.7 Changes to other designs
+
+- Doc 3 4.2's Damage tap and 4.4's shared attacks send each damage roll as asked with `critical: true`, never doubled on the client.
+- Section 3.5's `doubleDice` is the server's `rollTwice` now. Section 8.4's splitter counts a critical roll's dice twice.
+
+### X.8 Tests
+
+- **Unit**: `shared/dice/crit.test.ts`: each rule's formula and total with a scripted draw, riders merged into one formula, a keep term, a negative term, `critBound` at 50 and 51 dice and at the text bound, `askedCritical`. `server/rooms/dice.test.ts`: `dice.roll` with `critical` under each rule from the room's settings, an absent setting rolling twice, the stored `crit`, a setting changed later leaving the line as it was. `protocol.dice.test.ts`: `critRule` in the patch, another value refused, `critical` with a mode, a save or `critOn` refused, the doubled bounds. `batch.test.ts`: a critical roll counting twice. `stateSchema.test.ts`: an old backup defaulting `critRule`, and a snapshot without it reading `rollTwice`. `logText.dice.test.ts`: each rule's `diceText`, line and toast. Client: `damageRolls` sending the formula as asked with `critical`, `resultWords`, `againInput`, the settings field and its help.
+- **e2e**: `groupsave.e2e.ts` gains one step: under "Max plus a roll", a goblin's Scimitar with Critical pressed rolls 6 max + 1d6+2, and its row and line read so. Run it, `dice` and `reach`.
