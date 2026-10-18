@@ -297,6 +297,16 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     const fog = tools.getByRole("button", { name: "Fog", exact: true });
     const ruler = tools.getByRole("button", { name: "Ruler", exact: true });
     const toolIs = async (button: Locator, what: string) => waitFor(what, async () => ((await button.getAttribute("aria-pressed")) === "true" ? true : null));
+    /** A tool's tooltip, which a mouse's toolbar shows in place of a native title: the one its description names. */
+    const tipOf = (button: Locator) =>
+      button.evaluate((el) => {
+        const doc = (globalThis as unknown as { document: { getElementById(id: string): { getAttribute(name: string): string | null; textContent: string | null } | null } }).document;
+        for (const id of (el.getAttribute("aria-describedby") ?? "").split(" ")) {
+          const tip = doc.getElementById(id);
+          if (tip?.getAttribute("role") === "tooltip") return tip.textContent;
+        }
+        return null;
+      });
     const openSheet = async () => {
       await dm.keyboard.press("?");
       const sheet = dm.getByRole("dialog", { name: "Shortcuts" });
@@ -312,7 +322,8 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     const stored = () => dm.evaluate(() => localStorage.getItem("rvtt.keys"));
 
     await dm.keyboard.press("v");
-    assert.equal(await fog.getAttribute("title"), "Fog (F)", "the tooltip names the default key");
+    assert.equal(await tipOf(fog), "Fog (F)", "the tooltip names the default key");
+    assert.equal(await fog.getAttribute("title"), null, "an icon alone has the shared tooltip, never a native title");
     let sheet = await openSheet();
     const change = sheet.getByRole("button", { name: "Change the key for Fog", exact: true });
     // Escape while the row waits cancels the wait and leaves the sheet open.
@@ -332,7 +343,11 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await shots.take(dm, "kb-a-dm-fog-on-k");
     await closeSheet(sheet);
 
-    assert.equal(await fog.getAttribute("title"), "Fog (K)", "the tooltip names the new key at once");
+    assert.equal(await tipOf(fog), "Fog (K)", "the tooltip names the new key at once");
+    // It shows on hover, as every icon alone's name does.
+    await fog.hover();
+    await dm.locator('[role="tooltip"]:popover-open', { hasText: "Fog (K)" }).waitFor();
+    await dm.mouse.move(0, 0);
     await dm.keyboard.press("f");
     await dm.waitForTimeout(150);
     assert.equal(await fog.getAttribute("aria-pressed"), "false", "F no longer picks Fog");
@@ -343,7 +358,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     // A reload keeps it, on this device.
     await dm.reload();
     await dm.getByRole("status", { name: "Connected" }).first().waitFor();
-    assert.equal(await fog.getAttribute("title"), "Fog (K)", "the tooltip after a reload");
+    assert.equal(await tipOf(fog), "Fog (K)", "the tooltip after a reload");
     await dm.keyboard.press("k");
     await toolIs(fog, "K to pick Fog after a reload");
     await dm.keyboard.press("v");
@@ -368,8 +383,8 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await swap.click();
     await waitFor("Fog on R and Ruler on K", async () => ((await keyOf(sheet, "Fog")) === "R" && (await keyOf(sheet, "Ruler")) === "K" ? true : null));
     await closeSheet(sheet);
-    assert.equal(await fog.getAttribute("title"), "Fog (R)");
-    assert.equal(await ruler.getAttribute("title"), "Ruler (K)");
+    assert.equal(await tipOf(fog), "Fog (R)");
+    assert.equal(await tipOf(ruler), "Ruler (K)");
     await dm.keyboard.press("r");
     await toolIs(fog, "R to pick Fog");
     await dm.keyboard.press("k");
@@ -384,7 +399,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     assert.equal(await sheet.getByRole("button", { name: /^Reset the key for/ }).count(), 0, "nothing left to reset");
     assert.equal(await stored(), '{"v":1,"keys":{}}');
     await closeSheet(sheet);
-    assert.equal(await fog.getAttribute("title"), "Fog (F)");
+    assert.equal(await tipOf(fog), "Fog (F)");
     await dm.keyboard.press("f");
     await toolIs(fog, "F to pick Fog again");
     await dm.keyboard.press("v");

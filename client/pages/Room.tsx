@@ -15,6 +15,7 @@ import { Row } from "../components/Row.tsx";
 import { returnFocusAfterSheet, sheetFocusSlot, useAlertsSummaryEntry, useDockSummaryButton } from "../components/sheetFocus.ts";
 import { SheetHeader } from "../components/SheetHeader.tsx";
 import { NOTICE_TONES } from "../components/tones.ts";
+import { addsWords, useTooltip } from "../components/Tooltip.tsx";
 import { QuietLoadNotice } from "./QuietLoadNotice.tsx";
 import { Loading } from "../components/Loading.tsx";
 import { ScrollStrip } from "../components/ScrollStrip.tsx";
@@ -1879,6 +1880,7 @@ function Toolbar(props: {
           popup={opensMenu ? all : undefined}
           floating={wide}
           iconOnly
+          alone={!props.named}
           size={size}
           // The pair's second button carries its caret whether or not its tool is active, so the other tools behind it always show (5.1). While active, its menu takes the place of a pressed state, so its description says it is in use.
           mark={second ? (active && tucked ? "tucked" : "caret") : own && tucked ? "tucked" : null}
@@ -1964,7 +1966,7 @@ function Toolbar(props: {
       {wide ? (
         props.sideHidden ? (
           <div style={{ flex: "none", display: "flex", alignItems: "center", height: "100%" }}>
-            <ToolButton ref={props.panelsRef} label="Panels" active={false} expanded={false} controls={props.sidePanelId} onClick={props.onShowSide} floating iconOnly size={inRow ? size : "floating"}>
+            <ToolButton ref={props.panelsRef} label="Panels" active={false} expanded={false} controls={props.sidePanelId} onClick={props.onShowSide} floating iconOnly alone={!props.named} size={inRow ? size : "floating"}>
               {props.named ? <Stacked icon={panelsIcon} text="Panels" /> : panelsIcon}
               <Badge count={props.unread} corner label={props.unreadLabel} />
             </ToolButton>
@@ -2093,6 +2095,13 @@ function ToolButton(props: {
   label: string;
   /** Its key, which the tooltip adds to its name: "Fog (F)". */
   hint?: string;
+  /**
+   * Its icon stands alone, with no name under it (a mouse's toolbar), so
+   * its name shows as the shared tooltip on hover, keyboard focus and a
+   * long press, as every icon-only control's does (docs/design-v1-icons.md
+   * 3.2). A tool named under its icon keeps the native title.
+   */
+  alone?: boolean;
   active: boolean;
   onClick(): void;
   floating?: boolean;
@@ -2121,7 +2130,10 @@ function ToolButton(props: {
     [outer, anchorRef],
   );
   const expanded = popup ? undefined : props.expanded;
+  const name = props.hint ? `${props.label} (${props.hint})` : props.label;
+  const tooltip = useTooltip(name, { describes: addsWords(name, props.label) });
   return (
+    <>
     <button
       ref={ref}
       type="button"
@@ -2131,9 +2143,9 @@ function ToolButton(props: {
       aria-haspopup={popup?.anchorProps["aria-haspopup"]}
       {...(popup ? { "aria-expanded": popup.anchorProps["aria-expanded"] } : null)}
       aria-controls={popup?.open ? popup.anchorProps["aria-controls"] : props.controls}
-      aria-describedby={props.describedBy}
       aria-label={props.iconOnly ? props.label : undefined}
-      title={props.hint ? `${props.label} (${props.hint})` : props.label}
+      title={props.alone ? undefined : name}
+      {...(props.alone ? tooltip.anchor({ "aria-describedby": props.describedBy }) : { "aria-describedby": props.describedBy })}
       onClick={popup ? popup.anchorProps.onClick : props.onClick}
       onKeyDown={popup?.anchorProps.onKeyDown}
       style={{
@@ -2160,6 +2172,8 @@ function ToolButton(props: {
         </span>
       ) : null}
     </button>
+    {props.alone ? tooltip.tip : null}
+    </>
   );
 }
 
