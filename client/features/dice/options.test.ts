@@ -9,7 +9,9 @@ import { reminderPreset } from "#shared/rules/rollReminders.ts";
 import type { OptionState } from "./optionState.ts";
 import { ReceiptTracker } from "./useReceipt.ts";
 import { watchInitiative, type InitiativeEnv } from "./useRollOption.ts";
-import { asInitiative, asSave, creatureKey, CRIT_WORDS, critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, playerCreatures, presetLine, resultWords, routedTest, routeOf, scoreOf, spendOnStart, testLabel, withExtra, withUsed } from "./options.ts";
+import { TYPE_BONUS, BONUS_WORDS, parseBonus } from "../rolls/card.ts";
+import { creatureRolls } from "./creature.ts";
+import { asInitiative, asSave, creatureKey, CRIT_WORDS, critical, cutLabel, d20Roll, damageRolls, initiativeOp, initiativeRow, noNumbersNote, playerCreatures, presetLine, resultWords, routedTest, routeOf, scoreOf, spendOnStart, testLabel, typedTap, typedText, withExtra, withUsed } from "./options.ts";
 
 /** The roll options' rules (docs/design-v1-roll-options.md 4.2 and 4.3). */
 
@@ -67,6 +69,32 @@ describe("where a save or check tap goes", () => {
     assert.equal(routeOf({ state, creature: { tokenId: "breeTok" }, test: save, dm: true, played: true, ask: false }).kind, "roll");
     assert.equal(routeOf({ state, creature: { tokenId: "breeTok" }, test: { kind: "attack" }, dm: true, played: true, ask: true }).kind, "roll");
     assert.equal(routeOf({ state, creature: { tokenId: "gob" }, test: save, dm: true, played: false, ask: true }).kind, "roll");
+  });
+});
+
+describe("a creature with no numbers", () => {
+  test("lists its saves and checks with no bonus shown: the DM's ask needs none, and a roll here waits for the bonus typed (owner's no-numbers rule)", () => {
+    const state = table();
+    const dm = creatureRolls({ you: { memberId: "dm1", role: "dm" }, view: state, srd: { monsters: [], rolls: {} } }, { tokenId: "breeTok" })!;
+    assert.equal(dm.numbers, null, "Bree has no stat block");
+    assert.equal(dm.initBonus, state.characters.bree!.actor.initBonus, "its initiative is the card's own");
+    const save = { kind: "save" as const, ability: "dex" as const };
+    const asks = routeOf({ state, creature: { tokenId: "breeTok" }, test: save, dm: true, played: true, ask: true }).kind;
+    assert.deepEqual(typedTap(asks, null), { bonus: null, waits: null }, "an ask goes with nothing typed");
+    const rolls = routeOf({ state, creature: { tokenId: "breeTok" }, test: save, dm: true, played: true, ask: false }).kind;
+    assert.deepEqual(typedTap(rolls, null), { bonus: null, waits: TYPE_BONUS }, "never a +0 no one gave");
+    assert.deepEqual(typedTap(rolls, parseBonus("+3")), { bonus: 3, waits: null });
+    assert.deepEqual(typedTap(rolls, parseBonus("+99")), { bonus: null, waits: BONUS_WORDS });
+    const answer = routeOf({ state: table({ r1: request() }), creature: { characterId: "bree" }, test: save, dm: false, played: false, ask: false }).kind;
+    assert.equal(answer, "answer");
+    assert.deepEqual(typedTap(answer, null), { bonus: null, waits: TYPE_BONUS }, "a player's answer rolls here too");
+    assert.deepEqual([typedText("Str", null), typedText("Athletics", parseBonus("-1"))], ["Str d20", "Athletics d20-1"]);
+  });
+
+  test("its note says why no bonus shows and what a tap does", () => {
+    assert.equal(noNumbersNote({ name: "Bree", hidden: false, rollsHere: false }), "No stat block, so no bonus is known. A save or check tap asks its player.");
+    assert.equal(noNumbersNote({ name: "Bree", hidden: false, rollsHere: true }), "No stat block, so no bonus is known. Type the bonus of the roll you make, then tap it.");
+    assert.equal(noNumbersNote({ name: "Thorn", hidden: true, rollsHere: true }), "Thorn's numbers are for the DM and its own players. Type the bonus of the roll you make, then tap it.");
   });
 });
 

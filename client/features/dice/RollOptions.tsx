@@ -18,7 +18,7 @@ import { useRoomView } from "../../state/view.ts";
 import type { PanelProps } from "../panels.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { useOpenPcStats } from "../pcstats/open.ts";
-import { parseBonus, TYPE_BONUS } from "../rolls/card.ts";
+import { parseBonus } from "../rolls/card.ts";
 import { editsPcStats } from "../tokens/access.ts";
 import { Note, Section, SmallButton, Stepper } from "../tokens/ui.tsx";
 import { creatureRolls, type CreatureRolls, type DiceView } from "./creature.ts";
@@ -30,6 +30,7 @@ import {
   damageRolls,
   initiativeRow,
   namedRoll,
+  noNumbersNote,
   partToggleText,
   playerCreatures,
   presetLine,
@@ -41,8 +42,11 @@ import {
   signedText,
   spendOnStart,
   testLabel,
+  typedTap,
+  typedText,
   withUsed,
   writeUsed,
+  type TypedBonus,
 } from "./options.ts";
 import { useOption, useOptionStore } from "./optionState.ts";
 import { presetFor } from "./presets.ts";
@@ -209,19 +213,17 @@ function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creature: Ac
               })}
             </div>
           </Section>
+          {rolls.initBonus !== null ? <InitiativeCell ctx={ctx} bonus={rolls.initBonus} bonusText={signedText(rolls.initBonus)} /> : null}
         </>
-      ) : null}
-      {rolls.initBonus === null ? <TypedBonusOptions ctx={ctx} name={props.name} /> : <InitiativeCell ctx={ctx} bonus={rolls.initBonus} bonusText={signedText(rolls.initBonus)} />}
-      {!numbers && rolls.initBonus !== null ? (
-        <>
-          <Note>No stat block. Roll from the field above.</Note>
-          {character && actor?.srdId === undefined && editsPcStats(dice.you, character) ? (
-            <div>
-              <SmallButton onClick={() => openPcStats(character.id)}>Add a stat block</SmallButton>
-            </div>
-          ) : null}
-        </>
-      ) : null}
+      ) : (
+        <UnknownNumbers
+          ctx={ctx}
+          name={props.name}
+          skillsOpen={skillsOpen}
+          onSkills={() => setSkillsOpen((o) => !o)}
+          addBlock={character && actor?.srdId === undefined && rolls.initBonus !== null && editsPcStats(dice.you, character) ? () => openPcStats(character.id) : null}
+        />
+      )}
       {ACTION_SECTIONS.map(([section, title]) => {
         const these = named.filter((r) => r.section === section);
         const multiattack = section === "actions" ? rolls.multiattack : null;
@@ -335,11 +337,16 @@ function OptionCell(props: { text: string; sub?: string | undefined; name: strin
   );
 }
 
-/** A save, check, skill or attack button: its bonus, its preset in words, and where its tap goes. */
-function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; text: string; label?: string; critOn?: 18 | 19; rowKey?: string; onLanded?(critical: boolean): void }) {
+/**
+ * A save, check, skill or attack button: its bonus, its preset in words, and
+ * where its tap goes. With `unknown` the creature has no numbers here, and
+ * the tap goes by the bonus typed (options.ts typedTap).
+ */
+function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { typed: TypedBonus }; text: string; label?: string; critOn?: 18 | 19; rowKey?: string; onLanded?(critical: boolean): void }) {
   const { ctx, test } = props;
   const option = useRollOption();
   const route = routeOf({ state: ctx.dice.view, creature: ctx.creature, test, dm: ctx.dice.you.role === "dm", played: ctx.played, ask: ctx.ask });
+  const tap = props.unknown ? typedTap(route.kind, props.unknown.typed) : { bonus: props.bonus, waits: null };
   // An answer rolls the request's own test, with its `spell`, so the button shows the preset its tap sends.
   const presetOf = (t: D20Test) => presetFor(ctx.dice, ctx.creature, t, { rolls: ctx.rolls });
   const preset = presetOf(routedTest(route, test));
@@ -356,13 +363,14 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; text: string; 
       sub={sub || undefined}
       name={label}
       row={row}
-      disabled={ctx.blocked}
+      disabled={ctx.blocked ?? tap.waits}
       result={rolls.length > 0 ? resultWords(rolls, test.kind === "attack" ? "attack" : "d20") : null}
       onTap={() =>
         option.d20({
           creature: ctx.creature,
           test,
-          bonus: props.bonus,
+          bonus: tap.bonus,
+          ...(props.unknown ? { typed: true } : {}),
           preset,
           presetOf,
           label,
@@ -378,52 +386,83 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; text: string; 
 }
 
 /**
- * The options of a creature whose numbers this viewer does not hold: a
- * character rolled for through a token lent to them, whose numbers go only
- * to the DM and its own players (docs/design-v1-pc-stats.md 4.2). Its
- * saves, checks and initiative roll a d20 with the bonus the player types,
- * as a request's card does for a creature with no stat block, never a "+0"
- * this device does not know. One field serves the roll tapped next.
+ * The saves, checks, skills and initiative of a creature whose numbers this
+ * viewer does not hold: one with no stat block, or a character rolled for
+ * through a token lent to them, whose numbers go only to the DM and its own
+ * players (docs/design-v1-pc-stats.md 4.2). Each is listed with no bonus
+ * shown. A tap that asks a player needs none, and any other waits for the
+ * bonus typed in the one field, which serves the roll tapped next.
  */
-function TypedBonusOptions(props: { ctx: Ctx; name: string }) {
+function UnknownNumbers(props: { ctx: Ctx; name: string; skillsOpen: boolean; onSkills(): void; addBlock: (() => void) | null }) {
   const { ctx } = props;
   const [text, setText] = useState("");
   const typed = parseBonus(text);
-  const bonus = typed?.ok ? typed.bonus : null;
-  const d20 = bonus === null ? "d20" : `d20${signedText(bonus)}`;
-  // Each roll waits for the bonus, its reason the card's words.
-  const cells: Ctx = ctx.blocked === null && bonus === null ? { ...ctx, blocked: typed?.ok === false ? typed.error : TYPE_BONUS } : ctx;
+  const unknown = { typed };
+  const init = ctx.rolls.initBonus;
+  const hidden = init === null;
+  const state = ctx.dice.view;
+  const dm = ctx.dice.you.role === "dm";
+  // The field shows where some tap rolls here. A DM's Ask on a player's creature needs none, its initiative aside.
+  const rollsHere =
+    hidden || TESTS.some((test) => routeOf({ state, creature: ctx.creature, test, dm, played: ctx.played, ask: ctx.ask }).kind !== "ask");
   return (
     <>
-      <Note>{`${props.name}'s numbers are for the DM and its own players. Type the bonus of the roll you make, then tap it.`}</Note>
-      <label style={{ display: "flex", alignItems: "center", gap: theme.space(2), fontWeight: theme.weight.strong }}>
-        Bonus
-        <Input
-          value={text}
-          placeholder="+0"
-          enterKeyHint="done"
-          autoComplete="off"
-          maxLength={3}
-          error={typed?.ok === false}
-          onChange={(e) => setText(e.target.value)}
-          style={{ width: 88, flex: "none", textAlign: "center" }}
-        />
-      </label>
-      {typed?.ok === false ? <Note tone="error">{typed.error}</Note> : null}
+      <Note>{noNumbersNote({ name: props.name, hidden, rollsHere })}</Note>
+      {props.addBlock ? (
+        <div>
+          <SmallButton onClick={props.addBlock}>Add a stat block</SmallButton>
+        </div>
+      ) : null}
+      {rollsHere ? (
+        <>
+          <label style={{ display: "flex", alignItems: "center", gap: theme.space(2), fontWeight: theme.weight.strong }}>
+            Bonus
+            <Input
+              value={text}
+              placeholder="+0"
+              enterKeyHint="done"
+              autoComplete="off"
+              maxLength={3}
+              error={typed?.ok === false}
+              onChange={(e) => setText(e.target.value)}
+              style={{ width: 88, flex: "none", textAlign: "center" }}
+            />
+          </label>
+          {typed?.ok === false ? <Note tone="error">{typed.error}</Note> : null}
+        </>
+      ) : null}
       <Grid label="Saves">
         {ABILITY_KEYS.map((a) => (
-          <D20Cell key={a} ctx={cells} test={{ kind: "save", ability: a }} bonus={bonus ?? 0} text={`${ABILITY_SHORT[a]} ${d20}`} />
+          <D20Cell key={a} ctx={ctx} test={{ kind: "save", ability: a }} bonus={0} unknown={unknown} text={typedText(ABILITY_SHORT[a], typed)} />
         ))}
       </Grid>
       <Grid label="Checks">
         {ABILITY_KEYS.map((a) => (
-          <D20Cell key={a} ctx={cells} test={{ kind: "check", ability: a }} bonus={bonus ?? 0} text={`${ABILITY_SHORT[a]} ${d20}`} />
+          <D20Cell key={a} ctx={ctx} test={{ kind: "check", ability: a }} bonus={0} unknown={unknown} text={typedText(ABILITY_SHORT[a], typed)} />
         ))}
       </Grid>
-      <InitiativeCell ctx={cells} bonus={bonus ?? 0} bonusText={d20} />
+      <Section title="Skills" fold={{ open: props.skillsOpen, onToggle: props.onSkills }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: theme.space(1) }}>
+          {SKILL_KEYS.map((s: SkillKey) => (
+            <D20Cell key={s} ctx={ctx} test={{ kind: "check", ability: SKILLS[s].ability, skill: s }} bonus={0} unknown={unknown} text={typedText(SKILLS[s].name, typed)} />
+          ))}
+        </div>
+      </Section>
+      {init !== null ? (
+        <InitiativeCell ctx={ctx} bonus={init} bonusText={signedText(init)} />
+      ) : (
+        <InitiativeCell ctx={{ ...ctx, blocked: ctx.blocked ?? typedTap("roll", typed).waits }} bonus={typed?.ok ? typed.bonus : 0} bonusText={typed?.ok ? `d20${signedText(typed.bonus)}` : "d20"} />
+      )}
     </>
   );
 }
+
+/** Every save, check and skill a creature lists, for whether any tap of one rolls here. */
+const TESTS: readonly D20Test[] = [
+  ...ABILITY_KEYS.map((ability): D20Test => ({ kind: "save", ability })),
+  ...ABILITY_KEYS.map((ability): D20Test => ({ kind: "check", ability })),
+  ...SKILL_KEYS.map((skill): D20Test => ({ kind: "check", ability: SKILLS[skill].ability, skill })),
+];
 
 /**
  * Initiative (4.2, 4.3): "+2", in a fight "Initiative +2, sets its row",

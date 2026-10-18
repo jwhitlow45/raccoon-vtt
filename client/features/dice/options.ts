@@ -9,6 +9,7 @@ import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { critSums, effectName } from "#shared/logText.ts";
 import type { PanelRoll } from "./useDicePanel.ts";
+import { parseBonus, TYPE_BONUS } from "../rolls/card.ts";
 
 /**
  * The rules of the Dice panel's roll options (docs/design-v1-roll-options.md
@@ -192,6 +193,36 @@ export function routeOf(input: { state: Pick<RoomState, "tokens" | "rolls">; cre
  */
 export function routedTest(route: Route, test: D20Test): D20Test {
   return route.kind === "answer" ? testOf(route.request, route.choice) : test;
+}
+
+// ------------------------------------------------------------ no numbers
+
+/** What the bonus field of a creature with no numbers reads, by parseBonus: null while empty. */
+export type TypedBonus = ReturnType<typeof parseBonus>;
+
+/**
+ * A d20 tap for a creature whose numbers this viewer does not hold: one
+ * with no stat block, or a character whose numbers go only to the DM and
+ * its own players (docs/design-v1-pc-stats.md 4.2). Its saves, checks and
+ * skills are listed all the same. An ask needs no bonus, since its player
+ * answers it. A roll here, an answer included, takes the bonus typed, and
+ * waits for one, so no "+0" goes that no one gave.
+ */
+export function typedTap(route: Route["kind"], typed: TypedBonus): { bonus: number | null; waits: string | null } {
+  if (route === "ask") return { bonus: null, waits: null };
+  if (typed?.ok) return { bonus: typed.bonus, waits: null };
+  return { bonus: null, waits: typed?.ok === false ? typed.error : TYPE_BONUS };
+}
+
+/** Such a creature's option as its button reads: "Str d20", then "Str d20+3" once a bonus is typed. */
+export function typedText(name: string, typed: TypedBonus): string {
+  return typed?.ok ? `${name} d20${signedText(typed.bonus)}` : `${name} d20`;
+}
+
+/** The note over such a creature's options: why no bonus shows, and what a tap does. */
+export function noNumbersNote(input: { name: string; hidden: boolean; rollsHere: boolean }): string {
+  const why = input.hidden ? `${input.name}'s numbers are for the DM and its own players.` : "No stat block, so no bonus is known.";
+  return input.rollsHere ? `${why} Type the bonus of the roll you make, then tap it.` : `${why} A save or check tap asks its player.`;
 }
 
 /** The request target a `roll.dice` names: the target as the request holds it. */

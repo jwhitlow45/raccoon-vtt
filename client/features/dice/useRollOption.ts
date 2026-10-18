@@ -57,7 +57,13 @@ export function useRollOption() {
       d20(input: {
         creature: ActorTarget;
         test: D20Test;
-        bonus: number;
+        /**
+         * Its bonus, or null where this viewer knows none and none is typed:
+         * then only an ask goes, which needs none (options.ts typedTap).
+         */
+        bonus: number | null;
+        /** The bonus is one the viewer typed, so an answer sends it for the server to use where it knows none. */
+        typed?: boolean;
         preset: RollPreset;
         /**
          * The creature's preset for another test, read at the tap. An answer
@@ -80,6 +86,7 @@ export function useRollOption() {
           openAsk(scope, { kind: "selection", tokenIds: [input.tokenId], fill: { test: rollTestOf(input.test) } });
           return "asked";
         }
+        if (input.bonus === null) return null;
         if (route.kind === "answer") {
           const preset = input.presetOf ? input.presetOf(routedTest(route, input.test)) : input.preset;
           // The taken choices belong to this tap, as a panel roll's do, and come back if nothing went.
@@ -96,6 +103,7 @@ export function useRollOption() {
               ...(route.request.test.choices.length > 1 ? { choice: route.choice === 1 ? (1 as const) : (0 as const) } : {}),
               ...advantageFields([...preset.sources, ...taken.sources]),
               ...(extra ? { extra } : {}),
+              ...(input.typed ? { bonus: input.bonus } : {}),
               ...(dm ? { unanswered: true as const } : {}),
             },
             { onAnswer: (answer) => answer === "refused" && taken.restore() },
