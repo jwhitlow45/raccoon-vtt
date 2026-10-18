@@ -357,7 +357,8 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await dm.keyboard.press("Tab");
     assert.equal(await focusedName(dm), "Move window");
     const grip = frame.getByRole("button", { name: "Move window", exact: true });
-    assert.equal(await grip.getAttribute("title"), "Move window");
+    // Its name shows beside it on keyboard focus, in place of a native title (docs/design-v1-icons.md 3.2).
+    await dm.getByRole("tooltip").filter({ hasText: "Move window" }).waitFor();
     const described = await grip.getAttribute("aria-describedby");
     assert.ok(described, "the grip names no description of its keys");
     assert.match((await dm.locator(`[id="${described}"]`).textContent()) ?? "", /^Drag to move the window\. With this focused, the arrow keys move it/);
@@ -398,7 +399,12 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     const resetBox = await rectOf(resetButton);
     const closeBox = await rectOf(frame.getByRole("button", { name: "Close", exact: true }));
     assert.ok(resetBox.right <= closeBox.left + 0.5 && Math.abs(resetBox.top - closeBox.top) < 1, `Reset is not left of Close: ${JSON.stringify({ resetBox, closeBox })}`);
-    assert.equal(await resetButton.getAttribute("title"), "Reset window position and size");
+    await resetButton.hover();
+    await dm.getByRole("tooltip").filter({ hasText: "Reset window position and size" }).waitFor();
+    await dm.mouse.move(0, 0);
+    // The tooltip's wait lets the keys rest, so the status says the Shift+ArrowUp spot before the held key below.
+    await dm.waitForTimeout(900);
+    assert.deepEqual(await said(), ["Window 24 pixels from the right and 64 pixels from the bottom"]);
 
     // A held key moves the window to its room's edge and no further.
     await grip.focus();

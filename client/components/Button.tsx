@@ -1,7 +1,9 @@
-import type { ButtonHTMLAttributes, CSSProperties, MouseEvent, Ref } from "react";
+import type { ButtonHTMLAttributes, CSSProperties, MouseEvent, ReactNode, Ref } from "react";
 import { theme } from "../lib/theme.ts";
 import { Icon, type IconName } from "./Icon.tsx";
 import { Spinner } from "./Loading.tsx";
+import { useTooltip } from "./Tooltip.tsx";
+import { isCoarsePointer } from "../lib/device.ts";
 import { buttonLook, dangerLook, type ButtonVariant } from "./looks.ts";
 
 export type { ButtonVariant } from "./looks.ts";
@@ -51,7 +53,31 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   busy?: boolean;
   /** An icon before the label, such as the copy icon on "Copy link". */
   icon?: IconName;
+  /**
+   * The icon alone, its words (`children`, or `aria-label`) its name and
+   * its tooltip (docs/design-v1-icons.md 3.1): `always` for an icon read at
+   * once without hover, such as the trash can (rule 1), and `fine` for one
+   * a mouse learns from its tooltip, which a touch screen draws with its
+   * words, since nothing may need hover (rule 2).
+   */
+  iconOnly?: "always" | "fine";
 };
+
+/**
+ * The words among a button's children, its name when its icon stands
+ * alone. A caller may pass its words beside a mark that is not always
+ * there (a tool row's check), so an array of words and nothing counts too.
+ */
+function wordsOf(children: ReactNode): string | undefined {
+  const parts: string[] = [];
+  const walk = (node: ReactNode) => {
+    if (typeof node === "string" || typeof node === "number") parts.push(String(node));
+    else if (Array.isArray(node)) node.forEach(walk);
+  };
+  walk(children);
+  const text = parts.join("").trim();
+  return text === "" ? undefined : text;
+}
 
 /**
  * The one button (docs/design-v1-visual.md 2.3). At least 44 px tall and
@@ -62,9 +88,15 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
  * destructive actions, and `armed` marks one that waits for its second tap.
  */
 export function Button(props: ButtonProps) {
-  const { variant = "secondary", size = "md", block, armed, pressed, expanded, busy, icon, style, disabled, onClick, children, ...rest } = props;
+  const { variant = "secondary", size = "md", block, armed, pressed, expanded, busy, icon, iconOnly, title, style, disabled, onClick, children, onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onFocus, onBlur, ...rest } = props;
   const ignore = busy === true && disabled !== true;
-  return (
+  const bare = icon !== undefined && (iconOnly === "always" || (iconOnly === "fine" && !isCoarsePointer()));
+  const name = rest["aria-label"] ?? wordsOf(children);
+  // An icon alone shows its name on hover, keyboard focus and a long press (Tooltip.tsx), never the native title, which a keyboard never shows.
+  const tipped = icon !== undefined && (bare || children === undefined || children === null || children === false);
+  const tooltip = useTooltip(title ?? name ?? "", { describes: title !== undefined && title !== name });
+  const handlers = { onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onFocus, onBlur };
+  const button = (
     <button
       type="button"
       disabled={disabled}
@@ -72,6 +104,9 @@ export function Button(props: ButtonProps) {
       aria-expanded={expanded}
       aria-busy={busy ? true : undefined}
       {...rest}
+      aria-label={bare ? name : rest["aria-label"]}
+      title={tipped ? undefined : title}
+      {...(tipped ? tooltip.anchor({ ...handlers, "aria-describedby": rest["aria-describedby"] }) : handlers)}
       onClick={(e: MouseEvent<HTMLButtonElement>) => {
         // Not `disabled`: a busy button keeps its focus and its color. A submit button's default would send the form again.
         if (ignore) {
@@ -94,11 +129,19 @@ export function Button(props: ButtonProps) {
         cursor: disabled || busy ? "default" : "pointer",
         width: block ? "100%" : undefined,
         ...buttonLook(variant, { pressed: pressed ?? expanded, disabled, armed }),
+        ...(bare ? { padding: 0 } : null),
         ...style,
       }}
     >
-      {busy ? <Spinner size={theme.icon.sm} /> : icon ? <Icon name={icon} size="sm" /> : null}
-      {children}
+      {busy ? <Spinner size={theme.icon.sm} /> : icon ? <Icon name={icon} size={bare ? "md" : "sm"} /> : null}
+      {bare ? null : children}
     </button>
+  );
+  if (!tipped) return button;
+  return (
+    <>
+      {button}
+      {tooltip.tip}
+    </>
   );
 }

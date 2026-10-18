@@ -99,6 +99,29 @@ describe("choices and icon buttons", () => {
     assert.doesNotMatch(markup, /opacity/);
   });
 
+  test("an icon alone is named by its words and shows them on hover and focus, never in a native title (docs/design-v1-icons.md 3)", () => {
+    const icon = html(createElement(IconButton, { icon: "close", label: "Close Journal" }));
+    assert.doesNotMatch(icon, / title=/);
+    assert.match(icon, /<div[^>]*role="tooltip"[^>]*>Close Journal<\/div>/);
+    assert.doesNotMatch(icon, /aria-describedby/, "a tip that only repeats the name is not read twice");
+    const more = html(createElement(IconButton, { icon: "undo", label: "Undo", title: "Undo your last change" }));
+    assert.match(more, /aria-describedby="([^"]+)"[\s\S]*role="tooltip"[^>]*>Undo your last change</, "a tip that says more is the button's description");
+    for (const iconOnly of ["always", "fine"] as const) {
+      // A server render has no pointer to ask, so `fine` draws as a computer's.
+      const bare = html(createElement(Button, { icon: "delete", iconOnly, title: "Delete Goblin" }, "Delete"));
+      assert.match(bare, /aria-label="Delete"/, iconOnly);
+      assert.doesNotMatch(bare, />Delete</, "no words beside the icon");
+      assert.match(bare, /role="tooltip"[^>]*>Delete Goblin</);
+      assert.match(bare, /min-width:44px/);
+    }
+    // A tool row's button passes its words beside a check that shows only when pressed in ⋯ (measure/controls.tsx OptButton).
+    const rowed = html(createElement(Button, { icon: "duplicate", iconOnly: "fine" }, "Duplicate", null));
+    assert.match(rowed, /aria-label="Duplicate"/, "words beside nothing still name an icon alone");
+    const worded = html(createElement(Button, { icon: "copy", title: "Copies the link" }, "Copy link"));
+    assert.match(worded, / title="Copies the link"/, "words beside an icon keep the native title");
+    assert.doesNotMatch(worded, /role="tooltip"/);
+  });
+
   test("every icon draws and hides itself from screen readers", () => {
     for (const name of ICON_NAMES) {
       const markup = html(createElement(Icon, { name }));

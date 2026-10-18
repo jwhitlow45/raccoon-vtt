@@ -23,7 +23,7 @@ export function IconButton(
     children?: ReactNode;
   },
 ) {
-  const { icon, label, title, pressed, disabled, style, children, ...rest } = props;
+  const { icon, label, title, pressed, disabled, style, children, onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onFocus, onBlur, ...rest } = props;
   // The name on hover, keyboard focus and a long press, never covering the button (docs/design-v1-icons.md 3). Said by a reader only when it adds to the name.
   const tooltip = useTooltip(title ?? label, { describes: title !== undefined && title !== label });
   const look: CSSProperties = disabled
@@ -36,10 +36,10 @@ export function IconButton(
     <button
       type="button"
       aria-label={label}
-      {...tooltip.anchor}
       aria-pressed={pressed}
       disabled={disabled}
       {...rest}
+      {...tooltip.anchor({ onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onFocus, onBlur, "aria-describedby": rest["aria-describedby"] })}
       style={{
         flex: "none",
         display: "inline-grid",

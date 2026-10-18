@@ -12,7 +12,6 @@ import { Icon, type IconName } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
 import { GRIP_ATTR, PaneHeader, STICKY_HEADER_ATTR, type PaneHandle } from "../components/SheetHeader.tsx";
 import { useLayoutSize } from "../features/device/layout.ts";
-import { isCoarsePointer } from "../lib/device.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { useOptionStore } from "../features/dice/optionState.ts";
 import { useGroupSaveStore } from "../features/dice/groupSave/store.ts";
@@ -1449,8 +1448,6 @@ function BarButton(props: {
   /** The icon alone on every screen: only for an icon read at once without hover, such as the trash can. */
   always?: boolean;
 }) {
-  const bare = props.icon !== undefined && props.iconOnly === true && (props.always === true || !isCoarsePointer());
-  const words = typeof props.children === "string" ? props.children : undefined;
   return (
     <Button
       ref={props.ref}
@@ -1460,17 +1457,17 @@ function BarButton(props: {
       armed={props.armed}
       pressed={props.half ? undefined : props.pressed}
       aria-pressed={props.half ? "mixed" : props.pressed}
-      aria-label={props.label ?? (bare ? words : undefined)}
-      title={props.label ?? (bare ? words : undefined)}
-      icon={bare ? undefined : props.icon}
+      aria-label={props.label}
+      title={props.label}
+      icon={props.icon}
+      iconOnly={props.iconOnly ? (props.always ? "always" : "fine") : undefined}
       onClick={props.onClick}
       style={{
         flex: props.grow ? "1 0 auto" : "none",
-        ...(bare ? { minWidth: theme.touch, padding: 0 } : null),
         ...(props.half ? { background: theme.color.surfaceRaised, border: `${theme.line.border}px dashed ${theme.color.accent}`, color: theme.color.text } : null),
       }}
     >
-      {bare ? <Icon name={props.icon!} size="md" /> : props.children}
+      {props.children}
     </Button>
   );
 }

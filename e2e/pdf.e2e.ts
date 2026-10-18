@@ -910,7 +910,9 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
         const icon = (await reset.boundingBox())!;
         assert.ok(icon.x + icon.width <= magnified[0]!.x + 1 && Math.abs(icon.y - magnified[0]!.y) < 1, `Reset zoom is not to the left of the zoom buttons at ${what}: ${JSON.stringify(icon)}`);
         assert.ok(icon.width >= 44 && icon.height >= 44, `Reset zoom is too small at ${what}`);
-        assert.equal(await reset.getAttribute("title"), "Reset zoom");
+        // Its name shows in a tooltip on hover, focus or a long press, never as a native title (docs/design-v1-icons.md 3.2).
+        assert.equal(await reset.getAttribute("aria-label"), "Reset zoom");
+        assert.equal(await reset.getAttribute("title"), null);
         if (size.width === 320) {
           const row = popup.getByRole("button", { name: "Previous page" }).locator("..");
           const zoom = popup.getByRole("button", { name: "Zoom in" }).locator("..");
