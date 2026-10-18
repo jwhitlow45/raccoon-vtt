@@ -11,7 +11,7 @@ import type { LicenseId } from "#shared/licenses.ts";
 import { STARTER_KINDS, indexWorks, starterAssetCredit, type StarterPack, type StarterUse, type StarterWork } from "#shared/starter.ts";
 import { STARTER_PACKS } from "#shared/starterArt.ts";
 import { STARTER_HOURLY } from "../assets/limits.ts";
-import { roomStoredBytes } from "../assets/quota.ts";
+import { RoomQuota, roomStoredBytes } from "../assets/quota.ts";
 import { FakeAuth, buildAssetApp, dropRooms, makeRoom, testConfig, testPool } from "../assets/testApp.ts";
 import { solid, tempDir } from "../assets/testImages.ts";
 import type { ExportManifest } from "../rooms/exportRoom.ts";
@@ -603,25 +603,52 @@ describe("a starter pick in a room export and import (docs/design-v1-starter-art
     assert.ok((await roomStoredBytes(t.pool, roomId)) >= Number(token?.bytes));
   });
 
+  /** Imports the export as a version 1 manifest, so every image comes from the zip and reserves quota, into `engine`. */
+  async function importAllFromZip(engine: Engine) {
+    const entries = new Map(files);
+    const v1 = { formatVersion: 1, assets: manifest.assets.map(({ starter: _starter, ...a }) => a) };
+    entries.set("assets.json", Buffer.from(JSON.stringify(v1)));
+    return engine.client().request(
+      "POST",
+      "/api/rooms/import",
+      undefined,
+      { "content-type": "application/zip", "x-import-form": Buffer.from(JSON.stringify({ playerPassword: "owlbear-druid-wand", dmName: "Importer" })).toString("base64url") },
+      await zipOf(entries),
+    );
+  }
+
+  const roomsNamed = async (engine: Engine) => (await engine.pool.query<{ n: string }>("select count(*) as n from rooms where name = $1", ["Starter source"])).rows[0]?.n;
+
   test("an import whose images do not fit the room's quota is refused whole, and its room is removed", async () => {
     // Each zip image reserves its kind's whole size cap, which a 1 MiB quota never has room for.
     const small = await startEngine({ env: { ROOM_QUOTA_MB: "1" }, assets: { starter: { packs: fixture.packs, root: fixture.root } } });
     try {
-      const entries = new Map(files);
-      const v1 = { formatVersion: 1, assets: manifest.assets.map(({ starter: _starter, ...a }) => a) };
-      entries.set("assets.json", Buffer.from(JSON.stringify(v1)));
-      const named = async () => (await small.pool.query<{ n: string }>("select count(*) as n from rooms where name = $1", ["Starter source"])).rows[0]?.n;
-      const before = await named();
-      const res = await small.client().request(
-        "POST",
-        "/api/rooms/import",
-        undefined,
-        { "content-type": "application/zip", "x-import-form": Buffer.from(JSON.stringify({ playerPassword: "owlbear-druid-wand", dmName: "Importer" })).toString("base64url") },
-        await zipOf(entries),
-      );
+      const before = await roomsNamed(small);
+      const res = await importAllFromZip(small);
       assert.equal(res.statusCode, 413, res.body);
       assert.deepEqual(res.json(), { error: "quota_exceeded" });
-      assert.equal(await named(), before);
+      assert.equal(await roomsNamed(small), before);
+    } finally {
+      await small.close();
+    }
+  });
+
+  test("an import whose image's variants outgrow its reservation past the quota is refused whole at commit, and its room is removed", async () => {
+    const small = await startEngine({ assets: { starter: { packs: fixture.packs, root: fixture.root } } });
+    try {
+      // A map near its 32 MiB cap whose variants come out bigger than the upload, within a room's last few MiB,
+      // stands here as a reservation of one byte against a quota of 1,000: admission passes, and the variants'
+      // real total then meets the quota's second look at commit (quota.ts commitReservation).
+      const quota = new RoomQuota(1000, (roomId) => roomStoredBytes(small.pool, roomId));
+      const reserve = quota.reserve.bind(quota);
+      quota.reserve = (roomId: string) => reserve(roomId, 1);
+      (small.app.assets as unknown as { quota: RoomQuota }).quota = quota;
+      const before = await roomsNamed(small);
+      const res = await importAllFromZip(small);
+      assert.equal(res.statusCode, 413, res.body);
+      assert.deepEqual(res.json(), { error: "quota_exceeded" });
+      assert.equal(await roomsNamed(small), before);
+      assert.equal(quota.reservedBytes("any"), 0);
     } finally {
       await small.close();
     }

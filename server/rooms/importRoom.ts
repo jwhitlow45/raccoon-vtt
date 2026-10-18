@@ -14,6 +14,7 @@ import { assetCreditSchema } from "#shared/protocol.ts";
 import { STARTER_KEY, type FoundWork, type StarterKind } from "#shared/starter.ts";
 import type { Member, RoomState } from "#shared/model.ts";
 import { splitCheck } from "#shared/rules/walls.ts";
+import { isAssetError } from "../assets/errors.ts";
 import { KINDS, isAssetKind, type AssetKind } from "../assets/kinds.ts";
 import type { AssetService } from "../assets/service.ts";
 import { StarterWorkError, isStarterKind, workForKind, type StarterCatalog } from "../assets/starter.ts";
@@ -352,12 +353,16 @@ async function importImages(
  * manifest is untrusted, so one bad image is expected input and does not
  * sink the room. Only the image's own steps run here. A room over its
  * quota, or a disk that is full, is no fault of one image, so those
- * refusals are checked before and refuse the whole import.
+ * refusals are checked before and refuse the whole import. So does the
+ * quota's second look at commit, when an image's variants came out bigger
+ * than its reservation and no longer fit (quota.ts commitReservation):
+ * skipping that image would make a room whose scenes lost their art.
  */
 async function skippingRefusals(deps: ImportDeps, roomId: string, name: string, run: () => Promise<ImportedAsset | null>): Promise<ImportedAsset | null> {
   try {
     return await run();
   } catch (err) {
+    if (isAssetError(err) && err.code === "quota_exceeded") throw err;
     if (err instanceof Error && "status" in err && typeof (err as { status: unknown }).status === "number" && (err as { status: number }).status < 500) {
       deps.log.warn({ roomId, entry: name, err: err.message }, "import skipped an image");
       return null;
