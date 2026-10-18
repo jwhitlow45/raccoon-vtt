@@ -729,13 +729,16 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await bar(dm, "Goblin 4").getByRole("button", { name: "Details", exact: true }).click();
     const panel = tokenPanel(dm);
     await panel.getByRole("heading", { name: "Goblin 4" }).waitFor();
-    // A folded group's heading holds its summary after its name, so each is read by its first line.
-    const headings = (await panel.locator("h3").allInnerTexts()).map((h) => h.trim().toLowerCase().split("\n")[0]!.trim());
+    // A folded group's heading holds its summary after its name, so each is read by its first line. A group's sections are h4s under its h3.
+    const headings = (await panel.locator("h3, h4").allInnerTexts()).map((h) => h.trim().toLowerCase().split("\n")[0]!.trim());
     const order = ["goblin 4", "stat block", "combat", "hit points", "conditions", "range rings", "rest", "notes", "position", "image", "stats", "token settings", "owners", "remove"];
     const at = order.map((h) => headings.indexOf(h));
     assert.ok(at.every((i) => i >= 0), `missing headings: ${JSON.stringify({ headings })}`);
     for (let i = 1; i < at.length; i++) assert.ok(at[i]! > at[i - 1]!, `out of order: ${headings.join(" | ")}`);
     assert.equal(headings.includes("companion"), false);
+    assert.equal(await panel.getByRole("heading", { name: "Combat", level: 3 }).count(), 1, "a group is an h3");
+    for (const name of ["Hit points", "Conditions", "Range rings", "Rest"]) assert.equal(await panel.getByRole("heading", { name, level: 4 }).count(), 1, `${name} is an h4 inside Combat`);
+    assert.equal(await panel.getByRole("region").count(), 0, "no group is a landmark");
     for (const name of ["Notes", "Position", "Image", "Stats", "Token settings", "Owners"]) assert.equal(await panel.getByRole("button", { name, exact: true }).getAttribute("aria-expanded"), "false", `${name} starts open`);
     assert.equal(await panel.getByRole("button", { name: "Combat", exact: true }).getAttribute("aria-expanded"), "true", "Combat starts folded");
     // A folded group says what it holds on its row, and only while folded.
