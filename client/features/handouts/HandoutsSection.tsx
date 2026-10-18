@@ -16,7 +16,7 @@ import { useScoped } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomView } from "../../state/view.ts";
 import { FileButton, RadioGroup } from "../dm/controls.tsx";
 import { honorsImageOrientation } from "../images/orientation.ts";
-import { docShowing } from "../images/library.ts";
+import { apartFromStarter, docShowing } from "../images/library.ts";
 import { checkImageFile, prepareImageUpload } from "../images/upload.ts";
 import { EMPTY_DRAFT, handoutDraftSlot, withPick, withTypedTitle, type HandoutDraft } from "./draft.ts";
 import { HANDOUT_MAX_BYTES, HANDOUT_MAX_SIDE } from "./downscale.ts";
@@ -260,6 +260,19 @@ function ShowHandout(props: {
   const uploading = jobPageIds(pdf.job);
   const inDocs = useMemo(() => new Set(docs.flatMap((d) => d.pages.map((p) => p.assetId))), [docs]);
   const loose = library?.filter((a) => !inDocs.has(a.id) && !uploading.has(a.id)) ?? null;
+  // The DM's own images first, then the starter picks apart (docs/design-v1-starter-art.md 5), as the Library panel lists them.
+  const looseApart = apartFromStarter(loose ?? [], (a) => a);
+  const imageTile = (a: AssetRow) => (
+    <button
+      key={a.id}
+      type="button"
+      aria-label="Use this image"
+      onClick={() => draftStore.setState(withPick(draftStore.getState(), { kind: "image", asset: a }, ""))}
+      style={{ padding: 0, border: `${theme.line.border}px solid ${theme.color.border}`, borderRadius: theme.radius.sm, background: "transparent", cursor: "pointer", aspectRatio: "1" }}
+    >
+      <img src={assets.url(a.id, "thumb")} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: theme.radius.sm }} />
+    </button>
+  );
 
   if (!open) {
     return (
@@ -408,7 +421,7 @@ function ShowHandout(props: {
             {library || docs.length > 0 ? (
               docs.length === 0 && loose?.length === 0 ? (
                 <Help>No handout images yet. Upload one.</Help>
-              ) : (
+              ) : docs.length === 0 && looseApart.own.length === 0 ? null : (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))", gap: theme.space(2) }}>
                   {docs.map((d) => (
                     <button
@@ -433,19 +446,15 @@ function ShowHandout(props: {
                       </span>
                     </button>
                   ))}
-                  {(loose ?? []).map((a) => (
-                    <button
-                      key={a.id}
-                      type="button"
-                      aria-label="Use this image"
-                      onClick={() => draftStore.setState(withPick(draftStore.getState(), { kind: "image", asset: a }, ""))}
-                      style={{ padding: 0, border: `${theme.line.border}px solid ${theme.color.border}`, borderRadius: theme.radius.sm, background: "transparent", cursor: "pointer", aspectRatio: "1" }}
-                    >
-                      <img src={assets.url(a.id, "thumb")} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: theme.radius.sm }} />
-                    </button>
-                  ))}
+                  {looseApart.own.map(imageTile)}
                 </div>
               )
+            ) : null}
+            {looseApart.starter.length > 0 ? (
+              <>
+                <Help>From starter packs</Help>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))", gap: theme.space(2) }}>{looseApart.starter.map(imageTile)}</div>
+              </>
             ) : null}
           </>
         )}

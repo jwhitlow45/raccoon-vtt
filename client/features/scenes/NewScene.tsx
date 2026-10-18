@@ -13,6 +13,7 @@ import { copyUrls, importFound, importSearch, IMPORT_WAIT_MS, nameGivesSize, sea
 import { showOutcome } from "../grid/outcome.ts";
 import { endFinding, useGridStore } from "../grid/store.ts";
 import { useLandLater } from "../grid/useFindGrid.ts";
+import { apartFromStarter } from "../images/library.ts";
 import { loadedStarterWork } from "../starter/catalog.ts";
 import { answeredGrid, retainedGrid, starterMapScene, type StarterGrid } from "../starter/mapScene.ts";
 import { StarterDialog } from "../starter/StarterDialog.tsx";
@@ -356,10 +357,11 @@ function FeetNote(props: { found: FoundWork; roomFeet: number }) {
 
 /**
  * Maps already in the room, so one image can back several scenes. The list
- * is fetched when the form opens, never polled.
+ * is fetched when the form opens, never polled. The DM's own uploads come
+ * first and starter picks after, apart (docs/design-v1-starter-art.md 5),
+ * as the Library panel lists them.
  */
 function UploadedMaps(props: { roomId: string; disabled: boolean; onPick(row: AssetRow): void }) {
-  const assets = useAssets();
   const [maps, setMaps] = useState<AssetRow[] | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -372,11 +374,26 @@ function UploadedMaps(props: { roomId: string; disabled: boolean; onPick(row: As
     };
   }, [props.roomId]);
   if (!maps || maps.length === 0) return null;
+  const { own, starter } = apartFromStarter(maps, (m) => m);
   return (
     <div style={{ display: "grid", gap: theme.space(1) }}>
-      <Help>Or use a map already uploaded</Help>
-      <div style={{ display: "flex", gap: theme.space(2), overflowX: "auto", paddingBottom: theme.space(1) }}>
-        {maps.map((m) => (
+      <Help>Or use a map already in this room</Help>
+      {own.length > 0 ? <MapStrip maps={own} disabled={props.disabled} onPick={props.onPick} /> : null}
+      {starter.length > 0 ? (
+        <>
+          <Help>From starter packs</Help>
+          <MapStrip maps={starter} disabled={props.disabled} onPick={props.onPick} />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function MapStrip(props: { maps: readonly AssetRow[]; disabled: boolean; onPick(row: AssetRow): void }) {
+  const assets = useAssets();
+  return (
+    <div style={{ display: "flex", gap: theme.space(2), overflowX: "auto", paddingBottom: theme.space(1) }}>
+      {props.maps.map((m) => (
           <button
             key={m.id}
             type="button"
@@ -400,7 +417,6 @@ function UploadedMaps(props: { roomId: string; disabled: boolean; onPick(row: As
             />
           </button>
         ))}
-      </div>
     </div>
   );
 }
