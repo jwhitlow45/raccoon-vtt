@@ -84,6 +84,10 @@ describe("the side panel's party bar", () => {
     assert.equal(hasParty(owned([])), false);
     assert.equal(hasParty(room({})), false);
     assert.equal(hasParty(null), false);
+    // A player's copy of another player's character, which carries no owners, never breaks the side panel.
+    const unowned = owned(["p1"]);
+    delete (unowned.characters.c as { ownerIds?: string[] }).ownerIds;
+    assert.equal(hasParty(unowned), false);
   });
 });
 

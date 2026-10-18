@@ -15,7 +15,8 @@ const Bar = quietLazy(() => import("./PartyBar.tsx").then((m) => m.PartyBar), ["
  */
 export function PartyDock(props: { short?: boolean }) {
   const dm = useRoomView((s) => s.you?.role === "dm");
-  const party = useRoomView((s) => hasParty(s.view));
+  // Only the DM's view holds every character's owners, so a player's never asks.
+  const party = useRoomView((s) => s.you?.role === "dm" && hasParty(s.view));
   if (!dm || !party) return null;
   return (
     // A header row's padding (components/HeaderRow.tsx): none above or below, so the folded bar is one 44 px line.
@@ -29,9 +30,10 @@ export function PartyDock(props: { short?: boolean }) {
  * Whether a player owns a character, so the bar has a party to show
  * (rolls/logic.ts partyCharacters). Counting every character left an empty
  * strip with a rule for a room whose characters no player owns yet, since
- * the bar draws nothing then.
+ * the bar draws nothing then. A player's copy of another player's character
+ * has no owners (shared/project.ts), which counts as none.
  */
 export function hasParty(view: Pick<RoomState, "members" | "characters"> | null | undefined): boolean {
   if (!view) return false;
-  return Object.values(view.characters).some((c) => c !== undefined && c.ownerIds.some((id) => view.members[id]?.kind === "player"));
+  return Object.values(view.characters).some((c) => c !== undefined && (c.ownerIds ?? []).some((id) => view.members[id]?.kind === "player"));
 }
