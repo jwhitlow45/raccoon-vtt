@@ -132,7 +132,7 @@ function Sources(props: { sceneId: string }) {
                 </span>
                 <span style={{ color: row.lends ? theme.color.textMuted : theme.color.warning }}>
                   {noSightText(row)}
-                  {row.lends && row.blinded ? ". Blinded: blindsight only" : ""}
+                  {row.lends && row.blinded ? ". Blinded: Blindsight only" : ""}
                 </span>
               </li>
             ))}

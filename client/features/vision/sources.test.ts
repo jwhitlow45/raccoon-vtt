@@ -21,7 +21,7 @@ describe("senses", () => {
     assert.deepEqual(sensesLines(parseSenses("Darkvision 60 ft."), 5), ["Sees in the dark to 60 ft"]);
     assert.deepEqual(sensesLines(parseSenses(""), 5), ["Sees only where there is light"]);
     assert.equal(sensesLines(parseSenses("truesight 120 ft, blindsight 10 ft"), 5).length, 2);
-    assert.equal(sensesShort(parseSenses("Darkvision 60 ft, blindsight 10 ft"), 5), "darkvision 60 ft, blindsight 10 ft");
+    assert.equal(sensesShort(parseSenses("Darkvision 60 ft, blindsight 10 ft"), 5), "Darkvision 60 ft, Blindsight 10 ft");
     assert.equal(sensesShort(parseSenses(""), 5), "needs light");
   });
 });

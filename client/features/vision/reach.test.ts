@@ -23,7 +23,7 @@ describe("what senses and lights reach on the room's grid", () => {
     assert.equal(senseOnGrid(60, 1), 30);
     assert.equal(senseFeetText(60, 1), "60 ft (reaches 30 ft on this grid)");
     assert.deepEqual(sensesLines(parseSenses("Darkvision 60 ft."), 1), ["Sees in the dark to 60 ft (reaches 30 ft on this grid)"]);
-    assert.equal(sensesShort(parseSenses("Darkvision 60 ft, blindsight 10 ft"), 1), "darkvision 60 ft (reaches 30 ft on this grid), blindsight 10 ft");
+    assert.equal(sensesShort(parseSenses("Darkvision 60 ft, blindsight 10 ft"), 1), "Darkvision 60 ft (reaches 30 ft on this grid), Blindsight 10 ft");
     // Under the cap in cells, a sense reads as written on any grid.
     assert.equal(senseFeetText(30, 1), "30 ft");
     // At 2 ft per cell, 30 cells are 60 ft.

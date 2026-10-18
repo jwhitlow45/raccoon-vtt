@@ -57,7 +57,7 @@ export function TokenSight(props: { token: Token; actor: Partial<Actor> | undefi
       {access.dm && row ? (
         <Help style={row.lends ? undefined : { color: theme.color.warning }}>
           {noSightText(row)}
-          {row.lends && row.blinded ? ". Blinded, it sees only by blindsight." : ""}
+          {row.lends && row.blinded ? ". Blinded, it sees only by Blindsight." : ""}
         </Help>
       ) : null}
       {canLight ? (

@@ -16,19 +16,19 @@ export { parseSenses, type Senses } from "#shared/rules/vision.ts";
 export function sensesLines(s: Senses, feetPerCell: number): string[] {
   const lines: string[] = [];
   const ft = (feet: number) => senseFeetText(feet, feetPerCell);
-  if (s.truesight > 0) lines.push(`Sees through any darkness to ${ft(s.truesight)} (truesight)`);
+  if (s.truesight > 0) lines.push(`Sees through any darkness to ${ft(s.truesight)} (Truesight)`);
   if (s.darkvision > 0) lines.push(`Sees in the dark to ${ft(s.darkvision)}`);
-  if (s.blindsight > 0) lines.push(`Senses its surroundings to ${ft(s.blindsight)} without light (blindsight)`);
+  if (s.blindsight > 0) lines.push(`Senses its surroundings to ${ft(s.blindsight)} without light (Blindsight)`);
   if (lines.length === 0) lines.push("Sees only where there is light");
   return lines;
 }
 
-/** The senses in a few words, for a row in the Vision settings: "darkvision 60 ft, blindsight 10 ft". */
+/** The senses in a few words, for a row in the Vision settings: "Darkvision 60 ft, Blindsight 10 ft". */
 export function sensesShort(s: Senses, feetPerCell: number): string {
   const parts: string[] = [];
   const ft = (feet: number) => senseFeetText(feet, feetPerCell);
-  if (s.darkvision > 0) parts.push(`darkvision ${ft(s.darkvision)}`);
-  if (s.blindsight > 0) parts.push(`blindsight ${ft(s.blindsight)}`);
-  if (s.truesight > 0) parts.push(`truesight ${ft(s.truesight)}`);
+  if (s.darkvision > 0) parts.push(`Darkvision ${ft(s.darkvision)}`);
+  if (s.blindsight > 0) parts.push(`Blindsight ${ft(s.blindsight)}`);
+  if (s.truesight > 0) parts.push(`Truesight ${ft(s.truesight)}`);
   return parts.length > 0 ? parts.join(", ") : "needs light";
 }
