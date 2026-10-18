@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { INPUT_ATTR, isTextField, modalityAfter, trackInputModality, type InputEventLike, type ModalityHost, type ModalityRoot } from "./inputModality.ts";
+import { INPUT_ATTR, modalityAfter, takesTypedText, trackInputModality, type InputEventLike, type ModalityHost, type ModalityRoot } from "./inputModality.ts";
 
 /** A window that fires the events a test sends, and the `<html>` whose attribute it sets. */
 class FakePage implements ModalityHost, ModalityRoot {
@@ -117,13 +117,13 @@ describe("input modality", () => {
   });
 
   test("a text field is a text-like input, a textarea or an editable element", () => {
-    for (const type of ["text", "search", "email", "number", "password", "date", "tel", "url"]) assert.equal(isTextField({ tagName: "INPUT", type }), true, type);
-    assert.equal(isTextField({ tagName: "INPUT" }), true, "no type is text");
-    for (const type of ["checkbox", "radio", "range", "button", "submit", "color", "file"]) assert.equal(isTextField({ tagName: "INPUT", type }), false, type);
-    assert.equal(isTextField({ tagName: "TEXTAREA" }), true);
-    assert.equal(isTextField({ tagName: "DIV", isContentEditable: true }), true);
-    assert.equal(isTextField({ tagName: "SELECT" }), false, "a select's arrow keys move between options, as a key press");
-    assert.equal(isTextField(button), false);
-    assert.equal(isTextField(null), false);
+    for (const type of ["text", "search", "email", "number", "password", "date", "tel", "url"]) assert.equal(takesTypedText({ tagName: "INPUT", type }), true, type);
+    assert.equal(takesTypedText({ tagName: "INPUT" }), true, "no type is text");
+    for (const type of ["checkbox", "radio", "range", "button", "submit", "color", "file"]) assert.equal(takesTypedText({ tagName: "INPUT", type }), false, type);
+    assert.equal(takesTypedText({ tagName: "TEXTAREA" }), true);
+    assert.equal(takesTypedText({ tagName: "DIV", isContentEditable: true }), true);
+    assert.equal(takesTypedText({ tagName: "SELECT" }), false, "a select's arrow keys move between options, as a key press");
+    assert.equal(takesTypedText(button), false);
+    assert.equal(takesTypedText(null), false);
   });
 });

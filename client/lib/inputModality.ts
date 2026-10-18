@@ -31,11 +31,16 @@ const NOT_TEXT = new Set(["button", "checkbox", "color", "file", "hidden", "imag
 /** The parts of an input event this reads, so the rules can be tested without a browser. */
 export type InputEventLike = { type: string; key?: string; ctrlKey?: boolean; metaKey?: boolean; target?: unknown };
 
-/** The parts of an element `isTextField` reads. */
+/** The parts of an element `takesTypedText` reads. */
 type FieldLike = { tagName?: unknown; type?: unknown; isContentEditable?: unknown };
 
-/** Whether `el` takes typed text: a text-like input, a textarea, or an editable element. */
-export function isTextField(el: unknown): boolean {
+/**
+ * Whether `el` takes typed text: a text-like input, a textarea, or an
+ * editable element. Not shortcuts.ts `isTextField`, which counts a select
+ * box too, since a select picks by typed letters. Here a select's arrow
+ * keys are a key press like any other.
+ */
+export function takesTypedText(el: unknown): boolean {
   if (typeof el !== "object" || el === null) return false;
   const f = el as FieldLike;
   if (f.isContentEditable === true) return true;
@@ -51,7 +56,7 @@ export function modalityAfter(now: InputModality | null, e: InputEventLike): Inp
   const key = e.key ?? "";
   if (MODIFIERS.has(key)) return now;
   const shortcut = e.ctrlKey === true || e.metaKey === true;
-  if (!shortcut && key !== "Tab" && key !== "Escape" && isTextField(e.target)) return now;
+  if (!shortcut && key !== "Tab" && key !== "Escape" && takesTypedText(e.target)) return now;
   return "keys";
 }
 
