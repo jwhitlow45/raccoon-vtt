@@ -3,11 +3,18 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { chance, int, pick, rng } from "#shared/testutil.ts";
 import { FakeClock } from "../state/testing.ts";
-import type { TipEvent } from "./Tooltip.tsx";
+import type { TipClick, TipEvent } from "./Tooltip.tsx";
 
 const { FOCUS_MS, HOVER_MS, KEEP_MS, PRESS_MS, TipTimer, addsWords, placeTip, placeTipZoomed } = await import("./Tooltip.tsx");
 
 /** The tooltip's rules (docs/design-v1-icons.md 3.2), on a fake clock and with plain boxes for the DOM. */
+
+// Clicks as browsers send them: a finger's lift, Enter or Space (`detail` 0), a screen reader's (no pointer named), a mouse's, and Safari's, which names no pointer at all.
+const FINGER: TipClick = { detail: 1, pointerType: "touch" };
+const KEYBOARD: TipClick = { detail: 0, pointerType: "" };
+const READER: TipClick = { detail: 1, pointerType: "" };
+const MOUSE: TipClick = { detail: 1, pointerType: "mouse" };
+const UNNAMED: TipClick = { detail: 1 };
 
 function timer() {
   const clock = new FakeClock();
@@ -53,7 +60,7 @@ describe("when a tooltip shows (docs/design-v1-icons.md 3.2)", () => {
     tip.send({ t: "leave", pointer: "touch" });
     clock.advance(3000);
     assert.deepEqual(changes, [], "a tap is a tap");
-    assert.equal(tip.takeClick(), false, "a tap's click reaches the control");
+    assert.equal(tip.takeClick(FINGER), false, "a tap's click reaches the control");
     tip.send({ t: "enter", pointer: "touch" });
     tip.send({ t: "down", pointer: "touch" });
     clock.advance(PRESS_MS);
@@ -82,14 +89,14 @@ describe("when a tooltip shows (docs/design-v1-icons.md 3.2)", () => {
     tip.send({ t: "down", pointer: "touch" });
     clock.advance(PRESS_MS);
     tip.send({ t: "up" });
-    assert.equal(tip.takeClick(), true, "the long press's click is swallowed");
-    assert.equal(tip.takeClick(), false, "only that once");
+    assert.equal(tip.takeClick(FINGER), true, "the long press's click is swallowed");
+    assert.equal(tip.takeClick(FINGER), false, "only that once");
     // A press the browser cancels for a scroll closes the name and keeps nothing for a later click.
     tip.send({ t: "down", pointer: "touch" });
     clock.advance(PRESS_MS);
     tip.send({ t: "cancel" });
     assert.equal(tip.shown, false);
-    assert.equal(tip.takeClick(), false);
+    assert.equal(tip.takeClick(FINGER), false);
     // A long press whose click never came (Android's context menu) does not eat the next tap's.
     tip.send({ t: "down", pointer: "touch" });
     clock.advance(PRESS_MS);
@@ -97,14 +104,114 @@ describe("when a tooltip shows (docs/design-v1-icons.md 3.2)", () => {
     tip.send({ t: "down", pointer: "touch" });
     clock.advance(100);
     tip.send({ t: "up" });
-    assert.equal(tip.takeClick(), false);
+    assert.equal(tip.takeClick(FINGER), false);
     // A mouse held as long is a click as usual.
     tip.send({ t: "enter", pointer: "mouse" });
     clock.advance(HOVER_MS);
     tip.send({ t: "down", pointer: "mouse" });
     clock.advance(PRESS_MS);
     tip.send({ t: "up" });
-    assert.equal(tip.takeClick(), false);
+    assert.equal(tip.takeClick(FINGER), false);
+  });
+
+  test("a long press whose click never came takes no later click: a keyboard's or a reader's runs the control at once, and any once the name has gone", () => {
+    const hold = () => {
+      const t = timer();
+      t.tip.send({ t: "enter", pointer: "touch" });
+      t.tip.send({ t: "down", pointer: "touch" });
+      t.clock.advance(PRESS_MS);
+      t.tip.send({ t: "up" });
+      t.tip.send({ t: "leave", pointer: "touch" });
+      assert.equal(t.tip.shown, true);
+      return t;
+    };
+    {
+      // Android's context menu ate the click. Then Enter, then a screen reader's click, each runs the control.
+      const { tip } = hold();
+      assert.equal(tip.takeClick(KEYBOARD), false, "Enter or Space runs the control");
+      assert.equal(tip.takeClick(READER), false, "and so does a screen reader's click");
+    }
+    {
+      const { tip } = hold();
+      assert.equal(tip.takeClick(READER), false, "a screen reader's click, while the name is still up, runs the control");
+    }
+    {
+      const { tip } = hold();
+      assert.equal(tip.takeClick(MOUSE), false, "a mouse's click runs the control");
+    }
+    {
+      const { tip } = hold();
+      assert.equal(tip.takeClick(UNNAMED), true, "where the browser names no pointer, the hold's lift is still taken");
+    }
+    {
+      const { clock, tip } = hold();
+      clock.advance(KEEP_MS);
+      assert.equal(tip.shown, false);
+      assert.equal(tip.takeClick(UNNAMED), false, "once the name has gone, nothing is taken");
+    }
+    for (const e of [{ t: "key" }, { t: "blur" }, { t: "focus", visible: true }, { t: "escape" }, { t: "scroll" }] as TipEvent[]) {
+      const { tip } = hold();
+      tip.send(e);
+      assert.equal(tip.takeClick(UNNAMED), false, `after ${e.t}, a click runs the control`);
+    }
+    {
+      // A finger's own focus comes between its lift and its click, and is no reason to let the click through.
+      const { tip } = hold();
+      tip.send({ t: "focus", visible: false });
+      assert.equal(tip.takeClick(FINGER), true);
+    }
+  });
+
+  test("randomized: a click is taken only from a finger, a pen or an unnamed pointer, never Enter or Space, only while the name is up, and once a press", () => {
+    let takes = 0;
+    for (let seed = 1; seed <= 300; seed++) {
+      const r = rng(seed);
+      const { clock, tip } = timer();
+      let takenThisPress = false;
+      // A browser clicks only once no finger is down.
+      let pressing = false;
+      for (let step = 0; step < 80; step++) {
+        if (!pressing && chance(r, 0.2)) {
+          // A whole long press as a browser sends it, so lifts that showed the name come often.
+          tip.send({ t: "down", pointer: "touch" });
+          takenThisPress = false;
+          clock.advance(PRESS_MS + int(r, 0, 300));
+          tip.send({ t: "up" });
+          tip.send({ t: "leave", pointer: "touch" });
+        } else if (!pressing && chance(r, 0.4)) {
+          const click = pick(r, [FINGER, KEYBOARD, READER, MOUSE, UNNAMED, { detail: 1, pointerType: "pen" }]);
+          const shown = tip.shown;
+          const taken = tip.takeClick(click);
+          if (taken) {
+            assert.notEqual(click.detail, 0, `seed ${seed}: never a keyboard's click`);
+            assert.ok(click.pointerType === undefined || click.pointerType === "touch" || click.pointerType === "pen", `seed ${seed}: never a ${click.pointerType || "reader"}'s click`);
+            assert.ok(shown, `seed ${seed}: only while the name is up`);
+            assert.equal(takenThisPress, false, `seed ${seed}: once a press`);
+            takenThisPress = true;
+            takes++;
+          }
+        } else {
+          const e: TipEvent = pick(r, [
+            { t: "enter", pointer: pick(r, ["mouse", "touch"]) },
+            { t: "leave", pointer: pick(r, ["mouse", "touch"]) },
+            { t: "down", pointer: pick(r, ["mouse", "touch"]) },
+            { t: "up" },
+            { t: "cancel" },
+            { t: "focus", visible: chance(r, 0.5) },
+            { t: "blur" },
+            { t: "key" },
+            { t: "escape" },
+            { t: "scroll" },
+          ] satisfies TipEvent[]);
+          tip.send(e);
+          if (e.t === "down") takenThisPress = false;
+          if (e.t === "down" || e.t === "up" || e.t === "cancel") pressing = e.t === "down" && e.pointer === "touch";
+        }
+        clock.advance(chance(r, 0.5) ? 0 : int(r, 0, 900));
+      }
+      tip.dispose();
+    }
+    assert.ok(takes > 50, `the run reaches a held lift's click often enough to mean something: ${takes}`);
   });
 
   test("Escape, a scroll, a cancelled pointer and a mouse press close it", () => {
@@ -137,6 +244,7 @@ describe("when a tooltip shows (docs/design-v1-icons.md 3.2)", () => {
           { t: "cancel" },
           { t: "focus", visible: chance(r, 0.5) },
           { t: "blur" },
+          { t: "key" },
           { t: "escape" },
           { t: "scroll" },
         ] satisfies TipEvent[]);
@@ -153,8 +261,8 @@ describe("when a tooltip shows (docs/design-v1-icons.md 3.2)", () => {
         } else if (e.t === "up") {
           armed = null;
           keepUntil = was ? clock.t + KEEP_MS : null;
-        } else if (e.t === "leave" && e.pointer !== "mouse") {
-          // A finger's or pen's leave comes with its lift, and changes nothing.
+        } else if ((e.t === "leave" && e.pointer !== "mouse") || e.t === "key") {
+          // A finger's or pen's leave comes with its lift, and a key only stops a hold taking a click: neither changes what shows.
         } else if (e.t !== "enter") {
           armed = null;
           keepUntil = null;

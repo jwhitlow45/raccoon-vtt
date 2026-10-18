@@ -20,8 +20,13 @@ export type TipEvent =
   | { t: "cancel" }
   | { t: "focus"; visible: boolean }
   | { t: "blur" }
+  /** Any key but Escape, anywhere, while the tip is up. */
+  | { t: "key" }
   | { t: "escape" }
   | { t: "scroll" };
+
+/** What `takeClick` reads of a click: `detail` 0 for Enter or Space, and the pointer, which some browsers do not name. */
+export type TipClick = { detail: number; pointerType?: string };
 
 export type TipClock = { set(run: () => void, ms: number): unknown; clear(handle: unknown): void };
 
@@ -35,7 +40,11 @@ export class TipTimer {
   #pending: unknown = null;
   /** A finger is on the control. */
   #pressing = false;
-  /** A held finger showed the name, so the click its lift makes is not a tap (`takeClick`). */
+  /**
+   * A held finger showed the name, so the click its lift makes is not a tap
+   * (`takeClick`). Only while the name is up: a hold whose click never came
+   * (Android's context menu) must not take a later one.
+   */
   #pressShown = false;
   readonly #clock: TipClock;
   readonly #onChange: (shown: boolean) => void;
@@ -73,7 +82,14 @@ export class TipTimer {
         return;
       case "focus":
         // Only keyboard focus: a mouse or a finger that focuses the control by pressing it is handled by its pointer.
-        if (e.visible) this.#after(FOCUS_MS, true);
+        if (e.visible) {
+          this.#pressShown = false;
+          this.#after(FOCUS_MS, true);
+        }
+        return;
+      case "key":
+        // A key means the next click may be the keyboard's or a reader's, which is never the hold's.
+        this.#pressShown = false;
         return;
       default:
         this.#set(false);
@@ -84,12 +100,17 @@ export class TipTimer {
    * True once after a held finger showed the name: the click its lift
    * makes then belongs to learning the name, not to the control, so a long
    * press on Delete never deletes. A tap, or a press that ended first, is
-   * a click as usual.
+   * a click as usual. So is a keyboard's click, and one whose pointer the
+   * browser names as anything but a finger or a pen, such as a screen
+   * reader's, which names none (""). Where the browser names no pointer at
+   * all, the hold's flag alone decides, and it lasts only while the name
+   * is up.
    */
-  takeClick(): boolean {
+  takeClick(click: TipClick): boolean {
     const held = this.#pressShown;
     this.#pressShown = false;
-    return held;
+    if (!held || click.detail === 0) return false;
+    return click.pointerType === undefined || click.pointerType === "touch" || click.pointerType === "pen";
   }
 
   dispose(): void {
@@ -112,6 +133,7 @@ export class TipTimer {
   #set(shown: boolean): void {
     this.#cancel();
     if (shown && this.#pressing) this.#pressShown = true;
+    if (!shown) this.#pressShown = false;
     if (this.shown === shown) return;
     this.shown = shown;
     this.#onChange(shown);
@@ -211,9 +233,10 @@ export function useTooltip(text: string, opts: { describes?: boolean } = {}): { 
     tip.style.top = `${place.top}px`;
     tip.style.left = `${place.left}px`;
     tip.style.visibility = "visible";
+    // Heard only while the tip is up, the only time a hold can have armed takeClick, so every key before a keyboard's click reaches the timer.
     const close = (e: Event) => {
-      if (e instanceof KeyboardEvent && e.key !== "Escape") return;
-      timer.send({ t: e instanceof KeyboardEvent ? "escape" : "scroll" });
+      if (e instanceof KeyboardEvent) timer.send({ t: e.key === "Escape" ? "escape" : "key" });
+      else timer.send({ t: "scroll" });
     };
     window.addEventListener("keydown", close, true);
     window.addEventListener("scroll", close, true);
@@ -253,7 +276,7 @@ export function useTooltip(text: string, opts: { describes?: boolean } = {}): { 
       },
       // Capture, so the control's own onClick never hears it.
       onClickCapture: (e: MouseEvent<HTMLElement>) => {
-        if (timer.takeClick()) {
+        if (timer.takeClick(e.nativeEvent as TipClick)) {
           e.preventDefault();
           e.stopPropagation();
           return;
