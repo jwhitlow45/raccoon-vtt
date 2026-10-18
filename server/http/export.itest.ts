@@ -557,6 +557,47 @@ describe("room export and import", () => {
     assert.deepEqual(rows[0]!.state.handoutDocs, {});
   });
 
+  test("a backup from before the dragon turtle's id was fixed imports with the new id everywhere it named the old one", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Shell game");
+    const dmSocket = await t.connect(roomId, dm);
+    const sceneId = ((await dmSocket.snapshot("dm")).state as ProjectedState).meta.playerSceneId!;
+    const tokenId = uuidv7();
+    const image = { icon: "lorc/turtle", color: "#30a46c" };
+    for (const op of [
+      { t: "monster.setSrdImage", srdId: "dragon-turtle", image },
+      { t: "token.create", token: { id: tokenId, sceneId, kind: "monster", name: "Dragon Turtle", size: "gargantuan", x: 2, y: 2, image, actor: { inline: { ...actor, srdId: "dragon-turtle" } } } },
+      { t: "savedEncounter.create", encounter: { id: uuidv7(), name: "Shell game", monsters: [{ srdId: "dragon-turtle", count: 1 }] } },
+      { t: "encounter.start", entries: [{ id: uuidv7(), tokenId }] },
+    ]) {
+      assert.equal((await dmSocket.apply(op)).rejects, undefined, op.t);
+    }
+    const res = await dm.get(`/api/rooms/${roomId}/export`);
+    assert.equal(res.statusCode, 200, res.body);
+    const room = JSON.parse((await unzip(res.rawPayload)).get("room.json")!.toString()) as RoomExport;
+    assert.equal(room.state.encounter?.entries[0]?.groupKey, "dragon-turtle");
+    // The same room as a build from before the fix exported it, the old id wherever it named the dragon turtle.
+    const v13 = JSON.parse(JSON.stringify(room.state).replaceAll('"dragon-turtle"', '"dragon-tur-t-le"')) as RoomState;
+    assert.ok(v13.srdImages["dragon-tur-t-le"]);
+    const imported = await importZip(t.client(), await zipOf({ "room.json": JSON.stringify({ ...room, schemaVersion: 13, state: v13 }) }));
+    assert.equal(imported.statusCode, 201, imported.body);
+    const newId = imported.json<{ roomId: string }>().roomId;
+    t.track(newId);
+    const { rows } = await t.pool.query<{ state: RoomState; schema_version: number }>("select state, schema_version from room_snapshots where room_id = $1", [newId]);
+    const state = rows[0]!.state;
+    assert.equal(rows[0]!.schema_version, SNAPSHOT_VERSION);
+    assert.equal(JSON.stringify(state).includes("dragon-tur-t-le"), false);
+    assert.deepEqual(Object.keys(state.srdImages), ["dragon-turtle"]);
+    assert.equal(state.srdImages["dragon-turtle"]?.id, "dragon-turtle");
+    assert.deepEqual(state.srdImages["dragon-turtle"]?.image, image);
+    const [turtle] = Object.values(state.tokens);
+    assert.ok(turtle && "inline" in turtle.actor);
+    assert.equal(turtle.actor.inline.srdId, "dragon-turtle");
+    assert.deepEqual(Object.values(state.savedEncounters)[0]?.monsters, [{ srdId: "dragon-turtle", count: 1 }]);
+    assert.equal(state.encounter?.entries[0]?.groupKey, "dragon-turtle");
+    dmSocket.close();
+  });
+
   test("a saved encounter is the DM's alone, and a backup brings it back pointing at the room's monsters under their new ids", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom("Saved encounters");
