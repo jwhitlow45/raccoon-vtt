@@ -242,6 +242,8 @@ How the raw values map:
 }
 ```
 
+The rings follow how the viewer last moved, not `:focus-visible` alone (`lib/inputModality.ts`, 2026-10-18). iOS Safari matches `:focus-visible` on most focus the app moves with `focus()` after a tap, such as a sheet's opener as the sheet closes, so a ring stayed on the page after a tap. A press of a pointer sets `data-rvtt-input="pointer"` on `<html>`, and a key sets `"keys"`: any key but a bare modifier, though typing into a text field changes nothing unless the key is Tab, Escape or a shortcut. A phone or a tablet starts as a pointer. While a pointer was last, `globals.css` draws no ring on `:focus-visible` except on a text field (a text-like input, a textarea or an editable element), which keeps its focus look to show where typing goes. A select box follows the other controls. The choice and pill rings follow, each in a rule of its own. So the rings show after keys and never after a tap, except on a text field, and a key press brings every ring back at once on whatever has focus. An element that takes focus only as a place to land (a heading, a region or a dialog with `tabindex="-1"`, none of them a control) draws no ring after either, except the map's focus target (`data-rvtt-ring`). Script that asks whether focus came from the keyboard, such as the tooltip's, reads `keyboardFocus()` from the same module.
+
 ### 2.2 The member accent, by component
 
 The accent is the viewer's member color as `lib/accent.ts` resolves it, or the crest yellow outside a room. `accentFor` already guarantees 4.5:1 for the accent against every surface and its tint, and for `onAccent` against the accent, for any color a member can pick. Nothing below needs a new contrast rule for the accent.
