@@ -34,6 +34,27 @@ export type TipClick = { detail: number; pointerType?: string };
 export type TipClock = { set(run: () => void, ms: number): unknown; clear(handle: unknown): void };
 
 /**
+ * The page's tips, of which one shows at a time: a tip that shows closes
+ * the one up before it. Each control keeps its own timer, so two quick
+ * long presses on neighbouring icons showed both names, one over the
+ * other, while the first one's 1.5 s ran out, as did keyboard focus on one
+ * tool and a hover on another.
+ */
+export class TipStage {
+  #up: TipTimer | null = null;
+
+  shows(tip: TipTimer): void {
+    const before = this.#up;
+    this.#up = tip;
+    if (before && before !== tip) before.close();
+  }
+
+  gone(tip: TipTimer): void {
+    if (this.#up === tip) this.#up = null;
+  }
+}
+
+/**
  * When a tip shows, without React or a DOM, so its rules are tested on a
  * fake clock (Tooltip.test.ts). One timer at most is pending: a new event
  * that arms or closes replaces it.
@@ -51,10 +72,12 @@ export class TipTimer {
   #pressShown = false;
   readonly #clock: TipClock;
   readonly #onChange: (shown: boolean) => void;
+  readonly #stage: TipStage | undefined;
 
-  constructor(clock: TipClock, onChange: (shown: boolean) => void) {
+  constructor(clock: TipClock, onChange: (shown: boolean) => void, stage?: TipStage) {
     this.#clock = clock;
     this.#onChange = onChange;
+    this.#stage = stage;
   }
 
   send(e: TipEvent): void {
@@ -116,8 +139,14 @@ export class TipTimer {
     return click.pointerType === undefined || click.pointerType === "touch" || click.pointerType === "pen";
   }
 
+  /** Another tip showed (TipStage). */
+  close(): void {
+    this.#set(false);
+  }
+
   dispose(): void {
     this.#cancel();
+    this.#stage?.gone(this);
   }
 
   #after(ms: number, shown: boolean): void {
@@ -139,6 +168,8 @@ export class TipTimer {
     if (!shown) this.#pressShown = false;
     if (this.shown === shown) return;
     this.shown = shown;
+    if (shown) this.#stage?.shows(this);
+    else this.#stage?.gone(this);
     this.#onChange(shown);
   }
 }
@@ -206,6 +237,8 @@ export type TipAnchor = {
 
 const BROWSER_CLOCK: TipClock = { set: (run, ms) => setTimeout(run, ms), clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>) };
 
+const PAGE_TIPS = new TipStage();
+
 /**
  * The name of an icon-only control, shown beside it on hover, on keyboard
  * focus and on a long press (docs/design-v1-icons.md 3.2). It replaces the
@@ -215,7 +248,7 @@ const BROWSER_CLOCK: TipClock = { set: (run, ms) => setTimeout(run, ms), clear: 
  * own first, so a caller's `onPointerDown` or `onFocus` still runs.
  *
  * The tip opens in the browser's top layer (the popover attribute), so no
- * scrolling pane, sheet or dialog clips it. Escape is heard but not used
+ * scrolling pane, sheet or dialog clips it. One shows at a time (TipStage). Escape is heard but not used
  * up, so the room's own Escape still runs. The control keeps its own
  * `aria-label`, and `describes` is set only when the tip says more than the
  * name (`addsWords`), its id joined to any description the control has.
@@ -227,7 +260,7 @@ export function useTooltip(text: string, opts: { describes?: boolean } = {}): { 
   const [at, setAt] = useState<DOMRect | null>(null);
   const anchorEl = useRef<HTMLElement | null>(null);
   const tipRef = useRef<HTMLDivElement>(null);
-  const timer = useMemo(() => new TipTimer(BROWSER_CLOCK, (shown) => setAt(shown && anchorEl.current ? anchorEl.current.getBoundingClientRect() : null)), []);
+  const timer = useMemo(() => new TipTimer(BROWSER_CLOCK, (shown) => setAt(shown && anchorEl.current ? anchorEl.current.getBoundingClientRect() : null), PAGE_TIPS), []);
   useEffect(() => () => timer.dispose(), [timer]);
   // Before paint, so a tip shown again never draws a frame where it last stood.
   useLayoutEffect(() => {

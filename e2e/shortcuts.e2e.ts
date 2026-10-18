@@ -344,9 +344,13 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await closeSheet(sheet);
 
     assert.equal(await tipOf(fog), "Fog (K)", "the tooltip names the new key at once");
-    // It shows on hover, as every icon alone's name does.
+    // It shows on hover, as every icon alone's name does, and closes the name keyboard focus showed on Ruler: one at a time (LP8-UI-8).
+    await dm.keyboard.press("v");
+    await ruler.focus();
+    await dm.locator('[role="tooltip"]:popover-open', { hasText: /^Ruler/ }).waitFor();
     await fog.hover();
     await dm.locator('[role="tooltip"]:popover-open', { hasText: "Fog (K)" }).waitFor();
+    assert.equal(await dm.locator('[role="tooltip"]:popover-open').count(), 1, "two names show at once");
     await dm.mouse.move(0, 0);
     await dm.keyboard.press("f");
     await dm.waitForTimeout(150);

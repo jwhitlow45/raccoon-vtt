@@ -5,7 +5,7 @@ import { chance, int, pick, rng } from "#shared/testutil.ts";
 import { FakeClock } from "../state/testing.ts";
 import type { TipClick, TipEvent } from "./Tooltip.tsx";
 
-const { FOCUS_MS, HOVER_MS, KEEP_MS, PRESS_MS, TipTimer, addsWords, placeTip, placeTipZoomed, tipMaxWidth } = await import("./Tooltip.tsx");
+const { FOCUS_MS, HOVER_MS, KEEP_MS, PRESS_MS, TipStage, TipTimer, addsWords, placeTip, placeTipZoomed, tipMaxWidth } = await import("./Tooltip.tsx");
 
 /** The tooltip's rules (docs/design-v1-icons.md 3.2), on a fake clock and with plain boxes for the DOM. */
 
@@ -287,6 +287,93 @@ describe("when a tooltip shows (docs/design-v1-icons.md 3.2)", () => {
       }
       tip.dispose();
       assert.equal(clock.pendingTimers, 0, `seed ${seed}: nothing waits once the control is gone`);
+    }
+  });
+});
+
+describe("one tooltip at a time", () => {
+  /** Tips of one page on one clock, as useTooltip makes them. */
+  function page(count: number) {
+    const clock = new FakeClock();
+    const stage = new TipStage();
+    const tips = Array.from({ length: count }, () => new TipTimer({ set: (run, ms) => clock.setTimeout(run, ms), clear: (h) => clock.clearTimeout(h) }, () => undefined, stage));
+    return { clock, tips };
+  }
+
+  test("a long press on the next icon 300 ms after the first closes the first's name as its own shows", () => {
+    const { clock, tips } = page(2);
+    const [find, fit] = tips as [InstanceType<typeof TipTimer>, InstanceType<typeof TipTimer>];
+    find.send({ t: "down", pointer: "touch" });
+    clock.advance(PRESS_MS + 50);
+    find.send({ t: "up" });
+    clock.advance(300);
+    fit.send({ t: "down", pointer: "touch" });
+    clock.advance(PRESS_MS - 1);
+    assert.deepEqual([find.shown, fit.shown], [true, false], "the first keeps its 1.5 s until the next shows");
+    clock.advance(1);
+    assert.deepEqual([find.shown, fit.shown], [false, true]);
+    fit.send({ t: "up" });
+    clock.advance(KEEP_MS);
+    assert.deepEqual([find.shown, fit.shown], [false, false], "nothing waits to bring the first back");
+  });
+
+  test("a hover over another tool closes the name keyboard focus showed", () => {
+    const { clock, tips } = page(2);
+    const [ruler, fog] = tips as [InstanceType<typeof TipTimer>, InstanceType<typeof TipTimer>];
+    ruler.send({ t: "focus", visible: true });
+    clock.advance(FOCUS_MS);
+    fog.send({ t: "enter", pointer: "mouse" });
+    clock.advance(HOVER_MS);
+    assert.deepEqual([ruler.shown, fog.shown], [false, true]);
+    // Focus coming back shows it again, and closes the hover's.
+    ruler.send({ t: "focus", visible: true });
+    clock.advance(FOCUS_MS);
+    assert.deepEqual([ruler.shown, fog.shown], [true, false]);
+  });
+
+  test("a control that goes while its name shows leaves the page free for the next", () => {
+    const { clock, tips } = page(2);
+    const [gone, next] = tips as [InstanceType<typeof TipTimer>, InstanceType<typeof TipTimer>];
+    gone.send({ t: "focus", visible: true });
+    clock.advance(FOCUS_MS);
+    gone.dispose();
+    next.send({ t: "enter", pointer: "mouse" });
+    clock.advance(HOVER_MS);
+    assert.equal(next.shown, true);
+  });
+
+  test("randomized: whatever reaches four icons and when, at most one name shows, and the one showing is the newest to show", () => {
+    for (let seed = 1; seed <= 300; seed++) {
+      const r = rng(seed);
+      const { clock, tips } = page(4);
+      let newest: InstanceType<typeof TipTimer> | null = null;
+      const shownBefore = new Set<InstanceType<typeof TipTimer>>();
+      for (let step = 0; step < 80; step++) {
+        const tip = pick(r, tips);
+        tip.send(
+          pick(r, [
+            { t: "enter", pointer: pick(r, ["mouse", "touch"]) },
+            { t: "leave", pointer: pick(r, ["mouse", "touch"]) },
+            { t: "down", pointer: pick(r, ["mouse", "touch"]) },
+            { t: "up" },
+            { t: "cancel" },
+            { t: "focus", visible: chance(r, 0.7) },
+            { t: "blur" },
+            { t: "escape" },
+          ] satisfies TipEvent[]),
+        );
+        for (let ms = int(r, 0, 900); ms > 0; ms -= 50) {
+          clock.advance(Math.min(50, ms));
+          for (const t of tips) {
+            if (t.shown && !shownBefore.has(t)) newest = t;
+          }
+          shownBefore.clear();
+          for (const t of tips) if (t.shown) shownBefore.add(t);
+          const up = tips.filter((t) => t.shown);
+          assert.ok(up.length <= 1, `seed ${seed}: ${up.length} names show at once`);
+          if (up.length === 1) assert.equal(up[0], newest, `seed ${seed}: an older name shows over the newest`);
+        }
+      }
     }
   });
 });
