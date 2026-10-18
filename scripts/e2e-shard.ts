@@ -43,7 +43,7 @@ type Durations = { defaultSeconds: number; seconds: Record<string, number> };
 /** e2e/macos-only.json: each file's name, and why it runs only on macOS. */
 type MacosOnly = { rule: string; files: Record<string, string> };
 type Shard = { files: string[]; seconds: number };
-type Run = { ok: boolean; seconds: number; tests: number | null; passed: number | null; timedOut: boolean };
+type Run = { ok: boolean; seconds: number; tests: number | null; passed: number | null; todo: number | null; timedOut: boolean };
 type Result = { file: string; first: Run; rerun: Run | null };
 
 /** A file's recorded time, or the default for a file not recorded yet. */
@@ -168,13 +168,15 @@ async function runFile(file: string, label: string, seconds: number): Promise<Ru
     seconds: Math.round((Date.now() - started) / 1000),
     tests: summaryCount(tail, "tests"),
     passed: summaryCount(tail, "pass"),
+    todo: summaryCount(tail, "todo"),
     timedOut,
   };
 }
 
 function outcome(run: Run): string {
   // A failed hook cancels its tests rather than failing them, so the count that means something is the passes.
-  const counts = run.tests === null ? "" : run.ok ? ` (${run.tests} tests)` : ` (${run.passed ?? "?"} of ${run.tests} tests passed)`;
+  const todo = run.todo ? `, ${run.todo} todo` : "";
+  const counts = run.tests === null ? "" : run.ok ? ` (${run.tests} tests${todo})` : ` (${run.passed ?? "?"} of ${run.tests} tests passed${todo})`;
   const how = run.timedOut ? "timed out" : run.ok ? "passed" : "failed";
   return `${how}${counts} in ${run.seconds} s`;
 }

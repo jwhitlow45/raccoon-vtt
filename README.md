@@ -133,7 +133,10 @@ phone. A file that fails on Linux from font metrics alone, and cannot be
 made tolerant without losing what it guards, goes in `e2e/macos-only.json`
 with the reason. The Linux shards leave those files out, and an
 **e2e-macos** job runs them on a Mac. The list is empty, and the macOS job
-runs only when it is not.
+runs only when it is not. A single test that fails on Linux from font
+metrics alone is marked with `linuxFontTodo` (`e2e/harness.ts`) instead:
+on Linux it still runs and shows as a todo, but does not fail its file.
+The marks stay until the app has one font on every OS.
 
 A newer push to a `ci/` branch cancels that branch's run in progress. Every
 push to `main` runs to the end, so each commit there is tested. A failing

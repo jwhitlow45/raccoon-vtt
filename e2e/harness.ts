@@ -168,6 +168,19 @@ export async function touchSwipe(cdp: CDPSession, from: TouchAt, to: TouchAt, op
   await touches.end([], every);
 }
 
+/**
+ * node:test's `todo` for a test that fails on Linux from font metrics
+ * alone. Chrome on Linux draws the app's system font in Roboto
+ * (e2e/fonts.conf), whose widths differ from San Francisco's. There the
+ * test still runs and its result shows as a todo, but it does not fail
+ * its file, so the file's other tests still guard on CI. Elsewhere it is
+ * an ordinary test. The Inter font lane gives every OS the same font and
+ * removes these marks.
+ */
+export function linuxFontTodo(why: string): string | false {
+  return process.platform === "linux" && `Fails on Linux from font metrics until the Inter font lane: ${why}`;
+}
+
 /** Polls until `check` returns something truthy, or fails with `what` and the last value seen. */
 export async function waitFor<T>(what: string, check: () => T | Promise<T>, timeoutMs = 15_000): Promise<NonNullable<T>> {
   const deadline = Date.now() + timeoutMs;
