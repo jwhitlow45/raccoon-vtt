@@ -12,7 +12,7 @@ import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { StatBlockView } from "../monsters/StatBlockView.tsx";
 import { useSrdList } from "../tokens/StatSummary.tsx";
 import { saveUnitsOf } from "../tokens/statSummary.ts";
-import { Note, Section, SmallButton } from "../tokens/ui.tsx";
+import { Note, SmallButton } from "../tokens/ui.tsx";
 import { useOpenPcStats } from "./open.ts";
 import { PcStatsView } from "./PcStatsView.tsx";
 import { END_SHAPE, shapeNote } from "./shape.ts";

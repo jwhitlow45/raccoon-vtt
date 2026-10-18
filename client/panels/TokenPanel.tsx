@@ -288,8 +288,9 @@ function ImageRow(props: { token: Token; name: string; access: TokenAccess; upda
   const shape = token.kind === "object" ? "square" : "circle";
   const ring = RING[token.disposition] ?? theme.color.neutral;
   const alts = useAltImages({ token, shape, aspect: fp.w / fp.h, ring, onPatch: update });
+  // No padding of its own: the Image group's body pads it, as a section in a group has none.
   return (
-    <div style={{ paddingBottom: theme.space(4) }}>
+    <div>
       <ImageField
         value={token.image}
         onChange={(image) => update({ image })}
