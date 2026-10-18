@@ -1,13 +1,14 @@
 import { useSyncExternalStore } from "react";
 import { setBoardInterfaceScale } from "../../lib/boardScale.ts";
 import { preferredMapVariant, readMapVariantSetting, type MapVariantSetting } from "../../lib/device.ts";
+import { formatKeyChanges, parseKeyChanges, type KeyChanges } from "../../state/keyBindings.ts";
 
 /**
  * This device's own settings (docs/design-v1-dm-tools.md 2.7): the
- * interface size, low power and the map detail. They belong to one device,
- * never to the room, so each lives in local storage, read and written
- * inside try and catch as every `rvtt.*` key is. A device that blocks
- * storage keeps a change until the page closes.
+ * interface size, low power, the map detail and the keys. They belong to
+ * one device, never to the room, so each lives in local storage, read and
+ * written inside try and catch as every `rvtt.*` key is. A device that
+ * blocks storage keeps a change until the page closes.
  *
  * Each follows the store pattern the sounds use (features/encounter/alerts.ts):
  * a module variable, a listener set and useSyncExternalStore, so every
@@ -193,3 +194,17 @@ export function useMapVariant(): "full" | "mobile" {
     shortSidePx: typeof screen === "undefined" ? 0 : Math.min(screen.width, screen.height),
   });
 }
+
+// ---------------------------------------------------------------- keys
+
+/**
+ * The shortcut sheet's changed keys (state/keyBindings.ts): only the
+ * changes from the defaults, with the stored form's version, as
+ * `{"v":1,"keys":{"tool:fog":"x"}}`. What they mean against the table is
+ * state/shortcuts.ts's to say, since only it knows the defaults.
+ */
+const keyChangesSetting = setting<KeyChanges>("rvtt.keys", parseKeyChanges, formatKeyChanges);
+
+export const keyChanges = keyChangesSetting.get;
+export const setKeyChanges = keyChangesSetting.set;
+export const useKeyChanges = keyChangesSetting.use;

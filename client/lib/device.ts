@@ -80,6 +80,27 @@ export function sheetDevice(): { mouse: boolean; android: boolean } {
   };
 }
 
+let keyboardSeen = false;
+
+/**
+ * A key pressed outside a text field, which an on-screen keyboard never
+ * types there: a keyboard is attached, as on a tablet with a keyboard case
+ * and no trackpad. The room's shortcut listener reports every such press.
+ */
+export function noteKeyboard(key: string): void {
+  if (key !== "" && key !== "Unidentified" && key !== "Process") keyboardSeen = true;
+}
+
+/**
+ * Whether this device has a keyboard, as far as a page can tell: a mouse
+ * or trackpad, as every computer has, or a key pressed on this page. The
+ * shortcut sheet offers to change keys only then, so a touch screen's
+ * sheet stays a plain list.
+ */
+export function hasKeyboard(): boolean {
+  return keyboardSeen || sheetDevice().mouse;
+}
+
 const NAME_KEY = "rvtt.name";
 
 /** The last display name used on this device, as a convenience for the next form. */
