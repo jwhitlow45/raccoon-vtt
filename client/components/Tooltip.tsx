@@ -11,6 +11,7 @@ export const PRESS_MS = 500;
 export const KEEP_MS = 1500;
 const GAP = 6;
 const MARGIN = 8;
+const MAX_WIDTH = 240;
 
 export type TipEvent =
   | { t: "enter"; pointer: string }
@@ -167,6 +168,16 @@ export function placeTipZoomed(anchor: Box, tip: { width: number; height: number
   return placeTip({ top: anchor.top / z, left: anchor.left / z, width: anchor.width / z, height: anchor.height / z }, { width: tip.width / z, height: tip.height / z }, { width: view.width / z });
 }
 
+/**
+ * A tip's widest, in its own unzoomed pixels: 240 px, or the window less
+ * both margins where that is narrower. At 320 px wide and 130%, 240 px
+ * draws as 312 px and could not sit 8 px inside both sides.
+ */
+export function tipMaxWidth(view: { width: number }, zoom: number): number {
+  const z = zoom > 0 ? zoom : 1;
+  return Math.min(MAX_WIDTH, view.width / z - 2 * MARGIN);
+}
+
 /** The zoom an element is drawn at: the browser's own figure where it gives one, else its drawn width over its laid-out width. */
 export function effectiveZoom(el: HTMLElement): number {
   const own = (el as HTMLElement & { currentCSSZoom?: number }).currentCSSZoom;
@@ -229,7 +240,11 @@ export function useTooltip(text: string, opts: { describes?: boolean } = {}): { 
     const tip = tipRef.current;
     if (!tip) return;
     tip.showPopover?.();
-    const place = placeTipZoomed(at, tip.getBoundingClientRect(), { width: window.innerWidth }, effectiveZoom(tip));
+    const view = { width: window.innerWidth };
+    const zoom = effectiveZoom(tip);
+    // Capped before it is measured, so the width placed is the width drawn.
+    tip.style.maxWidth = `${tipMaxWidth(view, zoom)}px`;
+    const place = placeTipZoomed(at, tip.getBoundingClientRect(), view, zoom);
     tip.style.top = `${place.top}px`;
     tip.style.left = `${place.left}px`;
     tip.style.visibility = "visible";
@@ -307,7 +322,6 @@ export function useTooltip(text: string, opts: { describes?: boolean } = {}): { 
           margin: 0,
           // A popover scrolls by the browser's own rule, and a few words never need to: a script looking for a panel's scrolling body would find the tip first.
           overflow: "visible",
-          maxWidth: 240,
           padding: `${theme.space(1)}px ${theme.space(2)}px`,
           border: `${theme.line.border}px solid ${theme.color.border}`,
           borderRadius: theme.radius.sm,

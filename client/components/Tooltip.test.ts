@@ -5,7 +5,7 @@ import { chance, int, pick, rng } from "#shared/testutil.ts";
 import { FakeClock } from "../state/testing.ts";
 import type { TipClick, TipEvent } from "./Tooltip.tsx";
 
-const { FOCUS_MS, HOVER_MS, KEEP_MS, PRESS_MS, TipTimer, addsWords, placeTip, placeTipZoomed } = await import("./Tooltip.tsx");
+const { FOCUS_MS, HOVER_MS, KEEP_MS, PRESS_MS, TipTimer, addsWords, placeTip, placeTipZoomed, tipMaxWidth } = await import("./Tooltip.tsx");
 
 /** The tooltip's rules (docs/design-v1-icons.md 3.2), on a fake clock and with plain boxes for the DOM. */
 
@@ -324,19 +324,37 @@ describe("where a tooltip goes (docs/design-v1-icons.md 3.2)", () => {
     assert.deepEqual(placeTipZoomed(anchor, tip, { width: 1280 }, 1), placeTip(anchor, tip, { width: 1280 }), "no zoom changes nothing");
   });
 
+  test("at 320 px and 130%, the widest tip is capped to the window less both margins, and drawn 8 px inside both sides", () => {
+    const z = 1.3;
+    const view = { width: 320 };
+    const cap = tipMaxWidth(view, z);
+    assert.ok(Math.abs(cap - (320 / z - 16)) < 1e-9, `${cap}`);
+    assert.equal(tipMaxWidth({ width: 1280 }, z), 240, "240 px where the window has room");
+    assert.equal(tipMaxWidth({ width: 320 }, 1), 240, "and at 100% on a 320 px phone");
+    // The widest tip, as drawn, under a control at either edge and in the middle.
+    const tip = { width: cap * z, height: 2 * 18 * z };
+    for (const left of [0, 130, 320 - 44 * z]) {
+      const anchor = { top: 400, left, width: 44 * z, height: 44 * z };
+      const at = placeTipZoomed(anchor, tip, view, z);
+      const drawn = at.left * z;
+      assert.ok(drawn >= 8 * z - 1e-9, `${left}: ${drawn} past the left edge`);
+      assert.ok(drawn + tip.width <= 320 - 8 * z + 1e-9, `${left}: ${drawn + tip.width} past the right edge`);
+    }
+  });
+
   test("randomized: at 85% to 130% the tip as drawn never covers its control and stays inside the window", () => {
     const r = rng(11);
     for (let i = 0; i < 2000; i++) {
       const z = pick(r, [0.85, 1, 1.15, 1.3]);
       const view = { width: int(r, 320, 1600) };
       const anchor = { top: int(r, 0, 900), left: int(r, 0, view.width - 60), width: int(r, 24, 200) * z, height: int(r, 24, 60) * z };
-      const tip = { width: int(r, 40, 240) * z, height: int(r, 18, 80) * z };
+      const tip = { width: Math.min(int(r, 40, 240), tipMaxWidth(view, z)) * z, height: int(r, 18, 80) * z };
       const at = placeTipZoomed(anchor, tip, view, z);
       const drawn = { top: at.top * z, left: at.left * z };
       const overlaps = drawn.top < anchor.top + anchor.height && drawn.top + tip.height > anchor.top && drawn.left < anchor.left + anchor.width && drawn.left + tip.width > anchor.left;
       assert.equal(overlaps, false, JSON.stringify({ z, anchor, tip, drawn }));
       assert.ok(drawn.left >= 8 * z - 1e-9, "never past the left edge");
-      if (tip.width + 16 * z <= view.width) assert.ok(drawn.left + tip.width <= view.width - 8 * z + 1e-9, "never past the right edge");
+      assert.ok(drawn.left + tip.width <= view.width - 8 * z + 1e-9, "never past the right edge");
     }
   });
 
