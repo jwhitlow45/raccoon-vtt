@@ -68,7 +68,7 @@ export function noSightText(row: Pick<SourceRow, "reason" | "belowFt">): string 
     case "object":
       return "An object: lends no sight";
     case "down":
-      return "Down or unconscious: lends no sight";
+      return "Down or Unconscious: lends no sight";
     case "ground":
       return `Inside the ground (${row.belowFt ?? 0} ft below): lends no sight`;
     case "cap":

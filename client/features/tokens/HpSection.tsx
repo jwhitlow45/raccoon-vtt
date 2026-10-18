@@ -335,7 +335,7 @@ export function HpSection(props: {
           onChange={(ok, fail) => actions.dispatch({ t: "actor.deathSave", target, ok, fail })}
         />
       ) : null}
-      {life === "stable" ? <Note>Stable: unconscious, but no more death saves.</Note> : null}
+      {life === "stable" ? <Note>Stable: Unconscious, but no more death saves.</Note> : null}
 
       {/* No HP rule kills an object, so its life controls would only ever mark one dead by hand (3.6.6). */}
       {access.life && props.token?.kind !== "object" ? <LifeControls life={life} onLife={(next) => actions.dispatch({ t: "actor.life", target, life: next })} /> : null}

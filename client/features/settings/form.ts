@@ -101,7 +101,7 @@ export const SETTING_GROUPS: SettingGroup[] = [
         kind: "toggle",
         key: "monstersDieAtZero",
         label: "Monsters die at 0 HP",
-        help: "Off makes monsters and NPCs fall unconscious and make death saves at 0 HP, like player characters.",
+        help: "Off makes monsters and NPCs fall Unconscious and make death saves at 0 HP, like player characters.",
       },
       {
         kind: "toggle",
