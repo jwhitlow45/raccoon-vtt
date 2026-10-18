@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
-import { ConsoleWatch, openSideTab, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, openSideTab, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * Dice on the server (docs/design-v1-dice.md 13), on the real server serving
@@ -18,7 +19,11 @@ import { ConsoleWatch, openSideTab, Shots, sideTabName, SocketWatch, startServer
  * sticky line, the field and the choices in view, Dice in the bottom
  * one of two panels, rolling there and counting as on screen, and a roll
  * of 100 dice keeping the sticky line to one line on a phone, and Roll
- * waiting in the DM's view as a player.
+ * waiting in the DM's view as a player. Then Pat's Thorn with a stat block
+ * (docs/design-v1-dice-ui.md): a weapon row's controls on one line at
+ * 390 px, a result in the header line and never in its row, a save
+ * spell's DC in its row, the header line inside its column at 100% and
+ * 130%, and an answer's line with no Again.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twenty, one file after
  * another as the others. The other environment variables are the smoke
@@ -46,7 +51,35 @@ const playerSocket = new SocketWatch("player");
 const dmConsole = new ConsoleWatch("dm");
 const playerConsole = new ConsoleWatch("player");
 
-const run = { roomId: "", roomName: `E2E dice ${new Date().toISOString().slice(0, 19)}`, password: "", patId: "", dmId: "" };
+const run = { roomId: "", roomName: `E2E dice ${new Date().toISOString().slice(0, 19)}`, password: "", patId: "", dmId: "", thornId: randomUUID() };
+let ops: OpSocket | undefined;
+
+const THORN_ACTOR = { hp: { cur: 44, max: 44, temp: 0 }, life: "alive", ac: 18, speeds: { walk: 30 }, initBonus: 0, passivePerception: 13, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
+
+/** Level 5, so +3 proficiency: Longsword +6 to hit, and a spell save DC of 14 from Charisma 16. */
+const THORN_STATS = {
+  abilities: { str: 16, dex: 10, con: 14, int: 8, wis: 12, cha: 16 },
+  saves: ["wis", "cha"],
+  skills: {},
+  spellAbility: "cha",
+  adjust: {},
+  defenses: {},
+  rolls: [
+    {
+      id: "r-longsword",
+      name: "Longsword",
+      kind: "weapon",
+      ability: "str",
+      attack: { prof: true, bonus: 0 },
+      dice: [
+        { formula: "1d8", type: "slashing", mod: true },
+        { formula: "2d8", type: "radiant", optional: true, name: "Divine Smite" },
+      ],
+    },
+    { id: "r-flame", name: "Sacred Flame", kind: "spell", ability: "spell", level: 0, save: { ability: "dex" }, dice: [{ formula: "1d8", type: "radiant", grows: true }] },
+    { id: "r-hold", name: "Hold Person", kind: "spell", ability: "spell", level: 2, save: { ability: "wis" }, dice: [] },
+  ],
+};
 
 type DiceLine = Extract<LogEvent, { type: "dice" }>;
 
@@ -79,6 +112,16 @@ async function rollWithEnter(page: Page, watch: SocketWatch, text: string): Prom
   return line;
 }
 
+/** Thorn's roll options in the phone's Dice sheet. */
+function thornRolls(page: Page): Locator {
+  return page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]').getByRole("region", { name: "Rolls for Thorn" });
+}
+
+/** A named roll's row, from one of its controls: the header line, then the controls line. */
+function namedRow(control: Locator): Locator {
+  return control.locator("xpath=../..");
+}
+
 /** Whether a box lies whole inside the window. */
 async function inView(page: Page, selector: string): Promise<boolean> {
   const box = await page.locator(selector).first().boundingBox();
@@ -105,6 +148,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       for (const c of [dmConsole, playerConsole]) console.error(`[${c.label}] errors`, c.errors, "warnings", c.warnings);
       console.error(server?.output().split("\n").slice(-40).join("\n"));
     }
+    ops?.close();
     if (run.roomId && dmContext) {
       try {
         const res = await dmContext.request.delete(`${server.origin}/api/rooms/${run.roomId}`, { headers: { Origin: server.origin }, data: { name: run.roomName } });
@@ -332,5 +376,95 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     await shots.take(dm, "dice-preview-waits");
     await preview.getByRole("button", { name: "Exit", exact: true }).click();
     await preview.waitFor({ state: "detached" });
+  });
+
+  test("11. Pat's Thorn with a stat block: at 390 x 844 the Longsword row's Attack, Damage and Critical share one line under its numbers", async () => {
+    const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+    ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
+    await ops.send({ t: "character.create", character: { id: run.thornId, name: "Thorn", size: "medium", ownerIds: [run.patId], actor: THORN_ACTOR, level: 5, stats: THORN_STATS } });
+    await waitFor("Thorn on Pat's phone", () => playerSocket.state?.characters[run.thornId]?.stats ?? null);
+    await player.setViewportSize({ width: 390, height: 844 });
+    await openDicePhone(player);
+    const rolls = thornRolls(player);
+    const attack = rolls.getByRole("button", { name: "Longsword", exact: true });
+    await attack.scrollIntoViewIfNeeded();
+    // By their middles, since a chip and a button may differ in height on one line.
+    const middles = await Promise.all(
+      [attack, rolls.getByRole("button", { name: "Longsword damage", exact: true }), rolls.getByRole("button", { name: "Critical hit for Longsword's next damage", exact: true })].map(async (l) => {
+        const box = (await l.boundingBox())!;
+        return box.y + box.height / 2;
+      }),
+    );
+    assert.ok(middles.every((m) => Math.abs(m - middles[0]!) < 1), `the row's controls take more than one line: ${middles.join(", ")}`);
+    // The numbers stand in the row's header, after its name, as a stat block prints them (docs/design-v1-dice-ui.md 4.4).
+    const header = (await namedRow(attack).locator("div").first().innerText()).replace(/\s+/g, " ");
+    assert.match(header, /^Longsword ?\+6 to hit, 1d8\+3 slashing/);
+    await shots.take(player, "dice-weapon-row-390");
+  });
+
+  test("12. Attack's result lands in the header line, and its row neither grows nor shows it", async () => {
+    const rolls = thornRolls(player);
+    const attack = rolls.getByRole("button", { name: "Longsword", exact: true });
+    const row = namedRow(attack);
+    const before = { box: (await row.boundingBox())!, text: await row.innerText() };
+    const count = diceLines(playerSocket.state?.log).length;
+    await attack.tap();
+    const line = await waitFor("Longsword's roll", () => diceLines(playerSocket.state?.log).slice(count).find((l) => l.data.rolls[0]?.label === "Longsword")?.data ?? null);
+    const total = String(line.rolls[0]!.total);
+    const sticky = player.locator("[data-dice-last]");
+    await sticky.getByText(total, { exact: true }).waitFor();
+    await waitFor("the row at rest", async () => ((await attack.getAttribute("aria-busy")) === null ? true : null));
+    const after = { box: (await row.boundingBox())!, text: await row.innerText() };
+    assert.equal(after.box.height, before.box.height, "the row grew as the roll landed");
+    assert.equal(after.text, before.text, "the row shows something of the roll");
+    await shots.take(player, "dice-attack-in-header-line");
+  });
+
+  test("13. a save spell's row says its DC where an attack's bonus stands: Hold Person DC 14 Wis, Sacred Flame DC 14 Dex and its damage", async () => {
+    const rolls = thornRolls(player);
+    const headerOf = async (name: string) => {
+      const header = rolls.locator("div").filter({ has: player.getByText(name, { exact: true }) }).last();
+      return (await header.innerText()).replace(/\s+/g, " ").trim();
+    };
+    assert.match(await headerOf("Hold Person"), /^Hold Person ?DC 14 Wis$/);
+    assert.match(await headerOf("Sacred Flame"), /^Sacred Flame ?DC 14 Dex, \dd8 radiant/);
+    await rolls.getByText("Hold Person", { exact: true }).scrollIntoViewIfNeeded();
+    await shots.take(player, "dice-save-spells-dc");
+  });
+
+  test("14. the header line keeps to its column, at 100% and at 130%", async () => {
+    for (const scale of [1, 1.3]) {
+      if (scale !== 1) {
+        await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+        await player.reload();
+        await player.getByRole("status", { name: "Connected" }).first().waitFor();
+        await openDicePhone(player);
+        await rollWithEnter(player, playerSocket, "1d20+3");
+      }
+      const sheet = player.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+      const line = (await sheet.locator("[data-dice-last]").boundingBox())!;
+      const column = (await sheet.locator("[data-roll-options]").boundingBox())!;
+      const label = `${Math.round(scale * 100)}%`;
+      assert.ok(line.x >= column.x - 0.5, `${label}: the line starts ${column.x - line.x} px left of its column`);
+      assert.ok(line.x + line.width <= column.x + column.width + 0.5, `${label}: the line ends ${line.x + line.width - column.x - column.width} px right of its column`);
+      await shots.take(player, `dice-header-line-column-${Math.round(scale * 100)}`);
+    }
+    await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await player.reload();
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+  });
+
+  test("15. an answer sent from the panel shows in the header line with its label and no Again (LP7-DICE-10)", async () => {
+    await ops!.send({ t: "roll.ask", request: { id: randomUUID(), test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thornId }] } });
+    await openDicePhone(player);
+    const cell = thornRolls(player).getByRole("button", { name: /^Dexterity save, answers the DM's request/ });
+    await cell.scrollIntoViewIfNeeded();
+    await cell.tap();
+    const sticky = player.locator("[data-dice-last]");
+    await sticky.getByText("Dexterity save").waitFor();
+    assert.equal(await sticky.getByRole("button", { name: "Again" }).count(), 0, "an answer cannot go again as it went");
+    await shots.take(player, "dice-answer-header-line");
+    assert.deepEqual(dmConsole.errors, []);
+    assert.deepEqual(playerConsole.errors, []);
   });
 });

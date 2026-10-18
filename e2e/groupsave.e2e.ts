@@ -13,7 +13,8 @@ import { ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, tapCell, waitF
  * the real server serving the production build, with the DM and a player
  * each on a phone at 375 x 667 and the DM's interface at 130%: one
  * goblin's options from its bar's Roll, a tap on an option scrolled to
- * the foot of the sheet showing its result in view, a critical hit's
+ * the foot of the sheet showing its result in the header line, in view
+ * (docs/design-v1-dice-ui.md 4.1), a critical hit's
  * damage under the room's "Max plus a roll" rule, then three goblins and
  * Bree selected for a DC 13 Dexterity save. The goblins roll on the
  * server, Bree's player answers on her card, 5d6 fire + 5d6 radiant rolls
@@ -198,7 +199,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await dm.locator(".konvajs-content").first().waitFor();
   });
 
-  test("2. a goblin's Roll opens its options, shot at 375 x 667 at 130%, and a tap on a save scrolled to the sheet's foot shows its result in view", async () => {
+  test("2. a goblin's Roll opens its options, shot at 375 x 667 at 130%, and a tap on a save scrolled to the sheet's foot shows its result in the header line, in view", async () => {
     const goblin = run.goblins[0]!;
     await tapCell(dm, run.bounds, goblin);
     const bar = dm.getByRole("dialog", { name: `${goblin.name} actions` });
@@ -218,21 +219,22 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await save.evaluate((el) => (el as unknown as { scrollIntoView(o: { block: string }): void }).scrollIntoView({ block: "end" }));
     const before = diceLines(dmSocket.state?.log).length;
     await save.tap();
-    await waitFor("the Cha save's line", () => diceLines(dmSocket.state?.log).length > before || null);
-    const result = save.locator("xpath=..").getByRole("status");
+    const line = await waitFor("the Cha save's line", () => diceLines(dmSocket.state?.log).slice(before)[0] ?? null);
+    // The result lands in the panel's header line, which stays in view, and never under the cell (docs/design-v1-dice-ui.md 4.1).
+    const result = sheet.locator("[data-dice-last]").getByText(String(line.rolls[0]!.total), { exact: true });
     await result.waitFor();
-    // The cell comes into view on its own once its line lands, after any smooth scroll the tap began.
     await waitFor("the result inside the sheet's view", async () => {
       const box = await result.boundingBox();
       const shown = await sheetView(dm);
       return box !== null && box.y >= shown.top - 1 && box.y + box.height <= shown.bottom + 1 ? true : null;
     });
+    assert.equal(await save.locator("xpath=..").getByRole("status").count(), 0, "a result under the cell");
     await shots.take(dm, "groupsave-option-result-130");
     await sheet.getByRole("button", { name: "Close Dice" }).tap();
     await sheet.waitFor({ state: "hidden" });
   });
 
-  test("2b. under Max plus a roll, a goblin's Scimitar with Critical pressed rolls 6 max + 1d6+2 on the server, and its row and line say so", async () => {
+  test("2b. under Max plus a roll, a goblin's Scimitar with Critical pressed rolls 6 max + 1d6+2 on the server, and the header line says so", async () => {
     await ops.send({ t: "room.update", settings: { critRule: "maxPlusRoll" } });
     await waitFor("the rule in the DM's view", () => dmSocket.state?.meta.settings.critRule === "maxPlusRoll" || null);
     const goblin = run.goblins[0]!;
@@ -243,7 +245,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     const sheet = diceSheet(dm);
     await sheet.waitFor();
     const options = sheet.locator("[data-roll-options]");
-    // How far the sheet scrolls sideways. The sticky line bleeds into the pane's padding, so it is not 0 at rest: a long label must add nothing.
+    // How far the sheet scrolls sideways, which a long label on the sticky line must not add to.
     const sideways = () =>
       dm.evaluate(() => {
         type El = { scrollWidth: number; clientWidth: number; querySelectorAll(s: string): ArrayLike<El> };
@@ -268,8 +270,8 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     assert.equal(roll.total, 6 + roll.faces[0]! + 2);
     assert.match(roll.label ?? "", /^Scimitar critical damage/);
     // The tap that rolls lets Critical go, so the cell's name loses the rule's words.
-    const result = options.getByRole("button", { name: "Scimitar damage", exact: true }).locator("xpath=..").getByRole("status");
-    await result.getByText(`${roll.total} (6 max + ${roll.faces[0]! + 2})`).waitFor();
+    await options.getByRole("button", { name: "Scimitar damage", exact: true }).waitFor();
+    await sheet.locator("[data-dice-last]").getByText(String(roll.total), { exact: true }).waitFor();
     await shots.take(dm, "groupsave-crit-max-plus-roll-130");
     const after = await sideways();
     assert.ok(after <= atRest + 1, `the crit's label and sum on the sticky line widen the sheet sideways from ${atRest} to ${after} px`);
