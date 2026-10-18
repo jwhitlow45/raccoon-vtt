@@ -21,10 +21,12 @@ export function playedCreature(state: Pick<RoomState, "members" | "characters" |
  * Whether a roll starts hidden from players (docs/design-v1-dice.md 17,
  * the project owner, 2026-10-17): only a DM's roll for a monster, a
  * creature no player plays, so the table never learns its numbers by
- * default. A free formula and a roll for a creature a player plays start
- * in the open, and the roll's own Secret hides one. A player's roll always
- * starts in the open. A roll for several creatures starts hidden when any
- * of them is a monster.
+ * default. The Dice panel's Secret follows the selection, so a formula the
+ * DM types with a monster selected counts as a roll for it and starts
+ * hidden too. A formula with no creature selected, and a roll for a
+ * creature a player plays, start in the open, and the roll's own Secret
+ * hides one. A player's roll always starts in the open. A roll for several
+ * creatures starts hidden when any of them is a monster.
  */
 export function startsSecret(state: Pick<RoomState, "members" | "characters" | "tokens">, dm: boolean, creatures: readonly ActorTarget[]): boolean {
   return dm && creatures.some((c) => !playedCreature(state, c));
