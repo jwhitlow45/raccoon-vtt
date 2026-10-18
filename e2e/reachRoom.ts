@@ -493,45 +493,45 @@ export async function createRoom(): Promise<void> {
  */
 export function playerRollTest(scale: (typeof SCALES)[number]): void {
   if (ONLY_SCALES && !ONLY_SCALES.includes(scale)) return;
-    test(`2. the player's roll, at ${Math.round(scale * 100)}%: every size, fight, notice and tool`, { skip: ONLY === "dm" }, async () => {
-      await reloadAt(player, scale);
-      shotPage = player;
-      const before = misses.length;
-      let steps = 0;
-      for (const fight of FIGHTS) {
-        await setFight(fight);
-        const id = randomUUID();
-        await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
-        await waitFor("the roll on the player's side", () => playerSocket.state?.rolls[id]);
-        for (const notice of ["none", "reconnecting"] as const) {
-          if (notice === "reconnecting") {
-            await server.stop();
-            await player.getByText(/^Reconnecting…/).first().waitFor({ timeout: 15_000 });
-          }
-          for (const size of sizes()) {
-            await view(player, playerCdp, size);
-            for (const tool of TOOLS) {
-              const label = `player, ${sizeLabel(size, scale)}, ${fight === "none" ? "no fight" : fight}, ${notice === "none" ? "no notice" : "reconnecting"}, tool ${tool}`;
-              if (await setTool(player, tool, label, selectThorn)) await playerStep(label, tool);
-              await clearTool(player);
-              steps += 1;
-            }
-            if (scale === 1.3 && size.width === 480) await shots.take(player, `reach-player-480x320-130-${fight.replace(" ", "-")}-${notice}`);
-          }
-          if (notice === "reconnecting") {
-            server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
-            await player.evaluate(() => (globalThis as unknown as { dispatchEvent(e: Event): void }).dispatchEvent(new Event("online")));
-            await player.getByRole("status", { name: "Connected" }).first().waitFor({ timeout: 30_000 });
-            ops.close();
-            ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
-            await dm.evaluate(() => (globalThis as unknown as { dispatchEvent(e: Event): void }).dispatchEvent(new Event("online")));
-          }
+  test(`2. the player's roll, at ${Math.round(scale * 100)}%: every size, fight, notice and tool`, { skip: ONLY === "dm" }, async () => {
+    await reloadAt(player, scale);
+    shotPage = player;
+    const before = misses.length;
+    let steps = 0;
+    for (const fight of FIGHTS) {
+      await setFight(fight);
+      const id = randomUUID();
+      await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+      await waitFor("the roll on the player's side", () => playerSocket.state?.rolls[id]);
+      for (const notice of ["none", "reconnecting"] as const) {
+        if (notice === "reconnecting") {
+          await server.stop();
+          await player.getByText(/^Reconnecting…/).first().waitFor({ timeout: 15_000 });
         }
-        await ops.send({ t: "roll.close", rollIds: [id] });
+        for (const size of sizes()) {
+          await view(player, playerCdp, size);
+          for (const tool of TOOLS) {
+            const label = `player, ${sizeLabel(size, scale)}, ${fight === "none" ? "no fight" : fight}, ${notice === "none" ? "no notice" : "reconnecting"}, tool ${tool}`;
+            if (await setTool(player, tool, label, selectThorn)) await playerStep(label, tool);
+            await clearTool(player);
+            steps += 1;
+          }
+          if (scale === 1.3 && size.width === 480) await shots.take(player, `reach-player-480x320-130-${fight.replace(" ", "-")}-${notice}`);
+        }
+        if (notice === "reconnecting") {
+          server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
+          await player.evaluate(() => (globalThis as unknown as { dispatchEvent(e: Event): void }).dispatchEvent(new Event("online")));
+          await player.getByRole("status", { name: "Connected" }).first().waitFor({ timeout: 30_000 });
+          ops.close();
+          ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
+          await dm.evaluate(() => (globalThis as unknown as { dispatchEvent(e: Event): void }).dispatchEvent(new Event("online")));
+        }
       }
-      await setFight("none");
-      console.error(`player at ${scale}: ${steps} steps, ${misses.length - before} misses`);
-    });
+      await ops.send({ t: "roll.close", rollIds: [id] });
+    }
+    await setFight("none");
+    console.error(`player at ${scale}: ${steps} steps, ${misses.length - before} misses`);
+  });
 }
 
 /** Case 5: every step of this file's sweeps in reach. */
