@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
-import { ConsoleWatch, OpSocket, openSideTab, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, openSideTab, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Dice on the server (docs/design-v1-dice.md 13), on the real server serving
@@ -23,7 +23,11 @@ import { ConsoleWatch, OpSocket, openSideTab, Shots, sideTabName, SocketWatch, s
  * (docs/design-v1-dice-ui.md): a weapon row's controls on one line at
  * 390 px, a result in the header line and never in its row, a save
  * spell's DC in its row, the header line inside its column at 100% and
- * 130%, and an answer's line with no Again.
+ * 130%, and an answer's line with no Again. Last, the two faults the
+ * project owner met on an iPhone: a roll option's words run past its
+ * button (the Aboleth's group save), and the header line cut through a
+ * die (a long critical damage with three riders), each at 390 x 844 at
+ * 100% and 130%, and the header line at 320 x 568 at 130% as well.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twenty, one file after
  * another as the others. The other environment variables are the smoke
@@ -110,6 +114,109 @@ async function rollWithEnter(page: Page, watch: SocketWatch, text: string): Prom
     return lines.length > before ? lines.at(-1)!.data : null;
   });
   return line;
+}
+
+/** Flame Tongue's long name and three riders: a critical hit with all three makes the longest header line a weapon can. */
+const LONG_WEAPON = {
+  id: "r-dawn",
+  name: "Flame Tongue Greatsword of the Burning Dawn",
+  kind: "weapon",
+  ability: "str",
+  attack: { prof: true, bonus: 1 },
+  dice: [
+    { formula: "2d6", type: "slashing", mod: true },
+    { formula: "2d6", type: "fire", optional: true, name: "Flame Tongue" },
+    { formula: "2d8", type: "radiant", optional: true, name: "Divine Smite" },
+    { formula: "1d6", type: "force", optional: true, name: "Hunter's Mark" },
+  ],
+};
+
+/**
+ * What runs past its box in the roll options: a button whose words are
+ * wider than it, a part of a button outside it, or a button outside the
+ * options' column. Empty when nothing does.
+ */
+function overflowing(scope: Locator): Promise<string[]> {
+  return scope.evaluate((root) => {
+    type Box = { left: number; right: number; width: number };
+    type El = { getBoundingClientRect(): Box; scrollWidth: number; clientWidth: number; querySelectorAll(s: string): ArrayLike<El>; getAttribute(n: string): string | null; textContent: string | null };
+    const column = (root as unknown as El).getBoundingClientRect();
+    const out: string[] = [];
+    for (const button of Array.from((root as unknown as El).querySelectorAll("button"))) {
+      const box = button.getBoundingClientRect();
+      if (box.width === 0) continue;
+      const name = button.getAttribute("aria-label") ?? button.textContent ?? "";
+      if (button.scrollWidth > button.clientWidth + 1) out.push(`${name}: its words are ${button.scrollWidth} px in ${button.clientWidth}`);
+      if (box.left < column.left - 1 || box.right > column.right + 1) out.push(`${name}: outside the column`);
+      for (const part of Array.from(button.querySelectorAll("span"))) {
+        const r = part.getBoundingClientRect();
+        if (r.width > 0 && (r.left < box.left - 1 || r.right > box.right + 1)) out.push(`${name}: "${part.textContent}" outside its button`);
+      }
+    }
+    return out;
+  });
+}
+
+/**
+ * The header line's faults. Each piece of words or die is judged by every
+ * box above it that clips: it shows whole, or it is gone whole, never cut
+ * through. Words may also end in their own "…" (the label). A die gone
+ * needs a whole "+N" for it while the label shows, as the label goes
+ * before it (Roller.tsx ResultRest), and each of `keep` must show whole.
+ * Empty when it holds.
+ */
+function headerFaults(line: Locator, keep: string[]): Promise<string[]> {
+  return line.evaluate((root, keep) => {
+    type Box = { left: number; right: number; top: number; bottom: number; width: number };
+    type El = {
+      getBoundingClientRect(): Box;
+      scrollWidth: number;
+      clientWidth: number;
+      parentElement: El | null;
+      childNodes: ArrayLike<{ nodeType: number; textContent: string | null }>;
+      textContent: string | null;
+      closest(s: string): El | null;
+      matches(s: string): boolean;
+      querySelectorAll(s: string): ArrayLike<El>;
+      ownerDocument: { defaultView: { getComputedStyle(e: El): { overflowX: string; textOverflow: string } } };
+    };
+    const r = root as unknown as El;
+    const style = (el: El) => el.ownerDocument.defaultView.getComputedStyle(el);
+    const seen = (el: El): "whole" | "gone" | "cut" => {
+      const b = el.getBoundingClientRect();
+      let whole = true;
+      for (let p = el.parentElement; p && p !== r.parentElement; p = p.parentElement) {
+        if (style(p).overflowX === "visible") continue;
+        const c = p.getBoundingClientRect();
+        if (b.right <= c.left + 0.5 || b.left >= c.right - 0.5 || b.bottom <= c.top + 0.5 || b.top >= c.bottom - 0.5) return "gone";
+        if (b.left < c.left - 0.5 || b.right > c.right + 0.5 || b.top < c.top - 0.5 || b.bottom > c.bottom + 0.5) whole = false;
+      }
+      return whole ? "whole" : "cut";
+    };
+    const out: string[] = [];
+    const shown = new Set<string>();
+    let gone = 0;
+    let label = false;
+    for (const el of Array.from(r.querySelectorAll("*"))) {
+      const own = Array.from(el.childNodes)
+        .filter((n) => n.nodeType === 3)
+        .map((n) => n.textContent ?? "")
+        .join("")
+        .trim();
+      // A screen reader's words, drawn 1 px square, are not on the line.
+      if (own === "" || el.closest('[role="status"]') || el.getBoundingClientRect().width < 2) continue;
+      const words = (el.textContent ?? "").trim();
+      const v = seen(el);
+      if (v === "cut") out.push(`"${words}" is cut through`);
+      if (v === "whole" && el.scrollWidth > el.clientWidth + 1 && style(el).textOverflow !== "ellipsis") out.push(`"${words}" runs past its own box`);
+      if (v === "whole") shown.add(words);
+      if (v === "whole" && style(el).textOverflow === "ellipsis") label = true;
+      if (v === "gone" && el.matches("[data-face]")) gone++;
+    }
+    if (gone > 0 && label && !shown.has(`+${gone}`)) out.push(`${gone} dice are gone with no whole "+${gone}"`);
+    for (const words of keep) if (!shown.has(words)) out.push(`"${words}" does not show whole`);
+    return out;
+  }, keep);
 }
 
 /** Thorn's roll options in the phone's Dice sheet. */
@@ -464,6 +571,77 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     await sticky.getByText("Dexterity save").waitFor();
     assert.equal(await sticky.getByRole("button", { name: "Again" }).count(), 0, "an answer cannot go again as it went");
     await shots.take(player, "dice-answer-header-line");
+    assert.deepEqual(dmConsole.errors, []);
+    assert.deepEqual(playerConsole.errors, []);
+  });
+
+  test("16. the DM's Aboleth at 390 x 844, at 100% and 130%: no roll option's words run past its button, the group save's among them, and none leaves the panel", async () => {
+    const sceneId = dmSocket.state!.meta.playerSceneId!;
+    const bounds = dmSocket.state!.scenes[sceneId]!.bounds;
+    await ops!.send({ t: "token.create", token: { id: randomUUID(), sceneId, kind: "monster", name: "Aboleth", size: "large", x: 2, y: 2, visibility: "all", disposition: "hostile", actor: { inline: { ...THORN_ACTOR, srdId: "aboleth" } } } });
+    for (const scale of [1, 1.3]) {
+      const label = `390 x 844 at ${Math.round(scale * 100)}%`;
+      await dm.setViewportSize({ width: 390, height: 844 });
+      await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+      await dm.reload();
+      await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+      await dm.locator(".konvajs-content").first().waitFor();
+      await tapCell(dm, bounds, { x: 2.5, y: 2.5 });
+      const bar = dm.getByRole("dialog", { name: "Aboleth actions" });
+      await bar.getByRole("button", { name: "Roll", exact: true }).click();
+      const sheet = dm.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+      const options = sheet.locator("[data-roll-options]");
+      const group = options.getByRole("button", { name: /^Group save, DC 16 Wis/ });
+      await group.waitFor();
+      assert.deepEqual(await overflowing(options), [], `${label}: words run past their buttons`);
+      await group.scrollIntoViewIfNeeded();
+      await shots.take(dm, `dice-aboleth-group-save-${Math.round(scale * 100)}`);
+      await sheet.getByRole("button", { name: "Close Dice" }).click();
+      await dm.keyboard.press("Escape");
+    }
+    await dm.setViewportSize({ width: 1280, height: 800 });
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await dm.reload();
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+  });
+
+  test("17. a critical Flame Tongue with its three riders under Max plus a roll: at 390 x 844 at 100% and 130% the header line keeps its total, its sum and Again whole and drops whole dice for a +N, and at 320 x 568 at 130% nothing on it is cut", async () => {
+    await ops!.send({ t: "room.update", settings: { critRule: "maxPlusRoll" } });
+    await ops!.send({ t: "character.update", characterId: run.thornId, patch: { stats: { ...THORN_STATS, rolls: [...THORN_STATS.rolls, LONG_WEAPON] } } });
+    // 320 at 130% stands for a small iPhone with Safari's text made larger, which narrows the page as much. There the sum may go, whole.
+    for (const [width, height, scale] of [[390, 844, 1], [390, 844, 1.3], [320, 568, 1.3]] as const) {
+      const label = `${width} x ${height} at ${Math.round(scale * 100)}%`;
+      await player.setViewportSize({ width, height });
+      await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+      await player.reload();
+      await player.getByRole("status", { name: "Connected" }).first().waitFor();
+      await openDicePhone(player);
+      const rolls = thornRolls(player);
+      const name = LONG_WEAPON.name;
+      // Longsword has a Divine Smite of its own, so the chips are found in this weapon's row.
+      const row = namedRow(rolls.getByRole("button", { name, exact: true }));
+      for (const rider of ["Flame Tongue", "Divine Smite", "Hunter's Mark"]) {
+        const chip = row.getByRole("button", { name: new RegExp(`^Add \\d+d\\d+ ${rider} to the next damage`) });
+        await chip.scrollIntoViewIfNeeded();
+        await chip.tap();
+      }
+      await rolls.getByRole("button", { name: `Critical hit for ${name}'s next damage` }).tap();
+      const count = diceLines(playerSocket.state?.log).length;
+      await rolls.getByRole("button", { name: new RegExp(`^${name} damage, Critical: max plus a roll`) }).tap();
+      const line = await waitFor("the critical damage's line", () => diceLines(playerSocket.state?.log).slice(count).find((l) => l.data.rolls[0]?.crit !== undefined)?.data ?? null);
+      const sticky = player.locator("[data-dice-last]");
+      await sticky.getByText(String(line.rolls[0]!.total), { exact: true }).waitFor();
+      const sum = (await sticky.getByText(/^\(\d+ max \+ \d+\)$/).textContent())!;
+      const keep = [String(line.rolls[0]!.total), "Again", ...(width === 390 ? [sum] : [])];
+      assert.deepEqual(await headerFaults(sticky, keep), [], `${label}: the header line`);
+      assert.deepEqual(await overflowing(player.locator('dialog[data-rvtt-sheet][aria-label="Dice"] [data-roll-options]')), [], `${label}: words run past their buttons`);
+      await shots.take(player, `dice-long-crit-header-${width}-${Math.round(scale * 100)}`);
+    }
+    await ops!.send({ t: "room.update", settings: { critRule: "rollTwice" } });
+    await player.setViewportSize({ width: 390, height: 844 });
+    await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await player.reload();
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
     assert.deepEqual(dmConsole.errors, []);
     assert.deepEqual(playerConsole.errors, []);
   });
