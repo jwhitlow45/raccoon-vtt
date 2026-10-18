@@ -330,7 +330,8 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
           ? (slot) => {
               const template = view.templates[(page.source as { templateId: string }).templateId];
               const filled = template ? areaFill(dice, template, slot) : null;
-              if (filled) update({ ...pageRef.current, fill: filled.fill, outcome: { ...pageRef.current.outcome, damage: filled.outcome.damage ?? "", slot } });
+              // The fill holds the slot at the spell's own level or above, so the stepper never reads a slot it cannot be cast with (5.4).
+              if (filled) update({ ...pageRef.current, fill: filled.fill, outcome: { ...pageRef.current.outcome, damage: filled.outcome.damage ?? "", slot: filled.outcome.slot ?? slot } });
             }
           : undefined
       }

@@ -51,6 +51,9 @@ describe("an area's fill", () => {
     assert.deepEqual([fill.test, fill.dc, fill.spell, fill.outcome.damage, fill.outcome.onPass, fill.outcome.slot], [{ kind: "save", ability: "dex" }, 14, true, "8d6 fire", "half", 3]);
     assert.equal(fill.fill.from, "From Fireball: Dexterity save, DC 14 (Cultist's spell save DC), 8d6 fire, half on a pass.");
     assert.equal(areaFill(dice(), { spell: "Fireball", casterId: "cultist" }, 5)!.outcome.damage, "10d6 fire");
+    // A slot below the spell's own reads as its own, which the page's stepper then shows (LP7-PC-8).
+    const low = areaFill(dice(), { spell: "Fireball", casterId: "cultist" }, 1)!;
+    assert.deepEqual([low.outcome.slot, low.outcome.damage], [3, "8d6 fire"]);
   });
 
   test("a character's own spell gives its DC and dice, and a cantrip grows with its level", () => {
