@@ -592,8 +592,9 @@ commit you ran before (`git log` lists it), rebuild with
 Restore under Backups with the backup taken just before the update. Every
 room loses what changed after that backup. Reload every page left open
 across the update, table displays included. Until it reloads, an old page
-finds no stat block for a dragon turtle, and an old DM page places new ones
-under the old id.
+finds no stat block for a dragon turtle. A dragon turtle an old DM page
+places, saves in an encounter or gives an image is stored under the new id,
+so it has its stat block once the page reloads.
 
 Compose rebuilds the image and replaces only the containers that changed. On
 the way down the app closes every WebSocket with code 1012, finishes each
