@@ -41,7 +41,7 @@ export type VitalUnit =
   | { kind: "text"; label?: string; value: string; comma?: boolean; tone?: "temp" | "muted" }
   /** The life tag after the HP: Dying, Stable or Dead. */
   | { kind: "tag"; text: string; tone: "danger" | "warning" }
-  /** "Open the sheet ↗", a 44 px link. */
+  /** "Sheet" and the new tab icon, a link as tall as the line's text with a 44 px touch target (SheetLink.tsx). */
   | { kind: "sheet"; url: string };
 
 export type VitalKey = "ac" | "hp" | "speed" | "passivePerception" | "sheet";
@@ -58,7 +58,7 @@ export function unitText(unit: VitalUnit): string {
     case "tag":
       return unit.text;
     case "sheet":
-      return "Open the sheet ↗";
+      return "Sheet ↗";
   }
 }
 
@@ -109,7 +109,7 @@ export function hpUnits(input: { actor: HpView | undefined; hpVisibility: HpVisi
 
 /**
  * The vitals, in order: AC, HP (the bar only, since the panel has its own
- * section), speed, Passive Perception, and in the panel the sheet link.
+ * section), speed, Passive Perception, and the sheet link last.
  * Each item shows only when the viewer's copy holds it, and AC, speed and
  * Passive Perception only on a creature. An object's summary is its HP
  * alone, and nothing shows HP or AC while `hpLess` holds.
@@ -137,10 +137,8 @@ export function vitals(input: {
       items.push({ key: "passivePerception", units: [{ kind: "text", label: "Passive Perception", value: String(actor.passivePerception) }] });
     }
   }
-  if (place === "panel") {
-    const url = actor?.sheetUrl ? validSheetUrl(actor.sheetUrl) : null;
-    if (url) items.push({ key: "sheet", units: [{ kind: "sheet", url }] });
-  }
+  const url = actor?.sheetUrl ? validSheetUrl(actor.sheetUrl) : null;
+  if (url) items.push({ key: "sheet", units: [{ kind: "sheet", url }] });
   return items;
 }
 
@@ -151,7 +149,7 @@ export function vitals(input: {
  */
 export function shortSplit(items: readonly VitalItem[]): { line: VitalItem[]; more: VitalItem[] } {
   return {
-    line: items.filter((i) => i.key === "ac" || i.key === "hp"),
+    line: items.filter((i) => i.key === "ac" || i.key === "hp" || i.key === "sheet"),
     more: items.filter((i) => i.key === "speed" || i.key === "passivePerception"),
   };
 }

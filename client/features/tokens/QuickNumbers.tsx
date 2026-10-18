@@ -4,6 +4,7 @@ import { AcBadge } from "../../components/AcBadge.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { theme } from "../../lib/theme.ts";
 import { elevationBadge } from "../../lib/tokenView.ts";
+import { SheetLink } from "./SheetLink.tsx";
 import type { VitalItem } from "./statSummary.ts";
 
 /**
@@ -71,20 +72,7 @@ export function QuickNumbers(props: { items: readonly VitalItem[]; actor: Partia
   }
   if (sheetUrl) {
     // Last, as the one unit that leaves the page: its icon says a new tab, as every outside link's does.
-    units.push(
-      <a
-        key="sheet"
-        href={sheetUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        referrerPolicy="no-referrer"
-        aria-label="Open the sheet"
-        style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1), minHeight: theme.touch, color: theme.color.accent, fontWeight: theme.weight.strong, whiteSpace: "nowrap" }}
-      >
-        Sheet
-        <Icon name="external" size="sm" />
-      </a>,
-    );
+    units.push(<SheetLink key="sheet" url={sheetUrl} />);
   }
   if (units.length === 0) return null;
   return (

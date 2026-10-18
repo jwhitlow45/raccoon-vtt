@@ -38,15 +38,16 @@ describe("the vitals, by viewer", () => {
     assert.deepEqual(items.map(words), [["15"], ["HP 10/10"], ["Speed 30 ft"], ["Passive Perception 9"]]);
   });
 
-  test("an owner on their character: the same, and in the panel the sheet link and no HP", () => {
+  test("an owner on their character: the same with the sheet link last, and in the panel no HP", () => {
     const state = room();
     state.characters.hero = character("hero", { ownerIds: ["p1"], actor: actor({ ac: 16, hp: { cur: 31, max: 38, temp: 5 }, passivePerception: 14, sheetUrl: "https://www.dndbeyond.com/characters/1" }) });
     state.tokens.t = token("t", { kind: "pc", actor: { ref: "hero" } });
     const view = projectState(state, P1, { sceneId: null });
     const a = view.characters.hero!.actor;
     const bar = vitals({ actor: a, token: { kind: "pc", hpVisibility: view.tokens.t!.hpVisibility }, fullAccess: true, place: "bar" });
-    assert.deepEqual(keys(bar), ["ac", "hp", "speed", "passivePerception"]);
+    assert.deepEqual(keys(bar), ["ac", "hp", "speed", "passivePerception", "sheet"]);
     assert.deepEqual(words(bar[1]), ["HP 31/38", "+5"]);
+    assert.deepEqual(keys(shortSplit(bar).line), ["ac", "hp", "sheet"], "a short bar keeps the link on its line");
     const panel = vitals({ actor: a, token: { kind: "pc" }, fullAccess: true, place: "panel" });
     assert.deepEqual(keys(panel), ["ac", "speed", "passivePerception", "sheet"]);
   });

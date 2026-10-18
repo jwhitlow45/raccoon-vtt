@@ -27,9 +27,9 @@ import { offersRequest } from "../features/rolls/logic.ts";
 import { openAsk } from "../features/rolls/open.ts";
 import { EffectIcon } from "../features/tokens/EffectIcon.tsx";
 import { duplicateToken, occupiedBoxes, spreadPositions } from "../features/tokens/factory.ts";
-import { DefenseLines, MoreStats, SavesLine, SheetAnchor, useLinkedBlock, VitalsLine } from "../features/tokens/StatSummary.tsx";
+import { DefenseLines, MoreStats, SavesLine, useLinkedBlock, VitalsLine } from "../features/tokens/StatSummary.tsx";
 import { openStatBlock } from "../features/tokens/statBlockOpen.ts";
-import { shortSplit, validSheetUrl, vitals } from "../features/tokens/statSummary.ts";
+import { shortSplit, vitals } from "../features/tokens/statSummary.ts";
 import { opensStatBlock, statBlockShown, tokenStatBlock } from "../features/monsters/statBlockLink.ts";
 import { visionOn } from "../features/vision/sightMode.ts";
 import {
@@ -126,7 +126,7 @@ const REVIVE_FOCUS_IN_BAR = { scope: '[role="dialog"]', to: [":scope"] } as cons
  * order docs/design-v1-token-panel.md 3.3 ranks by use: the header, the
  * stat summary's vitals (AC, HP, speed, Passive Perception), the HP entry
  * right after them, death saves, the effects, a linked block's saves and
- * defenses, then "Stat block", the sheet link and Details beside the
+ * defenses, then "Stat block" and Details beside the
  * summary they expand, elevation, other images, the Conditions drawer,
  * and the buttons in rows (barButtons.ts): the answers to the move just
  * made while they show, what play needs, then setup and Delete apart from
@@ -206,7 +206,6 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   // and a player character's DM and players its own stat block (docs/design-v1-pc-stats.md 7.4).
   const shown = statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion: token.companion !== undefined, character: character !== undefined });
   const statBlock = (shown && character?.stats !== undefined) || opensStatBlock(shown, tokenStatBlock(actor, monsters, blocks));
-  const sheetUrl = actor?.sheetUrl ? validSheetUrl(actor.sheetUrl) : null;
   // A dead creature's bar offers the DM Revive after the Dead tag, and tells a player who may heal it what healing will do (docs/design-v1-combat-flow.md 3.5).
   // An HP-less token shows no life tag, so it has neither (docs/design-v1-token-panel.md 3.2).
   const noHp = hpLess(actor, token);
@@ -397,7 +396,6 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
       {/* Stat block and Details both open the panel, so they sit with the summary they expand. */}
       <div role="group" aria-label="Read more" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
         {statBlock ? <BarButton onClick={() => openStatBlock(scope, ui, token.id)}>Stat block</BarButton> : null}
-        {sheetUrl ? <SheetAnchor url={sheetUrl} /> : null}
         <BarButton onClick={props.onDetails}>Details</BarButton>
       </div>
 

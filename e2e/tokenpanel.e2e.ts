@@ -1373,6 +1373,32 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await player.unroute(/\/assets\/monsters-[^/]*\.js$/);
   });
 
+  test("sheetlink-a. the sheet link is the vitals line's last unit: its text height, a 44 px target, no taller line, at a desktop and at 390 x 844", async () => {
+    for (const [label, page, cdp, view] of [
+      ["desktop", dm, dmCdp, DESK],
+      ["390 x 844", player, playerCdp, { width: 390, height: 844, scale: 1 }],
+    ] as const) {
+      await setUp(page, cdp, view, null);
+      await tapToken(page, run.thorn.at);
+      const thorn = bar(page, "Thorn");
+      await thorn.getByRole("img", { name: "Armor Class 16" }).waitFor();
+      const link = thorn.getByRole("link", { name: "Open the sheet" });
+      assert.equal(await link.getAttribute("href"), SHEET, `${label}: the link`);
+      const line = thorn.locator("[data-vitals]");
+      assert.equal(await line.getByRole("link", { name: "Open the sheet" }).count(), 1, `${label}: the link sits in the vitals line`);
+      assert.equal(await thorn.getByRole("group", { name: "Read more" }).getByRole("link").count(), 0, `${label}: none beside Stat block and Details`);
+      assert.equal(await link.innerText(), "Sheet", `${label}: the compact words`);
+      const withLink = await rectOf(line);
+      await shots.take(page, `sheetlink-${label.replace(/ /g, "")}-thorn-bar`);
+      const target = await rectOf(link);
+      assert.ok(target.height >= 43.5, `${label}: a 44 px target, ${target.height} px`);
+      await link.evaluate((el) => ((el as unknown as { parentElement: { style: { display: string } } }).parentElement.style.display = "none"));
+      const without = await rectOf(line);
+      assert.ok(withLink.height <= without.height + 0.5, `${label}: the line is ${withLink.height} px with the link and ${without.height} px without`);
+      await page.keyboard.press("Escape");
+    }
+  });
+
   test("8c. the DM's SRD lists and blocks that did not load offer the reload, which brings them", async () => {
     await dm.route(/\/assets\/monsters-[^/]*\.js$/, failSrdData);
     dmConsole.allow = [/monsters-/, /dynamically imported module/, /ERR_FAILED|net::/];

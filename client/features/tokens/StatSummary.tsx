@@ -11,6 +11,7 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
 import type { TokenAccess } from "./access.ts";
+import { SheetLink } from "./SheetLink.tsx";
 import { defenseLines, linkedBlockState, moreStatsShown, saveUnits, saveUnitsOf, type LinkedBlock, type VitalItem, type VitalUnit } from "./statSummary.ts";
 import { pcDefenseLines } from "../pcstats/reading.ts";
 import { useCharacterRollNumbers } from "../pcstats/useRollNumbers.ts";
@@ -75,30 +76,6 @@ function pcSummary(character: Character): LinkedBlock | null {
   return { kind: "numbers", saves: savesOf(numbers), defenses: pcDefenseLines(character) };
 }
 
-/** "Open the sheet" and its new tab's icon: the owner's D&D Beyond sheet in a new tab, with no referrer and no opener. 44 px tall. */
-export function SheetAnchor(props: { url: string }) {
-  return (
-    <a
-      href={props.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      referrerPolicy="no-referrer"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: theme.space(1),
-        minHeight: theme.touch,
-        color: theme.color.accent,
-        fontWeight: theme.weight.strong,
-        whiteSpace: "nowrap",
-      }}
-    >
-      Open the sheet
-      <Icon name="external" size="sm" />
-    </a>
-  );
-}
-
 function Unit(props: { unit: VitalUnit }) {
   const { unit } = props;
   switch (unit.kind) {
@@ -107,7 +84,7 @@ function Unit(props: { unit: VitalUnit }) {
     case "tag":
       return <Tag tone={unit.tone}>{unit.text}</Tag>;
     case "sheet":
-      return <SheetAnchor url={unit.url} />;
+      return <SheetLink url={unit.url} />;
     case "text":
       return (
         <span style={{ minWidth: 0 }}>
