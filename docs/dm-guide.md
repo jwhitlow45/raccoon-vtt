@@ -127,7 +127,7 @@ This part covers everything you do to get a map ready before the players see it:
 
 A scene is one map, together with its image or build, its grid, its fog and the tokens on it. A room can hold up to 50 scenes. The **Scenes** panel (DM only) lists them, makes new ones, and holds the settings of the scene you are viewing.
 
-![The Scenes panel: the scene list with Players here and Move players, then New scene.](dm-guide/scenes-panel.webp)
+![The Scenes panel: the scene list with thumbnails, Players here on the crypt, and Move players under the others.](dm-guide/scenes-panel.webp)
 
 **Viewing a scene and moving the players.** Tapping a scene's row shows that scene to you alone. The players stay where they are, so you can prepare the next scene while they play this one. When you are ready to bring them along, press **Move players** under the scene's row. Every player is sent there, and that row is then marked **Players here**.
 
@@ -182,7 +182,11 @@ You don't need any art of your own to get started. The app comes with **starter 
 - In the **DM** panel, under **Show a handout**, press **From starter packs**.
 - In the map builder's **Stamp** mode, press **Choose a stamp** and open the **Starter** tab.
 
+![Starter maps under New scene: Dyson's maps sorted by category, and the tapped coaching inn with its pack, author, license and Use.](dm-guide/starter-maps.webp)
+
 Each place shows only the packs that suit it, sorted by pack and then by category inside the pack: Dyson's maps by Taverns and inns, Caves or Crypts and tombs, for example, and the Bestiary by Dragons, Undead and so on. The search box looks through names, categories and tags across all the packs on show, so `owlbear`, `crypt` or `elf` takes you straight to what you're after. Tap a picture to see its name, its pack, its author and its license, then press **Use**.
+
+![The image picker's Starter tab: a search for goblin across the packs, and the tapped Goblin with its pack, author, license and Use.](dm-guide/starter-token.webp)
 
 **How a pick joins the room.** When you use a map, a token or a handout, the app copies that picture into your room's library together with its credit, and then carries on just as it would after an upload of your own: a token picture opens in the crop editor, a map becomes a new scene, and a handout is ready to show. From then on it is one of the room's images like any other. It goes into your backups, and it travels with the room if you move it to another server.
 
@@ -200,7 +204,7 @@ Players get the **Starter** tab too, in the image picker for their own character
 
 Many map images come with a grid already drawn on them. Lining up the grid makes the app's squares match the drawn ones, so that tokens, rulers and areas land where the art says they should.
 
-![Line up grid: a box over 3 by 3 squares with its corner handles, the proposed grid drawn over the whole map, and Apply, Nudge and the pixels per square in the options row.](dm-guide/grid-line-up.webp)
+![Line up grid after an upload that found the map's grid: "Found a grid of 70 px squares.", the box on 3 by 3 of those squares, the grid drawn over the whole map, and Use default, Find the grid and Nudge in the options row.](dm-guide/grid-line-up.webp)
 
 1. Pick **Line up grid** in the toolbar (behind **Setup** on a phone), or press **Line up the grid** in the scene's **Grid** settings. When you create a map scene whose file name doesn't give its size, the tool opens on its own.
 2. Drag a box over 3 by 3 squares of the art. To adjust it, drag inside the box to move it, or drag a corner to resize it. You can also tap elsewhere on the map to move the box to the squares you tapped. As you work, the app draws the grid the box would make across the whole map, so you can check that it lines up everywhere, not just inside the box.
@@ -282,7 +286,7 @@ Heights let you raise or lower the ground, for a hill, a watchtower or a pit, an
 
 While this mode is open, each raised or lowered area shows its height in a pill, such as "↑10 ft". During play, tap the ground with **Select** to see its height for a few seconds ("↑10 ft", or "Stairs · ↑5 ft" on a stair). Raised ground is also drawn lighter and casts a shadow, so the shape of the land shows at a glance.
 
-![Heights and stairs: a watchtower raised 20 ft above a field with stairs up its side, each height in a pill.](dm-guide/heights.webp)
+![Heights and stairs: a rise 10 ft above a field, a watchtower 30 ft up on it with stairs up its side, and each height in a pill.](dm-guide/heights.webp)
 
 Heights change play in several ways:
 
@@ -362,7 +366,7 @@ This part covers what you use once the dice come out: monsters and encounters, t
 
 The **Monsters** panel (DM only) holds the 330 monsters of the SRD 5.2.1, along with any your room has added. Use it to look up a stat block or to put monsters on the map.
 
-![The Monsters panel with a search and filters, and a monster's page with its place card.](dm-guide/monsters.webp)
+![A monster's page in the Monsters panel: the Goblin Warrior's place card with How many, Hidden from players and Place 4 on the map, then its token image and credit.](dm-guide/monsters.webp)
 
 **Finding a monster.** Type in **Search** (`goblin`, `undead`, `huge`), and your words are matched against each monster's name, type and size. You can add a challenge rating to the search as well: `cr 5` for one rating, `cr 1-5` or `cr 1/2-3` for a range, or `cr 10-` for 10 and up. **Filters** narrows the list further by challenge rating, creature type, **Legendary**, **Has a lair**, size, immunities, resistances, vulnerabilities, movement, senses and alignment.
 
@@ -388,7 +392,7 @@ For a legendary monster, the editor looks for two names in particular. A trait n
 
 The **Encounters** panel (DM only) lets you prepare fights ahead of time: which monsters, how many, and how hard the fight will be for your party. Players never see your encounters, only the tokens you place from them.
 
-![The encounter editor: the monsters with their counts, Place on the map, and the XP budget for the party.](dm-guide/encounters.webp)
+![The encounter editor: Place on the map, then the XP budget for the party, with Low outlined for this encounter.](dm-guide/encounters.webp)
 
 1. Press **New encounter** and give it a name ("Ambush at the ford").
 2. Search under **Add** (`goblin`, `cr 1-3`) and tap a monster's **+** once for each copy you want. Each line has a count you can change, and **Remove**.
@@ -409,7 +413,7 @@ The monsters go on the scene you are viewing, with average HP and their monsters
 
 Tap a token with the **Select** tool to open its **action bar**. On a phone held upright, the bar opens under the token. On a wider screen, it opens as a window at the bottom right of the map, which you can drag by its header to move it. For everything about the selected token, open the **Token** panel.
 
-![A goblin's action bar: AC, HP, speed and passive Perception, the HP entry, its saves and defenses, then Conditions, Hidden, Multi-select, Roll, Size, and the padlock, copy and trash can icons.](dm-guide/action-bar.webp)
+![A goblin's action bar: AC, HP, speed and passive Perception, the HP entry, its saves, Stat block, Details and elevation, then Conditions, Hidden, Multi-select, Roll, Size, and the padlock, copy and trash can icons.](dm-guide/action-bar.webp)
 
 The action bar holds, from top to bottom:
 
@@ -494,7 +498,7 @@ A creature can carry up to 32 conditions and statuses at once.
 
 The **Initiative** panel runs the fight: who is in it, the order they act in, and the turns and rounds. Players see the order too, but never hidden creatures, monsters' dice or anything else they can't see. In a new room, they don't even see a monster's place in the order until its turn comes (see [What players see of the order](#what-players-see-of-the-order), below).
 
-![The Initiative panel during a fight: the round header with Previous and Next, the order with HP and conditions, and Auto initiative below.](dm-guide/initiative.webp)
+![The Initiative panel during a fight: the round header with Previous and Next, and the order with HP and conditions.](dm-guide/initiative.webp)
 
 ### Starting a fight
 
@@ -570,7 +574,7 @@ A few more details follow from this. A creature added mid-fight waits for its ow
 
 Every roll in the app happens on the server, so everyone sees the same result and nobody can fake one. Players who prefer real dice can still roll at the table and type their totals wherever the app asks for one, unless you turn off **Players may type their roll totals** in Room settings. The **Dice** panel is open to everyone.
 
-![The Dice panel with a goblin selected: the formula field, quick dice, Adv, Dis and Secret, and the goblin's roll options with its saves, checks and Scimitar attack.](dm-guide/dice.webp)
+![The Dice panel with a goblin selected: the formula field, quick dice, Adv, Dis and Secret, and the goblin's roll options with its saves, checks and initiative.](dm-guide/dice.webp)
 
 **Typing a roll.** Type a formula in the field and press **Roll** or Enter. A few examples of what it understands:
 
@@ -638,7 +642,7 @@ Each player gets a card with the question and rolls it with their bonus (conditi
 - Answer a player's ask, such as "Asks to reroll (Heroic Inspiration)", with **Allow** or **Keep**.
 - **Reopen for one more answer**, **Close**, or **Close all answered**.
 
-![The DM's card for a Dexterity save: Mara rolled a natural 1 and failed, Thorn passed, Bree and Ivo still waiting with Roll +0 and Roll +2.](dm-guide/roll-card.webp)
+![The DM's card for a Dexterity save: Mara's and Thorn's answers, each with its roll and its pass or fail, and Bree and Ivo still waiting with Roll +0 and Roll +2.](dm-guide/roll-card.webp)
 
 Only you and the creature's player see an answer. Up to 20 requests can be open at once.
 
@@ -646,7 +650,7 @@ Only you and the creature's player see an answer. Up to 20 requests can be open 
 
 The **Area** tool (`A`) draws areas of effect: spells, breath weapons and auras. The **Areas** panel lists the ones placed on the scene. An area works out who is inside it, in three dimensions, and stops at walls, so you don't have to count squares by hand.
 
-![A Fireball preview: the shaded squares and "In area (3)" naming who it catches, with Place in the options row.](dm-guide/areas.webp)
+![A Fireball preview: the shaded squares and "In area (4)" naming who it catches, with Place in the options row.](dm-guide/areas.webp)
 
 ### Placing an area
 
@@ -699,7 +703,7 @@ Reminders fire only while a fight's turns are running. Each one adds a line to t
 
 The group save rolls one saving throw for many creatures at once and applies the damage and conditions to all of them in a single step, with a single undo. Start it from a placed area's **Save and damage**, or from a save action in the Dice panel's roll options.
 
-![The group save for a Fireball: the fill line, the damage, each creature's row with its roll and damage, and Apply.](dm-guide/group-save.webp)
+![The group save for a Fireball: the fill line, the count of passes and fails, each creature's row with its roll and damage, and Apply.](dm-guide/group-save.webp)
 
 When you start it from an area, the page fills itself in from the spell and its caster: "From Fireball: Dexterity save, DC 15 (Ivo's spell save DC), 8d6 fire, half on a pass." Then work down the page:
 
@@ -748,7 +752,7 @@ This part covers the tools that help a long campaign run smoothly: the Outliner,
 
 The **Outliner** (DM only) lists everything on the scene you are viewing, along with what the players get of each thing. It is the place to find one token in a crowd, check what is still hidden, and track down things you have lost. The `/` key opens it with the search ready to type in.
 
-![The Outliner: groups that fold, each row with what players get, such as Hidden, Under fog or Secret door, hidden.](dm-guide/outliner.webp)
+![The Outliner on the crypt: the chips that show one group, groups that fold, and each row with what players get, such as Out of the party's sight.](dm-guide/outliner.webp)
 
 - Everything is sorted into groups that fold: **Creatures and objects**, **Map** (stamps, labels, pins and lights), **Areas**, **Drawings** and **Doors** (windows too). The chips at the top show one group at a time.
 - Each row says what the players get of it: **Hidden**, **Under fog**, **Out of the party's sight**, **DM only**, **Only Pat** (only that one player gets it, such as a pin linked to a page only Pat can read), **Secret door, hidden** or **Secret door, found**. On a scene you are preparing, the rows read as they will once the players move there, so you can check a scene before anyone arrives.
@@ -761,7 +765,7 @@ A companion whose character has no token on this scene reads **Away from Bree**,
 
 The **DM** panel holds the tools that act on your players' screens.
 
-![The DM panel: Handouts, Players' screens, Check their view, Player link and Table display.](dm-guide/dm-panel.webp)
+![The top of the DM panel: Handouts, Players' screens and Check their view.](dm-guide/dm-panel.webp)
 
 - **Handouts**: **Show a handout** shows an image or a PDF as a popup, to **Everyone** or to **Chosen players**. Pick **From the library** or **Upload a file**, or press **From starter packs** to choose one of the pictures that come with the app (see [Starter art](#starter-art)). Give it a **Title** (a starter picture fills in its own name if you haven't typed one), then press **Show**. For a PDF, the app asks which pages to include (up to 100). **Showing now** lists what is up, with **Hide** to take a handout down for everyone.
 - **Players' screens**:
@@ -782,7 +786,7 @@ The **Characters** panel lists the party. A character belongs to the room rather
 - To put a character on the scene you are viewing, open it, press **Place a token**, and tap the map.
 - A character's card shows its numbers, its companions and its stat block.
 
-![Thorn's card in the Characters panel: Place a token, his companions, and his stat block with its scores, skills and weapons.](dm-guide/pc-stats.webp)
+![Thorn's card in the Characters panel: Short rest and Long rest, then his stat block with its scores, skills and weapons.](dm-guide/pc-stats.webp)
 
 **Stat blocks.** A character can have a stat block of its own: its level, ability scores, save and skill proficiencies, spellcasting, defenses, and its weapons, spells and other rolls, with riders such as Sneak Attack. A stat block makes the rest of the app smarter about that character. The Dice panel offers its rolls, roll requests know its bonuses, and the group save knows its resistances and Evasion. The block stays between you and the character's own players: only you and those players see it, and only you and they get **Add a stat block**, **Edit**, **Take a shape** and **End the shape**. Other players and the table display never see it.
 
@@ -846,7 +850,7 @@ The display shows the players' scene the way the players see it: fog, party visi
 
 Open the Menu, then **Room settings** (DM only). Each switch takes effect at once. These are the settings that shape maps and fights, each with its default in parentheses:
 
-![Room settings: the Players settings with their help lines, and Combat below.](dm-guide/room-settings.webp)
+![Room settings: the Combat settings, each switch with its help line.](dm-guide/room-settings.webp)
 
 - **Players**: **Who can move any token** (No one), **Who can draw** (Every player), **Players can create their own characters** (on), **Players can apply damage and healing** (off), **Players may type their roll totals** (on), **Players see the party's HP** (on) and **Players see each other's areas** (on).
 - **Combat**: **Monsters die at 0 HP** (on), **Healing brings back the dead** (on), **Skip defeated creatures** (on), **Use initiative scores for monsters** (off), **Reveal hidden combatants on their turn** (on), **Initiative order players see** (**Player characters, the rest on their turn** in a new room), **Critical hit damage** (**Roll the dice twice**) and **Turn timer** (Off).
@@ -885,7 +889,7 @@ Goblins and wolves wait in the trees beside a road, and the party is about to wa
 5. Pick the **Fog** tool with **Clear fog** and **Rectangle**, drag over the road, the party and the trees where the goblins wait, and press **Reveal to players**. Clearing the fog doesn't reveal the goblins, because hidden tokens stay hidden even on open ground. You clear their ground now because a token that is revealed later still can't be seen while it stands under fog.
 6. In **Scenes**, press **Move players** on the forest road.
 
-![The ambush in round 1: the four goblin warriors and the boss selected, with Hidden lit in the group's bar and their tracker rows tagged Hidden, just before the reveal.](dm-guide/ambush-reveal.webp)
+![The ambush in round 1: the four goblin warriors and the boss selected, with Hidden in the group's bar, and the rows of those still hidden tagged Hidden in the tracker, just before the reveal.](dm-guide/ambush-reveal.webp)
 
 **Running it**
 
@@ -943,7 +947,7 @@ A watchtower stands on a rise above a field, and harpies circle overhead.
 4. Place an archer on the tower. A token placed on raised ground stands on top of it.
 5. Place the harpies and raise them to 40 ft with **+5** in the action bar, or Page Up. Each shows "↑40", with a shadow on the ground under it.
 
-![The watchtower: the rise and the tower with their heights in pills, the stairs, an archer on top, and harpies flying with their shadows.](dm-guide/heights-build.webp)
+![The watchtower: the rise and the tower with their stairs, Mara on top as the archer, harpies flying at 40 and 30 ft, and the Ruler from Mara down to Thorn reading 50 ft.](dm-guide/heights-build.webp)
 
 **Running it**
 
@@ -974,7 +978,7 @@ The party faces an adult red dragon in its lair. It has Multiattack, Fire Breath
 - To spend a legendary action, open the dragon's row's **⋯** and tap a pip under **Legendary actions used**. They refill at the start of its turn.
 - When the dragon fails a save in a group save, its row offers **Use Legendary Resistance (4 left)** the first time, since the label counts the uses it still has, and a save-ends or concentration card offers the same. For a save you roll yourself from its roll options, tap a pip under **Legendary resistances used today** in its row's **⋯**.
 
-![The dragon's turn: its roll options with Rend, Fire Breath's Recharge and Used, and the tracker row with its LA and LR tags.](dm-guide/boss.webp)
+![The dragon's turn: its action bar beside its roll options, with Rend, and Fire Breath's Recharge and Used.](dm-guide/boss.webp)
 
 ## Spirit Guardians and a summoned companion
 
@@ -988,7 +992,7 @@ Bree casts Spirit Guardians and wades into the goblins, while Ivo's owl familiar
 4. Resolve it. For one goblin, select it, roll its Wisdom save from its roll options, and apply Bree's 3d8 radiant damage (half on a pass) with the **Use** chip. For several at once, press **Save and damage** on the aura and **Skip** the rows that weren't affected this time.
 5. When Bree takes damage, her player gets the concentration check. If it fails, delete the aura from the **Areas** panel, because areas don't end on their own when concentration does.
 
-![Spirit Guardians around Bree: the attached aura, the goblins inside it in the Areas panel, and the reminder in the log.](dm-guide/guardians.webp)
+![Spirit Guardians around Bree: the attached aura, the skeletons inside it in the Areas panel, and the reminder's notice as Skeleton 2 walks in.](dm-guide/guardians.webp)
 
 **The familiar**
 
@@ -1032,7 +1036,7 @@ This part is for quick lookups during play, starting with the keys that save a D
 
 Press `?` (or open the Menu, then **This device**, then **Show the shortcuts**) for the full list of shortcuts for your role.
 
-![The shortcut list the ? key opens.](dm-guide/shortcuts.webp)
+![The shortcut list the ? key opens: Change beside each key, Reset beside Draw after its move to K, and Swap for Ruler, since Full screen already has W.](dm-guide/shortcuts.webp)
 
 These are the keys a DM uses most:
 
