@@ -9,12 +9,14 @@ import {
   migrateOp,
   migrateSnapshot,
   oldSrdIdGuards,
+  storedSrdId,
   opMigrations,
   oneLinkPerActor,
   resizeStop,
   reviveToOne,
   runMigrations,
   snapshotMigrations,
+  todaysSrdId,
   withOldSrdIds,
   withTodaysSrdIds,
   type MigrationStep,
@@ -591,6 +593,9 @@ describe("the dragon turtle's id: op version 10 and snapshot version 14", () => 
     // Text that mentions the old id is text, not an id.
     expected.tokens.t2!.name = `not ${OLD}`;
     expected.log[1]!.text = `${OLD} is how the old build spelled it`;
+    // A fight's rows keep the group keys they were stored with, which the tracker reads as today's id (rowGroup).
+    expected.encounter = old.encounter;
+    expected.encounterHistory = old.encounterHistory;
     assert.deepEqual(migrated, expected);
     assert.deepEqual(Object.keys(migrated.srdImages).sort(), ["dragon-turtle", "goblin-warrior"]);
     assert.deepEqual(migrated.srdImages[NEW], { id: NEW, rev: 3, image: srdImage(NEW, "img-turtle").image });
@@ -618,9 +623,6 @@ describe("the dragon turtle's id: op version 10 and snapshot version 14", () => 
       { t: "savedEncounter.create", encounter: { id: "se2", name: "Shell game", monsters: [{ srdId: OLD, count: 2 }] } },
       { t: "savedEncounter.update", encounterId: "se1", patch: { monsters: [{ srdId: "goblin-warrior", count: 1 }, { srdId: OLD, count: 1, inLair: true }] } },
       { t: "companionBlock.create", block: { ...blockOf(companionBlock("cb2", "c1")), id: "cb2", characterId: "c1", fromSrd: OLD } },
-      { t: "encounter.start", entries: [{ id: "e1", tokenId: "t1", groupKey: OLD }] },
-      { t: "encounter.add", entries: [{ id: "e3", tokenId: "t9", groupKey: OLD }] },
-      { t: "encounter.update", entryId: "e1", patch: { groupKey: OLD } },
     ];
     for (const op of ops) {
       const migrated = migrateOp(JSON.parse(JSON.stringify(op)), 9);
@@ -636,17 +638,23 @@ describe("the dragon turtle's id: op version 10 and snapshot version 14", () => 
     assert.equal(withTodaysSrdIds(today), today);
   });
 
-  test("an op that names no SRD monster by the old id is the very same op, text that mentions it included", () => {
+  test("an op that names no SRD monster by the old id is the very same op, text and group keys that hold it included", () => {
     const ops: unknown[] = [
       { t: "log.chat", text: `the ${OLD} returns` },
       { t: "token.update", tokenId: "t1", patch: { name: OLD, actor: { srdId: "goblin-warrior" } } },
       { t: "encounter.next" },
       { t: "monster.setSrdImage", srdId: "owlbear", image: null },
+      { t: "encounter.start", entries: [{ id: "e1", tokenId: "t1", groupKey: OLD }] },
+      { t: "encounter.add", entries: [{ id: "e3", tokenId: "t9", groupKey: OLD }] },
+      { t: "encounter.update", entryId: "e1", patch: { groupKey: OLD } },
     ];
-    for (const op of ops) assert.equal(runMigrations(op, 9, 10, opMigrations), op);
+    for (const op of ops) {
+      assert.equal(runMigrations(op, 9, 10, opMigrations), op);
+      assert.equal(withTodaysSrdIds(op as Op), op);
+    }
   });
 
-  test("a stored restore takes the new id in its values and in an SRD image's key, and keeps every guard", () => {
+  test("a stored restore takes the new id in its values and in an SRD image's key, and keeps every guard and group key", () => {
     const turtle = token("t1", { actor: { inline: actor({ srdId: OLD }) } });
     const entries = [
       { key: "token:t1", value: turtle, expectHash: "a".repeat(32) },
@@ -659,7 +667,9 @@ describe("the dragon turtle's id: op version 10 and snapshot version 14", () => 
     ];
     const restore = { t: "sys.restore", entries, from: "undo", deps: true };
     const migrated = migrateOp(JSON.parse(JSON.stringify(restore)), 9);
-    assert.deepEqual(migrated, renamed(restore));
+    const expected = renamed(restore);
+    expected.entries[5]!.value = entries[5]!.value;
+    assert.deepEqual(migrated, expected);
     assert.deepEqual(
       (migrated as { entries: RestoreEntry[] }).entries.map((e) => e.key),
       ["token:t1", "token:t9", `srdImage:${NEW}`, `srdImage:${NEW}`, "srdImage:owlbear", "encounter", "drawing:d1"],
@@ -674,30 +684,24 @@ describe("the dragon turtle's id: op version 10 and snapshot version 14", () => 
     assert.equal(oldSrdIdGuards(10), false);
     assert.equal(oldSrdIdGuards(undefined), false);
     const turtle = token("t1", { actor: { inline: actor({ srdId: NEW }) } });
+    assert.deepEqual(withOldSrdIds("token:t1", turtle), token("t1", { actor: { inline: actor({ srdId: OLD }) } }));
+    assert.deepEqual(withOldSrdIds(`srdImage:${NEW}`, srdImage(NEW, "img-turtle")), srdImage(OLD, "img-turtle"));
     const goblin = token("t2", { actor: { inline: actor({ srdId: "goblin-warrior" }) } });
-    const tokens = { t1: turtle, t2: goblin };
-    assert.deepEqual(withOldSrdIds("token:t1", turtle, tokens), token("t1", { actor: { inline: actor({ srdId: OLD }) } }));
-    assert.deepEqual(withOldSrdIds(`srdImage:${NEW}`, srdImage(NEW, "img-turtle"), tokens), srdImage(OLD, "img-turtle"));
-    assert.equal(withOldSrdIds("token:t2", goblin, tokens), goblin);
-    assert.equal(withOldSrdIds("srdImage:owlbear", null, tokens), null);
+    assert.equal(withOldSrdIds("token:t2", goblin), goblin);
+    assert.equal(withOldSrdIds("srdImage:owlbear", null), null);
   });
 
-  test("a row keyed by the name of a monster called dragon-turtle keeps its key, and every other dragon-turtle row takes the old id", () => {
-    const tokens = {
-      t1: token("t1", { name: "Dragon Turtle", actor: { inline: actor({ srdId: NEW }) } }),
-      t2: token("t2", { name: NEW, actor: { inline: actor({ monsterId: "m1" }) } }),
-      t3: token("t3", { name: NEW, actor: { inline: actor({ srdId: NEW }) } }),
-    };
-    const fight = (...rows: [string, string][]): Encounter => ({ rev: 1, round: 1, activeEntryId: null, entries: rows.map(([id, tokenId]) => entry(id, { tokenId, groupKey: NEW })) });
-    const now = fight(["e1", "t1"], ["e2", "t2"], ["e3", "t3"], ["e4", "gone"]);
-    const then: Encounter = { ...now, entries: [entry("e1", { tokenId: "t1", groupKey: OLD }), now.entries[1]!, entry("e3", { tokenId: "t3", groupKey: OLD }), entry("e4", { tokenId: "gone", groupKey: OLD })] };
-    assert.deepEqual(withOldSrdIds("encounter", now, tokens), then);
-    // A past fight's tokens are often gone: its rows take the old id, as a fight with SRD dragon turtles held them.
-    const history = [{ encounter: fight(["e5", "gone"]), effects: {}, revealed: [], at: AT }];
-    const historyThen = [{ ...history[0]!, encounter: { ...history[0]!.encounter, entries: [entry("e5", { tokenId: "gone", groupKey: OLD })] } }];
-    assert.deepEqual(withOldSrdIds("encounterHistory", history, tokens), historyThen);
-    const onlyNamed = fight(["e2", "t2"]);
-    assert.equal(withOldSrdIds("encounter", onlyNamed, tokens), onlyNamed);
+  test("a fight's group keys are read back as they were stored, whichever spelling they hold, and a v9 op keys a new row as its build did", () => {
+    const fight: Encounter = { rev: 1, round: 1, activeEntryId: null, entries: [entry("e1", { tokenId: "t1", groupKey: OLD }), entry("e2", { tokenId: "t2", groupKey: NEW })] };
+    assert.equal(withOldSrdIds("encounter", fight), fight);
+    const history = [{ encounter: fight, effects: {}, revealed: [], at: AT }];
+    assert.equal(withOldSrdIds("encounterHistory", history), history);
+    assert.equal(storedSrdId(NEW, 9), OLD);
+    assert.equal(storedSrdId(NEW, 10), NEW);
+    assert.equal(storedSrdId(NEW, undefined), NEW);
+    assert.equal(storedSrdId("goblin-warrior", 9), "goblin-warrior");
+    assert.equal(todaysSrdId(OLD), NEW);
+    assert.equal(todaysSrdId(NEW), NEW);
   });
 
   test("a room's v13 snapshot and the v9 ops after it load as one room that names the dragon turtle by its new id, its guards still refusing a real change", () => {
@@ -723,7 +727,10 @@ describe("the dragon turtle's id: op version 10 and snapshot version 14", () => 
     assert.equal(turtle.name, "Dragon Turtle");
     assert.deepEqual(turtle.actor, { inline: actor({ srdId: NEW }) });
     assert.deepEqual(loaded.state.srdImages[NEW]?.image, { icon: "lorc/turtle", color: "#30a46c" });
-    assert.equal(JSON.stringify(loaded.state).includes(`"${OLD}"`), false);
+    // Only the fight's group keys still hold the old id, as stored.
+    const { encounter: _encounter, encounterHistory: _history, ...rest } = loaded.state;
+    assert.equal(JSON.stringify(rest).includes(`"${OLD}"`), false);
+    assert.equal(loaded.state.encounter?.entries[0]?.groupKey, OLD);
     // By today's rule the undo's guard hashed a token that named the old id, which the migrated room no longer holds.
     const live10 = load([rename, setImage, undo], undefined);
     assert.ok(!live10.ok);

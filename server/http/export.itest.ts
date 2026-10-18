@@ -557,7 +557,7 @@ describe("room export and import", () => {
     assert.deepEqual(rows[0]!.state.handoutDocs, {});
   });
 
-  test("a backup from before the dragon turtle's id was fixed imports with the new id everywhere it named the old one", async () => {
+  test("a backup from before the dragon turtle's id was fixed imports with the new id everywhere it named the old one, its fight's group keys kept as stored", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom("Shell game");
     const dmSocket = await t.connect(roomId, dm);
@@ -586,7 +586,9 @@ describe("room export and import", () => {
     const { rows } = await t.pool.query<{ state: RoomState; schema_version: number }>("select state, schema_version from room_snapshots where room_id = $1", [newId]);
     const state = rows[0]!.state;
     assert.equal(rows[0]!.schema_version, SNAPSHOT_VERSION);
-    assert.equal(JSON.stringify(state).includes("dragon-tur-t-le"), false);
+    // The fight's rows keep their group keys, which the tracker reads as today's id (rowGroup), and nothing else names the old one.
+    const { encounter: _encounter, encounterHistory: _history, ...rest } = state;
+    assert.equal(JSON.stringify(rest).includes("dragon-tur-t-le"), false);
     assert.deepEqual(Object.keys(state.srdImages), ["dragon-turtle"]);
     assert.equal(state.srdImages["dragon-turtle"]?.id, "dragon-turtle");
     assert.deepEqual(state.srdImages["dragon-turtle"]?.image, image);
@@ -594,7 +596,7 @@ describe("room export and import", () => {
     assert.ok(turtle && "inline" in turtle.actor);
     assert.equal(turtle.actor.inline.srdId, "dragon-turtle");
     assert.deepEqual(Object.values(state.savedEncounters)[0]?.monsters, [{ srdId: "dragon-turtle", count: 1 }]);
-    assert.equal(state.encounter?.entries[0]?.groupKey, "dragon-turtle");
+    assert.equal(state.encounter?.entries[0]?.groupKey, "dragon-tur-t-le");
     dmSocket.close();
   });
 

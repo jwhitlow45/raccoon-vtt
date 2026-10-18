@@ -409,13 +409,16 @@ describe("op admission", () => {
         assert.ok(answer !== "stuck" && answer.acks?.includes(i + 1), `${op.t} is applied`);
       }
       const state = actor.committed.state;
-      assert.equal(JSON.stringify(state).includes(OLD), false);
+      // A row's group key is kept as sent, which the tracker reads as today's id (rowGroup), so only it holds the old id.
+      const { encounter, encounterHistory: _history, ...rest } = state;
+      assert.equal(JSON.stringify(rest).includes(OLD), false);
       assert.deepEqual(state.tokens[tokenId]?.actor, { inline: { ...inline, srdId: NEW } });
       assert.deepEqual(state.savedEncounters[encounterId]?.monsters, [{ srdId: NEW, count: 2 }]);
       assert.deepEqual(Object.keys(state.srdImages), [NEW]);
       assert.equal(state.srdImages[NEW]?.id, NEW);
-      assert.equal(state.encounter?.entries[0]?.groupKey, NEW);
-      assert.equal(JSON.stringify(db.storedRows).includes(OLD), false, "no stored op names the old id");
+      assert.equal(encounter?.entries[0]?.groupKey, OLD);
+      const storedOps = db.storedRows.map((row) => (row as { op: Op }).op);
+      assert.equal(JSON.stringify(storedOps.filter((op) => op.t !== "encounter.start")).includes(OLD), false, "no other stored op names the old id");
       assert.ok(db.storedRows.every((row) => (row as { op_version: number }).op_version === OP_VERSION));
 
       // The fight's undo and redo take it back and bring it again under the id it was stored with.
@@ -434,7 +437,7 @@ describe("op admission", () => {
       assert.equal(loaded?.replayFailed, false);
       assert.deepEqual(loaded?.state, actor.committed.state);
       assert.deepEqual(loaded?.state.srdImages[NEW]?.image, picture);
-      assert.equal(loaded?.state.encounter?.entries[0]?.groupKey, NEW);
+      assert.equal(loaded?.state.encounter?.entries[0]?.groupKey, OLD);
     } finally {
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });

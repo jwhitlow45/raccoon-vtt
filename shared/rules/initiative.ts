@@ -1,4 +1,5 @@
 import type { Actor, Effect, Encounter, EntryId, InitEntry, OrderReveal, RoomSettings, RoomState } from "../model.ts";
+import { storedSrdId, todaysSrdId } from "../migrate.ts";
 import { INCAPACITATING_KEYS } from "./hp.ts";
 
 /**
@@ -176,10 +177,27 @@ export function nextTurn(state: RoomState, encounter: Encounter, settings: RoomS
   return { landing: fallback.id, skipped: [], wrapped: activeIndex + 1 >= entries.length };
 }
 
-/** The group key identical monsters share, for the tracker's grouping: the SRD id, or the base name. */
-export function groupKeyFor(state: Pick<RoomState, "tokens">, entry: Pick<InitEntry, "tokenId" | "characterId">): string | undefined {
+/**
+ * The group key identical monsters share, for the tracker's grouping: the
+ * SRD id, or the base name. An op stored before op version 10 keys an SRD
+ * monster's row by the id as its build spelled it (`storedSrdId`), so its
+ * replay writes the very row a later stored undo's guard hashed.
+ */
+export function groupKeyFor(state: Pick<RoomState, "tokens">, entry: Pick<InitEntry, "tokenId" | "characterId">, opVersion?: number): string | undefined {
   if (entry.tokenId === undefined) return undefined;
   const token = state.tokens[entry.tokenId];
   if (!token || token.kind === "pc" || "ref" in token.actor) return undefined;
-  return token.actor.inline.srdId ?? token.name;
+  const { srdId } = token.actor.inline;
+  return srdId !== undefined ? storedSrdId(srdId, opVersion) : token.name;
+}
+
+/**
+ * The group a row is in, for every reader that groups or compares rows. A
+ * row keeps the key it was stored with (shared/migrate.ts, SRD_ID_FIELDS),
+ * so one keyed before the dragon turtle's SRD id was renamed still reads
+ * `dragon-tur-t-le`. It is today's id here, so it groups with the rows
+ * added since.
+ */
+export function rowGroup(entry: Pick<InitEntry, "groupKey">): string | undefined {
+  return entry.groupKey === undefined ? undefined : todaysSrdId(entry.groupKey);
 }

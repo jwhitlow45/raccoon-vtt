@@ -261,6 +261,20 @@ describe("grouping", () => {
     );
   });
 
+  test("by creature, a dragon turtle's row keyed before its SRD id was renamed shares one roll with one added since", () => {
+    let state = room({
+      tokens: {
+        old: token("old", { name: "Dragon Turtle", actor: { inline: actor({ srdId: "dragon-turtle", initBonus: 6 }) } }),
+        new: token("new", { name: "Dragon Turtle", actor: { inline: actor({ srdId: "dragon-turtle", initBonus: 6 }) } }),
+      },
+    });
+    state = apply(state, { t: "encounter.start", entries: [{ id: "old", tokenId: "old", groupKey: "dragon-tur-t-le" }, { id: "new", tokenId: "new" }] });
+    assert.deepEqual(state.encounter?.entries.map((e) => e.groupKey).sort(), ["dragon-tur-t-le", "dragon-turtle"]);
+    const { rows } = rowsOf(state);
+    assert.deepEqual(rows.map((r) => r.groupKey), ["dragon-turtle", "dragon-turtle"]);
+    assert.deepEqual(ids(planRolls(rows, "creature")).map((g) => g.sort()), [["new", "old"]]);
+  });
+
   test("by creature, an ungrouped monster rolls alone", () => {
     const groups = planRolls([goblins[0]!, row("g-alone"), goblins[1]!], "creature");
     assert.deepEqual(ids(groups), [["g1", "g2"], ["g-alone"]]);

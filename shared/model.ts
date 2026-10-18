@@ -1304,7 +1304,11 @@ export type InitEntry = {
   label?: string;
   value: number | null;
   tieOrder: number;
-  /** The SRD id or base name shared by identical monsters. DM only. */
+  /**
+   * The SRD id or base name shared by identical monsters. DM only. Kept as
+   * stored, so a row keyed before the dragon turtle's SRD id was renamed
+   * holds the old id, which `rowGroup` reads as today's.
+   */
   groupKey?: string;
   hidden: boolean;
   reactionUsed: boolean;

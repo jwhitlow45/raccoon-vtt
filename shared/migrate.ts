@@ -108,7 +108,8 @@ export const snapshotMigrations: MigrationStep[] = [
   { from: 12, to: 13, apply: (state) => state },
   // The dragon turtle's SRD id was `dragon-tur-t-le` until the SRD import took the name from the stat block instead of
   // the index's kerning gaps. Rooms and backups from before name it that way wherever they name an SRD monster, so each
-  // of those spots takes today's id (renameSrdIdsInState).
+  // of those spots takes today's id (renameSrdIdsInState). An initiative row's group key keeps its spelling, since it
+  // may be a name rather than an id (SRD_ID_FIELDS).
   { from: 13, to: 14, apply: (state) => renameSrdIdsInState(state) },
 ];
 
@@ -327,12 +328,16 @@ export const opMigrations: MigrationStep[] = [
   {
     // The dragon turtle's SRD id, as in snapshot step 13 to 14: a v9 op
     // names it `dragon-tur-t-le` wherever it names an SRD monster, and
-    // takes today's id there (renameSrdIdsInOp). A stored restore keeps its
-    // guards, though a hash guard may have hashed a value that held the old
-    // id, which no migrated room holds. Replay hands the reducer the stored
-    // version instead, as in step 3 to 4, and a v9 guard also matches the
-    // entity spelled the old way (`oldSrdIdGuards`, `withOldSrdIds`). So a
-    // guard still refuses a change that really happened since.
+    // takes today's id there (renameSrdIdsInOp). A group key keeps its
+    // spelling, as in the room. A stored restore keeps its guards, though a
+    // hash guard may have hashed a value that held the old id, which no
+    // migrated room holds. Replay hands the reducer the stored version
+    // instead, as in step 3 to 4, and a v9 guard also matches the entity
+    // spelled the old way (`oldSrdIdGuards`, `withOldSrdIds`). So a guard
+    // still refuses a change that really happened since. A v9 op that keys a
+    // new row by its token's SRD id keys it by the old spelling, as its
+    // build did (`storedSrdId`), so the rows a later guard hashed come back
+    // as they were.
     //
     // Deploy: back up the database just before. The first op after it is
     // stored at version 10, and the shutdown writes version 14 snapshots.
@@ -352,21 +357,28 @@ export const opMigrations: MigrationStep[] = [
  * gaps split it ("Dragon Tur t le").
  */
 const RENAMED_SRD_IDS: ReadonlyMap<string, string> = new Map([["dragon-tur-t-le", "dragon-turtle"]]);
-/** The other way round, for guards hashed before the rename. Today's ids were no SRD id then. */
+/** The other way round, for what a build from before the rename wrote. Today's ids were no SRD id then. */
 const OLD_SRD_IDS: ReadonlyMap<string, string> = new Map([...RENAMED_SRD_IDS].map(([old, now]) => [now, old]));
 
 /**
  * The fields that hold an SRD id (shared/model.ts): an actor's `srdId`, a
- * saved encounter monster's and `monster.setSrdImage`'s `srdId`, a
- * companion block's `fromSrd`, and an initiative row's `groupKey`, which is
- * the SRD id that identical monsters share, or else a base name. An HP log
- * line's `shapeTemp` names shapes by SRD id too, in `before` and `after`.
- * An SRD image is keyed by its SRD id, and names it as its `id`.
+ * saved encounter monster's and `monster.setSrdImage`'s `srdId`, and a
+ * companion block's `fromSrd`. An HP log line's `shapeTemp` names shapes by
+ * SRD id too, in `before` and `after`. An SRD image is keyed by its SRD id,
+ * and names it as its `id`.
+ *
+ * An initiative row's `groupKey` is left as it was stored. It is the SRD id
+ * that identical monsters share, or else a base name, and a monster named
+ * `dragon-turtle` gave its row that key before the rename too. So the old
+ * spelling could not be told back from a renamed key, and an older undo's
+ * guard over the fight would stop matching. The tracker reads a stored old
+ * id as today's instead (`todaysSrdId`, rowGroup in
+ * shared/rules/initiative.ts).
  */
-const SRD_ID_FIELDS: ReadonlySet<string> = new Set(["srdId", "fromSrd", "groupKey"]);
+const SRD_ID_FIELDS: ReadonlySet<string> = new Set(["srdId", "fromSrd"]);
 
-/** The parts of a room that can name an SRD monster, besides `srdImages`. */
-const SRD_NAMING_FIELDS = ["tokens", "characters", "savedEncounters", "companionBlocks", "encounter", "encounterHistory", "log"] as const;
+/** The parts of a room that can name an SRD monster, besides `srdImages`. A fight's rows name none but their group keys. */
+const SRD_NAMING_FIELDS = ["tokens", "characters", "savedEncounters", "companionBlocks", "log"] as const;
 
 const SRD_IMAGE_KEY = "srdImage:";
 
@@ -381,28 +393,20 @@ function mappedId(id: unknown, ids: IdMap): unknown {
  * value where it names none of the ids, so a room or op without one is
  * left as it was.
  */
-function withMappedSrdIds(value: unknown, ids: IdMap, keepsGroupKey?: (row: Record<string, unknown>) => boolean): unknown {
+function withMappedSrdIds(value: unknown, ids: IdMap): unknown {
   if (value === null || typeof value !== "object") return value;
   if (Array.isArray(value)) {
     let out: unknown[] | undefined;
     value.forEach((item, i) => {
-      const next = withMappedSrdIds(item, ids, keepsGroupKey);
+      const next = withMappedSrdIds(item, ids);
       if (next !== item) (out ??= [...value])[i] = next;
     });
     return out ?? value;
   }
-  const row = value as Record<string, unknown>;
   let out: Record<string, unknown> | undefined;
-  for (const [field, item] of Object.entries(row)) {
-    const next =
-      field === "groupKey" && keepsGroupKey?.(row)
-        ? item
-        : SRD_ID_FIELDS.has(field)
-          ? mappedId(item, ids)
-          : field === "shapeTemp"
-            ? mappedShapes(item, ids)
-            : withMappedSrdIds(item, ids, keepsGroupKey);
-    if (next !== item) (out ??= { ...row })[field] = next;
+  for (const [field, item] of Object.entries(value)) {
+    const next = SRD_ID_FIELDS.has(field) ? mappedId(item, ids) : field === "shapeTemp" ? mappedShapes(item, ids) : withMappedSrdIds(item, ids);
+    if (next !== item) (out ??= { ...value })[field] = next;
   }
   return out ?? value;
 }
@@ -492,28 +496,28 @@ export function oldSrdIdGuards(opVersion: number | undefined): boolean {
   return opVersion !== undefined && opVersion < 10;
 }
 
-/**
- * An entity of the room as a build from before op version 10 held it, its
- * SRD ids spelled the old way. An initiative row's `dragon-turtle` key is
- * the one that may not have been an id: then as now, a monster with no SRD
- * link groups by its name (groupKeyFor), so a token named `dragon-turtle`
- * gave its row that very key. A row keeps the key where its token is still
- * such a monster with that name. Every other row takes the old id, the rows
- * of a fight whose tokens are gone included, as before.
- */
-export function withOldSrdIds(key: string, value: unknown, tokens: RoomState["tokens"]): unknown {
+/** An entity of the room as a build from before op version 10 held it, its SRD ids spelled the old way. Group keys stay as stored. */
+export function withOldSrdIds(key: string, value: unknown): unknown {
   if (key.startsWith(SRD_IMAGE_KEY)) {
     const old = OLD_SRD_IDS.get(key.slice(SRD_IMAGE_KEY.length));
     return old === undefined ? value : srdImageWithId(value, old);
   }
-  return withMappedSrdIds(value, OLD_SRD_IDS, (row) => groupKeyIsName(row, tokens));
+  return withMappedSrdIds(value, OLD_SRD_IDS);
 }
 
-/** Whether a row's group key is its token's name, as groupKeyFor gives a monster with no SRD link. */
-function groupKeyIsName(row: Record<string, unknown>, tokens: RoomState["tokens"]): boolean {
-  const token = typeof row.tokenId === "string" ? tokens[row.tokenId] : undefined;
-  if (!token || token.kind === "pc" || !("inline" in token.actor)) return false;
-  return token.actor.inline.srdId === undefined && token.name === row.groupKey;
+/** Today's id for an SRD id an earlier import spelled wrong, else the id itself. */
+export function todaysSrdId(id: string): string {
+  return RENAMED_SRD_IDS.get(id) ?? id;
+}
+
+/**
+ * An SRD id as the build that stored an op of this version spelled it: the
+ * old way before op version 10, today's from it on and for a live op.
+ * Replay keys a new initiative row by it (groupKeyFor), so the row is the
+ * one that build wrote, since group keys are kept as stored.
+ */
+export function storedSrdId(id: string, opVersion: number | undefined): string {
+  return opVersion !== undefined && opVersion < 10 ? (OLD_SRD_IDS.get(id) ?? id) : id;
 }
 
 /**

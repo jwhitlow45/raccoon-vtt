@@ -121,6 +121,14 @@ describe("grouping identical monsters", () => {
   test("a player's projection has no group keys, so every row stands alone", () => {
     assert.deepEqual(groupEntries([entry("a"), entry("b")]).map((g) => g.entryIds), [["a"], ["b"]]);
   });
+
+  test("a dragon turtle's row keyed before its SRD id was renamed groups with one added since", () => {
+    const entries = [entry("old", { groupKey: "dragon-tur-t-le" }), entry("g1", { groupKey: "goblin" }), entry("new", { groupKey: "dragon-turtle" })];
+    assert.deepEqual(groupEntries(entries), [
+      { key: "group:dragon-turtle", entryIds: ["old", "new"] },
+      { key: "group:goblin", entryIds: ["g1"] },
+    ]);
+  });
 });
 
 describe("dragging ties", () => {

@@ -5,7 +5,7 @@ import type { ProjectedActor } from "#shared/project.ts";
 import { orderShown, withheldWhereItStands } from "#shared/project.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import { actsOnCharacterTurn } from "#shared/reducer/companions.ts";
-import { advantageHint, compareEntries, rowCharacter } from "#shared/rules/initiative.ts";
+import { advantageHint, compareEntries, rowCharacter, rowGroup } from "#shared/rules/initiative.ts";
 import { displayName } from "../../lib/scene.ts";
 
 /**
@@ -56,14 +56,15 @@ export type EntryGroup = { key: string; entryIds: string[] };
 
 /**
  * Rows the DM can type one value for: identical monsters share a `groupKey`
- * (the SRD id, or the base name), and every other row stands alone. Groups
- * keep the table's order, by their first row.
+ * (the SRD id, or the base name, read through `rowGroup`), and every other
+ * row stands alone. Groups keep the table's order, by their first row.
  */
 export function groupEntries(entries: readonly InitEntry[]): EntryGroup[] {
   const byKey = new Map<string, EntryGroup>();
   const out: EntryGroup[] = [];
   for (const entry of entries) {
-    const key = entry.groupKey !== undefined ? `group:${entry.groupKey}` : `entry:${entry.id}`;
+    const shared = rowGroup(entry);
+    const key = shared !== undefined ? `group:${shared}` : `entry:${entry.id}`;
     let group = byKey.get(key);
     if (!group) {
       group = { key, entryIds: [] };

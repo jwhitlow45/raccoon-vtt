@@ -2,6 +2,7 @@ import { advantageFields, d20Formula, type AdvantageSource } from "#shared/dice/
 import { rolledTerms } from "#shared/dice/roll.ts";
 import type { DiceResult, DiceRoll, InitEntry, RoomState, TokenId } from "#shared/model.ts";
 import { MAX_ENTRIES_PER_OP, type ClientOp } from "#shared/protocol.ts";
+import { rowGroup } from "#shared/rules/initiative.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { rollsOf } from "../dice/logic.ts";
 import { withExtra } from "../dice/options.ts";
@@ -53,7 +54,7 @@ export type RollRow = {
   tokenId: TokenId;
   /** The DM's name for it, numbered ("Goblin 2"). */
   name: string;
-  /** Identical monsters share it (the SRD id or the base name). Absent once ungrouped. */
+  /** Identical monsters share it (the SRD id or the base name, as `rowGroup` reads it). Absent once ungrouped. */
   groupKey?: string;
   /**
    * The actor's initiative bonus: the printed "Initiative +X" of a 2024
@@ -115,11 +116,12 @@ export function rollRows(
       continue;
     }
     const preset = presetOf({ tokenId: entry.tokenId });
+    const group = rowGroup(entry);
     rows.push({
       entryId: entry.id,
       tokenId: entry.tokenId,
       name: name(entry),
-      ...(entry.groupKey !== undefined ? { groupKey: entry.groupKey } : {}),
+      ...(group !== undefined ? { groupKey: group } : {}),
       // Every actor has an initiative bonus. Only a player's projection may leave it out, and players never get here.
       modifier: actor?.initBonus ?? 0,
       sources: [...preset.sources],

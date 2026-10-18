@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { createInitialState } from "#shared/initial.ts";
 import { OP_VERSION, SNAPSHOT_VERSION, opMigrations, type MigrationStep } from "#shared/migrate.ts";
 import type { Member, RoomState, Viewer } from "#shared/model.ts";
-import type { Op } from "#shared/protocol.ts";
+import type { Op, RestoreEntry } from "#shared/protocol.ts";
 import { stableStringify } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { DM, actor, character, entry, env, member, reveal, room, token } from "#shared/testutil.ts";
@@ -77,39 +77,6 @@ describe("replaying stored ops", () => {
     assert.deepEqual(Object.keys(loaded?.state.srdImages ?? {}), ["dragon-turtle"]);
   });
 
-  test("a fight with an SRD dragon turtle and a monster named dragon-turtle loads, an older undo of one of its rows replayed", async () => {
-    const OLD = "dragon-tur-t-le";
-    const NEW = "dragon-turtle";
-    // The rows' keys as that build gave them: the SRD id for the turtle, the name for the room's own monster.
-    const old = room({
-      tokens: {
-        t1: token("t1", { name: "Dragon Turtle", actor: { inline: actor({ srdId: OLD }) } }),
-        t2: token("t2", { name: NEW, actor: { inline: actor({ monsterId: "m1" }) } }),
-      },
-      encounter: { rev: 1, round: 1, activeEntryId: null, entries: [entry("e1", { tokenId: "t1", groupKey: OLD }), entry("e2", { tokenId: "t2", groupKey: NEW })] },
-    });
-    const react: Op = { t: "encounter.update", entryId: "e2", patch: { reactionUsed: true } };
-    const reacted = applyOp(old, react, DM, env(1));
-    assert.ok(reacted.ok && reacted.inverse);
-    const undo = { t: "sys.restore", entries: reacted.inverse, from: "undo", deps: true };
-    assert.ok(applyOp(reacted.state, undo as Op, DM, env(2)).ok, "the undo applied in the build that stored it");
-    const rows = [react, undo].map((op, i) => ({ seq: String(i + 1), at: new Date(env(i + 1).at), actor_member_id: "dm1", actor_role: "dm", op, op_version: 9 }));
-    const query = (sql: string) => Promise.resolve({ rows: sql.includes("room_snapshots") ? [{ seq: "0", state: JSON.parse(JSON.stringify(old)), schema_version: 13 }] : rows });
-    const reasons: string[] = [];
-    const loaded = await loadRoom({ query, connect: () => Promise.reject(new Error("not used")) } as unknown as Pool, "R", (_seq, reason) => reasons.push(reason));
-    assert.deepEqual(reasons, []);
-    assert.equal(loaded?.replayFailed, false);
-    assert.equal(loaded?.seq, 2);
-    const entries = loaded?.state.encounter?.entries ?? [];
-    assert.deepEqual(
-      entries.map((e) => [e.id, e.groupKey, e.reactionUsed]),
-      [
-        ["e1", NEW, false],
-        ["e2", NEW, false],
-      ],
-    );
-  });
-
   test("a room from before who may move any token loads with the switch's answer, and its older settings changes and their undo replay", async () => {
     // The snapshot and the ops as an older build stored them, with the switch.
     const { playersMoveAny: _new, ...settings } = room().meta.settings;
@@ -178,6 +145,102 @@ describe("replaying stored ops", () => {
     assert.equal(marked.loaded?.replayFailed, true);
     assert.equal(marked.loaded?.seq, 2);
     assert.match(marked.reasons[0] ?? "", /op 3 \(sys\.restore\) was refused on replay: other work depends on it/);
+  });
+});
+
+describe("a fight stored before the dragon turtle's id was renamed", () => {
+  const OLD = "dragon-tur-t-le";
+  const NEW = "dragon-turtle";
+  const UNDO = "undo";
+
+  /**
+   * Plays the steps in the build from before op version 10, where the
+   * reducer saw only the old id, with "undo" taking back the step before it
+   * as that build's restore did. Every step must apply there. Then loads
+   * the room from that build's v13 snapshot and v9 ops.
+   */
+  async function playedAndLoaded(old: RoomState, steps: readonly (Op | typeof UNDO)[]) {
+    let state = old;
+    let inverse: RestoreEntry[] | undefined;
+    const stored: Op[] = [];
+    for (const [i, step] of steps.entries()) {
+      const op: Op = step === UNDO ? ({ t: "sys.restore", entries: inverse!, from: "undo", deps: true } as Op) : step;
+      const result = applyOp(state, op, DM, env(i + 1));
+      assert.ok(result.ok, `step ${i} applied in the build that stored it${result.ok ? "" : `: ${result.message}`}`);
+      state = result.state;
+      inverse = result.inverse ?? undefined;
+      stored.push(op);
+    }
+    const rows = stored.map((op, i) => ({ seq: String(i + 1), at: new Date(env(i + 1).at), actor_member_id: "dm1", actor_role: "dm", op: JSON.parse(JSON.stringify(op)), op_version: 9 }));
+    const query = (sql: string) => Promise.resolve({ rows: sql.includes("room_snapshots") ? [{ seq: "0", state: JSON.parse(JSON.stringify(old)), schema_version: 13 }] : rows });
+    const reasons: string[] = [];
+    const loaded = await loadRoom({ query, connect: () => Promise.reject(new Error("not used")) } as unknown as Pool, "R", (_seq, reason) => reasons.push(reason));
+    assert.deepEqual(reasons, []);
+    assert.equal(loaded?.replayFailed, false);
+    assert.equal(loaded?.seq, steps.length);
+    return { played: state, loaded: loaded! };
+  }
+
+  /** An SRD dragon turtle's row, keyed by its id, and a room monster named dragon-turtle, keyed by its name. */
+  function mixed(): RoomState {
+    return room({
+      tokens: {
+        t1: token("t1", { name: "Dragon Turtle", actor: { inline: actor({ srdId: OLD }) } }),
+        t2: token("t2", { name: NEW, actor: { inline: actor({ monsterId: "m1" }) } }),
+      },
+      encounter: { rev: 1, round: 1, activeEntryId: "e1", entries: [entry("e1", { tokenId: "t1", groupKey: OLD }), entry("e2", { tokenId: "t2", groupKey: NEW })] },
+    });
+  }
+
+  const keys = (state: RoomState) => (state.encounter?.entries ?? []).map((e) => [e.id, e.groupKey]);
+
+  test("an undo of a row's Reaction loads, each row keeping the key it was stored with", async () => {
+    const { played, loaded } = await playedAndLoaded(mixed(), [{ t: "encounter.update", entryId: "e2", patch: { reactionUsed: true } }, UNDO]);
+    assert.deepEqual(keys(loaded.state), [["e1", OLD], ["e2", NEW]]);
+    assert.deepEqual(loaded.state.encounter, played.encounter);
+  });
+
+  test("with the monster named dragon-turtle renamed since, an undo of its Reaction loads", async () => {
+    const { loaded } = await playedAndLoaded(mixed(), [
+      { t: "token.update", tokenId: "t2", patch: { name: "Shelly" } },
+      { t: "encounter.update", entryId: "e2", patch: { reactionUsed: true } },
+      UNDO,
+    ]);
+    assert.equal(loaded.state.tokens.t2?.name, "Shelly");
+    assert.deepEqual(keys(loaded.state), [["e1", OLD], ["e2", NEW]]);
+  });
+
+  test("with that monster deleted between two turns, an undo of the second turn loads, the fight's history keeping both keys", async () => {
+    const { played, loaded } = await playedAndLoaded(mixed(), [{ t: "encounter.next" }, { t: "token.delete", tokenId: "t2" }, { t: "encounter.next" }, UNDO]);
+    assert.equal(loaded.state.tokens.t2, undefined);
+    assert.deepEqual(loaded.state.encounter, played.encounter);
+    assert.deepEqual(loaded.state.encounterHistory, played.encounterHistory);
+  });
+
+  test("an SRD dragon turtle detached from its stat block and renamed dragon-turtle keeps its row's old key, and an undo since loads", async () => {
+    const one = room({
+      tokens: { t1: token("t1", { name: "Dragon Turtle", actor: { inline: actor({ srdId: OLD }) } }) },
+      encounter: { rev: 1, round: 1, activeEntryId: null, entries: [entry("e1", { tokenId: "t1", groupKey: OLD })] },
+    });
+    const { loaded } = await playedAndLoaded(one, [
+      { t: "token.update", tokenId: "t1", patch: { actor: { srdId: null } } },
+      { t: "token.update", tokenId: "t1", patch: { name: NEW } },
+      { t: "encounter.update", entryId: "e1", patch: { reactionUsed: true } },
+      UNDO,
+    ]);
+    assert.deepEqual(keys(loaded.state), [["e1", OLD]]);
+  });
+
+  test("a row an older op added keyed by its token's SRD id is keyed as that build keyed it, so an undo over the fight loads", async () => {
+    const turtle = room({ tokens: { t1: token("t1", { name: "Dragon Turtle", actor: { inline: actor({ srdId: OLD }) } }) } });
+    const { played, loaded } = await playedAndLoaded(turtle, [
+      { t: "encounter.start", entries: [{ id: "e1", tokenId: "t1" }] },
+      { t: "encounter.update", entryId: "e1", patch: { reactionUsed: true } },
+      UNDO,
+    ]);
+    assert.equal(played.encounter?.entries[0]?.groupKey, OLD);
+    assert.deepEqual(keys(loaded.state), [["e1", OLD]]);
+    assert.deepEqual(loaded.state.tokens.t1?.actor, { inline: actor({ srdId: NEW }) });
   });
 });
 

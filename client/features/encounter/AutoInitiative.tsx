@@ -3,7 +3,7 @@ import type { D20Test } from "#shared/dice/bonus.ts";
 import { FORMULA_ERRORS } from "#shared/dice/formula.ts";
 import type { InitEntry } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
-import { groupKeyFor } from "#shared/rules/initiative.ts";
+import { groupKeyFor, rowGroup } from "#shared/rules/initiative.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Help } from "../../components/Panel.tsx";
@@ -273,10 +273,11 @@ export function RowRollTools(props: { entry: InitEntry }) {
   if (!row) return null;
 
   const ownKey = groupKeyFor(facts.view, entry);
-  const grouped = entry.groupKey !== undefined ? entries.filter((e) => e.groupKey === entry.groupKey) : [];
+  // Rows compare by `rowGroup`, so a row keyed before the dragon turtle's SRD id was renamed is in the same group.
+  const grouped = entry.groupKey !== undefined ? entries.filter((e) => rowGroup(e) === rowGroup(entry)) : [];
   const joinable =
     entry.groupKey === undefined && ownKey !== undefined
-      ? entries.filter((e) => e.groupKey === ownKey || (e.groupKey === undefined && groupKeyFor(facts.view, e) === ownKey))
+      ? entries.filter((e) => rowGroup(e) === ownKey || (e.groupKey === undefined && groupKeyFor(facts.view, e) === ownKey))
       : [];
 
   const small = { flex: 1, minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted } as const;
@@ -314,7 +315,7 @@ export function RowRollTools(props: { entry: InitEntry }) {
             onClick={() =>
               !regroup.waiting &&
               regroup.send(
-                joinable.filter((e) => e.groupKey !== ownKey).map((e) => ({ t: "encounter.update", entryId: e.id, patch: { groupKey: ownKey } })),
+                joinable.filter((e) => rowGroup(e) !== ownKey).map((e) => ({ t: "encounter.update", entryId: e.id, patch: { groupKey: ownKey } })),
               )
             }
           >
