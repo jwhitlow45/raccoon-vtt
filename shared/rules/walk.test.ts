@@ -91,6 +91,34 @@ describe("walking around walls (docs/design-v1-movement.md 4.4, 5)", () => {
     assert.equal(findRoute(input(flat, tok(flat, { x: 5, y: 8 })), { x: 15, y: 2 }), "none");
   });
 
+  test("a straight leg over a rise and down again is searched, and an even stair is not", () => {
+    const stairs = (feet: number[]) => world({ w: feet.length, h: 1, heights: Object.fromEntries(feet.map((f, x) => [`${x},0`, f])), marks: Object.fromEntries(feet.map((_, x) => [`${x},0`, "a" as const])) });
+    // Up 10 ft and down again: two steps of 2 squares each, the second vertical diagonal doubled under 5-10-5, and 5 by 10 ft twice under true distance, rounded to the foot.
+    const over = { five: 20, fiveTen: 25, euclid: 22 };
+    for (const diagonal of ["five", "fiveTen", "euclid"] as const) {
+      const hump = stairs([0, 10, 0]);
+      const i = input(hump, tok(hump, { x: 0, y: 0 }), { rules: { feetPerCell: 5, diagonal } });
+      assert.equal(openLeg(new WalkWorld(i), { x: 2, y: 0 }), false, diagonal);
+      assert.equal(pieceFeet(i, routeOf(i, { x: 2, y: 0 })), over[diagonal], diagonal);
+      const step = stairs([0, 0, 10]);
+      assert.equal(openLeg(new WalkWorld(input(step, tok(step, { x: 0, y: 0 }), { rules: { feetPerCell: 5, diagonal } })), { x: 2, y: 0 }), false, `a step partway, ${diagonal}`);
+      const even = stairs([0, 5, 10]);
+      assert.equal(findRoute(input(even, tok(even, { x: 0, y: 0 }), { rules: { feetPerCell: 5, diagonal } }), { x: 2, y: 0 }), null, `an even stair, ${diagonal}`);
+    }
+    // An even stair taken on the diagonal: under 5-10-5 each climbing diagonal is a piece of its own.
+    const heights: Record<string, number> = {};
+    const marks: Record<string, "a"> = {};
+    for (let y = 0; y < 3; y++) for (let x = 0; x < 3; x++) [heights[`${x},${y}`], marks[`${x},${y}`]] = [5 * Math.min(x, y), "a"];
+    const diagonalStair = world({ w: 3, h: 3, heights, marks });
+    const along = (diagonal: "five" | "fiveTen") => openLeg(new WalkWorld(input(diagonalStair, tok(diagonalStair, { x: 0, y: 0 }), { rules: { feetPerCell: 5, diagonal } })), { x: 2, y: 2 });
+    assert.deepEqual([along("five"), along("fiveTen")], [true, false]);
+    // Off the eight directions only level ground keeps the straight leg.
+    const ramp: Record<string, number> = {};
+    for (let y = 0; y < 2; y++) for (let x = 0; x < 4; x++) [ramp[`${x},${y}`], marks[`${x},${y}`]] = [5 * x, "a"];
+    const slope = world({ w: 4, h: 2, heights: ramp, marks });
+    assert.equal(openLeg(new WalkWorld(input(slope, tok(slope, { x: 0, y: 0 }))), { x: 3, y: 1 }), false);
+  });
+
   test("a Large creature through a 5 ft door and corridor, a Huge one through 10 ft and not 5", () => {
     // A wall along x = 10 with an opening of `width` squares at y 5.
     const wall = (width: number) => world({ edges: { ...line("w", 10, 0, 5), ...line("w", 10, 5 + width, 30) } });

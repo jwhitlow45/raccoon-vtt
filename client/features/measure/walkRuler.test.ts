@@ -87,6 +87,13 @@ describe("the walking ruler", () => {
     assert.deepEqual(read(fogged(10), stops, true).onDm, [55, false], "the DM's own ruler, before it is shared, reads the DM's map");
   });
 
+  test("a walk over a rise and down again counts both climbs", () => {
+    // A ridge 10 ft high along x = 5, so there is no way round it.
+    const state = world({ blockMovement: false, heights: Object.fromEntries(Array.from({ length: 30 }, (_, y) => [`5,${y}`, 10])) });
+    const m = measureWalk({ view: state, sceneId: "s1", stops: [free(4, 5), free(6, 5)], viewer: { role: "player" }, everything: false })!;
+    assert.equal(m.totalFt, 20, "10 ft up and 10 ft down, where the straight ruler reads 10 ft");
+  });
+
   test("the 5-10-5 count runs on across the stops", () => {
     const state = world({});
     state.meta = { ...state.meta, settings: { ...state.meta.settings, diagonal: "fiveTen" } };

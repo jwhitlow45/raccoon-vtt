@@ -882,6 +882,12 @@ class Heap {
  * reducer's spots are, costs extra or stops a walk short. Most drags are,
  * and need no search. Unseen ground reads as plain, as a straight drop into
  * the fog does today.
+ *
+ * The straight leg counts only the change of height between its ends,
+ * while a walk counts each piece's (4.6). So the ground must also rise or
+ * fall evenly all the way, as one piece of the search would: a walk over a
+ * rise and down again, or up a step partway, is searched. Under 5-10-5 a
+ * diagonal that climbs is a piece of its own, so it holds for one step only.
  */
 export function openLeg(world: WalkWorld, to: Point): boolean {
   const { token, build } = world.input;
@@ -894,6 +900,9 @@ export function openLeg(world: WalkWorld, to: Point): boolean {
   const dy = to.y - token.y;
   const n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / L - EPS));
   const exact = Math.abs(dx) < EPS || Math.abs(dy) < EPS || Math.abs(Math.abs(dx) - Math.abs(dy)) < EPS;
+  // Off the eight directions the samples are not lattice steps, so only level ground keeps one rise per step.
+  const even = exact ? (n === 1 || world.input.rules.diagonal !== "fiveTen" || Math.abs(dx) < EPS || Math.abs(dy) < EPS ? "slope" : "level") : "level";
+  let rise: number | null = null;
   let px = token.x;
   let py = token.y;
   let pe = token.elevation;
@@ -903,6 +912,9 @@ export function openLeg(world: WalkWorld, to: Point): boolean {
     if (x === px && y === py) continue;
     const node = world.nodeAt({ x, y });
     const e = node >= 0 ? world.elevationAt(node) : pe;
+    const dz = e - pe;
+    if (even === "level" ? Math.abs(dz) > EPS : rise !== null && Math.abs(dz - rise) > EPS) return false;
+    rise = dz;
     if (k < n && world.endOnly(x, y, e)) return false;
     if (world.extraOf(px, py, x, y, e, node).extra !== 0) return false;
     px = x;

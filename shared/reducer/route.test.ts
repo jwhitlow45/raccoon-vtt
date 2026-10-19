@@ -5,7 +5,10 @@ import type { EdgeFeature, LogEvent, PathStop, RoomState, TokenPath, Viewer } fr
 import { projectState } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
+import { encodeHeights } from "../rules/heights.ts";
 import { pathCounters, stopsForNonOwners, stopsForOwners } from "../rules/path.ts";
+import { findRoute } from "../rules/walk.ts";
+import { publicWorld } from "../rules/walkWorld.ts";
 import { DM, P1, P2, actor, env, reveal, room, template, token, withoutWalked } from "../testutil.ts";
 import type { Env } from "./tx.ts";
 
@@ -83,6 +86,20 @@ describe("what a leg takes (6.2)", () => {
     });
     swimmer.run(move(5, 1, { route }));
     assert.equal(swimmer.stops()[1]!.cost, 10 + 30 + 5 + 5);
+  });
+
+  test("a walk over a rise and down again records both climbs, as the search finds it", () => {
+    // A ridge 10 ft high and one square wide along x = 2, across the wolf's way to (3, 1).
+    const f = fight((s) => {
+      const feet = new Array<number>(256).fill(0);
+      for (let y = 0; y < 16; y++) feet[y * 16 + 2] = 10;
+      s.scenes.s1 = { ...s.scenes.s1!, bounds: { w: 16, h: 16 } };
+      s.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, heights: encodeHeights(feet) };
+    });
+    const found = findRoute(publicWorld(f.state, f.state.tokens.wolf!, { role: "player" }).input, { x: 3, y: 1 });
+    assert.ok(found !== null && found !== "none", "the straight leg over the rise is not the walk");
+    f.run(move(3, 1, { route: found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) }), P1);
+    assert.deepEqual(pick(f.stops()[1]!), { moved: 20, cost: 20, diag: undefined }, "10 ft up and 10 ft down");
   });
 
   test("a leg seen at every spot is marked, one through the fog not, though both its ends are seen", () => {
