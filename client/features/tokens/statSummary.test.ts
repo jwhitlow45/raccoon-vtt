@@ -151,7 +151,7 @@ describe("the vitals' units", () => {
     const items = vitals({ actor: big, token: { kind: "monster", hpVisibility: "exact" }, fullAccess: true, place: "bar" });
     for (const unit of items.flatMap((i) => i.units)) {
       const w = unitWidth(unit);
-      // The compact bar at 480 x 320 at 130% gives its content 234 px (docs/design-v1-token-panel.md 3.12). The widest unit, "Passive Perception 60", is about 150.
+      // The compact bar at 480 x 320 at 130% gives its content 234 px (docs/design-v1-token-panel.md 3.12). Each unit is measured by its full words, wider than the bar draws them ("Passive Perception 60", about 150, draws as "PP 60"), so the bound holds for both.
       assert.ok(w <= 234, `"${unitText(unit)}" is ${Math.round(w)} px`);
     }
     assert.ok(unitWidth({ kind: "text", label: "HP", value: "100000/100000" }) >= 120, "the HP unit is about 130 px");

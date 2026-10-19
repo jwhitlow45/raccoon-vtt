@@ -139,9 +139,8 @@ export function Field(
  * long one beside a number field stood five lines tall. It describes the
  * row's controls through `RowHint`, so the label stays the control's name
  * alone. Only the field controls read it (Input, Select, TextArea and the
- * token panel's text and number fields, Stepper's included). A bare
- * `<input>` or a row of buttons keeps its hint as text under it, unread
- * as a description.
+ * token panel's text and number fields, Stepper's included). A row of
+ * buttons keeps its hint as text under them, unread as a description.
  */
 export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactNode; children: ReactNode }) {
   const hintId = useId();

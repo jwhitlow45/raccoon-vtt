@@ -111,7 +111,7 @@ export function LibraryGrid(props: {
       </li>
     );
     return (
-      <div style={{ display: "grid", gap: theme.space(3) }}>
+      <div data-library="" tabIndex={-1} style={{ display: "grid", gap: theme.space(3), outline: "none" }}>
         <LibraryStatus library={library} />
         {ids.length === 0 && (listed || library.failed) ? <Empty>{emptyText}</Empty> : null}
         {own.length > 0 || starter.length === 0 ? <Tiles label="Token images in this room">{own.map(tile)}</Tiles> : null}
@@ -168,8 +168,7 @@ function LibraryStatus(props: { library: LibraryState; failed?: string }) {
     <>
       {library.rows === null && !library.failed ? <Loading text="Loading the library…" /> : null}
       {library.failed ? (
-        // Focus goes to the panel's first control, as when the last tile goes.
-        <LoadFailed retry={library.retry} focusTo={(from) => panelControl(from, from)}>
+        <LoadFailed retry={library.retry} focusTo={retryFocus}>
           {props.failed ?? "The library did not load. Images already on the map are below."}
         </LoadFailed>
       ) : null}
@@ -481,7 +480,7 @@ function TileLibrary(props: { sections: readonly LibrarySection[]; before?: Reac
     </section>
   );
   return (
-    <div ref={rootRef} style={{ display: "grid", gap: props.gap }}>
+    <div ref={rootRef} data-library="" tabIndex={-1} style={{ display: "grid", gap: props.gap, outline: "none" }}>
       {props.before}
       {shownSections.filter((s) => !s.starter).map((section) => sectionEl(section))}
       {starterSections.length > 0 ? (
@@ -533,14 +532,26 @@ function focusHeading(section: HTMLElement | null): void {
 
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/** The panel's first control: in its pane of the desktop side panel (either of two, docs/design-v1-split-panel.md 9.1), or the phone sheet's region, which holds its header too. `except` is a control on its way out. */
-function panelControl(root: HTMLElement | null, except?: HTMLElement): HTMLElement | undefined {
+/** The panel's first control: in its pane of the desktop side panel (either of two, docs/design-v1-split-panel.md 9.1), or the phone sheet's region, which holds its header too. */
+function panelControl(root: HTMLElement | null): HTMLElement | undefined {
   const panel = root?.closest<HTMLElement>("[data-pane]") ?? root?.closest<HTMLElement>('[role="tabpanel"], section[aria-label]') ?? root?.parentElement ?? null;
-  return panel ? [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].find((el) => el !== except && el.getClientRects().length > 0) : undefined;
+  return panel ? [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].find((el) => el.getClientRects().length > 0) : undefined;
 }
 
 function focusPanel(root: HTMLElement | null): void {
   panelControl(root)?.focus();
+}
+
+/**
+ * Where focus goes as Try again leaves: the Library's first control inside
+ * the Library, never the sheet's header around it, since the person just
+ * acted in the Library. With none left, such as in an empty library, the
+ * Library's own root, which takes focus from script only.
+ */
+function retryFocus(from: HTMLElement): HTMLElement | undefined {
+  const library = from.closest<HTMLElement>('[data-pane], [data-pane-body], [role="tabpanel"]');
+  const control = library ? [...library.querySelectorAll<HTMLElement>(FOCUSABLE)].find((el) => el !== from && el.getClientRects().length > 0) : undefined;
+  return control ?? from.closest<HTMLElement>("[data-library]") ?? undefined;
 }
 
 /** A tile's marks: its tag in the bottom left, and its status in the bottom right, which wraps above the tag where a narrow tile has no room for both. The tile's name says both, so they are hidden from screen readers. */

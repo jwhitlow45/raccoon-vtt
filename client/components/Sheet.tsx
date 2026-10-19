@@ -196,9 +196,10 @@ export function Sheet(props: {
         : wholeScreen;
   // Filled, it keeps the upright sheet's top corners, with the room behind showing in them, so they never square off as it reaches the top or round again on the step down.
   const sheetCorners = `${theme.radius.lg}px ${theme.radius.lg}px 0 0`;
-  const fullHeight: CSSProperties = { ...wholeScreen, ...bottomWidth, borderRadius: sheetCorners };
+  // Its shadow stays once it settles: on a tablet the capped column stands over the map, where a phone's spans the screen and shows none.
+  const fullHeight: CSSProperties = { ...wholeScreen, ...bottomWidth, borderRadius: sheetCorners, boxShadow: theme.shadow.sheet };
   // Beside the map while a drag holds it above its normal top, so it is drawn over the bars as it rises.
-  const rising: CSSProperties = { ...fullHeight, zIndex: theme.z.overBars, boxShadow: theme.shadow.sheet };
+  const rising: CSSProperties = { ...fullHeight, zIndex: theme.z.overBars };
   const shape = swipe.rising ? rising : filled ? fullHeight : box;
   return (
     <dialog

@@ -181,7 +181,7 @@ export type Slot = {
   priority: number;
   /** A kit control, which draws by where it stands (SlotPlace). */
   control: ReactNode;
-  /** It has a compact form: a chip's glyph or swatch alone, short words, a choice of two as a chip. */
+  /** It has a compact form: a chip's glyph or swatch alone, short words, a choice of two as a chip, or an icon alone (OptButton `compactIcon`). */
   compact?: boolean;
   /** A value chip whose options all have glyphs: glyph and words where the row has room (6.2). */
   glyph?: boolean;

@@ -68,9 +68,14 @@ export function HomeHeader(props: { title?: string; tagline?: string; actions?: 
   return (
     <header style={{ display: "flex", alignItems: "center", gap: theme.space(3), flexWrap: "wrap" }}>
       <img src="/icon.svg" alt="" width={48} height={48} />
-      {/* Its own width first, so on a phone the actions wrap under the name instead of squeezing it onto two lines. */}
-      <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-        <h1 style={{ margin: 0, fontSize: theme.font.display, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>{props.title ?? "RaccoonVTT"}</h1>
+      {/*
+       * With actions, its own width first, so on a phone the actions wrap
+       * under the name instead of squeezing it onto two lines. Without, the
+       * name keeps beside the crest and wraps there, as a long room name on
+       * Join must, and a name with no spaces breaks anywhere.
+       */}
+      <div style={{ flex: props.actions ? "1 1 auto" : "1 1 0", minWidth: 0 }}>
+        <h1 style={{ margin: 0, fontSize: theme.font.display, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>{props.title ?? "RaccoonVTT"}</h1>
         {props.tagline ? <p style={{ margin: 0, color: theme.color.textMuted, fontSize: theme.font.body14 }}>{props.tagline}</p> : null}
       </div>
       {props.actions ? <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>{props.actions}</div> : null}

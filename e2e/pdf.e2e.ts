@@ -1707,4 +1707,85 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     }
   });
 
+  test("lp4-library-empty-retry. with no images and no handouts, Try again by key leaves focus in the Library: in the picker's Library tab, and in the Library's sheet on a phone, never its header", async () => {
+    // A room of its own: this run's room has images and handouts, which would take the focus first.
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    let page = await context.newPage();
+    try {
+      await page.goto(`${server.origin}/`);
+      await page.getByLabel("Room name").fill(`${run.roomName} empty`);
+      await page.getByLabel("Your name").fill("Dana the DM");
+      await page.getByRole("button", { name: "Create room" }).click();
+      await page.getByRole("heading", { name: "Save your DM link" }).waitFor();
+      const link = (await page.locator("code").first().textContent()) ?? "";
+      const roomId = /\/r\/([0-9A-Z]{4}-[0-9A-Z]{4})#dm=/.exec(link)?.[1]?.replace("-", "");
+      assert.ok(roomId, `DM link looks wrong: ${link}`);
+
+      // The list's GET fails, then is held while it tries again, so the loading line shows.
+      let mode: "fail" | "hold" = "fail";
+      let release: () => void = () => undefined;
+      let held = new Promise<void>((resolve) => (release = resolve));
+      await context.route(`**/api/rooms/${roomId}/assets`, async (route) => {
+        if (route.request().method() !== "GET") return route.continue();
+        if (mode === "fail") return route.abort("internetdisconnected");
+        await held;
+        return route.continue();
+      });
+      const focused = () =>
+        page.evaluate(() => {
+          type El = { hasAttribute(n: string): boolean; closest(s: string): unknown };
+          const el = (globalThis as unknown as { document: { activeElement: El | null } }).document.activeElement;
+          return {
+            library: el?.hasAttribute("data-library") === true,
+            inPicker: el?.closest('dialog [role="tabpanel"]') != null,
+            inBody: el?.closest("[data-pane-body]") != null,
+          };
+        });
+      const retry = async (where: Locator, what: string) => {
+        const failed = where.getByRole("alert").filter({ hasText: "did not load" });
+        await failed.waitFor();
+        await failed.getByRole("button", { name: "Try again" }).focus();
+        mode = "hold";
+        await page.keyboard.press("Enter");
+        await where.getByText("Loading the library…").waitFor();
+        const at = await focused();
+        await shots.take(page, `lp4-library-empty-retrying-${what}`);
+        release();
+        await where.getByText("Loading the library…").waitFor({ state: "detached" });
+        return at;
+      };
+
+      await page.getByLabel("I saved my DM link").check();
+      await page.getByRole("button", { name: "Continue to the room" }).click();
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+
+      // The image picker's Library tab, where Try again is the only control.
+      await openSideTab(page, "Characters");
+      await page.getByRole("button", { name: "New character" }).click();
+      await page.getByRole("button", { name: "Add image" }).first().click();
+      const picker = page.getByRole("dialog", { name: "Choose an image" });
+      await picker.getByRole("tab", { name: "Library" }).click();
+      const inPicker = await retry(picker.getByRole("tabpanel"), "picker");
+      assert.deepEqual(inPicker, { library: true, inPicker: true, inBody: false }, "focus left the picker's Library as Try again went");
+      await picker.getByText("No token images yet.").waitFor();
+
+      // The Library's sheet on a phone: focus stays in its body, not on the sheet's header.
+      // A page of its own, since the open New character form would hold a reload with "Leave site?".
+      mode = "fail";
+      held = new Promise<void>((resolve) => (release = resolve));
+      await page.close();
+      page = await context.newPage();
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(`${server.origin}/r/${roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      await page.locator('nav[aria-label="Tools"] button[title="Panels"]').click();
+      await page.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Library/ }).click();
+      const sheet = page.getByRole("region", { name: "Library" });
+      const inSheet = await retry(sheet, "phone");
+      assert.equal(inSheet.inBody, true, `focus went to the sheet's header as Try again went: ${JSON.stringify(inSheet)}`);
+    } finally {
+      await context.close();
+    }
+  });
+
 });

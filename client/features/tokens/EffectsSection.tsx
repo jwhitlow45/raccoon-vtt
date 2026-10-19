@@ -5,7 +5,7 @@ import { CONDITIONS, EXHAUSTION_MAX_LEVEL } from "#shared/srd/conditions.ts";
 import type { RulesTextEntry } from "#shared/srd/rules-text.ts";
 import { STATUSES } from "#shared/srd/statuses.ts";
 import { Checkbox } from "../../components/Checkbox.tsx";
-import { fieldStyle } from "../../components/Field.tsx";
+import { fieldStyle, Input } from "../../components/Field.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { buttonLook } from "../../components/looks.ts";
 import { Markdown } from "../../components/Markdown.tsx";
@@ -385,13 +385,7 @@ function EffectDetail(props: {
           ) : null}
           {key === "readied" ? (
             <FieldRow label="Trigger" hint="What it waits for, such as “if the door opens”.">
-              <input
-                aria-label="Trigger"
-                value={label}
-                maxLength={MAX_TRIGGER}
-                onChange={(e) => setLabel(e.target.value)}
-                style={{ ...fieldStyle(), flex: 1 }}
-              />
+              <Input aria-label="Trigger" value={label} maxLength={MAX_TRIGGER} onChange={(e) => setLabel(e.target.value)} style={{ flex: 1 }} />
             </FieldRow>
           ) : null}
           {key === "concentrating" ? (
@@ -412,7 +406,7 @@ function EffectDetail(props: {
                 <input aria-label="Label" value={label} maxLength={80} placeholder="Marked by Vex" onChange={(e) => setLabel(e.target.value)} style={{ ...fieldStyle(), flex: 1 }} />
               </FieldRow>
               <FieldRow label="Emoji or letters" hint="Up to 2 characters show on the token.">
-                <input aria-label="Emoji or letters" value={glyph} maxLength={8} placeholder="MV" onChange={(e) => setGlyph(e.target.value)} style={{ ...fieldStyle(), width: 100, textAlign: "center" }} />
+                <Input aria-label="Emoji or letters" value={glyph} maxLength={8} placeholder="MV" onChange={(e) => setGlyph(e.target.value)} style={{ width: 100, textAlign: "center" }} />
               </FieldRow>
               <FieldRow label="Color">
                 <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), justifyContent: "flex-end" }}>
