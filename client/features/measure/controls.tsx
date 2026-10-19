@@ -1312,9 +1312,11 @@ export function OptionsDivider() {
  *
  * In a slot (6.2, 6.5): `short` is its compact form's words ("Reveal
  * (4)"), whose name is then those words, with the full words as the
- * tooltip. In a popover it is a row as wide as the popover, a pressed
- * toggle with a check mark, and `ends` closes the popover after it acts,
- * for a button that ends the tool's task.
+ * tooltip. `compactIcon` makes its compact form its icon alone, named by
+ * its words with their tooltip, for a row that cannot hold the words
+ * (docs/design-v1-look-pass.md 3.4). In a popover it is a row as wide as
+ * the popover, a pressed toggle with a check mark, and `ends` closes the
+ * popover after it acts, for a button that ends the tool's task.
  */
 export function OptButton(props: {
   ref?: Ref<HTMLButtonElement>;
@@ -1331,6 +1333,8 @@ export function OptButton(props: {
   repeatValue?: RepeatValue;
   /** Its compact form's words. */
   short?: ReactNode;
+  /** Its compact form is its icon alone, as `iconOnly="always"` draws it. */
+  compactIcon?: boolean;
   /** It ends the tool's task: in a popover, the popover closes after it acts (7.2). */
   ends?: boolean;
   /** Its words in ⋯, where an icon alone would not read as a row ("Undo"). */
@@ -1351,8 +1355,9 @@ export function OptButton(props: {
 function OptButtonFace(props: Parameters<typeof OptButton>[0] & { form: SlotForm }) {
   const variant = props.tone ?? "secondary";
   const short = props.form === "compact" && props.short !== undefined;
+  const iconAlone = props.form === "compact" && props.compactIcon === true;
   return (
-    <Button size="sm" variant={variant} pressed={props.pressed} icon={props.icon} iconOnly={short ? undefined : props.iconOnly} disabled={props.disabled} tabIndex={-1} style={{ flex: "none", whiteSpace: "nowrap" }}>
+    <Button size="sm" variant={variant} pressed={props.pressed} icon={props.icon} iconOnly={short ? undefined : iconAlone ? "always" : props.iconOnly} disabled={props.disabled} tabIndex={-1} style={{ flex: "none", whiteSpace: "nowrap" }}>
       {short ? props.short : props.children}
     </Button>
   );
@@ -1365,6 +1370,7 @@ function LiveOptButton(props: Parameters<typeof OptButton>[0] & { place: SlotPla
   const { task } = usePopoverClose();
   const variant = tone ?? "secondary";
   const short = place?.at === "row" && place.form === "compact" && props.short !== undefined;
+  const iconAlone = place?.at === "row" && place.form === "compact" && props.compactIcon === true;
   const row = inPopover(place);
   const children = short ? props.short : row && props.children === undefined && props.rowWords ? props.rowWords : props.children;
   const full = props.label ?? textOf(props.children);
@@ -1381,7 +1387,7 @@ function LiveOptButton(props: Parameters<typeof OptButton>[0] & { place: SlotPla
       pressed={pressed}
       armed={tone === "danger" && pressed === true}
       icon={props.icon}
-      iconOnly={short || row ? undefined : props.iconOnly}
+      iconOnly={short || row ? undefined : iconAlone ? "always" : props.iconOnly}
       disabled={props.disabled && !atLimit}
       aria-disabled={atLimit || undefined}
       aria-label={short ? (hasWords(props.short) ? undefined : props.label) : children === undefined ? props.label : accessibleName(children, props.label)}

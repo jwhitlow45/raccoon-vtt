@@ -183,14 +183,18 @@ describe("the fit (6.3)", () => {
     assert.deepEqual(fit.more, []);
   });
 
-  test("everything fits once compact forms are taken, lowest priority first: the DM's Ruler at 374 keeps its kept rulers' chip in short words", () => {
-    // The DM's Ruler row with two kept rulers, as Inter draws it in the dev room: Shared and Clear with their icons, and "Kept rulers (2)" or "Kept (2)".
-    const slots = [slot("shared", 1, 98), slot("keep", 2, 60.6), slot("clear", 2, 86), slot("kept", 3, 146, { compact: 94 })];
+  test("everything fits once compact forms are taken, lowest priority first: the DM's Ruler keeps its kept rulers' chip in short words at 374, and Clear's eraser alone at 344", () => {
+    // The DM's Ruler row with two kept rulers, as Inter draws it in the dev room: Shared and Clear with their icons, "Kept rulers (2)" or "Kept (2)", and Clear's eraser alone at 44.
+    const slots = [slot("shared", 1, 98), slot("keep", 2, 60.6), slot("clear", 2, 86, { compact: 44 }), slot("kept", 3, 146, { compact: 94 })];
     assert.equal(ids(fitRow({ room: 403, slots, alwaysMore: false, pins: [] })), "shared keep clear kept");
     assert.equal(ids(fitRow({ room: 374, slots, alwaysMore: false, pins: [] })), "shared keep clear kept:compact");
     assert.equal(ids(fitRow({ room: 358, slots, alwaysMore: false, pins: [] })), "shared keep clear kept:compact");
-    // At 343, the pair at 130%, even the short words leave the row 8 px over, so the chip waits behind ⋯.
-    assert.equal(ids(fitRow({ room: 343, slots, alwaysMore: false, pins: [] })), "shared keep clear …");
+    // At 344, a 360 px phone's row, and 343, the pair at 130%, the short words leave the row 7 or 8 px over: Clear's eraser alone takes the row to 308.6, so nothing waits.
+    for (const room of [344, 343]) {
+      const fit = fitRow({ room, slots, alwaysMore: false, pins: [] });
+      assert.equal(ids(fit), "shared keep clear:compact kept:compact", `at ${room}`);
+      assert.deepEqual(fit.more, [], `at ${room}`);
+    }
   });
 
   test("content always in ⋯ skips the first pass and keeps ⋯", () => {

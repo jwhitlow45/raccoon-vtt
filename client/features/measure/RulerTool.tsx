@@ -250,8 +250,10 @@ function RulerOptions(props: { role: "dm" | "player" }) {
         {
           id: "clear",
           priority: 2,
+          // Its eraser alone where the row cannot hold its words, such as a DM's with kept rulers on a 360 px phone, so the kept rulers' chip never waits behind ⋯ for it.
+          compact: true,
           control: (
-            <OptButton tone="danger" icon="eraser" disabled={!ruler} onClick={() => tool.activeCtx && publish(tool.activeCtx, null)}>
+            <OptButton tone="danger" icon="eraser" compactIcon disabled={!ruler} onClick={() => tool.activeCtx && publish(tool.activeCtx, null)}>
               Clear
             </OptButton>
           ),

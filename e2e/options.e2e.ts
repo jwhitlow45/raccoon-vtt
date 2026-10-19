@@ -747,5 +747,22 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await reloadAt(dm, 1);
   });
 
+  test("lp8-ruler-a. a DM's Ruler with kept rulers on a 360 px phone keeps every control in the row, Clear as its eraser alone", async () => {
+    await view(dm, dmCdp, { width: 360, height: 780, insets: {} });
+    await selectTool(dm, "r");
+    await dm.waitForTimeout(300);
+    const row = options(dm).locator("[data-options-row]");
+    const inline = await row.locator("> [data-rvtt-slot]").evaluateAll((els) => els.map((e) => e.getAttribute("data-rvtt-slot")));
+    assert.deepEqual(inline, ["shared", "keep", "clear", "kept"], "the kept rulers' chip waits behind ⋯");
+    assert.equal(await options(dm).locator("[data-rvtt-more]").count(), 0, "⋯ shows");
+    const clear = row.locator('[data-rvtt-slot="clear"] button').first();
+    assert.equal(await clear.getAttribute("aria-label"), "Clear");
+    assert.equal(((await clear.textContent()) ?? "").trim(), "", "Clear shows its words");
+    const box = await clear.boundingBox();
+    assert.ok(box && Math.abs(box.width - 44) < 1, `Clear is ${box?.width ?? 0} px wide`);
+    await shots.take(dm, "lp8-ruler-360");
+    await key(dm, "v");
+  });
+
   test("9. nothing went wrong in the browsers", assertNoConsoleErrors);
 });
