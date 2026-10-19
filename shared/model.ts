@@ -710,7 +710,26 @@ export type Token = {
    * other than its owners get it only while the token is the party's.
    */
   companion?: Companion;
+  /**
+   * The token this one is attached to, its holder (docs/design-v1-attach.md
+   * 5.1): a rider on a mount, a familiar on a shoulder, a torch in a hand,
+   * a grappled creature dragged beside. Stored on the carried token, so a
+   * holder's own data never says what it carries. Players get it only
+   * while they get the holder.
+   */
+  attached?: TokenLink;
 };
+
+/**
+ * How a token is attached, fixed when it is attached and never worked out
+ * again (docs/design-v1-attach.md 5.1): a `ride`, a `perch` and a `carry`
+ * sit inside the holder's footprint and take its elevation, and a `drag`
+ * walks beside it within 5 ft.
+ */
+export type AttachKind = "ride" | "perch" | "carry" | "drag";
+
+/** A link to a holder. `steer` marks a controlled ride, whose mount moves and acts on its rider's turn (7.1). */
+export type TokenLink = { to: TokenId; kind: AttachKind; steer?: true };
 
 /** Whose turn a companion acts on (docs/design-v1-combat-flow.md 3.6.2): its own row, its character's turn listed under it, or its character's turn and not listed. */
 export type CompanionTurn = "own" | "shared" | "none";
@@ -790,6 +809,12 @@ export type PathStop = {
    * its ends seen too, and not joined across an unseen stop.
    */
   routeSeen?: true;
+  /**
+   * DM only, always with `uncounted`: the leg is one its holder's move took
+   * it along (docs/design-v1-attach.md 7.2), drawn on the holder's trail
+   * instead. "Doesn't count" pressed on it counts it and drops the mark.
+   */
+  carried?: true;
 };
 
 export type LifeState = "alive" | "dying" | "stable" | "dead";
@@ -1350,6 +1375,14 @@ export type TurnStart = {
    * Absent on turns started before paths were recorded, which record none.
    */
   seq?: number;
+  /**
+   * The controlled mounts sharing this turn (docs/design-v1-attach.md 7.1):
+   * each joined at the turn's start or at a controlled ride taken during
+   * it, while every player saw the pair, and left in the op that ended
+   * that ride. A mount on it moves on this turn's path while the turn's
+   * creature still rides it. Absent when none.
+   */
+  mounts?: TokenId[];
 };
 
 export type InitEntry = {
@@ -1380,6 +1413,18 @@ export type InitEntry = {
    * 11.2). Set when its turn starts, never by an op's input. DM only.
    */
   hadTurn?: true;
+  /**
+   * Next passes over the row in this round (docs/design-v1-attach.md 7.1):
+   * a controlled mount mounted after its own row had its turn, so its
+   * durations never tick twice in one round. Left in place after the round.
+   */
+  skipRound?: number;
+  /**
+   * The row only marks time in this round (7.1): its mount shared a rider's
+   * turn in it, so its movement, actions and Reaction were that turn's. Its
+   * durations and area reminders still run here. Left in place after the round.
+   */
+  markRound?: number;
 };
 
 export type EncounterSnapshot = {

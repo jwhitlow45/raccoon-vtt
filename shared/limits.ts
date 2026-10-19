@@ -340,6 +340,23 @@ export const LIMITS = {
   receiptsDmFloor: 2_000,
   receiptsKeptOlder: 10_000,
   receiptDays: 7,
+
+  // Attached tokens (docs/design-v1-attach.md 5.1).
+
+  /**
+   * A chain of carried tokens, counted in tokens: a torch held by a rider
+   * on a horse is 3. A token carries at most `carriedPerToken` directly,
+   * and a group, a holder with everything under it, is at most
+   * `groupTokens`. The DM's attach counts the whole link graph and a
+   * player's only what every player sees and the tokens the op names, so a
+   * hidden link can let a group pass them. The scene's 500 tokens bound
+   * every walk over the links whatever they hold.
+   */
+  attachDepth: 3,
+  carriedPerToken: 8,
+  groupTokens: 20,
+  /** The mounts sharing one turn (TurnStart.mounts). A chain is 3 deep, so a turn's creature rides at most two. */
+  turnMounts: 8,
 } as const;
 
 export type LimitCheck = { ok: true } | { ok: false; code: "quota"; message: string };

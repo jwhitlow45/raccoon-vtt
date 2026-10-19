@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
+import { ATTACH_KINDS } from "#shared/rules/attach.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
 import {
   MAX_ALT_IMAGES,
@@ -233,6 +234,8 @@ const pathStop = z.strictObject({
   cost: z.number().min(0).max(1_000_000).optional(),
   diag: z.tuple([z.number().min(0).max(1_000_000), z.number().min(0).max(1_000_000)]).optional(),
   routeSeen: z.literal(true).optional(),
+  // Attached tokens (docs/design-v1-attach.md 7.2): a leg the holder's move took the creature along.
+  carried: z.literal(true).optional(),
 });
 
 const token = z.strictObject({
@@ -273,6 +276,8 @@ const token = z.strictObject({
   partyVision: z.boolean().optional(),
   // Backups from before companions have none (docs/design-v1-combat-flow.md 4.7). A spent Reaction comes with its token.
   companion: z.strictObject({ of: id, turn: z.enum(["own", "shared", "none"]), reactionUsed: z.literal(true).optional() }).optional(),
+  // Backups from before attached tokens have none (docs/design-v1-attach.md 8.1).
+  attached: z.strictObject({ to: id, kind: z.enum(ATTACH_KINDS), steer: z.literal(true).optional() }).optional(),
 });
 
 const character = z.strictObject({
@@ -360,6 +365,9 @@ const entry = z.strictObject({
   inLair: z.boolean(),
   advantage: z.enum(["adv", "dis"]).optional(),
   hadTurn: z.literal(true).optional(),
+  // Attached tokens (docs/design-v1-attach.md 7.1): the round a controlled mount's row is passed over or marks time in.
+  skipRound: z.number().int().min(0).max(100_000).optional(),
+  markRound: z.number().int().min(0).max(100_000).optional(),
 });
 
 const turnStart = z.strictObject({
@@ -371,6 +379,7 @@ const turnStart = z.strictObject({
   elevation: z.number().int().min(-100_000).max(100_000),
   seen: z.literal(true).optional(),
   seq: z.number().int().min(0).optional(),
+  mounts: z.array(id).min(1).max(LIMITS.turnMounts).optional(),
 });
 
 const encounter = z.strictObject({
