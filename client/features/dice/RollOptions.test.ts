@@ -2,7 +2,7 @@ import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
-import type { LogEntry, PcStats, RoomState, Viewer } from "#shared/model.ts";
+import type { LogEntry, PcStats, RollRequest, RoomState, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { P1, character, room, token } from "#shared/testutil.ts";
 import { creatureRolls, type DiceView } from "./creature.ts";
@@ -46,8 +46,10 @@ function line(tag: string, total: number, label: string, n: number): LogEntry {
   return { id: `${n}:0`, at: "2026-10-17T20:00:00.000Z", kind: "event", data: { type: "dice", tag, by: "p1", to: "all", rolls: [{ formula: "1d20+7", faces: [total - 7], total, label }] } };
 }
 
-function render(viewer: Viewer, landed: boolean, pending = false): string {
-  const view = projectState(table(), viewer, { sceneId: "s1" }) as unknown as RoomState;
+function render(viewer: Viewer, landed: boolean, pending = false, requests: RoomState["rolls"] = {}): string {
+  const state = table();
+  state.rolls = requests;
+  const view = projectState(state, viewer, { sceneId: "s1" }) as unknown as RoomState;
   const dice: DiceView = { you: viewer, view, srd: { monsters: null, rolls: null } };
   const creature = { characterId: "thorn" } as const;
   const rolls = creatureRolls(dice, creature);
@@ -121,5 +123,14 @@ describe("a roll option's result shows in the header line, never under its butto
     const busy = [...markup.matchAll(/<button[^>]*aria-busy="true"[^>]*>(.*?)<\/button>/g)].map((m) => m[1]);
     assert.equal(busy.length, 1, "only the roll still on its way");
     assert.match(busy[0]!, /DEX \+7/, "the Dex save waits for its line");
+  });
+});
+
+describe("an ask for a skill opens the folded Skills group", () => {
+  test("the skill's Asked button draws as the panel opens, where the group starts folded", () => {
+    const button = (markup: string) => [...markup.matchAll(/<button[^>]*>(.*?)<\/button>/g)].map((m) => m[1]!.replace(/<[^>]*>/g, " ")).find((text) => text.includes("Perception"));
+    assert.equal(button(render(P1, false)), undefined, "folded, Skills draws no buttons");
+    const request: RollRequest = { id: "r1", rev: 0, test: { kind: "check", choices: [{ ability: "wis", skill: "perception" }] }, dcShown: false, resultShown: true, at: "2026-10-17T20:00:00.000Z", targets: [{ characterId: "thorn" }] };
+    assert.match(button(render(P1, false, false, { r1: request })) ?? "", /Perception \+1.*Asked/);
   });
 });

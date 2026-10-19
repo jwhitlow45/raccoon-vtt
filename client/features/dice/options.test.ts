@@ -11,7 +11,7 @@ import { ReceiptTracker } from "./useReceipt.ts";
 import { watchInitiative, type InitiativeEnv } from "./useRollOption.ts";
 import { TYPE_BONUS, BONUS_WORDS, parseBonus } from "../rolls/card.ts";
 import { creatureRolls } from "./creature.ts";
-import { asInitiative, asSave, commonTags, creatureKey, CRIT_WORDS, critical, cutLabel, d20Roll, damageRolls, groupNote, initiativeOp, initiativeRow, noNumbersNote, playerCreatures, presetLine, resultWords, routedTest, routeOf, scoreOf, spendOnStart, testLabel, typedTap, typedText, withExtra, withUsed } from "./options.ts";
+import { asInitiative, asSave, commonTags, creatureKey, CRIT_WORDS, critical, cutLabel, d20Roll, damageRolls, groupNote, initiativeOp, initiativeRow, noNumbersNote, playerCreatures, presetLine, resultWords, routedTest, routeOf, scoreOf, skillAsks, spendOnStart, testLabel, typedTap, typedText, withExtra, withUsed } from "./options.ts";
 
 /** The roll options' rules (docs/design-v1-roll-options.md 4.2 and 4.3). */
 
@@ -60,6 +60,13 @@ describe("where a save or check tap goes", () => {
     const check = table({ r1: request({ test: { kind: "check", choices: [{ ability: "wis", skill: "perception" }] } }) });
     assert.equal(routeOf({ state: check, creature: { characterId: "bree" }, test: { kind: "check", ability: "wis", skill: "perception" }, dm: false, played: false, ask: false }).kind, "answer");
     assert.equal(routeOf({ state: check, creature: { characterId: "bree" }, test: { kind: "check", ability: "wis" }, dm: false, played: false, ask: false }).kind, "roll");
+  });
+
+  test("the requests a skill button answers: an open check of a skill, never a save, a bare check or an answered one", () => {
+    const perception = { kind: "check" as const, choices: [{ ability: "wis" as const, skill: "perception" as const }] };
+    const open = table({ r1: request({ test: perception }), r2: request({ id: "r2" }), r3: request({ id: "r3", test: { kind: "check", choices: [{ ability: "wis" }] } }) });
+    assert.deepEqual(skillAsks(open, { tokenId: "breeTok" }), ["r1"]);
+    assert.deepEqual(skillAsks(table({ r1: request({ test: perception, targets: [{ characterId: "bree", total: 12 }] }) }), { characterId: "bree" }), []);
   });
 
   test("the DM's Ask switch on a creature a player plays: on asks, off rolls, and attacks always roll", () => {

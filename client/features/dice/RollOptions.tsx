@@ -47,6 +47,7 @@ import {
   routeOf,
   scoreOf,
   signedText,
+  skillAsks,
   spendOnStart,
   testLabel,
   typedTap,
@@ -195,6 +196,17 @@ export function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creat
   const openPcStats = useOpenPcStats();
   const cast = useOption((s) => (s.cast?.key === key ? s.cast : null));
   const [skillsOpen, setSkillsOpen] = useState(false);
+  /*
+   * A new ask for a skill opens the fold over its Asked button, as a tap
+   * would, so the fold stays open once it is answered. Set in render, not
+   * in an effect, so the closed fold never draws first.
+   */
+  const skillAsked = skillAsks(state, creature);
+  const [seenAsks, setSeenAsks] = useState<readonly string[]>([]);
+  if (skillAsked.length !== seenAsks.length || skillAsked.some((id) => !seenAsks.includes(id))) {
+    setSeenAsks(skillAsked);
+    if (skillAsked.some((id) => !seenAsks.includes(id))) setSkillsOpen(true);
+  }
   const actor = token && "inline" in token.actor ? token.actor.inline : character?.actor;
   const numbers = rolls.numbers;
   const named = rolls.named.filter((r) => r.section !== "spells");
