@@ -1,12 +1,13 @@
 import { keys } from "../keys.ts";
-import { healRevivesDead, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers, walksRoutes } from "../migrate.ts";
+import { attaches, healRevivesDead, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers, walksRoutes } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
 import { inSightOfNonOwners, seenAtEvery } from "../project.ts";
-import { MAX_RULER_STOPS, type ActorPatch, type OpOf, type TokenPatch } from "../protocol.ts";
+import { MAX_RULER_STOPS, type ActorPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
 import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/footprint.ts";
 import { pathCounters, pathThisTurn, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
 import { routeFeet, routePoints, routeWalk, straightCost, type LegCost, type RoutePiece, type RoutePoint } from "../rules/route.ts";
+import { planMove, type MovedToken } from "../rules/moveLeg.ts";
 import { deleteCharacterBlocks } from "./companionBlocks.ts";
 import {
   BLOCK_LINKS,
@@ -184,6 +185,8 @@ function setOrDelete<T extends object, K extends keyof T>(target: T, field: K, v
 
 export function tokenUpdate(tx: Tx, op: OpOf<"token.update">): void {
   const token = tx.token(op.tokenId);
+  // Planned before anything is written: what its group does follows where it stood (docs/design-v1-attach.md 8.2).
+  const along = carriedAlong(tx, op);
   const p = op.patch;
   const next: Token = { ...token };
   if (p.sceneId !== undefined) {
@@ -225,15 +228,12 @@ export function tokenUpdate(tx: Tx, op: OpOf<"token.update">): void {
   // A squeeze is where the token stood, at its size: a new size, scene or place leaves it standing full size (section 4.1).
   if (SQUEEZE_FIELDS.some((field) => p[field] !== undefined)) delete next.squeeze;
   updateCompanion(tx, token, next, p);
-  tx.write(keys.token(token.id), withPath(tx, token, next, judgedIn(tx, [next])));
+  const judged = judgedIn(tx, [next, ...along.map((c) => c.next)]);
+  tx.write(keys.token(token.id), withPath(tx, token, next, judged));
+  placeCarried(tx, along, judged);
   // Coming to act on its character's turn takes its rows out of the fight and its history (docs/design-v1-combat-flow.md 3.6.7).
   if (p.companion && actsOnCharacterTurn(next)) dropRows(tx, tx.token(token.id), true);
-  if (next.sceneId !== token.sceneId) {
-    // An attached area follows its token, to another scene too, rather than staying behind at a stale origin.
-    for (const template of sortedById(Object.values(tx.state.templates))) {
-      if (template.attachedTo === token.id) tx.write(keys.template(template.id), { ...template, sceneId: next.sceneId });
-    }
-  }
+  if (next.sceneId !== token.sceneId) areasFollow(tx, token.id, next.sceneId);
   if (p.actor) {
     const resolved = tx.resolveActor({ tokenId: token.id });
     const r = applyActorPatch(tx, resolved, p.actor);
@@ -276,6 +276,45 @@ function updateCompanion(tx: Tx, token: Token, next: Token, p: TokenPatch): void
   if (p.ownerIds !== undefined) throw invalid(COMPANION_OWNERS);
   checkCompanion(tx, next);
   next.ownerIds = [...tx.character(next.companion.of).ownerIds];
+}
+
+/** An attached area follows its token, to another scene too, rather than staying behind at a stale origin. */
+function areasFollow(tx: Tx, tokenId: string, sceneId: string): void {
+  for (const template of sortedById(Object.values(tx.state.templates))) {
+    if (template.attachedTo === tokenId) tx.write(keys.template(template.id), { ...template, sceneId });
+  }
+}
+
+/** A token a holder's move takes along: as it was, where the plan puts it, and the plan's entry. */
+export type Carried = { token: Token; next: Token; plan: MovedToken };
+
+/**
+ * What an op's named moves take along (docs/design-v1-attach.md 8.2):
+ * every token of their groups the plan moves, each where it puts it, from
+ * op version 14. Asked before the op writes anything, since every member
+ * follows the walk its holder took from where it stood. A move of a carried
+ * token alone takes along only what it carries itself.
+ */
+export function carriedAlong(tx: Tx, op: Op): Carried[] {
+  if (!attaches(tx.env.opVersion)) return [];
+  const out: Carried[] = [];
+  for (const plan of planMove(op, tx.state, tx.actor, tx.env)) {
+    if (plan.carriedBy === undefined) continue;
+    const token = tx.token(plan.tokenId);
+    const next: Token = { ...token, sceneId: plan.to.sceneId, x: plan.to.x, y: plan.to.y, elevation: plan.to.elevation };
+    // A squeeze is where the token stood at its size, and only its own move takes one.
+    delete next.squeeze;
+    out.push({ token, next, plan });
+  }
+  return out;
+}
+
+/** Writes the tokens a move took along, each with the leg on its path the path rules give it, and its areas sent along to another scene. */
+export function placeCarried(tx: Tx, carried: readonly Carried[], judged: Judged): void {
+  for (const { token, next } of carried) {
+    tx.write(keys.token(token.id), withPath(tx, token, next, judged, true));
+    if (next.sceneId !== token.sceneId) areasFollow(tx, token.id, next.sceneId);
+  }
 }
 
 /** Removes a token with what hangs off it: attached templates, caster references and its initiative rows. */
@@ -332,9 +371,9 @@ function movedToken(tx: Tx, move: Move): { move: Move; token: Token; next: Token
  * (shared/writable.ts), and `after` is made only when a stop is judged, so
  * a move with no path to mark copies nothing.
  */
-type Judged = { before: RoomState; after: () => RoomState };
+export type Judged = { before: RoomState; after: () => RoomState };
 
-function judgedIn(tx: Tx, tokens: readonly Token[]): Judged {
+export function judgedIn(tx: Tx, tokens: readonly Token[]): Judged {
   const before = { ...tx.state };
   let arrived: RoomState | undefined;
   const after = () => {
@@ -375,7 +414,7 @@ function placeMoved(tx: Tx, { move, token, next }: { move: Move; token: Token; n
  * footprint now unless it holds its own. Ops stored before version 6 did
  * neither (`resizeStop`), and replay as they were.
  */
-function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted = false, route?: readonly RoutePiece[]): Token {
+export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted = false, route?: readonly RoutePiece[]): Token {
   if (after.sceneId !== before.sceneId) return withoutPath(after);
   const from = footprintSize(before);
   const to = footprintSize(after);
@@ -465,9 +504,13 @@ function withoutPath(token: Token): Token {
   return rest;
 }
 
+/** A holder's move takes its group along (docs/design-v1-attach.md 8.2), every stop judged with all of them where they end. */
 export function tokenMove(tx: Tx, op: OpOf<"token.move">): void {
+  const along = carriedAlong(tx, op);
   const moved = movedToken(tx, op);
-  placeMoved(tx, moved, judgedIn(tx, [moved.next]));
+  const judged = judgedIn(tx, [moved.next, ...along.map((c) => c.next)]);
+  placeMoved(tx, moved, judged);
+  placeCarried(tx, along, judged);
 }
 
 /** Every token is placed first, so each stop is judged with the whole group where it stood or where it ends. */
@@ -478,8 +521,10 @@ export function tokenMoveMany(tx: Tx, op: OpOf<"token.moveMany">): void {
     seen.add(move.tokenId);
     return movedToken(tx, move);
   });
-  const judged = judgedIn(tx, moves.map((m) => m.next));
+  const along = carriedAlong(tx, op);
+  const judged = judgedIn(tx, [...moves.map((m) => m.next), ...along.map((c) => c.next)]);
   for (const moved of moves) placeMoved(tx, moved, judged);
+  placeCarried(tx, along, judged);
 }
 
 /** The refusal of "Doesn't count" on a resize's leg or a squeeze's in place, which is no move and counts no movement. */

@@ -6,6 +6,9 @@ import { allRevealedTiles, decodeTile, encodeTile, isEmptyBits, pointInPolygonFi
 import { occupiedCells } from "../rules/footprint.ts";
 import { footprintGround } from "../rules/heights.ts";
 import { boxTouchesCell, labelBox } from "../rules/labels.ts";
+import { attaches } from "../migrate.ts";
+import { carriedIndex, holderOf, onHolder } from "../rules/attach.ts";
+import { ridingGroup } from "../rules/moveLeg.ts";
 import { sortedById } from "./tokens.ts";
 import { Refuse, gone, invalid, type Tx } from "./tx.ts";
 
@@ -254,8 +257,11 @@ function setCells(tx: Tx, scene: Scene, cells: Cell[], terrain: TerrainId | null
  */
 export function standingOn(tx: Tx, sceneId: string, cells: ReadonlySet<string> | null): Token[] {
   const out: Token[] = [];
+  const groups = attaches(tx.env.opVersion);
   for (const token of sortedById(Object.values(tx.state.tokens))) {
     if (token.sceneId !== sceneId) continue;
+    // What sits on its holder stands on the holder, not the floor, and moves only with it (docs/design-v1-attach.md 5.2).
+    if (groups && token.attached && onHolder(token.attached.kind) && holderOf(tx.state.tokens, token)) continue;
     if (cells && !occupiedCells(token).some((c) => cells.has(`${c.x},${c.y}`))) continue;
     if (token.elevation === footprintGround(tx.state.buildChunks, token)) out.push(token);
   }
@@ -272,10 +278,22 @@ export function standingOn(tx: Tx, sceneId: string, cells: ReadonlySet<string> |
  * ground, and refuses if one of them changed since, as any restore does.
  */
 export function landOnGround(tx: Tx, standing: readonly Token[]): void {
+  // Links do not change here, so one index, read before any token is written, says which tokens carry anything.
+  const links = attaches(tx.env.opVersion) ? tx.state.tokens : null;
+  const holders = links ? carriedIndex(links) : null;
   for (const was of standing) {
     const token = tx.token(was.id);
     const ground = footprintGround(tx.state.buildChunks, token);
-    if (ground !== token.elevation) tx.write(keys.token(token.id), { ...token, elevation: ground });
+    if (ground === token.elevation) continue;
+    const rise = ground - token.elevation;
+    // From op version 14 what sits on it rises or sinks with it, down its chain, while a dragged creature keeps to its
+    // own ground. The link pass at the end of the op lets loose one left out of reach (docs/design-v1-attach.md 5.2).
+    const riding = links && holders?.has(token.id) ? ridingGroup(links, token.id).slice(1) : [];
+    tx.write(keys.token(token.id), { ...token, elevation: ground });
+    for (const id of riding) {
+      const rider = tx.token(id);
+      tx.write(keys.token(id), { ...rider, elevation: rider.elevation + rise });
+    }
   }
 }
 

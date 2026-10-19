@@ -15,6 +15,7 @@ import {
   resizeStop,
   reviveToOne,
   walksRoutes,
+  attaches,
   runMigrations,
   snapshotMigrations,
   todaysSrdId,
@@ -818,9 +819,9 @@ describe("a player's asks for saves: op version 12 and snapshot version 16 (docs
 });
 
 describe("walking routes: op version 13 and snapshot version 17 (docs/design-v1-movement.md 6.6)", () => {
-  test("is the version now", () => {
-    assert.equal(OP_VERSION, 13);
-    assert.equal(SNAPSHOT_VERSION, 17);
+  test("came before attached tokens' versions", () => {
+    assert.ok(OP_VERSION >= 13);
+    assert.ok(SNAPSHOT_VERSION >= 17);
   });
 
   test("both steps are the identity", () => {
@@ -839,5 +840,30 @@ describe("walking routes: op version 13 and snapshot version 17 (docs/design-v1-
   test("a version 13 op and a version 17 snapshot never migrate down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 13, 12, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 17, 16, snapshotMigrations), /down/);
+  });
+});
+
+describe("attached tokens: op version 14 and snapshot version 18 (docs/design-v1-attach.md 8.6)", () => {
+  test("is the version now", () => {
+    assert.equal(OP_VERSION, 14);
+    assert.equal(SNAPSHOT_VERSION, 18);
+  });
+
+  test("both steps are the identity", () => {
+    const state = room();
+    assert.equal(runMigrations(state, 17, 18, snapshotMigrations), state);
+    const ops: unknown[] = [{ t: "token.move", tokenId: "t1", x: 3, y: 4 }, { t: "encounter.next" }];
+    for (const op of ops) assert.equal(runMigrations(op, 13, 14, opMigrations), op);
+  });
+
+  test("only ops stored before version 14 replay without what attached tokens write", () => {
+    assert.equal(attaches(13), false);
+    assert.equal(attaches(14), true);
+    assert.equal(attaches(undefined), true);
+  });
+
+  test("a version 14 op and a version 18 snapshot never migrate down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 14, 13, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 18, 17, snapshotMigrations), /down/);
   });
 });

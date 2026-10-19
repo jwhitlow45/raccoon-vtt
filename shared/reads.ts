@@ -2,6 +2,7 @@ import { doorChunk, keys, readEntity, type EntityKey } from "./keys.ts";
 import type { RoomState, Viewer } from "./model.ts";
 import type { ActorTarget, Op } from "./protocol.ts";
 import type { ProjectedState } from "./project.ts";
+import { moveGroups } from "./rules/attach.ts";
 import { nextTurn } from "./rules/initiative.ts";
 
 /**
@@ -127,10 +128,20 @@ export function reads(op: Op, state: RoomState): Reads {
       const token = state.tokens[op.tokenId];
       return of([{ key: keys.token(op.tokenId) }, { key: keys.encounterHistory }], token ? [`scene:${token.sceneId}`, "encounter"] : ["encounter"]);
     }
+    // A holder's move reads its group as the viewer's copy holds it (docs/design-v1-attach.md 8.4). A visible token that
+    // rides a holder the viewer cannot see moves only in the server's answer.
     case "token.move":
-      return of([{ key: keys.token(op.tokenId) }]);
+      return of(groupReads(state, [op.tokenId]));
     case "token.moveMany":
-      return of(op.moves.map((m) => ({ key: keys.token(m.tokenId) })));
+      return of(groupReads(state, op.moves.map((m) => m.tokenId)));
+    // The two tokens and what the carried one carries. A controlled ride in a fight changes the order, which a player's
+    // renumbered copy cannot predict, so it reads the encounter whole.
+    case "token.attach":
+      return of([...groupReads(state, [op.tokenId]), { key: keys.token(op.to) }], op.steer && state.encounter ? ["encounter"] : []);
+    case "token.detach": {
+      const link = state.tokens[op.tokenId]?.attached;
+      return of([...groupReads(state, [op.tokenId]), ...(link ? [{ key: keys.token(link.to) }] : [])], link?.steer && state.encounter ? ["encounter"] : []);
+    }
     case "token.countLeg":
       return of([{ key: keys.token(op.tokenId), fields: ["path"] }, { key: keys.encounter }]);
 
@@ -353,6 +364,15 @@ export function reads(op: Op, state: RoomState): Reads {
       return of([{ key: keys.cast(op.castId) }, ...(ask ? [{ key: keys.token(ask.caster) }] : [])]);
     }
   }
+}
+
+/** The tokens an op names and everything their groups carry, as this copy holds them. */
+function groupReads(state: RoomState, named: readonly string[]): Read[] {
+  const out: Read[] = [];
+  for (const ids of moveGroups(state.tokens, named).values()) for (const id of ids) out.push({ key: keys.token(id) });
+  // A named token the copy lacks still reads, so the prediction waits for the server.
+  for (const id of named) if (!state.tokens[id]) out.push({ key: keys.token(id) });
+  return out;
 }
 
 /**

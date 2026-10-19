@@ -12,6 +12,8 @@ import {
   effectUpdate,
 } from "./reducer/actors.ts";
 import { remindAfter, remindTurnEnd } from "./reducer/areaTriggers.ts";
+import { linkPass, tokenAttach, tokenDetach } from "./reducer/attach.ts";
+import { attaches } from "./migrate.ts";
 import {
   encounterAdd,
   encounterEnd,
@@ -124,6 +126,8 @@ export function applyOp(state: RoomState, op: Op, actor: Viewer, env: Env): Appl
     // Areas that hit a creature again remind the table around the op itself (reducer/areaTriggers.ts).
     if (op.t === "encounter.next" && !pressChangesNothing(state, actor, op, env)) remindTurnEnd(tx);
     dispatch(tx, op);
+    // Every op's dispatch ends with the links that no longer hold coming loose (docs/design-v1-attach.md 5.2).
+    if (attaches(env.opVersion)) linkPass(tx);
     endSaves(tx);
     remindAfter(tx, state, op);
     tx.finish();
@@ -188,6 +192,10 @@ function dispatch(tx: Tx, op: Op): void {
       return tokenMoveMany(tx, op);
     case "token.countLeg":
       return tokenCountLeg(tx, op);
+    case "token.attach":
+      return tokenAttach(tx, op);
+    case "token.detach":
+      return tokenDetach(tx, op);
     case "actor.hp":
       return actorHp(tx, op);
     case "actor.damageMany":

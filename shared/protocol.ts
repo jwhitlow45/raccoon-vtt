@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LIMITS, serializedBytes } from "./limits.ts";
+import { ATTACH_KINDS } from "./rules/attach.ts";
 import { critBound } from "./dice/crit.ts";
 import { applyMode, diceCount, doubleDice, parseExtra, parseFormula, type Formula } from "./dice/formula.ts";
 import { ICON_KEY_RE } from "./imageRef.ts";
@@ -1366,6 +1367,21 @@ export const clientOps = [
    * counting again (features section 4). The token stays where it is.
    */
   op("token.countLeg", { tokenId: id, counts: z.boolean() }),
+  /**
+   * Attaches a token to a holder (docs/design-v1-attach.md 8.1): a ride, a
+   * perch, a carry or a drag, `steer` on a controlled ride alone. `x`, `y`
+   * and `elevation` are the seat the client picked, which the reducer
+   * checks fits, and for a drag where the creature stands. An attach of a
+   * token already attached replaces its link.
+   */
+  op("token.attach", { tokenId: id, to: id, kind: z.enum(ATTACH_KINDS), steer: z.literal(true).optional(), x: coord, y: coord, elevation: feet }),
+  /**
+   * Detaches a token (8.1). A place is only for a creature getting off,
+   * beside its holder: Put down and Let go leave it where it stands.
+   */
+  op("token.detach", { tokenId: id, x: coord.optional(), y: coord.optional(), elevation: feet.optional() })
+    .refine((o) => (o.x === undefined) === (o.y === undefined), { message: "a place has both x and y" })
+    .refine((o) => o.elevation === undefined || o.x !== undefined, { message: "an elevation comes with a place" }),
   op("actor.hp", { target: actorTarget, change: hpChange }),
   /**
    * Damage to several creatures in one step, such as everyone a Fireball

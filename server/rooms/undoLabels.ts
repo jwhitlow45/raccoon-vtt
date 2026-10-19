@@ -87,6 +87,16 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return op.teleport ? `teleporting ${token(op.tokenId)}` : `moving ${token(op.tokenId)}`;
     case "token.countLeg":
       return op.counts ? `counting the last move of ${token(op.tokenId)} again` : `not counting the last move of ${token(op.tokenId)}`;
+    // Attached tokens (docs/design-v1-attach.md 8.3): "putting Bree on Warhorse", "letting go of Goblin 2".
+    case "token.attach":
+      if (op.kind === "drag") return `letting ${token(op.to)} drag ${token(op.tokenId)}`;
+      if (op.kind === "carry") return `letting ${token(op.to)} carry ${token(op.tokenId)}`;
+      return `putting ${token(op.tokenId)} on ${token(op.to)}`;
+    case "token.detach": {
+      const link = before.tokens[op.tokenId]?.attached;
+      if (op.x !== undefined) return link ? `taking ${token(op.tokenId)} off ${token(link.to)}` : `moving ${token(op.tokenId)}`;
+      return before.tokens[op.tokenId]?.kind === "object" && link?.kind !== "drag" ? `putting down ${token(op.tokenId)}` : `letting go of ${token(op.tokenId)}`;
+    }
     case "token.moveMany": {
       const first = op.moves[0];
       return op.moves.length === 1 && first ? `moving ${token(first.tokenId)}` : `moving ${op.moves.length} tokens`;

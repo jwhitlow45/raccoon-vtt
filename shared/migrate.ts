@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 17;
-export const OP_VERSION = 13;
+export const SNAPSHOT_VERSION = 18;
+export const OP_VERSION = 14;
 
 export type MigrationStep = {
   from: number;
@@ -127,6 +127,11 @@ export const snapshotMigrations: MigrationStep[] = [
   // before, so a v16 room is a v17 room as it is. The number moves so that an older build, whose strict state schema
   // refuses the fields, refuses a v17 snapshot instead of loading it under old rules.
   { from: 16, to: 17, apply: (state) => state },
+  // Attached tokens (docs/design-v1-attach.md 8.6): a token's `attached`, a path stop's `carried`, a row's `skipRound`
+  // and `markRound` and a turn start's `mounts` are optional fields whose absence reads as before, so a v17 room is a
+  // v18 room as it is. The number moves so that an older build, whose strict state schema refuses the fields and whose
+  // reducer would move a holder without what it carries, refuses a v18 snapshot instead of loading it under old rules.
+  { from: 17, to: 18, apply: (state) => state },
 ];
 
 /**
@@ -416,6 +421,24 @@ export const opMigrations: MigrationStep[] = [
     to: 13,
     apply: (op) => op,
   },
+  {
+    // Attached tokens (docs/design-v1-attach.md 8.6): `token.attach` and
+    // `token.detach` are new, and no older op names them, so the step is the
+    // identity. What the reducer writes on its own, a holder's group moving
+    // with it, the link pass, a carried leg's mark, a mount's path and its
+    // turn's `mounts`, `skipRound` and `markRound`, it writes only from this
+    // version (`attaches`). Older ops never meet a link, so the gate changes
+    // nothing they did and keeps the boundary exact.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 14, and the shutdown writes version 18 snapshots.
+    // Rollback: an older build refuses to migrate either down
+    // (runMigrations), so going back restores that backup, losing the play
+    // since.
+    from: 13,
+    to: 14,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -703,6 +726,18 @@ export function marksHadTurn(opVersion: number | undefined): boolean {
  */
 export function walksRoutes(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 13);
+}
+
+/**
+ * Whether the reducer writes what attached tokens add on its own
+ * (docs/design-v1-attach.md 8.6): a holder's move carrying its group, the
+ * link pass, a carried leg's mark, a mount's path, a turn's `mounts`, a
+ * row's `skipRound` and `markRound`, and Next's Reaction for a mount. Ops
+ * stored before version 14 wrote none of them and replay by that rule.
+ * Live ops carry no stored version and take today's rule.
+ */
+export function attaches(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 14);
 }
 
 /** Runs the steps that lead from `from` to `to`, in order, and refuses a version with no path. */

@@ -1,8 +1,9 @@
-import { walksRoutes } from "../migrate.ts";
+import { attaches, walksRoutes } from "../migrate.ts";
 import type { AreaTemplate, AreaTrigger, LogEntry, RoomState, Token } from "../model.ts";
 import { seenByNonOwners } from "../project.ts";
 import { MAX_NAME, type Op } from "../protocol.ts";
 import { creaturesInArea, type AreaContext, type AreaToken } from "../rules/aoe.ts";
+import { describeMove, type MovedToken } from "../rules/moveLeg.ts";
 import { pieceReach, routePoints, type RoutePoint } from "../rules/route.ts";
 import { sceneWalls } from "../rules/walls.ts";
 import type { Tx } from "./tx.ts";
@@ -169,13 +170,25 @@ function placeChanged(a: Token | undefined, b: Token | undefined): boolean {
 }
 
 /** The tokens an op moved, and whether it moved an area. */
-function movedBy(op: Op, before: RoomState, after: RoomState): { tokens: Set<string>; templateId: string | null } {
+type Moved = { tokens: Set<string>; templateId: string | null; walks?: GroupWalks };
+
+function movedBy(tx: Tx, op: Op, before: RoomState, after: RoomState): Moved {
   const tokens = new Set<string>();
+  const templateId = op.t === "template.update" ? op.templateId : null;
+  // From op version 14 a holder's group moves with it, and the move's one description names every token (docs/design-v1-attach.md 9).
+  if (attaches(tx.env.opVersion)) {
+    const described = describeMove(op, before, after, tx.actor, tx.env).filter((m) => placeChanged(before.tokens[m.tokenId], after.tokens[m.tokenId]));
+    for (const m of described) tokens.add(m.tokenId);
+    return { tokens, templateId, walks: { named: described.filter((m) => m.carriedBy === undefined), all: described } };
+  }
   const ids =
     op.t === "token.move" ? [op.tokenId] : op.t === "token.moveMany" ? op.moves.map((m) => m.tokenId) : op.t === "token.update" ? [op.tokenId] : [];
   for (const id of ids) if (placeChanged(before.tokens[id], after.tokens[id])) tokens.add(id);
-  return { tokens, templateId: op.t === "template.update" ? op.templateId : null };
+  return { tokens, templateId };
 }
+
+/** The walks of an op's moved tokens, the named ones apart: only they decide how finely the move is swept. */
+type GroupWalks = { named: MovedToken[]; all: MovedToken[] };
 
 /*
  * A move, or an area's move, is one straight leg from where it was to where
@@ -238,6 +251,60 @@ function alongWalk(after: RoomState, walk: Walked): RoomState[] {
   return out;
 }
 
+/**
+ * The room along an op's walks since op version 14 (docs/design-v1-attach.md
+ * 9): every moved token, a holder's group included, at the same progress
+ * along its own walk. How finely is decided by the tokens the op names
+ * alone, as before groups, so a hidden passenger never changes where a
+ * visible token is sampled: piece by piece at the straight leg's density for
+ * a routed walk, and for straight legs by the longest named one. A carried
+ * token stopped short of its holder's walk waits at its stop.
+ */
+function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, routed: boolean): RoomState[] {
+  const fpc = after.meta.settings.feetPerCell;
+  const { named, all } = moved.walks;
+  const at = (walk: MovedToken, piece: number, f: number) => {
+    const points = walk.route;
+    if (!routed) return lerpPoint(points[0]!, points[points.length - 1]!, f);
+    if (piece >= points.length) return points[points.length - 1]!;
+    return lerpPoint(points[piece - 1]!, points[piece]!, f);
+  };
+  const place = (piece: number, f: number): RoomState => {
+    const placed = { ...after.tokens };
+    for (const walk of all) {
+      const token = after.tokens[walk.tokenId];
+      if (!token || walk.from.sceneId !== walk.to.sceneId) continue;
+      placed[token.id] = { ...token, ...at(walk, piece, f) };
+    }
+    return { ...after, tokens: placed };
+  };
+  const out: RoomState[] = [];
+  if (routed) {
+    const lead = named[0]!.route;
+    for (let i = 1; i < lead.length && out.length < MAX_ROUTE_SWEEP; i++) {
+      const n = Math.max(1, Math.ceil(pieceReach(lead[i - 1]!, lead[i]!, fpc) / SWEEP_STEP));
+      for (let k = 1; k <= n && out.length < MAX_ROUTE_SWEEP; k++) {
+        if (i === lead.length - 1 && k === n) break;
+        out.push(place(i, k / n));
+      }
+    }
+  } else {
+    let reach = 0;
+    for (const walk of named) {
+      if (walk.from.sceneId !== walk.to.sceneId) continue;
+      reach = Math.max(reach, pieceReach(walk.from, walk.to, fpc));
+    }
+    const points = Math.min(MAX_SWEEP_POINTS, Math.max(1, Math.ceil(reach / SWEEP_STEP)));
+    for (let k = 1; k < points; k++) out.push(place(1, k / points));
+  }
+  out.push(after);
+  return out;
+}
+
+function lerpPoint(a: RoutePoint, b: RoutePoint, f: number): RoutePoint {
+  return { x: lerp(a.x, b.x, f), y: lerp(a.y, b.y, f), elevation: lerp(a.elevation, b.elevation, f) };
+}
+
 /** The room at each point along the op's leg after it began, ending with `after` itself. */
 function alongLeg(before: RoomState, after: RoomState, moved: { tokens: Set<string>; templateId: string | null }): RoomState[] {
   const fpc = after.meta.settings.feetPerCell;
@@ -286,9 +353,11 @@ export function remindAfter(tx: Tx, before: RoomState, op: Op): void {
   if (op.t !== "token.move" && op.t !== "token.moveMany" && op.t !== "token.update" && op.t !== "template.update") return;
   const after = tx.state;
   if (!inTurn(after)) return;
-  const moved = movedBy(op, before, after);
+  const moved = movedBy(tx, op, before, after);
   if (moved.tokens.size === 0 && moved.templateId === null) return;
-  const walk = moved.tokens.size > 0 ? walkOf(before, after, op, tx.env.opVersion) : null;
+  const walk = moved.tokens.size > 0 && !moved.walks ? walkOf(before, after, op, tx.env.opVersion) : null;
+  const grouped = moved.walks && moved.walks.named.length > 0 ? { ...moved, walks: moved.walks } : null;
+  const routed = op.t === "token.move" && op.route !== undefined && walksRoutes(tx.env.opVersion);
   let swept: RoomState[] | null = null;
   for (const template of Object.values(after.templates).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
     if (!(template.triggers?.includes("enter") ?? false)) continue;
@@ -306,7 +375,7 @@ export function remindAfter(tx: Tx, before: RoomState, op: Op): void {
     let outside = candidates.filter((t) => !earlier.has(t.id));
     // Each creature that entered, with the room at the point of the leg where it did.
     const entered = new Map<string, RoomState>();
-    const leg = outside.length > 0 ? (swept ??= walk ? alongWalk(after, walk) : alongLeg(before, after, moved)) : [];
+    const leg = outside.length > 0 ? (swept ??= grouped ? alongGroups(after, grouped, routed) : walk ? alongWalk(after, walk) : alongLeg(before, after, moved)) : [];
     for (const at of leg) {
       const area = at.templates[template.id];
       if (!area) continue;

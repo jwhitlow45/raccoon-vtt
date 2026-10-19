@@ -554,6 +554,11 @@ function forPlayer(op: Op, c: Check): Decision {
       return OK;
     }
 
+    // Attached tokens' rules for players (docs/design-v1-attach.md 6) come with their permissions.
+    case "token.attach":
+    case "token.detach":
+      return FORBIDDEN;
+
     case "token.countLeg": {
       // An owner says how their creature moved, on a locked token too, as with its elevation and facing.
       const token = c.visibleToken(op.tokenId);

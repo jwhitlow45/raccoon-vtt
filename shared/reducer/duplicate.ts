@@ -74,8 +74,11 @@ export function sceneDuplicate(tx: Tx, op: OpOf<"scene.duplicate">): void {
   for (const token of sortedById(Object.values(s.tokens))) {
     const id = copied.get(token.id);
     if (id === undefined) continue;
-    const { path: _path, ...kept } = token;
+    const { path: _path, attached, ...kept } = token;
     const next: Token = { ...kept, id, sceneId: to, fogExemptAuto: false };
+    // A link joins the copies of the two tokens, and goes when the holder was not copied (docs/design-v1-attach.md 5.2).
+    const holder = attached ? copied.get(attached.to) : undefined;
+    if (attached && holder !== undefined) next.attached = { ...attached, to: holder };
     if ("inline" in token.actor) {
       const actor = token.actor.inline;
       next.actor = { inline: { ...actor, effects: actor.effects.map((e) => pausedOn(e, id)) } };
