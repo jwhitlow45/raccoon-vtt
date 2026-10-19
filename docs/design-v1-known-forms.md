@@ -125,7 +125,7 @@ Known forms ships before movement, attach and traps. Each of those notes takes "
 | --- | --- |
 | A ninth form | The step disables the rest. Sent anyway, the schema refuses it |
 | An id the SRD list lacks (a later rename, a crafted op) | Muted text, "cave-bear: not in this app's SRD list", with nothing to take. The step removes it |
-| A level 1 character with known forms and no level remembered, reopened | Starts at Any: every creature listed, no marks |
+| A level 1 character with known forms and no level remembered, reopened | Starts at Any: no Druid level filter, no marks |
 | A tap by mistake | End the shape ends it. Wild Shape's Temporary HP stay by the rules, and the HP field sets them back |
 | Ownership lost or the character deleted while choosing | The refusal's words, as for any character edit |
 | A form over the chosen level's limit | Marked, kept, takes in one tap |
@@ -160,7 +160,7 @@ Each has the recommended answer, which the coordinator takes unless the project 
 2. **Track "replace one after a Long Rest"?** Recommended: no. The choose step states the rule, and any form can change at any time.
 3. **Does a known form's tap take the shape at once, or open the Wild Shape step?** Recommended: at once, as Wild Shape with the default Temporary HP. A form is known only for Wild Shape, so the step's one other question is the Temporary HP checkbox, on by default. The full list keeps the step.
 4. **Show the known forms in the token panel's Stat block group and the character's card too?** Recommended: yes, as one-tap buttons (5.3), which is where play happens. In Wild Shape they change the form.
-5. **Where does the Druid level start, and do the Temporary HP follow it?** Recommended: as 5.5 says. It starts at the level this device remembers for the character, else the character's level from level 2 once it has known forms, else Any. Wild Shape's Temporary HP follow a remembered level, as the SRD reads, so a Druid 4/Fighter 5 who picks 4 gets 4, not 9. A start level also filters "All creatures", and Any shows everything again for Polymorph. The other answer keeps Any always, and the Temporary HP the character's level.
+5. **Where does the Druid level start, and do the Temporary HP follow it?** Recommended: as 5.5 says. It starts at the level this device remembers for the character, else the character's level from level 2 once it has known forms, else Any. Wild Shape's Temporary HP follow a remembered level, as the SRD reads, so a Druid 4/Fighter 5 who picks 4 gets 4, not 9. A start level also filters "All creatures", and Any removes the Druid level filter again for Polymorph. The other answer keeps Any always, and the Temporary HP the character's level.
 
 ## 10. Decided, and later
 
