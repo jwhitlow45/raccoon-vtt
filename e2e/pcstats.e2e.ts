@@ -12,8 +12,9 @@ import { ConsoleWatch, openSideTab, OpSocket, reopenRoom, Shots, SocketWatch, st
  * section 12): a player types scores and proficiencies and saves, the
  * token panel and the DM's device show the totals, another player's device
  * has none, a level change moves them, Take a shape changes the bar's
- * saves line and End the shape restores it, and a D&D Beyond character's
- * JSON pasted from a fixture fills the review.
+ * saves line and End the shape restores it, a Druid's known forms are
+ * chosen and taken in one tap (docs/design-v1-known-forms.md 7), and a D&D
+ * Beyond character's JSON pasted from a fixture fills the review.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus twenty-one.
  */
@@ -349,6 +350,82 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     assert.match(await savesLine(ana), /STR \+0/);
     await bar(ana).getByRole("img", { name: "Armor Class 15" }).waitFor();
     assert.deepEqual([breeActor()?.ac, breeActor()?.speeds, breeActor()?.hp.temp], [15, { walk: 30 }, 9], "Wild Shape's temporary HP stay");
+  });
+
+  test("4b. knownforms-a: at 390 x 844 Ana chooses Bree's known forms, one tap takes Wild Shape as one, the panel changes the form, and only the DM and Ana see them (docs/design-v1-known-forms.md 7)", async () => {
+    await ana.setViewportSize({ width: 390, height: 844 });
+    await reopenRoom(ana);
+    await ana.getByRole("status", { name: "Connected" }).first().waitFor();
+    await ana.locator(".konvajs-content").first().waitFor();
+    await tapCell(ana, BOUNDS, { x: 5, y: 5 });
+    await bar(ana).getByRole("button", { name: "Stat block", exact: true }).click();
+    const sheetPanel = ana.getByRole("region", { name: "Token", exact: true });
+    await sheetPanel.locator("[data-pc-stats]").waitFor();
+    await sheetPanel.getByRole("button", { name: "Take a shape" }).click();
+    const picker = ana.getByRole("dialog", { name: "Take a shape" });
+    await picker.getByText("Bree knows no forms yet. A Druid knows 4 Beast forms at level 2, 6 at level 4 and 8 at level 8.").waitFor();
+    await picker.getByRole("button", { name: "Choose known forms" }).click();
+
+    // knownforms-a: the step toggles each form with one op, with the count read against the level picked.
+    const step = ana.getByRole("dialog", { name: "Bree’s known forms" });
+    await step.getByLabel("Druid level").selectOption("4");
+    const row = (name: RegExp) => step.getByRole("button", { name }).first();
+    const breeForms = () => anaSocket.state?.characters[run.bree.characterId]?.knownForms;
+    await row(/^Black Bear /).click();
+    await waitFor("Black Bear known", () => (breeForms()?.includes("black-bear") ? true : null));
+    await row(/^Wolf /).click();
+    await step.getByText("2 of 6 known forms at Druid level 4.").waitFor();
+    assert.equal(await row(/^Wolf /).getAttribute("aria-pressed"), "true");
+    await step.getByLabel("Druid level").selectOption("Any");
+    await step.getByRole("searchbox", { name: "Search creatures" }).fill("owl");
+    await row(/^Owl /).click();
+    await step.getByText("3 known forms.").waitFor();
+    await step.getByRole("searchbox", { name: "Search creatures" }).fill("");
+    // Back at level 4 the Owl stays listed, pressed and marked, so it can still be taken out.
+    await step.getByLabel("Druid level").selectOption("4");
+    await step.getByText("3 of 6 known forms at Druid level 4.").waitFor();
+    assert.equal(await row(/^Owl .*Fly Speed/).getAttribute("aria-pressed"), "true");
+    // In the order chosen, as the server holds them.
+    await waitFor("the Owl known", () => (JSON.stringify(breeForms()) === JSON.stringify(["black-bear", "wolf", "owl"]) ? true : null));
+    await shots.take(ana, "pcstats-known-forms-choose");
+    await step.getByRole("button", { name: "Back to the creatures" }).click();
+
+    // knownforms-a: the group lists them highest CR first, the Owl marked at level 4, and one tap takes the form.
+    await picker.getByText("3 of 6 at Druid level 4").waitFor();
+    const forms = picker.getByRole("button", { name: /^Wild Shape as / });
+    assert.deepEqual(await forms.evaluateAll((els) => els.map((el) => el.getAttribute("aria-label"))), ["Wild Shape as Black Bear", "Wild Shape as Wolf", "Wild Shape as Owl, has a Fly Speed"]);
+    await shots.take(ana, "pcstats-known-forms");
+    await picker.getByRole("button", { name: "Wild Shape as Wolf", exact: true }).click();
+    await picker.waitFor({ state: "detached" });
+    const breeActor = () => anaSocket.state?.characters[run.bree.characterId]?.actor;
+    await waitFor("Bree as a wolf", () => (breeActor()?.srdId === "wolf" && breeActor()?.wildShape ? true : null));
+    await sheetPanel.getByText("In Wild Shape as Wolf.", { exact: false }).waitFor();
+    // The remembered Druid level 4 gives 4 Temporary HP, fewer than the 9 Bree holds, which stay.
+    assert.deepEqual([breeActor()?.ac, breeActor()?.hp.temp], [12, 9]);
+
+    // knownforms-a: the panel's buttons change the form, the current one pressed, and End the shape ends it.
+    await sheetPanel.getByRole("heading", { name: "Known forms" }).waitFor();
+    assert.equal(await sheetPanel.getByRole("button", { name: "Wolf", exact: true }).getAttribute("aria-pressed"), "true");
+    await sheetPanel.getByRole("heading", { name: "Known forms" }).scrollIntoViewIfNeeded();
+    await shots.take(ana, "pcstats-known-forms-panel");
+    await sheetPanel.getByRole("button", { name: "Black Bear", exact: true }).click();
+    await waitFor("Bree as a black bear", () => (breeActor()?.srdId === "black-bear" && breeActor()?.wildShape ? true : null));
+    await sheetPanel.getByText("In Wild Shape as Black Bear.", { exact: false }).waitFor();
+    assert.equal(breeActor()?.ac, 11);
+    await sheetPanel.getByRole("button", { name: "End the shape" }).click();
+    await waitFor("the shape ended", () => (breeActor()?.srdId === undefined ? true : null));
+    assert.deepEqual([breeActor()?.ac, breeActor()?.speeds, breeActor()?.hp.temp], [15, { walk: 30 }, 9], "Bree's own AC and speeds come back from the first form");
+
+    // knownforms-a: the DM's panel shows the same row, and Cy's device never receives the list.
+    const dmPanel = await showBree(dm);
+    for (const name of ["Black Bear", "Wolf", "Owl"]) await dmPanel.getByRole("button", { name, exact: true }).waitFor();
+    await waitFor("Cy's view of Bree", () => cySocket.state?.characters[run.bree.characterId] ?? null);
+    assert.equal("knownForms" in cySocket.state!.characters[run.bree.characterId]!, false, "Cy's device never receives the known forms");
+
+    await ana.setViewportSize({ width: 1280, height: 800 });
+    await reopenRoom(ana);
+    await ana.getByRole("status", { name: "Connected" }).first().waitFor();
+    await ana.locator(".konvajs-content").first().waitFor();
   });
 
   test("5. a D&D Beyond character's JSON pasted fills the review, and Use it then Save keeps Ana's own block parts it did not read", async () => {
