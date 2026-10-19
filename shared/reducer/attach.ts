@@ -9,7 +9,7 @@ import { footprintSize, snapStep } from "../rules/footprint.ts";
 import { sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
 import { routeWalk } from "../rules/route.ts";
 import { renumber, sortEntries } from "../rules/initiative.ts";
-import { sharedMounts, writeEncounter } from "./encounter.ts";
+import { sharedMounts, tokenRow, writeEncounter } from "./encounter.ts";
 import { carriedAlong, judgedIn, placeCarried, sharesTurn, sortedById, speedsOf, withPath, type Judged } from "./tokens.ts";
 import { invalid, type Tx } from "./tx.ts";
 
@@ -82,12 +82,7 @@ export function tokenAttach(tx: Tx, op: OpOf<"token.attach">): void {
 
 /** A token's initiative row: its own, or for a character's token the character's row without a token. */
 function rowOf(tx: Tx, tokenId: string): InitEntry | undefined {
-  const entries = tx.state.encounter?.entries ?? [];
-  const own = entries.find((e) => e.tokenId === tokenId);
-  if (own) return own;
-  const token = tx.state.tokens[tokenId];
-  const ref = token && "ref" in token.actor ? token.actor.ref : undefined;
-  return ref === undefined ? undefined : entries.find((e) => e.tokenId === undefined && e.characterId === ref);
+  return tokenRow(tx.state.encounter?.entries ?? [], tx.state, tokenId);
 }
 
 /**
@@ -132,7 +127,8 @@ function controlledRide(tx: Tx, riderId: string, mountId: string): void {
       marked.add(id);
     }
     if (mounts.length !== (turn.mounts ?? []).length) turnStart = { ...turn, mounts };
-    entries = entries.map((e) => (e.tokenId !== undefined && marked.has(e.tokenId) ? { ...e, markRound: encounter.round } : e));
+    const rows = new Set([...marked].flatMap((id) => rowOf(tx, id)?.id ?? []));
+    entries = entries.map((e) => (rows.has(e.id) ? { ...e, markRound: encounter.round } : e));
   }
   if (entries !== encounter.entries || turnStart !== encounter.turnStart) writeEncounter(tx, { ...encounter, entries, ...(turnStart ? { turnStart } : {}) });
 }

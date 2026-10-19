@@ -54,6 +54,19 @@ function withTurn(tx: Tx, encounter: Encounter, activeEntryId: string | null): E
 }
 
 /**
+ * A token's initiative row: its own, else its character's row that names
+ * no token, so a mount on a character's row is found the same way wherever
+ * its row is read (docs/design-v1-attach.md 7.1).
+ */
+export function tokenRow(entries: readonly InitEntry[], state: RoomState, tokenId: string): InitEntry | undefined {
+  const own = entries.find((e) => e.tokenId === tokenId);
+  if (own) return own;
+  const token = state.tokens[tokenId];
+  const ref = token && "ref" in token.actor ? token.actor.ref : undefined;
+  return ref === undefined ? undefined : entries.find((e) => e.tokenId === undefined && e.characterId === ref);
+}
+
+/**
  * The mounts a creature's turn shares (docs/design-v1-attach.md 7.1): up
  * its chain of controlled rides, each mount whose rider and itself every
  * player sees now, so the link is seen too, at most a turn's limit.
@@ -86,10 +99,8 @@ function withMounts(tx: Tx, encounter: Encounter, reactions: boolean): Encounter
   if (!start) return encounter;
   const mounts = sharedMounts(tx, start.tokenId);
   if (mounts.length === 0) return encounter;
-  const entries = encounter.entries.map((e) => {
-    if (e.tokenId === undefined || !mounts.includes(e.tokenId)) return e;
-    return { ...e, markRound: encounter.round, ...(reactions ? { reactionUsed: false } : {}) };
-  });
+  const rows = new Set(mounts.flatMap((id) => tokenRow(encounter.entries, tx.state, id)?.id ?? []));
+  const entries = encounter.entries.map((e) => (rows.has(e.id) ? { ...e, markRound: encounter.round, ...(reactions ? { reactionUsed: false } : {}) } : e));
   return { ...encounter, entries, turnStart: { ...start, mounts } };
 }
 

@@ -4,7 +4,7 @@ import type { InitEntry, RoomState, Viewer } from "../model.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp, type Applied } from "../reducer.ts";
 import { sortEntries } from "../rules/initiative.ts";
-import { DM, actor, effect, env, room, token } from "../testutil.ts";
+import { DM, actor, character, effect, env, room, token } from "../testutil.ts";
 
 /**
  * A controlled mount's turn is its rider's (docs/design-v1-attach.md 7.1):
@@ -121,6 +121,24 @@ describe("sharing the rider's turn (7.1)", () => {
     assert.equal(f.row("horse").markRound, 1);
     f.run({ t: "token.move", tokenId: "horse", x: 8, y: 4 });
     assert.equal(f.state.tokens.horse!.path!.stops.length, 2);
+  });
+
+  test("a mount on its character's row with no token is found as the reorder finds it: the row marks time and its Reaction comes back", () => {
+    const f = fight((s) => {
+      s.characters.steed = character("steed", { name: "Warhorse", actor: actor({ speeds: { walk: 60 } }) });
+      s.tokens.horse = { ...s.tokens.horse!, actor: { ref: "steed" } };
+    });
+    // The fight's rows, the horse's on its character alone.
+    f.run({ t: "encounter.remove", entryIds: ["eh"] }).run({ t: "encounter.add", entries: [{ id: "ec", characterId: "steed", value: 8 }] });
+    const steed = () => f.state.encounter!.entries.find((e) => e.id === "ec")!;
+    f.next().ride();
+    assert.deepEqual(f.mounts(), ["horse"]);
+    assert.equal(steed().markRound, 1);
+    f.next().next();
+    f.run({ t: "encounter.update", entryId: "ec", patch: { reactionUsed: true } });
+    while (f.active() !== "bree") f.next();
+    assert.equal(steed().reactionUsed, false);
+    assert.equal(steed().markRound, 2);
   });
 
   test("the rider's turn starting with the ride in place joins it, and brings the mount's Reaction back with its own", () => {
