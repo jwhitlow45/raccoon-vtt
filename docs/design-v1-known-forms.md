@@ -1,6 +1,6 @@
 # raccoon-vtt v1: a Druid's known forms
 
-Status: draft 1, for design review. Code is cited from the batch tip `1145718c`. It builds on docs/design-v1-pc-stats.md (sections 3.6 and 7.3, a shape on the character's own token) and on the "Druid level" filter being built beside it in `client/features/pcstats/ShapePicker.tsx` and `shapeLevel.ts` (`shapeLimit`, `fitsShapeLimit`, `byCrThenName`, `DRUID_LEVELS`), which this note uses as that build has it and does not redesign.
+Status: built. It reached consensus in design review round 2, and the build follows it with the round 2 notes applied: the import's empty list is stored as none in a named place (3.1), and the rename mapper serves an import only from before snapshot version 14 (3.4). Code is cited from the batch tip `1145718c`. It builds on docs/design-v1-pc-stats.md (sections 3.6 and 7.3, a shape on the character's own token) and on the "Druid level" filter being built beside it in `client/features/pcstats/ShapePicker.tsx` and `shapeLevel.ts` (`shapeLimit`, `fitsShapeLimit`, `byCrThenName`, `DRUID_LEVELS`), which this note uses as that build has it and does not redesign.
 
 On 2026-10-18, right after asking for that filter, the project owner asked: "also as part of this druids should be able to pick a loadout of wild shapes they have prepared".
 
@@ -30,7 +30,7 @@ export const MAX_KNOWN_FORMS = 8   // the Beast Shapes table's most
 
 - **Not the actor**: a PC's tokens patch the actor through `token.update` too, under the actor's own owner field list and HP rules. Known forms are something the character knows, as its level is. **Not `stats`**: a druid with no stat block still takes shapes (pc-stats 3.6), and a block write spends the per-member budget and the 12 KiB bound, which 8 short ids do not need.
 - **Only SRD ids**, as a shape is only an SRD link (pc-stats 3.6: a `monsterId` is not a shape, since a player's view lacks it).
-- **Bounds**: `characterPatch.knownForms` is `z.array(srdId).max(MAX_KNOWN_FORMS)` with the `unique` refine `saves` uses. At most 8 ids of 80 characters, under 1 KiB on a character resent on every HP change. `character.create` does not take it: a new character knows none. The import schema (`server/rooms/stateSchema.ts`'s character) takes it with the same bound, `[]` included, which normalizing stores as absent, and remap leaves it, since SRD ids are not room ids.
+- **Bounds**: `characterPatch.knownForms` is `z.array(srdId).max(MAX_KNOWN_FORMS)` with the `unique` refine `saves` uses. At most 8 ids of 80 characters, under 1 KiB on a character resent on every HP change. `character.create` does not take it: a new character knows none. The import schema (`server/rooms/stateSchema.ts`'s character) takes it with the same bound, `[]` included. The remap's character loop (`remapState`, `server/rooms/remap.ts`) stores `[]` as absent and leaves any other list as it is, since SRD ids are not room ids.
 
 ### 3.2 Ops, reducer, permissions, `canApply`
 
@@ -47,7 +47,7 @@ No change. `projectCharacter` (`shared/project.ts:618`) gives the DM the charact
 
 - **Undo**: the DM's edits go on the DM's stack with the character's other edits, labelled "changing Bree's known forms" (`server/rooms/undoLabels.ts:123`), and an undo puts back the character whole under its guard, as any character edit. A player's go on no stack, by the rule for players' stacks. No log line, as for other card edits.
 - **Replay**: no stored op before this build carries the field, and no older op's outcome changes, so the reducer needs no `opVersion` gate.
-- **SRD renames**: `knownForms` joins the fields `shared/migrate.ts` maps when an SRD id is renamed (`SRD_ID_FIELDS` and `withMappedSrdIds`). The list's mapping maps each id, then drops repeats in order, keeping the first, so `["dragon-tur-t-le", "dragon-turtle"]` becomes `["dragon-turtle"]` and still passes the `unique` refine. That one mapper serves the live op (`withTodaysSrdIds`, `server/rooms/actor.ts:881`, which runs after the schema parse), stored-op replay, the snapshot steps and import, so none of them stores or replays a repeat, which replay's schema check would refuse and leave the room read-only.
+- **SRD renames**: `knownForms` joins the fields `shared/migrate.ts` maps when an SRD id is renamed (`SRD_ID_LIST_FIELDS`, beside `SRD_ID_FIELDS`, in `withMappedSrdIds`). The list's mapping maps each id, then drops repeats in order, keeping the first, so `["dragon-tur-t-le", "dragon-turtle"]` becomes `["dragon-turtle"]` and still passes the `unique` refine. That one mapper serves the live op (`withTodaysSrdIds`, `server/rooms/actor.ts:881`, which runs after the schema parse), stored-op replay, the snapshot steps and an import from before snapshot version 14, since a current-version file runs no rename step. So none of them stores or replays a repeat, which replay's schema check would refuse and leave the room read-only.
 
 ### 3.5 Versions, and the order with the Later three
 
