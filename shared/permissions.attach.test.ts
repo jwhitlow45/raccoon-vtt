@@ -203,4 +203,24 @@ describe("moving a group (6)", () => {
     assert.equal(answer(walled(true), move), "ok");
     assert.equal(answer(walled(false), move, DM), "ok");
   });
+
+  test("so does a creature dragged by a token stepping onto its seat or getting off, whose leg follows that step", () => {
+    const walled = (setup: (s: RoomState) => void) =>
+      table((s) => {
+        s.scenes.s1 = { ...s.scenes.s1!, blockMovement: true };
+        s.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: { "7,5,w": { kind: "wall" } as EdgeFeature } };
+        setup(s);
+      });
+    // Bree steps west onto the horse, so the goblin she drags steps west from 7,5 through the wall.
+    const mounting = walled((s) => (s.tokens.gob = { ...s.tokens.gob!, attached: { to: "bree", kind: "drag" } }));
+    assert.equal(answer(mounting, ride()), `forbidden: ${WALL_IN_THE_WAY}`);
+    assert.equal(answer(mounting, ride(), DM), "ok");
+    // Bree gets off east, so the goblin she drags steps east from 6,5 through the same wall.
+    const riding = walled((s) => {
+      s.tokens.bree = { ...s.tokens.bree!, x: 5, y: 4, attached: { to: "horse", kind: "ride", steer: true } };
+      s.tokens.gob = { ...s.tokens.gob!, x: 6, y: 5, attached: { to: "bree", kind: "drag" } };
+    });
+    assert.equal(answer(riding, { t: "token.detach", tokenId: "bree", x: 6, y: 4 }), `forbidden: ${WALL_IN_THE_WAY}`);
+    assert.equal(answer(riding, { t: "token.detach", tokenId: "bree", x: 5, y: 6 }), "ok");
+  });
 });

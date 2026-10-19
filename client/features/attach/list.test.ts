@@ -103,6 +103,14 @@ describe("the Attach list", () => {
     assert.equal(attachRows(state, dm, "thorn").some((r) => r.text === "Carry Kobold"), true);
   });
 
+  test("so is a seat whose step takes a creature the token drags through a wall, as the server's walls test of a group walks it", () => {
+    const tokens = Object.values(table().tokens).map((t) => (t.id === "kobold" ? { ...t, attached: { to: "thorn", kind: "drag" as const } } : t));
+    // Thorn steps east onto the horse, so the kobold steps east from 4,4 through the wall.
+    const state = world({ edges: { "5,4,w": { kind: "wall" } }, tokens });
+    assert.equal(attachRows(asPlayer(state), p1, "thorn").some((r) => r.kind === "ride"), false);
+    assert.equal(attachRows(state, dm, "thorn").some((r) => r.kind === "ride"), true);
+  });
+
   test("a link already made, a seat that does not fit and the limits are left out", () => {
     const state = table();
     state.tokens.thorn = { ...state.tokens.thorn!, attached: { to: "horse", kind: "ride" } };

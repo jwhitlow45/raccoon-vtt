@@ -4,8 +4,9 @@ import { carriedGroup, getOffSpot, holderOf, isCreature, overlaps } from "#share
 import { verticalExtentFt } from "#shared/rules/footprint.ts";
 import { legStop } from "#shared/rules/movement.ts";
 import { displayName } from "../../lib/scene.ts";
-import { landedElevation } from "../movement/drop.ts";
+import { landedElevation, walkersStop } from "../movement/drop.ts";
 import type { AttachViewer } from "./rights.ts";
+import { walkersFor } from "./walk.ts";
 
 /**
  * Getting off and letting go (docs/design-v1-attach.md 4.3), as plain
@@ -46,7 +47,8 @@ export function holderAction(token: Token): { words: string; choice: "letGo" | "
  * Where a creature gets off (4.3): the first spot beside its holder, in the
  * order new companions spread (getOffSpot), inside the scene, within reach
  * and clear of the holder, on no creature this viewer sees, and for a
- * player on a scene whose walls stop moves, with a clear leg from the seat.
+ * player on a scene whose walls stop moves, with a clear leg from the seat
+ * for it and for each creature it drags, which follows that leg (4.2).
  * The server checks the same place but for the creatures, whose check would
  * tell a player where a hidden one stands. It lands as any walk lands: on
  * the ground there, or at its height when it flies. Null when there is no
@@ -61,6 +63,8 @@ export function getOffPlace(view: RoomState, viewer: AttachViewer, carried: Toke
   const own = new Set(carriedGroup(view.tokens, carried.id));
   const creatures = Object.values(view.tokens).filter((t): t is Token => t !== undefined && t.sceneId === carried.sceneId && !own.has(t.id) && t.id !== holder.id && isCreature(t));
   const walls = viewer.role === "player" && scene.blockMovement === true;
+  const walkers = walls ? walkersFor(view, carried.id, "player") : [];
+  const seat = { x: carried.x, y: carried.y, elevation: carried.elevation };
   const spot = getOffSpot(view.meta.settings, scene.bounds, carried, holder, (at) => {
     const elevation = landedElevation(view.buildChunks, carried, at);
     const placed: Token = { ...carried, x: at.x, y: at.y, elevation };
@@ -70,7 +74,9 @@ export function getOffPlace(view: RoomState, viewer: AttachViewer, carried: Toke
       const other = verticalExtentFt(c, fpc);
       if (overlaps(placed, c) && lo < other.hi && hi > other.lo) return false;
     }
-    return !walls || legStop(view, carried, { x: at.x, y: at.y, elevation }) === null;
+    if (!walls) return true;
+    const to = { x: at.x, y: at.y, elevation };
+    return legStop(view, carried, to) === null && walkersStop(view, carried, [seat, to], walkers) === null;
   });
   return spot ? { x: spot.x, y: spot.y, elevation: landedElevation(view.buildChunks, carried, spot) } : null;
 }

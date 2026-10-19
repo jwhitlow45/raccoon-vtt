@@ -5,7 +5,9 @@ import { sizeCategory } from "#shared/rules/footprint.ts";
 import { legStop } from "#shared/rules/movement.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
 import { displayName } from "../../lib/scene.ts";
+import { walkersStop } from "../movement/drop.ts";
 import { attachAllowed, grappledSeen, type AttachViewer } from "./rights.ts";
+import { walkersFor } from "./walk.ts";
 
 /**
  * The Attach list (docs/design-v1-attach.md 4.1), as plain functions for
@@ -128,13 +130,17 @@ function checkedRow(view: RoomState, viewer: AttachViewer, choice: AttachChoice,
 
 /**
  * Whether a wall stops the step onto a seat, on a scene whose walls stop a
- * player's moves (shared/permissions.ts legCheck): every attach but a drag
- * steps onto its seat, a grappled creature carried by a creature included
- * (docs/design-v1-attach.md 4.1). A token rising where it stands crosses no edge.
+ * player's moves (shared/permissions.ts legCheck and draggedWalls): every
+ * attach but a drag steps onto its seat, a grappled creature carried by a
+ * creature included (docs/design-v1-attach.md 4.1), and what the stepping
+ * token drags follows the step as on any walk (4.2). A token rising where it
+ * stands crosses no edge.
  */
 function stepStopped(view: RoomState, carried: Token, at: AttachRow["at"]): boolean {
   if (view.scenes[carried.sceneId]?.blockMovement !== true || (at.x === carried.x && at.y === carried.y)) return false;
-  return legStop(view, carried, at) !== null;
+  if (legStop(view, carried, at) !== null) return true;
+  const from = { x: carried.x, y: carried.y, elevation: carried.elevation };
+  return walkersStop(view, carried, [from, at], walkersFor(view, carried.id, "player")) !== null;
 }
 
 function seenByAll(view: RoomState, tokenId: string): boolean {

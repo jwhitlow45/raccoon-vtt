@@ -1201,12 +1201,14 @@ function namedMoveCheck(c: Check, tokenId: string, to?: Pick<Token, "x" | "y"> &
  * The walls test of a player's group move (docs/design-v1-attach.md 4.2):
  * besides each named token's own legs, each dragged creature among the
  * public members walks the holder's route offset by its place, piece by
- * piece, on its own ground. What sits on its holder rides and is not tested,
+ * piece, on its own ground. A step onto a seat and a get-off leg are walks
+ * too, so what the stepping token drags meets the walls as it would on a move. What sits on its holder rides and is not tested,
  * and a dragged creature some player cannot see walks in the private pass,
  * stopping where it must unseen (rules/moveLeg.ts), so no refusal reads it.
  */
 function draggedWalls(c: Check, op: Op): Decision {
-  const first = op.t === "token.move" ? op.tokenId : op.t === "token.moveMany" ? op.moves[0]?.tokenId : undefined;
+  const first =
+    op.t === "token.move" || op.t === "token.attach" || op.t === "token.detach" ? op.tokenId : op.t === "token.moveMany" ? op.moves[0]?.tokenId : undefined;
   const token = first !== undefined ? c.state.tokens[first] : undefined;
   if (!token || c.state.scenes[token.sceneId]?.blockMovement !== true) return OK;
   if (op.t === "token.move" && op.teleport !== undefined) return OK;
@@ -1253,11 +1255,13 @@ function ownTurnOr(c: Check, tokenId: string): Decision {
 /**
  * A player's attach (docs/design-v1-attach.md 6), on two tokens their copy
  * holds. A ride, a perch or a carry onto a holder needs the right to move
- * both, the two within reach as they stand, and on a scene whose walls stop
- * moves the step onto the seat passing the leg test. A drag, or a creature
+ * both and the two within reach as they stand. A drag, or a creature
  * carried by a creature, needs the right to move the holder, the two within
  * reach, and the right to move the creature too or a Grappled mark players
- * see on it. A ride during a fight waits for the rider's own turn. The
+ * see on it. On a scene whose walls stop moves, every attach but a drag
+ * steps onto its seat by the leg test, and what the stepping token drags
+ * follows that step by the walls test of a group move. A ride during a
+ * fight waits for the rider's own turn. The
  * limits and loops are the reducer's, on what every player sees and the two
  * named tokens.
  */
@@ -1286,6 +1290,8 @@ function attachCheck(c: Check, op: OpOf<"token.attach">): Decision {
     const walls = legCheck(c, carried.id, op, false);
     if (!walls.ok) return walls;
   }
+  const dragged = draggedWalls(c, op);
+  if (!dragged.ok) return dragged;
   return op.kind === "ride" ? ownTurnOr(c, carried.id) : OK;
 }
 
@@ -1305,7 +1311,9 @@ function detachCheck(c: Check, op: OpOf<"token.detach">): Decision {
     const may = moveCheck(c, holder.id);
     if (!may.ok) return may;
   }
-  return op.x !== undefined && op.y !== undefined ? legCheck(c, carried.id, { x: op.x, y: op.y, ...(op.elevation !== undefined ? { elevation: op.elevation } : {}) }, false) : OK;
+  if (op.x === undefined || op.y === undefined) return OK;
+  const walls = legCheck(c, carried.id, { x: op.x, y: op.y, ...(op.elevation !== undefined ? { elevation: op.elevation } : {}) }, false);
+  return walls.ok ? draggedWalls(c, op) : walls;
 }
 
 /**
