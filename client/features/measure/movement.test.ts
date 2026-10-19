@@ -459,6 +459,11 @@ describe("a drag along a route (docs/design-v1-movement.md 3.1, 3.2 and 4.2)", (
     const out = dragReading({ ...calm, token: walker, to: { x: 6, y: 0 }, walk: walk([[0, 0], [2, 0], [4, 0], [6, 0]], [...pieces, [6, 0, 0, 0]], inside) });
     assert.equal(out.halfSpeed, undefined);
     assert.deepEqual(out.left, { kind: "walk", speed: 30, leftFt: 30, band: "dash" }, "out again with the full Speed, but the walk needed a Dash");
+    // 35 ft inside, past its halved Dash of 30, then 5 ft out: 40 ft is within the full Dash, so the words are the area's.
+    const deep = (x: number) => x < 7.5;
+    const past = dragReading({ ...calm, token: walker, to: { x: 8, y: 0 }, walk: walk([[0, 0], [8, 0]], [[8, 0, 0, 0]], deep) });
+    assert.deepEqual(past.left, { kind: "walk", speed: 15, leftFt: 5, band: "over" });
+    assert.equal(dragLabel(past), "40 ft · 5 ft past Dash");
   });
 
   test("a halved Speed rounds down, and the marker reads used where it differs from moved", () => {

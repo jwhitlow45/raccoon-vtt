@@ -304,6 +304,11 @@ export function dragReading(input: {
     const prefix = [...points.slice(0, inside.piece + 1), inside.at];
     const there = speedsLeft(halvedSpeeds(input.speeds), token.elevation, before + legCost(prefix).cost).find((s) => s.kind === atEnd.kind);
     if (there && BAND_ORDER.indexOf(there.band) > BAND_ORDER.indexOf(band)) band = there.band;
+    // Past Dash in the area but not at the end: how far past is the area's to tell, against its halved Speed, where the end would read less than nothing.
+    if (there && band === "over" && atEnd.band !== "over") {
+      out.left = there;
+      return out;
+    }
   }
   const total = before + legFt;
   const leftFt = band === "walk" ? atEnd.speed - total : band === "dash" ? atEnd.speed * 2 - total : total - atEnd.speed * 2;
