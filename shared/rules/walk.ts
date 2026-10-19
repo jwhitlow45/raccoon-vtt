@@ -1,11 +1,11 @@
 import { CHUNK_CELLS, type BuildChunk } from "../model.ts";
 import type { BuildState } from "../ruleHooks.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
-import { canSqueeze, footprintSize, squeezedSize } from "./footprint.ts";
+import { canSqueeze, footprintSize, snapStep, squeezedSize } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { footprintGround, standing } from "./heights.ts";
 import { legStop, stepTester, type MovingToken, type StepTester } from "./movement.ts";
-import { routeLattice, trueLength, type RoutePiece, type RoutePoint } from "./route.ts";
+import { routeFeet, routeLattice, straightCost, trueLength, type RoutePiece, type RoutePoint } from "./route.ts";
 
 /**
  * Finding the way a creature walks (docs/design-v1-movement.md section 5):
@@ -1048,7 +1048,9 @@ export class WalkSearch {
 
 /**
  * A walk's pieces (5.2, 5.4), from its steps, built a few steps at a time
- * so a slice can stop between any two. On the grid rules a piece runs while the direction, the
+ * so a slice can stop between any two, and the same for a search's route
+ * and an arrow key's step (drop.ts keyStep), so the two can never count a
+ * walk differently. On the grid rules a piece runs while the direction, the
  * extra, the swimming foot and the change of height per step stay the
  * same, a 5-10-5 diagonal that climbs alone. Under true distance it runs
  * from each corner to the farthest later step reachable by an allowed
@@ -1181,6 +1183,50 @@ function straightHolds(world: WalkWorld, a: RoutePoint, b: RoutePoint, extra: nu
   return { holds: true, steps: n };
 }
 
+/**
+ * The straight leg to `to` as a route (review ASTRA-13): its lattice steps
+ * as `routeWalk` takes them, exactly along one of the eight directions or
+ * snapped to the lattice for any other, each step's extra, swimming foot
+ * and rise read as the search reads them, and its pieces built as a
+ * search's route's are (`PieceBuilder`). An arrow key's press counts what
+ * it walks over this way. Null where a step leaves the lattice or the
+ * scene, or a spot short of `to` stops a walk.
+ */
+export function stepRoute(world: WalkWorld, to: Point): WalkRoute | null {
+  const { token } = world.input;
+  const L = world.L;
+  const dx = to.x - token.x;
+  const dy = to.y - token.y;
+  const n = Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / L - EPS);
+  const start = world.nodeAt(token);
+  if (n <= 0 || start < 0) return null;
+  // One of the eight directions in whole lattice steps, or -2 for any other line, which never counts as a climbing diagonal.
+  const d = DX.findIndex((x, k) => Math.abs(x * L * n - dx) < EPS && Math.abs(DY[k]! * L * n - dy) < EPS);
+  const steps: WalkSteps = { nodes: [start], dir: [-1], extra: [0], swim: [0], dz: [0] };
+  let px = token.x;
+  let py = token.y;
+  let pe = world.elevationAt(start);
+  for (let k = 1; k <= n; k++) {
+    const x = k === n ? to.x : d >= 0 ? token.x + DX[d]! * L * k : token.x + Math.round((dx * k) / n / L) * L;
+    const y = k === n ? to.y : d >= 0 ? token.y + DY[d]! * L * k : token.y + Math.round((dy * k) / n / L) * L;
+    if (k < n && x === px && y === py) continue;
+    const node = world.nodeAt({ x, y });
+    if (node < 0) return null;
+    const e = world.elevationAt(node);
+    if (k < n && world.endOnly(x, y, e)) return null;
+    const { extra, swim } = world.extraOf(px, py, x, y, e, node);
+    steps.nodes.push(node);
+    steps.dir.push(d >= 0 ? d : -2);
+    steps.extra.push(extra);
+    steps.swim.push(swim);
+    steps.dz.push(Math.round((e - pe) * 2));
+    px = x;
+    py = y;
+    pe = e;
+  }
+  return new PieceBuilder(world, steps).run(() => false);
+}
+
 function less(c1: number, k1: number, l1: number, c2: number, k2: number, l2: number): boolean {
   if (c1 !== c2) return c1 < c2;
   if (k1 !== k2) return k1 < k2;
@@ -1305,6 +1351,10 @@ class Heap {
  * fall evenly all the way, as one piece of the search would: a walk over a
  * rise and down again, or up a step partway, is searched. Under 5-10-5 a
  * diagonal that climbs is a piece of its own, so it holds for one step only.
+ * And a walk's feet round up to the creature's step, so last the straight
+ * leg must cost what the route along it does (`stepRoute`): 3 ft up a stair
+ * in a Tiny creature's half square reads 3 ft straight and 5 ft walked,
+ * and is searched (review ASTRA-13).
  */
 export function openLeg(world: WalkWorld, to: Point): boolean {
   const { token, build } = world.input;
@@ -1338,7 +1388,12 @@ export function openLeg(world: WalkWorld, to: Point): boolean {
     py = y;
     pe = e;
   }
-  return true;
+  const route = stepRoute(world, to);
+  if (!route) return true;
+  const { rules, counter } = world.input;
+  const straight = straightCost(token, token, route.points[route.points.length - 1]!, rules, counter);
+  const walked = routeFeet(route.points, route.pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed: false, step: snapStep(token) });
+  return straight.cost === walked.cost && straight.diag[0] === walked.diag[0] && straight.diag[1] === walked.diag[1];
 }
 
 /**
