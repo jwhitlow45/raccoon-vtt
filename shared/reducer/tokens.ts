@@ -491,7 +491,8 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
   }
   // A controlled mount sharing its rider's turn moves on its own path then (docs/design-v1-attach.md 7.2), from op version 14.
   const mount = turn.tokenId !== after.id && attaches(tx.env.opVersion) && sharesTurn(tx.state, after.id, turn);
-  if (turn.tokenId !== after.id && !mount) return withoutPath(after);
+  // A mount's path this turn outlives a move that shares no turn, which records nothing, so a remount the same turn goes on with it (7.2).
+  if (turn.tokenId !== after.id && !mount) return attaches(tx.env.opVersion) && before.path?.turn === turn.seq ? after : withoutPath(after);
   // A row that marks time had its movement on its rider's turn, so its moves there are outside its turn (7.1).
   if (!mount && attaches(tx.env.opVersion) && marksTime(encounter, turn.entryId)) return withoutPath(after);
   // Since op version 13 every leg records what it took, and full paths join by those sums (walksRoutes).
@@ -501,7 +502,11 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
   let path: TokenPath = before.path?.turn === turn.seq ? before.path : { turn: turn.seq, stops: first };
   // Every move of the creature this turn is a leg, so the last stop is where it stood. The check keeps a stop from being skipped if not.
   const last = path.stops[path.stops.length - 1];
-  if (!last || !sameSpot(last, before)) path = withStop(path, stopAt(judged.before, before, tx.env), undefined, walked);
+  if (!last || !sameSpot(last, before)) {
+    // A mount moved between two shares of the turn: that move shared no turn, so its leg does not count.
+    const gap = stopAt(judged.before, before, tx.env);
+    path = withStop(path, mount && last ? { ...gap, uncounted: true } : gap, undefined, walked);
+  }
   // Where it stops is judged as the finished move will be: with it and every token moving with it there, their lights too.
   let stop = stopAt(judged.after(), after, tx.env);
   if (reshaped) {
