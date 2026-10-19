@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { chunkKey } from "#shared/keys.ts";
 import type { RoomState } from "#shared/model.ts";
-import { template, token } from "#shared/testutil.ts";
+import { projectState } from "#shared/project.ts";
+import { P1, reveal, template, token } from "#shared/testutil.ts";
 import { line, world } from "../movement/testing.ts";
 import { tokenStop, type RulerStop } from "./ruler.ts";
 import { measureWalk, saveWalk, savedWalk, walkText } from "./walkRuler.ts";
@@ -54,6 +55,36 @@ describe("the walking ruler", () => {
     assert.equal(shared.totalFt, 45, "the goblin in the way will have moved, and players do not see the web");
     const mine = measureWalk({ view: state, sceneId: "s1", stops, viewer: { role: "dm" }, everything: true })!;
     assert.ok(mine.totalFt > 45, "the DM's own ruler counts the web it knows of");
+  });
+
+  test("a shared ruler keeps to ground players have seen, the same on the DM's device as on a player's", () => {
+    const fogged = (h: number): RoomState => {
+      const state = room();
+      state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true };
+      reveal(state, "s1", { x: 0, y: 0, w: 30, h });
+      return state;
+    };
+    const read = (state: RoomState, stops: RulerStop[], everything = false) => {
+      const onDm = measureWalk({ view: state, sceneId: "s1", stops, viewer: { role: "dm" }, everything })!;
+      const view = projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState;
+      const onPlayer = measureWalk({ view, sceneId: "s1", stops, viewer: { role: "player" }, everything: false })!;
+      return { onDm: [onDm.totalFt, onDm.legs[0]!.none], onPlayer: [onPlayer.totalFt, onPlayer.legs[0]!.none] };
+    };
+    const stops = [free(2, 5), free(9, 5)];
+    // Only above the wall's end is seen, so the way round it is not.
+    const dark = read(fogged(10), stops);
+    assert.deepEqual(dark.onDm, dark.onPlayer);
+    assert.deepEqual(dark.onDm, [35, true]);
+    const lit = read(fogged(12), stops);
+    assert.deepEqual(lit.onDm, lit.onPlayer);
+    assert.deepEqual(lit.onDm, [55, false]);
+    // On a monster too, which a DM's drag would walk on the DM's own map.
+    const monster = fogged(10);
+    monster.tokens.gob = token("gob", { x: 2, y: 5 });
+    const onGob = read(monster, [tokenStop(monster.tokens.gob), free(9, 5)]);
+    assert.deepEqual(onGob.onDm, onGob.onPlayer);
+    assert.deepEqual(onGob.onDm, [35, true]);
+    assert.deepEqual(read(fogged(10), stops, true).onDm, [55, false], "the DM's own ruler, before it is shared, reads the DM's map");
   });
 
   test("the 5-10-5 count runs on across the stops", () => {

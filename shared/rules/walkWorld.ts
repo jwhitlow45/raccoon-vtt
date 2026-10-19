@@ -46,6 +46,13 @@ export type WorldOptions = {
    * Every drag and every shared ruler keeps to the public world.
    */
   everything?: boolean;
+  /**
+   * Keep to ground players have seen whatever walks. A shared or kept
+   * walking ruler reads the same on every device, so even on the DM's it
+   * keeps to that ground, for a monster or for nobody in particular, where a
+   * DM's drag of a monster reads the DM's own map.
+   */
+  seenGround?: boolean;
 };
 
 /** Whether players see a token where it stands, as the projection judges it: not hidden by the DM, and on the DM's state not withheld by fog or sight. */
@@ -116,8 +123,8 @@ export function publicWorld(state: RoomState, token: Token, viewer: WalkViewer, 
   const blocks = scene?.blockMovement === true;
   const everything = opts.everything === true && viewer.role === "dm";
   const shown = shownTokens(state, token, viewer, everything);
-  // A player's drag, and the DM's of a party member, keep to ground players have seen. The DM's other drags read the DM's own map.
-  const publicGround = !everything && (viewer.role === "player" || isPartyMember(state, token));
+  // A player's drag, the DM's of a party member and every shared ruler keep to ground players have seen. The DM's other drags read the DM's own map.
+  const publicGround = !everything && (opts.seenGround === true || viewer.role === "player" || isPartyMember(state, token));
   const ground = publicGround && scene && scene.fogEnabled !== false ? playersSeeGround(state, scene.id) : null;
   const fpc = rules.feetPerCell;
   const creatures: WalkCreature[] = [];

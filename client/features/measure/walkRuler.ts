@@ -63,7 +63,7 @@ function searchFor(view: RoomState, walker: Token, viewer: WalkViewer, everythin
   const key = `${walker.id},${walker.size},${walker.w},${walker.h},${walker.x},${walker.y},${walker.elevation},${walker.squeeze === true},${counter.h},${counter.v},${everything}`;
   let search = kept.searches.get(key);
   if (!search) {
-    const world = publicWorld(view, walker, viewer, [], { creatures: false, everything });
+    const world = publicWorld(view, walker, viewer, [], { creatures: false, everything, seenGround: !everything });
     search = new WalkSearch(new WalkWorld({ ...world.input, prone: false, counter }));
     if (kept.searches.size >= 16) kept.searches.delete(kept.searches.keys().next().value!);
     kept.searches.set(key, search);
