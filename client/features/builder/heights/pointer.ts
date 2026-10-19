@@ -21,7 +21,7 @@ function flush(ctx: ToolContext, done: boolean): void {
   if (!done && !strokeMaySend(stroke.touch, stroke.startedAt, performance.now())) return;
   store.setState({ unsent: [] });
   if (ctx.scene.id !== stroke.sceneId) return;
-  for (const op of paintCells(ctx.getState().view, stroke.sceneId, s.unsent, s)) ctx.actions.dispatch(op, { group: stroke.group });
+  for (const op of paintCells(ctx.getState().view, stroke.sceneId, s.unsent, { ...s, paint: gesture.paint })) ctx.actions.dispatch(op, { group: stroke.group });
 }
 
 function endStroke(ctx: ToolContext, send: boolean): void {
@@ -43,6 +43,8 @@ export const heightPointer = {
     const { store, gesture } = ctx.scope.get(heightSlot);
     const s = store.getState();
     endStroke(ctx, true);
+    // Difficult ground mode marks with Height mode's own strokes and areas.
+    gesture.paint = ctx.scope.get(builderSlot).store.getState().mode === "rough" ? "rough" : s.paint;
     if (s.shape === "area") {
       gesture.areaSceneId = ctx.scene.id;
       store.setState({ area: { a: p.world, b: p.world } });
@@ -87,7 +89,7 @@ export const heightPointer = {
     store.setState({ area: null });
     gesture.areaSceneId = null;
     if (!area || sceneId !== ctx.scene.id) return;
-    dispatchGesture(ctx.actions, paintCells(ctx.getState().view, sceneId, areaCells(area.a, p.world, ctx.scene.bounds), s));
+    dispatchGesture(ctx.actions, paintCells(ctx.getState().view, sceneId, areaCells(area.a, p.world, ctx.scene.bounds), { ...s, paint: gesture.paint }));
   },
 
   /** A second finger landed or the tool changed. Cells a stroke already sent stay, and undo takes them back. The rest is dropped. */
@@ -100,12 +102,16 @@ export const heightPointer = {
 };
 
 /**
- * The builder tool's pointer handlers with Height mode in front of them, so
- * the builder registers Height mode with one line. A gesture that began in
- * Height mode ends there, whatever the mode is by the time it ends.
+ * The builder tool's pointer handlers with Height mode and Difficult ground
+ * mode in front of them, so the builder registers both with one line. A
+ * gesture that began in either ends there, whatever the mode is by the time
+ * it ends.
  */
 export function withHeightMode(handlers: ToolPointerHandlers): ToolPointerHandlers {
-  const inMode = (ctx: ToolContext) => ctx.scope.get(builderSlot).store.getState().mode === "height";
+  const inMode = (ctx: ToolContext) => {
+    const mode = ctx.scope.get(builderSlot).store.getState().mode;
+    return mode === "height" || mode === "rough";
+  };
   const busy = (ctx: ToolContext) => {
     const slot = ctx.scope.get(heightSlot);
     return slot.gesture.stroke !== null || slot.store.getState().area !== null;

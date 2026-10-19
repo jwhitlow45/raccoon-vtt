@@ -10,8 +10,10 @@ import type { BrushSize, Point } from "../cells.ts";
  * dragged area from here, so they show under the finger before the op goes.
  */
 
-/** What a stroke paints: a height on cells, or stair marks. */
-export type HeightPaint = "height" | "stairs";
+/** What a stroke paints: a height on cells, stair marks, or difficult ground marks (the builder's own Difficult ground mode). */
+export type HeightPaint = "height" | "stairs" | "rough";
+/** Difficult ground mode's choice: mark the cells or clear their marks (docs/design-v1-movement.md 3.4). */
+export type RoughChoice = "mark" | "clear";
 /** A brush of 1 to 3 cells, or an area dragged from corner to corner. */
 export type HeightShape = BrushSize | "area";
 /** The way marked stairs point: by the rule ("a"), one way, or "remove" to take marks away. */
@@ -32,6 +34,7 @@ export type HeightState = {
   /** Feet. 0 clears. */
   height: number;
   stairs: StairChoice;
+  rough: RoughChoice;
   /** Cells the stroke has touched and not yet sent. */
   unsent: readonly string[];
   /** The area being dragged, in world cells. */
@@ -53,8 +56,8 @@ export type HeightStroke = {
 /** One Room page's Height mode (client/state/scope.ts). */
 export const heightSlot = scopeSlot(
   () => ({
-    store: createStore<HeightState>(() => ({ paint: "height", shape: 1, height: 10, stairs: "a", unsent: [], area: null })),
-    gesture: { stroke: null as HeightStroke | null, areaSceneId: null as string | null },
+    store: createStore<HeightState>(() => ({ paint: "height", shape: 1, height: 10, stairs: "a", rough: "mark", unsent: [], area: null })),
+    gesture: { stroke: null as HeightStroke | null, areaSceneId: null as string | null, paint: "height" as HeightPaint },
   }),
   (slot) => {
     if (slot.gesture.stroke) clearInterval(slot.gesture.stroke.timer);

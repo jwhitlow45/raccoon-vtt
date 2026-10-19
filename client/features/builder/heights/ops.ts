@@ -1,4 +1,6 @@
-import { stairMarkAt } from "#shared/heightCodec.ts";
+import { decodeRough, stairMarkAt } from "#shared/heightCodec.ts";
+import { chunkKey } from "#shared/keys.ts";
+import { CHUNK_CELLS } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { RoomState, StairMark } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
@@ -33,6 +35,23 @@ export function stairOps(sceneId: string, cells: readonly string[], choice: Stai
   return chunk(changed, LIMITS.heightCellsPerOp).map((part) => ({ t: "build.stairs", sceneId, cells: part, up }));
 }
 
+/** Marks cells as difficult ground or clears their marks (docs/design-v1-movement.md 6.3), leaving out cells already so. */
+export function roughOps(sceneId: string, cells: readonly string[], on: boolean, marked: (x: number, y: number) => boolean): ClientOp[] {
+  const changed = cells.filter((key) => {
+    const c = parseCellKey(key);
+    return marked(c.x, c.y) !== on;
+  });
+  return chunk(changed, LIMITS.heightCellsPerOp).map((part) => ({ t: "build.rough", sceneId, cells: part, on }));
+}
+
+/** Whether a cell carries a difficult ground mark in these chunks. */
+export function roughAt(chunks: RoomState["buildChunks"], sceneId: string, x: number, y: number): boolean {
+  const cx = Math.floor(x / CHUNK_CELLS);
+  const cy = Math.floor(y / CHUNK_CELLS);
+  const c = chunks[chunkKey(sceneId, cx, cy)];
+  return c?.rough !== undefined && decodeRough(c.rough)[(y - cy * CHUNK_CELLS) * CHUNK_CELLS + (x - cx * CHUNK_CELLS)] === true;
+}
+
 /** Every cell of the area between two points, both cells included, inside the scene, row by row. */
 export function areaCells(a: Point, b: Point, bounds: Bounds): string[] {
   const r = clipRect(rectBetween(a, b), bounds);
@@ -43,8 +62,9 @@ export function areaCells(a: Point, b: Point, bounds: Bounds): string[] {
 }
 
 /** The ops for cells under Height mode's choices, read against the build in a view. */
-export function paintCells(view: RoomState | null, sceneId: string, cells: readonly string[], choice: Pick<HeightState, "paint" | "height" | "stairs">): ClientOp[] {
+export function paintCells(view: RoomState | null, sceneId: string, cells: readonly string[], choice: Pick<HeightState, "paint" | "height" | "stairs"> & Partial<Pick<HeightState, "rough">>): ClientOp[] {
   const chunks = view?.buildChunks ?? {};
   if (choice.paint === "height") return heightOps(sceneId, cells, choice.height, (x, y) => groundAt(chunks, sceneId, x, y));
+  if (choice.paint === "rough") return roughOps(sceneId, cells, choice.rough !== "clear", (x, y) => roughAt(chunks, sceneId, x, y));
   return stairOps(sceneId, cells, choice.stairs, (x, y) => stairMarkAt(chunks, sceneId, x, y));
 }

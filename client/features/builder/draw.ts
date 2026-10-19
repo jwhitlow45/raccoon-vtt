@@ -1,4 +1,5 @@
-import type { AutoWalls, BuildChunk, EdgeFeature, FreeWall, Label, Light, Scene, WallFeature } from "#shared/model.ts";
+import { decodeRough } from "#shared/heightCodec.ts";
+import { CHUNK_CELLS, type AutoWalls, type BuildChunk, type EdgeFeature, type FreeWall, type Label, type Light, type Scene, type WallFeature } from "#shared/model.ts";
 import { cellId, deriveWalls, indexBuild, type WallEdge } from "#shared/rules/walls.ts";
 import { theme } from "../../lib/theme.ts";
 import { buildDrawing, swingSide, wallRuns, type BuildDrawing, type CellRect, type TexturedTerrain } from "./geometry.ts";
@@ -26,6 +27,8 @@ import { TERRAIN_COLORS, TEXTURE_CELLS } from "./textures.ts";
  * shading of heights/relief.ts, then stairs pointing their way up. Stairs
  * over floor sit on the Stairs terrain's pale slab. Stairs over the map
  * image draw only their treads, translucent, so the art shows through.
+ * Difficult ground (docs/design-v1-movement.md 3.4) draws its hatch over all
+ * of that and under the stamps, so the map under it still shows.
  */
 
 const WALL_COLOR = "#15120f";
@@ -58,6 +61,9 @@ export type BoardPaths<P = Path2D> = {
   stairs: P;
   /** Stairs over floor: treads toward their direction, or five lines when they have none. */
   floorStairs: StairPaths<P>;
+  /** Squares marked difficult ground (docs/design-v1-movement.md 3.4), and the box around them for the hatch, or null when none is. */
+  rough: P;
+  roughBox: { x0: number; y0: number; x1: number; y1: number } | null;
   /** Stair marks over the map image, where no floor is painted: the same shapes, drawn translucent. */
   artStairs: StairPaths<P>;
   /** Heights: the tints, shadows, rims and lines of the relief. */
@@ -237,6 +243,20 @@ export function buildPaths(
   const floorStairs = stairPaths(stairList.filter((c) => c.floor), makePath);
   const artStairs = stairPaths(stairList.filter((c) => !c.floor), makePath);
   const relief = reliefPaths(chunks, derived, scene.bounds ?? null, makePath);
+  const rough = makePath();
+  let roughBox: BoardPaths["roughBox"] = null;
+  for (const chunk of chunks) {
+    if (chunk.rough === undefined) continue;
+    const marks = decodeRough(chunk.rough);
+    for (let i = 0; i < marks.length; i++) {
+      if (!marks[i]) continue;
+      const x = chunk.cx * CHUNK_CELLS + (i % CHUNK_CELLS);
+      const y = chunk.cy * CHUNK_CELLS + Math.floor(i / CHUNK_CELLS);
+      if (scene.bounds && (x >= scene.bounds.w || y >= scene.bounds.h)) continue;
+      rough.rect(x, y, 1, 1);
+      roughBox = roughBox ? { x0: Math.min(roughBox.x0, x), y0: Math.min(roughBox.y0, y), x1: Math.max(roughBox.x1, x + 1), y1: Math.max(roughBox.y1, y + 1) } : { x0: x, y0: y, x1: x + 1, y1: y + 1 };
+    }
+  }
 
   const runs = wallRuns(edges, (e) => e.feature.kind === "wall" || (dm && hiddenSecret(e.feature)));
   const walls = makePath();
@@ -321,6 +341,8 @@ export function buildPaths(
     pillarShine,
     stairs,
     floorStairs,
+    rough,
+    roughBox,
     artStairs,
     relief,
     walls,
@@ -437,6 +459,29 @@ function drawStairs(g: CanvasRenderingContext2D, stairs: StairPaths<Path2D>, sty
   g.lineJoin = "miter";
 }
 
+/** Difficult ground's hatch: a muted ochre at 45% opacity, over the floor or the map and under the stamps (docs/design-v1-movement.md 3.4). */
+const ROUGH_HATCH = "rgba(186, 142, 64, 0.45)";
+/** Cells between the hatch's lines. */
+const ROUGH_PITCH = 0.25;
+
+/** Thin diagonal lines over every square marked difficult ground, so the map under them still shows. */
+function drawRough(g: CanvasRenderingContext2D, paths: BoardPaths, scale: number): void {
+  const box = paths.roughBox;
+  if (!box) return;
+  g.save();
+  g.clip(paths.rough);
+  g.strokeStyle = ROUGH_HATCH;
+  g.lineWidth = Math.max(0.04, 1 / scale);
+  g.beginPath();
+  // Lines x + y = k across the box, every ROUGH_PITCH cells.
+  for (let k = box.x0 + box.y0; k <= box.x1 + box.y1; k += ROUGH_PITCH) {
+    g.moveTo(k - box.y0, box.y0);
+    g.lineTo(k - box.y1, box.y1);
+  }
+  g.stroke();
+  g.restore();
+}
+
 export type DrawBuildOptions = {
   role: "dm" | "player";
   /** Output pixels per cell, for strokes that keep a minimum width on screen. */
@@ -509,6 +554,7 @@ export function drawBuild(g: CanvasRenderingContext2D, paths: BoardPaths, opts: 
   drawRelief(g, paths.relief, scale);
   drawStairs(g, paths.floorStairs, FLOOR_STAIRS);
   drawStairs(g, paths.artStairs, ART_STAIRS);
+  drawRough(g, paths, scale);
   opts.underWalls?.(g);
   // Every rim first, then every wall, so a rim never shows across a wall that meets it.
   for (const [color, width] of [

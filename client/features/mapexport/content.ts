@@ -103,12 +103,12 @@ export function playerFog(fogTiles: RoomState["fogTiles"], exploredTiles: RoomSt
 
 /**
  * Whether a scene has anything of the build to export: floor, edges,
- * heights, stairs or labels. Heights and stairs draw on their own, over the
+ * heights, stairs, difficult ground or labels. Heights and stairs draw on their own, over the
  * background (docs/design-v1-maps-vision.md 4.2), so a blank mat with only
  * those has something to export.
  */
 export function hasBuildOn(sceneId: string, chunks: RoomState["buildChunks"], labels: RoomState["labels"]): boolean {
   const some = (c: BuildChunk | undefined) =>
-    !!c && c.sceneId === sceneId && (Object.keys(c.cells).length > 0 || Object.keys(c.edges).length > 0 || c.heights !== undefined || c.up !== undefined);
+    !!c && c.sceneId === sceneId && (Object.keys(c.cells).length > 0 || Object.keys(c.edges).length > 0 || c.heights !== undefined || c.up !== undefined || c.rough !== undefined);
   return Object.values(chunks).some(some) || Object.values(labels).some((l: Label | undefined) => l?.sceneId === sceneId);
 }

@@ -4,8 +4,8 @@ import { useShallow } from "zustand/react/shallow";
 import type { AutoWalls } from "#shared/model.ts";
 import { Icon } from "../../../components/Icon.tsx";
 import { OptSegmented, Stepper, type Slot } from "../../measure/controls.tsx";
-import { heightHint } from "./hint.ts";
-import { HEIGHT_MAX_FT, HEIGHT_MIN_FT, HEIGHT_STEP_FT, heightName, stepHeight, useHeightStore, type HeightPaint, type HeightShape, type StairChoice } from "./store.ts";
+import { heightHint, roughHint } from "./hint.ts";
+import { HEIGHT_MAX_FT, HEIGHT_MIN_FT, HEIGHT_STEP_FT, heightName, stepHeight, useHeightStore, type HeightPaint, type HeightShape, type RoughChoice, type StairChoice } from "./store.ts";
 
 const SHAPES: readonly { value: HeightShape; label: string; title: string }[] = [
   { value: 1, label: "1", title: "Brush, one square" },
@@ -37,15 +37,37 @@ const STAIR_CHOICES: readonly { value: StairChoice; label: ReactNode; title: str
  * spoken once a hold ends. A typed number would open the keyboard over the
  * map being painted.
  */
-export function useHeightSlots(): Slot[] {
+export function useHeightSlots(rough = false): Slot[] {
   const store = useHeightStore();
   const s = useStore(
     store,
-    useShallow((h) => ({ paint: h.paint, shape: h.shape, height: h.height, stairs: h.stairs })),
+    useShallow((h) => ({ paint: h.paint, shape: h.shape, height: h.height, stairs: h.stairs, rough: h.rough })),
   );
   const set = store.setState;
   // What a press the browser cancels puts back (OptButton `repeatValue`).
   const height = useMemo(() => ({ read: () => store.getState().height, write: (v: number) => store.setState({ height: v }) }), [store]);
+  // Difficult ground mode (docs/design-v1-movement.md 3.4): the same brush and area, marking or clearing.
+  if (rough) {
+    return [
+      {
+        id: "rough",
+        priority: 1,
+        compact: true,
+        control: (
+          <OptSegmented<RoughChoice>
+            label="Difficult ground"
+            value={s.rough}
+            onChange={(choice) => set({ rough: choice })}
+            options={[
+              { value: "mark", label: "Mark", title: "Mark difficult ground" },
+              { value: "clear", label: "Clear", title: "Clear difficult ground" },
+            ]}
+          />
+        ),
+      },
+      { id: "heightBrush", priority: 3, compact: true, control: <OptSegmented<HeightShape> label="Brush" value={s.shape} onChange={(shape) => set({ shape })} options={SHAPES} /> },
+    ];
+  }
   return [
     {
       id: "paint",
@@ -92,11 +114,11 @@ export function useHeightSlots(): Slot[] {
   ];
 }
 
-/** Height mode's hint for the scene, following the mode's choices. */
-export function useHeightHint(autoWalls: AutoWalls | undefined): string {
+/** Height mode's hint for the scene, or Difficult ground mode's, following the mode's choices. */
+export function useHeightHint(autoWalls: AutoWalls | undefined, rough = false): string {
   const s = useStore(
     useHeightStore(),
-    useShallow((h) => ({ paint: h.paint, shape: h.shape, height: h.height, stairs: h.stairs })),
+    useShallow((h) => ({ paint: h.paint, shape: h.shape, height: h.height, stairs: h.stairs, rough: h.rough })),
   );
-  return heightHint(s, autoWalls);
+  return rough ? roughHint(s) : heightHint(s, autoWalls);
 }

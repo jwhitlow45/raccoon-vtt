@@ -3,7 +3,8 @@ import { describe, test } from "node:test";
 import { CHUNK_CELLS, type BuildChunk, type RoomState } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
-import { areaCells, heightOps, paintCells, stairOps } from "./ops.ts";
+import { roughHint } from "./hint.ts";
+import { areaCells, heightOps, paintCells, roughAt, stairOps } from "./ops.ts";
 
 const flat = () => 0;
 
@@ -64,6 +65,17 @@ describe("reading the view", () => {
 
   test("stairs compare against the stored marks", () => {
     assert.deepEqual(paintCells(view(), "s1", ["0,0", "1,0"], { paint: "stairs", height: 10, stairs: "n" }), [{ t: "build.stairs", sceneId: "s1", cells: ["1,0"], up: "n" }]);
+  });
+
+  test("difficult ground compares against the stored marks, marking or clearing (docs/design-v1-movement.md 3.4)", () => {
+    const marked = view();
+    marked.buildChunks["s1:0,0"] = { ...marked.buildChunks["s1:0,0"]!, rough: "d" + ".".repeat(255) };
+    assert.deepEqual(paintCells(marked, "s1", ["0,0", "1,0"], { paint: "rough", height: 10, stairs: "a", rough: "mark" }), [{ t: "build.rough", sceneId: "s1", cells: ["1,0"], on: true }]);
+    assert.deepEqual(paintCells(marked, "s1", ["0,0", "1,0"], { paint: "rough", height: 10, stairs: "a", rough: "clear" }), [{ t: "build.rough", sceneId: "s1", cells: ["0,0"], on: false }]);
+    assert.equal(roughAt(marked.buildChunks, "s1", 0, 0), true);
+    assert.equal(roughAt(marked.buildChunks, "s1", 1, 0), false);
+    assert.equal(roughHint({ shape: 1, rough: "mark" }), "Difficult ground costs double to walk through. It paints over the map without hiding it.");
+    assert.equal(roughHint({ shape: "area", rough: "clear" }), "Drag from corner to corner to clear difficult ground.");
   });
 
   test("with no view yet, every cell is flat and unmarked", () => {

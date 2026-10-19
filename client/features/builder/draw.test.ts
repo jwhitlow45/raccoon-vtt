@@ -239,3 +239,18 @@ describe("stairs and heights on the board", () => {
     assert.equal(narrow.artStairs.steps.points().length, 10, "within the scene: no direction, five lines across");
   });
 });
+
+describe("difficult ground (docs/design-v1-movement.md 3.4)", () => {
+  test("each marked square is a rect of the hatch's path, inside a box around them all, players' and the DM's alike", () => {
+    const c: BuildChunk = { ...chunk({}), rough: "d" + ".".repeat(16) + "d" + ".".repeat(238) };
+    for (const role of ["player", "dm"] as const) {
+      const p = paths(c, role);
+      assert.deepEqual((p.rough as Recorder).ops, [
+        ["R", 0, 0, 1, 1],
+        ["R", 1, 1, 1, 1],
+      ]);
+      assert.deepEqual(p.roughBox, { x0: 0, y0: 0, x1: 2, y1: 2 });
+    }
+    assert.equal(paths(chunk({})).roughBox, null);
+  });
+});

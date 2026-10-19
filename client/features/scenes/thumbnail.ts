@@ -59,6 +59,7 @@ export function thumbSceneOf(op: ClientOp, viewingSceneId: string | null): strin
     case "build.lights":
     case "build.height":
     case "build.stairs":
+    case "build.rough":
     case "scene.setMap":
     case "scene.setGrid":
     case "scene.setPhase":

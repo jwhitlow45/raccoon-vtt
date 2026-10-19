@@ -9,7 +9,7 @@ import type { BrushSize, Point } from "./cells.ts";
  * the unsent part of a gesture from here so it shows under the finger
  * before its op goes out.
  */
-export type BuildMode = "paint" | "rect" | "poly" | "erase" | "eraseRect" | "edge" | "label" | "light" | "stamp" | "height";
+export type BuildMode = "paint" | "rect" | "poly" | "erase" | "eraseRect" | "edge" | "label" | "light" | "stamp" | "height" | "rough";
 export type EdgeKind = "wall" | "none" | "door" | "secret" | "window" | "clear";
 
 export type BuilderState = {

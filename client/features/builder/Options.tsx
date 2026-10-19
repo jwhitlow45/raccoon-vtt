@@ -25,6 +25,7 @@ const MODES: readonly { value: BuildMode; label: string; short: string }[] = [
   { value: "eraseRect", label: "Erase area", short: "Erase area" },
   { value: "edge", label: "Walls and doors", short: "Walls" },
   { value: "height", label: "Heights and stairs", short: "Heights" },
+  { value: "rough", label: "Difficult ground", short: "Difficult" },
   { value: "label", label: "Label", short: "Label" },
   { value: "light", label: "Lights", short: "Lights" },
   { value: "stamp", label: "Stamp", short: "Stamp" },
@@ -39,11 +40,11 @@ const EDGES: readonly { value: EdgeKind; label: string }[] = [
   { value: "clear", label: "Remove" },
 ];
 
-const HINTS: Record<Exclude<BuildMode, "edge" | "light" | "height">, string> = {
+const HINTS: Record<Exclude<BuildMode, "edge" | "light" | "height" | "rough">, string> = {
   paint: "Drag to paint. Two fingers or a right-drag move the map.",
   rect: "Drag from corner to corner.",
   poly: "Tap corners, then tap the first one to close.",
-  erase: "Drag to erase floor and everything on it: walls, doors, windows, heights, stairs, labels, stamps and lights.",
+  erase: "Drag to erase floor and everything on it: walls, doors, windows, heights, stairs, difficult ground, labels, stamps and lights.",
   eraseRect: "Drag from corner to corner to erase everything inside.",
   label: "Type, then tap the map. Tap a label to edit or delete it, or drag it to move it. In the other modes a tap builds instead.",
   stamp: "Tap the map to place the stamp. Tap a stamp to select it, drag it to move it, and use its handles to turn or resize it. Snap turns in 15 degree steps and moves in half cells.",
@@ -58,9 +59,14 @@ const EDGE_HINTS: Record<EdgeKind, string> = {
   clear: "Tap or drag to remove walls, doors, windows and No wall marks. Walls around floor come back.",
 };
 
-function hint(mode: BuildMode, edge: EdgeKind, secretFound: boolean, hasLights: boolean, heightHint: string): string {
+/** What painting a terrain does to a walk (docs/design-v1-movement.md 3.4), for the hint of a mode that paints it. */
+const TERRAIN_COST = "Difficult and Rubble cost double to walk through. Water costs double without a swim speed.";
+
+function hint(mode: BuildMode, edge: EdgeKind, secretFound: boolean, hasLights: boolean, heightHint: string, terrain: TerrainId): string {
   if (mode === "light") return lightModeHint(hasLights);
-  if (mode === "height") return heightHint;
+  if (mode === "height" || mode === "rough") return heightHint;
+  const costs = terrain === "difficult" || terrain === "rubble" || terrain === "water";
+  if ((mode === "paint" || mode === "rect" || mode === "poly") && costs) return `${HINTS[mode]} ${TERRAIN_COST}`;
   if (mode !== "edge") return HINTS[mode];
   if (edge === "secret") {
     return secretFound
@@ -104,8 +110,8 @@ export default function BuilderOptions() {
   const scene = useRoomView((v) => (v.sceneId ? v.view?.scenes[v.sceneId] : undefined));
   const hasLights = useRoomView((v) => (v.sceneId ? sceneHasLights(v.view?.lights, v.sceneId) : false));
   const actions = useRoomActions();
-  const heightHint = useHeightHint(scene?.autoWalls);
-  const heightSlots = useHeightSlots();
+  const heightHint = useHeightHint(scene?.autoWalls, s.mode === "rough");
+  const heightSlots = useHeightSlots(s.mode === "rough");
   // ⋯ in this row, where focus goes back from the stamp picker when the chooser waits behind it.
   const row = useRef<HTMLDivElement>(null);
   const more = useCallback(() => row.current?.closest('[role="toolbar"]')?.querySelector<HTMLElement>("[data-rvtt-more] button") ?? null, []);
@@ -230,7 +236,7 @@ export default function BuilderOptions() {
       },
     );
   }
-  if (s.mode === "height") slots.push(...heightSlots);
+  if (s.mode === "height" || s.mode === "rough") slots.push(...heightSlots);
   if (s.mode === "label") {
     slots.push(
       { id: "labelText", priority: 1, flex: theme.layout.options.field, control: <OptInput label="Label text" placeholder="Label text" maxLength={80} width={160} value={s.labelText} onChange={(labelText) => set({ labelText })} /> },
@@ -259,7 +265,7 @@ export default function BuilderOptions() {
       <ConfirmButton
         label="Clear build"
         confirm="Tap again to clear"
-        title="Remove every floor, wall, door, height, stair, label, light and stamp on this scene"
+        title="Remove every floor, wall, door, height, stair, difficult ground mark, label, light and stamp on this scene"
         onConfirm={() => actions.dispatch({ t: "build.clear", sceneId })}
       />
     ),
@@ -267,7 +273,7 @@ export default function BuilderOptions() {
 
   return (
     <div ref={row} style={{ display: "contents" }}>
-      <OptionsStrip tool="Map builder" task={corners || stamped} line={{ tone: s.note ? "warning" : "hint", content: s.note ?? hint(s.mode, s.edge, s.secretFound, hasLights, heightHint) }} slots={slots} />
+      <OptionsStrip tool="Map builder" task={corners || stamped} line={{ tone: s.note ? "warning" : "hint", content: s.note ?? hint(s.mode, s.edge, s.secretFound, hasLights, heightHint, s.terrain) }} slots={slots} />
       {s.mode === "stamp" ? stamps.picker : null}
     </div>
   );

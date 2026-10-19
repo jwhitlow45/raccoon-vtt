@@ -13,3 +13,10 @@ export function heightHint(s: Pick<HeightState, "paint" | "shape" | "stairs" | "
   const point = s.stairs === "a" ? " Auto points them uphill. Use an arrow where a ? shows." : "";
   return `${how} to mark stairs.${point}${walls}`;
 }
+
+/** What a gesture does in Difficult ground mode (docs/design-v1-movement.md 3.4). */
+export function roughHint(s: Pick<HeightState, "shape" | "rough">): string {
+  const how = s.shape === "area" ? "Drag from corner to corner" : "Drag";
+  if (s.rough === "clear") return `${how} to clear difficult ground.`;
+  return "Difficult ground costs double to walk through. It paints over the map without hiding it.";
+}

@@ -38,9 +38,19 @@ const measureBoardPill = (text: string, px: number) => measurePill(text, px, the
  */
 export function HeightLayer(props: LayerProps) {
   const building = useRoomView((s) => s.local.tool === "build");
-  const heightMode = useStore(useBuilderStore(), (b) => b.mode === "height");
-  if (props.role !== "dm" || !building || !heightMode) return null;
-  return <HeightMarks {...props} />;
+  const mode = useStore(useBuilderStore(), (b) => b.mode);
+  if (props.role !== "dm" || !building) return null;
+  if (mode === "rough") return <RoughPreview scene={props.scene} scale={props.scale} />;
+  return mode === "height" ? <HeightMarks {...props} /> : null;
+}
+
+/** Difficult ground mode's stroke or area being marked (docs/design-v1-movement.md 3.4): ochre to mark, red to clear. */
+function RoughPreview(props: Pick<LayerProps, "scene" | "scale">) {
+  const gesture = useStore(
+    useHeightStore(),
+    useShallow((s) => ({ unsent: s.unsent, area: s.area, rough: s.rough })),
+  );
+  return <Preview unsent={gesture.unsent} area={gesture.area} paint="rough" height={0} stairs="a" clearing={gesture.rough === "clear"} bounds={props.scene.bounds} scale={props.scale} />;
 }
 
 function HeightMarks(props: LayerProps) {
@@ -82,14 +92,16 @@ function HeightMarks(props: LayerProps) {
 }
 
 /** The stroke or area being painted, in a wash that says what it does: lighter to raise, darker to lower, red to clear, the accent for stairs. */
-function Preview(props: Pick<HeightState, "unsent" | "area" | "paint" | "height" | "stairs"> & { bounds: { w: number; h: number }; scale: number }) {
+function Preview(props: Pick<HeightState, "unsent" | "area" | "paint" | "height" | "stairs"> & { clearing?: boolean; bounds: { w: number; h: number }; scale: number }) {
   const { unsent, area, bounds } = props;
   const area2 = area ? clipRect(rectBetween(area.a, area.b), bounds) : null;
   if (unsent.length === 0 && !area2) return null;
-  const clearing = props.paint === "height" ? props.height === 0 : props.stairs === "remove";
+  const clearing = props.clearing ?? (props.paint === "height" ? props.height === 0 : props.stairs === "remove");
   const fill = clearing
     ? "rgba(229, 72, 77, 0.4)"
-    : props.paint === "stairs"
+    : props.paint === "rough"
+      ? "rgba(186, 142, 64, 0.45)"
+      : props.paint === "stairs"
       ? "rgba(247, 223, 0, 0.35)"
       : props.height > 0
         ? "rgba(255, 255, 255, 0.4)"
