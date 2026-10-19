@@ -118,6 +118,27 @@ describe("area spells", () => {
     assert.ok(AREA_SPELLS.every((s) => !s.oncePerTurn || s.triggers !== undefined));
   });
 
+  test("the presets that slow movement are these (docs/design-v1-movement.md 3.5), and no others", () => {
+    const slowing = Object.fromEntries(AREA_SPELLS.filter((s) => s.slows).map((s) => [s.name, s.slows]));
+    const difficult = { kind: "difficult" };
+    assert.deepEqual(slowing, {
+      "Black Tentacles": difficult,
+      "Conjure Minor Elementals": { kind: "difficult", foes: true },
+      Earthquake: difficult,
+      Entangle: difficult,
+      Grease: difficult,
+      "Ice Storm": difficult,
+      "Insect Plague": difficult,
+      "Plant Growth": { kind: "quarter" },
+      "Sleet Storm": difficult,
+      "Spike Growth": difficult,
+      "Spirit Guardians": { kind: "halfSpeed", foes: true },
+      Web: difficult,
+    });
+    // Each says so in its text and has a reason in the import's review: only toward the caster, a condition on its targets, the caster's choice.
+    for (const name of ["Gust of Wind", "Slow", "Speak with Plants"]) assert.equal(spell(name).slows, undefined, name);
+  });
+
   test("spells without an area of effect are left out", () => {
     for (const name of ["Wall of Fire", "Light", "Magic Missile", "Major Image", "Alarm"]) {
       assert.equal(AREA_SPELLS.find((s) => s.name === name), undefined, name);

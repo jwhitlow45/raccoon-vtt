@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
-import type { AreaShape, AreaTemplate, AreaTrigger } from "#shared/model.ts";
+import type { AreaShape, AreaSlows, AreaTemplate, AreaTrigger } from "#shared/model.ts";
 import { AREA_MAX_FT, AREA_MIN_FT, canPitch, emanationFootprint, MAX_PITCH, pitchOf, type AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { boxDistanceFt, pointCellBox, tokenCellBox } from "#shared/rules/distance.ts";
 import { displayName } from "../../lib/scene.ts";
@@ -40,6 +40,7 @@ import {
   normalizeTriggers,
   usesFrom,
   withShape,
+  withSlows,
   type AreaDraft,
   type SnapMode,
 } from "./placement.ts";
@@ -351,6 +352,41 @@ function triggerSlots(props: {
   ];
 }
 
+type SlowsChoice = AreaSlows["kind"] | "normal";
+
+const SLOWS: readonly { value: SlowsChoice; label: string }[] = [
+  { value: "normal", label: "Normal" },
+  { value: "difficult", label: "Difficult terrain" },
+  { value: "halfSpeed", label: "Half Speed" },
+  { value: "quarter", label: "4 ft per foot" },
+];
+
+/**
+ * How the area changes movement inside it (docs/design-v1-movement.md
+ * 3.5), in ⋯: Normal, difficult terrain, Spirit Guardians' halved Speed or
+ * Plant Growth's 4 ft per foot, set from the spell's preset. "Only the
+ * caster's enemies" shows only with a caster to leave out, and a change of
+ * kind keeps it, so a player whose copy hides the caster cannot clear it
+ * by picking another kind.
+ */
+function slowSlots(props: { value: AreaSlows | undefined; caster: boolean; onChange(next: AreaSlows | null): void }): Slot[] {
+  const v = props.value;
+  const kind = (next: SlowsChoice) => props.onChange(next === "normal" ? null : { kind: next, ...(v?.foes ? { foes: true as const } : {}) });
+  return [
+    more("slows", <OptSegmented label="Movement inside" value={v?.kind ?? "normal"} options={SLOWS} onChange={kind} />),
+    ...(v && props.caster
+      ? [
+          more(
+            "slowsFoes",
+            <OptButton pressed={v.foes === true} label="Leave out the caster and creatures on its side" onClick={() => props.onChange({ kind: v.kind, ...(v.foes ? {} : { foes: true as const }) })}>
+              Only the caster's enemies
+            </OptButton>,
+          ),
+        ]
+      : []),
+  ];
+}
+
 /** ", aimed 30° up" after an area's name, or nothing when it is level. */
 function aimSuffix(pitch: number): string {
   return pitch === 0 ? "" : `, aimed ${aimText(pitch)}`;
@@ -538,6 +574,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
           </OptButton>,
         ),
         ...triggerSlots({ value: d.triggers, once: d.oncePerTurn, onChange: (triggers) => set({ triggers }), onOnce: (oncePerTurn) => set({ oncePerTurn }) }),
+        ...slowSlots({ value: d.slows, caster: !!casterId, onChange: (slows) => setDraft(env, withSlows(d, slows)) }),
         more("color", <OptSwatches label="Color" value={d.color} options={MEMBER_COLORS} onChange={(color) => set({ color })} />),
         env.role === "dm" &&
           more(
@@ -677,6 +714,7 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
               onOnce: (once) => update({ oncePerTurn: once ? true : null }),
             })
           : []),
+        ...(editable ? slowSlots({ value: t.slows, caster: t.casterId !== undefined, onChange: (slows) => update({ slows }) }) : []),
         editable && more("color", <OptSwatches label="Color" value={t.color} options={MEMBER_COLORS} onChange={(color) => update({ color })} />),
       ]}
     />

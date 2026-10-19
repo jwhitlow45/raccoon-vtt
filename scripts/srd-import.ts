@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import { CONDITION_KEYS, STATUS_KEYS, type AbilityKey, type AreaShape, type AreaTrigger, type ConditionKey, type StatusKey } from "../shared/model.ts";
+import { CONDITION_KEYS, STATUS_KEYS, type AbilityKey, type AreaShape, type AreaSlows, type AreaTrigger, type ConditionKey, type StatusKey } from "../shared/model.ts";
 import type { DamageType } from "../shared/rules/damage.ts";
 import type { AreaSpell } from "../shared/srd/area-spells.ts";
 import type { SaveSpell } from "../shared/srd/save-spells.ts";
@@ -416,6 +416,10 @@ type AreaReview =
       catchesTarget?: false;
       /** What it does to the creatures it catches, for the group save (docs/design-v1-roll-options.md 5.6), each checked against the text (outcomeProblems). */
       outcome?: AreaOutcome;
+      /** How it changes movement inside it (docs/design-v1-movement.md 3.5), checked against the text both ways (slowsProblems). */
+      slows?: AreaSlows;
+      /** Why a spell whose text slows movement has no `slows`. */
+      notSlowing?: string;
     }
   | { skip: string };
 
@@ -480,6 +484,48 @@ const TRIGGER_TEXT: Record<AreaTrigger, RegExp> = {
 const ONCE_PER_TURN_TEXT = /\bonly once per turn\b/;
 
 /**
+ * What a spell's text says for each way an area slows movement: Black
+ * Tentacles' "Difficult Terrain", Spirit Guardians' "Speed is halved",
+ * and a cost per foot, as Plant Growth's "spend 4 feet of movement for
+ * every 1 foot" or Gust of Wind's 2 feet toward the caster. Only 4 feet is
+ * `quarter` (QUARTER_TEXT).
+ */
+const SLOWS_TEXT: Record<AreaSlows["kind"], RegExp> = {
+  difficult: /\bDifficult Terrain\b/,
+  halfSpeed: /\bSpeed is halved\b/,
+  quarter: /\bfeet of movement for every 1 foot\b/,
+};
+
+const QUARTER_TEXT = /\b4 feet of movement for every 1 foot\b/;
+
+/** "for your enemies" (Conjure Minor Elementals), or the creatures the caster designates to be unaffected (Spirit Guardians). */
+const FOES_TEXT = /\bfor your enemies\b|\bdesignate creatures to be unaffected\b/;
+
+/**
+ * Both ways: a reviewed `slows` must be in the spell's text, and a spell
+ * whose text slows movement must have `slows` or a reason it has none, so
+ * a new SRD revision cannot add a slowing spell nobody read.
+ */
+function slowsProblems(name: string, flat: string, review: { slows?: AreaSlows; notSlowing?: string }): string[] {
+  const said = (Object.keys(SLOWS_TEXT) as AreaSlows["kind"][]).filter((kind) => SLOWS_TEXT[kind].test(flat));
+  const words = said.map((kind) => `"${SLOWS_TEXT[kind].source.replace(/\\b/g, "")}"`);
+  const out: string[] = [];
+  if (review.slows) {
+    if (!said.includes(review.slows.kind) || (review.slows.kind === "quarter" && !QUARTER_TEXT.test(flat))) {
+      out.push(`${name}: review says it slows movement as ${review.slows.kind}, but its text does not`);
+    }
+    if (review.slows.foes && !FOES_TEXT.test(flat)) out.push(`${name}: review says it slows only the caster's enemies, but its text does not`);
+    if (!review.slows.foes && FOES_TEXT.test(flat)) out.push(`${name}: its text slows only the caster's enemies, but the review does not`);
+    if (review.notSlowing) out.push(`${name}: review gives both slows and a reason it does not slow`);
+  } else if (said.length > 0 && !review.notSlowing) {
+    out.push(`${name}: its text says ${words.join(" and ")}, but the review has neither slows nor a reason it does not`);
+  } else if (said.length === 0 && review.notSlowing) {
+    out.push(`${name}: review gives a reason it does not slow, but its text says nothing that slows`);
+  }
+  return out;
+}
+
+/**
  * The hand review of every spell that mentions an area. Each entry was read
  * against the spell's text in SRD 5.2.1. Sizes are in feet: the radius of a
  * sphere or cylinder, the length of a cone or line, the side of a cube, or
@@ -498,6 +544,7 @@ const AREA_REVIEW: Record<string, AreaReview> = {
     note: "A 20-foot square on the ground.",
     triggers: ["enter", "turnEnd"],
     outcome: { save: "str", damage: [{ formula: "3d6", type: "bludgeoning" }], conditions: ["restrained"] },
+    slows: { kind: "difficult" },
   },
   "Burning Hands": { shape: "cone", size: 15, outcome: { save: "dex", onPass: "half", damage: [{ formula: "3d6", type: "fire", perSlot: "1d6" }] } },
   "Call Lightning": {
@@ -536,7 +583,7 @@ const AREA_REVIEW: Record<string, AreaReview> = {
     triggers: ["enter", "turnEnd"],
     outcome: { save: "dex", onPass: "half", damage: [{ formula: "6d12", type: "radiant", perSlot: "1d12" }] },
   },
-  "Conjure Minor Elementals": { shape: "emanation", size: 15, attached: true },
+  "Conjure Minor Elementals": { shape: "emanation", size: 15, attached: true, slows: { kind: "difficult", foes: true } },
   "Conjure Woodland Beings": {
     shape: "emanation",
     size: 10,
@@ -562,9 +609,17 @@ const AREA_REVIEW: Record<string, AreaReview> = {
     manual: true,
     note: "A 100-foot-radius circle on the ground. It affects creatures on the ground.",
     outcome: { save: "dex", conditions: ["prone"] },
+    slows: { kind: "difficult" },
   },
   Elementalism: { skip: "harmless effects in a 5-foot Cube" },
-  Entangle: { shape: "cube", size: 20, manual: true, note: "A 20-foot square on the ground.", outcome: { save: "str", conditions: ["restrained"] } },
+  Entangle: {
+    shape: "cube",
+    size: 20,
+    manual: true,
+    note: "A 20-foot square on the ground.",
+    outcome: { save: "str", conditions: ["restrained"] },
+    slows: { kind: "difficult" },
+  },
   Fabricate: { skip: "the largest object it can make" },
   "Faerie Fire": { shape: "cube", size: 20, outcome: { save: "dex" } },
   Fear: { shape: "cone", size: 30, outcome: { save: "wis", conditions: ["frightened"] } },
@@ -597,9 +652,17 @@ const AREA_REVIEW: Record<string, AreaReview> = {
     note: "A 10-foot square on the ground.",
     triggers: ["enter", "turnEnd"],
     outcome: { save: "dex", conditions: ["prone"] },
+    slows: { kind: "difficult" },
   },
   "Guards and Wards": { skip: "a ward on floor space the caster chooses" },
-  "Gust of Wind": { shape: "line", size: 60, width: 10, triggers: ["turnEnd"], outcome: { save: "str" } },
+  "Gust of Wind": {
+    shape: "line",
+    size: 60,
+    width: 10,
+    triggers: ["turnEnd"],
+    outcome: { save: "str" },
+    notSlowing: "2 feet of movement for every 1 foot only while moving closer to the caster, which a route's cost cannot tell",
+  },
   Hallow: { skip: "an area the caster chooses, up to a 60-foot radius" },
   "Hallucinatory Terrain": { shape: "cube", size: 150 },
   "Heroes’ Feast": { skip: "where the feast appears" },
@@ -617,6 +680,7 @@ const AREA_REVIEW: Record<string, AreaReview> = {
     size: 20,
     height: 40,
     outcome: { save: "dex", onPass: "half", damage: [{ formula: "2d10", type: "bludgeoning", perSlot: "1d10" }, { formula: "4d6", type: "cold" }] },
+    slows: { kind: "difficult" },
   },
   "Incendiary Cloud": {
     shape: "sphere",
@@ -629,6 +693,7 @@ const AREA_REVIEW: Record<string, AreaReview> = {
     size: 20,
     triggers: ["enter", "turnEnd"],
     outcome: { save: "con", onPass: "half", damage: [{ formula: "4d10", type: "piercing", perSlot: "1d10" }] },
+    slows: { kind: "difficult" },
   },
   Light: { skip: "a light radius" },
   "Lightning Bolt": { shape: "line", size: 100, width: 5, outcome: { save: "dex", onPass: "half", damage: [{ formula: "8d6", type: "lightning", perSlot: "1d6" }] } },
@@ -654,7 +719,7 @@ const AREA_REVIEW: Record<string, AreaReview> = {
   "Move Earth": { skip: "an area of terrain the caster chooses" },
   "Pass without Trace": { shape: "emanation", size: 30, attached: true },
   "Phantasmal Force": { skip: "the largest illusion it can create" },
-  "Plant Growth": { shape: "sphere", size: 100, note: "The Overgrowth effect." },
+  "Plant Growth": { shape: "sphere", size: 100, note: "The Overgrowth effect.", slows: { kind: "quarter" } },
   "Prismatic Spray": { shape: "cone", size: 60, outcome: { save: "dex", onPass: "half" } },
   "Private Sanctum": { skip: "a Cube the caster chooses, from 5 to 100 feet" },
   "Produce Flame": { skip: "a light radius" },
@@ -666,16 +731,35 @@ const AREA_REVIEW: Record<string, AreaReview> = {
   Silence: { shape: "sphere", size: 20 },
   "Silent Image": { skip: "the largest illusion it can create" },
   Sleep: { shape: "sphere", size: 5, outcome: { save: "wis", conditions: ["incapacitated"], lasts: { at: "end", of: "target" } } },
-  "Sleet Storm": { shape: "cylinder", size: 20, height: 40, triggers: ["enter", "turnStart"], outcome: { save: "dex", conditions: ["prone"] } },
-  Slow: { shape: "cube", size: 40, note: "Up to six creatures in the area.", outcome: { save: "wis" } },
-  "Speak with Plants": { shape: "emanation", size: 30, note: "Immobile once cast." },
-  "Spike Growth": { shape: "sphere", size: 20, triggers: ["enter"], outcome: { save: null, damage: [{ formula: "2d4", type: "piercing" }] } },
+  "Sleet Storm": {
+    shape: "cylinder",
+    size: 20,
+    height: 40,
+    triggers: ["enter", "turnStart"],
+    outcome: { save: "dex", conditions: ["prone"] },
+    slows: { kind: "difficult" },
+  },
+  Slow: {
+    shape: "cube",
+    size: 40,
+    note: "Up to six creatures in the area.",
+    outcome: { save: "wis" },
+    notSlowing: "its halved Speed is a condition on the targets that fail the save, not on the area",
+  },
+  "Speak with Plants": {
+    shape: "emanation",
+    size: 30,
+    note: "Immobile once cast.",
+    notSlowing: "the caster chooses to make plants Difficult Terrain or to clear it, so the table marks it",
+  },
+  "Spike Growth": { shape: "sphere", size: 20, triggers: ["enter"], outcome: { save: null, damage: [{ formula: "2d4", type: "piercing" }] }, slows: { kind: "difficult" } },
   "Spirit Guardians": {
     shape: "emanation",
     size: 15,
     attached: true,
     triggers: ["enter", "turnEnd"],
     outcome: { save: "wis", onPass: "half", damage: [{ formula: "3d8", type: "radiant", perSlot: "1d8" }] },
+    slows: { kind: "halfSpeed", foes: true },
   },
   "Starry Wisp": { skip: "a light radius" },
   "Stinking Cloud": { shape: "sphere", size: 20, triggers: ["turnStart"], outcome: { save: "con", conditions: ["poisoned"] } },
@@ -699,7 +783,7 @@ const AREA_REVIEW: Record<string, AreaReview> = {
   "Vitriolic Sphere": { shape: "sphere", size: 20, outcome: { save: "dex", onPass: "half", damage: [{ formula: "10d4", type: "acid", perSlot: "2d4" }] } },
   "Wall of Force": { skip: "a wall" },
   "Wall of Ice": { skip: "a wall" },
-  Web: { shape: "cube", size: 20, triggers: ["enter", "turnStart"], outcome: { save: "dex", conditions: ["restrained"] } },
+  Web: { shape: "cube", size: 20, triggers: ["enter", "turnStart"], outcome: { save: "dex", conditions: ["restrained"] }, slows: { kind: "difficult" } },
   Weird: {
     shape: "sphere",
     size: 30,
@@ -738,6 +822,7 @@ function buildAreaSpells(spells: readonly Spell[]): AreaSpell[] {
     }
     const o = review.outcome;
     if (o) problems.push(...outcomeProblems(spell.name, flat, o));
+    problems.push(...slowsProblems(spell.name, flat, review));
     const entry: AreaSpell = {
       srdId: slug(spell.name),
       name: spell.name,
@@ -763,6 +848,7 @@ function buildAreaSpells(spells: readonly Spell[]): AreaSpell[] {
       ...(o?.conditions ? { conditions: o.conditions } : {}),
       ...(o?.lasts ? { lasts: o.lasts } : {}),
       ...(o?.saveEnds ? { saveEnds: true as const } : {}),
+      ...(review.slows ? { slows: review.slows } : {}),
     };
     out.push(entry);
   }

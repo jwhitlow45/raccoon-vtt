@@ -1,4 +1,4 @@
-import type { AreaFootprint, AreaShape, AreaTemplate, AreaTrigger, BuildChunk } from "#shared/model.ts";
+import type { AreaFootprint, AreaShape, AreaSlows, AreaTemplate, AreaTrigger, BuildChunk } from "#shared/model.ts";
 import type { EphEvent, TemplateInput, TemplatePatch } from "#shared/protocol.ts";
 import {
   AREA_MAX_FT,
@@ -99,6 +99,8 @@ export type AreaDraft = {
   triggers: AreaTrigger[];
   /** Whether it hits a creature only once a turn, whichever trigger comes first (AreaTemplate.oncePerTurn). */
   oncePerTurn: boolean;
+  /** How it changes movement inside it (AreaTemplate.slows). Absent: Normal. */
+  slows?: AreaSlows;
 };
 
 /** Every trigger, in the order the options list them and a template stores them. */
@@ -164,6 +166,12 @@ export function newDraft(id: string, shape: AreaShape, color: string): AreaDraft
   };
 }
 
+/** The draft with how it changes movement inside it, or Normal for null. */
+export function withSlows(d: AreaDraft, slows: AreaSlows | null): AreaDraft {
+  const { slows: _old, ...rest } = d;
+  return slows ? { ...rest, slows } : rest;
+}
+
 /**
  * A shape change keeps the placement, the aim and the caster, and resets
  * what only made sense for the old shape. A new shape never surrounds a
@@ -187,6 +195,7 @@ export function withShape(d: AreaDraft, shape: AreaShape): AreaDraft {
     triggers: d.triggers,
     oncePerTurn: d.oncePerTurn,
   };
+  if (d.slows) next.slows = d.slows;
   if (d.lastCaster !== undefined) next.lastCaster = d.lastCaster;
   return next;
 }
@@ -322,6 +331,7 @@ export type DraftTemplate = AreaTemplateInput & {
   origin: Point3;
   triggers?: AreaTrigger[];
   oncePerTurn?: true;
+  slows?: AreaSlows;
   width?: number;
   height?: number;
   anchor?: "bottom" | "top";
@@ -350,6 +360,7 @@ export function draftTemplate(d: AreaDraft, tokens: AreaTokens, feetPerCell: num
     base.triggers = normalizeTriggers(d.triggers);
     if (d.oncePerTurn) base.oncePerTurn = true;
   }
+  if (d.slows) base.slows = d.slows;
   if (canPitch(d.shape) && clampPitch(d.pitch) !== 0) base.pitch = clampPitch(d.pitch);
   if (d.shape === "cylinder") {
     base.height = clampFeet(d.height);
@@ -411,6 +422,7 @@ export function templateInput(
     input.triggers = normalizeTriggers(t.triggers);
     if (t.oncePerTurn) input.oncePerTurn = true;
   }
+  if (t.slows) input.slows = t.slows;
   if (t.casterId !== undefined) input.casterId = t.casterId;
   if (extra.spell) input.spell = extra.spell.slice(0, 80);
   if (extra.label) input.label = extra.label.slice(0, 80);
@@ -480,6 +492,7 @@ export function draftFromTemplate(t: AreaTemplate, id: string, tokens: AreaToken
   d.visibility = t.visibility;
   d.triggers = normalizeTriggers(t.triggers);
   d.oncePerTurn = t.oncePerTurn === true;
+  if (t.slows) d.slows = t.slows;
   if (t.spell) d.spell = t.spell;
   const caster = t.casterId ?? undefined;
   if (caster) d.lastCaster = caster;

@@ -1,4 +1,4 @@
-import type { AbilityKey, AreaShape, AreaTrigger, ConditionKey } from "../model.ts";
+import type { AbilityKey, AreaShape, AreaSlows, AreaTrigger, ConditionKey } from "../model.ts";
 import type { DamageType } from "../rules/damage.ts";
 import data from "./area-spells.json" with { type: "json" };
 
@@ -78,6 +78,12 @@ export type AreaSpell = {
   conditions?: ConditionKey[];
   lasts?: { at: "start" | "end"; of: "target" | "self" };
   saveEnds?: true;
+  /**
+   * How the area changes movement inside it (docs/design-v1-movement.md
+   * 3.5), as its text says, and a new area from the preset keeps it
+   * (AreaTemplate.slows).
+   */
+  slows?: AreaSlows;
 };
 
 export const AREA_SPELLS = data as readonly AreaSpell[];

@@ -103,6 +103,7 @@ export function presetDraft(spell: AreaSpell, prev: AreaDraft, casterId: string 
     triggers: spell.triggers ? [...spell.triggers] : [],
     oncePerTurn: spell.oncePerTurn === true,
   };
+  if (spell.slows) draft.slows = spell.slows;
   if (fromToken && casterId) draft.fromId = casterId;
   if (casterId) draft.casterId = casterId;
   const last = casterId ?? prev.lastCaster;

@@ -27,6 +27,7 @@ import {
   templateInput,
   triggerSummary,
   withShape,
+  withSlows,
   yawToward,
   type AreaDraft,
   type AreaTokens,
@@ -203,6 +204,22 @@ describe("preview to template", () => {
     assert.deepEqual(areaOutline(t, ctx(walked)), { kind: "roundRect", x: 3, y: 3, w: 5, h: 5, r: 2 });
     // An attached one has no footprint of its own: it follows its token.
     assert.equal(draftTemplate(draft({ shape: "emanation", size: 10, fromId: "thorn", attached: true }), tokens, 5)!.footprint, undefined);
+  });
+
+  test("how a spell slows movement goes from its preset to the template and back to a copy (docs/design-v1-movement.md 3.5)", () => {
+    const guardians = presetDraft(spell("Spirit Guardians"), draft(), "thorn");
+    assert.deepEqual(guardians.slows, { kind: "halfSpeed", foes: true });
+    const t = draftTemplate(guardians, tokens, 5)!;
+    const input = templateInput(t, { sceneId: "s", ownerId: "m1", color: "#f38400", spell: "Spirit Guardians", visibility: "all" });
+    assert.deepEqual(input.slows, { kind: "halfSpeed", foes: true });
+    assert.ok(clientOpSchema.safeParse({ t: "template.create", template: input }).success);
+    const placed = { ...input, rev: 1, origin: input.origin } as AreaTemplate;
+    assert.deepEqual(draftFromTemplate(placed, "copy", tokens, 5).slows, { kind: "halfSpeed", foes: true });
+    assert.deepEqual(withShape(guardians, "sphere").slows, guardians.slows, "a new shape keeps it, as it keeps the reminders");
+    assert.equal(presetDraft(spell("Fireball"), guardians, "thorn").slows, undefined, "another spell sets its own");
+    const normal = withSlows(guardians, null);
+    assert.equal("slows" in normal, false);
+    assert.equal("slows" in templateInput(draftTemplate(normal, tokens, 5)!, { sceneId: "s", ownerId: "m1", color: "#f38400", visibility: "all" }), false);
   });
 
   test("a placed draft becomes a valid template.create with the caster recorded", () => {
