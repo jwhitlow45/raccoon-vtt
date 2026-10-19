@@ -15,6 +15,7 @@ import { markOwner } from "../pings/who.ts";
 import { dragLabel, dragReading, type DragRead, type SpeedLeft, type Speeds } from "./movement.ts";
 import { Pill, pillGeometry } from "./Pill.tsx";
 import { drawnPoints, formatFeet, keptStops, measureStops, type DistanceRules, type Point, type RulerStop } from "./ruler.ts";
+import { measureWalk, walkText } from "./walkRuler.ts";
 
 /**
  * Rulers and the distance a dragged token travels (design sections 7.6 and
@@ -64,6 +65,9 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
   const drawings = useRoomView((s) => s.view?.drawings ?? EMPTY_DRAWINGS);
   const characters = useRoomView((s) => s.view?.characters);
   const role = useRoomView((s) => s.you?.role ?? "player");
+  // Walking rulers search the room itself, so only they read the whole view.
+  const anyWalk = useRoomView((s) => Object.values(s.ephemeral.rulers).some((r) => r.walk) || Object.values(s.view?.drawings ?? {}).some((d) => d?.kind === "ruler" && d.walk === true));
+  const view = useRoomView((s) => (anyWalk ? s.view : null));
   const groupRef = useRef<Konva.Group>(null);
   const localDrag = useLocalDrag(groupRef);
   const feetPerCell = settings?.feetPerCell ?? 5;
@@ -94,11 +98,24 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
           scale={props.scale}
           color={members?.[d.ownerId]?.color ?? d.style.stroke}
           owner={markOwner({ from: d.ownerId, local: d.ownerId === youId }, members)}
+          walk={d.walk && view ? { view, sceneId: props.scene.id, viewer: { role }, everything: role === "dm" && d.visibility === "dm" } : undefined}
         />
       ))}
-      {Object.entries(rulers).map(([key, r]) => (
-        <Ruler key={key} stops={r.points} tokens={tokens} rules={rules} scale={props.scale} color={colorOf(r.from)} owner={markOwner(r, members)} />
-      ))}
+      {Object.entries(rulers).map(([key, r]) =>
+        r.walk && view ? (
+          // Only the DM's own ruler, before it is shared, may read what players cannot see (docs/design-v1-movement.md 3.3).
+          <WalkRuler
+            key={key}
+            stops={r.points}
+            walk={{ view, sceneId: props.scene.id, viewer: { role }, everything: role === "dm" && r.local && !r.shared }}
+            scale={props.scale}
+            color={colorOf(r.from)}
+            owner={markOwner(r, members)}
+          />
+        ) : (
+          <Ruler key={key} stops={r.points} tokens={tokens} rules={rules} scale={props.scale} color={colorOf(r.from)} owner={markOwner(r, members)} />
+        ),
+      )}
       {Object.entries(drags).map(([key, d]) =>
         // This device's own drag is measured from Konva's node below. Another device of the same member counts as remote.
         d.ended || d.tokenId === localDrag?.tokenId ? null : (
@@ -120,13 +137,58 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
   );
 });
 
-function KeptRuler(props: { drawing: Drawing; tokens: Record<string, Token>; rules: DistanceRules; scale: number; color: string; owner: string | null }) {
+type WalkSource = Omit<Parameters<typeof measureWalk>[0], "stops">;
+
+function KeptRuler(props: { drawing: Drawing; tokens: Record<string, Token>; rules: DistanceRules; scale: number; color: string; owner: string | null; walk: WalkSource | undefined }) {
   const { drawing } = props;
   const stops = useMemo(() => keptStops(drawing), [drawing]);
   return (
     <Group opacity={drawing.visibility === "dm" ? 0.6 : 1}>
-      <Ruler stops={stops} tokens={props.tokens} rules={props.rules} scale={props.scale} color={props.color} owner={props.owner} kept />
+      {props.walk ? (
+        <WalkRuler stops={stops} walk={props.walk} scale={props.scale} color={props.color} owner={props.owner} kept />
+      ) : (
+        <Ruler stops={stops} tokens={props.tokens} rules={props.rules} scale={props.scale} color={props.color} owner={props.owner} kept />
+      )}
     </Group>
+  );
+}
+
+/**
+ * A walking ruler (docs/design-v1-movement.md 3.3): each leg along the
+ * route the creature would walk, between its footprint's centers, with a
+ * dot at each stop, each leg's cost, and "Walking 40 ft" at the end with
+ * what terrain added. A leg with no route runs straight in red, "No way
+ * through".
+ */
+function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale: number; color: string; owner: string | null; kept?: boolean }) {
+  const { stops, walk, scale, color } = props;
+  const m = useMemo(() => measureWalk({ ...walk, stops }), [walk.view, walk.sceneId, walk.viewer.role, walk.everything, stops]);
+  if (!m) return <Ruler stops={stops} tokens={walk.view.tokens} rules={walk.view.meta.settings} scale={scale} color={color} owner={props.owner} kept={props.kept === true} />;
+  const mid = (p: Point) => ({ x: p.x + m.size.w / 2, y: p.y + m.size.h / 2 });
+  const last = mid(m.legs[m.legs.length - 1]!.to);
+  return (
+    <>
+      {m.legs.map((leg, i) => {
+        const pts = [leg.from, ...leg.corners, leg.to].map(mid);
+        const flat = pts.flatMap((p) => [p.x, p.y]);
+        const stroke = leg.none ? theme.color.danger : color;
+        const a = pts[0]!;
+        const b = pts[pts.length - 1]!;
+        const labelled = leg.none || (m.legs.length > 1 && Math.hypot(b.x - a.x, b.y - a.y) * scale >= LEG_LABEL_MIN_PX);
+        return (
+          <Group key={i}>
+            <Line points={flat} stroke={theme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" perfectDrawEnabled={false} />
+            <Line points={flat} stroke={stroke} strokeWidth={LINE_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" dash={props.kept ? undefined : [10, 6]} perfectDrawEnabled={false} />
+            {labelled ? <Pill x={(a.x + b.x) / 2} y={(a.y + b.y) / 2} scale={scale} value={leg.none ? "No way through" : formatFeet(leg.ft)} size="screen" color={stroke} small /> : null}
+          </Group>
+        );
+      })}
+      {[m.legs[0]!.from, ...m.legs.map((l) => l.to)].map((p, i) => {
+        const c = mid(p);
+        return <Circle key={i} x={c.x} y={c.y} radius={(i === 0 || i === m.legs.length ? 5 : 4) / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />;
+      })}
+      <Pill x={last.x} y={last.y} scale={scale} name={props.owner} value={walkText(m)} size="screen" color={color} offsetPx={18} />
+    </>
   );
 }
 

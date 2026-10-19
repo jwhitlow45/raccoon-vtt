@@ -249,7 +249,7 @@ export function lift(input: {
  * when the live ruler was: always for a player, and for the DM only once
  * Shared.
  */
-export function keptDrawing(input: { id: string; sceneId: string; stops: readonly RulerStop[]; ownerId: string; color: string; shared: boolean }): DrawingInput | null {
+export function keptDrawing(input: { id: string; sceneId: string; stops: readonly RulerStop[]; ownerId: string; color: string; shared: boolean; walk?: boolean }): DrawingInput | null {
   const stops = input.stops.slice(0, MAX_RULER_POINTS);
   if (stops.length < 2) return null;
   const drawing: DrawingInput = {
@@ -264,6 +264,8 @@ export function keptDrawing(input: { id: string; sceneId: string; stops: readonl
   if (stops.some((s) => s.tokenId !== undefined)) drawing.anchors = stops.map((s) => s.tokenId ?? null);
   const z = stops.map((s) => (s.tokenId === undefined ? (s.z ?? 0) : 0));
   if (z.some((feet) => feet !== 0)) drawing.z = z;
+  // A walking ruler stays one when kept (docs/design-v1-movement.md 3.3).
+  if (input.walk) drawing.walk = true;
   return drawing;
 }
 

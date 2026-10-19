@@ -345,7 +345,7 @@ export function dragLabel(read: DragRead): string {
 }
 
 /** "a", "a and b", "a, b and c". */
-function joinWords(words: readonly string[]): string {
+export function joinWords(words: readonly string[]): string {
   return words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
 }
 

@@ -72,7 +72,7 @@ export function applyEph(
     case "ruler":
       return {
         ...eph,
-        rulers: { ...eph.rulers, [key(from, e.id)]: { from, id: e.id, points: e.points, shared: e.shared ?? false, local, at: now } },
+        rulers: { ...eph.rulers, [key(from, e.id)]: { from, id: e.id, points: e.points, shared: e.shared ?? false, local, at: now, ...(e.walk ? { walk: true as const } : {}) } },
       };
     case "rulerEnd":
       return { ...eph, rulers: without(eph.rulers, key(from, e.id)) };

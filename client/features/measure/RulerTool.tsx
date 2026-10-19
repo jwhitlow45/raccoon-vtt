@@ -8,7 +8,7 @@ import { groundSource, seenGround } from "../builder/heights/ground.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
-import { OptButton, OptionsStrip } from "./controls.tsx";
+import { OptButton, OptionsStrip, OptSegmented } from "./controls.tsx";
 import { KeptRulersChip, useKeptRulers } from "./KeptRulers.tsx";
 import {
   allStops,
@@ -25,6 +25,7 @@ import {
   type RulerState,
   type RulerToken,
 } from "./ruler.ts";
+import { measureWalk, saveWalk, savedWalk, walkText } from "./walkRuler.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /**
@@ -48,11 +49,13 @@ type RulerToolState = {
   share: boolean;
   /** Whether a frame of the current ruler went to the server, so its end must too. */
   sent: boolean;
+  /** Measure: Walking rather than Straight (docs/design-v1-movement.md 3.3), as this device remembers it. */
+  walk: boolean;
 };
 
 /** One Room page's ruler: the ruler shown, the gesture in progress, and the context its option buttons act through. */
 const rulerSlot = scopeSlot(() => ({
-  store: createStore<RulerToolState>(() => ({ ruler: null, share: false, sent: false })),
+  store: createStore<RulerToolState>(() => ({ ruler: null, share: false, sent: false, walk: savedWalk() })),
   gesture: null as (RulerGesture & { screen: { x: number; y: number }; before: RulerState | null }) | null,
   /** Room.tsx renders Options without a tool context, so the buttons reach the tool through this. */
   activeCtx: null as ToolContext | null,
@@ -94,7 +97,7 @@ function publish(ctx: ToolContext, ruler: RulerState | null): void {
   }
   const shared = shares(ctx);
   const points = allStops(ruler);
-  const e: EphEvent = { k: "ruler", id: ruler.id, points, shared };
+  const e: EphEvent = { k: "ruler", id: ruler.id, points, shared, ...(prev.walk ? { walk: true as const } : {}) };
   ctx.actions.sendEph(e, { localOnly: !shared });
   rulerStore.setState({ ruler: { ...ruler, shared }, sent: prev.sent || shared });
 }
@@ -153,6 +156,7 @@ function keep(ctx: ToolContext, ruler: RulerState | null): void {
           ownerId: you.memberId,
           color: s.view?.members[you.memberId]?.color ?? theme.color.crest,
           shared: shares(ctx),
+          walk: ctx.scope.get(rulerSlot).store.getState().walk,
         }
       : null,
   );
@@ -175,22 +179,39 @@ function onCancel(ctx: ToolContext): void {
   else publish(ctx, null);
 }
 
+const MEASURES = [
+  { value: "straight", label: "Straight" },
+  { value: "walking", label: "Walking" },
+] as const;
+
 /**
  * The Ruler's row (docs/design-v1-tool-options.md 9.2): Shared for the DM,
- * Keep and Clear, and the kept rulers behind a chip. Its line is the hint,
- * or the reading with the diagonal rule.
+ * Measure, Keep and Clear, and the kept rulers behind a chip. Its line is
+ * the hint, or the reading with the diagonal rule: a walking ruler's walk
+ * and what terrain added (docs/design-v1-movement.md 3.3).
  */
 function RulerOptions(props: { role: "dm" | "player" }) {
   const tool = useScoped(rulerSlot);
   const rulerStore = tool.store;
-  const { ruler, share } = useStore(rulerStore);
+  const { ruler, share, walk } = useStore(rulerStore);
   const tokens = useRoomView((s) => s.view?.tokens);
   const settings = useRoomView((s) => s.view?.meta.settings);
+  const view = useRoomView((s) => (walk ? s.view : null));
   const kept = useKeptRulers(props.role);
   const stops = ruler ? allStops(ruler) : [];
   let info: ReactNode = "Drag to measure. Tap to add a waypoint. Double-tap to keep a ruler on the map.";
   if (stops.length === 1) info = "Tap or drag to the next point.";
-  if (stops.length > 1 && tokens && settings) {
+  const walked = walk && view && tool.activeCtx && stops.length > 1 ? measureWalk({ view, sceneId: tool.activeCtx.scene.id, stops, viewer: { role: props.role }, everything: props.role === "dm" && !share }) : null;
+  if (walked) {
+    const [first, extra] = walkText(walked).split("\n");
+    info = (
+      <>
+        <strong>{first}</strong>
+        {extra ? ` · ${extra}` : null}
+        {walked.legs.some((l) => l.none) ? " · No way through" : null}
+      </>
+    );
+  } else if (stops.length > 1 && tokens && settings) {
     const { totalFt, legsFt } = measureStops(stops, tokens, settings);
     info = (
       <>
@@ -239,6 +260,26 @@ function RulerOptions(props: { role: "dm" | "player" }) {
           ),
         },
         {
+          id: "measure",
+          priority: 2,
+          compact: true,
+          control: (
+            <OptSegmented
+              label="Measure"
+              value={walk ? "walking" : "straight"}
+              options={MEASURES}
+              onChange={(v) => {
+                const next = v === "walking";
+                saveWalk(next);
+                rulerStore.setState({ walk: next });
+                const ctx = tool.activeCtx;
+                const current = rulerStore.getState().ruler;
+                if (ctx && current) publish(ctx, current);
+              }}
+            />
+          ),
+        },
+        {
           id: "keep",
           priority: 2,
           control: (
@@ -275,7 +316,7 @@ export const rulerTool: ToolDef = {
   activate(ctx) {
     const tool = ctx.scope.get(rulerSlot);
     tool.activeCtx = ctx;
-    // Every ruler starts private for the DM (design 7.6).
+    // Every ruler starts private for the DM (design 7.6). Measure stays as this device left it.
     tool.store.setState({ ruler: null, share: false, sent: false });
   },
   deactivate(ctx) {

@@ -40,8 +40,12 @@ export type SpeedAreas = { halfSpeed: AreaTemplate[]; areaCtx: AreaContext };
 export type WorldOptions = {
   /** A walking ruler leaves out other creatures' spaces, since they will move before anyone walks there (3.3). */
   creatures?: boolean;
-  /** The DM's own ruler, before it is shared, may read all the ground. Every drag and every shared ruler holds to the public ground. */
-  allGround?: boolean;
+  /**
+   * The DM's own ruler, before it is shared, may use everything the DM
+   * knows: all the ground, every area and every creature where it stands.
+   * Every drag and every shared ruler keeps to the public world.
+   */
+  everything?: boolean;
 };
 
 /** Whether players see a token where it stands, as the projection judges it: not hidden by the DM, and on the DM's state not withheld by fog or sight. */
@@ -85,10 +89,15 @@ function slowsMover(slows: AreaSlows, caster: Token | undefined, mover: Token): 
  * players cannot see, another's only where players see others' areas or a
  * DM placed it, and without a caster players cannot see.
  */
-function publicAreas(state: RoomState, sceneId: string, seen: (id: string) => Token | undefined): { template: AreaTemplate; caster: Token | undefined }[] {
+function publicAreas(state: RoomState, sceneId: string, seen: (id: string) => Token | undefined, everything = false): { template: AreaTemplate; caster: Token | undefined }[] {
   const out: { template: AreaTemplate; caster: Token | undefined }[] = [];
   for (const t of Object.values(state.templates)) {
-    if (!t || t.sceneId !== sceneId || t.visibility === "dm") continue;
+    if (!t || t.sceneId !== sceneId) continue;
+    if (everything) {
+      out.push({ template: t, caster: t.casterId ? seen(t.casterId) : undefined });
+      continue;
+    }
+    if (t.visibility === "dm") continue;
     if (t.attachedTo !== undefined && !seen(t.attachedTo)) continue;
     if (!state.meta.settings.playersSeeAoeOfOthers && state.members[t.ownerId]?.kind !== "dm") continue;
     out.push({ template: t, caster: t.casterId ? seen(t.casterId) : undefined });
@@ -105,9 +114,10 @@ export function publicWorld(state: RoomState, token: Token, viewer: WalkViewer, 
   const scene = state.scenes[token.sceneId];
   const rules: DistanceSettings = { feetPerCell: state.meta.settings.feetPerCell, diagonal: state.meta.settings.diagonal };
   const blocks = scene?.blockMovement === true;
-  const shown = shownTokens(state, token, viewer);
+  const everything = opts.everything === true && viewer.role === "dm";
+  const shown = shownTokens(state, token, viewer, everything);
   // A player's drag, and the DM's of a party member, keep to ground players have seen. The DM's other drags read the DM's own map.
-  const publicGround = !opts.allGround && (viewer.role === "player" || isPartyMember(state, token));
+  const publicGround = !everything && (viewer.role === "player" || isPartyMember(state, token));
   const ground = publicGround && scene && scene.fogEnabled !== false ? playersSeeGround(state, scene.id) : null;
   const fpc = rules.feetPerCell;
   const creatures: WalkCreature[] = [];
@@ -125,7 +135,7 @@ export function publicWorld(state: RoomState, token: Token, viewer: WalkViewer, 
   const areaCtx = areaContext(state, token, shown);
   const areas: WalkArea[] = [];
   const halfSpeed: AreaTemplate[] = [];
-  for (const { template, kind } of slowingAreas(state, token, shown)) {
+  for (const { template, kind } of slowingAreas(state, token, shown, everything)) {
     if (kind === "halfSpeed") halfSpeed.push(template);
     else areas.push({ extra: kind === "quarter" ? 3 : 1, cells: computeCoverage(template, areaCtx).cells });
   }
@@ -143,9 +153,9 @@ export function publicWorld(state: RoomState, token: Token, viewer: WalkViewer, 
 }
 
 /** The tokens on the mover's scene players see, by id. */
-function shownTokens(state: RoomState, token: Token, viewer: WalkViewer): Map<string, Token> {
+function shownTokens(state: RoomState, token: Token, viewer: WalkViewer, everything = false): Map<string, Token> {
   const onScene = Object.values(state.tokens).filter((t): t is Token => t !== undefined && t.sceneId === token.sceneId);
-  return new Map(onScene.filter((t) => publicToken(state, t, viewer)).map((t) => [t.id, t]));
+  return new Map(onScene.filter((t) => everything || publicToken(state, t, viewer)).map((t) => [t.id, t]));
 }
 
 function areaContext(state: RoomState, token: Token, shown: ReadonlyMap<string, Token>): AreaContext {
@@ -159,9 +169,9 @@ function areaContext(state: RoomState, token: Token, shown: ReadonlyMap<string, 
 }
 
 /** The public areas that slow this mover, each without a caster players cannot see. An area on the mover goes with it, so it never meets the mover along the way. */
-function slowingAreas(state: RoomState, token: Token, shown: ReadonlyMap<string, Token>): { template: AreaTemplate; kind: AreaSlows["kind"] }[] {
+function slowingAreas(state: RoomState, token: Token, shown: ReadonlyMap<string, Token>, everything = false): { template: AreaTemplate; kind: AreaSlows["kind"] }[] {
   const out: { template: AreaTemplate; kind: AreaSlows["kind"] }[] = [];
-  for (const { template, caster } of publicAreas(state, token.sceneId, (id) => shown.get(id))) {
+  for (const { template, caster } of publicAreas(state, token.sceneId, (id) => shown.get(id), everything)) {
     const slows = template.slows;
     if (!slows || template.attachedTo === token.id || !slowsMover(slows, caster, token)) continue;
     const { casterId: _hidden, ...uncast } = template;
