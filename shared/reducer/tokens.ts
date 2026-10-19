@@ -415,7 +415,7 @@ function placeMoved(tx: Tx, { move, token, next }: { move: Move; token: Token; n
  * footprint now unless it holds its own. Ops stored before version 6 did
  * neither (`resizeStop`), and replay as they were.
  */
-export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted = false, route?: readonly RoutePiece[], carried?: readonly RoutePoint[]): Token {
+export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted = false, route?: readonly RoutePiece[], carried?: readonly RoutePoint[], cost?: number): Token {
   if (after.sceneId !== before.sceneId) return withoutPath(after);
   const from = footprintSize(before);
   const to = footprintSize(after);
@@ -452,6 +452,8 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
     path = { turn: path.turn, stops: path.stops.map((s): PathStop => (s.footprint ? s : { ...s, footprint: old })) };
   }
   if (walked) stop = walkedStop(tx, path, stop, before, after, judged, route, carried);
+  // Getting on or off a mount costs what the rules say whatever the leg (docs/design-v1-attach.md 7.3), set before the stop joins the path.
+  if (cost !== undefined) stop = { ...stop, cost };
   // A leg a holder's move took the creature along never counts, and only the DM learns how it was made (7.2).
   if (carried) stop = { ...stop, uncounted: true, carried: true };
   const counts = !resized && !(reshaped && inPlace) && !uncounted;

@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { readEntity, type EntityKey } from "#shared/keys.ts";
 import type { AttachKind, CreatureSize, Encounter, InitEntry, RoomState, Token, Viewer } from "#shared/model.ts";
 import { inSightOfNonOwners } from "#shared/project.ts";
-import type { Op } from "#shared/protocol.ts";
+import { MAX_PATH_STOPS, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { sharesTurn } from "#shared/reducer/tokens.ts";
 import { ATTACH_KINDS, carriedGroup, getOffSpot, holderOf, linkHolds, seatSpot } from "#shared/rules/attach.ts";
@@ -30,6 +30,7 @@ const INVARIANTS = {
   sharesJoined: "a mount shares only a turn whose list it joined at a qualifying event",
   restoreWhole: "every restore applies whole or refuses",
   replay: "replaying the stored ops rebuilds the same state",
+  pathBound: "no path holds more stops than the room keeps",
 } as const;
 
 type Invariant = keyof typeof INVARIANTS;
@@ -187,6 +188,7 @@ class Watch {
     const after = t.state;
     const { op, who } = t.last;
     this.#links(after, where);
+    for (const t of Object.values(after.tokens)) holds("pathBound", (t.path?.stops.length ?? 0) <= MAX_PATH_STOPS, where, `${t.id} holds ${t.path?.stops.length} stops`);
     for (const [id, was] of Object.entries(before.tokens)) {
       if (was.attached && after.tokens[id] && !after.tokens[id]!.attached && op.t !== "token.detach") this.seen.linksDropped++;
     }

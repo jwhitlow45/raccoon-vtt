@@ -108,6 +108,17 @@ describe("what getting on and off costs (7.3)", () => {
     assert.deepEqual([last(f.stops("bree")).moved, last(f.stops("bree")).cost], [5, 15]);
   });
 
+  test("a full path stays full: getting on in place and getting off join the oldest legs as any stop does", () => {
+    const f = bresTurn((s) => (s.tokens.bree = { ...s.tokens.bree!, x: 6, y: 4, attached: undefined }));
+    for (let i = 0; i < MAX_PATH_STOPS - 1; i++) f.run({ t: "token.move", tokenId: "bree", x: i % 2 === 0 ? 5 : 6, y: 4 }, P1);
+    assert.equal(f.stops("bree").length, MAX_PATH_STOPS);
+    f.run({ t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", steer: true, x: 5, y: 4, elevation: 0 }, P1);
+    assert.equal(f.stops("bree").length, MAX_PATH_STOPS, "getting on in place");
+    assert.equal(last(f.stops("bree")).cost, 15);
+    f.run({ t: "token.detach", tokenId: "bree", x: 3, y: 6 }, P1);
+    assert.equal(f.stops("bree").length, MAX_PATH_STOPS, "getting off");
+  });
+
   test("a rider already on the mount pays nothing to change Controlled or Independent", () => {
     const f = bresTurn();
     f.run({ t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", x: 4, y: 4, elevation: 0 });
