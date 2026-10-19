@@ -3,6 +3,7 @@ import { useStore } from "zustand";
 import { Icon } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
 import { useAlertsSummaryEntry } from "../components/sheetFocus.ts";
+import { SHEET_MAX_WIDTH } from "../components/sheetCap.ts";
 import { chromeZoom, smallUi } from "../features/device/layout.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { GRAB_STYLE, SWIPE_REST_EVENT, SWIPING_ATTR } from "../lib/sheetSwipe.ts";
@@ -52,7 +53,11 @@ export function useDockSummary(hides: "sheet" | "bar" | "room" = "sheet"): Alert
  *
  * It follows the open sheet's top edge (`sheetHeight`, in the chrome's own
  * pixels), and Room keeps the dock and the gap above it free when it caps
- * the sheet (Sheet `reserveTop`). It rides the sheet's swipe (Sheet
+ * the sheet (Sheet `reserveTop`). It takes the sheet's width and place, 8
+ * px in from its sides past the safe areas the sheet holds: a phone's
+ * whole width, or the medium dialog's width a wider screen centers the
+ * sheet at (components/sheetCap.ts SHEET_MAX_WIDTH), the same rule in CSS
+ * as the sheet's, so the two never part. It rides the sheet's swipe (Sheet
  * `riders`): it moves with the sheet, and a drag on it moves the sheet,
  * while its buttons still take a tap.
  */
@@ -78,6 +83,8 @@ export function DockRow(props: {
         position: "absolute",
         left: `calc(${theme.safe.left} + ${theme.space(2)}px)`,
         right: `calc(${theme.safe.right} + ${theme.space(2)}px)`,
+        maxWidth: `calc(${SHEET_MAX_WIDTH - 2 * theme.space(2)}px - ${theme.safe.left} - ${theme.safe.right})`,
+        margin: "0 auto",
         bottom: `calc(${theme.safe.bottom} + ${theme.layout.toolbar + props.sheetHeight}px)`,
         zIndex: theme.z.sheet,
         display: "flex",

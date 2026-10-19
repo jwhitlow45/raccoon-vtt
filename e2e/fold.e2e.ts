@@ -263,7 +263,7 @@ async function assertColumnReachable(page: Page, label: string): Promise<void> {
   assert.ok(result.tappable, `${label}: "${result.name}" is covered`);
 }
 
-/** The dock on the sheet's edge: clear of the bars, on the sheet, and the sheet at least 120 layout px, clear of the toolbar. */
+/** The dock on the sheet's edge: clear of the bars, on the sheet and 8 layout px in from its sides, and the sheet at least 120 layout px, clear of the toolbar. */
 async function assertDocked(page: Page, scale: number, label: string): Promise<void> {
   await page.locator("[data-rvtt-dock]").waitFor();
   // The dock follows the sheet's height once it is measured.
@@ -276,6 +276,12 @@ async function assertDocked(page: Page, scale: number, label: string): Promise<v
   assert.ok(b.sheet.height >= 120 * scale - 1, `${label}: the sheet is ${b.sheet.height} px, under 120 layout px`);
   assert.ok(b.sheet.bottom <= b.toolbar.top + 1, `${label}: the sheet runs under the toolbar`);
   assert.ok(b.dock.left >= 0 && b.dock.right <= size.width, `${label}: the dock leaves the window`);
+  // It takes the sheet's width and place, a phone's whole width or a tablet's centered sheet (docs/design-v1-look-pass.md 2.8). No case here has side safe areas.
+  const inset = 8 * scale;
+  assert.ok(
+    Math.abs(b.dock.left - b.sheet.left - inset) <= 1.5 && Math.abs(b.sheet.right - b.dock.right - inset) <= 1.5,
+    `${label}: the dock (${b.dock.left} to ${b.dock.right}) does not keep ${inset} px in from the sheet (${b.sheet.left} to ${b.sheet.right})`,
+  );
 }
 
 describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { timeout: 600_000 }, () => {
@@ -819,6 +825,20 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     assert.equal(await dm.evaluate(() => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem("rvtt.tokenBarSpot")), spot, "the stored spot changed");
     await shots.take(dm, "fold-tablet-docked-back");
     await bar.getByRole("button", { name: "Reset window position and size", exact: true }).click();
+    await dm.keyboard.press("Escape");
+  });
+
+  test("lp3-dock-a. an upright tablet at 820 x 1180: the sheet stands no wider than a medium dialog in the middle of the map, and the dock row on its edge takes its width and place (docs/design-v1-look-pass.md 2.8)", async () => {
+    // Still 820 x 1180 from the step before, which resized rather than reloaded for the server's snapshot budget.
+    await tapThorn(dm);
+    await panelsButton(dm).click();
+    await assertDocked(dm, 1, "820 x 1180, the sheet and its dock");
+    const b = await boxes(dm);
+    const width = b.sheet!.right - b.sheet!.left;
+    assert.ok(Math.abs(width - 560) <= 1, `the sheet is ${width} px wide, not a medium dialog's 560`);
+    assert.ok(Math.abs(b.sheet!.left - (820 - width) / 2) <= 1, `the sheet is not centered: ${b.sheet!.left} to ${b.sheet!.right}`);
+    await shots.take(dm, "fold-lp3-tablet-sheet-dock");
+    await dm.getByRole("button", { name: "Close Panels" }).click();
     await dm.keyboard.press("Escape");
   });
 
