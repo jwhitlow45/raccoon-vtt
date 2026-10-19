@@ -502,6 +502,13 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await checkDialog(crop, `${label}, Crop the image`, { name: "Save", in: "footer" });
         await shoot("crop");
         await closeDialog(crop);
+        // The panel keeps an open form across a switch to another panel, so New character is left by its Back, and Characters opens on its list again below.
+        await page.getByRole("button", { name: "Back to Characters" }).click();
+        const discard = page.getByRole("button", { name: "Discard changes?" }).first();
+        const list = page.getByRole("button", { name: "New character" });
+        await discard.or(list).first().waitFor();
+        if (await discard.isVisible()) await discard.click();
+        await list.waitFor();
 
         // Modal: a Universal VTT import.
         await openPanel("Scenes", phone);
