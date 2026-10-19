@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { Character } from "#shared/model.ts";
-import { characterKind, kindLine, kindLineText, sizeText, tokenKind } from "./creatureKind.ts";
+import type { Character, CompanionBlock, CustomMonster, PcStats } from "#shared/model.ts";
+import { characterKind, kindLine, kindLineText, linkedBlockSummary, pcBlockSummary, sizeText, tokenKind } from "./creatureKind.ts";
 
 const MEDIUM = sizeText("medium", { w: 1, h: 1 }, 5);
 
 /** A character's actor as the kind line reads it: only whether it is in a shape. */
-function thorn(level: number | undefined, shape?: { srdId: string; wild: boolean }): Pick<Character, "level" | "actor"> {
+function thorn(level: number | undefined, shape?: { srdId: string; wild: boolean }, block = false): Pick<Character, "level" | "actor" | "stats"> {
   const actor = { srdId: shape?.srdId, ...(shape?.wild ? { wildShape: true as const } : {}) } as Character["actor"];
-  return { ...(level !== undefined ? { level } : {}), actor };
+  // The summary asks only whether there is a block, never what is in it.
+  return { ...(level !== undefined ? { level } : {}), actor, ...(block ? { stats: {} as PcStats } : {}) };
 }
 
 describe("the kind line (docs/design-v1-look-pass.md 2.11)", () => {
@@ -68,5 +69,50 @@ describe("a token's kind, from the viewer's copy", () => {
     assert.deepEqual(tokenKind({ token: { kind: "monster" }, cr: "10" }), { kind: "monster", cr: "10" });
     assert.deepEqual(tokenKind({ token: { kind: "npc" } }), { kind: "npc" });
     assert.deepEqual(tokenKind({ token: { kind: "object" }, cr: "1" }), { kind: "object" });
+  });
+});
+
+describe("the folded Stat block names its source (3.3)", () => {
+  test("a character with a block: its level and Proficiency Bonus, or that its level is not set", () => {
+    assert.equal(pcBlockSummary(thorn(5, undefined, true), 0), "Level 5, PB +3");
+    assert.equal(pcBlockSummary(thorn(1, undefined, true), 0), "Level 1, PB +2");
+    assert.equal(pcBlockSummary(thorn(17, undefined, true), 0), "Level 17, PB +6");
+    assert.equal(pcBlockSummary(thorn(undefined, undefined, true), 0), "Level not set");
+  });
+
+  test("a character with no block, as today", () => {
+    assert.equal(pcBlockSummary(thorn(5), 0), "None yet");
+    assert.equal(pcBlockSummary(thorn(5), 4), "4 known forms", "known forms stand in for None yet");
+    assert.equal(pcBlockSummary(thorn(5), 1), "1 known form");
+  });
+
+  test("known forms follow the block's words", () => {
+    assert.equal(pcBlockSummary(thorn(5, undefined, true), 4), "Level 5, PB +3 · 4 known forms");
+    assert.equal(pcBlockSummary(thorn(undefined, undefined, true), 2), "Level not set · 2 known forms");
+  });
+
+  test("a character in a shape names it, with or without a block", () => {
+    assert.equal(pcBlockSummary(thorn(5, { srdId: "brown-bear", wild: true }, true), 0), "Wild Shape: Brown Bear");
+    assert.equal(pcBlockSummary(thorn(5, { srdId: "brown-bear", wild: true }), 3), "Wild Shape: Brown Bear · 3 known forms");
+    assert.equal(pcBlockSummary(thorn(5, { srdId: "brown-bear", wild: false }, true), 0), "Shape: Brown Bear");
+  });
+
+  const wolf = { srdId: "wolf", name: "Wolf", cr: "1/4" };
+
+  test("a companion's or a monster's linked block: its name and CR", () => {
+    assert.equal(linkedBlockSummary({ kind: "block", block: { name: "Moth Spirit", cr: "1/4" } as CompanionBlock }, null), "Moth Spirit, CR 1/4");
+    assert.equal(linkedBlockSummary({ kind: "room", monster: { name: "Goblin Boss", cr: "1" } as CustomMonster }, null), "Goblin Boss, CR 1");
+    assert.equal(linkedBlockSummary({ kind: "block", block: { name: "Pip", cr: "" } as CompanionBlock }, null), "Pip", "a block with no CR, its name alone");
+  });
+
+  test("an SRD block reads its CR once the page has the SRD, and its name alone while it loads or after it failed", () => {
+    assert.equal(linkedBlockSummary({ kind: "srd", srdId: "wolf" }, [wolf]), "Wolf, CR 1/4");
+    assert.equal(linkedBlockSummary({ kind: "srd", srdId: "giant-wolf-spider" }, null), "Giant Wolf Spider");
+    assert.equal(linkedBlockSummary({ kind: "srd", srdId: "giant-wolf-spider" }, [wolf]), "Giant Wolf Spider", "an id the SRD lacks");
+  });
+
+  test("a link with no block to fold has no summary", () => {
+    assert.equal(linkedBlockSummary({ kind: "none" }, [wolf]), undefined);
+    assert.equal(linkedBlockSummary({ kind: "deleted", monsterId: "m1" }, null), undefined);
   });
 });

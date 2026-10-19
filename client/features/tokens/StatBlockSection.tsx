@@ -17,6 +17,7 @@ import { StatBlockView, useSrdMonsters } from "../monsters/StatBlockView.tsx";
 import { attachPatch, DETACH_PATCH, OWNER_DETACH_PATCH, statBlockFoldable, statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
 import { ownsCharacter, type TokenAccess } from "./access.ts";
 import { AttachBlockDialog } from "./CompanionBlocks.tsx";
+import { linkedBlockSummary } from "./creatureKind.ts";
 import { whose } from "./companionBlocks.ts";
 import { usePreview } from "../dm/previewContext.ts";
 import { relationKey, statBlockOpen, statBlockOpenedSlot, usePanelFolds } from "./panelFolds.ts";
@@ -24,6 +25,7 @@ import { panelRelation } from "./panelOrder.ts";
 import { statBlockRequest } from "./statBlockOpen.ts";
 import { Note, Section, SmallButton } from "./ui.tsx";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
+import { useSrdBlocks } from "../monsters/srdBlocks.ts";
 import { PcStatBlock } from "../pcstats/PcStatBlock.tsx";
 
 /** A companion's character, as the section names it and saves blocks under it. */
@@ -83,6 +85,8 @@ export function StatBlockSection(props: {
   const openEditor = useOpenEditor();
   const store = useRoomStore();
   const [picking, setPicking] = useState(false);
+  // The SRD as far as this page has loaded it, for the folded row's name and CR: folding never loads it.
+  const srd = useSrdBlocks(false);
   const ref = useRef<HTMLDivElement>(null);
   const focusRef = useRef<HTMLButtonElement>(null);
 
@@ -142,7 +146,7 @@ export function StatBlockSection(props: {
     // Its lines and buttons name the companion's character, whose name may be long and unbroken: it wraps rather than run out of the panel.
     <div ref={ref} data-stat-block="" style={{ scrollMarginTop: theme.space(2), overflowWrap: "anywhere" }}>
       {statBlockFoldable(link) ? (
-        <Group label="Stat block" open={open} onToggle={toggle} foldRef={focusRef}>
+        <Group label="Stat block" open={open} onToggle={toggle} foldRef={focusRef} summary={linkedBlockSummary(link, srd.list)}>
           {link.kind === "room" ? (
             <>
               <StatBlockView view={viewOf(link.monster)} source="room" />

@@ -10,6 +10,7 @@ import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { editsPcStats } from "../tokens/access.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { StatBlockView } from "../monsters/StatBlockView.tsx";
+import { pcBlockSummary } from "../tokens/creatureKind.ts";
 import { useSrdList } from "../tokens/StatSummary.tsx";
 import { saveUnitsOf } from "../tokens/statSummary.ts";
 import { Note, SmallButton } from "../tokens/ui.tsx";
@@ -56,12 +57,14 @@ export function PcStatBlock(props: {
     ) : null;
   const picker = picking ? <ShapePicker character={character} onClose={() => setPicking(false)} /> : null;
   // In another shape, such as Polymorph, the forms are not drawn: End the shape first.
-  const forms = edits && (character.knownForms?.length ?? 0) > 0 && pcShape(character) !== "other" ? <KnownFormsSection character={character} /> : null;
+  const formCount = edits && pcShape(character) !== "other" ? (character.knownForms?.length ?? 0) : 0;
+  const forms = formCount > 0 ? <KnownFormsSection character={character} /> : null;
+  // Folded, the row says what the block holds, so it reads without opening (docs/design-v1-look-pass.md 3.3).
+  const summary = pcBlockSummary(character, formCount);
   if (!character.stats && !shaped) {
-    const count = character.knownForms?.length ?? 0;
     return (
       <>
-        <Group label="Stat block" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary={count > 0 ? `${count} known ${count === 1 ? "form" : "forms"}` : "None yet"}>
+        <Group label="Stat block" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary={summary}>
           {forms}
           {edits ? (
             <>
@@ -79,7 +82,7 @@ export function PcStatBlock(props: {
   }
   return (
     <>
-      <Group label="Stat block" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} action={take}>
+      <Group label="Stat block" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary={summary} action={take}>
         {forms}
         {shaped ? <ShapeBody character={character} edits={edits} /> : <PcStatsView character={character} />}
         {edits ? (

@@ -1,12 +1,16 @@
 import type { Character, CreatureSize } from "#shared/model.ts";
-import { pcShape } from "#shared/rules/pcStats.ts";
+import { pcProficiency, pcShape } from "#shared/rules/pcStats.ts";
+import type { SrdMonster } from "#shared/srd/monsters.ts";
+import { signed } from "#shared/statBlock.ts";
+import type { TokenStatBlock } from "../monsters/statBlockLink.ts";
 import { srdTitle } from "./companionBlocks.ts";
 import { SIZE_WORDS } from "./resize.ts";
 
 /*
  * What a creature's header says it is (docs/design-v1-look-pass.md 2.11),
- * the same words in the token panel and on a character's page, as plain
- * functions for node --test.
+ * the same words in the token panel and on a character's page, and what
+ * its folded Stat block says it holds (3.3), as plain functions for node
+ * --test.
  */
 
 /** What a creature is, as far as the viewer's copy of the room tells. */
@@ -99,5 +103,44 @@ export function tokenKind(input: {
       return { kind: token.kind, ...(input.cr !== undefined ? { cr: input.cr } : {}) };
     case "object":
       return { kind: "object" };
+  }
+}
+
+/**
+ * A character's folded Stat block (3.3): the shape it is in, else its level
+ * and Proficiency Bonus as the open block starts, else "None yet". Known
+ * forms the section draws follow either, as `forms`, or stand alone where
+ * there is no block.
+ */
+export function pcBlockSummary(character: Pick<Character, "level" | "stats" | "actor">, forms: number): string {
+  const known = forms > 0 ? `${forms} known ${forms === 1 ? "form" : "forms"}` : null;
+  const shape = pcShape(character);
+  const srdId = character.actor.srdId;
+  let lead: string;
+  if (shape !== "none" && srdId !== undefined) lead = `${shape === "wild" ? "Wild Shape" : "Shape"}: ${srdTitle(srdId)}`;
+  else if (character.stats) lead = character.level !== undefined ? `Level ${character.level}, PB ${signed(pcProficiency(character.level))}` : "Level not set";
+  else return known ?? "None yet";
+  return known ? `${lead} · ${known}` : lead;
+}
+
+/**
+ * A companion's or a monster's folded Stat block (3.3): the linked block's
+ * name and CR, "Wolf, CR 1/4". An SRD block the page has not loaded, or
+ * failed to, names itself from its id alone, so folding never loads the
+ * SRD. A link with no block to fold has no summary.
+ */
+export function linkedBlockSummary(link: TokenStatBlock, srd: readonly Pick<SrdMonster, "srdId" | "name" | "cr">[] | null): string | undefined {
+  const named = (name: string, cr: string) => (cr.trim() ? `${name}, CR ${cr.trim()}` : name);
+  switch (link.kind) {
+    case "room":
+      return named(link.monster.name, link.monster.cr);
+    case "block":
+      return named(link.block.name, link.block.cr);
+    case "srd": {
+      const monster = srd?.find((m) => m.srdId === link.srdId);
+      return monster ? named(monster.name, monster.cr) : srdTitle(link.srdId);
+    }
+    default:
+      return undefined;
   }
 }
