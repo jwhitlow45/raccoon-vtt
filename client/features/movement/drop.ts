@@ -28,6 +28,18 @@ export type Point = { x: number; y: number };
 /** The token fields a drop reads. */
 export type DropToken = Pick<Token, "id" | "sceneId" | "size" | "x" | "y" | "elevation"> & Partial<Pick<Token, "w" | "h" | "squeeze" | "name" | "number">>;
 
+/**
+ * A press planned from where the board last drew the token, read again
+ * where the room now has it (review MV-O-16): a drop that waited for its
+ * route and just landed moved it, and the press steps on from there, by the
+ * same offset. A token the room no longer has stays as it was.
+ */
+export function rebased(tokens: Readonly<Record<string, DropToken | undefined>>, token: DropToken, at: Point): { token: DropToken; at: Point } {
+  const now = tokens[token.id];
+  if (!now) return { token, at };
+  return { token: now, at: { x: at.x + now.x - token.x, y: at.y + now.y - token.y } };
+}
+
 /** The fields a landing's elevation reads: where the token stands and how high. */
 export type LandingToken = Omit<DropToken, "id" | "name" | "number">;
 

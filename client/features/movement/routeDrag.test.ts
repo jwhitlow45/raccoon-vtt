@@ -4,16 +4,19 @@ import type { EdgeFeature, TerrainId } from "#shared/model.ts";
 import type { Point } from "#shared/rules/geom.ts";
 import { findRoute, type WalkInput } from "#shared/rules/walk.ts";
 import { tok, world } from "#shared/rules/testWorld.ts";
+import { rebased } from "./drop.ts";
 import { RouteDrag, type Frames, type Settled } from "./routeDrag.ts";
 
 /**
  * The drag's search as a state machine (docs/design-v1-movement.md 12):
  * random runs of finger moves, frames, drops, cancels, wall changes and
- * frames that fire late, against five invariants:
+ * frames that fire late, against six invariants:
  * - a drop lands at most once,
  * - nothing lands after a cancel,
  * - a drop that waits is never lost: a flush (a new drag, a key press)
  *   lands it at once,
+ * - a key press while a drop waits steps on from where the drop landed,
+ *   never from where the board last drew the token,
  * - the route a drop lands with is the settled route to the drop's spot,
  *   as a fresh search finds it in the world as it is when it lands,
  * - no search state outlives its drag.
@@ -102,6 +105,9 @@ function run(seed: number): void {
   const span = (n: number) => Math.floor(rand() * (n - (big ? 2 : 1)) / step) * step;
   const spot = (): Point => ({ x: span(W), y: span(H) });
   const landings: { at: Point; answer: Settled; input: WalkInput }[] = [];
+  // Where the room has the token: the drop's spot once it lands. The board draws it where the drag began.
+  const drawn = { id: "t", sceneId: "s", size, x: 0, y: 0, elevation: 0 };
+  let standing: Point = { x: 0, y: 0 };
   let cancelled = false;
   let dropped: Point | null = null;
   const events = 20 + Math.floor(rand() * 60);
@@ -120,13 +126,18 @@ function run(seed: number): void {
       // A second drop while the first waits is the board's mistake to make: it is ignored, and the first lands.
       const at = spot();
       dropped ??= at;
-      const land = (answer: Settled) => landings.push({ at, answer, input: built });
+      const land = (answer: Settled) => {
+        landings.push({ at, answer, input: built });
+        standing = at;
+      };
       drag.drop(at, land);
     } else if (r < 0.97) {
-      // A new drag starts, or an arrow key is pressed, while a drop may wait.
+      // A new drag starts, or an arrow key is pressed, while a drop may wait: as stageHooks' plan does, the drop lands, then the press reads where the token stands.
       const waiting = dropped !== null && !cancelled && landings.length === 0;
       drag.flush();
       if (waiting) assert.equal(landings.length, 1, `seed ${seed}: a flush lost the waiting drop`);
+      const press = rebased({ t: { ...drawn, ...standing } }, drawn, { x: drawn.x + 1, y: drawn.y });
+      if (waiting) assert.deepEqual([press.token.x, press.token.y, press.at.x, press.at.y], [standing.x, standing.y, standing.x + 1, standing.y], `seed ${seed}: the press stepped from where the board drew the token`);
     } else {
       cancelled = true;
       drag.cancel();
@@ -157,7 +168,7 @@ function run(seed: number): void {
 }
 
 describe("the drag's search as a state machine (12)", () => {
-  test("random drags keep the five invariants", () => {
+  test("random drags keep the six invariants", () => {
     for (let seed = 1; seed <= 400; seed++) run(seed);
   });
 

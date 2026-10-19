@@ -7,7 +7,7 @@ import type { OpAnswer } from "../../state/types.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi } from "../../state/view.ts";
 import { pathNow } from "../measure/movement.ts";
-import { dropMode, keyStep, planGroup, planOne, planWalk, routeTarget, type DropPlan, type DropToken, type Found, type Point, type Role, type Stop } from "./drop.ts";
+import { dropMode, keyStep, planGroup, planOne, planWalk, rebased, routeTarget, type DropPlan, type DropToken, type Found, type Point, type Role, type Stop } from "./drop.ts";
 import { walkPreview } from "./preview.ts";
 import { RouteDrag, type Frames, type RouteAnswer } from "./routeDrag.ts";
 import { sendPlan } from "./send.ts";
@@ -216,11 +216,14 @@ export function useDragStops(role: Role): DragStops {
         if (!route || route.tokenId !== tokenId) return {};
         return { ...(route.corners.length > 0 ? { path: route.corners.flatMap((c) => [c.x, c.y]) } : {}), ft: route.read.dragFt };
       },
-      plan(node, token, group) {
-        const at = raw?.tokenId === token.id ? { x: raw.x, y: raw.y } : { x: node.x(), y: node.y() };
+      plan(node, drawn, drawnGroup) {
+        const asked = raw?.tokenId === drawn.id ? { x: raw.x, y: raw.y } : { x: node.x(), y: node.y() };
+        // A drop still waiting lands first, and the press steps on from where it put the token.
         reset(true);
         const view = store.getState().view;
         if (!view) return NOTHING;
+        const { token, at } = rebased(view.tokens, drawn, asked);
+        const group = drawnGroup.map((t) => rebased(view.tokens, t, t).token);
         const mode = dropMode(role, view.scenes[token.sceneId]);
         if (group.length > 1) return planGroup(view, group, at.x - token.x, at.y - token.y, mode);
         const full = view.tokens[token.id];
