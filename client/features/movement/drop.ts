@@ -1,7 +1,7 @@
 import type { BuildChunk, Scene, Token } from "#shared/model.ts";
 import { MAX_MOVES, MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type ClientOp, type DoorRef, type OpOf } from "#shared/protocol.ts";
 import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
-import { canSqueeze, footprintSize } from "#shared/rules/footprint.ts";
+import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround, standing } from "#shared/rules/heights.ts";
 import { landing, legStop, previewSqueezed, squeezeFits, type DropMode } from "#shared/rules/movement.ts";
 import { routeLattice, routePoints, routeReach, type RoutePiece } from "#shared/rules/route.ts";
@@ -172,16 +172,22 @@ export function routeTarget(state: BuildState, token: DropToken, raw: Point): Po
 /**
  * A route past 64 pieces, cut where the drop can land (5.2): at the last
  * piece end, no later than the 64th, where the creature stands as a drop
- * would, squeezed only where the squeeze is a real one (`squeezeFits`) and
- * not squeezing where nothing pinches it. Null when the route needs no cut,
- * or no piece end is such a spot.
+ * would, squeezed only where the squeeze is a real one (`squeezeFits`), and
+ * where nothing pinches it only on its own snap grid from where it stands,
+ * as `routeSpots` counts a stand. Null when the route needs no cut, or no
+ * piece end is such a spot.
  */
 export function cutRoute(state: BuildState, token: DropToken, pieces: readonly RoutePiece[]): { pieces: RoutePiece[]; at: Point & { squeeze: boolean } } | null {
   if (pieces.length <= MAX_ROUTE_PIECES) return null;
+  const grid = snapStep(token);
+  const onGrid = (v: number, from: number) => Math.abs((v - from) / grid - Math.round((v - from) / grid)) < 1e-9;
   for (let k = MAX_ROUTE_PIECES; k > 0; k--) {
     const [x, y] = pieces[k - 1]!;
     const at = { x, y };
-    if (!previewSqueezed(state, token, at)) return { pieces: pieces.slice(0, k), at: { ...at, squeeze: false } };
+    if (!previewSqueezed(state, token, at)) {
+      if (onGrid(x, token.x) && onGrid(y, token.y)) return { pieces: pieces.slice(0, k), at: { ...at, squeeze: false } };
+      continue;
+    }
     if (squeezeFits(state, token, at)) return { pieces: pieces.slice(0, k), at: { ...at, squeeze: true } };
   }
   return null;

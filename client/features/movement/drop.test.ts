@@ -266,6 +266,14 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     // The 64th ends at y 13, half a square off it: the cut steps back to the 63rd.
     const offGrid = planWalk(state, ogre, { x: 9.5, y: 15.5 }, "free", { kind: "route", route: { pieces: [...above, ...down([12.5, 13, 13.5, 14, 14.5, 15, 15.5])] } }, 5);
     assert.deepEqual([offGrid.moves[0]!.x, offGrid.moves[0]!.y, offGrid.moves[0]!.squeeze, offGrid.moves[0]!.route!.length], [9.5, 12.5, true, 63]);
+    // On open ground, where nothing pinches it, a cut lands only on the creature's own grid from where it stands: half a square off it, the cut steps back.
+    const open = world({});
+    const half = Array.from({ length: 70 }, (_, i): [number, number, number, 0 | 1] => [4, 0.5 * (i + 1), 0, 0]);
+    const cut = planWalk(open, ogre, { x: 4, y: 35 }, "free", { kind: "route", route: { pieces: half } }, 5);
+    assert.deepEqual([cut.moves[0]!.x, cut.moves[0]!.y, cut.moves[0]!.squeeze, cut.moves[0]!.route!.length], [4, 32, undefined, 64]);
+    // The 64th piece ends at y 32.5.
+    const odd = planWalk(open, ogre, { x: 4, y: 35 }, "free", { kind: "route", route: { pieces: half.map(([x, y, e, w]): [number, number, number, 0 | 1] => [x, y + 0.5, e, w]) } }, 5);
+    assert.deepEqual([odd.moves[0]!.y, odd.moves[0]!.route!.length], [32, 63]);
   });
 
   test("the route's spot is the drop's own, squeezed where the creature squeezes, on the lattice from where it stands", () => {
