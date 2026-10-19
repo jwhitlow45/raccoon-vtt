@@ -149,6 +149,36 @@ describe("walking around walls (docs/design-v1-movement.md 4.4, 5)", () => {
     }
   });
 
+  test("two spots traced by turns on one search both finish: neither's trace is thrown away for the other's (review ASTRA-12)", () => {
+    // Two rulers from a Large creature past a short wall, their ends five squares apart, asked a slice each by turns.
+    const w = world({ w: 200, h: 200, edges: line("w", 20, 0, 5) });
+    const i = input(w, tok(w, { size: "large", x: 2, y: 2 }));
+    const ends = [
+      { x: 81, y: 3 },
+      { x: 86, y: 3 },
+    ];
+    const alone = ends.map((to) => {
+      const s = new WalkSearch(new WalkWorld(i));
+      s.settle(to);
+      return s.routeTo(to)!;
+    });
+    const search: WalkSearch = new WalkSearch(new WalkWorld(i), undefined, () => search.work);
+    const got: (WalkRoute | null | "paused")[] = ["paused", "paused"];
+    let turns = 0;
+    for (; got.includes("paused") && turns < 20_000; turns++) {
+      const k = turns % 2;
+      if (got[k] !== "paused") continue;
+      const deadline = search.work + 500;
+      const settled = search.settle(ends[k]!, deadline);
+      got[k] = settled === "paused" ? "paused" : search.traceTo(ends[k]!, deadline);
+    }
+    assert.ok(!got.includes("paused"), `still searching after ${turns} turns`);
+    assert.deepEqual(
+      got.map((r) => (r as WalkRoute).pieces),
+      alone.map((r) => r.pieces),
+    );
+  });
+
   test("through an open door, and not a closed one or a secret door nobody found", () => {
     const wall = (door: EdgeFeature) => world({ edges: { ...line("w", 5, 0, 30), "5,4,w": door } });
     const open = wall(OPEN_DOOR);

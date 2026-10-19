@@ -70,7 +70,13 @@ function sameBasis(a: Basis, b: Basis): boolean {
  * leaves those parts alone, such as a chat line or a die roll:
  * - searches for the legs of the rulers drawn, one per leg start, world and
  *   5-10-5 residue, so a stop dragged around reuses the search of its leg,
- *   as a drag's search serves every spot the finger visits.
+ *   as a drag's search serves every spot the finger visits, and two rulers
+ *   from one spot share one.
+ * - Each ruler's progress, by its stops and viewer: its legs answered and
+ *   the search of the leg it is on. The shared caches above may let either
+ *   go for room, but a ruler's own progress goes only with the ruler, so
+ *   no number of rulers searching at once can undo each other's progress
+ *   (review ASTRA-12).
  * - Each ruler's finished walk, by its stops and viewer, so a kept ruler
  *   is not walked again for every op.
  */
@@ -84,11 +90,22 @@ const MAX_LEGS = 4096;
  */
 type LegAnswer = { kind: "open" } | { kind: "route"; pieces: RoutePiece[] } | { kind: "none" };
 
-let kept: { basis: Basis; searches: Map<string, WalkSearch>; pending: Set<string>; legs: Map<string, LegAnswer>; walks: WeakMap<readonly RulerStop[], Map<string, WalkMeasure>> } | null = null;
+/** A ruler's walk so far: each leg's answer by its place, and the search of the leg still searching. */
+type Progress = { answers: LegAnswer[]; on: { key: string; search: WalkSearch } | null };
 
-function keptFor(view: RoomState, sceneId: string): NonNullable<typeof kept> {
+type Kept = {
+  basis: Basis;
+  searches: Map<string, WalkSearch>;
+  legs: Map<string, LegAnswer>;
+  progress: WeakMap<readonly RulerStop[], Map<string, Progress>>;
+  walks: WeakMap<readonly RulerStop[], Map<string, WalkMeasure>>;
+};
+
+let kept: Kept | null = null;
+
+function keptFor(view: RoomState, sceneId: string): Kept {
   const basis = basisOf(view, sceneId);
-  if (!kept || !sameBasis(kept.basis, basis)) kept = { basis, searches: new Map(), pending: new Set(), legs: new Map(), walks: new WeakMap() };
+  if (!kept || !sameBasis(kept.basis, basis)) kept = { basis, searches: new Map(), legs: new Map(), progress: new WeakMap(), walks: new WeakMap() };
   return kept;
 }
 
@@ -96,24 +113,22 @@ function searchKey(walker: Token, everything: boolean, counter: DiagonalCounter)
   return `${walker.id},${walker.size},${walker.w},${walker.h},${walker.x},${walker.y},${walker.elevation},${walker.squeeze === true},${counter.h},${counter.v},${everything}`;
 }
 
-/** A leg start's search, made when first asked for. Over the cap the oldest goes, one still searching last of all, so no ruler pushes out its own unfinished leg. */
+/** A leg start's search, made when first asked for. Over the cap the one asked for longest ago goes: a ruler still searching holds its own (Progress). */
 function searchFor(view: RoomState, walker: Token, viewer: WalkViewer, everything: boolean, counter: DiagonalCounter, key: string): WalkSearch {
   const kept = keptFor(view, walker.sceneId);
   let search = kept.searches.get(key);
-  if (!search) {
+  if (search) kept.searches.delete(key);
+  else {
     const world = publicWorld(view, walker, viewer, [], { creatures: false, everything, seenGround: !everything });
     search = new WalkSearch(new WalkWorld({ ...world.input, prone: false, counter }));
-    if (kept.searches.size >= MAX_SEARCHES) {
-      const done = [...kept.searches.keys()].find((k) => !kept.pending.has(k));
-      kept.searches.delete(done ?? kept.searches.keys().next().value!);
-    }
-    kept.searches.set(key, search);
+    if (kept.searches.size >= MAX_SEARCHES) kept.searches.delete(kept.searches.keys().next().value!);
   }
+  kept.searches.set(key, search);
   return search;
 }
 
 /** A leg's answer, searched within the slice: null while it is still searching, or when the slice is over before it begins. */
-function legAnswer(view: RoomState, walker: Token, input: WalkInput & { deadline?: number }, counter: DiagonalCounter, target: Point, slice: { began: boolean }): LegAnswer | null {
+function legAnswer(view: RoomState, walker: Token, input: WalkInput & { deadline?: number }, counter: DiagonalCounter, target: Point, slice: { began: boolean }, progress: Progress): LegAnswer | null {
   const kept = keptFor(view, walker.sceneId);
   const key = searchKey(walker, input.everything, counter);
   const legKey = `${key}|${target.x},${target.y}`;
@@ -122,7 +137,7 @@ function legAnswer(view: RoomState, walker: Token, input: WalkInput & { deadline
   // Past the deadline no leg begins but the slice's first, so each slice answers one leg at least and a ruler of many legs never builds every leg's world in one frame.
   if (slice.began && input.deadline !== undefined && performance.now() > input.deadline) return null;
   slice.began = true;
-  const search = searchFor(view, walker, input.viewer, input.everything, counter, key);
+  const search = progress.on?.key === key ? progress.on.search : searchFor(view, walker, input.viewer, input.everything, counter, key);
   let answer: LegAnswer;
   if (openLeg(search.world, target)) answer = { kind: "open" };
   else {
@@ -130,12 +145,12 @@ function legAnswer(view: RoomState, walker: Token, input: WalkInput & { deadline
     // The trace shares the slice: a ruler's frame never runs past it.
     const traced = settled === "settled" ? search.traceTo(target, input.deadline) : null;
     if (settled === "paused" || traced === "paused") {
-      kept.pending.add(key);
+      progress.on = { key, search };
       return null;
     }
     answer = traced ? { kind: "route", pieces: traced.pieces } : { kind: "none" };
   }
-  kept.pending.delete(key);
+  progress.on = null;
   if (kept.legs.size >= MAX_LEGS) kept.legs.delete(kept.legs.keys().next().value!);
   kept.legs.set(legKey, answer);
   return answer;
@@ -152,10 +167,15 @@ export type WalkInput = { view: RoomState; sceneId: string; stops: readonly Rule
  */
 export function measureWalk(input: WalkInput & { deadline?: number }): WalkMeasure | null {
   const { view, stops } = input;
-  const memo = keptFor(view, input.sceneId).walks;
+  const room = keptFor(view, input.sceneId);
+  const memo = room.walks;
   const memoKey = `${input.sceneId},${input.viewer.role},${input.everything}`;
   const known = memo.get(stops)?.get(memoKey);
   if (known) return known;
+  const byRuler = room.progress.get(stops) ?? new Map<string, Progress>();
+  room.progress.set(stops, byRuler);
+  const progress = byRuler.get(memoKey) ?? { answers: [], on: null };
+  byRuler.set(memoKey, progress);
   const first = stops[0];
   let walker = first ? walkerAt(view, input.sceneId, first) : null;
   if (!walker || stops.length < 2) return null;
@@ -168,7 +188,7 @@ export function measureWalk(input: WalkInput & { deadline?: number }): WalkMeasu
   let extraFt = 0;
   let searching = false;
   const slice = { began: false };
-  for (const drawn of stops.slice(1)) {
+  for (const [k, drawn] of stops.slice(1).entries()) {
     // A stop on a token is where that token stands now, as the straight ruler reads it. One this view cannot resolve stays where it was drawn.
     const on = drawn.tokenId ? view.tokens[drawn.tokenId] : undefined;
     const stop = on ? tokenStop(on) : drawn;
@@ -180,7 +200,8 @@ export function measureWalk(input: WalkInput & { deadline?: number }): WalkMeasu
     let corners: Point[] = [];
     let none = false;
     // Past a leg still searching, the walker's later legs start from where it would land, never searched until it is known: they would only push its search out.
-    const answer = searching ? null : legAnswer(view, walker, input, counter, target, slice);
+    const answer = progress.answers[k] ?? (searching ? null : legAnswer(view, walker, input, counter, target, slice, progress));
+    if (answer) progress.answers[k] = answer;
     if (!answer) {
       searching = true;
       legs.push({ from, to: { x: target.x, y: target.y }, corners, ft: 0, none, searching: true });

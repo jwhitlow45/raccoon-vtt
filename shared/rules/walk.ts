@@ -553,7 +553,13 @@ export class WalkSearch {
   #capped = false;
   /** Each traced spot's walk, by node. */
   readonly #routes = new Map<number, WalkRoute>();
-  /** The trace under way, for one spot at a time: aiming elsewhere starts it again there. */
+  /**
+   * The trace under way. One at a time, and never thrown away: asked for
+   * another spot first, it is finished in that caller's slices, and kept,
+   * before the next begins, so two rulers on one search never undo each
+   * other's progress (review ASTRA-12). A drag's finger gone on to another
+   * spot pays at most the one trace it left.
+   */
   #job: TraceJob | null = null;
   readonly #traced: number;
   readonly #clock: () => number;
@@ -802,7 +808,13 @@ export class WalkSearch {
     const known = this.#routes.get(n);
     if (known) return known;
     const late = this.#lateness(deadline);
-    if (this.#job?.target !== n) this.#job = this.#startTrace(n);
+    // Another spot's trace under way is finished first, never thrown away.
+    if (this.#job && this.#job.target !== n) {
+      if (!this.#runTrace(this.#job, late)) return "paused";
+      this.#routes.set(this.#job.target, this.#job.route!);
+      this.#job = null;
+    }
+    this.#job ??= this.#startTrace(n);
     if (!this.#runTrace(this.#job, late)) return "paused";
     const route = this.#job.route!;
     this.#job = null;

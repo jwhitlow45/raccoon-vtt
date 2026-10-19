@@ -10,6 +10,16 @@ import { measureWalk, saveWalk, savedWalk, walkText } from "./walkRuler.ts";
 
 /** The ruler's walking mode (docs/design-v1-movement.md 3.3). */
 
+function mulberry32(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 /** A wall along x = 6 from the top down to y = 10, so a walk from the left side to the right goes round its end. */
 function room(): RoomState {
   return world({ edges: line("w", 6, 0, 10) });
@@ -176,6 +186,80 @@ describe("the walking ruler", () => {
     }
     assert.ok(slices >= 20, `${slices} slices`);
     assert.deepEqual(m.legs, whole.legs);
+  });
+
+  test("rulers searching by turns all finish: two from one creature on one search, and more than the searches kept (review ASTRA-12)", () => {
+    // Two rulers from a Large creature past a short wall, ends five squares apart, as astra drew them.
+    const state = world({ edges: line("w", 20, 0, 5), tokens: [token("ogre", { size: "large", x: 2, y: 2 })] });
+    state.scenes.s1 = { ...state.scenes.s1!, bounds: { w: 200, h: 200 } };
+    const at = tokenStop(state.tokens.ogre!);
+    const byTurns = (rulers: RulerStop[][], view: RoomState, turns: number) => {
+      const got: (ReturnType<typeof measureWalk> | undefined)[] = rulers.map(() => undefined);
+      let t = 0;
+      for (; t < turns && got.some((m) => m?.searching !== false); t++) {
+        const k = t % rulers.length;
+        if (got[k]?.searching === false) continue;
+        got[k] = measureWalk({ view, sceneId: "s1", stops: rulers[k]!, viewer: { role: "player" }, everything: false, deadline: -Infinity });
+      }
+      assert.ok(got.every((m) => m?.searching === false), `still searching after ${t} turns`);
+      return got.map((m) => m!);
+    };
+    // Each alone in a copy of the room, so it shares nothing kept with the others.
+    const alone = (view: RoomState, stops: RulerStop[]) => measureWalk({ view: structuredClone(view), sceneId: "s1", stops, viewer: { role: "player" }, everything: false })!.legs;
+    const two = [
+      [at, free(81, 3)],
+      [at, free(86, 3)],
+    ];
+    assert.deepEqual(
+      byTurns(two, state, 20_000).map((m) => m.legs),
+      two.map((stops) => alone(state, stops)),
+    );
+    // 40 rulers at once, each from a spot of its own, round a wall: more searches than are kept, none pushes out another's.
+    const walled = world({ edges: line("w", 6, 0, 28) });
+    const many = Array.from({ length: 40 }, (_, k) => [free(1 + (k % 4), 1 + Math.floor(k / 4) * 2), free(9 + (k % 3), 2 + (k % 20))]);
+    assert.deepEqual(
+      byTurns(many, walled, 200_000).map((m) => m.legs),
+      many.map((stops) => alone(walled, stops)),
+    );
+  });
+
+  test("random rulers searched by turns, their stops moved and the room changed between, all finish with the walk each reads alone", () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const rand = mulberry32(seed);
+      const edgesOf = () => {
+        const edges: Record<string, EdgeFeature> = {};
+        for (let y = 0; y < 30; y++) for (let x = 1; x < 30; x++) if (rand() < 0.12) edges[`${x},${y},${rand() < 0.5 ? "w" : "n"}`] = WALL;
+        return edges;
+      };
+      const ogre = token("ogre", { size: rand() < 0.3 ? "large" : "medium", x: 0, y: 0 });
+      let view = world({ edges: edgesOf(), tokens: [ogre] });
+      const spot = () => free(Math.floor(rand() * 28), Math.floor(rand() * 28));
+      // Rulers often start on one creature or spot, so they share searches.
+      const starts = [tokenStop(ogre), free(1, 1)];
+      const rulers = Array.from({ length: 2 + Math.floor(rand() * 4) }, () => [starts[Math.floor(rand() * 2)]!, ...Array.from({ length: 1 + Math.floor(rand() * 3) }, spot)]);
+      const measure = (k: number) => measureWalk({ view, sceneId: "s1", stops: rulers[k]!, viewer: { role: "player" }, everything: false, deadline: -Infinity })!;
+      for (let turn = 0; turn < 300; turn++) {
+        const r = rand();
+        const k = Math.floor(rand() * rulers.length);
+        if (r < 0.8) measure(k);
+        else if (r < 0.95) {
+          // A stop dragged to a new spot: a new stops list, as the board makes one.
+          const moved = [...rulers[k]!];
+          moved[1 + Math.floor(rand() * (moved.length - 1))] = spot();
+          rulers[k] = moved;
+        } else view = world({ edges: edgesOf(), tokens: [ogre] });
+      }
+      const done = rulers.map(() => false);
+      for (let turn = 0; turn < 100_000 && done.includes(false); turn++) {
+        const k = turn % rulers.length;
+        if (!done[k]) done[k] = !measure(k).searching;
+      }
+      assert.ok(!done.includes(false), `seed ${seed}: a ruler never finished`);
+      const finals = rulers.map((_, k) => measure(k));
+      for (const [k, stops] of rulers.entries()) {
+        assert.deepEqual(finals[k]!.legs, measureWalk({ view: structuredClone(view), sceneId: "s1", stops, viewer: { role: "player" }, everything: false })!.legs, `seed ${seed}: ruler ${k}`);
+      }
+    }
   });
 
   test("Measure is remembered on the device, Straight when storage fails", () => {

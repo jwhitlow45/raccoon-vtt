@@ -9,8 +9,9 @@ import { RouteDrag, type Frames, type Settled } from "./routeDrag.ts";
 
 /**
  * The drag's search as a state machine (docs/design-v1-movement.md 12):
- * random runs of finger moves, frames, drops, cancels, wall changes and
- * frames that fire late, against six invariants:
+ * random runs of finger moves, often back to a spot visited before while
+ * another spot's trace is under way, frames, drops, cancels, wall changes
+ * and frames that fire late, against six invariants:
  * - a drop lands at most once,
  * - nothing lands after a cancel,
  * - a drop that waits is never lost: a flush (a new drag, a key press)
@@ -103,7 +104,14 @@ function run(seed: number): void {
   const drag = new RouteDrag(() => (built = current), frames);
   const step = big ? 0.5 : 1;
   const span = (n: number) => Math.floor(rand() * (n - (big ? 2 : 1)) / step) * step;
-  const spot = (): Point => ({ x: span(W), y: span(H) });
+  const visited: Point[] = [];
+  const spot = (): Point => {
+    // Back to a spot visited before, whose trace was put aside for a later one's, or the finger on to a new one.
+    if (visited.length > 0 && rand() < 0.4) return visited[Math.floor(rand() * visited.length)]!;
+    const at = { x: span(W), y: span(H) };
+    visited.push(at);
+    return at;
+  };
   const landings: { at: Point; answer: Settled; input: WalkInput }[] = [];
   // Where the room has the token: the drop's spot once it lands. The board draws it where the drag began.
   const drawn = { id: "t", sceneId: "s", size, x: 0, y: 0, elevation: 0 };
