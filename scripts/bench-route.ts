@@ -108,15 +108,18 @@ export function cases(): Case[] {
   ];
 }
 
-/** One search as a drag runs it: the world built, then settled to a spot or flooded to a cost. */
+/** One search as a drag runs it: the world built, then settled to a spot and its route traced, or flooded to a cost. */
 function runCase(c: Case): number {
   const sceneId = Object.keys(c.state.scenes)[0]!;
   // On its own ground, so a walker on the stairs stands on them.
   const token = { ...c.token, sceneId, elevation: footprintGround(c.state.buildChunks, { ...c.token, sceneId }) };
   const input: WalkInput = { build: c.state, token, rules: { feetPerCell: 5, diagonal: c.diagonal ?? "five" }, seen: null, creatures: [], areas: [], prone: false, counter: { h: 0, v: 0 } };
   const search = new WalkSearch(new WalkWorld(input));
-  if (c.to) search.settle(c.to);
-  else search.flood(c.limit ?? Infinity);
+  // A spot's row times the completed route, the trace with the fewest corners included (review ASTRA-08).
+  if (c.to) {
+    search.settle(c.to);
+    search.routeTo(c.to);
+  } else search.flood(c.limit ?? Infinity);
   return search.settled;
 }
 
@@ -156,6 +159,50 @@ export function runTraceRow(runs = 15): RouteRow {
  */
 export function runLongTraceRow(runs = 15): RouteRow {
   return { ...traceRow("Large past a 60-square wall, about 148 squares: the trace, bounded", 10, 60, { x: 150, y: 72 }, runs), budget: 40 };
+}
+
+/**
+ * The same walk as a drag finds it, a 4 ms slice a frame (review ASTRA-08):
+ * the settle and then the trace, each slice ended by the same deadline. Rows:
+ * the whole route over all its slices, and the longest slice, which a frame
+ * pays. `settled` holds the slices.
+ */
+export function runSlicedRows(runs = 15): RouteRow[] {
+  const SLICE = 4;
+  const edges = new Map<string, EdgeFeature>();
+  for (let y = 0; y < 60; y++) edges.set(`10,${y},w`, { kind: "wall" });
+  const sceneId = "bench-route-sliced";
+  const state = stateOf({ cells: new Map(), edges, walls: [], heights: new Map() }, sceneId);
+  const token = { size: "large" as const, x: 2, y: 2, elevation: 0, sceneId };
+  const to = { x: 150, y: 72 };
+  const whole: number[] = [];
+  const longest: number[] = [];
+  let slices = 0;
+  for (let r = 0; r < runs + 3; r++) {
+    forgetStepCaches();
+    const search = new WalkSearch(new WalkWorld({ build: state, token, rules: { feetPerCell: 5, diagonal: "five" }, seen: null, creatures: [], areas: [], prone: false, counter: { h: 0, v: 0 } }));
+    let total = 0;
+    let worst = 0;
+    let n = 0;
+    for (let done = false; !done; n++) {
+      const t = performance.now();
+      const settled = search.settle(to, t + SLICE);
+      done = settled !== "paused" && (settled !== "settled" || search.traceTo(to, t + SLICE) !== "paused");
+      const spent = performance.now() - t;
+      total += spent;
+      worst = Math.max(worst, spent);
+    }
+    if (r >= 3) {
+      whole.push(total);
+      longest.push(worst);
+      slices = n;
+    }
+  }
+  const row = "Large past a 60-square wall, about 148 squares, as a drag finds it";
+  return [
+    { row: `${row}: settle and trace, ${SLICE} ms slices (settled holds the slices)`, settled: slices, ms: stats(whole) },
+    { row: `${row}: its longest slice`, settled: slices, ms: stats(longest) },
+  ];
 }
 
 function traceRow(row: string, wallX: number, wallLength: number, to: { x: number; y: number }, runs: number): RouteRow {
@@ -265,7 +312,7 @@ if (argv?.[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scrip
   // The walking ruler's and the public world's rows read client code and the test rooms, so only the Node run loads them, never the Chrome bundle.
   const nodeOnly = "./bench-ruler.ts";
   const { runPublicWorldRow, runRulerRows } = (await import(/* @vite-ignore */ nodeOnly)) as typeof import("./bench-ruler.ts");
-  console.log(formatRouteBench([...runRouteBench(), runTraceRow(), runLongTraceRow(), runRouteSeenRow(), runPublicWorldRow(), ...runRulerRows()]));
+  console.log(formatRouteBench([...runRouteBench(), runTraceRow(), runLongTraceRow(), ...runSlicedRows(), runRouteSeenRow(), runPublicWorldRow(), ...runRulerRows()]));
   if (argv.includes("--chrome")) {
     console.log("");
     console.log(await runChrome());

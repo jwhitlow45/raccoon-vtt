@@ -477,6 +477,26 @@ function cellFlags(input: WalkInput, W: number, H: number, walker: boolean): Uin
 /** A traced walk: its states from the start, and for each the step that reached it (the start's is empty). */
 type TracedWalk = { states: number[]; dir: number[]; extra: number[]; swim: number[]; dz: number[] };
 
+type TraceEdge = { from: number; to: number; d: number; extra: number; swim: number; dz: number };
+
+/** A trace under way for one spot: back over the cheapest steps, then forward counting corners. `walk` is its answer, null past MAX_TRACED. */
+type TraceJob = {
+  target: number;
+  phase: "back" | "forward" | "done";
+  q: number;
+  k: number;
+  index: Map<number, number>;
+  states: number[];
+  edges: TraceEdge[];
+  into: Map<number, number[]>;
+  order: number[] | null;
+  corners: Float64Array | null;
+  len: Float64Array | null;
+  prev: Int32Array | null;
+  via: Int32Array | null;
+  walk: TracedWalk | null;
+};
+
 /** The answer to `settle`: the spot is settled, no route reaches it, the search hit its cap, or the time slice ran out. */
 export type SettleResult = "settled" | "unreachable" | "capped" | "paused";
 
@@ -521,6 +541,8 @@ export class WalkSearch {
   #capped = false;
   /** Each traced spot's walk, by node. */
   readonly #routes = new Map<number, WalkRoute>();
+  /** The trace under way, for one spot at a time: aiming elsewhere starts it again there. */
+  #job: TraceJob | null = null;
   readonly #traced: number;
   #toH = 0;
   #toV = 0;
@@ -741,16 +763,37 @@ export class WalkSearch {
    * the direction, the extra, the swimming foot or the change of height per
    * step changes, a 5-10-5 diagonal that climbs on its own, so a piece's
    * feet are its steps' (route.ts `routeFeet`). Under true distance the
-   * route is pulled taut (5.4).
+   * route is pulled taut (5.4). The whole trace at once: a drag and a
+   * ruler use `traceTo` a slice at a time.
    */
   routeTo(to: Point): WalkRoute | null {
-    const world = this.world;
-    const n = world.nodeAt(to);
+    const route = this.traceTo(to);
+    return route === "paused" ? null : route;
+  }
+
+  /**
+   * `routeTo` within a time slice, as `settle` runs (review ASTRA-08): past
+   * `deadline` the trace pauses, and asked again for the same spot it goes
+   * on where it stopped. Its answer is the same however it was sliced. Once
+   * a spot is traced its walk is kept, so the finger's every return to it
+   * and a ruler's every frame reuse it.
+   */
+  traceTo(to: Point, deadline = Infinity): WalkRoute | null | "paused" {
+    const n = this.world.nodeAt(to);
     if (n < 0 || this.#best[n]! < 0) return null;
-    // Once a spot is settled its walk never changes, so the finger's every return to it, and a ruler's every frame, reuse it.
     const known = this.#routes.get(n);
     if (known) return known;
-    const walk = this.#fewestCorners(n) ?? this.#firstArrival(n);
+    if (this.#job?.target !== n) this.#job = this.#startTrace(n);
+    const job = this.#job;
+    if (!this.#runTrace(job, deadline)) return "paused";
+    this.#job = null;
+    const route = this.#piecesOf(job.walk ?? this.#firstArrival(n));
+    this.#routes.set(n, route);
+    return route;
+  }
+
+  #piecesOf(walk: TracedWalk): WalkRoute {
+    const world = this.world;
     const chain = walk.states;
     const first = chain[0]!;
     const points: RoutePoint[] = [{ x: world.xOf(this.#node[first]!), y: world.yOf(this.#node[first]!), elevation: world.input.token.elevation }];
@@ -780,9 +823,7 @@ export class WalkSearch {
       }
     }
     const last = points[points.length - 1]!;
-    const route = { pieces, points, endsBlocked: world.endOnly(last.x, last.y, last.elevation) };
-    this.#routes.set(n, route);
-    return route;
+    return { pieces, points, endsBlocked: world.endOnly(last.x, last.y, last.elevation) };
   }
 
   /** The walk the search first arrived by, each state's own step: the trace's answer past MAX_TRACED. */
@@ -804,126 +845,153 @@ export class WalkSearch {
     return walk;
   }
 
-  /**
+  /*
    * The walk to a settled node with the fewest corners, then the shortest
    * length on the map, among all its cheapest walks (5.3). The search keeps
    * one state per node and residues, so two equal arrivals from different
    * directions keep only the first, and the one dropped may have bent less
    * on the way on. So the trace looks again over every step that keeps the
-   * cost exact, the steps of some cheapest walk, back from the node, and
-   * counts corners along them by the direction each arrives from. It runs
-   * once per traced spot and leaves the search as it was. Null past
-   * MAX_TRACED states.
+   * cost exact, the steps of some cheapest walk, back from the node, then
+   * forward, cheapest first, counting corners by the direction each step
+   * arrives from. It leaves the search as it was. Past MAX_TRACED states it
+   * gives up for the first arrival's walk.
    */
-  #fewestCorners(target: number): TracedWalk | null {
-    const world = this.world;
+  #startTrace(target: number): TraceJob {
     const goalCost = this.#cost[this.#best[target]!]!;
-    // Back from the goal: every settled state with a step into a state of the walk that keeps its cost exact.
-    const index = new Map<number, number>();
-    const states: number[] = [];
-    const edges: { from: number; to: number; d: number; extra: number; swim: number; dz: number }[] = [];
-    const add = (s: number) => {
-      if (index.has(s)) return;
-      index.set(s, states.length);
-      states.push(s);
-    };
+    const job: TraceJob = { target, phase: "back", q: 0, k: 0, index: new Map(), states: [], edges: [], into: new Map(), order: null, corners: null, len: null, prev: null, via: null, walk: null };
     // Every state at the spot as cheap as the first settled there, settled or not: once all cheaper states are settled their costs are final, so the trace is the same however far the search has run.
-    for (const s of this.#statesAt(target)) if (this.#cost[s] === goalCost) add(s);
-    for (let q = 0; q < states.length; q++) {
-      if (states.length > this.#traced) return null;
-      const t = states[q]!;
-      const b = this.#node[t]!;
-      const bx = world.xOf(b);
-      const by = world.yOf(b);
-      if (!world.seenAt(bx, by, b)) continue;
-      const eb = world.elevationAt(b);
-      const bi = b % world.nx;
-      const bj = Math.floor(b / world.nx);
-      for (let d = 0; d < 8; d++) {
-        const ai = bi - DX[d]!;
-        const aj = bj - DY[d]!;
-        if (ai < 0 || aj < 0 || ai >= world.nx || aj >= world.ny) continue;
-        const a = aj * world.nx + ai;
-        const from = this.#statesAt(a).filter((s) => this.#done[s] === 1 && this.#cost[s]! < this.#cost[t]!);
-        if (from.length === 0 || !world.wallsClear(a, d, b)) continue;
-        const ax = world.xOf(a);
-        const ay = world.yOf(a);
-        const ea = world.elevationAt(a);
-        const stops = world.endOnly(ax, ay, ea);
-        const { extra, swim } = world.extraOf(ax, ay, bx, by, eb, b);
-        for (const s of from) {
-          if (stops && this.#parent[s] !== -1) continue;
-          this.#advance(s, d, extra, eb - ea);
-          if (this.#toH !== this.#h[t] || this.#toV !== this.#v[t] || this.#toCost !== this.#cost[t]) continue;
-          add(s);
-          edges.push({ from: s, to: t, d, extra, swim, dz: Math.round((eb - ea) * 2) });
+    for (const s of this.#statesAt(target)) if (this.#cost[s] === goalCost) this.#traceAdd(job, s);
+    return job;
+  }
+
+  #traceAdd(job: TraceJob, s: number): void {
+    if (job.index.has(s)) return;
+    job.index.set(s, job.states.length);
+    job.states.push(s);
+  }
+
+  /** Runs a trace until it is done (true) or `deadline` passes, checked every few states. */
+  #runTrace(job: TraceJob, deadline: number): boolean {
+    const world = this.world;
+    // Counted from this call, as `settle` counts, so each call goes some way before it may pause.
+    let work = 0;
+    const late = () => deadline !== Infinity && ++work % 16 === 0 && performance.now() > deadline;
+    // Back from the goal: every settled state with a step into a state of the walk that keeps its cost exact.
+    if (job.phase === "back") {
+      const { states, edges } = job;
+      for (; job.q < states.length; job.q++) {
+        if (states.length > this.#traced) {
+          job.phase = "done";
+          return true;
         }
-      }
-    }
-    // Forward, cheapest first: the fewest corners and then the shortest length into each state by each direction it can arrive from, 8 standing for the start.
-    const m = states.length;
-    const corners = new Float64Array(m * 9).fill(Infinity);
-    const len = new Float64Array(m * 9).fill(Infinity);
-    const prev = new Int32Array(m * 9).fill(-1);
-    const via = new Int32Array(m * 9).fill(-1);
-    const into = new Map<number, number[]>();
-    for (const [k, e] of edges.entries()) {
-      const list = into.get(e.to);
-      if (list) list.push(k);
-      else into.set(e.to, [k]);
-    }
-    const order = states.map((_, k) => k).sort((x, y) => this.#cost[states[x]!]! - this.#cost[states[y]!]! || states[x]! - states[y]!);
-    for (const k of order) {
-      const t = states[k]!;
-      if (this.#parent[t] === -1) {
-        corners[k * 9 + 8] = 0;
-        len[k * 9 + 8] = 0;
-        continue;
-      }
-      for (const e of into.get(t) ?? []) {
-        const edge = edges[e]!;
-        const from = index.get(edge.from)!;
-        const step = (edge.d >= 4 ? Math.SQRT2 : 1) * world.L;
-        for (let dd = 0; dd < 9; dd++) {
-          const c0 = corners[from * 9 + dd]!;
-          if (c0 === Infinity) continue;
-          const c = c0 + (dd !== 8 && dd !== edge.d ? 1 : 0);
-          const l = len[from * 9 + dd]! + step;
-          const at = k * 9 + edge.d;
-          if (c < corners[at]! || (c === corners[at]! && l < len[at]!)) {
-            corners[at] = c;
-            len[at] = l;
-            prev[at] = from * 9 + dd;
-            via[at] = e;
+        if (late()) return false;
+        const t = states[job.q]!;
+        const b = this.#node[t]!;
+        const bx = world.xOf(b);
+        const by = world.yOf(b);
+        if (!world.seenAt(bx, by, b)) continue;
+        const eb = world.elevationAt(b);
+        const bi = b % world.nx;
+        const bj = Math.floor(b / world.nx);
+        for (let d = 0; d < 8; d++) {
+          const ai = bi - DX[d]!;
+          const aj = bj - DY[d]!;
+          if (ai < 0 || aj < 0 || ai >= world.nx || aj >= world.ny) continue;
+          const a = aj * world.nx + ai;
+          const from = this.#statesAt(a).filter((s) => this.#done[s] === 1 && this.#cost[s]! < this.#cost[t]!);
+          if (from.length === 0 || !world.wallsClear(a, d, b)) continue;
+          const ax = world.xOf(a);
+          const ay = world.yOf(a);
+          const ea = world.elevationAt(a);
+          const stops = world.endOnly(ax, ay, ea);
+          const { extra, swim } = world.extraOf(ax, ay, bx, by, eb, b);
+          for (const s of from) {
+            if (stops && this.#parent[s] !== -1) continue;
+            this.#advance(s, d, extra, eb - ea);
+            if (this.#toH !== this.#h[t] || this.#toV !== this.#v[t] || this.#toCost !== this.#cost[t]) continue;
+            this.#traceAdd(job, s);
+            const e = edges.length;
+            edges.push({ from: s, to: t, d, extra, swim, dz: Math.round((eb - ea) * 2) });
+            const list = job.into.get(t);
+            if (list) list.push(e);
+            else job.into.set(t, [e]);
           }
         }
       }
+      job.phase = "forward";
     }
-    // The goal state and arrival with the fewest corners, then the shortest length.
-    let end = -1;
-    for (let k = 0; k < m; k++) {
-      if (this.#node[states[k]!] !== target) continue;
-      for (let dd = 0; dd < 9; dd++) {
-        const at = k * 9 + dd;
-        if (corners[at] === Infinity) continue;
-        if (end < 0 || corners[at]! < corners[end]! || (corners[at] === corners[end] && len[at]! < len[end]!)) end = at;
+    // Forward, cheapest first: the fewest corners and then the shortest length into each state by each direction it can arrive from, 8 standing for the start.
+    if (job.phase === "forward") {
+      const { states, edges, index } = job;
+      const m = states.length;
+      if (!job.order) {
+        job.order = states.map((_, k) => k).sort((x, y) => this.#cost[states[x]!]! - this.#cost[states[y]!]! || states[x]! - states[y]!);
+        job.corners = new Float64Array(m * 9).fill(Infinity);
+        job.len = new Float64Array(m * 9).fill(Infinity);
+        job.prev = new Int32Array(m * 9).fill(-1);
+        job.via = new Int32Array(m * 9).fill(-1);
       }
+      const order = job.order;
+      const corners = job.corners!;
+      const len = job.len!;
+      const prev = job.prev!;
+      const via = job.via!;
+      for (; job.k < order.length; job.k++) {
+        if (late()) return false;
+        const k = order[job.k]!;
+        const t = states[k]!;
+        if (this.#parent[t] === -1) {
+          corners[k * 9 + 8] = 0;
+          len[k * 9 + 8] = 0;
+          continue;
+        }
+        for (const e of job.into.get(t) ?? []) {
+          const edge = edges[e]!;
+          const from = index.get(edge.from)!;
+          const step = (edge.d >= 4 ? Math.SQRT2 : 1) * world.L;
+          for (let dd = 0; dd < 9; dd++) {
+            const c0 = corners[from * 9 + dd]!;
+            if (c0 === Infinity) continue;
+            const c = c0 + (dd !== 8 && dd !== edge.d ? 1 : 0);
+            const l = len[from * 9 + dd]! + step;
+            const at = k * 9 + edge.d;
+            if (c < corners[at]! || (c === corners[at]! && l < len[at]!)) {
+              corners[at] = c;
+              len[at] = l;
+              prev[at] = from * 9 + dd;
+              via[at] = e;
+            }
+          }
+        }
+      }
+      // The goal state and arrival with the fewest corners, then the shortest length.
+      let end = -1;
+      for (let k = 0; k < m; k++) {
+        if (this.#node[states[k]!] !== job.target) continue;
+        for (let dd = 0; dd < 9; dd++) {
+          const at = k * 9 + dd;
+          if (corners[at] === Infinity) continue;
+          if (end < 0 || corners[at]! < corners[end]! || (corners[at] === corners[end] && len[at]! < len[end]!)) end = at;
+        }
+      }
+      const walk: TracedWalk = { states: [], dir: [], extra: [], swim: [], dz: [] };
+      for (let at = end; at >= 0; at = prev[at]!) {
+        walk.states.push(states[Math.floor(at / 9)]!);
+        const edge = via[at]! >= 0 ? edges[via[at]!]! : null;
+        walk.dir.push(edge ? edge.d : -1);
+        walk.extra.push(edge ? edge.extra : 0);
+        walk.swim.push(edge ? edge.swim : 0);
+        walk.dz.push(edge ? edge.dz : 0);
+      }
+      walk.states.reverse();
+      walk.dir.reverse();
+      walk.extra.reverse();
+      walk.swim.reverse();
+      walk.dz.reverse();
+      job.walk = walk;
+      job.phase = "done";
     }
-    const walk: TracedWalk = { states: [], dir: [], extra: [], swim: [], dz: [] };
-    for (let at = end; at >= 0; at = prev[at]!) {
-      walk.states.push(states[Math.floor(at / 9)]!);
-      const edge = via[at]! >= 0 ? edges[via[at]!]! : null;
-      walk.dir.push(edge ? edge.d : -1);
-      walk.extra.push(edge ? edge.extra : 0);
-      walk.swim.push(edge ? edge.swim : 0);
-      walk.dz.push(edge ? edge.dz : 0);
-    }
-    walk.states.reverse();
-    walk.dir.reverse();
-    walk.extra.reverse();
-    walk.swim.reverse();
-    walk.dz.reverse();
-    return walk;
+    return true;
   }
 
   /** Every state at a node: its horizontal residues at the starting vertical one, and the others where it has any. */

@@ -136,7 +136,9 @@ export function measureWalk(input: WalkInput & { deadline?: number }): WalkMeasu
     let none = false;
     // Past a leg still searching, the walker's later legs start from where it would land, unsearched until it is known.
     const answer = searching || openLeg(search.world, target) ? null : search.settle(target, input.deadline);
-    if (answer === "paused") searching = true;
+    // The trace shares the slice: a ruler's frame never runs past it.
+    const traced = answer === "settled" ? search.traceTo(target, input.deadline) : null;
+    if (answer === "paused" || traced === "paused") searching = true;
     if (searching) {
       legs.push({ from, to: { x: target.x, y: target.y }, corners, ft: 0, none, searching: true });
       walker = { ...walker, x: target.x, y: target.y, elevation: landing, ...(target.squeeze ? { squeeze: true as const } : { squeeze: undefined }) };
@@ -145,7 +147,7 @@ export function measureWalk(input: WalkInput & { deadline?: number }): WalkMeasu
     if (answer === null) {
       taken = straightCost(walker, walker, end, rules, counter);
     } else {
-      const route = answer === "settled" ? search.routeTo(target) : null;
+      const route = traced === "paused" ? null : traced;
       if (route) {
         const points = routePoints(view.buildChunks, walker, route.pieces, landing);
         taken = routeFeet(points, route.pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed: false, step: snapStep(walker) });

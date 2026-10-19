@@ -98,6 +98,28 @@ describe("walking around walls (docs/design-v1-movement.md 4.4, 5)", () => {
     assertPiecesPass(i, a);
   });
 
+  test("the trace goes a slice at a time, and its walk is the same however it is sliced", () => {
+    // Past a wall 30 squares long and on across open ground, where many cheapest walks tie.
+    const w = world({ w: 80, h: 60, edges: line("w", 10, 0, 30) });
+    const i = input(w, tok(w, { size: "large", x: 2, y: 2 }));
+    const to = { x: 60, y: 40 };
+    const whole = new WalkSearch(new WalkWorld(i));
+    whole.settle(to);
+    const all = whole.routeTo(to)!;
+    const sliced = new WalkSearch(new WalkWorld(i));
+    sliced.settle(to);
+    let slices = 0;
+    let got: ReturnType<WalkSearch["traceTo"]> = "paused";
+    // A deadline already past: each call goes its few states, then pauses.
+    while (got === "paused" && slices < 100_000) {
+      got = sliced.traceTo(to, -Infinity);
+      slices++;
+    }
+    assert.ok(slices > 10, `${slices} slices`);
+    assert.notEqual(got, "paused");
+    assert.deepEqual((got as WalkRoute).pieces, all.pieces);
+  });
+
   test("through an open door, and not a closed one or a secret door nobody found", () => {
     const wall = (door: EdgeFeature) => world({ edges: { ...line("w", 5, 0, 30), "5,4,w": door } });
     const open = wall(OPEN_DOOR);

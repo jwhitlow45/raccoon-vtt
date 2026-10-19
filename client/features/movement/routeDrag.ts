@@ -137,13 +137,14 @@ export class RouteDrag {
     const search = this.#search!;
     const to = this.#target!;
     const result = search.settle(to, deadline);
-    if (result === "paused") {
+    // The trace runs in the same slice, so a frame never goes past it (review ASTRA-08).
+    const route = result === "settled" ? search.traceTo(to, deadline) : null;
+    if (result === "paused" || route === "paused") {
       if (this.#answer.kind !== "searching") this.#set({ kind: "searching", since: this.#frames.now() });
       this.#schedule();
       return;
     }
     this.#stopFrames();
-    const route = result === "settled" ? search.routeTo(to) : null;
     this.#set(route ? { kind: "route", route } : { kind: "none", capped: result === "capped" });
     this.#landed();
   }
@@ -159,12 +160,15 @@ export class RouteDrag {
 
   #schedule(): void {
     if (this.#handle !== null) return;
-    this.#handle = this.#frames.request(() => {
+    const handle = this.#frames.request(() => {
+      // A frame cancelled but already under way, or one a later frame replaced, does nothing and leaves the current one asked for.
+      if (this.#handle !== handle) return;
       this.#handle = null;
       // A frame that fires after the drag ended, or after a rebuild dropped its search, does nothing.
       if (this.#over || !this.#search || !this.#target) return;
       this.#slice();
     });
+    this.#handle = handle;
   }
 
   #stopFrames(): void {
