@@ -2,12 +2,14 @@ import { chunkKey, doorChunk, keys, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
 import type { Actor, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
 import { MAX_ROUTE_REACH, type ActorTarget, type DoorRef, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
-import { ownsCharacter, ownsToken, projectEntity, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
+import { inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { LIMITS } from "./limits.ts";
 import { restoreAddedAssets } from "./referencedAssets.ts";
 import { handoutPages } from "./handouts.ts";
 import { movementRules, type LegEnd } from "./ruleHooks.ts";
+import { carriedIndex, holderOf, isCreature, linkHolds, withinReach } from "./rules/attach.ts";
 import { boxDistanceFt, tokenCellBox } from "./rules/distance.ts";
+import { planMove } from "./rules/moveLeg.ts";
 import { footprintSize } from "./rules/footprint.ts";
 import { footprintGround, groundAt, standing } from "./rules/heights.ts";
 import type { Point } from "./rules/geom.ts";
@@ -534,16 +536,17 @@ function forPlayer(op: Op, c: Check): Decision {
     }
 
     case "token.move": {
-      const d = moveCheck(c, op.tokenId);
+      const d = namedMoveCheck(c, op.tokenId, op);
       if (!d.ok) return d;
-      if (!op.route) return legCheck(c, op.tokenId, op, op.teleport !== undefined);
+      const own = !op.route ? legCheck(c, op.tokenId, op, op.teleport !== undefined) : routeFits(op, c);
+      if (!own.ok) return own;
       // A route of no walk's shape is refused as such before its pieces meet the walls.
-      const shape = routeFits(op, c);
-      return shape.ok ? routeCheck(c, op.tokenId, [op.route], op) : shape;
+      const walked = op.route ? routeCheck(c, op.tokenId, [op.route], op) : OK;
+      return walked.ok ? draggedWalls(c, op) : walked;
     }
     case "token.moveMany": {
       for (const move of op.moves) {
-        const d = moveCheck(c, move.tokenId);
+        const d = namedMoveCheck(c, move.tokenId, move);
         if (!d.ok) return d;
       }
       // A group move is refused whole when a leg is stopped: the client sends only the legs it found allowed.
@@ -551,13 +554,13 @@ function forPlayer(op: Op, c: Check): Decision {
         const d = legCheck(c, move.tokenId, move, false);
         if (!d.ok) return d;
       }
-      return OK;
+      return draggedWalls(c, op);
     }
 
-    // Attached tokens' rules for players (docs/design-v1-attach.md 6) come with their permissions.
     case "token.attach":
+      return attachCheck(c, op);
     case "token.detach":
-      return FORBIDDEN;
+      return detachCheck(c, op);
 
     case "token.countLeg": {
       // An owner says how their creature moved, on a locked token too, as with its elevation and facing.
@@ -817,7 +820,18 @@ function tokenImagesUsable(c: Check, input: { image?: ImageRef | null; altImages
  */
 export function mayMoveToken(state: RoomState, viewer: Viewer, tokenId: string): Decision {
   if (viewer.role === "dm") return state.tokens[tokenId] ? OK : GONE;
-  return moveCheck(new Check(state, viewer, { canUseAsset: () => false }), tokenId);
+  const c = new Check(state, viewer, { canUseAsset: () => false });
+  const d = namedMoveCheck(c, tokenId);
+  if (d.ok || d.code === "gone") return d;
+  // A token a holder the player moves carries goes with it, however the player stands with it (docs/design-v1-attach.md 6).
+  const seen = new Set<string>([tokenId]);
+  let at = state.tokens[tokenId];
+  for (let up = at && holderOf(state.tokens, at); up && !seen.has(up.id); up = at && holderOf(state.tokens, at)) {
+    seen.add(up.id);
+    if (namedMoveCheck(c, up.id).ok) return OK;
+    at = state.tokens[up.id];
+  }
+  return d;
 }
 
 /**
@@ -1126,6 +1140,156 @@ function moveCheck(c: Check, tokenId: string): Decision {
   if (token.locked) return refuse("forbidden", "that token is locked");
   if (ownsToken(c.state, c.actor, token)) return OK;
   return movesAnyToken(c.state.meta.settings, c.actor.memberId) ? OK : NOT_YOURS;
+}
+
+/** Whether every player sees a token where it stands, as the reducer's seen marks judge (docs/design-v1-attach.md 8.0). */
+function seenByAll(c: Check, token: Token): boolean {
+  return inSightOfNonOwners(c.state, token, {});
+}
+
+/**
+ * Whether the player directs this mount (docs/design-v1-attach.md 6): it
+ * carries a creature of theirs by a controlled ride, "it moves on your turn
+ * as you direct it", and the DM chose that by marking the ride controlled.
+ * A refusal must not read what some player cannot see, so only a rider and
+ * a link every player sees count (8.0).
+ */
+function directsMount(c: Check, mount: Token): boolean {
+  if (!seenByAll(c, mount)) return false;
+  for (const id of carriedIndex(c.state.tokens).get(mount.id) ?? []) {
+    const rider = c.state.tokens[id];
+    if (rider?.attached?.kind !== "ride" || rider.attached.steer !== true || !isCreature(rider)) continue;
+    if (ownsToken(c.state, c.actor, rider) && seenByAll(c, rider)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the player may move a token an op names (design 8.1 and
+ * docs/design-v1-attach.md 6): by the movement rule, or a controlled mount
+ * one of their creatures rides, or, with `to`, a token carried by one they
+ * may move whose move keeps its link there, a new seat or a dragged
+ * creature still within reach. Its whole group rides along whoever owns the
+ * rest. A lock stops a token's own drag, whatever the other rights.
+ */
+function namedMoveCheck(c: Check, tokenId: string, to?: Pick<Token, "x" | "y"> & { elevation?: number }): Decision {
+  const d = moveCheck(c, tokenId);
+  if (d.ok || d.code === "gone") return d;
+  const token = c.visibleToken(tokenId)!;
+  if (token.locked) return d;
+  if (directsMount(c, token)) return OK;
+  const holder = holderOf(c.state.tokens, token);
+  const link = token.attached;
+  if (!to || !link || !holder || !seenByAll(c, token) || !seenByAll(c, holder as Token)) return d;
+  if (!moveCheck(c, holder.id).ok && !directsMount(c, holder as Token)) return d;
+  const there = { ...token, x: to.x, y: to.y, elevation: to.elevation ?? token.elevation };
+  return linkHolds(c.state.meta.settings, link.kind, there, holder as Token) ? OK : d;
+}
+
+/**
+ * The walls test of a player's group move (docs/design-v1-attach.md 4.2):
+ * besides each named token's own legs, each dragged creature among the
+ * public members walks the holder's route offset by its place, piece by
+ * piece, on its own ground. What sits on its holder rides and is not tested,
+ * and a dragged creature some player cannot see walks in the private pass,
+ * stopping where it must unseen (rules/moveLeg.ts), so no refusal reads it.
+ */
+function draggedWalls(c: Check, op: Op): Decision {
+  const first = op.t === "token.move" ? op.tokenId : op.t === "token.moveMany" ? op.moves[0]?.tokenId : undefined;
+  const token = first !== undefined ? c.state.tokens[first] : undefined;
+  if (!token || c.state.scenes[token.sceneId]?.blockMovement !== true) return OK;
+  if (op.t === "token.move" && op.teleport !== undefined) return OK;
+  for (const moved of planMove(op, c.state, c.actor, {})) {
+    const member = c.state.tokens[moved.tokenId];
+    if (moved.carriedBy === undefined || moved.pass !== "public" || !member || member.attached?.kind !== "drag") continue;
+    for (let i = 1; i < moved.route.length; i++) {
+      const a = moved.route[i - 1]!;
+      const from: Token = { ...member, x: a.x, y: a.y, elevation: a.elevation };
+      delete from.squeeze;
+      const blocker = movementRules.legBlocker(c.state, from, moved.route[i]!);
+      if (blocker !== null) return refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
+    }
+  }
+  return OK;
+}
+
+/** A player's refusals of attaching (docs/design-v1-attach.md 6). */
+export const RIDE_ON_YOUR_TURN = "You can get on a mount on your own turn.";
+
+/** The player's name for a token, as their copy shows it. */
+function shownName(token: Token): string {
+  return token.nameHidden ? (token.publicName ?? "Unknown creature") : token.name;
+}
+
+/** Whether the creature holds a Grappled effect players see: the DM's mark is the DM's consent to drag it (question 2). */
+function grappledShown(c: Check, token: Token): boolean {
+  const actor = "inline" in token.actor ? token.actor.inline : c.state.characters[token.actor.ref]?.actor;
+  return actor?.effects.some((e) => e.key === "grappled" && e.hiddenFromPlayers !== true) ?? false;
+}
+
+/** Whether a turn is running in the player's copy and its acting row is the creature's own (7.1: mounting is "during your move"). */
+function ownTurnOr(c: Check, tokenId: string): Decision {
+  const encounter = c.visibleEncounter();
+  if (!encounter || (encounter.activeEntryId === null && encounter.started !== true)) return OK;
+  const entry = encounter.activeEntryId !== null ? c.visibleEntry(encounter.activeEntryId) : undefined;
+  if (!entry) return refuse("forbidden", RIDE_ON_YOUR_TURN);
+  const token = c.state.tokens[tokenId];
+  const ref = token && "ref" in token.actor ? token.actor.ref : undefined;
+  const its = entry.tokenId === tokenId || (entry.tokenId === undefined && ref !== undefined && entry.characterId === ref);
+  return its ? OK : refuse("forbidden", RIDE_ON_YOUR_TURN);
+}
+
+/**
+ * A player's attach (docs/design-v1-attach.md 6), on two tokens their copy
+ * holds. A ride, a perch or a carry onto a holder needs the right to move
+ * both, the two within reach as they stand, and on a scene whose walls stop
+ * moves the step onto the seat passing the leg test. A drag, or a creature
+ * carried by a creature, needs the right to move the holder, the two within
+ * reach, and the right to move the creature too or a Grappled mark players
+ * see on it. A ride during a fight waits for the rider's own turn. The
+ * limits and loops are the reducer's, on what every player sees and the two
+ * named tokens.
+ */
+function attachCheck(c: Check, op: OpOf<"token.attach">): Decision {
+  const carried = c.visibleToken(op.tokenId);
+  const holder = c.visibleToken(op.to);
+  if (!carried || !holder) return GONE;
+  const settings = c.state.meta.settings;
+  const grapple = op.kind === "drag" || (op.kind === "carry" && isCreature(carried) && isCreature(holder));
+  if (grapple) {
+    const may = moveCheck(c, holder.id);
+    if (!may.ok) return may;
+    if (!withinReach(settings, carried, holder)) return refuse("forbidden", `${shownName(carried)} is too far to ${op.kind === "drag" ? "drag" : "carry"}`);
+    if (!moveCheck(c, carried.id).ok && !grappledShown(c, carried)) return refuse("forbidden", `${shownName(carried)} is not marked Grappled`);
+  } else {
+    for (const id of [carried.id, holder.id]) {
+      const may = moveCheck(c, id);
+      if (!may.ok) return may;
+    }
+    if (!withinReach(settings, carried, holder)) return refuse("forbidden", `${shownName(carried)} is too far from ${shownName(holder)}`);
+    const walls = legCheck(c, carried.id, op, false);
+    if (!walls.ok) return walls;
+  }
+  return op.kind === "ride" ? ownTurnOr(c, carried.id) : OK;
+}
+
+/**
+ * A player's detach (docs/design-v1-attach.md 6): of a link their copy
+ * holds, by the right to move the carried token or its holder, and a
+ * creature's player can always get off. A link to a holder they cannot see
+ * is not in their copy, so it answers as a token attached to nothing does.
+ * Getting off is a walk from the seat, which meets the walls.
+ */
+function detachCheck(c: Check, op: OpOf<"token.detach">): Decision {
+  const carried = c.visibleToken(op.tokenId);
+  if (!carried) return GONE;
+  const holder = carried.attached ? c.visibleToken(carried.attached.to) : undefined;
+  if (!holder) return refuse("invalid", `${shownName(carried)} is not attached to anything`);
+  if (!ownsToken(c.state, c.actor, carried) && !moveCheck(c, carried.id).ok) {
+    const may = moveCheck(c, holder.id);
+    if (!may.ok) return may;
+  }
+  return op.x !== undefined && op.y !== undefined ? legCheck(c, carried.id, { x: op.x, y: op.y, ...(op.elevation !== undefined ? { elevation: op.elevation } : {}) }, false) : OK;
 }
 
 /**
