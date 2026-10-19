@@ -189,6 +189,8 @@ export const SAVE_IS_DMS = "only the DM sets a save that ends an effect";
  * the DM is preparing in private. The scene menu shows these words too.
  */
 export const MOVE_PLAYERS_FIRST = "Move the players to another scene first.";
+/** The same, as an undo or redo refusal words it after "could not redo deleting the scene Crypt: ", like every restore's reason. */
+export const MOVE_PLAYERS_FIRST_BACK = "move the players to another scene first";
 
 /**
  * Whether an op names a "save ends" save or occurrence on an effect. Only

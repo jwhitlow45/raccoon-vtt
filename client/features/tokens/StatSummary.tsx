@@ -136,7 +136,11 @@ export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: Reac
           return unit.kind === "tag" && props.afterTag ? [shown, <span key={`${item.key}:after`} style={{ display: "inline-flex", ...OVER_REACH }}>{props.afterTag}</span>] : [shown];
         });
       })}
-      {props.end}
+      {props.end != null ? (
+        <span data-unit="elevation" style={{ display: "inline-flex", flex: "none", ...OVER_REACH }}>
+          {props.end}
+        </span>
+      ) : null}
     </div>
   );
 }

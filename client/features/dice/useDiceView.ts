@@ -74,7 +74,8 @@ export function useDiceView(creatures: readonly ActorTarget[]): { dice: DiceView
     // The key stands for the creatures, so a new array of the same creatures reads nothing again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [you, view, key]);
-  const blocks = useSrdBlocks(needs.monsters);
+  // Keyed on the creatures, so a failed load tries again for others, as a view mounted for them would.
+  const blocks = useSrdBlocks(needs.monsters, key);
   const monsters = { value: blocks.list, failed: blocks.failed };
   const rolls = useRollsChunk(needs.rolls);
   const dice = useMemo(() => (you && view ? { you, view, srd: { monsters: monsters.value, rolls: rolls.value } } : null), [you, view, monsters.value, rolls.value]);

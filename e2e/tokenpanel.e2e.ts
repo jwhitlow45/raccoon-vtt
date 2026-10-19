@@ -1379,51 +1379,66 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await player.unroute(/\/assets\/monsters-[^/]*\.js$/);
   });
 
-  test("sheetlink-a. the sheet link is the vitals line's last unit: its text height, a 44 px target, no taller line, at a desktop and at 390 x 844", async () => {
-    for (const [label, page, cdp, view] of [
-      ["desktop", dm, dmCdp, DESK],
-      ["390 x 844", player, playerCdp, { width: 390, height: 844, scale: 1 }],
-    ] as const) {
-      await setUp(page, cdp, view, null);
-      await tapToken(page, run.thorn.at);
-      const thorn = bar(page, "Thorn");
-      await thorn.getByRole("img", { name: "Armor Class 16" }).waitFor();
-      const link = thorn.getByRole("link", { name: "Open the sheet" });
-      assert.equal(await link.getAttribute("href"), SHEET, `${label}: the link`);
-      const line = thorn.locator("[data-vitals]");
-      assert.equal(await line.getByRole("link", { name: "Open the sheet" }).count(), 1, `${label}: the link sits in the vitals line`);
-      assert.equal(await thorn.getByRole("group", { name: "Read more" }).getByRole("link").count(), 0, `${label}: none beside Stat block and Details`);
-      assert.equal(await link.innerText(), "Sheet", `${label}: the compact words`);
-      const withLink = await rectOf(line);
-      await shots.take(page, `sheetlink-${label.replace(/ /g, "")}-thorn-bar`);
-      const target = await rectOf(link);
-      assert.ok(target.height >= 43.5, `${label}: a 44 px target, ${target.height} px`);
-      // Wrapped under the line above, its reach runs over that line's units, which stay on top: a tap on "HP 31/38" opens no tab.
-      const covered = await line.evaluate((el) => {
-        const sheet = el.querySelector('a[aria-label="Open the sheet"]');
-        const hits: string[] = [];
-        for (const unit of el.querySelectorAll("[data-unit], [role=img]")) {
-          if (!sheet || unit.contains(sheet) || sheet.contains(unit)) continue;
-          const r = unit.getBoundingClientRect();
-          for (const x of [r.left + 2, (r.left + r.right) / 2, r.right - 2]) {
-            for (const y of [r.top + 2, r.bottom - 2]) {
-              const top = el.ownerDocument.elementFromPoint(x, y);
-              if (top && sheet.contains(top)) hits.push(`${unit.textContent ?? ""} at ${Math.round(x)}, ${Math.round(y)}`);
+  test("sheetlink-a. the sheet link is the vitals line's last unit: its text height, a 44 px target, no taller line, at a desktop, at 390 x 844, and in a window narrowed beside a sheet with the elevation after it", async () => {
+    try {
+      for (const [label, page, cdp, view, elevation] of [
+        ["desktop", dm, dmCdp, DESK, 0],
+        ["390 x 844", player, playerCdp, { width: 390, height: 844, scale: 1 }, 0],
+        // Beside a sideways sheet at 130% the window is too narrow for the elevation in its header's row, so it shows at the line's end, after the link (docs/design-v1-token-window.md 7.1).
+        ["844 x 390 at 130% beside a sheet", dm, dmCdp, { width: 844, height: 390, scale: 1.3, insets: { side: 47, bottom: 21 } }, 15],
+      ] as const) {
+        if (elevation) await ops.send({ t: "token.update", tokenId: run.thorn.id, patch: { elevation } });
+        await setUp(page, cdp, view, null);
+        await tapToken(page, run.thorn.at);
+        const thorn = bar(page, "Thorn");
+        await thorn.getByRole("img", { name: "Armor Class 16" }).waitFor();
+        if (elevation) {
+          await page.locator('nav[aria-label="Tools"] button[title="Panels"]').click();
+          await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: "Outliner", exact: true }).click();
+          await page.locator('section[aria-label="Outliner"]').waitFor();
+          await thorn.waitFor();
+        }
+        const link = thorn.getByRole("link", { name: "Open the sheet" });
+        assert.equal(await link.getAttribute("href"), SHEET, `${label}: the link`);
+        const line = thorn.locator("[data-vitals]");
+        assert.equal(await line.getByRole("link", { name: "Open the sheet" }).count(), 1, `${label}: the link sits in the vitals line`);
+        assert.equal(await thorn.getByRole("group", { name: "Read more" }).getByRole("link").count(), 0, `${label}: none beside Stat block and Details`);
+        assert.equal(await link.innerText(), "Sheet", `${label}: the compact words`);
+        if (elevation) assert.match(await line.locator('[data-unit="elevation"]').innerText(), new RegExp(`${elevation} ft$`), `${label}: the elevation at the line's end`);
+        const withLink = await rectOf(line);
+        await shots.take(page, `sheetlink-${label.replace(/ /g, "")}-thorn-bar`);
+        const target = await rectOf(link);
+        assert.ok(target.height >= 43.5, `${label}: a 44 px target, ${target.height} px`);
+        // Wrapped under the line above, its reach runs over that line's units, which stay on top: a tap on "HP 31/38", or on the elevation after it, opens no tab.
+        const covered = await line.evaluate((el) => {
+          const sheet = el.querySelector('a[aria-label="Open the sheet"]');
+          const hits: string[] = [];
+          for (const unit of el.querySelectorAll("[data-unit], [role=img]")) {
+            if (!sheet || unit.contains(sheet) || sheet.contains(unit)) continue;
+            const r = unit.getBoundingClientRect();
+            for (const x of [r.left + 2, (r.left + r.right) / 2, r.right - 2]) {
+              for (const y of [r.top + 2, r.bottom - 2]) {
+                const top = el.ownerDocument.elementFromPoint(x, y);
+                if (top && sheet.contains(top)) hits.push(`${unit.textContent ?? ""} at ${Math.round(x)}, ${Math.round(y)}`);
+              }
             }
           }
-        }
-        return hits;
-      });
-      assert.deepEqual(covered, [], `${label}: the link's reach takes taps meant for the line above`);
-      // The link's 44 px reach, a padding its negative margin takes back, leaves the line as tall as the link's text alone would. Only the reach goes, so the line wraps where it did.
-      await link.evaluate((el) => {
-        const style = (el as unknown as { style: { padding: string; margin: string } }).style;
-        style.padding = "0";
-        style.margin = "0";
-      });
-      const without = await rectOf(line);
-      assert.ok(withLink.height <= without.height + 0.5, `${label}: the line is ${withLink.height} px with the link's reach and ${without.height} px without`);
-      await page.keyboard.press("Escape");
+          return hits;
+        });
+        assert.deepEqual(covered, [], `${label}: the link's reach takes taps meant for the line above`);
+        // The link's 44 px reach, a padding its negative margin takes back, leaves the line as tall as the link's text alone would. Only the reach goes, so the line wraps where it did.
+        await link.evaluate((el) => {
+          const style = (el as unknown as { style: { padding: string; margin: string } }).style;
+          style.padding = "0";
+          style.margin = "0";
+        });
+        const without = await rectOf(line);
+        assert.ok(withLink.height <= without.height + 0.5, `${label}: the line is ${withLink.height} px with the link's reach and ${without.height} px without`);
+        await page.keyboard.press("Escape");
+      }
+    } finally {
+      // Back on the ground, as the later steps expect, even after a failure here.
+      if (dmSocket.state?.tokens[run.thorn.id]?.elevation) await ops.send({ t: "token.update", tokenId: run.thorn.id, patch: { elevation: 0 } });
     }
   });
 

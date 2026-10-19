@@ -1,6 +1,6 @@
 import { keys, parseKey, revOf, type EntityKey, type ParsedKey } from "../keys.ts";
 import { oldSrdIdGuards, withOldSrdIds } from "../migrate.ts";
-import { MOVE_PLAYERS_FIRST } from "../permissions.ts";
+import { MOVE_PLAYERS_FIRST_BACK } from "../permissions.ts";
 import type { AreaTemplate, CompanionBlock, Encounter, Handout, HandoutDoc, Pin, Scene, Token } from "../model.ts";
 import type { OpOf, RestoreEntry } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
@@ -209,8 +209,8 @@ function checkReferences(tx: Tx, entries: RestoreEntry[], before: Map<EntityKey,
   const characters = new Set(removed.flatMap((p) => (p.kind === "character" ? [p.id] : [])));
   const tokens = new Set(removed.flatMap((p) => (p.kind === "token" ? [p.id] : [])));
   if (scenes.size > 0) {
-    // The players' scene says what a delete of it says, since moving them is the step that frees it.
-    if (s.meta.playerSceneId !== null && scenes.has(s.meta.playerSceneId)) throw invalid(MOVE_PLAYERS_FIRST);
+    // The players' scene says what a delete of it says. Once they move, other work on the scene still refuses it below.
+    if (s.meta.playerSceneId !== null && scenes.has(s.meta.playerSceneId)) throw invalid(MOVE_PLAYERS_FIRST_BACK);
     const named = (x: { sceneId: string }) => scenes.has(x.sceneId);
     if (
       Object.values(s.buildChunks).some(named) ||

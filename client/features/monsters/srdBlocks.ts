@@ -11,21 +11,28 @@ import { loadedMonsters, loadMonsters, onMonstersLoaded, type SrdMonster } from 
  * reaches every view that shows them. Kept in state, a load another view
  * finished in that gap left this one loading for good.
  *
- * While `active`, the load starts on first need. A failure stays until a
- * reload (SrdLoadFailed.tsx), so a caller can say so instead of looking stuck.
+ * While `active`, the load starts on first need. A failure stays, so a
+ * caller can say so instead of looking stuck (SrdLoadFailed.tsx), until a
+ * reload or a new `attempt`, such as the Dice panel's pick of another
+ * creature, which tries again as a view mounted afresh would.
  */
-export function useSrdBlocks(active = true): { list: readonly SrdMonster[] | null; failed: boolean } {
+export function useSrdBlocks(active = true, attempt = ""): { list: readonly SrdMonster[] | null; failed: boolean } {
   const list = useSyncExternalStore(onMonstersLoaded, loadedMonsters, loadedMonsters);
-  const [failed, setFailed] = useState(false);
+  const [failedFor, setFailedFor] = useState<string | null>(null);
   useEffect(() => {
     if (!active || list) return;
     let live = true;
     loadMonsters().catch(() => {
-      if (live) setFailed(true);
+      if (live) setFailedFor(attempt);
     });
     return () => {
       live = false;
     };
-  }, [active, list]);
-  return { list, failed };
+  }, [active, list, attempt]);
+  return { list, failed: blocksFailed(list, failedFor, attempt) };
+}
+
+/** A failed load counts for the attempt it came from, and never once the blocks have loaded, whichever view loaded them. */
+export function blocksFailed(list: readonly SrdMonster[] | null, failedFor: string | null, attempt: string): boolean {
+  return list === null && failedFor === attempt;
 }
