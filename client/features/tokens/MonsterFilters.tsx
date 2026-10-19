@@ -1,11 +1,10 @@
-import { useCallback, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { CONDITION_KEYS, CR_VALUES } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Chip, ChipRow } from "../../components/Chip.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
 import { Select } from "../../components/Field.tsx";
-import { Icon } from "../../components/Icon.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
@@ -192,27 +191,27 @@ function FilterSheet(props: {
       <FilterSection title="Size" hint="Any size picked. A Medium or Small creature counts as both.">
         <Picks title="Size" options={SIZES} picked={filters.sizes} label={titleWords} onChange={(sizes) => set({ sizes })} />
       </FilterSection>
-      <Fold title="Condition immunities" picked={filters.conditionImmunities.length} hint="Immune to every condition picked.">
+      <FoldedFilter title="Condition immunities" picked={filters.conditionImmunities.length} hint="Immune to every condition picked.">
         <Picks title="Condition immunities" options={CONDITION_KEYS} picked={filters.conditionImmunities} label={titleWords} onChange={(conditionImmunities) => set({ conditionImmunities })} />
-      </Fold>
-      <Fold title="Damage immunities" picked={filters.damageImmunities.length} hint="Immune to every damage type picked.">
+      </FoldedFilter>
+      <FoldedFilter title="Damage immunities" picked={filters.damageImmunities.length} hint="Immune to every damage type picked.">
         <Picks title="Damage immunities" options={DAMAGE_TYPES} picked={filters.damageImmunities} label={titleWords} onChange={(damageImmunities) => set({ damageImmunities })} />
-      </Fold>
-      <Fold title="Damage resistances" picked={filters.resistances.length} hint="Resists every damage type picked.">
+      </FoldedFilter>
+      <FoldedFilter title="Damage resistances" picked={filters.resistances.length} hint="Resists every damage type picked.">
         <Picks title="Damage resistances" options={DAMAGE_TYPES} picked={filters.resistances} label={titleWords} onChange={(resistances) => set({ resistances })} />
-      </Fold>
-      <Fold title="Damage vulnerabilities" picked={filters.vulnerabilities.length} hint="Vulnerable to every damage type picked.">
+      </FoldedFilter>
+      <FoldedFilter title="Damage vulnerabilities" picked={filters.vulnerabilities.length} hint="Vulnerable to every damage type picked.">
         <Picks title="Damage vulnerabilities" options={DAMAGE_TYPES} picked={filters.vulnerabilities} label={titleWords} onChange={(vulnerabilities) => set({ vulnerabilities })} />
-      </Fold>
-      <Fold title="Movement" picked={filters.movement.length} hint="Every kind picked.">
+      </FoldedFilter>
+      <FoldedFilter title="Movement" picked={filters.movement.length} hint="Every kind picked.">
         <Picks title="Movement" options={MOVEMENTS} picked={filters.movement} label={(m) => MOVEMENT_LABEL[m]} onChange={(movement) => set({ movement })} />
-      </Fold>
-      <Fold title="Senses" picked={filters.senses.length} hint="Every sense picked.">
+      </FoldedFilter>
+      <FoldedFilter title="Senses" picked={filters.senses.length} hint="Every sense picked.">
         <Picks title="Senses" options={SENSES} picked={filters.senses} label={titleWords} onChange={(senses) => set({ senses })} />
-      </Fold>
-      <Fold title="Alignment" picked={filters.alignments.length} hint="Any alignment picked.">
+      </FoldedFilter>
+      <FoldedFilter title="Alignment" picked={filters.alignments.length} hint="Any alignment picked.">
         <Picks title="Alignment" options={ALIGNMENTS} picked={filters.alignments} label={titleWords} onChange={(alignments) => set({ alignments })} />
-      </Fold>
+      </FoldedFilter>
     </Dialog>
   );
 }
@@ -229,16 +228,6 @@ function CrSelect(props: { label: string; value: CrChoice; onChange(value: CrCho
   );
 }
 
-/** A SectionLabel's look, for the folded groups, whose label is the button that unfolds them. */
-const LABEL_STYLE: CSSProperties = {
-  fontSize: theme.font.small,
-  fontWeight: theme.weight.bold,
-  letterSpacing: theme.caps,
-  textTransform: "uppercase",
-  lineHeight: theme.leading.tight,
-  color: theme.color.textMuted,
-};
-
 /** One filter under its label, a section parted from the one above by a line. Named for what it holds, since a Group is a panel's fold. */
 function FilterSection(props: { title: string; hint?: string; first?: boolean; children: ReactNode }) {
   return (
@@ -250,46 +239,24 @@ function FilterSection(props: { title: string; hint?: string; first?: boolean; c
 }
 
 /**
- * A group folded away until it is wanted, so the sheet opens short on a
+ * A filter folded away until it is wanted, so the sheet opens short on a
  * phone. It starts open when something in it is picked, so a filter that
- * is on is never hidden.
+ * is on is never hidden. It folds as every section fold does, chevron
+ * first, and its count of picks sits after the label as the fold's summary,
+ * so the disclosure is named by its title alone.
  */
-function Fold(props: { title: string; hint: string; picked: number; children: ReactNode }) {
+function FoldedFilter(props: { title: string; hint: string; picked: number; children: ReactNode }) {
   const [open, setOpen] = useState(props.picked > 0);
-  const id = useId();
   return (
-    <section style={{ borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
-      <h3 style={{ margin: 0 }}>
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={id}
-          onClick={() => setOpen(!open)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: theme.space(2),
-            width: "100%",
-            minHeight: theme.touch,
-            padding: 0,
-            border: "none",
-            background: "transparent",
-            color: theme.color.textMuted,
-            fontFamily: theme.font.body,
-            textAlign: "left",
-            cursor: "pointer",
-          }}
-        >
-          <span style={{ ...LABEL_STYLE, flex: 1 }}>{props.title}</span>
-          {props.picked > 0 ? <Tag>{props.picked} on</Tag> : null}
-          <Icon name={open ? "chevronDown" : "chevronRight"} size="sm" />
-        </button>
-      </h3>
-      <div id={id} hidden={!open} style={{ display: "grid", gap: theme.space(2), paddingBottom: theme.space(3) }}>
-        <Help>{props.hint}</Help>
-        {props.children}
-      </div>
-    </section>
+    <Section
+      label={props.title}
+      fold={{ open, onToggle: () => setOpen((o) => !o), summary: props.picked > 0 ? <Tag>{props.picked} on</Tag> : undefined }}
+      // As dense as the filters above: a folded row is its 44 px button between two lines.
+      style={{ paddingTop: 0, paddingBottom: open ? theme.space(3) : 0 }}
+    >
+      <Help>{props.hint}</Help>
+      {props.children}
+    </Section>
   );
 }
 
