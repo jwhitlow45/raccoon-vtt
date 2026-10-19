@@ -23,10 +23,13 @@ import { assertCanvasAt, ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoi
  * the builder is not what this run tests. Everything after that goes through
  * the two browsers: the DM drags a goblin to the edge of the party's torch
  * and back out, the player's drag stops at a closed door and the player
- * opens it, stops at a ledge and takes the stair, reads the platform's and
- * the stair's height with a tap (docs/design-v1-heights-readout.md), measures
- * up onto the platform, teleports past a wall, and leaves explored ground
- * behind.
+ * opens it, stops at a ledge no stair it has seen leads up and takes the
+ * stair, reads the platform's and the stair's height with a tap
+ * (docs/design-v1-heights-readout.md), measures up onto the platform,
+ * teleports past a wall, and leaves explored ground behind. Back in the
+ * first room, on its turn, it walks round a wall's end, pays double for a
+ * square of rubble, and its marker says what that used
+ * (docs/design-v1-movement.md 12, steps mv-1 to mv-3).
  *
  * Every frame the player receives is kept. After each step the player's
  * creatures and sight tiles are checked against the party's sight computed
@@ -98,6 +101,7 @@ const run = {
   bossId: randomUUID(),
   lightId: randomUUID(),
   pinId: randomUUID(),
+  entryId: randomUUID(),
   /** The DM's frames from where the player's ruler began to where it ended, and the player's fog meanwhile, which nothing changes then. */
   playerRulers: null as { from: number; to: number; fog: RoomState["fogTiles"] } | null,
   /** The player's frame count when the goblin left the party's sight. */
@@ -289,6 +293,15 @@ function pinPopover(page: Page, text: string): Promise<boolean> {
   }, text);
 }
 
+/** Every text the board draws in Konva, such as a drag's label and the movement marker. */
+function boardTexts(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    type Node = { text(): string; isVisible(): boolean };
+    const konva = (globalThis as unknown as { Konva: { stages: { find(selector: string): Node[] }[] } }).Konva;
+    return konva.stages[0]!.find("Text").filter((t) => t.isVisible()).map((t) => t.text());
+  });
+}
+
 /** A cell's ground as the layout painted it. The run paints nothing after, so it is the ground every ruler stood on. */
 function layoutGround(x: number, y: number): number {
   return groundAt(dmSocket.state?.buildChunks ?? {}, run.sceneId, Math.floor(x), Math.floor(y));
@@ -428,11 +441,12 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
   });
 
   test("5. a ledge stops a walking token, and the stair takes it up", async () => {
+    // The platform is 10 ft up, so the torch below has not shown the party its top: no route the party has seen leads there.
     await dragCells(player, BOUNDS, { x: 3, y: 12 }, { x: 7, y: 12 });
     await thornAt({ x: 5, y: 12, elevation: 0 });
-    await stopNote("Ledge in the way. Take the stairs.").waitFor();
+    await stopNote("Ledge in the way. No stairs you have seen lead there.").waitFor();
     await shots.take(player, "vision-player-stopped-at-ledge");
-    await closeNote("Ledge in the way. Take the stairs.");
+    await closeNote("Ledge in the way. No stairs you have seen lead there.");
 
     await dragCells(player, BOUNDS, { x: 5, y: 12 }, { x: 5, y: 14 });
     await thornAt({ x: 5, y: 14, elevation: 0 });
@@ -585,7 +599,8 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await bar.waitFor();
     await dragCells(player, BOUNDS, { x: 7, y: 14 }, { x: 10, y: 14 });
     await thornAt({ x: 8, y: 14, elevation: 10 });
-    const text = "Stopped at a wall. Drop at the corner first, then go on.";
+    // The platform's east half has no way up and no way round the wall that the party has seen.
+    const text = "Stopped at a wall. There is no way around it that you have seen.";
     await stopNote(text).getByRole("button", { name: "Teleport here" }).waitFor();
     assert.equal(await bar.count(), 0, "the action bar came back over the stopped walk's note");
     await shots.take(player, "vision-player-stopped-at-wall");
@@ -630,6 +645,61 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     assert.equal(tokenOf(playerSocket.state, run.goblinId), undefined);
     await shots.take(player, "vision-player-explored-behind");
     await shots.take(dm, "vision-dm-explored-outline");
+  });
+
+  test("mv-1. on Thorn's turn the player's drag walks round a wall's end, and the trail bends there", async () => {
+    // Out of the party's way first: the goblin goes where nobody sees it, so no frame of it reaches the player again.
+    await ops.send({ t: "token.update", tokenId: run.goblinId, patch: { visibility: "dm" } });
+    const wall: EdgeFeature = { kind: "wall" };
+    await ops.send({ t: "build.edge", sceneId: run.sceneId, edges: [0, 1, 2, 3].map((y) => ({ key: `8,${y},w`, feature: wall })) });
+    await ops.send({ t: "build.paint", sceneId: run.sceneId, terrain: "rubble", cells: ["10,5"] });
+    await ops.send({ t: "token.move", tokenId: run.thornId, x: 7, y: 3, elevation: 0 });
+    await thornAt({ x: 7, y: 3, elevation: 0 });
+    await ops.send({ t: "encounter.start", entries: [{ id: run.entryId, tokenId: run.thornId, value: 15 }] });
+    await ops.send({ t: "encounter.next" });
+    await waitFor("Thorn's turn in the player's state", () => playerSocket.state?.encounter?.activeEntryId === run.entryId || null);
+    await viewSettles("the player's view back in the first room");
+
+    // The wall runs along column 8 from the top down to row 4, so the way to (9, 3) goes round its end.
+    await dragCells(player, BOUNDS, { x: 7, y: 3 }, { x: 9, y: 3 });
+    await thornAt({ x: 9, y: 3, elevation: 0 });
+    const walked = await waitFor("the walk's stop in the player's state", () => tokenOf(playerSocket.state, run.thornId)?.path?.stops.at(-1));
+    assert.ok(walked.via && walked.via.length >= 2, `the walk did not bend: ${JSON.stringify(walked)}`);
+    assert.ok(Math.max(...walked.via.filter((_, i) => i % 2 === 1)) >= 4, "the walk went through the wall, not round its end");
+    await shots.take(player, "vision-player-walked-round-wall");
+  });
+
+  test("mv-2. a step into rubble reads 10 ft while dragged", async () => {
+    // A new turn, so the marker counts only what follows.
+    await ops.send({ t: "encounter.next" });
+    await waitFor("Thorn's next turn", () => ((tokenOf(playerSocket.state, run.thornId)?.path?.stops.length ?? 0) <= 1 ? true : null));
+    await dragCells(player, BOUNDS, { x: 9, y: 3 }, { x: 9, y: 5 });
+    await thornAt({ x: 9, y: 5, elevation: 0 });
+    const a = await pagePoint(player, BOUNDS, { x: 9.5, y: 5.5 });
+    const b = await pagePoint(player, BOUNDS, { x: 10.5, y: 5.5 });
+    await assertCanvasAt(player, a);
+    await player.mouse.move(a.x, a.y);
+    await player.mouse.down();
+    await player.mouse.move(a.x + (b.x - a.x) * 0.2, a.y, { steps: 3 });
+    await player.mouse.move(b.x, b.y, { steps: 8 });
+    // The kept ruler of test 8 reads "10 ft" too: the drag's label is the one with the band's words.
+    const label = await waitFor("the drag's label", async () => (await boardTexts(player)).find((t) => t.startsWith("10 ft · ")));
+    assert.equal(label, "10 ft · 10 ft left\n+5 ft for difficult terrain");
+    await shots.take(player, "vision-player-rubble-step");
+    await player.mouse.up();
+    await thornAt({ x: 10, y: 5, elevation: 0 });
+    const stop = await waitFor("the rubble step's stop", () => {
+      const s = tokenOf(playerSocket.state, run.thornId)?.path?.stops.at(-1);
+      return s && s.x === 10 ? s : null;
+    });
+    assert.deepEqual([stop.moved, stop.cost], [5, 10]);
+  });
+
+  test("mv-3. the marker reads what the turn moved and what it used", async () => {
+    const marker = await waitFor("the movement marker", async () => (await boardTexts(player)).find((t) => t.startsWith("Moved ")));
+    assert.equal(marker, "Moved 15 ft, used 20 ft\n10 ft left");
+    await shots.take(player, "vision-player-moved-used");
+    await ops.send({ t: "encounter.end" });
   });
 
   test("11. no frame the player received held anything out of the party's sight, and every ruler stood on its measurer's ground", () => {
