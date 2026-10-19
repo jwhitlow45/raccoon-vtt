@@ -1,6 +1,6 @@
 # raccoon-vtt design: pasting images from the clipboard
 
-Status: proposal. Section 10's questions go to the project owner, each with the answer this note recommends.
+Status: built. Section 10's questions were decided as this note recommends, and section 11 records where the build chose what the note left open, with the code review's round 1 fixes.
 
 The project owner asked: "it would also be great if there was support from uploading media from the clipboard. (on both mobile and desktop). this way a battlemap, player icon, etc. can just be copied to clipboard without the user needing to save the file to disk"
 
@@ -189,6 +189,7 @@ The e2e runs Chrome only. The rest is a hand check in the live play review, each
 - Android Chrome: the first press's prompt, a denial (the box opens), the box's paste.
 - Safari on a Mac: Cmd+V in an open picker with focus on a tab, with and without the `beforepaste` remedy (section 2.1).
 - On a Mac: a file copied in Finder, and a picture copied in Photos or Preview, each by Cmd+V and by the button.
+- Firefox: Copy Image, then Ctrl+V with focus in a text field (the picker's search box, New scene's name). Firefox is believed to put the image's address on the clipboard as `text/plain` beside the bytes, and by the text field rule (1.3) the field then keeps the paste and inserts the address. The check says whether it does.
 
 ## 9. Build plan
 
@@ -210,3 +211,17 @@ About 600 lines of code and tests: one build lane and one review round.
 2. **Should the room-level offer include New token?** Recommended: no, in this change. A blank token then a paste with it selected covers it in two steps, and the Add token tool asks the kind and size a new token needs.
 3. **Should a pasted link import a map, a handout or a stamp, or a copied page's `<img>` be fetched?** Recommended: no. Copy image hands over the bytes, which needs no fetch by the server, and a map fetched by link would be held to 10 MiB and searched only on the server's copy. Links stay where they work today, in Choose an image.
 4. **Should a pasted map over 8 MB be re-encoded as WebP at its own size before upload?** Recommended: yes, on a computer. It keeps every pixel the server keeps, the server re-encodes at quality 82 anyway, and a painted 4096 px map goes up as a few MB instead of about 15.
+
+## 11. As built
+
+What the build chose where the note left it open, and what the code review's round 1 changed:
+
+- **`pasteError(why)`** takes no `accepts`. A format the server refuses (HEIC, TIFF or BMP copied as a file) gets the entry's own refusal, as a chosen file does: the picker's "That file type is not supported…", and the map entries' 415 words. Nothing is refused by type before upload except SVG and files that are not images, so a browser that can redraw HEIC still does.
+- **Words the note did not give.** With a mouse, the refusal reads "The browser did not let the app read the clipboard. Paste in the box with Ctrl+V or a right-click." (Cmd+V on Apple devices), and the box's line says Cmd+V there. On iOS a read with no picture reads "The clipboard has no image in it. If you copied a picture, press and hold in the box, then tap Paste." In the room-level offer, the token row's help is "Then crop it to fit the token.", a busy row's is "Wait for New scene's upload to finish." or "Wait for the handout's upload to finish.", and a picture the browser cannot draw reads "This browser cannot show the picture. It can still upload."
+- **The room-level offer.** Stamp shows only with a scene open. The token's picture goes through the image picker started on the pasted file, then the crop editor in the token's shape, then the token panel's own image patch, from a host in the Room page, so it works with the token panel closed. A key paste with focus in the players' unconfirmed Map image row reaches the offer, which asks before anything uploads (decided: kept). The row itself takes nothing.
+- **A closed or unconfirmed entry takes nothing by any path.** An entry declares `closed` beside `disabled`: a folded Show a handout form, New scene with another kind than Map image, the players' Map image row before the confirm. Closed, it is disabled for a key paste, a paste into its box and a `read()` that answers late. Turning closed, or its element leaving the page, drops a read still waiting, and the box and the note go with it (3.3). A read the entry closed on never counts, even once it opens again.
+- **Handoffs are used now or not at all.** Stamp in the offer closes an open panel sheet on a narrow window, whose tool row would otherwise keep the stamp picker from being drawn. A picture no entry takes is dropped with a note: when Stamp mode closes before the stamp picker takes it, or after 10 s, as when the tool row stays hidden. It never uploads by itself later.
+- **The stamp picker** registers its whole dialog, so an image pasted with focus in the header's search box lands too. Its paste note, upload line and error show above its tabs, in view on Starter as on Stamps, and a pasted stamp is named "Room image", as the room's image tiles are.
+- **On the players' scene**, Paste an image sits in the row beside "Choose the image", above the warning.
+- **The newest open entry** is the one opened last: an entry's order moves up when it starts taking key pastes, not only when it mounts.
+- **The e2e run** is `e2e/paste.e2e.ts` on E2E_PORT plus 19. Besides 8.2's steps, it checks a closed or unconfirmed entry's box and late reads, the stamp picker's note on its Starter tab, and Stamp from the offer on a narrow window with a panel's sheet open.
