@@ -7,7 +7,8 @@ import type { OpAnswer } from "../../state/types.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi } from "../../state/view.ts";
 import { pathNow } from "../measure/movement.ts";
-import { dropMode, keyStep, planGroup, planOne, planWalk, rebased, routeTarget, type DropPlan, type DropToken, type Found, type Point, type Role, type Stop } from "./drop.ts";
+import { dropMode, keyStep, planGroup, planOne, planWalk, rebased, routeLanding, routeTarget, type DropPlan, type DropToken, type Found, type Point, type Role, type Stop } from "./drop.ts";
+import { frameDeadline } from "./frameBudget.ts";
 import { frameFields as routeFrame, walkPreview } from "./preview.ts";
 import { RouteDrag, type Frames, type RouteAnswer } from "./routeDrag.ts";
 import { sendPlan } from "./send.ts";
@@ -61,6 +62,7 @@ const BROWSER_FRAMES: Frames = {
   now: () => performance.now(),
   request: (run) => requestAnimationFrame(() => run()),
   cancel: (handle) => cancelAnimationFrame(handle),
+  deadline: frameDeadline,
 };
 
 /** The parts of the room a drag's world is built from: when one changes during the drag, the world is built again (9, "A door closes during a drag"). */
@@ -195,7 +197,9 @@ export function useDragStops(role: Role): DragStops {
           w.held = at;
           publish(w);
         };
-        if (dropMode(role, view.scenes[token.sceneId]) !== "walk" || answer.kind !== "none") {
+        // The drop goes straight, and may be held at the wall, with no route, or one it would not take (drop.ts `routeLanding`).
+        const straight = answer.kind === "none" || (answer.kind === "route" && !routeLanding(view, token, target, answer.route.pieces, view.meta.settings.feetPerCell));
+        if (dropMode(role, view.scenes[token.sceneId]) !== "walk" || !straight) {
           holdAt(null);
           setHold(null);
           return;

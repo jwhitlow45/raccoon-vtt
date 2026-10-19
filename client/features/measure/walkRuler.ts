@@ -112,13 +112,16 @@ function searchFor(view: RoomState, walker: Token, viewer: WalkViewer, everythin
   return search;
 }
 
-/** A leg's answer, searched within the slice: null while it is still searching. */
-function legAnswer(view: RoomState, walker: Token, input: WalkInput & { deadline?: number }, counter: DiagonalCounter, target: Point): LegAnswer | null {
+/** A leg's answer, searched within the slice: null while it is still searching, or when the slice is over before it begins. */
+function legAnswer(view: RoomState, walker: Token, input: WalkInput & { deadline?: number }, counter: DiagonalCounter, target: Point, slice: { began: boolean }): LegAnswer | null {
   const kept = keptFor(view, walker.sceneId);
   const key = searchKey(walker, input.everything, counter);
   const legKey = `${key}|${target.x},${target.y}`;
   const known = kept.legs.get(legKey);
   if (known) return known;
+  // Past the deadline no leg begins but the slice's first, so each slice answers one leg at least and a ruler of many legs never builds every leg's world in one frame.
+  if (slice.began && input.deadline !== undefined && performance.now() > input.deadline) return null;
+  slice.began = true;
   const search = searchFor(view, walker, input.viewer, input.everything, counter, key);
   let answer: LegAnswer;
   if (openLeg(search.world, target)) answer = { kind: "open" };
@@ -164,6 +167,7 @@ export function measureWalk(input: WalkInput & { deadline?: number }): WalkMeasu
   let totalFt = 0;
   let extraFt = 0;
   let searching = false;
+  const slice = { began: false };
   for (const drawn of stops.slice(1)) {
     // A stop on a token is where that token stands now, as the straight ruler reads it. One this view cannot resolve stays where it was drawn.
     const on = drawn.tokenId ? view.tokens[drawn.tokenId] : undefined;
@@ -176,7 +180,7 @@ export function measureWalk(input: WalkInput & { deadline?: number }): WalkMeasu
     let corners: Point[] = [];
     let none = false;
     // Past a leg still searching, the walker's later legs start from where it would land, never searched until it is known: they would only push its search out.
-    const answer = searching ? null : legAnswer(view, walker, input, counter, target);
+    const answer = searching ? null : legAnswer(view, walker, input, counter, target, slice);
     if (!answer) {
       searching = true;
       legs.push({ from, to: { x: target.x, y: target.y }, corners, ft: 0, none, searching: true });

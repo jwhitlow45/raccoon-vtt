@@ -1,11 +1,11 @@
 import type { RoomState, Token } from "#shared/model.ts";
 import { footprintSize, tokenHeightFt } from "#shared/rules/footprint.ts";
-import { routePoints, type RoutePoint } from "#shared/rules/route.ts";
+import type { RoutePoint } from "#shared/rules/route.ts";
 import { halvedAt, type PublicWorld } from "#shared/rules/walkWorld.ts";
 import { displayName } from "../../lib/scene.ts";
 import { areaTitle } from "../areas/labels.ts";
 import { dragReading, type Speeds } from "../measure/movement.ts";
-import { cutRoute, landedElevation, type Point, type Role } from "./drop.ts";
+import { landedElevation, routeLanding, type Point, type Role } from "./drop.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
 import type { DragRoute } from "./store.ts";
 
@@ -44,22 +44,22 @@ export function endsIn(view: RoomState, world: PublicWorld, token: Token, at: Ro
 /**
  * The board's picture of a lone drag's walk (docs/design-v1-movement.md
  * 3.1): the line, its corners and the label, for where the drop would land
- * now. A route past 64 pieces is drawn and read to where it is cut, as the
- * drop lands it, and its frames carry no more corners than that. With no
- * route, a walk held at the wall (`held`) is drawn and read to the wall.
+ * now. The walk is the one the drop lands with (`routeLanding`): a route
+ * past 64 pieces is drawn and read to where it is cut, and its frames carry
+ * no more corners than that, and one the drop would not take is drawn
+ * straight. So reading it walks at most 300 squares. With no route, a walk
+ * held at the wall (`held`) is drawn and read to the wall.
  */
 export function walkPreview(input: { view: RoomState; token: Token; target: Point; answer: RouteAnswer; held: Point | null; world: PublicWorld | null; role: Role }): Pick<DragRoute, "to" | "cut" | "corners" | "read" | "endsIn"> {
   const { view, token, answer, world, role } = input;
-  const found = answer.kind === "route" ? answer.route : null;
-  const cut = found ? cutRoute(view, token, found.pieces) : null;
-  const pieces = cut ? cut.pieces : found?.pieces;
-  const to = cut ? cut.at : answer.kind === "none" && input.held ? input.held : input.target;
-  const landing = landedElevation(view.buildChunks, token, to);
-  const points = pieces
-    ? routePoints(view.buildChunks, token, pieces, landing)
+  const walk = answer.kind === "route" ? routeLanding(view, token, input.target, answer.route.pieces, view.meta.settings.feetPerCell) : null;
+  const pieces = walk?.pieces;
+  const to = walk ? walk.at : (input.held ?? input.target);
+  const points = walk
+    ? walk.points
     : [
         { x: token.x, y: token.y, elevation: token.elevation },
-        { x: to.x, y: to.y, elevation: landing },
+        { x: to.x, y: to.y, elevation: landedElevation(view.buildChunks, token, to) },
       ];
   const encounter = view.encounter;
   const activeTokenId = encounter?.entries.find((e) => e.id === encounter.activeEntryId)?.tokenId ?? null;
@@ -87,7 +87,7 @@ export function walkPreview(input: { view: RoomState; token: Token; target: Poin
   });
   return {
     to: { x: to.x, y: to.y },
-    cut: cut !== null,
+    cut: walk?.cut === true,
     corners: pieces ? points.slice(1, -1).map((p) => ({ x: p.x, y: p.y })) : [],
     read,
     endsIn: world ? endsIn(view, world, token, points[points.length - 1]!) : null,

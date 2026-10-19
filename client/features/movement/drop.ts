@@ -4,7 +4,7 @@ import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
 import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround, standing } from "#shared/rules/heights.ts";
 import { landing, legStop, previewSqueezed, squeezeFits, type DropMode } from "#shared/rules/movement.ts";
-import { routeLattice, routePoints, routeReach, type RoutePiece } from "#shared/rules/route.ts";
+import { routeLattice, routePoints, routeReach, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { openLeg, type WalkRoute, type WalkWorld } from "#shared/rules/walk.ts";
 import { snapPosition } from "../../lib/scene.ts";
 
@@ -194,6 +194,23 @@ export function cutRoute(state: BuildState, token: DropToken, pieces: readonly R
 }
 
 /**
+ * The walk a lone drop lands with (3.1, 5.6), the same for the board's
+ * picture of a drag and for the drop: the route to `target`, cut after 64
+ * pieces where the creature can stand (`cutRoute`). Null when it cannot be
+ * cut, or reaches past 300 squares, which the server refuses: the drop then
+ * goes as the straight leg. So the picture never draws a walk the drop
+ * would not take, and never reads one longer than the server takes.
+ */
+export function routeLanding(state: BuildState, token: DropToken, target: Point & { squeeze?: boolean }, pieces: readonly RoutePiece[], feetPerCell: number): { pieces: RoutePiece[]; at: Point & { squeeze?: boolean }; points: RoutePoint[]; cut: boolean } | null {
+  const cut = cutRoute(state, token, pieces);
+  if (pieces.length === 0 || (pieces.length > MAX_ROUTE_PIECES && !cut)) return null;
+  const at = cut ? cut.at : target;
+  const kept = cut ? cut.pieces : [...pieces];
+  const points = routePoints(state.buildChunks, token, kept, landedElevation(state.buildChunks, token, at));
+  return routeReach(points, feetPerCell) <= MAX_ROUTE_REACH ? { pieces: kept, at, points, cut: cut !== null } : null;
+}
+
+/**
  * What an arrow key's press finds (design 14.17, review MV-O-12): one
  * square, never searched round a wall. A press the leg test stops, or into
  * open ground, is the straight drop, stopped at the wall as before. One
@@ -245,18 +262,11 @@ export const CUT_TEXT = "Stopped partway: the way there turns too often for one 
  * words, the DM's drop straight through.
  */
 export function planWalk(state: BuildState, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">, found: Found, feetPerCell: number): DropPlan {
-  if (found.kind === "route") {
-    const target = routeTarget(state, token, raw);
-    const cut = found.route.pieces.length > MAX_ROUTE_PIECES ? cutRoute(state, token, found.route.pieces) : null;
-    const pieces = cut ? cut.pieces : found.route.pieces.length > MAX_ROUTE_PIECES ? [] : found.route.pieces;
-    const last = pieces[pieces.length - 1];
-    if (last) {
-      const at = cut ? cut.at : target;
-      const move = landed(state.buildChunks, token, at);
-      const reach = routeReach(routePoints(state.buildChunks, token, pieces, move.elevation ?? token.elevation), feetPerCell);
-      const route = pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
-      if (reach <= MAX_ROUTE_REACH) return { moves: [{ ...move, route }], stop: null, held: [], ...(cut ? { cut: true as const } : {}) };
-    }
+  const walk = found.kind === "route" ? routeLanding(state, token, routeTarget(state, token, raw), found.route.pieces, feetPerCell) : null;
+  if (walk) {
+    const move = landed(state.buildChunks, token, { ...walk.at, squeeze: walk.at.squeeze === true });
+    const route = walk.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
+    return { moves: [{ ...move, route }], stop: null, held: [], ...(walk.cut ? { cut: true as const } : {}) };
   }
   const plan = planOne(state, token, raw, mode);
   if (found.kind === "none" && plan.stop) plan.stop = { ...plan.stop, searched: true, ...(found.capped ? { capped: true as const } : {}) };

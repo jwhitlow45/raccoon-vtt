@@ -23,8 +23,8 @@ export type RouteAnswer = { kind: "open" } | { kind: "route"; route: WalkRoute }
 
 export type Settled = Exclude<RouteAnswer, { kind: "searching" }>;
 
-/** The clock and the frames a search runs in: `performance.now` and `requestAnimationFrame` in a browser. */
-export type Frames = { now(): number; request(run: () => void): number; cancel(handle: number): void };
+/** The clock and the frames a search runs in: `performance.now` and `requestAnimationFrame` in a browser. `deadline` ends a slice, by default SLICE_MS from now, on the board the frame's budget it shares with the walking rulers (frameBudget.ts). */
+export type Frames = { now(): number; request(run: () => void): number; cancel(handle: number): void; deadline?(): number };
 
 export class RouteDrag {
   readonly #input: () => WalkInput | null;
@@ -133,7 +133,7 @@ export class RouteDrag {
     this.#slice();
   }
 
-  #slice(deadline = this.#frames.now() + SLICE_MS): void {
+  #slice(deadline = this.#frames.deadline?.() ?? this.#frames.now() + SLICE_MS): void {
     const search = this.#search!;
     const to = this.#target!;
     const result = search.settle(to, deadline);

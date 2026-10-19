@@ -159,6 +159,25 @@ describe("the walking ruler", () => {
     assert.equal(m.legs[0]!.none, true, "No way through");
   });
 
+  test("past its deadline a slice begins no leg but its first, so a ruler of many legs never builds every leg's world in one frame (review ASTRA-08)", () => {
+    // 20 legs round the wall's end, each from a spot of its own, so each has a search and a world of its own.
+    const stops = [free(2, 5), ...Array.from({ length: 20 }, (_, k) => free(k % 2 === 0 ? 9 : 2, 5 + Math.floor(k / 2)))];
+    const input = { sceneId: "s1", stops, viewer: { role: "player" as const }, everything: false };
+    const whole = measureWalk({ ...input, view: room() })!;
+    const view = room();
+    const answered = (w: typeof whole) => w.legs.filter((l) => !l.searching).length;
+    let m = measureWalk({ ...input, view, deadline: -Infinity })!;
+    let slices = 1;
+    while (m.searching && slices < 1_000) {
+      const before = answered(m);
+      m = measureWalk({ ...input, view, deadline: -Infinity })!;
+      assert.ok(answered(m) - before <= 1, `slice ${slices + 1} answered ${answered(m) - before} legs`);
+      slices++;
+    }
+    assert.ok(slices >= 20, `${slices} slices`);
+    assert.deepEqual(m.legs, whole.legs);
+  });
+
   test("Measure is remembered on the device, Straight when storage fails", () => {
     const items = new Map<string, string>();
     const storage = () => ({ getItem: (k: string) => items.get(k) ?? null, setItem: (k: string, v: string) => void items.set(k, v) }) as unknown as Storage;
