@@ -75,6 +75,29 @@ describe("walking around walls (docs/design-v1-movement.md 4.4, 5)", () => {
     assert.equal(bruteCorners(i, { x: 5, y: 5 }), 3);
   });
 
+  test("a traced spot's walk is kept, and past the trace's bound the walk is the first arrival's, the same on every run", () => {
+    const pillars = ["3,0", "4,0", "3,2", "4,2", "1,3", "2,3", "4,3", "3,4", "4,4", "0,5", "3,5"];
+    const w = world({ w: 6, h: 6, cells: Object.fromEntries(pillars.map((k) => [k, "pillar" as TerrainId])) });
+    const i = input(w, tok(w, { x: 0, y: 0 }));
+    const to = { x: 5, y: 5 };
+    const search = new WalkSearch(new WalkWorld(i));
+    search.settle(to);
+    const first = search.routeTo(to)!;
+    assert.equal(search.routeTo(to), first, "kept");
+    assert.equal(cornersOf(first), 3);
+    // Bound to a single state, the trace gives way to the walk the search first arrived by: as cheap, one corner more here.
+    const bounded = () => {
+      const s = new WalkSearch(new WalkWorld(i), 1);
+      s.settle(to);
+      return s.routeTo(to)!;
+    };
+    const a = bounded();
+    assert.equal(pieceFeet(i, a), pieceFeet(i, first));
+    assert.equal(cornersOf(a), 4);
+    assert.deepEqual(bounded().pieces, a.pieces);
+    assertPiecesPass(i, a);
+  });
+
   test("through an open door, and not a closed one or a secret door nobody found", () => {
     const wall = (door: EdgeFeature) => world({ edges: { ...line("w", 5, 0, 30), "5,4,w": door } });
     const open = wall(OPEN_DOOR);

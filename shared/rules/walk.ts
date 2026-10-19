@@ -77,6 +77,14 @@ export type WalkRoute = {
 /** The search's cap (5.2): settled states, never a time, so every device finds the same route or none. */
 export const MAX_SETTLED = 200_000;
 
+/**
+ * The most states the fewest-corners trace looks at (5.3, review MV-O-17).
+ * Past it, the walk is the one the search first arrived by, as before the
+ * trace: as cheap, maybe bent once more. The count depends only on the
+ * settled search, so every device makes the same choice.
+ */
+export const MAX_TRACED = 10_000;
+
 /** The eight steps in lattice units, straight ones first. Their order fixes the route among equal ones, on every device. */
 const DX = [1, 0, -1, 0, 1, -1, -1, 1] as const;
 const DY = [0, 1, 0, -1, 1, 1, -1, -1] as const;
@@ -511,14 +519,19 @@ export class WalkSearch {
   readonly #best: Int32Array;
   #heap = new Heap();
   #capped = false;
+  /** Each traced spot's walk, by node. */
+  readonly #routes = new Map<number, WalkRoute>();
+  readonly #traced: number;
   #toH = 0;
   #toV = 0;
   #toCost = 0;
   /** Nodes with a state off the starting vertical residue, so a trace looks them up by key only there. */
   readonly #offResidue: Uint8Array;
 
-  constructor(world: WalkWorld) {
+  /** `traced` lowers MAX_TRACED, for tests. */
+  constructor(world: WalkWorld, traced = MAX_TRACED) {
     this.world = world;
+    this.#traced = traced;
     const rules = world.input.rules;
     this.#fiveTen = rules.diagonal === "fiveTen";
     this.#euclid = rules.diagonal === "euclid";
@@ -734,7 +747,10 @@ export class WalkSearch {
     const world = this.world;
     const n = world.nodeAt(to);
     if (n < 0 || this.#best[n]! < 0) return null;
-    const walk = this.#fewestCorners(n);
+    // Once a spot is settled its walk never changes, so the finger's every return to it, and a ruler's every frame, reuse it.
+    const known = this.#routes.get(n);
+    if (known) return known;
+    const walk = this.#fewestCorners(n) ?? this.#firstArrival(n);
     const chain = walk.states;
     const first = chain[0]!;
     const points: RoutePoint[] = [{ x: world.xOf(this.#node[first]!), y: world.yOf(this.#node[first]!), elevation: world.input.token.elevation }];
@@ -764,7 +780,28 @@ export class WalkSearch {
       }
     }
     const last = points[points.length - 1]!;
-    return { pieces, points, endsBlocked: world.endOnly(last.x, last.y, last.elevation) };
+    const route = { pieces, points, endsBlocked: world.endOnly(last.x, last.y, last.elevation) };
+    this.#routes.set(n, route);
+    return route;
+  }
+
+  /** The walk the search first arrived by, each state's own step: the trace's answer past MAX_TRACED. */
+  #firstArrival(target: number): TracedWalk {
+    const walk: TracedWalk = { states: [], dir: [], extra: [], swim: [], dz: [] };
+    for (let s = this.#best[target]!; s >= 0; s = this.#parent[s]!) {
+      const start = this.#parent[s] === -1;
+      walk.states.push(s);
+      walk.dir.push(start ? -1 : this.#dir[s]!);
+      walk.extra.push(start ? 0 : this.#extra[s]!);
+      walk.swim.push(start ? 0 : this.#swim[s]!);
+      walk.dz.push(start ? 0 : this.#dz[s]!);
+    }
+    walk.states.reverse();
+    walk.dir.reverse();
+    walk.extra.reverse();
+    walk.swim.reverse();
+    walk.dz.reverse();
+    return walk;
   }
 
   /**
@@ -775,9 +812,10 @@ export class WalkSearch {
    * on the way on. So the trace looks again over every step that keeps the
    * cost exact, the steps of some cheapest walk, back from the node, and
    * counts corners along them by the direction each arrives from. It runs
-   * once per traced spot and leaves the search as it was.
+   * once per traced spot and leaves the search as it was. Null past
+   * MAX_TRACED states.
    */
-  #fewestCorners(target: number): TracedWalk {
+  #fewestCorners(target: number): TracedWalk | null {
     const world = this.world;
     const goalCost = this.#cost[this.#best[target]!]!;
     // Back from the goal: every settled state with a step into a state of the walk that keeps its cost exact.
@@ -792,6 +830,7 @@ export class WalkSearch {
     // Every state at the spot as cheap as the first settled there, settled or not: once all cheaper states are settled their costs are final, so the trace is the same however far the search has run.
     for (const s of this.#statesAt(target)) if (this.#cost[s] === goalCost) add(s);
     for (let q = 0; q < states.length; q++) {
+      if (states.length > this.#traced) return null;
       const t = states[q]!;
       const b = this.#node[t]!;
       const bx = world.xOf(b);

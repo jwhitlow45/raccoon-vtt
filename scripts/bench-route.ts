@@ -145,11 +145,25 @@ export function runRouteBench(runs = 15, only?: (c: Case) => boolean): RouteRow[
  * `settled` column holds the states the search settled first.
  */
 export function runTraceRow(runs = 15): RouteRow {
+  return traceRow("Large round a 40-square wall, 80 squares: the trace with the fewest corners", 40, 40, { x: 80, y: 2 }, runs);
+}
+
+/**
+ * The trace's worst case (review MV-O-17): a Large creature past a wall 60
+ * squares long, then 140 squares on across open ground, where the cheapest
+ * walks tie by the tens of thousands, so the trace stops at MAX_TRACED and
+ * keeps the first arrival's walk. Gated at the Large row's 40 ms.
+ */
+export function runLongTraceRow(runs = 15): RouteRow {
+  return { ...traceRow("Large past a 60-square wall, about 148 squares: the trace, bounded", 10, 60, { x: 150, y: 72 }, runs), budget: 40 };
+}
+
+function traceRow(row: string, wallX: number, wallLength: number, to: { x: number; y: number }, runs: number): RouteRow {
   const edges = new Map<string, EdgeFeature>();
-  for (let y = 0; y < 40; y++) edges.set(`40,${y},w`, { kind: "wall" });
-  const state = stateOf({ cells: new Map(), edges, walls: [], heights: new Map() }, "bench-route-trace");
-  const token = { size: "large" as const, x: 2, y: 2, elevation: 0, sceneId: "bench-route-trace" };
-  const to = { x: 80, y: 2 };
+  for (let y = 0; y < wallLength; y++) edges.set(`${wallX},${y},w`, { kind: "wall" });
+  const sceneId = `bench-route-trace-${wallX}-${wallLength}`;
+  const state = stateOf({ cells: new Map(), edges, walls: [], heights: new Map() }, sceneId);
+  const token = { size: "large" as const, x: 2, y: 2, elevation: 0, sceneId };
   let settled = 0;
   const times: number[] = [];
   for (let r = 0; r < runs + 3; r++) {
@@ -160,7 +174,7 @@ export function runTraceRow(runs = 15): RouteRow {
     search.routeTo(to);
     if (r >= 3) times.push(performance.now() - t);
   }
-  return { row: "Large round a 40-square wall, 80 squares: the trace with the fewest corners", settled, ms: stats(times) };
+  return { row, settled, ms: stats(times) };
 }
 
 /**
@@ -251,7 +265,7 @@ if (argv?.[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scrip
   // The walking ruler's and the public world's rows read client code and the test rooms, so only the Node run loads them, never the Chrome bundle.
   const nodeOnly = "./bench-ruler.ts";
   const { runPublicWorldRow, runRulerRows } = (await import(/* @vite-ignore */ nodeOnly)) as typeof import("./bench-ruler.ts");
-  console.log(formatRouteBench([...runRouteBench(), runTraceRow(), runRouteSeenRow(), runPublicWorldRow(), ...runRulerRows()]));
+  console.log(formatRouteBench([...runRouteBench(), runTraceRow(), runLongTraceRow(), runRouteSeenRow(), runPublicWorldRow(), ...runRulerRows()]));
   if (argv.includes("--chrome")) {
     console.log("");
     console.log(await runChrome());
