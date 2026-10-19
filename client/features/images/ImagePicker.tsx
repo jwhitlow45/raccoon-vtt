@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { IconImage, ImageRef } from "#shared/model.ts";
 import type { FoundWork } from "#shared/starter.ts";
 import { Button } from "../../components/Button.tsx";
-import { Dialog } from "../../components/Dialog.tsx";
+import { Dialog, DIALOG_PHONE_MAX } from "../../components/Dialog.tsx";
 import { Empty } from "../../components/Empty.tsx";
 import { ErrorText, Input } from "../../components/Field.tsx";
 import { choiceLook } from "../../components/looks.ts";
@@ -11,6 +11,7 @@ import { Help } from "../../components/Panel.tsx";
 import { api, type AssetRow, type SearchResult, type SearchSource } from "../../lib/api.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
+import { useLayoutSize } from "../device/layout.ts";
 import { licenseName } from "./credit.ts";
 import { imageErrorMessage, isQuotaError, isShortWait } from "./errors.ts";
 import { LibraryGrid, tileImage, tileStyle } from "./LibraryGrid.tsx";
@@ -168,6 +169,9 @@ export function ImagePicker(props: {
     { id: "library", label: "Library" },
   ];
 
+  // The dialog fills a phone, where the sources sit in even rows of three. Each as wide as its word, six wrapped four over two.
+  const sourceRows = useLayoutSize().width < DIALOG_PHONE_MAX;
+
   return (
     <Dialog
       title="Choose an image"
@@ -179,7 +183,15 @@ export function ImagePicker(props: {
     >
       <div ref={body}>
         {props.hint ? <p style={{ margin: `0 0 ${theme.space(3)}px`, fontSize: theme.font.body14, color: theme.color.textMuted }}>{props.hint}</p> : null}
-        <div role="tablist" aria-label="Where the image comes from" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), marginBottom: theme.space(3) }}>
+        <div
+          role="tablist"
+          aria-label="Where the image comes from"
+          style={{
+            ...(sourceRows ? { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))" } : { display: "flex", flexWrap: "wrap" }),
+            gap: theme.space(1),
+            marginBottom: theme.space(3),
+          }}
+        >
           {tabs.map((t) => (
             <button
               key={t.id}
