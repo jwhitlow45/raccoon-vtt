@@ -236,12 +236,15 @@ function RulerOptions(props: { role: "dm" | "player" }) {
         props.role === "dm" && {
           id: "shared",
           priority: 1,
+          // Its eye alone where the row cannot hold its word, so a DM's row with Measure and kept rulers still fits a 375 px phone.
+          compact: true,
           control: (
             // A fixed name that says what pressed means (docs/design-v1-visual.md 3.7).
             <OptButton
               pressed={share}
               icon="shown"
               label="Players see this ruler"
+              compactIcon
               onClick={() => {
                 const ctx = tool.activeCtx;
                 const next = !share;
@@ -261,7 +264,8 @@ function RulerOptions(props: { role: "dm" | "player" }) {
         },
         {
           id: "measure",
-          priority: 2,
+          // A choice this device keeps, so on a narrow row it waits behind ⋯ before Keep, Clear or the kept rulers' chip.
+          priority: 4,
           compact: true,
           control: (
             <OptSegmented

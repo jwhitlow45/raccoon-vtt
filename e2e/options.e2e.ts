@@ -676,7 +676,8 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await reloadAt(player, 1);
     await view(player, playerCdp, SIZES[1]!);
     await selectTool(player, "r");
-    const chip = options(player).getByRole("button", { name: /^Kept rulers/ });
+    // Beside Measure the chip stands in its short words ("Kept (3)").
+    const chip = options(player).getByRole("button", { name: /^Kept( rulers)? \(/ });
     await chip.focus();
     await player.keyboard.press("Enter");
     const kept = player.getByRole("dialog", { name: "Kept rulers" });
@@ -747,20 +748,27 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await reloadAt(dm, 1);
   });
 
-  test("lp8-ruler-a. a DM's Ruler with kept rulers on a 360 px phone keeps every control in the row, Clear as its eraser alone", async () => {
-    await view(dm, dmCdp, { width: 360, height: 780, insets: {} });
+  test("lp8-ruler-a. a DM's Ruler with kept rulers on a 375 px phone keeps every control in the row, Shared and Clear as their icons alone", async () => {
+    await view(dm, dmCdp, { width: 375, height: 812, insets: {} });
     await selectTool(dm, "r");
     await dm.waitForTimeout(300);
     const row = options(dm).locator("[data-options-row]");
-    const inline = await row.locator("> [data-rvtt-slot]").evaluateAll((els) => els.map((e) => e.getAttribute("data-rvtt-slot")));
-    assert.deepEqual(inline, ["shared", "keep", "clear", "kept"], "the kept rulers' chip waits behind ⋯");
+    const inlineIds = () => row.locator("> [data-rvtt-slot]").evaluateAll((els) => els.map((e) => e.getAttribute("data-rvtt-slot")));
+    assert.deepEqual(await inlineIds(), ["shared", "measure", "keep", "clear", "kept"], "the kept rulers' chip waits behind ⋯");
     assert.equal(await options(dm).locator("[data-rvtt-more]").count(), 0, "⋯ shows");
-    const clear = row.locator('[data-rvtt-slot="clear"] button').first();
-    assert.equal(await clear.getAttribute("aria-label"), "Clear");
-    assert.equal(((await clear.textContent()) ?? "").trim(), "", "Clear shows its words");
-    const box = await clear.boundingBox();
-    assert.ok(box && Math.abs(box.width - 44) < 1, `Clear is ${box?.width ?? 0} px wide`);
-    await shots.take(dm, "lp8-ruler-360");
+    for (const [slot, name] of [["shared", "Shared"], ["clear", "Clear"]] as const) {
+      const button = row.locator(`[data-rvtt-slot="${slot}"] button`).first();
+      assert.equal(await button.getAttribute("aria-label"), name);
+      assert.equal(((await button.textContent()) ?? "").trim(), "", `${name} shows its words`);
+      const box = await button.boundingBox();
+      assert.ok(box && Math.abs(box.width - 44) < 1, `${name} is ${box?.width ?? 0} px wide`);
+    }
+    await shots.take(dm, "lp8-ruler-375");
+    // At 360 px the row cannot hold all five even in their short forms, so Measure and the kept rulers wait behind ⋯, Measure the first to go.
+    await view(dm, dmCdp, { width: 360, height: 780, insets: {} });
+    await dm.waitForTimeout(300);
+    assert.deepEqual(await inlineIds(), ["shared", "keep", "clear"]);
+    await shots.take(dm, "lp8-ruler-360-measure");
     await key(dm, "v");
   });
 

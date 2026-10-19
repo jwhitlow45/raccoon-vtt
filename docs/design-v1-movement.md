@@ -381,4 +381,5 @@ What the build settled where the note left room, each the reading closest to the
 - **The band.** When an earlier spot inside a Half Speed area is the leg's worst, the color is that spot's and the words read what is left against the Speed at the end, in that band ("30 ft left with Dash").
 - **Arrow keys** search their one-square route whole, at once.
 - **The walking ruler** reads no Swim Speed and no crawling, since a ruler has no turn and a shared one must read the same on every device.
+- **Measure in the row** stands after Shared at priority 4, below the kept rulers' chip, so on a narrow row it is the first to wait behind ⋯. It is a choice the device keeps, and Keep, Clear and the kept rulers act on the map. Shared gained its eye alone as a compact form, so a DM's row with kept rulers still holds every control at 375 px. At 360 px it cannot, even in short forms, and Measure and the kept rulers wait behind ⋯ (the look pass had kept that chip in the row there, L11).
 - **Differential generators** that need attached tokens (hidden holders, dragged and carried creatures, passengers) wait for attach's build, which adds them to `shared/differential.test.ts`.
