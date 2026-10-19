@@ -181,10 +181,6 @@ function MonsterDetail(props: {
 
   return (
     <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: theme.space(2) }}>
-        {listed.source === "room" ? <RoomBadge /> : null}
-        <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>CR {m.cr}</span>
-      </div>
       <div
         style={{
           display: "grid",
@@ -195,6 +191,11 @@ function MonsterDetail(props: {
           border: `${theme.line.border}px solid ${theme.color.border}`,
         }}
       >
+        {/* The card's first line, so the page opens on the card and not on a line of its own above it. */}
+        <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+          <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>CR {m.cr}</span>
+          {listed.source === "room" ? <RoomBadge /> : null}
+        </div>
         <FieldRow label="How many">
           <Stepper label="How many" value={count} step={1} min={1} max={20} onChange={setCount} />
         </FieldRow>
